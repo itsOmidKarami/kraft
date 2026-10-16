@@ -62,6 +62,13 @@ describe("the gate review (F)", () => {
     expect(!!screen.queryByText("Approve the plan. It marks the MR ready.")).toBe(shown);
   });
 
+  it("names the gate as the desktop does and marks that it needs you, not the raw id", async () => {
+    mount(gateItem(), "/work-items/w1/review?gate=plan_approval");
+    const head = (await screen.findByText("Approve plan")).closest("header")!;
+    expect(head).toHaveTextContent("Approve plan NEEDS YOU");
+    expect(head).not.toHaveTextContent("plan_approval");
+  });
+
   it("shows a gate's document and the files that changed, and opens one file at a time", async () => {
     mount(gateItem());
     // The file's first mount pays for its imports, and the document and the diff come in two reads: under load, past 1s.
@@ -149,10 +156,14 @@ describe("the gate review (F)", () => {
 });
 
 describe("Approve (F.3)", () => {
-  it("sends the review's approval with the document's digest", async () => {
+  it("asks first, since an approval cannot be taken back, then sends it with the document's digest", async () => {
     const calls = mount(gateItem(), "/work-items/w1/review", { "GET /work-items/w1/artifact": [200, { work_item_id: "w1", path: "p.md", title: "Chain revision", content: "x", truncated: false, artifact_max_bytes: 1, digest: "d1g" }], "POST /work-items/w1/gates/plan_approval/review": [200, { outcome: "approve", gate: "plan_approval" }] });
     await screen.findByText("x");
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    const sheet = await screen.findByRole("dialog", { name: /^Approve (?!and send)/ });
+    expect(sheet).toHaveTextContent("An approval cannot be taken back.");
+    expect(posts(calls)).toEqual([]);
+    await userEvent.click(within(sheet).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/gates/plan_approval/review", body: { outcome: "approve", digest: "d1g" } }]));
     await waitFor(() => expect(where()).toBe("/work-items/w1"));
   });
@@ -198,6 +209,7 @@ describe("Approve (F.3)", () => {
     mount(gateItem(), "/work-items/w1/review", { "POST /work-items/w1/gates/plan_approval/review": [409, { detail: "gate 'plan_approval' is not pending" }] });
     await screen.findByText("Add EmbeddingCache");
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Approve" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("is not pending");
     expect(where()).toBe("/work-items/w1/review");
   });
@@ -208,9 +220,11 @@ describe("Request changes (F.3)", () => {
     const calls = mount(gateItem(), "/work-items/w1/review", { "POST /work-items/w1/gates/plan_approval/review": [200, { outcome: "request_changes", gate: "plan_approval" }] });
     await userEvent.click(await screen.findByRole("button", { name: "Request changes" }));
     expect(where()).toBe("/work-items/w1/review?compose=reject");
-    expect(screen.getByText("Goes back to: plan")).toBeInTheDocument();
-    const send = screen.getByRole("button", { name: "Reject to plan" });
-    expect(send).toBeDisabled();
+    expect(screen.getByText(/Sends your note back to plan, with your note/)).toBeInTheDocument();
+    const send = screen.getByRole("button", { name: "Request changes" });
+    await userEvent.click(send);
+    expect(screen.getByText("Write what needs to change first.")).toBeInTheDocument();
+    expect(posts(calls)).toEqual([]);
     await userEvent.type(screen.getByRole("textbox", { name: "Your note" }), "bound the cache");
     await userEvent.click(send);
     await waitFor(() => expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/gates/plan_approval/review", body: { outcome: "request_changes", summary: "bound the cache" } }]));
@@ -219,13 +233,13 @@ describe("Request changes (F.3)", () => {
   });
 
   it.each([
-    ["a server with no fix target: none named", gateItem({ fix_target: null }), "/work-items/w1/review?compose=reject", null],
-    ["an older server sending no fix_target: the chain's guess", gateItem({ fix_target: undefined, chain_definition: { nodes: [{ id: "plan", kind: "exec" }, { id: "plan_approval", kind: "gate" }] } }), "/work-items/w1/review?compose=reject", "Goes back to: plan"],
-  ] as [string, ReturnType<typeof gateItem>, string, string | null][])("names the target the server sends: %s", async (_id, item, path, line) => {
+    ["a server with no fix target: none named", gateItem({ fix_target: null }), "/work-items/w1/review?compose=reject", "Sends your note back to the previous node"],
+    ["an older server sending no fix_target: the chain's guess", gateItem({ fix_target: undefined, chain_definition: { nodes: [{ id: "plan", kind: "exec" }, { id: "plan_approval", kind: "gate" }] } }), "/work-items/w1/review?compose=reject", "Sends your note back to plan"],
+  ] as [string, ReturnType<typeof gateItem>, string, string][])("names the target once, in the help line: %s", async (_id, item, path, line) => {
     mount(item, path);
     await screen.findByRole("textbox", { name: "Your note" });
-    if (line) expect(screen.getByText(line)).toBeInTheDocument();
-    else expect(screen.queryByText(/Goes back to/)).not.toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`^${line}, with your note`))).toBeInTheDocument();
+    expect(screen.queryByText(/Goes back to/)).not.toBeInTheDocument();
   });
 
   it.each([
@@ -255,7 +269,7 @@ describe("Request changes (F.3)", () => {
   it("stays on the composer, with the text, when the server refuses", async () => {
     mount(gateItem(), "/work-items/w1/review?compose=reject", { "POST /work-items/w1/gates/plan_approval/review": [409, { detail: "no fix rounds left" }] });
     await userEvent.type(await screen.findByRole("textbox", { name: "Your note" }), "x");
-    await userEvent.click(screen.getByRole("button", { name: "Reject to plan" }));
+    await userEvent.click(screen.getByRole("button", { name: "Request changes" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("no fix rounds left");
     expect(screen.getByRole("textbox", { name: "Your note" })).toHaveValue("x");
   });

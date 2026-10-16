@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { Archived } from "./board/Archived";
 import { Board } from "./board/Board";
 import { Analytics } from "./analytics/Analytics";
@@ -10,6 +10,8 @@ import { StorageScreen } from "./areas/Storage";
 import { AboutScreen } from "./areas/About";
 import { AccessScreen } from "./areas/Access";
 import { AppearanceScreen } from "./areas/Appearance";
+import { MovedAnchors } from "../settings/MovedAnchors";
+import { BoardCodeScreen } from "./areas/BoardCode";
 import { IntakeScreen, ScheduleScreen } from "./areas/Intake";
 import { NotificationChannel, NotificationsList } from "./areas/Notifications";
 import { PolicyScreen } from "./areas/Policy";
@@ -21,17 +23,24 @@ import { NewItem } from "./new/NewItem";
 import { NodeRoute } from "./node/NodeRoute";
 import { Alias, ALIASES, ShippedHash } from "../shell/aliases";
 import { NotFound } from "./nav/NotFound";
+import { OfflineBanner } from "./nav/OfflineBanner";
 import { TabBar } from "./nav/TabBar";
 import { Toaster } from "./nav/Toaster";
 import { Tooltip } from "../ui/Tooltip";
 import { useTrail } from "./nav/trail";
+import { screenKey } from "./nav/route";
+import { useDocumentTitle, useFocusHeading } from "../shell/usePageChrome";
 import "./nav/nav.css";
 
 function Frame() {
   useTrail();
+  useDocumentTitle();
+  const { pathname, search } = useLocation();
+  useFocusHeading("ph-main", screenKey(pathname + search));
   return (
     <div className="ph-app">
-      <main id="ph-main" className="ph-screen">
+      <OfflineBanner />
+      <main id="ph-main" tabIndex={-1} className="ph-screen">
         <Outlet />
       </main>
       <TabBar />
@@ -76,7 +85,8 @@ export function PhoneApp() {
           <Route path="/settings/notifications" element={<NotificationsList />} />
           <Route path="/settings/notifications/:channel" element={<NotificationChannel />} />
           <Route path="/settings/access" element={<AccessScreen />} />
-          <Route path="/settings/appearance" element={<AppearanceScreen />} />
+          <Route path="/settings/appearance" element={<MovedAnchors><AppearanceScreen /></MovedAnchors>} />
+          <Route path="/settings/board-and-code" element={<BoardCodeScreen />} />
           <Route path="/settings/about" element={<AboutScreen />} />
           <Route path="/settings/storage" element={<StorageScreen />} />
           <Route path="/settings/*" element={<NotFound />} />

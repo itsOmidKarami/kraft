@@ -45,8 +45,8 @@
 /* The node view: the strip on top, the node's canvas under it. */
 .tpl-area > .strip { position: absolute; left: 0; right: 0; top: 0; z-index: 3; }
 /* In a node view the side pane starts under the strip, as on the item page (W3 Workbench). */
-.tpl-area.has-strip > .pane, .tpl-area.has-strip > .pane-rail { top: 64px; }
-.tpl-node-area { position: absolute; left: 0; right: 0; top: 64px; bottom: 0; }
+.tpl-area.has-strip > .pane, .tpl-area.has-strip > .pane-rail { top: 40px; }
+.tpl-node-area { position: absolute; left: 0; right: 0; top: 40px; bottom: 0; }
 /* The Library's node view has no chain rail above it. */
 .tpl-node-area.no-strip { top: 0; }
 /* The canvas keeps its zoom bar above the bottom pane's tab bar; the open pane overlays it (no reflow). */
@@ -55,7 +55,7 @@
 .tpl-empty-node p { margin: 0; }
 .tpl-phrase { padding: 0; border: 0; background: none; font: inherit; color: var(--ok); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .tpl-phrase:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
-.tpl-extends-pill { position: absolute; left: 16px; top: 12px; padding: 2px 9px; border: 1px solid var(--border); border-radius: 10px; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-sub); background: var(--surface); }
+.tpl-extends-pill { position: absolute; left: 16px; bottom: 12px; padding: 2px 9px; border: 1px solid var(--border); border-radius: 10px; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-sub); background: var(--surface); }
 
 /* The bottom pane (Decisions §9 Bottom pane): docked under the node canvas, up to the side pane. */
 .bp { position: absolute; left: 0; bottom: 0; z-index: 5; display: flex; flex-direction: column; box-sizing: border-box; border-top: 1px solid var(--line); background: var(--surface); box-shadow: 0 -10px 24px color-mix(in srgb, var(--bg) 50%, transparent); }
@@ -164,8 +164,8 @@
 .adr-val:is(:hover, :focus-visible):not(:disabled) { background: var(--line); }
 .adr-val:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .adr-val:disabled { cursor: default; }
-.adr-pen { margin-left: 6px; vertical-align: -1px; color: var(--text-muted); opacity: 0; }
-.adr-val:is(:hover, :focus-visible) .adr-pen { opacity: 1; }
+.adr-pen { margin-left: 6px; vertical-align: -1px; color: var(--text-faint); }
+.adr-val:is(:hover, :focus-visible) .adr-pen { color: var(--text); }
 .adr-edit { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .adr-in { width: 100%; box-sizing: border-box; padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); font-size: var(--fs-label); color: var(--text); }
 .adr-in:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }

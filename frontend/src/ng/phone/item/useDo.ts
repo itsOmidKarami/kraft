@@ -13,7 +13,7 @@ export function useDo(reload: () => void) {
     if (r.ok) {
       if (ok) showToast(typeof ok === "function" ? ok(r.body) : ok);
       reload();
-    } else showToast(r.error);
+    } else showToast(r.error, { tone: "error" });
     return r;
   }, [reload]);
   return { busy, run };

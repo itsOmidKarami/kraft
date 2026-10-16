@@ -7,6 +7,7 @@ import {
   abandonRefusal, attachChoices, attachState, chainsFor, cwdFor, createBody, draftNote, draftUrl, isRemoteFolder, outcomeMessage, remoteEscape, pickRepo, previewLine, repoDefaultChain,
   titleFrom, titleProblem, warningActions, warningsOf, type FileDraft,
 } from "./core/fileWork";
+import { nameOf } from "./core/board";
 import { mutating } from "./core/guard";
 import { folderScope, type ScopeDeps } from "./core/repoScope";
 import type { Store } from "./core/store";
@@ -94,9 +95,9 @@ export async function offerWarnings(deps: FileWorkDeps, id: string, warnings: st
     void vscode.env.openExternal(vscode.Uri.parse(`${api.base}/work-items/${encodeURIComponent(id)}`));
   } else if (picked === "Abandon") {
     // D24: decided now, not when the item was filed: it may have started since.
-    const no = abandonRefusal(id, store.item(id));
+    const no = abandonRefusal(store.item(id)?.title ?? id, store.item(id));
     if (no) return void vscode.window.showInformationMessage(no);
-    const ok = await vscode.window.showWarningMessage(`Abandon ${id}? Kraft deletes its worktree and branch.`, { modal: true }, "Abandon");
+    const ok = await vscode.window.showWarningMessage(`Abandon ${nameOf(store, id)}? Kraft deletes its worktree and branch.`, { modal: true }, "Abandon");
     if (ok !== "Abandon") return;
     // The server has the last word: a 409 shows its detail.
     try {
@@ -176,7 +177,7 @@ async function fileWork(deps: FileWorkDeps, seed: Seed): Promise<void> {
   await store.refresh(c.id).catch(() => {});
   // Not on this window's board (another repo, or the list read failed): show it in the web UI instead.
   if (!(await deps.reveal(c.id))) void vscode.commands.executeCommand("kraft.openInWebUi", { item: { id: c.id } });
-  void vscode.window.showInformationMessage(outcomeMessage(how.start, c));
+  void vscode.window.showInformationMessage(outcomeMessage(how.start, c, draft.title));
   const warnings = warningsOf(c);
   if (warnings.length) void offerWarnings(deps, c.id, warnings, warningActions(c));
 }

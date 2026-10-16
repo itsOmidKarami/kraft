@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { nameOf } from "../../board/rowText";
 import { Button } from "../../ui/Button";
 import { act } from "../actions";
 import type { FooterState } from "../nodeGraph";
@@ -17,8 +18,11 @@ export type FooterAct = "pause" | "resume" | "skip" | "retry";
  *  waiting one nothing (R10b-01). An ended item runs nothing again (R8b-06).
  *  Each also only where the server's `actions` admit it (`admits`), but a task's
  *  or a step's Skip: their `skip` is the node's, and `/skip` takes a task or a
- *  step its own `skippable` allows on a node that does not. */
-export function footerActs(item: ItemDetail, shown: FooterState, what: "node" | "step" | "task" = "node"): FooterAct[] {
+ *  step its own `skippable` allows on a node that does not. A failed item's card carries the Retry for the node it
+ *  stopped on, so that node's pane (`path`) leaves it out. */
+export function footerActs(item: ItemDetail, shown: FooterState, what: "node" | "step" | "task" = "node", path = ""): FooterAct[] {
+  // The failed card already offers Retry for the node it stopped on: the pane of that node does not say it twice.
+  const cardRetries = item.display_status === "failed" && !!item.stop?.node && path.split(".")[0] === item.stop.node && admits(item, "retry", true);
   const state = ENDED.has(item.display_status ?? "") ? null : shown;
   const skips = what === "node" ? skippable(item) : skipsNow(item);
   return [
@@ -26,7 +30,7 @@ export function footerActs(item: ItemDetail, shown: FooterState, what: "node" | 
     ...(state === "paused" && admits(item, "resume", true) ? ["resume" as const] : []),
     // Skip on a live footer only while the item runs: a stopped one with a live session (a gate's auto-review) has a walk /skip refuses.
     ...(((state === "running" && pausable(item)) || state === "paused") && skips ? ["skip" as const] : []),
-    ...((state === "paused" || state === "stopped") && retryable(item) ? ["retry" as const] : []),
+    ...((state === "paused" || state === "stopped") && retryable(item) && !cardRetries ? ["retry" as const] : []),
   ];
 }
 
@@ -37,7 +41,7 @@ export function footerActs(item: ItemDetail, shown: FooterState, what: "node" | 
  *  destructive button), and Cancel or Escape hands it back to the button that
  *  opened it (R11b-03); Escape in a steer with text in it keeps the text. */
 export function PathFooter({ item, path, what, state, reload, extra, only }: { item: ItemDetail; path: string; what: "node" | "step" | "task"; state: FooterState; reload: () => void; extra?: React.ReactNode; only?: FooterAct }) {
-  const acts = footerActs(item, state, what).filter((x) => !only || x === only);
+  const acts = footerActs(item, state, what, path).filter((x) => !only || x === only);
   const [confirm, setConfirm] = useState<"skip" | "retry" | null>(null);
   const [steer, setSteer] = useState("");
   const [busy, setBusy] = useState(false);
@@ -62,6 +66,8 @@ export function PathFooter({ item, path, what, state, reload, extra, only }: { i
     setSteer("");
     reload();
   };
+  // A node reads as its name; a step or task keeps the path that is its identity.
+  const named = what === "node" ? nameOf(item.chain_definition.nodes, path) : null;
   const retry = () => run(act.retry(item.id, { path, ...(steer.trim() ? { steer: steer.trim() } : {}) }));
   // The confirm's own Escape: it closes the confirm, never the pane, and keeps a steer that has text.
   const onKey = (e: KeyboardEvent) => {
@@ -73,8 +79,8 @@ export function PathFooter({ item, path, what, state, reload, extra, only }: { i
   if (!extra && !acts.length) return null;
   if (confirm === "skip")
     return (
-      <div className="ip-confirm" role="group" aria-label={`Skip ${path}?`} onKeyDown={onKey}>
-        <p className="ip-confirm-q">Skip <code>{path}</code>?</p>
+      <div className="ip-confirm" role="group" aria-label={`Skip ${named ?? path}?`} onKeyDown={onKey}>
+        <p className="ip-confirm-q">Skip {named ?? <code>{path}</code>}?</p>
         <p className="item-muted">{what === "task" ? "The task stops and does not run again this round." : what === "step" ? "Every task in the step stops; the node goes on with the next step." : "The node stops here; the chain goes on with the next node."}</p>
         {error && <p className="item-error" role="alert">{error}</p>}
         <div className="item-actions">
@@ -89,8 +95,8 @@ export function PathFooter({ item, path, what, state, reload, extra, only }: { i
     // select another node's path under that node's view: the pass is not that path's.
     const earlier = item.earlier_pass?.node === path.split(".")[0] ? item.earlier_pass.pass : null;
     return (
-      <div className="ip-confirm" role="group" aria-label={`Retry ${path}`} onKeyDown={onKey}>
-        <p className="ip-confirm-q">Retry <code>{path}</code></p>
+      <div className="ip-confirm" role="group" aria-label={`Retry ${named ?? path}`} onKeyDown={onKey}>
+        <p className="ip-confirm-q">Retry {named ?? <code>{path}</code>}</p>
         {earlier && <p className="item-muted">You are reading pass {earlier}. The retry runs on the node as it stands now, and pass {earlier} stays as it is.</p>}
         {steerable && <textarea autoFocus aria-label="Steer for the retry" className="item-input" rows={2} placeholder="Steer the next attempt (optional)" value={steer} onChange={(e) => setSteer(e.target.value)} onKeyDown={sendOnModEnter(retry, !busy)} />}
         {error && <p className="item-error" role="alert">{error}</p>}

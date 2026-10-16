@@ -43,6 +43,7 @@ const ALLOWED = [
   "board/bulk",
   "board/prefs",
   "board/draft/draftBody",
+  "board/newWords", // what the new-item composer says, on both layouts
   "review/useReview",
   "review/url",
   "review/finish",
@@ -55,8 +56,11 @@ const ALLOWED = [
   "templates/draft/types",
   "templates/draft/view", // counts(), the pure helpers
   "templates/problems", // problemText
-  "review/prefs", // DEFAULT_PREFS and the DiffPrefs type: the diff choices Appearance saves
+  "review/prefs", // DEFAULT_PREFS and the DiffPrefs type: the diff choices Board & code saves
   "settings/savedWords", // what a save-on-change page says about whether it sticks, on both layouts
+  "settings/MovedAnchors", // a bookmark to a section that moved off Appearance
+  "settings/useTheme", // the theme a page edits and saves on change, and theme.yaml as it reads
+  "settings/boardCodeWords", // the code and board choices, on both layouts
   "settings/accessWords", // what Access says, on both layouts
   "settings/notifyWords", // the channels, their state words and the permission lines, on both layouts
   "settings/storageWords", // the categories and the state note
@@ -77,8 +81,10 @@ const ALLOWED = [
   "templates/repos/fields", // the Repos rows: label, parse, patch, source
   "templates/repos/types", // reposOf, runningOf, problemsOf
   "templates/repos/evidence", // readiness: the list's can-run-work word, one source with the desktop
+  "templates/repos/path", // a repo path with the home directory as ~, one source with the desktop
   "templates/repos/RepoConfig", // setRepo and setEnabled: the preview-checked set_repo
   "templates/fields", // fieldMeta labels and routeOf: a task field goes by one name on both layouts
+  "templates/fieldChoices", // the sets a typed or enum field takes, one source with the desktop's Config tab
   "templates/choices", // the steering profiles and harnesses a typed list takes, as data
   "templates/useLibrary", // the published library's components, read once
   "templates/panes/useHarnessOptions", // the harness profiles, read once
@@ -86,8 +92,11 @@ const ALLOWED = [
   "library/types", // the four sections and the ref grammar
   "shell/useDraftCounts", // the draft dots of More
   "apply/store", // the apply state; Restart has one call site, behind the phone's own confirm
+  "shell/pageName", // a screen's name: the tab title, the Back label and the not-found links, one source with the desktop
+  "shell/usePageChrome", // the tab title and the focus on a new screen's heading, one source with the desktop
   "shell/routes", // the list of pages, as data: Search's Go to rows
   "board/cue", // the stop-kind icon of a Needs you reason, drawn the same on the card and the row
+  "offline", // the offline state and its words: one banner text, both layouts
   "shell/health", // olderServer and useHealth: the restart banner over the board, one test for both layouts
 ];
 

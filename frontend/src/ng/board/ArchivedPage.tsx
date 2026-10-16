@@ -6,6 +6,8 @@ import { useStore } from "../../store";
 import type { WorkItem } from "../../types";
 import { act } from "../item/actions";
 import { Menu } from "../ui/Menu";
+import { NoMatch } from "../ui/NoMatch";
+import { archivedLede, ARCHIVED_READ_ERROR } from "../ui/archivedWords";
 import { BulkBar } from "./BulkBar";
 import { sendBulk } from "./bulk";
 import { Row } from "./Row";
@@ -28,6 +30,10 @@ export function ArchivedPage() {
   const [error, setError] = useState<string | null>(null);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [checked, setChecked] = useState<Set<string>>(() => new Set());
+  const [archiveDays, setArchiveDays] = useState<number | null>(null);
+  useEffect(() => {
+    api.getPolicy().then((p) => setArchiveDays(p.archive?.after_days ?? null)).catch(() => {});
+  }, []);
   const version = useStore((s) => s.archivedVersion);
   const now = Date.now();
 
@@ -59,7 +65,10 @@ export function ArchivedPage() {
 
   return (
     <div className="board-page">
-      <h1 className="board-visually-hidden">Archived</h1>
+      <header className="board-page-head">
+        <h1>Archived</h1>
+        <p>{archivedLede(archiveDays)}</p>
+      </header>
       <div className="board-filters">
         <label className="board-filter">
           <span className="board-visually-hidden">Filter</span>
@@ -76,27 +85,29 @@ export function ArchivedPage() {
       <div className="board-body">
         <div className="board-list">
           <div className="board-list-inner">
-            {error && <p className="item-error board-empty" role="alert">{error}</p>}
-            <section className="board-group" aria-label="Archived">
-              <h2 className="board-group-head"><span>Archived</span><span className="board-count">{shown.length}</span></h2>
-              {items && !shown.length && <p className="board-empty">{q.trim() ? "nothing here for this filter" : "Nothing is archived."}</p>}
-              {shown.map((i) => (
-                <Row
-                  key={i.id}
-                  item={i}
-                  now={now}
-                  selected={false}
-                  checked={checked.has(i.id)}
-                  offline={false}
-                  error={rowErrors[i.id]}
-                  onSelect={(id) => navigate(`/work-items/${encodeURIComponent(id)}`)}
-                  onOpen={(id) => navigate(`/work-items/${encodeURIComponent(id)}`)}
-                  onCheck={toggle}
-                  onAction={() => {}}
-                  own={{ label: "Restore", run: () => void restore(i.id), tail: `archived by ${i.archived_by ?? "you"}`, age: ago(i.archived_at, now) }}
-                />
-              ))}
-            </section>
+            {error && <p className="item-error board-empty board-empty-solo" role="alert">{ARCHIVED_READ_ERROR(error)}</p>}
+            {items && !shown.length && (q.trim() ? <NoMatch className="board-empty board-empty-solo" query={q} onClear={() => set("q", "")} /> : <p className="board-empty board-empty-solo">Nothing is archived.</p>)}
+            {shown.length > 0 && (
+              <section className="board-group" aria-label="Archived">
+                <h2 className="board-group-head"><span>Archived</span><span className="board-count">{shown.length}</span></h2>
+                {shown.map((i) => (
+                  <Row
+                    key={i.id}
+                    item={i}
+                    now={now}
+                    selected={false}
+                    checked={checked.has(i.id)}
+                    offline={false}
+                    error={rowErrors[i.id]}
+                    onSelect={(id) => navigate(`/work-items/${encodeURIComponent(id)}`)}
+                    onOpen={(id) => navigate(`/work-items/${encodeURIComponent(id)}`)}
+                    onCheck={toggle}
+                    onAction={() => {}}
+                    own={{ label: "Restore", run: () => void restore(i.id), tail: `archived by ${i.archived_by ?? "you"}`, age: ago(i.archived_at, now) }}
+                  />
+                ))}
+              </section>
+            )}
           </div>
         </div>
         {checked.size > 0 && (

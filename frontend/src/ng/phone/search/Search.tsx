@@ -1,4 +1,5 @@
 import { CircleDot, FileText, Kanban, MoveRight, Search as SearchIcon } from "lucide-react";
+import { SEARCH_MODES } from "../../ui/searchModes";
 import { NoMatch } from "../../ui/NoMatch";
 import { useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -6,7 +7,10 @@ import { docTitle, repoName } from "../../../format";
 import { useStore } from "../../../store";
 import type { Bead, SearchResult, WorkItem } from "../../../types";
 import { groupOf } from "../../board/model";
-import { reasonTail } from "../../board/rowText";
+import { CUE_ICON } from "../../board/cue";
+import { reasonTail, stopCueOf } from "../../board/rowText";
+import { NodeGlyph } from "../../graph/NodeGlyph";
+import { stateGlyph } from "../board/glyph";
 import { ROUTES } from "../../shell/routes";
 import { Doc } from "../doc/Doc";
 import { ChoiceSheet, EditSheet, useSheet } from "../nav/Sheet";
@@ -24,11 +28,13 @@ interface Row {
   section: Section;
   title: string;
   sub?: string;
+  /** A work item: its row draws the board's glyph, and a Needs you row the cue of its stop. */
+  item?: WorkItem;
   open: () => void;
 }
 
 const SOURCES = [{ value: "", label: "Any source" }, { value: "artifact", label: "Documents" }, { value: "session_summary", label: "Session summaries" }];
-const MODES = [{ value: "hybrid", label: "Hybrid" }, { value: "fts", label: "Keywords" }, { value: "vector", label: "Meaning" }];
+const MODES = [...SEARCH_MODES];
 
 /** `/search` (W17 brief I): items, documents and beads in the sections the ⌘K overlay has, in one list. A Needs you row opens the gate and never approves. Only what the server returned is shown. */
 export function Search() {
@@ -56,6 +62,7 @@ export function Search() {
       section,
       title: i.title,
       sub: [repoName(i.repo), reasonTail(i)].filter(Boolean).join(" · "),
+      item: i,
       // Opens the gate: the decision is made on the review screen, never from a search result (GAP §2 #27).
       open: () => navigate(atGate(i) ? `/work-items/${encodeURIComponent(i.id)}/review?gate=${encodeURIComponent(i.pending_gate!)}` : `/work-items/${encodeURIComponent(i.id)}`),
     });
@@ -112,10 +119,16 @@ export function Search() {
             <h2 className="ph-search-head">{s === "items" && !query ? "Recent" : HEAD[s]}</h2>
             {list.map((r) => {
               const Icon = ICON[s];
+              const g = r.item ? stateGlyph(r.item) : null;
+              const cue = r.item && s === "needs" ? stopCueOf(r.item) : null;
+              const Cue = cue ? CUE_ICON[cue] : null;
               return (
                 <button key={r.id} type="button" className="ph-search-row" onClick={r.open}>
-                  <span className="ph-search-icon"><Icon size={16} aria-hidden="true" /></span>
-                  <span className="ph-row-text"><span className="ph-row-label">{r.title}</span>{r.sub && <span className="ph-row-hint">{r.sub}</span>}</span>
+                  {g ? <NodeGlyph kind={g.kind} size="sm" state={g.state} icon={g.icon} /> : <span className="ph-search-icon"><Icon size={16} aria-hidden="true" /></span>}
+                  <span className="ph-row-text">
+                    <span className="ph-row-label">{r.title}</span>
+                    {r.sub && <span className={`ph-row-hint${cue ? `${cue === "paused" ? "" : " ph-search-hot"} ph-is-${cue}` : ""}`}>{Cue && <Cue size={12} aria-hidden className="ph-card-cue" />}{r.sub}</span>}
+                  </span>
                 </button>
               );
             })}

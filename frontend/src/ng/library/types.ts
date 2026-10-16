@@ -56,4 +56,10 @@ export function chainsForRepo<C extends { addon?: Addon | null }>(chains: C[], r
   });
 }
 
+/** A chain's option in a picker, desktop and phone alike: its id and size. */
+export const chainOptionText = (c: { id: string; nodes: unknown[] }) => `${c.id} · ${c.nodes.length} nodes`;
+
+/** The line under a chain picker that names the repo's default chain. */
+export const defaultChainNote = (chain: string) => `${chain} is the repo's default chain`;
+
 export const refUrl = (id: string) => `/templates/library/${encodeURIComponent(id)}`;

@@ -22,6 +22,7 @@ import type {
   WorkItemDocument,
   WorkerSession,
 } from "./types";
+import { OFFLINE_REFUSAL, refusesWrite } from "./writeGuard";
 
 /** Every JSON route lives under /api/ (Kraft-psuq). `req()` below is where
  *  most callers end up, but `logStreamUrl`/`getLogText` build a request
@@ -40,6 +41,7 @@ export function detailText(detail: unknown): string | undefined {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  if (refusesWrite(init)) throw new Error(OFFLINE_REFUSAL);
   let res: Response;
   try {
     res = await fetch(apiUrl(path), {

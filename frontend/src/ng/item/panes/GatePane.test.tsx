@@ -38,11 +38,14 @@ describe("GateFooter", () => {
     const calls = stubFetch(WRITES);
     render(<GateFooter item={pending} gate={gate} reload={() => {}} onRead={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Request changes…" }));
-    const card = screen.getByRole("group", { name: "Reject plan_approval" });
-    expect(card).toHaveTextContent("goes back to plan");
-    expect(screen.getByRole("button", { name: "Reject to plan" })).toBeDisabled();
+    const card = screen.getByRole("group", { name: "Request changes: approve plan" });
+    expect(card).toHaveTextContent("Sends your note back to plan");
+    // Pressed with no note it says what is missing, and sends nothing.
+    await userEvent.click(screen.getByRole("button", { name: "Request changes" }));
+    expect(screen.getByText("Write what needs to change first.")).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
     await userEvent.type(screen.getByLabelText("Why (the next agent reads it)"), "Add the invalidation story.");
-    await userEvent.click(screen.getByRole("button", { name: "Reject to plan" }));
+    await userEvent.click(screen.getByRole("button", { name: "Request changes" }));
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/gates/plan_approval/reject", body: { note: "Add the invalidation story." } }]));
   });
 
@@ -92,9 +95,9 @@ describe("GateFooter", () => {
     render(<GateFooter item={pending} gate={gate} reload={reload} onRead={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Request changes…" }));
     await userEvent.type(screen.getByLabelText("Why (the next agent reads it)"), "Add the invalidation story.");
-    await userEvent.click(screen.getByRole("button", { name: "Reject to plan" }));
+    await userEvent.click(screen.getByRole("button", { name: "Request changes" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("no fix rounds left");
-    expect(screen.getByRole("group", { name: "Reject plan_approval" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Request changes: approve plan" })).toBeInTheDocument();
     expect(screen.getByLabelText("Why (the next agent reads it)")).toHaveValue("Add the invalidation story.");
     expect(reload).not.toHaveBeenCalled();
   });
@@ -124,9 +127,15 @@ describe("GateBody", () => {
     expect(screen.getByText("passed · auto")).toBeInTheDocument();
     expect(screen.queryByText("decides on")).toBeNull();
     unmount();
-    render(<GateBody item={pending} version="1" gate={gate} events={[]} />);
+    const { unmount: unmount2 } = render(<GateBody item={pending} version="1" gate={gate} events={[]} />);
     expect(screen.getByText("waiting for you")).toBeInTheDocument();
     expect(screen.getByText("p.md")).toBeInTheDocument();
+    // The node it rejects to by its name, as the footer says it.
+    expect(screen.getByText("reject to").nextElementSibling).toHaveTextContent(/^plan$/);
+    unmount2();
+    const far = { ...pending, chain_definition: { ...pending.chain_definition, nodes: V1.map((n) => (n.id === "plan_approval" ? { ...n, reject_to: "merge_request" } : n)) } };
+    render(<GateBody item={far} version="1" gate={gate} events={[]} />);
+    expect(screen.getByText("reject to").nextElementSibling).toHaveTextContent(/^merge request$/);
   });
 
   // R14b-05: a skipped gate on a finished item was "not reached", though the item had passed it.

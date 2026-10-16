@@ -116,6 +116,9 @@ it("dropMessage lists every comment line for line", () =>
     "(summary): s",
   ]));
 
+it("dropMessage names the item as it is told to", () =>
+  expect(dropMessage("Cache layer", draft).split("\n")[0]).toBe("Kraft dropped 2 local review comments on Cache layer: it has nothing to review any more. Their text:"));
+
 it.each<[DropReason, LegacyDraft, string]>([
   ["refused", { comments: [{ file: "a.py", line: 3, body: "x" }] }, "Kraft dropped 1 local review comment on K-1: Kraft refused them. Their text:"],
   ["unreviewable", { comments: [], summary: "s" }, "Kraft dropped 1 local review comment on K-1: it has nothing to review any more. Their text:"],

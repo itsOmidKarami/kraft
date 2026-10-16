@@ -1,4 +1,5 @@
 import { elapsed } from "../../format";
+import { gateName } from "../board/rowText";
 import type { Analytics } from "../../types";
 
 /** What the API takes for `range`, less `all`, which the weekly chart cannot show. Both layouts offer these. */
@@ -9,6 +10,12 @@ export const RANGES = [
   { value: "90d", label: "90 days" },
 ];
 export const DEFAULT_RANGE = "8w";
+
+/** The line that says which items every figure covers, the range spelt as the picker spells it. */
+export const scopeLine = (rangeLabel: string) => `Items created in the last ${rangeLabel}`;
+
+/** What both layouts say, in place of every figure, when the range holds no completed item and no node ran. */
+export const EMPTY_RANGE = "Nothing has completed in this range yet.";
 
 /** The gates items waited at, each with the times that gate was rejected. */
 export const gateRows = (r: Analytics) => {
@@ -29,3 +36,34 @@ export const minutes = (ms: number, runs: number) => (runs === 0 ? "—" : ms > 
 
 /** A span the report carries as 0 when nothing was measured (no completed item, no merge request): "—" then, not "0s". */
 export const measured = (ms: number, has = ms > 0) => (has ? elapsed(ms) : "—");
+
+/** The board, scoped the way the report is, and narrowed to a gate or a stop kind when the row names one. */
+export const boardHref = (scope: { repo?: string | null; chain?: string | null; gate?: string | null; stop?: string | null }) => {
+  const q = new URLSearchParams();
+  if (scope.repo) q.set("repo", scope.repo);
+  if (scope.chain) q.set("chain", scope.chain);
+  if (scope.gate) q.set("gate", scope.gate);
+  if (scope.stop) q.set("stop", scope.stop);
+  const s = q.toString();
+  return s ? `/?${s}` : "/";
+};
+
+/** A gate id as the board names it ("spec_approval" reads "approve spec"). The report has no chain, so no artifact kind. */
+export const gateLabel = (id: string) => gateName(undefined, id);
+
+/** A stop-reason bucket for reading: a gate stop's "gate · <id>" names the gate as the board does, the rest as the server wrote them. */
+export const stopLabel = (label: string) => (label.startsWith("gate · ") ? `gate · ${gateLabel(label.slice("gate · ".length))}` : label);
+
+/** What a stop-reason row filters the board to. The report's labels are its own buckets: a gate stop reads
+ *  "gate · <gate>", and only "budget" and "cap breach" are one stop kind each. The rest (a task failure, an
+ *  orchestrator defect, a preventable dispatch) are judged from the stop's text and span several kinds, so they
+ *  narrow nothing and land on the board for the same scope. */
+export function stopFilter(label: string): { gate?: string; stop?: string } {
+  if (label.startsWith("gate · ")) return { gate: label.slice("gate · ".length) };
+  if (label === "budget") return { stop: "budget" };
+  if (label === "cap breach") return { stop: "cap" };
+  return {};
+}
+
+/** The share of lead time spent waiting on a person, the report's main figure. */
+export const waitingKpi = (pct: number) => ({ label: "Waiting on you", value: `${pct}%`, sub: "of lead time" });

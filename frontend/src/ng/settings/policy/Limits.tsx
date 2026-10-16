@@ -1,6 +1,6 @@
 import { Inbox, Layers, Rows3, Server, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
-import { capKey, KEYS } from "./keys";
+import { capKey, KEYS, limitLabel } from "./keys";
 import { PolicyCell } from "./PolicyCell";
 import { SectionHead } from "./SectionHead";
 import { outerValue, problemAt, scopeUnset, type Ctx } from "./ctx";
@@ -15,6 +15,16 @@ const ICON: Record<string, ReactNode> = {
 /** "implementer · library" or "verification.main · chain default": what sets a cap below policy. */
 const belowText = (b: Below, unit: "min" | "usd" | "tok") =>
   `${b.via ? b.via.split(".").pop() : b.path.split(".").pop() || b.chain} ${show(unit, b.value)} · ${b.via ? "library" : `chain ${b.chain}`}`;
+
+/** The same line from several tasks is said once, with how many. */
+const belowLines = (below: Below[], unit: "min" | "usd" | "tok") => {
+  const lines = new Map<string, { text: string; exceeds: boolean; n: number }>();
+  for (const b of below) {
+    const text = belowText(b, unit), seen = lines.get(text);
+    if (seen) { seen.n += 1; seen.exceeds ||= !!b.exceeds; } else lines.set(text, { text, exceeds: !!b.exceeds, n: 1 });
+  }
+  return [...lines.values()];
+};
 
 function Scope({ id, name, sub, count, fold = 0, children }: { id: string; name: string; sub: string; count: number; /** Set when nothing in the scope is set: how many caps it folds. */ fold?: number; children: ReactNode }) {
   if (fold)
@@ -66,7 +76,7 @@ export function Limits({ ctx, preview }: { ctx: Ctx; preview?: ReactNode }) {
                 <PolicyCell draft={ctx.draft} k={mk} label={`${LEVEL_LABEL[level].name} ${label.name} maximum`} value={c.maximum.value} bound change={changes.get(mk.key)} problem={problemAt(ctx, mk.key)} inherited={c.maximum.source && c.maximum.source !== level ? c.maximum.source : null} />
                 {showBelow && (
                   <span className="pol-below">
-                    {(c.below ?? []).map((b, k) => <span key={k} className={b.exceeds ? "is-bad" : undefined}>{belowText(b, label.unit as "min")}{b.exceeds ? " !" : ""}</span>)}
+                    {belowLines(c.below ?? [], label.unit as "min").map((l) => <span key={l.text} className={l.exceeds ? "is-bad" : undefined}>{l.text}{l.n > 1 ? ` ×${l.n}` : ""}{l.exceeds ? " !" : ""}</span>)}
                   </span>
                 )}
               </div>
@@ -77,7 +87,7 @@ export function Limits({ ctx, preview }: { ctx: Ctx; preview?: ReactNode }) {
           <div className="pol-one">
             <span className="pol-k">outer ceiling</span>
             <PolicyCell draft={ctx.draft} k={KEYS.outer} label="outer ceiling" value={outerValue(ctx)} change={changes.get(KEYS.outer.key)} problem={problemAt(ctx, KEYS.outer.key)} />
-            <span className="pol-help">A second dollar cap on each item. Both bind; the lower one wins{p.limits.work_item_usd.binding ? `: ${p.limits.work_item_usd.binding.key} ${show("usd", p.limits.work_item_usd.binding.value)}` : ""}.</span>
+            <span className="pol-help">A second dollar cap on each item. Both bind; the lower one wins{p.limits.work_item_usd.binding ? `: ${limitLabel(p.limits.work_item_usd.binding.key) ?? p.limits.work_item_usd.binding.key} ${show("usd", p.limits.work_item_usd.binding.value)}` : ""}.</span>
           </div>
         )}
         {level === "tasks" && <p className="pol-note">A wait&apos;s timeout is its task&apos;s wall clock, so the tasks wall-clock maximum is also the longest any wait may wait.</p>}

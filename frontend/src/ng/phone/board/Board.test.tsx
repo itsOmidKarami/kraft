@@ -85,7 +85,7 @@ describe("the phone board (B)", () => {
     mount();
     await act(async () => {});
     const heads = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    const want = groupsOf(list, { filter: { q: "", repo: "", chain: "" }, group: "status", sort: "attention", doneCap: 2 }).filter((g) => g.total).map((g) => `${g.label}${g.total}`);
+    const want = groupsOf(list, { filter: { q: "", repo: "", chain: "", gate: "", stop: "" }, group: "status", sort: "attention", doneCap: 2 }).filter((g) => g.total).map((g) => `${g.label}${g.total}`);
     expect(heads).toEqual(want);
     // Paused mid-chain and failed are under Needs you, a paused item with no node is Not started (R54).
     const needs = screen.getByRole("region", { name: "Needs you" });
@@ -107,6 +107,14 @@ describe("the phone board (B)", () => {
     expect(gated).not.toHaveClass("ph-is-failed");
   });
 
+  it("a paused card's tail is neutral: ph-is-hot (amber) is only for a stop that needs a human", async () => {
+    put(item("p1", "paused"), gate("g2"));
+    mount();
+    await act(async () => {});
+    expect(document.querySelector('[data-row="p1"] .ph-card-tail')).not.toHaveClass("ph-is-hot");
+    expect(document.querySelector('[data-row="g2"] .ph-card-tail')).toHaveClass("ph-is-hot");
+  });
+
   it("counts the chips from the same rule as the tab badge, and the chip is in the URL", async () => {
     const list = [gate("g1"), item("f2", "failed"), item("r3", "running"), item("d4", "done")];
     put(...list);
@@ -124,6 +132,60 @@ describe("the phone board (B)", () => {
     expect(screen.getByText("Item g1")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /^All\d+$/ }));
     expect(where()).not.toContain("f=");
+  });
+
+  it("says one line with Clear when the chosen chip holds nothing, and Clear shows the board again", async () => {
+    put(item("r3", "running"));
+    mount("/?f=done");
+    await act(async () => {});
+    expect(screen.getByText("Nothing matches this filter.")).toBeInTheDocument();
+    expect(screen.queryByRole("region")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(where()).not.toContain("f=");
+    expect(screen.getByText("Item r3")).toBeInTheDocument();
+  });
+
+  it("filters by chain, gate and stop reason from their sheets, in the URL", async () => {
+    put(
+      gate("g1"),
+      item("m1", "needs_you", { chain_template: "docs_only", stop: { kind: "mr_closed", node: "merge_request", resume_at: null, reason: null } }),
+      item("r3", "running"),
+    );
+    mount();
+    await act(async () => {});
+    await userEvent.click(screen.getByRole("button", { name: /^Chain/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /docs_only/ }));
+    expect(where()).toContain("chain=docs_only");
+    expect(screen.getByText("Item m1")).toBeInTheDocument();
+    expect(screen.queryByText("Item g1")).toBeNull();
+    expect(screen.getByRole("button", { name: /^Needs you/ })).toHaveTextContent("1");
+
+    await userEvent.click(screen.getByRole("button", { name: /Chain · docs_only/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /All chains/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Gate/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /approve plan/ }));
+    expect(where()).toContain("gate=plan_approval");
+    expect(screen.getByText("Item g1")).toBeInTheDocument();
+    expect(screen.queryByText("Item r3")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: /Gate · approve plan/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /All gates/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Stop reason/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /MR closed/ }));
+    expect(where()).toContain("stop=mr_closed");
+    expect(screen.queryByText("Item g1")).toBeNull();
+  });
+
+  it("says so when a link's gate has nothing waiting, and Clear drops the gate and the stop", async () => {
+    put(item("r3", "running"));
+    mount("/?gate=spec_approval&stop=budget");
+    await act(async () => {});
+    expect(screen.getByText("Nothing matches this filter.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Gate · spec approval/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(where()).not.toContain("gate=");
+    expect(where()).not.toContain("stop=");
+    expect(screen.getByText("Item r3")).toBeInTheDocument();
   });
 
   it("has a Not started chip, so the four chips add up to All", async () => {
@@ -182,12 +244,20 @@ describe("the phone board (B)", () => {
     expect(screen.queryByRole("link", { name: "More › Repos" })).toBeNull();
   });
 
-  it("says offline beside the title when the list read fails, and keeps the rows", async () => {
+  it("keeps the rows when the list read fails, and records why", async () => {
     put(item("r1", "running"));
-    vi.spyOn(useStore.getState(), "bootstrap").mockRejectedValue(new Error("down"));
+    vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("down"));
     mount();
-    expect(await screen.findByText("offline")).toBeInTheDocument();
+    await waitFor(() => expect(useStore.getState().loadError).toBe("down"));
     expect(screen.getByText("Item r1")).toBeInTheDocument();
+  });
+
+  it("does not call an empty list nothing while the read failed", async () => {
+    put();
+    vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("down"));
+    mount();
+    await waitFor(() => expect(useStore.getState().loadError).toBe("down"));
+    expect(screen.queryByText("Nothing here. Tap + to file one.")).toBeNull();
   });
 });
 
@@ -248,7 +318,7 @@ describe("a card's inline actions (B.4)", () => {
   it("disables the buttons while offline", async () => {
     put(gate("g1"));
     stubFetch();
-    vi.spyOn(useStore.getState(), "bootstrap").mockRejectedValue(new Error("down"));
+    vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("down"));
     mount();
     expect(await screen.findByRole("button", { name: "Review to approve" })).toBeDisabled();
   });

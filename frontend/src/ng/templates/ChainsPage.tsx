@@ -1,12 +1,11 @@
+import { NotFound } from "../ui/NotFound";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Pencil } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { usePaneSelection } from "../graph/usePaneSelection";
 import { useResizable } from "../graph/useResizable";
 import { detailOf } from "../http";
 import { isTextField } from "../keys";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
-import { IconButton } from "../ui/IconButton";
 import { showToast } from "../ui/Toast";
 import { ChainCanvas } from "./ChainCanvas";
 import { BottomPane, handlerOf, type BottomTab } from "./BottomPane";
@@ -19,12 +18,14 @@ import { Dialog } from "../ui/Dialog";
 import { draftsChanged, postOps } from "./draft/draftApi";
 import * as api from "../../api";
 import { Button } from "../ui/Button";
+import { NOTHING_TO_PUBLISH } from "../ui/reasons";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
 import { authoredNodes, chainFile, counts, kindOf, liveChainId } from "./draft/view";
 import { addonRepo } from "../library/types";
 import { AddonBadge, ReadOnly } from "./addon";
-import { CHAIN_SEL, pathOf, selOf, type TSel } from "./sel";
+import { pathOf, selOf, type TSel } from "./sel";
 import "./templates.css";
+import { usePane } from "../shell/usePane";
 
 /** An element's width and height, kept current. */
 export function useBox() {
@@ -58,7 +59,7 @@ export function ChainsPage() {
 
 function ChainEditor({ chain, node }: { chain: string; node?: string }) {
   const draft = useConfigDraft("chains", chain);
-  if (draft.status === "notFound") return <div className="tpl-note"><h1>No chain called {chain}</h1></div>;
+  if (draft.status === "notFound") return <NotFound what="chain" id={chain} backTo="/templates/chains" backLabel="Back to Chains" />;
   if (draft.status === "error" && !draft.view) return <div className="tpl-note" role="alert">Couldn't load {chain}. {draft.error}</div>;
   if (!draft.view) return <div className="tpl-note">Loading {chain}…</div>;
   return <Editor chain={chain} node={node} draft={draft} />;
@@ -76,6 +77,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const size = useResizable("chains", canvasW);
   // The chain's own pane is the floor and open on load (Decisions §9 Chain settings).
   const [s, dispatch] = usePaneSelection(true);
+  usePane(s.open);
   const [refused, setRefused] = useState<string | null>(null);
   const [bottomTab, setBottomTab] = useState<BottomTab>("on_failure");
   const [bottomOpen, setBottomOpen] = useState(false);
@@ -113,7 +115,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   }, [node]);
 
   useEffect(() => {
-    if (draft.error) showToast(draft.error);
+    if (draft.error) showToast(draft.error, { tone: "error" });
   }, [draft.error]);
 
   // The bottom pane opens collapsed on each node entry, unless the person came
@@ -257,7 +259,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const move = async (path: string, to: number) => {
     const op = { op: "move", path, to };
     const check = await draft.ops([op], { preview: true });
-    if (check.status !== 200) return showToast(`Can't move ${path.split(".").pop()}: ${detailOf(check.body)}`);
+    if (check.status !== 200) return showToast(`Can't move ${path.split(".").pop()}: ${detailOf(check.body)}`, { tone: "error" });
     await draft.ops([op]);
   };
   moveSel.current = (dir) => {
@@ -304,7 +306,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         )}
         {view.draft
           ? <span className="tpl-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span>
-          : <><span className="tpl-published" id={publishedId}>published</span><span className="reason is-quiet" id={`${publishedId}-why`}>nothing to publish</span></>}
+          : <><span className="tpl-published" id={publishedId}>published</span><span className="reason is-quiet" id={`${publishedId}-why`}>{NOTHING_TO_PUBLISH}</span></>}
         {n.problems > 0 && (
           <button
             type="button"
@@ -313,7 +315,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             onClick={() => {
               const list = r.problems;
               if (!list.length) return;
-              goTo(list[nextProblem % list.length].path);
+              goTo(list[nextProblem % list.length].path ?? "");
               setNextProblem(nextProblem + 1);
             }}
           >
@@ -326,11 +328,6 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
           <Button aria-pressed={surface === "yaml"} disabled={surface === "yaml" && !!yamlErr} title={surface === "yaml" && yamlErr ? `Fix line ${yamlErr.line} first, or revert` : undefined} onClick={toggleYaml}>
             {surface === "yaml" ? "⇄ Canvas" : "YAML"}
           </Button>
-        )}
-        {!readOnly && s.level === "chain" && !review && surface === "canvas" && (
-          <IconButton label="Chain settings" onClick={() => dispatch({ type: "expand", sel: CHAIN_SEL })}>
-            <Pencil size={14} aria-hidden />
-          </IconButton>
         )}
         {/* With no draft there is nothing to publish: the server would answer 404 (R8b-04), as Repos, Policy and Harnesses already know. */}
         {/* A repo library's chain is edited in its repository's `.kraft/`: the server refuses a copy. */}

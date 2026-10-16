@@ -7,15 +7,15 @@ import { scaledTimeout } from "../e2e-timing";
 // back at the same gate -> approve -> plan_approval -> read the plan.
 
 const waitingAt = (page: import("@playwright/test").Page, gate: string) =>
-  page.getByRole("status").filter({ hasText: `Waiting for your approval at ${gate}` });
+  page.getByRole("status").filter({ hasText: `Waiting for you to approve ${gate}` });
 
 test("spec gate: read, reject and send back, then approve into the plan gate", async ({ page }) => {
   const id = await createItem(page, "planning gate walk", "default");
   await page.goto(`/work-items/${id}`);
-  await expect(waitingAt(page, "spec_approval")).toBeVisible({ timeout: scaledTimeout(100_000) });
+  await expect(waitingAt(page, "spec")).toBeVisible({ timeout: scaledTimeout(100_000) });
 
   // The banner's Review and decide opens the gate's review with its brief beside the diff.
-  await waitingAt(page, "spec_approval").getByRole("button", { name: "Review and decide" }).click();
+  await waitingAt(page, "spec").getByRole("button", { name: "Review and decide" }).click();
   await expect(page).toHaveURL(new RegExp(`/work-items/${id}/review\\?gate=spec_approval&doc=1$`));
   await expect(page.getByRole("dialog", { name: "Gate review: spec_approval" })).toContainText("fake spec body");
 
@@ -30,17 +30,17 @@ test("spec gate: read, reject and send back, then approve into the plan gate", a
   // same gate. The re-run takes well under a second and the gate looks the
   // same before and after, so the wait is on the server's events.
   await gate.getByRole("button", { name: "Request changes…" }).click();
-  const reject = gate.getByRole("group", { name: "Reject spec_approval" });
-  await expect(reject).toContainText("goes back to spec");
+  const reject = gate.getByRole("group", { name: "Request changes: approve spec" });
+  await expect(reject).toContainText("Sends your note back to spec");
   await reject.getByRole("textbox").fill("the spec misses the error path");
-  await reject.getByRole("button", { name: "Reject to spec" }).click();
+  await reject.getByRole("button", { name: "Request changes" }).click();
   await expect.poll(() => eventCount(page, id, "gate_rejected"), { timeout: scaledTimeout(30_000) }).toBe(1);
   await expect.poll(() => eventCount(page, id, "gate_requested"), { timeout: scaledTimeout(100_000) }).toBe(2);
 
   await page.reload();
   await expect(gate).toContainText("waiting for you");
   await gate.getByRole("button", { name: "Approve" }).click();
-  await expect(waitingAt(page, "plan_approval")).toBeVisible({ timeout: scaledTimeout(100_000) });
+  await expect(waitingAt(page, "plan")).toBeVisible({ timeout: scaledTimeout(100_000) });
 
   await page.goto(`/work-items/${id}?sel=plan_approval`);
   await page.getByRole("complementary", { name: "plan_approval pane" }).getByRole("button", { name: /^Read / }).click();

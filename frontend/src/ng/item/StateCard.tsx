@@ -8,6 +8,7 @@ import type { ChainNode, DiffFile, KraftEvent, WorkerSession } from "../../types
 import { Ban, CircleCheck, CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
+import { nameOf } from "../board/rowText";
 import { admits, neverStarted, RELEASED, spentLine } from "./status";
 import { actionPath, taskName } from "./paths";
 import { pathSel, placeUrl } from "./url";
@@ -42,9 +43,11 @@ const pathOf = (task?: string | null) => (task ? task.split(".").join(" › ") :
 export function StateCard({ item, files = null, ...h }: { item: ItemDetail; files?: DiffFile[] | null } & Handlers) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // A failed card's Retry takes a steer, as the pane's Retry did before the card took that over.
+  const [steer, setSteer] = useState("");
   const events = useEndEvents(item);
   const navigate = useNavigate();
-  const card = cardFor(item, { ...h, files, logUrl: logLink(item), onRepos: () => navigate(`/settings/repos/${encodeURIComponent(item.repo)}`), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
+  const card = cardFor(item, { ...h, steer, setSteer, files, logUrl: logLink(item), onRepos: () => navigate(`/settings/repos/${encodeURIComponent(item.repo)}`), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
     setBusy(true);
     setError(null);
     const r = await p;
@@ -73,7 +76,7 @@ export function StateCard({ item, files = null, ...h }: { item: ItemDetail; file
         {card.actions.map((a) => (
           <Button key={a.label} variant={a.primary ? "primary" : "secondary"} disabled={busy} aria-describedby={a.primary && card.note ? `${item.id}-card-note` : undefined} onClick={() => void a.run()}>{a.label}</Button>
         ))}
-        {card.node && <button type="button" className="item-link item-card-open" onClick={() => h.onOpenNode(card.node!)}>Open {card.node} →</button>}
+        {card.node && <button type="button" className="item-link item-card-open" onClick={() => h.onOpenNode(card.node!)}>Open {nameOf(item.chain_definition.nodes, card.node)} →</button>}
       </div>
       {card.note && <p id={`${item.id}-card-note`} className="item-muted item-card-note">{card.note}</p>}
     </section>
@@ -84,12 +87,12 @@ type Run = (p: Promise<{ ok: true } | { ok: false; error: string }>) => Promise<
 
 /** The card's Retry: named by the path it sends, so a stop inside a fix loop
  *  reads "Retry from verification", not "from judge", a task it cannot name. */
-function retryFrom(item: ItemDetail, node: ChainNode | undefined, run: Run) {
+function retryFrom(item: ItemDetail, node: ChainNode | undefined, run: Run, steer = "") {
   const task = item.stop?.task;
   const path = node ? actionPath(node, task) : null;
   const label = task ? `Retry from ${taskName(path ?? task)}` : "Retry";
-  const target = task ? taskName(path ?? task) : item.stop?.node ?? "the node";
-  return { label, target, primary: true, run: () => run(act.retry(item.id, path ? { path } : {})) };
+  const target = task ? taskName(path ?? task) : (item.stop?.node ? nameOf(item.chain_definition.nodes, item.stop.node) : "the node");
+  return { label, target, primary: true, run: () => run(act.retry(item.id, { ...(path ? { path } : {}), ...(steer.trim() ? { steer: steer.trim() } : {}) })) };
 }
 
 /** What the failed card offers besides Escalate, by `failedFix`: a refused forge credential gets words, not a button
@@ -100,12 +103,12 @@ function failedActions(item: ItemDetail, retry: ReturnType<typeof retryFrom>, h:
   return failedFix(item) === "repo" ? [...retries, { label: "Check the repo settings", run: h.onRepos }] : retries;
 }
 
-function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void; logUrl: string }, events: KraftEvent[], run: Run): Card | null {
+function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: string) => void; files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void; logUrl: string }, events: KraftEvent[], run: Run): Card | null {
   const stop = item.stop;
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
   const node = item.chain_definition.nodes.find((n) => n.id === stop?.node);
   const spent: [string, ReactNode] | null = item.budget_cap ? ["spent", spentLine(item)] : null;
-  const where = stop ? [pathOf(stop.task) || stop.node, stop.attempt ? `attempt ${stop.attempt}` : ""].filter(Boolean).join(" · ") : undefined;
+  const where = stop ? [pathOf(stop.task) || (stop.node && nameOf(item.chain_definition.nodes, stop.node)), stop.attempt ? `attempt ${stop.attempt}` : ""].filter(Boolean).join(" · ") : undefined;
   const status = item.display_status;
 
   if (status === "failed" && stop) {
@@ -115,15 +118,20 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
     const keptFact: [string, ReactNode][] = kept ? [["work kept", kept]] : [];
     // A stop that names no cause says why it failed in the agent's own words: the end of its log.
     const unexplained = !rows.length && !/ — /.test(stop.reason ?? "");
-    const retry = retryFrom(item, node, run);
+    const retry = retryFrom(item, node, run, h.steer);
     const retries = admits(item, "retry", true);
     return {
       tone: "bad", glyph: <X size={14} aria-hidden />, title: "Failed", where, text: (structured ? headline(stop.reason) : stop.reason) ?? undefined, node: stop.node,
-      body: failedFix(item) === "forge_login" ? <p className="item-card-text item-card-fix">{withCode(FORGE_LOGIN_HINT)}</p> : unexplained ? <FailedTail item={item} to={h.logUrl} /> : undefined,
+      body: (
+        <>
+          {failedFix(item) === "forge_login" ? <p className="item-card-text item-card-fix">{withCode(FORGE_LOGIN_HINT)}</p> : unexplained ? <FailedTail item={item} to={h.logUrl} /> : null}
+          {retries && item.steerable !== false && <textarea aria-label="Steer for the retry" className="item-input" rows={2} placeholder="Steer the next attempt (optional)" value={h.steer} onChange={(e) => h.setSteer(e.target.value)} onKeyDown={sendOnModEnter(() => void retry.run(), !!h.steer.trim())} />}
+        </>
+      ),
       facts: [...keptFact, ...rows.slice(0, 3 - keptFact.length), ...(spent ? [spent] : [])],
       actions: [...failedActions(item, retry, h), ...when(admits(item, "escalate", true), { label: "Escalate…", run: h.onEscalate })],
-      // What Retry does, in the card's words: the task it restarts, the branch it keeps and what it has cost so far.
-      note: retries ? `Restarts ${retry.target}${item.branch ? ` on the kept branch ${item.branch}` : ""}${item.budget_cap ? ` · ${spentLine(item)} spent` : ""}` : undefined,
+      // What Retry does, in the card's words: the task it restarts. The branch and the spend are already facts above.
+      note: retries ? `Restarts ${retry.target}${item.branch ? " on the kept branch" : ""}` : undefined,
     };
   }
   if (status === "waiting" && stop?.kind === "rate_limit") {
@@ -172,7 +180,7 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
     const by = str(closed?.payload.by);
     return {
       tone: "warn", glyph: <CircleHelp size={14} aria-hidden />, title: `MR !${ref} was closed on the forge`,
-      where: [stop.node, closed ? `closed ${by ? `by ${by} ` : ""}${ago(closed.created_at)}, not merged` : "not merged"].filter(Boolean).join(" · "),
+      where: [stop.node && nameOf(item.chain_definition.nodes, stop.node), closed ? `closed ${by ? `by ${by} ` : ""}${ago(closed.created_at)}, not merged` : "not merged"].filter(Boolean).join(" · "),
       node: stop.node,
       text: "Kraft stopped syncing the MR. The branch, the review and all findings are intact. Decide whether this work still goes ahead.",
       facts: [],
@@ -227,7 +235,7 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
     const ev = [...events].reverse().find((e) => e.type === "work_item_cancelled");
     const at = str(ev?.payload.node_id) ?? item.current_node_id;
     return {
-      tone: "muted", glyph: <Ban size={14} aria-hidden />, title: "Cancelled", where: at ? `at ${at}` : undefined, node: at,
+      tone: "muted", glyph: <Ban size={14} aria-hidden />, title: "Cancelled", where: at ? `at ${nameOf(item.chain_definition.nodes, at)}` : undefined, node: at,
       text: "The run stopped. Everything it produced is kept. A cancelled item stays cancelled; duplicating it starts a new one with the same title, brief and chain.",
       facts: [
         ["work kept", "the branch, the worktree until it is archived, findings and threads"],
@@ -313,7 +321,7 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
   const steerable = item.steerable !== false;
   // One primary: Resume until a steer is typed, then Resume with steer.
   const steered = steerable && !!steer.trim();
-  const what = item.current_node_id ? ` at ${item.current_node_id}` : "";
+  const what = item.current_node_id ? ` at ${nameOf(item.chain_definition.nodes, item.current_node_id)}` : "";
   const resume = async (withSteer: boolean) => {
     setBusy(true);
     setError(null);

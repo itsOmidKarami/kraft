@@ -5,7 +5,7 @@ import { repoName } from "../../format";
 import { countedAgainst } from "../settings/storageWords";
 import { useStore } from "../../store";
 import type { ChainNode, Repo, SearchResult, TemplateSummary } from "../../types";
-import { chainsForRepo } from "../library/types";
+import { chainOptionText, chainsForRepo, defaultChainNote } from "../library/types";
 import { NodeGlyph } from "../graph/NodeGlyph";
 import { detailOf, jsonBody, request } from "../http";
 import { useFocusSoon } from "../item/useFocusSoon";
@@ -13,7 +13,8 @@ import { Menu } from "../ui/Menu";
 import { Popover } from "../ui/Popover";
 import { showToast } from "../ui/Toast";
 import { Ticks } from "./Ticks";
-import { mod, sendOnModEnter } from "../keys";
+import { FILED_PAUSED, KEEP_EDITING } from "./newWords";
+import { mod, sendOnModEnter, useShortcutRows, type ShortcutRow } from "../keys";
 import { useReason } from "../ui/Reason";
 import { ADD_TITLE, CHOOSE_REPO } from "../ui/reasons";
 import { tip } from "../ui/Tooltip";
@@ -61,18 +62,37 @@ export function repoStops(repo: Repo): string | null {
   return stops.length ? `${repoName(repo.path)} ${stops.join("; and it ")}.` : null;
 }
 
+/** The composer's own draft, kept per tab so a reload or a click on a row (which closes it) does not lose the text. */
+export const COMPOSER_KEY = "kraft.ng.composer";
+const blank: Draft = { title: "", brief: "", repo: "", chain: "", spec: "", plan: "" };
+function loadComposerDraft(): Draft {
+  try {
+    const saved = sessionStorage.getItem(COMPOSER_KEY);
+    if (saved) return { ...blank, ...JSON.parse(saved) };
+  } catch { /* nothing kept */ }
+  return blank;
+}
+const forgetComposerDraft = () => { try { sessionStorage.removeItem(COMPOSER_KEY); } catch { /* nothing kept */ } };
+
 const looksLikePath = (s: string) => /[/.]/.test(s) && !/\s/.test(s.trim());
 
 /** The composer at the top of the board (Decisions §7b, AreaBoard 37–62):
  *  title, a line of brief, repo, chain, an optional spec or plan, and a tick
  *  preview of what will run from the server's dry run. ⌘↵ creates paused. */
+/** What the composer adds to the shortcut help while it is open. */
+const COMPOSER_KEYS: ShortcutRow[] = [
+  { keys: [mod("↵")], does: "Create the item, paused" },
+  { keys: ["Esc"], does: "Close the composer, asking first if you typed something" },
+];
+
 export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: string; onClose: () => void; onCreated: (id: string) => void }) {
   const navigate = useNavigate();
   /** The enabled repos, null until read: an empty list is no repo to file to. */
+  useShortcutRows("New work item", COMPOSER_KEYS);
   const [repos, setRepos] = useState<Repo[] | null>(null);
   const [roots, setRoots] = useState<Set<string>>(new Set());
   const [chains, setChains] = useState<TemplateSummary[]>([]);
-  const [d, setD] = useState<Draft>({ title: "", brief: "", repo: "", chain: "", spec: "", plan: "" });
+  const [d, setD] = useState<Draft>(loadComposerDraft);
   const [ask, setAsk] = useState(false);
   const [preview, setPreview] = useState<{ run: DryRun } | { error: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +102,12 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
   useEffect(() => { if (d.title.trim()) setTried(false); }, [d.title]);
   const set = (p: Partial<Draft>) => setD((x) => ({ ...x, ...p }));
   const dirty = !!(d.title.trim() || d.brief.trim());
+  useEffect(() => {
+    if (!dirty) return forgetComposerDraft();
+    try { sessionStorage.setItem(COMPOSER_KEY, JSON.stringify(d)); } catch { /* nothing kept */ }
+  }, [d, dirty]);
+  // Discard, More options and Create hand the draft on or end it; closing any other way keeps it.
+  const discard = () => { forgetComposerDraft(); onClose(); };
 
   useEffect(() => {
     api.getRepos().then((r) => {
@@ -91,7 +117,8 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
       const byId = (id: string) => r.repos.find((x) => x.id === id);
       setRoots(new Set(Object.values(r.workspaces ?? {}).filter((w) => Object.keys(w.members).length).map((w) => byId(w.root)?.path ?? "")));
       const first = live.find((x) => x.path === repoFilter) ?? live[0];
-      if (first) setD((x) => (x.repo ? x : { ...x, repo: first.path, chain: first.default_chain }));
+      // A restored draft keeps its repo only while that repo is still connected and enabled; else the default one stands in.
+      setD((x) => (live.some((r) => r.path === x.repo) || !x.repo && !first ? x : { ...x, repo: first?.path ?? "", chain: first?.default_chain ?? "", spec: "", plan: "" }));
     }).catch(() => {});
     api.getTemplates().then(setChains).catch(() => {});
   }, [repoFilter]);
@@ -124,6 +151,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
 
   // More options hands the draft to the draft item page (Decisions §7b): title, brief, repo, chain and attachments.
   const more = (members: boolean) => {
+    forgetComposerDraft();
     onClose();
     navigate("/work-items/new", { state: { draft: d, members } });
   };
@@ -136,6 +164,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
     if (r.status !== 201 && r.status !== 200) return setError(detailOf(r.body));
     if (r.body.duplicate_warning) showToast(r.body.duplicate_warning, 6000);
     sayIfFiledPaused(autostart, r.body);
+    forgetComposerDraft();
     await useStore.getState().bootstrap().catch(() => {});
     onCreated(r.body.id);
   };
@@ -173,12 +202,12 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
         />
         <Menu
           label="Chain"
+          description={repo?.default_chain ? defaultChainNote(repo.default_chain) : undefined}
           triggerClass="composer-chip composer-mono"
           trigger={<>{d.chain || "chain"} <span className="composer-muted">{full.length} nodes</span> <span aria-hidden className="board-caret">▾</span></>}
           items={chainsForRepo(chains, repo?.id).filter((c) => !c.error).map((c) => ({
-            label: c.id,
+            label: chainOptionText(c),
             checked: c.id === d.chain,
-            hint: `${c.nodes.length} nodes · ${c.gates} gates${c.id === repo?.default_chain ? " · repo default" : ""}`,
             onSelect: () => set({ chain: c.id }),
           }))}
         />
@@ -194,15 +223,15 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
         {ask ? (
           <>
             <span className="composer-ask">Discard this draft? Nothing has been created.</span>
-            <button type="button" className="btn btn-danger" onClick={onClose}>Discard</button>
-            <button type="button" className="btn btn-secondary" autoFocus onClick={() => setAsk(false)}>Keep editing</button>
+            <button type="button" className="btn btn-danger" onClick={discard}>Discard</button>
+            <button type="button" className="btn btn-secondary" autoFocus onClick={() => setAsk(false)}>{KEEP_EDITING}</button>
           </>
         ) : (
           <>
             <span className="composer-note">
               {error ? <span className="item-error" role="alert">{error}</span>
                 : repos?.length === 0 ? <>No enabled repo to file to. Connect or enable one in <Link to="/settings/repos" className="item-link">Settings › Repos</Link>.</>
-                : "Created paused. Nothing spends tokens until you start it."}
+                : FILED_PAUSED}
             </span>
             <button type="button" className="board-select-all" title="Continue on the full page" onClick={() => more(false)}>More options ⤢</button>
             <button type="button" className="board-select-all" onClick={leave}>Cancel</button>

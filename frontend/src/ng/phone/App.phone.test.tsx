@@ -1,5 +1,8 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
+import * as api from "../../api";
+import { useStore } from "../../store";
 import { App } from "../App";
 import { ROUTES } from "../shell/routes";
 import { stubFetch } from "../item/testkit";
@@ -52,6 +55,18 @@ describe("ng App at phone width (A.1)", () => {
     render(<App />);
     expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Skip to content" })).toBeNull();
+  });
+
+  it("says it is offline on every screen, in words, and Retry now reads again", async () => {
+    width(true);
+    window.history.pushState({}, "", "/analytics");
+    const list = vi.spyOn(api, "listWorkItems").mockResolvedValue({ items: [], cursor: 1 });
+    useStore.setState({ loadError: "down", connection: "open" } as never);
+    render(<App />);
+    expect(screen.getByText(/^Offline: down\. What is shown may be out of date/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry now" }));
+    await waitFor(() => expect(screen.queryByText(/^Offline: /)).toBeNull());
+    expect(list).toHaveBeenCalled();
   });
 
   it("renders the desktop shell above 767px", () => {
@@ -152,5 +167,36 @@ describe("one address space across a resize", () => {
     act(() => set(true));
     await waitFor(() => expect(window.location.pathname + window.location.search).toBe(lands));
     expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
+  });
+});
+
+describe("the phone's unknown address", () => {
+  it("says Not found once, keeps the tab bar, and offers the way up", async () => {
+    width(true);
+    stubFetch();
+    window.history.pushState({}, "", "/settings/nope");
+    render(<App />);
+    expect(await screen.findAllByRole("heading", { name: "Not found" })).toHaveLength(1);
+    expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Up to More" })).toHaveAttribute("href", "/more");
+    expect(document.title).toBe("Not found · Kraft");
+  });
+
+  it("offers the area's own list for a deep unknown address, not More", async () => {
+    width(true);
+    stubFetch();
+    window.history.pushState({}, "", "/settings/repos/x/y");
+    render(<App />);
+    expect(await screen.findByRole("link", { name: "Up to Repos" })).toHaveAttribute("href", "/settings/repos");
+  });
+
+  it("titles each screen and moves focus to its heading on a tab change", async () => {
+    width(true);
+    stubFetch();
+    window.history.pushState({}, "", "/");
+    render(<App />);
+    await userEvent.click(screen.getByRole("link", { name: "More" }));
+    await waitFor(() => expect(document.title).toBe("More · Kraft"));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "More" })).toHaveFocus());
   });
 });

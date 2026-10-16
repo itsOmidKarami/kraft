@@ -22,13 +22,13 @@ export function bulkPlan(verb: BulkVerb, items: WorkItem[]): { ids: string[]; sk
 
 const PAST: Record<BulkVerb, string> = { pause: "paused", resume: "resumed", archive: "archived", restore: "restored" };
 
-/** One line for the whole selection: how many it did, then each id it did not
- *  do and why, refusals before skips. */
-export function bulkSummary(verb: BulkVerb, results: BulkResult[], skipped: Skipped[]): string {
+/** One line for the whole selection: how many it did, then each item it did not
+ *  do and why, refusals before skips. `name` says what an id is called. */
+export function bulkSummary(verb: BulkVerb, results: BulkResult[], skipped: Skipped[], name: (id: string) => string = (id) => id): string {
   const done = results.filter((r) => r.ok).length;
   const not = [
-    ...results.filter((r) => !r.ok).map((r) => `${r.id} (${r.error ?? "refused"})`),
-    ...skipped.map((s) => `${s.id} (${s.why})`),
+    ...results.filter((r) => !r.ok).map((r) => `${name(r.id)} (${r.error ?? "refused"})`),
+    ...skipped.map((s) => `${name(s.id)} (${s.why})`),
   ];
   const past = PAST[verb];
   const head = done || !not.length ? `${past[0].toUpperCase()}${past.slice(1)} ${done}.` : "";

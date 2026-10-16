@@ -4,7 +4,7 @@ import { detailOf, request } from "../../http";
 import { useConfigDraft, type ConfigDraft } from "../../templates/draft/useConfigDraft";
 import { problemText } from "../../templates/problems";
 import { readiness } from "../../templates/repos/evidence";
-import { FIELDS, forgeOptions, patchFor, sourceOf, valueOf, type RepoField } from "../../templates/repos/fields";
+import { FIELDS, GROUPS, forgeOptions, patchFor, sourceOf, valueOf, type RepoField } from "../../templates/repos/fields";
 import { setEnabled, setRepo } from "../../templates/repos/RepoConfig";
 import { harnessChoices, steeringChoices } from "../../templates/choices";
 import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
@@ -15,6 +15,7 @@ import { NoMatch } from "../../ui/NoMatch";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, type RowSpec } from "./kit";
+import { homePath, pathTail } from "../../templates/repos/path";
 
 const url = (r: RepoView) => `/settings/repos/${encodeURIComponent(r.name || r.path)}`;
 
@@ -47,13 +48,13 @@ export function ReposList() {
           title="Connected"
           rows={shown.map((r): RowSpec => ({
             key: r.path, label: repoName(r), mono: true, to: url(r),
-            sub: r.path, subCut: true, value: String(r.entry.default_chain ?? "default"),
+            sub: pathTail(r.path), subFull: r.path, subCut: true, value: String(r.entry.default_chain ?? "default"),
             chips: [{ label: readiness(r.entry).word, tone: readiness(r.entry).ok ? "ok" as const : "warn" as const }, { label: r.entry.enabled === false ? "off" : "on", tone: r.entry.enabled === false ? undefined : "ok" }, ...(running[r.path] ? [{ label: `${running[r.path]} open` }] : []), ...(problemsOf(draft.view!.result, r.path).length ? [{ label: "problem", tone: "bad" as const }] : [])],
           }))}
         />
       )}
       {data && data.detected.length > 0 && (
-        <Group title="Detected" note="Workspace members Kraft found that are not connected." rows={data.detected.map((r): RowSpec => ({ key: r.path, label: repoName(r), mono: true, sub: r.path, chips: [{ label: "connect", tone: "ok" }], onClick: () => void connect(r) }))} />
+        <Group title="Detected" note="Workspace members Kraft found that are not connected." rows={data.detected.map((r): RowSpec => ({ key: r.path, label: repoName(r), mono: true, sub: homePath(r.path), chips: [{ label: "connect", tone: "ok" }], onClick: () => void connect(r) }))} />
       )}
     </AreaScreen>
   );
@@ -94,7 +95,7 @@ export function RepoView() {
     }
     const choices = f.choices === "steering" ? steeringChoices(library) : f.choices === "harnesses" ? harnessChoices(typeof opts === "string" ? null : opts.harnesses) : [];
     const listed = choices.length ? { choices, closed: true, multiple: true, noun: f.choices === "steering" ? "steering profile" : "harness" } : undefined;
-    return { ...base, mono: f.key.includes("command"), onEdit: () => edit({ kind: "text", title: f.label, help: "Leave empty to clear it, which falls back to the default.", value: f.show(f.key === "steering" ? repo!.resolved.steering : v), placeholder: f.placeholder, listed, set: sendTo(draft, repo!, f) }) };
+    return { ...base, mono: f.key.includes("command"), onEdit: () => edit({ kind: "text", title: f.label, help: `Leave empty to clear it, which falls back to the default.${f.none ? ` Tick "${f.none}" for the empty command.` : ""}`, value: v === "" && f.none ? "" : f.show(f.key === "steering" ? repo!.resolved.steering : v), placeholder: f.placeholder, listed, none: f.none ? { label: f.none, on: v === "" } : undefined, set: (t, none) => none ? setRepo(draft, repo!, patchFor(repo!, f, "")) : sendTo(draft, repo!, f)(t) }) };
   };
 
   const disconnect = async () => {
@@ -116,9 +117,9 @@ export function RepoView() {
             rows={[
               { label: "enabled", sw: repo.entry.enabled !== false, changed: changed("enabled"), onSwitch: (on) => void setEnabled(draft, repo, on).then((e) => e && showToast(e)) },
               ...(running ? [{ label: "open items", value: String(running) } as RowSpec] : []),
-              ...FIELDS.map(rowOf),
             ]}
           />
+          {GROUPS.map((g) => <Group key={g} title={g} rows={FIELDS.filter((f) => f.group === g).map(rowOf)} />)}
           <Group rows={[{ label: "Disconnect repo", danger: true, onClick: () => { setError(null); sheet.open("disconnect"); } }]} />
         </>
       )}

@@ -13,6 +13,7 @@ describe("gateView", () => {
     expect(v.gate).toEqual({ id: "final_review", state: "current", sel: true });
     expect(v.doc?.label).toBe("review.md");
     expect(v.reject?.id).toBe("merge_request");
+    expect(v.reject?.label).toBe("merge request");
     expect(v.youSub).toBe("waiting");
     v.reject!.onClick!();
     expect(on.reject).toHaveBeenCalledWith("merge_request");

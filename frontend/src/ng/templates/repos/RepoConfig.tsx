@@ -4,6 +4,8 @@ import { detailOf } from "../../http";
 import type { ConfigDraft } from "../draft/useConfigDraft";
 import type { Problem, Result } from "../draft/types";
 import { ValueCell } from "../draft/ValueCell";
+import { ValueMenu } from "../draft/ValueMenu";
+import { Switch } from "../../ui/Switch";
 import { harnessChoices, steeringChoices } from "../choices";
 import { useHarnessOptions } from "../panes/useHarnessOptions";
 import { useLibrary } from "../useLibrary";
@@ -117,15 +119,13 @@ function Row({ draft, repo, f, chains, problem, changed }: { draft: ConfigDraft;
         {f.choice === "forge" ? (
           <Segmented label="forge" value={(typeof v === "string" ? v : "none")} options={forgeOptions(v).map((x) => ({ value: x, label: x }))} onChange={(x) => void send(x === "none" ? null : x)} />
         ) : f.choice === "chain" ? (
-          <select className="rp-select" aria-label={f.label} value={String(v ?? f.fallback ?? "default")} onChange={(e) => void send(e.target.value)}>
-            {[...new Set([String(v ?? "default"), ...chains])].map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          <ValueMenu label={f.label} value={String(v ?? f.fallback ?? "default")} options={[...new Set([String(v ?? "default"), ...chains])].map((c) => ({ value: c, label: c }))} onPick={(c) => void send(c)} />
         ) : (
           <ValueCell label={f.label} value={f.show(v)} display={shown || f.fallback || "not set"} muted={!shown} bad={!!problem} changed={changed} placeholder={f.placeholder} choices={choices} closed multiple noun={f.choices === "steering" ? "steering profile" : "harness"} onCommit={commit} />
         )}
         {f.none && (
           <label className="rp-none">
-            <input type="checkbox" checked={v === ""} onChange={(e) => void send(e.target.checked ? "" : null).then(setNoneRefused)} /> {f.none}
+            <Switch checked={v === ""} label={f.none} onChange={(on) => void send(on ? "" : null).then(setNoneRefused)} /> {f.none}
           </label>
         )}
         {(problem || (f.choice && refused) || noneRefused) && <span className="adr-err" role="alert">{(f.choice && refused) || noneRefused || problem!.message}</span>}

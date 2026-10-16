@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { PanelLeftClose, PanelLeftOpen } from "../icons";
 import { Kbd } from "../ui/Kbd";
@@ -6,20 +6,22 @@ import { useStore } from "../../store";
 import { NAV_ICON } from "../icons";
 import { isTextField, mod } from "../keys";
 import { routesIn, type NgRoute } from "./routes";
-import { currentSidebar, writeSidebar, type SidebarMode } from "./sidebarPref";
+import { effectiveSidebar, subscribeSidebar, writeSidebar } from "./sidebarPref";
 import { useDraftCounts } from "./useDraftCounts";
 import { useGroupCount } from "../board/counts";
 import { request } from "../http";
 import type { UpdateState } from "../settings/AboutPage";
+import { connectionWord } from "../offline";
 import { restartPending, useHealth } from "./health";
 import { tip } from "../ui/Tooltip";
 
-const connectionWord = (c: "connecting" | "open" | "reconnecting") =>
-  c === "open" ? "live" : c === "connecting" ? "connecting…" : "reconnecting…";
-
 export function Sidebar({ onSearch }: { onSearch?: () => void }) {
-  const [mode, setMode] = useState<SidebarMode>(currentSidebar);
+  // The stored choice, or the rail while a page holds a pane open on a narrow screen.
+  const mode = useSyncExternalStore(subscribeSidebar, effectiveSidebar);
   const connection = useStore((s) => s.connection);
+  const word = connectionWord(connection, useStore((s) => s.loadError));
+  // Red comes with the banner (a failed read, a dropped socket); the first connect is not a failure.
+  const tone = word === "live" ? "ok" : word === "connecting…" ? "neutral" : "bad";
   // The board's own Needs you count: failed and paused mid-chain included.
   const needsYou = useGroupCount("needs");
   const health = useHealth();
@@ -45,9 +47,7 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
     toPage();
   };
   const toggle = () => {
-    const next = mode === "pinned" ? "rail" : "pinned";
-    writeSidebar(next);
-    setMode(next);
+    writeSidebar(mode === "pinned" ? "rail" : "pinned");
   };
 
   useEffect(() => {
@@ -99,9 +99,9 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
       <div className="ng-side-edge" aria-hidden />
       <aside className="ng-sidebar" aria-label="Sidebar" onKeyDown={onSideKey}>
         <div className="ng-side-head">
-          <span className={`ng-side-live-dot ${connection === "open" ? "ok" : "warn"}`} role="img" aria-label={connectionWord(connection)} />
+          <span className={`ng-side-live-dot ${tone}`} role="img" aria-label={word} />
           <span className="ng-side-brand ng-side-label">Kraft</span>
-          <span className={`ng-side-live ng-side-label ${connection === "open" ? "ok" : "warn"}`}>{connectionWord(connection)}</span>
+          <span className={`ng-side-live ng-side-label ${tone}`}>{word}</span>
           <button
             type="button"
             className="ng-side-pin"

@@ -5,17 +5,20 @@ import { repoName } from "../../format";
 import { useStore } from "../../store";
 import type { WorkItem } from "../../types";
 import { act } from "../item/actions";
+import { usePane } from "../shell/usePane";
 import { gateReviewUrl } from "../review/url";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
+import { reload, useOffline } from "../offline";
 import { OLDER_SERVER, olderServer, useHealth } from "../shell/health";
 import { clearFirstRun, FirstRun, savedFirstRun } from "../shell/FirstRun";
 import { Kbd } from "../ui/Kbd";
 import { Menu } from "../ui/Menu";
 import { tip } from "../ui/Tooltip";
+import { NoMatch } from "../ui/NoMatch";
 import { chainOf, groupsOf, type GroupBy, type SortBy } from "./model";
 import { useBoardPrefs } from "./prefs";
 import { Row } from "./Row";
-import type { RowAction } from "./rowText";
+import { ALL_GATES, ALL_STOPS, gateChip, nodeWords, stopChip, stopFilterOptions, stopWords, type RowAction } from "./rowText";
 import { useBoardQuery } from "./url";
 import { BulkBar } from "./BulkBar";
 import { Composer } from "./Composer";
@@ -24,42 +27,41 @@ import { useResizable, useWidth } from "../graph/useResizable";
 import { useBulk } from "./bulk";
 import { usePeekFocus } from "./peekFocus";
 import "./board.css";
+import { autoArchiveNote } from "../ui/archivedWords";
 import { countIn } from "./counts";
-import { Shortcuts } from "./Shortcuts";
+import { isTextField, mod, openShortcutHelp, useShortcutRows, type ShortcutRow } from "../keys";
 import { Skeleton } from "./Skeleton";
 
 const GROUP_LABEL: Record<GroupBy, string> = { status: "Status", repo: "Repo", chain: "Chain" };
 const SORT_LABEL: Record<SortBy, string> = { attention: "Needs attention", updated: "Recently updated", created: "Created", title: "Title" };
 
-const isTextField = (t: EventTarget | null) =>
-  t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
+/** What the board adds to the shared shortcut help. */
+const BOARD_KEYS: ShortcutRow[] = [
+  { keys: ["/"], does: "Focus the filter" },
+  { keys: ["↑", "↓"], does: "Move between rows" },
+  { keys: ["↵"], does: "Open the row in the side panel" },
+  { keys: ["Space"], does: "Select or unselect the row" },
+  { keys: [mod("↵")], does: "Open the row's full page" },
+  { keys: ["Esc"], does: "Close the side panel" },
+];
 
 type Load = { state: "loading" | "ok" } | { state: "error"; error: string };
 
 /** The list, read again on mount (C.2): the store's own load ran at boot and
- *  may have failed. Offline (C.3) while that read failed or the event socket
- *  is reconnecting; it clears once the socket is open and a read succeeds. */
+ *  may have failed. Offline (C.3) is the app's (`useOffline`): the shell reads again
+ *  once the socket is open. */
 function useListLoad() {
   const [load, setLoad] = useState<Load>({ state: "loading" });
-  const connection = useStore((s) => s.connection);
   const refresh = useCallback(() => {
     setLoad((l) => (l.state === "error" ? l : { state: "loading" }));
-    useStore.getState().bootstrap().then(
+    reload().then(
       () => setLoad({ state: "ok" }),
       (e: Error) => setLoad({ state: "error", error: e.message }),
     );
   }, []);
   useEffect(refresh, [refresh]);
-  const was = useRef(connection);
-  useEffect(() => {
-    if (connection === "open" && was.current === "reconnecting") refresh();
-    was.current = connection;
-  }, [connection, refresh]);
-  return { load, refresh, offline: load.state === "error" || connection === "reconnecting" };
+  return { load, refresh, offline: useOffline().offline };
 }
-
-/** The read's error without its request line ("(GET /work-items?…)"): the banner says what broke, not which call. */
-const bannerError = (e: string) => e.replace(/ \((?:GET|POST|PUT|PATCH|DELETE) [^)]*\)/, "").replace(/\.$/, "");
 
 /** A minute's clock for the rows' ages and "retry in". */
 function useNow() {
@@ -76,6 +78,9 @@ function useNow() {
  *  the first work item exists: one filed from the CLI or anywhere else ends
  *  the setup, so the board shows it (R11a-02). */
 export function BoardPage() {
+  // The peek lies over the list, so the sidebar steps back to its rail on arrival at a narrow width, not when the peek
+  // opens: opening it then moves nothing. A pinned or railed choice of the reader's own still wins.
+  usePane(true);
   const prefs = useBoardPrefs();
   const [query, setQuery] = useBoardQuery(prefs?.group_by);
   const navigate = useNavigate();
@@ -88,14 +93,14 @@ export function BoardPage() {
   const filterRef = useRef<HTMLInputElement>(null);
   const [peekTab, setPeekTab] = useState<PeekTab>("overview");
   const [budgetEdit, setBudgetEdit] = useState(false);
-  const [keys, setKeys] = useState(false);
+  useShortcutRows("Board", BOARD_KEYS);
   const [body, bodyW] = useWidth();
   const bodyEl = useRef<HTMLDivElement | null>(null);
   const bodyRef = useCallback((el: HTMLDivElement | null) => { body(el); bodyEl.current = el; }, [body]);
   const size = useResizable("board", bodyW);
   const itemsById = useStore((s) => s.workItems);
   const items = useMemo(() => Object.values(itemsById).filter((i) => i.display_status !== "archived"), [itemsById]);
-  const { load, refresh, offline } = useListLoad();
+  const { load, offline } = useListLoad();
   // R10c-01: an older server still running after an update gets a banner, not only the footer line.
   const health = useHealth();
   // A bulk answer with failures: those items stay checked (D.6).
@@ -134,14 +139,15 @@ export function BoardPage() {
   const groups = useMemo(
     () =>
       groupsOf(items, {
-        filter: { q: query.q, repo: query.repo, chain: query.chain },
+        filter: { q: query.q, repo: query.repo, chain: query.chain, gate: query.gate, stop: query.stop },
         group: query.group,
         sort: query.sort,
         doneCap: allDone ? null : (prefs?.show_done ?? 5),
       }),
-    [items, query.q, query.repo, query.chain, query.group, query.sort, allDone, prefs?.show_done],
+    [items, query.q, query.repo, query.chain, query.gate, query.stop, query.group, query.sort, allDone, prefs?.show_done],
   );
   const needsN = countIn(items, "needs");
+  const filtered = !!(query.q.trim() || query.repo || query.chain || query.gate || query.stop);
 
   const open = useCallback((id: string, search = "") => navigate(`/work-items/${encodeURIComponent(id)}${search}`), [navigate]);
   const peek = useCallback((id: string, tab: PeekTab = "overview", budget = false) => {
@@ -178,16 +184,13 @@ export function BoardPage() {
     if (lost) requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-row]")].find((r) => r.dataset.row === id)?.querySelector<HTMLElement>(".board-row-main")?.focus());
   }, [query.sel, setQuery]);
 
-  // "/" focuses the filter, "?" lists the shortcuts; Escape clears the selection once menus have had it.
+  // "/" focuses the filter; Escape clears the selection once menus have had it.
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.defaultPrevented) return;
       if (e.key === "/" && !isTextField(e.target)) {
         e.preventDefault();
         filterRef.current?.focus();
-      } else if (e.key === "?" && !isTextField(e.target) && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        e.preventDefault();
-        setKeys(true);
       } else if (e.key === "Escape" && query.sel) closePeek();
     };
     window.addEventListener("keydown", onKey);
@@ -226,9 +229,9 @@ export function BoardPage() {
 
   // Over first-run as over the board: a server older than its interface says so either way (R11a-11).
   const restart = olderServer(health) && (
-    <div className="board-offline board-restart" role="alert">
-      <span className="board-offline-mark" aria-hidden>!</span>
-      <span className="board-offline-text">{OLDER_SERVER} Run <code>kraft admin restart</code>.</span>
+    <div className="ng-offline ng-offline-warn" role="alert">
+      <span className="ng-offline-mark" aria-hidden>!</span>
+      <span className="ng-offline-text">{OLDER_SERVER} Run <code>kraft admin restart</code>.</span>
     </div>
   );
   // FirstRun's last step opens the composer, which lives on the board.
@@ -245,6 +248,10 @@ export function BoardPage() {
   const count = (f: (i: WorkItem) => boolean) => String(items.filter(f).length);
   const repos = [...new Set(items.map((i) => i.repo))].sort((a, b) => repoName(a).localeCompare(repoName(b)));
   const chains = [...new Set(items.map(chainOf))].sort();
+  const { gates, stops } = stopFilterOptions(items);
+  // A chosen gate or stop nothing waits at any more stays listed, so the menu says what is filtering.
+  const gateLabel = (id: string) => gates.find((g) => g.value === id)?.label ?? nodeWords(id);
+  const stopLabel = (kind: string) => stops.find((s) => s.value === kind)?.label ?? stopWords(kind);
 
   return (
     <div className="board-page">
@@ -267,15 +274,6 @@ export function BoardPage() {
         <button type="button" className="btn btn-primary" disabled={offline} onClick={() => setQuery({ new: true, sel: "" })}>+ New work item</button>
       </HeaderActions>
 
-      {offline && (
-        <div className="board-offline" role="alert">
-          <span className="board-offline-mark" aria-hidden>!</span>
-          <span className="board-offline-text">
-            Could not load the board{load.state === "error" ? `: ${bannerError(load.error)}` : ": the live connection dropped"}. Showing what was loaded before; actions are off until it reconnects.
-          </span>
-          <button type="button" className="btn btn-danger" onClick={refresh}>Retry now</button>
-        </div>
-      )}
       {restart}
       <div className="board-filters">
         <label className="board-filter">
@@ -292,6 +290,26 @@ export function BoardPage() {
             ...chains.map((c) => ({ label: c, checked: query.chain === c, hint: count((i) => chainOf(i) === c), onSelect: () => setQuery({ chain: c }) })),
           ]}
         />
+        <Menu
+          label="Gate"
+          triggerClass={`board-menu-btn${query.gate ? " is-set" : ""}`}
+          trigger={<>{query.gate ? gateChip(gateLabel(query.gate)) : "Gate"} <span aria-hidden className="board-caret">▾</span></>}
+          items={[
+            { label: ALL_GATES, checked: !query.gate, onSelect: () => setQuery({ gate: "" }) },
+            ...gates.map((g) => ({ label: g.label, checked: query.gate === g.value, hint: String(g.n), onSelect: () => setQuery({ gate: g.value }) })),
+            ...(query.gate && !gates.some((g) => g.value === query.gate) ? [{ label: gateLabel(query.gate), checked: true, hint: "0", onSelect: () => {} }] : []),
+          ]}
+        />
+        <Menu
+          label="Stop reason"
+          triggerClass={`board-menu-btn${query.stop ? " is-set" : ""}`}
+          trigger={<>{query.stop ? stopChip(stopLabel(query.stop)) : "Stop reason"} <span aria-hidden className="board-caret">▾</span></>}
+          items={[
+            { label: ALL_STOPS, checked: !query.stop, onSelect: () => setQuery({ stop: "" }) },
+            ...stops.map((s) => ({ label: s.label, checked: query.stop === s.value, hint: String(s.n), onSelect: () => setQuery({ stop: s.value }) })),
+            ...(query.stop && !stops.some((s) => s.value === query.stop) ? [{ label: stopLabel(query.stop), checked: true, hint: "0", onSelect: () => {} }] : []),
+          ]}
+        />
         <span className="board-filters-gap" />
         <Menu
           label="Group by"
@@ -306,7 +324,7 @@ export function BoardPage() {
           trigger={<><span className="board-menu-key">Sort</span> {SORT_LABEL[query.sort]} <span aria-hidden className="board-caret">▾</span></>}
           items={(Object.keys(SORT_LABEL) as SortBy[]).map((s) => ({ label: SORT_LABEL[s], checked: query.sort === s, onSelect: () => setQuery({ sort: s }) }))}
         />
-        <button type="button" className="board-keys-btn" {...tip("Keyboard shortcuts")} aria-keyshortcuts="?" onClick={() => setKeys(true)}><Kbd>?</Kbd></button>
+        <button type="button" className="board-keys-btn" {...tip("Keyboard shortcuts")} aria-keyshortcuts="?" onClick={openShortcutHelp}><Kbd>?</Kbd></button>
       </div>
 
       <div className="board-body" ref={bodyRef}>
@@ -314,7 +332,11 @@ export function BoardPage() {
         <div className="board-list" onKeyDown={onListKey}>
           <div className="board-list-inner">
             {query.new && <Composer repoFilter={query.repo} onClose={() => setQuery({ new: false })} onCreated={(id) => peek(id)} />}
-            {load.state === "loading" && items.length === 0 ? <Skeleton label="Loading the board" /> : groups.map((g) => (
+            {load.state === "loading" && items.length === 0 ? <Skeleton label="Loading the board" /> : groups.length === 0 ? (
+              filtered
+                ? <NoMatch className="board-empty board-empty-solo" query={query.q} onClear={() => setQuery({ q: "", repo: "", chain: "", gate: "", stop: "" })} />
+                : <p className="board-empty board-empty-solo">No work items yet.</p>
+            ) : groups.map((g) => (
               <section key={g.key} className="board-group" aria-label={g.label}>
                 <h2 className="board-group-head">
                   <span>{g.label}</span>
@@ -322,7 +344,7 @@ export function BoardPage() {
                   <span className="board-count">{g.total}</span>
                   {g.done && (
                     <span className="board-note">
-                      <Link to="/archived">completed and cancelled{archiveDays != null ? ` · auto-archive after ${archiveDays} days` : ""}</Link>
+                      <Link to="/archived">Archived</Link>{autoArchiveNote(archiveDays) && ` · ${autoArchiveNote(archiveDays)}`}
                     </span>
                   )}
                   <span className="board-head-gap" />
@@ -330,7 +352,6 @@ export function BoardPage() {
                     <button type="button" className="board-select-all" onClick={() => setChecked((c) => new Set([...c, ...g.rows.map((r) => r.id)]))}>Select all</button>
                   )}
                 </h2>
-                {g.rows.length === 0 && g.empty && <p className="board-empty">{g.empty}</p>}
                 {g.rows.map((i) => (
                   <Row
                     key={i.id}
@@ -369,7 +390,6 @@ export function BoardPage() {
         )}
         <BulkBar checked={items.filter((i) => checked.has(i.id))} byId={itemsById} offline={offline} onChecked={(ids) => setChecked(new Set(ids))} />
       </div>
-      {keys && <Shortcuts onClose={() => setKeys(false)} />}
     </div>
   );
 }

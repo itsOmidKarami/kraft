@@ -43,5 +43,14 @@ export const CLEAR_URL = "Clear URL";
 export const CLEAR_URL_TITLE = "Clear the webhook URL?";
 export const CLEAR_URL_TEXT = "Removes the stored webhook and stops all sends.";
 export const PROGRESS_NOTE = "Progress events are deliberately not offered. A notifier that fires on progress gets muted, and a muted channel is the same as no channel at all.";
-export const evLine = (ids: string[]): string => (ids.length ? ids.join(", ") : "nothing");
+/** An event id in words, for a chip or a list: the one map both layouts read. An id it does not know reads as itself. */
+export const EVENT_WORDS: Record<string, string> = { gate_requested: "Decision waiting", work_item_needs_human: "Stopped for you", work_item_storage_held: "Storage held" };
+export const eventWords = (id: string): string => EVENT_WORDS[id] ?? id;
+export const evLine = (ids: string[]): string => (ids.length ? ids.map(eventWords).join(", ") : "nothing");
+
+/** The address a preview notification links to: the configured link back, else the address this page was opened at. */
+export const previewAddress = (link: string): string => (link || location.origin).replace(/\/$/, "");
+
+/** What a failed load says on both layouts, over its retry button. */
+export const RETRY = "Try again";
 export const toggled = (ids: string[], id: string): string[] => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);

@@ -52,6 +52,7 @@ export const NAV_ICON = {
   notifications: Bell,
   access: Lock,
   appearance: Palette,
+  boardCode: GitCompare,
   storage: HardDrive,
   about: Info,
 } as const;

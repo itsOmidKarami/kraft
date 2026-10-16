@@ -2,7 +2,7 @@
  *  Kept here, not in `icons.ts`, so the board's pure modules stay React-free. */
 export type TaskKind = "agent" | "builtin" | "subprocess" | "forge";
 
-export type GlyphState = "plain" | "done" | "current" | "todo" | "failed" | "esc" | "ghost" | "amber";
+export type GlyphState = "plain" | "done" | "current" | "todo" | "failed" | "esc" | "ghost" | "amber" | "paused";
 export type GlyphKind = "exec" | "gate" | "slot";
 
 /** What a canvas draws for one node or task. Pages map API data onto this. */
@@ -29,7 +29,7 @@ export type GraphItem = {
   faded?: boolean;
 };
 
-const STATE_WORD: Record<GlyphState, string> = { plain: "", done: "done", current: "running", todo: "not started", failed: "failed", esc: "escalated", ghost: "removed", amber: "waiting" };
+const STATE_WORD: Record<GlyphState, string> = { plain: "", done: "done", current: "running", todo: "not started", failed: "failed", esc: "escalated", ghost: "removed", amber: "waiting", paused: "paused" };
 
 /** A node or task button's accessible name: `<id>, <kind>, <state>[, attempt N]` (spec §5.2).
  *  A current node or task that runs nothing says why in the words drawn for

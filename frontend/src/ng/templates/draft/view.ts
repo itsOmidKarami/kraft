@@ -58,9 +58,12 @@ export function kindOf(r: Result, n: NodeA): "exec" | "gate" {
 
 const under = (path: string, root: string) => path === root || path.startsWith(`${root}.`);
 
+/** What a problem names as its place: its path, else the chain itself (the server sends `path: null` for a chain-level problem). */
+export const problemPath = (p: Problem): string => p.path ?? "chain";
+
 /** The problems at a path; `deep` adds its children's (a node's ring counts its tasks'). */
 export const problemsAt = (r: Result, path: string, deep = false): Problem[] =>
-  r.problems.filter((p) => (deep ? under(p.path, path) : p.path === path));
+  r.problems.filter((p) => (deep ? under(p.path ?? "", path) : p.path === path));
 
 /** The change at a path: its own, else an added or removed ancestor it folds into. */
 export function changeAt(r: Result, path: string): Change | undefined {
@@ -73,6 +76,27 @@ export function changeAt(r: Result, path: string): Change | undefined {
 const NOT_ROWS = new Set(["id", "kind", "icon"]);
 export const sourceRows = (r: Result, path: string) =>
   Object.entries(r.sources[path] ?? {}).filter(([f]) => !NOT_ROWS.has(f)).map(([field, s]) => ({ field, value: s.value, source: s.source, recovery: s.recovery }));
+
+/** A node's Config rows, a read-only one carrying why it is locked: a node with a fix loop cannot be read only (the prototype's lock). */
+export function settingRows(r: Result, path: string) {
+  const rows: (ReturnType<typeof sourceRows>[number] & { locked?: string })[] = sourceRows(r, path);
+  if (resolvedAt(r, path)?.fix_loop) rows.forEach((x) => { if (x.field === "read_only") x.locked = "A node with a fix loop cannot be read only"; });
+  return rows;
+}
+
+/** The chain's own caps, in two groups: `sources` has no row for the chain, so these read the file and say "policy" when unset. */
+export function chainCapGroups(r: Result, scope: Scope): { head: string; rows: { field: string; value: unknown; source: string }[] }[] {
+  const policy = (authoredAt(r, scope, "")?.policy ?? {}) as Record<string, unknown>;
+  const row = (f: string) => ({ field: `policy.${f}`, value: policy[f] ?? null, source: policy[f] === undefined ? "policy" : "chain" });
+  return [
+    { head: "Chain-wide time caps", rows: ["time_cap_minutes", "total_time_cap_minutes"].map(row) },
+    { head: "Fix loops in this chain", rows: ["max_attempts", "timeout_minutes"].map(row) },
+  ];
+}
+
+/** Whether the draft changed this Config row: a change at its path names the field, or names `policy` (a policy key is reported by the group) and the row is a `policy.*` key the file sets. */
+export const rowChanged = (r: Result, path: string, field: string, source?: string) =>
+  r.changes.some((c) => c.path === path && ((c.fields ?? []).includes(field) || (field.startsWith("policy.") && source === "chain" && (c.fields ?? []).includes("policy"))));
 
 /** The header's two numbers. A YAML syntax error counts as a problem. */
 export const counts = (r: Result) => ({ changes: r.changes.length, problems: r.problems.length + (r.yaml_error ? 1 : 0) });

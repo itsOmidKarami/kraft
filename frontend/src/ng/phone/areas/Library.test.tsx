@@ -157,6 +157,13 @@ describe("Library component (L.2)", () => {
     expect(within(g).getByText("breaks default")).toBeInTheDocument();
   });
 
+  it("a chain-level problem with a null path does not break the component page", async () => {
+    open("tasks.implementer", lib({ draft: true }, { problems: [{ ...problem("x", "Value error, chain cap is under a task's own"), path: null }, problem("tasks.implementer", "Value error, unknown profile", { component: "tasks.implementer" })] }));
+    const g = await screen.findByRole("region", { name: "Problems" });
+    expect(within(g).getByText("unknown profile")).toBeInTheDocument();
+    expect(within(g).queryByText(/chain cap/)).toBeNull();
+  });
+
   it("says there is no such component", async () => {
     open("tasks.nope");
     expect(await screen.findByText("There is no component tasks.nope.")).toBeInTheDocument();

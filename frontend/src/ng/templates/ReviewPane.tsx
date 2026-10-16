@@ -108,7 +108,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
       else onDone();
     } else if (a.status === 422) setRefused((a.body as { problems?: Problem[] }).problems ?? null);
     // A 409 shows its diff here; any other refusal says why, never nothing.
-    else if (a.status !== 409) showToast(`Couldn't publish: ${detailOf(a.body)}`);
+    else if (a.status !== 409) showToast(`Couldn't publish: ${detailOf(a.body)}`, { tone: "error" });
   };
   const discard = async () => {
     setAsking(false);
@@ -124,7 +124,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
       await navigator.clipboard.writeText(all);
       showToast("Copied the draft's YAML");
     } catch {
-      showToast("Couldn't copy: the browser refused the clipboard");
+      showToast("Couldn't copy: the browser refused the clipboard", { tone: "error" });
     }
   };
 
@@ -197,7 +197,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
               <span className="tpl-rv-path">{p.path || chain}{p.field && p.field !== p.path ? ` · ${p.field}` : ""}</span>
               <span>{problemText(p)}</span>
               {problemWhere?.(p)}
-              <button type="button" className="tpl-rv-fix" onClick={() => onFix(p.path, p)}>Fix →</button>
+              <button type="button" className="tpl-rv-fix" onClick={() => onFix(p.path ?? "", p)}>Fix →</button>
             </div>
           ))}
         </>

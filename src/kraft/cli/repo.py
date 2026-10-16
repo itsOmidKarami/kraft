@@ -268,7 +268,7 @@ def _say_setup(result: dict) -> None:
         )
         _print(
             f"setup command: {why}; pass --setup-command or set `setup_command` in its "
-            'repos.yaml entry, `""` if it needs no preparation, or tick No setup needed '
+            'repos.yaml entry, `""` if it needs no preparation, or turn on No setup needed '
             "under Settings › Repos"
         )
 

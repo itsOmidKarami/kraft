@@ -77,7 +77,7 @@
 .item-del { color: var(--bad); font-family: ui-monospace, Menlo, monospace; }
 
 /* Banner (Decisions §4) and the cards under the brief (§14). */
-.item-banner { flex: none; display: flex; align-items: center; gap: 10px; box-sizing: border-box; padding: 8px 8px 8px 14px; border: 1px solid color-mix(in oklab, var(--warn) 45%, transparent); border-radius: 8px; background: color-mix(in oklab, var(--warn) 8%, var(--bg)); font-size: var(--fs-meta); color: var(--text); }
+.item-banner { flex: none; display: flex; align-items: center; gap: 10px; box-sizing: border-box; padding: 8px 8px 8px 14px; border: 1px solid var(--warn-edge); border-radius: 8px; background: var(--warn-wash); font-size: var(--fs-meta); color: var(--text); }
 .item-banner-glyph { color: var(--warn); }
 .item-banner-text { flex: 1 1 auto; min-width: 0; }
 .item-banner-note { display: block; margin-top: 2px; font-size: var(--fs-label); color: var(--text-sub); }
@@ -98,6 +98,7 @@
 .item-card.is-muted { border-color: var(--border); background: var(--surface); }
 .item-card.is-muted .item-card-title { color: var(--text-sub); }
 .item-card .item-facts dt { color: var(--text-sub); }
+.item-card .item-input { max-width: 860px; }
 .item-card-text { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text); }
 .item-card-fix code { font: var(--fs-label) ui-monospace, Menlo, monospace; }
 .item-card-open { margin-left: auto; }
@@ -126,7 +127,7 @@
 .ip-recent li:is(:hover, :focus-within) .ip-recent-line { -webkit-line-clamp: unset; display: block; }
 button.ip-recent-line { cursor: pointer; }
 button.ip-recent-line:is(:hover, :focus-visible) { background: var(--line); color: var(--text); }
-button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .meter { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; }
 .meter-row { display: flex; align-items: center; gap: 10px; font-size: var(--fs-meta); }
 .meter-label { width: 110px; flex: none; color: var(--text-sub); }

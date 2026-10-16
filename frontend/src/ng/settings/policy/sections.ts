@@ -14,7 +14,7 @@ export function sectionOfKey(key: string): Section | null {
 }
 
 /** The section a problem is about: its key when it names one, else its group (`scope`). */
-export function sectionOfProblem(p: { scope?: string; field?: string | null; path?: string }): Section | null {
+export function sectionOfProblem(p: { scope?: string; field?: string | null; path?: string | null }): Section | null {
   const byKey = sectionOfKey(p.field || p.path || "");
   if (byKey) return byKey;
   if (p.scope === "limits") return "limits";

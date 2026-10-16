@@ -5,7 +5,9 @@
      current page; one missing from the other build gets the site's 404 page,
      so a click first asks for the page with a HEAD request and goes to that
      version's home when it is not there. Without JavaScript the link goes to
-     the 404 page, which offers every version. The pill is amber on /next/, as
+     the 404 page, which offers every version. The click keeps the #heading
+     the reader is at; the link itself cannot (it is rendered on the server,
+     where there is no fragment). The pill is amber on /next/, as
      it was before there were more than two versions.
      The trigger is 24px tall on a phone (text-xs, py-1). Text is the default
      color, not muted: muted on the elevated surface is 4.35:1. -->
@@ -28,7 +30,9 @@ async function open(event: MouseEvent) {
   event.preventDefault()
   const href = at.value.samePage(v.base)
   const found = await fetch(href, { method: 'HEAD' }).then(r => r.status !== 404, () => true)
-  location.assign(found ? href : v.base)
+  // The section the reader is at goes with them; a page the other version
+  // lacks, or a heading it renamed, is the page's top.
+  location.assign(found ? href + location.hash : v.base)
 }
 onMounted(() => document.addEventListener('click', open))
 onBeforeUnmount(() => document.removeEventListener('click', open))

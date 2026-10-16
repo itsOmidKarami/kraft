@@ -38,7 +38,7 @@ export function ItemDraftProvider({ item, reload, children }: { item: ItemDetail
   const [review, setReview] = useState<{ on: boolean; start: (() => void) | null }>({ on: false, start: null });
   const setReviewing = useCallback((on: boolean, start?: () => void) => setReview({ on, start: on ? start ?? null : null }), []);
   const { view, error } = draft;
-  useEffect(() => { if (error) showToast(error, 6000); }, [error]);
+  useEffect(() => { if (error) showToast(error, { ms: 6000, tone: "error" }); }, [error]);
   const value = useMemo<DraftCtx>(() => {
     const ops = view?.ops ?? [];
     const shown = ops.length && view ? { ...item, chain_definition: { ...item.chain_definition, nodes: view.nodes } } : item;

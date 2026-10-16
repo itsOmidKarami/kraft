@@ -24,7 +24,7 @@ import { useEvents } from "../item/useEvents";
 import { useItem, type ItemDetail } from "../item/useItem";
 import { Popover } from "../ui/Popover";
 import { groupOf } from "./model";
-import { reasonTail } from "./rowText";
+import { capitalise, gateName, reasonTail } from "./rowText";
 import "../item/item.css";
 
 export type PeekTab = "overview" | "activity" | "config";
@@ -94,7 +94,7 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
       footer={<Footer cards={tab === "overview"} item={item} reload={loaded.reload} offline={offline} onOpen={open} onRaise={raise} onAnswer={() => onTab("overview")} />}
     >
       {tab === "overview" && <Overview item={item} version={loaded.version} reload={loaded.reload} onRaise={raise} onMore={() => onTab("activity")} />}
-      {tab === "activity" && <Activity id={item.id} version={loaded.version} />}
+      {tab === "activity" && <Activity id={item.id} nodes={item.chain_definition.nodes} version={loaded.version} />}
       {tab === "config" && <Config item={item} reload={loaded.reload} budget={budget} onBudget={onBudget} />}
     </Inspector>
   );
@@ -133,7 +133,8 @@ function GateNote({ item, version }: { item: ItemDetail; version: string }) {
   const gates = item.chain_definition.nodes.filter((n) => n.kind === "gate").map((n) => n.id);
   const gate = item.pending_gate ?? item.stop?.node ?? "";
   const k = gates.indexOf(gate);
-  const place = k < 0 ? "" : k === gates.length - 1 ? `${gate} is the last gate.` : `${gate} is gate ${k + 1} of ${gates.length}.`;
+  const name = capitalise(gateName(item.chain_definition.nodes, gate));
+  const place = k < 0 ? "" : k === gates.length - 1 ? `${name} is the last gate.` : `${name} is gate ${k + 1} of ${gates.length}.`;
   const { add, del } = totals(files ?? []);
   const change = files?.length ? ` ${files.length} ${files.length === 1 ? "file" : "files"}, +${add} −${del}` : "";
   const open = threads ? `${change ? "," : ""} ${threads} open ${threads === 1 ? "thread" : "threads"}` : "";
@@ -143,7 +144,7 @@ function GateNote({ item, version }: { item: ItemDetail; version: string }) {
 const PAGE = 50;
 
 /** Every event of the item, newest first, paged backwards (B13). */
-function Activity({ id, version }: { id: string; version: string }) {
+function Activity({ id, nodes, version }: { id: string; nodes: ItemDetail["chain_definition"]["nodes"]; version: string }) {
   const navigate = useNavigate();
   const [events, setEvents] = useState<KraftEvent[]>([]);
   const [more, setMore] = useState(false);
@@ -159,7 +160,7 @@ function Activity({ id, version }: { id: string; version: string }) {
     <div className="peek-activity">
       <ol className="peek-events">
         {events.map((e) => {
-          const text = eventLine(e) ?? e.type.replaceAll("_", " ");
+          const text = eventLine(e, nodes) ?? e.type.replaceAll("_", " ");
           return (
             <li key={e.seq}>
               <span className="peek-ev-t">{age(e.created_at, now)}</span>

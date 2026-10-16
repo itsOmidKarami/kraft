@@ -6,6 +6,10 @@
 .ph-row-static { cursor: default; }
 .ph-row.ph-is-danger { color: var(--bad); }
 .ph-chips-end { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: 150px; }
+/* A row with chips and a value leaves its label too little room: the label takes the first line, the chips and value the second. */
+.ph-row:has(> .ph-chips-end):has(> .ph-row-value) { flex-wrap: wrap; row-gap: 6px; }
+.ph-row:has(> .ph-chips-end):has(> .ph-row-value) > .ph-row-text { flex-basis: 100%; }
+.ph-row:has(> .ph-chips-end):has(> .ph-row-value) > .ph-chips-end { margin-right: auto; justify-content: flex-start; max-width: none; }
 .ph-chipword { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; font-size: var(--fs-label); color: var(--text-sub); }
 .ph-chipword.ph-tone-ok { color: var(--ok); }
 .ph-chipword.ph-tone-warn { color: var(--warn); }
@@ -19,6 +23,7 @@
 .ph-area-title h1 { margin: 0; font-size: var(--fs-ph-title); font-weight: 600; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .ph-status { padding: 3px 8px; border-radius: 5px; font: 600 var(--fs-label) system-ui, sans-serif; letter-spacing: .06em; text-transform: uppercase; background: var(--line); color: var(--text-sub); }
 .ph-status.ph-tone-warn { color: var(--warn); background: color-mix(in oklab, var(--warn) 16%, transparent); }
+.ph-status.ph-tone-change { color: var(--mark-change); background: color-mix(in oklab, var(--mark-change) 16%, transparent); }
 .ph-status.ph-tone-bad { color: var(--bad); background: color-mix(in oklab, var(--bad) 16%, transparent); }
 .ph-area-sub { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-sub); overflow-wrap: anywhere; }
 .ph-yaml { display: flex; flex-direction: column; gap: 6px; }
@@ -56,6 +61,7 @@
 .ph-notice-link { color: var(--text-muted); font: var(--fs-label) ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
 .ph-command { display: block; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--side); font: var(--fs-meta)/1.5 ui-monospace, Menlo, monospace; color: var(--text); user-select: all; overflow-wrap: anywhere; }
 .ph-row-value { white-space: pre-line; }
+.ph-row-value.ph-row-figure { max-width: none; white-space: nowrap; overflow-wrap: normal; }
 a.ph-row, a.ph-row:hover { color: inherit; text-decoration: none; }
 .ph-row-hint.ph-row-cut { max-height: 2.9em; overflow: hidden; }
 .ph-unset-btn { width: 100%; min-height: 44px; padding: 0 4px; border: 0; border-top: 1px solid var(--line); background: transparent; text-align: left; font-size: var(--fs-meta); color: var(--text-muted); }

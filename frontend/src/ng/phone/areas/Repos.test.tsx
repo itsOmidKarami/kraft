@@ -1,7 +1,7 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DETECTED, problemAt, REPOS, reposView } from "../../templates/repos/fixture";
+import { DETECTED, problemAt, repo, REPOS, reposView } from "../../templates/repos/fixture";
 import { FIELDS, patchFor } from "../../templates/repos/fields";
 import { ReposList, RepoView } from "./Repos";
 import { mountAt, posts, where } from "./testkit";
@@ -23,6 +23,14 @@ describe("Repos list (M.2)", () => {
     expect(within(connected).getByRole("link", { name: /^docs-site/ })).toHaveTextContent("docs_only");
     expect(within(connected).getByRole("link", { name: /^docs-site/ })).toHaveTextContent("No setup");
     expect(within(screen.getByRole("region", { name: "Detected" })).getByText("/src/plugins")).toBeInTheDocument();
+  });
+
+  it("shows a long path by its tail and keeps the whole of it as the hint's title", async () => {
+    const long = "/home/ana/work/clients/billing-reconciliation/monorepo-checkout-main";
+    const v = reposView();
+    list(ans({ ...v, result: { ...v.result, resolved: { repos: [{ ...repo("monorepo-checkout-main"), path: long }], detected: [] } as never } }));
+    const hint = within(await screen.findByRole("link", { name: /^monorepo-checkout-main/ })).getByText("…/billing-reconciliation/monorepo-checkout-main");
+    expect(hint).toHaveAttribute("title", long);
   });
 
   it("connects a detected repo with connect_detected", async () => {
@@ -65,7 +73,7 @@ describe("a repo (M.2)", () => {
   it("shows every field the desktop's Config tab edits, with where each value comes from", async () => {
     open("platform");
     expect(await screen.findByRole("heading", { level: 1, name: "platform" })).toBeInTheDocument();
-    for (const f of FIELDS) expect(screen.getByRole("button", { name: (n) => n.startsWith(f.label) })).toBeInTheDocument();
+    for (const f of FIELDS) expect(within(screen.getByRole("region", { name: f.group })).getByRole("button", { name: (n) => n.startsWith(f.label) })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^tasks running cap/ })).toHaveTextContent("60");
     expect(screen.getByRole("button", { name: /^tasks running cap/ })).toHaveTextContent("this repo");
     expect(screen.getByRole("button", { name: /^deny tools/ })).toHaveTextContent("default");
@@ -80,6 +88,29 @@ describe("a repo (M.2)", () => {
     await userEvent.type(box, "pytest -q{Enter}");
     const want = { op: "set_repo", path: "/src/platform", patch: patchFor(REPOS[1], FIELDS.find((f) => f.key === "test_command")!, "pytest -q") };
     await waitFor(() => expect(ops(calls)).toEqual([want, want]));
+  });
+
+  it.each([
+    { id: "no tests", field: "test command", key: "test_command", label: "No tests" },
+    { id: "no setup", field: "setup command", key: "setup_command", label: "No setup needed" },
+  ])("$id: the desktop's tick, not a literal pair of quotes in the box", async ({ field, key, label }) => {
+    const none = reposView({ resolved: { repos: [repo("platform", { [key]: "" })], detected: [] } as never });
+    const set = reposView({ resolved: { repos: [repo("platform", { [key]: "make x" })], detected: [] } as never });
+    const f = FIELDS.find((x) => x.key === key)!;
+    open("platform", ans(none));
+    await userEvent.click(await screen.findByRole("button", { name: new RegExp(`^${field}`) }));
+    expect(screen.getByLabelText(field, { selector: "input" })).toHaveValue("");
+    expect(screen.getByRole("checkbox", { name: label })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: label })).toBeEnabled();
+    expect(screen.getByLabelText(field, { selector: "input" })).toBeDisabled();
+    cleanup();
+    const again = open("platform", ans(set));
+    await userEvent.click(await screen.findByRole("button", { name: new RegExp(`^${field}`) }));
+    expect(screen.getByRole("checkbox", { name: label })).not.toBeChecked();
+    await userEvent.click(screen.getByRole("checkbox", { name: label }));
+    await userEvent.click(screen.getByRole("button", { name: "Set" }));
+    const want = { op: "set_repo", path: "/src/platform", patch: patchFor(repo("platform"), f, "") };
+    await waitFor(() => expect(ops(again.calls)).toEqual([want, want]));
   });
 
   it("a policy field patches inside the policy block, and a bad number is refused before any call", async () => {

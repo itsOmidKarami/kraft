@@ -5,7 +5,7 @@ import { Inspector } from "../graph/Inspector";
 import type { useResizable } from "../graph/useResizable";
 import { Head, Note, SelectRow } from "../templates/panes/controls";
 import type { ConfigDraft } from "../templates/draft/useConfigDraft";
-import { ACCESS_WORD, TOOLS_EVERY, TOOLS_RESTRICT, ESCALATION_PATH, type HProblem, type Resolved } from "./model";
+import { ACCESS_WORD, ITEM_HARNESS, itemHarnessNow, TOOLS_EVERY, TOOLS_RESTRICT, ESCALATION_PATH, type HProblem, type Resolved } from "./model";
 import type { Published } from "./usePublishedPolicy";
 import { problemText } from "../templates/problems";
 
@@ -38,7 +38,7 @@ export function AreaPane({ draft, r, problems, published, tab, onTab, open, size
   const send = (op: Record<string, unknown>) => void draft.ops([{ op: "set_escalation", harness: r.escalation.harness, grants: r.escalation.grants, ...op }]);
   const effective = r.escalation_effective.harness;
   const runsOn = [
-    { value: "item", label: "item's harness" },
+    { value: "item", label: r.escalation.harness == null ? itemHarnessNow(effective) : ITEM_HARNESS },
     ...r.harnesses.filter((h) => h.state !== "never" || h.id === effective).map((h) => ({ value: h.id, label: h.state === "never" ? `${h.id} (Never)` : h.id })),
   ];
   const escalationBad = problems.some((p) => p.path === ESCALATION_PATH);
@@ -104,7 +104,7 @@ export function AreaPane({ draft, r, problems, published, tab, onTab, open, size
           <Head>Escalation</Head>
           <SelectRow
             label="runs on"
-            value={r.escalation.harness ?? effective}
+            value={r.escalation.harness ?? "item"}
             options={runsOn}
             bad={escalationBad}
             sub={escalationBad ? "This harness is set to Never, so escalation cannot run there." : "\"item's harness\" follows the one the item's latest agent task used. Harnesses set to Never aren't offered."}

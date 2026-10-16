@@ -4,7 +4,7 @@ import * as api from "../../../api";
 import { repoName, shortId } from "../../../format";
 import { useStore } from "../../../store";
 import type { ChainNode, Repo, TemplateSummary, Workspace } from "../../../types";
-import { chainsForRepo } from "../../library/types";
+import { chainOptionText, chainsForRepo, defaultChainNote } from "../../library/types";
 import { Inspector } from "../../graph/Inspector";
 import type { ChainNode as GraphNode } from "../../graph/layout";
 import { ITEM_FIT } from "../../graph/camera";
@@ -252,10 +252,10 @@ export function DraftItemPage() {
           nodes={nodes}
           selected={sel ?? undefined}
           reserve={size.overlay ? 0 : paneOpen ? size.width : 40}
-          // The item page's fit: labels stay readable, Fit shows the whole chain, and its stages fold to pills (a click opens one in place).
+          // The item page's fit and overview: labels stay readable, and a long chain shows whole above them.
           fit={ITEM_FIT}
-          fold
-          foldAhead={0}
+          overview
+          names
           onSelect={(id) => { setSel(id); setTab((t) => (sel === id ? t : "overview")); }}
           onOpen={(id) => { setSel(id); setPaneOpen(true); }}
           onEscape={() => setSel(null)}
@@ -264,9 +264,10 @@ export function DraftItemPage() {
         <div className="draft-canvas-head">
           <Menu
             label="Chain"
+            description={repos.find((r) => r.path === d.repo)?.default_chain ? defaultChainNote(repos.find((r) => r.path === d.repo)!.default_chain!) : undefined}
             triggerClass="composer-chip composer-mono draft-chain-btn"
             trigger={<>{d.chain || "chain"} <span aria-hidden className="board-caret">▾</span></>}
-            items={chainsForRepo(chains, repos.find((r) => r.path === d.repo)?.id).filter((c) => !c.error).map((c) => ({ label: c.id, checked: c.id === d.chain, hint: `${c.nodes.length} nodes · ${c.gates} gates${c.id === repos.find((r) => r.path === d.repo)?.default_chain ? " · repo default" : ""}`, onSelect: () => { set({ chain: c.id, skip: [] }); setSel(null); } }))}
+            items={chainsForRepo(chains, repos.find((r) => r.path === d.repo)?.id).filter((c) => !c.error).map((c) => ({ label: chainOptionText(c), checked: c.id === d.chain, onSelect: () => { set({ chain: c.id, skip: [] }); setSel(null); } }))}
           />
           <span>{runText}</span>
         </div>

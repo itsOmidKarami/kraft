@@ -25,3 +25,5 @@
 
 .ph-actionbar { flex: none; display: flex; gap: 8px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--bg); }
 .ph-actionbar > .ph-btn { flex: 1; }
+.ph-actionbar > .ph-btn.btn { padding-inline: 8px; }
+.ph-row:focus-visible, .ph-tabstrip-tab:focus-visible, .ph-unset-btn:focus-visible { outline-offset: -2px; }

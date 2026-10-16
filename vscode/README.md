@@ -13,7 +13,7 @@ is doing, approve or reject a gate, review a branch's diff with the review
 agents' findings on the lines they name, and edit Kraft's config with errors
 flagged as you type.
 
-![Kraft's gate document open in VS Code, with Approve and Reject in the tab's title bar and the board in the sidebar](media/screenshot-gate.png)
+![Kraft's gate document, rendered as a Markdown preview, with Approve and Reject in the tab's title bar and the board in the sidebar](media/screenshot-gate.png)
 
 ## Get started
 
@@ -37,22 +37,47 @@ runs `kraft admin start` in a terminal.
 
 ## Board
 
-![The Kraft board in the sidebar: items that need you, and done items](media/screenshot-board.png)
+![The Kraft board in the sidebar: each item's title, then why it is there, such as "approve spec" or "failed at implementation", with a coloured icon per state](media/screenshot-board.png)
 
 The Kraft view in the activity bar lists every work item, grouped as in the web
-UI, with a badge counting the ones waiting on you. It shows the repos open in
-the window; the filter button shows every repo. Right-click an item to pause,
-resume, retry, skip, escalate, cancel or archive it, open its worktree in a new
-window, or open it in the web UI.
+UI, with a badge counting the ones waiting on you. Each row shows the item's
+title, then why it is there ("approve spec", "agent asks: …", "failed at
+implementation"), with an icon whose colour tells a gate from a failure. It
+shows the repos open in the window; the filter button shows every repo.
+Right-click an item to pause, resume, retry, skip, escalate, cancel or archive
+it, or open the **Open** submenu for its worktree, its merge request, its spec
+and plan, the worker log or the web UI. Hover a row for its id and the full
+reason.
+
+The status bar item `Kraft` shows a bell and the count on a warning background
+while anything waits on you, and a check mark when nothing does. Click it for
+the log, the web UI and Retry Now.
 
 ## Gates
 
-![A notification that a work item is waiting at its spec approval gate, with Open and Reject…](media/screenshot-gate-notification.png)
+![A notification naming the work item and its gate, "Design the caching layer: approve spec", with Open and Reject…](media/screenshot-gate-notification.png)
 
 When a gate opens, a notification offers **Open** and **Reject…**; read-only, it
-offers Open only. Open shows the gate's document in a tab, with Approve and
-Reject in its title bar: you approve a document once you have read it. A reject
-asks for a reason, which goes to the agent.
+offers Open only. Open shows the gate's document as a rendered Markdown
+preview, with Approve and Reject in its tab's title bar: you approve a document
+once you have read it. Approving says what was approved ("Approved: title ·
+approve spec"), and asks first when the gate merges or pushes, from Approve
+or from Submit Review. Several notifications at once become one ("3 items need
+you") with a Next Gate button. A reject asks for
+a reason, which goes to the agent.
+
+**Kraft: Next Gate** in the Command Palette opens the gate document directly when
+one gate waits, and with several lists them, longest-waiting first, so a queue of
+gates goes by without the mouse.
+
+Default keys (`Cmd+Alt+K` on macOS), each chord starting `Ctrl+Alt+K`:
+
+| Key | Does |
+|---|---|
+| `Ctrl+Alt+K N` | Next Gate |
+| `Ctrl+Alt+K A` | Approve, on a gate document |
+| `Ctrl+Alt+K R` | Reject…, on a gate document |
+| `Ctrl+Alt+K S` | Submit Review |
 
 ## Review
 

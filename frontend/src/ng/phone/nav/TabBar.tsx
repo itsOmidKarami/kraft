@@ -2,7 +2,7 @@ import { ChartColumn, Ellipsis, Kanban, Search } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useApply } from "../../apply/store";
 import { useNeedsCount } from "./needsCount";
-import { tabOf, type Tab } from "./route";
+import { tabOf, tabsHidden, type Tab } from "./route";
 
 const TABS: { tab: Tab; label: string; to: string; Icon: typeof Kanban }[] = [
   { tab: "board", label: "Board", to: "/", Icon: Kanban },
@@ -18,7 +18,7 @@ export function TabBar() {
   const active = tabOf(pathname + search);
   const needs = useNeedsCount();
   const pending = useApply((s) => s.restart.length + s.reload.length);
-  if (!active) return null;
+  if (tabsHidden(pathname + search)) return null;
   return (
     <nav className="ph-tabs" aria-label="Primary">
       {TABS.map(({ tab, label, to, Icon }) => {

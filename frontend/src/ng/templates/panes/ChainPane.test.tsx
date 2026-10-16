@@ -45,6 +45,21 @@ beforeEach(() => {
 });
 
 describe("Config tab", () => {
+  it.each([
+    { id: "a node field", path: "implementation.main.implement", label: "harness", changes: [{ path: "implementation.main.implement", kind: "change" as const, summary: "harness", fields: ["harness"] }], marked: true },
+    { id: "another field's change", path: "implementation.main.implement", label: "harness", changes: [{ path: "implementation.main.implement", kind: "change" as const, summary: "model", fields: ["model"] }], marked: false },
+    { id: "another node's change", path: "implementation.main.implement", label: "harness", changes: [{ path: "implementation.main.verify", kind: "change" as const, summary: "harness", fields: ["harness"] }], marked: false },
+    { id: "a chain policy key, reported by the group", path: "", label: "attempts", changes: [{ path: "", kind: "change" as const, summary: "policy", fields: ["policy"] }], marked: true, set: true },
+    { id: "a chain policy key it does not set", path: "", label: "attempts", changes: [{ path: "", kind: "change" as const, summary: "policy", fields: ["policy"] }], marked: false },
+  ])("marks a row the draft changed: $id", async ({ path, label, changes, marked, set }) => {
+    const model = structuredClone(DEFAULT_VIEW.result.model);
+    if (set) model["chains/default.yaml"].policy = { max_attempts: 3 };
+    mount(path, { changes, model });
+    await configTab();
+    await showDefaults();
+    expect(rowOf(label).classList.contains("is-changed")).toBe(marked);
+  });
+
   it("lists the server's rows in its order, each with its source chip, folds the unset ones, and brings one out when it becomes an override", async () => {
     mount("implementation.main.implement");
     await configTab();
@@ -134,38 +149,39 @@ describe("Config tab", () => {
   });
 });
 
-/** A select row edits in place: its value is a button until clicked. */
+/** A pick row edits in place: its value is a button until clicked, then a list of the options. */
 const editing = async (name: string) => {
   await userEvent.click(screen.getByRole("button", { name: new RegExp(`^${name}, .*\\. Edit$`) }));
-  return screen.getByRole("combobox", { name });
+  return screen.getByRole("menu", { name });
 };
+const labels = (menu: HTMLElement) => within(menu).getAllByRole("menuitemradio").map((o) => o.textContent?.replace(/^✓/, ""));
 
 describe("Overview tab", () => {
   it("picks a gate's document from what earlier nodes produce; required shows only with a document", async () => {
     const { draft } = mount("local_review");
-    await userEvent.click(screen.getByRole("checkbox", { name: "required" }));
+    await userEvent.click(screen.getByRole("switch", { name: "required" }));
     expect(draft.field).toHaveBeenCalledWith("local_review", "artifact_required", true);
     const doc = await editing("document");
-    expect([...doc.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["none", ...DEFAULT_VIEW.result.resolved!.documents.local_review]);
-    await userEvent.selectOptions(doc, "none");
+    expect(labels(doc)).toEqual(["none", ...DEFAULT_VIEW.result.resolved!.documents.local_review]);
+    await userEvent.click(within(doc).getByRole("menuitemradio", { name: /none/ }));
     expect(draft.field).toHaveBeenCalledWith("local_review", "artifact", null);
-    // The pick closes the select back to its value.
-    expect(screen.queryByRole("combobox", { name: "document" })).toBeNull();
+    // The pick closes the list back to its value.
+    expect(screen.queryByRole("menu", { name: "document" })).toBeNull();
   });
 
   it("has no required box on a gate that needs no document", () => {
     const sources = structuredClone(DEFAULT_VIEW.result.sources);
     sources.local_review.artifact = { value: null, source: "default" };
     mount("local_review", { sources });
-    expect(screen.queryByRole("checkbox", { name: "required" })).toBeNull();
+    expect(screen.queryByRole("switch", { name: "required" })).toBeNull();
     expect(screen.getByText("Nothing is needed to approve.")).toBeInTheDocument();
   });
 
   it("offers only earlier exec nodes to reject to; gates are disabled", async () => {
     mount("local_review");
-    const opts = [...(await editing("reject to")).querySelectorAll("option")];
-    expect(opts.map((o) => o.textContent)).toEqual(["not set", "spec", "spec_approval (gate)", "implementation", "verification"]);
-    expect(opts.find((o) => o.value === "spec_approval")).toBeDisabled();
+    const menu = await editing("reject to");
+    expect(labels(menu)).toEqual(["not set", "spec", "spec_approval (gate)", "implementation", "verification"]);
+    expect(within(menu).getByRole("menuitemradio", { name: /spec_approval/ })).toBeDisabled();
   });
 
   it("focuses an empty prompt and says it is required", () => {
@@ -183,11 +199,11 @@ describe("Overview tab", () => {
     expect(screen.queryByRole("textbox", { name: "model" })).toBeNull();
     // Each route says what it is, where it is edited.
     expect(screen.getByText(/How the model is chosen/)).toBeInTheDocument();
-    await userEvent.selectOptions(await editing("route"), "model");
+    await userEvent.click(within(await editing("route")).getByRole("menuitemradio", { name: /model/ }));
     expect(draft.field).toHaveBeenCalledWith("implementation.main.implement", "profile", null);
     expect(screen.getByRole("textbox", { name: "model" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^profile, / })).toBeNull();
-    expect([...(await editing("effort")).querySelectorAll("option")].map((o) => o.textContent)).toEqual(["default", "low", "medium", "high"]);
+    expect(labels(await editing("effort"))).toEqual(["default", "low", "medium", "high"]);
   });
 
   it("sends a typed field on a pause, and flushes on blur", async () => {

@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import * as api from "../../../api";
 import { repoName } from "../../../format";
 import { useStore } from "../../../store";
 import type { Repo, SearchResult, TemplateSummary } from "../../../types";
-import { chainsForRepo } from "../../library/types";
+import { FILED_PAUSED, KEEP_EDITING } from "../../board/newWords";
+import { chainOptionText, chainsForRepo, defaultChainNote } from "../../library/types";
 import { detailOf, jsonBody, request } from "../../http";
 import { Button } from "../../ui/Button";
 import { useReason } from "../../ui/Reason";
@@ -31,6 +32,7 @@ export function NewItem() {
   const [busy, setBusy] = useState(false);
   // Spoken from the start, drawn once the title has been visited and left empty.
   const [touched, setTouched] = useState(false);
+  const chainHint = useId();
   const why = useReason(d.title.trim() ? null : ADD_TITLE);
   const set = (p: Partial<NewDraft>) => setD((x) => ({ ...x, ...p }));
   const dirty = !!(d.title.trim() || d.brief.trim());
@@ -40,7 +42,8 @@ export function NewItem() {
     api.getRepos().then((r) => {
       const live = r.repos.filter((x) => x.enabled !== false);
       setRepos(live);
-      setD((x) => (x.repo || !live[0] ? x : { ...x, repo: live[0].path, chain: live[0].default_chain }));
+      // A restored draft keeps its repo only while that repo is still connected and enabled.
+      setD((x) => (live.some((r) => r.path === x.repo) || !x.repo && !live[0] ? x : { ...x, repo: live[0]?.path ?? "", chain: live[0]?.default_chain ?? "", spec: "", plan: "" }));
     }).catch(() => {});
     api.getTemplates().then(setChains).catch(() => {});
   }, []);
@@ -106,20 +109,22 @@ export function NewItem() {
         </label>
         <label className="ph-field">
           <span>Chain</span>
-          <select className="ph-input ph-select" value={d.chain} onChange={(e) => set({ chain: e.target.value })}>
-            {chainsForRepo(chains, repo?.id).filter((c) => !c.error).map((c) => <option key={c.id} value={c.id}>{`${c.id} · ${c.nodes.length} nodes · ${c.gates} gates${c.id === repo?.default_chain ? " (repo default)" : ""}`}</option>)}
+          <select className="ph-input ph-select" value={d.chain} aria-describedby={repo?.default_chain ? chainHint : undefined} onChange={(e) => set({ chain: e.target.value })}>
+            {chainsForRepo(chains, repo?.id).filter((c) => !c.error).map((c) => <option key={c.id} value={c.id}>{chainOptionText(c)}</option>)}
           </select>
         </label>
+        {repo?.default_chain && <p className="ph-note" id={chainHint}>{defaultChainNote(repo.default_chain)}</p>}
         <div className="ph-attaches">{chip("spec")}{chip("plan")}</div>
         {error && !sheet.openId && <p className="ph-error" role="alert">{error}</p>}
+        <p className="ph-note">{FILED_PAUSED}</p>
       </div>
       {why.text && <p className={`ph-block-reason${touched ? "" : " ph-visually-hidden"}`} id={why.id}>{why.text}</p>}
       <div className="ph-actionbar">
-        <Button className="ph-btn" disabled={busy || !d.title.trim()} {...why.attrs} onClick={() => create(true)}>Create and start</Button>
         <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy || !d.title.trim()} {...why.attrs} onClick={() => create(false)}>Create paused</Button>
+        <Button className="ph-btn" disabled={busy || !d.title.trim()} {...why.attrs} onClick={() => create(true)}>Create and start</Button>
       </div>
       {sheet.is("discard") && (
-        <ConfirmSheet title="Discard this draft?" text="The title and brief you typed will be lost." confirm={{ label: "Discard", danger: true, run: () => { saveDraft(null); sheet.goTo("/"); } }} onClose={sheet.close} />
+        <ConfirmSheet title="Discard this draft?" text="The title and brief you typed will be lost." cancel={KEEP_EDITING} confirm={{ label: "Discard", danger: true, run: () => { saveDraft(null); sheet.goTo("/"); } }} onClose={sheet.close} />
       )}
       {sheet.is("attach") && (
         <EditSheet title={`Attach a ${kind}`} text={`Search this repo's ${kind}s, or paste a repo-relative path. The file must be inside the repo: it is committed on the item's branch.`} placeholder={`search ${kind}s, or paste a path`} submitLabel="Find" error={error} onSubmit={(q) => (q.trim() ? attach(q) : setError("Type a search or paste a path."))} onClose={sheet.close} />

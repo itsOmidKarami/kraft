@@ -8,25 +8,23 @@ import type { Bead, SearchResult, WorkItem } from "../../types";
 import { backdropProps, useModal } from "../../useModal";
 import { groupOf } from "../board/model";
 import { termsOf } from "../item/DocViewer";
-import { gateWords, reasonTail } from "../board/rowText";
+import { gateName, reasonTail } from "../board/rowText";
 import { headerState, neverStarted } from "../item/status";
 import { Kbd } from "../ui/Kbd";
 import { NoMatch } from "../ui/NoMatch";
+import { SEARCH_MODES, type SearchMode } from "../ui/searchModes";
 import { Tabs } from "../ui/Tabs";
 import { ROUTES } from "./routes";
 import "./search.css";
 
 type Tab = "all" | "items" | "docs" | "beads";
 type Load = "idle" | "loading" | "ok" | "error";
-const MODES = ["hybrid", "fts", "vector"] as const;
 
 interface Row {
   id: string;
   section: "needs" | "items" | "docs" | "beads" | "goto";
   label: string;
   sub?: string;
-  /** Leads the sub and is the one part of it that shortens: a gate row's item title. */
-  subLead?: string;
   snippet?: string;
   /** What Enter does, in the footer. */
   note: string;
@@ -42,6 +40,8 @@ interface Row {
 /** The board's composer (W6 brief A.2). */
 const NEW_ITEM = { path: "/?new=1", label: "New work item", icon: Plus, group: null };
 const has = (hay: string, q: string) => hay.toLowerCase().includes(q.toLowerCase());
+/** The pages Go to offers before anything is typed; typing finds the rest. */
+const TOP_PAGES = new Set(["/", "/analytics", "/archived", "/settings/repos", "/?new=1"]);
 const GROUP = { templates: "Templates", settings: "Settings" } as const;
 const SECTIONS: Record<Row["section"], string> = { needs: "Needs you", items: "Work items", docs: "Documents", beads: "Beads", goto: "Go to" };
 
@@ -67,10 +67,9 @@ const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => vo
     ? {
         id: `${section}:${i.id}`,
         section,
-        // The gate as the board words it: "Review spec", not "Review spec_approval" (#502 review).
-        label: `Review ${gateWords(i.pending_gate)}`,
-        subLead: i.title,
-        sub: [shortId(i.id), repoName(i.repo)].filter(Boolean).join(" · "),
+        // The item first, then the action: "Review" and the gate as the board words it ("approve spec", not "spec_approval", #502 review).
+        label: i.title,
+        sub: ["Review", gateName(i.chain_definition?.nodes, i.pending_gate), shortId(i.id), repoName(i.repo)].filter(Boolean).join(" · "),
         icon: Diamond,
         tag: headerState(i).badge,
         note: `reviews ${i.title}`,
@@ -97,7 +96,7 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
   const workItems = useStore((s) => s.workItems);
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<Tab>("all");
-  const [mode, setMode] = useState<(typeof MODES)[number]>("hybrid");
+  const [mode, setMode] = useState<SearchMode>("hybrid");
   const [filters, setFilters] = useState(false);
   const [sourceKind, setSourceKind] = useState("");
   const [kind, setKind] = useState("");
@@ -105,6 +104,7 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
   const [beads, setBeads] = useState<{ load: Load; list: Bead[] }>({ load: "idle", list: [] });
   const [active, setActive] = useState(0);
   const query = q.trim();
+  const modeLabel = SEARCH_MODES.find((m) => m.value === mode)!.label;
   const seq = useRef(0);
 
   useEffect(() => {
@@ -170,7 +170,7 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
           note: "drafts a work item that implements this bead",
           open: () => navigate(`/work-items/new?${new URLSearchParams({ title: b.title, bead: b.id })}`),
         })),
-      ...[...ROUTES, NEW_ITEM].filter((r) => !query || has(r.label, query)).map((r): Row => ({
+      ...[...ROUTES, NEW_ITEM].filter((r) => (query ? has(r.label, query) : TOP_PAGES.has(r.path))).map((r): Row => ({
         id: `goto:${r.path}`,
         section: "goto",
         label: r.label,
@@ -232,12 +232,7 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
                   <r.icon size={14} aria-hidden className={`ng-search-ico${r.icon === Diamond ? " is-gate" : ""}`} />
                   <span className="ng-search-main">
                     <span className="ng-search-title" title={r.label}><Marked text={r.label} query={query} /></span>
-                    {r.sub && (
-                      <span className="ng-search-sub">
-                        {r.subLead && <><span className="ng-search-sublead" data-allow-ellipsis title={r.subLead}><Marked text={r.subLead} query={query} /></span><span aria-hidden>&nbsp;·&nbsp;</span></>}
-                        <span className="ng-search-subrest">{r.sub}</span>
-                      </span>
-                    )}
+                    {r.sub && <span className="ng-search-sub">{r.sub}</span>}
                     {r.snippet && <span className="ng-search-snippet"><Snippet text={r.snippet} /></span>}
                   </span>
                   {r.tag && <span className="ng-search-tag">{r.tag}</span>}
@@ -248,6 +243,7 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
             </div>
           ))}
         </div>
+        {s === "goto" && !query && <p className="ng-search-note" role="none">Type a page name to find the rest.</p>}
         {s === "docs" && docs.load === "loading" && !list.length && <p className="ng-search-note" role="none">Searching documents…</p>}
         {s === "docs" && (noteHere ? failed("Documents") : list.length > 0 && <p className="ng-search-note" role="none">documents come from a lagging index, not live state</p>)}
         {s === "beads" && noteHere && failed("Beads")}
@@ -278,7 +274,7 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onKeyDown}
           />
-          <button type="button" className="ng-search-mode" aria-label={`Search mode: ${mode}. Change mode`} onClick={() => setMode(MODES[(MODES.indexOf(mode) + 1) % MODES.length])}>{mode}</button>
+          <button type="button" className="ng-search-mode" aria-label={`Search mode: ${modeLabel}. Change mode`} onClick={() => setMode(SEARCH_MODES[(SEARCH_MODES.findIndex((m) => m.value === mode) + 1) % SEARCH_MODES.length].value)}>Match: {modeLabel}</button>
           <Kbd>esc</Kbd>
         </div>
         <div className="ng-search-tabrow">

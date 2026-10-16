@@ -59,7 +59,7 @@ describe("Back (A.3)", () => {
     await userEvent.click(screen.getByRole("button", { name: "open task" }));
     await userEvent.click(screen.getByRole("button", { name: "open scope" }));
     expect(idx()).toBe(2);
-    await userEvent.click(screen.getByRole("button", { name: "Task" }));
+    await userEvent.click(screen.getByRole("button", { name: "t" }));
     await waitFor(() => expect(where()).toBe("/work-items/a/nodes/n?sel=n.s.t"));
     expect(idx()).toBe(1);
   });
@@ -68,7 +68,7 @@ describe("Back (A.3)", () => {
     window.history.replaceState(null, "", "/work-items/a/nodes/n?sel=n.s.t");
     render(<BrowserRouter><Harness /></BrowserRouter>);
     for (const next of ["/work-items/a/nodes/n", "/work-items/a", "/"]) {
-      await userEvent.click(screen.getByRole("button", { name: /^Back|Node|Chain|Board/ }));
+      await userEvent.click(screen.getByRole("button", { name: /^(n|a|Board)$/ }));
       await waitFor(() => expect(where()).toBe(next));
       expect(idx()).toBe(0);
     }
@@ -78,6 +78,6 @@ describe("Back (A.3)", () => {
   it("labels the control with the parent", async () => {
     window.history.replaceState(null, "", "/work-items/a/nodes/n?sel=n.s.t");
     render(<BrowserRouter><Harness /></BrowserRouter>);
-    expect(screen.getByRole("button", { name: "Node" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "n" })).toBeInTheDocument();
   });
 });

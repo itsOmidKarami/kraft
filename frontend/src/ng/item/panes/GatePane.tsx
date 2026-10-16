@@ -1,9 +1,12 @@
-import { REQUEST_CHANGES, rejectTo } from "../../review/finish";
+import { REQUEST_CHANGES, sendsBack } from "../../review/finish";
+import { gateName, nameOf } from "../../board/rowText";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ChainNode, KraftEvent } from "../../../types";
 import { FileText } from "../../icons";
 import { Button } from "../../ui/Button";
+import { useReason } from "../../ui/Reason";
+import { ADD_NOTE } from "../../ui/reasons";
 import { request } from "../../http";
 import { act } from "../actions";
 import { TestsLine } from "../TestsLine";
@@ -62,7 +65,7 @@ export function GateBody({ item, version, gate, events }: { item: ItemDetail; ve
       <dl className="item-facts ip-facts ip-gap">
         {item.test_result && <div><dt>tests</dt><dd><TestsLine workItemId={item.id} result={item.test_result} /></dd></div>}
         {item.gate_artifact && pending && <div><dt>decides on</dt><dd className="is-mono">{item.gate_artifact.split("/").pop()}</dd></div>}
-        {to && <div><dt>reject to</dt><dd className="is-mono">{to}</dd></div>}
+        {to && <div><dt>reject to</dt><dd>{nameOf(item.chain_definition.nodes, to)}</dd></div>}
         <div><dt>status</dt><dd>{pending ? "waiting for you" : decided ? `passed · ${decided.by}` : gateSkipped(events, gate.id) ? "skipped" : item.chain_definition.nodes.findIndex((n) => n.id === gate.id) < item.chain_definition.nodes.findIndex((n) => n.id === item.current_node_id) ? "passed" : "not reached"}</dd></div>
       </dl>
     </>
@@ -86,7 +89,13 @@ export function GateFooter({ item, gate, reload, onRead }: { item: ItemDetail; g
     setRejecting(false);
     reload();
   };
-  const reject = () => run(act.reject(item.id, gate.id, note.trim()));
+  const [tried, setTried] = useState(false);
+  // Said after a press with no note, and gone once there is one (the review page does the same).
+  const noNote = useReason(tried && !note.trim() ? ADD_NOTE : null);
+  const reject = () => {
+    if (!note.trim()) return setTried(true);
+    return run(act.reject(item.id, gate.id, note.trim()));
+  };
   // Cancel hands focus back to Request changes…, which comes back as the note goes.
   const rejectButton = useRef<HTMLButtonElement>(null);
   const refocus = useRef(false);
@@ -97,18 +106,19 @@ export function GateFooter({ item, gate, reload, onRead }: { item: ItemDetail; g
   if (rejecting)
     return (
       // Escape closes the note, not the pane, and only when there is no text in it to lose (R11b-02).
-      <div className="ip-confirm" role="group" aria-label={`Reject ${gate.id}`} onKeyDown={(e) => {
+      <div className="ip-confirm" role="group" aria-label={`${REQUEST_CHANGES}: ${gateName(item.chain_definition.nodes, gate.id)}`} onKeyDown={(e) => {
         if (!isEscape(e)) return;
         e.preventDefault();
         e.stopPropagation();
         if (!holdsText(e.target)) { refocus.current = true; setRejecting(false); }
       }}>
-        <p className="ip-confirm-q">Reject <code>{gate.id}</code>{to && <> · goes back to <code>{to}</code></>}</p>
-        {/* Focus moves into the note: the Reject… button that had it is gone (R7b-10, R10b-04). */}
-        <textarea autoFocus aria-label="Why (the next agent reads it)" className="item-input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={sendOnModEnter(reject, !busy && !!note.trim())} />
+        <p className="ip-confirm-q">{sendsBack(false)}{to ? nameOf(item.chain_definition.nodes, to) : "the previous node"}</p>
+        {/* Focus moves into the note: the Request changes… button that had it is gone (R7b-10, R10b-04). */}
+        <textarea autoFocus aria-label="Why (the next agent reads it)" {...noNote.attrs} className="item-input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={sendOnModEnter(reject, !busy)} />
         {error && <p className="item-error" role="alert">{error}</p>}
         <div className="item-actions">
-          <Button variant="danger" disabled={busy || !note.trim()} onClick={reject}>{to ? rejectTo(to) : REQUEST_CHANGES}</Button>
+          {noNote.note}
+          <Button variant="danger" disabled={busy} onClick={reject}>{REQUEST_CHANGES}</Button>
           <Button onClick={() => { refocus.current = true; setRejecting(false); }}>Cancel</Button>
         </div>
       </div>

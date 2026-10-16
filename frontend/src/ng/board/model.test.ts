@@ -6,7 +6,7 @@ import { groupOf, groupsOf, type BoardView } from "./model";
 
 const item = (id: string, display_status: DisplayStatus, over: Partial<WorkItem> = {}): WorkItem =>
   detail({ id, title: `t-${id}`, display_status, updated_at: `2026-09-13T0${id.length % 10}:00:00Z`, ...over });
-const view = (over: Partial<BoardView> = {}): BoardView => ({ filter: { q: "", repo: "", chain: "" }, group: "status", sort: "attention", doneCap: null, ...over });
+const view = (over: Partial<BoardView> = {}): BoardView => ({ filter: { q: "", repo: "", chain: "", gate: "", stop: "" }, group: "status", sort: "attention", doneCap: null, ...over });
 const labels = (items: WorkItem[], v = view()) => groupsOf(items, v).map((g) => `${g.label}:${g.rows.map((r) => r.id).join(",")}`);
 
 describe("groupOf", () => {
@@ -41,11 +41,10 @@ describe("groupOf", () => {
 });
 
 describe("groupsOf", () => {
-  it("always draws the four status groups, empty ones with a hint only under a filter", () => {
-    const g = groupsOf([], view());
-    expect(g.map((x) => x.label)).toEqual(["Needs you", "Running", "Not started", "Done"]);
-    expect(g.map((x) => x.empty)).toEqual(["", "", "", ""]);
-    expect(groupsOf([], view({ filter: { q: "zzz", repo: "", chain: "" } }))[1].empty).toBe("nothing here for this filter");
+  it("draws only the status groups that hold rows, in order, and none for an empty board", () => {
+    expect(groupsOf([], view())).toEqual([]);
+    const g = groupsOf([item("d", "done"), item("n", "needs_you")], view());
+    expect(g.map((x) => x.label)).toEqual(["Needs you", "Done"]);
   });
 
   it("puts Needs you first under Group by Repo and Chain, then one group per key by name", () => {
@@ -73,7 +72,7 @@ describe("groupsOf", () => {
 
   it("filters on title, id, bead id and repo, and narrows by repo and chain exactly", () => {
     const items = [item("abc", "running", { title: "Cache layer", bead_id: "kraft-cb59", repo: "/r/kraft-api" }), item("def", "running", { repo: "/r/other", chain_template: "docs_only", bead_id: null })];
-    const ids = (f: Partial<BoardView["filter"]>) => groupsOf(items, view({ filter: { q: "", repo: "", chain: "", ...f } }))[1].rows.map((r) => r.id);
+    const ids = (f: Partial<BoardView["filter"]>) => groupsOf(items, view({ filter: { q: "", repo: "", chain: "", ...f } })).flatMap((g) => g.rows).map((r) => r.id);
     expect(ids({ q: "CACHE" })).toEqual(["abc"]);
     expect(ids({ q: "cb59" })).toEqual(["abc"]);
     expect(ids({ q: "kraft-api" })).toEqual(["abc"]);
@@ -82,13 +81,29 @@ describe("groupsOf", () => {
     expect(ids({ chain: "default" })).toEqual(["abc"]);
   });
 
+  it("narrows by the gate an item waits at and by its kind of stop, on items that need a person", () => {
+    const gate = (id: string, at: string) => item(id, "needs_you", { pending_gate: at, stop: { kind: "gate", node: at, resume_at: null, reason: null } });
+    const items = [
+      gate("g1", "plan_approval"),
+      gate("g2", "spec_approval"),
+      item("q1", "needs_you", { stop: { kind: "question", node: "implement", resume_at: null, reason: "x" } }),
+      // A run that merely sits at a gate node, or a done item with a stale stop, is neither.
+      item("r1", "running", { pending_gate: "plan_approval", stop: { kind: "gate", node: "plan_approval", resume_at: null, reason: null } }),
+    ];
+    const ids = (f: Partial<BoardView["filter"]>) => groupsOf(items, view({ filter: { q: "", repo: "", chain: "", ...f } })).flatMap((g) => g.rows).map((r) => r.id);
+    expect(ids({ gate: "plan_approval" })).toEqual(["g1"]);
+    expect(ids({ stop: "gate" }).sort()).toEqual(["g1", "g2"]);
+    expect(ids({ stop: "question" })).toEqual(["q1"]);
+    expect(ids({ gate: "plan_approval", stop: "question" })).toEqual([]);
+  });
+
   it("caps Done at the newest show_done rows and keeps the total for show all", () => {
     // Titles run against recency, so the Title sort's first two are the oldest.
     const done = ["1", "22", "333", "4444"].map((id, n) => item(id, "done", { title: "abcd"[n] }));
-    const g = groupsOf(done, view({ doneCap: 2, sort: "title" }))[3];
+    const g = groupsOf(done, view({ doneCap: 2, sort: "title" }))[0];
     expect(g.total).toBe(4);
     expect(g.rows.map((r) => r.id)).toEqual(["333", "4444"]);
-    expect(groupsOf(done, view({ doneCap: null }))[3].rows).toHaveLength(4);
+    expect(groupsOf(done, view({ doneCap: null }))[0].rows).toHaveLength(4);
     expect(groupsOf(done, view({ group: "repo", doneCap: 2 }))[0].rows).toHaveLength(4);
   });
 });

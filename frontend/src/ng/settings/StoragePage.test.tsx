@@ -124,7 +124,9 @@ describe("Settings › Storage worktrees", () => {
     stubFetch({ "GET /storage": [200, storageUsage()] });
     mount();
     await screen.findByRole("table");
-    expect(screen.getAllByRole("checkbox").map((c) => c.getAttribute("aria-label"))).toEqual(["Select Cache embeddings", "Select Old spike"]);
+    const boxes = screen.getAllByRole("checkbox");
+    expect(boxes.filter((c) => !(c as HTMLInputElement).disabled).map((c) => c.getAttribute("aria-label"))).toEqual(["Select Cache embeddings", "Select Old spike"]);
+    expect(boxes.filter((c) => (c as HTMLInputElement).disabled).map((c) => c.getAttribute("aria-label"))).toEqual([expect.stringMatching(/, cannot be cleaned up yet$/)]);
     const orphan = rows().at(-1) as HTMLElement;
     expect(orphan).toHaveTextContent("7f3a");
     expect(orphan).toHaveTextContent("no work item");
@@ -152,7 +154,7 @@ describe("Settings › Storage worktrees", () => {
     expect(all).toBeDisabled();
     expect(screen.getByRole("button", { name: "Clean up selected" })).toBeDisabled();
     expect(screen.getByText(/Nothing to clean up: no finished item holds a worktree/)).toBeInTheDocument();
-    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.getAllByRole("checkbox").every((c) => (c as HTMLInputElement).disabled)).toBe(true);
   });
 
   it("drops a ticked row that a refresh no longer shows as reclaimable", async () => {

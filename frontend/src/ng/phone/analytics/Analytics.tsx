@@ -1,10 +1,11 @@
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import * as api from "../../../api";
 import { elapsed, repoName, usd } from "../../../format";
 import { useStore } from "../../../store";
 import type { Analytics as Report } from "../../../types";
-import { DEFAULT_RANGE, gateRows, HOW_COUNTED, measured, RANGES } from "../../analytics/shared";
+import { boardHref, DEFAULT_RANGE, gateLabel, gateRows, HOW_COUNTED, measured, RANGES, EMPTY_RANGE, scopeLine, stopFilter, stopLabel, waitingKpi } from "../../analytics/shared";
 import { chainOf } from "../../board/model";
 import { ChoiceSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
@@ -33,11 +34,12 @@ export function Analytics() {
   const chains = [...new Set(items.map(chainOf))].sort();
   const gates = report ? gateRows(report) : [];
   const empty = !!report && t!.completed === 0 && report.by_node.length === 0;
+  const rangeLabel = RANGES.find((r) => r.value === range)!.label;
   return (
     <>
       <RootHeader title="Analytics" />
       <div className="ph-chips" role="group" aria-label="Filters">
-        <button type="button" className="ph-pill" onClick={() => sheet.open("range")}>{RANGES.find((r) => r.value === range)!.label}<ChevronDown size={14} aria-hidden="true" /></button>
+        <button type="button" className="ph-pill" onClick={() => sheet.open("range")}>{rangeLabel}<ChevronDown size={14} aria-hidden="true" /></button>
         <button type="button" className="ph-pill" onClick={() => sheet.open("repo")}>{repo ? repoName(repo) : "All repos"}<ChevronDown size={14} aria-hidden="true" /></button>
         <button type="button" className="ph-pill" onClick={() => sheet.open("chain")}>{chain || "All chains"}<ChevronDown size={14} aria-hidden="true" /></button>
       </div>
@@ -46,25 +48,28 @@ export function Analytics() {
         {!report && !error && <div className="ph-skeleton" aria-busy="true"><span /><span /></div>}
         {report && t && (
           <>
-            <div className="ph-tiles">
-              <Tile label="Completed" value={String(t.completed)} sub={delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`} />
-              <Tile label="Lead time" value={measured(t.median_lead_ms, t.completed > 0)} sub={`median · ${t.human_wait_pct}% waiting on you`} />
-              <Tile label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={t.completed ? `${usd(t.cost_usd / t.completed)} per completed item` : "nothing completed yet"} />
-              <Tile label="Repairs per item" value={t.fix_cycles.toFixed(1)} sub={t.fix_cycles_capped ? `${t.fix_cycles_capped} hit their cap` : "none hit their cap"} />
-            </div>
+            <p className="ph-note">{scopeLine(rangeLabel)}</p>
             {empty ? (
-              <p className="ph-empty">Nothing has completed in this range yet.</p>
+              <p className="ph-empty">{EMPTY_RANGE}</p>
             ) : (
               <>
+                <div className="ph-tiles">
+                <Tile label="Completed" value={String(t.completed)} sub={delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`} />
+                <Tile label="Lead time" value={measured(t.median_lead_ms, t.completed > 0)} sub="median" />
+                <Tile {...waitingKpi(t.human_wait_pct)} />
+                <Tile label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={t.completed ? `${usd(t.cost_usd / t.completed)} per completed item` : "nothing completed yet"} />
+                <Tile label="Repairs per item" value={t.fix_cycles.toFixed(1)} sub={t.fix_cycles_capped ? `${t.fix_cycles_capped} hit their cap` : "none hit their cap"} />
+                </div>
+
                 <Block title="Waiting at each gate">
                   {gates.length === 0 ? <p className="ph-note">No gate waits in this range.</p> : (
                     <div className="ph-list">
                       {gates.map((g) => (
-                        <div key={g.gate} className="ph-stat-row">
-                          <span className="ph-stat-name ph-mono">{g.gate}</span>
+                        <Link key={g.gate} to={boardHref({ repo, chain, gate: g.gate })} className="ph-stat-row ph-stat-link">
+                          <span className="ph-stat-name">{gateLabel(g.gate)}</span>
                           <span className="ph-stat-meta">{g.n} {g.n === 1 ? "wait" : "waits"} · median {elapsed(g.median_ms)}{g.rejected ? ` · ${g.rejected} rejected` : ""}</span>
-                          <span className="ph-stat-val">{elapsed(g.total_ms)}</span>
-                        </div>
+                          <span className="ph-stat-val">{elapsed(g.total_ms)}<ChevronRight size={14} aria-hidden="true" /></span>
+                        </Link>
                       ))}
                     </div>
                   )}
@@ -86,11 +91,11 @@ export function Analytics() {
                   {report.by_repo.length === 0 ? <p className="ph-note">Nothing here yet.</p> : (
                     <div className="ph-list">
                       {report.by_repo.map((r) => (
-                        <div key={r.repo} className="ph-stat-row">
+                        <Link key={r.repo} to={boardHref({ repo: r.repo, chain })} className="ph-stat-row ph-stat-link">
                           <span className="ph-stat-name">{repoName(r.repo)}</span>
                           <span className="ph-stat-meta">{r.items} items · {r.done} done · avg repairs {r.cycles.toFixed(1)}</span>
-                          <span className="ph-stat-val">{usd(r.cost_usd, r.cost_complete)}</span>
-                        </div>
+                          <span className="ph-stat-val">{usd(r.cost_usd, r.cost_complete)}<ChevronRight size={14} aria-hidden="true" /></span>
+                        </Link>
                       ))}
                     </div>
                   )}
@@ -99,10 +104,10 @@ export function Analytics() {
                   {report.stop_reasons.length === 0 ? <p className="ph-note">Nothing stopped for a person in this range.</p> : (
                     <div className="ph-list">
                       {report.stop_reasons.map((s) => (
-                        <div key={s.label} className="ph-stat-row">
-                          <span className="ph-stat-name">{s.label}</span>
-                          <span className="ph-stat-val">{s.n}</span>
-                        </div>
+                        <Link key={s.label} to={boardHref({ repo, chain, ...stopFilter(s.label) })} className="ph-stat-row ph-stat-link">
+                          <span className="ph-stat-name">{stopLabel(s.label)}</span>
+                          <span className="ph-stat-val">{s.n}<ChevronRight size={14} aria-hidden="true" /></span>
+                        </Link>
                       ))}
                     </div>
                   )}

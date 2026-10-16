@@ -115,7 +115,7 @@ It applies above the harness profile's own `defaults:`, below a task's `model:` 
 
 ### `setup_command`
 
-- `""` means "deliberately nothing", which is the **No setup needed** checkbox in Settings › Repos.
+- `""` means "deliberately nothing", which is the **No setup needed** switch in Settings › Repos.
 - An absent value stops the repo's next work item rather than guessing.
 - On a [sandboxed](/concepts/vocabulary#sandbox) item it runs as `sh -c` inside the sandbox, never on the host. Without docker the item stops.
 
@@ -124,7 +124,7 @@ It applies above the harness profile's own `defaults:`, below a task's `model:` 
 ### `test_command`
 
 - It runs from the worktree root without a shell.
-- `""` declares a repo with no tests (docs, infrastructure): verification passes and its session says so. It is the **No tests** checkbox in Settings › Repos.
+- `""` declares a repo with no tests (docs, infrastructure): verification passes and its session says so. It is the **No tests** switch in Settings › Repos.
 - A repo with neither this nor `test_scopes` stops that verification for you rather than inventing a command.
 - Verification ignores it while `test_scopes` is set: the scopes are what runs. For a repo with more than one project, connect saves the first scope's command here, beside the scopes, so it does not cover every path.
 

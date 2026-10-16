@@ -20,6 +20,11 @@ const IGNORED = ['style']
 // its own, titled as the command is typed, so "approve" finds `kraft item
 // approve` and not only the prose around it.
 const VERB_INDEX = 'Verbs at a glance'
+// Under these a table row is a lookup of its own: a Troubleshooting row is
+// the message Kraft shows, and a configuration row is a field of a YAML file,
+// and "task failed in node" or "budget.daily_usd" is typed to find that row,
+// which a section of forty rows (its text one block) ranks behind its prose.
+const ROW_PAGES = ['/troubleshooting/', '/reference/configuration/']
 
 // The index keeps the page's HTML entities (&lt; &gt; &#39;), which a result
 // would show literally, so they are decoded here, once: `&amp;lt;` becomes
@@ -65,10 +70,31 @@ function verbSections(page: Page, table: MinimarkNode): SearchSection[] {
   })
 }
 
+// A row of a table, as a section under the heading it is in: its first cell
+// is the title and the other cells are the text.
+function rowSections(section: SearchSection, table: MinimarkNode): SearchSection[] {
+  return rowsOf(table).flatMap((row) => {
+    const [, , first, ...rest] = row as [string, unknown, MinimarkNode?, ...MinimarkNode[]]
+    const header = [first, ...rest].some(cell => typeof cell !== 'string' && cell?.[0] === 'th')
+    const cells = rest.map(cell => textOf(cell).replace(/ · $/, '').trim())
+    const title = first ? textOf(first).replace(/ · $/, '').trim() : ''
+    if (header || !title || !cells.some(Boolean)) return []
+    return [{ id: section.id, title, titles: [...section.titles, section.title].filter(Boolean), content: cells.join(' · '), level: section.level + 1 }]
+  })
+}
+
+// Nuxt UI shows the title and the start of the text side by side, so a text
+// that opens with its own title read "Install Install Kraft with uv".
+const withoutTitle = (title: string, content: string) =>
+  title && content.toLowerCase().startsWith(title.toLowerCase()) && /^\W|^$/.test(content.slice(title.length))
+    ? content.slice(title.length).replace(/^[\s:\-–—.,]+/, '')
+    : content
+
 export function searchSections(pages: Page[]): SearchSection[] {
   return pages.flatMap((page) => {
     const sections: SearchSection[] = [{ id: page.path, title: page.title || '', titles: [], content: (page.description || '').trim(), level: 1 }]
     const trail: { level: number, title: string }[] = []
+    let heading = sections[0]! // the section the text being read belongs to
     let inVerbIndex = false // the heading just read is a CLI page's verb index
     let skipFrom = 0 // the level of a link list being skipped, until a heading at or above it
     for (const node of page.body?.value ?? []) {
@@ -83,14 +109,20 @@ export function searchSections(pages: Page[]): SearchSection[] {
         }
         inVerbIndex = title === VERB_INDEX
         while (trail.length && trail[trail.length - 1]!.level >= level) trail.pop()
-        sections.push({ id: `${page.path}#${(node as [string, Record<string, unknown>])[1].id}`, title, titles: [page.title, ...trail.map(t => t.title)], content: '', level })
+        heading = { id: `${page.path}#${(node as [string, Record<string, unknown>])[1].id}`, title, titles: [page.title, ...trail.map(t => t.title)], content: '', level }
+        sections.push(heading)
         trail.push({ level, title })
       } else {
-        const current = sections[sections.length - 1]!
-        current.content = `${current.content} ${textOf(node).trim()}`.trim()
-        if (inVerbIndex && typeof node !== 'string' && node[0] === 'table') sections.push(...verbSections(page, node))
+        heading.content = `${heading.content} ${textOf(node).trim()}`.trim()
+        if (typeof node !== 'string' && node[0] === 'table') {
+          if (inVerbIndex) sections.push(...verbSections(page, node))
+          else if (ROW_PAGES.some(prefix => page.path.startsWith(prefix))) sections.push(...rowSections(heading, node))
+        }
       }
     }
-    return sections.map(section => ({ ...section, title: plain(section.title), titles: section.titles.map(plain), content: plain(section.content) }))
+    return sections.map((section) => {
+      const title = plain(section.title)
+      return { ...section, title, titles: section.titles.map(plain), content: withoutTitle(title, plain(section.content)) }
+    })
   })
 }

@@ -31,10 +31,10 @@ proposes, and rehearses them with `--verify`.
 [What's new in 2.0](https://kraft-sdlc.dev/next/get-started/whats-new)
 has the rest, and what to check before you upgrade from 1.4.
 
-![The Kraft board in the dark graphite look: work items grouped by Needs you (a paused item with Resume, a failed one with Retry, and two waiting at a gate, each with its one button), Running, Not started, and Done, the unstarted items marked created paused, with a Select all link on every group and a ? shortcuts button in the toolbar](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)
+![The Kraft board in the dark graphite look: filters for chain, gate and stop reason above work items grouped by Needs you (a paused item with Resume, a failed one with Retry, and two waiting at a gate, each with its one button), Running and Not started, the unstarted items marked created paused, with a Select all link on every group and a ? shortcuts button in the toolbar](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)
 
 - **Gates where a human decides.** Kraft pauses at a spec, a plan, or a merge
-  request for your approval; reject with a note and the node that wrote it
+  request for your approval; request changes with a note and the node that wrote it
   tries again.
 - **Capped retries, not runaway loops.** Attempts, wall-clock time, and spend
   are all bounded. Hit a cap and the item stops and hands you the full trace
@@ -55,17 +55,25 @@ then approve, or request changes with a note that re-runs the node that wrote it
 
 ![The gate's review page headed Approve spec: Request changes and Approve buttons in the header, a Waiting for you mark, a line saying Approving starts plan with the gates left and the spend, the spec an agent wrote rendered below, and the files on the branch with one pending comment](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/gate.png)
 
+**Read by name, not by id.** Nodes show as "approve spec" and "chain revision",
+and a chain too long to read whole gets an overview of all of it, one small
+glyph per node with a frame on the part in view, above the full-size graph. The
+board filters by chain, gate and stop reason, and retries or resumes a
+selection in one go. Settings keeps code and board preferences on their own
+Board & code page. Every page warns when Kraft is offline, and `?` lists the
+keyboard shortcuts.
+
 <table>
 <tr>
 <td width="60%">
 
-**Same app, phone-sized.** Below 768 pixels it switches to a phone layout on its own. A gate's card opens its review, so nothing is approved from the list. Reach it from another device through a tunnel; see
+**Same app, phone-sized.** Below 768 pixels it switches to a phone layout on its own. A gate's card opens its review, so nothing is approved from the list, and Chains edits drafts there too. Reach it from another device through a tunnel; see
 [Remote access](https://kraft-sdlc.dev/guides/remote-access).
 
 </td>
 <td width="40%">
 
-![The board at a 390px phone viewport, with bottom tab navigation and filter chips, and cards for a paused item with Resume, a failed one with Retry, and gate-waiting items whose Review to approve button opens the review](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/mobile.png)
+![The board at a 390px phone viewport, with bottom tab navigation, filter chips and Chain, Gate and Stop reason menus, and cards for a paused item with Resume, a failed one with Retry, and gate-waiting items whose Review to approve button opens the review](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/mobile.png)
 
 </td>
 </tr>
@@ -174,7 +182,7 @@ Lead time, cost, and where both go — by node and by repo, over a Range you pic
 7 days, 30 days, 8 weeks (the default) or 90 days, the same menu on a desktop and a phone. Built from the same events the
 board renders live, not a separate pipeline.
 
-![The Analytics view over 8 weeks, with Range, Repo and Chain menus: completed count, median lead time, cost and repairs per item; merged items per week; a Waiting at each gate table with waits, median, total and rejected for each gate; the top of the By node cost table](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/analytics.png)
+![The Analytics view over 8 weeks, with Range, Repo and Chain menus: the five overview figures (completed count, median lead time, the share waiting on you, cost and repairs per item); merged items per week; a Waiting at each gate table with waits, median, total and rejected for each gate; the top of the By node cost table](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/analytics.png)
 
 ## Where to go next
 

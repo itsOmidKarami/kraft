@@ -135,10 +135,12 @@ export const STATES: State[] = [
 
   // Settings
   { area: "settings", state: "policy", ...appSettings("/settings/policy") },
+  { area: "settings", state: "policy-offline", app: (p) => app(p, "/settings/policy", { mock: { boardState: "offline" }, ready: (pg) => pg.getByRole("button", { name: "Retry now" }).waitFor() }) },
   { area: "settings", state: "auto-intake", ...appSettings("/settings/auto-intake") },
   { area: "settings", state: "notifications", ...appSettings("/settings/notifications") },
   { area: "settings", state: "access", ...appSettings("/settings/access") },
   { area: "settings", state: "appearance", ...appSettings("/settings/appearance") },
+  { area: "settings", state: "board-and-code", ...appSettings("/settings/board-and-code") },
   { area: "settings", state: "about", ...appSettings("/settings/about") },
   // Item header (H1–H6): the main button's menu, ⋮, the four anchored cards, the diff line
   { area: "work-item", state: "header-menu", app: appHeader("running", async (p) => { await appMain(p).hover(); }) },
@@ -161,7 +163,7 @@ export const STATES: State[] = [
   { area: "new-item", state: "composer-filled", app: async (p) => { await app(p, "/?new=1", { ready: (pg) => pg.getByText(/nodes run ·/).waitFor() }); await p.getByRole("textbox", { name: "Title" }).fill("Design the caching layer for document search"); await p.getByRole("textbox", { name: "Brief" }).fill("Cache embeddings by content hash; invalidate on reindex."); await p.waitForTimeout(600); } },
   { area: "new-item", state: "chain-menu", app: async (p) => { await app(p, "/?new=1", { ready: (pg) => pg.getByText(/nodes run ·/).waitFor() }); await p.getByRole("button", { name: /^default/ }).click(); await p.waitForTimeout(400); } },
   { area: "new-item", state: "draft-page", app: (p) => app(p, `/work-items/new?${new URLSearchParams({ repo: "/Users/dev/code/kraft-plugins", chain: "default", title: "Design the caching layer for document search" })}`) },
-  { area: "new-item", state: "draft-node", app: async (p) => { await app(p, `/work-items/new?${new URLSearchParams({ repo: "/Users/dev/code/kraft-plugins", chain: "default", title: "Design the caching layer for document search" })}`, { ready: (pg) => pg.getByText(/nodes run ·/).first().waitFor() }); await p.waitForTimeout(500); { const n = p.getByRole("button", { name: /^spec_approval,/ }).last(); await n.focus(); await p.keyboard.press("Enter"); } await p.waitForTimeout(600); } },
+  { area: "new-item", state: "draft-node", app: async (p) => { await app(p, `/work-items/new?${new URLSearchParams({ repo: "/Users/dev/code/kraft-plugins", chain: "default", title: "Design the caching layer for document search" })}`, { ready: (pg) => pg.getByText(/nodes run ·/).first().waitFor() }); await p.waitForTimeout(500); { const n = p.getByRole("button", { name: /^approve spec,/ }).last(); await n.focus(); await p.keyboard.press("Enter"); } await p.waitForTimeout(600); } },
 
   // Chain / node graph (CG-): Templates › Chains, and the item's chain at the wide width
   { area: "chain-graph", state: "chains-canvas", ...appArea("/templates/chains/default", { ready: (pg) => pg.locator("main h1, .gcanvas, svg").first().waitFor() }) },
@@ -200,6 +202,7 @@ export const STATES: State[] = [
 
   // Phone, 390px (PH-): the app at 390 against the mobile prototype
   { area: "phone", state: "board", viewport: "phone", app: appPhone("/") },
+  { area: "phone", state: "board-offline", viewport: "phone", app: appPhone("/", { mock: { boardState: "offline" }, ready: (pg) => pg.getByRole("button", { name: "Retry now" }).waitFor() }) },
   { area: "phone", state: "item-running", viewport: "phone", app: appPhone(item("running")) },
   { area: "phone", state: "item-gate", viewport: "phone", app: appPhone(item("needs-gate")) },
   { area: "phone", state: "item-capped", viewport: "phone", app: appPhone(item("capped")) },
@@ -215,6 +218,7 @@ export const STATES: State[] = [
   { area: "phone", state: "more", viewport: "phone", app: appPhone("/more") },
   { area: "phone", state: "chains", viewport: "phone", app: appPhone("/templates/chains") },
   { area: "phone", state: "policy", viewport: "phone", app: appPhone("/settings/policy") },
+  { area: "phone", state: "policy-offline", viewport: "phone", app: appPhone("/settings/policy", { mock: { boardState: "offline" }, ready: (pg) => pg.getByRole("button", { name: "Retry now" }).waitFor() }) },
   { area: "phone", state: "sign-in", viewport: "phone", app: (p) => app(p, "/", { mock: { locked: true }, noShell: true, ready: (pg) => pg.getByLabel(/^Password/).waitFor() }) },
 
   // Follow-ups: what a seed adds, review ranges, the revealed sidebar, the phone

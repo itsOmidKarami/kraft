@@ -126,8 +126,8 @@ export function DiffSettings({ prefs, set }: { prefs: DiffPrefs; set: (patch: Pa
     ["wrap_lines", "Wrap long lines"],
   ];
   return (
-    <Pop label="Diff settings" triggerClass="icon-btn rv-settings" trigger={<><List size={16} aria-hidden /><ChevronDown size={12} aria-hidden /></>}>
-      <span className="menu-heading" aria-hidden="true">Compare changes</span>
+    <Pop label="Display" triggerClass="icon-btn rv-settings" trigger={<><List size={16} aria-hidden /><ChevronDown size={12} aria-hidden /></>}>
+      <span className="menu-heading" aria-hidden="true">Display</span>
       {(["split", "unified"] as const).map((l) => (
         <button key={l} type="button" role="menuitemradio" aria-checked={prefs.layout === l} tabIndex={-1} className="rv-check" onClick={() => set({ layout: l })}>
           <span className="rv-tick" aria-hidden="true">{prefs.layout === l ? "✓" : ""}</span>

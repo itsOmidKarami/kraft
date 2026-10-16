@@ -25,7 +25,7 @@ Find the message you are looking at in the first column, then follow its link.
 | A `kraft admin doctor` row that prints `FAIL` or `warn` | [Doctor failures](/troubleshooting/doctor-failures#doctor-rows) |
 | A `kraft admin addon` verb that refuses, such as `no collection 'acme' under collections` or `namespace 'release' is taken`, or an error from `kraft admin addon validate` | [Add-on problems](/troubleshooting/addon-problems) |
 | `could not start ...` with `add-on <id> <version> could not be read: ...` | [`add-on ... could not be read`](/troubleshooting/stop-reasons-in-detail#add-on-could-not-be-read) |
-| A page that is not where you left it, or a theme that looks different, after an upgrade from 1.4 | [Where the pages moved](/guides/run/upgrade-from-1-4#where-the-pages-moved) |
+| A page that is not where you left it, or a theme that looks different, after an upgrade from 1.4 | [Where the pages moved](/reference/changes-from-1-4#where-the-pages-moved) |
 | A question about [forges](/concepts/vocabulary#forge), [harnesses](/concepts/vocabulary#harness), cost, platforms, specs, sharing chains with add-ons, Kraft Lite or the permission gate | [FAQ](/get-started/faq) |
 | None of these matches | [Getting help](/project/status-and-support#getting-help) |
 

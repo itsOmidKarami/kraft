@@ -42,6 +42,12 @@ Run `just` for the full list of recipes.
 `just dev-seed` fills a running dev instance with work items in every state by
 driving the real HTTP API, and `just dev-reset` throws `.dev/` away. A work item
 title containing `KRAFT_FAIL` or `KRAFT_SLOW` steers that item's fake agent.
+`just dev-seed --rich` instead fills it for judging the dashboard under load: about
+40 items over every board state, long and non-ASCII text, a 30-node chain, three
+repos (one on a long path), and a review with a 41-file diff and long threads. It
+also uses `KRAFT_HANG` (an agent that stays running), `KRAFT_MANY_FILES` (a wide
+change) and `KRAFT_COST_<usd>` (what a run reports it cost). Usage and cost all
+land in the current week: the API gives a caller no way to backdate a row.
 
 To run the VS Code extension from source, open the `vscode/` folder in VS Code
 and press F5 (the first run installs its npm dependencies). **Run Extension
@@ -341,7 +347,12 @@ Page rules:
   paragraph must carry on from it, not say it again. Delete a paragraph that
   only restates it. `dev/check_docs_ledes.py` fails the `lint` job when
   65% or more of the content words in the paragraph's first sentence are
-  already in the description.
+  already in the description. The same check fails a description with a
+  backtick in it: the lede, the search result and the meta tags show it as
+  one.
+- A code block that lists commands to pick from, not to run in order, is
+  fenced ` ```bash each `: every line gets its own copy button, where the
+  block's one button would copy them all as a single paste.
 - When you move or rename a page, or a heading that something links to, add
   an entry to `docsite/content/redirects.yml` in the same pull request. The
   file shows the two forms: an old page to its new address, and an old
@@ -428,7 +439,11 @@ default at the next stable release. There is nothing else to do. Link to
 
 A section that is new since the last release says so with an "Added in"
 note, which the release turns into the version that shipped it (see
-[User-facing docs](#user-facing-docs) above).
+[User-facing docs](#user-facing-docs) above). The `/next/` build also lists
+those notes on an Unreleased page, linked from its version banner and marked
+in the sidebar: `dev/gen_docs_unreleased.py` writes it at build time, so there
+is no list to keep. A release stamps every note into a number, which leaves
+that page nothing to list, so a released site has none.
 
 `dev/docs_versions.py` picks the tags from the repo's tags, so nothing is
 configured: `/` is the highest `vX.Y.Z` tag, and each lower major with a

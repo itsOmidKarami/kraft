@@ -207,7 +207,13 @@ describe("FirstRun", () => {
     await reveal();
     expect(screen.getByText("just test — from justfile recipe `test`")).toBeInTheDocument();
     expect(screen.getByText("just setup — from justfile recipe `setup`")).toBeInTheDocument();
-    expect(screen.getByText("uv run pytest (uv.lock)")).toBeInTheDocument();
+    // The others are alternatives, not results: folded behind a count, under results that take the card's full width.
+    const also = screen.getByText("Also found (1)").closest("details")!;
+    expect(also).not.toHaveAttribute("open");
+    expect(also).toContainElement(screen.getByText("uv run pytest (uv.lock)"));
+    expect(screen.getByRole("list", { name: "Probe results" })).not.toHaveTextContent("Also found");
+    expect(document.querySelector(".fr-card")).toHaveClass("fr-wide");
+    expect(document.querySelector(".fr-aside")).toBeNull();
   });
 
   it("sends no root scope for a single-stack repo: it would shadow later test command edits", async () => {
@@ -340,7 +346,7 @@ describe("FirstRun", () => {
     mount();
     await probeAndAdd(user);
     await user.click(stepButton(1)!);
-    expect(screen.getByText(/No setup command found: its first work item stops before it starts until you set one, or tick No setup needed/)).toBeInTheDocument();
+    expect(screen.getByText(/No setup command found: its first work item stops before it starts until you set one, or turn on No setup needed/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings › Repos" })).toHaveAttribute("href", "/settings/repos");
   });
 

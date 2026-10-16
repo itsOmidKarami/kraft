@@ -129,20 +129,17 @@ describe("Chains page: the chain canvas", () => {
   });
 
   // CG-5: the glyph is the one the item page draws from the tasks (agent ✦, several steps layers), never the cube.
-  it("draws each node's glyph from its tasks' kinds on the canvas, in the strip and in the pane", async () => {
+  it("draws each node's glyph from its tasks' kinds on the canvas and in the pane, and every node on the node view's strip", async () => {
     const glyph = (el: HTMLElement | null) => el?.querySelector("svg")?.getAttribute("class") ?? "";
     mount();
     const g = await canvas();
     expect(glyph(within(g).getByRole("button", { name: "spec, node" }))).toContain("lucide-sparkles");
     expect(glyph(within(g).getByRole("button", { name: "verification, node" }))).toContain("lucide-layers");
     await userEvent.dblClick(within(g).getByRole("button", { name: "implementation, node" }));
-    const strip = await screen.findByRole("button", { name: "Back to the chain" });
-    const node = (name: string) => strip.closest(".strip")!.querySelector<HTMLElement>(`[aria-label="${name}, node"]`);
-    // The viewed stage is drawn node by node; the one before it is a pill until opened.
-    expect(node("spec")).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: /^spec stage, .*expand$/ }));
-    expect(glyph(node("spec"))).toContain("lucide-sparkles");
-    expect(glyph(node("verification"))).toContain("lucide-layers");
+    // The strip is the whole chain, small, with nothing folded away.
+    const strip = within(await screen.findByRole("group", { name: "Chain" }));
+    expect(strip.getAllByRole("button")).toHaveLength(6);
+    expect(strip.getByRole("button", { name: "implementation, node" })).toHaveAttribute("aria-current", "step");
     expect(glyph(screen.getByRole("complementary", { name: "implementation pane" }).querySelector<HTMLElement>(".pane-glyph"))).toContain("lucide-sparkles");
   });
 
@@ -208,7 +205,8 @@ describe("Chains page: the chain canvas", () => {
     expect(screen.queryByRole("button", { name: "Review & publish" })).toBeNull();
     expect(screen.getByRole("button", { name: "Back to editing" })).not.toHaveAttribute("aria-pressed");
     await waitFor(() => expect(within(g).getByRole("button", { name: "plan, node, removed" })).toBeInTheDocument());
-    const names = within(g).getAllByRole("button").map((b) => b.getAttribute("aria-label"));
+    // The canvas's nodes, not the chain overview's glyphs above them.
+    const names = within(g).getAllByRole("button").filter((b) => b.classList.contains("graph-node")).map((b) => b.getAttribute("aria-label"));
     expect(names.slice(0, 4)).toEqual(["spec, node", "spec_approval, gate", "plan, node, removed", "implementation, node"]);
     expect(within(g).getByRole("button", { name: "spec, node" })).toHaveClass("is-faded");
     const impl = within(g).getByRole("button", { name: "implementation, node" });
@@ -228,7 +226,6 @@ describe("Chains page: the chain canvas", () => {
     await canvas();
     await userEvent.click(screen.getByRole("button", { name: "YAML" }));
     expect(screen.getByRole("region", { name: "chains/default.yaml, YAML" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Chain settings" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "⇄ Canvas" }));
     expect(screen.queryByRole("region", { name: "chains/default.yaml, YAML" })).toBeNull();
 

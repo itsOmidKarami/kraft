@@ -38,6 +38,14 @@ describe("ng CSS", () => {
     expect(bad).toEqual([]);
   });
 
+  it("draws a gate waiting on you amber: the gate's own rule for it comes after the gate's base rule, which resets the border", () => {
+    const css = readFileSync(join(here, "graph/graph.css"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const base = css.indexOf(".glyph-gate .glyph-box {");
+    const amber = css.search(/\.glyph-gate \.glyph-box\.is-amber\s*{[^}]*border-color:\s*var\(--warn\)/);
+    expect(base).toBeGreaterThan(-1);
+    expect(amber).toBeGreaterThan(base);
+  });
+
   it("shrinks the repo crumb before the work item title", () => {
     const css = readFileSync(join(here, "shell/shell.css"), "utf-8");
     const shrink = (sel: string) => Number(new RegExp(`${sel}\\s*{[^}]*flex-shrink:\\s*(\\d+)`).exec(css)?.[1]);
@@ -62,6 +70,7 @@ describe("ng CSS", () => {
   it("lays the document drawer over the theme's scrim, black at 40%", () => {
     expect(readFileSync(join(here, "theme/theme.css"), "utf-8")).toContain(":root { --scrim: rgb(0 0 0 / 40%); }");
     expect(readFileSync(join(here, "item/item.css"), "utf-8")).toMatch(/\.dv-scrim\s*{[^}]*background:\s*var\(--scrim\)/);
+    expect(readFileSync(join(here, "ui/ui.css"), "utf-8")).toMatch(/\.dialog-backdrop\s*{[^}]*background:\s*var\(--scrim\)/);
   });
 
   it("scrolls a pane's log in its own <pre>, which fills the pane body, so follow has something to move", () => {
@@ -74,6 +83,17 @@ describe("ng CSS", () => {
     const css = readFileSync(join(here, "review/review.css"), "utf-8");
     expect(css).toMatch(/\.rv-bar \.btn\s*{[^}]*flex:\s*none;[^}]*white-space:\s*nowrap/);
     expect(css).toMatch(/\.rv-bar > \.rv-muted\s*{[^}]*text-overflow:\s*ellipsis/);
+  });
+
+  it("clips a long file name in the review tree without letting it scroll, and shrinks the diff header's note before its path", () => {
+    const css = readFileSync(join(here, "review/review.css"), "utf-8");
+    expect(css).toMatch(/\.rv-file-name\s*{[^}]*overflow:\s*clip;[^}]*text-overflow:\s*ellipsis/);
+    expect(css).toMatch(/\.rv-file-note\s*{[^}]*flex:\s*0 100 auto;[^}]*text-overflow:\s*ellipsis/);
+  });
+
+  it("gives a phone row with chips and a value its label on a line of its own, and keeps the review tag whole", () => {
+    expect(readFileSync(join(here, "phone/areas/areas.css"), "utf-8")).toMatch(/\.ph-row:has\(> \.ph-chips-end\):has\(> \.ph-row-value\) > \.ph-row-text\s*{[^}]*flex-basis:\s*100%/);
+    expect(readFileSync(join(here, "phone/item/item.css"), "utf-8")).toMatch(/\.ph-pillbadge\s*{[^}]*white-space:\s*nowrap/);
   });
 
   it("keeps the Policy page's \"set below policy\" column at every width", () => {
@@ -144,7 +164,7 @@ describe("round 4 layout pins", () => {
   const rules: [string, string, RegExp][] = [
     ["BD-13: a probe's name keeps the mono face once it has a result", "shell/first-run.css", /\.fr-probes li > span:first-child\s*{[^}]*font-family:\s*ui-monospace/],
     ["ST-6: two hints in one block read as two lines", "settings/settings.css", /(?:^|\n)\.set-hint\s*{[^}]*display:\s*block/],
-    ["GR-12: the review toolbar wraps rather than clip Diff settings", "review/review.css", /\.rv-toolbar\s*{[^}]*flex-wrap:\s*wrap/],
+    ["GR-12: the review toolbar wraps rather than clip Display", "review/review.css", /\.rv-toolbar\s*{[^}]*flex-wrap:\s*wrap/],
     ["GR-12: the toolbar's right-hand controls wrap together and stay at the right end", "review/review.css", /\.rv-tools\s*{[^}]*margin-left:\s*auto/],
     ["LV-10: follow and copy move as one unit", "item/item.css", /\.ip-follow-copy\s*{[^}]*white-space:\s*nowrap/],
   ];

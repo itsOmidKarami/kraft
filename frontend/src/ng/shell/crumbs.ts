@@ -1,4 +1,4 @@
-import { gateWords } from "../board/rowText";
+import { capitalise, gateName } from "../board/rowText";
 import { repoName, shortId } from "../../format";
 import type { CrumbItem } from "./pageItem";
 import { ROUTES } from "./routes";
@@ -37,7 +37,7 @@ export function crumbsFor(pathname: string, item: ItemLookup): Crumb[] {
     const id = decodeURIComponent(wi[1]);
     const it = item(id);
     // The review page names the gate it waits at, else the changes.
-    const node = wi[2] ? decodeURIComponent(wi[2]) : wi[3] && (it?.pending_gate ? `Approve ${gateWords(it.pending_gate)}` : "Review changes");
+    const node = wi[2] ? decodeURIComponent(wi[2]) : wi[3] && (it?.pending_gate ? capitalise(gateName(it.chain_definition?.nodes, it.pending_gate)) : "Review changes");
     const name = it?.bead_id || shortId(id);
     const out: Crumb[] = [mid("Board", { to: "/" })];
     // The repo, like the draft page's, is the board filtered to it.

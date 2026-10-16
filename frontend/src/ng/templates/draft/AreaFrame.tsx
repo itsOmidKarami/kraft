@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useResizable, useWidth } from "../../graph/useResizable";
 import { isTextField } from "../../keys";
 import { HeaderActions, HeaderTail } from "../../shell/HeaderActions";
 import { Button } from "../../ui/Button";
+import { NOTHING_TO_PUBLISH } from "../../ui/reasons";
 import { ReviewPane, type ReviewArea } from "../ReviewPane";
 import { YamlView } from "../YamlView";
 import type { ConfigDraft } from "./useConfigDraft";
@@ -97,6 +98,7 @@ export function AreaFrame({ draft, area, pageKey, title, tail, actions, onFix, o
     const open = review ? reviewOpen : own;
     return size.overlay ? 0 : open ? size.width : 40;
   };
+  const publishedId = useId();
   const step = () => {
     if (!r.problems.length) return;
     setReview(false);
@@ -111,7 +113,7 @@ export function AreaFrame({ draft, area, pageKey, title, tail, actions, onFix, o
         {tail}
         {view.draft
           ? <span className="tpl-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span>
-          : <span className="tpl-published">published</span>}
+          : <><span className="tpl-published" id={publishedId}>published</span><span className="reason is-quiet" id={`${publishedId}-why`}>{NOTHING_TO_PUBLISH}</span></>}
         {n.problems > 0 && (
           <button type="button" className="tpl-problems" title="Step through the problems" onClick={step}>
             {n.problems} {n.problems === 1 ? "PROBLEM" : "PROBLEMS"}
@@ -125,7 +127,7 @@ export function AreaFrame({ draft, area, pageKey, title, tail, actions, onFix, o
             {surface === "yaml" ? "⇄ Page" : "YAML"}
           </Button>
         )}
-        <Button variant={review ? undefined : "primary"} disabled={!review && n.changes === 0 && n.problems === 0} onClick={toggleReview}>{review ? "Back to editing" : "Review & publish"}</Button>
+        <Button variant={review ? undefined : "primary"} disabled={!review && n.changes === 0 && n.problems === 0} aria-describedby={view.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={toggleReview}>{review ? "Back to editing" : "Review & publish"}</Button>
       </HeaderActions>
       <div className="tpl-area">
         {surface === "yaml" ? (

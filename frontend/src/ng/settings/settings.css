@@ -3,9 +3,8 @@
 /* The frame every settings page shares: one column, one page heading, one section heading. */
 .set-page, .nt-page, .pol-page, .ink-page { width: 100%; max-width: var(--set-page-w); box-sizing: border-box; margin: 0 auto; padding: 22px 24px 70px; display: flex; flex-direction: column; }
 .set-title h1, .nt-title h1, .pol-title { margin: 0; font-size: var(--fs-h2); font-weight: 500; color: var(--text); }
-.set-h2, .set-block h2, .nt-h2, .pol-h2, .ink-h2 { font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.set-h2, .set-block h2, .nt-h2, .pol-h2, .ink-h2 { font-size: var(--fs-label); font-weight: 400; color: var(--text-muted); }
 .appearance-controls h2, .appearance-preview h2 { margin: 0 0 8px; }
-.set-more > h2 { margin: 0; }
 .lede { margin: 4px 0 0; font-size: var(--fs-label); color: var(--text-muted); }
 .note { margin: 8px 2px 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-muted); }
 .error { font-size: var(--fs-label); color: var(--bad); }
@@ -27,8 +26,9 @@
 .choice-note { padding: 0 2px; font-size: var(--fs-label); color: var(--text-muted); }
 .accent-row { display: flex; flex-wrap: wrap; gap: 6px; }
 
-.set-more { margin-top: 12px; padding-top: 22px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 26px; }
-.set-h3 { margin: 0 0 8px; font-size: var(--fs-meta); font-weight: 500; color: var(--text); }
+.set-section { padding: 14px 0 18px; border-top: 1px solid var(--line); }
+.set-section:first-of-type { margin-top: 16px; }
+.set-section > h2 { margin: 0 0 8px; }
 .set-sub { margin: 12px 0 6px; font-size: var(--fs-meta); font-weight: 500; color: var(--text); }
 .set-hint { display: block; margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-muted); }
 .set-cards { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -168,11 +168,9 @@
 .set-chip.is-add { display: inline-flex; align-items: center; gap: 4px; border-style: dashed; color: var(--text-sub); }
 .set-chip { border-radius: 12px; }
 .set-modes.is-cards { gap: 10px; }
-/* The line under the Reach cards would touch the selected card's ring. */
-.set-modes.is-cards + .set-hint, .set-modes.is-cards + .set-error { margin-top: 6px; }
 .set-mode.is-card { flex-direction: row; align-items: flex-start; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--bg); }
 .set-mode.is-card:hover { background: var(--surface); }
-.set-mode.is-card[aria-checked="true"] { background: var(--bg); box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text-sub); border-color: var(--border); }
+.set-mode.is-card[aria-checked="true"] { background: var(--surface-2); border-color: var(--text-sub); }
 .set-mode-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; background: var(--line); color: var(--text-sub); }
 .set-mode-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .set-mode-dot { flex: none; width: 14px; height: 14px; box-sizing: border-box; margin-top: 2px; border: 1.5px solid var(--text-muted); border-radius: 50%; }

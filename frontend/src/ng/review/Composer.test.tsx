@@ -21,7 +21,8 @@ describe("Composer", () => {
     const { onSubmit } = compose(NEW);
     expect(screen.getByRole("group", { name: "Comment: Lines 5–6" })).toBeInTheDocument();
     const add = screen.getByRole("button", { name: "Add to review" });
-    expect(add).toBeDisabled();
+    expect(add).toBeEnabled();
+    expect(screen.queryByText("A comment needs some text.")).toBeNull();
     fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Cap it lower" } });
     fireEvent.click(screen.getByRole("radio", { name: "Must fix" }));
     // The chosen label is filled and checked, not only tinted; Preview is a toggle, not a label.
@@ -127,10 +128,13 @@ describe("Composer", () => {
   it("sends on ⌘↵ or Ctrl+↵ from the comment or the suggestion, never with no text", async () => {
     const { onSubmit } = compose(NEW);
     const box = screen.getByRole("textbox", { name: "Comment" });
+    // Quiet until a send finds no text, and gone once there is some.
+    expect(screen.queryByText("A comment needs some text.")).toBeNull();
     await act(async () => fireEvent.keyDown(box, { key: "Enter", ctrlKey: true }));
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Add to review" })).toHaveAccessibleDescription("A comment needs some text.");
+    expect(box).toHaveAccessibleDescription("A comment needs some text.");
     fireEvent.change(box, { target: { value: "Cap it lower" } });
+    expect(screen.queryByText("A comment needs some text.")).toBeNull();
     // A plain Enter is a new line.
     await act(async () => fireEvent.keyDown(box, { key: "Enter" }));
     expect(onSubmit).not.toHaveBeenCalled();
@@ -140,6 +144,16 @@ describe("Composer", () => {
     await act(async () => fireEvent.keyDown(screen.getByRole("textbox", { name: "Suggested change" }), { key: "Enter", ctrlKey: true }));
     expect(onSubmit).toHaveBeenCalledTimes(2);
     expect(onSubmit).toHaveBeenLastCalledWith({ body: "Cap it lower", label: null, suggest: LINES.join("\n") });
+  });
+
+  it("goes back to Write when Add to review finds no text in Preview, with the reason on the field", async () => {
+    const { onSubmit } = compose(NEW);
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add to review" }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    const box = screen.getByRole("textbox", { name: "Comment" });
+    expect(box).toHaveFocus();
+    expect(box).toHaveAccessibleDescription("A comment needs some text.");
   });
 
   it("closes on Escape at once when empty, and shows a refusal in place", async () => {

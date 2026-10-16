@@ -52,3 +52,34 @@
     transition: transform 0.12s ease-out;
   }
 }
+
+/* Touch targets: the header's controls were 32px square (the version pill
+   24px tall, the logo link 24px) on a phone, under the 44px a finger needs.
+   Up to the width where the header grows its own links (lg), each is at least
+   44px each way. The icons stay their size; the button around them grows. */
+@media (max-width: 1023px) {
+  header :is(button, a[aria-label="GitHub"]) {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    justify-content: center;
+  }
+  header a[aria-label="Kraft"] {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+  }
+}
+/* A 320px header cannot hold the logo, the version pill and four 44px
+   controls with their gaps: the gaps go, the header's side padding halves, and
+   the pill loses its chevron (it is still a button that opens the menu). */
+@media (max-width: 359px) {
+  header [data-slot='container'] {
+    padding-inline: 0.5rem;
+  }
+  header [data-slot='right'] {
+    gap: 0;
+  }
+  header [aria-label^='Docs version'] [data-slot='trailingIcon'] {
+    display: none;
+  }
+}

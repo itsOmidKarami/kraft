@@ -74,3 +74,11 @@ def test_main_names_the_page_and_says_what_to_do(cl, tmp_path, capsys):
     captured = capsys.readouterr()
     assert f"{page}: first paragraph repeats the description" in captured.out
     assert "Delete the paragraph" in captured.err
+
+
+def test_a_backtick_in_a_description_is_flagged(cl, tmp_path):
+    page = tmp_path / "page.md"
+    page.write_text(_page("Short.", desc="What `kraft admin doctor` reports."))
+    assert cl.check([page]) == [f"{page}: description holds a backtick, which shows as one"]
+    page.write_text(_page("Short.", desc="What kraft admin doctor reports."))
+    assert cl.check([page]) == []

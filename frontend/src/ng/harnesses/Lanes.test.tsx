@@ -72,6 +72,7 @@ describe("the canvas", () => {
     renderPage();
     const glyphs = await screen.findAllByRole("link", { name: /default › implement\.main\.implementer.*has a problem/ });
     expect(glyphs[0]).toHaveAttribute("href", "/templates/chains/default/nodes/implement");
+    expect(glyphs[0]).toHaveTextContent("implement · implementer");
     expect(screen.getAllByRole("link", { name: /default › spec\.main\.spec_author. Open in Chains/ })[0]).not.toHaveTextContent("problem");
     const claude = screen.getByRole("region", { name: "claude" });
     expect(within(claude).getAllByRole("group").map((g) => g.getAttribute("aria-label"))).toEqual(["Chain default"]);

@@ -18,6 +18,7 @@ import { limitLabel } from "./policy/keys";
 import { policyOf } from "./policy/types";
 import "./settings.css";
 import "./policy/policy.css";
+import { usePane } from "../shell/usePane";
 
 const isSection = (s: string | undefined): s is Section => SECTIONS.some((x) => x.id === s);
 export const policyUrl = (s: Section) => `/settings/policy/${s}`;
@@ -40,6 +41,7 @@ function Editor({ draft, section }: { draft: ConfigDraft; section: Section }) {
   const [active, setActive] = useState<number | null>(null);
   const [chains, setChains] = useState<string[]>([]);
   const [preview, setPreview] = useState(false);
+  usePane(preview && section === "limits");
   const [flash, setFlash] = useState<string | null>(null);
   const stamp = draft.view!.files["policy.yaml"];
 

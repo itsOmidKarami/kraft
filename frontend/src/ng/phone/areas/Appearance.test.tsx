@@ -97,37 +97,17 @@ describe("Appearance (O.4)", () => {
     await waitFor(() => expect(put).toHaveBeenCalledWith({ surface: "moss", accent: "blue", colour_amount: "subtle" }));
   });
 
-  it("the syntax schemes are chosen per mode and go whole", async () => {
-    const put = setup();
-    await userEvent.click(await row(/^Dark scheme/));
-    await userEvent.click(screen.getByRole("radio", { name: "Dracula" }));
-    await waitFor(() => expect(put).toHaveBeenLastCalledWith({ code_scheme: { light: "auto", dark: "dracula" } }));
-    await userEvent.click(await row(/^Light scheme/));
-    expect(screen.queryByRole("radio", { name: "Dracula" })).toBeNull();
-    await userEvent.click(screen.getByRole("radio", { name: "Solarized Light" }));
-    await waitFor(() => expect(put).toHaveBeenLastCalledWith({ code_scheme: { light: "solarized-light", dark: "dracula" } }));
-  });
-
-  it("the review diff choices send the whole diff object with one key changed", async () => {
-    const put = setup({ diff: { layout: "unified", colours: "theme", show_whitespace: true, word_highlight: true, wrap_lines: false, one_file_at_a_time: true } });
-    await userEvent.click(await screen.findByRole("switch", { name: /Wrap long lines/ }));
-    await waitFor(() => expect(put).toHaveBeenLastCalledWith({ diff: { layout: "unified", colours: "theme", show_whitespace: true, word_highlight: true, wrap_lines: true, one_file_at_a_time: true } }));
-    await userEvent.click(await row(/^Layout/));
-    await userEvent.click(screen.getByRole("radio", { name: "Side-by-side" }));
-    await waitFor(() => expect(put).toHaveBeenLastCalledWith({ diff: expect.objectContaining({ layout: "split", wrap_lines: true }) }));
-    await userEvent.click(await row(/^Added and removed colours/));
-    await userEvent.click(screen.getByRole("radio", { name: /Colour-blind safe/ }));
-    await waitFor(() => expect(put).toHaveBeenLastCalledWith({ diff: expect.objectContaining({ colours: "safe", layout: "split" }) }));
-  });
-
-  it("the board choices: density and open in (merged into board)", async () => {
+  it("saves density alone", async () => {
     const put = setup();
     await userEvent.click(await row(/^Density/));
     await userEvent.click(screen.getByRole("radio", { name: "Comfortable" }));
     await waitFor(() => expect(put).toHaveBeenLastCalledWith({ density: "comfortable" }));
-    await userEvent.click(await row(/^Open items in/));
-    await userEvent.click(screen.getByRole("radio", { name: "Full page" }));
-    await waitFor(() => expect(put).toHaveBeenLastCalledWith({ board: { group_by: "status", show_done: 5, open_in: "full" } }));
+  });
+
+  it("holds none of the code or board choices, which are on Board & code", async () => {
+    setup();
+    await row(/^Mode/);
+    for (const moved of [/^Dark scheme/, /^Layout/, /^Open items in/]) expect(screen.queryByRole("button", { name: moved })).toBeNull();
   });
 
   it("YAML shows the effective values", async () => {

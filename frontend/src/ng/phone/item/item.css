@@ -20,7 +20,7 @@
 .ph-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; background: transparent; color: var(--text-sub); cursor: pointer; }
 
 .ph-statecard { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; }
-.ph-statecard.ph-tone-warn { border-color: color-mix(in oklab, var(--warn) 50%, transparent); background: color-mix(in oklab, var(--warn) 7%, var(--bg)); }
+.ph-statecard.ph-tone-warn { border-color: var(--warn-edge); background: var(--warn-wash); }
 .ph-statecard.ph-tone-bad { border-color: color-mix(in oklab, var(--bad) 50%, transparent); background: color-mix(in oklab, var(--bad) 7%, var(--bg)); }
 .ph-statecard.ph-tone-info { border-color: color-mix(in oklab, var(--info) 50%, transparent); background: color-mix(in oklab, var(--info) 7%, var(--bg)); }
 .ph-statecard.ph-tone-ok { border-color: color-mix(in oklab, var(--ok) 50%, transparent); }
@@ -38,7 +38,7 @@
 .ph-tone-warn.ph-row-hint { color: var(--warn); }
 .ph-tone-info.ph-row-hint { color: var(--info); }
 .ph-tone-bad.ph-row-hint { color: var(--bad); }
-.ph-pillbadge { padding: 2px 7px; border-radius: 5px; font-size: var(--fs-label); color: var(--warn); background: color-mix(in oklab, var(--warn) 16%, transparent); }
+.ph-pillbadge { white-space: nowrap; padding: 2px 7px; border-radius: 5px; font-size: var(--fs-label); color: var(--warn); background: color-mix(in oklab, var(--warn) 16%, transparent); }
 .ph-chev { flex: none; color: var(--text-faint); }
 .ph-log-path { margin: 0; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); overflow-wrap: anywhere; }
 

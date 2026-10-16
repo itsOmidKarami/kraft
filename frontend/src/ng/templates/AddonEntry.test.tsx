@@ -86,7 +86,6 @@ describe("An add-on's chain on the Chains page", () => {
     expect(screen.queryAllByText("release@acme 1.0.0")).toHaveLength(shipped ? 1 : 0);
     expect(screen.queryAllByRole("button", { name: "Copy to my library" })).toHaveLength(shipped ? 1 : 0);
     there(screen.queryByRole("button", { name: /Review & publish/ }));
-    there(screen.queryByRole("button", { name: "Chain settings" }));
     expect(within(canvas).queryAllByRole("button", { name: "Add a node or gate here" })).toHaveLength(shipped ? 0 : 7);
     // The chain's pane: no rename on its title, no description field, no Duplicate or Delete.
     const pane = screen.getByRole("complementary", { name: `${chain} pane` });

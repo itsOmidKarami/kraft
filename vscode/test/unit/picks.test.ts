@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gatePicks, itemPick, pickableFor, type PickVerb } from "../../src/core/picks";
+import { gatePicks, itemPick, nextGate, pickableFor, type PickVerb } from "../../src/core/picks";
 import { item, stopped } from "./fixtures/item";
 
 const ids = (items: { id: string }[]) => items.map((i) => i.id);
@@ -23,5 +23,18 @@ it("gatePicks lists the items at a gate, the longest-waiting first", () => {
   expect(ids(gatePicks([gate("b", "2026-10-12T10:00:00Z"), item({ id: "r" }), gate("a", "2026-10-12T09:00:00Z")]))).toEqual(["a", "b"]);
 });
 
+describe("nextGate", () => {
+  const gate = (id: string, at: string) => stopped("gate", { id, pending_gate: "spec_approval", updated_at: at });
+  it.each<[string, ReturnType<typeof item>[], string | undefined, string[]]>([
+    ["one gate opens at once", [gate("a", "2026-10-12T09:00:00Z"), item({ id: "r" })], "a", ["a"]],
+    ["several are asked about, the longest-waiting first", [gate("b", "2026-10-12T10:00:00Z"), gate("a", "2026-10-12T09:00:00Z")], undefined, ["a", "b"]],
+    ["none is asked about", [item({ id: "r" })], undefined, []],
+  ])("%s", (_, items, open, ask) => {
+    const next = nextGate(items);
+    expect(next.open?.id).toBe(open);
+    expect(ids(next.ask)).toEqual(ask);
+  });
+});
+
 it("itemPick shows the title, then the id and why", () =>
-  expect(itemPick(stopped("budget", { id: "K-7", title: "Fix it" }))).toEqual({ label: "Fix it", description: "K-7 · waiting for you at implementation", id: "K-7" }));
+  expect(itemPick(stopped("budget", { id: "K-7", title: "Fix it" }))).toEqual({ label: "Fix it", description: "waiting for you at implementation", detail: "K-7", id: "K-7" }));

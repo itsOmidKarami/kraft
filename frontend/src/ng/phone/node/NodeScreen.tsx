@@ -28,6 +28,7 @@ import { chainName } from "../../item/chainName";
 import { appliedRows } from "../../item/draft/applied";
 import { useApplied } from "../../item/draft/useApplied";
 import { gateMessage, loopPaths, materialized, nodeAt } from "../../item/chainValues";
+import { nameOf } from "../../board/rowText";
 import "../areas/areas.css";
 import { yamlOf } from "../areas/yaml";
 import "./node.css";
@@ -54,6 +55,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   const navigate = useNavigate();
   const sheet = useSheet();
   const { busy, run } = useDo(reload);
+  const name = nameOf(item.chain_definition.nodes, nodeId);
   const api = item.chain_definition.nodes.find((n) => n.id === nodeId)!;
   const { nodes } = useMemo(() => chainGraph(item, events, now), [item, events, now]);
   const graph = nodes.find((n) => n.id === nodeId)!;
@@ -90,7 +92,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
       case "resume": return void run(act.resume(item.id), "Resumed.");
       case "skip": return sheet.open("skip");
       case "retry-from": return sheet.open("rewind");
-      case "retry-node": return void run(act.retry(item.id, { path: nodeId }), `Retrying ${nodeId} from its first step.`);
+      case "retry-node": return void run(act.retry(item.id, { path: nodeId }), `Retrying ${name} from its first step.`);
       case "review": return navigate(`/work-items/${encodeURIComponent(item.id)}/review?gate=${encodeURIComponent(nodeId)}`);
     }
   };
@@ -99,7 +101,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   return (
     <>
       <ScreenHeader id={item.bead_id ?? item.id.slice(0, 8)} />
-      <Strip nodes={nodes} current={nodeId} onPick={(id) => setPlace({ node: id, sel: { kind: "node", node: id }, tab: undefined, attempt: undefined })} />
+      <Strip nodes={nodes} current={nodeId} name={(id) => nameOf(item.chain_definition.nodes, id)} onPick={(id) => setPlace({ node: id, sel: { kind: "node", node: id }, tab: undefined, attempt: undefined })} />
       <div className="ph-content">
         <div className="ph-node-head">
           <h1 className="ph-node-title">{breakable(nodeId)}</h1>
@@ -134,7 +136,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
                     ...(message ? [["message", message]] : []),
                     ...(item.test_result ? [["tests", <TestsLine key="t" workItemId={item.id} result={item.test_result} linkClass="ph-linkbtn ph-mono" />]] as [string, React.ReactNode][] : []),
                     ...(doc ? [["document", <button key="d" type="button" className="ph-linkbtn ph-mono" onClick={() => navigate(`${placeUrl(item.id, { node: nodeId, sel: { kind: "node", node: nodeId } })}?doc=${encodeURIComponent(doc.document_id)}`)}>{doc.path.split("/").at(-1)}</button>]] as [string, React.ReactNode][] : []),
-                    ["reject to", rejectTarget(item.chain_definition.nodes, nodeId) ? <button key="r" type="button" className="ph-linkbtn ph-mono" onClick={() => setPlace({ node: rejectTarget(item.chain_definition.nodes, nodeId)!, sel: { kind: "node", node: rejectTarget(item.chain_definition.nodes, nodeId)! } })}>{rejectTarget(item.chain_definition.nodes, nodeId)}</button> : "reopens the gate"],
+                    ["reject to", rejectTarget(item.chain_definition.nodes, nodeId) ? <button key="r" type="button" className="ph-linkbtn" onClick={() => setPlace({ node: rejectTarget(item.chain_definition.nodes, nodeId)!, sel: { kind: "node", node: rejectTarget(item.chain_definition.nodes, nodeId)! } })}>{nameOf(item.chain_definition.nodes, rejectTarget(item.chain_definition.nodes, nodeId)!)}</button> : "reopens the gate"],
                   ] as [string, React.ReactNode][])
                 : ([
                     ...(api.fix_loop ? [["fix loop", fixLoopWords(seen, api)]] : []),
@@ -212,7 +214,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
             <Facts rows={[
               ["chain", `${chainName(item)} · frozen at intake`],
               ...(api.fix_loop ? ([["fix loop", fixLoopWords(seen, api)]] as [string, React.ReactNode][]) : []),
-              ["on failure", api.on_failure?.length ? `${api.on_failure.map(plainName).join(", ")}, once` : gate ? `reject to ${rejectTarget(item.chain_definition.nodes, nodeId) ?? "this gate"}` : "—"],
+              ["on failure", api.on_failure?.length ? `${api.on_failure.map(plainName).join(", ")}, once` : gate ? `reject to ${nameOf(item.chain_definition.nodes, rejectTarget(item.chain_definition.nodes, nodeId) ?? nodeId)}` : "—"],
               ["overrides", overridden ? [mine && `${mine} · changed for this item`, ...drafted].filter(Boolean).join(" · ") : "none"],
             ]} />
             <p className="ph-note">{overridden ? "An override applies to this item only. The chain file is unchanged." : "No item override on this node."}</p>
@@ -223,19 +225,19 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
       {sheet.is("pause") && <PauseSheet item={item} node={nodeId} sheet={sheet} reload={reload} />}
       {sheet.is("skip") && (
         <ConfirmSheet
-          title={`Skip ${nodeId}?`}
+          title={`Skip ${name}?`}
           text="The node is marked skipped without running. The chain carries on at the next node."
           busy={busy}
-          confirm={{ label: "Skip node", run: async () => { const r = await run(act.skip(item.id, nodeId), `Skipped ${nodeId}.`); if (r.ok) sheet.close(); } }}
+          confirm={{ label: "Skip node", run: async () => { const r = await run(act.skip(item.id, nodeId), `Skipped ${name}.`); if (r.ok) sheet.close(); } }}
           onClose={sheet.close}
         />
       )}
       {sheet.is("rewind") && (
         <ConfirmSheet
-          title={`Retry from ${nodeId}?`}
-          text={`The item rewinds to ${nodeId} and runs it again from its first step. Every node after it runs again afterwards.`}
+          title={`Retry from ${name}?`}
+          text={`The item rewinds to ${name} and runs it again from its first step. Every node after it runs again afterwards.`}
           busy={busy}
-          confirm={{ label: "Rewind and retry", danger: true, run: async () => { const r = await run(act.retry(item.id, { path: nodeId }), `Rewound to ${nodeId}.`); if (r.ok) sheet.close(); } }}
+          confirm={{ label: "Rewind and retry", danger: true, run: async () => { const r = await run(act.retry(item.id, { path: nodeId }), `Rewound to ${name}.`); if (r.ok) sheet.close(); } }}
           onClose={sheet.close}
         />
       )}

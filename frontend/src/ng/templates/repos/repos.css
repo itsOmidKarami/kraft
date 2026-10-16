@@ -1,5 +1,6 @@
 /* The Repos area (W15). Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279. */
 .rp-body { position: absolute; left: 0; top: 0; bottom: 0; overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.rp-body > * { box-sizing: border-box; width: 100%; max-width: 1180px; margin-inline: auto; }
 .rp-loading { display: flex; flex-direction: column; gap: 8px; }
 .rp-skel { height: 34px; border-radius: 8px; background: var(--surface); }
 .rp-bar { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; }
@@ -9,7 +10,7 @@
 .rp-rows { display: flex; flex-direction: column; gap: 2px; }
 .rp-row { border-radius: 8px; font-size: var(--fs-label); cursor: pointer; }
 .rp-row:hover { background: var(--surface); }
-.rp-row.is-sel { background: var(--surface-2); box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text-sub); }
+.rp-row.is-sel { background: var(--surface-2); }
 .rp-row:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .rp-row.is-off .rp-name-text, .rp-row.is-off .rp-cell { color: var(--text-muted); }
 .rp-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -48,7 +49,7 @@
 .rp-reset:is(:hover, :focus-visible) { color: var(--text); }
 .rp-v .segmented { flex-wrap: wrap; max-width: 100%; }
 .rp-none { display: inline-flex; align-items: center; gap: 6px; color: var(--text-sub); cursor: pointer; }
-.rp-select { max-width: 100%; padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); font-size: var(--fs-label); color: var(--text); }
+
 
 .rp-connect-panel { margin: 0 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .rp-connect { display: flex; flex-direction: column; gap: 8px; max-width: 480px; padding: 10px; }
@@ -63,6 +64,9 @@
 @media (max-width: 1279px) {
   .rp-head, .rp-row { grid-template-columns: minmax(0, 1fr) 70px minmax(0, 96px) minmax(0, 132px); }
   .rp-head > :nth-child(4), .rp-row > :nth-child(4) { display: none; }
-  .rp-row-cfg { grid-template-columns: minmax(70px, 108px) minmax(0, 1fr); }
-  .rp-row-cfg > .rp-src { grid-column: 2; padding-top: 0; }
+  .rp-row-cfg { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .rp-row-cfg > .rp-k { padding-top: 0; }
+  .rp-row-cfg > .rp-src { padding-top: 0; }
 }
+/* A path is cut from the left: the end of it is what names the repo. */
+.rp-path { display: block; direction: rtl; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

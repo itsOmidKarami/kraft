@@ -92,23 +92,23 @@ describe("CleanupDialog", () => {
     [
       "someone archived one between the preview and the confirm",
       [200, { results: [{ id: "w1", ok: false, error: "work item is already archived" }, { id: "w4", ok: true, status: "abandoned" }] }],
-      "1 of 2 archived",
+      "1 of 2 cleaned up",
       ["Cache embeddings: work item is already archived"],
     ],
     [
       "the server leaves an id out of its answer",
       [200, { results: [{ id: "w4", ok: true, status: "abandoned" }] }],
-      "1 of 2 archived",
-      ["Cache embeddings: not archived"],
+      "1 of 2 cleaned up",
+      ["Cache embeddings: not cleaned up"],
     ],
     [
       "the bulk call is refused outright",
       [500, { detail: "database is locked" }],
-      "0 of 2 archived",
+      "0 of 2 cleaned up",
       ["Cache embeddings: database is locked", "Old spike: database is locked"],
     ],
   ];
-  it.each(failures)("keeps the dialog open and names what was not archived: %s", async (_name, answer, summary, lines) => {
+  it.each(failures)("keeps the dialog open and names what was not cleaned up: %s", async (_name, answer, summary, lines) => {
     const { onClose, onDone } = mount({ "POST /storage/preview": [200, storagePreview()], "POST /work-items/bulk": answer });
     await userEvent.click(await screen.findByRole("button", { name: "Clean up 2 items and free 3 GB" }));
     const alert = await screen.findByRole("alert");

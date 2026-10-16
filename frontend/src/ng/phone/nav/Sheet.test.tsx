@@ -37,7 +37,7 @@ describe("the three shapes (A.5)", () => {
     render(<EditSheet title="Port" error="port is in use" onSubmit={onSubmit} onClose={() => {}} />);
     expect(screen.getByRole("alert")).toHaveTextContent("port is in use");
     await userEvent.type(screen.getByLabelText("Port", { selector: "input" }), "9{Enter}");
-    expect(onSubmit).toHaveBeenCalledWith("9");
+    expect(onSubmit).toHaveBeenCalledWith("9", false);
   });
 
   it("keeps a listed field focused when Set is pressed, so its inline list does not close and move Set from under the tap", async () => {
@@ -50,7 +50,7 @@ describe("the three shapes (A.5)", () => {
     expect(fireEvent.mouseDown(set)).toBe(false);
     expect(field).toHaveFocus();
     fireEvent.click(set);
-    expect(onSubmit).toHaveBeenCalledWith("kraft.mr_rebase");
+    expect(onSubmit).toHaveBeenCalledWith("kraft.mr_rebase", false);
   });
 
   it("closes on Escape, the scrim and Cancel through one path", async () => {

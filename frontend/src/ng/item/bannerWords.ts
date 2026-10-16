@@ -1,18 +1,20 @@
 import type { WorkItem } from "../../types";
+import { gateName, nameOf } from "../board/rowText";
 import { FORGE_LOGIN_HINT, failedFix } from "./cause";
 import { budgetRaise, NOT_RAISABLE, offersRaise, RAISE_REFUSED } from "./status";
 
-/** Which frame a stop's words sit in: a gate's "Waiting for your approval at
- *  <node>.", a cap or budget's "Stopped at <node>. <text>", a question, a
+/** Which frame a stop's words sit in: a gate's "Waiting for you to <name>.",
+ *  a cap or budget's "Stopped at <name>. <text>", a question, a
  *  failure, or any other stop that needs you. */
 export type BannerKind = "gate" | "limit" | "question" | "failed" | "stop";
 
 /** A stopped item's banner, as words both front doors draw (spec §4.5 of the
- *  console's design): the node it names, the server's reason as the web
- *  shows it, and the way on the web gives in words. `""` for none. */
-export type BannerWords = { kind: BannerKind; node: string; text: string; way: string };
+ *  console's design): the node it names, by id and as a reader calls it
+ *  (`gateName`, `nameOf`), the server's reason as the web shows it, and the
+ *  way on the web gives in words. `""` for none. */
+export type BannerWords = { kind: BannerKind; node: string; name: string; text: string; way: string };
 
-type BannerItem = Pick<WorkItem, "display_status" | "stop" | "pending_gate" | "needs_context_question" | "actions">;
+type BannerItem = Pick<WorkItem, "display_status" | "stop" | "pending_gate" | "needs_context_question" | "actions"> & Partial<Pick<WorkItem, "chain_definition">>;
 
 /** A stop's reason as a sentence of its own: a capital first letter and a full stop. */
 export const sentence = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1).replace(/\.*$/, "")}.`;
@@ -25,6 +27,13 @@ export const REPO_FIX = "Check the repo settings.";
  *  A failure's text is its whole reason: the console has no fact rows to move
  *  the " — tests failed: …" tail into. */
 export function bannerOf(item: BannerItem): BannerWords | null {
+  const words = bannerWords(item);
+  if (!words) return null;
+  const nodes = item.chain_definition?.nodes;
+  return { ...words, name: !words.node ? "" : words.kind === "gate" ? gateName(nodes, words.node) : nameOf(nodes, words.node) };
+}
+
+function bannerWords(item: BannerItem): Omit<BannerWords, "name"> | null {
   const stop = item.stop;
   if (!stop || (item.display_status !== "needs_you" && item.display_status !== "failed")) return null;
   const node = stop.node ?? "";

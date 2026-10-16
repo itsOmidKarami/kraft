@@ -146,6 +146,15 @@ describe("a fix-loop node", () => {
     expect(screen.getAllByRole("menuitemradio").map((r) => r.textContent)).toEqual(["✓Attempt 2failed · 5s", "Attempt 1failed · 4m"]);
   });
 
+  it("names the nodes a frozen node's Config rows point at, not their ids", async () => {
+    const named = nodes.map((n) => (n.id === "verification" ? { ...n, reject_to: "merge_request", rebase_bounce_to: "merge_request" } : n));
+    mount("/work-items/w1/nodes/verification", detail({ chain_definition: { template_id: "default", nodes: named }, materialized_chain: LOOPED, worker_sessions: run() }));
+    const config = screen.queryByRole("tab", { name: /config/i });
+    if (config) await userEvent.click(config);
+    expect(within(pane("verification")).getByText("reject to").nextElementSibling).toHaveTextContent(/^merge request$/);
+    expect(within(pane("verification")).getByText("rebase back to").nextElementSibling).toHaveTextContent(/^merge request$/);
+  });
+
   it("says 'round 2 of 3' in the node's own fix loop row", () => {
     mount("/work-items/w1/nodes/verification");
     expect(within(pane("verification")).getByText("fix loop").nextElementSibling).toHaveTextContent("round 2 of 3");
@@ -171,7 +180,7 @@ describe("a node the chain ran again", () => {
     expect(sub("lint")).toBe("subprocess task · round 1 of 3 · done 12s");
     // The passes say what started them, newest first.
     await userEvent.click(screen.getByRole("button", { name: /^pass \d/ }));
-    expect(screen.getAllByRole("menuitemradio").map((r) => r.textContent)).toEqual(["Pass 2 · nowafter a reject at local_review", "Pass 1first run"]);
+    expect(screen.getAllByRole("menuitemradio").map((r) => r.textContent)).toEqual(["Pass 2 · nowafter changes were requested at approve local review", "Pass 1first run"]);
   });
 
   it("follows the pass picked: its rounds, its tasks and their runs, and back to the newest", async () => {
@@ -258,7 +267,6 @@ describe("a node the chain ran again", () => {
     // Another node's view starts on its own newest.
     await pickPass(1);
     const strip = within(screen.getByRole("group", { name: "Chain" }));
-    await userEvent.click(strip.getAllByRole("button", { name: /stage, .*expand$/ })[0]);
     await userEvent.click(strip.getByRole("button", { name: /^plan, node/ }));
     expect(where()).toBe("/work-items/w1/nodes/plan");
   });

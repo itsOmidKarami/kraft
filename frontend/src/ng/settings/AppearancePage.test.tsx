@@ -1,7 +1,6 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
-import * as http from "../http";
 import type { Theme } from "../../types";
 import { AppearancePage } from "./AppearancePage";
 import { WithHeader } from "./testkit";
@@ -45,42 +44,26 @@ describe("ng AppearancePage", () => {
     expect(document.documentElement.dataset).toMatchObject({ surface: "moss", accent: "rose", amount: "full", mode: "light" });
   });
 
-  it("puts the look first, then Density, then the code and board view under its own heading", async () => {
+  it("puts the look first, then Density, and none of the code or board choices", async () => {
     setup();
     await screen.findByRole("radiogroup", { name: "Mode" });
     expect(screen.getByText("Saved on change")).toHaveClass("saved-note");
-    const order = [...screen.getAllByRole("heading", { level: 2 }), ...screen.getAllByRole("heading", { level: 3 })].sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)).map((h) => h.textContent);
-    expect(order.slice(order.indexOf("Mode"), order.indexOf("Default editor") + 1)).toEqual(["Mode", "Colour amount", "Surface", "Accent", "Density", "Preview", "Code and board view", "Syntax highlighting", "Review diff", "Board", "Default editor"]);
+    const order = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(order).toEqual(["Mode", "Colour amount", "Surface", "Accent", "Density", "Preview"]);
+    for (const moved of ["Open items in", "Default editor", "Wrap long lines"]) expect(screen.queryByText(moved)).toBeNull();
   });
 
-  it.each([
-    // r12 review: unset is KRAFT_EDITOR first, so it is "Not set", not "System default".
-    ["a choice this machine has", "zed", ["VS Code", "Zed", "Not set"], "Zed"],
-    ["none set", null, ["VS Code", "Zed", "Not set"], "Not set"],
-    ["a choice this machine no longer has, still shown", "obsidian", ["VS Code", "Zed", "Obsidian", "Not set"], "Obsidian"],
-  ])("lists the editors found on this machine for the default editor, with %s selected", async (_, editor, names, selected) => {
-    vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: { available: ["code", "zed"], system: true, default: editor } });
-    const put = setup({ editor });
-    const group = await screen.findByRole("radiogroup", { name: "Default editor" });
-    expect(within(group).getAllByRole("radio").map((r) => r.textContent)).toEqual(names);
-    expect(within(group).getByRole("radio", { name: selected })).toBeChecked();
-    fireEvent.click(within(group).getByRole("radio", { name: "VS Code" }));
-    fireEvent.click(within(group).getByRole("radio", { name: "Not set" }));
-    await waitFor(() => expect(put.mock.calls.map((c) => c[0])).toEqual([{ editor: "code" }, { editor: null }]));
+  it("saves density alone", async () => {
+    const put = setup();
+    fireEvent.click(await screen.findByRole("radio", { name: "Comfortable" }));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    expect(put.mock.calls[0][0]).toEqual({ density: "comfortable" });
   });
 
   it("names the preview's item by an id in the board's shortened form", async () => {
     setup();
     await screen.findByRole("radiogroup", { name: "Mode" });
     expect(document.querySelector(".tc-crumb")).toHaveTextContent(/^Board › [0-9a-f]{8}…[0-9a-f]{5}$/);
-  });
-
-  // R14b-03: the preview's lines scroll sideways, so a keyboard has to be able to reach them.
-  it("lets the keyboard reach the diff preview's scrolling lines", async () => {
-    setup();
-    const lines = await screen.findByRole("group", { name: /^Diff preview lines/ });
-    expect(lines).toHaveAttribute("tabindex", "0");
-    expect(lines).toHaveClass("set-diff-body");
   });
 
   it("paints a change before the server answers", async () => {
@@ -130,56 +113,6 @@ describe("ng AppearancePage", () => {
     expect(document.documentElement.dataset.surface).toBe("slate");
   });
 
-  describe("code scheme, review diff, density, board", () => {
-    it("writes code_scheme whole, one mode changed, and paints data-code", async () => {
-      const put = setup({ code_scheme: { light: "auto", dark: "auto" } });
-      fireEvent.click(await screen.findByRole("button", { name: "dark scheme: Monokai" }));
-      await waitFor(() => expect(put).toHaveBeenCalledWith({ code_scheme: { light: "auto", dark: "monokai" } }));
-      expect(document.documentElement.dataset.code).toBe("monokai");
-      fireEvent.click(screen.getByRole("button", { name: "light scheme: Solarized Light" }));
-      await waitFor(() => expect(put).toHaveBeenLastCalledWith({ code_scheme: { light: "solarized-light", dark: "monokai" } }));
-      expect(screen.getByRole("button", { name: "light scheme: Solarized Light" })).toHaveAttribute("aria-pressed", "true");
-      expect(screen.queryByRole("button", { name: "light scheme: Monokai" })).toBeNull();
-    });
-
-    it("None is its own choice, not Auto", async () => {
-      const put = setup();
-      fireEvent.click(await screen.findByRole("button", { name: "dark scheme: None" }));
-      await waitFor(() => expect(put).toHaveBeenCalledWith({ code_scheme: { light: "auto", dark: "none" } }));
-      expect(document.documentElement.dataset.code).toBeUndefined();
-    });
-
-    it("sends the whole diff object with only the changed key different", async () => {
-      const put = setup({ diff: { layout: "unified", colours: "theme", show_whitespace: true, word_highlight: true, wrap_lines: false, one_file_at_a_time: true } });
-      fireEvent.click(await screen.findByRole("radio", { name: "Side-by-side" }));
-      fireEvent.click(screen.getByRole("button", { name: "Diff colours: Colour-blind safe" }));
-      fireEvent.click(screen.getByRole("switch", { name: "Wrap long lines" }));
-      await waitFor(() => expect(put).toHaveBeenCalledTimes(3));
-      const base = { layout: "unified", colours: "theme", show_whitespace: true, word_highlight: true, wrap_lines: false, one_file_at_a_time: true };
-      expect(put.mock.calls.map((c) => c[0])).toEqual([
-        { diff: { ...base, layout: "split" } },
-        { diff: { ...base, layout: "split", colours: "safe" } },
-        { diff: { ...base, layout: "split", colours: "safe", wrap_lines: true } },
-      ]);
-    });
-
-    it("saves density and open-in alone, keeping the rest of board", async () => {
-      const put = setup();
-      fireEvent.click(await screen.findByRole("radio", { name: "Comfortable" }));
-      fireEvent.click(screen.getByRole("radio", { name: "Full page" }));
-      await waitFor(() => expect(put).toHaveBeenCalledTimes(2));
-      expect(put.mock.calls.map((c) => c[0])).toEqual([{ density: "comfortable" }, { board: { group_by: "status", show_done: 5, open_in: "full" } }]);
-    });
-
-    it("puts a diff switch back when the save fails", async () => {
-      setup();
-      vi.mocked(api.putTheme).mockRejectedValueOnce(new Error("422: nope"));
-      fireEvent.click(await screen.findByRole("switch", { name: "Wrap long lines" }));
-      expect(await screen.findByRole("alert")).toHaveTextContent("Not saved: 422: nope");
-      expect(screen.getByRole("switch", { name: "Wrap long lines" })).toHaveAttribute("aria-checked", "false");
-    });
-  });
-
   it("shows theme.yaml from the page's state under the header's YAML button, kept current as it changes", async () => {
     setup();
     await screen.findByRole("radiogroup", { name: "Mode" });
@@ -189,20 +122,12 @@ describe("ng AppearancePage", () => {
     await waitFor(() => expect(screen.getByLabelText("theme.yaml").textContent).toContain("surface: moss"));
   });
 
-  it("starts with the pane collapsed, and its Overview lists the values in force", async () => {
-    setup({ colour_amount: "mono" });
+  it("keeps no side rail until YAML is opened", async () => {
+    setup();
     await screen.findByRole("radiogroup", { name: "Mode" });
-    expect(screen.getByRole("complementary", { name: "appearance pane, collapsed" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Expand appearance" }));
-    const pane = screen.getByRole("complementary", { name: "appearance pane" });
-    expect(within(pane).getByText("colour amount").nextSibling).toHaveTextContent("mono");
-    expect(within(pane).getByText("accent").nextSibling).toHaveTextContent("none");
+    expect(screen.queryByRole("complementary")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "YAML" }));
+    expect(screen.getByRole("complementary", { name: "appearance pane" })).toBeInTheDocument();
   });
 
-  it("writes the chosen code schemes and diff preferences into the YAML, not the defaults", async () => {
-    setup({ code_scheme: { light: "none", dark: "monokai" }, diff: { layout: "split", colours: "safe", show_whitespace: false, word_highlight: false, wrap_lines: true, one_file_at_a_time: false } });
-    await screen.findByRole("radiogroup", { name: "Mode" });
-    fireEvent.click(screen.getByRole("button", { name: "YAML" }));
-    expect(screen.getByLabelText("theme.yaml").textContent).toContain("code_scheme:\n  light: none\n  dark: monokai\ndiff:\n  layout: split\n  colours: safe\n  show_whitespace: false\n  word_highlight: false\n  wrap_lines: true\n  one_file_at_a_time: false\n");
-  });
 });

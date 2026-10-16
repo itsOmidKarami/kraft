@@ -36,8 +36,13 @@ const ROWS: Row[] = [
     run: async (p) => { await app(p, "/"); expect(await sideEdge(p)).toBeGreaterThan(OPEN); },
   },
   {
+    // A page with no pane to open: the Board is the exception, below.
     name: "sidebar: open by default on a 900px window",
-    run: async (p) => { await p.setViewportSize({ width: 900, height: 800 }); await app(p, "/"); expect(await sideEdge(p)).toBeGreaterThan(OPEN); },
+    run: async (p) => { await p.setViewportSize({ width: 900, height: 800 }); await app(p, "/analytics"); expect(await sideEdge(p)).toBeGreaterThan(OPEN); },
+  },
+  {
+    name: "sidebar: the Board steps back to its rail on a 900px window, so its peek moves nothing",
+    run: async (p) => { await p.setViewportSize({ width: 900, height: 800 }); await app(p, "/"); expect(await sideEdge(p)).toBeLessThan(OPEN); },
   },
   {
     name: "sidebar: the toggle collapses it and the pointer leaving keeps it collapsed",
@@ -103,7 +108,7 @@ const ROWS: Row[] = [
   },
   {
     name: "search: a needs-you row for a gate is an action row, Review <gate>, and Enter opens that review (Q1)",
-    run: async (p) => { await app(p, "/"); await p.keyboard.press("ControlOrMeta+k"); await pause(p, 400); const r = p.getByRole("option", { name: /Review final.review/ }).first(); await expect(r).toBeVisible({ timeout: 3000 }); await r.click(); await pause(p, 800); expect(p.url()).toMatch(/\/review/); },
+    run: async (p) => { await app(p, "/"); await p.keyboard.press("ControlOrMeta+k"); await pause(p, 400); const r = p.getByRole("option", { name: /Review · approve review brief/ }).first(); await expect(r).toBeVisible({ timeout: 3000 }); await r.click(); await pause(p, 800); expect(p.url()).toMatch(/\/review/); },
   },
   {
     name: "search: the query is highlighted in titles (Q3)",
@@ -198,6 +203,15 @@ const ROWS: Row[] = [
       await app(p, "/settings/about");
       await expect(p.getByText(/127\.0\.0\.1:8765 · sign-in (on|off on localhost)/)).toBeVisible({ timeout: 3000 });
       await expect(p.getByText(/Python 3\.14/)).toBeVisible();
+    },
+  },
+  {
+    name: "offline: a page that loads its own data says the server is down and can retry, rather than loading forever [decided]",
+    run: async (p) => {
+      await app(p, "/settings/policy", { mock: { boardState: "offline" }, ready: (pg) => pg.getByRole("button", { name: "Retry now" }).waitFor() });
+      await expect(p.getByText(/^Offline: /)).toBeVisible();
+      await expect(p.getByText("Loading policy…")).toHaveCount(0);
+      await expect(p.getByRole("heading", { name: "Could not load policy" })).toBeVisible();
     },
   },
 ];

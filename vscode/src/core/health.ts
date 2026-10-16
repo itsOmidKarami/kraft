@@ -29,7 +29,16 @@ export function statusMenu(connected: boolean): { label: string; choice: MenuCho
  *  the count left out at 0. Down shows neither: the board it counts may be stale. */
 export function statusText(connected: boolean, readOnly: boolean, needs: number): string {
   if (!connected) return "$(debug-disconnect) Kraft";
-  return `$(check) Kraft${readOnly ? " (read-only)" : ""}${needs > 0 ? ` ${needs}` : ""}`;
+  return `$(${needs > 0 ? "bell-dot" : "check"}) Kraft${readOnly ? " (read-only)" : ""}${needs > 0 ? ` ${needs}` : ""}`;
+}
+
+/** Whether the status bar takes the warning background: connected, with items waiting. */
+export const statusWaiting = (connected: boolean, needs: number) => connected && needs > 0;
+
+/** What a screen reader says for the status bar. */
+export function statusLabel(connected: boolean, needs: number): string {
+  if (!connected) return "Kraft: not running";
+  return needs > 0 ? `Kraft: ${needs} ${needs === 1 ? "item" : "items"} waiting on you` : "Kraft: connected, nothing waiting";
 }
 
 /** The status bar's hover. Connected: the read-only reasons (`readOnly.tooltip`) and

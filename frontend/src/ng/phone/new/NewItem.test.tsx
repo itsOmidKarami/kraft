@@ -54,13 +54,17 @@ describe("the new work item screen (G)", () => {
     mount();
     expect(await screen.findByRole("button", { name: "Create paused" })).toHaveClass("ph-btn-primary");
     expect(screen.getByRole("button", { name: "Create and start" })).not.toHaveClass("ph-btn-primary");
+    const buttons = screen.getAllByRole("button", { name: /^Create / }).map((b) => b.textContent);
+    expect(buttons).toEqual(["Create paused", "Create and start"]);
+    expect(screen.getByText("Created paused. Nothing spends tokens until you start it.")).toBeInTheDocument();
   });
 
   it("Create paused and Create and start send the same body except autostart", async () => {
     const calls = mount({ "POST /work-items": [201, { id: "abcdef0123456789abcdef0123456789", bead_id: "kraft-a1c7" }] });
     await userEvent.type(title(), "Add retry budget");
     await userEvent.type(screen.getByRole("textbox", { name: "Brief" }), "Give the poller a budget.");
-    await screen.findByRole("option", { name: /default · 15 nodes · 5 gates \(repo default\)/ });
+    await screen.findByRole("option", { name: "default · 15 nodes" });
+    expect(screen.getByRole("combobox", { name: "Chain" })).toHaveAccessibleDescription("default is the repo's default chain");
     await userEvent.click(screen.getByRole("button", { name: "Create paused" }));
     await waitFor(() => expect(posts(calls)).toHaveLength(1));
     expect(await screen.findByText("Created kraft-a1c7. Created paused.")).toBeInTheDocument();
@@ -141,9 +145,18 @@ describe("discarding (G.2)", () => {
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     const sheet = screen.getByRole("dialog", { name: "Discard this draft?" });
     expect(where()).toBe("/work-items/new");
+    expect(within(sheet).queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(within(sheet).getByRole("button", { name: "Keep editing" })).toBeInTheDocument();
     await userEvent.click(within(sheet).getByRole("button", { name: "Discard" }));
     await waitFor(() => expect(where()).toBe("/"));
     expect(sessionStorage.getItem("kraft.ng.phone.new")).toBeNull();
+  });
+
+  it("drops a restored draft's repo that is no longer connected, for the first connected one", async () => {
+    sessionStorage.setItem("kraft.ng.phone.new", JSON.stringify({ title: "back again", brief: "", repo: "/code/gone", chain: "gone_chain", spec: "", plan: "" }));
+    const calls = mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Create paused" }));
+    await waitFor(() => expect(posts(calls)[0].body).toMatchObject({ repo: "/code/kraft-plugins", chain_template: "default" }));
   });
 
   it("keeps the unsent draft across a reload", async () => {

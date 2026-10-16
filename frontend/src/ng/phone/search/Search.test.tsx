@@ -50,6 +50,16 @@ const type = async (text: string) => {
 };
 
 describe("Search (I)", () => {
+  it("draws each item row with its board glyph and gives a Needs you row its stop's cue, so rows differ by state", () => {
+    mount();
+    const state = (title: string) => screen.getByText(title).closest("button")!.querySelector(".glyph-box")!.className;
+    expect(state("Item g2")).toMatch(/is-amber/);
+    expect(state("Item a1")).toMatch(/is-current/);
+    expect(state("Item d3")).toMatch(/is-done/);
+    expect(screen.getByText("Item g2").closest("button")!.querySelector(".ph-row-hint.ph-search-hot.ph-is-gate svg")).not.toBeNull();
+    expect(screen.getByText("Item a1").closest("button")!.querySelector(".ph-search-hot")).toBeNull();
+  });
+
   it("with nothing typed lists the gates waiting on you, then the items most recently updated, newest first, no archived one", () => {
     mount();
     expect(within(screen.getByRole("region", { name: "Needs you" })).getByText("Item g2")).toBeInTheDocument();
@@ -90,6 +100,9 @@ describe("Search (I)", () => {
     expect(needs.getByRole("button", { name: /Item p6/ })).toHaveTextContent("paused at implementation");
     expect(needs.getByRole("button", { name: /Item g2/ })).toHaveTextContent("approve plan");
     expect(needs.getByRole("button", { name: /Item g2/ })).not.toHaveTextContent("plan_approval");
+    const hint = (re: RegExp) => needs.getByRole("button", { name: re }).querySelector(".ph-row-hint")!;
+    expect(hint(/Item p6/)).not.toHaveClass("ph-search-hot");
+    expect(hint(/Item g2/)).toHaveClass("ph-search-hot");
     expect(needs.queryByText(/Item n7/)).toBeNull();
     expect(within(screen.getByRole("region", { name: "Recent" })).getByRole("button", { name: /Item n7/ })).toHaveTextContent("created paused");
     await userEvent.click(needs.getByRole("button", { name: /Item f5/ }), { advanceTimers: vi.advanceTimersByTime });

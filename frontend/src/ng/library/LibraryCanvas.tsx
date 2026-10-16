@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useContext, useEffect, useRef, useState } from "react";
 import { NodeGlyph } from "../graph/NodeGlyph";
 import { detailOf } from "../http";
@@ -12,10 +13,11 @@ import type { Row } from "./rows";
 import { SteeringCanvas } from "./steering";
 import type { Use } from "./types";
 import { libSel } from "./sel";
+import { useUrl } from "./UsedBy";
 import { ReadOnly } from "../templates/addon";
 
 /** The Library's canvas (Decisions §10): a node as its steps and tasks, with its failure handlers in the bottom
- *  pane; a step as one step; a task as its one glyph. Drawn from the draft as written (R18). The page keys it by
+ *  pane; a step as one step; a task as its one glyph and the chains that use it. Drawn from the draft as written (R18). The page keys it by
  *  component, so a new component starts the canvas over. */
 export function LibraryCanvas({ draft, row, uses, path, reserve, height, onPick, onOpen, onEscape, onBackground, onGoTo }: {
   draft: ConfigDraft;
@@ -58,7 +60,7 @@ export function LibraryCanvas({ draft, row, uses, path, reserve, height, onPick,
     if (at < 0 || to < 0 || to >= ids.length) return;
     const op = { op: "move", path, to };
     const check = await draft.ops([op], { preview: true });
-    if (check.status !== 200) return showToast(`Can't move ${sel.step}: ${detailOf(check.body)}`);
+    if (check.status !== 200) return showToast(`Can't move ${sel.step}: ${detailOf(check.body)}`, { tone: "error" });
     await draft.ops([op]);
   };
   useEffect(() => {
@@ -125,6 +127,12 @@ export function LibraryCanvas({ draft, row, uses, path, reserve, height, onPick,
         </button>
         <span className="lib-glyph-sub">{kind || "task"}</span>
         {typeof base === "string" && <button type="button" className="tpl-phrase" onClick={() => onGoTo(`tasks.${base}`)}>extends {base}</button>}
+        {uses && (
+          <div className="lib-glyph-uses">
+            {uses.length ? "used in" : "not used by any chain"}
+            {[...new Map(uses.map((u) => [u.chain, u])).values()].map((u) => <Link key={u.chain} className="lib-landing-link" to={useUrl(u)}>{u.chain}</Link>)}
+          </div>
+        )}
       </div>
     );
   }

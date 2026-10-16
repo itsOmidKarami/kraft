@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
@@ -16,13 +17,13 @@ const REPORT: Analytics = {
   by_repo: [{ repo: "/Users/dev/code/kraft", items: 14, mrs: 9, tokens: 1.2e7, cost_usd: 70.2, cost_complete: true, done: 9, cycles: 2 }],
   rejected_gates_by_gate: [{ gate: "spec_approval", n: 2 }],
   gate_waits: [{ gate: "spec_approval", n: 3, median_ms: 3.6e6, total_ms: 1.2e7 }],
-  stop_reasons: [{ label: "agent needs context", n: 2 }],
+  stop_reasons: [{ label: "agent needs context", n: 2 }, { label: "gate · plan_approval", n: 2 }, { label: "budget", n: 1 }, { label: "cap breach", n: 1 }],
 };
 
-const show = async (r: Analytics) => {
+const show = async (r: Analytics, heading = "Overview") => {
   vi.spyOn(api, "getAnalytics").mockResolvedValue(r);
-  render(<AnalyticsPage />);
-  await screen.findByRole("heading", { name: "Overview" });
+  render(<MemoryRouter><AnalyticsPage /></MemoryRouter>);
+  await screen.findByText(heading);
 };
 
 afterEach(() => vi.restoreAllMocks());
@@ -36,7 +37,7 @@ const FOOTNOTES = [
   /Bars count merges, not completions/,
   /A wait at a gate runs from the gate being requested until it is approved or rejected/,
 ];
-const TILES = ["Completed", "Lead time", "Cost", "Repairs per item"];
+const TILES = ["Completed", "Lead time", "Waiting on you", "Cost", "Repairs per item"];
 
 describe("ng AnalyticsPage", () => {
   it("has every section and tile, one short line under each tile, and the footnotes in one disclosure", async () => {
@@ -44,7 +45,8 @@ describe("ng AnalyticsPage", () => {
     for (const name of SECTIONS) expect(screen.getByRole("heading", { name })).toBeInTheDocument();
     for (const label of TILES) expect(screen.getByText(label, { selector: ".an-kpi-label" })).toBeInTheDocument();
     expect(screen.getByText("+8 vs previous")).toBeInTheDocument();
-    expect(screen.getByText("median · 25% waiting on you")).toBeInTheDocument();
+    expect(screen.getByText("Lead time", { selector: ".an-kpi-label" }).parentElement).toHaveTextContent("median");
+    expect(screen.getByText("Waiting on you", { selector: ".an-kpi-label" }).parentElement).toHaveTextContent("25%of lead time");
     expect(screen.getByText("$7.08 per completed item")).toBeInTheDocument();
     expect(screen.getByText("6 hit their cap")).toBeInTheDocument();
     expect(screen.getByText(/1\.25 unplanned touches per item · open MR → checks done/)).toBeVisible();
@@ -55,17 +57,28 @@ describe("ng AnalyticsPage", () => {
     expect(screen.getByRole("cell", { name: "2.0" })).toBeInTheDocument();
   });
 
+  it("links a repo row to the board for that repo and the gate and stop rows to the board narrowed to that gate or stop kind", async () => {
+    await show(REPORT);
+    expect(screen.getByRole("link", { name: "kraft" })).toHaveAttribute("href", "/?repo=%2FUsers%2Fdev%2Fcode%2Fkraft");
+    expect(screen.getByRole("link", { name: "approve spec" })).toHaveAttribute("href", "/?gate=spec_approval");
+    expect(screen.getByRole("link", { name: "gate · approve plan" })).toHaveAttribute("href", "/?gate=plan_approval");
+    expect(screen.getByRole("link", { name: "budget" })).toHaveAttribute("href", "/?stop=budget");
+    expect(screen.getByRole("link", { name: "cap breach" })).toHaveAttribute("href", "/?stop=cap");
+    // A bucket judged from the stop's text spans several kinds: it narrows nothing.
+    expect(screen.getByRole("link", { name: "agent needs context" })).toHaveAttribute("href", "/");
+  });
+
   it("names the gate items waited at, with its median, total and rejections", async () => {
     await show(REPORT);
-    const row = screen.getByText("spec_approval").closest("tr")!;
-    expect(within(row).getAllByRole("cell").map((c) => c.textContent)).toEqual(["spec_approval", "", "3", "1h", "3h 20m", "2"]);
+    const row = screen.getByText("approve spec").closest("tr")!;
+    expect(within(row).getAllByRole("cell").map((c) => c.textContent)).toEqual(["approve spec", "", "3", "1h", "3h 20m", "2"]);
   });
 
   it("says its scope once, in the header row, with no visible heading of its own (AN-1)", async () => {
     vi.spyOn(api, "getAnalytics").mockResolvedValue(REPORT);
     const tail = document.createElement("div");
     document.body.append(tail);
-    const { container } = render(<HeaderTailHost.Provider value={tail}><AnalyticsPage /></HeaderTailHost.Provider>);
+    const { container } = render(<HeaderTailHost.Provider value={tail}><MemoryRouter><AnalyticsPage /></MemoryRouter></HeaderTailHost.Provider>);
     await screen.findByRole("heading", { name: "Overview" });
     expect(tail).toHaveTextContent("· Items created in the last 8 weeks");
     // One heading for a screen reader (R14b-03), which sighted readers do not see twice: the crumb says it.
@@ -92,7 +105,7 @@ describe("ng AnalyticsPage", () => {
     document.body.append(actions);
     const tail = document.createElement("div");
     document.body.append(tail);
-    render(<HeaderActionsHost.Provider value={actions}><HeaderTailHost.Provider value={tail}><AnalyticsPage /></HeaderTailHost.Provider></HeaderActionsHost.Provider>);
+    render(<HeaderActionsHost.Provider value={actions}><HeaderTailHost.Provider value={tail}><MemoryRouter><AnalyticsPage /></MemoryRouter></HeaderTailHost.Provider></HeaderActionsHost.Provider>);
     await screen.findByRole("heading", { name: "Overview" });
     expect(api.getAnalytics).toHaveBeenLastCalledWith({ range: "8w", repo: undefined, template: undefined });
     await userEvent.click(within(actions).getByRole("button", { name: /Range/ }));
@@ -108,6 +121,7 @@ describe("ng AnalyticsPage", () => {
     await show(REPORT);
     const bars = within(screen.getByRole("group", { name: "Merged items per week" })).getAllByLabelText(/^Week of /);
     expect(bars).toHaveLength(8);
+    expect(screen.getByText(/always the last eight weeks/)).toBeInTheDocument();
     bars.forEach((b) => expect(b).toHaveAttribute("tabindex", "0"));
     expect(screen.getByRole("table", { name: "Merged items per week" })).toBeInTheDocument();
   });
@@ -131,15 +145,21 @@ describe("ng AnalyticsPage", () => {
   });
 
   it("collapses an empty section to one line under its heading, in no panel", async () => {
-    await show({ ...REPORT, totals: { ...REPORT.totals, mrs_merged: 0, completed: 0, completed_prev: null }, by_node: [], by_repo: [], gate_waits: [], stop_reasons: [] });
-    expect(screen.getByText("Nothing merged in this range.")).toBeInTheDocument();
+    await show({ ...REPORT, totals: { ...REPORT.totals, mrs_merged: 0, completed: 1, completed_prev: null }, by_node: [], by_repo: [], gate_waits: [], stop_reasons: [] });
+    expect(screen.getByText("No merge requests merged in this range.")).toBeInTheDocument();
     expect(screen.getByText("No gate waits in this range.")).toBeInTheDocument();
     expect(screen.getAllByText("Nothing here yet.")).toHaveLength(2);
     expect(screen.getByText("Nothing stopped for a person in this range.")).toBeInTheDocument();
     expect(screen.getByText("no previous period")).toBeInTheDocument();
-    expect(screen.getByText("nothing completed yet")).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Merged items per week" })).toBeNull();
     expect(document.querySelector(".an-panel")).toBeNull();
+  });
+
+  it("says one line, with no figures or headings, when the range holds no completed item and no node ran", async () => {
+    await show({ ...REPORT, totals: { ...REPORT.totals, mrs_merged: 0, completed: 0, completed_prev: null, cost_usd: 0 }, by_node: [], by_repo: [], gate_waits: [], stop_reasons: [] }, "Nothing has completed in this range yet.");
+    expect(screen.getByText("Nothing has completed in this range yet.")).toBeInTheDocument();
+    expect(screen.queryByText("Lead time")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "By node" })).toBeNull();
   });
 
   it("names a long repo and node once, whole in its title", async () => {
@@ -151,7 +171,7 @@ describe("ng AnalyticsPage", () => {
 
   it("shows the error and no report when the request fails", async () => {
     vi.spyOn(api, "getAnalytics").mockRejectedValue(new Error("boom"));
-    render(<AnalyticsPage />);
+    render(<MemoryRouter><AnalyticsPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("boom"));
     expect(screen.queryByRole("heading", { name: "Overview" })).toBeNull();
   });

@@ -35,7 +35,7 @@ describe("Repos Config row formats", () => {
 
   it("refuses a number that is not whole and positive, and clears on blank", () => {
     expect(whole("Minutes").parse("45")).toEqual({ value: 45 });
-    expect(whole("Minutes").parse("0")).toEqual({ error: "Minutes is a whole number above 0." });
+    expect(whole("Minutes").parse("0")).toEqual({ error: "Minutes must be a whole number greater than 0." });
     expect(whole("Minutes").parse("")).toEqual({ value: null });
     expect(dollars.parse("$2.5")).toEqual({ value: 2.5 });
     expect(dollars.parse("x")).toEqual({ error: "Dollars is a number above 0." });

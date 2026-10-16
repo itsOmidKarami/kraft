@@ -8,7 +8,9 @@ import { rejectTarget } from "../../item/graph";
 import { admits } from "../../item/status";
 import { useEvents } from "../../item/useEvents";
 import { useItem, type ItemDetail } from "../../item/useItem";
-import { REQUEST_CHANGES, approveBlock, drafts, gateConsequence, rejectTo } from "../../review/finish";
+import { useReason } from "../../ui/Reason";
+import { ADD_NOTE } from "../../ui/reasons";
+import { REQUEST_CHANGES, approveBlock, drafts, gateConsequence, sendsBack } from "../../review/finish";
 import { useSubmit } from "../../review/FinishReview";
 import { parsePatch, type PatchFile } from "../../review/patch";
 import { rangeName, threadRange } from "../../review/range";
@@ -18,6 +20,7 @@ import { Button } from "../../ui/Button";
 import { Markdown } from "../../ui/Markdown";
 import { Doc } from "../doc/Doc";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
+import { capitalise, gateName, nameOf } from "../../board/rowText";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { useBack } from "../nav/trail";
 import { ActionBar } from "../ui/Rows";
@@ -98,7 +101,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
   const [openFile, setOpenFile] = useState<string | null>(place.file);
   useEffect(() => setOpenFile(place.file), [place.file]);
 
-  if (params.get("compose") === "reject") return <ReviewComposer target={target} submit={submit} />;
+  if (params.get("compose") === "reject") return <ReviewComposer target={target && nameOf(item.chain_definition.nodes, target)} submit={submit} />;
   // Comments are written on the desktop; this screen reads the change and decides the gate.
   const readOnly = "Read-only here: add comments on the desktop.";
 
@@ -123,7 +126,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
 
   return (
     <>
-      <ScreenHeader id={<span className="ph-mono">{gate ?? ""}</span>} />
+      <ScreenHeader id={gate && <>{capitalise(gateName(item.chain_definition.nodes, gate))}{waiting && <> <span className="ph-pillbadge">NEEDS YOU</span></>}</>} />
       <div className="ph-content">
         <div className="ph-review-head">
           <h1 className="ph-review-title">{hasDoc && artifact?.state === "ready" ? artifact.data.title : item.title}</h1>
@@ -192,16 +195,16 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
           {block && <p className="ph-block-reason" id={blockId} role="status">{block}</p>}
           <ActionBar>
             {rejectable && <Button className="ph-btn" onClick={reject} disabled={busy || !gate}>{REQUEST_CHANGES}</Button>}
-            <Button className="ph-btn ph-btn-primary" variant="primary" onClick={pending ? () => sheet.open("approve-drafts") : approve} disabled={busy || !!block} aria-describedby={block ? blockId : undefined}>Approve</Button>
+            <Button className="ph-btn ph-btn-primary" variant="primary" onClick={() => sheet.open("approve")} disabled={busy || !!block} aria-describedby={block ? blockId : undefined}>Approve</Button>
           </ActionBar>
         </>
       ) : (
         <p className="ph-block-reason" role="status">{decided(events, gate)}</p>
       )}
-      {sheet.is("approve-drafts") && (
+      {sheet.is("approve") && gate && (
         <ConfirmSheet
-          title={`Approve and send ${pending} ${pending === 1 ? "comment" : "comments"}?`}
-          text={`Your pending ${pending === 1 ? "comment goes" : "comments go"} out with the approval, as the gate passes: no agent acts on ${pending === 1 ? "it" : "them"}. To have them acted on, Request changes instead.`}
+          title={pending ? `Approve and send ${pending} ${pending === 1 ? "comment" : "comments"}?` : `${capitalise(gateName(item.chain_definition.nodes, gate))}?`}
+          text={pending ? `Your pending ${pending === 1 ? "comment goes" : "comments go"} out with the approval, as the gate passes: no agent acts on ${pending === 1 ? "it" : "them"}. To have them acted on, Request changes instead.` : `${next ? `${next}. ` : ""}An approval cannot be taken back.`}
           busy={busy}
           confirm={{ label: "Approve", run: () => void approve() }}
           onClose={sheet.close}
@@ -246,7 +249,11 @@ function ReviewComposer({ target, submit }: { target: string | null; submit: Ret
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tried, setTried] = useState(false);
+  // Said after a press with no note, and gone once there is one (the review page does the same).
+  const noNote = useReason(tried && !text.trim() ? ADD_NOTE : null);
   const send = async () => {
+    if (!text.trim()) return setTried(true);
     setBusy(true);
     setError(null);
     const e = await submit("request_changes", text.trim());
@@ -261,14 +268,14 @@ function ReviewComposer({ target, submit }: { target: string | null; submit: Ret
         <span className="ph-composer-pad" />
       </header>
       <div className="ph-content">
-        <p className="ph-help">{`The item goes back${target ? ` to ${target}` : ""} with your note as the first thing the agent reads.`}</p>
-        <textarea className="ph-input ph-input-area" aria-label="Your note" placeholder="What needs to change?" value={text} onChange={(e) => setText(e.target.value)} />
-        {target && <p className="ph-target">Goes back to: {target}</p>}
+        <p className="ph-help">{`${sendsBack(false)}${target ?? "the previous node"}, with your note as the first thing the agent reads.`}</p>
+        <textarea className="ph-input ph-input-area" aria-label="Your note" {...noNote.attrs} placeholder="What needs to change?" value={text} onChange={(e) => setText(e.target.value)} />
         {error && <p className="ph-error" role="alert">{error}</p>}
       </div>
       {sheet.is("discard") && <ConfirmSheet title="Discard your note?" text="Your note has not been sent." confirm={{ label: "Discard", danger: true, run: back.go }} onClose={sheet.close} />}
       <div className="ph-actionbar">
-        <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy || !text.trim()} onClick={send}>{target ? rejectTo(target) : REQUEST_CHANGES}</Button>
+        {noNote.note}
+        <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy} onClick={send}>{REQUEST_CHANGES}</Button>
       </div>
     </>
   );

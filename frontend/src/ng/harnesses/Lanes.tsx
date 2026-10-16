@@ -1,14 +1,14 @@
 import { Link } from "react-router-dom";
 import { NodeGlyph } from "../graph/NodeGlyph";
 import { NodeIcon, TriangleAlert } from "../icons";
-import { type HProblem, type Lane, type TaskRef, problemsOfTask, taskLeaf, taskName } from "./model";
+import { type HProblem, type Lane, type TaskRef, problemsOfTask, taskName, taskTile } from "./model";
 
 const nodeOf = (path: string) => path.split(".")[0];
 export const chainLink = (t: TaskRef) => `/templates/chains/${encodeURIComponent(t.chain)}/nodes/${encodeURIComponent(nodeOf(t.path))}`;
 
 function Glyph({ t, problems }: { t: TaskRef; problems: HProblem[] }) {
   const bad = problemsOfTask(problems, t).length > 0;
-  const name = `${taskLeaf(t)}${t.fallback ? " (fallback)" : ""}`;
+  const name = `${taskTile(t)}${t.fallback ? " (fallback)" : ""}`;
   return (
     <Link
       className={`hn-glyph${bad ? " is-bad" : ""}`}

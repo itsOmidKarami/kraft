@@ -1,4 +1,7 @@
-import { REQUEST_CHANGES, rejectTo } from "../../review/finish";
+import { useReason } from "../../ui/Reason";
+import { ADD_NOTE, WRITE_FIRST } from "../../ui/reasons";
+import { REQUEST_CHANGES, sendsBack } from "../../review/finish";
+import { nameOf } from "../../board/rowText";
 import { useEffect, useState } from "react";
 import { usd } from "../../../format";
 import type { CancelPreview } from "../../../types";
@@ -19,6 +22,9 @@ export const isComposeKind = (v: string | null): v is ComposeKind => COMPOSE_KIN
 
 const gateOf = (item: ItemDetail) => item.pending_gate ?? item.stop?.node ?? "";
 const nodeOf = (item: ItemDetail) => item.stop?.node ?? item.current_node_id;
+/** The node as a reader names it. */
+const rejectName = (i: ItemDetail) => { const id = rejectTarget(i.chain_definition.nodes, gateOf(i)); return id ? nameOf(i.chain_definition.nodes, id) : "the previous node"; };
+const nodeName = (item: ItemDetail) => { const id = nodeOf(item); return id ? nameOf(item.chain_definition.nodes, id) : null; };
 
 /** Sends the note through the door `steerDoor` names. A stopped item's retry
  *  carries it, at the node it stopped on. A running item is paused, then
@@ -53,23 +59,22 @@ interface Spec {
 const SPEC: Record<ComposeKind, Spec> = {
   steer: {
     title: "Steer",
-    help: (i) => (running(i) ? `Steering pauses the item. The running attempt${nodeOf(i) ? ` on ${nodeOf(i)}` : ""} stops now and restarts with your note.`
-      : stopped(i) ? `Steering retries${nodeOf(i) ? ` ${nodeOf(i)}` : " the item"} with your note as the first thing its next agent reads.`
+    help: (i) => (running(i) ? `Steering pauses the item. The running attempt${nodeOf(i) ? ` on ${nodeName(i)}` : ""} stops now and restarts with your note.`
+      : stopped(i) ? `Steering retries${nodeOf(i) ? ` ${nodeName(i)}` : " the item"} with your note as the first thing its next agent reads.`
       : "Your note goes to the next agent launch, and the item resumes with it."),
     placeholder: "What should the next attempt do differently?",
     label: "Send steer",
-    target: (i) => (nodeOf(i) ? `goes to ${nodeOf(i)} · added to that agent's next launch` : null),
+    target: (i) => (nodeOf(i) ? `goes to ${nodeName(i)} · added to that agent's next launch` : null),
   },
   reject: {
     title: REQUEST_CHANGES,
-    help: (i) => `The item goes back to ${rejectTarget(i.chain_definition.nodes, gateOf(i)) ?? "the previous node"} with your note as the first thing the agent reads.`,
+    help: (i) => `${sendsBack(false)}${rejectName(i)}, with your note as the first thing the agent reads.`,
     placeholder: "What needs to change?",
-    label: (i) => { const to = rejectTarget(i.chain_definition.nodes, gateOf(i)); return to ? rejectTo(to) : REQUEST_CHANGES; },
-    target: (i) => `Goes back to: ${rejectTarget(i.chain_definition.nodes, gateOf(i)) ?? "the previous node"}`,
+    label: REQUEST_CHANGES,
   },
   answer: {
     title: "Answer",
-    help: (i) => (i.needs_context_question ? `Asked${nodeOf(i) ? ` on ${nodeOf(i)}` : ""}: “${i.needs_context_question}”` : "The agent is waiting for your answer."),
+    help: (i) => (i.needs_context_question ? `Asked${nodeOf(i) ? ` on ${nodeName(i)}` : ""}: “${i.needs_context_question}”` : "The agent is waiting for your answer."),
     placeholder: "Write your answer…",
     label: "Send and resume",
   },
@@ -94,7 +99,7 @@ const SPEC: Record<ComposeKind, Spec> = {
   },
 };
 
-/** A full-screen composer (W17 brief C.7): help, a 16px textarea, a target line, one primary, disabled until it has what it needs. */
+/** A full-screen composer (W17 brief C.7): help, a 16px textarea, a target line, one primary that says what is missing when pressed without it. */
 export function Composer({ item, kind, reload }: { item: ItemDetail; kind: ComposeKind; reload: () => void }) {
   const back = useBack();
   const spec = SPEC[kind];
@@ -117,15 +122,18 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
     : null;
   const target = spec.target?.(item) ?? null;
 
+  const [tried, setTried] = useState(false);
+  // Said after a press with nothing written, and gone once there is something.
+  const noText = useReason(tried && !text.trim() ? (kind === "reject" ? ADD_NOTE : WRITE_FIRST) : null);
   const send = async () => {
     const t = text.trim();
-    if (!t) return;
+    if (!t) return setTried(true);
     setBusy(true);
     setError(null);
     let r: Done & { paused?: boolean };
     let ok = "";
     switch (kind) {
-      case "steer": r = await steer(item, t); ok = running(item) ? `Steered. ${nodeOf(item) ?? "The item"} is running again.` : stopped(item) ? "Retrying with your steer." : "Steer sent. The item is running again."; break;
+      case "steer": r = await steer(item, t); ok = running(item) ? `Steered. ${nodeName(item) ?? "The item"} is running again.` : stopped(item) ? "Retrying with your steer." : "Steer sent. The item is running again."; break;
       case "reject": r = await act.reject(item.id, gateOf(item), t); ok = "Changes requested."; break;
       case "answer": r = await act.resume(item.id, t); ok = "Sent. The item is running again."; break;
       case "escalate": r = await act.escalate(item.id, t, flag); ok = "Escalated. A new thread started."; break;
@@ -140,7 +148,7 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
     }
     if (r.paused) {
       // The item is paused now; the composer has nothing left to send.
-      showToast(`Paused, but the steer was not sent: ${r.error}`);
+      showToast(`Paused, but the steer was not sent: ${r.error}`, { tone: "error" });
       reload();
       return back.go();
     }
@@ -157,7 +165,7 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
       <div className="ph-content">
         <p className="ph-help">{spec.help(item)}</p>
         {/* Focus starts in the box, as in the desktop's dialogs: it opened on <body>, so a keyboard or switch user had to find it first (R12b-13). */}
-        <textarea autoFocus className="ph-input ph-input-area" aria-label={kind === "cancel" || kind === "complete" ? "Reason" : "Your note"} placeholder={spec.placeholder} value={text} onChange={(e) => setText(e.target.value)} />
+        <textarea autoFocus className="ph-input ph-input-area" aria-label={kind === "cancel" || kind === "complete" ? "Reason" : "Your note"} {...noText.attrs} placeholder={spec.placeholder} value={text} onChange={(e) => setText(e.target.value)} />
         {flagLabel && <div className="ph-list"><SwitchRow label={flagLabel} on={flag} onChange={setFlag} /></div>}
         {kind === "cancel" && preview && (
           <Facts rows={[
@@ -169,7 +177,8 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
         {error && <p className="ph-error" role="alert">{error}</p>}
       </div>
       <div className="ph-actionbar">
-        <Button className="ph-btn ph-btn-primary" variant={spec.danger ? "danger" : "primary"} disabled={busy || !text.trim()} onClick={send}>{typeof spec.label === "function" ? spec.label(item) : spec.label}</Button>
+        {noText.note}
+        <Button className="ph-btn ph-btn-primary" variant={spec.danger ? "danger" : "primary"} disabled={busy} onClick={send}>{typeof spec.label === "function" ? spec.label(item) : spec.label}</Button>
       </div>
     </>
   );

@@ -20,11 +20,11 @@ export function toThreadIns(d: LegacyDraft): ThreadIn[] {
 export type DropReason = "unreviewable" | "refused";
 const WHY: Record<DropReason, string> = { unreviewable: "it has nothing to review any more", refused: "Kraft refused them" };
 
-/** What is said, and offered to copy, when drafts cannot go anywhere. */
-export function dropMessage(id: string, d: LegacyDraft, why: DropReason = "unreviewable"): string {
+/** What is said, and offered to copy, when drafts cannot go anywhere. `name` is what the item is called. */
+export function dropMessage(name: string, d: LegacyDraft, why: DropReason = "unreviewable"): string {
   const n = d.comments.length || 1; // a summary alone is one comment
   return [
-    `Kraft dropped ${n} local review comment${n === 1 ? "" : "s"} on ${id}: ${WHY[why]}. Their text:`,
+    `Kraft dropped ${n} local review comment${n === 1 ? "" : "s"} on ${name}: ${WHY[why]}. Their text:`,
     ...d.comments.map((c) => `${c.file}:${c.line}${c.side === "base" ? " (base)" : ""}: ${c.body}`),
     ...(d.summary?.trim() ? [`(summary): ${d.summary.trim()}`] : []),
   ].join("\n");

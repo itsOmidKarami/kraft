@@ -1,5 +1,5 @@
 import { groupOf, STATUS_GROUPS, type GroupKey } from "../../../frontend/src/ng/board/model";
-import { reasonTail } from "../../../frontend/src/ng/board/rowText";
+import { nodeWords, reasonTail } from "../../../frontend/src/ng/board/rowText";
 import type { WorkItem, WorkItemDetail } from "./api";
 import { linkTokens } from "./links";
 import { primaryAction, primaryToken } from "./primary";
@@ -15,16 +15,19 @@ export type ItemState =
   | "gate" | "question" | "budget" | "cap" | "needs_you" | "failed" | "paused" | "not_started"
   | "running" | "waiting" | "queued" | "blocked" | "escalated" | "done" | "cancelled" | "archived" | "unknown";
 
+/** Glyphs differ wherever colour differs (failed `error`, capped `stop-circle`),
+ *  so no state is told by colour alone. Running is static: a spinner on every
+ *  running row would compete with the rows that wait on you. */
 const ICONS: Record<ItemState, string> = {
   gate: "pass",
   question: "question",
   budget: "credit-card",
-  cap: "error",
+  cap: "stop-circle",
   needs_you: "warning",
   failed: "error",
   paused: "debug-pause",
   not_started: "debug-pause",
-  running: "sync~spin",
+  running: "play-circle",
   waiting: "watch",
   queued: "watch",
   blocked: "watch",
@@ -86,13 +89,14 @@ export const archivedChildren = (cached: WorkItem[], store: { item(id: string): 
 
 /** The board's welcome text: `here` says this repo has no Kraft work and
  *  offers Show all repos; `connect` says this repo is not connected at all
- *  (`unconnected`) and offers to connect it. Never before the scope is ready
- *  (git is async), never while disconnected (the Start row says that), and
- *  not when every repo is already shown. */
-export type Welcome = "none" | "here" | "connect";
+ *  (`unconnected`) and offers to connect it; `all` says there is none anywhere
+ *  while every repo is shown. Never before the scope is ready (git is async),
+ *  never while disconnected (the Start row says that). */
+export type Welcome = "none" | "here" | "connect" | "all";
 
 export function welcomeState(connected: boolean, ready: boolean, showAll: boolean, visible: number, unconnected = false): Welcome {
-  if (!(connected && ready && !showAll && visible === 0)) return "none";
+  if (!(connected && ready && visible === 0)) return "none";
+  if (showAll) return "all";
   return unconnected ? "connect" : "here";
 }
 
@@ -136,11 +140,41 @@ export const announceable = (items: WorkItem[], include: Include) => items.filte
 
 export const iconOf = (item: WorkItem) => ICONS[stateOf(item)];
 
-/** The row's description: the id, then why it is where it is. */
-export function describe(item: WorkItem): string {
-  const tail = reasonTail(item);
-  return tail ? `${item.id} · ${tail}` : item.id;
+/** The theme colour of a row's icon: a ThemeColor id. Waiting on you reads
+ *  yellow, a fault red; everything else keeps the default. */
+const COLORS: Partial<Record<ItemState, string>> = {
+  gate: "list.warningForeground",
+  question: "list.warningForeground",
+  budget: "list.warningForeground",
+  needs_you: "list.warningForeground",
+  cap: "list.errorForeground",
+  failed: "list.errorForeground",
+};
+
+export const colorOf = (item: WorkItem): string | undefined => COLORS[stateOf(item)];
+
+/** Whether a stop is a fault, not a request: failed, capped, over budget or
+ *  stuck on a conflict. A gate or a question is the item asking for you. */
+export function isFault(item: Pick<WorkItem, "display_status" | "stop">): boolean {
+  if (item.display_status === "failed") return true;
+  return item.display_status === "needs_you" && item.stop?.kind !== "gate" && item.stop?.kind !== "question";
 }
+
+/** The row's description: why it is where it is, or its status when it has no
+ *  reason. The id lives in the hover and in a quick pick's detail. */
+export function describe(item: WorkItem): string {
+  return reasonTail(item) || nodeWords(item.display_status ?? item.status);
+}
+
+/** What a screen reader says for a row: the title, its state, then the reason. */
+export function itemLabel(item: WorkItem): string {
+  const state = nodeWords(item.display_status ?? item.status);
+  const reason = reasonTail(item);
+  return [item.title, state, reason && reason !== state ? reason : ""].filter(Boolean).join(", ");
+}
+
+/** What a screen reader says for a group row: "Needs you, 3 items". */
+export const groupLabel = (label: string, count: number) => `${label}, ${count} ${count === 1 ? "item" : "items"}`;
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -165,6 +199,9 @@ export function nextTick(items: Pick<WorkItem, "display_status" | "stop" | "retr
   return next;
 }
 
+/** What a message calls an item: its title, or its id before the board has read it. */
+export const nameOf = (store: { item(id: string): WorkItem | undefined }, id: string): string => store.item(id)?.title ?? id;
+
 /** A question's text without the worker's `needs_context:` marker. */
 export const questionText = (reason: string) => reason.replace(/^needs_context:\s*/, "");
 
@@ -172,9 +209,10 @@ export const questionText = (reason: string) => reason.replace(/^needs_context:\
  *  then, with the item's detail, what it has spent and how long it has run against their caps. */
 export function tooltipOf(item: WorkItem, detail?: Pick<WorkItemDetail, "budget_cap" | "running_time">): string {
   const reason = item.stop?.reason;
-  const first = reason
-    ? item.stop?.kind === "question" ? questionText(reason) : reason
-    : `${item.id} — ${reasonTail(item) || item.display_status || item.status}`;
+  const first = `${item.id} — ${
+    reason
+      ? item.stop?.kind === "question" ? questionText(reason) : reason
+      : reasonTail(item) || item.display_status || item.status}`;
   if (!detail) return first;
   return [first, spendLine(detail.budget_cap), timeLine(detail.running_time)].filter((l) => l !== null).join("\n");
 }
@@ -182,5 +220,12 @@ export function tooltipOf(item: WorkItem, detail?: Pick<WorkItemDetail, "budget_
 /** The Resume/Retry input box's prompt: a question stop shows the question, so the steer answers it. */
 export function steerPrompt(item: WorkItem): string {
   const reason = item.stop?.kind === "question" ? item.stop.reason : null;
-  return reason ? `${item.id} asks: ${questionText(reason)} Your answer steers it (optional)` : `Steer for ${item.id} (optional)`;
+  return reason ? `${item.title} asks: ${questionText(reason)} Your answer steers it (optional)` : `Steer for ${item.title} (optional)`;
+}
+
+/** The board view's description: which repos it shows, or, while disconnected
+ *  with rows still on it, that they are the last ones known. */
+export function boardDescription(connected: boolean, showAll: boolean, rows: number): string {
+  if (!connected) return rows ? "Not connected · last known" : "";
+  return showAll ? "All repos" : "This repo";
 }

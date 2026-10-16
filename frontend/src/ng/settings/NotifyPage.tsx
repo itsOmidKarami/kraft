@@ -9,7 +9,7 @@ import { useResizable, useWidth } from "../graph/useResizable";
 import { HeaderActions } from "../shell/HeaderActions";
 import { SavedCue } from "./parts";
 import { SAVED } from "./savedWords";
-import { ALLOW, browserActive as browserIsActive, BROWSER_OFF, BROWSER_WHY, channelState, CHANNELS, CHECK_AGAIN, CLEAR_URL, CLEAR_URL_TEXT, CLEAR_URL_TITLE, eventMeaning, evLine, PERMISSION_LEAD, PERMISSION_SHORT, permissionNow, PROGRESS_NOTE, toggled, webhookActive as webhookOn, type Channel, type Permission } from "./notifyWords";
+import { ALLOW, browserActive as browserIsActive, BROWSER_OFF, BROWSER_WHY, channelState, CHANNELS, CHECK_AGAIN, CLEAR_URL, CLEAR_URL_TEXT, CLEAR_URL_TITLE, eventMeaning, eventWords, evLine, previewAddress, RETRY, PERMISSION_LEAD, PERMISSION_SHORT, permissionNow, PROGRESS_NOTE, toggled, webhookActive as webhookOn, type Channel, type Permission } from "./notifyWords";
 import { Head, Kv, Note } from "../templates/panes/controls";
 import { Button } from "../ui/Button";
 import { useReason } from "../ui/Reason";
@@ -20,6 +20,7 @@ import { showToast } from "../ui/Toast";
 import "../templates/templates.css";
 import "./notify.css";
 import "./settings.css";
+import { usePane } from "../shell/usePane";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -55,6 +56,7 @@ export function NotifyPage() {
   const [sel, setSel] = useState<Channel | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [paneOpen, setPaneOpen] = useState(true);
+  usePane(paneOpen);
   const [url, setUrl] = useState("");
   const [urlBad, setUrlBad] = useState<string | null>(null);
   const [base, setBase] = useState<string | null>(null);
@@ -67,12 +69,24 @@ export function NotifyPage() {
   const [frame, w] = useWidth();
   const size = useResizable("notify", w);
 
-  useEffect(() => {
+  const load = () => {
+    setErrors({});
     api.getNotify().then(setNotify, (e) => setErrors({ page: message(e) }));
-  }, []);
+  };
+  useEffect(load, []);
   const err = (key: string, text: string | null) => setErrors((e) => ({ ...e, [key]: text }));
 
-  if (!notify) return <div className="tpl-note">{errors.page && <p className="set-error" role="alert">{errors.page}</p>}</div>;
+  if (!notify)
+    return (
+      <div className="tpl-note">
+        {errors.page && (
+          <>
+            <p className="set-error" role="alert">{errors.page}</p>
+            <Button onClick={load}>{RETRY}</Button>
+          </>
+        )}
+      </div>
+    );
 
   const put = async (key: string, body: Parameters<typeof api.putNotify>[0]): Promise<boolean> => {
     err(key, null);
@@ -141,7 +155,11 @@ export function NotifyPage() {
     setBrowserEvents(next);
     setBrowserEventsState(next);
   };
-  const ask = async () => setPermission(await requestPermission());
+  const ask = async () => {
+    const next = await requestPermission();
+    setPermission(next);
+    if (next === "granted") toggleBrowser(true);
+  };
   const recheck = () => setPermission(permissionNow());
   const testBrowser = () => {
     try {
@@ -184,7 +202,7 @@ export function NotifyPage() {
     {
       id: "browser", icon: <Monitor size={15} />, name: CHANNELS.browser, active: browserActive, events: browserEvents,
       sub: "Alerts while this tab is in the background. This device only.",
-      extra: permission === "granted" ? (browserTest ? browserTestLine.replace(/^last /, "") : "") : PERMISSION_SHORT[permission],
+      extra: permission === "granted" ? (browserTest ? browserTestLine.replace(/^last /, "") : browserOn ? "" : "alerts switched off") : PERMISSION_SHORT[permission],
       extraBad: permission === "denied" || !!browserTest?.error, testing: false, why: browserWhy, quiet: true, test: testBrowser,
     },
   ];
@@ -198,7 +216,7 @@ export function NotifyPage() {
         <div className="set-notice-text">
           <span className="set-notice-title">{text.title}</span>
           <span className="set-notice-body">{text.body}</span>
-          <span className="set-notice-link">{(link || "192.168.1.20:8765").replace(/\/$/, "")}/work-items/k7m2x9qa</span>
+          <span className="set-notice-link">{previewAddress(link)}/work-items/k7m2x9qa</span>
         </div>
       </div>
     );
@@ -211,7 +229,7 @@ export function NotifyPage() {
       <Kv k="status" v={state(webhookActive)} />
       <Kv k="last sent" v={notify.url_set ? lastTest.replace(/^last (delivered|attempt) /, "") : "never"} />
       <Head>Notifies</Head>
-      <Kv k="events" v={evLine(notify.events)} mono />
+      <Kv k="events" v={evLine(notify.events)} />
       <Head>A notification looks like</Head>
       {sample(notify.events)}
     </>
@@ -221,7 +239,7 @@ export function NotifyPage() {
       <Kv k="status" v={state(browserActive)} />
       {permission !== "granted" && <Kv k="permission" v={PERMISSION_SHORT[permission]} />}
       <Head>Notifies</Head>
-      <Kv k="events" v={evLine(browserEvents)} mono />
+      <Kv k="events" v={evLine(browserEvents)} />
       <Head>A notification looks like</Head>
       {sample(browserEvents)}
       <Note>Kept in this browser, apart from notify.yaml. Alerts show only while this tab is in the background.</Note>
@@ -230,10 +248,10 @@ export function NotifyPage() {
     <>
       <Head>Webhook</Head>
       <Kv k="status" v={state(webhookActive)} />
-      <Kv k="notifies" v={evLine(notify.events)} mono muted={!webhookActive} />
+      <Kv k="notifies" v={evLine(notify.events)} muted={!webhookActive} />
       <Head>This browser</Head>
       <Kv k="status" v={state(browserActive)} />
-      <Kv k="notifies" v={evLine(browserEvents)} mono muted={!browserActive} />
+      <Kv k="notifies" v={evLine(browserEvents)} muted={!browserActive} />
       <Head>A notification looks like</Head>
       {sample(notify.events)}
       <Note>Each channel sends only for its own events. Select a channel to change them.</Note>
@@ -347,7 +365,7 @@ export function NotifyPage() {
                   <span className="nt-text">
                     <span className="nt-name">{c.name}</span>
                     <span className="nt-sub">{c.sub}</span>
-                    <span className="nt-chips">{c.events.map((id) => <span key={id} className="nt-chip">{id}</span>)}</span>
+                    <span className="nt-chips">{c.events.map((id) => <span key={id} className="nt-chip">{eventWords(id)}</span>)}</span>
                   </span>
                   <span className="nt-state">
                     <span className="nt-status"><span className="nt-dot" aria-hidden />{channelState(c.active)}</span>

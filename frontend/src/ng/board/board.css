@@ -8,6 +8,10 @@
 .board-group-head { display: flex; align-items: center; gap: 8px; margin: 0; padding: 16px 14px 6px 46px; font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .board-count { padding: 0 6px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); letter-spacing: 0; font-size: var(--fs-label); }
 .board-empty { margin: 0; padding: 6px 14px 6px 54px; font-size: var(--fs-label); color: var(--text-muted); }
+.board-empty-solo { padding-left: 14px; }
+.board-page-head { flex: none; max-width: 1180px; width: 100%; box-sizing: border-box; margin: 0 auto; padding: 14px 14px 0; }
+.board-page-head h1 { margin: 0 0 2px; font-size: var(--fs-h2); font-weight: 600; }
+.board-page-head p { margin: 0; font-size: var(--fs-meta); color: var(--text-sub); }
 .board-more { all: unset; cursor: pointer; display: inline-block; margin: 2px 0 0 54px; padding: 4px 8px; border-radius: 5px; font-size: var(--fs-label); color: var(--text-sub); }
 .board-more:hover { background: var(--surface-2); color: var(--text); }
 .board-more:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
@@ -33,10 +37,6 @@
 .board-keys-btn { padding: 2px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
 .board-keys-btn:is(:hover, :focus-visible) { background: var(--surface-2); }
 .board-keys-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.board-shortcuts-list { margin: 0; display: grid; gap: 8px; }
-.board-shortcut { display: flex; align-items: center; gap: 12px; }
-.board-shortcut dt { display: flex; gap: 4px; min-width: 96px; }
-.board-shortcut dd { margin: 0; color: var(--text-sub); }
 .board-filter input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .board-filters-gap { flex: 1; }
 .board-menu-btn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font: inherit; font-size: var(--fs-label); color: var(--text); cursor: pointer; white-space: nowrap; }
@@ -64,6 +64,7 @@
 /* Offline: the live parts dim, the text stays readable. */
 .board-row.is-off :is(.glyph, .ticks) { opacity: .5; }
 .board-check { width: 16px; height: 16px; margin: 0; accent-color: var(--text); cursor: pointer; }
+.board-check:disabled { opacity: .4; cursor: default; }
 .board-check:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .board-row-main { all: unset; min-width: 0; display: flex; flex-direction: column; gap: 2px; cursor: pointer; border-radius: 5px; }
 .board-row-main:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
@@ -112,12 +113,7 @@
   .board-filter input { width: 170px; }
 }
 
-/* Offline (AreaBoard 20, 23) and loading (65–70). */
-.board-offline { flex: none; display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-bottom: 1px solid color-mix(in oklab, var(--bad) 40%, transparent); background: color-mix(in oklab, var(--bad) 10%, var(--bg)); font-size: var(--fs-meta); }
-.board-offline-mark { flex: none; width: 16px; height: 16px; border-radius: 50%; background: var(--bad); color: var(--bg); font: 700 var(--fs-label)/16px var(--font-sans); text-align: center; }
-.board-offline-text { flex: 1; color: var(--text); }
-.board-restart { border-bottom-color: color-mix(in oklab, var(--warn) 40%, transparent); background: color-mix(in oklab, var(--warn) 10%, var(--bg)); }
-.board-restart .board-offline-mark { background: var(--warn); }
+/* Loading (65–70). */
 .board-skeleton { padding-top: 10px; }
 /* Static: the CSS contract allows only the breakpoint queries, so no reduced-motion guard for a pulse. */
 .sk { display: block; height: 12px; border-radius: 4px; background: var(--surface-2); }
@@ -131,7 +127,7 @@
 /* The selection bar (AreaBoard 92–94), floating over the list's bottom. */
 body:has(.bulk-bar) { --toast-bottom: 88px; }
 .bulk-wrap { position: absolute; left: 0; right: 0; bottom: 18px; z-index: 8; display: flex; justify-content: center; pointer-events: none; padding: 0 16px; }
-.bulk-bar { pointer-events: auto; display: flex; align-items: center; gap: 12px; max-width: 100%; box-sizing: border-box; padding: 8px 10px 8px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 10px 28px color-mix(in oklab, var(--side) 60%, transparent); font-size: var(--fs-label); color: var(--text); }
+.bulk-bar { pointer-events: auto; display: flex; align-items: center; gap: 12px; max-width: 100%; box-sizing: border-box; padding: 8px 10px 8px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 10px 28px var(--side-shade); font-size: var(--fs-label); color: var(--text); }
 .bulk-confirm-text { max-width: 340px; line-height: 1.45; color: var(--bad); }
 .bulk-reason { width: 200px; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font: inherit; font-size: var(--fs-label); color: var(--text); }
 .bulk-reason:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
@@ -157,10 +153,12 @@ body:has(.bulk-bar) { --toast-bottom: 88px; }
 .peek-error { font-size: var(--fs-meta); }
 
 /* The composer (AreaBoard 37–62): where the new row will appear. */
-.composer { display: flex; flex-direction: column; gap: 10px; margin: 12px 8px 6px; padding: 12px 14px; border: 1.5px dashed var(--stroke); border-radius: 10px; background: var(--bg); box-shadow: 0 12px 30px color-mix(in oklab, var(--side) 50%, transparent); }
+.composer { display: flex; flex-direction: column; gap: 10px; margin: 12px 8px 6px; padding: 12px 14px; border: 1.5px dashed var(--stroke); border-radius: 10px; background: var(--bg); box-shadow: 0 12px 30px var(--side-shade); }
 .composer-row { display: flex; align-items: center; gap: 12px; }
 .composer-title { all: unset; flex: 1; min-width: 0; font: 500 var(--fs-h3)/1.3 var(--font-sans); color: var(--text); border-radius: 4px; }
-.composer-title:focus-visible, .composer-brief:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.composer-brief:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+/* The title is the field a person lands in: an underline as the search bar's, not a box around the text. */
+.composer-title:focus-visible { outline: none; box-shadow: 0 2px 0 var(--focus); }
 .composer-hint { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); white-space: nowrap; }
 .composer-indent { padding-left: 42px; }
 .composer-brief { width: 100%; box-sizing: border-box; min-height: 38px; resize: vertical; padding: 0; border: none; background: transparent; font: var(--fs-meta)/1.55 var(--font-sans); color: var(--text-sub); border-radius: 4px; }
@@ -199,6 +197,7 @@ body:has(.draft-page) { --toast-bottom: 88px; }
 .draft-tag.is-ok { color: var(--text); }
 .draft-title { flex: none; box-sizing: border-box; padding: 1px 6px; margin: -1px -6px; border: none; border-radius: 6px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); font: 500 var(--fs-h1)/1.25 var(--font-sans); letter-spacing: -.01em; color: var(--text); }
 .draft-brief { flex: none; min-height: 64px; box-sizing: border-box; resize: vertical; padding: 8px 10px; border: none; border-radius: 6px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); font: var(--fs-meta)/1.55 var(--font-sans); color: var(--text-sub); }
+.draft-title, .draft-brief { max-width: 860px; }
 .draft-title:focus-visible, .draft-brief:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .draft-chips { flex: none; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: var(--fs-meta); color: var(--text-muted); }
 .draft-gap { width: 6px; }
@@ -211,6 +210,9 @@ body:has(.draft-page) { --toast-bottom: 88px; }
 .draft-skips { color: var(--text-muted); }
 .draft-canvas { position: relative; flex: 0 1 360px; min-height: 240px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg); }
 .draft-canvas-head { position: absolute; top: 12px; left: 14px; z-index: 3; display: flex; align-items: center; gap: 10px; font-size: var(--fs-meta); color: var(--text-sub); }
+/* A long chain's overview starts under the chain menu, and the canvas grows to hold the menu, the overview and the row. */
+.draft-canvas:has(.chain-mapped) { flex-basis: 380px; }
+.draft-canvas .chain-mapped { top: 40px; }
 .draft-chain-btn { background: var(--bg); }
 .draft-pane-body { display: flex; flex-direction: column; gap: 14px; }
 .draft-section { display: flex; flex-direction: column; gap: 4px; }
@@ -235,6 +237,6 @@ body:has(.draft-page) { --toast-bottom: 88px; }
 .draft-input:focus-visible, .draft-add-list input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .draft-amber { color: var(--mark-change); }
 .draft-yaml { margin: 0; padding: 10px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); font: var(--fs-label)/1.65 ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: pre-wrap; overflow-wrap: anywhere; }
-.draft-ask { position: absolute; left: 24px; top: 12px; z-index: 29; width: 340px; box-sizing: border-box; display: flex; flex-direction: column; gap: 9px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: var(--fs-label); color: var(--text-sub); box-shadow: 0 14px 36px color-mix(in oklab, var(--side) 60%, transparent); }
+.draft-ask { position: absolute; left: 24px; top: 12px; z-index: 29; width: 340px; box-sizing: border-box; display: flex; flex-direction: column; gap: 9px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: var(--fs-label); color: var(--text-sub); box-shadow: 0 14px 36px var(--side-shade); }
 .draft-ask b { font-weight: 500; color: var(--text); }
 @media (max-width: 1023px) { .draft-page { padding: 14px 16px; } }

@@ -39,6 +39,9 @@
 .cfg-chip.is-own { background: var(--surface-2); color: var(--text); }
 /* An own value only the item's draft holds, until Review & apply applies it. */
 .cfg-chip.is-draft { border: 1px solid var(--mark-change-line); color: var(--mark-change); }
+/* A value the chain's draft changes: the changed-value mark, on the value and a line at the row's edge. */
+.cfg-row.is-changed { box-shadow: inset 2px 0 0 var(--mark-change-line); }
+.cfg-row.is-changed .cfg-v { color: var(--mark-change); }
 .cfg-dot.is-draft { box-sizing: border-box; background: transparent; border: 1.5px solid var(--mark-change-line); }
 .cfg-row .icon-btn { min-width: 22px; min-height: 22px; }
 .cfg-gap { flex: none; width: 22px; }

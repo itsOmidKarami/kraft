@@ -212,7 +212,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
 
   return (
     <div className="item-canvas" ref={frame}>
-      {viewing && <ChainStrip nodes={graph.nodes} viewing={viewing.id} onOpen={(node) => dispatch({ type: "focus", node })} onBack={() => dispatch({ type: "back" })} />}
+      {viewing && <ChainStrip nodes={graph.nodes} viewing={viewing.id} names onOpen={(node) => dispatch({ type: "focus", node })} onBack={() => dispatch({ type: "back" })} />}
       <div className="item-area" ref={areaRef}>
         {viewing?.kind === "gate" ? (
           <GateView {...gateView(item, viewing, events, now, sel, { doc: () => setArtifact(true), reject: (to) => dispatch({ type: "focus", node: to }) })} right={reserve}
@@ -254,8 +254,9 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
             // Opens with the whole chain in the visible canvas, or no smaller than the floor, on the node the run stands on.
             fit={ITEM_FIT}
             focus={item.display_status === "done" ? "last" : "current"}
-            // Passed stages, and those past the next, fold to a pill each.
-            fold
+            // A long chain draws under its overview; nodes read by name.
+            overview
+            names
             reserve={reserve}
             cover={cover}
             onSelect={(node) => pick({ kind: "node", node })}
@@ -288,7 +289,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
         </Inspector>
       </div>
       {adding && draft && <AddNodeMenu at={adding.at} seam={adding.seam} onClose={() => setAdding(null)} />}
-      {place.doc && <DocViewer source={{ kind: "document", id: place.doc, by: docBy(docs.find((d) => d.document_id === place.doc)) }} query={place.q} onClose={() => go({ ...place, doc: undefined, q: undefined })} />}
+      {place.doc && <DocViewer source={{ kind: "document", id: place.doc, by: docBy(docs.find((d) => d.document_id === place.doc), item.chain_definition.nodes) }} query={place.q} onClose={() => go({ ...place, doc: undefined, q: undefined })} />}
       {produced && <DocViewer source={{ kind: "produced", workItemId: item.id, produces: produced.kind, by: produced.path }} onClose={() => setProduced(null)} />}
       {artifact && <DocViewer source={{ kind: "artifact", workItemId: item.id, by: producerOf(materialized(item), item.pending_gate ?? "") ?? undefined }} onClose={() => setArtifact(false)} />}
     </div>

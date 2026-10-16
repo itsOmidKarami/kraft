@@ -1,5 +1,5 @@
 /* Settings › Harnesses (W14). Colours only from W1 tokens; classes are hn-*. */
-.hn-page { position: absolute; inset: 0; display: flex; overflow: hidden; }
+.hn-page { position: absolute; inset: 0; max-width: 1280px; margin: 0 auto; display: flex; overflow: hidden; }
 .hn-note { padding: 28px 24px; font-size: var(--fs-meta); color: var(--text-sub); }
 .hn-crumb-sep { flex: none; color: var(--text-muted); }
 .hn-crumb { flex: none; font-size: var(--fs-label); color: var(--text-muted); }
@@ -55,9 +55,9 @@
 .hn-chain { display: flex; flex-direction: column; gap: 4px; }
 .hn-chain-name { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); overflow-wrap: anywhere; }
 .hn-glyphs { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 8px; }
-.hn-glyph { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 78px; padding: 2px; border-radius: 8px; color: var(--text-sub); text-decoration: none; }
+.hn-glyph { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100px; padding: 2px; border-radius: 8px; color: var(--text-sub); text-decoration: none; }
 .hn-glyph:hover { background: var(--line); }
-.hn-glyph-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-label); }
+.hn-glyph-name { max-width: 100%; overflow-wrap: anywhere; text-align: center; line-height: 1.3; font-size: var(--fs-label); }
 .hn-glyph.is-bad .hn-glyph-name { color: var(--bad); }
 .hn-more { align-self: center; font-size: var(--fs-meta); color: var(--text-muted); }
 .hn-lane-note { margin: 0; font-size: var(--fs-meta); color: var(--text-muted); }
@@ -69,13 +69,12 @@
 .hn-field .segmented { flex-wrap: wrap; max-width: 100%; box-sizing: border-box; }
 .hn-field-label { font-size: var(--fs-meta); color: var(--text-muted); }
 .hn-field-help { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-muted); }
+.hn-used-by { margin: -6px 0 12px; }
 .hn-field-help.is-changed { color: var(--mark-change); }
 .hn-switch-row { display: flex; align-items: center; gap: 8px; }
 .hn-input { box-sizing: border-box; width: 100%; min-height: 28px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: var(--fs-label) ui-monospace, Menlo, monospace; }
 .hn-input.is-changed { border-color: var(--mark-change-line); }
 .hn-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.hn-chip { padding: 0 6px; border-radius: 4px; background: var(--surface-2); font: var(--fs-label) inherit; color: var(--text-sub); }
-.hn-chip.is-bad { color: var(--bad); }
 .hn-link { padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; text-decoration: underline; cursor: pointer; }
 .hn-error { margin: 6px 0; font-size: var(--fs-meta); color: var(--bad); }
 .hn-toast { position: absolute; z-index: 8; left: 260px; top: 6px; margin: 0; }

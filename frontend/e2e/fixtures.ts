@@ -52,7 +52,7 @@ export async function openComposer(page: Page, title: string, chain: string) {
 }
 
 /** Files a work item from the composer and starts it. The board answers with
- *  the item in the peek (`?sel=<id>`), or on its page when Appearance says
+ *  the item in the peek (`?sel=<id>`), or on its page when Board & code says
  *  open items in Full page. Returns the item's id. */
 export async function createItem(page: Page, title: string, chain: string): Promise<string> {
   const composer = await openComposer(page, title, chain);

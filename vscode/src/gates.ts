@@ -1,10 +1,11 @@
 import * as vscode from "vscode";
+import { gateWords } from "../../frontend/src/ng/board/rowText";
 import { drafts } from "../../frontend/src/ng/review/finish";
 import { reportError } from "./actions";
 import type { Api, WorkItem } from "./core/api";
-import { Announcer, toastActions, type Announcement } from "./core/announcer";
-import { announceable, onBoard, type Include } from "./core/board";
-import { approveOrRead, isStaleRevision } from "./core/approve";
+import { Announcer, toastActions, toastLevel, toastPlan, type Announcement } from "./core/announcer";
+import { announceable, nameOf, onBoard, type Include } from "./core/board";
+import { approvedMessage, approveOrRead, confirmConsequence, gateConsequence, isStaleRevision } from "./core/approve";
 import { approveFlow } from "./core/mustFix";
 import { showRefusal } from "./review/refusal";
 import type { Artifact } from "./core/api";
@@ -50,6 +51,10 @@ export function registerGates(
   const gateOf = (id: string) => store.item(id)?.pending_gate ?? undefined;
   const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
 
+  /** The merge/push question, for this route and Submit Review's; true when nothing needs asking or it was answered yes. */
+  const confirmApprove = (id: string, gate: string) =>
+    confirmConsequence(store.item(id), gate, async (question, button) => (await vscode.window.showWarningMessage(question, { modal: true }, button)) === button);
+
   // Resolves once the preview is up; only then is the render remembered as read.
   const show = async (id: string, gate: string | undefined, a: Artifact) => {
     const { scheme, path } = artifactUri(id, a.title);
@@ -61,9 +66,13 @@ export function registerGates(
     latest.set(id, basename);
     preview.opening(id, basename); // before the tab appears, so its tab change finds it
     // Locked, so it never follows the active editor onto someone else's file.
-    if ((await vscode.commands.getCommands(true)).includes("markdown.showPreview"))
+    // Not checked against getCommands first: the Markdown extension registers its commands when it
+    // activates, which opening this document only starts, so a fresh window would show raw text.
+    try {
       await vscode.commands.executeCommand("markdown.showPreview", uri, undefined, { locked: true });
-    else await vscode.window.showTextDocument(doc, { preview: false }); // the Markdown extension is disabled
+    } catch {
+      await vscode.window.showTextDocument(doc, { preview: false }); // the Markdown extension is disabled
+    }
     if (gate) shown.record(id, gate, a.digest); // no gate to bind it to: shown, not remembered
   };
 
@@ -73,7 +82,7 @@ export function registerGates(
     gate ??= gateOf(id);
     try {
       const a = await api.getArtifact(id);
-      if (!a) return void vscode.window.showInformationMessage(`${id}'s gate has no document to show.`), false;
+      if (!a) return void vscode.window.showInformationMessage(`${nameOf(store, id)}'s gate has no document to show.`), false;
       await show(id, gate, a);
       return true;
     } catch (e) {
@@ -84,7 +93,7 @@ export function registerGates(
 
   // Clicked on a preview of an older render than the latest: open the latest instead of acting.
   const readFirst = async (id: string, gate: string) => {
-    if (await openArtifact(id, gate)) void vscode.window.showInformationMessage(`Read ${gate} first: the document is open.`);
+    if (await openArtifact(id, gate)) void vscode.window.showInformationMessage(`Read the ${gateWords(gate)} on ${nameOf(store, id)} first: the document is open.`);
   };
 
   // Guarded here, not at registration: a gate notification's buttons call these directly.
@@ -92,15 +101,18 @@ export function registerGates(
   const approve = mutating("kraft.approve", refusal, warn, async (id?: string, gate?: string, stale = false) => {
     if (!id) return;
     gate ??= gateOf(id);
-    if (!gate) return void vscode.window.showInformationMessage(`${id} is not waiting at a gate.`);
+    if (!gate) return void vscode.window.showInformationMessage(`${nameOf(store, id)} is not waiting at a gate.`);
     const g = gate;
     if (stale) return readFirst(id, g);
     // Read once the approve is about to go: drafts written since the document opened go with it.
     const send = async (digest: string | undefined) => {
       const n = drafts(await cache.load(id)).length;
+      const item = store.item(id);
+      const what = item && gateConsequence(item, g);
+      if (!n && !(await confirmApprove(id, g))) return false;
       if (!n) return api.approve(id, g, digest).then(() => true);
       const ok = await vscode.window.showWarningMessage(
-        `Approve ${g} and send ${n} draft comment${n === 1 ? "" : "s"} with it? No agent acts on comments sent with an approval.`,
+        `Approve ${gateWords(g)} on ${item?.title ?? id} and send ${n} draft comment${n === 1 ? "" : "s"} with it?${what ? ` This also ${what === "merge" ? "merges it into the target branch" : "pushes it"}.` : ""} No agent acts on comments sent with an approval.`,
         { modal: true },
         "Approve and Send",
       );
@@ -117,9 +129,13 @@ export function registerGates(
         refuse: (r) => showRefusal(id, r, reveal),
         readOrSend: () => approveOrRead(api, shown, id, g, (a) => show(id, g, a), undefined, undefined, send),
       });
-      if (outcome === "read-first") void vscode.window.showInformationMessage(`Read ${g} first: the document is open.`);
+      if (outcome === "read-first") void vscode.window.showInformationMessage(`Read the ${gateWords(g)} on ${nameOf(store, id)} first: the document is open.`);
       // The approve went through: a failed re-read is not a failed approve.
-      if (outcome === "approved") await store.refresh(id).catch(() => {});
+      if (outcome === "approved") {
+        const title = store.item(id)?.title ?? id;
+        await store.refresh(id).catch(() => {});
+        void vscode.window.showInformationMessage(approvedMessage(title, g, store.item(id)));
+      }
     } catch (e) {
       // A failed re-open has already said why; one toast is enough.
       if (isStaleRevision(e) && !(await openArtifact(id, g))) return;
@@ -130,10 +146,10 @@ export function registerGates(
   const reject = mutating("kraft.reject", refusal, warn, async (id?: string, gate?: string, note?: string, stale = false) => {
     if (!id) return;
     gate ??= gateOf(id);
-    if (!gate) return void vscode.window.showInformationMessage(`${id} is not waiting at a gate.`);
+    if (!gate) return void vscode.window.showInformationMessage(`${nameOf(store, id)} is not waiting at a gate.`);
     if (stale) return readFirst(id, gate);
     note ??= await vscode.window.showInputBox({
-      prompt: `Why reject ${id} at ${gate}?`,
+      prompt: `Why reject ${store.item(id)?.title ?? id} at ${gateWords(gate)}?`,
       validateInput: (v) => (v.trim() ? undefined : "A reject needs a reason: it goes to the agent."),
     });
     if (!note?.trim()) return;
@@ -148,17 +164,27 @@ export function registerGates(
 
   const scoped = (ids: string[] | "all") =>
     announceable(ids === "all" ? store.items() : ids.map((id) => store.item(id)).filter((i) => i !== undefined), include);
-  const toast = (found: [WorkItem, Announcement][]) => {
-    for (const [item, a] of found) {
+  const toast = (all: [WorkItem, Announcement][]) => {
+    const plan = toastPlan(all);
+    if ("summary" in plan) {
+      void (plan.level === "warning" ? vscode.window.showWarningMessage(plan.summary, ...plan.buttons) : vscode.window.showInformationMessage(plan.summary, ...plan.buttons)).then((pick) => {
+        if (pick === "Next Gate") void vscode.commands.executeCommand("kraft.approveNextGate");
+        if (pick === "Show Board") void vscode.commands.executeCommand("kraft.board.focus");
+      });
+      return;
+    }
+    for (const [item, a] of plan.each) {
       if (a.kind === "gate") {
         const buttons = refusal() === null ? ["Open", "Reject…"] : ["Open"];
-        void vscode.window.showInformationMessage(`${item.id} · ${a.gate}: ${item.title}`, ...buttons).then((pick) => {
+        void vscode.window.showInformationMessage(`${item.title}: ${a.text}`, ...buttons).then((pick) => {
           if (pick === "Open") void openArtifact(item.id, a.gate);
           if (pick === "Reject…") void reject(item.id, a.gate);
         });
       } else {
         const buttons = toastActions(item, refusal() !== null);
-        void vscode.window.showInformationMessage(`${item.id}: ${item.title} — ${a.text}`, ...buttons.map((b) => b.label)).then((pick) => {
+        const text = `${item.title}: ${a.text}`;
+        const labels = buttons.map((b) => b.label);
+        void (toastLevel(item) === "warning" ? vscode.window.showWarningMessage(text, ...labels) : vscode.window.showInformationMessage(text, ...labels)).then((pick) => {
           const run = buttons.find((b) => b.label === pick);
           if (run) void vscode.commands.executeCommand(run.command, { item });
         });
@@ -185,5 +211,5 @@ export function registerGates(
       return reject(c.id, c.gate, c.note, c.stale);
     }),
   );
-  return { announcer, shown, show: (id: string, gate: string, a: Artifact) => show(id, gate, a), openArtifact };
+  return { announcer, shown, confirmApprove, show: (id: string, gate: string, a: Artifact) => show(id, gate, a), openArtifact };
 }

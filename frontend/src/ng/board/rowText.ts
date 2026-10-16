@@ -2,7 +2,7 @@ import { until } from "../../format";
 import type { ChainNode, ItemAction, TaskProgress, WorkItem } from "../../types";
 import type { GlyphKind, GlyphState } from "../graph/types";
 import { admits } from "../item/status";
-import { groupOf } from "./model";
+import { gateOf, groupOf, stopOf } from "./model";
 
 /** What a board row says and offers (W6 brief B.4, B.5, B.7), from the
  *  server's `display_status` and `stop` and the raw row, one table each. */
@@ -14,8 +14,26 @@ const nodeOf = (i: Row) => i.stop?.node ?? i.current_node_id ?? "";
 /** A node id as words for a row's tail: `merge_request` or `merge-request` reads "merge request". */
 export const nodeWords = (id: string) => id.replace(/[_-]+/g, " ");
 
-/** A gate id as what it decides: `spec_approval` reads "spec", so the row says "approve spec". */
-export const gateWords = (id: string) => nodeWords(id.replace(/[_-]approval$/, ""));
+type Named = { id: string; kind?: string; artifact?: string | null };
+
+/** What a gate decides, in words: its document's kind ("spec"), else its id without a trailing "approval". The
+ *  VS Code extension knows only a gate's id, so an id is accepted too. */
+export const gateWords = (g: Named | string) => {
+  const n = typeof g === "string" ? { id: g } : g;
+  return nodeWords(n.artifact || n.id.replace(/[_-]approval$/, ""));
+};
+
+/** What a reader calls a node: a gate by what it decides ("approve spec"), any other node in words. The id stays
+ *  for places where the id is the point (config, the chain editor, CLI hints). */
+export const displayName = (n: Named) => (n.kind === "gate" ? `approve ${gateWords(n)}` : nodeWords(n.id));
+
+/** `displayName` for a node known by id: found in the chain for its kind and artifact, else its id in words. */
+export const nameOf = (nodes: Named[] | undefined, id: string) => displayName(nodes?.find((n) => n.id === id) ?? { id });
+
+/** `nameOf` for an id known to be a gate (`pending_gate`), whether or not the chain lists it as one. */
+export const gateName = (nodes: Named[] | undefined, id: string) => displayName({ ...(nodes?.find((n) => n.id === id) ?? { id }), kind: "gate" });
+
+export const capitalise = (s: string) => s.replace(/^./, (c) => c.toUpperCase());
 
 /** Every sub-task of the plan done: a list with nothing left on it, not an empty or a board-only one. */
 export const allDone = (p: Pick<TaskProgress, "tasks">) => !!p.tasks?.length && p.tasks.every((t) => t.state === "done");
@@ -25,12 +43,12 @@ const firstSentence = (s: string) => s.split(/\.(?:\s|$)/)[0];
 
 /** The reason tail after the meta: one short line per status and stop kind. */
 export function reasonTail(i: Row, now = Date.now()): string {
-  const node = nodeWords(nodeOf(i));
+  const node = nameOf(i.chain_definition?.nodes, nodeOf(i));
   const tail = (() => {
     switch (i.display_status) {
       case "needs_you":
         switch (i.stop?.kind) {
-          case "gate": return `approve ${gateWords(i.pending_gate ?? nodeOf(i))}`;
+          case "gate": return gateName(i.chain_definition?.nodes, i.pending_gate ?? nodeOf(i));
           case "question": return `agent asks: ${(i.stop.reason ?? "").replace(/^needs_context:\s*/, "")}`.trim();
           // A cap or budget stop's reason goes on to what was not interrupted: the row keeps its first sentence.
           case "cap":
@@ -66,6 +84,37 @@ function fallbackName(to: unknown): string {
   if (!to || typeof to !== "object") return "";
   const { model, harness } = to as { model?: unknown; harness?: unknown };
   return typeof model === "string" && model ? model : typeof harness === "string" ? harness : "";
+}
+
+/** A stop kind as a filter and its Analytics row say it: the kind in words, `mr_closed` as "MR closed". */
+export const stopWords = (kind: string) => (kind === "mr_closed" ? "MR closed" : nodeWords(kind));
+
+/** What the Gate and Stop reason filters say, on the desktop's menus and the phone's sheets alike. */
+export const ALL_GATES = "All gates";
+export const ALL_STOPS = "All stop reasons";
+export const gateChip = (label: string) => `Gate · ${label}`;
+export const stopChip = (label: string) => `Stop · ${label}`;
+
+export interface FilterOption { value: string; label: string; n: number }
+
+/** The gates items wait at and the kinds they are stopped on, as the Gate and Stop filters list them: named by what
+ *  a reader calls them (`gateName`, `stopWords`), most items first. Desktop and phone list the same. */
+export function stopFilterOptions(items: WorkItem[]): { gates: FilterOption[]; stops: FilterOption[] } {
+  const tally = (key: (i: WorkItem) => string, label: (id: string, i: WorkItem) => string) => {
+    const m = new Map<string, FilterOption>();
+    for (const i of items) {
+      const v = key(i);
+      if (!v) continue;
+      const o = m.get(v) ?? { value: v, label: label(v, i), n: 0 };
+      o.n += 1;
+      m.set(v, o);
+    }
+    return [...m.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
+  };
+  return {
+    gates: tally(gateOf, (id, i) => gateName(i.chain_definition?.nodes, id)),
+    stops: tally(stopOf, stopWords),
+  };
 }
 
 export type StopCue = "failed" | "paused" | "gate" | "question" | "limit" | "other";
@@ -144,7 +193,8 @@ export function glyphOf(i: Row): { kind: GlyphKind; icon?: string; state: GlyphS
       case "cancelled": return "ghost";
       case "archived": return i.status === "abandoned" ? "ghost" : "done";
       case "running": case "waiting": return "current";
-      case "paused": return i.current_node_id ? "amber" : "todo";
+      // Amber is "needs a human"; a paused item waits on nobody, so it is neutral.
+      case "paused": return i.current_node_id ? "paused" : "todo";
       default: {
         const g = groupOf(i);
         return g === "needs" ? "amber" : g === "not_started" ? "todo" : "current";
@@ -167,7 +217,7 @@ export function chainMarks(i: Row): ChainMark[] {
   const nodes = i.chain_definition?.nodes ?? [];
   const ended = i.display_status === "done" || i.display_status === "cancelled" || i.display_status === "archived";
   const at = nodes.findIndex((n) => n.id === i.current_node_id);
-  const hot = groupOf(i) === "needs" || i.display_status === "escalated";
+  const hot = (groupOf(i) === "needs" && i.display_status !== "paused") || i.display_status === "escalated";
   return nodes.map((n, k) => ({
     node: n.id,
     gate: n.kind === "gate",

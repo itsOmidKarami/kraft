@@ -38,7 +38,8 @@ just install    # build the SPA, install the `kraft` command; then run `kraft`
 
 `just dev` puts `fixtures/bin` (a `claude` symlink to `fixtures/fake-claude.sh`)
 ahead of the real agent on PATH, so a dev instance never spends tokens. A work
-item title containing `KRAFT_FAIL` or `KRAFT_SLOW` steers its own fake agent.
+item title (or description) containing `KRAFT_FAIL` or `KRAFT_SLOW` steers its own fake agent.
+`just dev-seed --rich` fills the instance with about 40 items, extreme text, a 30-node chain, three repos and a wide review for stress-testing the dashboard; it also uses `KRAFT_HANG`, `KRAFT_MANY_FILES` and `KRAFT_COST_<usd>`.
 
 ### The `kraft` command
 

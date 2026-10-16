@@ -2,8 +2,9 @@ import { create } from "zustand";
 import * as api from "./api";
 import type { KraftEvent, WorkItem, WorkerSession } from "./types";
 import { REREAD_EVENTS } from "./rereadEvents";
+import { bindOffline } from "./writeGuard";
 
-type Connection = "connecting" | "open" | "reconnecting";
+export type Connection = "connecting" | "open" | "reconnecting";
 
 interface State {
   workItems: Record<string, WorkItem>;
@@ -11,6 +12,8 @@ interface State {
   eventsByItem: Record<string, KraftEvent[]>;
   lastSeq: number;
   connection: Connection;
+  /** Why the last list read failed; null once one succeeds. With `connection`, what the offline banner is about. */
+  loadError: string | null;
   /** Bumped on every work_item_archived/restored event so a count fetched
    *  from the archive endpoint (Header's breadcrumb, the board's Archived
    *  chip) knows to refetch instead of only refreshing after its own click. */
@@ -113,21 +116,33 @@ async function fetchRounds(id: string): Promise<void> {
   // Nothing applied: the store keeps its reducer-patched state, and the next event's re-read tries again.
 }
 
+/** The one definition of offline, over the store's two fields. */
+export const offlineIn = (s: { loadError: string | null; connection: Connection }) => s.loadError !== null || s.connection === "reconnecting";
+
 export const useStore = create<State>((set, get) => ({
   workItems: {},
   sessionsByItem: {},
   eventsByItem: {},
   lastSeq: 0,
   connection: "connecting",
+  loadError: null,
   archivedVersion: 0,
 
   setConnection: (connection) => set({ connection }),
 
   bootstrap: async () => {
-    const { items, cursor } = await api.listWorkItems();
+    let list;
+    try {
+      list = await api.listWorkItems();
+    } catch (e) {
+      set({ loadError: e instanceof Error ? e.message : String(e) });
+      throw e;
+    }
+    const { items, cursor } = list;
     set({
       workItems: Object.fromEntries(items.map((i) => [i.id, i])),
       lastSeq: cursor,
+      loadError: null,
     });
     // W11 · J: whether a needs_human item has an escalation turn running lives
     // in its sessions, which the list does not carry. Hydrate those items so
@@ -436,3 +451,5 @@ function upsert(rows: WorkerSession[], row: WorkerSession): WorkerSession[] {
   copy[i] = { ...copy[i], ...row };
   return copy;
 }
+
+bindOffline(() => offlineIn(useStore.getState()));

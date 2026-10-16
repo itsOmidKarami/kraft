@@ -19,6 +19,11 @@ describe("Archived (the desktop's /archived at phone width)", () => {
     expect(read.map((c) => Object.fromEntries(c.query))).toEqual([{ archived: "true", include_abandoned: "true" }]);
   });
 
+  it("states what Archived holds with the auto-archive days, as the desktop does", async () => {
+    mountAt(<Archived />, "/archived", "/archived", { "GET /work-items": [200, { items: [], cursor: 0 }], "GET /policy": [200, { archive: { after_days: 30 } }] });
+    expect(await screen.findByText(/30 days after they finish. Open one to restore it./)).toBeInTheDocument();
+  });
+
   it("says so when nothing is archived", async () => {
     open([200, { items: [], cursor: 0 }]);
     expect(await screen.findByText("Nothing is archived.")).toBeInTheDocument();

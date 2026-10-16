@@ -1443,7 +1443,7 @@ async def _repo_checks() -> list[dict]:
                     f"setup {_label(repo)}",
                     False,
                     f"no setup_command in repos.yaml — suggest: {suggestion or 'none found'}"
-                    f' (use "" if this repo deliberately needs no preparation){again}, or tick '
+                    f' (use "" if this repo deliberately needs no preparation){again}, or turn on '
                     "No setup needed under Settings › Repos",
                 )
             )

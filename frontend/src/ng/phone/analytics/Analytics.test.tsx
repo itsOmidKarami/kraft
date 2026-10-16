@@ -17,7 +17,7 @@ const REPORT = {
   by_repo: [{ repo: "/code/kraft-plugins", items: 8, mrs: 6, tokens: 1, cost_usd: 20, cost_complete: false, done: 6, cycles: 3 }],
   rejected_gates_by_gate: [{ gate: "plan_approval", n: 1 }],
   gate_waits: [{ gate: "plan_approval", n: 4, median_ms: 1800_000, total_ms: 9e6 }],
-  stop_reasons: [{ label: "gate wait", n: 5 }],
+  stop_reasons: [{ label: "gate wait", n: 5 }, { label: "gate · spec_approval", n: 3 }, { label: "budget", n: 2 }],
 } as unknown as Report;
 
 function mount(answer: [number, unknown] = [200, REPORT]) {
@@ -36,10 +36,23 @@ describe("Analytics (J): each tile reads one field", () => {
     expect(within(tile("Completed")).getByText("12")).toBeInTheDocument();
     expect(within(tile("Completed")).getByText("+3 vs previous")).toBeInTheDocument();
     expect(within(tile("Lead time")).getByText("1h")).toBeInTheDocument();
-    expect(within(tile("Lead time")).getByText("median · 8% waiting on you")).toBeInTheDocument();
+    expect(within(tile("Lead time")).getByText("median")).toBeInTheDocument();
+    expect(within(tile("Waiting on you")).getByText("8%")).toBeInTheDocument();
+    expect(within(tile("Waiting on you")).getByText("of lead time")).toBeInTheDocument();
     expect(within(tile("Cost")).getByText("$3.18 per completed item")).toBeInTheDocument();
     expect(within(tile("Repairs per item")).getByText("1.5")).toBeInTheDocument();
     expect(within(tile("Repairs per item")).getByText("2 hit their cap")).toBeInTheDocument();
+  });
+
+  it("links a repo row to the board for that repo and the gate and stop rows to the board", async () => {
+    mount();
+    await screen.findByText("$38.20");
+    expect(screen.getByRole("link", { name: /kraft-plugins/ })).toHaveAttribute("href", "/?repo=%2Fcode%2Fkraft-plugins");
+    expect(screen.getByRole("link", { name: /approve plan/ })).toHaveAttribute("href", "/?gate=plan_approval");
+    // The server's bucket is "gate · spec_approval"; the page names the gate as the board does, and still filters by its id.
+    expect(screen.getByRole("link", { name: /gate · approve spec/ })).toHaveAttribute("href", "/?gate=spec_approval");
+    expect(screen.getByRole("link", { name: /budget/ })).toHaveAttribute("href", "/?stop=budget");
+    expect(screen.getByRole("link", { name: /gate wait/ })).toHaveAttribute("href", "/");
   });
 
   it("reads a lead time and a checks span nothing measured as a dash, not 0s", async () => {
@@ -71,7 +84,7 @@ describe("Analytics (J): each tile reads one field", () => {
   it("lists gates, nodes, repos and stop reasons, and keeps the footnotes behind one disclosure", async () => {
     mount();
     expect(await screen.findByText("implementation")).toBeInTheDocument();
-    expect(screen.getByText("plan_approval")).toBeInTheDocument();
+    expect(screen.getByText("approve plan")).toBeInTheDocument();
     expect(screen.getByText("4 waits · median 30m · 1 rejected")).toBeInTheDocument();
     expect(screen.getByText("2h 30m")).toBeInTheDocument();
     expect(screen.getByText("18 runs")).toBeInTheDocument();
@@ -79,6 +92,7 @@ describe("Analytics (J): each tile reads one field", () => {
     expect(screen.getByText("$20.00+")).toBeInTheDocument();
     expect(screen.getByText("8 items · 6 done · avg repairs 3.0")).toBeInTheDocument();
     expect(screen.getByText("gate wait")).toBeInTheDocument();
+    expect(screen.getByText("Items created in the last 8 weeks")).toBeInTheDocument();
     expect(screen.getByText("0.25 unplanned touches per item · open MR → checks done 10m median")).toBeInTheDocument();
     const how = /Tokens are as recorded, never estimated\. Dollars are what agents reported plus Kraft's estimate from its price table where they reported none, and a session it cannot price puts a "\+" on the sum/;
     expect(screen.getByText(how)).not.toBeVisible();
@@ -97,6 +111,7 @@ describe("Analytics (J): each tile reads one field", () => {
     await waitFor(() => expect(asked(calls)).toHaveLength(2));
     expect(asked(calls).map((c) => c.query.get("range"))).toEqual(["8w", "30d"]);
     expect(screen.getByRole("button", { name: /30 days/ })).toBeInTheDocument();
+    expect(await screen.findByText("Items created in the last 30 days")).toBeInTheDocument();
   });
 
   it("narrows by the repo and chain the person picks, as the desktop does", async () => {
@@ -110,6 +125,7 @@ describe("Analytics (J): each tile reads one field", () => {
     await userEvent.click(within(screen.getByRole("dialog", { name: "Chain" })).getByRole("radio", { name: /quick-task/ }));
     await waitFor(() => expect(asked(calls)).toHaveLength(3));
     expect(asked(calls).map((c) => [c.query.get("repo"), c.query.get("template")])).toEqual([[null, null], ["/code/kraft-plugins", null], ["/code/kraft-plugins", "quick-task"]]);
+    expect(await screen.findByRole("link", { name: /approve plan/ })).toHaveAttribute("href", "/?repo=%2Fcode%2Fkraft-plugins&chain=quick-task&gate=plan_approval");
   });
 
   it("says when nothing completed, with no zero-height chart", async () => {

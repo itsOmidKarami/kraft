@@ -1,5 +1,5 @@
 ---
-title: Security and project
+title: Project
 navigation:
   title: Overview
 description: Security, data and privacy, release news, status and support, architecture, and how to contribute.

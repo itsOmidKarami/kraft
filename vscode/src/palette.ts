@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import type { WorkItem } from "./core/api";
-import { gatePicks, itemPick, pickableFor, PICK_TITLE, type PickVerb } from "./core/picks";
+import { itemPick, nextGate, pickableFor, PICK_TITLE, type PickVerb } from "./core/picks";
 import { clickTarget, PRIMARY_COMMAND } from "./core/primary";
 
 /** Asks which of `items` a row command run from the palette acts on, among
@@ -16,9 +16,10 @@ async function pickFrom(items: WorkItem[], placeHolder: string, none: string): P
   return pick && items.find((i) => i.id === pick.id);
 }
 
-/** Approve Next Gate… and Open Item…: palette entries over the window's
- *  items. Both reads, so unguarded; an approve still goes through the gate
- *  document, which must be read first. */
+/** Next Gate and Open Item…: palette entries over the window's items. Both
+ *  reads, so unguarded; an approve still goes through the gate document, which
+ *  must be read first. The id `kraft.approveNextGate` is kept from when Next
+ *  Gate was titled Approve Next Gate…. */
 export function registerPalette(
   context: vscode.ExtensionContext,
   inScope: () => WorkItem[],
@@ -26,7 +27,8 @@ export function registerPalette(
 ): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("kraft.approveNextGate", async () => {
-      const item = await pickFrom(gatePicks(inScope()), "Pick a gate to review", "Nothing here is waiting at a gate.");
+      const { open, ask } = nextGate(inScope());
+      const item = open ?? await pickFrom(ask, "Pick a gate to review", "Nothing here is waiting at a gate.");
       if (item) await vscode.commands.executeCommand(PRIMARY_COMMAND.openArtifact, { item });
     }),
     vscode.commands.registerCommand("kraft.openItem", async () => {

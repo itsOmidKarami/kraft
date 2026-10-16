@@ -1,9 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import type { ChainNode, TemplateSummary } from "../../types";
-import { Composer, sayIfFiledPaused } from "./Composer";
+import { ShortcutHelp } from "../shell/ShortcutHelp";
+import { COMPOSER_KEY, Composer, sayIfFiledPaused } from "./Composer";
 
 const N = (id: string, kind: "exec" | "gate" = "exec", covered_by: string | null = null) => ({ id, kind, covered_by, gate_after: null, tasks: [] }) as unknown as ChainNode;
 const DEFAULT = [N("spec", "exec", "spec"), N("spec_approval", "gate", "spec"), N("implementation"), N("final_review", "gate")];
@@ -39,6 +40,7 @@ const mount = (dry?: [number, unknown], props: { repoFilter?: string } = {}) => 
 };
 
 beforeEach(() => {
+  sessionStorage.clear();
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.spyOn(api, "getRepos").mockResolvedValue({ repos: REPOS });
   vi.spyOn(api, "getTemplates").mockResolvedValue(CHAINS);
@@ -55,6 +57,13 @@ const settle = async () => {
 };
 
 describe("Composer", () => {
+  it("adds its own ⌘↵ row to the shortcut help while it is open", async () => {
+    stubFetch();
+    mount();
+    render(<ShortcutHelp onClose={() => {}} />);
+    expect(await screen.findByText("Create the item, paused")).toBeInTheDocument();
+  });
+
   it("lists only the chosen repo's own repo library chains, and switching the repo changes the list", async () => {
     const lib = (repo: string) => ({ id: `${repo}:ship`, nodes: [N("implementation")], gates: 0, addon: { id: `library@repo:${repo}`, version: "abc", repo } });
     vi.spyOn(api, "getTemplates").mockResolvedValue([...CHAINS, lib("plugins"), lib("docs")]);
@@ -66,7 +75,9 @@ describe("Composer", () => {
     await settle();
     const listed = () => screen.getAllByRole("menuitemradio").map((m) => m.textContent ?? "");
     fireEvent.click(screen.getByRole("button", { name: /^default/ }));
-    expect(listed().filter((t) => t.includes(":ship"))).toEqual([expect.stringMatching(/^plugins:ship/)]);
+    expect(listed().filter((t) => t.includes(":ship"))).toEqual([expect.stringMatching(/^plugins:ship · 1 nodes$/)]);
+    expect(listed()).toContain("✓default · 4 nodes");
+    expect(screen.getByRole("button", { name: /^default/ })).toHaveAccessibleDescription("default is the repo's default chain");
     fireEvent.click(screen.getByRole("button", { name: /^default/ }));
     fireEvent.click(screen.getByRole("button", { name: /^kraft-plugins/ }));
     fireEvent.click(screen.getByRole("menuitemradio", { name: /kraft-docs/ }));
@@ -192,6 +203,33 @@ describe("Composer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(onClose).toHaveBeenCalledTimes(2);
+    expect(sessionStorage.getItem(COMPOSER_KEY)).toBeNull();
+  });
+
+  it("keeps its text when closed any way but Discard (a click on a row, a reload), and restores it", async () => {
+    const first = mount();
+    await settle();
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "half an idea" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Brief" }), { target: { value: "and a line" } });
+    cleanup();
+    first.onClose.mockClear();
+    mount();
+    await settle();
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("half an idea");
+    expect(screen.getByRole("textbox", { name: "Brief" })).toHaveValue("and a line");
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(sessionStorage.getItem(COMPOSER_KEY)).toBeNull();
+  });
+
+  it("drops a restored draft's repo that is no longer connected, for the default repo, and files nothing to the old one", async () => {
+    sessionStorage.setItem(COMPOSER_KEY, JSON.stringify({ title: "half an idea", repo: "/code/gone", chain: "gone_chain", spec: "docs/a.md", plan: "", brief: "" }));
+    const { calls } = mount();
+    await settle();
+    expect(screen.getByRole("button", { name: /kraft-plugins/ })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Title" }), { key: "Enter", metaKey: true });
+    await settle();
+    expect(creates(calls).at(-1)?.body).toMatchObject({ repo: "/code/kraft-plugins", chain_template: "default", attachments: [] });
   });
 
   it("starts on the board's repo filter and resets the chain to a picked repo's default", async () => {

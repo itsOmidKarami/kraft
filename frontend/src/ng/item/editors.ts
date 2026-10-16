@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { detailOf, request } from "../http";
 
 /** `GET /editors`: the editors whose executable this machine has, whether the
- *  system opener is there, and the default chosen in Settings › Appearance. */
+ *  system opener is there, and the default chosen in Settings › Board & code. */
 export type Editors = { available: string[]; system: boolean; default: string | null };
 
 /** The `editor` that asks `POST …/open` for the system's opener by name. `null`

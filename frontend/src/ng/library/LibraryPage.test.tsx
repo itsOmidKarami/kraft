@@ -2,7 +2,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as d from "../templates/draft/draftApi";
-import { libView } from "./fixture";
+import { libView, LIB_MODEL } from "./fixture";
 import { draftWith, mount, ok, setup, where } from "./testSupport";
 
 const list = () => screen.findByRole("listbox", { name: "Library components" });
@@ -23,12 +23,13 @@ describe("Library page: the list", () => {
     expect(within(box).getByRole("option", { name: /approval/ })).toHaveTextContent("unpublished");
   });
 
-  it("shows a long id whole, wrapping instead of cutting", async () => {
+  it("cuts a long id to one line, the whole id in its title", async () => {
     mount();
     const box = await list();
     const long = within(box).getByText("never-signal-processes-you-didnt-start");
-    expect(long).not.toHaveAttribute("data-allow-ellipsis");
-    expect(long).not.toHaveAttribute("title");
+    // One line, cut with an ellipsis, the whole id in the title.
+    expect(long).toHaveAttribute("data-allow-ellipsis");
+    expect(long).toHaveAttribute("title", "never-signal-processes-you-didnt-start");
   });
 
   it("folds a group on its heading, and a search opens it again", async () => {
@@ -60,6 +61,37 @@ describe("Library page: the list", () => {
     await waitFor(() => expect(within(unused).getByRole("link", { name: "tasks.verify" })).toHaveAttribute("href", "/templates/library/tasks.verify"));
   });
 
+  it("a count tile narrows the list to its section, which a pick keeps until Show all", async () => {
+    const u = userEvent.setup();
+    mount();
+    const counts = await screen.findByRole("list", { name: "Components per section" });
+    await u.click(within(counts).getByRole("link", { name: /tasks/ }));
+    const box = await list();
+    expect(within(box).queryByRole("group", { name: "Nodes" })).toBeNull();
+    expect(within(box).getByRole("group", { name: "Tasks" })).toBeInTheDocument();
+    expect(screen.getByText("Showing tasks only")).toBeInTheDocument();
+    await u.click(within(box).getByRole("option", { name: /implementer/ }));
+    expect(screen.getByText("Showing tasks only")).toBeInTheDocument();
+    // Opening what a component extends stays inside the section.
+    await u.click(within(box).getByRole("option", { name: /code_review/ }));
+    await u.click(await screen.findByRole("button", { name: "extends implementer" }));
+    expect(where()).toBe("/templates/library/tasks.implementer");
+    expect(screen.getByText("Showing tasks only")).toBeInTheDocument();
+    await u.click(screen.getByRole("button", { name: "Show all" }));
+    expect(within(await list()).getByRole("group", { name: "Nodes" })).toBeInTheDocument();
+    expect(screen.queryByText("Showing tasks only")).toBeNull();
+  });
+
+  it("a tile's section shows even when the kind filter hides it", async () => {
+    const u = userEvent.setup();
+    mount();
+    await u.click(await screen.findByRole("button", { name: "Filter kinds" }));
+    await u.click(await screen.findByRole("checkbox", { name: /Tasks/ }));
+    await u.keyboard("{Escape}");
+    await u.click(within(await screen.findByRole("list", { name: "Components per section" })).getByRole("link", { name: /tasks/ }));
+    expect(within(await list()).getByRole("option", { name: /implementer/ })).toBeInTheDocument();
+  });
+
   it("opens a component by its ref in the URL, and says so for one that isn't there", async () => {
     const u = userEvent.setup();
     mount();
@@ -70,7 +102,9 @@ describe("Library page: the list", () => {
 
   it("says when the ref names nothing", async () => {
     mount("/templates/library/tasks.nope");
-    expect(await screen.findByText(/There is no component called tasks.nope/)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "No component called tasks.nope" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to the Library" })).toHaveAttribute("href", "/templates/library");
+    expect(document.querySelector(".lib-ref")).toBeNull();
   });
 
   it("hides a kind the filter turns off, remembers it, and still renders when storage throws", async () => {
@@ -88,6 +122,17 @@ describe("Library page: the list", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked"); });
     mount();
     expect(await screen.findByRole("group", { name: "Steering" })).toBeInTheDocument();
+  });
+
+  it("offers only the kinds the library has in the filter", async () => {
+    const u = userEvent.setup();
+    draftWith({ model: { "library.yaml": { ...LIB_MODEL, steps: {} } } });
+    mount();
+    await list();
+    await u.click(screen.getByRole("button", { name: "Filter kinds" }));
+    const kinds = within(screen.getByRole("dialog", { name: "Show kinds" })).getAllByRole("checkbox").map((c) => c.closest("label")!.textContent);
+    expect(kinds.some((k) => /Steps/.test(k!))).toBe(false);
+    expect(kinds.some((k) => /Tasks/.test(k!))).toBe(true);
   });
 
   it("searches by name, and / focuses the search, ↓ walks the rows", async () => {

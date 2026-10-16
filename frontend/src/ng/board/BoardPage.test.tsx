@@ -1,3 +1,4 @@
+import { ShortcutHelp } from "../shell/ShortcutHelp";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -6,7 +7,9 @@ import * as api from "../../api";
 import { useStore } from "../../store";
 import type { DisplayStatus, WorkItem } from "../../types";
 import { detail, stubFetch } from "../item/testkit";
+import { SIDEBAR_KEY } from "../shell/sidebarPref";
 import { Shell } from "../shell/Shell";
+import { reload } from "../offline";
 import { BoardPage } from "./BoardPage";
 import { useBulk } from "./bulk";
 import { resetBoardPrefs } from "./prefs";
@@ -138,7 +141,7 @@ describe("BoardPage", () => {
     board();
     await act(async () => {});
     expect(screen.queryByRole("heading", { name: "Nothing on the board yet" })).toBeNull();
-    expect(screen.getByRole("region", { name: "Needs you" })).toBeInTheDocument();
+    expect(screen.getByText("No work items yet.")).toBeInTheDocument();
     expect(localStorage.getItem("kraft.firstRun")).toBeNull();
   });
 
@@ -146,7 +149,7 @@ describe("BoardPage", () => {
     vi.spyOn(api, "getRepos").mockRejectedValue(new Error("down"));
     board();
     await act(async () => {});
-    expect(screen.getByRole("region", { name: "Needs you" })).toBeInTheDocument();
+    expect(screen.getByText("No work items yet.")).toBeInTheDocument();
   });
 
   it("files the store's items in the four groups and caps Done at show_done, with show all", async () => {
@@ -166,12 +169,59 @@ describe("BoardPage", () => {
     put(item("n1", "needs_you"), item("f2", "failed"), item("d3", "done"));
     board();
     expect(await screen.findByText("2 NEED YOU")).toBeInTheDocument();
-    await userEvent.click(await screen.findByRole("link", { name: "completed and cancelled · auto-archive after 30 days" }));
+    const link = await screen.findByRole("link", { name: "Archived" });
+    expect(link.parentElement).toHaveTextContent("Archived · auto-archive after 30 days");
+    await userEvent.click(link);
     expect(where()).toBe("/archived");
   });
 
+  it.each([
+    ["steps back to its rail on arrival at a narrow width, before any peek", 1024, null, "rail"],
+    ["stays pinned on a wide screen", 1500, null, "pinned"],
+    ["keeps the reader's pinned choice", 1024, "pinned", "pinned"],
+  ] as const)("the sidebar %s", async (_n, width, stored, want) => {
+    vi.stubGlobal("innerWidth", width);
+    if (stored) localStorage.setItem(SIDEBAR_KEY, stored);
+    put(item("a1", "running"));
+    board();
+    await screen.findByText("Item a1");
+    expect(document.documentElement.dataset.sidebar).toBe(want);
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it("opens on a gate from a link, says so when nothing waits there, and Clear drops it", async () => {
+    put(item("n1", "needs_you"));
+    board("/?gate=spec_approval&stop=budget");
+    expect(await screen.findByText("Nothing matches this filter.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Gate · spec approval/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(where()).toBe("/");
+    expect(screen.getByText("Item n1")).toBeInTheDocument();
+  });
+
+  it("draws only the groups that hold rows, and one line with Clear when a filter leaves none", async () => {
+    put(item("n1", "needs_you"), item("d3", "done"));
+    board();
+    const user = userEvent.setup();
+    await screen.findByRole("region", { name: "Needs you" });
+    expect(screen.queryByRole("region", { name: "Running" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Not started" })).toBeNull();
+    await user.type(screen.getByRole("searchbox", { name: "Filter" }), "zzz");
+    expect(screen.queryByRole("region")).toBeNull();
+    expect(screen.getAllByText(/No match for “zzz”/)).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Clear" }));
+    expect(where()).toBe("/");
+    expect(await screen.findByRole("region", { name: "Needs you" })).toBeInTheDocument();
+  });
+
   it("filters by text, repo crumb and Chain menu, and groups and sorts from their menus, all in the URL", async () => {
-    put(item("a1", "running", { repo: "/r/kraft-api" }), item("b2", "running", { repo: "/r/kraft-core", chain_template: "docs_only" }));
+    put(
+      item("a1", "running", { repo: "/r/kraft-api" }),
+      item("b2", "running", { repo: "/r/kraft-core", chain_template: "docs_only" }),
+      item("g1", "needs_you", { pending_gate: "plan_approval", stop: { kind: "gate", node: "plan_approval", resume_at: null, reason: null } }),
+      item("m1", "needs_you", { stop: { kind: "mr_closed", node: "merge_request", resume_at: null, reason: null } }),
+    );
     board();
     const user = userEvent.setup();
     await user.type(await screen.findByRole("searchbox", { name: "Filter" }), "a1");
@@ -191,6 +241,26 @@ describe("BoardPage", () => {
     expect(screen.getByRole("button", { name: /Chain · docs_only/ })).toBeInTheDocument();
     expect(screen.queryByText("Item a1")).toBeNull();
 
+    await user.click(screen.getByRole("button", { name: /Chain · docs_only/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: /All chains/ }));
+
+    // Gate lists the gates by what they decide, Stop reason the kinds of stop in words; neither shows ids.
+    await user.click(screen.getByRole("button", { name: /^Gate/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: /approve plan/ }));
+    expect(where()).toContain("gate=plan_approval");
+    expect(screen.getByRole("button", { name: /Gate · approve plan/ })).toBeInTheDocument();
+    expect(screen.getByText("Item g1")).toBeInTheDocument();
+    expect(screen.queryByText("Item a1")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /Gate · / }));
+    await user.click(screen.getByRole("menuitemradio", { name: /All gates/ }));
+    await user.click(screen.getByRole("button", { name: /^Stop reason/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: /^MR closed/ }));
+    expect(where()).toContain("stop=mr_closed");
+    expect(screen.getByText("Item m1")).toBeInTheDocument();
+    expect(screen.queryByText("Item g1")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /Stop · MR closed/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: /All stop reasons/ }));
+
     await user.click(screen.getByRole("button", { name: /Group/ }));
     await user.click(screen.getByRole("menuitemradio", { name: "Repo" }));
     expect(where()).toContain("group=repo");
@@ -200,7 +270,7 @@ describe("BoardPage", () => {
     expect(where()).toContain("sort=title");
   });
 
-  it("starts Group from Appearance › Board", async () => {
+  it("starts Group from Board & code › Board", async () => {
     theme({ group_by: "chain" });
     put(item("a1", "running"));
     board();
@@ -220,21 +290,14 @@ describe("BoardPage", () => {
     expect(screen.getByRole("searchbox", { name: "Filter" })).toHaveFocus();
   });
 
-  it("lists its keyboard shortcuts from ? and from the button, and hints / in the empty filter", async () => {
+  it("hints / in the empty filter, and adds its rows to the shortcut help", async () => {
     put(item("r1", "running"));
     board();
     await screen.findByRole("button", { name: /Item r1/ });
     const filter = screen.getByRole("searchbox", { name: "Filter" });
     expect(filter.parentElement).toHaveTextContent("/");
-    fireEvent.keyDown(filter, { key: "?" });
-    expect(screen.queryByRole("dialog")).toBeNull();
-    fireEvent.keyDown(document.body, { key: "?" });
+    render(<ShortcutHelp onClose={() => {}} />);
     expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveTextContent("Focus the filter");
-    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
-    expect(screen.queryByRole("dialog")).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
-    expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
-    await userEvent.keyboard("{Escape}");
     await userEvent.type(filter, "x");
     expect(filter.parentElement).not.toHaveTextContent("/");
   });
@@ -272,7 +335,7 @@ describe("BoardPage", () => {
     board("/?new=1");
     await act(async () => {});
     expect(screen.queryByRole("heading", { name: "Nothing on the board yet" })).toBeNull();
-    expect(screen.getByRole("region", { name: "Needs you" })).toBeInTheDocument();
+    expect(screen.getByText("No work items yet.")).toBeInTheDocument();
   });
 
   it("shows the skeleton while the first read runs with nothing loaded, and not once rows are there", async () => {
@@ -294,20 +357,17 @@ describe("BoardPage", () => {
     expect(screen.queryByLabelText("Loading the board")).toBeNull();
   });
 
-  it("goes offline when the read fails: the banner carries the error, rows stay, actions are off; Retry now reads again", async () => {
+  it("goes offline when the read fails: rows stay, actions are off, and a successful read clears it", async () => {
     put(item("p1", "paused"));
     const list = vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("could not reach the Kraft server (GET /work-items?include_abandoned=true) — it may have stopped."));
     board();
-    const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent("Could not load the board: could not reach the Kraft server — it may have stopped. Showing what was loaded before");
-    expect(screen.getByText("OFFLINE")).toBeInTheDocument();
+    expect(await screen.findByText("OFFLINE")).toBeInTheDocument();
     expect(screen.getByText("Item p1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Resume" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "+ New work item" })).toBeDisabled();
     list.mockResolvedValue({ items: [item("p1", "paused")], cursor: 1 });
-    await userEvent.click(within(banner).getByRole("button", { name: "Retry now" }));
+    await act(async () => { await reload(); });
     expect(list).toHaveBeenCalledTimes(2);
-    await act(async () => {});
     expect(screen.queryByText("OFFLINE")).toBeNull();
     expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
   });

@@ -26,7 +26,7 @@ import { useDo } from "./useDo";
 import "./item.css";
 import { tip } from "../../ui/Tooltip";
 
-const TAG_TONE = { running: "info", waiting: "info", queued: "info", blocked: "info", escalated: "warn", needs_you: "warn", failed: "bad", paused: "warn", done: "ok", cancelled: "muted", archived: "muted" } as const;
+const TAG_TONE = { running: "info", waiting: "info", queued: "info", blocked: "info", escalated: "warn", needs_you: "warn", failed: "bad", paused: "muted", done: "ok", cancelled: "muted", archived: "muted" } as const;
 
 /** The session whose log the screen previews: the latest work session on the node the item stands on. */
 export function currentSession(item: ItemDetail): WorkerSession | null {
@@ -201,10 +201,10 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
           try {
             if (v === "apply") {
               const a = await act.applyDraft(item.id);
-              if (!a.ok) return void showToast(a.error);
+              if (!a.ok) return void showToast(a.error, { tone: "error" });
             }
             const r = await act.resume(item.id);
-            if (!r.ok) return void showToast(r.error);
+            if (!r.ok) return void showToast(r.error, { tone: "error" });
             showToast(v === "apply" ? "Applied the draft and started." : "Started. The draft is kept.");
             sheet.close();
             reload();
@@ -227,13 +227,13 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
             case "open-mr": sheet.close(); return void window.open(item.mr_ref?.url, "_blank", "noopener");
             case "duplicate": {
               const r = await act.duplicate(item.id);
-              if (!r.ok) return void showToast(r.error);
+              if (!r.ok) return void showToast(r.error, { tone: "error" });
               showToast(r.body.duplicate_warning ?? "Duplicated as a new item, paused.");
               return sheet.goTo(itemUrl(r.body.id));
             }
             case "archive": {
               const r = await act.archive(item.id);
-              if (!r.ok) return void showToast(r.error);
+              if (!r.ok) return void showToast(r.error, { tone: "error" });
               showToast("Archived.");
               return sheet.goTo("/");
             }
@@ -261,7 +261,7 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
         onPick={async (v) => {
           if (v === "amount") return sheet.swap("raise-amount");
           const r = await act.raiseBudget(item.id, v === "none" ? null : cap + Number(v));
-          if (!r.ok) return void showToast(r.error);
+          if (!r.ok) return void showToast(r.error, { tone: "error" });
           showToast("Budget raised. The item is running again.");
           sheet.close();
           reload();

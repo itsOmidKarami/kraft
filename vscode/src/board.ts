@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { reportError, runAction, runBulk } from "./actions";
 import { ApiError, type Api, type ItemAction, type WorkItem } from "./core/api";
-import { archivedChildren, contextValueOf, hoverFromCache, describe, groupHolding, groupItems, iconOf, needsYouCount, nextTick, onBoard, tooltipOf, welcomeState, withArchived, worktreeTarget, type Include, type Welcome } from "./core/board";
+import { archivedChildren, contextValueOf, hoverFromCache, colorOf, describe, groupHolding, groupItems, groupLabel, iconOf, itemLabel, nameOf, needsYouCount, nextTick, onBoard, tooltipOf, boardDescription, welcomeState, withArchived, worktreeTarget, type Include, type Welcome } from "./core/board";
 import { selectedItems, type BulkVerb, type SelectionRow } from "./core/bulk";
 import { findingsOf } from "./core/findings";
 import { downRow } from "./core/health";
@@ -11,7 +11,7 @@ import { mutating } from "./core/guard";
 import type { PickVerb } from "./core/picks";
 import { rowCommand } from "./core/primary";
 import { RESTRICTED } from "./core/readOnly";
-import { ALREADY_STARTING, alreadyRunning, oneAtATime, startFailure, startInvocation, type StartError } from "./core/start";
+import { ALREADY_STARTING, alreadyRunning, INSTALL_URL, oneAtATime, startButtons, startFailure, startInvocation, type StartError } from "./core/start";
 import type { WorkspaceScope } from "./core/repoScope";
 import type { Store } from "./core/store";
 import { log } from "./log";
@@ -158,6 +158,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
       // Its key, not its label: the count in the label changes as items move.
       t.id = `group:${node.id}`;
       t.contextValue = "group";
+      t.accessibilityInformation = { label: groupLabel(node.label, node.items.length) };
       return t;
     }
     if (node.kind === "archived") {
@@ -178,7 +179,9 @@ export class Board implements vscode.TreeDataProvider<Node> {
     const t = new vscode.TreeItem(item.title, this.unlocated(item).length ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
     t.id = item.id;
     t.description = describe(item);
-    t.iconPath = new vscode.ThemeIcon(iconOf(item));
+    const color = colorOf(item);
+    t.iconPath = new vscode.ThemeIcon(iconOf(item), color ? new vscode.ThemeColor(color) : undefined);
+    t.accessibilityInformation = { label: itemLabel(item) };
     t.contextValue = contextValueOf(item, { drafts: this.drafts?.has(item.id) ?? false });
     // A gate row's click opens its document; any other row's only selects it.
     const click = rowCommand(item);
@@ -202,6 +205,11 @@ export class Board implements vscode.TreeDataProvider<Node> {
       t.tooltip = tooltipOf(item);
     }
     return t;
+  }
+
+  /** How many items the board shows. */
+  rows(): number {
+    return groupItems(this.store.items(), this.include).reduce((n, g) => n + g.items.length, 0);
   }
 
   badge(): vscode.ViewBadge | undefined {
@@ -230,8 +238,18 @@ export function registerBoard(
     if (e.element.kind === "archived") void board.loadArchived();
   }));
   const updateBadge = () => (view.badge = board.badge());
+  // The description says which repos; a stale board also says so above its rows, where a single-view sidebar shows no description.
+  const updateDescription = () => {
+    const text = boardDescription(store.connected, scope.showAll, board.rows());
+    view.description = text;
+    view.message = store.connected ? undefined : text;
+  };
+  updateDescription();
   store.onChange(updateBadge);
+  store.onChange(updateDescription);
+  store.onConnection(updateDescription);
   scope.onChange(updateBadge);
+  scope.onChange(updateDescription);
 
   const itemOf = (node: { item?: WorkItem } | undefined) => node?.item;
   // From the palette there is no row: ask for one among the window's items,
@@ -290,7 +308,7 @@ export function registerBoard(
         return reportError(e, store, id);
       }
       const target = worktreeTarget(store.detail(id));
-      if (!target) return void vscode.window.showInformationMessage(`${id} has no worktree on disk: it was reclaimed, or the item has not run yet.`);
+      if (!target) return void vscode.window.showInformationMessage(`${nameOf(store, id)} has no worktree on disk: it was reclaimed, or the item has not run yet.`);
       await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(target), { forceNewWindow: true });
     }),
     vscode.commands.registerCommand("kraft.openInWebUi", async (node?: { item?: WorkItem }) => {
@@ -339,10 +357,10 @@ async function startKraft(file: string, args: string[], store: Store): Promise<v
       void vscode.window.showInformationMessage(startFailure(err, file));
       return store.retryNow();
     }
-    const settings = err.code === "ENOENT" ? ["Open Settings"] : [];
     // Not awaited: an open toast must not hold the progress notification or the next start.
-    void vscode.window.showErrorMessage(startFailure(err, file), ...settings).then((pick) => {
-      if (pick) void vscode.commands.executeCommand("workbench.action.openSettings", "kraft.path");
+    void vscode.window.showErrorMessage(startFailure(err, file), ...startButtons(err)).then((pick) => {
+      if (pick === "Get Kraft") void vscode.env.openExternal(vscode.Uri.parse(INSTALL_URL));
+      else if (pick) void vscode.commands.executeCommand("workbench.action.openSettings", "kraft.path");
     });
   }
 }

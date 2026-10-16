@@ -92,7 +92,7 @@ describe("Policy page: Limits", () => {
 
   it("names the dollar cap that binds, from the server's answer", async () => {
     mount();
-    expect(await screen.findByText(/the lower one wins: budget.work_item_usd \$10/)).toBeInTheDocument();
+    expect(await screen.findByText(/the lower one wins: outer ceiling \$10/)).toBeInTheDocument();
   });
 
   it("refuses a value that is not a number without sending it", async () => {
@@ -104,10 +104,11 @@ describe("Policy page: Limits", () => {
   });
 
   it("draws the set-below-policy column from the server's lists, and marks one past the maximum", async () => {
-    vi.mocked(d.getDraft).mockImplementation(() => ok(policyView({ problems: [problem({ message: "implement 120 is above the maximum 90", scope: "limits", level: "tasks", field: "maxima.tasks.time_cap_minutes" })] }, { ...RESOLVED, limits: { ...RESOLVED.limits, caps: { ...RESOLVED.limits.caps, tasks: { ...RESOLVED.limits.caps.tasks, time_cap_minutes: { ...RESOLVED.limits.caps.tasks.time_cap_minutes, below: [{ layer: "library", chain: "default", path: "i", via: "library:tasks.implementer", value: 120, exceeds: true }] } } } } }, true)));
+    vi.mocked(d.getDraft).mockImplementation(() => ok(policyView({ problems: [problem({ message: "implement 120 is above the maximum 90", scope: "limits", level: "tasks", field: "maxima.tasks.time_cap_minutes" })] }, { ...RESOLVED, limits: { ...RESOLVED.limits, caps: { ...RESOLVED.limits.caps, tasks: { ...RESOLVED.limits.caps.tasks, time_cap_minutes: { ...RESOLVED.limits.caps.tasks.time_cap_minutes, below: [{ layer: "library", chain: "default", path: "i", via: "library:tasks.implementer", value: 120, exceeds: true }, { layer: "library", chain: "default", path: "j", via: "library:tasks.implementer", value: 120, exceeds: true }] } } } } }, true)));
     mount();
     const row = await screen.findByRole("group", { name: "tasks running" });
-    expect(within(row).getByText("implementer 120 min · library !")).toHaveClass("is-bad");
+    // The same line from two tasks is said once, with how many.
+    expect(within(row).getByText("implementer 120 min · library ×2 !")).toHaveClass("is-bad");
     expect(screen.getByRole("region", { name: "tasks" })).toHaveTextContent("1 problem");
     expect(within(row).getByRole("button", { name: /maximum, 240 min/ })).toHaveClass("is-bad");
   });
@@ -161,7 +162,9 @@ describe("Policy page: Limits", () => {
 describe("Policy page: Loops", () => {
   it("sends the default: block's keys, a per-loop entry through set_loop in seconds, and removes an entry", async () => {
     mount("/settings/policy/loops");
-    await screen.findByRole("region", { name: "Every fix loop" });
+    const every = await screen.findByRole("region", { name: "Every fix loop" });
+    expect(within(every).getByText("attempts")).toBeInTheDocument();
+    expect(within(every).getByText("wall clock")).toBeInTheDocument();
     await edit(/^default loop attempts, 3/, "4");
     await waitFor(() => expect(sent()).toContainEqual({ op: "set_value", scope: "loops", key: "default.attempts", value: 4 }));
     await edit(/^default loop wall clock, 60 min/, "90");

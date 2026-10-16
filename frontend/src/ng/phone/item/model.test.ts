@@ -109,10 +109,23 @@ describe("cardOf: a gate's message (PH-14)", () => {
   });
 });
 
+describe("cardOf: a node reads as its name, not its id", () => {
+  const node = "merge_request";
+  it.each([
+    ["failed", mk("failed", stop("failed", { node, reason: "exit 1" })), "merge request"],
+    ["cap", mk("needs_you", stop("cap", { node, reason: "Running time hit its 8h cap" })), "at merge request"],
+    ["question", mk("needs_you", stop("question", { node }), { needs_context_question: "Allow it?" }), "asked by the agent · on merge request"],
+    ["paused", mk("paused", null, { current_node_id: node }), "at merge request"],
+    ["escalated", mk("escalated", null, { current_node_id: node }), "at merge request"],
+  ])("on the %s card", (_, item, where) => {
+    expect(cardOf(item)?.where).toContain(where);
+  });
+});
+
 describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
   it("has none for a plain running item and one for each stop", () => {
     expect(cardOf(mk("running"))).toBeNull();
-    expect(cardOf(mk("needs_you", stop("gate", { node: "plan_approval" }), { pending_gate: "plan_approval" }))).toMatchObject({ title: "Waiting for your approval", where: "at plan_approval" });
+    expect(cardOf(mk("needs_you", stop("gate", { node: "plan_approval" }), { pending_gate: "plan_approval" }))).toMatchObject({ title: "Waiting for your approval", where: "approve plan" });
     expect(cardOf(mk("needs_you", stop("budget", { reason: "The budget ran out." })))).toMatchObject({ tone: "bad", title: "The budget ran out", where: "at verification" });
     expect(cardOf(mk("needs_you", own(), OWN_CAP))?.text).toBe("Raising the budget resumes the item at once.");
     // F4: a cap the item could raise, which the server takes no raise for now: the bar offers Retry, and the card says so.
@@ -126,7 +139,7 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     expect(cardOf(mk("blocked", null, { dependencies: [{ id: "a1", title: "Schema first", status: "needs_human", met: false }, { id: "b2", title: "Old cleanup", status: "completed", met: true }] })))
       .toMatchObject({ tone: "info", title: "Blocked", where: "waiting on 1 item", facts: [["needs human", "Schema first", "a1"], ["completed", "Old cleanup", "b2"]] });
     expect(cardOf(mk("blocked"))).toMatchObject({ where: "nothing left to wait for", text: "Kraft queues it within seconds.", facts: [] });
-    expect(cardOf(mk("paused"))).toMatchObject({ title: "Paused", where: "at verification" });
+    expect(cardOf(mk("paused"))).toMatchObject({ tone: "muted", title: "Paused", where: "at verification" });
     expect(cardOf(mk("paused", null, { current_node_id: null }))).toBeNull();
     expect(cardOf(mk("done", null, { mr_ref: { number: 7, url: "u" } }))).toMatchObject({ tone: "ok", where: "MR !7 merged", text: undefined });
     expect(cardOf(mk("done"))).toMatchObject({ text: "The chain finished. No merge request was opened." });
@@ -189,7 +202,7 @@ describe("nodeSub: a chain row's words", () => {
     expect(nodeSub(graph(mk("running")).find((n) => n.id === "verification")!).text).toMatch(/^running/);
     expect(nodeSub(graph(mk("failed", stop("failed"))).find((n) => n.id === "verification")!)).toEqual({ text: "failed", tone: "bad" });
     expect(nodeSub(graph(mk("needs_you", stop("cap"))).find((n) => n.id === "verification")!)).toEqual({ text: "stopped at the cap", tone: "bad" });
-    expect(nodeSub(graph(mk("paused")).find((n) => n.id === "verification")!)).toEqual({ text: "paused", tone: "warn" });
+    expect(nodeSub(graph(mk("paused")).find((n) => n.id === "verification")!)).toEqual({ text: "paused", tone: "muted" });
     // R11b-04: a waiting node says what it waits on, not "running".
     expect(nodeSub(graph(mk("waiting", stop("wait"))).find((n) => n.id === "verification")!).text).toMatch(/^waiting on CI/);
     expect(nodeSub(graph(mk("waiting", stop("rate_limit"))).find((n) => n.id === "verification")!).text).toMatch(/^waiting · rate limit/);

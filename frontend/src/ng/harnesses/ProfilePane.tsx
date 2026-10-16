@@ -8,7 +8,7 @@ import { problemText } from "../templates/problems";
 import { Button } from "../ui/Button";
 import { AddEntry, EntryEditor } from "./HarnessPane";
 import { chainLink } from "./Lanes";
-import { type HProblem, type Resolved, problemsOfProfile, taskName } from "./model";
+import { type HProblem, type Resolved, problemsOfProfile, taskName, entryUsers } from "./model";
 import { entryOp, useRun } from "./ops";
 import type { ProviderStatus } from "./useProviders";
 
@@ -52,7 +52,7 @@ export function ProfilePane(p: Props) {
       <Inspector id="harnesses-entry" open={p.open} size={p.size} crumbs={[{ label: "Profiles", onClick: () => p.onLane(null) }, { label: name, onClick: () => p.onLane(null) }]} icon="bot" title={lane} sub={`provider entry of ${name}`} onCollapse={p.onCollapse} onExpand={p.onExpand}
         footer={entry ? <><Button variant="danger" onClick={() => void run(entryOp(name, lane, null))}>Remove entry</Button></> : undefined}>
         <Head>Provider entry</Head>
-        {entry ? <EntryEditor draft={draft} profile={name} provider={lane} entry={entry} status={status(lane)} changed={changed} /> : <AddEntry draft={draft} profile={name} provider={lane} status={status(lane)} />}
+        {entry ? <EntryEditor draft={draft} profile={name} provider={lane} entry={entry} status={status(lane)} changed={changed} used={entryUsers(r, name, lane)} /> : <AddEntry draft={draft} profile={name} provider={lane} status={status(lane)} />}
         <Head>Runs on · {hs.length}</Head>
         {hs.map((h) => <Kv key={h.id} k={h.id} v={`${h.state[0].toUpperCase()}${h.state.slice(1)} →`} onClick={() => p.onHarness(h.id)} />)}
         {error && <p className="hn-error" role="alert">{error}</p>}

@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { Board, registerBoard } from "../../src/board";
 import { ApiError, type BulkResult } from "../../src/core/api";
 import type { Store } from "../../src/core/store";
-import { announceable, archivedChildren, contextValueOf, hoverFromCache, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, nextTick, steerPrompt, tooltipOf, welcomeState, withArchived, worktreeTarget } from "../../src/core/board";
+import { announceable, boardDescription, archivedChildren, colorOf, contextValueOf, groupLabel, hoverFromCache, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, nextTick, steerPrompt, tooltipOf, welcomeState, withArchived, worktreeTarget } from "../../src/core/board";
 import { log } from "../../src/log";
 import { item, stopped } from "./fixtures/item";
 
@@ -13,12 +13,12 @@ it.each([
   ["gate", stopped("gate", { pending_gate: "spec_approval" }), "pass", "needs"],
   ["question", stopped("question"), "question", "needs"],
   ["budget", stopped("budget"), "credit-card", "needs"],
-  ["cap", stopped("cap"), "error", "needs"],
+  ["cap", stopped("cap"), "stop-circle", "needs"],
   ["conflict", stopped("conflict"), "warning", "needs"],
   ["failed", item({ display_status: "failed", stop: { kind: "failed", node: "implementation", reason: "x", resume_at: null } }), "error", "needs"],
   ["paused", item({ display_status: "paused" }), "debug-pause", "needs"],
   ["not started", item({ display_status: "paused", current_node_id: null }), "debug-pause", "not_started"],
-  ["running", item(), "sync~spin", "running"],
+  ["running", item(), "play-circle", "running"],
   ["waiting", item({ display_status: "waiting" }), "watch", "running"],
   ["queued", item({ display_status: "queued" }), "watch", "running"],
   ["blocked", item({ display_status: "blocked", current_node_id: null }), "watch", "not_started"],
@@ -148,16 +148,27 @@ it("announces only what is in scope", () => {
 });
 
 it.each([
-  ["a question", stopped("question", { stop: { kind: "question", node: "implementation", reason: "needs_context: Keep the header?", resume_at: null } }), "K-1 · agent asks: Keep the header?"],
-  ["a stop with no reason", stopped("cap"), "K-1 · waiting for you at implementation"],
-  ["a row with no display status", item({ display_status: undefined }), "K-1"],
+  ["a question", stopped("question", { stop: { kind: "question", node: "implementation", reason: "needs_context: Keep the header?", resume_at: null } }), "agent asks: Keep the header?"],
+  ["a stop with no reason", stopped("cap"), "waiting for you at implementation"],
+  ["a gate, in the board's words", stopped("gate", { pending_gate: "spec_approval" }), "approve spec"],
+  ["a row with no display status", item({ display_status: undefined }), "active"],
 ])("describes %s", (_, it_, want) => {
   expect(describeItem(it_)).toBe(want);
 });
 
 it.each([
-  ["a question, without its prefix", stopped("question", { stop: { kind: "question", node: "implementation", reason: "needs_context: Keep the header?", resume_at: null } }), "Keep the header?"],
-  ["a cap's whole reason", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "Loop cap hit. Raise it to retry.", resume_at: null } }), "Loop cap hit. Raise it to retry."],
+  ["a gate", stopped("gate", { pending_gate: "spec_approval" }), "list.warningForeground"],
+  ["a question", stopped("question"), "list.warningForeground"],
+  ["a failure", item({ display_status: "failed" }), "list.errorForeground"],
+  ["a cap", stopped("cap"), "list.errorForeground"],
+  ["a running row", item(), undefined],
+])("colour: %s", (_, it_, want) => expect(colorOf(it_)).toBe(want));
+
+it.each([[3, "Needs you, 3 items"], [1, "Needs you, 1 item"]])("group label for %s", (n, want) => expect(groupLabel("Needs you", n)).toBe(want));
+
+it.each([
+  ["a question, without its prefix", stopped("question", { stop: { kind: "question", node: "implementation", reason: "needs_context: Keep the header?", resume_at: null } }), "K-1 — Keep the header?"],
+  ["a cap's whole reason", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "Loop cap hit. Raise it to retry.", resume_at: null } }), "K-1 — Loop cap hit. Raise it to retry."],
   ["a stop with no reason", stopped("cap"), "K-1 — waiting for you at implementation"],
   ["a running row", item(), "K-1 — implementation"],
   ["a row with no tail", item({ display_status: "someday" as never }), "K-1 — someday"],
@@ -169,7 +180,7 @@ it.each([
 it.each([
   ["no detail", item(), undefined, "K-1 — implementation"],
   ["a capped spend, no running time", item(), { budget_cap: { cap_usd: 5, spent_usd: 1, source: "item" as const }, running_time: null }, "K-1 — implementation\nSpent $1.00 of $5.00"],
-  ["spend and time", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "Loop cap hit.", resume_at: null } }), { budget_cap: { cap_usd: null, spent_usd: 0.12, source: "policy" as const }, running_time: { running_s: 240, cap_minutes: null } }, "Loop cap hit.\nSpent $0.120 (no cap)\nRan 4m (no cap)"],
+  ["spend and time", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "Loop cap hit.", resume_at: null } }), { budget_cap: { cap_usd: null, spent_usd: 0.12, source: "policy" as const }, running_time: { running_s: 240, cap_minutes: null } }, "K-1 — Loop cap hit.\nSpent $0.120 (no cap)\nRan 4m (no cap)"],
   ["a detail with neither", item(), {}, "K-1 — implementation"],
 ])("tooltip with detail: %s", (_, it_, detail, want) => {
   expect(tooltipOf(it_, detail)).toBe(want);
@@ -178,9 +189,9 @@ it.each([
 it("tooltip: a row alone has no spend line", () => expect(tooltipOf(item())).not.toContain("Spent"));
 
 it.each([
-  ["a question", stopped("question", { stop: { kind: "question", node: "implementation", reason: "needs_context: Keep the header?", resume_at: null } }), "K-1 asks: Keep the header? Your answer steers it (optional)"],
-  ["a question with no reason", stopped("question"), "Steer for K-1 (optional)"],
-  ["a cap", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "cap hit", resume_at: null } }), "Steer for K-1 (optional)"],
+  ["a question", stopped("question", { stop: { kind: "question", node: "implementation", reason: "needs_context: Keep the header?", resume_at: null } }), "t asks: Keep the header? Your answer steers it (optional)"],
+  ["a question with no reason", stopped("question"), "Steer for t (optional)"],
+  ["a cap", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "cap hit", resume_at: null } }), "Steer for t (optional)"],
 ])("steer prompt for %s", (_, it_, want) => {
   expect(steerPrompt(it_)).toBe(want);
 });
@@ -190,16 +201,24 @@ it.each([
   ["connected, scope not ready yet", true, false, false, 0, "none"],
   ["something visible", true, true, false, 2, "none"],
   ["connected, ready, nothing in this repo", true, true, false, 0, "here"],
-  ["showing every repo, nothing anywhere", true, true, true, 0, "none"],
+  ["showing every repo, nothing anywhere", true, true, true, 0, "all"],
+  ["showing every repo, something in one", true, true, true, 2, "none"],
 ])("welcome: %s", (_, connected, ready, showAll, visible, want) => {
   expect(welcomeState(connected, ready, showAll, visible)).toBe(want);
 });
 
 it.each([
+  ["this repo's board", true, false, 3, "This repo"],
+  ["every repo's board", true, true, 0, "All repos"],
+  ["disconnected with cached rows: stale, said so", false, false, 3, "Not connected · last known"],
+  ["disconnected with nothing cached: the Start row says it", false, true, 0, ""],
+])("boardDescription: %s", (_, connected, showAll, rows, want) => expect(boardDescription(connected, showAll, rows)).toBe(want));
+
+it.each([
   ["this repo is not connected", true, true, false, 0, true, "connect"],
   ["connected, nothing in it", true, true, false, 0, false, "here"],
   ["unconnected, but something visible", true, true, false, 3, true, "none"],
-  ["unconnected, showing every repo", true, true, true, 0, true, "none"],
+  ["unconnected, showing every repo", true, true, true, 0, true, "all"],
   ["unconnected, scope not ready", true, false, false, 0, true, "none"],
 ])("welcome with unconnected: %s", (_, connected, ready, showAll, visible, unconnected, want) => {
   expect(welcomeState(connected, ready, showAll, visible, unconnected)).toBe(want);
@@ -265,7 +284,7 @@ describe("Board, an item's row", () => {
   it("takes its first line from the store's current row", async () => {
     const { board } = boardOn(() => undefined, async () => capped, stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "Loop cap hit.", resume_at: null } }));
     const t = board.getTreeItem(node);
-    expect((await board.resolveTreeItem(t, node)).tooltip).toBe("Loop cap hit.\nSpent $1.00 of $5.00");
+    expect((await board.resolveTreeItem(t, node)).tooltip).toBe("K-1 — Loop cap hit.\nSpent $1.00 of $5.00");
   });
 
   it.each([
@@ -275,6 +294,14 @@ describe("Board, an item's row", () => {
     const at = { kind: "item", item: current } as never;
     const command = want && { command: want, title: "Open", arguments: [{ item: current }] };
     expect(boardOn(() => undefined, vi.fn(), current).board.getTreeItem(at).command).toEqual(command);
+  });
+
+  it.each([
+    ["a gate", stopped("gate", { title: "Cache", pending_gate: "spec_approval" }), "pass", "list.warningForeground", "Cache, needs you, approve spec"],
+    ["a running row", item({ title: "Cache" }), "play-circle", undefined, "Cache, running, implementation"],
+  ])("draws %s with its icon colour and a screen reader label", (_, current, icon, color, label) => {
+    const t = boardOn(() => undefined, vi.fn(), current).board.getTreeItem({ kind: "item", item: current } as never);
+    expect([(t.iconPath as { id: string; color?: { id: string } }).id, (t.iconPath as { color?: { id: string } }).color?.id, t.accessibilityInformation?.label]).toEqual([icon, color, label]);
   });
 
   it("falls back to the row's own line when the read fails", async () => {
@@ -342,23 +369,24 @@ describe("Answer", () => {
     await handlers.get("kraft.answer")!({ kind: "item", item: asked }, [{ kind: "item", item: asked }, { kind: "item", item: other }]);
     expect(api.resume.mock.calls).toEqual(resumed);
     expect(api.retry).not.toHaveBeenCalled();
-    if (resumed.length) expect(input).toHaveBeenCalledWith({ prompt: "Q-1 asks: Which API? Your answer steers it (optional)" });
+    if (resumed.length) expect(input).toHaveBeenCalledWith({ prompt: "t asks: Which API? Your answer steers it (optional)" });
   });
   afterEach(() => vi.restoreAllMocks());
 });
 
 describe("A multi-selection", () => {
   const row = (i: ReturnType<typeof item>) => ({ kind: "item", item: i });
-  const [p1, p2] = [item({ id: "P-1", actions: ["pause"] }), item({ id: "P-2", actions: ["pause"] })];
-  const [r1, r2] = [item({ id: "R-1", display_status: "paused", actions: ["resume"] }), item({ id: "R-2", display_status: "paused", actions: ["resume"] })];
-  const q = stopped("question", { id: "Q-1", actions: ["resume", "retry"] });
-  const [d1, d2] = [item({ id: "D-1", display_status: "done", actions: ["archive"] }), item({ id: "D-2", display_status: "done", actions: ["archive"] })];
-  const p3 = item({ id: "P-3", actions: ["pause"] });
+  const [p1, p2] = [item({ id: "P-1", actions: ["pause"] }), item({ id: "P-2", title: "Cache layer", actions: ["pause"] })];
+  const [r1, r2] = [item({ id: "R-1", display_status: "paused", actions: ["resume"] }), item({ id: "R-2", title: "Login page", display_status: "paused", actions: ["resume"] })];
+  const q = stopped("question", { id: "Q-1", title: "Rate limits", actions: ["resume", "retry"] });
+  const d3 = item({ id: "D-3", display_status: "done", actions: ["archive"], worktree_exists: false });
+  const [d1, d2] = [item({ id: "D-1", display_status: "done", actions: ["archive"], worktree_exists: true }), item({ id: "D-2", display_status: "done", actions: ["archive"], worktree_exists: true })];
+  const p3 = item({ id: "P-3", title: "Search box", actions: ["pause"] });
   /** The ids each bulk call sent, without the results array it fills. */
   const sent = (bulk: { mock: { calls: unknown[][] } }) => bulk.mock.calls.map((c) => c.slice(0, 2));
 
   function setup(refusal: () => string | null = () => null, answer: string | null = "Archive") {
-    const all = [p1, p2, p3, r1, r2, q, d1, d2];
+    const all = [p1, p2, p3, r1, r2, q, d1, d2, d3];
     const refreshed: string[] = [];
     const store = { items: () => all, item: (id: string) => all.find((i) => i.id === id), detail: () => undefined,
       refresh: async (id: string) => { refreshed.push(id); if (id === "P-2") throw new Error("gone"); return true; },
@@ -399,7 +427,7 @@ describe("A multi-selection", () => {
     expect(sent(api.bulk)).toEqual([["pause", ["P-1", "P-2"]]]);
     expect(logged).toHaveBeenCalledWith("Paused 1. Not paused: P-2 (being started).");
     expect(api.pause).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith("Paused 1. Not paused: P-2 (being started).");
+    expect(warn).toHaveBeenCalledWith("Paused 1. Not paused: Cache layer (being started).");
     expect(info).not.toHaveBeenCalled();
     expect(refreshed).toEqual(["P-1", "P-2"]);
   });
@@ -409,20 +437,22 @@ describe("A multi-selection", () => {
     await handlers.get("kraft.resume")!(row(r1), [row(r1), row(q), row(r2)]);
     expect(api.resume.mock.calls).toEqual([["R-1"], ["R-2"]]);
     expect(input).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith("Resumed 1. Not resumed: R-2 (boom), Q-1 (needs an answer).");
+    expect(warn).toHaveBeenCalledWith("Resumed 1. Not resumed: Login page (boom), Rate limits (needs an answer).");
   });
 
   it("still refreshes each id when a batch fails, and says what went through", async () => {
     const { handlers, warn, refreshed } = setup();
     await handlers.get("kraft.pause")!(row(p1), [row(p1), row(p3)]);
     expect(refreshed).toEqual(["P-1", "P-3"]);
-    expect(warn).toHaveBeenCalledWith("Paused 1. Not paused: P-3 (Kraft did not answer within 60s).");
+    expect(warn).toHaveBeenCalledWith("Paused 1. Not paused: Search box (Kraft did not answer within 60s).");
   });
 
   it.each([
     ["archives after asking once", "Archive", [d1, d2], [["archive", ["D-1", "D-2"]]], "Archive 2 items? Their worktrees are deleted.", "Archived 2."],
     ["archives nothing when the question is dismissed", null, [d1, d2], [], "Archive 2 items? Their worktrees are deleted.", undefined],
-    ["asks nothing when only one of the selection can be archived", "Archive", [d1, p1], [["archive", ["D-1"]]], undefined, undefined],
+    ["asks once, by name, when only one of the selection can be archived", "Archive", [d1, p1], [["archive", ["D-1"]]], "Archive t? Its worktree is deleted.", undefined],
+    ["archives nothing when that one question is dismissed", null, [d1, p1], [], "Archive t? Its worktree is deleted.", undefined],
+    ["asks nothing when the one archivable has no worktree", "Archive", [d3, p1], [["archive", ["D-3"]]], undefined, undefined],
   ])("%s", async (_, answer, selection, calls, asked, said) => {
     const { handlers, api, warn, info } = setup(() => null, answer);
     await handlers.get("kraft.archive")!(row(selection[0]), selection.map(row));

@@ -142,7 +142,7 @@ SYSTEM_EDITOR = "system"
 
 def _default_editor(request: Request) -> str | None:
     """The editor chosen when none is named: `editor` in theme.yaml (Settings ›
-    Appearance), else `KRAFT_EDITOR`, else None, which is the system's opener."""
+    Board & code), else `KRAFT_EDITOR`, else None, which is the system's opener."""
     try:
         chosen = config_mod.Theme.load(request.app.state.templates_dir / "theme.yaml").editor
     except config_mod.ConfigError:

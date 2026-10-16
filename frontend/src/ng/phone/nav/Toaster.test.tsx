@@ -1,22 +1,30 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { showToast } from "../../ui/Toast";
-import { Toaster, TOAST_MS } from "./Toaster";
+import { TOAST_MS } from "../../ui/toastModel";
+import { Toaster } from "./Toaster";
 
 beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
 afterEach(() => vi.useRealTimers());
 
 describe("the phone toaster (A.6)", () => {
-  it("shows a toast raised by shared code, one at a time, and drops it after 3.2 s", () => {
+  it("stacks toasts raised by shared code as the desktop does, and drops them after TOAST_MS", () => {
     render(<Toaster />);
-    act(() => showToast("Copied id"));
-    act(() => showToast("Paused at plan."));
-    expect(screen.queryByText("Copied id")).toBeNull();
-    expect(screen.getByText("Paused at plan.")).toBeInTheDocument();
+    for (const m of ["one", "two", "three", "four"]) act(() => showToast(m));
+    expect(screen.queryByText("one")).toBeNull();
+    expect(screen.getAllByText(/two|three|four/)).toHaveLength(3);
     act(() => void vi.advanceTimersByTime(TOAST_MS + 10));
-    expect(screen.queryByText("Paused at plan.")).toBeNull();
-    expect(TOAST_MS).toBe(3200);
+    expect(screen.queryByText("four")).toBeNull();
+  });
+
+  it("keeps an error until it is dismissed, announced as an alert", async () => {
+    render(<Toaster />);
+    act(() => showToast("Could not pause", { tone: "error" }));
+    act(() => void vi.advanceTimersByTime(TOAST_MS * 5));
+    expect(within(screen.getByRole("alert")).getByText("Could not pause")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText("Could not pause")).toBeNull();
   });
 
   it("runs the action button once and removes the toast", async () => {

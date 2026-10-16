@@ -1,6 +1,6 @@
 import { Navigate, useParams, useSearchParams } from "react-router-dom";
 import { detailOf } from "../../http";
-import { ACCESS, ACCESS_HELP, ACCESS_SECTION, ACCESS_WORD, defaultLabel, enabledHelp, executableWord, HARNESS_FIELD, TOOLS_EVERY, TOOLS_RESTRICT, problemsOfHarness, problemsOfProfile, resolvedOf, toolsWord, type Access, type HProblem, type Resolved } from "../../harnesses/model";
+import { ACCESS, ACCESS_HELP, ACCESS_SECTION, ACCESS_WORD, defaultLabel, enabledHelp, executableWord, HARNESS_FIELD, ITEM_HARNESS, itemHarnessNow, TOOLS_EVERY, TOOLS_RESTRICT, problemsOfHarness, problemsOfProfile, resolvedOf, taskTile, toolsWord, usedBy, entryUsers, type Access, type HProblem, type Resolved } from "../../harnesses/model";
 import { entryOp } from "../../harnesses/ops";
 import { useProviders } from "../../harnesses/useProviders";
 import type { Op } from "../../templates/draft/types";
@@ -45,11 +45,11 @@ function HarnessesIndex() {
         <>
           <Group title="Harnesses" rows={r.harnesses.map((h): RowSpec => ({ key: h.id, label: h.id, mono: true, sub: `${h.provider ?? "?"} · ${executableWord(h.executable_found)}`, to: `/settings/harnesses/${encodeURIComponent(h.id)}`, chips: [{ label: ACCESS_WORD[h.state], tone: h.state === "never" ? "warn" : undefined }, ...(problemsOfHarness(r, problems, h.id).length ? [{ label: "problem", tone: "bad" as const }] : [])] }))} />
           <Group title="Profiles" rows={Object.entries(r.profiles).map(([name, p]): RowSpec => ({ key: name, label: name, mono: true, sub: Object.entries(p.providers).map(([prov, e]) => `${prov} ${e.model ?? "—"}`).join(" · "), to: `/settings/harnesses/profiles/${encodeURIComponent(name)}`, chips: problemsOfProfile(r, problems, name).length ? [{ label: "problem", tone: "bad" as const }] : undefined }))} />
-          <Group title="Tasks" note="Each agent task and the harness it runs on. Change it in the chain." rows={tasks.map((t, i): RowSpec => ({ key: `${t.chain}:${t.path}:${i}`, label: t.path, mono: true, sub: t.chain, value: `${t.harness}${t.profile ? ` · ${t.profile}` : ""}` }))} />
+          <Group title="Tasks" note="Each agent task and the harness it runs on. Change it in the chain." rows={tasks.map((t, i): RowSpec => ({ key: `${t.chain}:${t.path}:${i}`, label: taskTile(t), sub: t.chain, value: `${t.harness}${t.profile ? ` · ${t.profile}` : ""}` }))} />
           <Group
             title="Defaults"
             rows={[
-              { label: "escalation runs on", value: r.escalation.harness ?? `item's harness (${r.escalation_effective.harness})`, changed: changedAt(draft, "escalation"), onEdit: () => edit({ kind: "choice", title: "Escalation runs on", help: "\"item's harness\" follows the one the item's latest agent task used. Harnesses set to Never aren't offered.", value: r.escalation.harness ?? "", options: [{ value: "", label: "item's harness" }, ...r.harnesses.filter((h) => h.state !== "never" || h.id === r.escalation_effective.harness).map((h) => ({ value: h.id, label: h.state === "never" ? `${h.id} (Never)` : h.id }))], set: (v) => send(draft, { op: "set_escalation", harness: v || null, grants: r.escalation.grants }) }) },
+              { label: "escalation runs on", value: r.escalation.harness ?? itemHarnessNow(r.escalation_effective.harness), changed: changedAt(draft, "escalation"), onEdit: () => edit({ kind: "choice", title: "Escalation runs on", help: "\"item's harness\" follows the one the item's latest agent task used. Harnesses set to Never aren't offered.", value: r.escalation.harness ?? "", options: [{ value: "", label: ITEM_HARNESS }, ...r.harnesses.filter((h) => h.state !== "never" || h.id === r.escalation_effective.harness).map((h) => ({ value: h.id, label: h.state === "never" ? `${h.id} (Never)` : h.id }))], set: (v) => send(draft, { op: "set_escalation", harness: v || null, grants: r.escalation.grants }) }) },
               { label: "allowed tools", value: toolsWord(r.allowed_tools), changed: changedAt(draft, "allowed_tools"), onEdit: () => edit({ kind: "menu", title: "Allowed tools", help: "Every tool is allowed until a list restricts it. An empty list allows no tools.", options: [{ value: "every", label: TOOLS_EVERY }, { value: "list", label: TOOLS_RESTRICT }], pick: (v) => v === "every" ? (r.allowed_tools == null ? Promise.resolve(null) : send(draft, { op: "set_allowed_tools", tools: null })) : { kind: "text", title: "Allowed tools", help: "Comma separated. Empty allows no tools.", value: (r.allowed_tools ?? []).join(", "), set: (t) => send(draft, { op: "set_allowed_tools", tools: list(t) }) } }) },
               { label: "escalation grants", value: (r.escalation.grants ?? []).join(", ") || "none", changed: changedAt(draft, "grants"), onEdit: () => edit({ kind: "text", title: "Escalation grants", help: "Comma separated. What every escalation turn may do on top of its node's own grants.", value: (r.escalation.grants ?? []).join(", "), listed: { choices: draft.view?.result.choices?.grants ?? [], closed: true, multiple: true, noun: "grant" }, set: (v) => send(draft, { op: "set_escalation", harness: r.escalation.harness, grants: list(v) }) }) },
             ]}
@@ -87,7 +87,7 @@ export function HarnessView() {
             ]}
           />
           <p className="ph-note">Who may use it and enabled are edited here; a harness's other fields are edited in YAML on a computer.</p>
-          <Group title={`Tasks · ${h.tasks.length}`} rows={h.tasks.map((t, i): RowSpec => ({ key: `${t.chain}:${t.path}:${i}`, label: t.path, mono: true, sub: [t.chain, t.profile, t.fallback ? "fallback" : null].filter(Boolean).join(" · ") }))} />
+          <Group title={`Tasks · ${h.tasks.length}`} rows={h.tasks.map((t, i): RowSpec => ({ key: `${t.chain}:${t.path}:${i}`, label: taskTile(t), sub: [t.chain, t.profile, t.fallback ? "fallback" : null].filter(Boolean).join(" · ") }))} />
         </>
       )}
       {node}
@@ -115,7 +115,7 @@ export function ProfileView() {
             key={prov}
             title={prov}
             rows={[
-              { label: "model", value: e.model || "not set", mono: true, changed: changedAt(draft, `profiles.${name}.providers.${prov}`), onEdit: () => edit({ kind: "text", title: `${prov} model`, help: status?.models.length ? `Known: ${status.models.slice(0, 6).join(", ")}` : undefined, value: e.model ?? "", set: (v) => send(draft, entryOp(name, prov, { ...e, model: v.trim() })) }) },
+              { label: "model", value: e.model || "not set", sub: usedBy(entryUsers(r!, name, prov)), mono: true, changed: changedAt(draft, `profiles.${name}.providers.${prov}`), onEdit: () => edit({ kind: "text", title: `${prov} model`, help: status?.models.length ? `Known: ${status.models.slice(0, 6).join(", ")}` : undefined, value: e.model ?? "", set: (v) => send(draft, entryOp(name, prov, { ...e, model: v.trim() })) }) },
               ...((status?.efforts.length ?? 0) > 0 ? [{ label: "effort", value: e.effort || "default", changed: false, onEdit: () => edit({ kind: "choice", title: `${prov} effort`, help: `What ${prov} accepts.`, value: e.effort ?? "", options: [{ value: "", label: "default" }, ...status!.efforts.map((x) => ({ value: x, label: x }))], set: (v) => send(draft, entryOp(name, prov, { model: e.model, effort: v })) }) } as RowSpec] : []),
             ]}
           />

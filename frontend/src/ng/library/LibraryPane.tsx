@@ -17,7 +17,7 @@ import { IdCard } from "../templates/menus/IdCard";
 import { ItemYaml } from "../templates/panes/ItemYaml";
 import type { PaneCtx } from "../templates/panes/Overview";
 import { problemText } from "../templates/problems";
-import { LibraryConfig } from "./config";
+import { configRows, LibraryConfig } from "./config";
 import { libCrumbs, libDescribe } from "./describe";
 import { LibraryOverview } from "./overview";
 import { UsedBy } from "./UsedBy";
@@ -100,7 +100,7 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
   const root = d.inside === "";
   const taskKind = String(valueAt(r, scope, path, "kind") ?? "");
   const icon = FIXED_ICON[d.kind] ?? (typeof own?.icon === "string" ? own.icon : undefined);
-  const probs = r.problems.filter((p) => p.component === d.component || p.path === path || p.path.startsWith(`${path}.`));
+  const probs = r.problems.filter((p) => p.component === d.component || p.path === path || p.path?.startsWith(`${path}.`));
   const ext = typeof own?.extends === "string" ? ` · extends ${own.extends}` : "";
   const sub = (() => {
     const prefix = root ? `library ${SINGULAR[d.section]} · ` : "";
@@ -119,7 +119,8 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
       default: return `${prefix}${taskKind ? `${taskKind} task` : "task"}${ext}`;
     }
   })();
-  const tabs = d.kind === "fixloop" ? undefined : d.kind === "steering" ? STEERING_TABS : TABS;
+  // A tab with nothing in it is not offered: Config shows only when the component writes a setting Overview does not edit.
+  const tabs = d.kind === "fixloop" ? undefined : d.kind === "steering" ? STEERING_TABS : configRows(own, d.kind).length ? TABS : TABS.filter((x) => x.value !== "config");
   const shown = tabs?.some((x) => x.value === tab) ? tab : tabs?.[0].value;
   const pickable = !readOnly && ["node", "step", "task", "esc", "review"].includes(d.kind);
   const renameable = !readOnly && !["fixloop", "judge"].includes(d.kind);

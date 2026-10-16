@@ -52,6 +52,21 @@ describe("ArchivedPage", () => {
     expect(titles()).toEqual(["Bravo"]);
   });
 
+  it("says what Archived holds and when items arrive, under a visible heading", async () => {
+    vi.spyOn(api, "getPolicy").mockResolvedValue({ archive: { after_days: 30 } } as never);
+    mount();
+    await act(async () => {});
+    const h1 = screen.getByRole("heading", { level: 1, name: "Archived" });
+    expect(h1).not.toHaveClass("board-visually-hidden");
+    expect(h1.nextElementSibling).toHaveTextContent("Items you archive land here, and so do done and cancelled ones 30 days after they finish. Open one to restore it.");
+  });
+
+  it("words a failed read as a sentence, not the bare error", async () => {
+    list.mockRejectedValue(new Error("Failed to fetch"));
+    mount();
+    expect(await screen.findByRole("alert")).toHaveTextContent("The archived items could not be read. Failed to fetch");
+  });
+
   it("restores one item from its row, and checked ones in bulk", async () => {
     const calls = stubFetch({ ...WRITES, "POST /work-items/bulk": [200, { results: [{ id: "a1", ok: true }, { id: "b2", ok: true }] }] });
     mount();
@@ -77,5 +92,6 @@ describe("ArchivedPage", () => {
     list.mockResolvedValue({ items: [], cursor: 1 });
     mount();
     expect(await screen.findByText("Nothing is archived.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Archived/, level: 2 })).toBeNull();
   });
 });

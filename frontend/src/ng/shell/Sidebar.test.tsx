@@ -212,14 +212,26 @@ describe("ng Sidebar", () => {
   });
 
   it.each([
-    ["open", "live"],
-    ["connecting", "connecting…"],
-    ["reconnecting", "reconnecting…"],
-  ])("says %s as %s", (connection, word) => {
+    ["open", "live", "ok"],
+    ["connecting", "connecting…", "neutral"],
+    ["reconnecting", "reconnecting…", "bad"],
+  ])("says %s as %s", (connection, word, tone) => {
     useStore.setState({ connection } as never);
     mount();
     expect(screen.getByText(word)).toBeInTheDocument();
+    expect(screen.getByText(word)).toHaveClass(tone);
     expect(screen.getByRole("img", { name: word })).toBeInTheDocument();
+  });
+
+  it("says offline, not live, while the list read has failed", () => {
+    useStore.setState({ connection: "open", loadError: "down" } as never);
+    mount();
+    expect(screen.getByText("offline")).toBeInTheDocument();
+    expect(screen.queryByText("live")).toBeNull();
+    // Offline is a fault, not a wait for a person: red like the banner, never amber.
+    expect(screen.getByText("offline")).toHaveClass("bad");
+    expect(screen.getByText("offline")).not.toHaveClass("warn");
+    useStore.setState({ loadError: null } as never);
   });
 
   it("shows the version alone in the footer, linking About", async () => {

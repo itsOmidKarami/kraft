@@ -156,37 +156,18 @@ describe("rename", () => {
     expect(screen.getByRole("complementary", { name: "implementation pane" })).toBeInTheDocument();
   });
 
-  it("a click on the selected node, then on the canvas, renames nothing later", async () => {
+  it("a click on the selected node, then on another node, renames nothing later, nor when the node is picked again", async () => {
     mount();
     const g = await canvas();
     const spec = within(g).getByRole("button", { name: "spec, node" });
     await user.click(spec);
     await pause(DOUBLE_CLICK_MS + 50);
     await user.click(spec);
-    await user.click(g);
-    await user.click(screen.getByRole("button", { name: "Chain settings" }));
+    await user.click(within(g).getByRole("button", { name: "implementation, node" }));
     await pause(DOUBLE_CLICK_MS + 50);
-    expect(screen.getByRole("complementary", { name: "default pane" })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "implementation pane" })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /^Rename/ })).toBeNull();
     // Nor when the node is picked again.
-    await user.click(spec);
-    expect(pane()).toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: /^Rename/ })).toBeNull();
-  });
-
-  it("a click on the selected node, then Chain settings, renames nothing later, nor when the node is picked again", async () => {
-    mount();
-    const g = await canvas();
-    const spec = within(g).getByRole("button", { name: "spec, node" });
-    await user.click(spec);
-    await pause(DOUBLE_CLICK_MS + 50);
-    await user.click(spec);
-    // Chain settings moves the pane without ending the click's wait, so the
-    // rename has to check, when it fires, that its node is still the one shown.
-    await user.click(screen.getByRole("button", { name: "Chain settings" }));
-    await pause(DOUBLE_CLICK_MS + 50);
-    expect(screen.getByRole("complementary", { name: "default pane" })).toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: /^Rename/ })).toBeNull();
     await user.click(spec);
     expect(pane()).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /^Rename/ })).toBeNull();

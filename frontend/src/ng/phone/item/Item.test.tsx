@@ -37,6 +37,8 @@ function mount(it: ReturnType<typeof detail>, path: string | { pathname: string;
   );
   return calls;
 }
+/** The inline refusal, not the error toast that repeats it. */
+const inlineAlert = async () => (await screen.findAllByRole("alert")).find((a) => !a.classList.contains("ph-toast"))!;
 const posts = (calls: Call[]) => calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path}`);
 const lastPost = (calls: Call[]) => calls.filter((c) => c.method !== "GET").at(-1);
 const where = () => screen.getByLabelText("where").textContent;
@@ -44,15 +46,23 @@ const where = () => screen.getByLabelText("where").textContent;
 afterEach(() => vi.unstubAllGlobals());
 
 describe("the item screen (C)", () => {
+  it("shows a paused item's badge in the neutral tone: amber is for what needs a person", async () => {
+    mount(item("paused"));
+    expect(await screen.findByText("PAUSED")).toHaveClass("ph-tag-muted");
+    const ticks = [...document.querySelectorAll(".ph-ticks .ph-tick")].map((t) => t.className);
+    expect(ticks.some((c) => c.includes("ph-tick-paused"))).toBe(true);
+    expect(ticks.some((c) => c.includes("ph-tick-hot"))).toBe(false);
+  });
+
   it("shows the brief, the chain with done nodes collapsed, a log preview and the pair", async () => {
     mount(item("running"));
     expect(await screen.findByRole("heading", { level: 1, name: "Design the cache" })).toBeInTheDocument();
     expect(screen.getByText("RUNNING")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "2 done" })).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("plan_approval")).toBeNull();
+    expect(screen.queryByText("approve plan")).toBeNull();
     expect(screen.getByRole("button", { name: /verification/ })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "2 done" }));
-    expect(screen.getByText("plan_approval")).toBeInTheDocument();
+    expect(screen.getByText("approve plan")).toBeInTheDocument();
     expect(await screen.findByText(/loaded review_package/)).toBeInTheDocument();
     expect(screen.getByText("verification › review › code_review")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
@@ -192,7 +202,7 @@ describe("Pause (C.5)", () => {
     mount(item("running"), "/work-items/w1", { "POST /work-items/w1/pause": [409, { detail: "work item is already paused" }] });
     await userEvent.click(await screen.findByRole("button", { name: "Pause" }));
     await userEvent.click(screen.getByRole("button", { name: "Pause now" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("already paused");
+    expect(await inlineAlert()).toHaveTextContent("already paused");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });
@@ -202,7 +212,9 @@ describe("Steer (C.8, R66)", () => {
     const calls = mount(item("running"), "/work-items/w1?compose=steer");
     expect(await screen.findByText(/Steering pauses the item\. The running attempt on verification stops now/)).toBeInTheDocument();
     const send = screen.getByRole("button", { name: "Send steer" });
-    expect(send).toBeDisabled();
+    await userEvent.click(send);
+    expect(screen.getByText("Write something first.")).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
     await userEvent.type(screen.getByRole("textbox", { name: "Your note" }), "skip the flaky suite");
     await userEvent.click(send);
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toEqual([
@@ -242,9 +254,13 @@ describe("the other composers (C.7)", () => {
 
   it("Reject names its target and needs a note", async () => {
     const calls = mount(gateItem(), "/work-items/w1?compose=reject");
-    expect(await screen.findByText("Goes back to: plan")).toBeInTheDocument();
-    const send = screen.getByRole("button", { name: "Reject to plan" });
-    expect(send).toBeDisabled();
+    // The target is said once, in the help line.
+    expect(await screen.findByText(/Sends your note back to plan, with your note/)).toBeInTheDocument();
+    expect(screen.queryByText(/Goes back to/)).not.toBeInTheDocument();
+    const send = screen.getByRole("button", { name: "Request changes" });
+    await userEvent.click(send);
+    expect(screen.getByText("Write what needs to change first.")).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
     await userEvent.type(screen.getByRole("textbox"), "the plan skips the cache bound");
     await userEvent.click(send);
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/gates/plan_approval/reject", body: { note: "the plan skips the cache bound" } }]));
@@ -275,7 +291,9 @@ describe("the other composers (C.7)", () => {
     });
     expect(await screen.findByText(/branch kraft\/x, the worktree until it is archived, 2 findings, 1 threads/)).toBeInTheDocument();
     await userEvent.click(await screen.findByRole("switch", { name: "Also close !142 on the forge" }));
-    expect(screen.getByRole("button", { name: "Cancel item" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel item" }));
+    expect(screen.getByText("Write something first.")).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
     await userEvent.type(screen.getByRole("textbox", { name: "Reason" }), "wrong repo");
     await userEvent.click(screen.getByRole("button", { name: "Cancel item" }));
     await waitFor(() => expect(lastPost(calls)).toEqual({ method: "POST", path: "/work-items/w1/cancel", body: { reason: "wrong repo", close_mr: true } }));
@@ -284,7 +302,7 @@ describe("the other composers (C.7)", () => {
   it("keeps a refusal under the button and the text in the box", async () => {
     mount(gateItem(), "/work-items/w1?compose=reject", { "POST /work-items/w1/gates/plan_approval/reject": [409, { detail: "gate 'plan_approval' is not pending" }] });
     await userEvent.type(await screen.findByRole("textbox"), "no");
-    await userEvent.click(screen.getByRole("button", { name: "Reject to plan" }));
+    await userEvent.click(screen.getByRole("button", { name: "Request changes" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("is not pending");
     expect(screen.getByRole("textbox")).toHaveValue("no");
   });
@@ -369,8 +387,8 @@ describe("a skipped gate in the chain (R15b-03)", () => {
     const skipped = { seq: 3, work_item_id: "w1", type: "node_skipped", node_id: "plan_approval", payload: { node_id: "plan_approval", gate: "plan_approval" }, created_at: "2026-09-13T09:00:00Z" };
     mount(item("running"), "/work-items/w1", { "GET /work-items/w1/events": [200, [skipped]] });
     await userEvent.click(await screen.findByRole("button", { name: "2 done" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /plan_approval/ })).toHaveTextContent("skipped"));
-    expect(screen.getByRole("button", { name: /plan_approval/ })).not.toHaveTextContent("approved");
+    await waitFor(() => expect(screen.getByRole("button", { name: /approve plan/ })).toHaveTextContent("skipped"));
+    expect(screen.getByRole("button", { name: /approve plan/ })).not.toHaveTextContent("approved");
   });
 });
 
@@ -567,7 +585,7 @@ describe("raising the cap that stopped the item (R73)", () => {
     const reads = () => calls.filter((c) => c.method === "GET" && c.path === "/work-items/w1").length;
     const before = reads();
     await type("600");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Raised to 600, but the retry was refused: already running");
+    expect(await inlineAlert()).toHaveTextContent("Raised to 600, but the retry was refused: already running");
     expect(reads()).toBeGreaterThan(before);
     expect(sent(calls)).toEqual(["PATCH /work-items/w1", "POST /work-items/w1/retry"]);
   });

@@ -1,4 +1,6 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { copyFileSync, existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // The site is served from the root of the custom domain (kraft-sdlc.dev), so
@@ -32,6 +34,15 @@ const redirects = (existsSync(redirectsFile) ? readFileSync(redirectsFile, 'utf8
   })
 const movedPages = redirects.filter(([from]) => !from.includes('#'))
 const movedSections = redirects.filter(([from]) => from.includes('#'))
+
+// What is new on main since the latest release: dev/gen_docs_unreleased.py
+// writes the Unreleased page from the "Added in next" notes and names the pages
+// that carry one. Only main's docs and a local build have such notes (a release
+// stamps them into numbers), so a released site gets no page, no banner link
+// and no marks. A tag's build never runs it: its content has no notes left.
+const unreleased: { page: string | null, routes: Record<string, 'new' | 'updated'> } = version === 'next' || version === ''
+  ? JSON.parse(execFileSync('python3', [fileURLToPath(new URL('../dev/gen_docs_unreleased.py', import.meta.url)), fileURLToPath(new URL('./content', import.meta.url))], { encoding: 'utf8' }))
+  : { page: null, routes: {} }
 const withBase = (path: string) => `${baseURL.replace(/\/$/, '')}${path}`
 
 // What a moved page's old address serves. The prerenderer writes a redirect
@@ -105,6 +116,21 @@ const breakableLinks = (links: TocLink[] = []) => links.forEach((link) => {
   breakableLinks(link.children)
 })
 
+// GitHub Pages serves /guides/ from guides/index.html and /guides from
+// guides.html, and a section's index page is written only as guides.html, so
+// the address with the slash was the 404 page. Each section folder gets a copy
+// of its index as index.html (the copy's asset URLs are absolute, so it loads
+// from the deeper address). Only a folder with no index.html of its own: a
+// page folder that already has one is left as built.
+function addSectionIndexes(dir: string) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name.startsWith('_') || entry.name === 'raw') continue
+    const folder = join(dir, entry.name)
+    if (existsSync(`${folder}.html`) && !existsSync(join(folder, 'index.html'))) copyFileSync(`${folder}.html`, join(folder, 'index.html'))
+    addSectionIndexes(folder)
+  }
+}
+
 export default defineNuxtConfig({
   extends: ['docus'],
   // Off until Nuxt ships @nuxt/devtools 4: devtools 3 default-imports
@@ -112,11 +138,14 @@ export default defineNuxtConfig({
   // default export, so loading the module fails `nuxt dev` and `generate`.
   devtools: { enabled: false },
   hooks: {
+    'nitro:init'(nitro) {
+      nitro.hooks.hook('prerender:done', () => addSectionIndexes(nitro.options.output.publicDir))
+    },
     'content:file:afterParse'({ content }) {
       breakableLinks((content as { body?: { toc?: { links?: TocLink[] } } }).body?.toc?.links)
     },
   },
-  css: ['~/assets/css/type.css', '~/assets/css/hero.css', '~/assets/css/prose.css', '~/assets/css/a11y.css'],
+  css: ['~/assets/css/type.css', '~/assets/css/hero.css', '~/assets/css/prose.css', '~/assets/css/layout.css', '~/assets/css/a11y.css'],
   // Nuxt UI's code theme is Material (lighter / palenight). On the code
   // block's background its light strings were 2.2:1, keys 2.6:1 and comments
   // 2.5:1, and its dark comments 3.0:1, under WCAG AA's 4.5:1; prose.css
@@ -181,6 +210,7 @@ export default defineNuxtConfig({
       docs: {
         version,
         versions,
+        unreleased,
       },
       // Every moved address, old to new. app/plugins/moved.ts forwards them:
       // not a `routeRules` redirect, which Nuxt follows in the browser before

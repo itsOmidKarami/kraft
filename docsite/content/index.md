@@ -6,10 +6,10 @@ description: 'A local orchestrator that takes your coding agent from spec to pul
 ::u-page-hero
 ---
 title: 'Run your coding agent from spec to pull request.'
-description: "A local orchestrator. Kraft isn't another coding agent: it runs the one you already use, and stops only when a decision is yours."
+description: "A local orchestrator. Kraft isn't another coding agent: it runs Claude Code, the one you may already use, and stops only when a decision is yours."
 links:
   - label: Get started
-    to: /get-started
+    to: /get-started/install
     color: primary
     size: lg
   - label: View on GitHub
@@ -31,6 +31,8 @@ uv tool install kraft-sdlc && kraft
 #default
 :::stage-strip
 :::
+
+Kraft needs Claude Code installed and logged in. The shipped chains run every agent task on it, and another agent CLI works as a [harness](/reference/harnesses) after a chain edit.
 
 It adds what a single session can't:
 
@@ -54,7 +56,7 @@ ui:
 :::landing-shot
 ---
 src: /assets/board.png
-alt: 'The Kraft board in the dark graphite look: work items grouped by Needs you (a paused item with Resume, a failed one with Retry, and two waiting at a gate, each with its one button), Running, Not started, and Done, the unstarted items marked created paused, with a Select all link on every group and a ? shortcuts button in the toolbar'
+alt: 'The Kraft board in the dark graphite look: filters for chain, gate and stop reason above work items grouped by Needs you (a paused item with Resume, a failed one with Retry, and two waiting at a gate, each with its one button), Running and Not started, the unstarted items marked created paused, with a Select all link on every group and a ? shortcuts button in the toolbar'
 crop: 210 0 1230 688
 width: 1440
 ---
@@ -64,7 +66,7 @@ width: 1440
 ::u-page-section
 ---
 title: A gate stops the chain where a person decides
-description: Read what the agent wrote, then approve, or reject with a note that re-runs the node that wrote it.
+description: Read what the agent wrote, then approve, or request changes with a note that re-runs the node that wrote it.
 ui:
   root: landing
 ---
@@ -72,8 +74,8 @@ ui:
 :::::landing-shot
 ---
 src: /assets/item.png
-alt: "The spec_approval gate on an item's page: waiting for you, the files it decides on, an open thread, reject to spec, and Read spec.md, Review changes, Approve and Reject buttons"
-crop: 1036 250 380 434
+alt: "The spec_approval gate on an item's page: waiting for you, the files it decides on, an open thread, reject to spec, and Read spec.md, Review changes, Approve and Request changes buttons"
+crop: 1034 214 384 474
 width: 1440
 ---
 **The gate.** What it decides on, where a rejection goes, and the buttons. [The review page](/reference/web-ui/review-page)
@@ -83,7 +85,7 @@ width: 1440
 ---
 src: /assets/review.png
 alt: 'A line comment on a one-line change, labelled Must fix, being added to a review'
-crop: 500 256 560 380
+crop: 500 296 860 320
 width: 1440
 ---
 **The note.** Comment on the lines it is about, and label it must-fix, question, or nit. [Review a change](/guides/day-to-day/review-a-change)
@@ -92,8 +94,8 @@ width: 1440
 :::::landing-shot
 ---
 src: /assets/mobile.png
-alt: 'The board at a 390px phone viewport: a failed item with a Retry button, and an item waiting at approve spec with a Review to approve button on the card'
-crop: 0 330 390 444
+alt: 'The board at a 390px phone viewport: an item waiting at approve spec with a Review to approve button on the card, and a failed item with a Retry button'
+crop: 0 366 390 358
 width: 390
 ---
 **On your phone.** The same board at the same address, laid out for a phone. Open a gate's review from the card's one button, and answer a question or retry a stopped item from its page. [The phone layout](/guides/day-to-day/kraft-on-a-phone) · [Reach it from your phone](/guides/run/remote-access)

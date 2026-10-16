@@ -4,7 +4,7 @@ import { Button } from "../ui/Button";
 import { gutter } from "./draft/lineDiff";
 import type { ConfigDraft } from "./draft/useConfigDraft";
 import type { Scope } from "./draft/types";
-import { scopeFile } from "./draft/view";
+import { problemPath, scopeFile } from "./draft/view";
 import { ReadOnly } from "./addon";
 import { problemText } from "./problems";
 import { tip } from "../ui/Tooltip";
@@ -130,7 +130,7 @@ export function YamlView({ draft, scope, published, file: named }: { draft: Conf
             <ul className="yv-issues-list">
               {err && <li><button type="button" className="yv-issue" onClick={() => jumpTo(ta.current, scroller.current, err.line - 1)}>line {err.line} · {err.message}</button></li>}
               {probs.slice(0, 30).map((p, i) => (
-                <li key={i}><button type="button" className="yv-issue" onClick={() => jumpTo(ta.current, scroller.current, p.line! - 1)}>line {p.line} · {p.path} · {problemText(p)}</button></li>
+                <li key={i}><button type="button" className="yv-issue" onClick={() => jumpTo(ta.current, scroller.current, p.line! - 1)}>line {p.line} · {problemPath(p)} · {problemText(p)}</button></li>
               ))}
             </ul>
           )}

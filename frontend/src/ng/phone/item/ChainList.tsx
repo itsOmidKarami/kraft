@@ -1,3 +1,4 @@
+import { nameOf } from "../../board/rowText";
 import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -21,7 +22,7 @@ export function ChainList({ item, events, now }: { item: ItemDetail; events: Kra
   return (
     <Block title="Chain" aside={`${done.length} of ${nodes.length} nodes`}>
       <div className="ph-ticks ph-ticks-flush" aria-hidden="true">
-        {nodes.map((n) => <span key={n.id} className={`ph-tick ph-tick-${n.state === "done" ? "done" : n.state === "failed" || n.capped ? "failed" : n.state === "current" ? (n.running ? "current" : "hot") : "todo"}${n.kind === "gate" ? " ph-tick-gate" : ""}`} />)}
+        {nodes.map((n) => <span key={n.id} className={`ph-tick ph-tick-${n.state === "done" ? "done" : n.state === "failed" || n.capped ? "failed" : n.state === "current" ? (n.running ? "current" : n.paused ? "paused" : "hot") : "todo"}${n.kind === "gate" ? " ph-tick-gate" : ""}`} />)}
       </div>
       <div className="ph-list">
         {done.length > 0 && (
@@ -36,7 +37,7 @@ export function ChainList({ item, events, now }: { item: ItemDetail; events: Kra
             <button key={n.id} type="button" className="ph-row ph-node-row" onClick={() => navigate(placeUrl(item.id, { node: n.id, sel: { kind: "node", node: n.id } }))}>
               <NodeGlyph kind={n.kind} size="sm" state={n.state} icon={n.icon} running={n.running} paused={n.paused} capped={n.capped} attempt={n.attempt} attemptStopped={n.attemptStopped} esc={n.esc} />
               <span className="ph-row-text">
-                <span className="ph-row-label ph-mono">{n.id}</span>
+                <span className="ph-row-label">{nameOf(item.chain_definition.nodes, n.id)}</span>
                 <span className={`ph-row-hint ph-tone-${sub.tone}`}>{sub.text}</span>
               </span>
               {n.state === "current" && n.sub === "needs you" && n.kind === "gate" && <span className="ph-pillbadge">you</span>}

@@ -9,14 +9,17 @@
      surface in both modes; amber text on it did not. It is a labelled region,
      or it would be the one block of the page outside every landmark. The text
      wraps rather than truncating, which on a phone cut it before
-     "unreleased". -->
+     "unreleased". On /next/ a second link lists what changed since the release
+     (the Unreleased page, built from the docs' "Added in next" notes); it is
+     a router link, inside this build. -->
 <script setup lang="ts">
 const at = useDocsVersion()
+const unreleased = useRuntimeConfig().public.docs.unreleased
 const notice = computed(() => {
   const { current, latest } = at.value
   if (!current || !latest || current.id === latest.id) return null
   return current.id === 'next'
-    ? { text: 'Docs for unreleased main', link: `Switch to ${latest.tag.slice(1)} docs →`, mark: 'bg-warning-500' }
+    ? { text: 'Docs for unreleased main', link: `Switch to ${latest.tag.slice(1)} docs →`, mark: 'bg-warning-500', main: true }
     : { text: `Docs for ${current.tag.slice(1)}, an older release`, link: 'Switch to the latest →', mark: 'bg-neutral-400 dark:bg-neutral-500' }
 })
 </script>
@@ -33,7 +36,11 @@ const notice = computed(() => {
       <p>
         <span>{{ notice.text }}</span>
         <span aria-hidden="true" class="mx-1">·</span>
-        <a :href="at.samePage(at.latest.base)" class="font-medium underline underline-offset-2 hover:text-highlighted">{{ notice.link }}</a>
+        <template v-if="'main' in notice && unreleased?.page">
+          <NuxtLink :to="unreleased.page" class="whitespace-nowrap font-medium underline underline-offset-2 hover:text-highlighted">What changed since the release →</NuxtLink>
+          <span aria-hidden="true" class="mx-1">·</span>
+        </template>
+        <a :href="at.samePage(at.latest.base)" class="whitespace-nowrap font-medium underline underline-offset-2 hover:text-highlighted">{{ notice.link }}</a>
       </p>
     </div>
   </div>

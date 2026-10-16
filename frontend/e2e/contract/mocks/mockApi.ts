@@ -14,7 +14,7 @@ export interface MockOptions {
   /** ux2-W6: GET /work-items answers the board's fixtures (`S.ngBoard`, `S.ngArchived`); "empty" answers none. */
   ngBoard?: boolean | "empty";
   /** ux2-W6 board states. `loading`: boot's list read fails, every later one never answers.
-   *  `offline`: boot's read answers, every later one fails to connect, and the event socket closes. */
+   *  `offline`: boot's read answers, every later one, and every draft read, fails to connect, and the event socket closes. */
   boardState?: "loading" | "offline";
   /** ux2-W15: the repos, policy and intake drafts, answered as W13's server does (areasMock.ts); the value seeds the cell's state. */
   areas?: "default";
@@ -273,6 +273,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if (p === "/budget/today") return json(route, { spent_usd: 8.3, cap_usd: 50 });
 
     /* work items */
+    if (opts.boardState === "offline" && p.startsWith("/drafts/")) return route.abort("connectionrefused");
     if (p === "/work-items" && method === "GET" && opts.boardState && q.get("archived") !== "true") {
       const n = ++listReads;
       if (opts.boardState === "offline" && n > 1) return route.abort("connectionrefused");

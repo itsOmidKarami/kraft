@@ -101,7 +101,7 @@ describe("StateCard", () => {
     expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/retry", body: { path: "merge_request.open.open_draft" } }]);
     await userEvent.click(within(card).getByRole("button", { name: "Escalate…" }));
     expect(h.onEscalate).toHaveBeenCalled();
-    await userEvent.click(within(card).getByRole("button", { name: "Open merge_request →" }));
+    await userEvent.click(within(card).getByRole("button", { name: "Open merge request →" }));
     expect(h.onOpenNode).toHaveBeenCalledWith("merge_request");
   });
 
@@ -127,11 +127,11 @@ describe("StateCard", () => {
 
   // The infra stop's `facts.cause` picks what the card offers (Kraft-9d8b2.67); every other cause, or none, says where to look.
   it.each([
-    ["forge_auth", ["Retry from open_draft", "Escalate…", "Open merge_request →"], null],
-    ["stranded", ["Retry from open_draft", "Escalate…", "Open merge_request →"], "the run was left behind by a restart"],
-    ["git", ["Retry from open_draft", "Check the repo settings", "Escalate…", "Open merge_request →"], null],
-    [undefined, ["Retry from open_draft", "Check the repo settings", "Escalate…", "Open merge_request →"], null],
-    ["forge_unreachable", ["Retry from open_draft", "Check the repo settings", "Escalate…", "Open merge_request →"], "the forge could not be reached"],
+    ["forge_auth", ["Retry from open_draft", "Escalate…", "Open merge request →"], null],
+    ["stranded", ["Retry from open_draft", "Escalate…", "Open merge request →"], "the run was left behind by a restart"],
+    ["git", ["Retry from open_draft", "Check the repo settings", "Escalate…", "Open merge request →"], null],
+    [undefined, ["Retry from open_draft", "Check the repo settings", "Escalate…", "Open merge request →"], null],
+    ["forge_unreachable", ["Retry from open_draft", "Check the repo settings", "Escalate…", "Open merge request →"], "the forge could not be reached"],
   ])("an infra failure with cause %s offers %j", async (cause, labels, why) => {
     stubFetch();
     show({ display_status: "failed", stop: stop("infra", { facts: cause ? { cause } : {} }) });
@@ -209,12 +209,25 @@ describe("StateCard", () => {
     });
   });
 
-  it("Retry says what it restarts, on which branch, and what the item has cost", () => {
+  it("Retry says what it restarts and that the branch is kept", () => {
     stubFetch();
     show({ display_status: "failed", stop: stop("failed", { facts: { error: "403" } }), branch: "kraft/design-the-cache-w1", budget_cap: { cap_usd: 10, source: "item", spent_usd: 0.04 } });
     const card = screen.getByRole("region", { name: "Failed" });
-    expect(card).toHaveTextContent("Restarts open_draft on the kept branch kraft/design-the-cache-w1 · $0.040 of $10.00 spent");
+    expect(card).toHaveTextContent(/Restarts open_draft on the kept branch$/);
     expect(within(card).getByRole("button", { name: "Retry from open_draft" })).toHaveAccessibleDescription(/^Restarts open_draft/);
+  });
+
+  // The pane's Retry (the one with the steer) leaves the stopped node to the card, so the card takes the steer.
+  it.each([["steerable", true, { path: "merge_request.open.open_draft", steer: "check the tokenizer" }], ["not steerable", false, { path: "merge_request.open.open_draft" }]])("a failed card's Retry on a %s item sends the steer typed in it, if it has the box", async (_n, steerable, body) => {
+    const calls = stubFetch(WRITES);
+    show({ display_status: "failed", stop: stop("failed", { facts: { error: "403" } }), steerable });
+    const card = screen.getByRole("region", { name: "Failed" });
+    const box = within(card).queryByLabelText("Steer for the retry");
+    expect(!!box).toBe(steerable);
+    if (box) await userEvent.type(box, "check the tokenizer");
+    await userEvent.click(within(card).getByRole("button", { name: "Retry from open_draft" }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(1));
+    expect(posts(calls)[0].body).toMatchObject(body);
   });
 
   it("says what a failed run kept: its branch and the files changed on it (WI-4)", async () => {
@@ -321,9 +334,9 @@ describe("StateCard", () => {
 
   // The server's `actions` (F4): a door it does not list is no button; links and Open node stay.
   it.each<[string, Parameters<typeof detail>[0], string, string[]]>([
-    ["a failed infra stop, the server refusing retry", { display_status: "failed", stop: stop("infra"), actions: ["escalate", "cancel"] }, "Failed", ["Check the repo settings", "Escalate…", "Open merge_request →"]],
-    ["a stuck stop, the server refusing escalate", { display_status: "needs_you", stop: stop("stuck"), actions: ["retry", "cancel"] }, "Stuck", ["Retry from open_draft", "Open merge_request →"]],
-    ["a conflict, the server refusing escalate", { display_status: "needs_you", stop: stop("conflict"), actions: ["cancel"] }, "Rebase needs you", ["Review the conflicts", "Open merge_request →"]],
+    ["a failed infra stop, the server refusing retry", { display_status: "failed", stop: stop("infra"), actions: ["escalate", "cancel"] }, "Failed", ["Check the repo settings", "Escalate…", "Open merge request →"]],
+    ["a stuck stop, the server refusing escalate", { display_status: "needs_you", stop: stop("stuck"), actions: ["retry", "cancel"] }, "Stuck", ["Retry from open_draft", "Open merge request →"]],
+    ["a conflict, the server refusing escalate", { display_status: "needs_you", stop: stop("conflict"), actions: ["cancel"] }, "Rebase needs you", ["Review the conflicts", "Open merge request →"]],
     ["cancelled, the server refusing archive", { display_status: "cancelled", stop: null, current_node_id: null, actions: [] }, "Cancelled", ["Duplicate as new item"]],
   ])("%s", (_name, over, title, labels) => {
     stubFetch();

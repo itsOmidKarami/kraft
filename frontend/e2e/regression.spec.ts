@@ -6,7 +6,7 @@ import { expect, publish, test } from "./fixtures";
 
 // Every area's write path, the way the new UI writes it: Templates and
 // Policy/Auto-intake edit a server-side draft and publish it; Access,
-// Notifications and Appearance save on change. Each test reads the result
+// Notifications, Appearance and Board & code save on change. Each test reads the result
 // back from the API (or after a reload), not from the control it just set.
 
 /** A cell that reads "<label>, <value>. Edit": click, type, Enter. */
@@ -52,7 +52,7 @@ test("chains: a change to a chain publishes to its file", async ({ page }) => {
 
 test("library: a component lists the chains that use it, and links to them", async ({ page }) => {
   await page.goto("/templates/library/tasks.implementer");
-  await page.getByRole("link", { name: "quick-task" }).click();
+  await page.locator("#library-pane-panel").getByRole("link", { name: "quick-task" }).click();
   await expect(page).toHaveURL(/\/templates\/chains\/quick-task\/nodes\/implementation$/);
 });
 
@@ -114,11 +114,14 @@ test("notifications: send a test reports a result", async ({ page }) => {
 test("appearance: density and open-in persist after a reload", async ({ page }) => {
   await page.goto("/settings/appearance");
   await page.getByRole("radiogroup", { name: "Density" }).getByRole("radio", { name: "Comfortable" }).check();
+  await expect.poll(async () => (await (await page.request.get("/api/theme")).json()).density).toBe("comfortable");
+  await page.goto("/settings/board-and-code");
   await page.getByRole("radiogroup", { name: "Open items in" }).getByRole("radio", { name: "Full page" }).check();
   await expect.poll(async () => (await (await page.request.get("/api/theme")).json()).board.open_in).toBe("full");
   await page.reload();
-  await expect(page.getByRole("radiogroup", { name: "Density" }).getByRole("radio", { name: "Comfortable" })).toBeChecked();
   await expect(page.getByRole("radiogroup", { name: "Open items in" }).getByRole("radio", { name: "Full page" })).toBeChecked();
+  await page.goto("/settings/appearance");
+  await expect(page.getByRole("radiogroup", { name: "Density" }).getByRole("radio", { name: "Comfortable" })).toBeChecked();
   // The other specs click rows expecting the peek.
   await page.request.put("/api/theme", { data: { density: "compact", board: { open_in: "peek" } } });
 });

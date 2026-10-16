@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -108,7 +108,7 @@ describe("the node screen (D)", () => {
     mount(item("running"), "/work-items/w1/nodes/verification");
     expect(await screen.findByRole("heading", { level: 1, name: "verification" })).toBeInTheDocument();
     const strip = screen.getByRole("group", { name: "Chain" });
-    expect(within(strip).getAllByRole("button").map((b) => b.textContent)).toEqual(["plan", "plan_approval", "verification", "merge_request"]);
+    expect(within(strip).getAllByRole("button").map((b) => b.textContent)).toEqual(["plan", "approve plan", "verification", "merge request"]);
     expect(within(strip).getByRole("button", { name: "verification" })).toHaveAttribute("aria-current", "true");
     expect(screen.getAllByText("exec node · running", { exact: false })).toHaveLength(2);
     await userEvent.click(screen.getByRole("button", { name: /code_review/ }));
@@ -118,7 +118,7 @@ describe("the node screen (D)", () => {
   it("changes node from the strip with replace, not a new history entry", async () => {
     mount(item("running"), "/work-items/w1/nodes/verification");
     const before = window.history.length;
-    await userEvent.click(within(await screen.findByRole("group", { name: "Chain" })).getByRole("button", { name: "merge_request" }));
+    await userEvent.click(within(await screen.findByRole("group", { name: "Chain" })).getByRole("button", { name: "merge request" }));
     await waitFor(() => expect(where()).toBe("/work-items/w1/nodes/merge_request"));
     expect(window.history.length).toBe(before);
   });
@@ -221,7 +221,7 @@ describe("the node screen (D)", () => {
   it("picks a pass of a node the chain ran again: its rounds, its tasks and their runs, with the pass in the URL", async () => {
     mount(twice(), "/work-items/w1/nodes/verification");
     const passes = await screen.findByRole("group", { name: "Passes" });
-    expect(within(passes).getAllByRole("button").map((b) => b.textContent)).toEqual(["pass 1 · first run", "pass 2 · after a reject at local_review"]);
+    expect(within(passes).getAllByRole("button").map((b) => b.textContent)).toEqual(["pass 1 · first run", "pass 2 · after changes were requested at approve local review"]);
     const task = (name: string) => screen.getByText(name).closest("button")!;
     // The newest pass is on its first round: it has no rounds to pick between, and counts none of the pass before.
     expect(screen.queryByRole("group", { name: "Fix loop rounds" })).toBeNull();
@@ -286,6 +286,17 @@ describe("the node screen (D)", () => {
     expect(screen.getByText(/grep cache/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "stdout" }));
     expect(screen.getByText("No lines to show. Clear the filter, or the node has not started.")).toBeInTheDocument();
+  });
+
+  it("names the reject target on a gate's overview button and its config's on-failure fact, not its id", async () => {
+    const nodes = detail().chain_definition.nodes.map((n) => (n.id === "plan_approval" ? { ...n, reject_to: "merge_request" } : n));
+    const over = { current_node_id: "plan_approval", pending_gate: "plan_approval", worker_sessions: [], chain_definition: { template_id: "default", nodes } };
+    mount(item("needs_you", stop("gate", { node: "plan_approval" }), over), "/work-items/w1/nodes/plan_approval");
+    expect((await screen.findAllByRole("button", { name: "merge request" })).length).toBeGreaterThan(0);
+    expect(screen.queryByText("merge_request")).toBeNull();
+    cleanup();
+    mount(item("needs_you", stop("gate", { node: "plan_approval" }), over), "/work-items/w1/nodes/plan_approval?tab=config");
+    expect(await screen.findByText("reject to merge request")).toBeInTheDocument();
   });
 
   it("a gate shows its review path with the reject target, never an invented verdict", async () => {
@@ -464,10 +475,10 @@ describe("the task screen (E)", () => {
       const row = (k: string) => within(facts).getByText(k).nextElementSibling!.textContent;
       expect([row("status"), row("command"), row("paths"), row("execution")]).toEqual(["passed · 24s", "just test-api", "api/**", "sequential"]);
       expect(within(facts).queryByText("repo")).toBeNull();
-      expect(screen.getByRole("button", { name: "Task" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: SCOPE_PATH.split(".").at(-1)!.replace(/[_-]+/g, " ") })).toBeInTheDocument();
       await userEvent.click(screen.getByRole("tab", { name: "Log" }));
       await waitFor(() => expect(calls.some((c) => c.path === `/work-items/w1/sessions/${api[1].id}/log`)).toBe(true));
-      await userEvent.click(screen.getByRole("button", { name: "Task" }));
+      await userEvent.click(screen.getByRole("button", { name: SCOPE_PATH.split(".").at(-1)!.replace(/[_-]+/g, " ") }));
       await waitFor(() => expect(where()).toBe(TESTS));
       // The task fact is the same way back.
       await userEvent.click(await screen.findByRole("button", { name: /just test-api/ }));
@@ -543,7 +554,7 @@ describe("the task screen (E)", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "code_review" })).toBeInTheDocument();
     expect(screen.getByText(/agent task · running now/)).toBeInTheDocument();
     expect(where()).toBe(TASK);
-    expect(screen.getByRole("button", { name: "Node" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "verification" })).toBeInTheDocument();
   });
 
   it.each([
