@@ -53,8 +53,8 @@ describe("Library canvas: a node", () => {
     mount("/templates/library/nodes.verification");
     await canvas("nodes.verification");
     // The seam under a step's tasks says what it adds, not a bare "+".
-    expect(screen.getByRole("button", { name: "Add a parallel task" })).toHaveTextContent(/^\+ parallel task$/);
-    await u.click(screen.getByRole("button", { name: "Add a parallel task" }));
+    expect(screen.getByRole("button", { name: "parallel task" })).toHaveTextContent(/^\+ parallel task$/);
+    await u.click(screen.getByRole("button", { name: "parallel task" }));
     await u.click(await screen.findByRole("menuitem", { name: "Blank forge task" }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("library", "library", [{ op: "add_task", container: "nodes.verification", step: "review", id: "forge", kind: "forge" }], undefined));
   });
@@ -111,7 +111,7 @@ describe("Library canvas: a step and a task", () => {
     const post = vi.spyOn(d, "postOps").mockImplementation(() => ok({ ...libView(), ops: [{ op: "add_task" }] }) as never);
     mount("/templates/library/steps.checks");
     await canvas("steps");
-    await u.click(screen.getByRole("button", { name: "Add a parallel task" }));
+    await u.click(screen.getByRole("button", { name: "parallel task" }));
     await u.click(await screen.findByRole("menuitem", { name: "Blank agent task" }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("library", "library", [{ op: "add_task", container: "steps", step: "checks", id: "agent", kind: "agent" }], undefined));
   });

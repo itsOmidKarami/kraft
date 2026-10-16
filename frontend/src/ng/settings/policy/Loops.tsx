@@ -54,7 +54,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
       </section>
 
       <section className="pol-card" aria-label={EVERY_FIX_LOOP}>
-        <h3 className="pol-h2">Every fix loop</h3>
+        <h3 className="pol-h2">{EVERY_FIX_LOOP}</h3>
         <div className="pol-loops">
           <div className="pol-loop is-head" aria-hidden>
             <span className="pol-colh">loop</span><span className="pol-colh">attempts</span><span className="pol-colh">wall clock</span><span />
@@ -113,7 +113,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
       </section>
 
       <section className="pol-card" aria-label={WHEN_STUCK}>
-        <h3 className="pol-h2">When an item is stuck</h3>
+        <h3 className="pol-h2">{WHEN_STUCK}</h3>
         <div className="pol-one">
           <span className="pol-k">auto-escalate</span>
           <span className="pol-chips" role="group" aria-label="Auto-escalate on stuck">

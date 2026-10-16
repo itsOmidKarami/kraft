@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Field } from "./Field";
@@ -20,6 +21,15 @@ describe("ng LinkButton", () => {
   it("renders an anchor when given an href", () => {
     render(<LinkButton href="/log.txt" inline>Download</LinkButton>);
     expect(screen.getByRole("link", { name: "Download" })).toHaveClass("link-btn", "is-inline");
+  });
+});
+
+describe("ng LinkButton in a sentence", () => {
+  it("takes its sentence's size, inline or inside an Empty", () => {
+    const css = readFileSync("src/ng/ui/ui.css", "utf-8");
+    const rule = css.match(/^([^{\n]*\.link-btn[^{\n]*)\{[^}]*font-size:\s*inherit/m)?.[1] ?? "";
+    expect(rule).toContain(".link-btn.is-inline");
+    expect(rule).toContain(".empty .link-btn");
   });
 });
 

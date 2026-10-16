@@ -14,6 +14,7 @@ import { resetLibrary, useLibrary } from "./useLibrary";
 import { Head, Kv, Note } from "./panes/controls";
 import { problemText } from "./problems";
 import "./panes/panes.css";
+import { LinkButton } from "../ui/LinkButton";
 
 const TABS = [{ value: "changes", label: "Changes" }, { value: "yaml", label: "YAML diff" }];
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -185,7 +186,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
       )}
       {r.warnings.map((w) => <Note key={w.file}>{w.file}: {w.message}.</Note>)}
       {tab === "yaml" && (problems.length > 0 || r.yaml_error) && (
-        <p className="pane-note is-bad">{plural(problems.length + (r.yaml_error ? 1 : 0), "problem")} block publishing. <button type="button" className="tpl-rv-fix" onClick={() => setTab("changes")}>See them →</button></p>
+        <p className="pane-note is-bad">{plural(problems.length + (r.yaml_error ? 1 : 0), "problem")} block publishing. <LinkButton inline onClick={() => setTab("changes")}>See them →</LinkButton></p>
       )}
       {tab === "changes" && (problems.length > 0 || r.yaml_error) && (
         <>
@@ -197,7 +198,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
               <span className="tpl-rv-path">{p.path || chain}{p.field && p.field !== p.path ? ` · ${p.field}` : ""}</span>
               <span>{problemText(p)}</span>
               {problemWhere?.(p)}
-              <button type="button" className="tpl-rv-fix" onClick={() => onFix(p.path ?? "", p)}>Fix →</button>
+              <LinkButton onClick={() => onFix(p.path ?? "", p)}>Fix →</LinkButton>
             </div>
           ))}
         </>

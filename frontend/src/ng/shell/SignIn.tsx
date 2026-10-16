@@ -109,7 +109,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
           />
         </Field>
         <div className="ng-signin-stay">
-          <span className="field-label" aria-hidden>Stay signed in</span>
+          <span className="field-label" aria-hidden>{STAY_SIGNED_IN}</span>
           <Segmented
             label={STAY_SIGNED_IN}
             value={stay}

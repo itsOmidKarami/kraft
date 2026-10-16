@@ -14,6 +14,7 @@ import { NoMatch } from "../ui/NoMatch";
 import { AddonBadge } from "../templates/addon";
 import { SEARCH_LIBRARY } from "./sharedWords";
 import { Empty } from "../ui/Empty";
+import { LinkButton } from "../ui/LinkButton";
 
 /** What `+ New` can add: the section, and the node's or task's kind. */
 const NEW: { label: string; section: Section; kind?: string }[] = [
@@ -154,7 +155,7 @@ export function LibraryList({ rows, selected, only, onShowAll, onSelect, onAdd }
       {only && (
         <p className="lib-only">
           <span>Showing {SECTION_LABEL[only].toLowerCase()} only</span>
-          <button type="button" className="lib-only-all" onClick={onShowAll}>Show all</button>
+          <LinkButton onClick={onShowAll}>Show all</LinkButton>
         </p>
       )}
       <div className="lib-rows" role="listbox" aria-label="Library components">

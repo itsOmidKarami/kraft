@@ -37,7 +37,7 @@ export function ApplyChip() {
         <div className="apply-pop">
           {nR > 0 && (
             <section className="apply-block" aria-label={RESTART_NEEDED}>
-              <div className="apply-block-head"><span>Restart needed</span><span className="apply-muted">interrupts running work</span></div>
+              <div className="apply-block-head"><span>{RESTART_NEEDED}</span><span className="apply-muted">interrupts running work</span></div>
               {restart.map((i) => <div key={i.id} className="apply-row"><span className="apply-src">{i.file}</span><span>{i.text}</span></div>)}
               <div className="apply-actions">
                 {managed ? (
