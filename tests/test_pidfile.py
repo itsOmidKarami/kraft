@@ -23,9 +23,8 @@ def started(tmp_path):
     procs = []
 
     def start(*argv: str) -> subprocess.Popen:
-        proc = exec_landed(subprocess.Popen(argv))
-        procs.append(proc)
-        return proc
+        procs.append(subprocess.Popen(argv))  # owned before the wait, so teardown kills it
+        return exec_landed(procs[-1])
 
     yield start
     for proc in procs:

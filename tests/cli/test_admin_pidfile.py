@@ -22,14 +22,17 @@ def decoy(tmp_path, monkeypatch):
     """A `sleep` this test started, named by the run dir's pidfile the way a
     reused pid would be after a server died without removing it."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    proc = exec_landed(subprocess.Popen(["sleep", "60"]))
-    pid_path = RunDirs(tmp_path / "run").pid
-    pid_path.parent.mkdir(parents=True, exist_ok=True)
-    pid_path.write_text(str(proc.pid))
-    os.utime(pid_path, (time.time() + 5, time.time() + 5))
-    yield proc
-    proc.kill()
-    proc.wait()
+    proc = subprocess.Popen(["sleep", "60"])
+    try:
+        exec_landed(proc)
+        pid_path = RunDirs(tmp_path / "run").pid
+        pid_path.parent.mkdir(parents=True, exist_ok=True)
+        pid_path.write_text(str(proc.pid))
+        os.utime(pid_path, (time.time() + 5, time.time() + 5))
+        yield proc
+    finally:
+        proc.kill()
+        proc.wait()
 
 
 @pytest.mark.parametrize("verb", ["stop", "restart"])
