@@ -176,23 +176,23 @@ def test_the_header_says_where_the_item_stands(
         (
             QUESTION,
             [],
-            ["The agent asks:", "keep [/] in titles?", "", "p answers it.", ""],
+            ["The agent asks:", "keep [/] in titles?", "", "p answers it."],
             "answer",
         ),
-        (FAILED, [], ["t retries it.", "", "Chain"], None),
-        (FAILED, [{"id": "s1"}], ["t retries it.", item_view.LOG_POINTER, "", "Chain"], None),
-        (PAUSED, [], ["p resumes it.", "", "Chain"], "resume"),
-        (RUNNING, [], ["Chain"], "pause"),
+        (FAILED, [], ["t retries it."], None),
+        (FAILED, [{"id": "s1"}], ["t retries it.", item_view.LOG_POINTER], None),
+        (PAUSED, [], ["p resumes it."], "resume"),
+        (RUNNING, [], [], "pause"),
         (
             PAUSED | {"actions": []},
             [],
-            ["Kraft offers no action for it now; m shows what it allows.", "", "Chain"],
+            ["Kraft offers no action for it now; m shows what it allows."],
             None,
         ),
         (
             FAILED | {"actions": []},
             [],
-            ["Kraft offers no action for it now; m shows what it allows.", "", "Chain"],
+            ["Kraft offers no action for it now; m shows what it allows."],
             None,
         ),
     ],
@@ -267,7 +267,7 @@ def test_the_gate_document_is_read_whole_and_scrolls_by_keys(board, monkeypatch)
     assert (top, moved, at_end) == (0, True, True)
     assert lines[:60] == [f"line {n} [/]" for n in range(60)]
     assert lines[61].startswith("WARNING: this document was truncated by the server at 1000 bytes")
-    assert lines[-4:] == [" ✓ spec", " ● spec_approval (gate)", "   plan", "   implement"]
+    assert lines[-1].endswith("Read the rest at spec.md.")  # no chain list after the warning
 
 
 @pytest.mark.parametrize(
@@ -549,7 +549,7 @@ def test_the_title_names_the_view_the_item_was_opened_from(board, monkeypatch):
         await _settled(console, app, pilot)
         app.show("server")
         app.open_item(RUNNING["id"])
-        await console.until(pilot, lambda: _overview(app))
+        await console.until(pilot, lambda: app.view.item is not None)
         return _text(app, "#item-title")
 
     assert console.run(scenario) == "Server › k7f2e9a0  Docs per major"
@@ -601,11 +601,11 @@ def test_a_read_for_the_item_shown_before_is_dropped(board, monkeypatch):
 @pytest.mark.parametrize(
     ("keys", "tab"),
     [
-        (["right"], "activity"),
+        (["right"], "chain"),
         (["left"], "diff"),
-        (["tab"], "activity"),
+        (["tab"], "chain"),
         (["shift+tab"], "diff"),
-        (["right", "right", "left"], "activity"),
+        (["right", "right", "left"], "chain"),
     ],
     ids=["right", "left-wraps", "tab", "shift-tab-wraps", "back-and-forth"],
 )
@@ -630,13 +630,13 @@ def test_clicking_a_tabs_name_opens_it(board, monkeypatch):
     async def scenario(app, pilot):
         await _opened(console, app, pilot, GATE["id"])
         shown = []
-        # " Overview  Activity  Log  Diff": Log's name starts at column 22.
-        for x in (25, 14):
+        # " Overview  Chain  Activity  Log  Diff": Log's name starts at column 30.
+        for x in (33, 22, 14):
             await pilot.click("#item-tabs", offset=(x, 0))
             shown.append(app.view.tab)
         return shown
 
-    assert console.run(scenario) == ["log", "activity"]
+    assert console.run(scenario) == ["log", "activity", "chain"]
 
 
 def test_the_footer_and_the_keys_dialog_name_the_tab_keys(board, monkeypatch):

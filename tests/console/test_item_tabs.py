@@ -5,23 +5,21 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from support.console_board import GATE, RUNNING, _detail, _iso, _opened, _overview, _serve, _settled
+from support.console_board import (
+    GATE,
+    RUNNING,
+    _detail,
+    _event,
+    _opened,
+    _overview,
+    _serve,
+    _serve_events,
+    _settled,
+)
 from textual.widgets import RichLog
 
 from kraft import client, render
 from kraft.console.screens import item as item_view
-
-
-def _event(seq: int, kind: str, minutes_ago: float, **payload) -> dict:
-    return {
-        "seq": seq,
-        "work_item_id": GATE["id"],
-        "type": kind,
-        "node_id": payload.pop("node", None),
-        "payload": payload,
-        "created_at": _iso(minutes_ago),
-    }
-
 
 HISTORY = [
     _event(1, "work_item_created", 90),
@@ -30,23 +28,6 @@ HISTORY = [
     _event(4, "gate_requested", 65, gate="spec_approval"),
     _event(5, "gate_rejected", 12, gate="spec_approval", note="vague [/]"),
 ]
-
-
-def _serve_events(monkeypatch, history: list[dict], hold=None) -> list[dict]:
-    """`client.events` over `history`, as the server pages it; returns the reads.
-    `hold` maps a `before_seq` to an Event its read waits for."""
-    reads: list[dict] = []
-
-    async def events(work_item_id=None, after_seq=0, *, limit=None, before_seq=None):
-        if before_seq in (hold or {}):
-            await hold[before_seq].wait()
-        reads.append({"after_seq": after_seq, "limit": limit, "before_seq": before_seq})
-        if before_seq is not None:
-            return [e for e in history if e["seq"] < before_seq][-limit:]
-        return [e for e in history if e["seq"] > after_seq][:limit]
-
-    monkeypatch.setattr(client, "events", events)
-    return reads
 
 
 def _activity(app) -> list[str]:
@@ -75,7 +56,7 @@ def test_brackets_step_through_the_tabs_and_a_shows_the_overview_first(board, mo
 
     seen, calls = console.run(scenario)
     # Round the start to the last tab.
-    assert seen == ["activity", "overview", item_view.TABS[-1][0], ("overview", [])]
+    assert seen == ["chain", "overview", item_view.TABS[-1][0], ("overview", [])]
     assert calls == [("approve_gate", ("spec_approval", "a91c03fe", "d1g3st"), {})]
 
 
@@ -90,7 +71,7 @@ def test_the_activity_reads_newest_first_and_end_reads_earlier(board, monkeypatc
 
     async def scenario(app, pilot):
         await _opened(console, app, pilot, GATE["id"])
-        await pilot.press("right_square_bracket")
+        app.view.show_tab("activity")
         await console.until(pilot, lambda: _activity(app))
         first = _activity(app)
         await pilot.press("end")
@@ -132,7 +113,7 @@ def test_a_live_event_adds_its_line_to_the_activity(board, monkeypatch, event, r
 
     async def scenario(app, pilot):
         await _opened(console, app, pilot, GATE["id"])
-        await pilot.press("right_square_bracket")
+        app.view.show_tab("activity")
         await console.until(pilot, lambda: _activity(app))
         history.append(event)
         app.view.rows_changed([GATE], [event])
@@ -176,7 +157,7 @@ def test_the_log_follows_the_newest_session_and_s_steps_to_older_ones(board, mon
     async def scenario(app, pilot):
         await _opened(console, app, pilot, RUNNING["id"])
         offered = app.view.check_action("session", ())
-        await pilot.press("right_square_bracket", "right_square_bracket")
+        await pilot.press("right_square_bracket", "right_square_bracket", "right_square_bracket")
         await console.until(pilot, lambda: _log(app)[-1:] == ["session ended"])
         newest = _log(app)
         await pilot.press("s")
@@ -367,7 +348,7 @@ def _paged_back(board, monkeypatch, then):
 
     async def scenario(app, pilot):
         await _opened(console, app, pilot, GATE["id"])
-        await pilot.press("right_square_bracket")
+        app.view.show_tab("activity")
         await console.until(pilot, lambda: [e["seq"] for e in app.view.events] == [6, 5])
         await pilot.press("end")  # asks for the page before seq 5, which is held
         await pilot.pause()
@@ -422,7 +403,7 @@ def test_another_items_activity_answer_is_dropped(board, monkeypatch):
 
     async def scenario(app, pilot):
         await _opened(console, app, pilot, GATE["id"])
-        await pilot.press("right_square_bracket")
+        app.view.show_tab("activity")
         await console.until(pilot, lambda: asked)
         app.open_item(other["id"])
         await pilot.pause()
@@ -460,7 +441,7 @@ def test_an_activity_read_that_fails_says_so(board, monkeypatch, error, gone, sa
         toasts = []
         app.notify_refusal = lambda exc: toasts.append(client.reason_of(str(exc)))
         await _opened(console, app, pilot, GATE["id"])
-        await pilot.press("right_square_bracket")
+        app.view.show_tab("activity")
         await console.until(pilot, lambda: app.view._dead or toasts)
         return app.view._dead, toasts
 
@@ -493,7 +474,7 @@ def test_a_log_with_no_session_yet_follows_once_one_is_known(board, monkeypatch,
     async def scenario(app, pilot):
         await _settled(console, app, pilot)
         app.open_item(RUNNING["id"])
-        await pilot.press("right_square_bracket", "right_square_bracket")
+        await pilot.press("right_square_bracket", "right_square_bracket", "right_square_bracket")
         await console.until(pilot, lambda: _log(app) == ["No session has run yet."])
         if late == "read-lands":
             hold.set()
@@ -548,7 +529,7 @@ def test_the_log_says_what_it_cannot_follow(board, monkeypatch, sessions, failur
 
     async def scenario(app, pilot):
         await _opened(console, app, pilot, RUNNING["id"])
-        await pilot.press("right_square_bracket", "right_square_bracket")
+        await pilot.press("right_square_bracket", "right_square_bracket", "right_square_bracket")
         await console.until(pilot, lambda: _log(app) == lines)
         return app.view.check_action("session", ())
 
@@ -603,7 +584,7 @@ def test_a_reread_that_lands_out_of_sight_does_not_shred_the_document(board, mon
         before = len(done)
         app.view.rows_changed([moved], [{"seq": 1}])
         if leave == "another-tab":
-            await pilot.press("right_square_bracket")
+            app.view.show_tab("activity")
         else:
             app.show("server")
         await pilot.pause()
@@ -636,7 +617,7 @@ def test_a_log_is_not_followed_by_a_read_landing_behind_the_board(board, monkeyp
         await _settled(console, app, pilot)
         hold.clear()
         app.open_item(RUNNING["id"])
-        await pilot.press("right_square_bracket", "right_square_bracket")
+        await pilot.press("right_square_bracket", "right_square_bracket", "right_square_bracket")
         await console.until(pilot, lambda: _log(app) == ["No session has run yet."])
         app.show("server")
         await pilot.pause()  # the Item has heard it is hidden
@@ -739,7 +720,7 @@ def test_end_after_coming_back_does_not_page_from_the_last_visits_boundary(board
 
     async def scenario(app, pilot):
         await _opened(console, app, pilot, GATE["id"])
-        await pilot.press("right_square_bracket")
+        app.view.show_tab("activity")
         await console.until(pilot, lambda: seqs(app) == [6, 5])
         older.set()
         await pilot.press("end")
@@ -748,7 +729,7 @@ def test_end_after_coming_back_does_not_page_from_the_last_visits_boundary(board
         history.extend(_event(n, "node_started", 0, node=f"n{n}") for n in (7, 8))
         first.clear()
         older.clear()
-        await pilot.press("right_square_bracket")
+        app.view.show_tab("activity")
         await pilot.pause()
         await pilot.press("end")  # asks for the page before 3, while the first is held
         await pilot.pause()
@@ -779,12 +760,12 @@ def test_the_overview_shows_the_new_version_of_the_document_on_return(board, mon
 
     async def scenario(app, pilot):
         await _opened(console, app, pilot, GATE["id"])
-        await pilot.press("right_square_bracket")
+        app.view.show_tab("activity")
         monkeypatch.setattr(client, "artifact", artifact)
         app.view.rows_changed([moved], [{"seq": 1}])
         await console.until(pilot, lambda: len(done) > 1)
         await pilot.pause()
-        await pilot.press("left_square_bracket")
+        app.view.show_tab("overview")
         await console.until(pilot, lambda: _overview(app)[:1] == ["new line 0 [/]"])
         await pilot.press("a")
         await console.until(pilot, lambda: calls)
