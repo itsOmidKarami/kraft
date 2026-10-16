@@ -60,8 +60,8 @@ describe("ng AnalyticsPage", () => {
   it("links a repo row to the board for that repo and the gate and stop rows to the board narrowed to that gate or stop kind", async () => {
     await show(REPORT);
     expect(screen.getByRole("link", { name: "kraft" })).toHaveAttribute("href", "/?repo=%2FUsers%2Fdev%2Fcode%2Fkraft");
-    expect(screen.getByRole("link", { name: "spec_approval" })).toHaveAttribute("href", "/?gate=spec_approval");
-    expect(screen.getByRole("link", { name: "gate · plan_approval" })).toHaveAttribute("href", "/?gate=plan_approval");
+    expect(screen.getByRole("link", { name: "approve spec" })).toHaveAttribute("href", "/?gate=spec_approval");
+    expect(screen.getByRole("link", { name: "gate · approve plan" })).toHaveAttribute("href", "/?gate=plan_approval");
     expect(screen.getByRole("link", { name: "budget" })).toHaveAttribute("href", "/?stop=budget");
     expect(screen.getByRole("link", { name: "cap breach" })).toHaveAttribute("href", "/?stop=cap");
     // A bucket judged from the stop's text spans several kinds: it narrows nothing.
@@ -70,8 +70,8 @@ describe("ng AnalyticsPage", () => {
 
   it("names the gate items waited at, with its median, total and rejections", async () => {
     await show(REPORT);
-    const row = screen.getByText("spec_approval").closest("tr")!;
-    expect(within(row).getAllByRole("cell").map((c) => c.textContent)).toEqual(["spec_approval", "", "3", "1h", "3h 20m", "2"]);
+    const row = screen.getByText("approve spec").closest("tr")!;
+    expect(within(row).getAllByRole("cell").map((c) => c.textContent)).toEqual(["approve spec", "", "3", "1h", "3h 20m", "2"]);
   });
 
   it("says its scope once, in the header row, with no visible heading of its own (AN-1)", async () => {

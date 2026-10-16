@@ -51,6 +51,16 @@ describe("Row", () => {
     } else expect(tail.querySelector("svg")).toBeNull();
   });
 
+  it.each<[DisplayStatus, Partial<WorkItem>, boolean]>([
+    ["paused", { current_node_id: "build" }, false],
+    ["failed", {}, true],
+    ["needs_you", { stop: { kind: "gate", node: "spec_approval", reason: null, resume_at: null } as WorkItem["stop"] }, true],
+  ])("a %s row's tail is amber only when it needs a human", (status, over, amber) => {
+    const { main } = mount(status, over);
+    const tail = main.querySelector(".board-meta-tail")!;
+    expect(tail.classList.contains("is-hot")).toBe(amber);
+  });
+
   it.each(["running", "done"] as const)("has no action when %s", (s) => {
     mount(s);
     expect(screen.getAllByRole("button")).toHaveLength(1);

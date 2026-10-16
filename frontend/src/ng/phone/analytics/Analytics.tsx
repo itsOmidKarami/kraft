@@ -5,7 +5,7 @@ import * as api from "../../../api";
 import { elapsed, repoName, usd } from "../../../format";
 import { useStore } from "../../../store";
 import type { Analytics as Report } from "../../../types";
-import { boardHref, DEFAULT_RANGE, gateRows, HOW_COUNTED, measured, RANGES, EMPTY_RANGE, scopeLine, stopFilter, waitingKpi } from "../../analytics/shared";
+import { boardHref, DEFAULT_RANGE, gateLabel, gateRows, HOW_COUNTED, measured, RANGES, EMPTY_RANGE, scopeLine, stopFilter, stopLabel, waitingKpi } from "../../analytics/shared";
 import { chainOf } from "../../board/model";
 import { ChoiceSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
@@ -66,7 +66,7 @@ export function Analytics() {
                     <div className="ph-list">
                       {gates.map((g) => (
                         <Link key={g.gate} to={boardHref({ repo, chain, gate: g.gate })} className="ph-stat-row ph-stat-link">
-                          <span className="ph-stat-name ph-mono">{g.gate}</span>
+                          <span className="ph-stat-name">{gateLabel(g.gate)}</span>
                           <span className="ph-stat-meta">{g.n} {g.n === 1 ? "wait" : "waits"} · median {elapsed(g.median_ms)}{g.rejected ? ` · ${g.rejected} rejected` : ""}</span>
                           <span className="ph-stat-val">{elapsed(g.total_ms)}<ChevronRight size={14} aria-hidden="true" /></span>
                         </Link>
@@ -105,7 +105,7 @@ export function Analytics() {
                     <div className="ph-list">
                       {report.stop_reasons.map((s) => (
                         <Link key={s.label} to={boardHref({ repo, chain, ...stopFilter(s.label) })} className="ph-stat-row ph-stat-link">
-                          <span className="ph-stat-name">{s.label}</span>
+                          <span className="ph-stat-name">{stopLabel(s.label)}</span>
                           <span className="ph-stat-val">{s.n}<ChevronRight size={14} aria-hidden="true" /></span>
                         </Link>
                       ))}

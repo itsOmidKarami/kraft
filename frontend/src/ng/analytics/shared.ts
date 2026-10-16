@@ -1,4 +1,5 @@
 import { elapsed } from "../../format";
+import { gateName } from "../board/rowText";
 import type { Analytics } from "../../types";
 
 /** What the API takes for `range`, less `all`, which the weekly chart cannot show. Both layouts offer these. */
@@ -46,6 +47,12 @@ export const boardHref = (scope: { repo?: string | null; chain?: string | null; 
   const s = q.toString();
   return s ? `/?${s}` : "/";
 };
+
+/** A gate id as the board names it ("spec_approval" reads "approve spec"). The report has no chain, so no artifact kind. */
+export const gateLabel = (id: string) => gateName(undefined, id);
+
+/** A stop-reason bucket for reading: a gate stop's "gate · <id>" names the gate as the board does, the rest as the server wrote them. */
+export const stopLabel = (label: string) => (label.startsWith("gate · ") ? `gate · ${gateLabel(label.slice("gate · ".length))}` : label);
 
 /** What a stop-reason row filters the board to. The report's labels are its own buckets: a gate stop reads
  *  "gate · <gate>", and only "budget" and "cap breach" are one stop kind each. The rest (a task failure, an

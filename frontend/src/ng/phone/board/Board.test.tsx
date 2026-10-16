@@ -107,6 +107,14 @@ describe("the phone board (B)", () => {
     expect(gated).not.toHaveClass("ph-is-failed");
   });
 
+  it("a paused card's tail is neutral: ph-is-hot (amber) is only for a stop that needs a human", async () => {
+    put(item("p1", "paused"), gate("g2"));
+    mount();
+    await act(async () => {});
+    expect(document.querySelector('[data-row="p1"] .ph-card-tail')).not.toHaveClass("ph-is-hot");
+    expect(document.querySelector('[data-row="g2"] .ph-card-tail')).toHaveClass("ph-is-hot");
+  });
+
   it("counts the chips from the same rule as the tab badge, and the chip is in the URL", async () => {
     const list = [gate("g1"), item("f2", "failed"), item("r3", "running"), item("d4", "done")];
     put(...list);

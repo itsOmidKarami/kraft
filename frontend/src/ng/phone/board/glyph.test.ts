@@ -25,4 +25,9 @@ describe("a phone row's glyph says the state, not the node kind (PH-11)", () => 
     const g = stateGlyph(row("needs_you", "gate", "gate"));
     expect(g).toMatchObject({ kind: "gate", state: "amber" });
   });
+
+  it("a paused item's glyph is the neutral paused state, whatever node it stops at", () => {
+    expect(stateGlyph(row("paused")).state).toBe("paused");
+    expect(stateGlyph(row("paused", undefined, "gate"))).toMatchObject({ kind: "gate", state: "paused" });
+  });
 });

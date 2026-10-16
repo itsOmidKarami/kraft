@@ -127,7 +127,7 @@ export function Search() {
                   {g ? <NodeGlyph kind={g.kind} size="sm" state={g.state} icon={g.icon} /> : <span className="ph-search-icon"><Icon size={16} aria-hidden="true" /></span>}
                   <span className="ph-row-text">
                     <span className="ph-row-label">{r.title}</span>
-                    {r.sub && <span className={`ph-row-hint${cue ? ` ph-search-hot ph-is-${cue}` : ""}`}>{Cue && <Cue size={12} aria-hidden className="ph-card-cue" />}{r.sub}</span>}
+                    {r.sub && <span className={`ph-row-hint${cue ? `${cue === "paused" ? "" : " ph-search-hot"} ph-is-${cue}` : ""}`}>{Cue && <Cue size={12} aria-hidden className="ph-card-cue" />}{r.sub}</span>}
                   </span>
                 </button>
               );
