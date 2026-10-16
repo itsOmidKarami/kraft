@@ -66,7 +66,7 @@
 .rv-file-icon[data-lang="clike"] { color: var(--text-sub); }
 .rv-file-icon[data-lang="shell"] { color: var(--ok); }
 .rv-file-row.is-viewed > :is(.rv-file-icon, .rv-file-name) { opacity: 0.6; }
-.rv-file-name { flex: 1 1 auto; min-width: 0; padding: 3px 0; border: 0; background: transparent; color: var(--text-sub); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.rv-file-name { flex: 1 1 auto; min-width: 0; padding: 3px 0; border: 0; background: transparent; color: var(--text-sub); text-align: left; overflow: clip; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .rv-file-row.is-on .rv-file-name { color: var(--text); }
 .rv-tree-threads { flex: none; min-width: 16px; padding: 0 4px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); font-size: var(--fs-label); text-align: center; }
 .rv-tree-foot { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-top: 1px solid var(--line); font-size: var(--fs-meta); color: var(--text-muted); }
@@ -81,7 +81,7 @@
 .rv-fold { flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .rv-fold:is(:hover, :focus-visible) { background: var(--line); color: var(--text); }
 .rv-file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--fs-label); }
-.rv-file-note { color: var(--text-muted); white-space: nowrap; }
+.rv-file-note { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); white-space: nowrap; }
 .rv-file-threads { padding: 1px 7px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); font-size: var(--fs-meta); white-space: nowrap; }
 .rv-viewed-btn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-sub); font-size: var(--fs-label); white-space: nowrap; cursor: pointer; }
 .rv-viewed-btn:is([aria-pressed="true"], :has(:checked)) { color: var(--text); }

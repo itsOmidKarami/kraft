@@ -299,7 +299,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
         <span className="rv-file-path rv-mono" title={file.path} data-allow-ellipsis="">{file.path}</span>
         <span className="rv-add">+{file.insertions}</span>
         <span className="rv-del">−{file.deletions}</span>
-        <span className="rv-file-note">{note(file, pf)}</span>
+        <span className="rv-file-note" title={note(file, pf)} data-allow-ellipsis="">{note(file, pf)}</span>
         {collapsed && threads > 0 && <span className="rv-file-threads">{threads} {threads === 1 ? "thread" : "threads"}</span>}
         <span className="rv-spacer" />
         {!p.readOnly && <IconButton label="Comment on this file" onClick={() => p.onFileComment(file.path)}><MessageSquare size={15} aria-hidden /></IconButton>}

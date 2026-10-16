@@ -6,6 +6,10 @@
 .ph-row-static { cursor: default; }
 .ph-row.ph-is-danger { color: var(--bad); }
 .ph-chips-end { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: 150px; }
+/* A row with chips and a value leaves its label too little room: the label takes the first line, the chips and value the second. */
+.ph-row:has(> .ph-chips-end):has(> .ph-row-value) { flex-wrap: wrap; row-gap: 6px; }
+.ph-row:has(> .ph-chips-end):has(> .ph-row-value) > .ph-row-text { flex-basis: 100%; }
+.ph-row:has(> .ph-chips-end):has(> .ph-row-value) > .ph-chips-end { margin-right: auto; justify-content: flex-start; max-width: none; }
 .ph-chipword { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; font-size: var(--fs-label); color: var(--text-sub); }
 .ph-chipword.ph-tone-ok { color: var(--ok); }
 .ph-chipword.ph-tone-warn { color: var(--warn); }
