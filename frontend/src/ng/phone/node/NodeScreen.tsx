@@ -33,6 +33,8 @@ import "../areas/areas.css";
 import { yamlOf } from "../areas/yaml";
 import "./node.css";
 import { FIX_LOOP_ROUNDS } from "../../graph/sharedWords";
+import { Chip } from "../ui/Chip";
+import { Badge } from "../ui/Badge";
 
 export type NodeTab = "overview" | "log" | "config" | "yaml";
 const TABS: { id: NodeTab; label: string }[] = [{ id: "overview", label: "Overview" }, { id: "log", label: "Log" }, { id: "config", label: "Config" }, { id: "yaml", label: "YAML" }];
@@ -151,7 +153,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
                 <ol className="ph-path">
                   {reviewPath(item, api, events).map((r) => (
                     <li key={r.title} className="ph-path-step">
-                      <span className="ph-path-title">{r.title}{r.chip && <span className={`ph-chip-word ph-tone-${r.chip.tone}`}>{r.chip.word}</span>}</span>
+                      <span className="ph-path-title">{r.title}{r.chip && <Badge tone={r.chip.tone}>{r.chip.word}</Badge>}</span>
                       <span className="ph-path-text">{r.text}</span>
                     </li>
                   ))}
@@ -260,7 +262,7 @@ function NodeLog({ item, node, round }: { item: ItemDetail; node: string; round?
   return (
     <>
       <div className="ph-chips ph-chips-inline" role="group" aria-label="Sources">
-        {SOURCES.map((s) => <button key={s} type="button" className={`ph-chip${src === s ? " ph-is-on" : ""}`} aria-pressed={src === s} onClick={() => setSrc(s)}>{s}</button>)}
+        {SOURCES.map((s) => <Chip key={s} pressed={src === s} onClick={() => setSrc(s)}>{s}</Chip>)}
         <span className="ph-spacer" />
         <span className="ph-count">{lines ? lineCount(lines.length) : "Reading…"}</span>
       </div>

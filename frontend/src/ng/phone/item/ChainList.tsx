@@ -10,6 +10,7 @@ import type { ItemDetail } from "../../item/useItem";
 import { Block } from "../ui/Rows";
 import { gateSkipped } from "../../item/events";
 import { nodeSub } from "./model";
+import { Badge } from "../ui/Badge";
 
 /** The vertical chain (W17 brief C.3): `N of M nodes`, a tick strip, the done
  *  nodes collapsed behind `N done`, then a 56px row per remaining node. */
@@ -40,7 +41,7 @@ export function ChainList({ item, events, now }: { item: ItemDetail; events: Kra
                 <span className="ph-row-label">{nameOf(item.chain_definition.nodes, n.id)}</span>
                 <span className={`ph-row-hint ph-tone-${sub.tone}`}>{sub.text}</span>
               </span>
-              {n.state === "current" && n.sub === "needs you" && n.kind === "gate" && <span className="ph-pillbadge">you</span>}
+              {n.state === "current" && n.sub === "needs you" && n.kind === "gate" && <Badge tone="warn">you</Badge>}
               <ChevronRight size={16} className="ph-chev" aria-hidden="true" />
             </button>
           );

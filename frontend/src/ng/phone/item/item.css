@@ -1,11 +1,6 @@
 /* The phone item screen, composers and the chain list (W17 C). */
 .ph-item-top { display: flex; flex-direction: column; gap: 10px; }
 .ph-item-tagline { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.ph-tag { flex: none; padding: 3px 8px; border-radius: 5px; font: 600 var(--fs-label) system-ui, sans-serif; letter-spacing: .06em; border: 1px solid currentColor; background: transparent; color: var(--text-sub); }
-.ph-tag-info { color: var(--info); }
-.ph-tag-warn { color: var(--warn); }
-.ph-tag-bad { color: var(--bad); }
-.ph-tag-ok { color: var(--ok); }
 .ph-item-meta { font-size: var(--fs-label); color: var(--text-muted); overflow-wrap: anywhere; min-width: 0; }
 .ph-item-title { margin: 0; font-size: var(--fs-ph-h1); font-weight: 600; line-height: 1.25; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .ph-brief { margin: 0; font-size: var(--fs-meta); line-height: 1.55; color: var(--text-sub); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -38,7 +33,6 @@
 .ph-tone-warn.ph-row-hint { color: var(--warn); }
 .ph-tone-info.ph-row-hint { color: var(--info); }
 .ph-tone-bad.ph-row-hint { color: var(--bad); }
-.ph-pillbadge { white-space: nowrap; padding: 2px 7px; border-radius: 5px; font-size: var(--fs-label); color: var(--warn); background: color-mix(in oklab, var(--warn) 16%, transparent); }
 .ph-chev { flex: none; color: var(--text-faint); }
 .ph-log-path { margin: 0; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); overflow-wrap: anywhere; }
 

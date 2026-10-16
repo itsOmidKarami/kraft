@@ -26,6 +26,7 @@ import { useDo } from "./useDo";
 import "./item.css";
 import { tip } from "../../ui/Tooltip";
 import { APPLY_AND_START, DRAFT_HOLDS_CHANGES, BUDGET_IN_DOLLARS, BUDGET_RAN_OUT } from "../../item/sharedWords";
+import { Badge } from "../ui/Badge";
 
 const TAG_TONE = { running: "info", waiting: "info", queued: "info", blocked: "info", escalated: "warn", needs_you: "warn", failed: "bad", paused: "muted", done: "ok", cancelled: "muted", archived: "muted" } as const;
 
@@ -118,7 +119,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
       <div className="ph-content">
         <div className="ph-item-top">
           <div className="ph-item-tagline">
-            <span className={`ph-tag ph-tag-${TAG_TONE[status]}`}>{hs.badge}</span>
+            <Badge tone={TAG_TONE[status]}>{hs.badge}</Badge>
             <span className="ph-item-meta">{elapsedBetween(item.created_at, ended ? item.updated_at : null, now)} · {item.repo.split("/").filter(Boolean).at(-1)}</span>
           </div>
           <h1 className="ph-item-title">{item.title}</h1>
