@@ -5,7 +5,7 @@ opens its door, each through its dialog, each said in the CLI's sentence."""
 from __future__ import annotations
 
 import pytest
-from support.console_board import FAILED, _detail, _opened, _serve
+from support.console_board import FAILED, _detail, _opened, _serve, _toasts
 from textual.widgets import OptionList
 
 from kraft import client
@@ -38,10 +38,6 @@ def _rereads(monkeypatch) -> list[int]:
 
     monkeypatch.setattr(client, "board_rows", board_rows)
     return reads
-
-
-def _toasts(app) -> list[str]:
-    return [str(toast.render()) for toast in app.screen.query("Toast")]
 
 
 async def _pick(console, pilot, app, name: str) -> None:

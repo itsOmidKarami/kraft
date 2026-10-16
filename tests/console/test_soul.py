@@ -22,16 +22,13 @@ from support.console_board import (
     _serve,
     _settled,
     _text,
+    _toasts,
 )
 
 from kraft import cli, client
 from kraft.console import moments
 from kraft.console.app import KraftConsole
 from kraft.console.screens import item as item_view
-
-
-def _toasts(app) -> list[str]:
-    return [str(toast.render()) for toast in app.screen.query("Toast")]
 
 
 def _seen(at: float) -> None:

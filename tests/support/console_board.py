@@ -73,6 +73,11 @@ ARCHIVED = _row("z9z9z9z9", "archived", 900)
 BOARD = [RUNNING, DONE, GATE, ARCHIVED, ELSEWHERE, FILED, FAILED]
 
 
+def _toasts(app) -> list[str]:
+    """Every toast on screen, as plain text."""
+    return [str(toast.render()) for toast in app.screen.query("Toast")]
+
+
 def _text(app, selector: str) -> str:
     """What a widget draws, as plain text."""
     return str(app.query_one(selector).render())
