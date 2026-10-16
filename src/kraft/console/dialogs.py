@@ -243,8 +243,12 @@ class Connect(Dialog[list[str] | None]):
             # Only a field still empty: one typed into while the probe ran is the person's.
             if not box.value:
                 box.value = text
+        # The repo by its last path component: the full path is on the row above.
+        name = render.printable(probed["path"].rstrip("/").rpartition("/")[2] or probed["path"])
         self._say(
-            f"Kraft proposes these for {render.printable(probed['path'])}. Keep or change them."
+            f"Kraft proposes these for {name}. Keep or change them."
+            if any(proposal)
+            else f"Kraft found no test or setup command in {name}; type them, or leave them empty."
         )
 
     @on(Input.Changed, "#connect-path")

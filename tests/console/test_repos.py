@@ -11,6 +11,7 @@ import shlex
 
 import pytest
 from support.console_board import _settled, _text
+from textual.color import Color
 from textual.widgets import Button, Checkbox, Input, OptionList
 
 from kraft import client
@@ -38,7 +39,7 @@ REPOS = [
     },
 ]
 PROBED = {"path": "/r", "test_command": "uv run pytest", "setup_command": "uv sync"}
-PROPOSED = "Kraft proposes these for /r. Keep or change them."
+PROPOSED = "Kraft proposes these for r. Keep or change them."
 NOT_GIT = client.status_error(400, "/x is not a git repository [/]")
 
 
@@ -181,7 +182,13 @@ def test_c_connects_through_a_form_the_probe_fills(
         (
             {"path": "/ot\x1bher", "test_command": "a\x1b[2K", "setup_command": ""},
             ("a\\x1b[2K", ""),
-            "Kraft proposes these for /ot\\x1bher. Keep or change them.",
+            "Kraft proposes these for ot\\x1bher. Keep or change them.",
+        ),
+        # A probe that found nothing says so, naming the repo by its last component.
+        (
+            {"path": "/src/empty-repo/", "test_command": None, "setup_command": ""},
+            ("", ""),
+            "Kraft found no test or setup command in empty-repo; type them, or leave them empty.",
         ),
         # A refused second probe leaves no command of the first path behind.
         (NOT_GIT, ("", ""), "400: /x is not a git repository [/]"),
@@ -192,7 +199,12 @@ def test_c_connects_through_a_form_the_probe_fills(
             "400: /x\\x1b[2K is not a git repository",
         ),
     ],
-    ids=["proposal-written-out", "each-probe-empties-the-fields", "refusal-written-out"],
+    ids=[
+        "proposal-written-out",
+        "nothing-proposed",
+        "each-probe-empties-the-fields",
+        "refusal-written-out",
+    ],
 )
 def test_each_probe_starts_from_empty_fields_and_writes_out_what_it_shows(
     board, monkeypatch, second, fields, said
@@ -601,3 +613,33 @@ def test_connecting_or_disconnecting_the_consoles_own_repo_moves_its_scope(
 
     got = console.run(scenario)
     assert got == (("/r", "/r", "* ") if connecting else (None, "all repos", "No"))
+
+
+@pytest.mark.parametrize("theme", ["kraft-dark", "kraft-light"])
+def test_the_connect_forms_unfocused_titles_and_mark_are_secondary_text(board, monkeypatch, theme):
+    """Textual left them dark on the dialog's surface; they take the muted
+    text colour, which the theme's contrast floor covers on that surface."""
+
+    async def probe_repo(path=None, *, detect=True, test_command=None):
+        return PROBED
+
+    async def repos():
+        return []
+
+    monkeypatch.setattr(client, "probe_repo", probe_repo)
+    monkeypatch.setattr(client, "repos", repos)
+    console = board([])
+
+    async def scenario(app, pilot):
+        app.theme = theme
+        await _settled(console, app, pilot)
+        await pilot.press("4", "c")
+        await console.until(pilot, lambda: _said(app) == PROPOSED)
+        box, mark = app.screen.query_one("#connect-test", Input), app.screen.query_one(Checkbox)
+        muted = Color.parse(app.theme_variables["kraft-muted"])
+        return (
+            box.styles.border_title_color == muted,
+            mark.get_component_styles("toggle--button").color == muted,
+        )
+
+    assert console.run(scenario) == (True, True)
