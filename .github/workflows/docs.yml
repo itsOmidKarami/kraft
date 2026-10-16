@@ -1,11 +1,12 @@
 # Builds the docs site with dev/build_docs_site.sh: the latest stable release's
-# pages at /, each older major's last release at /vN/, main's at /next/ and the
-# dashboard demo at /demo/ (frontend/demo/), all with main's site code. Runs
-# on every PR that touches it, building every version, so a change to
-# docsite/app that breaks the release's older pages fails the PR, not a merge
-# to main after the fact. Publishes to GitHub Pages
-# on push to main and on a manual run, which release.yml dispatches after a
-# stable release so / switches to the new tag. Separate from test.yml/release.yml: a docs-only
+# pages at /, each older major's last release at /vN/ and main's at /next/, all
+# with main's site code, and each version's dashboard demo (frontend/demo/) at
+# its <base>demo/, from its own code. Runs on every PR that touches it,
+# building every version, so a change to docsite/app that breaks the release's
+# older pages fails the PR, not a merge to main after the fact. Publishes to
+# GitHub Pages on push to main and on a manual run, which release.yml
+# dispatches after a stable release so / switches to the new tag. Separate
+# from test.yml/release.yml: a docs-only
 # change should not wait on the backend/frontend test matrix, and a docs build
 # failure should not block a release.
 name: docs
@@ -19,8 +20,8 @@ on:
       # rebuild.
       - ".github/assets/**"
       - "frontend/public/icon.svg"
-      # The dashboard demo at /demo/: the web UI, built from this checkout on
-      # the UI contract's mocked API (frontend/demo/main.ts).
+      # main's dashboard demo at /next/demo/: the web UI, built from this
+      # checkout on the UI contract's mocked API (frontend/demo/main.ts).
       - "frontend/demo/**"
       - "frontend/src/**"
       - "frontend/e2e/contract/mocks/**"

@@ -99,12 +99,15 @@ const missingPage = `<style>
 </main>
 </div>`
 
-// The dashboard demo at /demo/ is a single-page app with no file for most of
-// its addresses (/demo/work-items/<id>), so a reload or a shared link there gets
-// this 404.html. It sends such an address back to the demo's own page as ?to=,
-// which frontend/demo/shim.ts's restoreAddress puts back before the router
-// reads it. Before anything else in the head, so the 404 never paints.
-const demoReturn = `<script>(function(l){var b='/demo/';if(l.pathname.indexOf(b)===0&&l.pathname!==b)l.replace(b+'?to='+encodeURIComponent(l.pathname.slice(b.length-1)+l.search+l.hash))})(location)</script>`
+// Each version's dashboard demo, beside its pages at <base>demo/
+// (dev/build_docs_site.sh), is a single-page app with no file for most of its
+// addresses (/next/demo/work-items/<id>), so a reload or a shared link there
+// gets this 404.html, the one for every version. It sends such an address back
+// to its demo's own page as ?to=, which frontend/demo/shim.ts's restoreAddress
+// puts back before the router reads it. Before anything else in the head, so
+// the 404 never paints.
+const demoBases = (versions.length ? versions.map(v => v.base) : ['/']).map(b => `${b}demo/`)
+const demoReturn = `<script>(function(l){${JSON.stringify(demoBases)}.some(function(b){if(l.pathname.indexOf(b)!==0)return false;if(l.pathname!==b)l.replace(b+'?to='+encodeURIComponent(l.pathname.slice(b.length-1)+l.search+l.hash));return true})})(location)</script>`
 
 // A browser breaks a line after a space or a hyphen and after nothing else in
 // `POST /api/work-items/{id}/gates/{gate}/approve`, so an "On this page" entry
@@ -270,8 +273,11 @@ export default defineNuxtConfig({
       // And no 200.html: it is the SPA fallback of a host that serves one for
       // a missing path, which GitHub Pages is not (it serves 404.html). There
       // it was only a "Page not found" page answering 200 at /kraft/200, open
-      // to indexing.
+      // to indexing. Nor this build's dashboard demo: a folder of static files
+      // beside the pages that the docs link to, not a page of the site.
       ignore: [
+        /^\/demo(\/|$)/,
+        new RegExp(`^${withBase('/demo')}(/|$)`),
         '/200.html',
         ...versions.filter(v => v.id !== version).map(v => new RegExp(v.base === '/' ? '^/$' : `^${v.base}`)),
       ],

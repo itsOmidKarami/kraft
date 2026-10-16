@@ -13,7 +13,7 @@ links:
     color: primary
     size: lg
   - label: Try the demo
-    to: https://kraft-sdlc.dev/demo/
+    to: /demo/
     variant: outline
     color: neutral
     size: lg

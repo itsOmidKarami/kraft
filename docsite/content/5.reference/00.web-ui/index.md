@@ -10,7 +10,7 @@ here too. Four verbs are CLI-only for a person: `kraft item abandon`,
 `kraft item set-attachments`, `kraft item mr-label` and `kraft item set-chain`.
 
 These pages name each screen, what it is for, and the buttons on it. To look
-around before you install, open [the demo](https://kraft-sdlc.dev/demo/): this
+around before you install, open [the demo](/demo/): this
 web UI on sample data, running in your browser with no server and no agents.
 Nothing you change there is saved.
 

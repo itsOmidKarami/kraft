@@ -66,16 +66,18 @@ const demoVersion = () => {
 };
 
 // `--mode demo` (npm run build:demo, `just demo`): the dashboard demo in demo/, the
-// SPA on the UI contract's mocked API, built to dist-demo/ for the docs site to
-// serve under /demo/ (KRAFT_DEMO_BASE for another address). No proxy: nothing it
-// asks for leaves the page.
+// SPA on the UI contract's mocked API, built to dist-demo/. Served under /demo/
+// unless KRAFT_DEMO_BASE names another address: dev/build_docs_site.sh puts each
+// version's at its own (/next/demo/ for main). No proxy: nothing it asks for
+// leaves the page.
 export default defineConfig(({ mode }) => ({
   plugins: [react(), licenses],
   ...(mode === "demo"
     ? {
         root: "demo",
-        // The release the demo's sidebar and About name: the newest tag, else "dev".
-        define: { __KRAFT_DEMO_VERSION__: JSON.stringify(demoVersion()) },
+        // The release the demo's sidebar and About name: KRAFT_DEMO_VERSION (a
+        // release's demo, built outside a git checkout), else the newest tag, else "dev".
+        define: { __KRAFT_DEMO_VERSION__: JSON.stringify(process.env.KRAFT_DEMO_VERSION || demoVersion()) },
         base: process.env.KRAFT_DEMO_BASE ?? "/demo/",
         publicDir: "../public",
         build: { outDir: "../dist-demo", emptyOutDir: true },

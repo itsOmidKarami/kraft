@@ -402,7 +402,8 @@ docs:
     cd docsite && npm run dev
 
 # Build the published site (latest release at /, older majors at /vN/, main at
-# /next/, the dashboard demo at /demo/) and serve it at http://localhost:8000/.
+# /next/, each with its dashboard demo at <base>demo/) and serve it at
+# http://localhost:8000/.
 # python's server lists a page's folder and 404s the page itself
 # (/next/guides/x is guides/x.html), so the deep pages need a server that maps
 # /a/b to a/b.html, as GitHub Pages does.
