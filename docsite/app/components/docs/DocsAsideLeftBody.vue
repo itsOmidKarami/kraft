@@ -5,7 +5,10 @@
 // down.
 // package.json pins docus to exactly 5.13.0 for this copy: on a bump, copy the
 // new release's file again and reapply the exactNavigation() wrap, the
-// default-open, the key, the reveal and the nav label below.
+// default-open, the key, the reveal and the nav label below. A closed group
+// stays in the page (unmount-on-hide off, hidden): its trigger's aria-controls
+// names that content, which Reka leaves out of the page when it unmounts it
+// (axe aria-valid-attr-value, 12 per page).
 const { sidebarNavigation } = useSubNavigation()
 
 const contentNavVariants = useUIConfig('contentNavigation')
@@ -25,6 +28,7 @@ const listKey = useFoldedNavigation(root)
       :key="listKey"
       aria-label="Docs"
       default-open
+      :unmount-on-hide="false"
       :highlight="contentNavVariants.highlight ?? true"
       :highlight-color="contentNavVariants.highlightColor"
       :variant="contentNavVariants.variant ?? 'link'"

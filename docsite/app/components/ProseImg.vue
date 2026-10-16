@@ -7,8 +7,9 @@
 // from the original, besides the imports (`@nuxt/ui/...` for its relative
 // ones): the <DefineViewTemplate> wrapper around the DialogRoot, the dialog
 // markup and close button, the `open` watcher, `landscapeDiagram`, the
-// tabindex/role/keydown on the picture, and the wrapper and caption at the end
-// of the template. The changes:
+// tabindex/role/keydown on the picture, the scroll lock and inert page in the
+// `open` watcher, and the wrapper and caption at the end of the template. The
+// changes:
 //
 // 1. A tapped screenshot opened enlarged with nothing to close it but another
 //    tap, no dialog role and no name. The layer is now role="dialog", named by
@@ -16,6 +17,11 @@
 //    Escape (Nuxt UI's own) and a tap anywhere close it as before, and the
 //    focus goes back to the picture, which is a button now (tabindex, Enter
 //    and Space open it). Tab stays on the close button: it is all there is.
+//    The dialog is not Reka's DialogContent (`:modal="false"`), so what a
+//    modal one does is done by hand: the page behind is `inert` (#__nuxt; the
+//    dialog is teleported to the body, outside it) and cannot scroll (the
+//    scrollbar's width is padded back, so the page does not shift). The zoomed
+//    image has an empty alt: the dialog is already named by the alt text.
 // 2. A landscape diagram (public/diagrams/*.svg, wider than a phone) is wrapped
 //    in .diagram-scroll, the box that scrolls sideways under 640px
 //    (assets/css/prose.css), with a caption under it that says so. The caption
@@ -30,7 +36,7 @@ import theme from "#build/ui/prose/img";
 </script>
 
 <script setup>
-import { ref, computed, nextTick, useId, watch } from "vue";
+import { ref, computed, nextTick, onBeforeUnmount, useId, watch } from "vue";
 import { DialogRoot, DialogPortal, DialogTrigger } from "reka-ui";
 import { AnimatePresence, Motion } from "motion-v";
 import { useEventListener, createReusableTemplate } from "@vueuse/core";
@@ -75,7 +81,28 @@ if (props.zoom) {
   });
 }
 let opener = null;
+let restoreScroll = null;
+function lockPage(locked) {
+  const page = document.getElementById("__nuxt");
+  const root = document.documentElement;
+  if (locked) {
+    page?.setAttribute("inert", "");
+    const scrollbar = window.innerWidth - root.clientWidth;
+    const { overflow, paddingRight } = root.style;
+    root.style.overflow = "hidden";
+    if (scrollbar > 0) root.style.paddingRight = `${scrollbar}px`;
+    restoreScroll = () => {
+      root.style.overflow = overflow;
+      root.style.paddingRight = paddingRight;
+    };
+  } else {
+    page?.removeAttribute("inert");
+    restoreScroll?.();
+    restoreScroll = null;
+  }
+}
 watch(open, (isOpen) => {
+  lockPage(isOpen);
   if (isOpen) {
     opener = document.activeElement;
     nextTick(() => closeButton.value?.focus());
@@ -83,6 +110,9 @@ watch(open, (isOpen) => {
     opener?.focus();
     opener = null;
   }
+});
+onBeforeUnmount(() => {
+  if (open.value) lockPage(false);
 });
 </script>
 
@@ -106,7 +136,7 @@ watch(open, (isOpen) => {
     <component
       :is="ImageComponent"
       :src="refinedSrc"
-      :alt="props.alt"
+      alt=""
       v-bind="$attrs"
       :class="ui.zoomedImage({ class: [props.ui?.zoomedImage] })"
     />

@@ -6,7 +6,12 @@
 //   which resolve at the domain root, outside a build under /next/.
 // - llms-full.txt joins every page into one file, so a page's own `#anchor`
 //   links all landed on the landing page.
+// - A `::diagram-*` component is stringified as a tag with its props as one JSON
+//   string; both files get it as a caption and a nested list instead
+//   (server/utils/diagramText.ts).
 // dev/check_llm_docs.py fails the docs build when either comes back.
+
+import { diagramsToMarkdown, diagramsToNodes } from '../utils/diagramText'
 
 // `](/path`, the `href="/path"` of the raw HTML some components leave (also
 // `src` and `to`) and the `"to":"/path"` inside a component's JSON prop (the
@@ -60,7 +65,7 @@ export default defineNitroPlugin((nitroApp) => {
 
   nitroApp.hooks.hook('beforeResponse', (event, response) => {
     if (/\/raw\/.+\.md$/.test(event.path) && typeof response.body === 'string') {
-      response.body = absolutizeLinks(response.body, base)
+      response.body = absolutizeLinks(diagramsToMarkdown(response.body), base)
     }
   })
 
@@ -68,6 +73,9 @@ export default defineNitroPlugin((nitroApp) => {
   // llms-full.txt, which prefixes only the domain onto a link's href.
   nitroApp.hooks.hook('content:llms:generate:document', (_event, doc) => {
     const { body, path } = doc as { body?: { value?: unknown[] }; path?: string }
-    if (body?.value && path) absolutizeProps(body.value, base, `${base}${path}`)
+    if (body?.value && path) {
+      diagramsToNodes(body.value)
+      absolutizeProps(body.value, base, `${base}${path}`)
+    }
   })
 })
