@@ -62,3 +62,5 @@
   .pol-one { grid-template-columns: minmax(80px, 110px) minmax(0, 1fr); }
   .pol-one > .pol-help { grid-column: 1 / -1; }
 }
+/* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
+.pol-row { padding-block: var(--row-pad-add); }

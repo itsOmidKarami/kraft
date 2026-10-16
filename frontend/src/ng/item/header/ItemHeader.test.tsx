@@ -199,6 +199,17 @@ describe("ItemHeader", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /^Pause$/ })).toHaveFocus());
   });
 
+  it("words a queued item's pause as leaving the queue, in the button and in what it asks", async () => {
+    const calls = stubFetch(WRITES);
+    show({ display_status: "queued" });
+    expect(screen.queryByRole("button", { name: /^Pause$/ })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Remove from queue" }));
+    const card = screen.getByRole("dialog", { name: "Remove this item from the queue?" });
+    expect(card).not.toHaveTextContent(/running task/);
+    await userEvent.click(within(card).getByRole("button", { name: "Remove from queue" }));
+    await waitFor(() => expect(writes(calls)).toEqual([{ method: "POST", path: "/work-items/w1/pause", body: {} }]));
+  });
+
   // R12b-08: a card's own button had the focus, and went with the card once its action was done.
   it.each([
     ["Cancel…", "More actions", "Cancel this item?", "Reason", "Cancel item", "POST /work-items/w1/cancel"],

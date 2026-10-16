@@ -5,6 +5,7 @@ import contextlib
 import os
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -15,6 +16,7 @@ from pathlib import Path
 
 import httpx
 
+from kraft.paths import RunDirs
 from support import harness, real_binaries
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -132,6 +134,9 @@ def _try_start(run_dir: Path, templates_dir: Path, bd_cwd: Path | None, env: dic
                 "KRAFT_CONFIG_DIR": str(templates_dir),
                 **({"KRAFT_BD_CWD": str(bd_cwd)} if bd_cwd is not None else {}),
                 "KRAFT_PORT": str(port),
+                # A child that never serves dumps every thread's stack on the
+                # SIGABRT below, into the test's captured stderr.
+                "PYTHONFAULTHANDLER": "1",
                 **(env or {}),
             },
             bd=bd_cwd is not None,
@@ -149,9 +154,18 @@ def _try_start(run_dir: Path, templates_dir: Path, bd_cwd: Path | None, env: dic
                 return Server(proc, base, port, client)
         time.sleep(0.02)
     client.close()
-    proc.kill()
-    proc.wait()
-    raise RuntimeError("server did not become healthy in 15s")
+    proc.send_signal(signal.SIGABRT)
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+    log = RunDirs(run_dir).logs / "server.log"
+    tail = log.read_text(errors="replace")[-2000:] if log.exists() else "(no server.log)"
+    raise RuntimeError(
+        "server did not become healthy in 15s; its stack is in the captured stderr, "
+        f"and its server.log ends:\n{tail}"
+    )
 
 
 class BdStubRefused(AssertionError):

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../../store";
 import type { DisplayStatus, WorkItemStop, WorkerSession } from "../../../types";
 import { chainGraph } from "../../item/graph";
-import { acceptWrites, detail, FROZEN, holdFetch, LOOPED, pendingRun, SCOPE_PATH, scopeChain, scoped, scopeRun, stubFetch, WORKSPACE, type Call } from "../../item/testkit";
+import { acceptWrites, detail, FROZEN, V1, holdFetch, LOOPED, pendingRun, SCOPE_PATH, scopeChain, scoped, scopeRun, stubFetch, WORKSPACE, type Call } from "../../item/testkit";
 import { Toaster } from "../nav/Toaster";
 import { nodeBar } from "./model";
 import { NodeRoute } from "./NodeRoute";
@@ -113,6 +113,28 @@ describe("the node screen (D)", () => {
     expect(screen.getAllByText("exec node · running", { exact: false })).toHaveLength(2);
     await userEvent.click(screen.getByRole("button", { name: /code_review/ }));
     expect(where()).toBe("/work-items/w1/nodes/verification?sel=verification.review.code_review");
+  });
+
+  it("lists the plan task's sub-tasks on its overview, the current one marked, a done one with its commit, and only there", async () => {
+    const nodes = [{ id: "implementation", kind: "exec", gate_after: null, tasks: ["implementation.main.implement"], steps: [["implementation.main.implement"]] }, V1.find((n) => n.id === "verification")!] as never;
+    const frozen = JSON.stringify({ chain: { nodes: [
+      { id: "implementation", kind: "exec", tasks: [{ id: "implement", kind: "agent", skill: null }] },
+      { id: "verification", kind: "exec", steps: [{ id: "review", tasks: [{ id: "code_review", kind: "agent", skill: "kraft:code-review" }] }] },
+    ] } });
+    const st = (n: number, state: "done" | "current" | "pending", sha: string | null = null) => ({ n, title: ["parse", "serve", "render"][n - 1], state, sha });
+    const planned = item("running", null, {
+      chain_definition: { template_id: "default", nodes }, current_node_id: "implementation", materialized_chain: frozen,
+      progress: { current: 2, total: 3, title: "serve", tasks: [st(1, "done", "a1b2c3d"), st(2, "current"), st(3, "pending")] },
+      worker_sessions: [session({ node_id: "implementation", hook_point: "implementation.main.implement" }), session({ id: "s2", hook_point: "verification.review.code_review" })],
+    });
+    mount(planned, "/work-items/w1/nodes/implementation?sel=implementation.main.implement");
+    const list = await screen.findByRole("list", { name: "Sub-tasks" });
+    expect(within(list).getAllByRole("listitem").map((r) => [r.textContent, r.getAttribute("aria-current")])).toEqual([["1parsea1b2c3d", null], ["2servecurrent", "step"], ["3render", null]]);
+    expect(screen.getByText("progress").nextSibling).toHaveTextContent("2 of 3 · serve");
+    cleanup();
+    mount(planned, "/work-items/w1/nodes/verification?sel=verification.review.code_review");
+    await screen.findByRole("heading", { level: 1, name: "code_review" });
+    expect(screen.queryByRole("list", { name: "Sub-tasks" })).toBeNull();
   });
 
   it("changes node from the strip with replace, not a new history entry", async () => {
@@ -305,7 +327,7 @@ describe("the node screen (D)", () => {
     expect(screen.getByText("waiting for your decision")).toBeInTheDocument();
     expect(screen.getByText("Goes back to plan with your note.")).toBeInTheDocument();
     expect(screen.queryByText("approve")).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "Review and decide" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review" }));
     expect(where()).toBe("/work-items/w1/review?gate=plan_approval");
   });
 
@@ -334,7 +356,7 @@ describe("the node screen (D)", () => {
   // R15b-01: the desktop's gate pane shows the last test run on the gate; so does the phone's page, each red scope linked to its log.
   it.each([
     ["green", { passed: true, scopes: [{ command: "just test", scope: "**", passed: true, exit_code: 0, session_id: "s1" }] }, "✓ 1 scope", null],
-    ["red", { passed: false, scopes: [{ command: "just test", scope: "web/**", passed: false, exit_code: 1, session_id: "s2" }, { command: "just lint", scope: "api/**", passed: true, exit_code: 0, session_id: "s3" }] }, "✗ 1 of 2 scopes · web/**", "/api/work-items/w1/sessions/s2/log"],
+    ["red", { passed: false, scopes: [{ command: "just test", scope: "web/**", passed: false, exit_code: 1, session_id: "s2" }, { command: "just lint", scope: "api/**", passed: true, exit_code: 0, session_id: "s3" }] }, "✗ 1 of 2 scopes · just test", "/api/work-items/w1/sessions/s2/log"],
   ])("a gate shows its %s tests row", async (_name, test_result, text, log) => {
     mount(item("needs_you", stop("gate", { node: "plan_approval" }), { current_node_id: "plan_approval", pending_gate: "plan_approval", worker_sessions: [], test_result }), "/work-items/w1/nodes/plan_approval");
     const row = (await screen.findByText("tests")).closest("div")!;

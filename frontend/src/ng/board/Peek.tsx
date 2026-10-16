@@ -12,7 +12,6 @@ import { age, eventLine } from "../item/events";
 import { CancelCard } from "../item/header/CancelCard";
 import { EscalateCard, PauseConfirm } from "../item/header/Dialogs";
 import { useDuplicate } from "../item/header/ItemHeader";
-import { useSelect } from "../item/draft/select";
 import { totals, useDiffFiles, useOpenThreads } from "../item/Top";
 import { ChainConfig, ChainOverview } from "../item/panes/ChainPane";
 import { actionPath } from "../item/paths";
@@ -27,6 +26,7 @@ import { groupOf } from "./model";
 import { capitalise, gateName, reasonTail } from "./rowText";
 import "../item/item.css";
 import { PAUSE_THIS_ITEM } from "./sharedWords";
+import { REMOVE_FROM_QUEUE, REMOVE_FROM_QUEUE_TITLE } from "../item/sharedWords";
 import { LinkButton } from "../ui/LinkButton";
 
 export type PeekTab = "overview" | "activity" | "config";
@@ -91,8 +91,6 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
       tabs={[{ value: "overview", label: "Overview" }, { value: "activity", label: "Activity" }, { value: "config", label: "Config" }]}
       tab={tab}
       onTab={(t) => onTab(t as PeekTab)}
-      onFocus={open}
-      focusAs={{ label: "Full page", tip: "Open the full item page" }}
       footer={<Footer cards={tab === "overview"} item={item} reload={loaded.reload} offline={offline} onOpen={open} onRaise={raise} onAnswer={() => onTab("overview")} />}
     >
       {tab === "overview" && <Overview item={item} version={loaded.version} reload={loaded.reload} onRaise={raise} onMore={() => onTab("activity")} />}
@@ -186,6 +184,7 @@ function Config({ item, reload, budget, onBudget }: { item: ItemDetail; reload: 
 /** `cards`: the Overview's banner and cards are on screen, so a main action one of them carries is not repeated here (as on the item page). */
 function Footer({ cards, item, reload, offline, onOpen, onRaise, onAnswer }: { cards: boolean; item: ItemDetail; reload: () => void; offline: boolean; onOpen: () => void; onRaise: () => void; onAnswer: () => void }) {
   const hs = headerState(item);
+  const queued = item.display_status === "queued";
   const btn = useRef<HTMLButtonElement>(null);
   const [pausing, setPausing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -201,7 +200,6 @@ function Footer({ cards, item, reload, offline, onOpen, onRaise, onAnswer }: { c
   };
   const node = item.chain_definition.nodes.find((n) => n.id === (item.stop?.node ?? item.current_node_id));
   const navigate = useNavigate();
-  const openGate = useSelect(item.id);
   const startHere = async () => {
     setBusy(true);
     setError(null);
@@ -214,7 +212,6 @@ function Footer({ cards, item, reload, offline, onOpen, onRaise, onAnswer }: { c
   const main = () => {
     if (hs.main === "pause") return setPausing(true);
     if (hs.main === "raise") return onRaise();
-    if (hs.main === "gate") return openGate(item.pending_gate ?? item.stop?.node ?? null);
     // The question card is on Overview, its answer box with it.
     if (hs.main === "answer") {
       onAnswer();
@@ -231,16 +228,16 @@ function Footer({ cards, item, reload, offline, onOpen, onRaise, onAnswer }: { c
   };
   return (
     <>
-      {/* No main when the server admits none of the item's ways on: Open item alone. */}
-      {hs.main && !(cards && bodyOffers(item, hs.main)) && (
+      {/* No main when the server admits none of the item's ways on: Open item alone. A gate's door is the banner's Review. */}
+      {hs.main && hs.main !== "gate" && !(cards && bodyOffers(item, hs.main)) && (
         <button ref={btn} type="button" className={`btn ${hs.main === "pause" ? "btn-secondary" : "btn-primary"}`} disabled={offline || busy} onClick={main}>
-          {hs.main === "pause" ? "‖ Pause" : MAIN_LABEL[hs.main]}
+          {hs.main === "pause" ? (queued ? REMOVE_FROM_QUEUE : "‖ Pause") : MAIN_LABEL[hs.main]}
         </button>
       )}
       <button type="button" className="btn btn-secondary" onClick={onOpen}>Open item ↗</button>
       {error && !pausing && <span className="item-error peek-error" role="alert">{error}</span>}
-      <Popover anchor={btn} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label={PAUSE_THIS_ITEM}>
-        <PauseConfirm busy={busy} error={error} onClose={() => setPausing(false)} onPause={async () => { if (await run(act.pause(item.id))) setPausing(false); }} />
+      <Popover anchor={btn} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label={queued ? REMOVE_FROM_QUEUE_TITLE : PAUSE_THIS_ITEM}>
+        <PauseConfirm queued={queued} busy={busy} error={error} onClose={() => setPausing(false)} onPause={async () => { if (await run(act.pause(item.id))) setPausing(false); }} />
       </Popover>
     </>
   );

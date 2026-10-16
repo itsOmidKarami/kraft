@@ -14,3 +14,8 @@ export const LOG_UNREADABLE = "The log could not be read.";
 export const WAITING_ON_THE_PROVIDER = "Waiting on the provider";
 export const DRAFT_HOLDS_CHANGES = "This item's draft holds changes Start does not apply. Apply them now, or start without them and they stay in the draft.";
 export const GOES_IN_THE_RUN_LOG = "Goes in the run log.";
+
+/** A queued item has no session to stop: its Pause is the door that takes it out of the queue. */
+export const REMOVE_FROM_QUEUE = "Remove from queue";
+export const REMOVE_FROM_QUEUE_TITLE = "Remove this item from the queue?";
+export const REMOVE_FROM_QUEUE_TEXT = "It is waiting for a free slot and has not started. It stays paused until you resume it.";

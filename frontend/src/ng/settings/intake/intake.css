@@ -31,3 +31,5 @@
 .ink-v > .segmented { align-self: flex-start; }
 .ink-v { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .ink-rownote { grid-column: 2 / -1; font-size: var(--fs-meta); line-height: 1.45; color: var(--text-muted); }
+/* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
+.ink-row { padding-block: calc(6px + var(--row-pad-add)); }

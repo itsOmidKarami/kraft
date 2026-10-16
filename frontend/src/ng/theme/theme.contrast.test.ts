@@ -45,6 +45,20 @@ const contrast = (a: string, b: string) => {
   return (x + 0.05) / (y + 0.05);
 };
 
+const here = dirname(fileURLToPath(import.meta.url));
+/** The tint a chip rule mixes over its ground, read from the rule so the pair follows the CSS. */
+const tintOf = (file: string, selector: string) => {
+  const rule = readFileSync(join(here, file), "utf-8").split("\n").find((l) => l.startsWith(selector));
+  const pct = rule?.match(/color-mix\(in (?:oklab|srgb), var\(--[a-z-]+\) (\d+)%/)?.[1];
+  if (!pct) throw new Error(`no tint in ${selector}`);
+  return Number(pct) / 100;
+};
+const BADGE_TINT = tintOf("../ui/ui.css", ".badge.is-warn");
+const SCOPE_NEW_TINT = tintOf("../graph/graph.css", ".scope-new");
+/** `fg` at `p` over `ground`, per channel in sRGB (the chips mix in oklab; the difference is a few hundredths). */
+const tint = (fg: string, ground: string, p: number) =>
+  "#" + [1, 3, 5].map((i) => Math.round(parseInt(fg.slice(i, i + 2), 16) * p + parseInt(ground.slice(i, i + 2), 16) * (1 - p)).toString(16).padStart(2, "0")).join("");
+
 // 5 surfaces × 2 modes × 13 amount-and-accent choices (Mono locks the accent to none).
 const combos = SURFACES.flatMap((s) =>
   MODES.flatMap((m) => AMOUNTS.flatMap((a) => (a === "mono" ? ["none"] : ACCENTS).map((x) => [s, m, a, x]))),
@@ -91,6 +105,11 @@ describe("theme.css", () => {
       at(r, "--surface", 4.5);
     }
     at("--focus", "--bg", 3);
+    // Tinted chips: the colour at a few percent over the ground it sits on, so the text is lighter or darker than the ground it was checked on.
+    for (const g of ["--bg", "--surface", "--surface-2"]) {
+      if (m === "light") expect(contrast(t["--warn"], tint(t["--warn"], t[g], BADGE_TINT)), `.badge.is-warn on ${g}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(t["--accent"], tint(t["--accent"], t[g], SCOPE_NEW_TINT)), `.scope-new on ${g}`).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });
 

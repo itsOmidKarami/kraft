@@ -41,3 +41,5 @@
 .ph-chip:focus-visible { outline-offset: -2px; }
 .ph-chip.ph-is-on { background: var(--text); border-color: var(--text); color: var(--bg); }
 .ph-badge-tag.ph-tone-change { border-color: transparent; background: color-mix(in oklab, var(--mark-change) 9%, transparent); color: var(--mark-change); }
+/* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
+.ph-row { padding-block: calc(8px + var(--row-pad-add)); }

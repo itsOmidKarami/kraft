@@ -18,9 +18,10 @@ import "./harnesses.css";
 import { usePane } from "../shell/usePane";
 import { LinkButton } from "../ui/LinkButton";
 import { Empty } from "../ui/Empty";
+import { useMedia } from "../useMedia";
 
 /** Below the wide-desktop breakpoint the open pane costs the lanes too much width: the floor starts on its labelled rail. */
-const narrow = () => typeof matchMedia === "function" && matchMedia("(max-width: 1279px)").matches;
+const NARROW = "(max-width: 1279px)";
 
 /** Settings › Harnesses (Decisions §11): one draft over harnesses.yaml and policy.yaml.
  *  The selection is in the query (`?harness=` / `?profile=`, `&lane=`), so no id shadows a route. */
@@ -39,7 +40,8 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   const providers = useProviders();
   const published = usePublishedPolicy(view.draft);
   const [params, setParams] = useSearchParams();
-  const [open, setOpen] = useState(params.has("harness") || params.has("profile") || !narrow());
+  const narrow = useMedia(NARROW);
+  const [open, setOpen] = useState(params.has("harness") || params.has("profile") || !narrow);
   const [tab, setTab] = useState("overview");
   usePane(open);
   const { run, error: addError } = useRun(draft);

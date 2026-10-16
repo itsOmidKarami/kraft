@@ -30,7 +30,7 @@ export interface Check {
   at: string;
   ready: number;
   started: string[];
-  skipped: { bead_id: string; reason: string }[];
+  skipped: { bead: string | null; reason: string }[];
 }
 
 export const problemsOfSchedule = (r: Result, index: number): Problem[] => r.problems.filter((p) => p.schedule === index);

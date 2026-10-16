@@ -111,11 +111,11 @@ describe("GateFooter", () => {
 
   it("reviews changes on the review page: the gate's document first while it is pending (W8)", async () => {
     const { unmount } = render(<GateFooter item={pending} gate={gate} reload={() => {}} onRead={() => {}} />);
-    await userEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review gate" }));
     expect(where).toBe("/work-items/w1/review?gate=plan_approval&doc=1");
     unmount();
     render(<GateFooter item={detail({ gate_artifact: null })} gate={gate} reload={() => {}} onRead={() => {}} />);
-    await userEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review gate" }));
     expect(where).toBe("/work-items/w1/review?gate=plan_approval");
   });
 });
@@ -154,13 +154,13 @@ describe("GateBody", () => {
   it.each([
     ["no run: no tests line", null, null],
     ["every scope passed", { passed: true, scopes: [scope(1, true), scope(2, true), scope(3, true)] }, "✓ 3 scopes"],
-    ["one of three failed, named and linked to its log", { passed: false, scopes: [scope(1, true), scope(2, false, "backend/**"), scope(3, true)] }, "✗ 1 of 3 scopes · backend/**"],
+    ["one of three failed, named and linked to its log", { passed: false, scopes: [scope(1, true), scope(2, false, "backend/**"), scope(3, true)] }, "✗ 1 of 3 scopes · cmd2"],
   ])("tests line: %s", async (_name, test_result, line) => {
     stubFetch();
     render(<GateBody item={{ ...pending, test_result }} version="1" gate={gate} events={[]} />);
     if (line === null) return expect(screen.queryByText("tests")).toBeNull();
     expect(screen.getByText("tests").nextElementSibling).toHaveTextContent(line);
-    if (line.startsWith("✗")) expect(screen.getByRole("link", { name: "backend/**" })).toHaveAttribute("href", "/api/work-items/w1/sessions/sess2/log");
+    if (line.startsWith("✗")) expect(screen.getByRole("link", { name: "cmd2" })).toHaveAttribute("href", "/api/work-items/w1/sessions/sess2/log");
     else expect(screen.queryByRole("link", { name: /\*\*/ })).toBeNull();
   });
 

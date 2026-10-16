@@ -119,6 +119,17 @@ async def _read_done(console, app, pilot) -> None:
             "spec → spec_approval → plan → implement",
         ),
         (
+            # Nothing to say but that it stopped: the frame still says that much.
+            STUCK | {"stop": {"kind": "stuck", "node": None, "reason": None}},
+            "Board › s5s5s5s5  item s5s5s5s5",
+            "● Needs you · waiting for you at verification",
+            "▌ Stopped.",
+            "$warning",
+            "5m",
+            "r · default",
+            "spec → spec_approval → plan → implement",
+        ),
+        (
             FILED,
             "Board › n0n0n0n0  item n0n0n0n0",
             "● Not started · created paused",
@@ -129,7 +140,15 @@ async def _read_done(console, app, pilot) -> None:
             "spec → spec_approval → plan → implement",
         ),
     ],
-    ids=["gate", "budget-it-cannot-raise", "running", "failed", "stuck", "not-started"],
+    ids=[
+        "gate",
+        "budget-it-cannot-raise",
+        "running",
+        "failed",
+        "stuck",
+        "stopped-saying-nothing",
+        "not-started",
+    ],
 )
 def test_the_header_says_where_the_item_stands(
     board, monkeypatch, row, title, status, banner, tone, spent, where, chain
@@ -176,23 +195,23 @@ def test_the_header_says_where_the_item_stands(
         (
             QUESTION,
             [],
-            ["The agent asks:", "keep [/] in titles?", "", "p answers it.", ""],
+            ["The agent asks:", "keep [/] in titles?", "", "p answers it."],
             "answer",
         ),
-        (FAILED, [], ["t retries it.", "", "Chain"], None),
-        (FAILED, [{"id": "s1"}], ["t retries it.", item_view.LOG_POINTER, "", "Chain"], None),
-        (PAUSED, [], ["p resumes it.", "", "Chain"], "resume"),
-        (RUNNING, [], ["Chain"], "pause"),
+        (FAILED, [], ["t retries it."], None),
+        (FAILED, [{"id": "s1"}], ["t retries it.", item_view.LOG_POINTER], None),
+        (PAUSED, [], ["p resumes it."], "resume"),
+        (RUNNING, [], [], "pause"),
         (
             PAUSED | {"actions": []},
             [],
-            ["Kraft offers no action for it now; m shows what it allows.", "", "Chain"],
+            ["Kraft offers no action for it now; m shows what it allows."],
             None,
         ),
         (
             FAILED | {"actions": []},
             [],
-            ["Kraft offers no action for it now; m shows what it allows.", "", "Chain"],
+            ["Kraft offers no action for it now; m shows what it allows."],
             None,
         ),
     ],
@@ -267,7 +286,7 @@ def test_the_gate_document_is_read_whole_and_scrolls_by_keys(board, monkeypatch)
     assert (top, moved, at_end) == (0, True, True)
     assert lines[:60] == [f"line {n} [/]" for n in range(60)]
     assert lines[61].startswith("WARNING: this document was truncated by the server at 1000 bytes")
-    assert lines[-4:] == [" ✓ spec", " ● spec_approval (gate)", "   plan", "   implement"]
+    assert lines[-1].endswith("Read the rest at spec.md.")  # no chain list after the warning
 
 
 @pytest.mark.parametrize(
@@ -549,16 +568,22 @@ def test_the_title_names_the_view_the_item_was_opened_from(board, monkeypatch):
         await _settled(console, app, pilot)
         app.show("server")
         app.open_item(RUNNING["id"])
-        await console.until(pilot, lambda: _overview(app))
+        await console.until(pilot, lambda: app.view.item is not None)
         return _text(app, "#item-title")
 
     assert console.run(scenario) == "Server › k7f2e9a0  Docs per major"
 
 
-def test_a_read_for_the_item_shown_before_is_dropped(board, monkeypatch):
+@pytest.mark.parametrize(
+    "late",
+    [_detail(GATE), client.status_error(404, "gone"), client.status_error(409, "first refused")],
+    ids=["answers", "gone", "refused"],
+)
+def test_a_read_for_the_item_shown_before_is_dropped(board, monkeypatch, late):
     """Ctrl+P from an open item lands while its live read is in flight: the
     answer for the old item must not draw its header or open `a` for its gate,
-    even when the new item's own read fails."""
+    even when the new item's own read fails; nor, when it is an error, say
+    the new item is gone or toast the old item's refusal."""
     other = GATE | {"id": "b2b2b2b2", "title": "Second", "pending_gate": "plan_review"}
     calls: list[tuple] = []
     _serve(monkeypatch, _detail(other), calls=calls)
@@ -571,12 +596,16 @@ def test_a_read_for_the_item_shown_before_is_dropped(board, monkeypatch):
             if work_item_id == GATE["id"]:
                 asked.set()
                 await release.wait()
-                return _detail(GATE)
+                if isinstance(late, client.ClientError):
+                    raise late
+                return late
             if broken:
                 raise client.status_error(500, "down")
             return _detail(other)
 
         monkeypatch.setattr(client, "get_work_item", get_work_item)
+        refused, toast = [], app.notify_refusal
+        monkeypatch.setattr(app, "notify_refusal", lambda e: (refused.append(str(e)), toast(e)))
         await _settled(console, app, pilot)
         app.open_item(GATE["id"])
         await console.until(pilot, asked.is_set)
@@ -584,7 +613,12 @@ def test_a_read_for_the_item_shown_before_is_dropped(board, monkeypatch):
         release.set()
         await _read_done(console, app, pilot)
         await pilot.pause()
-        stale = (_text(app, "#item-title"), app.view.check_action("approve", ()))
+        stale = (
+            _text(app, "#item-title"),
+            app.view.check_action("approve", ()),
+            app.query_one("#item-gone").display,
+            [said for said in refused if "first" in said],
+        )
         broken.clear()
         app.view.rows_changed([], [])
         await console.until(pilot, lambda: app.view.item is not None and _overview(app))
@@ -593,7 +627,7 @@ def test_a_read_for_the_item_shown_before_is_dropped(board, monkeypatch):
         return stale, _text(app, "#item-title"), calls
 
     stale, title, sent = console.run(scenario)
-    assert stale == ("Board › b2b2b2b2", False)
+    assert stale == ("Board › b2b2b2b2", False, False, [])
     assert title == "Board › b2b2b2b2  Second"
     assert sent == [("approve_gate", ("plan_review", "b2b2b2b2", "d1g3st"), {})]
 
@@ -601,11 +635,11 @@ def test_a_read_for_the_item_shown_before_is_dropped(board, monkeypatch):
 @pytest.mark.parametrize(
     ("keys", "tab"),
     [
-        (["right"], "activity"),
+        (["right"], "chain"),
         (["left"], "diff"),
-        (["tab"], "activity"),
+        (["tab"], "chain"),
         (["shift+tab"], "diff"),
-        (["right", "right", "left"], "activity"),
+        (["right", "right", "left"], "chain"),
     ],
     ids=["right", "left-wraps", "tab", "shift-tab-wraps", "back-and-forth"],
 )
@@ -630,13 +664,13 @@ def test_clicking_a_tabs_name_opens_it(board, monkeypatch):
     async def scenario(app, pilot):
         await _opened(console, app, pilot, GATE["id"])
         shown = []
-        # " Overview  Activity  Log  Diff": Log's name starts at column 22.
-        for x in (25, 14):
+        # " Overview  Chain  Activity  Log  Diff": Log's name starts at column 30.
+        for x in (33, 22, 14):
             await pilot.click("#item-tabs", offset=(x, 0))
             shown.append(app.view.tab)
         return shown
 
-    assert console.run(scenario) == ["log", "activity"]
+    assert console.run(scenario) == ["log", "activity", "chain"]
 
 
 def test_the_footer_and_the_keys_dialog_name_the_tab_keys(board, monkeypatch):

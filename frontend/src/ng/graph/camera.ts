@@ -26,9 +26,7 @@ export function zoomAt(cam: Cam, px: number, py: number, f: number, canvas: Canv
  *  and a world wider than the view starts `left` px from the left edge, or centred on `focus` when it has one. */
 /** `initial`: the floor is for the opening view only; the Fit button then shows the whole chain. */
 /** `reach`: world x's past the focus to bring in on the right, most wanted first; the first that fits beside the whole focus is shown. */
-/** `top`: a row under the chain overview. Its boxes sit this many px under the view's top edge and it starts `left` px
- *  in, under the overview's start, instead of centred both ways. */
-export type FitRule = { floor: number; left: number; focus?: number; initial?: boolean; start?: number; reach?: number[]; top?: number };
+export type FitRule = { floor: number; left: number; focus?: number; initial?: boolean; start?: number; reach?: number[] };
 /** The editors' fit (Templates prototype `fit1`): opens no smaller than 80% (Fit shows it all), a chain wider than the view starting 12px in. */
 export const EDITOR_FIT: FitRule = { floor: 0.8, left: 12, initial: true };
 /** An item's fit: node labels and captions (12px) stay at 11px or more, and a chain too wide for it opens on the node that matters (`focus`, a
@@ -45,7 +43,7 @@ export function fitCam(world: { W: number; H: number }, view: Size, canvas: Canv
   const s = Math.max(rule?.floor ?? 0.3, Math.min(1, (view.w - 40) / world.W, (view.h - 40) / world.H));
   const mid = (view.w - world.W * s) / 2;
   const wide = rule && world.W * s > view.w - 2 * rule.left;
-  let tx = !rule ? mid : rule.top != null ? rule.left : Math.max(rule.left, mid);
+  let tx = !rule ? mid : Math.max(rule.left, mid);
   if (rule && wide && rule.focus != null) {
     const f = rule.focus;
     const centred = Math.max(view.w - world.W * s - rule.left, view.w / 2 - f * s);
@@ -58,8 +56,22 @@ export function fitCam(world: { W: number; H: number }, view: Size, canvas: Canv
   const ty = (view.h - world.H * s) / 2;
   // The row's middle is a label's depth below the node centre; a world taller than the view stays centred.
   const row = view.h / 2 - (L.CY + 12) * s;
-  const chainTy = rule?.top != null ? rule.top - (L.CY - L.BOX / 2) * s : world.H * s <= view.h ? Math.min(Math.max(row, 0), view.h - world.H * s) : ty;
+  const chainTy = world.H * s <= view.h ? Math.min(Math.max(row, 0), view.h - world.H * s) : ty;
   return canvas === "chain" ? { s, tx, ty: chainTy } : { s, tx: Math.max(20, tx), ty };
+}
+
+/** Empty canvas a moved view may show past the world's edge (px). */
+export const PAN_SLACK = 40;
+
+/** Keep a moved view on its world: one smaller than the view stays wholly inside it, a bigger one shows at most
+ *  `PAN_SLACK` px of empty canvas past an edge. `cover`, the px an overlaid pane hides on the right, lets the world's
+ *  right end slide out from under it. Fit and current frame themselves; this is for pans and zooms. */
+export function clampCam(cam: Cam, world: { W: number; H: number }, view: Size, cover = 0): Cam {
+  const axis = (t: number, size: number, v: number, hidden: number) => {
+    const room = v - size * cam.s;
+    return Math.min(Math.max(t, Math.min(0, room - hidden - PAN_SLACK)), Math.max(room, PAN_SLACK));
+  };
+  return { s: cam.s, tx: axis(cam.tx, world.W, view.w, cover), ty: axis(cam.ty, world.H, view.h, 0) };
 }
 
 /** 100%, the current node centred across and 30% down the view. */

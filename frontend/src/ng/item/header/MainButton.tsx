@@ -3,7 +3,7 @@ import { Archive, ArchiveRestore, ChevronDown, ChevronUp, CircleAlert, CircleChe
 import { Popover } from "../../ui/Popover";
 import { MAIN_LABEL, type Main, type PanelItem } from "../status";
 import { tip } from "../../ui/Tooltip";
-import { MARK_COMPLETE } from "../sharedWords";
+import { MARK_COMPLETE, REMOVE_FROM_QUEUE } from "../sharedWords";
 
 const MAIN_ICON: Record<Main, typeof Pause> = { pause: Pause, resume: Play, start: Play, raise: Play, retry: RotateCcw, archive: Archive, restore: ArchiveRestore, gate: CircleCheck, answer: MessageSquare, conflicts: CircleAlert, reopen: RotateCcw };
 const ITEM: Record<PanelItem, { label: string; icon: typeof Pause; tone?: string }> = {
@@ -20,6 +20,8 @@ type Props = {
   main: Main;
   panel: PanelItem[];
   archivable: boolean;
+  /** A queued item: its pause door is worded as leaving the queue. */
+  queued?: boolean;
   busy?: boolean;
   onMain: () => void;
   onItem: (it: PanelItem) => void;
@@ -34,9 +36,10 @@ type Props = {
  *  the main action first (▴), the panel's items under it. ↓, Enter or Space on
  *  ▾ open it from the keyboard, on the main action; Escape closes it and focus
  *  goes back to ▾, so nothing here is reachable by hover alone. */
-export function MainButton({ main, panel: all, archivable, busy, onMain, onItem, groupRef, children }: Props) {
+export function MainButton({ main, panel: all, archivable, queued, busy, onMain, onItem, groupRef, children }: Props) {
   // The main action is the menu's first row; a panel item that is the same action would repeat it.
   const panel = all.filter((it) => it !== main);
+  const label = main === "pause" && queued ? REMOVE_FROM_QUEUE : MAIN_LABEL[main];
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
@@ -104,7 +107,7 @@ export function MainButton({ main, panel: all, archivable, busy, onMain, onItem,
         <Icon size={14} aria-hidden />
         {/* Every row's label in one cell, only the main one shown: the button is as wide as its widest row, so the menu over it fits at its width. */}
         <span className="item-main-label">
-          <span>{MAIN_LABEL[main]}</span>
+          <span>{label}</span>
           {panel.map((it) => <span key={it} className="item-main-sizer" aria-hidden>{ITEM[it].label}</span>)}
         </span>
       </button>
@@ -119,7 +122,7 @@ export function MainButton({ main, panel: all, archivable, busy, onMain, onItem,
       }} role="menu" label="Item actions" focusIn={false}>
         <div ref={list} className="menu item-panel" onMouseEnter={() => hover(true)} onMouseLeave={left}>
           <button ref={(el) => void (refs.current[0] = el)} type="button" role="menuitem" tabIndex={-1} aria-disabled={busy || undefined} className={`menu-item item-panel-item item-panel-main is-${main}`} onClick={() => { quiet.current = true; close(); button.current?.focus(); act(); }}>
-            <Icon size={14} aria-hidden /> <span className="item-main-label">{MAIN_LABEL[main]}</span>
+            <Icon size={14} aria-hidden /> <span className="item-main-label">{label}</span>
             {/* Over ▾: a press there, meant to open the menu, must not run the action. */}
             <span className="item-panel-caret" aria-hidden onClick={(e) => e.stopPropagation()}><ChevronUp size={12} /></span>
           </button>

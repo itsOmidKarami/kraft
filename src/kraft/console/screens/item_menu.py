@@ -3,6 +3,7 @@ web, each asking what it needs in its own dialog and sent as the CLI says it."""
 
 from __future__ import annotations
 
+import time
 from functools import partial
 
 from kraft import answers, client
@@ -35,7 +36,12 @@ def cancel_lines(preview: dict) -> list[str]:
     if run:
         name = words.task_name(run["task"]) if run.get("task") else run.get("node")
         attempt = f"attempt {run['attempt']}" if run.get("attempt") else ""
-        stops = f"{', '.join(p for p in (name, attempt) if p)}. That attempt's work is lost."
+        what = ", ".join(p for p in (name, attempt) if p)
+        if started := run.get("started_at"):
+            then = words._seconds(started)
+            # `elapsedBetween`: a start it cannot read is "0s", as on the web.
+            what += f" ({words.elapsed(time.time() - then if then is not None else 0)})"
+        stops = f"{what}. That attempt's work is lost."
     else:
         stops = "Nothing is running."
     kept = preview.get("kept") or {}

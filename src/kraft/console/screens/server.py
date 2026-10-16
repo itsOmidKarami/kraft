@@ -32,11 +32,14 @@ FOLLOWING = "following · f filter"
 HELD = "paused · End follows · f filter"
 
 
-#: A `server.log` record's level word: after Rich's time column, or the blank
-#: it leaves when the second is the last record's. Continuation lines have none.
-LEVEL = re.compile(r"^(?:\[[^\]]*\]\s+|\s+)(DEBUG|INFO|WARNING|ERROR|CRITICAL)\b")
-#: The `file.py:123` a record's first line ends on.
-SOURCE = re.compile(r"\S+\.py:\d+\s*$")
+#: A `server.log` record's level word: after the `2026-10-16 12:04:58` it is
+#: written with, or (a log from before records were one line) after Rich's time
+#: column or the blank it leaves. Continuation lines have none.
+LEVEL = re.compile(
+    r"^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\s+|\[[^\]]*\]\s+|\s+)(DEBUG|INFO|WARNING|ERROR|CRITICAL)\b"
+)
+#: The `file.py:123` after the level, or at the end of an older record's first line.
+SOURCE = re.compile(r"(?<=\s)\S+\.py:\d+(?=\s)|\S+\.py:\d+\s*$")
 #: The level words drawn in a colour; the word stays, so colour is not alone.
 LEVEL_COLOUR = {"WARNING": "warning", "ERROR": "error", "CRITICAL": "error"}
 

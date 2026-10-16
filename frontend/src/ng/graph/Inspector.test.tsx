@@ -92,6 +92,8 @@ describe("Inspector", () => {
     const panel = screen.getByRole("tabpanel");
     expect(panel).toHaveClass("pane-body");
     expect(panel).toHaveAttribute("aria-labelledby", "p-tab-overview");
+    // A tall Overview scrolls by keyboard only if the panel itself can take focus.
+    expect(panel).toHaveAttribute("tabindex", "0");
   });
 
   it("has a resize handle when docked and none when overlaid; Focus only when offered", async () => {

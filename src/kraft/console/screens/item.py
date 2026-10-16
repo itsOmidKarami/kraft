@@ -4,6 +4,7 @@ pushed screen, so the prompt and the top line stay; Esc goes back."""
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from functools import partial
@@ -23,11 +24,18 @@ from kraft.console.dialogs import Reject, reject_asks
 from kraft.console.pulse import Working, spins
 from kraft.console.screens import View
 from kraft.console.screens.board import bar_of, chain_line
+from kraft.console.screens.item_chain import ChainPane, ChainTab
 from kraft.console.screens.item_menu import MenuActions
 from kraft.console.words import status_words, usd
 
 #: The Item's tabs, in `[` and `]` order, with their names.
-TABS = (("overview", "Overview"), ("activity", "Activity"), ("log", "Log"), ("diff", "Diff"))
+TABS = (
+    ("overview", "Overview"),
+    ("chain", "Chain"),
+    ("activity", "Activity"),
+    ("log", "Log"),
+    ("diff", "Diff"),
+)
 #: How many events the Activity reads at a time, newest first.
 PAGE = 50
 #: A `before_seq` past every event: SQLite's largest integer.
@@ -46,15 +54,16 @@ DIFF_STYLE = (
     ("-", "error"),
     ("@@", "kraft-info"),
 )
+#: Diff lines one draw writes before it lets the loop run: a full-size diff
+#: (~40k lines) written at once holds every key for over a second.
+DIFF_PART = 500
 #: How long the node an approve moved the item to stays lit.
 LIT_S = 1.5
 #: A failed item's Overview, after its keys: where to read what happened.
 LOG_POINTER = "The Log tab holds the session it failed in."
-#: A chain node's mark in the Overview's list, by its state.
-MARK = {"done": "✓", "current": "●", "hot": "●", "todo": " "}
 
 
-class Item(MenuActions, View):
+class Item(ChainTab, MenuActions, View):
     label = "Item"
     BINDINGS: ClassVar[list[BindingType]] = [
         # Long content scrolls by keys: the view keeps the focus (spec §6).
@@ -66,7 +75,10 @@ class Item(MenuActions, View):
         Binding("end", "scroll('end')", "end", show=False),
         # Arrows and Tab are what people try first; the brackets stay. One
         # footer entry (←'s); →'s blank key_display keeps `?` from listing it twice.
-        Binding("left", "tab(-1)", "tabs", key_display="←→"),
+        # ← closes an open node and switches tabs otherwise: two bindings, so
+        # the footer and `?` name the one that acts.
+        Binding("left", "left", "tabs", key_display="←→"),
+        Binding("left", "close_node", "close", show=False),
         Binding("right", "tab(1)", "tabs", show=False, key_display=" "),
         Binding("left_square_bracket", "tab(-1)", "tabs", show=False),
         Binding("right_square_bracket", "tab(1)", "tabs", show=False),
@@ -77,6 +89,9 @@ class Item(MenuActions, View):
         *acts.P_KEYS,
         Binding("t", "retry", "retry"),
         Binding("s", "session", "session"),
+        # On the Chain tab: a node opens, then a session's log opens.
+        Binding("enter", "open", "open"),
+        Binding("escape", "close_node", "close"),
         Binding("m", "menu", "menu"),
     ]
 
@@ -94,6 +109,8 @@ class Item(MenuActions, View):
         #: `(updated_at, actions)` of the last read: a live event that leaves
         #: them alone reads nothing.
         self._key: tuple | None = None
+        #: The diff payload last drawn in full: read again unchanged, it is kept as drawn.
+        self._diff_drawn: dict | None = None
         #: The item answered 404: nothing is read until `open` shows another.
         self._dead = False
         #: What the Overview draws, kept for when its pane is shown.
@@ -107,6 +124,7 @@ class Item(MenuActions, View):
         self._approved: tuple[str, str] | None = None
         #: The chain's new place drawn lit, for `LIT_S` after that read.
         self._lit = False
+        self._init_chain()
 
     def compose(self) -> ComposeResult:
         with Vertical(id="item-head"):
@@ -125,6 +143,9 @@ class Item(MenuActions, View):
             overview = RichLog(id="overview", wrap=True, min_width=1)
             overview.can_focus = False
             yield overview
+            chain_pane = ChainPane(id="chain", wrap=True, min_width=1)
+            chain_pane.can_focus = False
+            yield chain_pane
             activity = RichLog(id="activity", wrap=True, min_width=1)
             activity.can_focus = False
             yield activity
@@ -139,7 +160,8 @@ class Item(MenuActions, View):
     def on_mount(self) -> None:
         self.query_one("#item-gone").display = False
         # The tabs' keys, on the panel's edge beside them.
-        self.query_one("#item-head").border_subtitle = "← → tabs"
+        self._sync_edge()
+        self.app.pulse.add(self._chain_beat)
 
     def open(self, work_item_id: str) -> None:
         """Show `work_item_id`, on the Overview, read afresh."""
@@ -156,6 +178,9 @@ class Item(MenuActions, View):
         self.events, self.more = [], False
         self._lines = []
         self.session_id = None
+        self._reset_chain()
+        self._sync_edge()
+        self._diff_drawn = None
         self.query_one("#item-gone").display = False
         self.query_one("#item-title", Static).update(Content(f"{self.crumb} › {work_item_id[:8]}"))
         for part in ("#item-where", "#item-status", "#item-spent", "#item-chain"):
@@ -174,12 +199,16 @@ class Item(MenuActions, View):
         self.tab = tab
         self.query_one("#item-panes", ContentSwitcher).current = tab
         self._draw_tabs()
+        self._sync_edge()
         self.refresh_bindings()
         # An older page asked for before the tab was left must not land on the
         # list this visit rereads: its boundary is gone.
         self.workers.cancel_group(self, "older")
+        if tab == "diff":  # a visit always draws afresh
+            self._diff_drawn = None
         if self.work_item_id is not None and not self._dead:
             work = {
+                "chain": (self._chain_first, "tab"),
                 "activity": (self._activity_first, "tab"),
                 "diff": (self._diff, "tab"),
                 "log": (self._follow, "log"),
@@ -190,6 +219,9 @@ class Item(MenuActions, View):
                 self.call_after_refresh(self._write_overview)
         if tab != "log" or self._dead:  # a log nobody sees is not followed
             self.workers.cancel_group(self, "log")
+
+    def _now(self) -> float:
+        return time.time()
 
     def _shown(self, tab: str) -> bool:
         """Whether `tab`'s pane is on screen: a RichLog written while it is not
@@ -218,11 +250,12 @@ class Item(MenuActions, View):
         # A hidden Item still hears every event: it reads nothing then.
         if not self.display or self.work_item_id is None or self._dead:
             return
-        if self.tab == "activity":
+        if self.tab in ("activity", "chain"):
             mine = [e for e in events if e.get("work_item_id") == self.work_item_id]
             # A reread (no events) or a line of this item's: read what is newer.
             if mine or not events:
-                self.run_worker(self._activity_newer, group="tab", exclusive=True)
+                newer = self._activity_newer if self.tab == "activity" else self._chain_newer
+                self.run_worker(newer, group="tab", exclusive=True)
         row = next((r for r in rows if r["id"] == self.work_item_id), None)
         key = (row.get("updated_at"), tuple(row.get("actions") or ())) if row else None
         if events and key == self._key:
@@ -254,6 +287,7 @@ class Item(MenuActions, View):
             # One copy of the error, not one per failed read.
             self._lines = [client.reason_of(str(exc))]
             self._write_overview()
+        self._write_chain()
         self.refresh_bindings()
         # A Log opened before this read had no session to pick; now it has.
         if self._shown("log") and self.session_id is None and not self._dead:
@@ -367,22 +401,6 @@ class Item(MenuActions, View):
             self.read_gate = gate
         else:
             lines += self._stopped(item)
-        if lines:
-            lines.append("")
-        lines.append(Text("Chain", style=f"bold {muted}"))
-        styles = {
-            "done": muted,
-            "current": f"bold {self.app.theme_variables['kraft-accent']}",
-            "hot": f"bold {self.app.theme_variables['kraft-accent']}",
-            "todo": "",
-        }
-        for mark in words.chain_marks(item):
-            gate_word = " (gate)" if mark["gate"] else ""
-            lines.append(
-                Text(
-                    f" {MARK[mark['state']]} {mark['node']}{gate_word}", style=styles[mark["state"]]
-                )
-            )
         self._lines = lines
         self._write_overview()
 
@@ -485,9 +503,12 @@ class Item(MenuActions, View):
             payload = await client.diff(self.work_item_id)
         except client.ClientError as exc:
             if self._shown("diff"):
+                self._diff_drawn = None
                 log.clear()
                 log.write(client.reason_of(str(exc)))
             return
+        if payload == self._diff_drawn and self._shown("diff"):
+            return  # a row change that left the diff as it was: no clear, scroll kept
         colour = self.app.theme_variables
         muted, warn = colour["kraft-muted"], colour["warning"]
         lines: list[Text] = []
@@ -507,10 +528,17 @@ class Item(MenuActions, View):
         if not self._shown("diff"):  # drawn again by the next visit
             return
         scrolled = log.scroll_y
+        self._diff_drawn = None
         log.clear()
-        for line in lines:
-            log.write(line, scroll_end=False)
-        log.scroll_to(y=scrolled, animate=False, immediate=True)
+        for start in range(0, len(lines), DIFF_PART):
+            if start:
+                await asyncio.sleep(0)
+                if not self._shown("diff"):  # left mid-draw: the next visit draws it again
+                    return
+            for line in lines[start : start + DIFF_PART]:
+                log.write(line, scroll_end=False)
+            log.scroll_to(y=scrolled, animate=False, immediate=True)
+        self._diff_drawn = payload
 
     def _diff_line(self, line: str) -> Text:
         style = next((style for start, style in DIFF_STYLE if line.startswith(start)), "")
@@ -581,9 +609,21 @@ class Item(MenuActions, View):
             return bool(self._menu_entries())
         if action == "session":
             return self.tab == "log" and len(self._sessions()) > 1
+        if (chain_says := self.check_chain_action(action)) is not None:
+            return chain_says
         return True
 
+    def back(self) -> bool:
+        """`q` on the Chain tab closes an open node before it leaves the item."""
+        if self.tab == "chain" and self.chain_open:
+            self._close_node()
+            return True
+        return False
+
     def action_scroll(self, how: str) -> None:
+        if self.tab == "chain" and how in ("up", "down", "home", "end"):
+            self._move_cursor(how)
+            return
         if how == "end" and self.tab == "activity" and self.more:
             # Its own group: a live line arriving meanwhile must not cancel it.
             self.run_worker(self._activity_older, group="older", exclusive=True)

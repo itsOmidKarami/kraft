@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import psutil
 import pytest
-from support.pidfile import hold_pidfile
+from support.pidfile import exec_landed, hold_pidfile
 
 from kraft import pidfile
 
@@ -23,9 +23,8 @@ def started(tmp_path):
     procs = []
 
     def start(*argv: str) -> subprocess.Popen:
-        proc = subprocess.Popen(argv)
-        procs.append(proc)
-        return proc
+        procs.append(subprocess.Popen(argv))  # owned before the wait, so teardown kills it
+        return exec_landed(procs[-1])
 
     yield start
     for proc in procs:

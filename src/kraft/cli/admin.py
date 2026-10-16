@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import plistlib
 import re
@@ -13,6 +14,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import traceback
 from importlib.metadata import PackageNotFoundError
@@ -845,8 +847,13 @@ class _Tee:
     def __init__(self, *streams) -> None:
         self._streams = streams
 
+    #: Set while a Rich-rendered log record is written: it goes to the terminal
+    #: only, because `_log_plain` puts the record in the file as one line.
+    terminal_only = threading.local()
+
     def write(self, data: str) -> int:
-        for stream in self._streams:
+        streams = self._streams[:1] if getattr(self.terminal_only, "on", False) else self._streams
+        for stream in streams:
             stream.write(data)
         return len(data)
 
@@ -859,6 +866,35 @@ class _Tee:
         # stderr already was) -- uvicorn checks this to decide whether to
         # colorize its own log output.
         return self._streams[0].isatty()
+
+
+def _log_plain(log_file, *, terminal: bool = True) -> None:
+    """The MCP SDK puts a `RichHandler` on the root logger when the API loads,
+    and Rich wraps each record to the terminal's width, so the teed copy was
+    several ragged lines per record. The terminal keeps Rich's rendering; the
+    file gets the record as one line (a traceback stays whole, after it). A
+    detached start has no terminal: its stderr is the file, so Rich is skipped."""
+    from rich.logging import RichHandler
+
+    emit = RichHandler._kraft_emit = getattr(RichHandler, "_kraft_emit", RichHandler.emit)
+    plain = logging.Formatter(
+        "%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s", "%Y-%m-%d %H:%M:%S"
+    )
+
+    def emit_both(self, record: logging.LogRecord) -> None:
+        if terminal:
+            _Tee.terminal_only.on = True
+            try:
+                emit(self, record)
+            finally:
+                _Tee.terminal_only.on = False
+        try:  # a handler never raises into the logging call, as Rich's own emit
+            log_file.write(plain.format(record) + "\n")
+            log_file.flush()
+        except Exception:
+            self.handleError(record)
+
+    RichHandler.emit = emit_both  # type: ignore[method-assign]
 
 
 def _redirect_output_to_log(log_path: Path) -> None:
@@ -877,6 +913,7 @@ def _redirect_output_to_log(log_path: Path) -> None:
     """
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = open(log_path, "a")
+    _log_plain(log_file)
     sys.stdout = _Tee(sys.stdout, log_file)
     sys.stderr = _Tee(sys.stderr, log_file)
 
@@ -943,6 +980,9 @@ def _serve() -> None:
         # ties fd 1/2 to this same file before spawning.
         _rotate_if_large(log_path)
         _redirect_output_to_log(log_path)
+    else:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        _log_plain(open(log_path, "a"), terminal=False)
     host, port = _bind(templates_dir)
     _refuse_if_addr_taken(host, port)
     running = _read_pid(pid_path)

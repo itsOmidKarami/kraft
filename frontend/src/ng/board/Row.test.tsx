@@ -30,6 +30,14 @@ describe("Row", () => {
     expect(onCheck).toHaveBeenCalledTimes(2);
   });
 
+  it("leads the meta line with the reason, drops the repo and chain when asked, and says node progress in words", () => {
+    const { main } = mount("failed", { stop: { kind: "failed", node: "build", reason: null, resume_at: null } as WorkItem["stop"] }, { hideRepo: true, hideChain: true });
+    const meta = main.querySelector(".board-meta")!;
+    expect(meta.firstElementChild).toHaveClass("board-meta-tail");
+    expect(meta.querySelector(".board-meta-repo, .board-meta-chain")).toBeNull();
+    expect(meta).toHaveTextContent(/\d+ of \d+ nodes done/);
+  });
+
   it("offers the row's one action and hands it over, none for a running or done row", () => {
     const { onAction, item } = mount("failed", { stop: { kind: "failed", node: "merge_request", reason: null, resume_at: null } as WorkItem["stop"] });
     fireEvent.click(screen.getByRole("button", { name: "Retry…" }));
@@ -66,9 +74,9 @@ describe("Row", () => {
     expect(screen.getAllByRole("button")).toHaveLength(1);
   });
 
-  it("describes its action by the item, so five \"Review to approve\" buttons are told apart", () => {
+  it("describes its action by the item, so five \"Review\" buttons are told apart", () => {
     mount("needs_you", { stop: { kind: "gate", node: "spec_approval", reason: null, resume_at: null }, pending_gate: "spec_approval" });
-    expect(screen.getByRole("button", { name: "Review to approve" })).toHaveAccessibleDescription("Design the cache");
+    expect(screen.getByRole("button", { name: "Review" })).toHaveAccessibleDescription("Design the cache");
   });
 
   it("turns the action off while offline and shows an action's error on the row", () => {

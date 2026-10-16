@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { shortId } from "../../format";
 import type { WorkItem } from "../../types";
 import { admits, headerState, pausable, resumable, retryable } from "../item/status";
@@ -21,6 +21,8 @@ export function BulkBar({ checked, byId, offline, onChecked }: { checked: WorkIt
   const last = useBulk((s) => s.last);
   const [confirm, setConfirm] = useState(false);
   const [reason, setReason] = useState("");
+  // Nothing selected any more (Escape, Clear, a send): the confirm does not wait for the next selection.
+  useEffect(() => { if (!checked.length) setConfirm(false); }, [checked.length]);
   const pause = checked.filter(pausable);
   // Each item only where the server's `actions` admit its door, the old reading kept for a server that sends none.
   const cancel = checked.filter((i) => admits(i, "cancel", !ended(i)));
@@ -68,7 +70,7 @@ export function BulkBar({ checked, byId, offline, onChecked }: { checked: WorkIt
 
   return (
     <div className="bulk-wrap">
-      <div className="bulk-bar" role="toolbar" aria-label="Selected work items">
+      <div className="bulk-bar" role="toolbar" aria-label="Selected work items" onKeyDown={(e) => { if (confirm && e.key === "Escape") { e.preventDefault(); setConfirm(false); } }}>
         <span>{checked.length} selected</span>
         {confirm ? (
           <>

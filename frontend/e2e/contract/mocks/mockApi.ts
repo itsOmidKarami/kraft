@@ -695,7 +695,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if ((m = p.match(/^\/steering\/([^/]+)$/))) return method === "DELETE" ? json({ deleted: m[1] }) : json(st.steeringBody(decodeURIComponent(m[1])));
     if (p === "/intake/checks" && opts.areas) return json(areas.checks());
     if (p === "/intake/checks") return json([
-      { id: 3, at: new Date(Date.now() - 60_000).toISOString(), ready: 2, started: ["w-2"], skipped: [{ bead_id: "B-9", reason: "max_concurrent" }] },
+      { id: 3, at: new Date(Date.now() - 60_000).toISOString(), ready: 2, started: ["w-2"], skipped: [{ bead: "B-9", reason: "max_concurrent" }] },
       { id: 2, at: new Date(Date.now() - 360_000).toISOString(), ready: 0, started: [], skipped: [] },
     ]);
     if (p === "/apply" || p === "/apply/reload") {
@@ -714,6 +714,15 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if (p === "/sessions") return json(st.sessions);
     if ((m = p.match(/^\/sessions\/[^/]+$/))) return { status: 204 };
     if (p === "/analytics") return json(S.analytics);
+    if (p === "/storage") return json(storageFor([...S.ngBoard, ...S.ngArchived]));
+    if (p === "/storage/preview" && method === "POST") {
+      const usage = storageFor([...S.ngBoard, ...S.ngArchived]);
+      const picked = usage.items.filter((i) => ((req.json() ?? {}).ids ?? []).includes(i.id));
+      const freed = picked.reduce((n, i) => n + i.bytes, 0);
+      return json({ freed_bytes: freed, used_after_bytes: usage.used_bytes - freed, state_after: "ok",
+        items: picked.map((i, k) => ({ id: i.id, title: i.title, bytes: i.bytes, archivable: true, refusal: null, uncommitted_files: k === 0 ? 2 : 0, unpushed_commits: 0, branch_kept: false })) });
+    }
+    if (p === "/editors") return json({ available: ["code", "cursor"], system: true, default: null });
     if (p === "/login") return json({ ok: true });
     if (p === "/logout") return { status: 204 };
 
@@ -721,4 +730,18 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
   };
   // The demo's handle on its motion, to pause it while the tab is hidden; null without `motion`.
   return Object.assign(serve, { motion: opts.motion ? motion(S, T, opts.motion === true ? {} : opts.motion) : null });
+}
+
+const GB = 1024 ** 3;
+/** `GET /storage` for the demo's own items: each worktree 0.4–2G, the finished ones what a clean-up would free, under a 40G quota. */
+function storageFor(items: any[]) {
+  const rows = items.map((i, k) => {
+    const ended = i.status === "completed" || i.status === "abandoned";
+    return { id: i.id, title: i.title, status: i.status, archived: !!i.archived_at, bytes: i.archived_at ? 0 : ((k * 7) % 5 + 1) * 0.4 * GB, documents_bytes: 3 * 1024 ** 2, updated_at: i.updated_at, reclaimable: ended && !i.archived_at };
+  }).sort((a, b) => b.bytes - a.bytes);
+  const worktrees = rows.reduce((n, r) => n + r.bytes, 0);
+  const categories = { worktrees, sandboxes: 0, documents: rows.length * 3 * 1024 ** 2, logs: 180 * 1024 ** 2, results: 12 * 1024 ** 2, databases: 40 * 1024 ** 2, attachments: 0, other: 0 };
+  const used = Object.values(categories).reduce((n, b) => n + b, 0);
+  return { measured_at: new Date(Date.now() - 120_000).toISOString(), state: "ok", used_bytes: used, quota_bytes: 40 * GB, limit_bytes: 50 * GB,
+    reclaimable_bytes: rows.filter((r) => r.reclaimable).reduce((n, r) => n + r.bytes, 0), categories, items: rows, orphans: [] };
 }

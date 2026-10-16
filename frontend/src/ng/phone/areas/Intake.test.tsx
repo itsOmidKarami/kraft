@@ -8,8 +8,8 @@ import { IntakeScreen, ScheduleScreen, statusLine } from "./Intake";
 import { mountAt, posts, problem, where } from "./testkit";
 
 const CHECKS = [
-  { id: 3, at: "2026-10-01T09:00:00Z", ready: 4, started: ["kraft-d71a"], skipped: [{ bead_id: "a", reason: "above_priority_ceiling" }, { bead_id: "b", reason: "above_priority_ceiling" }, { bead_id: "c", reason: "already_item" }] },
-  { id: 2, at: "2026-10-01T08:55:00Z", ready: 3, started: [], skipped: [{ bead_id: "d", reason: "max_concurrent" }] },
+  { id: 3, at: "2026-10-01T09:00:00Z", ready: 4, started: ["kraft-d71a"], skipped: [{ bead: "a", reason: "above_priority_ceiling" }, { bead: "b", reason: "above_priority_ceiling" }, { bead: "c", reason: "already_item" }] },
+  { id: 2, at: "2026-10-01T08:55:00Z", ready: 3, started: [], skipped: [{ bead: "d", reason: "max_concurrent" }] },
 ];
 const view = (resolved: Partial<IntakeResolved> = {}, r: Parameters<typeof intakeView>[0] = {}, draft = false) => intakeView(r, { ...INTAKE, ...resolved }, draft);
 const OPS = (v = view()): [number, unknown] => [200, { ...v, ops: [] }];

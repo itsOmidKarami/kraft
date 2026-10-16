@@ -14,6 +14,7 @@ describe("Library canvas: a node", () => {
   it("draws its steps and tasks, a task's kind coming from the task it extends", async () => {
     mount("/templates/library/nodes.verification");
     const g = await canvas("nodes.verification");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Library: verification");
     expect(within(g).getByRole("button", { name: "review, step" })).toBeInTheDocument();
     // `code_review` writes only `extends: code_review`, whose own base is the agent task `implementer`.
     expect(within(g).getByRole("button", { name: "code_review, agent task" })).toBeInTheDocument();

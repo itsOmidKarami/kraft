@@ -43,7 +43,7 @@ function nodeTable(item: ItemDetail, node: ApiNode, graph: ChainNode): { seconda
   if (status === "done" || status === "cancelled" || status === "archived") return none;
   // Queued: /skip and /retry refuse it until it is out of the queue.
   if (status === "queued" || status === "blocked") return none;
-  if (node.kind === "gate") return item.pending_gate === node.id ? { secondary: null, primary: a("review", "Review and decide") } : none;
+  if (node.kind === "gate") return item.pending_gate === node.id ? { secondary: null, primary: a("review", "Review") } : none;
   if (graph.state === "done") return retryable(item) ? { secondary: null, primary: a("retry-from", "Retry from here") } : none;
   if (graph.state !== "current" && graph.state !== "failed") return none;
   // A rate-limited node takes Pause only: /skip refuses it until it is paused (R10b-01's follow-up).

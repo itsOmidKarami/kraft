@@ -193,3 +193,7 @@
 .set-linkrow > svg:last-child { color: var(--text-muted); }
 .set-linkrow:is(:hover, :focus-visible) { background: var(--surface); }
 @media (max-width: 767px) { .set-about-kv { grid-template-columns: minmax(0, 1fr); gap: 2px; } .set-about-kv dd { margin-bottom: 8px; } }
+/* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
+.set-line-row { padding-block: calc(4px + var(--row-pad-add)); }
+.set-linkrow { padding-block: calc(10px + var(--row-pad-add)); }
+.set-event { padding-block: calc(4px + var(--row-pad-add)); }

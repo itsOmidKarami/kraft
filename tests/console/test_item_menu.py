@@ -4,8 +4,10 @@ opens its door, each through its dialog, each said in the CLI's sentence."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
-from support.console_board import FAILED, _detail, _opened, _serve, _toasts
+from support.console_board import FAILED, NOW, _detail, _iso, _opened, _serve, _toasts
 from textual.widgets import OptionList
 
 from kraft import client
@@ -340,11 +342,28 @@ def test_a_cancel_preview_that_fails_says_so_and_reads_the_item_again(board, mon
         ({"node": "implement"}, "implement. That attempt's work is lost."),
         ({"node": "implement", "attempt": 2}, "implement, attempt 2. That attempt's work is lost."),
         (None, "Nothing is running."),
+        (
+            {"node": "implement", "attempt": 2, "started_at": _iso(4)},
+            "implement, attempt 2 (4m). That attempt's work is lost.",
+        ),
+        (
+            {"node": "implement", "started_at": "soon"},
+            "implement (0s). That attempt's work is lost.",
+        ),
     ],
-    ids=["attempt-only", "node-only", "node-and-attempt", "nothing"],
+    ids=[
+        "attempt-only",
+        "node-only",
+        "node-and-attempt",
+        "nothing",
+        "running-for",
+        "unreadable-start",
+    ],
 )
-def test_cancel_lines_join_what_runs_as_the_web_does(running, stops):
-    """`stopsNow` joins the parts it has with ", ": no leading comma."""
+def test_cancel_lines_join_what_runs_as_the_web_does(monkeypatch, running, stops):
+    """`stopsNow` joins the parts it has with ", ": no leading comma; the
+    running attempt's time since it started, in `elapsedBetween`'s words."""
+    monkeypatch.setattr(item_menu, "time", SimpleNamespace(time=lambda: NOW))
     lines = item_menu.cancel_lines(PREVIEW | {"running": running})
     assert lines[0] == f"Stops now: {stops}"
 

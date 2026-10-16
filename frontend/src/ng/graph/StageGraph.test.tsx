@@ -137,10 +137,13 @@ describe("StageGraph", () => {
       sized();
       render(<StageGraph name="c" nodes={long} overview fit={{ floor: 1, left: 12 }} />);
       const at = (id: string) => layout(long).items.find((i) => i.node.id === id)!.cx;
-      fireEvent.click(overview().getByRole("button", { name: "merge, not started" }));
+      fireEvent.click(overview().getByRole("button", { name: "describe, done" }));
       // Centred across the 600px view, at the zoom the canvas has.
       const { s } = cam();
-      expect(cam().tx).toBeCloseTo(300 - at("merge") * s);
+      expect(cam().tx).toBeCloseTo(300 - at("describe") * s);
+      // The last node cannot be centred: the view stops 40px past the chain's end.
+      fireEvent.click(overview().getByRole("button", { name: "merge, not started" }));
+      expect(cam().tx).toBeCloseTo(600 - layout(long).W * s - 40);
       const strip = screen.getByRole("group", { name: "Chain overview" });
       const k = Math.min(MAP.K, (600 - 2 * MAP.PAD) / layout(long).W);
       fireEvent.pointerDown(strip, { button: 0, clientX: MAP.PAD + at("build") * k });

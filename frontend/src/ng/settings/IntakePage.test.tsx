@@ -13,8 +13,8 @@ import { IntakePage } from "./IntakePage";
 
 const ok = <T,>(body: T, status = 200) => Promise.resolve({ status, body });
 const CHECKS = [
-  { id: 3, at: "2026-10-01T10:05:00Z", ready: 4, started: ["kraft-d71a"], skipped: [{ bead_id: "a", reason: "above_priority_ceiling" }, { bead_id: "b", reason: "above_priority_ceiling" }, { bead_id: "c", reason: "already_item" }] },
-  { id: 2, at: "2026-10-01T10:00:00Z", ready: 3, started: [], skipped: [{ bead_id: "d", reason: "max_concurrent" }] },
+  { id: 3, at: "2026-10-01T10:05:00Z", ready: 4, started: ["kraft-d71a"], skipped: [{ bead: "a", reason: "above_priority_ceiling" }, { bead: "b", reason: "above_priority_ceiling" }, { bead: "c", reason: "already_item" }] },
+  { id: 2, at: "2026-10-01T10:00:00Z", ready: 3, started: [], skipped: [{ bead: "d", reason: "max_concurrent" }] },
 ];
 
 const mount = () =>

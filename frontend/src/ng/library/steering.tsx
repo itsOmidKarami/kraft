@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { request, detailOf } from "../http";
 import { PauseText } from "../templates/panes/controls";
@@ -50,12 +50,17 @@ function useRepoNames(): string[] | null {
   return names;
 }
 
+/** A use at a node has a path of one name; only a task's (`node.step.task`) can be an agent task, so those come first. */
+const taskUse = (uses: Use[] | null) => Math.max(0, (uses ?? []).findIndex((u) => u.path.split(".").length >= 3));
+
 /** What an agent task reads at launch, in launch order (Decisions §10 Steering): for one use of the profile
  *  in a chain and one repository, every section the server builds, each expanding to its text. It reads the
  *  published templates, so a draft change to the profile is not in it, and the pane says so. */
 export function SteeringCanvas({ row, uses, reserve, draft }: { row: Row; uses: Use[] | null; reserve: number; draft: ConfigDraft }) {
   const repos = useRepoNames();
-  const [useAt, setUseAt] = useState(0);
+  const [useAt, setUseAt] = useState(() => taskUse(uses));
+  // Until the person picks a use, the preview moves on from one the server says is not an agent task.
+  const picked = useRef(false);
   const [repoAt, setRepoAt] = useState(0);
   const [open, setOpen] = useState<Set<number>>(new Set());
   const [preview, setPreview] = useState<Preview>({ state: "loading" });
@@ -63,9 +68,12 @@ export function SteeringCanvas({ row, uses, reserve, draft }: { row: Row; uses: 
   const repo = repos?.[repoAt];
 
   useEffect(() => {
-    setUseAt(0);
+    picked.current = false;
     setOpen(new Set());
   }, [row.id]);
+  useEffect(() => {
+    if (!picked.current) setUseAt(taskUse(uses));
+  }, [row.id, uses]);
 
   useEffect(() => {
     if (uses === null || repos === null) return setPreview({ state: "loading" });
@@ -75,6 +83,7 @@ export function SteeringCanvas({ row, uses, reserve, draft }: { row: Row; uses: 
     setPreview({ state: "loading" });
     request<{ sections: Section[] }>(`/templates/steering/preview?chain=${encodeURIComponent(use.chain)}&task=${encodeURIComponent(use.path)}&repo=${encodeURIComponent(repo)}`).then((a) => {
       if (!live) return;
+      if (a.status === 422 && /not an agent task/.test(detailOf(a.body)) && !picked.current && uses && useAt < uses.length - 1) return setUseAt(useAt + 1);
       setPreview(a.status === 200 ? { state: "ok", sections: a.body.sections } : { state: "error", detail: detailOf(a.body) });
       setOpen(new Set());
     });
@@ -98,7 +107,7 @@ export function SteeringCanvas({ row, uses, reserve, draft }: { row: Row; uses: 
         {uses && !uses.length ? <p className="lib-preview-note">Not used by any chain</p> : (
           <label>
             <span>as used in</span>
-            <Select mono aria-label="Use" value={useAt} disabled={!uses?.length} onChange={(e) => setUseAt(Number(e.target.value))}>
+            <Select mono aria-label="Use" value={useAt} disabled={!uses?.length} onChange={(e) => { picked.current = true; setUseAt(Number(e.target.value)); }}>
               {(uses ?? []).map((u, i) => <option key={`${u.chain}|${u.path}`} value={i}>{u.chain} · {u.path}</option>)}
             </Select>
           </label>

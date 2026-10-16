@@ -38,7 +38,7 @@ export const SCREENS: PhoneScreen[] = [
   { id: "task", route: "/work-items/:id/nodes/:node", taps: [card("running"), node, { css: ".ph-task-row" }], data: true },
   { id: "scope", route: "/work-items/:id/nodes/:node", taps: [card("running"), { role: "button", name: "^verification" }, { role: "button", name: "^unit_tests" }, { role: "button", name: "^just test-unit" }], data: true, seed: "scopes", query: "scope" },
   { id: "gate-node", route: "/work-items/:id/nodes/:node", taps: [card("gate"), node], data: true },
-  { id: "review", route: "/work-items/:id/review", taps: [card("gate"), { role: "button", name: "^Review and decide$" }], data: true },
+  { id: "review", route: "/work-items/:id/review", taps: [card("gate"), { role: "button", name: "^Review$" }], data: true },
   { id: "new", route: "/work-items/new", taps: [{ role: "link", name: "^New work item$" }], heading: "New work item" },
   { id: "search", route: "/search", taps: [tab("Search")], heading: "Search" },
   { id: "analytics", route: "/analytics", taps: [tab("Analytics")], heading: "Analytics" },

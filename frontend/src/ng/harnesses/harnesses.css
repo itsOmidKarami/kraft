@@ -1,5 +1,5 @@
 /* Settings › Harnesses (W14). Colours only from W1 tokens; classes are hn-*. */
-.hn-page { position: absolute; inset: 0; max-width: 1280px; margin: 0 auto; display: flex; overflow: hidden; }
+.hn-page { position: absolute; inset: 0; display: flex; overflow: hidden; }
 .hn-note { padding: 28px 24px; font-size: var(--fs-meta); color: var(--text-sub); }
 .hn-crumb-sep { flex: none; color: var(--text-muted); }
 .hn-crumb { flex: none; font-size: var(--fs-label); color: var(--text-muted); }
@@ -87,3 +87,5 @@
   .hn-list { width: auto; border-right: 0; border-bottom: 1px solid var(--line); max-height: 220px; }
   .hn-stage { min-height: 520px; }
 }
+/* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
+.hn-row { padding-block: calc(3px + var(--row-pad-add)); }

@@ -152,6 +152,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   return (
     <DraftLibrary.Provider value={draftLibrary}>
     <div className="lib-page" data-ref={refId}>
+      {row && <h1 className="lib-sr">Library: {row.name}</h1>}
       <HeaderTail>
         {row && (
           <>
