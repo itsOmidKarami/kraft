@@ -21,7 +21,11 @@ from collections.abc import Mapping
 import yaml as pyyaml
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
+from ruamel.yaml.constructor import RoundTripConstructor
+from ruamel.yaml.emitter import RoundTripEmitter
 from ruamel.yaml.error import CommentMark, YAMLError
+from ruamel.yaml.events import MappingEndEvent, SequenceEndEvent
+from ruamel.yaml.representer import RoundTripRepresenter
 from ruamel.yaml.scalarstring import ScalarString, SingleQuotedScalarString
 from ruamel.yaml.tokens import CommentToken
 
@@ -52,9 +56,11 @@ def rewrite(text: str | None, data: Mapping, *, list_offset: int = 0) -> str:
         return written
     if not isinstance(doc, CommentedMap):
         return _plainly(data)
-    if offset := _list_offset(text) or list_offset:
-        # `  - path: …` under its key, as the file has it, not `- path: …`.
-        yaml.indent(mapping=2, sequence=offset + 2, offset=offset)
+    offset, gap = _list_offset(text) or list_offset, _dash_gap(text)
+    if offset or gap != 1:
+        # `  - path: …` under its key, as the file has it, not `- path: …`;
+        # `-   path: …` keeps its three spaces too.
+        yaml.indent(mapping=2, sequence=offset + 1 + gap, offset=offset)
     _merge(doc, data)
     out = io.StringIO()
     yaml.dump(doc, out)
@@ -91,6 +97,8 @@ def _reads_back(written: str, data: Mapping) -> None:
 def plain(value: object) -> object:
     """`value` as plain `dict`/`list`/scalars, ruamel's node and scalar types
     included, for `authored.dump` and for comparing with what PyYAML reads."""
+    if isinstance(value, _Null):
+        return None
     if isinstance(value, Mapping):
         return {plain(k): plain(v) for k, v in value.items()}
     if isinstance(value, list | tuple):
@@ -101,20 +109,74 @@ def plain(value: object) -> object:
     return value
 
 
+class _Null:
+    """A null as the file spelled it (`~`, `null`, nothing), so a rewrite
+    puts it back the same. It stands for None wherever values are compared
+    (`plain`)."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __repr__(self) -> str:
+        return f"_Null({self.text!r})"
+
+
+class _Emitter(RoundTripEmitter):
+    """ruamel leaves its `no_newline` flag set after a flow collection that
+    ends in an end-of-line comment, and the next line break is then
+    swallowed: a block entry after `- {…}  # note` lost its newline
+    (`- title: w cron: …`) when the list's key had a comment of its own."""
+
+    def expect_flow_mapping_key(self) -> None:
+        ending = isinstance(self.event, MappingEndEvent)
+        super().expect_flow_mapping_key()
+        if ending:
+            self.no_newline = False
+
+    def expect_flow_sequence_item(self) -> None:
+        ending = isinstance(self.event, SequenceEndEvent)
+        super().expect_flow_sequence_item()
+        if ending:
+            self.no_newline = False
+
+
+_NULL = "tag:yaml.org,2002:null"
+
+
+class _Constructor(RoundTripConstructor):
+    """Reads a null as `_Null`. On a subclass: `add_constructor` writes to the
+    class it is called on, and `RoundTripConstructor` is every round-trip
+    load's."""
+
+
+_Constructor.add_constructor(_NULL, lambda c, node: _Null(node.value))
+
+
+class _Representer(RoundTripRepresenter):
+    """ruamel writes None as nothing (`project:`); every other writer here,
+    and the operator's own file, says `null`. A null the file already has
+    keeps its own spelling (`_Null`)."""
+
+
+_Representer.add_representer(type(None), lambda r, _: r.represent_scalar(_NULL, "null"))
+_Representer.add_representer(_Null, lambda r, n: r.represent_scalar(_NULL, n.text))
+
+
 def _yaml() -> YAML:
     yaml = YAML()
+    yaml.Emitter = _Emitter
+    yaml.Constructor = _Constructor
+    yaml.Representer = _Representer
     yaml.preserve_quotes = True
     yaml.width = 4096  # never re-wrap a long line an author laid out
-    # ruamel writes None as nothing (`project:`); every other writer here,
-    # and the operator's own file, says `null`.
-    yaml.representer.add_representer(
-        type(None), lambda r, _: r.represent_scalar("tag:yaml.org,2002:null", "null")
-    )
     return yaml
 
 
 _KEY_LINE = re.compile(r"(?P<indent> *)[^\s#-][^:#]*:\s*(#.*)?")
-_ITEM_LINE = re.compile(r"(?P<indent> *)- ")
+_ITEM_LINE = re.compile(r"(?P<indent> *)-(?P<gap> +)")
 
 
 def list_offset(text: str | None) -> int:
@@ -133,6 +195,16 @@ def _list_offset(text: str) -> int:
         if head and dash:
             return max(0, len(dash["indent"]) - len(head["indent"]))
     return 0
+
+
+def _dash_gap(text: str) -> int:
+    """The spaces after a block list's `-` in the first entry that is a
+    mapping (`-   path: …` is 3): ruamel writes one, the file may not."""
+    for line in text.splitlines():
+        item = _ITEM_LINE.match(line)
+        if item and re.match(r"[^\s#-][^:#]*:(\s|$)", line[item.end() :]):
+            return len(item["gap"])
+    return 1
 
 
 def _line_value(line: str) -> object:
@@ -243,8 +315,18 @@ def _merge(doc: CommentedMap, data: Mapping, parent: tuple | None = None) -> Non
 
 def _is_block(node: object) -> bool:
     return (
-        isinstance(node, CommentedMap | CommentedSeq) and len(node) > 0 and not node.fa.flow_style()
+        isinstance(node, CommentedMap | CommentedSeq)
+        and len(node) > 0
+        and not node.fa.flow_style()
+        # An entry of only `<<: *a` has no key of its own to hold a comment.
+        and (not isinstance(node, CommentedMap) or bool(_own_keys(node)))
     )
+
+
+def _own_keys(node: CommentedMap) -> list:
+    """The keys `node` was written with, in order; `<<:` merges add the rest."""
+    own = getattr(node, "_ok", None)
+    return [k for k in node if own is None or k in own]
 
 
 def _tail(container: CommentedMap | CommentedSeq, key: object) -> tuple:
@@ -257,7 +339,7 @@ def _tail(container: CommentedMap | CommentedSeq, key: object) -> tuple:
     while _is_block(node):
         blocks.append(node)
         container = node
-        key = next(reversed(node)) if isinstance(node, CommentedMap) else len(node) - 1
+        key = _own_keys(node)[-1] if isinstance(node, CommentedMap) else len(node) - 1
         node = container[key]
     return container, key, 2 if isinstance(container, CommentedMap) else 0, blocks
 
@@ -460,6 +542,8 @@ def _same(current: object, value: object) -> bool:
 
 def _plain(value: object) -> object:
     """`value` as plain `dict`/`list`/scalars, with no ruamel node types."""
+    if isinstance(value, _Null):
+        return None
     if isinstance(value, Mapping):
         return {k: _plain(v) for k, v in value.items()}
     if isinstance(value, list | tuple):

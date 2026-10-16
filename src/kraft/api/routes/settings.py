@@ -647,8 +647,22 @@ async def put_intake(body: IntakeBody, request: Request):
         intake = config_mod.Intake.model_validate(data)
     except ValidationError as exc:
         raise HTTPException(422, config_mod.first_error(exc, config_mod.Intake.FILE)) from exc
+    # The checks the Settings draft runs, so a schedule the tick would skip
+    # every minute is refused here instead of saved. Imported here: the
+    # drafts import this module.
+    from kraft.drafts import intake as intake_draft
+
+    if problems := intake_draft.schedule_problems(st, data):
+        raise HTTPException(
+            422,
+            "; ".join(f"schedules[{p['schedule']}].{p['field']}: {p['message']}" for p in problems),
+        )
     _refuse_new_scope_problems(st, "intake.yaml", data)
-    intake.save(path)
+    saved = intake.model_dump()
+    # A schedule keeps only the keys it set: a file's `description` left out
+    # reads back as the default, and is not spelled out by this save.
+    saved["schedules"] = [s.model_dump(exclude_unset=True) for s in intake.schedules]
+    config_mod.write_preserving(path, saved)
     st.intake = data = intake.model_dump()
     st.invalid_intake = None
     st.intake_off = False
