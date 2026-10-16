@@ -46,8 +46,8 @@ PEEK_WAIT_S = 0.15
 PEEK_MIN_HEIGHT = 30
 #: How much of a gate's document the peek shows: its opening.
 PEEK_DOC_LINES = 40
-#: The Board with no item in scope. `n` files one once New item exists.
-EMPTY = "Nothing filed yet. /item create files one."
+#: The Board with no item in scope (spec §7.1).
+EMPTY = "Nothing filed yet. n files one."
 
 
 def cell(text: str, width: int, style: str = "") -> Content:

@@ -121,7 +121,7 @@ def test_amber_marks_only_what_needs_you(row, bar):
 @pytest.mark.parametrize(
     ("rows", "keys", "lines"),
     [
-        ([], [], ["Nothing filed yet. /item create files one."]),
+        ([], [], ["Nothing filed yet. n files one."]),
         (
             [RUNNING],
             [],

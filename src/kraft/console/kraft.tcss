@@ -185,11 +185,11 @@ OutputPanel {
     color: $kraft-muted;
 }
 
-Confirm, Note, Menu, Connect {
+Confirm, Note, Menu, Connect, NewItem {
     align: center middle;
 }
 
-#confirm, #note, #menu, #connect {
+#confirm, #note, #menu, #connect, #new-item {
     width: 72;
     max-width: 100%;
     height: auto;
@@ -309,5 +309,36 @@ Confirm, Note, Menu, Connect {
 }
 
 #connect Button {
+    margin-right: 2;
+}
+
+/* New item: a line a field, the description three. */
+.new-field {
+    height: 1;
+}
+
+#new-description-row {
+    height: 3;
+}
+
+.new-field > Static {
+    width: 12;
+    color: $kraft-muted;
+}
+
+.new-field > Input, .new-field > TextArea {
+    width: 1fr;
+}
+
+#new-said {
+    margin-top: 1;
+}
+
+#new-buttons {
+    height: auto;
+    margin-top: 1;
+}
+
+#new-buttons Button {
     margin-right: 2;
 }
