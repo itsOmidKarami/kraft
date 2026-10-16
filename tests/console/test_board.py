@@ -120,9 +120,9 @@ async def _settled(console, app, pilot) -> None:
             [
                 "NEEDS YOU 2",
                 "▌a91c03fe  Board critique fixe…  approve spec                              12m",
-                "▌m03d77b1  item m03d77b1         failed at verificat…                       1h",
+                "▌m03d77b1  item m03d77b1         failed at verification                     1h",
                 "RUNNING 1",
-                "▌k7f2e9a0  Docs per major        implement             docs                 4m",
+                "▌k7f2e9a0  Docs per major        implement                   docs           4m",
                 "NOT STARTED 1",
                 "▌n0n0n0n0  item n0n0n0n0         created paused                            30m",
                 "DONE 1 ›",
@@ -133,13 +133,13 @@ async def _settled(console, app, pilot) -> None:
             None,
             [
                 "NEEDS YOU 2",
-                "▌a91c03fe  Board critique fixe…  approve spec          r                   12m",
-                "▌m03d77b1  item m03d77b1         failed at verificat…  r                    1h",
+                "▌a91c03fe  Board critique fi…  approve spec            r                   12m",
+                "▌m03d77b1  item m03d77b1       failed at verification  r                    1h",
                 "RUNNING 2",
-                "▌e1e1e1e1  item e1e1e1e1         implement             other                2m",
-                "▌k7f2e9a0  Docs per major        implement             r · docs             4m",
+                "▌e1e1e1e1  item e1e1e1e1       implement               other                2m",
+                "▌k7f2e9a0  Docs per major      implement               r · docs             4m",
                 "NOT STARTED 1",
-                "▌n0n0n0n0  item n0n0n0n0         created paused        r                   30m",
+                "▌n0n0n0n0  item n0n0n0n0       created paused          r                   30m",
                 "DONE 1 ›",
             ],
         ),
@@ -148,12 +148,12 @@ async def _settled(console, app, pilot) -> None:
             "/r",
             [
                 "NEEDS YOU 2",
-                "▌a91c03fe  Board critique fixes [/]     approve spec",
-                "▌m03d77b1  item m03d77b1                failed at verification",
+                "▌a91c03fe  Board critique fixes [/]  approve spec",
+                "▌m03d77b1  item m03d77b1             failed at verification",
                 "RUNNING 1",
-                "▌k7f2e9a0  Docs per major               implement",
+                "▌k7f2e9a0  Docs per major            implement",
                 "NOT STARTED 1",
-                "▌n0n0n0n0  item n0n0n0n0                created paused",
+                "▌n0n0n0n0  item n0n0n0n0             created paused",
                 "DONE 1 ›",
             ],
         ),
@@ -337,7 +337,7 @@ def test_the_tail_is_amber_only_where_it_needs_you(board):
 
     assert style_of(GATE, "approve spec") == "$warning"
     assert style_of(RUNNING, "implement") == "$kraft-muted"
-    assert style_of(FAILED, "failed at verificati…") == "$error"
+    assert style_of(FAILED, "failed at verification") == "$error"
 
     async def scenario(app, pilot):
         await _settled(board([RUNNING]), app, pilot)
@@ -358,3 +358,26 @@ def test_enter_is_offered_only_on_done_s_heading(board):
         return on_item, app.view.check_action("open", ())
 
     assert board(BOARD).run(scenario) == (False, True)
+
+
+def test_a_board_longer_than_the_window_keeps_the_cursor_near_a_vanished_item(board):
+    """The item under the cursor is archived by a live event: the cursor moves
+    to its neighbour, not to the top, and the view stays near."""
+
+    async def scenario(app, pilot):
+        await _settled(board(LONG), app, pilot)
+        rows = app.query_one("#rows", OptionList)
+        await pilot.press(*["j"] * 20)
+        await pilot.pause()
+        gone, at, scrolled = app.view.selected["id"], rows.highlighted, rows.scroll_y
+        app.view.rows_changed(
+            [r | {"display_status": "archived"} if r["id"] == gone else r for r in LONG],
+            [{"seq": 1}],
+        )
+        await pilot.pause()
+        return gone, app.view.selected["id"], rows.highlighted - at, rows.scroll_y - scrolled
+
+    gone, now, moved, scroll = board(LONG).run(scenario)
+    assert now != gone
+    assert abs(moved) <= 1
+    assert abs(scroll) <= 2

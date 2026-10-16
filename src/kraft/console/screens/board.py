@@ -20,6 +20,11 @@ from kraft.console.screens import View
 #: A row's columns besides the title and the tail: the repo-and-chain column
 #: and the age. The bar, the id and the gaps take 1 + 8 + 2 + 2 more.
 META_WIDTH = 14
+#: The same column in one repo, where it holds only a chain's name.
+META_ONE_REPO = 8
+#: Of what is left after the fixed columns, the tail's share: a tail such as
+#: "failed at verification" is read whole before a title is.
+TAIL_SHARE = 55
 AGE_WIDTH = 8
 #: Each group's bar colour: amber is for what needs you, and nothing else.
 BAR = {
@@ -38,6 +43,10 @@ def cell(text: str, width: int, style: str = "") -> Content:
     return Content.styled(" ".join(text.split()), style).truncate(width, ellipsis=True, pad=True)
 
 
+def _is_item(option_id: str | None) -> bool:
+    return bool(option_id) and not option_id.startswith("group:")
+
+
 def bar_of(row: dict) -> str:
     """The row's state colour (spec §5.2): failed is bad, cancelled faint,
     the rest their group's."""
@@ -54,8 +63,9 @@ def row_line(row: dict, width: int, now: float, *, everywhere: bool, narrow: boo
     the repo (all repos shown) and a chain that is not the default, and the
     age. A narrow window drops the last two."""
     colour = bar_of(row)
-    rest = width - (1 + 8 + 2 + 2) - (0 if narrow else 2 + META_WIDTH + 1 + AGE_WIDTH)
-    title_width = max(rest // 2, 1)
+    meta_width = META_WIDTH if everywhere else META_ONE_REPO
+    rest = width - (1 + 8 + 2 + 2) - (0 if narrow else 2 + meta_width + 1 + AGE_WIDTH)
+    title_width = max(rest * (100 - TAIL_SHARE) // 100, 1)
     chain = words.chain_of(row)
     repo = os.path.basename(row.get("repo", "").rstrip("/")) if everywhere else ""
     meta = " · ".join(part for part in (repo, "" if chain == "default" else chain) if part)
@@ -70,7 +80,7 @@ def row_line(row: dict, width: int, now: float, *, everywhere: bool, narrow: boo
         cell(words.reason_tail(row, now), max(rest - title_width, 1), tail_style),
     ]
     if not narrow:
-        parts += ["  ", cell(meta, META_WIDTH, "$kraft-faint"), " "]
+        parts += ["  ", cell(meta, meta_width, "$kraft-faint"), " "]
         parts.append((age.rjust(AGE_WIDTH), "$kraft-faint"))
     return Content.assemble(*parts)
 
@@ -124,6 +134,7 @@ class Board(View):
         """Lay the rows out again. The cursor stays on its item (spec §5.4),
         or on `keep`; else it starts on the first item."""
         rows = self.query_one("#rows", OptionList)
+        old = rows.highlighted
         if keep is None and rows.highlighted_option is not None:
             keep = rows.highlighted_option.id
         shown = [
@@ -138,7 +149,18 @@ class Board(View):
         rows.set_options(options)
         ids = [option.id for option in options]
         first = next((k for k, i in enumerate(ids) if i and not i.startswith("group:")), 0)
-        rows.highlighted = ids.index(keep) if keep and keep in ids else first if options else None
+        if keep and keep in ids:
+            rows.highlighted = ids.index(keep)
+        elif old is not None and any(_is_item(i) for i in ids):
+            # Its item went: the nearest one at or after where it stood, else before.
+            after = next((k for k in range(old, len(ids)) if _is_item(ids[k])), None)
+            rows.highlighted = (
+                after
+                if after is not None
+                else max(k for k in range(min(old, len(ids))) if _is_item(ids[k]))
+            )
+        else:
+            rows.highlighted = first if options else None
         # set_options resets the scroll: put the reader back where they were,
         # unless that would hide the cursor.
         rows.scroll_to(y=scrolled, animate=False, immediate=True)

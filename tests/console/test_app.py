@@ -174,7 +174,7 @@ def test_enter_on_no_server_starts_one_on_its_own(console, kraft_is, monkeypatch
 
 @pytest.mark.parametrize(
     ("opened_in", "count"),
-    [(None, "Board 3"), ("/r", "Board 2")],
+    [(None, "Board 6"), ("/r", "Board 4")],
     ids=["all-repos", "in-a-repo"],
 )
 def test_the_board_tab_counts_what_needs_you_where_it_was_opened(
@@ -182,10 +182,20 @@ def test_the_board_tab_counts_what_needs_you_where_it_was_opened(
 ):
     """The count a person reads before opening the board: items that need
     them, in the repo the console was opened in (spec §5.4)."""
+    # Needs you also holds a failure and an item paused mid-chain, as on the web.
     rows = [
-        {"id": f"w{n}", "display_status": status, "repo": repo}
-        for n, (status, repo) in enumerate(
-            [("needs_you", "/r"), ("needs_you", "/r"), ("needs_you", "/other"), ("running", "/r")]
+        {"id": f"w{n}", "display_status": status, "repo": repo, "current_node_id": node}
+        for n, (status, repo, node) in enumerate(
+            [
+                ("needs_you", "/r", "plan"),
+                ("needs_you", "/r", "plan"),
+                ("needs_you", "/other", "plan"),
+                ("running", "/r", "plan"),
+                ("failed", "/r", "plan"),
+                ("paused", "/r", "plan"),
+                ("paused", "/other", None),
+                ("failed", "/other", "plan"),
+            ]
         )
     ]
 

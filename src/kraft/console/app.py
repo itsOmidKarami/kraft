@@ -25,7 +25,7 @@ from textual.theme import Theme
 from textual.widgets import Button, ContentSwitcher, Footer, HelpPanel, Input, Static
 
 from kraft import answers, client, config, update
-from kraft.console import runner, theme
+from kraft.console import runner, theme, words
 from kraft.console.dialogs import Confirm
 from kraft.console.live import Link, Live
 from kraft.console.output import OutputPanel
@@ -435,7 +435,7 @@ class KraftConsole(App):
         """Each top view's tab with its count (spec §5.4): how many need you
         in scope, the server's health word, how many add-on updates wait."""
         needs_you = sum(
-            row.get("display_status") == "needs_you" and self.repo in (None, row.get("repo"))
+            words.group_of(row) == "needs" and self.repo in (None, row.get("repo"))
             for row in self.rows
         )
         held = sum(
