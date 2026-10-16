@@ -183,13 +183,10 @@ def test_the_board_tab_counts_what_needs_you_where_it_was_opened(
     """The count a person reads before opening the board: items that need
     them, in the repo the console was opened in (spec §5.4)."""
     rows = [
-        {"display_status": status, "repo": repo}
-        for status, repo in [
-            ("needs_you", "/r"),
-            ("needs_you", "/r"),
-            ("needs_you", "/other"),
-            ("running", "/r"),
-        ]
+        {"id": f"w{n}", "display_status": status, "repo": repo}
+        for n, (status, repo) in enumerate(
+            [("needs_you", "/r"), ("needs_you", "/r"), ("needs_you", "/other"), ("running", "/r")]
+        )
     ]
 
     async def board_rows(**kwargs):
@@ -499,9 +496,11 @@ def test_live_updates_reach_the_frame_under_a_dialog(console, monkeypatch, dialo
     """A dialog is a pushed screen. The board, health and the no-server state
     belong to the frame underneath it, and reach it all the same."""
     seen = set()
-    monkeypatch.setattr(
-        View, "rows_changed", lambda self, rows, events: seen.add(("rows", self.id))
-    )
+    # Each view that has its own hook, and the base for the rest.
+    for owner in {View, *VIEWS.values()}:
+        monkeypatch.setattr(
+            owner, "rows_changed", lambda self, rows, events: seen.add(("rows", self.id))
+        )
     monkeypatch.setattr(View, "health_changed", lambda self, health: seen.add(("health", self.id)))
 
     async def scenario(app, pilot):
