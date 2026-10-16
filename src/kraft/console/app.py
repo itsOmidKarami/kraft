@@ -311,9 +311,7 @@ class KraftConsole(App):
             if no_server and not was_down and start is not None:
                 start.focus()
         elif was_down and frame.focused in (None, start):
-            # On the frame itself, at once: `view.focus()` is deferred, and the
-            # frame may not be the active screen (the output panel is open or
-            # closing), whose remembered focus must not stay the hidden button.
+            # The frame's own focus, which the output panel may be covering.
             frame.set_focus(self.view)
         if link is Link.LIVE and not self._scoped:
             self.run_worker(self._resolve_scope, name="scope", group="scope", exclusive=True)

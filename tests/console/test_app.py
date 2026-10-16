@@ -123,12 +123,27 @@ def test_enter_on_no_server_starts_one_on_its_own(console, kraft_is, monkeypatch
     async def gone(**kwargs):
         raise client.transport._unreachable()
 
-    monkeypatch.setattr(client, "board_rows", gone)
+    # The server is up once the scenario says so: the live loop's next read,
+    # due 0.5s after the first, must find it there, or it says DOWN again.
+    up, reads = [], []
+
+    async def board_rows(**kwargs):
+        reads.append(bool(up))
+        if not up:
+            raise client.transport._unreachable()
+        return [], 0
+
+    monkeypatch.setattr(client, "board_rows", board_rows)
     monkeypatch.setattr(client, "health", gone)
     retried = []
+    wake = live.Live.retry
     monkeypatch.setattr(live.Live, "retry", lambda self: retried.append(True))
 
     async def scenario(app, pilot):
+        def server_back() -> None:
+            up.append(True)
+            app._live_link(Link.LIVE, None)
+
         await pilot.pause()
         focused = app.focused.id
         await pilot.press("enter")
@@ -136,10 +151,13 @@ def test_enter_on_no_server_starts_one_on_its_own(console, kraft_is, monkeypatch
         # The server answers before the panel closes, or as it does: either way
         # the frame's remembered focus must not be the button that is gone.
         if live_first:
-            app._live_link(Link.LIVE, None)
+            server_back()
         await pilot.press("escape")
         if not live_first:
-            app._live_link(Link.LIVE, None)
+            server_back()
+        # The loop reads again now, not whenever its backoff ends.
+        wake(app.live)
+        await console.until(pilot, lambda: True in reads)
         await pilot.pause()
         return focused, console.output(app), retried, app.focused is app.view
 
