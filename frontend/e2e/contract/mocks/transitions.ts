@@ -1,5 +1,5 @@
 import { FAILURE_STOP_KINDS, LIVE_SESSION_STATUSES, WORK_ITEM_TRAITS, type DisplayStatus, type EventType, type SessionStatus, type StopKind, type WorkItemStatus } from "../../../src/types/vocab.generated";
-import { documentsFor, hex, logLines, type ItemBundle, type Scenario } from "./fixtures";
+import { documentsFor, hex, logLines, serverKeys, type ItemBundle, type Scenario } from "./fixtures";
 import { ngDryRun } from "./ngBoard";
 import { RESUME_PROMPT } from "./poller";
 import { buildNeverStarted } from "./ngItems";
@@ -111,7 +111,7 @@ const dollars = (v: number) => Math.round(v * 10_000) / 10_000;
 /** What a new item is made from: a sample item before it ran, with nothing on it that says it did. Built on its
  *  own, not taken from the scenario, so no edit to a sample item reaches it and the empty scenario has one too. */
 function template(): ItemBundle {
-  return buildNeverStarted(9999, "default");
+  return serverKeys(buildNeverStarted(9999, "default"));
 }
 
 export interface TransitionOptions {

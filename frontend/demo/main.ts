@@ -3,6 +3,7 @@ import { mockServer } from "../e2e/contract/mocks/mockApi";
 import { NG_NOW } from "../e2e/contract/mocks/ngItems";
 import { withoutBase } from "../src/ng/base";
 import { showBadge } from "./badge";
+import { demoOptions } from "./scenario";
 import { broadcast, patchFetch, patchWebSocket, restoreAddress, serveApiLinks, shiftClock, watch, whileShown } from "./shim";
 import { lookIn, Tries } from "./tries";
 
@@ -22,7 +23,7 @@ const onEvent: typeof broadcast = (e) => {
   broadcast(e);
   tries.moved();
 };
-const serve = mockServer(buildScenario("default"), { ngBoard: true, areas: "default", harnesses: "floor", version: __KRAFT_DEMO_VERSION__, onEvent, motion: true });
+const serve = mockServer(buildScenario("default"), { ...demoOptions, version: __KRAFT_DEMO_VERSION__, onEvent, motion: true });
 
 shiftClock(Date.parse(NG_NOW));
 patchFetch(watch(serve, tries.see));

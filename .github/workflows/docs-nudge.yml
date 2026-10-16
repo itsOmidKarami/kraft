@@ -68,3 +68,53 @@ jobs:
           its heading. If none of this applies, ignore this.
           EOF
           )"
+
+  # The same reminder for the dashboard demo and the UI contract: both answer
+  # from frontend/e2e/contract/mocks/, which nothing regenerates. A response
+  # the server changes reaches them only when someone updates the mock;
+  # tests/api/api_shapes.json and frontend/demo/apiShapes.test.ts catch a
+  # key or a route, not a value that changed meaning.
+  demo-nudge:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: check whether the API moved without the mock
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+          SOURCE=$(echo "$CHANGED" | grep -E '^src/kraft/(api|vocab)/' || true)
+          MOCKS=$(echo "$CHANGED" | grep -E '^(frontend/e2e/contract/mocks/|tests/api/api_shapes\.json$)' || true)
+
+          if [ -z "$SOURCE" ] || [ -n "$MOCKS" ]; then
+            echo "nothing to nudge about"
+            exit 0
+          fi
+
+          MARKER="<!-- demo-nudge -->"
+          ALREADY=$(gh pr view "$PR" --json comments -q ".comments[].body" | grep -qF "$MARKER" && echo yes || echo no)
+          if [ "$ALREADY" = "yes" ]; then
+            echo "already nudged this PR once; not repeating on every push"
+            exit 0
+          fi
+
+          gh pr comment "$PR" --body "$(cat <<EOF
+          $MARKER
+          This touches:
+          \`\`\`
+          $SOURCE
+          \`\`\`
+          but not the mocked API in \`frontend/e2e/contract/mocks/\`, which the
+          dashboard demo and the UI contract answer from. If a response changed,
+          run \`just shapes\` and update the mock to match in the same PR -- see
+          CONTRIBUTING.md's [dashboard demo](https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md#versions-of-the-docs)
+          paragraph. If none of this applies, ignore this.
+          EOF
+          )"

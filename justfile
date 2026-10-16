@@ -346,6 +346,12 @@ schemas:
 vocab:
     uv run python dev/gen_vocab.py
 
+# Rewrite tests/api/api_shapes.json, the keys each GET route the web UI reads
+# answers with, which frontend/demo/apiShapes.test.ts holds the mocked API to
+[doc("Rewrite the API response-shape table from the real server")]
+shapes:
+    WRITE_API_SHAPES=1 just test tests/api/test_api_shapes.py --no-testmon
+
 # Regenerate src/kraft/templates/lucide_icons.txt from the installed lucide-react
 # (the icon names a template's `icon:` is linted against). Run after every bump.
 [doc("Regenerate the lucide icon list after a lucide-react bump")]

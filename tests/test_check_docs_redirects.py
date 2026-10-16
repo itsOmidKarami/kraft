@@ -317,6 +317,19 @@ def test_check_reads_the_map_and_the_links_of_one_repository(cr, content, tmp_pa
     assert "Kraft links to /guides/vscode#nope" in link_problem
 
 
+def test_a_link_to_the_demo_is_no_page_to_resolve(cr, tmp_path):
+    # The README links the demo, which dev/build_docs_site.sh builds beside the
+    # pages; a page named `demonstration` is still a page.
+    write(
+        tmp_path,
+        "README.md",
+        "https://kraft-sdlc.dev/next/demo/ https://kraft-sdlc.dev/demonstration\n",
+    )
+    git(tmp_path, "init", "-q")
+    commit_all(tmp_path)
+    assert cr.kraft_links(tmp_path) == ["/demonstration"]
+
+
 def test_finding_no_links_at_all_is_a_failure(cr, content, tmp_path):
     # Outside a repository the grep finds nothing, which must not read as
     # "Kraft links to nothing broken".

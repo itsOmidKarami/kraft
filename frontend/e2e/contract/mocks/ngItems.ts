@@ -11,7 +11,7 @@ import { RESUME_PROMPT } from "./poller";
  */
 export const NG_SCENARIOS = [
   "running", "needs-you", "needs-gate", "escalated", "capped", "done", "cancelled", "archived",
-  "failed", "waiting", "conflict", "mr-closed", "waiting-ci", "paused",
+  "failed", "waiting", "conflict", "mr-closed", "waiting-ci", "paused", "queued", "blocked",
 ] as const;
 export type NgScenario = (typeof NG_SCENARIOS)[number];
 /** T0 + 130 minutes, as a literal: this module loads before fixtures.ts finishes (they import each other). */
@@ -64,7 +64,7 @@ const FROZEN = JSON.stringify({
 /** Where each scenario stands: the current node (index), and the step it is on there. */
 const AT: Record<NgScenario, number> = {
   running: 7, "needs-you": 7, "needs-gate": 13, escalated: 7, capped: 7, done: 15, cancelled: 7, archived: 15,
-  failed: 10, waiting: 7, conflict: 10, "mr-closed": 11, "waiting-ci": 7, paused: 7,
+  failed: 10, waiting: 7, conflict: 10, "mr-closed": 11, "waiting-ci": 7, paused: 7, queued: 7, blocked: 7,
 };
 
 export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): ItemBundle {
@@ -166,8 +166,9 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
   };
 
   switch (sc) {
-    case "running": case "escalated": case "paused": case "cancelled": case "waiting-ci": {
-      verificationAt(sc === "paused" ? "paused" : sc === "escalated" ? "done" : "running");
+    case "running": case "escalated": case "paused": case "cancelled": case "waiting-ci": case "queued": case "blocked": {
+      const held = sc === "paused" || sc === "queued" || sc === "blocked";
+      verificationAt(held ? "paused" : sc === "escalated" ? "done" : "running");
       if (sc === "escalated") {
         // Stuck on verification, an escalation agent's turn running on it: what `display_status` calls escalated.
         ev("work_item_needs_human", { node_id: "verification", kind: "stuck", reason: "The fix loop made no progress in 2 rounds." }, 0.5);
@@ -182,8 +183,22 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
         item.escalation_threads = [{ thread: 1, session_id: e.id, turns: 1, started_at: e.created_at, ended_at: null, status: "running" }];
         item.display_status = "escalated";
       }
+      if (held) ev("pause_requested", { sessions: [] }, 1);
+      if (sc === "queued") {
+        // Resumed with every slot busy: `store.queue_work_item` holds the start until one frees.
+        ev("work_item_queued", { verb: "resume", from: "paused" }, 20);
+        item.status = "queued"; item.display_status = "queued";
+        item.queued = { verb: "resume", since: t(m), storage: null };
+      }
+      if (sc === "blocked") {
+        // Resumed behind an unfinished item (`store.block_work_item`): it starts when that one completes.
+        // shortcut: the dependency is the board's never-started row by its seed (ngBoard.ts ROWS[9]); move this with that row.
+        const on = { id: hex(1309), title: "Spike: stream logs over SSE", status: "paused", met: false };
+        ev("work_item_blocked", { verb: "resume", from: "paused", on: [on.id] }, 20);
+        item.status = "blocked"; item.display_status = "blocked";
+        item.dependencies = [on];
+      }
       if (sc === "paused") {
-        ev("pause_requested", { sessions: [] }, 1);
         item.status = "paused"; item.display_status = "paused";
         item.pending_steer_context = long ? "Look at the invalidation path first: the race only shows when reindex and search overlap." : null;
       }

@@ -180,15 +180,18 @@ function libraryState() {
 /** The `default` view under another key: `stale` is it with a publish that 409s. */
 const chainView = (key: string) => {
   // A new chain before its first node: what `new_chain` leaves (no node, nothing resolves yet).
-  if (key === "empty") return { area: "chains", key, draft: true, files: { "chains/empty.yaml": "id: empty\ndescription: ''\nnodes: []\n" }, base: { "chains/empty.yaml": null }, updated_at: null, result: { ...clone(DRAFTS.views.broken.result), model: { "chains/empty.yaml": { id: "empty", description: "", nodes: [] } }, resolved: null, sources: {}, problems: [], changes: [], warnings: [] } };
+  if (key === "empty") return served({ area: "chains", key, draft: true, files: { "chains/empty.yaml": "id: empty\ndescription: ''\nnodes: []\n" }, base: { "chains/empty.yaml": null }, published: { "chains/empty.yaml": null }, updated_at: null, result: { ...clone(DRAFTS.views.broken.result), model: { "chains/empty.yaml": { id: "empty", description: "", nodes: [] } }, resolved: null, sources: {}, problems: [], changes: [], warnings: [] } });
   const v = DRAFTS.views[key] ?? DRAFTS.views.default;
-  if (DRAFTS.views[key]) return clone(v);
+  if (DRAFTS.views[key]) return served(clone(v));
   const s = JSON.stringify(v).replaceAll("chains/default.yaml", `chains/${key}.yaml`);
   const out = JSON.parse(s);
   out.key = key;
   out.result.model[`chains/${key}.yaml`].id = key;
-  return out;
+  return served(out);
 };
+/** The keys `drafts._view` sends that the recorded views predate: no add-on, the published file (the shipped chain),
+ *  and the closed sets the editors pick from (`catalogue.choices`). */
+const served = (v: any) => ({ addon: null, addon_library: null, published: { [`chains/${v.key}.yaml`]: DRAFTS.published.text }, ...v, result: { choices: DRAFTS.choices, ...v.result } });
 /** Block YAML of a mapping, for the fragment route's mock answer only (the server writes the real one). */
 const yamlOf = (v: unknown, ind = ""): string => {
   if (Array.isArray(v)) return v.map((x) => (x && typeof x === "object" ? `${ind}- ${yamlOf(x, `${ind}  `).trimStart()}` : `${ind}- ${x}\n`)).join("");
@@ -257,12 +260,12 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
   const threads: Record<string, any[]> = {};
   // W5b's gate-pane thread (the bundle's) comes first, in the full thread shape, then W8's review set.
   const threadsOf = (wid: string) =>
-    (threads[wid] ??= [
+    (threads[wid] ??= ([
       ...(S.bundles[wid]?.threads ?? []).map((t: any) => ({ anchor_sha: "9c8d7e6", resolved_at: null, draft: false, ...t, comments: t.comments.map((c: any) => ({ thread_id: t.id, review_id: "r1", attempt: null, suggestion: null, claim: null, draft: false, ...c })) })),
       ...(S.bundles[wid]?.item.pending_gate === "final_review" && Object.values(S.ng).includes(wid)
         ? ngThreads(wid, compareFor(wid, S.variant).files.map((f: { path: string }) => f.path).sort(treeOrder))
         : []),
-    ]);
+    ] as any[]).map((t) => ({ quote: null, start_side: null, ...t })));
   // The review tree's order: by folder, the top level last, so the seeded threads land on the file shown first.
   const dirOf = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/") + 1) : "\uffff");
   const treeOrder = (a: string, b: string) => dirOf(a).localeCompare(dirOf(b)) || a.localeCompare(b);
@@ -374,7 +377,10 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/compare$/)) && unstamped(m[1])) return json({ detail: "this work item has no base commit to compare against" }, 409);
     if ((m = p.match(/^\/work-items\/([^/]+)\/(diff|compare)$/)) && gone(m[1])) return json({ detail: "this work item's worktree was removed from disk" }, 404);
-    if ((m = p.match(/^\/work-items\/([^/]+)\/diff$/))) return json(diffFor(m[1], S.variant));
+    if ((m = p.match(/^\/work-items\/([^/]+)\/diff$/))) {
+      const ws = ["1", "true"].includes(q.get("ignore_whitespace") ?? "");
+      return json({ ignore_whitespace: ws, diff_max_bytes: 1_000_000, worktree_path: S.bundles[m[1]]?.item.worktree_path ?? `/Users/dev/.kraft/run/worktrees/${m[1]}`, ...diffFor(m[1], S.variant) });
+    }
     if ((m = p.match(/^\/work-items\/([^/]+)\/compare$/))) {
       return json(compareFor(m[1], S.variant, ["1", "true"].includes(q.get("ignore_whitespace") ?? ""), viewedMarks));
     }
@@ -389,7 +395,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       if (method === "GET") return json(list);
       const b = req.json() ?? {};
       const id = `th-new${seq++}`;
-      const t = { id, work_item_id: m[1], gate: S.bundles[m[1]]?.item.pending_gate ?? null, node_id: b.node_id ?? null, file_path: b.file_path ?? null, side: b.side ?? null, start_line: b.start_line ?? null, end_line: b.end_line ?? null, anchor_sha: b.anchor_sha ?? "9c8d7e6", label: b.label ?? null, state: "open", resolved_at: null, created_at: "2026-09-13T10:09:00.000Z", draft: true,
+      const t = { id, work_item_id: m[1], gate: S.bundles[m[1]]?.item.pending_gate ?? null, node_id: b.node_id ?? null, file_path: b.file_path ?? null, side: b.side ?? null, start_side: b.start_side ?? null, quote: b.quote ?? null, start_line: b.start_line ?? null, end_line: b.end_line ?? null, anchor_sha: b.anchor_sha ?? "9c8d7e6", label: b.label ?? null, state: "open", resolved_at: null, created_at: "2026-09-13T10:09:00.000Z", draft: true,
         comments: [{ id: `c-new${seq++}`, thread_id: id, review_id: null, author: "you", attempt: null, body: b.body, suggestion: b.suggestion ?? null, claim: null, created_at: "2026-09-13T10:09:00.000Z", draft: true }] };
       list.push(t);
       return json(t, 201);
@@ -449,6 +455,18 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       const b = S.bundles[m[1]];
       return b ? json(artifactFor(b.item, S.variant)) : json({ detail: "no artifact" }, 404);
     }
+    // A document a task produced, by its kind (`produces`), and one attached at intake: the gate artifact's text.
+    if ((m = p.match(/^\/work-items\/([^/]+)\/(artifacts|attachments)\/([^/]+)$/))) {
+      const b = S.bundles[m[1]];
+      if (!b) return json({ detail: "unknown work item" }, 404);
+      const [, wid, where, kind] = m;
+      const a = artifactFor(b.item, S.variant);
+      const title = `${kind[0].toUpperCase()}${kind.slice(1)}: ${b.item.title}`;
+      if (where === "artifacts") return json({ work_item_id: wid, kind, path: `items/${wid}/docs/${kind}.md`, absolute_path: `/Users/dev/.kraft/run/items/${wid}/docs/${kind}.md`, title, content: a.content, truncated: false });
+      const att = (b.item.attachments ?? []).find((x: { kind: string }) => x.kind === kind);
+      if (!att) return json({ detail: `this work item has no ${kind} attached` }, 404);
+      return json({ work_item_id: wid, kind, path: att.path, title, content: a.content, truncated: false });
+    }
     if ((m = p.match(/^\/work-items\/([^/]+)\/cancel-preview$/))) {
       const b = S.bundles[m[1]];
       if (!b) return json({ detail: "unknown work item" }, 404);
@@ -479,7 +497,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
         const problems = draftProblems(marked);
         const live = marked.filter((op, i) => !op.passed && !problems.some((x) => x.op === i));
         const cap = b.item.budget_cap ?? { spent_usd: 1.2, cap_usd: 10 };
-        return { ops: marked, problems, checks: { budget: { spent_usd: cap.spent_usd, cap_usd: cap.cap_usd } }, nodes: draftChain(nodes, live), base_seq: ops.length ? 42 : null, updated_at: ops.length ? "2026-10-01T09:12:00Z" : null };
+        return { ops: marked, problems, checks: { budget: { spent_usd: cap.spent_usd, cap_usd: cap.cap_usd }, added: [] }, nodes: draftChain(nodes, live).map((n: any) => ({ covered_by: null, icon: null, ...n })), base_seq: ops.length ? 42 : null, updated_at: ops.length ? "2026-10-01T09:12:00Z" : null };
       };
       if (method === "DELETE") { const had = stored().length > 0; itemDrafts.set(m[1], []); return had ? { status: 204 } : json({ detail: "this work item has no draft" }, 404); }
       if (method === "PUT") { itemDrafts.set(m[1], req.json()?.ops ?? []); return json(answer(stored())); }
@@ -535,7 +553,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
         const body = lines.slice(-5).map((l) => `data: ${JSON.stringify(l)}\n\n`).join("") + "event: end\ndata: {}\n\n";
         return { status: 200, contentType: "text/event-stream", body };
       }
-      if (q.get("format") === "jsonl") return json({ session_id: sid, status, lines });
+      if (q.get("format") === "jsonl") return json({ session_id: sid, status, lines, next_line: lines.length });
       return { status: 200, contentType: "text/plain", body: lines.map((l) => l.text).join("\n") };
     }
 
@@ -559,15 +577,17 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
 
     /* settings */
     const st = S.settings;
+    const policy = () => (opts.areas ? { ...st.policy, max_concurrent: 5, active_count: areas.activeCount() } : st.policy);
     if (p === "/repos") {
-      if (method === "GET") return json(opts.ngBoard && opts.ngBoard !== "empty" ? { repos: NG_REPOS, workspaces: NG_WORKSPACES } : { repos: st.repos });
+      // `suggested`: the checkout the server runs in, when it is not connected; none here.
+      if (method === "GET") return json(opts.ngBoard && opts.ngBoard !== "empty" ? { repos: NG_REPOS, workspaces: NG_WORKSPACES, suggested: null } : { repos: st.repos });
       if (method === "DELETE") return { status: 204 };
       return json({ ...(st.repos[0] ?? {}), ...(req.json() ?? {}) });
     }
     if (p === "/repos/probe") return json({ path: req.json()?.path ?? "/tmp/x", name: "x", branch: "main", submodules: ["vendor/kraft-lite"], has_beads: true, beads_export_auto: false, beads_export_git_add: true, has_engineering: true, test_command: "uv run pytest -q", test_scopes: null, forge: "gitlab", project: "acme/x" });
     if (hs) {
       if (p === "/harnesses") return json(PROVIDER_STATUS);
-      if (p === "/policy") return json({ maxima: { allowed_tools: ["git", "shell"] }, defaults: { escalation_grants: ["git-commit"] } });
+      if (p === "/policy") return json({ ...policy(), maxima: { allowed_tools: ["git", "shell"] }, defaults: { escalation_grants: ["git-commit"] } });
       if (p === "/drafts") return json([{ area: "harnesses", key: "harnesses", files: ["harnesses.yaml", "policy.yaml"], changes: hs.view().result.changes.length, problems: hs.problems().length, updated_at: "2026-10-01T09:12:00Z" }]);
       if ((m = p.match(/^\/drafts\/harnesses\/harnesses(?:\/(undo|publish|ops|rebase|fragment))?$/))) {
         if (method === "DELETE") return { status: 204 };
@@ -660,10 +680,12 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       return json(view);
     }
     /* the agent task's choices in the Chains editor (real answers, draftViews.json) */
-    if (p === "/harnesses/profiles" && method === "GET") return json(DRAFTS.harnesses);
+    // `addon`, `providers` and `problem_details` came after the recording: none from an add-on, each provider's model.
+    if (p === "/harnesses/profiles" && method === "GET") return json({ ...DRAFTS.harnesses, agent_profiles: DRAFTS.harnesses.agent_profiles.map((a: any) => ({ addon: null, problem_details: [], providers: Object.fromEntries(Object.entries(a.model).map(([n, model]) => [n, { model, effort: null }])), ...a })) });
     if (p === "/harnesses/providers") return json(DRAFTS.providers);
     if (p === "/drafts") return json([...areas.list(), ...["default", "broken", "yaml-error", "stale"].map((key) => ({ area: "chains", key, files: [`chains/${key}.yaml`], changes: 1, problems: key === "broken" ? 1 : 0, updated_at: "2026-10-01T09:12:00Z" }))]);
-    if (p === "/templates/chains") return json(opts.ngBoard ? NG_CHAINS : st.templates);
+    // `_chain_summary`'s other keys: no add-on, no description, it resolves, no node linked to a library component.
+    if (p === "/templates/chains") return json(opts.ngBoard ? NG_CHAINS.map((c) => ({ addon: null, description: null, error: null, uses: {}, ...c })) : st.templates);
     if (p === "/templates/parse") return json({ nodes: st.templates[0]?.nodes ?? [], error: null });
     if ((m = p.match(/^\/templates\/([^/]+)\/validate$/))) return json({ id: m[1], valid: true, error: null, unresolved: [] });
     /* the steering preview (B23): one agent task's launch context, section by section */
@@ -682,7 +704,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if ((m = p.match(/^\/templates\/chains\/([^/]+)$/))) {
       // For the Chains editor, `default` is the real shipped file, the draft views' published side.
       // The shipped Settings pages keep the scenario's chain (settings-chains/default reads this route).
-      if (m[1] === "default") return json(DRAFTS.published);
+      if (m[1] === "default") return json({ addon: null, ...DRAFTS.published });
       const tpl = st.templates.find((x) => x.id === decodeURIComponent(m![1])) ?? st.templates[0];
       if (!tpl) return json({ detail: "template not found" }, 404);
       // The real route returns the file's text, which is what the Chains editor shows.
@@ -690,7 +712,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     }
     // The Library screen (where Settings > Steering redirects): the scenario's hooks as its tasks.
     // The editors' pickers read the real shipped library; the shipped Library page keeps the scenario's.
-    if (p === "/templates/library" && method === "GET") return json(DRAFTS.library);
+    if (p === "/templates/library" && method === "GET") return json({ ...DRAFTS.library, components: DRAFTS.library.components.map((c: any) => ({ addon: null, ...c })) });
     if (p === "/templates/library" && method === "GET") {
       const hooks = Object.entries(st.hooks);
       const components = hooks.map(([name, definition]) => ({
@@ -702,7 +724,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     }
     if (p === "/registry") return json({ hooks: st.hooks, invalid_templates: {} });
     if ((m = p.match(/^\/registry\/([^/]+)\/runs$/))) return json({ runs: Object.values(S.bundles).slice(0, 8).map((b, i) => ({ work_item_id: b.item.id, node_id: b.item.current_node_id ?? "verify", round: i % 3, status: ["done", "failed", "done", "capped_out"][i % 4], wall_ms: 120_000 + i * 40_000, created_at: b.item.updated_at })) });
-    if (p === "/policy") return json(opts.areas ? { ...st.policy, max_concurrent: 5, active_count: areas.activeCount() } : st.policy);
+    if (p === "/policy") return json(policy());
     // PUT merges over the file, as the real route does since B30.
     if (p === "/theme") return json(method === "PUT" ? Object.assign(st.theme, req.json(), { derived: false }) : st.theme);
     if (p === "/steering") return json(st.steering);
@@ -728,9 +750,9 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if (p === "/sessions") return json(st.sessions);
     if ((m = p.match(/^\/sessions\/[^/]+$/))) return { status: 204 };
     if (p === "/analytics") return json(S.analytics);
-    if (p === "/storage") return json(storageFor([...S.ngBoard, ...S.ngArchived]));
+    if (p === "/storage") return json(storageFor([...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id].item)));
     if (p === "/storage/preview" && method === "POST") {
-      const usage = storageFor([...S.ngBoard, ...S.ngArchived]);
+      const usage = storageFor([...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id].item));
       const picked = usage.items.filter((i) => ((req.json() ?? {}).ids ?? []).includes(i.id));
       const freed = picked.reduce((n, i) => n + i.bytes, 0);
       return json({ freed_bytes: freed, used_after_bytes: usage.used_bytes - freed, state_after: "ok",

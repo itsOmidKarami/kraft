@@ -110,6 +110,13 @@ strands an entry fails it. It keeps live motion still, as a hidden tab does
 data. `just demo-smoke` runs it (`npm run demo:smoke` without `just`), and so
 does CI's `ui contract` job.
 
+Two unit tests hold the demo's data to Kraft itself. `demo/apiShapes.test.ts`
+asks the mock, with the demo's options (`demo/scenario.ts`), every route in
+`tests/api/api_shapes.json`, the keys a real server answers with, and fails
+on a key or route the mock leaves out. `just shapes` rewrites that table
+after a response changes. `demo/sampleCoverage.test.ts` fails when no sample
+item shows a display status or stop kind.
+
 ## Layout of `src/`
 
 ```text

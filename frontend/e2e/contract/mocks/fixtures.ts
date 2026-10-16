@@ -80,6 +80,9 @@ export function repo(path: string, i: number, long = false) {
     deny_tools: i === 0 ? ["WebFetch", "Bash(rm -rf*)"] : [],
     steering: i === 0 ? ["house-style", "commit-messages"] : [],
     allow_cross_repo: i === 2,
+    // The rest of a `repos.yaml` entry, at config.RepoEntry's defaults, with a setup command so none warns.
+    setup_command: "uv sync", managed: true, ci_checks: true, automated_review: null, sandbox: null, policy: null, intent_dir: null,
+    areas: {}, env: {}, env_passthrough: [], local_files: [], library_auto_update: false,
     submodules: long && i === 0
       ? [
           { path: "vendor/kraft-lite", enabled: true, test_command: "pytest -q", chain_override: null },
@@ -609,7 +612,7 @@ export function documentsFor(item: any, variant: Variant) {
     attempt: d.kind === "sessions" ? 1 : null,
     round: d.kind !== "sessions" ? null : long && d.node === "implement" ? Math.min(2, Math.floor(implementRun++ / 5)) : 0,
     session_status: d.kind === "sessions" ? "done" : null,
-    attachment_kind: d.attached ?? null,
+    attachment_kind: d.attached ?? null, session_work_item_id: d.kind === "sessions" ? item.id : null,
     headingless: d.headingless ?? false,
     indexed_at: t(200 - i * 7),
   }));
@@ -648,10 +651,11 @@ ${"Paragraph of prose. ".repeat(60)}
 `;
   return {
     id: d.document_id, repo: d.repo, source_kind: d.source_kind, kind: d.kind, title: d.title, path: d.path,
-    content: body, metadata: { author: "claude-opus-4-1", words: 1240 },
+    // The document's front matter, as an agent writes it (work_item_ids, node_id, hook_point, worker_session_id).
+    content: body, metadata: { work_item_ids: [d.work_item_id], node_id: d.node_id, hook_point: d.hook_point, worker_session_id: d.worker_session_id, author: "claude-opus-4-1", words: 1240 },
     source_created_at: t(10), source_updated_at: t(90), indexed_at: d.indexed_at,
     origin: d.source_kind === "artifact" ? "git_scan" : "event_ingest",
-    links: [{ work_item_id: null, node_id: d.node_id, hook_point: d.hook_point, worker_session_id: d.worker_session_id }],
+    links: [{ work_item_id: null, node_id: d.node_id, hook_point: d.hook_point, worker_session_id: d.worker_session_id, session_work_item_id: null }],
   };
 }
 
@@ -661,7 +665,32 @@ export function artifactFor(item: any, variant: Variant) {
     title: `Review: ${item.title}`,
     content: documentDetail("", [{ document_id: "", repo: item.repo, source_kind: "artifact", kind: "reviews", title: `Review: ${item.title}`, path: item.gate_artifact, indexed_at: t(1), node_id: "review", hook_point: "on.review.requested", worker_session_id: null }]).content,
     truncated: variant === "long", artifact_max_bytes: 65536,
+    absolute_path: `${item.worktree_path ?? `/Users/dev/.kraft/run/worktrees/${item.id}`}/${item.gate_artifact ?? ".engineering/reviews/2026-09-13-caching-layer.md"}`,
   };
+}
+
+/** Fills in, on an item and its sessions, the keys the server's detail always sends (`board.get_work_item`) that a
+ *  sample leaves out, at what the server sends an item without that fact, so the mock answers every key
+ *  `tests/api/api_shapes.json` lists (`frontend/demo/apiShapes.test.ts`). A key a sample sets is kept. */
+export function serverKeys(b: ItemBundle): ItemBundle {
+  const it = b.item;
+  const fill = (o: any, d: Record<string, unknown>) => { for (const [k, v] of Object.entries(d)) if (!(k in o)) o[k] = v; };
+  const ran = b.sessions.reduce((n, s) => n + (s.wall_ms ?? 0), 0);
+  fill(it, {
+    archived_at: null, archived_by: null, fallback: null, base_ref: null, bead_cwd: null, branch: `kraft/${it.id}`, budget_set: 0, budget_usd: null,
+    ci_pipeline_ref: null, current_step: 0, dependencies: [], depends_on: null, ended_reason: null, escalation_session_id: null, implements_beads: null,
+    judge_stop_note: [], needs_context_question: null, node_passes: {}, pending_rewind: null, pending_steer_context: null, policy_override: null,
+    queued: null, queued_request: null, reject_default: null, retry_at: null, root_merge_policy: null, run_chain: null,
+    running_time: { running_s: Math.round(ran / 1000), cap_minutes: null }, scope_runs: [], skipped_paths: [], step: null, stop_kind: null, stop_reason: null,
+    submodules: null, suggested_action: null, test_result: null, worktree_exists: true,
+  });
+  if (it.budget_cap && !("key" in it.budget_cap)) it.budget_cap.key = "budget_usd";
+  const run = `/Users/dev/.kraft/run/items/${it.id}/sessions`;
+  for (const s of b.sessions) fill(s, {
+    harness: "claude", command: null, cost_estimated: false, egress: null, sandbox: null, repository: null, skipped: false, pass: 1, pid: null, pid_start_time: null,
+    tokens_cache_read: 0, tokens_cache_write: 0, log_path: `${run}/${s.id}/session.log`, result_path: `${run}/${s.id}/out/result.json`,
+  });
+  return b;
 }
 
 /* ── settings & instance ─────────────────────────────────────────────────── */
@@ -697,16 +726,20 @@ function settingsFor(variant: Variant, theme: { mode?: string; density?: string;
       findings: { loop_severities: ["critical", "important"] },
       budget: { work_item_usd: 5, daily_usd: long ? 250 : null },
       max_concurrent: 3, rate_limit_retries: 5,
+      // As config/policy.yaml ships them.
+      forge_cli_timeout_s: 120, archive: { after_days: 30 },
     },
     // The UX V2 keys as GET /theme answers them (B30): an explicit look, not derived from `palette`.
-    theme: { palette: "nocturne", mode: theme.mode ?? "dark", density: theme.density ?? "compact", board: { group_by: theme.group_by ?? "status", show_done: 5, open_in: "peek" }, surface: "graphite", accent: "none", colour_amount: "subtle", derived: false } as Record<string, unknown>,
+    theme: { palette: "nocturne", mode: theme.mode ?? "dark", density: theme.density ?? "compact", board: { group_by: theme.group_by ?? "status", show_done: 5, open_in: "peek" }, surface: "graphite", accent: "none", colour_amount: "subtle", derived: false,
+      // The rest at config.Theme's defaults, which are the UI's own.
+      code_scheme: { light: "auto", dark: "auto" }, diff: { layout: "unified", colours: "theme", show_whitespace: true, word_highlight: true, wrap_lines: false, one_file_at_a_time: true }, editor: null } as Record<string, unknown>,
     steering: { files: empty ? [] : [
       { name: "house-style", bytes: 1412 }, { name: "commit-messages", bytes: 388 },
       ...(long ? [{ name: "a-steering-file-with-a-very-long-name-that-will-not-fit-in-the-list-column", bytes: 8190 }, { name: "empty", bytes: 0 }, { name: "unknown-size", bytes: null }] : []),
     ], max_bytes: 8192 },
     steeringBody: (name: string) => ({ name, body: `# ${name}\n\n` + "- prefer stdlib over a dependency\n- never mock what you can run\n".repeat(long ? 40 : 4) }),
     intake: {
-      enabled: variant !== "empty", interval_s: 300, priority_ceiling: 2,
+      enabled: variant !== "empty", interval_s: 300, priority_ceiling: 2, schedules: [],
       repos: repos.slice(0, 2).map((r) => r.path),
       repo_pickups: Object.fromEntries(repos.map((r, i) => [r.path, { items: i === 0 ? 14 : i === 1 ? 0 : null, last_picked_up: i === 0 ? t(400) : null }])),
       recent_pickups: variant === "empty" ? [] : Array.from({ length: long ? 25 : 5 }, (_, i) => ({
@@ -715,14 +748,17 @@ function settingsFor(variant: Variant, theme: { mode?: string; density?: string;
         priority: i % 3, status: ["created", "created", "skipped: no test_command", "created", "failed: bd unreachable"][i % 5], at: t(400 - i * 30),
       })),
     },
-    access: { bind: variant === "empty" ? "127.0.0.1" : "0.0.0.0", port: 8765, session_expiry_days: 7, password_set: variant !== "empty", auth_required: variant !== "empty", allowed_hosts: long ? ["kraft.local", "10.0.0.12", "a-very-long-hostname.internal.acme-corporation.example.com"] : ["kraft.local"] },
+    access: { bind: variant === "empty" ? "127.0.0.1" : "0.0.0.0", port: 8765, session_expiry_days: 7, password_set: variant !== "empty", auth_required: variant !== "empty", allowed_hosts: long ? ["kraft.local", "10.0.0.12", "a-very-long-hostname.internal.acme-corporation.example.com"] : ["kraft.local"], lan_hosts: [] as string[] },
     notify: { enabled: variant !== "empty", url_set: variant !== "empty", base_url: long ? "https://kraft.internal.acme-corporation.example.com:8765" : "http://kraft.local:8765", events: ["gate_requested", "work_item_needs_human", "work_item_completed"], last_test: variant === "empty" ? null : { at: t(500), status: long ? null : 200, ms: long ? null : 412, error: long ? "connect ETIMEDOUT 10.0.0.12:443 after 30000ms — the webhook host did not answer" : null } },
     sessions: { sessions: empty ? [] : [
       { id: hex(5000), label: "Chrome on macOS", ip: "127.0.0.1", created_at: t(0), last_seen_at: t(600), expires_at: t(7 * 1440), current: true },
       { id: hex(5001), label: long ? "Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Mobile/15E148 Safari/604.1" : "Safari on iPhone", ip: "10.0.0.44", created_at: t(-3000), last_seen_at: t(100), expires_at: t(4000), current: false },
       ...(long ? Array.from({ length: 8 }, (_, i) => ({ id: hex(5010 + i), label: null, ip: `10.0.${i}.${i * 17}`, created_at: t(-i * 400), last_seen_at: t(i * 20), expires_at: t(5000), current: false })) : []),
     ] },
-    health: { status: long ? "degraded" : "ok", invalid_templates: long ? { "docs-only": "node 'implement' references unknown task on.docs.write" } : {}, invalid_policy: long ? ["loops.an_extremely_long_loop_name_that_nobody_should_have_typed.wall_clock_s exceeds 24h"] : [], bind: "127.0.0.1", port: 8765, session_expiry_days: 7, version: "0.9.3", installed: "0.9.3", run_dir: "/Users/you/.kraft", pid: 41822, uptime_s: 3 * 86_400 + 4 * 3600 + 240, index: { documents: 214, last_scan_at: null as string | null, errors: [] as string[] } },
+    health: { status: long ? "degraded" : "ok", invalid_templates: long ? { "docs-only": "node 'implement' references unknown task on.docs.write" } : {}, invalid_policy: long ? ["loops.an_extremely_long_loop_name_that_nobody_should_have_typed.wall_clock_s exceeds 24h"] : [], bind: "127.0.0.1", port: 8765, session_expiry_days: 7, version: "0.9.3", installed: "0.9.3", run_dir: "/Users/you/.kraft", pid: 41822, uptime_s: 3 * 86_400 + 4 * 3600 + 240,
+      index: { documents: 214, last_scan_at: null as string | null, errors: [] as string[], repos_scanned: repos.length, embeddings: { available: true, model: "BAAI/bge-small-en-v1.5", chunks: 1830, reason: null, state: "ready" } },
+      // Nothing held, refused or left over from a restart: `storage` is null without a worktree limit in health's terms.
+      invalid_intake: null, intake_off: false, addon_updates: {}, storage: null, reattach_summary: { scanned: 0, adopted: [], resolved_from_file: [], resumed_work_items: [], unknown: [] } },
   };
 }
 
@@ -732,12 +768,14 @@ function analyticsFor(variant: Variant) {
   return {
     totals: { work_items: z(long ? 1284 : 42), work_items_run: z(long ? 1201 : 39), by_status: { completed: z(30), abandoned: z(4), needs_human: z(3), active: z(5) }, mrs_merged: z(long ? 812 : 27), wall_ms: z(long ? 9.1e9 : 3.2e8), human_wait_ms: z(long ? 4.4e9 : 8.1e7), tokens_in: z(long ? 4.1e9 : 3.9e7), tokens_out: z(long ? 3.8e8 : 4.2e6), cost_usd: z(long ? 18432.19 : 212.4), cost_complete: !long, rounds: z(140), capped_out: z(6), completed: z(30), completed_prev: empty ? null : 22, median_lead_ms: z(long ? 2.9e8 : 5.6e6), human_wait_pct: z(long ? 48 : 25), fix_cycles: z(88), fix_cycles_capped: z(6), rejected_gates: z(9),
       // The backend always sends these (kraft/analytics.py, zero defaults); the fixture omitted them and Analytics threw on `.toFixed`.
-      unplanned_touches_per_item: empty ? 0 : long ? 3.42 : 1.25, open_mr_to_green_ci_ms: z(long ? 5.4e6 : 1.2e6) },
+      unplanned_touches_per_item: empty ? 0 : long ? 3.42 : 1.25, open_mr_to_green_ci_ms: z(long ? 5.4e6 : 1.2e6),
+      // analytics.py's zero defaults: no estimated cost, the token split known, nothing timed out or cut.
+      cost_estimated: false, split_complete: true, tokens_cache_read: 0, tokens_cache_write: 0, wait_timed_out: 0, time_capped: 0 },
     // Monday-keyed, newest last, like the server (analytics.py): the old keys were T0 minus
     // whole weeks (a Sunday), and `long ? 52 : 12 - i` put every long week at 52.
     weekly_merged: empty ? [] : (() => { const n = long ? 52 : 12; const d = new Date(T0); const mon = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return Array.from({ length: n }, (_, i) => ({ week_start: new Date(mon - (n - 1 - i) * 7 * 86400e3).toISOString().slice(0, 10), n: (i * 7) % 11 })); })(),
-    by_node: empty ? [] : DEFAULT_NODES.map((n, i) => ({ node: n.id, runs: 30 + i * 4, wall_ms: 4e7 + i * 1e7, avg_ms: 1.2e6, tokens: 4e6 + i * 5e5, cost_usd: 21.5 + i * 3.1, cost_complete: i !== 4, rounds: 12, capped_out: i === 3 ? 6 : 0 })),
-    by_repo: (empty ? [] : long ? LONG_REPO_PATHS : REPO_PATHS).map((p, i) => ({ repo: p, items: 14 - i, mrs: Math.max(0, 9 - i), tokens: 1.2e7, cost_usd: 70.2 - i * 5, cost_complete: true, done: Math.max(0, 9 - i), cycles: 1.5 })),
+    by_node: empty ? [] : DEFAULT_NODES.map((n, i) => ({ node: n.id, runs: 30 + i * 4, wall_ms: 4e7 + i * 1e7, avg_ms: 1.2e6, tokens: 4e6 + i * 5e5, cost_usd: 21.5 + i * 3.1, cost_complete: i !== 4, cost_estimated: false, rounds: 12, capped_out: i === 3 ? 6 : 0, wait_timed_out: 0, time_capped: 0 })),
+    by_repo: (empty ? [] : long ? LONG_REPO_PATHS : REPO_PATHS).map((p, i) => ({ repo: p, items: 14 - i, mrs: Math.max(0, 9 - i), tokens: 1.2e7, cost_usd: 70.2 - i * 5, cost_complete: true, cost_estimated: false, done: Math.max(0, 9 - i), cycles: 1.5 })),
     rejected_gates_by_gate: empty ? [] : [{ gate: "spec_approval", n: 4 }, { gate: "plan_approval", n: 3 }, { gate: "code_review", n: 2 }],
     gate_waits: empty ? [] : [{ gate: "spec_approval", n: 12, median_ms: 2.4e6, total_ms: 3.1e7 }, { gate: "code_review", n: 9, median_ms: 9e5, total_ms: 9.2e6 }, { gate: "plan_approval", n: 8, median_ms: 3e5, total_ms: 3.4e6 }],
     stop_reasons: empty ? [] : [{ label: "verify_fix_loop hit its cap", n: 6 }, { label: "spend cap reached", n: 2 }, { label: long ? "worktree refresh failed: fatal: Not possible to fast-forward, aborting (origin/main diverged after a force-push on the protected branch)" : "agent needs context", n: 1 }],
@@ -806,6 +844,7 @@ export function buildScenario(variant: Variant, theme: { mode?: string; density?
   });
   const board = buildNgBoard(variant, bundles);
   for (const id of [...board.list, ...board.archived]) docs[id] = [];
+  for (const b of Object.values(bundles)) serverKeys(b);
   return { variant, items, archived, byState, ng, ngBoard: board.list, ngArchived: board.archived, bundles, docs, settings: settingsFor(variant, theme), analytics: analyticsFor(variant) };
 }
 
