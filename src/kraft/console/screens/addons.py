@@ -283,7 +283,9 @@ class Addons(View):
             results = await asyncio.to_thread(take, addon_id, install, self._accept)
         except flow.Refusal as exc:
             results = []
-            self.app.notify(str(exc), severity="error", markup=False)
+            # Written out, never obeyed, as the list's own refusal is.
+            said = "\n".join(map(render.printable, str(exc).splitlines()))
+            self.app.notify(said, severity="error", markup=False)
         finally:
             self.taking = False  # a quit's cancel too
         self.refresh_bindings()

@@ -560,7 +560,7 @@ def test_i_and_u_take_an_addon_after_its_review(
     if change == "1.1.0":
         publish(acme.repo, "release", version="1.1.0")
     elif change == "refused":
-        publish(acme.repo, "release", library={"tasks": {"base": {**AGENT, "kind": "subprocess"}}})
+        publish(acme.repo, "release", library={"tasks": {"b[/]": {**AGENT, "kind": "subprocess"}}})
     console = board([])
 
     async def scenario(app, pilot):
@@ -590,48 +590,94 @@ def test_i_and_u_take_an_addon_after_its_review(
     )
 
 
-def test_quitting_with_a_review_open_answers_it_no(board, acme):
+@pytest.mark.parametrize("when", ["dialog-open", "asked-after-quit"])
+def test_quitting_with_a_review_open_answers_it_no(board, acme, monkeypatch, when):
     """Spec §7.4, §8: the review's thread waits on its answer; quitting
-    answers it no, so nothing is installed and the console can exit."""
+    answers it no, so nothing is installed and the console can exit. Asked
+    after the view closed, the post is refused and the answer is no too."""
     before = acme.written()
     fired: list[None] = []
+    asked: list[bool] = []
+    gate = threading.Event()
     console = board([])
+    if when == "asked-after-quit":
+        real_take, unmount = addons_view.take, Addons.on_unmount
+
+        def take(addon_id, install, accept):
+            gate.wait(5.0)  # until the view has unmounted
+
+            def answer(reviewed):
+                asked.append(accept(reviewed))
+                return asked[-1]
+
+            return real_take(addon_id, install, answer)
+
+        def on_unmount(self):
+            unmount(self)
+            gate.set()
+            # Should the thread wait on a review nobody answers, this says yes
+            # after 5 s: the test then fails on what was installed.
+            timer = threading.Timer(5.0, lambda: self.waiting and self.waiting.give(True))
+            timer.daemon = True
+            timer.start()
+
+        monkeypatch.setattr(addons_view, "take", take)
+        monkeypatch.setattr(Addons, "on_unmount", on_unmount)
 
     async def scenario(app, pilot):
         await _shown(console, app, pilot)
+        view = app.default_screen.query_one("#addons", addons_view.Addons)
         await pilot.press("j", "i")
+        if when == "asked-after-quit":
+            await console.until(pilot, lambda: view.taking)
+            return None, None
         await console.until(pilot, lambda: isinstance(app.screen, Confirm))
-        waiting = app.default_screen.query_one("#addons", addons_view.Addons).waiting
         # Should quitting leave the thread waiting, this answers it yes after
         # 5 s: the test then fails on what was installed instead of hanging.
+        waiting = view.waiting
         timer = threading.Timer(5.0, lambda: (fired.append(None), waiting.give(True)))
         timer.daemon = True
         timer.start()
         return waiting, timer
 
     waiting, timer = console.run(scenario)
-    timer.cancel()
-    assert (fired, waiting.yes, acme.written(), acme.reloads) == ([], False, before, [])
+    if timer:
+        timer.cancel()
+    # The run joined the thread: what it was answered is in `asked` by now.
+    answered = [waiting.yes] if waiting else asked
+    assert (answered, fired, acme.written(), acme.reloads) == ([False], [], before, [])
 
 
-@pytest.mark.parametrize("why", ["kraft-was-updated", "one-is-running"])
-def test_install_and_update_stay_closed(board, acme, why):
+@pytest.mark.parametrize(
+    ("why", "key", "action"),
+    [
+        ("kraft-was-updated", "i", "install"),
+        ("kraft-was-updated", "u", "update"),
+        ("one-is-running", "i", "install"),
+    ],
+    ids=["updated-install", "updated-update", "one-is-running"],
+)
+def test_install_and_update_stay_closed(board, acme, why, key, action):
     """After an update installed another Kraft, the add-on modules would load
     from it (spec §3); while one install runs, a second would race it."""
+    if key == "u":
+        acme.install()
     console = board([])
 
     async def scenario(app, pilot):
         await _shown(console, app, pilot)
         view = app.default_screen.query_one("#addons", addons_view.Addons)
+        await pilot.press("j")
+        opened = view.check_action(action, ())  # before it is closed
         if why == "kraft-was-updated":
             app.updated = True
         else:
             view.taking = True
-        await pilot.press("j", "i")
+        await pilot.press(key)
         await pilot.pause()
-        return isinstance(app.screen, Confirm), view.check_action("install", ())
+        return opened, isinstance(app.screen, Confirm), view.check_action(action, ())
 
-    assert console.run(scenario) == (False, False)
+    assert console.run(scenario) == (True, False, False)
 
 
 def test_the_key_closes_install_before_its_worker_starts(board, acme):
@@ -682,3 +728,55 @@ def test_a_review_is_stored_before_it_is_posted(board, acme):
         patch.setattr(Addons, "post_message", post)
         console.run(scenario)
     assert seen == [True]
+
+
+@pytest.mark.parametrize("how", ["hidden-after-apply", "reload-refused", "no-server"])
+def test_an_applied_take_reloads_the_server_and_says_when_it_could_not(
+    board, acme, monkeypatch, how
+):
+    """Ruling 16: an accepted take is not cancelled by hiding the view, and
+    the server is still asked to reload. A refused reload is a warning in the
+    server's words, markup off; no server running is nothing to say."""
+    hold, took = threading.Event(), threading.Event()
+    real_take = addons_view.take
+
+    def take(*args):
+        results = real_take(*args)
+        took.set()
+        hold.wait(5.0)  # the view is hidden by now; the take commits after
+        return results
+
+    async def refused():
+        raise client.ClientError(
+            "kraft 500: boom [/]" if how == "reload-refused" else "no Kraft server",
+            kind=client.Failure.REFUSED,
+        )
+
+    if how == "hidden-after-apply":
+        monkeypatch.setattr(addons_view, "take", take)
+    else:
+        monkeypatch.setattr(client, "reload_addons", refused)
+    console = board([])
+
+    async def scenario(app, pilot):
+        await _shown(console, app, pilot)
+        view = app.default_screen.query_one("#addons", addons_view.Addons)
+        await pilot.press("j", "i")
+        await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+        await pilot.press("shift+tab", "enter")
+        if how == "hidden-after-apply":
+            await console.until(pilot, took.is_set)
+            await pilot.press("1")
+            await console.until(pilot, lambda: not view.display)
+            hold.set()
+        await console.until(pilot, lambda: not view.taking)
+        await pilot.pause()
+        return [str(t.render()) for t in app.screen.query("Toast") if t.has_class("-warning")]
+
+    warned = console.run(scenario, notifications=True)
+    assert (warned, acme.reloads) == (
+        ["warning: the running server did not reload: kraft 500: boom [/]"]
+        if how == "reload-refused"
+        else [],
+        [None] if how == "hidden-after-apply" else [],
+    )
