@@ -8,6 +8,17 @@ import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { sendOnModEnter } from "../keys";
 
+/** When an in-place editor closes and focus fell to the page, put it back on the control that opened it; a blur that moved on stays where it went. */
+function useReturnFocus(editing: boolean) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const was = useRef(false);
+  useEffect(() => {
+    if (was.current && !editing && (!document.activeElement || document.activeElement === document.body)) ref.current?.focus();
+    was.current = editing;
+  }, [editing]);
+  return ref;
+}
+
 /** The title, edited in place (Decisions §2): Enter or leaving the field
  *  saves, Esc restores; a blank one left by blur restores too. */
 export function Title({ id, title, onSaved }: { id: string; title: string; onSaved: () => void }) {
@@ -15,6 +26,7 @@ export function Title({ id, title, onSaved }: { id: string; title: string; onSav
   const [text, setText] = useState(title);
   const [error, setError] = useState<string | null>(null);
   const hint = useId();
+  const opener = useReturnFocus(editing);
   // Set by Enter or Esc: the blur that follows (the field going away) is not a second answer.
   const settled = useRef(false);
   useEffect(() => setText(title), [title]);
@@ -42,7 +54,7 @@ export function Title({ id, title, onSaved }: { id: string; title: string; onSav
   if (!editing)
     return (
       <h1 className="item-title">
-        <button type="button" className="item-title-btn" title="Rename" onClick={() => { settled.current = false; setEditing(true); }}>{title}</button>
+        <button ref={opener} type="button" className="item-title-btn" title="Rename" onClick={() => { settled.current = false; setEditing(true); }}>{title}</button>
       </h1>
     );
   return (
@@ -75,6 +87,7 @@ export function Brief({ id, brief, ended = false, onSaved }: { id: string; brief
   const [long, setLong] = useState(false);
   const [busy, setBusy] = useState(false);
   const p = useRef<HTMLParagraphElement>(null);
+  const opener = useReturnFocus(editing);
   useEffect(() => setText(brief), [brief]);
   // "more" only when two lines do not hold it.
   useEffect(() => {
@@ -108,7 +121,7 @@ export function Brief({ id, brief, ended = false, onSaved }: { id: string; brief
       <div className="item-brief-links">
         {(long || more) && <button type="button" className="item-link" aria-expanded={more} onClick={() => setMore((m) => !m)}>{more ? "less" : "more"}</button>}
         {(long || more) && !ended && <span aria-hidden> · </span>}
-        {!ended && <button type="button" className="item-link" onClick={() => setEditing(true)}>{brief ? "edit" : "Add a brief"}</button>}
+        {!ended && <button ref={opener} type="button" className="item-link" onClick={() => setEditing(true)}>{brief ? "edit" : "Add a brief"}</button>}
       </div>
     </div>
   );

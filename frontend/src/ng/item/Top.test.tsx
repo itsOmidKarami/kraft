@@ -23,6 +23,7 @@ describe("Title", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("can't be blank");
     await userEvent.keyboard("{Escape}");
     expect(screen.getByRole("heading", { name: "Old" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Old" })).toHaveFocus();
     await userEvent.click(screen.getByRole("button", { name: "Old" }));
     await userEvent.clear(screen.getByRole("textbox", { name: "Title" }));
     await userEvent.type(screen.getByRole("textbox", { name: "Title" }), "New{Enter}");
@@ -85,6 +86,7 @@ describe("Brief", () => {
     await userEvent.type(screen.getByRole("textbox", { name: "Brief" }), " Bounded.");
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "edit" })).toHaveFocus();
     expect(writes(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { description: "Cache embeddings. Bounded." } }]);
   });
 

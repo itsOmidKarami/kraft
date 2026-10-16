@@ -125,6 +125,7 @@
 .ip-recent-line { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; padding: 2px 4px; margin: -2px -4px; border: 0; border-radius: 4px; background: transparent; color: var(--text-sub); font: inherit; text-align: left; line-height: 1.45; }
 .ip-recent li:is(:hover, :focus-within) .ip-recent-line { -webkit-line-clamp: unset; display: block; }
 button.ip-recent-line { cursor: pointer; }
+button.ip-recent-line:focus-visible { outline-offset: -2px; }
 button.ip-recent-line:is(:hover, :focus-visible) { background: var(--line); color: var(--text); }
 button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
 .meter { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; }

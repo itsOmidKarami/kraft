@@ -231,3 +231,4 @@ body:has(.rv-bar) { --toast-bottom: 88px; }
 /* A coloured token on a changed-word tint leans toward the text colour, so it stays readable (4.5:1). */
 .rv-word-change:is(.tok-kw, .tok-str, .tok-num) { color: color-mix(in oklab, currentColor 65%, var(--text)); }
 .rv-next { flex: none; margin: 0; padding: 2px 16px 8px; font-size: var(--fs-meta); color: var(--text-sub); }
+.rv-file-name:focus-visible, .rv-num:focus-visible { outline-offset: -2px; }
