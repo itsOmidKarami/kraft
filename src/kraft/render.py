@@ -73,6 +73,14 @@ def visible_width(text: str) -> int:
     return len(strip_ansi(text))
 
 
+def printable(text: str) -> str:
+    """`text` with every character a terminal would act on written out as
+    its escape: a command or a path read from a repository is shown as it
+    is, never obeyed (an ANSI sequence in a CI line could otherwise show one
+    command while another is saved)."""
+    return "".join(c if c.isprintable() else c.encode("unicode_escape").decode() for c in text)
+
+
 def human_size(n: int) -> str:
     """Bytes as `12.1G`: the largest unit the number reaches, one decimal at most."""
     for unit, size in (("T", 1024**4), ("G", 1024**3), ("M", 1024**2)):

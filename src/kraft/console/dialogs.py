@@ -3,7 +3,9 @@ view underneath never act while one is open."""
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
+from functools import partial
 from typing import ClassVar
 
 from rich.text import Text
@@ -13,8 +15,10 @@ from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
 from textual.content import Content
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, OptionList, Select, Static
+from textual.widgets import Button, Checkbox, Input, OptionList, Select, Static
 from textual.widgets.option_list import Option
+
+from kraft import client, render
 
 
 class Dialog[R](ModalScreen[R]):
@@ -151,3 +155,128 @@ class Menu(Dialog[str | None]):
     @on(OptionList.OptionSelected)
     def _picked(self, event: OptionList.OptionSelected) -> None:
         self._answer(event.option.id)
+
+
+#: What the connect form says of the repo library the CLI offers after a
+#: connect: the console does not ask it (spec §7.5).
+LIBRARY = "/repo library reviews the repo's .kraft/ library once it is connected."
+
+
+class Connect(Dialog[list[str] | None]):
+    """`c` on Repos (spec §7.5): a path, and the test and setup commands the
+    probe proposes for it, to keep or change; Verify adds `--verify`. Answers
+    the words of a `kraft repo connect`, or None for Esc. A command left as
+    proposed is not passed, so the proposal stands whole, its test scopes
+    too, as the CLI's own picker leaves it (`_choose_interactively`)."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__()
+        self.path = path
+        #: The test and setup commands the probe proposed, as the fields show them.
+        self.proposed = ("", "")
+        #: The path `proposed` is for; None while no proposal is shown.
+        self.probed: str | None = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="connect"):
+            yield Static(Content("Connect a repo"), id="connect-title")
+            for box_id, value, title in (
+                ("connect-path", self.path, "Path · Enter reads it again"),
+                ("connect-test", "", "Test command"),
+                ("connect-setup", "", "Setup command"),
+            ):
+                box = Input(value, id=box_id)
+                box.border_title = title
+                yield box
+            yield Checkbox("Verify: run them once in a throwaway worktree", id="connect-verify")
+            yield Static(id="connect-said")
+            yield Static(Content(LIBRARY), id="connect-library")
+            with Horizontal():
+                yield Button("Connect", id="connect-go")
+                yield Button("Cancel", id="connect-no")
+
+    def on_mount(self) -> None:
+        self._box("path").focus()
+        self._probe()
+
+    def _box(self, name: str) -> Input:
+        return self.query_one(f"#connect-{name}", Input)
+
+    def _say(self, text: str, style: str = "$kraft-muted") -> None:
+        # Content: a path or a refusal may hold `[/]`.
+        self.query_one("#connect-said", Static).update(Content.styled(text, style))
+
+    @on(Input.Submitted, "#connect-path")
+    def _probe(self) -> None:
+        """Read what connecting the path would propose. The last path's
+        commands are no proposal for this one, so the fields start empty."""
+        self.proposed, self.probed = ("", ""), None
+        self._box("test").value = self._box("setup").value = ""
+        self._say("Reading the repo…")
+        path = self._box("path").value.strip()
+        self.run_worker(partial(self._probe_now, path), group="probe", exclusive=True)
+
+    async def _probe_now(self, path: str) -> None:
+        try:
+            probed = await client.probe_repo(path or None)
+        except client.ClientError as exc:
+            if path == self._box("path").value.strip():
+                # The server echoes the typed path: written out, never obeyed.
+                self._say(render.printable(client.reason_of(str(exc))), "$error")
+            else:
+                self._say("Enter reads the new path")
+            return
+        if path != self._box("path").value.strip():
+            # An answer for a path no longer in the box; the box holds a new one.
+            self._say("Enter reads the new path")
+            return
+        # Written out, never obeyed: the proposal comes from the repo's own files.
+        proposal = [
+            render.printable(probed.get(k) or "") for k in ("test_command", "setup_command")
+        ]
+        self.proposed, self.probed = (proposal[0], proposal[1]), path
+        for name, text in zip(("test", "setup"), proposal, strict=True):
+            box = self._box(name)
+            # Only a field still empty: one typed into while the probe ran is the person's.
+            if not box.value:
+                box.value = text
+        self._say(
+            f"Kraft proposes these for {render.printable(probed['path'])}. Keep or change them."
+        )
+
+    @on(Input.Changed, "#connect-path")
+    def _path_edited(self, event: Input.Changed) -> None:
+        """The box no longer holds the path the fields were proposed for: those
+        commands are another repo's, so they go, and only what is typed is sent."""
+        if self.probed is None or event.value.strip() == self.probed:
+            return
+        for name, was in zip(("test", "setup"), self.proposed, strict=True):
+            if self._box(name).value == was:
+                self._box(name).value = ""
+        self.proposed, self.probed = ("", ""), None
+        self._say("Enter reads the new path")
+
+    @on(Input.Submitted, "#connect-test, #connect-setup")
+    @on(Button.Pressed, "#connect-go")
+    def _go(self) -> None:
+        path = self._box("path").value.strip()
+        argv = ["repo", "connect"]
+        for flag, name, was in (
+            ("--test-command", "test", self.proposed[0]),
+            ("--setup-command", "setup", self.proposed[1]),
+        ):
+            value = self._box(name).value.strip()
+            if value != was:
+                # `=`: a command starting with `-` is not read as a flag.
+                argv.append(f"{flag}={value}")
+        if self.query_one(Checkbox).value:
+            argv.append("--verify")
+        # Flags first, then `--`: the path is never read as one.
+        self._answer([*argv, "--", client.absolute_path(path or os.getcwd())])
+
+    def action_cancel(self) -> None:
+        self._answer(None)
+
+    @on(Button.Pressed, "#connect-no")
+    def _no(self) -> None:
+        self._answer(None)

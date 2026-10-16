@@ -118,7 +118,7 @@ Screen.-tiny #tiny {
     background: $kraft-side;
 }
 
-#rows {
+#rows, #repo-rows {
     height: 1fr;
     max-height: 100%;
     border: none;
@@ -127,7 +127,7 @@ Screen.-tiny #tiny {
     background: $background;
 }
 
-#rows > .option-list--option-highlighted {
+#rows > .option-list--option-highlighted, #repo-rows > .option-list--option-highlighted {
     background: $primary 12%;
     text-style: bold;
 }
@@ -185,11 +185,11 @@ OutputPanel {
     color: $kraft-muted;
 }
 
-Confirm, Note, Menu {
+Confirm, Note, Menu, Connect {
     align: center middle;
 }
 
-#confirm, #note, #menu {
+#confirm, #note, #menu, #connect {
     width: 72;
     max-width: 100%;
     height: auto;
@@ -292,4 +292,22 @@ Confirm, Note, Menu {
     height: 1fr;
     padding: 0 1;
     background: $background;
+}
+
+/* The connect form: path, test and setup, Verify, what the probe said. */
+#connect Checkbox {
+    border: none;
+    height: 1;
+}
+
+#connect-said, #connect-library {
+    color: $kraft-muted;
+}
+
+#connect Horizontal {
+    height: auto;
+}
+
+#connect Button {
+    margin-right: 2;
 }

@@ -277,12 +277,19 @@ class KraftConsole(App):
         # markup=False: the server's words may hold `[/]`, which markup reads as a tag.
         self.notify(client.reason_of(str(error)), severity="error", markup=False)
 
+    def busy(self) -> bool:
+        """Whether a command is running, said in a toast when it is: only one
+        runs at a time."""
+        if self.command is None:
+            return False
+        self.notify("A command is still running: Ctrl+O shows it, x stops it.", markup=False)
+        return True
+
     async def run_command(self, argv: list[str]) -> int | None:
         """Run `kraft <argv>` in the output panel, opening it (spec §4.7), and
         return its exit code; None, and a toast, while another is running.
         Await it from a worker."""
-        if self.command is not None:
-            self.notify("A command is still running: Ctrl+O shows it, x stops it.", markup=False)
+        if self.busy():
             return None
         panel = self.get_screen("output", OutputPanel)
         run = self.command = runner.Run(argv, panel.write_line)
@@ -302,6 +309,10 @@ class KraftConsole(App):
         done.set_result(code)
         if run.argv[:2] == ["admin", "update"]:  # a key's or a typed one
             self._after_update()
+        if run.argv[:2] in (["repo", "connect"], ["repo", "disconnect"]):
+            # The directory's repo may now be connected, or gone: scope, top line,
+            # Board and the Repos `*` follow, whoever ran it.
+            self.run_worker(self._rescope, name="scope", group="scope", exclusive=True)
 
     async def _show_panel(self) -> None:
         """The panel on top, once: Ctrl+P can open over it. A dialog is never
@@ -375,9 +386,7 @@ class KraftConsole(App):
         """Run `kraft <argv>` in the output panel, after the console's own
         confirm where the verb cannot be undone (spec §7.8). Await it from a
         worker."""
-        if self.command is not None:
-            # Before the question: its answer would be thrown away.
-            self.notify("A command is still running: Ctrl+O shows it, x stops it.", markup=False)
+        if self.busy():  # before the question: its answer would be thrown away
             return
         asked = runner.ask(argv)
         if asked is not None:
@@ -479,6 +488,10 @@ class KraftConsole(App):
         self._scoped = True
         self._draw_top()
         self.query_one("#board", Board).draw()
+
+    async def _rescope(self) -> None:
+        await self._resolve_scope()
+        self.live.reread()  # the views read again, Repos for its `*`
 
     async def check_update(self) -> None:
         """Read the release feed through the server, keeping the answer for

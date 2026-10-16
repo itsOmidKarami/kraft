@@ -70,11 +70,9 @@ _ALSO_SHOWN = 4
 
 
 def _print(line: str) -> None:
-    """`print`, with every character a terminal would act on written out as
-    its escape: a command or a path read from a repository is shown as it
-    is, never obeyed (an ANSI sequence in a CI line could otherwise show
-    one command while another is saved)."""
-    print("".join(c if c.isprintable() else c.encode("unicode_escape").decode() for c in line))
+    """`print`, with every character a terminal would act on written out
+    (`render.printable`): what a repository holds is shown, never obeyed."""
+    print(render.printable(line))
 
 
 def _pick(
