@@ -29,6 +29,11 @@ ID = "release@acme"
 GOOD = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
 
 
+def _asking(app) -> bool:
+    """A Confirm on top and mounted: pushed is not mounted, and these tests read its widgets."""
+    return isinstance(app.screen, Confirm) and bool(app.screen.query("#question"))
+
+
 def _never(what: str):
     def called(*args, **kwargs):
         raise AssertionError(f"{what} in a console add-on test")
@@ -213,7 +218,7 @@ def test_e_and_d_run_their_verbs(board, acme, kraft_is, entry, keys, confirm, ra
         await _shown(console, app, pilot)
         await pilot.press(*keys)
         if confirm:
-            await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+            await console.until(pilot, lambda: _asking(app))
             await pilot.press(*confirm)
             await console.until(pilot, lambda: not isinstance(app.screen, Confirm))
         if ran:
@@ -568,7 +573,7 @@ def test_i_and_u_take_an_addon_after_its_review(
         await pilot.press("j", key)
         shown = None
         if answer:
-            await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+            await console.until(pilot, lambda: _asking(app))
             dialog = app.screen
             shown = (
                 str(dialog.query_one("#question").render()),
@@ -631,7 +636,7 @@ def test_quitting_with_a_review_open_answers_it_no(board, acme, monkeypatch, whe
         if when == "asked-after-quit":
             await console.until(pilot, lambda: view.taking)
             return None, None
-        await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+        await console.until(pilot, lambda: _asking(app))
         # Should quitting leave the thread waiting, this answers it yes after
         # 5 s: the test then fails on what was installed instead of hanging.
         waiting = view.waiting
@@ -718,7 +723,7 @@ def test_a_review_is_stored_before_it_is_posted(board, acme):
     async def scenario(app, pilot):
         await _shown(console, app, pilot)
         await pilot.press("j", "i")
-        await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+        await console.until(pilot, lambda: _asking(app))
         await pilot.press("escape")
         await console.until(
             pilot, lambda: not app.default_screen.query_one("#addons", Addons).taking
@@ -762,7 +767,7 @@ def test_an_applied_take_reloads_the_server_and_says_when_it_could_not(
         await _shown(console, app, pilot)
         view = app.default_screen.query_one("#addons", addons_view.Addons)
         await pilot.press("j", "i")
-        await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+        await console.until(pilot, lambda: _asking(app))
         await pilot.press("shift+tab", "enter")
         if how == "hidden-after-apply":
             await console.until(pilot, took.is_set)
