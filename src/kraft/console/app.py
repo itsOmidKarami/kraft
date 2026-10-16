@@ -485,11 +485,17 @@ class KraftConsole(App):
         the Server view; a failure leaves the last one (the Server reads
         again when shown)."""
         try:
-            self.release = await client.update_available()
+            found = await client.update_available()
         except client.ClientError:
             return
-        self.update_waiting = bool(self.release.get("behind"))
+        if found.get("behind") is None:  # the server could not read the feed: not an answer
+            return
+        self.release = found
+        self.update_waiting = bool(found.get("behind"))
         self._draw_top()
+        server = self.query_one("#server", View)
+        if server.display:  # it arrived while the Server is shown: say so now
+            server.draw()
 
     def _after_update(self) -> None:
         """After `kraft admin update` (spec §7.3): a new install is said until

@@ -21,6 +21,8 @@ from kraft.console.screens import View
 
 #: Lines of `server.log` kept, for the pane and for the filter to search.
 MAX_LINES = 2000
+#: Lines of `server.log` read when the view is shown.
+BACKLOG = 200
 #: What the rule over the log says while new lines move it to its end.
 FOLLOWING = "following · f filter"
 #: And while the reader has scrolled up, which holds it where it is.
@@ -177,8 +179,6 @@ class Server(View):
 
     async def _release(self) -> None:
         await self.app.check_update()
-        if self.display:
-            self.draw()
 
     async def _follow(self) -> None:
         """`server.log`'s last lines, then each one as the server writes it.
@@ -188,7 +188,7 @@ class Server(View):
         log = self.query_one("#server-log", RichLog)
         log.clear()
         self.lines.clear()
-        async for line in tail.follow(tail.server_log()):
+        async for line in tail.follow(tail.server_log(), backlog=BACKLOG):
             self.lines.append(line)
             if self._shows(line):
                 # To the end only from the end: a reader scrolled up stays there.
@@ -207,12 +207,14 @@ class Server(View):
         )
 
     def _redraw(self) -> None:
-        """The kept lines again, through the filter, followed from the end."""
+        """The kept lines again, through the filter: followed from the end, or
+        held where a reader scrolled up to."""
         log = self.query_one("#server-log", RichLog)
+        held = not log.is_vertical_scroll_end
         log.clear()
         for line in self.lines:
             if self._shows(line):
-                log.write(line)
+                log.write(line, scroll_end=not held)
         self._draw_rule()
 
     def back(self) -> bool:
@@ -225,8 +227,12 @@ class Server(View):
 
     def action_filter(self) -> None:
         box = self.query_one("#server-filter", Input)
+        log = self.query_one("#server-log", RichLog)
+        following = log.is_vertical_scroll_end
         box.display = True
         box.focus()
+        if following:  # the box takes a row from the log: keep a following reader at its end
+            self.call_after_refresh(log.scroll_end, animate=False)
 
     @on(Input.Changed, "#server-filter")
     def _filtered(self, event: Input.Changed) -> None:

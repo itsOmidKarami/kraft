@@ -343,8 +343,10 @@ def test_the_diff_reads_again_only_when_shown_and_its_row_changed(board, monkeyp
         await pilot.pause()
         hidden = len(reads)
         app.show("item")
+        await pilot.pause()  # the show's own read settles first
+        shown = len(reads)
         view.rows_changed([moved], [{"seq": 3}])
-        await console.until(pilot, lambda: len(reads) == 2)
+        await console.until(pilot, lambda: len(reads) > shown)
         return same, hidden
 
     assert console.run(scenario) == (1, 1)

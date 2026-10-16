@@ -268,8 +268,20 @@ _ELSEWHERE = httpx.Response(200, json={"run_dir": "/elsewhere"})
             client.Failure.BAD_RESPONSE,
             httpx.Response(200, text="<html>proxy</html>"),
         ),
+        (
+            lambda: client.update_available(),
+            client.Failure.BAD_RESPONSE,
+            httpx.Response(200, json=["not", "an", "object"]),
+        ),
     ],
-    ids=["other-instance", "blank-note", "no-item", "text-500", "text-200-post"],
+    ids=[
+        "other-instance",
+        "blank-note",
+        "no-item",
+        "text-500",
+        "text-200-post",
+        "update-not-object",
+    ],
 )
 def test_a_refusal_the_client_makes_itself_is_a_client_error(
     monkeypatch, tmp_path, call, kind, answer

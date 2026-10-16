@@ -82,9 +82,9 @@ def _reading_release(app) -> bool:
 
 
 @pytest.mark.parametrize(
-    ("healths", "releases", "lines"),
+    ("healths", "releases", "lines", "reads"),
     [
-        ([HEALTH], [RELEASE], OK_LINES),
+        ([HEALTH], [RELEASE], OK_LINES, 1),
         (
             [DEGRADED],
             [FEED_DOWN],
@@ -97,21 +97,29 @@ def _reading_release(app) -> bool:
                 "  invalid policy: bad key",
                 "  index error: disk [/] full",
             ],
+            3,
         ),
         (
             [HELD],
             [FEED_DOWN, RELEASE],
             [*OK_LINES[:2], "Storage  3.1G of 20G · held  ·  Add-ons  1 update waiting"],
+            2,
         ),
-        ([HEALTH, None], [RELEASE], [OK_LINES[0].replace("● ok", "● no answer"), *OK_LINES[1:]]),
+        (
+            [HEALTH, None],
+            [RELEASE],
+            [OK_LINES[0].replace("● ok", "● no answer"), *OK_LINES[1:]],
+            1,
+        ),
     ],
     ids=["ok", "degraded", "held-and-the-feed-read-again", "no-answer-keeps-the-last"],
 )
-def test_the_summary_says_how_the_server_is(console, monkeypatch, healths, releases, lines):
+def test_the_summary_says_how_the_server_is(console, monkeypatch, healths, releases, lines, reads):
     """Spec §7.3: from `/health` and the release feed, each reason it is
     degraded spelled out in the server's words, `[/]` and all. A feed that
-    failed at start is read again when the view is shown; a server that stops
-    answering leaves its last answer on screen, saying so (spec §8)."""
+    failed at start is read again each time the view is shown, one that
+    answered once is never read again; a server that stops answering leaves
+    its last answer on screen, saying so (spec §8)."""
     calls = _quiet(monkeypatch, releases)
 
     async def scenario(app, pilot):
@@ -124,9 +132,13 @@ def test_the_summary_says_how_the_server_is(console, monkeypatch, healths, relea
             lambda: (app.release is not None or len(calls) == 2) and not _reading_release(app),
         )
         await pilot.pause()
-        return _text(app, "#server-summary").split("\n")
+        said = _text(app, "#server-summary").split("\n")
+        await pilot.press("1", "2")  # shown a second time
+        await console.until(pilot, lambda: not _reading_release(app))
+        await pilot.pause()
+        return said, len(calls)
 
-    assert console.run(scenario) == lines
+    assert console.run(scenario) == (lines, reads)
 
 
 @pytest.mark.parametrize(
@@ -144,12 +156,18 @@ def test_the_summary_says_how_the_server_is(console, monkeypatch, healths, relea
             "kraft admin update --restart",
             ["kraft admin update --restart", "admin update --restart", "exit 0"],
         ),
+        (
+            ["shift+u", "shift+tab", "enter"],
+            "kraft admin update --restart",
+            ["kraft admin update --restart", "admin update --restart", "exit 0"],
+        ),
     ],
     ids=[
         "d-doctor",
         "R-restarts-once-told",
         "shift-r-asks-and-esc-runs-nothing",
         "U-updates-and-restarts",
+        "shift-u-updates-and-restarts",
     ],
 )
 def test_the_servers_keys_run_their_verbs_after_the_consoles_confirm(
@@ -252,7 +270,7 @@ def test_an_update_that_installed_another_kraft_says_restart_the_console(
     is said until it restarts, and `updated` closes add-on install for PR 6.
     The update itself is an echo."""
     kraft_is(ECHO)
-    _quiet(monkeypatch)
+    calls = _quiet(monkeypatch)
 
     async def no_one_running(status=None, **kwargs):
         return []
@@ -260,6 +278,8 @@ def test_an_update_that_installed_another_kraft_says_restart_the_console(
     monkeypatch.setattr(client, "list_work_items", no_one_running)
 
     async def scenario(app, pilot):
+        await console.until(pilot, lambda: calls)
+        before = len(calls)
         app.version = "0.0.1"  # what this console started on
         monkeypatch.setattr(update, "installed", lambda: installed)
         await pilot.press("2", "U")
@@ -268,6 +288,7 @@ def test_an_update_that_installed_another_kraft_says_restart_the_console(
         await console.until(pilot, lambda: console.output(app)[-1:] == ["exit 0"])
         await pilot.press("escape")
         await pilot.pause()
+        await console.until(pilot, lambda: len(calls) > before)  # "update available" may be over
         return app.updated, app.query_one("#updated").display
 
     assert console.run(scenario) == (banner, banner)
@@ -275,7 +296,7 @@ def test_an_update_that_installed_another_kraft_says_restart_the_console(
 
 def test_a_hidden_server_draws_nothing(console, monkeypatch):
     """A hidden view starts no work: a health answer while another view is
-    shown is kept, not drawn, and shown view draws it."""
+    shown is kept, not drawn, and the shown view draws it."""
     _quiet(monkeypatch)
 
     async def scenario(app, pilot):
@@ -389,7 +410,7 @@ def test_a_hidden_server_follows_nothing(console, monkeypatch):
     _quiet(monkeypatch)
     opened = []
 
-    async def follow(path, *, backlog=200):
+    async def follow(path, *, backlog=0):
         opened.append(backlog)
         return
         yield
@@ -405,3 +426,127 @@ def test_a_hidden_server_follows_nothing(console, monkeypatch):
         return hidden, opened[0]
 
     assert console.run(scenario) == ([], 200)
+
+
+def test_a_hiding_server_lets_go_of_a_feed_read(console, monkeypatch):
+    """Hidden, the view reads nothing: a feed read still waiting is cancelled,
+    so its answer, when it comes, is not kept."""
+    _quiet(monkeypatch)
+    answer = asyncio.Event()
+    calls = []
+
+    async def update_available(channel=None):
+        calls.append(None)
+        if len(calls) == 1:
+            raise FEED_DOWN
+        await answer.wait()
+        return RELEASE
+
+    monkeypatch.setattr(client, "update_available", update_available)
+
+    async def scenario(app, pilot):
+        await console.until(pilot, lambda: calls)
+        await pilot.press("2")
+        await console.until(pilot, lambda: _reading_release(app))
+        await pilot.press("1")
+        await pilot.pause()
+        answer.set()
+        await pilot.pause()
+        return app.release, _reading_release(app)
+
+    assert console.run(scenario) == (None, False)
+
+
+@pytest.mark.parametrize(
+    "unreadable",
+    [FEED_DOWN, {"installed": "2.4.0", "latest": None, "behind": None}],
+    ids=["failed", "behind-null"],
+)
+def test_a_feed_the_server_could_not_read_is_not_an_answer(console, monkeypatch, unreadable):
+    """`/update` answers 200 with `behind: null` when the feed was down; that
+    is a failed read, so the next show asks again."""
+    calls = _quiet(monkeypatch, [unreadable, RELEASE])
+
+    async def scenario(app, pilot):
+        await console.until(pilot, lambda: calls)
+        await pilot.pause()
+        unread = app.release, app.update_waiting
+        await pilot.press("2")
+        await console.until(pilot, lambda: app.release is not None)
+        return unread, app.release
+
+    assert console.run(scenario) == ((None, False), RELEASE)
+
+
+def test_a_release_that_arrives_while_the_server_is_shown_is_drawn_at_once(console, monkeypatch):
+    """The read at start can land after the person opened the Server: the
+    summary says so then, not at the next health poll."""
+    _quiet(monkeypatch)
+    answer = asyncio.Event()
+    calls = []
+
+    async def update_available(channel=None):
+        calls.append(None)
+        if len(calls) == 1:
+            await answer.wait()
+            return RELEASE
+        raise FEED_DOWN
+
+    monkeypatch.setattr(client, "update_available", update_available)
+
+    async def scenario(app, pilot):
+        await console.until(pilot, lambda: calls)
+        app._live_health(HEALTH)
+        await pilot.press("2")
+        await console.until(pilot, lambda: len(calls) == 2 and not _reading_release(app))
+        before = "available" in _text(app, "#server-summary")
+        answer.set()
+        await console.until(pilot, lambda: "(2.5.0 available)" in _text(app, "#server-summary"))
+        return before
+
+    assert console.run(scenario) is False
+
+
+def test_a_filter_key_leaves_a_scrolled_up_reader_where_they_are(console, monkeypatch):
+    """Typing the filter redraws the log: a reader who scrolled up stays at
+    the line they were on, and one who follows keeps following."""
+    monkeypatch.setattr(tail, "POLL_S", 0.01)
+    _quiet(monkeypatch)
+    _write(*(f"line {n}" for n in range(60)))
+
+    async def scenario(app, pilot):
+        await pilot.press("2")
+        log = app.query_one("#server-log", RichLog)
+        await console.until(pilot, lambda: len(_log(app)) == 60)
+        await pilot.press("f", "l")
+        await console.until(pilot, lambda: app.view.filter_text == "l")
+        await console.until(pilot, lambda: log.is_vertical_scroll_end)
+        followed = True
+        await pilot.press("escape", "pageup")
+        await console.until(pilot, lambda: "End follows" in _text(app, "#server-rule"))
+        at = log.scroll_y
+        await pilot.press("f", "l")
+        await console.until(pilot, lambda: app.view.filter_text == "l")
+        await pilot.pause()
+        return followed, log.scroll_y == at, "End follows" in _text(app, "#server-rule")
+
+    assert console.run(scenario) == (True, True, True)
+
+
+def test_widening_the_window_names_the_version_with_no_live_event(console, monkeypatch, stream):
+    """Resizing across `WIDE` redraws the top line itself; nothing else is
+    drawing it here (the stream is quiet, the health poll never answers)."""
+    _quiet(monkeypatch)
+
+    async def scenario(app, pilot):
+        # The start's own reads draw the top line too: let them finish first.
+        await console.until(
+            pilot, lambda: all(w.is_finished for w in app.workers if w.name == "update")
+        )
+        await pilot.pause()
+        before = f"v{app.version}" in _text(app, "#where")
+        await pilot.resize_terminal(100, 24)
+        await console.until(pilot, lambda: f"v{app.version}" in _text(app, "#where"))
+        return before
+
+    assert console.run(scenario) is False
