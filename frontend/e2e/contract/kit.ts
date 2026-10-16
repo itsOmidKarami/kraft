@@ -1,6 +1,6 @@
 import { test, type Page } from "@playwright/test";
 import { buildScenario, type Scenario, type Variant } from "./mocks/fixtures";
-import { installMocks, type MockOptions } from "./mocks/mockApi";
+import { installMocks, type MockOptions } from "./mocks/playwright";
 import { NG_NOW } from "./mocks/ngItems";
 
 /**
