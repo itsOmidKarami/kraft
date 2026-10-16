@@ -1,3 +1,4 @@
+import { hint } from "../ui/Tooltip";
 import { NotFound } from "../ui/NotFound";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -311,7 +312,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
           <button
             type="button"
             className="tpl-problems"
-            data-tip="Step through the problems"
+            {...hint("Step through the problems")}
             onClick={() => {
               const list = r.problems;
               if (!list.length) return;

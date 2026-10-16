@@ -17,7 +17,7 @@ import { FILED_PAUSED, KEEP_EDITING } from "./newWords";
 import { mod, sendOnModEnter, useShortcutRows, type ShortcutRow } from "../keys";
 import { useReason } from "../ui/Reason";
 import { ADD_TITLE, CHOOSE_REPO } from "../ui/reasons";
-import { tip } from "../ui/Tooltip";
+import { tip, hint } from "../ui/Tooltip";
 
 type Kind = "spec" | "plan";
 /** B33's answer: the chain as it would be filed, and what the attachments and skips dropped. */
@@ -212,7 +212,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
           }))}
         />
         {(["spec", "plan"] as Kind[]).map((k) => <Attach key={k} kind={k} repo={d.repo} path={d[k]} onPath={(p) => set({ [k]: p })} />)}
-        {roots.has(d.repo) && <button type="button" className="composer-add composer-cross" data-tip="Choose members on the full page" onClick={() => more(true)}>Cross-repo <span className="composer-muted">· on the page</span></button>}
+        {roots.has(d.repo) && <button type="button" className="composer-add composer-cross" {...hint("Choose members on the full page")} onClick={() => more(true)}>Cross-repo <span className="composer-muted">· on the page</span></button>}
         <span className="composer-gap" />
         <span className="composer-run">{ran} of {full.length || ran} nodes run · {gates} gate{gates === 1 ? "" : "s"}</span>
         <Ticks className="composer-ticks" ticks={(full.length ? full : run?.nodes ?? []).map((n) => ({ gate: n.kind === "gate", state: off.has(n.id) ? "todo" : "run" }))} />
@@ -233,7 +233,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
                 : repos?.length === 0 ? <>No enabled repo to file to. Connect or enable one in <Link to="/settings/repos" className="item-link">Settings › Repos</Link>.</>
                 : FILED_PAUSED}
             </span>
-            <button type="button" className="board-select-all" data-tip="Continue on the full page" onClick={() => more(false)}>More options ⤢</button>
+            <button type="button" className="board-select-all" {...hint("Continue on the full page")} onClick={() => more(false)}>More options ⤢</button>
             <button type="button" className="board-select-all" onClick={leave}>Cancel</button>
             {why.note}
             <CreateSplit disabled={!ok} describedBy={why.attrs["aria-describedby"]} onCreate={create} />
