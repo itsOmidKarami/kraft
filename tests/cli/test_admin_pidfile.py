@@ -10,6 +10,7 @@ import time
 
 import pytest
 from support.harness import fake_templates_dir, isolated_bd
+from support.pidfile import exec_landed
 from support.server import running_server
 
 from kraft import cli
@@ -21,7 +22,7 @@ def decoy(tmp_path, monkeypatch):
     """A `sleep` this test started, named by the run dir's pidfile the way a
     reused pid would be after a server died without removing it."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    proc = subprocess.Popen(["sleep", "60"])
+    proc = exec_landed(subprocess.Popen(["sleep", "60"]))
     pid_path = RunDirs(tmp_path / "run").pid
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(proc.pid))

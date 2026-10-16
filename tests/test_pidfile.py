@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import psutil
 import pytest
-from support.pidfile import hold_pidfile
+from support.pidfile import exec_landed, hold_pidfile
 
 from kraft import pidfile
 
@@ -23,7 +23,7 @@ def started(tmp_path):
     procs = []
 
     def start(*argv: str) -> subprocess.Popen:
-        proc = subprocess.Popen(argv)
+        proc = exec_landed(subprocess.Popen(argv))
         procs.append(proc)
         return proc
 

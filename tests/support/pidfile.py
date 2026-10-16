@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import fcntl
 import os
+import subprocess
+import time
 from pathlib import Path
+
+import psutil
 
 
 class HeldPidfile:
@@ -36,3 +40,15 @@ class HeldPidfile:
 
 def hold_pidfile(path: Path, pid: int | None = None) -> HeldPidfile:
     return HeldPidfile(path, os.getpid() if pid is None else pid)
+
+
+def exec_landed(proc: subprocess.Popen) -> subprocess.Popen:
+    """`proc` once the kernel shows the program it was started with. On Linux
+    `Popen` returns as soon as `exec` closes its close-on-exec pipe, a moment
+    before the new program's argv is filled in; until then the cmdline reads
+    empty (or as the parent's), and `kraft.pidfile` calls it "another program"."""
+    deadline = time.monotonic() + 10
+    while psutil.Process(proc.pid).cmdline() != list(proc.args):
+        assert time.monotonic() < deadline, f"{proc.args[0]} never exec'd"
+        time.sleep(0.01)
+    return proc
