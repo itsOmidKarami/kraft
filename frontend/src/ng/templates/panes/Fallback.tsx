@@ -3,6 +3,7 @@ import { IconButton } from "../../ui/IconButton";
 import { useContext } from "react";
 import { ReadOnly } from "../addon";
 import { Kv, type Option } from "./controls";
+import { Select } from "../../ui/Select";
 
 /** One `fallback:` entry (`FallbackEntry`): an optional harness plus one route,
  *  a profile or a model and/or effort. Whatever it omits is the task's own. */
@@ -74,12 +75,12 @@ export function FallbackRows({ value, harness, harnesses, profiles, onChange }: 
             return (
               <li key={i} className="fb-row">
                 <span className="fb-n" aria-hidden>{n}</span>
-                <select aria-label={`Fallback ${n} harness`} className="tpl-pf-select" value={e.harness ?? ""} onChange={(x) => set(i, x.target.value ? { ...e, harness: x.target.value } : drop(e, "harness"))}>
+                <Select aria-label={`Fallback ${n} harness`} mono value={e.harness ?? ""} onChange={(x) => set(i, x.target.value ? { ...e, harness: x.target.value } : drop(e, "harness"))}>
                   {harnessOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-                <select aria-label={`Fallback ${n} profile`} className="tpl-pf-select" value={e.profile ?? ""} onChange={(x) => set(i, x.target.value ? { ...drop(e, "model", "effort"), profile: x.target.value } : drop(e, "profile"))}>
+                </Select>
+                <Select aria-label={`Fallback ${n} profile`} mono value={e.profile ?? ""} onChange={(x) => set(i, x.target.value ? { ...drop(e, "model", "effort"), profile: x.target.value } : drop(e, "profile"))}>
                   {routeOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
+                </Select>
                 <IconButton label={`Remove fallback ${n}`} onClick={() => remove(i)}><X size={12} aria-hidden /></IconButton>
               </li>
             );

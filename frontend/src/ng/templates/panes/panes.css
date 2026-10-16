@@ -8,11 +8,10 @@
 .tpl-pf { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
 .tpl-pf-label { font-size: var(--fs-meta); color: var(--text-muted); }
 .tpl-pf-line { display: flex; align-items: center; gap: 10px; }
-.tpl-pf-input, .tpl-pf-select { box-sizing: border-box; width: 100%; min-height: 28px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: var(--fs-meta)/1.45 inherit; }
-.tpl-pf-select { flex: 1; min-width: 0; width: auto; font: var(--fs-label) ui-monospace, Menlo, monospace; cursor: pointer; }
+.tpl-pf-input { box-sizing: border-box; width: 100%; min-height: 28px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: var(--fs-meta)/1.45 inherit; }
 .tpl-pf-input.is-long { resize: vertical; }
 .tpl-pf-input.is-mono { font: var(--fs-label) ui-monospace, Menlo, monospace; }
-.tpl-pf-input.is-bad, .tpl-pf-select.is-bad { border-color: var(--bad); }
+.tpl-pf-input.is-bad { border-color: var(--bad); }
 .tpl-pf-sub { margin: 0; font-size: var(--fs-meta); color: var(--text-muted); }
 .tpl-pf-sub.is-bad { color: var(--bad); }
 .tpl-pf-check { display: flex; align-items: center; gap: 5px; flex: none; font-size: var(--fs-meta); color: var(--text-sub); cursor: pointer; }

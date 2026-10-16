@@ -11,6 +11,7 @@ import { ModelField } from "./fields";
 import { ACCESS, ACCESS_HELP, ACCESS_SECTION, enabledHelp, enableLabel, executableWord, ACCESS_WORD, entryUsers, usedBy, HARNESS_FIELD, type EntryView, type HarnessView, type HProblem, type Resolved } from "./model";
 import { entryOp, useRun } from "./ops";
 import type { ProviderStatus } from "./useProviders";
+import { LinkButton } from "../ui/LinkButton";
 
 type Common = {
   draft: ConfigDraft;
@@ -109,7 +110,7 @@ function HarnessFields({ draft, h, status, changed, onYaml }: { draft: ConfigDra
         <ModelField label={HARNESS_FIELD.permission_mode} value={h.defaults.permission_mode ?? ""} changed={changed} clearable onCommit={(v) => setDefault("permission_mode", v)} />
       ))}
       {error && <p className="hn-error" role="alert">{error}</p>}
-      {onYaml && <Note><button type="button" className="hn-link" onClick={() => onYaml("harnesses.yaml")}>Edit in YAML</button> for the rest of the file.</Note>}
+      {onYaml && <Note><LinkButton inline onClick={() => onYaml("harnesses.yaml")}>Edit in YAML</LinkButton> for the rest of the file.</Note>}
     </>
   );
 }

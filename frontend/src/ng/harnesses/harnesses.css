@@ -14,7 +14,7 @@
 .hn-row { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 3px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-label); text-align: left; cursor: pointer; }
 .hn-row:hover { background: var(--line); }
 .hn-row.is-sel { background: var(--surface-2); }
-.hn-row:focus-visible, .hn-glyph:focus-visible, .hn-lane-head:focus-visible, .hn-link:focus-visible, .hn-problem:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.hn-row:focus-visible, .hn-glyph:focus-visible, .hn-lane-head:focus-visible, .hn-problem:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .hn-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hn-row-meta { flex: none; font-size: var(--fs-meta); color: var(--text-muted); }
 .hn-row-meta[data-access="available"] { color: var(--ok); }
@@ -70,7 +70,6 @@
 .hn-input { box-sizing: border-box; width: 100%; min-height: 28px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: var(--fs-label) ui-monospace, Menlo, monospace; }
 .hn-input.is-changed { border-color: var(--mark-change-line); }
 .hn-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.hn-link { padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; text-decoration: underline; cursor: pointer; }
 .hn-error { margin: 6px 0; font-size: var(--fs-meta); color: var(--bad); }
 .hn-toast { position: absolute; z-index: 8; left: 260px; top: 6px; margin: 0; }
 .hn-problems-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }

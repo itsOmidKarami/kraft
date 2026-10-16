@@ -8,6 +8,7 @@ import { useDraft } from "./context";
 import { useSelect } from "./select";
 import { lines, PASSED } from "./view";
 import { APPLY_AND_START, DRAFT_HOLDS_CHANGES } from "../sharedWords";
+import { LinkButton } from "../../ui/LinkButton";
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
@@ -125,7 +126,7 @@ function Review() {
         <li className={problems.length ? "is-bad" : "is-ok"}>{problems.length ? `✕ ${problems.length} ${plural(problems.length, "problem", "problems")} to fix first` : "✓ resolves"}</li>
         <li className={passed.length ? "is-bad" : "is-ok"}>
           {passed.length ? `✕ ${passed.length} ${plural(passed.length, "edit", "edits")} the run has passed, which can no longer apply` : "✓ only nodes that have not run"}
-          {passed.length > 0 && <> <button type="button" className="item-link" disabled={busy} onClick={dropPassed}>Remove {passed.length === 1 ? "it" : "them"} from the draft</button></>}
+          {passed.length > 0 && <> <LinkButton disabled={busy} onClick={dropPassed}>Remove {passed.length === 1 ? "it" : "them"} from the draft</LinkButton></>}
         </li>
         {overrides.length > 0 && (overrun.length
           ? overrun.map((i) => <li key={i.index} className="is-bad">✕ {i.message}</li>)

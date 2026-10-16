@@ -19,6 +19,7 @@ import { useReason } from "../ui/Reason";
 import { ADD_TITLE, CHOOSE_REPO } from "../ui/reasons";
 import { tip, hint } from "../ui/Tooltip";
 import { BRIEF_HINT } from "./sharedWords";
+import { LinkButton, linkButtonClass } from "../ui/LinkButton";
 
 type Kind = "spec" | "plan";
 /** B33's answer: the chain as it would be filed, and what the attachments and skips dropped. */
@@ -219,7 +220,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
         <Ticks className="composer-ticks" ticks={(full.length ? full : run?.nodes ?? []).map((n) => ({ gate: n.kind === "gate", state: off.has(n.id) ? "todo" : "run" }))} />
       </div>
       {preview && "error" in preview && <p className="composer-indent item-error" role="alert">{preview.error}</p>}
-      {repo && repoStops(repo) && <p className="composer-indent composer-note">{repoStops(repo)} Set it in <Link to="/settings/repos" className="item-link">Settings › Repos</Link> before you start it.</p>}
+      {repo && repoStops(repo) && <p className="composer-indent composer-note">{repoStops(repo)} Set it in <Link to="/settings/repos" className={linkButtonClass({ inline: true })}>Settings › Repos</Link> before you start it.</p>}
       <div className="composer-foot">
         {ask ? (
           <>
@@ -231,11 +232,11 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
           <>
             <span className="composer-note">
               {error ? <span className="item-error" role="alert">{error}</span>
-                : repos?.length === 0 ? <>No enabled repo to file to. Connect or enable one in <Link to="/settings/repos" className="item-link">Settings › Repos</Link>.</>
+                : repos?.length === 0 ? <>No enabled repo to file to. Connect or enable one in <Link to="/settings/repos" className={linkButtonClass({ inline: true })}>Settings › Repos</Link>.</>
                 : FILED_PAUSED}
             </span>
-            <button type="button" className="board-select-all" {...hint("Continue on the full page")} onClick={() => more(false)}>More options ⤢</button>
-            <button type="button" className="board-select-all" onClick={leave}>Cancel</button>
+            <LinkButton {...hint("Continue on the full page")} onClick={() => more(false)}>More options ⤢</LinkButton>
+            <LinkButton onClick={leave}>Cancel</LinkButton>
             {why.note}
             <CreateSplit disabled={!ok} describedBy={why.attrs["aria-describedby"]} onCreate={create} />
           </>

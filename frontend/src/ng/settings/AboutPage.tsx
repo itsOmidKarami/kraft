@@ -10,6 +10,7 @@ import { showToast } from "../ui/Toast";
 import "./settings.css";
 import { installedOlder, olderServer, restartPending } from "../shell/health";
 import { COPIED_THE_COMMAND, COPIED_THE_DIAGNOSTICS, RELEASE_CHANNEL_HINT } from "./sharedWords";
+import { LinkButton } from "../ui/LinkButton";
 
 export interface UpdateState {
   installed: string;
@@ -131,7 +132,7 @@ export function AboutPage() {
             <a className="btn btn-secondary" href={RELEASES} target="_blank" rel="noopener noreferrer">Release notes ↗</a>
             <span className="set-about-gap" />
             <span className="set-hint">{checking ? "checking…" : update?.checked_at ? `checked ${ago(update.checked_at)}` : "not checked yet"}</span>
-            <button type="button" className="set-textbtn" disabled={checking} onClick={() => void load(true, channel)}>Check now</button>
+            <LinkButton inline disabled={checking} onClick={() => void load(true, channel)}>Check now</LinkButton>
           </div>
           <div className="set-about-row" title={RELEASE_CHANNEL_HINT}>
             <span className="set-hint">Channel</span>

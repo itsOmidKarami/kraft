@@ -13,6 +13,7 @@ import { sendBulk } from "./bulk";
 import { Row } from "./Row";
 import "./board.css";
 import "../item/item.css";
+import { LinkButton } from "../ui/LinkButton";
 
 type Sort = "archived" | "created" | "title";
 const SORT_LABEL: Record<Sort, string> = { archived: "Recently archived", created: "Created", title: "Title" };
@@ -115,7 +116,7 @@ export function ArchivedPage() {
             <div className="bulk-bar" role="toolbar" aria-label="Selected work items">
               <span>{checked.size} selected</span>
               <button type="button" className="btn btn-primary" onClick={() => void restoreChecked()}>Restore {checked.size}</button>
-              <button type="button" className="bulk-clear" onClick={() => setChecked(new Set())}>Clear</button>
+              <LinkButton onClick={() => setChecked(new Set())}>Clear</LinkButton>
             </div>
           </div>
         )}

@@ -18,6 +18,7 @@ import { FORGE_LOGIN_HINT, failedFix, failureFacts, headline, keptLine, withCode
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
 import { CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, WAITING_ON_THE_PROVIDER } from "./sharedWords";
+import { LinkButton, linkButtonClass } from "../ui/LinkButton";
 
 type Handlers = {
   reload: () => void;
@@ -77,7 +78,7 @@ export function StateCard({ item, files = null, ...h }: { item: ItemDetail; file
         {card.actions.map((a) => (
           <Button key={a.label} variant={a.primary ? "primary" : "secondary"} disabled={busy} aria-describedby={a.primary && card.note ? `${item.id}-card-note` : undefined} onClick={() => void a.run()}>{a.label}</Button>
         ))}
-        {card.node && <button type="button" className="item-link item-card-open" onClick={() => h.onOpenNode(card.node!)}>Open {nameOf(item.chain_definition.nodes, card.node)} →</button>}
+        {card.node && <LinkButton className="item-card-open" onClick={() => h.onOpenNode(card.node!)}>Open {nameOf(item.chain_definition.nodes, card.node)} →</LinkButton>}
       </div>
       {card.note && <p id={`${item.id}-card-note`} className="item-muted item-card-note">{card.note}</p>}
     </section>
@@ -220,7 +221,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
     const total = h.files?.length ? totals(h.files) : null;
     const took = item.running_time ? elapsed(item.running_time.running_s * 1000) : null;
     const facts: [string, ReactNode][] = [
-      ...(mr ? [["merge request", <><a className="item-link" href={mr.url} target="_blank" rel="noreferrer">!{mr.number}</a>{mrClosed ? " · closed on the forge" : ""}</>] as [string, ReactNode]] : []),
+      ...(mr ? [["merge request", <><LinkButton href={mr.url} target="_blank" rel="noreferrer">!{mr.number}</LinkButton>{mrClosed ? " · closed on the forge" : ""}</>] as [string, ReactNode]] : []),
       ...(h.files?.length ? [["changes", <>{plural(h.files.length, "file")} <span className="item-add">+{total!.add}</span> <span className="item-del">−{total!.del}</span></>] as [string, ReactNode]] : []),
       ...(spent ? [spent] : []),
       ...(took ? [["took", took] as [string, ReactNode]] : []),
@@ -292,7 +293,7 @@ export function ComesAfterCard({ item, reload }: { item: ItemDetail; reload: () 
       <p className="item-card-text">{!waits ? RELEASED.text : blocked ? "Kraft starts it when they complete." : "Started before they complete, it is blocked until they do."}</p>
       <dl className="item-facts item-card-facts">
         {deps.map((d) => (
-          <div key={d.id}><dt>{d.status.replace("_", " ")}</dt><dd><Link className="item-link" to={`/work-items/${encodeURIComponent(d.id)}`}>{d.title}</Link></dd></div>
+          <div key={d.id}><dt>{d.status.replace("_", " ")}</dt><dd><Link className={linkButtonClass()} to={`/work-items/${encodeURIComponent(d.id)}`}>{d.title}</Link></dd></div>
         ))}
       </dl>
       {error && <p className="item-error" role="alert">{error}</p>}
@@ -399,7 +400,7 @@ function Tail({ itemId, session, to }: { itemId: string; session: WorkerSession;
         : !lines ? <p className="item-muted">Reading the log…</p>
         : !last.length ? <p className="item-muted">The log is empty.</p>
         : <ul className="item-tail-lines" aria-label="Last lines of the log">{last.map((t, i) => <li key={i}>{t}</li>)}</ul>}
-      <Link className="item-link" to={to}>Open the full log →</Link>
+      <Link className={linkButtonClass()} to={to}>Open the full log →</Link>
     </div>
   );
 }

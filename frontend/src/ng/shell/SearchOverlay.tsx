@@ -16,6 +16,7 @@ import { SEARCH_MODES, type SearchMode } from "../ui/searchModes";
 import { Tabs } from "../ui/Tabs";
 import { ROUTES } from "./routes";
 import "./search.css";
+import { Select } from "../ui/Select";
 
 type Tab = "all" | "items" | "docs" | "beads";
 type Load = "idle" | "loading" | "ok" | "error";
@@ -296,7 +297,7 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
         </div>
         {(filters || filtersOn > 0) && (
           <div className="ng-search-filters">
-            <label className="ng-search-fchip"><span>source</span><select value={sourceKind} onChange={(e) => setSourceKind(e.target.value)}><option value="">any</option><option value="artifact">artifact</option><option value="session_summary">session summary</option></select></label>
+            <label className="ng-search-fchip"><span>source</span><Select value={sourceKind} onChange={(e) => setSourceKind(e.target.value)}><option value="">any</option><option value="artifact">artifact</option><option value="session_summary">session summary</option></Select></label>
             <label className="ng-search-fchip"><span>kind</span><input value={kind} placeholder="any" size={8} onChange={(e) => setKind(e.target.value)} /></label>
             <span className="ng-search-fnote">Filters narrow Documents only</span>
           </div>

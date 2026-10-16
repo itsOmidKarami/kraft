@@ -21,6 +21,7 @@ import { intervalFromText, PRIORITIES, showMinutes, toMinutes } from "./intake/u
 import "./settings.css";
 import "./intake/intake.css";
 import { SCHEDULED_ITEM, CANNOT_BE_EMPTY } from "./sharedWords";
+import { Select } from "../ui/Select";
 
 const CHECKS_EVERY_MS = 30_000;
 
@@ -248,15 +249,15 @@ function ScheduleRows({ draft, s, repos, chains, changes, problems }: { draft: C
         {problems.filter((p) => p.field === "cron").map((p, n) => <span key={n} className="ink-err" role="alert">{scheduleProblemText(p, s)}</span>)}
       </Row>
       <Row k="repo" changed={changed("repo")}>
-        <select className="ink-select" aria-label="repo" value={s.repo} onChange={(e) => void patch({ repo: e.target.value })}>
+        <Select aria-label="repo" value={s.repo} onChange={(e) => void patch({ repo: e.target.value })}>
           {[...new Set([s.repo, ...repos.map((r) => r.path)])].filter(Boolean).map((p) => <option key={p} value={p}>{repoChoice(p, repos)}</option>)}
-        </select>
+        </Select>
         {problems.filter((p) => p.field === "repo").map((p, n) => <span key={n} className="ink-err" role="alert">{p.message}</span>)}
       </Row>
       <Row k="chain" changed={changed("chain")}>
-        <select className="ink-select" aria-label="chain" value={s.chain} onChange={(e) => void patch({ chain: e.target.value })}>
+        <Select aria-label="chain" value={s.chain} onChange={(e) => void patch({ chain: e.target.value })}>
           {[...new Set([s.chain, ...chains])].map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
+        </Select>
         {problems.filter((p) => p.field === "chain").map((p, n) => <span key={n} className="ink-err" role="alert">{p.message}</span>)}
       </Row>
       {text("description", "description")}
@@ -279,10 +280,10 @@ function CronPicker({ cron, onPick }: { cron: string; onPick: (cron: string) => 
   };
   return (
     <>
-      <select className="ink-select" aria-label="runs" value={custom ? CUSTOM : cron} onChange={(e) => void pick(e.target.value)}>
+      <Select aria-label="runs" value={custom ? CUSTOM : cron} onChange={(e) => void pick(e.target.value)}>
         {CRON_PRESETS.map((p) => <option key={p.cron} value={p.cron}>{p.label}</option>)}
         <option value={CUSTOM}>Custom cron…</option>
-      </select>
+      </Select>
       {custom && <ValueCell label="cron" value={cron} display={cron || "not set"} muted={!cron} onCommit={(t) => cronProblem(t) ?? onPick(t.trim().split(/\s+/).join(" "))} />}
       {error && <span className="ink-err" role="alert">{error}</span>}
       <span className="ink-says">{describeCron(cron)}</span>

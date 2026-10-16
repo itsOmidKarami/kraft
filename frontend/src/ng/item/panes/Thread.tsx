@@ -8,6 +8,7 @@ import { admits } from "../status";
 import type { ItemDetail } from "../useItem";
 import { useEventLog } from "../useEvents";
 import { sendOnModEnter } from "../../keys";
+import { LinkButton } from "../../ui/LinkButton";
 
 type Turn = { thread: number; turn: number; who: string; text: string; at: string; node: string | null; session: string | null };
 
@@ -54,7 +55,7 @@ export function Thread({ item, version, node, upTo, reload, onNode }: { item: It
                 <header className="ip-turn-head">
                   <span className="is-mono">turn {t.turn}{t.node ? ` · ${t.node}` : ""}</span>
                   <span className="item-muted">{ago(t.at)}</span>
-                  {t.node && t.node !== node && <button type="button" className="item-link" onClick={() => onNode(t.node!)}>open node →</button>}
+                  {t.node && t.node !== node && <LinkButton onClick={() => onNode(t.node!)}>open node →</LinkButton>}
                 </header>
                 <p className="ip-turn-who is-mono">{t.who}</p>
                 <p className="ip-turn-text">{t.text}</p>
