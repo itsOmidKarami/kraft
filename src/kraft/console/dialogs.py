@@ -12,20 +12,35 @@ from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
 from textual.content import Content
 from textual.screen import ModalScreen
-from textual.widgets import Button, Static
+from textual.widgets import Button, Input, Static
 
 
-class Confirm(ModalScreen[bool]):
-    """Go on or not (spec §7.8): `question`, then `lines` saying what going
-    on does. Cancel has the focus, so Enter alone never goes on."""
+class Dialog[R](ModalScreen[R]):
+    """A question someone awaits the answer to. The output panel never pops
+    one (`KraftConsole._show_panel`): a pop drops its result callback, and
+    the decision with it."""
 
     BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "cancel", "cancel")]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._answered = False
+
+    def _answer(self, value: R) -> None:
+        # Esc and a button before the pop completes: the first answer stands.
+        if not self._answered:
+            self._answered = True
+            self.dismiss(value)
+
+
+class Confirm(Dialog[bool]):
+    """Go on or not (spec §7.8): `question`, then `lines` saying what going
+    on does. Cancel has the focus, so Enter alone never goes on."""
 
     def __init__(self, question: str, lines: Sequence[str]) -> None:
         super().__init__()
         self.question = question
         self.lines = lines
-        self._answered = False
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm"):
@@ -46,8 +61,34 @@ class Confirm(ModalScreen[bool]):
     def _pressed(self, event: Button.Pressed) -> None:
         self._answer(event.button.id == "yes")
 
-    def _answer(self, go_on: bool) -> None:
-        # Esc and a button before the pop completes: the first answer stands.
-        if not self._answered:
-            self._answered = True
-            self.dismiss(go_on)
+
+class Note(Dialog[str | None]):
+    """A line for the server (spec §7.2): a reject's note, a steer, the answer
+    to an agent's question. Enter sends it; an empty one only when it is not
+    `required` (sent as ""). Esc answers None: nothing is sent."""
+
+    def __init__(self, question: str, lines: Sequence[str] = (), *, required: bool) -> None:
+        super().__init__()
+        self.question = question
+        self.lines = lines
+        self.required = required
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="note"):
+            yield Static(Content(self.question), id="note-question")
+            if self.lines:
+                yield Static(Content("\n".join(self.lines)), id="note-lines")
+            hint = "Enter sends it · Esc sends nothing"
+            yield Input(placeholder=hint if self.required else "optional · " + hint)
+
+    def on_mount(self) -> None:
+        self.query_one(Input).focus()
+
+    def action_cancel(self) -> None:
+        self._answer(None)
+
+    @on(Input.Submitted)
+    def _sent(self, event: Input.Submitted) -> None:
+        text = event.value.strip()
+        if text or not self.required:
+            self._answer(text)

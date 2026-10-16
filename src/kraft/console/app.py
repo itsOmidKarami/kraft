@@ -26,7 +26,7 @@ from textual.widgets import Button, ContentSwitcher, Footer, HelpPanel, Input, S
 
 from kraft import answers, client, config, update
 from kraft.console import runner, theme, words
-from kraft.console.dialogs import Confirm
+from kraft.console.dialogs import Confirm, Dialog
 from kraft.console.live import Link, Live
 from kraft.console.output import OutputPanel
 from kraft.console.prompt import Prompt
@@ -235,14 +235,14 @@ class KraftConsole(App):
         done.set_result(code)
 
     async def _show_panel(self) -> None:
-        """The panel on top, once: Ctrl+P can open over it. A confirm is never
-        popped (that drops its result callback, and the pending decision with
+        """The panel on top, once: Ctrl+P can open over it. A dialog is never
+        popped (that drops its result callback, and the pending answer with
         it): the panel opens above it instead, since a command needs a mounted
-        panel to write to, and Esc then shows the confirm again."""
+        panel to write to, and Esc then shows the dialog again."""
         panel = self.get_screen("output", OutputPanel)
         if panel not in self.screen_stack:
             await self.push_screen(panel)
-        while self.screen is not panel and not isinstance(self.screen, Confirm):
+        while self.screen is not panel and not isinstance(self.screen, Dialog):
             await self.pop_screen()
 
     def stop_command(self) -> None:

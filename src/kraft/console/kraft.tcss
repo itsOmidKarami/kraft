@@ -169,11 +169,11 @@ OutputPanel {
     color: $kraft-muted;
 }
 
-Confirm {
+Confirm, Note {
     align: center middle;
 }
 
-#confirm {
+#confirm, #note {
     width: 72;
     max-width: 100%;
     height: auto;
@@ -182,9 +182,13 @@ Confirm {
     border: solid $kraft-line;
 }
 
-#listing {
+#listing, #note-lines {
     margin: 1 0;
     color: $kraft-muted;
+}
+
+#note Input {
+    margin-top: 1;
 }
 
 #confirm Horizontal {

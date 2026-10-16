@@ -18,7 +18,7 @@ from kraft import cli, client
 from kraft.console import app as console_app
 from kraft.console import live
 from kraft.console.app import TABS, KraftConsole
-from kraft.console.dialogs import Confirm
+from kraft.console.dialogs import Confirm, Note
 from kraft.console.live import Link
 from kraft.console.prompt import Prompt
 from kraft.console.screens import VIEWS, View
@@ -569,29 +569,46 @@ def test_start_server_takes_the_focus_only_from_the_view(console, steps, on_inpu
     assert console.run(scenario) == ends_on
 
 
+#: Each dialog that hands back an answer: how it is asked, its class, the
+#: keys that answer it, and that answer.
+ASKS = {
+    "confirm": (lambda app: app.confirm("kraft admin stop"), Confirm, ["shift+tab", "enter"], True),
+    "note": (
+        lambda app: app.push_screen_wait(Note("Reject spec_approval", required=True)),
+        Note,
+        ["w", "h", "y", "enter"],
+        "why",
+    ),
+}
+
+
+@pytest.mark.parametrize("dialog", list(ASKS))
 @pytest.mark.parametrize("panel_open_first", [True, False], ids=["panel-beneath", "panel-new"])
-def test_a_confirm_survives_the_output_panel_being_asked_for(console, kraft_is, panel_open_first):
+def test_a_dialog_survives_the_output_panel_being_asked_for(
+    console, kraft_is, panel_open_first, dialog
+):
     """Popping a modal drops its result callback: Ctrl+O and a new command must
-    leave an open confirm to answer."""
+    leave an open confirm or note to answer."""
     kraft_is("print('x')")
+    ask, kind, keys, answer = ASKS[dialog]
 
     async def scenario(app, pilot):
         # The panel already open beneath it: the case a pop loop would walk through.
         if panel_open_first:
             await pilot.press("ctrl+o")
             await pilot.pause()
-        asked = app.run_worker(app.confirm("kraft admin stop"))
-        await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+        asked = app.run_worker(ask(app))
+        await console.until(pilot, lambda: isinstance(app.screen, kind))
         await pilot.press("ctrl+o")
         async with asyncio.timeout(5):
             await app.run_command(["view", "list"])
         await pilot.pause()
-        if not isinstance(app.screen, Confirm):  # the panel opened above it: Esc closes it
+        if not isinstance(app.screen, kind):  # the panel opened above it: Esc closes it
             await pilot.press("escape")
             await pilot.pause()
-        still = isinstance(app.screen, Confirm)
-        await pilot.press("shift+tab", "enter")
+        still = isinstance(app.screen, kind)
+        await pilot.press(*keys)
         await console.until(pilot, lambda: asked.is_finished)
         return still, asked.result
 
-    assert console.run(scenario) == (True, True)
+    assert console.run(scenario) == (True, answer)
