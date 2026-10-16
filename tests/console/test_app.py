@@ -289,18 +289,19 @@ def test_the_keys_move_between_views(console, start, keys, view, running):
 
 
 @pytest.mark.parametrize(
-    ("view", "close", "here"),
+    ("view", "close", "here", "shut"),
     [
-        ("board", "question_mark", ["f filter", "v peek", "↓ j down"]),
-        ("server", "escape", ["d doctor", "R restart", "f filter", "↓ j down"]),
-        ("repos", "question_mark", ["c connect", "↓ j down"]),
+        ("board", "question_mark", ["f filter", "v peek", "↓ j down"], ["a approve", "r reject"]),
+        ("server", "escape", ["d doctor", "R restart", "f filter", "↓ j down"], []),
+        ("repos", "question_mark", ["c connect", "↓ j down"], ["d disconnect"]),
     ],
     ids=["board-closes-on-?", "server-closes-on-esc", "repos"],
 )
-def test_question_mark_lists_this_screens_keys_and_kraft_s_own(console, view, close, here):
+def test_question_mark_lists_this_screens_keys_and_kraft_s_own(console, view, close, here, shut):
     """`?` is Kraft's dialog, not Textual's panel: the shown view's keys that
-    act now, then the frame's, in the footer's words, with none of Textual's
-    own (focus next, copy text). It squeezes nothing, and `?` or Esc closes it."""
+    act now (none to approve on an empty Board), then the frame's, in the
+    footer's words, with none of Textual's own (focus next, copy text). It
+    squeezes nothing, and `?` or Esc closes it."""
 
     async def scenario(app, pilot):
         app.show(view)
@@ -322,6 +323,7 @@ def test_question_mark_lists_this_screens_keys_and_kraft_s_own(console, view, cl
 
     (mine, everywhere), squeezed, still = console.run(scenario)
     assert set(here) <= set(mine)
+    assert not set(shut) & set(mine)
     assert {"^p palette", "? keys", "esc back"} <= set(everywhere)
     assert not any("Focus" in line or "Copy" in line for line in mine + everywhere)
     assert (squeezed, still) == (False, False)

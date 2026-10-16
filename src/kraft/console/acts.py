@@ -13,7 +13,7 @@ from textual.app import App
 from textual.binding import Binding
 
 from kraft import answers, client
-from kraft.console import words
+from kraft.console import moments, words
 from kraft.console.dialogs import Dialog, Note, reject_asks
 from kraft.vocab import ThreadLabel
 
@@ -95,6 +95,7 @@ async def reject(app: App, row: dict, note_dialog: Dialog | None = None) -> None
             note, row.get("pending_gate"), row["id"], **({"node": node} if node else {})
         ),
         answers.item_action(f"rejected {gate} on {{id}}"),
+        decided=True,
     )
 
 
@@ -150,16 +151,20 @@ async def may_steer(app: App, row: dict) -> bool | None:
     return item.get("steerable") is not False
 
 
-async def act(app: App, call, said) -> bool:
+async def act(app: App, call, said, *, decided: bool = False) -> bool:
     """Send one action and toast what the server answered, in the CLI's
-    sentence (`kraft.answers`). A refusal is toasted in the server's words
-    and the board read again (spec §8), which every view hears as a reread.
-    True when the server took it."""
+    sentence (`kraft.answers`); a gate `decided` leads it with the mark
+    (`moments.marked`). A refusal is toasted in the server's words and the
+    board read again (spec §8), which every view hears as a reread. True
+    when the server took it."""
     try:
         result = await call
     except client.ClientError as exc:
         app.notify_refusal(exc)
         app.live.reread()
         return False
-    app.notify(said(result), markup=False)
+    if decided:
+        app.notify(moments.marked(said(result)))
+    else:
+        app.notify(said(result), markup=False)
     return True

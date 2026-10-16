@@ -47,6 +47,18 @@ Screen.-narrow #where {
     display: none;
 }
 
+/* What moved since the console was last closed (moments.since_line): for the
+ * first minute, or until a key. */
+#since {
+    display: none;
+    height: 1;
+    color: $kraft-muted;
+}
+
+Screen.-since #since {
+    display: block;
+}
+
 /* After an update installed another version: until the console restarts. */
 #updated {
     display: none;
@@ -116,6 +128,7 @@ Screen.-tiny > * {
 }
 
 /* Ids outrank the bare `> *`, and `-down` and `-narrow` name ids too. */
+Screen.-tiny #since,
 Screen.-tiny #updated,
 Screen.-tiny #down,
 Screen.-tiny #start,

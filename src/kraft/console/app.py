@@ -11,6 +11,7 @@ import os
 import shlex
 import signal
 import sys
+import time
 from collections.abc import Callable, Iterable, Sequence
 from functools import partial
 from typing import ClassVar
@@ -29,7 +30,7 @@ from textual.theme import Theme
 from textual.widgets import Button, ContentSwitcher, Footer, Input, Static
 
 from kraft import answers, client, config, update
-from kraft.console import runner, theme, words
+from kraft.console import moments, runner, theme, words
 from kraft.console.dialogs import Confirm, Dialog, Keys
 from kraft.console.live import Link, Live
 from kraft.console.output import OutputPanel
@@ -191,11 +192,21 @@ class KraftConsole(App):
         self.live = Live(
             on_event=self._live_event, on_health=self._live_health, on_link=self._live_link
         )
+        #: When the console was last closed (`moments.read_seen`); None the first time.
+        self.seen_at = moments.read_seen()
+        #: Whether the board has been read once: the moments speak only after it.
+        self._read_once = False
+        #: The items a finished toast has named: each is named once.
+        self._toasted: set[str] = set()
+        #: The line the terminal keeps after the console quits; None until it
+        #: quits, and when it never read the board.
+        self.farewell: str | None = None
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="top"):
             yield Static(id="tabs")
             yield Static(id="where")
+        yield Static(id="since")
         yield Static(Content(UPDATED), id="updated")
         yield Static(id="down")
         if starts_here():
@@ -377,6 +388,38 @@ class KraftConsole(App):
         # Quitting with a command running (spec §8): SIGINT, a bounded wait, SIGKILL.
         if self.command is not None:
             await self.command.end()
+        if self._read_once:  # a console that never read the board saw nothing
+            moments.write_seen(time.time())
+            self.farewell = moments.leaving(self._in_scope(self.rows))
+
+    async def on_event(self, event: events.Event) -> None:
+        # The since line goes at the first key, whatever it does.
+        if isinstance(event, events.Key):
+            self._since_off()
+        await super().on_event(event)
+
+    def _in_scope(self, rows: list[dict]) -> list[dict]:
+        """The rows the Board shows: in its repo, archived ones left out."""
+        return [
+            row
+            for row in rows
+            if self.repo in (None, row.get("repo")) and row.get("display_status") != "archived"
+        ]
+
+    def _since_on(self) -> None:
+        """Opening (D1): after the first read, if the console was here before,
+        what moved meanwhile, for `SINCE_S` or until a key."""
+        if self.seen_at is not None:
+            self.default_screen.add_class("-since")
+            self.set_timer(moments.SINCE_S, self._since_off)
+
+    def _since_off(self) -> None:
+        self.default_screen.remove_class("-since")
+
+    def _draw_since(self) -> None:
+        if self.seen_at is not None and self.default_screen.has_class("-since"):
+            line = moments.since_line(self._in_scope(self.rows), self.seen_at, time.time())
+            self.query_one("#since", Static).update(Content.styled(line, "$kraft-muted"))
 
     def action_prompt(self) -> None:
         prompt = self.query_one(Prompt)
@@ -493,7 +536,18 @@ class KraftConsole(App):
         self._draw_top(width)
 
     def _live_event(self, rows: list[dict], events: list[dict]) -> None:
-        self.rows = rows
+        before, first = self.rows, not self._read_once
+        self.rows, self._read_once = rows, True
+        if first:
+            self._since_on()
+        if done := [
+            row
+            for row in self._in_scope(moments.finished(before, rows))
+            if row["id"] not in self._toasted
+        ]:
+            # Work finishing (D3): never on the first read, whose done items were done before.
+            self._toasted |= {row["id"] for row in done}
+            self.notify(moments.finished_toast(done, time.time()))
         self._draw_top()
         for view in self.query(View):
             view.rows_changed(rows, events)
@@ -576,6 +630,7 @@ class KraftConsole(App):
         self.run_worker(self.check_update, name="update")
 
     def _draw_top(self, width: int | None = None) -> None:
+        self._draw_since()
         live = self.link is Link.LIVE
         tabs: list[str | tuple[str, str]] = []
         for name, count in self._tabs():
@@ -639,4 +694,7 @@ def main() -> None:
             raise
     app = KraftConsole()
     app.run()
+    if not app.return_code and app.farewell:
+        # Leaving (D4): one plain line stays in the terminal, never on an error.
+        print(app.farewell)
     raise SystemExit(app.return_code or 0)

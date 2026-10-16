@@ -58,6 +58,8 @@ SKIP = "A note for the record, or Enter for none."
 ESCALATE = "What the agent should look into: it gets the item's stop and this."
 REASON = "Why: the reason goes in the run log."
 RAISE = "The new cap in dollars, or none for no cap. It must be above what the item has spent."
+#: How long the node an approve moved the item to stays lit.
+LIT_S = 1.5
 #: A failed item's Overview, after its keys: where to read what happened.
 LOG_POINTER = "The Log tab holds the session it failed in."
 #: A chain node's mark in the Overview's list, by its state.
@@ -160,6 +162,10 @@ class Item(View):
         self.more = False
         #: The session the Log shows; None picks as `kraft view logs -f` does.
         self.session_id: str | None = None
+        #: `(id, gate)` just approved, until a read shows the item past it.
+        self._approved: tuple[str, str] | None = None
+        #: The chain's new place drawn lit, for `LIT_S` after that read.
+        self._lit = False
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="item-top"):
@@ -196,7 +202,7 @@ class Item(View):
         for group in ("read", "tab", "older", "log"):
             self.workers.cancel_group(self, group)
         self.work_item_id, self.item, self._key = work_item_id, None, None
-        self._dead = False
+        self._dead, self._approved = False, None
         # Where it was opened from: the top view showing, never a guess.
         from kraft.console.screens import VIEWS  # defined after this module loads
 
@@ -292,6 +298,9 @@ class Item(View):
             return
         self.item = item
         self._key = (item.get("updated_at"), tuple(item.get("actions") or ()))
+        if self._approved and self._approved != (item["id"], item.get("pending_gate")):
+            self._approved = None
+            self._light()
         self._draw_head(item)
         try:
             await self._overview(item)
@@ -352,7 +361,20 @@ class Item(View):
         # The frame's width: this view fills it, and may not be laid out yet.
         if self.item is not None:
             marks = words.chain_marks(self.item)
-            self.query_one("#item-chain", Static).update(chain_line(marks, self.app.size.width - 2))
+            line = chain_line(marks, self.app.size.width - 2, lit=self._lit)
+            self.query_one("#item-chain", Static).update(line)
+
+    def _light(self) -> None:
+        """Deciding (D2): the node an approve moved the item to, in the accent
+        for a moment; one highlight, drawn with the read that shows it."""
+        self._lit = True
+        self.query_one("#item-chain").add_class("-lit")
+        self.set_timer(LIT_S, self._unlight)
+
+    def _unlight(self) -> None:
+        self._lit = False
+        self.query_one("#item-chain").remove_class("-lit")
+        self._draw_chain()
 
     def on_resize(self) -> None:
         self._draw_chain()
@@ -636,11 +658,14 @@ class Item(View):
 
     async def _approve(self, item: dict, digest: str | None) -> None:
         gate = item["pending_gate"]
-        await acts.act(
+        if await acts.act(
             self.app,
             client.approve_gate(gate, item["id"], digest),
             answers.item_action(f"approved {gate} on {{id}}"),
-        )
+            decided=True,
+        ):
+            # The read that shows the item past this gate lights where it went.
+            self._approved = (item["id"], gate)
 
     def action_reject(self) -> None:
         if item := self.item:

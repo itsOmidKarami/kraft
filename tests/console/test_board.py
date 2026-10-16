@@ -125,16 +125,23 @@ def test_amber_marks_only_what_needs_you(row, bar):
         (
             [RUNNING],
             [],
-            ["NEEDS YOU 0", "Nothing needs you", "RUNNING 1", "k7f2e9a0"]
+            ["NEEDS YOU 0", "Nothing needs you. 1 running on their own.", "RUNNING 1", "k7f2e9a0"]
             + ["NOT STARTED 0", "DONE 0"],
+        ),
+        (
+            [FILED],
+            [],
+            ["NEEDS YOU 0", "Nothing needs you, and nothing is running.", "RUNNING 0"]
+            + ["NOT STARTED 1", "n0n0n0n0", "DONE 0"],
         ),
         ([RUNNING], ["f", *"zzz"], ["nothing here for this filter"]),
     ],
-    ids=["nothing-filed", "nothing-needs-you", "nothing-matches"],
+    ids=["nothing-filed", "nothing-needs-you", "nothing-runs-either", "nothing-matches"],
 )
 def test_an_empty_board_says_why(board, rows, keys, lines):
-    """Nothing filed says how to file; nothing needing you is said under
-    Needs you; a filter that matches nothing says so."""
+    """Nothing filed says how to file; nothing needing you is one calm line
+    under Needs you, saying what runs without you (D5, the quit line's own
+    sentence); a filter that matches nothing says so."""
 
     async def scenario(app, pilot):
         await _settled(board(rows), app, pilot)
@@ -255,7 +262,7 @@ def test_a_refresh_leaves_the_reader_where_they_scrolled(board):
 
 def test_the_tail_is_amber_only_where_it_needs_you(board):
     """Spec §5.2: a Needs-you tail takes its bar's colour, the rest are muted;
-    "Nothing needs you" is the ok colour."""
+    "Nothing needs you" is muted too: an absence is not the loudest line."""
     now = NOW
 
     def style_of(row, text):
@@ -273,7 +280,10 @@ def test_the_tail_is_amber_only_where_it_needs_you(board):
         [span] = option.prompt.spans
         return option.prompt.plain, str(span.style)
 
-    assert board([RUNNING]).run(scenario) == ("Nothing needs you", "$success")
+    assert board([RUNNING]).run(scenario) == (
+        "Nothing needs you. 1 running on their own.",
+        "$kraft-muted",
+    )
 
 
 def test_enter_is_offered_only_where_it_does_something(board):

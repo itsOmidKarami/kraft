@@ -20,7 +20,7 @@ from textual.widgets import Input, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
 
 from kraft import client, logs
-from kraft.console import acts, tail, words
+from kraft.console import acts, moments, tail, words
 from kraft.console.screens import View
 from kraft.console.screens.server import log_line
 
@@ -99,11 +99,11 @@ def row_line(row: dict, width: int, now: float, *, everywhere: bool, narrow: boo
     return Content.assemble(*parts)
 
 
-def chain_line(marks: list[dict], width: int) -> Content:
+def chain_line(marks: list[dict], width: int, *, lit: bool = False) -> Content:
     """The chain as a window around where the item stands (spec §6): what fits
     on either side, `+N …` and `… +N` counting what is hidden. An ended chain
     shows its end, one not started its start. The item's place is `●` in the
-    accent (spec §5.2); done nodes are faint."""
+    accent (spec §5.2), on it when `lit` (just moved there); done nodes are faint."""
     if not marks:
         return Content("")
     names = [m["node"] + (" ●" if m["state"] in ("current", "hot") else "") for m in marks]
@@ -127,7 +127,8 @@ def chain_line(marks: list[dict], width: int) -> Content:
             hi, grown = hi + 1, True
         if lo > 0 and size(lo - 1, hi) <= width:
             lo, grown = lo - 1, True
-    style = {"done": "$kraft-faint", "current": "bold $primary", "hot": "bold $primary", "todo": ""}
+    here = "bold $background on $primary" if lit else "bold $primary"
+    style = {"done": "$kraft-faint", "current": here, "hot": here, "todo": ""}
     parts: list[str | tuple[str, str]] = [(f"+{lo} … ", "$kraft-faint")] if lo else []
     for k in range(lo, hi + 1):
         parts += [(" → ", "$kraft-faint")] if k > lo else []
@@ -265,9 +266,9 @@ class Board(View):
             )
             options.append(Option(heading, id=f"group:{key}"))
             if key == "needs" and not members:
-                options.append(
-                    Option(Content.styled("Nothing needs you", "$success"), disabled=True)
-                )
+                # One calm line, the quit line's own sentence (moments.at_rest).
+                calm = moments.empty_needs_you(len(grouped["running"]))
+                options.append(Option(Content.styled(calm, "$kraft-muted"), disabled=True))
             if not folded:
                 everywhere = self.app.repo is None
                 options += [
