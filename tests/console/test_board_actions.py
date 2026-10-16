@@ -3,10 +3,14 @@ dialogs, to the item they opened for, and the server's own sentence back."""
 
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
 import pytest
 from support.console_board import FAILED, GATE, PAUSED, QUESTION, RUNNING, _detail, _settled
 
 from kraft import client
+from kraft.console import acts
 from kraft.console.dialogs import Note
 from kraft.console.screens import board as board_view
 
@@ -299,3 +303,36 @@ def test_an_action_is_not_sent_when_the_item_cannot_be_read(board, monkeypatch, 
         [client.reason_of(str(client.status_error(404, "no such work item [/]")))],
         False,
     )
+
+
+@pytest.mark.parametrize(
+    ("row", "offered"),
+    [(GATE, True), (GATE | {"actions": ["reject"]}, False), (RUNNING, False)],
+    ids=["approve-open", "must-fix-keeps-it-shut", "no-gate"],
+)
+def test_a_is_offered_on_the_board_only_where_approve_is_open(board, row, offered):
+    """`a` opens the Overview, so it is in the footer only where the server
+    lists `approve` (spec §6): the shared `DOORS` hold it to that."""
+
+    async def scenario(app, pilot):
+        await _settled(board([row]), app, pilot)
+        return app.view.check_action("approve", ())
+
+    assert board([row]).run(scenario) is offered
+
+
+def test_a_blank_note_with_a_node_sends_nothing(monkeypatch):
+    """The Item's reject dialog answers `(note, node)`: a blank note is no
+    answer, whatever node was picked."""
+    sent: list = []
+
+    async def reject_gate(*args, **kwargs):
+        sent.append(args)
+
+    async def push_screen_wait(dialog):
+        return ("", "spec")
+
+    monkeypatch.setattr(client, "reject_gate", reject_gate)
+    app = SimpleNamespace(push_screen_wait=push_screen_wait)
+    asyncio.run(acts.reject(app, GATE, note_dialog=object()))
+    assert sent == []

@@ -13,7 +13,7 @@ from textual.app import App
 
 from kraft import answers, client
 from kraft.console import words
-from kraft.console.dialogs import Note
+from kraft.console.dialogs import Dialog, Note
 from kraft.vocab import ThreadLabel
 
 #: The keys that act on an item, and the doors (`actions`) that open each: a
@@ -43,7 +43,7 @@ def opens(action: str, row: dict | None) -> bool:
     return bool(row) and any(door in (row.get("actions") or []) for door in DOORS[action])
 
 
-async def reject(app: App, row: dict, note_dialog: Note | None = None) -> None:
+async def reject(app: App, row: dict, note_dialog: Dialog | None = None) -> None:
     """Reject the pending gate with a required note. `note_dialog` asks
     instead of the plain note (the Item's, which also picks the node)."""
     gate = row.get("pending_gate") or "the gate"
@@ -56,6 +56,8 @@ async def reject(app: App, row: dict, note_dialog: Note | None = None) -> None:
     if not answer:
         return
     note, node = answer if isinstance(answer, tuple) else (answer, None)
+    if not note:  # a blank note is no answer, whatever node came with it
+        return
     await act(
         app,
         client.reject_gate(

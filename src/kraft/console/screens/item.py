@@ -83,6 +83,7 @@ class Item(View):
         #: The detail read (`get_work_item(full=True)`); None until it answers.
         self.item: dict | None = None
         self.tab = TABS[0][0]
+        self.crumb = "Board"
         #: The gate whose document the Overview shows, and that document's
         #: digest: approve sends the digest of what was read (spec §7.2).
         self.read_gate: str | None = None
@@ -114,10 +115,14 @@ class Item(View):
     def open(self, work_item_id: str) -> None:
         """Show `work_item_id`, on the Overview, read afresh."""
         self.work_item_id, self.item, self._key = work_item_id, None, None
+        # Where it was opened from: the top view showing, never a guess.
+        from kraft.console.screens import VIEWS  # defined after this module loads
+
+        self.crumb = VIEWS[self.app._last_top].label
         self.read_gate = self.digest = None
         self.tab = TABS[0][0]
         self.query_one("#item-gone").display = False
-        self.query_one("#item-title", Static).update(Content(f"Board › {work_item_id[:8]}"))
+        self.query_one("#item-title", Static).update(Content(f"{self.crumb} › {work_item_id[:8]}"))
         for part in ("#item-where", "#item-status", "#item-spent", "#item-chain"):
             self.query_one(part, Static).update("")
         self.query_one("#item-banner").display = False
@@ -157,7 +162,9 @@ class Item(View):
         try:
             await self._overview(item)
         except client.ClientError as exc:
-            self.query_one("#overview", RichLog).write(client.reason_of(str(exc)))
+            log = self.query_one("#overview", RichLog)
+            log.clear()  # one copy of the error, not one per failed read
+            log.write(client.reason_of(str(exc)))
         self.refresh_bindings()
 
     def _gone(self) -> None:
@@ -171,7 +178,7 @@ class Item(View):
         self.query_one("#item-panes").display = True
         title = " ".join((item.get("title") or "").split())
         self.query_one("#item-title", Static).update(
-            Content.assemble(("Board › ", "$kraft-muted"), f"{item['id'][:8]}  ", title)
+            Content.assemble((f"{self.crumb} › ", "$kraft-muted"), f"{item['id'][:8]}  ", title)
         )
         repo = os.path.basename((item.get("repo") or "").rstrip("/"))
         self.query_one("#item-where", Static).update(
@@ -220,7 +227,10 @@ class Item(View):
         """With a gate pending, its document, whole and scrollable, and why
         approve waits; else where the item stands. Then every node."""
         log = self.query_one("#overview", RichLog)
-        scrolled = log.scroll_y
+        # Nothing is read until the document answers: approve stays shut for
+        # the length of the reads, and never offers the last version's digest.
+        self.read_gate = self.digest = None
+        self.refresh_bindings()
         lines: list[str | Text] = []
         stop = item.get("stop") or {}
         gate = item.get("pending_gate")
@@ -264,8 +274,8 @@ class Item(View):
         for line in lines:
             # From the top: a document opens at its start, not its end.
             log.write(line, scroll_end=False)
-        # A live read redraws it: the reader stays where they were.
-        log.scroll_to(y=scrolled, animate=False, immediate=True)
+        # A live read redraws it; a clear keeps the log's scroll, and the
+        # reader stays where they were (pinned by a test).
 
     def _pane(self) -> RichLog:
         return self.query_one(f"#{self.tab}", RichLog)

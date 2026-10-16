@@ -3,6 +3,8 @@ the Overview, and the keys that act on it."""
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from support.console_board import CHAIN, FAILED, GATE, RUNNING, _detail, _settled, _text
 from textual.widgets import RichLog
@@ -59,6 +61,12 @@ def _serve(monkeypatch, detail, *, document=DOC, threads=(), calls=None):
             return {"id": detail["id"], "node_id": "implement"}
 
         monkeypatch.setattr(client, name, call)
+
+
+async def _read_done(console, app, pilot) -> None:
+    """The Item's read workers have all finished (the app's own stream worker
+    never does, so not `workers.wait_for_complete`)."""
+    await console.until(pilot, lambda: all(w.is_finished for w in app.workers if w.group == "read"))
 
 
 async def _opened(console, app, pilot, work_item_id: str) -> None:
@@ -307,3 +315,101 @@ def test_the_item_reads_again_only_when_shown_and_its_row_changed(board, monkeyp
         return quiet, hidden
 
     assert console.run(scenario) == (1, 1)
+
+
+@pytest.mark.parametrize("again", [False, True], ids=["first-read", "same-gate-pends-again"])
+def test_approve_waits_for_the_document_it_would_approve(board, monkeypatch, again):
+    """Review Focus 1: `a` is shut, and sends nothing, while the document is
+    being read, including when the same gate pends again with a new version
+    (the last version's digest is never offered); once read it sends the digest
+    of what is on screen."""
+    calls: list[tuple] = []
+    _serve(monkeypatch, _detail(GATE), calls=calls)
+    console = board([GATE])
+
+    async def scenario(app, pilot):
+        asked, release = asyncio.Event(), asyncio.Event()
+        if again:
+            await _opened(console, app, pilot, GATE["id"])
+
+        async def artifact(work_item_id=None):
+            asked.set()
+            await release.wait()
+            return DOC | {"digest": "new"}
+
+        monkeypatch.setattr(client, "artifact", artifact)
+        if again:
+            app.view.rows_changed([], [])
+        else:
+            app.open_item(GATE["id"])
+        await console.until(pilot, asked.is_set)
+        held = app.view.check_action("approve", ())
+        await pilot.press("a")
+        await pilot.pause()
+        sent_while_held = list(calls)
+        release.set()
+        await console.until(pilot, lambda: app.view.digest == "new")
+        opened = app.view.check_action("approve", ())
+        await pilot.press("a")
+        await console.until(pilot, lambda: calls)
+        return held, sent_while_held, opened, calls
+
+    held, early, opened, sent = console.run(scenario)
+    assert (held, early, opened) == (False, [], True)
+    assert sent == [("approve_gate", ("spec_approval", "a91c03fe", "new"), {})]
+
+
+def test_a_failed_live_read_leaves_the_error_once(board, monkeypatch):
+    """A read that fails after the item answered replaces what the Overview
+    shows with the error, again and again, never under the last one."""
+    _serve(monkeypatch, _detail(GATE), calls=[])
+    console = board([GATE])
+
+    async def scenario(app, pilot):
+        async def artifact(work_item_id=None):
+            raise client.status_error(500, "boom [/]")
+
+        monkeypatch.setattr(client, "artifact", artifact)
+        app.open_item(GATE["id"])
+        await console.until(pilot, lambda: app.view.item is not None and _overview(app))
+        for _ in range(2):
+            await _read_done(console, app, pilot)
+            app.view.rows_changed([], [])
+        await _read_done(console, app, pilot)
+        return _overview(app)
+
+    assert console.run(scenario) == [client.reason_of(str(client.status_error(500, "boom [/]")))]
+
+
+def test_a_live_read_leaves_the_reader_where_they_scrolled(board, monkeypatch):
+    """The Overview is drawn again by every live read; a reader halfway down
+    the document stays there."""
+    _serve(monkeypatch, _detail(GATE), calls=[])
+    console = board([GATE])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, GATE["id"])
+        log = app.query_one("#overview", RichLog)
+        await pilot.press("pagedown")
+        before = log.scroll_y
+        app.view.rows_changed([], [])
+        await _read_done(console, app, pilot)
+        await pilot.pause()
+        return before > 0, log.scroll_y == before
+
+    assert console.run(scenario) == (True, True)
+
+
+def test_the_title_names_the_view_the_item_was_opened_from(board, monkeypatch):
+    """Ctrl+P opens an item from whichever view shows; the crumb says which."""
+    _serve(monkeypatch, _detail(RUNNING), calls=[])
+    console = board([RUNNING])
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        app.show("server")
+        app.open_item(RUNNING["id"])
+        await console.until(pilot, lambda: _overview(app))
+        return _text(app, "#item-title")
+
+    assert console.run(scenario) == "Server › k7f2e9a0  Docs per major"

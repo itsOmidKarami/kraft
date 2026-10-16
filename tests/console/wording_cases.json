@@ -371,6 +371,11 @@
       "banner": { "kind": "limit", "node": "plan", "text": "Budget_usd reached.", "way": "" }
     },
     {
+      "name": "policy-limit-without-retry-listed",
+      "item": { "display_status": "needs_you", "actions": ["escalate"], "stop": { "kind": "budget", "node": "plan", "reason": "budget_usd reached", "limit": { "path": "", "key": "budget_usd", "value": 5, "maximum": null } } },
+      "banner": { "kind": "limit", "node": "plan", "text": "Budget_usd reached.", "way": "Kraft takes no raise for it right now." }
+    },
+    {
       "name": "cap-without-a-reason",
       "item": { "display_status": "needs_you", "stop": { "kind": "cap", "node": "verification", "reason": null } },
       "banner": { "kind": "limit", "node": "verification", "text": "A limit was reached.", "way": "" }
@@ -394,6 +399,11 @@
       "name": "failed-in-the-repo",
       "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "implement", "reason": "the worktree could not be made" } },
       "banner": { "kind": "failed", "node": "implement", "text": "the worktree could not be made", "way": "Check the repo settings." }
+    },
+    {
+      "name": "a-stop-on-a-paused-item",
+      "item": { "display_status": "paused", "stop": { "kind": "stuck", "node": "verification", "reason": "the fix loop made no progress in 3 rounds" } },
+      "banner": null
     },
     {
       "name": "stuck",
