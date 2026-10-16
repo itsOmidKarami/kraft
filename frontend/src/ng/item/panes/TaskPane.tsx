@@ -3,7 +3,7 @@ import type { TaskProgress, WorkerSession, WorkItemDocument } from "../../../typ
 import { allDone } from "../../board/rowText";
 import { FileText } from "../../icons";
 import { Menu, type MenuItem } from "../../ui/Menu";
-import { isSessionDoc, lookWord, sessionLook, statusWords } from "../nodeGraph";
+import { isSessionDoc, lookWord, NO_DOCUMENTS, sessionLook, statusWords } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 
 /** The attempt every tab shows, as a menu in the pane's subtitle (Decisions §6 Attempts): a pill
@@ -107,7 +107,7 @@ export function TaskOverview({ path, s, docs, onDoc, progress, running }: { path
             <li key={d.document_id}><button type="button" className="ip-row" onClick={() => onDoc(d)}><FileText size={12} aria-hidden /> <span>{d.title}</span><span className="ip-row-meta">{d.kind}</span></button></li>
           ))}
         </ul>
-      ) : <p className="item-muted">This attempt wrote no documents.</p>}
+      ) : <p className="item-muted">{NO_DOCUMENTS}</p>}
     </>
   );
 }
