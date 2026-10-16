@@ -135,7 +135,7 @@ def test_m_lists_only_the_doors_the_server_opens(board, monkeypatch, actions, en
             {"id": "m03d77b1"},
             ("moot [/]", "m03d77b1"),
             "cancelled m03d77b1; its worktree and branch stay "
-            "(kraft item abandon m03d77b1 --yes deletes them)",
+            "(kraft item abandon m03d77b1 --reason '...' --yes deletes them)",
         ),
         ("complete", ["enter", "escape"], "complete", None, None, None),
     ],

@@ -171,6 +171,15 @@ export class Tries {
     if (ticked || moved) for (const f of this.listeners) f(moved);
   };
 
+  /**
+   * The mock's `onEvent` listener: an event it appended, from an action or from live motion moving an item on
+   * its own. It ticks nothing (motion is not the visitor, and an action's own request already ticked), but an
+   * item may stand somewhere else now, so a Show me may go elsewhere.
+   */
+  readonly moved = () => {
+    for (const f of this.listeners) f(true);
+  };
+
   onChange(f: (moved: boolean) => void): () => void {
     this.listeners.add(f);
     return () => this.listeners.delete(f);

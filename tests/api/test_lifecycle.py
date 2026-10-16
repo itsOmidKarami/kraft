@@ -392,7 +392,7 @@ def test_abandon_sets_terminal_status_and_removes_the_worktree(client, repo):
     assert worktree.is_dir(), "fixture never made a worktree; the test would prove nothing"
     _set_status(wid, "paused")
 
-    r = client.post(f"/api/work-items/{wid}/abandon")
+    r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "abandoned"
@@ -408,7 +408,7 @@ def test_abandon_reclaims_a_cancelled_items_worktree_and_branch(client, repo):
     worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
     client.post(f"/api/work-items/{wid}/cancel", json={"reason": "later"})
 
-    r = client.post(f"/api/work-items/{wid}/abandon")
+    r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
     assert r.json() == {"id": wid, "status": "abandoned", "worktree_removed": True}
     assert not worktree.exists()
@@ -436,7 +436,7 @@ def test_abandon_reclaims_the_attachment_storage(client, repo):
     _poll_events(client, wid, "gate_requested")
     _set_status(wid, "paused")
 
-    client.post(f"/api/work-items/{wid}/abandon")
+    client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
     assert not stored.exists()
 
@@ -456,7 +456,7 @@ def test_abandon_reclaims_what_a_sandbox_kept_beside_the_worktree(client, repo):
     home = run_dirs.base / "sandbox-home" / wid
     home.mkdir(parents=True)
 
-    client.post(f"/api/work-items/{wid}/abandon")
+    client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
     assert not store.shadow.exists()
     assert not home.exists()
@@ -468,7 +468,7 @@ def test_abandon_refuses_an_active_item(client, repo):
     _poll_events(client, wid, "gate_requested")
     _set_status(wid, "active")
 
-    r = client.post(f"/api/work-items/{wid}/abandon")
+    r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
     assert r.status_code == 409, r.text
     assert "active" in r.json()["detail"]
@@ -485,7 +485,7 @@ def test_abandon_kills_a_process_left_running_from_the_worktree(client, repo):
     try:
         _set_status(wid, "paused")
 
-        r = client.post(f"/api/work-items/{wid}/abandon")
+        r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
         assert r.status_code == 200, r.text
         for _ in range(50):

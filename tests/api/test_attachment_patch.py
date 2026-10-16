@@ -109,6 +109,31 @@ def test_an_attachment_patch_keeps_the_nodes_skipped_at_intake(client, repo):
 
 
 @pytest.mark.parametrize(
+    ("attach", "to"),
+    [(False, "default"), (True, "default"), (False, "quick-task")],
+    ids=["same-chain", "same-chain-with-a-spec", "chain-without-the-node"],
+)
+def test_a_chain_switch_keeps_the_nodes_skipped_at_intake_that_the_new_chain_has(
+    client, repo, attach, to
+):
+    """Intake stores no skip list, so a switch used to materialize with none and
+    put every skipped node back. A skip whose node the new chain lacks has
+    nothing to apply, and the switch still goes through."""
+    attachments = []
+    if attach:
+        attachments = [{"kind": "spec", "path": _doc(repo, "specs/s.md", "# spec\n")}]
+    wid = _file(client, repo, skip_nodes=["local_review"], attachments=attachments)
+    assert "local_review" not in _nodes(_item(client, wid))
+
+    r = client.patch(f"/api/work-items/{wid}", json={"chain_template": to})
+
+    assert r.status_code == 200, r.text
+    item = _item(client, wid)
+    assert item["chain_template"] == to
+    assert "local_review" not in _nodes(item)
+
+
+@pytest.mark.parametrize(
     "change", [{"spec": "specs/new.md"}, {"spec": None}], ids=["replace", "drop"]
 )
 def test_a_started_item_refuses_an_attachment_change_and_keeps_its_snapshot(client, repo, change):

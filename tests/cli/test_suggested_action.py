@@ -48,7 +48,10 @@ def test_the_current_stop_s_suggestion_is_on_the_detail_payload(client, repo):
     [
         (SKIP, "kraft item skip {wid}"),
         ({"action": "retry", "reason": "CI is down"}, "kraft item retry {wid}"),
-        ({"action": "abandon", "reason": "already on main"}, "kraft item abandon --yes {wid}"),
+        (
+            {"action": "abandon", "reason": "already on main"},
+            'kraft item abandon --reason "..." --yes {wid}',
+        ),
     ],
     ids=["skip", "retry", "abandon"],
 )

@@ -68,6 +68,16 @@ describe("Tries", () => {
   });
 });
 
+describe("Tries.moved", () => {
+  it("ticks nothing for an event the mock sent on its own, but tells the list things moved", () => {
+    const tries = new Tries(() => at("/work-items/w1"));
+    const heard = vi.fn();
+    tries.onChange(heard);
+    tries.moved();
+    expect([[...tries.done], heard.mock.calls]).toEqual([[], [[true]]]);
+  });
+});
+
 describe("TRIES' Show me", () => {
   it("goes to the item waiting at a gate on the sample data, and rings its banner's Review", async () => {
     const { serve, look } = sample();

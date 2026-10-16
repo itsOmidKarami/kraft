@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildScenario } from "../e2e/contract/mocks/fixtures";
 import { ABORT, HANG, mockServer, type MockServer, type Reply } from "../e2e/contract/mocks/mockApi";
-import { useStore } from "../src/store";
+import type { Ev } from "../e2e/contract/mocks/transitions";
+import { hydrateInFlight, useStore } from "../src/store";
 import { connectEvents } from "../src/ws";
-import { broadcast, DemoSocket, patchFetch, patchWebSocket, restoreAddress, serveApiLinks, shiftClock, watch } from "./shim";
+import { broadcast, DemoSocket, patchFetch, patchWebSocket, restoreAddress, serveApiLinks, shiftClock, watch, whileShown } from "./shim";
 
 /** A server that answers every request with `reply` and records what it was asked. */
 const recording = (reply: Reply) => {
@@ -231,6 +232,80 @@ describe("broadcast", () => {
     expect(seqs.length).toBe(new Set(seqs).size);
     expect(useStore.getState().eventsByItem[id].slice(-2).map((e) => e.type)).toEqual(["pause_requested", "worker_session_paused"]);
     stop();
+  });
+
+  it("moves the board's row to the node live motion's node_started names, and the re-read list agrees", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    vi.stubGlobal("WebSocket", vi.fn());
+    const S = buildScenario("default");
+    let serve: ReturnType<typeof mockServer> | null = null;
+    // One tick only: it stops itself at the first node it starts.
+    const onEvent = (e: Ev) => { broadcast(e); if (e.type === "node_started") serve?.motion?.pause(); };
+    serve = mockServer(S, { ngBoard: true, onEvent, motion: { every: [0, 0] } });
+    serve.motion!.pause();
+    patchFetch(serve);
+    patchWebSocket();
+    await useStore.getState().bootstrap();
+    const id = S.ngBoard.find((x) => S.bundles[x].item.bead_id === "kraft-91bc")!;
+    const at = () => useStore.getState().workItems[id].current_node_id;
+    expect(at()).toBe("verification");
+    const stop = connectEvents();
+    await vi.waitFor(() => expect(useStore.getState().connection).toBe("open"));
+    serve.motion!.resume();
+    await vi.waitFor(() => expect(useStore.getState().eventsByItem[id]?.some((e) => e.type === "node_started" && e.payload.node_id === "work_brief")).toBe(true));
+    await vi.waitFor(() => expect(at()).toBe("work_brief"));
+    const list = await (await fetch("/api/work-items")).json();
+    expect(list.items.find((i: { id: string }) => i.id === id).current_node_id).toBe("work_brief");
+    // The re-reads the events queued have landed, and none moved it back.
+    await vi.waitFor(() => expect(hydrateInFlight()).toBe(0));
+    expect(at()).toBe("work_brief");
+    stop();
+    serve.motion!.stop();
+  });
+});
+
+describe("whileShown", () => {
+  /** A document whose `hidden` the row sets, telling its listeners as a browser does. */
+  const tab = (hidden: boolean) => {
+    const doc = Object.assign(new EventTarget(), { hidden });
+    const show = (h: boolean) => { doc.hidden = h; doc.dispatchEvent(new Event("visibilitychange")); };
+    return { doc: doc as unknown as Document, show };
+  };
+
+  it.each([
+    ["a hidden tab pauses it at once", true, ["pause"]],
+    ["a shown tab leaves it going", false, ["resume"]],
+  ])("%s", (_, hidden, want) => {
+    const calls: string[] = [];
+    whileShown({ pause: () => calls.push("pause"), resume: () => calls.push("resume") }, tab(hidden).doc);
+    expect(calls).toEqual(want);
+  });
+
+  it("pauses when the tab is hidden and goes on when it is shown again", () => {
+    const calls: string[] = [];
+    const { doc, show } = tab(false);
+    whileShown({ pause: () => calls.push("pause"), resume: () => calls.push("resume") }, doc);
+    show(true);
+    show(false);
+    expect(calls).toEqual(["resume", "pause", "resume"]);
+  });
+
+  it("keeps the demo's board still while its tab is hidden, and moving once it is shown", () => {
+    vi.useFakeTimers();
+    try {
+      const told: Ev[] = [];
+      const serve = mockServer(buildScenario("default"), { ngBoard: true, onEvent: (e) => told.push(e), motion: { random: () => 0 } });
+      const { doc, show } = tab(true);
+      whileShown(serve.motion!, doc);
+      vi.advanceTimersByTime(60_000);
+      expect(told).toEqual([]);
+      show(false);
+      vi.advanceTimersByTime(8_000);
+      expect(told.map((e) => e.type)).toContain("node_started");
+      serve.motion!.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

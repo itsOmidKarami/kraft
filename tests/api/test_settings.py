@@ -367,6 +367,7 @@ def test_put_intake_rejects_a_setting_the_poller_would_not_honour(client, over):
     assert client.put("/api/intake", json=body).status_code == 422
 
 
+@pytest.mark.api_client(default_setup=True)
 def test_put_intake_keeps_the_schedules_a_body_leaves_out(client, templates_dir):
     """The schedules live in intake.yaml since 2.0; a 1.x-shaped body says
     nothing about them and must not write them away, including those a hand
@@ -382,6 +383,44 @@ def test_put_intake_keeps_the_schedules_a_body_leaves_out(client, templates_dir)
     assert [s["title"] for s in on_disk["schedules"]] == ["t"]
     assert client.put("/api/intake", json={**body, "schedules": []}).status_code == 200
     assert yaml.safe_load((templates_dir / "intake.yaml").read_text())["schedules"] == []
+
+
+@pytest.mark.api_client(default_setup=True)
+def test_put_intake_keeps_the_files_comments(client, templates_dir):
+    """`Intake.save` rewrote the file whole: every comment gone."""
+    (templates_dir / "intake.yaml").write_text(
+        "# how often\ninterval_s: 120   # two minutes\nenabled: false\n"
+        "schedules:\n  # the weekly one\n"
+        "  - {cron: '0 9 * * 1', repo: /r, chain: default, title: t}\n"
+    )
+    body = {"enabled": True, "interval_s": 120, "priority_ceiling": 2, "repos": []}
+    reply = client.put("/api/intake", json=body)
+    assert reply.status_code == 200, reply.text
+    text = (templates_dir / "intake.yaml").read_text()
+    assert "# how often\ninterval_s: 120   # two minutes\n" in text, text
+    assert "  # the weekly one\n  - {cron: '0 9 * * 1'" in text, text
+    assert "enabled: true" in text
+
+
+@pytest.mark.parametrize(
+    ("over", "said"),
+    [
+        ({"chain": "nochain"}, "schedules[0].chain: chain 'nochain' is not in the library"),
+        ({"repo": "/nope"}, "schedules[0].repo: /nope is not a connected repo"),
+        ({"title": " "}, "schedules[0].title: the title and description are blank"),
+    ],
+    ids=["an-unknown-chain", "an-unconnected-repo", "a-blank-title"],
+)
+def test_put_intake_names_what_is_wrong_with_a_schedule(client, templates_dir, over, said):
+    """The tick skipped such a schedule every minute with a traceback while
+    health stayed ok; the save now refuses it as the Settings draft does."""
+    (templates_dir / "repos.yaml").write_text("repos:\n  - path: /r\n    setup_command: ''\n")
+    schedule = {"cron": "0 9 * * 1", "repo": "/r", "chain": "default", "title": "t", **over}
+    body = {"enabled": True, "interval_s": 60, "priority_ceiling": 2, "repos": []}
+    reply = client.put("/api/intake", json={**body, "schedules": [schedule]})
+    assert reply.status_code == 422
+    assert said in reply.json()["detail"]
+    assert not (templates_dir / "intake.yaml").exists()
 
 
 def test_put_intake_no_longer_requires_max_concurrent(client):

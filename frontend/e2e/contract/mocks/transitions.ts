@@ -1,7 +1,7 @@
 import { FAILURE_STOP_KINDS, LIVE_SESSION_STATUSES, WORK_ITEM_TRAITS, type DisplayStatus, type EventType, type SessionStatus, type StopKind, type WorkItemStatus } from "../../../src/types/vocab.generated";
-import { documentsFor, hex, type ItemBundle, type Scenario } from "./fixtures";
+import { documentsFor, hex, logLines, type ItemBundle, type Scenario } from "./fixtures";
 import { ngDryRun } from "./ngBoard";
-import { buildNgItem } from "./ngItems";
+import { buildNeverStarted } from "./ngItems";
 
 /**
  * The work item's transitions, as the server makes them: what each door changes, the event row it appends
@@ -46,6 +46,29 @@ export function escalationThreads(sessions: any[]) {
     thread, session_id: ss.at(-1).id, turns: ss.length, started_at: ss[0].created_at, ended_at: ss.at(-1).exited_at ?? null, status: ss.at(-1).status,
   }));
 }
+/** The rate-limit poller's steer for the relaunch (`rate_limit_retry.RESUME_PROMPT`). */
+export const RESUME_PROMPT = "You were working on this task when the agent hit an API rate limit and stopped. That limit has now reset \u2014 continue the work from where you left off.";
+/** `store.pending_rewind`: the newest `rewind_requested`, unless its target's `node_started` or its own
+ *  `rewind_cancelled` came after it. The server's walk writes that `node_started` as soon as the resume or retry
+ *  that honoured the rewind starts there; the doors here are not a walk, so the honouring `work_item_resumed` or
+ *  `work_item_retried` stands in for it, and spends the rewind too. Resume and retry start there; the demo's walk
+ *  (motion.ts) goes back there once the node it stands on completes, as `walk.run_once` does. */
+export function pendingRewind(b: ItemBundle): { target: string; note: string | null } | null {
+  const at = b.events.map((e) => e.type).lastIndexOf("rewind_requested");
+  if (at < 0) return null;
+  const p = b.events[at].payload as { review_id: string; target: string; note: string | null };
+  // The rate-limit poller's relaunch (`RESUME_PROMPT`) honours no rewind: it reruns the node it stopped on, and the
+  // rewind waits for that node to complete, as `walk.run_once` takes it.
+  const spent = b.events.slice(at + 1).some((e) =>
+    (e.type === "node_started" && e.payload.node_id === p.target) || (e.type === "rewind_cancelled" && e.payload.review_id === p.review_id) ||
+    e.type === "work_item_resumed" || (e.type === "work_item_retried" && e.payload.steer !== RESUME_PROMPT));
+  return spent ? null : p;
+}
+/** The events of the run the item is on: after its newest `run_forked` (`store.forks.fork_boundary`), or all of
+ *  them for the intake run. Completions and scope skips count within it. */
+export function sinceFork(events: ItemBundle["events"]) {
+  return events.slice(events.map((e) => e.type).lastIndexOf("run_forked") + 1);
+}
 const ENDED = (s: string) => WORK_ITEM_TRAITS[s as WorkItemStatus]?.ended ?? false;
 /** `kraft.vocab.work_item.TRAITS[...].admits_status`, the status half of each door (never exported to TS). */
 const ADMITS: Record<string, readonly string[]> = {
@@ -75,20 +98,17 @@ function notPaused(item: any): string {
 const py = (s: string) => `'${s}'`;
 const usd = (v: number | null) => (v === null ? "no cap" : `$${Number(v.toPrecision(6))}`);
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
+/** `kraft.usage.usd`: dollars as the budget meter prints them, cents from $1 up and a tenth of a cent under it. */
+const meter = (n: number) => `$${n.toFixed(n >= 1 ? 2 : 3)}`;
+/** `kraft.usage.cap_usd`: a cap as it was set, with more digits where it has more. */
+const capUsd = (n: number) => (String(n).split(".")[1]?.length ?? 0) > (n >= 1 ? 2 : 3) ? `$${n}` : meter(n);
+/** A sum of dollars without the float's tail ($2.4100000001). */
+const dollars = (v: number) => Math.round(v * 10_000) / 10_000;
 
 /** What a new item is made from: a sample item before it ran, with nothing on it that says it did. Built on its
  *  own, not taken from the scenario, so no edit to a sample item reaches it and the empty scenario has one too. */
 function template(): ItemBundle {
-  const b = buildNgItem("paused", 9999, "default");
-  const it = b.item;
-  Object.assign(it, {
-    current_node_id: null, pending_steer_context: null, stop: null, escalation_threads: [], concerns: [], deferred_findings: [],
-    worktree_path: null, head_sha: null, branch: null, mr_ref: null, progress: null, rate_limit: null, retry_at: null,
-    attempts: [], last_review_sha: null, fix_target: null, needs_context_question: null,
-    budget_cap: { ...it.budget_cap, source: "policy", spent_usd: 0 },
-    usage: { total: { tokens_in: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, wall_ms: 0, sessions: 0, rounds: 0, capped_out: 0 }, by_node: [] },
-  });
-  return { item: it, sessions: [], events: [], logs: {}, threads: [], beads: [] };
+  return buildNeverStarted(9999, "default");
 }
 
 export interface TransitionOptions {
@@ -107,6 +127,10 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
   let seq = Math.max(4242, ...Object.values(S.bundles).flatMap((b) => b.events.map((e) => e.seq)));
   let made = 0;
   let sessions = 0;
+  let forks = 0;
+  /** `store.bump_counter`'s `rate_limit:<node>` counters, per item: what `rate_limit_retry` counts relaunches by. */
+  const rateLimits = new Map<string, number>();
+  let mrs = 0;
   const blank = template();
 
   /** Append an event with the next seq. `node_id` defaults as `events.append` defaults it: the payload's own `node_id` or `node`. */
@@ -148,6 +172,35 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     for (const s of live) Object.assign(s, { status: "paused", exited_at: now() });
     return live.map((s) => s.id);
   };
+  /** `store.running_sessions_under`: the live sessions of a task or step, marked paused. */
+  const stopUnder = (b: ItemBundle, scope: string): string[] => {
+    const live = b.sessions.filter((s) => (s.hook_point === scope || String(s.hook_point).startsWith(`${scope}.`)) && LIVE_SESSION_STATUSES.includes(s.status));
+    for (const s of live) Object.assign(s, { status: "paused", exited_at: now() });
+    return live.map((s) => s.id);
+  };
+  /** `store.forks.fork_run` for a retry of `target`: every gate from it on that stands approved is reopened, then the
+   *  run forks, then (a person's retry) the span's counters reset. */
+  const fork = (b: ItemBundle, target: string) => {
+    const id = b.item.id;
+    const nodes: any[] = b.item.chain_definition?.nodes ?? [];
+    const from = Math.max(0, nodes.findIndex((n) => n.id === target));
+    const reopened: string[] = [];
+    for (const n of nodes.slice(from)) {
+      if (n.kind !== "gate") continue;
+      const last = [...b.events].reverse().find((e) => (e.type === "gate_approved" || e.type === "gate_reopened") && e.payload.gate === n.id);
+      if (last?.type !== "gate_approved") continue;
+      reopened.push(n.id);
+      append(id, "gate_reopened", { gate: n.id, reason: "retry" }, n.id);
+    }
+    const parent = [...b.events].reverse().find((e) => e.type === "run_forked")?.payload.fork ?? null;
+    append(id, "run_forked", { fork: hex(800_000 + ++forks), parent, scope: "node", path: target, reopened, preserved: [] });
+    append(id, "cap_counters_reset", { by: "human", counters: {} });
+  };
+  /** `store.complete_node`: once per node per run fork. */
+  const complete = (b: ItemBundle, node: string) => {
+    if (!sinceFork(b.events).some((e) => e.type === "node_completed" && e.payload.node_id === node)) append(b.item.id, "node_completed", { node_id: node });
+    tally(b);
+  };
   /** One `worker_session_paused` per session `stopSessions` stopped. */
   const paused = (b: ItemBundle, ids: string[]) => { for (const sid of ids) append(b.item.id, "worker_session_paused", { session_id: sid }); };
   /** `gates._gate_or_404` (a gate node of the item's chain), then the pending check both gate doors make. */
@@ -166,24 +219,12 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     if (ids.length && pauseItem) append(b.item.id, "pause_requested", { sessions: ids });
     paused(b, ids);
   };
-  /** `store.pending_rewind`: the newest `rewind_requested`, unless its target's `node_started` or its own
-   *  `rewind_cancelled` came after it. The server's walk writes that `node_started` as soon as the resume or retry
-   *  that honoured the rewind starts there; the mock has no walk, so the honouring `work_item_resumed` or
-   *  `work_item_retried` stands in for it, and spends the rewind too. (The mock never writes `node_started` for
-   *  them: live motion writes its own.) */
-  const pendingRewind = (b: ItemBundle): { target: string; note: string | null } | null => {
-    const at = b.events.map((e) => e.type).lastIndexOf("rewind_requested");
-    if (at < 0) return null;
-    const p = b.events[at].payload as { review_id: string; target: string; note: string | null };
-    const spent = b.events.slice(at + 1).some((e) =>
-      (e.type === "node_started" && e.payload.node_id === p.target) || (e.type === "rewind_cancelled" && e.payload.review_id === p.review_id) ||
-      e.type === "work_item_resumed" || e.type === "work_item_retried");
-    return spent ? null : p;
-  };
   const joined = (...parts: (string | null | undefined)[]) => parts.filter(Boolean).join("\n\n") || null;
   const run = (it: any) => Object.assign(it, { status: "active", stop: null, pending_gate: null, gate_artifact: null, needs_context_question: null, retry_at: null });
 
   const t = {
+    /** The instant the doors record: the mock's clock, which live motion reads a `retry_at` against. */
+    now,
     /** The newest event seq, as GET /work-items' `cursor` answers it. */
     cursor: () => seq,
     append,
@@ -207,7 +248,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       run(it);
       it.fix_target = null;
       append(id, "gate_approved", { gate, by: "human" }, gate);
-      append(id, "node_completed", { node_id: gate });
+      complete(x.b, gate);
       return ok(settle(it));
     },
     /** POST /work-items/{id}/gates/{gate}/reject: back to `node`, else the gate's `reject_to`, else the exec node
@@ -294,8 +335,10 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const attempt = Math.max(0, ...b.sessions.filter((s) => s.node_id === it.current_node_id).map((s) => s.attempt ?? 0)) + 1;
       run(it);
       append(id, "work_item_retried", { node_id: it.current_node_id, loop: null, steer, escalated: false, seeded: false });
+      fork(b, it.current_node_id);
       settle(it);
-      return ok({ id, node_id: it.current_node_id, path: null, loop: null, steer, attempt });
+      // A node retry's `path` is the node (`ChainPath`); only a restart of the whole item has none.
+      return ok({ id, node_id: it.current_node_id, path: it.current_node_id, loop: null, steer, attempt });
     },
     /** POST /work-items/{id}/skip: the node it stands on (or its pending gate), or one task or step of it by path. */
     skip(id: string, path?: string | null, note: string | null = null): Result {
@@ -311,7 +354,10 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
         return no(409, `path: ${py(path)} is not the node the item stands on (${py(it.current_node_id)}) or its pending gate`);
       const gate = it.pending_gate ?? null;
       const scope = path && path.includes(".") ? path : null;
-      const ids = stopSessions(b);
+      // `lifecycle._skip_within_node`: a task or step of the node the item stands on, and only its sessions stop.
+      if (scope && scope.split(".")[0] !== it.current_node_id)
+        return no(409, `path: ${py(scope)} is not inside the node the item stands on (${py(it.current_node_id)})`);
+      const ids = scope ? stopUnder(b, scope) : stopSessions(b);
       run(it);
       // As the store writes them: a node skip's event, then the sessions it stopped; a scope skip's after them.
       if (!scope) append(id, "node_skipped", { node_id: node, gate, note });
@@ -499,6 +545,212 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const it = b.item;
       return ok({ id, bead_id: null, status: it.status, chain_definition: it.chain_definition, materialized_chain: it.materialized_chain, current_node_id: it.current_node_id }, 201);
     },
+
+    /* The walk's writes: what the executor does to a running item, in the store's order and words. No route calls
+       these; the demo's live motion (motion.ts) does. Each refuses an unknown or ended item, as the doors above do. */
+
+    /** `store.enter_node`: the item stands on `node`, its step and plan progress cleared until a session reports. */
+    enterNode(id: string, node: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { b, it } = x;
+      if (!nodeIds(it).includes(node)) return no(409, `node ${py(node)} is not in this chain`);
+      // `builtins.ensure_worktree` runs as the walk starts: from here on the item has one.
+      Object.assign(it, { current_node_id: node, step: null, progress: null, worktree_exists: true });
+      if (it.summary) it.summary = { ...it.summary, step: null };
+      append(id, "node_started", { node_id: node });
+      tally(b);
+      return ok(settle(it));
+    },
+    /** `store.create_session`: a pending session of `node`'s task `hookPoint`, with a log to read. Every task kind has
+     *  one: an agent's goes on to `sessionRunning`, a builtin's, a forge's or a command's straight to `sessionExited`. */
+    createSession(id: string, node: string, hookPoint: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { b, it } = x;
+      const attempt = b.sessions.filter((s) => s.node_id === node && s.hook_point === hookPoint).length + 1;
+      const sid = sessionId();
+      b.sessions.push({
+        id: sid, work_item_id: id, node_id: node, hook_point: hookPoint, status: "pending", attempt, round: 0, thread: 1, model: null, head_sha: it.head_sha ?? null,
+        created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null,
+      });
+      b.logs[sid] = logLines(sid, 12, false);
+      append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: hookPoint, round: 0, attempt, thread: 1 });
+      settle(it);
+      return ok({ id, session_id: sid });
+    },
+    /** `store.session_running`: the session's process is up, and the item's step is the one its task is in. */
+    sessionRunning(id: string, sid: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { b, it } = x;
+      const s = b.sessions.find((y) => y.id === sid);
+      if (!s) return no(404, `unknown session ${sid}`);
+      if (s.status !== "pending") return no(409, `session ${sid} is ${s.status}, not pending`);
+      Object.assign(s, { status: "running", started_at: now() });
+      // `board._step_of`: only a node of more than one step has a step to name.
+      const steps: string[][] = (it.chain_definition?.nodes ?? []).find((n: any) => n.id === s.node_id)?.steps ?? [];
+      const at = steps.findIndex((g) => g.includes(s.hook_point));
+      const [, name, task] = String(s.hook_point).split(".");
+      it.step = steps.length > 1 && at >= 0 ? { index: at + 1, count: steps.length, name, task } : null;
+      if (it.summary) it.summary = { ...it.summary, step: it.step ? { index: it.step.index, count: it.step.count } : null };
+      append(id, "worker_session_started", { session_id: sid, node_id: s.node_id, hook_point: s.hook_point, round: s.round, attempt: s.attempt, thread: s.thread, pid: 40_000 + sessions });
+      settle(it);
+      return ok({ id, session_id: sid });
+    },
+    /** `store.session_exited`: the session done, with the usage an agent reported on the way out, added to the item's
+     *  spend. A builtin, forge or command task reports none (`usage` null): only its wall time. */
+    sessionExited(id: string, sid: string, usage: { model: string; tokens_in: number; tokens_out: number; cost_usd: number } | null): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { b, it } = x;
+      const s = b.sessions.find((y) => y.id === sid);
+      if (!s) return no(404, `unknown session ${sid}`);
+      if (!LIVE_SESSION_STATUSES.includes(s.status)) return no(409, `session ${sid} is ${s.status}, not live`);
+      const at = now();
+      const wall_ms = Math.max(0, Date.parse(at) - Date.parse(s.started_at ?? s.created_at));
+      if (!usage) {
+        Object.assign(s, { status: "done", exited_at: at, wall_ms });
+        append(id, "worker_session_exited", { session_id: sid, status: "done", wall_ms });
+        settle(it);
+        return ok({ id, session_id: sid });
+      }
+      Object.assign(s, { status: "done", exited_at: at, wall_ms, ...usage, tokens_cache_write: 0, tokens_cache_read: 0 });
+      const u = it.usage;
+      if (u) {
+        const add = (r: any) => ({ ...r, tokens_in: r.tokens_in + usage.tokens_in, tokens_out: r.tokens_out + usage.tokens_out, cost_usd: dollars(r.cost_usd + usage.cost_usd), wall_ms: r.wall_ms + wall_ms, sessions: r.sessions + 1 });
+        const row = u.by_node.find((r: any) => r.node === s.node_id);
+        u.total = add(u.total);
+        u.by_node = row ? u.by_node.map((r: any) => (r === row ? add(r) : r))
+          : [...u.by_node, add({ node: s.node_id, tokens_in: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, wall_ms: 0, sessions: 0, rounds: 1, capped_out: 0 })];
+      }
+      if (it.budget_cap) it.budget_cap = { ...it.budget_cap, spent_usd: dollars((it.budget_cap.spent_usd ?? 0) + usage.cost_usd) };
+      append(id, "worker_session_exited", { session_id: sid, status: "done", wall_ms, model: usage.model, tokens_in: usage.tokens_in, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: usage.tokens_out, cost_usd: usage.cost_usd });
+      settle(it);
+      return ok({ id, session_id: sid });
+    },
+    /** `store.complete_node`: the node done; the item still stands on it until the walk enters the next. Once per node
+     *  per run fork, as the store writes it: a node re-entered (a resume, a rejection's rerun) and completed again
+     *  writes nothing, until a retry forks the run (`run_forked`). */
+    completeNode(id: string, node: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { b, it } = x;
+      if (!nodeIds(it).includes(node)) return no(409, `node ${py(node)} is not in this chain`);
+      complete(b, node);
+      return ok(settle(it));
+    },
+    /** `store.request_gate`: the item stops at `gate` for a person, with the document the gate is about
+     *  (`executor.gate_artifact`: `items/<id>/docs/<artifact>.md`). */
+    requestGate(id: string, gate: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { it } = x;
+      const node = (it.chain_definition?.nodes ?? []).find((n: any) => n.id === gate && n.kind === "gate");
+      if (!node) return no(404, `unknown gate ${py(gate)}`);
+      Object.assign(it, {
+        status: "needs_human", current_node_id: gate, pending_gate: gate, gate_artifact: node.artifact ? `items/${id}/docs/${node.artifact}.md` : null,
+        step: null, stop: { kind: "gate", node: gate, task: null, attempt: 1, resume_at: null, reason: null, facts: {} },
+      });
+      append(id, "gate_requested", { gate, node_id: gate });
+      return ok(settle(it));
+    },
+    /** `stops.stop_for_budget`: a spend cap reached before an agent task launches. The item stops on `node`
+     *  (`store.mark_needs_human`, kind `budget`) in `stops.budget_reason`'s words for a work item's cap. */
+    stopForBudget(id: string, node: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { it } = x;
+      const spent = it.budget_cap?.spent_usd ?? 0;
+      const cap = it.budget_cap?.cap_usd ?? 0;
+      const reason = `budget cap reached: ${meter(spent)} spent on this work item, cap ${capUsd(cap)}. Nothing new was started; a running agent was not interrupted.`;
+      const budget = { scope: "work_item", spent_usd: spent, cap_usd: cap };
+      // `board._stop` names the cap's scope: `work_item`, the item's own, is the one `/budget/raise` takes.
+      Object.assign(it, { status: "needs_human", step: null, stop: { kind: "budget", node, task: null, attempt: 1, resume_at: null, reason, facts: {}, scope: "work_item" } });
+      append(id, "work_item_needs_human", { node_id: node, reason, kind: "budget", budget });
+      return ok(settle(it));
+    },
+    /** `store.mark_reentered`: a CI wait (`waiting`) its poller (`waits.py`) re-enters once its `retry_at` passes, back
+     *  to active with no event of its own (the walk's `node_started` narrates the re-entry). */
+    reenter(id: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { it } = x;
+      if (it.status !== "waiting") return no(409, `work item is ${it.status}, not waiting`);
+      Object.assign(it, { status: "active", retry_at: null, stop: null });
+      return ok(settle(it));
+    },
+    /** `rate_limit_retry._retry_one`: a rate-limited item once its limit resets. Its counter goes up; past the policy's
+     *  retries it stops for a person, else it is claimed and retried on its node (`store.retry_after_cap`, no fork). */
+    rateLimitRetry(id: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { it } = x;
+      if (it.status !== "rate_limited") return no(409, `work item is ${it.status}, not rate_limited`);
+      // The counter is kept by item and node; the item's `rate_limit` shows it only while it is rate limited
+      // (`board._rate_limit_retries`). A sample's starts where its row says it stands.
+      const node = it.current_node_id;
+      const key = `${id}|rate_limit:${node}`;
+      const cap = it.rate_limit?.cap ?? 5;
+      const count = (rateLimits.get(key) ?? it.rate_limit?.count ?? 0) + 1;
+      rateLimits.set(key, count);
+      it.rate_limit = null;
+      if (count > cap) {
+        const reason = `rate_limit retries exhausted after ${count - 1} attempt(s)`;
+        Object.assign(it, { status: "needs_human", retry_at: null, stop: { kind: "cap", node, task: null, attempt: 1, resume_at: null, reason, facts: {} } });
+        append(id, "work_item_needs_human", { node_id: node, reason, kind: "cap" });
+        return ok(settle(it));
+      }
+      Object.assign(it, { status: "active", retry_at: null, stop: null });
+      append(id, "work_item_retried", { node_id: node, loop: null, steer: RESUME_PROMPT, escalated: false, seeded: false });
+      return ok(settle(it));
+    },
+    /** A queued attempt the walk never launched (the mock's stand-in for a steer's next attempt), taken back. */
+    withdrawSession(id: string, sid: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { b } = x;
+      const at = b.sessions.findIndex((s) => s.id === sid && s.status === "pending");
+      if (at < 0) return no(409, `session ${sid} is not waiting to start`);
+      b.sessions.splice(at, 1);
+      delete b.logs[sid];
+      return ok({ id, session_id: sid });
+    },
+    /** `walk._report_if_undelivered`: a steer no launch took before the walk stopped, so it is not lost silently. */
+    steerUndelivered(id: string, steer: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      append(id, "steer_undelivered", { steer });
+      return ok(settle(x.it));
+    },
+    /** `forge.run`'s `open_mr`: the merge request the node's draft task opened (or found, re-entered), as `mr_opened`. */
+    mrOpened(id: string, node: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { it } = x;
+      const number = it.mr_ref?.number ?? 150 + mrs++;
+      const url = it.mr_ref?.url ?? `https://github.com/acme/${String(it.repo).split("/").pop()}/pull/${number}`;
+      it.mr_ref = { number, url };
+      append(id, "mr_opened", { number, url }, node);
+      return ok(settle(it));
+    },
+    /** `store.mark_completed`: the chain ran to its end. */
+    markCompleted(id: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { it } = x;
+      Object.assign(it, { status: "completed", stop: null, pending_gate: null, gate_artifact: null, step: null, retry_at: null });
+      append(id, "work_item_completed");
+      return ok(settle(it));
+    },
+  };
+  /** `board._summary`'s counts: the chain's nodes that completed, and how many of those are gates. */
+  const tally = (b: ItemBundle) => {
+    const it = b.item;
+    if (!it.summary) return;
+    const done = new Set(b.events.filter((e) => e.type === "node_completed").map((e) => e.payload.node_id));
+    const nodes: any[] = it.chain_definition?.nodes ?? [];
+    it.summary = { ...it.summary, nodes_done: nodes.filter((n) => done.has(n.id)).length, gates_passed: nodes.filter((n) => n.kind === "gate" && done.has(n.id)).length };
   };
   const move = (id: string, out: string[], into: string[], where: "front" | "back") => {
     const at = out.indexOf(id);

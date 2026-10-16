@@ -248,6 +248,12 @@ def _editable_repos(st, path: str | None = None) -> tuple[list[dict], dict | Non
     return repos, next((d for m, d in zip(models, repos, strict=True) if m is found), None)
 
 
+def _without_defaults(entry: dict) -> dict:
+    """`entry` without the keys that hold nothing (None, `{}`, `[]`), which is
+    what the loader gives a key the file does not have."""
+    return {k: v for k, v in entry.items() if v is not None and v != {} and v != []}
+
+
 def _workspaces(st) -> dict:
     """The raw `workspaces:` section, as written."""
     return dict(config_mod.read_yaml(deps.repos_path(st), {}).get("workspaces") or {})
@@ -557,11 +563,16 @@ async def _add_repo(body: RepoBody, st) -> dict:
         # through the same file and must NOT get this value.
         "managed": True,
     }
+    had = {id(r) for r in repos}
     repos.append(entry)
     children = _auto_connect_children(repos, entry, child_probes)
     workspaces = _workspaces(st)
     _declare_workspace(workspaces, repos, entry, children, held)
     _refuse_enable_without_test_command(entry)
+    # The file gets only what the new entries set: a default left out reads
+    # back the same, and `forge: null`, `models: {}` and the rest are noise in
+    # a file people edit by hand. The answer below keeps the whole entry.
+    repos = [r if id(r) in had else _without_defaults(r) for r in repos]
     _validate_repos(st, repos, workspaces)
     config_mod.save_repos(deps.repos_path(st), repos, workspaces)
     # Index it now: a repo connected mid-session would otherwise stay invisible
@@ -686,7 +697,8 @@ async def remove_repo(request: Request, path: str):
         raise HTTPException(
             409,
             f"{entry['path']} has {live} open item(s), paused ones included; complete, "
-            "cancel or abandon them first (kraft item complete, cancel, or abandon --yes)",
+            "cancel or abandon them first "
+            "(kraft item complete, cancel, or abandon --reason '...' --yes)",
         )
     kept = [r for r in repos if r["path"] != entry["path"]]
     repo_id = entry.get("id")

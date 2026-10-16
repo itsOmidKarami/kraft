@@ -141,6 +141,17 @@ export function patchWebSocket(win: Window & typeof globalThis = window) {
 }
 
 /**
+ * The mock's live motion only while the tab is shown: paused when it is hidden and going on when it is shown
+ * again, so a visitor who comes back finds the board where they left it. A browser notification fires only
+ * for a hidden tab, so the demo never shows one.
+ */
+export function whileShown(motion: { pause(): void; resume(): void }, doc: Document = document) {
+  const apply = () => (doc.hidden ? motion.pause() : motion.resume());
+  doc.addEventListener("visibilitychange", apply);
+  apply();
+}
+
+/**
  * `Date` running from `to` instead of today, so the scenario's timestamps read as the
  * contract suite reads them ("17d 10h", "2 min ago"). The clock still advances, so a
  * running item's elapsed time ticks on.

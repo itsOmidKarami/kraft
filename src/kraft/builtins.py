@@ -572,6 +572,12 @@ async def _discard_worktree(repo: Path, worktree: Path, members=()) -> str | Non
     return None if not worktree.exists() else f"{worktree} still present"
 
 
+#: Seconds `git worktree add` gets before its process group is killed: the
+#: checkout runs the repository's own smudge filters and `post-checkout` hook,
+#: and one that hangs must not leave the item active with nothing happening.
+WORKTREE_ADD_TIMEOUT_S = 600.0
+
+
 def _add_worktree(repo: Path, path: Path, branch: str, start: str | None) -> None:
     """`git worktree add` of `branch` at `path` in `repo`: the branch checked
     out if `repo` already has it (a rejected gate removes a worktree and keeps
@@ -601,7 +607,13 @@ def _add_worktree(repo: Path, path: Path, branch: str, start: str | None) -> Non
     subprocess.run(["git", "worktree", "prune"], cwd=repo, capture_output=True, text=True)
     args = ["git", "worktree", "add", str(path)]
     args += [branch] if exists else ["-b", branch, *([start] if start else [])]
-    done = subprocess.run(args, cwd=repo, capture_output=True, text=True)
+    try:
+        done = _run_git_group(args, timeout=WORKTREE_ADD_TIMEOUT_S, cwd=repo)
+    except _GroupTimedOut:
+        raise RuntimeError(
+            f"git worktree add timed out after {WORKTREE_ADD_TIMEOUT_S:.0f}s for {path}: "
+            "a checkout filter or hook (an LFS smudge with no network, say) did not finish"
+        ) from None
     if done.returncode != 0:
         raise RuntimeError(done.stderr.strip() or done.stdout.strip())
 
@@ -696,6 +708,11 @@ async def ensure_worktree(
     try:
         await asyncio.to_thread(_add_worktree, Path(repo), worktree, branch, head)
     except RuntimeError as exc:
+        # A killed checkout leaves its directory, which the early return above
+        # would take for a finished worktree on the retry.
+        left = await _discard_worktree(Path(repo), worktree)
+        if left:
+            exc = RuntimeError(f"{exc} (and its worktree could not be removed: {left})")
         # Raised, not returned: this runs outside a session, so there is no
         # session status to carry the failure. `kraft.api.deps.guard` turns it into
         # needs_human with the git stderr in the reason.
@@ -1256,6 +1273,7 @@ async def refresh_worktree_base(
     git.assert_on_branch(worktree, branch)
     lock_before = os.path.lexists(_index_lock(worktree))
     aside = await _set_aside_setup_lockfiles(worktree)
+    leftovers = (_untracked(worktree), head)
     git_left_running = False
     try:
         try:
@@ -1274,7 +1292,9 @@ async def refresh_worktree_base(
             if exc.group_gone:
                 note = await _uncancellable(
                     _try_abort_rebase(
-                        worktree, stale_lock=None if lock_before else _lock_identity(worktree)
+                        worktree,
+                        stale_lock=None if lock_before else _lock_identity(worktree),
+                        leftovers=leftovers,
                     )
                 )
                 if note:
@@ -1293,6 +1313,7 @@ async def refresh_worktree_base(
                 worktree,
                 RebaseTimedOut(f"git rebase timed out after {timeout:.0f}s for {worktree}"),
                 stale_lock=killed_lock if exc.group_gone and not lock_before else None,
+                leftovers=leftovers,
             )
         if done.returncode != 0:
             _refuse_unstarted_rebase(worktree, done)
@@ -1308,6 +1329,7 @@ async def refresh_worktree_base(
                 RebaseConflict(
                     f"git rebase failed for {worktree}: {detail}", tuple(unmerged.splitlines())
                 ),
+                leftovers=leftovers,
             )
     except BaseException:
         if git_left_running:
@@ -1481,6 +1503,12 @@ _RUNNING_GIT_GROUPS: set[int] = set()
 #: `index.lock` on one) before it is sent SIGKILL, and again to be reaped.
 GIT_STOP_GRACE_S = 2.0
 
+#: The longest a shutdown can spend undoing a rebase it cut short: the rebase's
+#: own group stopped (`GIT_STOP_GRACE_S` to end, again to be reaped), then
+#: `git rebase --abort`, twice when a stale `index.lock` makes it retry. What
+#: `kraft admin stop` and a service unit's stop timeout wait for.
+REBASE_UNDO_MAX_S = 2 * GIT_STOP_GRACE_S + 2 * REBASE_ABORT_TIMEOUT_S
+
 
 class _GitGroup:
     """What a coroutine keeps of the `_run_git_group` it runs in a thread, so
@@ -1513,6 +1541,7 @@ def _run_git_group(
     timeout: float | None,
     env: Mapping[str, str] | None = None,
     handle: _GitGroup | None = None,
+    cwd: Path | None = None,
 ) -> subprocess.CompletedProcess:
     """`subprocess.run(args, capture_output=True, text=True)` as the leader of
     its own process group. Past `timeout` the whole group is killed, not git
@@ -1526,6 +1555,7 @@ def _run_git_group(
         stderr=subprocess.PIPE,
         text=True,
         env=env,
+        cwd=cwd,
         start_new_session=True,
     ) as proc:
         _RUNNING_GIT_GROUPS.add(proc.pid)
@@ -1711,6 +1741,64 @@ def _clear_stale_index_lock(worktree: Path, identity: tuple[int, int] | None) ->
     return True
 
 
+def _untracked(worktree: Path) -> set[str]:
+    """The untracked, not ignored paths of `worktree`, relative to it."""
+    done = subprocess.run(
+        ["git", "-C", str(worktree), "ls-files", "--others", "--exclude-standard", "-z"],
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+    if done.returncode != 0:
+        return set()
+    return {os.fsdecode(p) for p in done.stdout.split(b"\0") if p}
+
+
+def _remove_rebase_leftovers(worktree: Path, before: set[str], onto: str) -> list[str]:
+    """After a rebase was aborted: delete what its killed checkout wrote but
+    never staged, which `git rebase --abort` does not remove and which would
+    make the next rebase refuse ("untracked file would be overwritten"). Only a
+    path that was not untracked `before` the rebase and whose bytes equal
+    `onto`'s own blob; anything else is a person's or an agent's and stays.
+    Returns the paths removed."""
+    removed = []
+    for rel in sorted(_untracked(worktree) - before):
+        wanted = git_read(
+            worktree, "rev-parse", "--verify", "--quiet", f"{onto}:{rel}", expected_failure=True
+        )
+        if not wanted:
+            continue
+        try:
+            parent = open_dir_no_symlinks(worktree, Path(rel).parts[:-1])
+        except OSError:
+            continue
+        try:
+            name = Path(rel).name
+            # No following a link: a symlink there is not the blob's file.
+            with os.fdopen(os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent), "rb") as fh:
+                data = fh.read()
+            hashed = subprocess.run(
+                ["git", "-C", str(worktree), "hash-object", "--stdin"],
+                input=data,
+                capture_output=True,
+            )
+            if hashed.returncode != 0 or hashed.stdout.decode().strip() != wanted:
+                continue
+            os.unlink(name, dir_fd=parent)
+            removed.append(rel)
+        except OSError:
+            continue
+        finally:
+            os.close(parent)
+    if removed:
+        logger.warning(
+            "removed %d file(s) a killed git rebase left untracked in %s: %s",
+            len(removed),
+            worktree,
+            ", ".join(removed),
+        )
+    return removed
+
+
 def _with_note(error: RebaseConflict | RebaseTimedOut, note: str) -> RuntimeError:
     """`error`'s own class, with `note` after its message (and its paths)."""
     if isinstance(error, RebaseConflict):
@@ -1723,6 +1811,7 @@ async def _abort_rebase(
     error: RebaseConflict | RebaseTimedOut,
     *,
     stale_lock: tuple[int, int] | None = None,
+    leftovers: tuple[set[str], str] | None = None,
 ) -> NoReturn:
     """`git rebase --abort` in `worktree` (`_try_abort_rebase`), then raise
     `error`. An abort that fails, or runs past `REBASE_ABORT_TIMEOUT_S`, still
@@ -1731,14 +1820,17 @@ async def _abort_rebase(
     `refresh_worktree_base` does not leave it clean. Never silent: a failed
     abort the item walked past left HEAD detached at the base without the
     item's commits (R11E-02)."""
-    note = await _try_abort_rebase(worktree, stale_lock=stale_lock)
+    note = await _try_abort_rebase(worktree, stale_lock=stale_lock, leftovers=leftovers)
     if note:
         raise _with_note(error, note)
     raise error
 
 
 async def _try_abort_rebase(
-    worktree: Path, *, stale_lock: tuple[int, int] | None = None
+    worktree: Path,
+    *,
+    stale_lock: tuple[int, int] | None = None,
+    leftovers: tuple[set[str], str] | None = None,
 ) -> str | None:
     """`git rebase --abort` in `worktree`. None when that left it clean, or
     when no rebase had started (a `pre-rebase` hook killed at the time cap
@@ -1749,11 +1841,17 @@ async def _try_abort_rebase(
     abort was still checking the branch out.
 
     `stale_lock`: the identity of the killed rebase's `index.lock`, which
-    may be cleared and the abort tried once more (`_clear_stale_index_lock`)."""
+    may be cleared and the abort tried once more (`_clear_stale_index_lock`).
+
+    `leftovers`: `(untracked before the rebase, the commit it was onto)`; once
+    the worktree is clean again what the killed checkout wrote untracked is
+    removed (`_remove_rebase_leftovers`)."""
     gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
     if gitdir is not None and not any(
         os.path.lexists(Path(gitdir, d)) for d in ("rebase-merge", "rebase-apply")
     ):
+        if leftovers:
+            _remove_rebase_leftovers(worktree, *leftovers)
         return None
     args = ["git", "-C", str(worktree), "rebase", "--abort"]
 
@@ -1773,6 +1871,8 @@ async def _try_abort_rebase(
     if done.returncode != 0:
         detail = (done.stderr.strip() or done.stdout.strip() or "no output").splitlines()[0]
         return f"`git rebase --abort` failed ({detail}); {worktree} was left mid-rebase for a human"
+    if leftovers:
+        _remove_rebase_leftovers(worktree, *leftovers)
     return None
 
 

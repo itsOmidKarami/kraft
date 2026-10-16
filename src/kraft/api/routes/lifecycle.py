@@ -14,7 +14,17 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
 from kraft import builtins as builtins_mod
-from kraft import escalate, events, executor, item_paths, node_runs, start_queue, storage, store
+from kraft import (
+    caps,
+    escalate,
+    events,
+    executor,
+    item_paths,
+    node_runs,
+    start_queue,
+    storage,
+    store,
+)
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.adapters.forge.git import PUSHED_REFS
@@ -99,6 +109,12 @@ class EndWorkItem(BaseModel):
     #: Required (`manual-*-is-an-explicit-work-item-terminal-action`): recorded
     #: on the audit event.
     reason: str
+
+
+class AbandonWorkItem(BaseModel):
+    #: Why the item is being dropped. Optional, so a caller from before reasons
+    #: were kept still abandons; the CLI asks for one in a terminal.
+    reason: str = ""
 
 
 class CompleteWorkItem(EndWorkItem):
@@ -453,7 +469,7 @@ def _connected_members(st, row) -> list[Path]:
 
 # Kraft-x85; reaping what else ran in the worktree: Kraft-ugm6.
 @api_router.post("/work-items/{wid}/abandon")
-async def abandon_work_item(wid: str, request: Request):
+async def abandon_work_item(wid: str, request: Request, body: AbandonWorkItem | None = None):
     """Terminal state plus worktree and branch reclaim, a cancelled item's
     included.
 
@@ -466,6 +482,7 @@ async def abandon_work_item(wid: str, request: Request):
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
     row = deps._work_item_row(st, wid)
+    reason = (body.reason if body else "").strip() or None
     if row["status"] not in admitting(Verb.ABANDON):
         raise HTTPException(409, "work item is active; pause it before abandoning")
     # An already-abandoned item is a cancelled one (cancel stores `abandoned`
@@ -473,7 +490,8 @@ async def abandon_work_item(wid: str, request: Request):
     # again, without a second `work_item_abandoned`. A second call finds
     # nothing left and answers `worktree_removed: false`.
     if row["status"] != WorkItemStatus.ABANDONED:
-        await st.db.write(lambda c: store.abandon_work_item(c, wid))
+        await st.db.write(lambda c: store.abandon_work_item(c, wid, reason))
+        await executor.settle_beads_on_abandon(row, deps.bd_cwd(), reason)
     worktree = st.run_dirs.worktrees / wid
     killed = await asyncio.to_thread(_kill_orphans_under, worktree)
     if killed:
@@ -1147,12 +1165,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             new_base = (
                 None
                 if walk.rebases_itself(row, start)
-                else await builtins_mod.refresh_worktree_base(
-                    worktree,
-                    Path(row["repo"]),
-                    store.branch_for(row),
-                    base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
-                )
+                else await refresh_base(request, wid, row, start)
             )
         except builtins_mod.RebaseConflict as exc:
             # Handed to the walk, which gives it to the node's `on_conflict`
@@ -1234,6 +1247,65 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             "steer": steer,
             "steered": sorted(targets or {}),
         }
+
+
+_STOPPED_DURING_REFRESH = (
+    "the work item was stopped while its branch was being brought up to date; nothing was resumed"
+)
+
+
+async def refresh_base(
+    request: Request,
+    wid: str,
+    row,
+    node_id: str | None,
+    *,
+    stopped: str = _STOPPED_DURING_REFRESH,
+) -> str | None:
+    """`builtins_mod.refresh_worktree_base` for `wid`'s worktree, run as the
+    item's own task (`deps.run_stoppable`) under the tightest time cap its item
+    and node carry, so a pause, a cancel or a server stop ends the rebase
+    instead of waiting behind it, and a hung checkout filter cannot hold the
+    request forever. Answers 409 when the item was paused or ended meanwhile -- a stop
+    that landed between the claim and here is not a reason to rebase."""
+    st = request.app.state
+    repo = Path(row["repo"])
+    base = await builtins_mod.base_branch(st.db, wid, repo)
+    hit = st.db.read(lambda c: caps.for_turn(c, row, node_id)) if node_id else None
+    # A spent cap is the walk's to refuse, not a rebase that dies at once.
+    timeout = hit.remaining_s if hit is not None and hit.remaining_s > 0 else None
+
+    def active() -> None:
+        # Paused or ended: what pause, cancel and abandon write. Not any other
+        # status, so a stop the claim's own bracket wrote over a racing 409
+        # (and the resume then undoes) stays what it was.
+        status = deps._work_item_row(st, wid)["status"]
+        if status == WorkItemStatus.PAUSED or status in ENDED:
+            raise HTTPException(409, stopped)
+
+    # No await between this read and the spawn: a stop from here on finds the task.
+    active()
+    try:
+        moved = await deps.run_stoppable(
+            request.app,
+            wid,
+            builtins_mod.refresh_worktree_base(
+                st.run_dirs.worktrees / wid,
+                repo,
+                store.branch_for(row),
+                base=base,
+                timeout=timeout,
+            ),
+            stopped=stopped,
+        )
+    except RuntimeError:
+        # A conflict or a failure of an item stopped meanwhile is not the
+        # walk's to be handed.
+        active()
+        raise
+    # A stop that came after the rebase ended found no task to cancel.
+    active()
+    return moved
 
 
 # Design 4b, handoff spec §8.
@@ -1496,12 +1568,7 @@ async def _retry(wid: str, body: Retry, request: Request):
             new_base = (
                 None
                 if walk.rebases_itself(row, node_id)
-                else await builtins_mod.refresh_worktree_base(
-                    worktree,
-                    Path(row["repo"]),
-                    store.branch_for(row),
-                    base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
-                )
+                else await refresh_base(request, wid, row, node_id)
             )
         except builtins_mod.RebaseConflict as exc:
             # The retry still forks; the walk hands the conflict to the
@@ -2064,13 +2131,18 @@ async def complete_work_item(wid: str, body: CompleteWorkItem, request: Request)
 @api_router.post("/work-items/{wid}/cancel")
 async def cancel_work_item(wid: str, body: CancelWorkItem, request: Request):
     """Cancel the item, with a reason. Unlike `abandon` the worktree stays:
-    archiving reclaims it later, the same as for any ended item.
+    archiving reclaims it later, the same as for any ended item. The item's
+    bead is closed with the reason, and the beads it implements are noted, as
+    for `abandon`.
 
     `body.close_mr` closes the item's open merge request once the cancel
     itself has landed -- a forge failure never undoes it, it only shows up in
     the response's `close_mr`.
     """
     row = await _end_work_item(request, wid, "cancel", body.reason)
+    await executor.settle_beads_on_abandon(
+        row, deps.bd_cwd(), body.reason.strip(), ended="cancelled"
+    )
     result = deps.work_item_answer(request.app.state, wid)
     if body.close_mr:
         result["close_mr"] = await _close_cancelled_mr(request.app.state, wid, row)

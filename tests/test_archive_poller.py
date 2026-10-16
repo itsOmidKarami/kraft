@@ -40,7 +40,10 @@ async def test_tick_archives_a_completed_item_past_after_days(tmp_path, repo, st
 async def test_tick_archives_an_abandoned_item_past_after_days(tmp_path, repo, stub_app):
     app = stub_app(**_state(tmp_path, archive_after_days=30))
     worktree = await seed_completed_item(
-        app, repo, updated_at=days_ago(31), end=store.abandon_work_item
+        app,
+        repo,
+        updated_at=days_ago(31),
+        end=lambda c, wid: store.abandon_work_item(c, wid, "test"),
     )
     assert (
         app.state.db.read(

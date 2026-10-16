@@ -153,9 +153,11 @@ describe("Show me", () => {
   });
 
   it.each([
-    ["while the list is open, a request that may move things reads where each Show me goes again", "open", "/work-items/w2"],
-    ["while it is shut, nothing is read until it opens", "closed", "/"],
-  ])("%s", async (_, state, href) => {
+    ["while the list is open, a request that may move things reads where each Show me goes again", "open", "/work-items/w2", "request"],
+    ["while the list is open, an event the mock sent on its own (live motion) does too", "open", "/work-items/w2", "event"],
+    ["while it is shut, nothing is read until it opens", "closed", "/", "request"],
+    ["while it is shut, an event reads nothing either", "closed", "/", "event"],
+  ])("%s", async (_, state, href, by) => {
     width(false);
     localStorage.setItem("kraft.demo.tries", state);
     const { board, look } = movable();
@@ -163,7 +165,8 @@ describe("Show me", () => {
     if (state === "open") await ready(go("gate"));
     const reads = board.reads;
     board.at = "w2";
-    tries.see(post("/work-items/w9/pause"), { status: 200 });
+    if (by === "event") tries.moved();
+    else tries.see(post("/work-items/w9/pause"), { status: 200 });
     // A read starts in the call itself (where() asks the board at once), and the open list's href follows it.
     const read = board.reads > reads;
     if (state === "open") await vi.waitFor(() => expect(go("gate").getAttribute("href")).toBe(href));

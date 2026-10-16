@@ -779,16 +779,19 @@ def open_counts_by_repo(conn: sqlite3.Connection) -> dict[str, int]:
     return {r[0]: r[1] for r in rows}
 
 
-def abandon_work_item(conn: sqlite3.Connection, work_item_id: str) -> None:
+def abandon_work_item(
+    conn: sqlite3.Connection, work_item_id: str, reason: str | None = None
+) -> None:
     """Terminal. The row stays — its events and sessions are still the record of
     what happened — but it is out of the running set for good, and off the board.
+    `reason` is why a person dropped it, kept on the event when given.
     """
     conn.execute(
         "UPDATE work_items SET status = 'abandoned', queued_request = NULL, updated_at = ? "
         "WHERE id = ?",
         (_now(), work_item_id),
     )
-    events.append(conn, work_item_id, WorkItemEvent.ABANDONED, {})
+    events.append(conn, work_item_id, WorkItemEvent.ABANDONED, {"reason": reason} if reason else {})
 
 
 def archive_work_item(

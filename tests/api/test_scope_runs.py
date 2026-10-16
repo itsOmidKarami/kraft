@@ -230,6 +230,31 @@ def test_detail_scope_runs_counts_only_the_latest_dispatch_of_a_repository_and_r
     ]
 
 
+def test_detail_scope_runs_keeps_the_recovery_re_measure_a_resumed_entry_measures_again(
+    client, repo, tmp_path
+):
+    """A fix cycle paused and resumed re-enters the node at the round its counter reached, and the
+    entry's own `on_failure` repair re-measures at the recovery round a second time: the first
+    recovery re-measure is a run of its own, not a dispatch the second replaces (it read
+    0, 1, -1, 2, the real one gone)."""
+    wid = _verified_item(client, repo, tmp_path, [])
+    _picks(wid, "ws", 0, ["fe-cmd"])
+    _session(tmp_path, wid, "s0", "fe-cmd", "failed", 0)
+    _picks(wid, "ws", -1, ["fe-cmd"])
+    _session(tmp_path, wid, "s1", "fe-cmd", "failed", -1)
+    _picks(wid, "ws", 1, ["fe-cmd"])
+    _session(tmp_path, wid, "s2", "fe-cmd", "failed", 1)
+    _picks(wid, "ws", -1, ["fe-cmd"])
+    _session(tmp_path, wid, "s3", "fe-cmd", "running", -1)
+
+    assert _runs(client, wid) == [
+        ("s0", "ws", 0, "fe-cmd", False, None),
+        ("s1", "ws", -1, "fe-cmd", False, None),
+        ("s2", "ws", 1, "fe-cmd", False, None),
+        ("s3", "ws", -1, "fe-cmd", None, None),
+    ]
+
+
 @pytest.mark.parametrize(
     "again, why",
     [

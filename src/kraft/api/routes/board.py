@@ -195,6 +195,24 @@ def display_status(
     return DisplayStatus.FAILED if stop_kind in FAILURE_KINDS else DisplayStatus.NEEDS_YOU
 
 
+def _ended_reason(st, row) -> str | None:
+    """The reason on the `work_item_cancelled` or `work_item_abandoned` event
+    that ended the item, None for any other item (and for an abandon recorded
+    before reasons were kept)."""
+    if row["status"] != WorkItemStatus.ABANDONED:
+        return None
+    evs = st.db.read(lambda c: events.read_after(c, 0, row["id"]))
+    ended = (WorkItemEvent.CANCELLED, WorkItemEvent.ABANDONED)
+    return next(
+        (
+            e["payload"].get("reason") or None
+            for e in reversed(evs)
+            if e["type"] in ended and e["payload"].get("reason")
+        ),
+        None,
+    )
+
+
 def _stop_reason(st, wid: str) -> str | None:
     stop = _current_stop(st, wid)
     return stop["reason"] if stop is not None else None
@@ -1353,6 +1371,8 @@ async def get_work_item(wid: str, request: Request):
         # stop -- `{action: skip|retry|abandon, reason}` -- or None
         # (Kraft-s7c04.27). Each action is one existing verb.
         "suggested_action": (stop_payload or {}).get("suggested_action"),
+        # Why a person ended it, from the cancel or abandon that did.
+        "ended_reason": _ended_reason(st, row),
         # The board's status badge (Kraft UI v2 · B1), and the stop it names
         # when there is one -- {kind, node, task, attempt, resume_at, reason,
         # facts} -- `None` off `needs_human`/`waiting`/`rate_limited`.

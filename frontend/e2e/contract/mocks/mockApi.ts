@@ -3,6 +3,7 @@ import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchF
 import { makeAreas } from "./areasMock";
 import { ngThreads } from "./ngItems";
 import { harnessesServer, PROVIDER_STATUS } from "./ngHarnesses";
+import { motion, type Motion, type MotionOptions } from "./motion";
 import { listRow, transitions, type Ev } from "./transitions";
 import draftViews from "./draftViews.json" with { type: "json" };
 
@@ -46,6 +47,9 @@ export interface MockOptions {
   /** Told of every event an action appends (transitions.ts), as the server's event socket would send it. The demo
    *  forwards each to its open sockets; the contract suite's socket stays silent. */
   onEvent?: (e: Ev) => void;
+  /** Live motion (motion.ts): the board's active items walk their chains on a timer and stop at gates, a waiting one
+   *  goes on once its retry time passes, and a fresh item is filed when the board goes quiet. Off unless set; only the demo sets it. An object paces it, for tests. */
+  motion?: boolean | MotionOptions;
 }
 
 /** The ops each `itemDraft` state starts from (the running item stands on `verification`). */
@@ -239,7 +243,7 @@ const json = (body: unknown, status = 200): Answer => ({ status, contentType: "a
  * (transitions.ts), for the page's life: the list, the detail and the events all read the one bundle.
  * Most other mutating verbs return a plausible 200 so a Submit never crashes, and change nothing.
  */
-export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
+export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { motion: Motion | null } {
   let restarted = 0;
   const hs = opts.harnesses ? harnessesServer() : null;
   let listReads = 0;
@@ -269,7 +273,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
   const T = transitions(S, { now: opts.now, mustFix, onEvent: opts.onEvent });
   const send = (r: { status: number; body: unknown }) => json(r.body, r.status);
   let seq = 0;
-  return async (req) => {
+  const serve: MockServer = async (req) => {
     const url = new URL(req.url);
     const p = url.pathname.replace(/^.*?\/api/, "");
     const method = req.method;
@@ -359,6 +363,17 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
     if ((m = p.match(/^\/work-items\/([^/]+)\/documents$/))) {
       return json({ work_item_id: m[1], documents: S.docs[m[1]] ?? [] });
     }
+    // An item the walk never entered has no base_ref stamped yet (`artifacts`): its diff is the server's empty answer
+    // for that, and its comparison the 409 that comes before any worktree check. One that ran and has no worktree any
+    // more answers both with `deps.worktree_missing`'s 404.
+    const unstamped = (wid: string) => !!S.bundles[wid] && !S.bundles[wid].events.some((e) => e.type === "node_started");
+    const gone = (wid: string) => S.bundles[wid]?.item.worktree_exists === false;
+    if ((m = p.match(/^\/work-items\/([^/]+)\/diff$/)) && unstamped(m[1])) {
+      const ws = ["1", "true"].includes(q.get("ignore_whitespace") ?? "");
+      return json({ work_item_id: m[1], base_ref: null, files: [], diff: "", untracked: [], truncated: false, ignore_whitespace: ws, landed: { commits: [], files: [], diff: "", truncated: false }, diff_max_bytes: 1_000_000, worktree_path: `/Users/dev/.kraft/run/worktrees/${m[1]}` });
+    }
+    if ((m = p.match(/^\/work-items\/([^/]+)\/compare$/)) && unstamped(m[1])) return json({ detail: "this work item has no base commit to compare against" }, 409);
+    if ((m = p.match(/^\/work-items\/([^/]+)\/(diff|compare)$/)) && gone(m[1])) return json({ detail: "this work item's worktree was removed from disk" }, 404);
     if ((m = p.match(/^\/work-items\/([^/]+)\/diff$/))) return json(diffFor(m[1], S.variant));
     if ((m = p.match(/^\/work-items\/([^/]+)\/compare$/))) {
       return json(compareFor(m[1], S.variant, ["1", "true"].includes(q.get("ignore_whitespace") ?? ""), viewedMarks));
@@ -724,6 +739,8 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
 
     return json({ detail: `mock: unhandled ${method} ${p}` }, 404);
   };
+  // The demo's handle on its motion, to pause it while the tab is hidden; null without `motion`.
+  return Object.assign(serve, { motion: opts.motion ? motion(S, T, opts.motion === true ? {} : opts.motion) : null });
 }
 
 const GB = 1024 ** 3;

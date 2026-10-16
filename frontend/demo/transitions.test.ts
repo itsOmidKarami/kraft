@@ -53,6 +53,14 @@ const noRejectTo: Act = (T, id, b) => {
   return T.reject(id, "final_review", "redo it");
 };
 
+/** What a retry's run fork writes after its `work_item_retried` (`store.forks.fork_run`): each approved gate from the
+ *  retried node on reopened, the fork, and the counters a person's retry resets. */
+const forked = (...gates: string[]): Want[] => [
+  ...gates.map((gate): Want => ["gate_reopened", { gate, reason: "retry" }, gate]),
+  ["run_forked", { scope: "node", reopened: gates, preserved: [] }],
+  ["cap_counters_reset", { by: "human", counters: {} }],
+];
+
 describe("transitions", () => {
   it.each<[string, string, Act, Record<string, unknown>, Want[]]>([
     ["approve clears the gate and runs on", "needs-gate", (T, id) => T.approve(id, "final_review"), { status: "active", display_status: "running", pending_gate: null, stop: null },
@@ -70,16 +78,16 @@ describe("transitions", () => {
     ["a rewind is used up by the resume that honoured it", "paused", (T, id) => (T.requestChanges(id, "implementation", "redo the cache"), T.resume(id), T.pause(id), T.resume(id)), { status: "active", current_node_id: "implementation" },
       [["rewind_requested"], ["work_item_resumed", { steer: "redo the cache" }], ["pause_requested"], ["work_item_resumed", { steer: null }]]],
     ["a rewind is used up by the retry that honoured it", "failed", (T, id, b) => (T.append(id, "rewind_requested", { review_id: "r1", target: "implementation", note: "redo it" }), T.retry(id), Object.assign(b.item, { status: "needs_human", current_node_id: "verification" }), T.retry(id)), { status: "active", current_node_id: "verification" },
-      [["rewind_requested"], ["work_item_retried", { node_id: "implementation", steer: "redo it" }], ["work_item_retried", { node_id: "verification", steer: null }]]],
+      [["rewind_requested"], ["work_item_retried", { node_id: "implementation", steer: "redo it" }], ...forked("local_review"), ["work_item_retried", { node_id: "verification", steer: null }], ...forked()]],
     ["resume starts a never-started item at its first node", "kraft-f5d3", (T, id) => T.resume(id), { status: "active", display_status: "running", current_node_id: "spec" }, [["work_item_resumed", { steer: null }, null]]],
     ["resume honours a queued rewind, its note carried with the steer", "paused", (T, id) => (T.requestChanges(id, "implementation", "redo the cache"), T.resume(id, "and bound it")), { status: "active", current_node_id: "implementation" },
       [["rewind_requested", { target: "implementation", note: "redo the cache" }, "implementation"], ["work_item_resumed", { steer: "redo the cache\n\nand bound it" }, null]]],
     ["retry honours a pending rewind", "failed", (T, id) => (T.append(id, "rewind_requested", { review_id: "r1", target: "implementation", note: "redo it" }, "implementation"), T.retry(id)), { status: "active", current_node_id: "implementation" },
-      [["rewind_requested"], ["work_item_retried", { node_id: "implementation", steer: "redo it" }, "implementation"]]],
+      [["rewind_requested"], ["work_item_retried", { node_id: "implementation", steer: "redo it" }, "implementation"], ...forked("local_review")]],
     ["a cancelled rewind is not honoured", "failed", (T, id) => (T.append(id, "rewind_requested", { review_id: "r1", target: "implementation", note: "redo it" }), T.append(id, "rewind_cancelled", { review_id: "r1" }), T.retry(id)), { current_node_id: "merge_request" },
-      [["rewind_requested"], ["rewind_cancelled"], ["work_item_retried", { node_id: "merge_request", steer: null }]]],
+      [["rewind_requested"], ["rewind_cancelled"], ["work_item_retried", { node_id: "merge_request", steer: null }], ...forked()]],
     ["escalate, retry, pause and resume: the retry stops the turn", "failed", (T, id) => (T.escalate(id, "look"), T.retry(id), T.pause(id), T.resume(id)), { status: "active", display_status: "running", escalation_threads: [expect.objectContaining({ status: "paused" })] },
-      [["escalation_message"], ["worker_session_paused"], ["work_item_retried"], ["pause_requested", { sessions: [] }], ["work_item_resumed"]]],
+      [["escalation_message"], ["worker_session_paused"], ["work_item_retried"], ...forked(), ["pause_requested", { sessions: [] }], ["work_item_resumed"]]],
     ["escalate at a gate, approve, pause and resume: the approval stops the turn", "needs-gate", (T, id) => (T.escalate(id, "look"), T.approve(id, "final_review"), T.pause(id), T.resume(id)), { status: "active", display_status: "running", escalation_threads: [expect.objectContaining({ status: "paused" })] },
       [["escalation_message"], ["pause_requested", { sessions: [expect.any(String)] }], ["worker_session_paused"], ["gate_approved"], ["node_completed"], ["pause_requested", { sessions: [] }], ["work_item_resumed"]]],
     ["escalate at a gate, then reject: the rejection stops the turn", "needs-gate", (T, id) => (T.escalate(id, "look"), T.reject(id, "final_review", "no")), { status: "active", escalation_threads: [expect.objectContaining({ status: "paused" })] },
@@ -90,7 +98,7 @@ describe("transitions", () => {
       [["escalation_message"], ["worker_session_paused"], ["work_item_cancelled", { node_id: "summary" }], ["work_item_abandoned"]]],
     ["abandon twice reclaims again with no second event", "failed", (T, id) => (T.abandon(id), T.abandon(id)), { status: "abandoned" }, [["work_item_abandoned", {}, null]]],
     ["retry runs a stopped item on its node", "failed", (T, id) => T.retry(id, "use the new token"), { status: "active", display_status: "running", stop: null, current_node_id: "merge_request" },
-      [["work_item_retried", { node_id: "merge_request", steer: "use the new token", escalated: false }, "merge_request"]]],
+      [["work_item_retried", { node_id: "merge_request", steer: "use the new token", escalated: false }, "merge_request"], ...forked()]],
     ["skip passes the node it stands on", "failed", (T, id) => T.skip(id, "merge_request", "opened by hand"), { status: "active", display_status: "running", stop: null },
       [["node_skipped", { node_id: "merge_request", gate: null, note: "opened by hand" }, "merge_request"]]],
     ["skip passes a pending gate", "needs-gate", (T, id) => T.skip(id, "final_review"), { status: "active", display_status: "running", pending_gate: null },
@@ -106,7 +114,7 @@ describe("transitions", () => {
       [["work_item_archived", { by: "you" }, null]]],
     ["restore puts it back under Done", "kraft-9a02", (T, id) => T.restore(id), { status: "completed", display_status: "done", archived_at: null }, [["work_item_restored", {}, null]]],
     ["raise budget lifts the cap and retries", "kraft-58e2", (T, id) => T.raiseBudget(id, 8), { status: "active", display_status: "running", stop: null, budget_cap: expect.objectContaining({ cap_usd: 8, source: "item" }) },
-      [["budget_raised", { budget_usd: 8 }, null], ["work_item_retried", { node_id: "verification" }, "verification"]]],
+      [["budget_raised", { budget_usd: 8 }, null], ["work_item_retried", { node_id: "verification" }, "verification"], ...forked()]],
     ["escalate starts a turn in a new thread", "failed", (T, id) => T.escalate(id, "look at the token", true), { status: "needs_human", display_status: "escalated" },
       [["escalation_message", { message: "look at the token", auto: false, thread: 1, turn: 1 }, "merge_request"]]],
     ["stop escalation ends the turn, the item as it stopped", "failed", (T, id) => (T.escalate(id, "look"), T.stopEscalation(id)), { status: "needs_human", display_status: "failed" },
@@ -218,7 +226,7 @@ describe("refusals", () => {
     ["restore, an item not archived", "done", (T, id) => T.restore(id), 409, "work item is not archived"],
     ["raise budget, a running item", "running", (T, id) => T.raiseBudget(id, 9), 409, "work item is not stopped"],
     ["raise budget, not a spend stop", "failed", (T, id) => T.raiseBudget(id, 9), 409, "work item was not stopped by a spend cap"],
-    ["raise budget, under what it spent", "kraft-58e2", (T, id) => T.raiseBudget(id, 2), 422, "the item has already spent $2.41; a cap of $2 would stop it again at once: raise it above that, or to none"],
+    ["raise budget, under what it spent", "kraft-58e2", (T, id) => T.raiseBudget(id, 2), 422, "the item has already spent $5; a cap of $2 would stop it again at once: raise it above that, or to none"],
     ["escalate, a running item", "running", (T, id) => T.escalate(id, "help"), 409, "work item is not needs_human or paused"],
     ["escalate, never started", "kraft-f5d3", (T, id) => T.escalate(id, "help"), 409, "work item has not started"],
     ["escalate, a spend stop", "kraft-58e2", (T, id) => T.escalate(id, "help"), 409, "a spend cap stopped this item, and an escalation's agent would hit it too: raise it with `kraft item raise-budget ID --usd N` where that takes it (`kraft view show ID` names the cap), then escalate"],
@@ -306,7 +314,7 @@ describe("the list and the detail", () => {
 
 describe("the review doors", () => {
   it.each([
-    ["a stopped item retries at the target", "kraft-b108", "implementation", "retried", "active", ["rewind_requested", "work_item_retried", "review_submitted"], "implementation"],
+    ["a stopped item retries at the target", "kraft-b108", "implementation", "retried", "active", ["rewind_requested", "work_item_retried", "gate_reopened", "run_forked", "cap_counters_reset", "review_submitted"], "implementation"],
     ["a running item at the target reruns it", "kraft-91bc", "verification", "rerun", "active", ["rewind_requested", "pause_requested", "worker_session_paused", "work_item_resumed", "review_submitted"], "verification"],
     ["a paused item waits for it", "kraft-4e19", "implementation", "queued", "paused", ["rewind_requested", "review_submitted"], "verification"],
   ])("with no gate pending, request changes: %s", async (_name, bead, node, action, status, types, at) => {
@@ -341,6 +349,30 @@ describe("the review doors", () => {
     const had = S.bundles[id].events.length;
     expect(await call("POST", `/work-items/${id}${door}`, body)).toEqual({ status, body: { detail } });
     expect(S.bundles[id].events.length).toBe(had);
+  });
+});
+
+describe("samples and answers as the server shapes them", () => {
+  it("an item that ran and lost its worktree answers its diff and its comparison with the 404", async () => {
+    const { S, call } = server();
+    const id = idOf(S, "kraft-91bc");
+    S.bundles[id].item.worktree_exists = false;
+    for (const route of ["diff", "compare"]) expect(await call("GET", `/work-items/${id}/${route}`)).toEqual({ status: 404, body: { detail: "this work item's worktree was removed from disk" } });
+  });
+
+  it("a node retry answers the node as its path", async () => {
+    const { S, call } = server();
+    expect((await call("POST", `/work-items/${idOf(S, "kraft-b108")}/retry`, {})).body).toMatchObject({ node_id: "merge_request", path: "merge_request" });
+  });
+
+  it("the spend-capped sample says so in its stop, its last event and its spend", () => {
+    const { S } = server();
+    const b = S.bundles[idOf(S, "kraft-58e2")];
+    expect(b.item.stop).toMatchObject({ kind: "budget", scope: "work_item" });
+    expect(b.item.stop.facts).toEqual({});
+    expect(b.events.filter((e) => e.type === "work_item_needs_human").at(-1)?.payload).toEqual({ node_id: "verification", reason: "Spend cap reached · $5.00 of $5.00", kind: "budget", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } });
+    const cost = b.sessions.reduce((a, s) => a + s.cost_usd, 0);
+    expect([Math.abs(cost - 5) < 0.01, Math.abs(b.item.usage.total.cost_usd - 5) < 0.01, b.item.budget_cap.spent_usd]).toEqual([true, true, 5]);
   });
 });
 
@@ -379,7 +411,11 @@ describe("a created item", () => {
     ]);
     const docs = (await call("GET", `/work-items/${id}/documents`)).body.documents;
     expect(docs.map((d: any) => d.attachment_kind)).toEqual(["spec"]);
-    expect((await call("GET", `/work-items/${id}/diff`)).body.files.length).toBeGreaterThan(0);
+    // No worktree and no base commit until the walk first enters a node: the server's empty diff, and its 409 for a
+    // comparison, which it answers before it looks for a worktree.
+    expect(detail.worktree_exists).toBe(false);
+    expect((await call("GET", `/work-items/${id}/diff`)).body).toMatchObject({ base_ref: null, files: [], landed: { files: [] } });
+    expect(await call("GET", `/work-items/${id}/compare`)).toEqual({ status: 409, body: { detail: "this work item has no base commit to compare against" } });
   });
 
   it("is not made from a sample item, so an edit to one never reaches it", async () => {

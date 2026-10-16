@@ -216,7 +216,9 @@ def test_fix_target_route_follows_a_chosen_node_and_refuses_bad_ones(client, gat
 
 @_REVIEW
 def test_fix_target_route_ends_with_the_item(client, gated):
-    assert client.post(f"/api/work-items/{gated}/abandon").status_code == 200
+    assert (
+        client.post(f"/api/work-items/{gated}/abandon", json={"reason": "test"}).status_code == 200
+    )
     assert client.get(f"/api/work-items/{gated}/fix-target").status_code == 409
 
 

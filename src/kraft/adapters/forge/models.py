@@ -40,6 +40,11 @@ _AUTH_MARKERS = (
     "gh auth login",
     "glab auth login",
     "invalid token",
+    # git's own HTTPS refusals print no marker above.
+    "the requested url returned error: 401",
+    "the requested url returned error: 403",
+    "invalid username or password",
+    "http basic: access denied",
 )
 _UNREACHABLE_MARKERS = (
     "could not resolve host",
@@ -52,6 +57,11 @@ _UNREACHABLE_MARKERS = (
     "could not connect",
     "timed out after",
 )
+#: Local git operations Kraft runs itself. Their messages carry a file name or
+#: git's own timeout, neither of which says anything about a forge: a file
+#: called "403 forbidden.txt" is not a refused credential, and a rebase that
+#: ran out of time did not fail to reach a host.
+_LOCAL_GIT = ("git rebase ", "git worktree add timed out")
 
 
 def failure_cause(text: str) -> Literal["forge_auth", "forge_unreachable"] | None:
@@ -61,6 +71,8 @@ def failure_cause(text: str) -> Literal["forge_auth", "forge_unreachable"] | Non
     or a forge that could not be reached (`forge_unreachable`). None when the
     text names neither."""
     low = text.lower()
+    if any(m in low for m in _LOCAL_GIT):
+        return None
     if any(m in low for m in _AUTH_MARKERS):
         return "forge_auth"
     if any(m in low for m in _UNREACHABLE_MARKERS):

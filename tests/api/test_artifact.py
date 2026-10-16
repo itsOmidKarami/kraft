@@ -306,6 +306,8 @@ def test_a_symlink_out_of_the_worktree_is_a_404(
         resp = client.get(f"/api/work-items/{item_at_spec_gate}/{route}")
     assert resp.status_code == 404
     assert "not yours" not in resp.text
+    # The answer is the absent file's, whichever route: the reason is for the timeline.
+    assert "escaped_containment" not in resp.text
     assert client.get(f"/api/work-items/{item_at_spec_gate}").json()["gate_artifact"] is None
     # Pins the escape branch specifically, not merely "some 404 happened": a
     # regression that made the containment check a no-op would still 404 (the

@@ -505,8 +505,10 @@ async def get_produced_artifact(wid: str, kind: str, request: Request):
         shown = _worktree_document(st, wid, rel, result.text, result.truncated, body)
         return {"kind": kind, **shown}
     if reason != "absent":
+        # The reason stays on the timeline (`artifact_refused`); the answer is
+        # the one an absent file gets, so it cannot tell a reader which.
         await _refused(st, wid, rel, reason)
-        raise HTTPException(404, f"this work item's {kind} could not be read: {reason}")
+        raise HTTPException(404, f"this work item has no {kind}")
     # Indexed at approval under the name it had then: an item that ran before
     # the upgrade wrote it in its worktree's `.engineering/`.
     names = (rel, item_paths.legacy_document_name(wid, kind))

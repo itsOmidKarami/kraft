@@ -8,6 +8,23 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
+/**
+ * The demo's live motion moves the board's items every 8–15 s, which would make a row land on whatever the
+ * board then holds. Kept still the way the demo itself keeps it still: `whileShown` pauses motion when the
+ * tab is hidden, so the tab reads hidden while the demo boots, and shown from DOMContentLoaded on (after
+ * main.ts ran, with no visibilitychange, so motion stays paused and the app sees a shown tab).
+ */
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    let booting = true;
+    const real = (name: "hidden" | "visibilityState") => Object.getOwnPropertyDescriptor(Document.prototype, name)!.get!;
+    const [hidden, state] = [real("hidden"), real("visibilityState")];
+    Object.defineProperty(Document.prototype, "hidden", { configurable: true, get() { return booting || hidden.call(this); } });
+    Object.defineProperty(Document.prototype, "visibilityState", { configurable: true, get() { return booting ? "hidden" : state.call(this); } });
+    document.addEventListener("DOMContentLoaded", () => { booting = false; });
+  });
+});
+
 /** Each entry: the page it lands on, and the control its ring is around, as a person names it. */
 const SHOW_ME: [string, RegExp, "button" | "textbox", string | RegExp][] = [
   ["Open a running item", /\/work-items\/[0-9a-f]{32}$/, "button", /, node, running\b/],

@@ -332,6 +332,16 @@ describe("StateCard", () => {
     expect(h.onDuplicate).toHaveBeenCalled();
   });
 
+  it("abandoned: its own card, with the reason the abandon recorded", async () => {
+    stubFetch({ "GET /work-items/w1/events": [200, [{ seq: 1, work_item_id: "w1", type: "work_item_abandoned", payload: { reason: "refiled as w9" }, node_id: null, created_at: "t" }]] });
+    const { h } = show({ display_status: "cancelled", stop: null, ended_reason: "refiled as w9" });
+    const card = await screen.findByRole("region", { name: "Abandoned" });
+    expect(within(card).getByText("refiled as w9")).toBeInTheDocument();
+    expect(within(card).queryByText("work kept")).not.toBeInTheDocument();
+    await userEvent.click(within(card).getByRole("button", { name: "Duplicate as new item" }));
+    expect(h.onDuplicate).toHaveBeenCalled();
+  });
+
   // The server's `actions` (F4): a door it does not list is no button; links and Open node stay.
   it.each<[string, Parameters<typeof detail>[0], string, string[]]>([
     ["a failed infra stop, the server refusing retry", { display_status: "failed", stop: stop("infra"), actions: ["escalate", "cancel"] }, "Failed", ["Check the repo settings", "Escalate…", "Open merge request →"]],

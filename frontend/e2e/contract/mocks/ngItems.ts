@@ -275,6 +275,23 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
   return { item, sessions, events, logs, threads };
 }
 
+/** An item filed paused that never ran: the V1 chain, no node, no session, no event, nothing spent. What a new item
+ *  is made from (transitions.ts `create`) and the board's never-started row; each adds its own `work_item_created`. */
+export function buildNeverStarted(seed: number, variant: Variant): ItemBundle {
+  const b = buildNgItem("paused", seed, variant);
+  const it = b.item;
+  Object.assign(it, {
+    current_node_id: null, pending_steer_context: null, stop: null, escalation_threads: [], concerns: [], deferred_findings: [],
+    // No worktree until the walk first enters a node (`board`'s `worktree_exists`), so no diff to show.
+    worktree_path: null, worktree_exists: false, head_sha: null, branch: null, mr_ref: null, progress: null, step: null, rate_limit: null, retry_at: null,
+    attempts: [], last_review_sha: null, fix_target: null, needs_context_question: null,
+    budget_cap: { ...it.budget_cap, source: "policy", spent_usd: 0 },
+    usage: { total: { tokens_in: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, wall_ms: 0, sessions: 0, rounds: 0, capped_out: 0 }, by_node: [] },
+    summary: { nodes_done: 0, nodes_total: NG_NODES.length, gates_passed: 0, step: null },
+  });
+  return { item: it, sessions: [], events: [], logs: {}, threads: [], beads: [] };
+}
+
 /** ux2-W8: the review threads a needs-gate item starts with, on the first two
  *  files of its comparison (`compareFor`), at lines its diff has: a must-fix
  *  still open, a question an agent answered and claimed, a resolved nit, and

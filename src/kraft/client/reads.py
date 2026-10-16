@@ -155,6 +155,8 @@ def trim_work_item(item: dict) -> dict:
         "queued",
         "dependencies",
         "suggested_action",
+        # why a person dropped or cancelled it (None off those)
+        "ended_reason",
     )
     return {
         **{k: item[k] for k in keep if k in item},

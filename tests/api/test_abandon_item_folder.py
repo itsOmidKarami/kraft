@@ -9,6 +9,7 @@ import asyncio
 import os
 from pathlib import Path
 
+import pytest
 from support.api import _paused
 from support.harness import write
 
@@ -25,7 +26,7 @@ def test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at
     (folder / "sandbox-home").mkdir()
     (folder / "sandbox-home" / ".cache").symlink_to(victim.parent)
 
-    r = client.post(f"/api/work-items/{wid}/abandon")
+    r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
     assert r.status_code == 200, r.text
     assert not folder.exists()
@@ -54,7 +55,7 @@ def test_abandoning_removes_the_item_s_folder_off_the_event_loop(client, repo, m
 
     monkeypatch.setattr(item_paths, "remove_tree", remove_tree)
 
-    assert client.post(f"/api/work-items/{wid}/abandon").status_code == 200
+    assert client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"}).status_code == 200
     assert walked and on_loop == []
     assert not (Path(os.environ["KRAFT_RUN_DIR"]) / "items" / wid).exists()
 
@@ -73,7 +74,72 @@ def test_abandoning_takes_the_item_s_documents_off_the_storage_figure(client, re
         {wid: 60, "other": 40},
     )
 
-    assert client.post(f"/api/work-items/{wid}/abandon").status_code == 200
+    assert client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"}).status_code == 200
 
     used = storage.usage(client.app.state)
     assert (used.governed, used.categories["documents"], used.documents) == (40, 40, {"other": 40})
+
+
+@pytest.mark.parametrize(
+    ("verb", "beads_fail"),
+    [("abandon", False), ("abandon", True), ("cancel", False)],
+    ids=["beads", "beads-down", "cancel"],
+)
+def test_abandon_records_why_and_settles_the_items_beads(
+    client, repo, fake_beads, monkeypatch, verb, beads_fail
+):
+    """The reason lands on the event and the detail; the bead intake filed is
+    closed with it, a bead the item implements gets a note and stays open, and
+    a beads failure never fails the abandon."""
+    cwd = os.environ["KRAFT_BD_CWD"]
+    other = client.portal.call(lambda: fake_beads.intake("sub-task", cwd=cwd))
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "autostart": False, "implements_beads": [other]},
+    ).json()["id"]
+    own = client.get(f"/api/work-items/{wid}").json()["bead_id"]
+    if beads_fail:
+
+        async def down(*_a, **_k):
+            raise RuntimeError("bd is down")
+
+        monkeypatch.setattr("kraft.adapters.beads.complete", down)
+        monkeypatch.setattr("kraft.adapters.beads.annotate", down)
+
+    r = client.post(f"/api/work-items/{wid}/{verb}", json={"reason": "refiled as another item"})
+
+    assert r.status_code == 200, r.text
+    ended = "cancelled" if verb == "cancel" else "abandoned"
+    event = [e for e in client.get(f"/api/work-items/{wid}/events").json()]
+    recorded = [e["payload"]["reason"] for e in event if e["type"] == f"work_item_{ended}"]
+    assert recorded == ["refiled as another item"]
+    assert client.get(f"/api/work-items/{wid}").json()["ended_reason"] == "refiled as another item"
+    beads = fake_beads.all()
+    if beads_fail:
+        assert beads[own]["status"] == "open" and "comments" not in beads[other]
+        return
+    assert beads[own]["status"] == "closed"
+    assert beads[own]["close_reason"] == f"{ended}: refiled as another item"
+    assert beads[other]["status"] == "open"
+    assert beads[other]["comments"] == [
+        f"Kraft work item {wid} was {ended}: refiled as another item"
+    ]
+
+
+@pytest.mark.parametrize("body", [None, {}, {"reason": "  "}], ids=["no-body", "missing", "blank"])
+def test_abandon_without_a_reason_still_abandons_and_records_none(client, repo, fake_beads, body):
+    """A caller from before reasons were kept still abandons: no reason on the
+    event or the detail, and the item's own bead is closed saying only that."""
+    wid = client.post(
+        "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+    ).json()["id"]
+    own = client.get(f"/api/work-items/{wid}").json()["bead_id"]
+
+    r = client.post(f"/api/work-items/{wid}/abandon", json=body)
+
+    assert r.status_code == 200, r.text
+    detail = client.get(f"/api/work-items/{wid}").json()
+    assert (detail["status"], detail["ended_reason"]) == ("abandoned", None)
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    assert [e["payload"] for e in events if e["type"] == "work_item_abandoned"] == [{}]
+    assert fake_beads.all()[own]["close_reason"] == "abandoned"

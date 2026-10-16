@@ -115,7 +115,7 @@ def test_list_hides_abandoned_items(client, repo):
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
     _set_status(wid, "paused")
-    client.post(f"/api/work-items/{wid}/abandon")
+    client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
     visible = client.get("/api/work-items").json()["items"]
     everything = client.get("/api/work-items?include_abandoned=true").json()["items"]
