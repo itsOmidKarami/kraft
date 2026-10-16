@@ -87,6 +87,14 @@ def acme(console, tmp_path, monkeypatch):
     )
 
 
+#: What Add-ons says with no collection: what they are, and the key.
+EMPTY = (
+    "Add-ons\n\nAn add-on is a directory of chains, library components, skills and agent "
+    "profiles. A collection is a git repository or a directory that lists add-ons.\n\n"
+    "m adds a collection."
+)
+
+
 def _rows(app) -> list[str]:
     rows = app.default_screen.query_one("#addon-rows", OptionList)
     return [option.prompt.plain for option in rows.options]
@@ -182,7 +190,7 @@ def test_the_list_shows_each_collection_and_what_it_publishes(
         app._live_health({"status": "ok", **held})
         return await _shown(console, app, pilot)
 
-    want = [f"acme  {acme.repo}", *lines] if lines else [addons_view.EMPTY.plain]
+    want = [f"acme  {acme.repo}", *lines] if lines else [EMPTY]
     assert console.run(scenario) == want
 
 
@@ -447,7 +455,7 @@ def test_the_list_claims_no_collection_only_after_a_read_found_none(board, acme,
             if case == "read-after-a-refusal":
                 write_yaml(acme.config / "addons.yaml", {"collections": {}, "addons": {}})
                 app._live_event([], [])
-                await console.until(pilot, lambda: _rows(app) == [addons_view.EMPTY.plain])
+                await console.until(pilot, lambda: _rows(app) == [EMPTY])
             return drawn, toasts
         finally:
             gate.set()

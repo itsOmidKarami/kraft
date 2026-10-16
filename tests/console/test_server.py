@@ -355,6 +355,30 @@ def test_the_log_follows_until_scrolled_up_and_end_follows_again(console, monkey
     assert console.run(scenario) == ("server.log · following · f filter", True, True)
 
 
+def test_the_log_draws_its_level_words_coloured_as_it_follows_and_filters(console, monkeypatch):
+    """`log_line` is how every line reaches the pane: followed, and drawn
+    again through the filter."""
+    monkeypatch.setattr(tail, "POLL_S", 0.01)
+    _quiet(monkeypatch)
+    _write("[10/16/26 12:05:13] WARNING  embedding unavailable    embed.py:114")
+
+    def warning_colour(app) -> str | None:
+        log = app.query_one("#server-log", RichLog)
+        found = [seg for strip in log.lines for seg in strip if seg.text == "WARNING"]
+        return found[0].style.color.triplet.hex if found and found[0].style.color else None
+
+    async def scenario(app, pilot):
+        await pilot.press("2")
+        await console.until(pilot, lambda: len(_log(app)) == 1)
+        followed = warning_colour(app)
+        await pilot.press("f", *"embed")
+        await pilot.pause()
+        return app.theme_variables["warning"], followed, warning_colour(app)
+
+    want, followed, filtered = console.run(scenario)
+    assert followed == filtered == want.lower()
+
+
 def test_f_filters_the_log_and_esc_brings_every_line_back(console, monkeypatch):
     """`f` keeps the lines holding the text, any case, as they come too;
     Esc clears it, shows every kept line again and gives the keys back."""
