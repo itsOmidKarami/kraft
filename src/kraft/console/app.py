@@ -32,7 +32,7 @@ from kraft.console.dialogs import Confirm, Dialog
 from kraft.console.live import Link, Live
 from kraft.console.output import OutputPanel
 from kraft.console.prompt import Prompt, commands
-from kraft.console.screens import VIEWS, Board, Item, View
+from kraft.console.screens import VIEWS, Board, Item, View, new_item
 from kraft.console.screens.server import updates_waiting
 from kraft.vocab import WorkItemStatus
 
@@ -146,6 +146,7 @@ class KraftConsole(App):
         Binding("question_mark", "keys", "keys"),
         Binding("slash", "prompt", "command", show=False),
         Binding("ctrl+o", "output", "output", show=False),
+        Binding("n", "new_item", "new item", show=False),
     ]
 
     def __init__(self) -> None:
@@ -367,6 +368,22 @@ class KraftConsole(App):
 
     def action_output(self) -> None:
         self.run_worker(self._show_panel)
+
+    def action_new_item(self) -> None:
+        """`n` from any view (spec §6, §7.6); not over a dialog or the output
+        panel, whose keys those are."""
+        if self.screen is self.default_screen:
+            self.run_worker(self._new_item, group="new")
+
+    async def _new_item(self) -> None:
+        created = await self.push_screen_wait(new_item.NewItem(self.scope))
+        if created is None:
+            return
+        text, severity = new_item.said(created)
+        timeout = new_item.WARNED_S if severity == "warning" else None
+        # markup=False: a warning quotes other items' titles.
+        self.notify(text, severity=severity, timeout=timeout, markup=False)
+        self.open_item(created["id"])
 
     @on(Input.Submitted, "#prompt")
     def _typed(self, event: Input.Submitted) -> None:

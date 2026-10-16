@@ -60,15 +60,7 @@ def _budget(raw: str) -> float | None:
 
 
 def _cmd_create(ns: argparse.Namespace) -> None:
-    # Resolved here rather than sent as typed: the server joins the path onto a
-    # candidate root (the repo, or the worktree we are standing in), never onto
-    # the cwd, so `--spec specs/x.md` from a subdirectory of either would miss
-    # both. Absolute, it is still accepted only if it lands inside one of them.
-    attachments = [
-        {"kind": kind, "path": str(Path(value).expanduser().resolve())}
-        for kind, value in (("spec", ns.spec), ("plan", ns.plan))
-        if value
-    ]
+    attachments = client.attachment_paths(ns.spec, ns.plan)
     common.emit(
         asyncio.run(
             client.create_work_item(
@@ -76,7 +68,7 @@ def _cmd_create(ns: argparse.Namespace) -> None:
                 common.repo_scope(ns),
                 ns.chain,
                 ns.description,
-                attachments or None,
+                attachments,
                 auto_gate=ns.auto_gate,
                 implements_beads=ns.implements or None,
                 depends_on=ns.after or None,
@@ -96,16 +88,9 @@ def _cmd_create(ns: argparse.Namespace) -> None:
 def _render_created(result: dict) -> str:
     """The created item, and, when an --autostart found every slot busy, why:
     what the board's composer says too."""
-    slots = result.get("slots")
     shown = common._render_action({k: v for k, v in result.items() if k != "slots"})
-    if not slots:
-        return shown
-    if queued := answers.held(result):
-        return f"{shown}\n{queued}"
-    return (
-        f"{shown}\nfiled paused: {slots['busy']} of {slots['limit']} slots are busy. "
-        f"Start it when one frees: kraft item resume {result['id']}"
-    )
+    said = answers.filed(result)
+    return f"{shown}\n{said}" if said else shown
 
 
 async def _gate_of(ns: argparse.Namespace) -> str:
