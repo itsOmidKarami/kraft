@@ -93,6 +93,19 @@ def complete(line: str, ids: Iterable[str]) -> tuple[str, list[str]]:
     return lead + " ".join([*done, word]), found if len(found) > 1 else []
 
 
+def commands() -> list[str]:
+    """Every verb the CLI takes, as typed after `kraft`: `item approve`,
+    `admin addon install`."""
+
+    def walk(parser: argparse.ArgumentParser, words: list[str]) -> list[str]:
+        verbs = _verbs(parser)
+        if not verbs:
+            return [" ".join(words)]
+        return [line for name, sub in verbs.items() for line in walk(sub, [*words, name])]
+
+    return walk(_parser(), [])
+
+
 class Prompt(Input):
     """One line at the bottom of every view. `/` from anywhere comes here."""
 

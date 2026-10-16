@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from kraft import client, render
+from kraft import answers, client, render
 from kraft.cli import common
 from kraft.vocab import DiffSide, ReplyClaim, ReviewOutcome, ThreadLabel, WorkItemStatus
 
@@ -102,7 +102,7 @@ def _render_created(result: dict) -> str:
     shown = common._render_action({k: v for k, v in result.items() if k != "slots"})
     if not slots:
         return shown
-    if queued := _held(result):
+    if queued := answers.held(result):
         return f"{shown}\n{queued}"
     return (
         f"{shown}\nfiled paused: {slots['busy']} of {slots['limit']} slots are busy. "
@@ -141,15 +141,11 @@ def _cmd_reject(ns: argparse.Namespace) -> None:
     common.emit(result, common.item_action(f"rejected {gate} on {{id}}"), ns.json)
 
 
-def _paused(result: dict) -> str:
-    stopped = len(result.get("paused_sessions") or [])
-    how = f", stopping {stopped} running session{'s' if stopped != 1 else ''}" if stopped else ""
-    return f"paused {result['id']}{how}; kraft item resume {result['id']} carries on"
-
-
 def _cmd_pause(ns: argparse.Namespace) -> None:
     common.emit(
-        asyncio.run(client.pause(ns.id)), common.item_action("paused {id}", small=_paused), ns.json
+        asyncio.run(client.pause(ns.id)),
+        common.item_action("paused {id}", small=answers.paused),
+        ns.json,
     )
 
 
@@ -273,64 +269,15 @@ def _cmd_resume(ns: argparse.Namespace) -> None:
         steers[path] = text
     common.emit(
         asyncio.run(client.resume(ns.steer, ns.id, steers=steers or None)),
-        common.item_action("resumed {id}", small=_resumed),
+        common.item_action("resumed {id}", small=answers.resumed),
         ns.json,
     )
-
-
-def _queued(result: dict) -> str | None:
-    """A start the board had no slot for, or None for any other answer."""
-    if result.get("status") != WorkItemStatus.QUEUED:
-        return None
-    slots = result.get("slots") or {}
-    return (
-        f"queued {result['id']}: {slots.get('busy')} of {slots.get('limit')} slots are busy. "
-        f"It starts when one frees; kraft item pause {result['id']} takes it out of the queue"
-    )
-
-
-def _blocked(result: dict) -> str | None:
-    """A start held behind unfinished items, or None for any other answer."""
-    if result.get("status") != WorkItemStatus.BLOCKED:
-        return None
-    on = ", ".join(f"{d['id']} ({d['status']})" for d in result.get("waiting_on") or [])
-    return (
-        f"blocked {result['id']}: it comes after {on}. It starts when they complete; "
-        f"kraft item unblock {result['id']} drops them"
-    )
-
-
-def _held(result: dict) -> str | None:
-    """A start that did not start: queued for a slot, or blocked."""
-    return _queued(result) or _blocked(result)
-
-
-def _resumed(result: dict) -> str:
-    """resume's usual answer: the node it went on from, and the agent tasks
-    a steer reached. No node is an item that had never started."""
-    if queued := _held(result):
-        return queued
-    node = result.get("node_id")
-    line = f"resumed {result['id']} at {node}" if node else f"started {result['id']}"
-    if steered := result.get("steered"):
-        line += f"; steered {', '.join(steered)}"
-    return line
-
-
-def _rerun_at(result: dict) -> str:
-    """Where a retry's run starts, from its usual answer, and its attempt."""
-    where = result.get("path") or result.get("node_id") or "its first node"
-    attempt = result.get("attempt")
-    return f"{where}, attempt {attempt}" if attempt else str(where)
 
 
 def _cmd_retry(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.retry(ns.steer, ns.id, path=ns.path, restart=ns.restart)),
-        common.item_action(
-            "retried {id}",
-            small=lambda r: _held(r) or f"retried {r['id']} at {_rerun_at(r)}",
-        ),
+        common.item_action("retried {id}", small=answers.retried),
         ns.json,
     )
 
@@ -343,7 +290,7 @@ def _cmd_raise_budget(ns: argparse.Namespace) -> None:
             f"raised the cap on {{id}} to {cap} and retried it",
             small=lambda r: (
                 f"raised the cap on {r['id']} to {cap}; "
-                + (_held(r) or f"retried at {_rerun_at(r)}")
+                + (answers.held(r) or f"retried at {answers.rerun_at(r)}")
             ),
         ),
         ns.json,

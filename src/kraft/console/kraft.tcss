@@ -116,6 +116,26 @@ Screen.-tiny #tiny {
     text-style: bold;
 }
 
+/* The peek: the bottom third of the Board, on the surface. */
+#peek {
+    height: 33%;
+    background: $surface;
+    border-top: solid $kraft-line;
+}
+
+#peek-head, #peek-chain {
+    height: 1;
+    padding: 0 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+#peek-body {
+    height: 1fr;
+    padding: 0 1;
+    background: $surface;
+}
+
 /* The output panel: above the prompt and footer, which stay in sight. */
 OutputPanel {
     align: center bottom;
@@ -149,11 +169,11 @@ OutputPanel {
     color: $kraft-muted;
 }
 
-Confirm {
+Confirm, Note {
     align: center middle;
 }
 
-#confirm {
+#confirm, #note {
     width: 72;
     max-width: 100%;
     height: auto;
@@ -162,9 +182,17 @@ Confirm {
     border: solid $kraft-line;
 }
 
-#listing {
+#listing, #note-lines {
     margin: 1 0;
     color: $kraft-muted;
+}
+
+#note Input {
+    margin-top: 1;
+}
+
+#note-error {
+    color: $error;
 }
 
 #confirm Horizontal {

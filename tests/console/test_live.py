@@ -262,3 +262,19 @@ async def test_a_view_that_fails_ends_the_run_not_just_a_task(monkeypatch):
         async with asyncio.timeout(5):
             await watched.run()
     assert raised.value.exceptions[0].args == ("a view broke",)
+
+
+async def test_a_reread_delivers_the_board_again_with_no_events(monkeypatch):
+    """A view that wants the board read now (a refused action) gets it as a
+    batch of no events, the same signal a reconnect gives."""
+    _script(monkeypatch, [([], 7), ([], 7)], [[OPEN]])
+    watched, seen = _recording()
+    asked = []
+
+    def done() -> bool:
+        if seen["events"] and not asked:
+            asked.append(watched.reread())
+        return len(seen["events"]) >= 2
+
+    await _run_until(watched, done)
+    assert seen["events"] == [[], []]

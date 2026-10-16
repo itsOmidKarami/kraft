@@ -6,14 +6,17 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from types import SimpleNamespace
 
 import pytest
 from support.api import run_with_app
+from support.console_board import NOW
 from textual.widgets import RichLog
 
 from kraft import client
 from kraft.console import live, runner
 from kraft.console.app import KraftConsole
+from kraft.console.screens import board as board_view
 
 
 class FakeStream:
@@ -91,3 +94,22 @@ def kraft_is(monkeypatch):
         monkeypatch.setattr(runner, "COMMAND", (sys.executable, "-c", script))
 
     return use
+
+
+@pytest.fixture
+def board(console, monkeypatch):
+    """`board(rows, repo)`: the console over these rows, opened in `repo`."""
+
+    def serve(rows: list[dict], repo: str | None = "/r"):
+        async def board_rows(**kwargs):
+            return rows, 0
+
+        async def resolve_repo(cwd=None):
+            return repo
+
+        monkeypatch.setattr(client, "board_rows", board_rows)
+        monkeypatch.setattr(client, "resolve_repo", resolve_repo)
+        monkeypatch.setattr(board_view, "time", SimpleNamespace(time=lambda: NOW))
+        return console
+
+    return serve

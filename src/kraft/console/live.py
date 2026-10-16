@@ -44,7 +44,8 @@ class Link(enum.StrEnum):
 
 
 #: `on_event(rows, events)`: the board read again after `events`. Empty
-#: `events` means the stream (re)connected: whatever a view shows, it reads again.
+#: `events` means the stream (re)connected, or a view asked for a read
+#: (`Live.reread`): whatever a view shows, it reads again.
 OnEvent = Callable[[list[dict], list[dict]], None]
 #: `on_health(health)`: `/health`'s answer, or None when there was none.
 OnHealth = Callable[[dict | None], None]
@@ -76,6 +77,11 @@ class Live:
         """Reconnect now rather than at the end of the backoff: the server is
         known to answer again."""
         self._retry.set()
+
+    def reread(self) -> None:
+        """Read the board again now, as after an event: a refused action
+        leaves the row it was about possibly stale, and no event says so."""
+        self._wake.set()
 
     async def _follow(self) -> None:
         failures = 0

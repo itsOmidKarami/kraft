@@ -11,13 +11,15 @@ import os
 import shlex
 import signal
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
+from functools import partial
 from typing import ClassVar
 from urllib.parse import urlsplit
 
 from textual import events, on
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding, BindingType
+from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Horizontal
 from textual.content import Content
 from textual.screen import Screen
@@ -26,10 +28,10 @@ from textual.widgets import Button, ContentSwitcher, Footer, HelpPanel, Input, S
 
 from kraft import answers, client, config, update
 from kraft.console import runner, theme, words
-from kraft.console.dialogs import Confirm
+from kraft.console.dialogs import Confirm, Dialog
 from kraft.console.live import Link, Live
 from kraft.console.output import OutputPanel
-from kraft.console.prompt import Prompt
+from kraft.console.prompt import Prompt, commands
 from kraft.console.screens import VIEWS, Board, View
 from kraft.vocab import WorkItemStatus
 
@@ -101,9 +103,32 @@ def starts_here() -> bool:
     return urlsplit(client.base_url()).hostname in config.LOOPBACK
 
 
+#: A palette entry that goes to a screen: the only ones listed before anything is typed.
+SCREEN = "Go to this screen"
+
+
+class Go(Provider):
+    """Ctrl+P's Kraft entries (spec §7.7): a screen, an item by its id or
+    title, a verb."""
+
+    async def search(self, query: str) -> Hits:
+        matcher = self.matcher(query)
+        for title, about, run in self.app.places():
+            if (score := matcher.match(title)) > 0:
+                # Content, not a str: the palette reads a str as markup, and a
+                # title may hold `[/]`. shortcut: no match highlighting.
+                yield Hit(score, Content(title), run, text=title, help=about)
+
+    async def discover(self) -> Hits:
+        for title, about, run in self.app.places():
+            if about == SCREEN:
+                yield DiscoveryHit(Content(title), run, text=title, help=about)
+
+
 class KraftConsole(App):
     CSS_PATH = "kraft.tcss"
     TITLE = "Kraft"
+    COMMANDS = App.COMMANDS | {Go}
     SCREENS: ClassVar[dict] = {"output": OutputPanel}
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("1", "show('board')", "Board", show=False),
@@ -201,6 +226,37 @@ class KraftConsole(App):
         self.everywhere = everywhere
         self._draw_top()
 
+    def places(self) -> list[tuple[str, str, Callable[[], object]]]:
+        """What Ctrl+P can go to, as `(title, help, callback)`: the screens,
+        each item on the board, and every verb, typed at the prompt."""
+        screens = [(VIEWS[name].label, SCREEN, partial(self.show, name)) for name in TABS]
+        items = [
+            (
+                f"{row['id'][:8]}  {' '.join((row.get('title') or '').split())}",
+                "Select it on the Board",
+                partial(self.go_to_item, row["id"]),
+            )
+            for row in self.rows
+            if row.get("display_status") != "archived"
+        ]
+        verbs = [
+            (f"/{line}", "Type it at the prompt", partial(self.type_command, f"/{line} "))
+            for line in commands()
+        ]
+        return screens + items + verbs
+
+    def go_to_item(self, work_item_id: str) -> None:
+        """The item selected on the Board, its peek open; the Item screen
+        (PR 4) opens it instead."""
+        self.show("board")
+        self.query_one("#board", Board).select(work_item_id)
+
+    def type_command(self, line: str) -> None:
+        self.action_prompt()
+        prompt = self.query_one(Prompt)
+        prompt.value = line
+        prompt.cursor_position = len(line)
+
     def notify_refusal(self, error: client.ClientError) -> None:
         """A call that failed, said in the server's words (spec §8). A token
         refusal is a state, not a toast: every view says so until it clears."""
@@ -223,7 +279,7 @@ class KraftConsole(App):
         # screen it ran on, and must then only stop waiting. Quitting cancels
         # this one too, and `on_unmount` ends the command then.
         done = asyncio.Future[int]()
-        self.run_worker(self._run(run, panel, done), group="command")
+        self.run_worker(partial(self._run, run, panel, done), group="command")
         return await asyncio.shield(done)
 
     async def _run(self, run: runner.Run, panel: OutputPanel, done: asyncio.Future[int]) -> None:
@@ -235,14 +291,14 @@ class KraftConsole(App):
         done.set_result(code)
 
     async def _show_panel(self) -> None:
-        """The panel on top, once: Ctrl+P can open over it. A confirm is never
-        popped (that drops its result callback, and the pending decision with
+        """The panel on top, once: Ctrl+P can open over it. A dialog is never
+        popped (that drops its result callback, and the pending answer with
         it): the panel opens above it instead, since a command needs a mounted
-        panel to write to, and Esc then shows the confirm again."""
+        panel to write to, and Esc then shows the dialog again."""
         panel = self.get_screen("output", OutputPanel)
         if panel not in self.screen_stack:
             await self.push_screen(panel)
-        while self.screen is not panel and not isinstance(self.screen, Confirm):
+        while self.screen is not panel and not isinstance(self.screen, Dialog):
             await self.pop_screen()
 
     def stop_command(self) -> None:
@@ -253,7 +309,7 @@ class KraftConsole(App):
         if run is self._stopping:
             # `end()` waits up to QUIT_GRACE_S: say so, or the press seems to do nothing.
             self.get_screen("output", OutputPanel).note("stopping…")
-            self.run_worker(run.end())
+            self.run_worker(run.end)
         else:
             self._stopping = run
             run.stop()
@@ -286,12 +342,12 @@ class KraftConsole(App):
         prompt.focus()
 
     def action_output(self) -> None:
-        self.run_worker(self._show_panel())
+        self.run_worker(self._show_panel)
 
     @on(Input.Submitted, "#prompt")
     def _typed(self, event: Input.Submitted) -> None:
         if event.value.strip(" /"):
-            self.run_worker(self._run_typed(event.value), group="typed")
+            self.run_worker(partial(self._run_typed, event.value), group="typed")
 
     async def _run_typed(self, line: str) -> None:
         kind, what = runner.route(line)
@@ -312,7 +368,7 @@ class KraftConsole(App):
 
     @on(Button.Pressed, "#start")
     def _start(self) -> None:
-        self.run_worker(self._start_server(), group="typed")
+        self.run_worker(self._start_server, group="typed")
 
     async def _start_server(self) -> None:
         if await self.run_command(["admin", "start", "--detach"]) == 0:
