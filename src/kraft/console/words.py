@@ -343,12 +343,23 @@ def _cut(text: str, n: int = 70) -> str:
 
 
 def _round(value: object) -> str:
-    """`Number(cycle ?? 0) + 1`: a cycle that is no number reads "NaN", as on the web."""
+    """`Number(cycle ?? 0) + 1`: a number as JavaScript reads it ("" is 0,
+    "Infinity" is infinite, "inf" is no number), else "NaN"."""
     try:
-        n = float(0 if value is None else value)
+        text = value.strip() if isinstance(value, str) else None
+        if text is None:
+            n = float(0 if value is None else value)
+        elif text.lstrip("+-") == "Infinity":
+            n = float(text.replace("Infinity", "inf"))
+        elif text and (text.lstrip("+-").lower() in ("inf", "infinity", "nan") or "_" in text):
+            return "NaN"  # Python reads these as numbers, JavaScript does not
+        else:
+            n = float(text or 0)
     except (TypeError, ValueError):
         return "NaN"
-    return "NaN" if n != n else _s(n + 1)
+    if n != n:
+        return "NaN"
+    return ("-" if n < 0 else "") + "Infinity" if math.isinf(n) else _s(n + 1)
 
 
 def task_name(path: str) -> str:

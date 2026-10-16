@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from support.console_board import GATE, RUNNING, _detail, _iso, _opened, _serve, _settled
+from support.console_board import GATE, RUNNING, _detail, _iso, _opened, _overview, _serve, _settled
 from textual.widgets import RichLog
 
 from kraft import client, render
@@ -209,7 +209,7 @@ def test_a_log_nobody_sees_is_not_followed(board, monkeypatch):
     console = board([RUNNING])
 
     def live(app) -> list:
-        return [w for w in app.view.workers if w.group == "log" and w.is_running]
+        return [w for w in app.view.workers if w.group == "log" and not w.is_finished]
 
     async def scenario(app, pilot):
         await _opened(console, app, pilot, RUNNING["id"])
@@ -504,7 +504,7 @@ def test_a_log_with_no_session_yet_follows_once_one_is_known(board, monkeypatch,
 
 
 @pytest.mark.parametrize(
-    ("sessions", "failure", "lines", "offered"),
+    ("sessions", "failure", "lines"),
     [
         (
             SESSIONS[1:],
@@ -514,7 +514,6 @@ def test_a_log_with_no_session_yet_follows_once_one_is_known(board, monkeypatch,
                 "waiting for output",
                 client.reason_of(str(client.status_error(409, "the log is gone [/]"))),
             ],
-            False,
         ),
         (
             SESSIONS[1:],
@@ -524,13 +523,11 @@ def test_a_log_with_no_session_yet_follows_once_one_is_known(board, monkeypatch,
                 "waiting for output",
                 "session ended",
             ],
-            False,
         ),
-        ([], None, ["No session has run yet."], False),
     ],
-    ids=["stream-refused", "one-session-offers-no-s", "no-session"],
+    ids=["stream-refused", "one-session-offers-no-s"],
 )
-def test_the_log_says_what_it_cannot_follow(board, monkeypatch, sessions, failure, lines, offered):
+def test_the_log_says_what_it_cannot_follow(board, monkeypatch, sessions, failure, lines):
     """A refused stream is said in the server's words (`[/]` as typed); with one
     session, or none, `s` is not offered."""
     _serve(monkeypatch, _detail(RUNNING, worker_sessions=sessions), calls=[])
@@ -551,4 +548,211 @@ def test_the_log_says_what_it_cannot_follow(board, monkeypatch, sessions, failur
         await console.until(pilot, lambda: _log(app) == lines)
         return app.view.check_action("session", ())
 
-    assert console.run(scenario) is offered
+    assert console.run(scenario) is False
+
+
+def _logging(app) -> list:
+    return [w for w in app.query_one("#item").workers if w.group == "log" and not w.is_finished]
+
+
+def _forever(monkeypatch) -> None:
+    """A session that never ends, having said one line."""
+
+    async def stream_log(work_item_id, session_id, after_line=0):
+        yield {"n": 0, "text": "first"}
+        await asyncio.Event().wait()
+        yield {}
+
+    monkeypatch.setattr(client, "stream_log", stream_log)
+
+
+def _held_reads(monkeypatch, detail):
+    """`get_work_item` that waits for `hold` once it is set; returns the hold and
+    the count of reads that finished."""
+    hold, done = asyncio.Event(), []
+    hold.set()
+
+    async def get_work_item(work_item_id=None, *, full=False):
+        await hold.wait()
+        done.append(1)
+        return detail
+
+    monkeypatch.setattr(client, "get_work_item", get_work_item)
+    return hold, done
+
+
+@pytest.mark.parametrize("leave", ["another-tab", "another-view"])
+def test_a_reread_that_lands_out_of_sight_does_not_shred_the_document(board, monkeypatch, leave):
+    """The Overview is drawn only while its pane is on screen (a hidden pane
+    wraps at one cell): a read that lands on another tab or view leaves the
+    document whole for when the reader comes back."""
+    detail = _detail(GATE)
+    _serve(monkeypatch, detail, calls=[])
+    _serve_events(monkeypatch, [])
+    hold, done = _held_reads(monkeypatch, detail)
+    console = board([GATE])
+    moved = GATE | {"updated_at": "2026-10-16T00:00:00+00:00"}
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, GATE["id"])
+        hold.clear()
+        before = len(done)
+        app.view.rows_changed([moved], [{"seq": 1}])
+        if leave == "another-tab":
+            await pilot.press("right_square_bracket")
+        else:
+            app.show("server")
+        await pilot.pause()
+        hold.set()
+        await console.until(pilot, lambda: len(done) > before)
+        await pilot.pause()
+        if leave == "another-tab":
+            await pilot.press("left_square_bracket")
+        else:
+            app.show("item")
+        await console.until(pilot, lambda: _overview(app)[:1] == ["line 0 [/]"])
+        await pilot.pause()
+        return _overview(app)
+
+    lines = console.run(scenario)
+    assert lines[:60] == [f"line {n} [/]" for n in range(60)]
+
+
+def test_a_log_is_not_followed_by_a_read_landing_behind_the_board(board, monkeypatch):
+    """A Log opened before the read, then left for another view: when the read
+    lands there is nobody to follow for."""
+    detail = _detail(RUNNING, worker_sessions=SESSIONS[1:])
+    _serve(monkeypatch, detail, calls=[])
+    _serve_events(monkeypatch, [])
+    _forever(monkeypatch)
+    hold, done = _held_reads(monkeypatch, detail)
+    console = board([RUNNING])
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        hold.clear()
+        app.open_item(RUNNING["id"])
+        await pilot.press("right_square_bracket", "right_square_bracket")
+        await console.until(pilot, lambda: _log(app) == ["No session has run yet."])
+        app.show("server")
+        await pilot.pause()  # the Item has heard it is hidden
+        hold.set()
+        await console.until(pilot, lambda: done)
+        await pilot.pause()
+        return _logging(app)
+
+    assert console.run(scenario) == []
+
+
+def test_a_log_stops_when_the_item_is_gone(board, monkeypatch):
+    """Archived while its Log is followed: the 404 reread says so and the
+    stream is let go."""
+    _serve(monkeypatch, _detail(RUNNING, worker_sessions=SESSIONS[1:]), calls=[])
+    _serve_events(monkeypatch, [])
+    _forever(monkeypatch)
+    console = board([RUNNING])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, RUNNING["id"])
+        app.view.show_tab("log")
+        await console.until(pilot, lambda: _logging(app) and "first" in _log(app))
+
+        async def gone(work_item_id=None, *, full=False):
+            raise client.status_error(404, "gone")
+
+        monkeypatch.setattr(client, "get_work_item", gone)
+        app.view.rows_changed([RUNNING | {"updated_at": "2026-10-16T00:00:00+00:00"}], [])
+        await console.until(pilot, lambda: app.view._dead)
+        await pilot.pause()
+        return _logging(app)
+
+    assert console.run(scenario) == []
+
+
+def test_a_log_follows_again_when_the_item_is_shown_again(board, monkeypatch):
+    """Hidden (another view, or a terminal too small) the Log was let go; shown
+    again with the Log tab current, it follows again."""
+    _serve(monkeypatch, _detail(RUNNING, worker_sessions=SESSIONS[1:]), calls=[])
+    _serve_events(monkeypatch, [])
+    _forever(monkeypatch)
+    console = board([RUNNING])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, RUNNING["id"])
+        app.view.show_tab("log")
+        await console.until(pilot, lambda: _logging(app))
+        app.show("server")
+        await pilot.pause()
+        hidden = _logging(app)
+        app.show("item")
+        await console.until(pilot, lambda: _logging(app))
+        return hidden
+
+    assert console.run(scenario) == []
+
+
+@pytest.mark.parametrize(
+    "then",
+    [
+        lambda view, app: view.show_tab("diff"),
+        lambda view, app: app.show("server"),
+    ],
+    ids=["another-tab", "another-view"],
+)
+def test_a_tab_started_late_checks_it_is_still_wanted(board, monkeypatch, then):
+    """The read a tab starts runs after the next refresh; a tab or view change
+    in the same frame must find it not started."""
+    _serve(monkeypatch, _detail(RUNNING, worker_sessions=SESSIONS[1:]), calls=[])
+    _serve_events(monkeypatch, [])
+    _forever(monkeypatch)
+    console = board([RUNNING])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, RUNNING["id"])
+        app.view.show_tab("log")
+        then(app.view, app)
+        await pilot.pause()
+        await pilot.pause()
+        return _logging(app)
+
+    assert console.run(scenario) == []
+
+
+def test_end_after_coming_back_does_not_page_from_the_last_visits_boundary(board, monkeypatch):
+    """Leave the Activity with the oldest event 3, let two arrive, come back and
+    press End before the first page answers: the page before 3 must not be
+    glued under the fresh first page (7 to 4 would be gone, silently)."""
+    _serve(monkeypatch, _detail(GATE), calls=[])
+    history = [_event(n, "node_started", 10 - n, node=f"n{n}") for n in range(1, 7)]
+    first, older = asyncio.Event(), asyncio.Event()
+    first.set()
+    _serve_events(monkeypatch, history, hold={item_view.NEWEST: first, 3: older})
+    monkeypatch.setattr(item_view, "PAGE", 2)
+    console = board([GATE])
+
+    def seqs(app):
+        return [e["seq"] for e in app.view.events]
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, GATE["id"])
+        await pilot.press("right_square_bracket")
+        await console.until(pilot, lambda: seqs(app) == [6, 5])
+        older.set()
+        await pilot.press("end")
+        await console.until(pilot, lambda: seqs(app) == [6, 5, 4, 3])
+        await pilot.press("left_square_bracket")
+        history.extend(_event(n, "node_started", 0, node=f"n{n}") for n in (7, 8))
+        first.clear()
+        older.clear()
+        await pilot.press("right_square_bracket")
+        await pilot.pause()
+        await pilot.press("end")  # asks for the page before 3, while the first is held
+        await pilot.pause()
+        first.set()
+        await console.until(pilot, lambda: seqs(app) == [8, 7])
+        older.set()
+        await pilot.pause()
+        await pilot.pause()
+        return seqs(app)
+
+    assert console.run(scenario) == [8, 7]
