@@ -152,6 +152,60 @@ def test_rewrite_applies_the_change_and_keeps_the_rest(change, expect, gone):
 
 
 @pytest.mark.parametrize(
+    ("text", "change", "expect"),
+    [
+        pytest.param(
+            "repos:\n  - path: /a\n    forge: ~\n    project:\n    setup: 'null'\n"
+            "  - path: /b\n    test_command: x\n",
+            lambda d: d["repos"][1].__setitem__("test_command", "y"),
+            ["    forge: ~\n    project:\n    setup: 'null'\n", "test_command: y"],
+            id="an-untouched-entrys-null-spellings-stay",
+        ),
+        pytest.param(
+            "repos:\n-   path: /a\n    sync: true\n-   path: /b\n    test_command: x\n",
+            lambda d: d["repos"][1].__setitem__("test_command", "y"),
+            ["-   path: /a\n    sync: true\n-   path: /b\n    test_command: y\n"],
+            id="a-wide-dash-indent-stays",
+        ),
+        pytest.param(
+            'triggers:  # c\n  - {cron: "0 9 * * 1-5", repo: /tmp/r, chain: default, title: N}'
+            "  # x\n  - title: w\n    cron: '0 9 * * 1'\n    repo: /tmp/r\n    chain: default\n",
+            lambda d: d.__setitem__("max_concurrent", 2),
+            ["  # x\n  - title: w\n    cron: '0 9 * * 1'\n", "max_concurrent: 2"],
+            id="a-flow-entry-with-a-comment-then-a-block-entry",
+        ),
+    ],
+)
+def test_rewrite_keeps_the_layout_of_what_it_did_not_touch(text, change, expect):
+    data = yaml.safe_load(text)
+    change(data)
+    out = preserve.rewrite(text, data)
+    assert yaml.safe_load(out) == data, out
+    for part in expect:
+        assert part in out, out
+
+
+@pytest.mark.parametrize(
+    "triggers",
+    [
+        "  - cron: '0 9 * * 1'\n    title: a\n",
+        "  - &a\n    cron: '0 9 * * 1'\n    title: a\n  - <<: *a\n    title: b\n",
+        "  - &a\n    cron: '0 9 * * 1'\n    title: a\n  - <<: *a\n",
+    ],
+    ids=["a-plain-entry", "a-merge-entry-with-a-key", "a-merge-entry-alone"],
+)
+def test_carried_entries_leave_the_comment_block_after_the_list_behind(triggers):
+    """The block after `triggers:` documents the next key, so it stays with
+    the file it was in whatever the last entry is made of."""
+    text = f"triggers:\n{triggers}# Operational defaults\nmax_concurrent: 2\n"
+    nodes = preserve.carried(text, "triggers")
+    moved = preserve.rewrite("schedules: []\n", {"schedules": nodes})
+    kept = preserve.rewrite(text, {"max_concurrent": 2})
+    assert "# Operational defaults" not in moved, moved
+    assert "# Operational defaults" in kept, kept
+
+
+@pytest.mark.parametrize(
     "text, data, written",
     [
         (

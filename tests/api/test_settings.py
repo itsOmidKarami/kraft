@@ -347,6 +347,9 @@ def test_put_intake_persists_and_applies_without_a_restart(client, templates_dir
         {"priority_ceiling": -1},
         {"schedules": [{"cron": "0 9 * * 1", "repo": "/r", "title": "t"}]},  # 500, R12F-06
         {"schedules": [{"cron": "61 9 * * *", "repo": "/r", "chain": "c", "title": "t"}]},
+        {"schedules": [{"cron": "0 9 * * 1", "repo": "/r", "chain": "nochain", "title": "t"}]},
+        {"schedules": [{"cron": "0 9 * * 1", "repo": "/nope", "chain": "default", "title": "t"}]},
+        {"schedules": [{"cron": "0 9 * * 1", "repo": "/r", "chain": "default", "title": " "}]},
     ],
     ids=[
         "interval-below-the-floor",
@@ -354,6 +357,9 @@ def test_put_intake_persists_and_applies_without_a_restart(client, templates_dir
         "negative-ceiling",
         "a-schedule-with-no-chain",
         "a-cron-the-scheduler-cannot-run",
+        "an-unknown-chain",
+        "an-unconnected-repo",
+        "a-blank-title",
     ],
 )
 def test_put_intake_rejects_a_setting_the_poller_would_not_honour(client, over):
@@ -382,6 +388,32 @@ def test_put_intake_keeps_the_schedules_a_body_leaves_out(client, templates_dir)
     assert [s["title"] for s in on_disk["schedules"]] == ["t"]
     assert client.put("/api/intake", json={**body, "schedules": []}).status_code == 200
     assert yaml.safe_load((templates_dir / "intake.yaml").read_text())["schedules"] == []
+
+
+def test_put_intake_keeps_the_files_comments(client, templates_dir):
+    """`Intake.save` rewrote the file whole: every comment gone."""
+    (templates_dir / "intake.yaml").write_text(
+        "# how often\ninterval_s: 120   # two minutes\nenabled: false\n"
+        "schedules:\n  # the weekly one\n"
+        "  - {cron: '0 9 * * 1', repo: /r, chain: default, title: t}\n"
+    )
+    body = {"enabled": True, "interval_s": 120, "priority_ceiling": 2, "repos": []}
+    assert client.put("/api/intake", json=body).status_code == 200
+    text = (templates_dir / "intake.yaml").read_text()
+    assert "# how often\ninterval_s: 120   # two minutes\n" in text, text
+    assert "  # the weekly one\n  - {cron: '0 9 * * 1'" in text, text
+    assert "enabled: true" in text
+
+
+def test_put_intake_names_what_is_wrong_with_a_schedule(client, templates_dir):
+    schedule = {"cron": "0 9 * * 1", "repo": "/r", "chain": "nochain", "title": "t"}
+    body = {"enabled": True, "interval_s": 60, "priority_ceiling": 2, "repos": []}
+    reply = client.put("/api/intake", json={**body, "schedules": [schedule]})
+    assert reply.status_code == 422
+    assert "schedules[0].chain: chain 'nochain' is not in the library" in reply.json()["detail"]
+    assert not (templates_dir / "intake.yaml").exists() or (
+        "nochain" not in (templates_dir / "intake.yaml").read_text()
+    )
 
 
 def test_put_intake_no_longer_requires_max_concurrent(client):

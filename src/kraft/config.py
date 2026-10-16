@@ -191,6 +191,19 @@ def write_yaml(path: str | Path, data: dict) -> None:
     write_text(path, yaml.safe_dump(data, sort_keys=False, default_flow_style=False))
 
 
+def write_preserving(path: str | Path, data: dict) -> None:
+    """`data` written over the file's own text, as the Settings draft writes
+    it: its comments, quoting and layout stay for every key this save did not
+    change. A file it cannot be written over is written plainly."""
+    from kraft.drafts import preserve
+
+    try:
+        text = Path(path).read_text() if Path(path).is_file() else None
+        write_text(path, preserve.rewrite(text, data))
+    except (OSError, preserve.RewriteError):
+        write_yaml(path, data)
+
+
 # ── repos ────────────────────────────────────────────────────────────────────
 
 REPOS_DEFAULT: dict = {"repos": []}
@@ -626,7 +639,7 @@ def save_repos(path: str | Path, repos: list[dict], workspaces: dict | None = No
     `workspaces:` section, so a Settings save of one entry never drops them."""
     if workspaces is None:
         workspaces = read_yaml(path, REPOS_DEFAULT).get("workspaces")
-    write_yaml(path, {"repos": repos, **({"workspaces": workspaces} if workspaces else {})})
+    write_preserving(path, {"repos": repos, **({"workspaces": workspaces} if workspaces else {})})
 
 
 def git_read(

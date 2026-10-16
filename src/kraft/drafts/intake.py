@@ -14,6 +14,7 @@ from kraft import intake as intake_mod
 from kraft.api import deps
 from kraft.drafts import config, store
 from kraft.drafts.ops import OpError
+from kraft.executor.entry import one_line_title
 
 NAME = "intake"
 INTAKE = "intake.yaml"
@@ -110,6 +111,9 @@ def _schedule_problems(
             repos = None  # `config_check` of repos.yaml says why
         if repos is not None and deps._connected(repos, repo) is None:
             out.append(_problem(index, "repo", f"{repo} is not a connected repo"))
+    title = entry.get("title")
+    if isinstance(title, str) and not one_line_title(title, entry.get("description"))[0].strip():
+        out.append(_problem(index, "title", "the title and description are blank"))
     chain = entry.get("chain")
     if isinstance(chain, str) and chains and chain not in chains:
         out.append(_problem(index, "chain", f"chain {chain!r} is not in the library"))
@@ -121,6 +125,19 @@ def _schedule_problems(
         except policy.PolicyError as exc:
             out.append(_problem(index, "cron", str(exc).removeprefix("cron: ")))
     return out
+
+
+def schedule_problems(st, data: Mapping) -> list[dict]:
+    """`_schedule_problems` over every schedule of `data` (an `intake.yaml`
+    mapping), for a save that does not go through a draft (`PUT /intake`)."""
+    chains = set(getattr(getattr(st, "library", None), "chain_ids", ()) or ())
+    raw = data.get("schedules")
+    return [
+        p
+        for i, entry in enumerate(raw if isinstance(raw, list) else ())
+        if isinstance(entry, dict)
+        for p in _schedule_problems(st, i, entry, chains, {})
+    ]
 
 
 #: A file-level problem `_schedule_problems` already names on its schedule.
