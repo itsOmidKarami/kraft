@@ -15,6 +15,7 @@ from textual.widgets import Button, RichLog
 from kraft import client, update
 from kraft.console import tail
 from kraft.console.dialogs import Confirm
+from kraft.console.screens import server as server_view
 
 ECHO = "import sys; print(' '.join(sys.argv[1:]))"
 HEALTH = {
@@ -560,3 +561,42 @@ def test_a_failed_read_after_an_update_forgets_the_old_release(console, kraft_is
         return app.release, app.update_waiting
 
     assert console.run(scenario) == (None, False)
+
+
+COLOURS = {"warning": "W", "error": "E", "kraft-faint": "F"}
+
+
+@pytest.mark.parametrize(
+    ("line", "styled"),
+    [
+        (
+            "[10/16/26 12:05:13] WARNING  embedding unavailable: the 'vector'    embed.py:114",
+            [("W", "WARNING"), ("F", "embed.py:114")],
+        ),
+        (
+            "                    ERROR    the store is gone [/]        store.py:9",
+            [("E", "ERROR"), ("F", "store.py:9")],
+        ),
+        ("[10/16/26 12:05:13] CRITICAL out of disk", [("E", "CRITICAL")]),
+        (
+            "[10/16/26 12:05:11] INFO     StreamableHTTP       streamable_http_manager.py:162",
+            [("F", "streamable_http_manager.py:162")],
+        ),
+        ("                             extra is not installed ERROR", []),
+        ("kraft: http://127.0.0.1:8766", []),
+    ],
+    ids=[
+        "warning",
+        "error-under-a-shown-second",
+        "critical",
+        "info-stays-plain",
+        "continuation",
+        "plain",
+    ],
+)
+def test_server_log_colours_its_level_word_and_dims_the_source(line, styled):
+    """The level word keeps its word and gains a colour, so colour is never
+    alone; only a record's own level, not the word inside a wrapped line."""
+    drawn = server_view.log_line(line, COLOURS)
+    assert drawn.plain == line
+    assert [(span.style, line[span.start : span.end]) for span in drawn.spans] == styled

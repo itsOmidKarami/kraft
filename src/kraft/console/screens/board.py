@@ -22,6 +22,7 @@ from textual.widgets.option_list import Option
 from kraft import client, logs
 from kraft.console import acts, tail, words
 from kraft.console.screens import View
+from kraft.console.screens.server import log_line
 
 #: A row's columns besides the title and the tail: the repo-and-chain column
 #: and the age. The bar, the id and the gaps take 1 + 8 + 2 + 2 more.
@@ -414,7 +415,7 @@ class Board(View):
         if row is None:
             head.update(Content.styled("server.log", "$kraft-muted"))
             async for line in tail.follow(tail.server_log()):
-                body.write(line)
+                body.write(log_line(line, self.app.theme_variables))
             return
         now = time.time()
         bead = f" · {row['bead_id']}" if row.get("bead_id") else ""
