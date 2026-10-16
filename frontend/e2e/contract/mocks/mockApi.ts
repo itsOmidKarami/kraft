@@ -363,6 +363,16 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if ((m = p.match(/^\/work-items\/([^/]+)\/documents$/))) {
       return json({ work_item_id: m[1], documents: S.docs[m[1]] ?? [] });
     }
+    // An item with no worktree (never started, `worktree_exists: false`) has no base_ref stamped yet either: the diff
+    // is the server's empty answer for that, and the comparison its 404 (`deps.worktree_missing`).
+    const bare = (wid: string) => S.bundles[wid]?.item.worktree_exists === false;
+    if ((m = p.match(/^\/work-items\/([^/]+)\/diff$/)) && bare(m[1])) {
+      const ws = ["1", "true"].includes(q.get("ignore_whitespace") ?? "");
+      return json({ work_item_id: m[1], base_ref: null, files: [], diff: "", untracked: [], truncated: false, ignore_whitespace: ws, landed: { commits: [], files: [], diff: "", truncated: false }, diff_max_bytes: 1_000_000, worktree_path: `/Users/dev/.kraft/run/worktrees/${m[1]}` });
+    }
+    if ((m = p.match(/^\/work-items\/([^/]+)\/compare$/)) && bare(m[1])) {
+      return json({ detail: S.bundles[m[1]].item.current_node_id == null ? "this work item has not started, so it has no worktree yet" : "this work item's worktree was removed from disk" }, 404);
+    }
     if ((m = p.match(/^\/work-items\/([^/]+)\/diff$/))) return json(diffFor(m[1], S.variant));
     if ((m = p.match(/^\/work-items\/([^/]+)\/compare$/))) {
       return json(compareFor(m[1], S.variant, ["1", "true"].includes(q.get("ignore_whitespace") ?? ""), viewedMarks));

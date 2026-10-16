@@ -60,6 +60,13 @@ export function pendingRewind(b: ItemBundle): { target: string; note: string | n
     e.type === "work_item_resumed" || e.type === "work_item_retried");
   return spent ? null : p;
 }
+/** The events of the run the item is on: after its newest `run_forked` (`store.forks.fork_boundary`), or all of
+ *  them for the intake run. Completions and scope skips count within it. */
+export function sinceFork(events: ItemBundle["events"]) {
+  return events.slice(events.map((e) => e.type).lastIndexOf("run_forked") + 1);
+}
+/** The rate-limit poller's steer for the relaunch (`rate_limit_retry.RESUME_PROMPT`). */
+export const RESUME_PROMPT = "You were working on this task when the agent hit an API rate limit and stopped. That limit has now reset \u2014 continue the work from where you left off.";
 const ENDED = (s: string) => WORK_ITEM_TRAITS[s as WorkItemStatus]?.ended ?? false;
 /** `kraft.vocab.work_item.TRAITS[...].admits_status`, the status half of each door (never exported to TS). */
 const ADMITS: Record<string, readonly string[]> = {
@@ -118,6 +125,8 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
   let seq = Math.max(4242, ...Object.values(S.bundles).flatMap((b) => b.events.map((e) => e.seq)));
   let made = 0;
   let sessions = 0;
+  let forks = 0;
+  let mrs = 0;
   const blank = template();
 
   /** Append an event with the next seq. `node_id` defaults as `events.append` defaults it: the payload's own `node_id` or `node`. */
@@ -158,6 +167,35 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     const live = b.sessions.filter((s) => (s.node_id === b.item.current_node_id || s.hook_point === "escalation") && LIVE_SESSION_STATUSES.includes(s.status));
     for (const s of live) Object.assign(s, { status: "paused", exited_at: now() });
     return live.map((s) => s.id);
+  };
+  /** `store.running_sessions_under`: the live sessions of a task or step, marked paused. */
+  const stopUnder = (b: ItemBundle, scope: string): string[] => {
+    const live = b.sessions.filter((s) => (s.hook_point === scope || String(s.hook_point).startsWith(`${scope}.`)) && LIVE_SESSION_STATUSES.includes(s.status));
+    for (const s of live) Object.assign(s, { status: "paused", exited_at: now() });
+    return live.map((s) => s.id);
+  };
+  /** `store.forks.fork_run` for a retry of `target`: every gate from it on that stands approved is reopened, then the
+   *  run forks, then (a person's retry) the span's counters reset. */
+  const fork = (b: ItemBundle, target: string) => {
+    const id = b.item.id;
+    const nodes: any[] = b.item.chain_definition?.nodes ?? [];
+    const from = Math.max(0, nodes.findIndex((n) => n.id === target));
+    const reopened: string[] = [];
+    for (const n of nodes.slice(from)) {
+      if (n.kind !== "gate") continue;
+      const last = [...b.events].reverse().find((e) => (e.type === "gate_approved" || e.type === "gate_reopened") && e.payload.gate === n.id);
+      if (last?.type !== "gate_approved") continue;
+      reopened.push(n.id);
+      append(id, "gate_reopened", { gate: n.id, reason: "retry" }, n.id);
+    }
+    const parent = [...b.events].reverse().find((e) => e.type === "run_forked")?.payload.fork ?? null;
+    append(id, "run_forked", { fork: hex(800_000 + ++forks), parent, scope: "node", path: target, reopened, preserved: [] });
+    append(id, "cap_counters_reset", { by: "human", counters: {} });
+  };
+  /** `store.complete_node`: once per node per run fork. */
+  const complete = (b: ItemBundle, node: string) => {
+    if (!sinceFork(b.events).some((e) => e.type === "node_completed" && e.payload.node_id === node)) append(b.item.id, "node_completed", { node_id: node });
+    tally(b);
   };
   /** One `worker_session_paused` per session `stopSessions` stopped. */
   const paused = (b: ItemBundle, ids: string[]) => { for (const sid of ids) append(b.item.id, "worker_session_paused", { session_id: sid }); };
@@ -206,7 +244,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       run(it);
       it.fix_target = null;
       append(id, "gate_approved", { gate, by: "human" }, gate);
-      append(id, "node_completed", { node_id: gate });
+      complete(x.b, gate);
       return ok(settle(it));
     },
     /** POST /work-items/{id}/gates/{gate}/reject: back to `node`, else the gate's `reject_to`, else the exec node
@@ -293,6 +331,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const attempt = Math.max(0, ...b.sessions.filter((s) => s.node_id === it.current_node_id).map((s) => s.attempt ?? 0)) + 1;
       run(it);
       append(id, "work_item_retried", { node_id: it.current_node_id, loop: null, steer, escalated: false, seeded: false });
+      fork(b, it.current_node_id);
       settle(it);
       return ok({ id, node_id: it.current_node_id, path: null, loop: null, steer, attempt });
     },
@@ -310,7 +349,10 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
         return no(409, `path: ${py(path)} is not the node the item stands on (${py(it.current_node_id)}) or its pending gate`);
       const gate = it.pending_gate ?? null;
       const scope = path && path.includes(".") ? path : null;
-      const ids = stopSessions(b);
+      // `lifecycle._skip_within_node`: a task or step of the node the item stands on, and only its sessions stop.
+      if (scope && scope.split(".")[0] !== it.current_node_id)
+        return no(409, `path: ${py(scope)} is not inside the node the item stands on (${py(it.current_node_id)})`);
+      const ids = scope ? stopUnder(b, scope) : stopSessions(b);
       run(it);
       // As the store writes them: a node skip's event, then the sessions it stopped; a scope skip's after them.
       if (!scope) append(id, "node_skipped", { node_id: node, gate, note });
@@ -508,7 +550,9 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       if (refused(x)) return x;
       const { b, it } = x;
       if (!nodeIds(it).includes(node)) return no(409, `node ${py(node)} is not in this chain`);
-      Object.assign(it, { current_node_id: node, step: null, progress: null });
+      // `builtins.ensure_worktree` runs as the walk starts: from here on the item has one.
+      Object.assign(it, { current_node_id: node, step: null, progress: null, worktree_exists: true });
+      if (it.summary) it.summary = { ...it.summary, step: null };
       append(id, "node_started", { node_id: node });
       tally(b);
       return ok(settle(it));
@@ -582,16 +626,13 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     },
     /** `store.complete_node`: the node done; the item still stands on it until the walk enters the next. Once per node
      *  per run fork, as the store writes it: a node re-entered (a resume, a rejection's rerun) and completed again
-     *  writes nothing, until a retry forks the run (`work_item_retried`). */
+     *  writes nothing, until a retry forks the run (`run_forked`). */
     completeNode(id: string, node: string): Result {
       const x = find(id, true);
       if (refused(x)) return x;
       const { b, it } = x;
       if (!nodeIds(it).includes(node)) return no(409, `node ${py(node)} is not in this chain`);
-      const fork = b.events.map((e) => e.type).lastIndexOf("work_item_retried");
-      const done = b.events.slice(fork + 1).some((e) => e.type === "node_completed" && e.payload.node_id === node);
-      if (!done) append(id, "node_completed", { node_id: node });
-      tally(b);
+      complete(b, node);
       return ok(settle(it));
     },
     /** `store.request_gate`: the item stops at `gate` for a person, with the document the gate is about
@@ -619,18 +660,51 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const cap = it.budget_cap?.cap_usd ?? 0;
       const reason = `budget cap reached: ${meter(spent)} spent on this work item, cap ${capUsd(cap)}. Nothing new was started; a running agent was not interrupted.`;
       const budget = { scope: "work_item", spent_usd: spent, cap_usd: cap };
-      Object.assign(it, { status: "needs_human", step: null, stop: { kind: "budget", node, task: null, attempt: 1, resume_at: null, reason, facts: {} } });
+      // `board._stop` names the cap's scope: `work_item`, the item's own, is the one `/budget/raise` takes.
+      Object.assign(it, { status: "needs_human", step: null, stop: { kind: "budget", node, task: null, attempt: 1, resume_at: null, reason, facts: {}, scope: "work_item" } });
       append(id, "work_item_needs_human", { node_id: node, reason, kind: "budget", budget });
       return ok(settle(it));
     },
-    /** `store.mark_reentered`: a waiting or rate-limited item its poller re-enters once its `retry_at` passes, back to
-     *  active with no event of its own (the walk's `node_started` narrates the re-entry). */
+    /** `store.mark_reentered`: a CI wait (`waiting`) its poller (`waits.py`) re-enters once its `retry_at` passes, back
+     *  to active with no event of its own (the walk's `node_started` narrates the re-entry). */
     reenter(id: string): Result {
       const x = find(id, true);
       if (refused(x)) return x;
       const { it } = x;
-      if (it.status !== "waiting" && it.status !== "rate_limited") return no(409, `work item is ${it.status}, not waiting`);
-      Object.assign(it, { status: "active", retry_at: null, stop: null, rate_limit: null });
+      if (it.status !== "waiting") return no(409, `work item is ${it.status}, not waiting`);
+      Object.assign(it, { status: "active", retry_at: null, stop: null });
+      return ok(settle(it));
+    },
+    /** `rate_limit_retry._retry_one`: a rate-limited item once its limit resets. Its counter goes up; past the policy's
+     *  retries it stops for a person, else it is claimed and retried on its node (`store.retry_after_cap`, no fork). */
+    rateLimitRetry(id: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { it } = x;
+      if (it.status !== "rate_limited") return no(409, `work item is ${it.status}, not rate_limited`);
+      const cap = it.rate_limit?.cap ?? 5;
+      const count = (it.rate_limit?.count ?? 0) + 1;
+      it.rate_limit = { ...(it.rate_limit ?? {}), count, cap };
+      const node = it.current_node_id;
+      if (count > cap) {
+        const reason = `rate_limit retries exhausted after ${count - 1} attempt(s)`;
+        Object.assign(it, { status: "needs_human", retry_at: null, stop: { kind: "cap", node, task: null, attempt: 1, resume_at: null, reason, facts: {} } });
+        append(id, "work_item_needs_human", { node_id: node, reason, kind: "cap" });
+        return ok(settle(it));
+      }
+      Object.assign(it, { status: "active", retry_at: null, stop: null });
+      append(id, "work_item_retried", { node_id: node, loop: null, steer: RESUME_PROMPT, escalated: false, seeded: false });
+      return ok(settle(it));
+    },
+    /** `forge.run`'s `open_mr`: the merge request the node's draft task opened (or found, re-entered), as `mr_opened`. */
+    mrOpened(id: string, node: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { it } = x;
+      const number = it.mr_ref?.number ?? 150 + mrs++;
+      const url = it.mr_ref?.url ?? `https://github.com/acme/${String(it.repo).split("/").pop()}/pull/${number}`;
+      it.mr_ref = { number, url };
+      append(id, "mr_opened", { number, url }, node);
       return ok(settle(it));
     },
     /** `store.mark_completed`: the chain ran to its end. */

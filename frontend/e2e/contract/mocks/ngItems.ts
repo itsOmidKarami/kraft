@@ -282,7 +282,8 @@ export function buildNeverStarted(seed: number, variant: Variant): ItemBundle {
   const it = b.item;
   Object.assign(it, {
     current_node_id: null, pending_steer_context: null, stop: null, escalation_threads: [], concerns: [], deferred_findings: [],
-    worktree_path: null, head_sha: null, branch: null, mr_ref: null, progress: null, step: null, rate_limit: null, retry_at: null,
+    // No worktree until the walk first enters a node (`board`'s `worktree_exists`), so no diff to show.
+    worktree_path: null, worktree_exists: false, head_sha: null, branch: null, mr_ref: null, progress: null, step: null, rate_limit: null, retry_at: null,
     attempts: [], last_review_sha: null, fix_target: null, needs_context_question: null,
     budget_cap: { ...it.budget_cap, source: "policy", spent_usd: 0 },
     usage: { total: { tokens_in: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, wall_ms: 0, sessions: 0, rounds: 0, capped_out: 0 }, by_node: [] },

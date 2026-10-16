@@ -3,16 +3,18 @@ import { buildScenario, type Scenario } from "../e2e/contract/mocks/fixtures";
 import { mockServer, type Answer, type MockOptions } from "../e2e/contract/mocks/mockApi";
 import { FRESH_TITLES } from "../e2e/contract/mocks/motion";
 import { NG_NOW } from "../e2e/contract/mocks/ngItems";
-import type { Ev } from "../e2e/contract/mocks/transitions";
+import { RESUME_PROMPT, type Ev } from "../e2e/contract/mocks/transitions";
+import { budgetRaise } from "../src/ng/item/status";
 
 /** The demo's live motion (motion.ts), on fake timers: what one tick does to the board's running items. */
 
 /** With `random` at 0 every tick is 8 s after the last, and every session reports the least usage. */
 const TICK = 8_000;
-const started = (motion: MockOptions["motion"] = { random: () => 0 }, now: () => string = () => NG_NOW) => {
+/** `"omit"` leaves `motion` out of the options altogether, as the contract suite calls the mock. */
+const started = (motion: MockOptions["motion"] | "omit" = { random: () => 0 }, now: () => string = () => NG_NOW) => {
   const S = buildScenario("default");
   const told: Ev[] = [];
-  const serve = mockServer(S, { ngBoard: true, now, onEvent: (e) => told.push(e), motion });
+  const serve = mockServer(S, { ngBoard: true, now, onEvent: (e) => told.push(e), ...(motion === "omit" ? {} : { motion }) });
   const call = async (method: string, path: string, body?: unknown) => {
     const a = (await serve({ method, url: `http://x/api${path}`, json: () => body ?? null })) as Answer;
     return { status: a.status, body: a.body ? JSON.parse(a.body) : null };
@@ -79,7 +81,7 @@ describe("one step", () => {
     expect(S.bundles[id].item).toMatchObject({ current_node_id: "verification", step: { index: 2, count: 3, name: "checks", task: "security_scan" }, summary: expect.objectContaining({ step: { index: 2, count: 3 } }) });
   });
 
-  it("a node with no agent task takes two ticks: a session per task created, then exited with no usage", async () => {
+  it("a node with no agent task takes two ticks: a session per task created, then exited with no usage; its draft task opens the MR", async () => {
     const { S, ticks, call } = started();
     const id = board(S, FAILED);
     expect((await call("POST", `/work-items/${id}/retry`, {})).status).toBe(200);
@@ -93,6 +95,7 @@ describe("one step", () => {
     expect(S.bundles[id].sessions.slice(-2).map((s) => [s.status, s.started_at])).toEqual([["pending", NG_NOW], ["pending", NG_NOW]]);
     expect(ticks(1, id)).toEqual([
       ["worker_session_exited", { session_id: expect.any(String), status: "done", wall_ms: expect.any(Number) }],
+      ["mr_opened", { number: 150, url: "https://github.com/acme/kraft-api/pull/150" }],
       ["worker_session_exited", { session_id: expect.any(String), status: "done", wall_ms: expect.any(Number) }],
       ["node_completed", { node_id: "merge_request" }],
       ["node_started", { node_id: "mr_checks" }],
@@ -101,6 +104,8 @@ describe("one step", () => {
     // No node is left standing finished: the tick that completed it entered the next.
     expect(S.bundles[id].item.current_node_id).toBe("mr_checks");
     expect(S.bundles[id].sessions.filter((s) => s.node_id === "merge_request").slice(-2).map((s) => [s.status, s.cost_usd])).toEqual([["done", null], ["done", null]]);
+    expect(S.bundles[id].item.mr_ref).toEqual({ number: 150, url: "https://github.com/acme/kraft-api/pull/150" });
+    expect(S.bundles[id].events.find((e) => e.type === "mr_opened")?.node_id).toBe("merge_request");
   });
 
   it("stops at a gate, asking for it with its artifact, and goes no further", () => {
@@ -124,6 +129,26 @@ describe("after the visitor", () => {
     expect((await call("POST", `/work-items/${id}/gates/final_review/approve`)).status).toBe(200);
     expect(types(ticks(1, id))).toEqual(["node_started", "worker_session_created"]);
     expect(S.bundles[id].item.current_node_id).toBe("release");
+  });
+
+  it("approve counts its gate at once, and a re-approve after a reject writes no second node_completed", async () => {
+    const { S, ticks, call } = started();
+    const id = board(S, GATED);
+    const passed = () => S.bundles[id].item.summary.gates_passed;
+    const before = passed();
+    await call("POST", `/work-items/${id}/gates/final_review/approve`);
+    expect(passed()).toBe(before + 1);
+    // Changes asked at implementation while it runs on: back there once release completes (no fork), then round to
+    // the gate again, which asks again since a later gate's decision is the newest.
+    expect((await call("POST", `/work-items/${id}/review`, { outcome: "request_changes", node: "implementation" })).body.action).toBe("queued");
+    for (let k = 0; k < 16 && S.bundles[id].item.pending_gate !== "final_review"; k++) {
+      ticks(1, id);
+      const g = S.bundles[id].item.pending_gate;
+      if (g && g !== "final_review") await call("POST", `/work-items/${id}/gates/${g}/approve`);
+    }
+    expect(S.bundles[id].item.pending_gate).toBe("final_review");
+    await call("POST", `/work-items/${id}/gates/final_review/approve`);
+    expect(count(S, id, "node_completed", "final_review")).toBe(1);
   });
 
   it("completes in the tick its last node completes, shown done", async () => {
@@ -159,7 +184,8 @@ describe("after the visitor", () => {
     const { S, ticks, call } = started();
     const id = board(S, NEVER_STARTED);
     const b = S.bundles[id];
-    expect([b.sessions, b.events.map((e) => e.type), b.item.budget_cap.spent_usd, b.item.usage.total.cost_usd]).toEqual([[], ["work_item_created"], 0, 0]);
+    expect([b.sessions, b.events.map((e) => e.type), b.item.budget_cap.spent_usd, b.item.usage.total.cost_usd, b.item.worktree_exists]).toEqual([[], ["work_item_created"], 0, 0, false]);
+    expect((await call("GET", `/work-items/${id}/diff`)).body.files).toEqual([]);
     expect(ticks(2, id)).toEqual([]);
     expect((await call("POST", `/work-items/${id}/resume`, {})).status).toBe(200);
     expect((await call("GET", `/work-items/${id}`)).body.summary).toEqual({ nodes_done: 0, nodes_total: 15, gates_passed: 0, step: null });
@@ -169,34 +195,50 @@ describe("after the visitor", () => {
       ["worker_session_started", expect.objectContaining({ node_id: "spec" })],
     ]);
     expect(b.sessions.map((s) => `${s.node_id}:${s.status}`)).toEqual(["spec:running"]);
+    expect(b.item.worktree_exists).toBe(true);
   });
 
-  it("a skipped task ends its node: the walk moves on, and does not run that task again", async () => {
+  it.each([
+    // The walk runs one task a node: skipping it ends the node, and the task is not run again.
+    ["a skip of the task it runs ends the node", { path: "work_brief.write.work_brief" }, [["node_completed", { node_id: "work_brief" }]]],
+    ["a node skip passes the node", {}, []],
+  ])("%s: the walk moves on", async (_, body, first) => {
     const { S, ticks, call } = started();
     const id = board(S, RUNNING);
     ticks(1, id);
-    expect((await call("POST", `/work-items/${id}/skip`, { path: "work_brief.write.work_brief" })).status).toBe(200);
-    expect(ticks(1, id)).toEqual([["node_completed", { node_id: "work_brief" }], ["node_started", { node_id: "local_review" }], ["gate_requested", { gate: "local_review", node_id: "local_review" }]]);
+    expect((await call("POST", `/work-items/${id}/skip`, body)).status).toBe(200);
+    expect(ticks(1, id)).toEqual([...first, ["node_started", { node_id: "local_review" }], ["gate_requested", { gate: "local_review", node_id: "local_review" }]]);
     expect(S.bundles[id].sessions.filter((s) => s.hook_point === "work_brief.write.work_brief").map((s) => s.status)).toEqual(["paused"]);
   });
 
-  it("a skipped step's tasks are passed over when its node runs", async () => {
+  it("a skip refuses a scope outside the node the item stands on, in the server's words", async () => {
+    const { S, call } = started();
+    const id = board(S, RUNNING);
+    expect(await call("POST", `/work-items/${id}/skip`, { path: "implementation.build" })).toEqual({ status: 409, body: { detail: "path: 'implementation.build' is not inside the node the item stands on ('verification')" } });
+  });
+
+  it("a skipped step stops only its own sessions, and is passed over when a reject reruns its node", async () => {
     const { S, ticks, call } = started();
-    const id = board(S, GATED);
-    await call("POST", `/work-items/${id}/gates/final_review/reject`, { note: "again" });
-    ticks(1, id);
+    const id = board(S, RUNNING);
+    const running = S.bundles[id].sessions.find((s) => s.status === "running")!;
     expect((await call("POST", `/work-items/${id}/skip`, { path: "verification.checks" })).status).toBe(200);
-    // implementation runs again (its session was stopped), then verification, on its first agent task left.
+    expect(running.status).toBe("running");
+    ticks(2, id);
+    await call("POST", `/work-items/${id}/gates/local_review/reject`, { note: "again" });
     ticks(2, id);
     expect(S.bundles[id].sessions.at(-1)).toMatchObject({ node_id: "verification", hook_point: "verification.review.code_review", status: "running" });
   });
 
-  it("a node skip passes the node it stands on", async () => {
+  it("a retry forks the run: a gate approved before is asked again", async () => {
     const { S, ticks, call } = started();
-    const id = board(S, RUNNING);
-    ticks(1, id);
-    expect((await call("POST", `/work-items/${id}/skip`, {})).status).toBe(200);
-    expect(ticks(1, id)).toEqual([["node_started", { node_id: "local_review" }], ["gate_requested", { gate: "local_review", node_id: "local_review" }]]);
+    const id = board(S, FAILED);
+    const had = S.bundles[id].events.length;
+    expect((await call("POST", `/work-items/${id}/review`, { outcome: "request_changes", node: "implementation" })).body.action).toBe("retried");
+    expect(S.bundles[id].events.slice(had).map((e) => e.type)).toEqual(["rewind_requested", "work_item_retried", "gate_reopened", "run_forked", "cap_counters_reset", "review_submitted"]);
+    for (let k = 0; k < 6 && S.bundles[id].item.status === "active"; k++) ticks(1, id);
+    expect(S.bundles[id].item).toMatchObject({ status: "needs_human", pending_gate: "local_review" });
+    // A new run: implementation, completed in the intake run, writes its completion again in this one.
+    expect(count(S, id, "node_completed", "implementation")).toBe(2);
   });
 
   it("a gate already approved is passed over when a rewind walks back through it", async () => {
@@ -270,14 +312,28 @@ describe("after the visitor", () => {
 });
 
 describe("the clock and the purse", () => {
-  it("re-enters a waiting item once its retry_at passes, as its poller does", () => {
+  it.each<[string, (it: any) => void, unknown[], Record<string, unknown>]>([
+    // kraft-e410 is a rate limit: its poller counts the retry and retries it on its node (`rate_limit_retry.py`).
+    ["a rate limit is retried on its node, its count up", () => {}, [
+      ["work_item_retried", { node_id: "verification", loop: null, steer: RESUME_PROMPT, escalated: false, seeded: false }],
+      ["node_started", { node_id: "verification" }], ["worker_session_created", expect.anything()], ["worker_session_started", expect.anything()],
+    ], { status: "active", display_status: "running", retry_at: null, stop: null, rate_limit: { count: 3, cap: 5 } }],
+    ["a rate limit past its retries stops for a person", (it) => { it.rate_limit = { count: 5, cap: 5 }; }, [
+      ["work_item_needs_human", { node_id: "verification", reason: "rate_limit retries exhausted after 5 attempt(s)", kind: "cap" }],
+    ], { status: "needs_human", display_status: "needs_you", stop: expect.objectContaining({ kind: "cap" }) }],
+    // A CI wait is re-entered with no event of its own (`waits.py`, `store.mark_reentered`).
+    ["a CI wait is re-entered", (it) => { Object.assign(it, { status: "waiting", stop: { ...it.stop, kind: "wait" } }); }, [
+      ["node_started", { node_id: "verification" }], ["worker_session_created", expect.anything()], ["worker_session_started", expect.anything()],
+    ], { status: "active", display_status: "running", retry_at: null, stop: null }],
+  ])("once its retry time passes, %s", (_, setup, want, item) => {
     let at = NG_NOW;
     const { S, ticks } = started(undefined, () => at);
     const id = board(S, WAITING);
+    setup(S.bundles[id].item);
     expect(ticks(2, id)).toEqual([]);
     at = "2026-09-13T10:13:43.000Z";
-    expect(types(ticks(1, id))).toEqual(["node_started", "worker_session_created", "worker_session_started"]);
-    expect(S.bundles[id].item).toMatchObject({ status: "active", display_status: "running", retry_at: null, stop: null });
+    expect(ticks(1, id)).toEqual(want);
+    expect(S.bundles[id].item).toMatchObject(item);
   });
 
   it("stops for a spend cap before the next agent task, and raising it lets it go on", async () => {
@@ -290,10 +346,22 @@ describe("the clock and the purse", () => {
       ["node_started", { node_id: "work_brief" }],
       ["work_item_needs_human", { node_id: "work_brief", reason, kind: "budget", budget: { scope: "work_item", spent_usd: 2.45, cap_usd: 2.42 } }],
     ]);
-    expect(S.bundles[id].item).toMatchObject({ status: "needs_human", display_status: "needs_you", stop: { kind: "budget", node: "work_brief", reason } });
+    expect(S.bundles[id].item).toMatchObject({ status: "needs_human", display_status: "needs_you", stop: { kind: "budget", node: "work_brief", reason, scope: "work_item" }, step: null, summary: expect.objectContaining({ step: null }) });
+    // The UI offers the item's own Raise budget for it (`budgetRaise`), as it does for the board's sample.
+    expect([budgetRaise((await call("GET", `/work-items/${id}`)).body), budgetRaise(S.bundles[board(S, "kraft-58e2")].item)]).toEqual(["item", "item"]);
     expect(ticks(2, id)).toEqual([]);
     expect((await call("POST", `/work-items/${id}/budget/raise`, { budget_usd: 8 })).status).toBe(200);
     expect(types(ticks(1, id))).toEqual(["node_started", "worker_session_created", "worker_session_started"]);
+  });
+
+  it("checks the cap before a steer's queued attempt starts too", async () => {
+    const { S, ticks, call } = started();
+    const id = board(S, RUNNING);
+    await call("POST", `/work-items/${id}/pause`);
+    await call("POST", `/work-items/${id}/resume`, { steer: "bound it" });
+    S.bundles[id].item.budget_cap.cap_usd = 2.41;
+    expect(types(ticks(1, id))).toEqual(["node_started", "work_item_needs_human"]);
+    expect(S.bundles[id].item.stop).toMatchObject({ kind: "budget", node: "verification", scope: "work_item" });
   });
 });
 
@@ -362,8 +430,11 @@ describe("what never moves", () => {
     expect(ticks(1).length).toBeGreaterThan(0);
   });
 
-  it("nothing, in a mock without motion, however long it runs", () => {
-    const { S, serve, ticks } = started(false);
+  it.each([
+    ["motion: false", false],
+    ["motion left out, as the contract suite calls the mock", "omit"],
+  ] as const)("nothing, in a mock with %s, however long it runs", (_, motion) => {
+    const { S, serve, ticks } = started(motion);
     const before = JSON.stringify(S.bundles);
     expect([serve.motion, ticks(20)]).toEqual([null, []]);
     expect(JSON.stringify(S.bundles)).toBe(before);

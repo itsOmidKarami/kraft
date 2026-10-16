@@ -21,7 +21,10 @@ const ROWS: Row[] = [
   { sc: "capped", title: "Fix flaky retry test in the worker pool", repo: "kraft-core", bead: "kraft-7d21", age: 22 },
   { sc: "needs-you", title: "Add rate limit headers to the public API", repo: "kraft-api", bead: "kraft-a3f0", age: 60 },
   { sc: "capped", title: "Migrate the config loader to pydantic v2", repo: "kraft-core", bead: "kraft-58e2", age: 120, tweak: (i) => {
-    i.stop = { ...i.stop, kind: "budget", reason: "Spend cap reached · $5.00 of $5.00" };
+    // `board._stop` names a budget stop's scope; `work_item` is the item's own cap, which `/budget/raise` takes.
+    i.stop = { ...i.stop, kind: "budget", reason: "Spend cap reached · $5.00 of $5.00", scope: "work_item" };
+    // What its stop says it spent: a raise must go above it (`/budget/raise`), and the walk stops at the cap again.
+    i.budget_cap = { ...i.budget_cap, spent_usd: 5 };
   } },
   { sc: "failed", title: "Retry on 429 from the forge API", repo: "kraft-api", bead: "kraft-b108", age: 40 },
   { sc: "paused", title: "Trim the review prompts for the docs chain", repo: "kraft-docs", bead: "kraft-4e19", age: 75, chain: "docs_only" },

@@ -1,15 +1,17 @@
 import { LIVE_SESSION_STATUSES } from "../../../src/types/vocab.generated";
 import type { ItemBundle, Scenario } from "./fixtures";
-import { pendingRewind, type Transitions } from "./transitions";
+import { pendingRewind, sinceFork, type Transitions } from "./transitions";
 
 /**
  * Live motion for the dashboard demo (`MockOptions.motion`): the board's items walk their chains on their own, as
  * the executor would, through transitions.ts's doors only. Off unless asked, so the contract suite and every unit
  * row stay still.
  *
- * One tick every 8–15 s (jittered). Each tick first re-enters any board item that is `waiting` or `rate_limited`
- * once its `retry_at` has passed (`store.mark_reentered`, as its poller does), then moves every board item
- * (`S.ngBoard`) whose status is `active` one step. Every node but a gate takes two ticks:
+ * One tick every 8–15 s (jittered). Each tick first wakes the board items whose `retry_at` has passed, as their
+ * pollers do: a CI wait (`waiting`) is re-entered (`waits.py`, `store.mark_reentered`, no event), a rate limit
+ * (`rate_limited`) is retried on its node (`rate_limit_retry.py`: its counter up, `work_item_retried`, or past the
+ * policy's retries a stop). Then it moves every board item (`S.ngBoard`) whose status is `active` one step. Every
+ * node but a gate takes two ticks:
  * - an agent node runs its first agent task: `node_started`, `worker_session_created`, `worker_session_started`;
  *   on the next tick `worker_session_exited` with its usage, then `node_completed`;
  * - a node with no agent task (builtin, forge, a command) has a session per task, created on the first tick and
@@ -68,8 +70,8 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
   let stopped = false;
   let filed = 0;
 
-  /** The paths a `scope_skipped` passed over: a task, or a step and every task in it. */
-  const skipped = (b: ItemBundle) => b.events.filter((e) => e.type === "scope_skipped").map((e) => String(e.payload.path));
+  /** The paths a `scope_skipped` passed over in this run fork (`store.skipped_paths`): a task, or a step and its tasks. */
+  const skipped = (b: ItemBundle) => sinceFork(b.events).filter((e) => e.type === "scope_skipped").map((e) => String(e.payload.path));
   const under = (path: string, scope: string) => path === scope || path.startsWith(`${scope}.`);
 
   /** A node's tasks in order, each kinded as the frozen chain kinds it (no frozen chain: every task an agent's),
@@ -126,6 +128,12 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
     return nodes[nodes.findIndex((n) => n.id === node.id) + 1];
   };
 
+  /** `dispatch.over_budget`, checked before every agent launch: the item's spend has reached its cap. */
+  const overBudget = (b: ItemBundle) => {
+    const cap = b.item.budget_cap?.cap_usd;
+    return cap != null && (b.item.budget_cap?.spent_usd ?? 0) >= cap;
+  };
+
   /** The walk entering `node`, or past the last one completing the item. */
   const enter = (id: string, node: any | undefined): void => {
     const b = S.bundles[id];
@@ -141,9 +149,7 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
     const tasks = tasksOf(b, node);
     const agent = tasks.find((t) => t.agent);
     if (agent) {
-      // `dispatch.over_budget`, before an agent task launches: a cap reached stops the item here.
-      const cap = b.item.budget_cap?.cap_usd;
-      if (cap != null && (b.item.budget_cap?.spent_usd ?? 0) >= cap) { T.stopForBudget(id, node.id); return; }
+      if (overBudget(b)) { T.stopForBudget(id, node.id); return; }
       T.sessionRunning(id, T.createSession(id, node.id, agent.path).body.session_id);
       return;
     }
@@ -169,11 +175,16 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
     const queued = live.find((s) => s.status === "pending" && isAgent(b, s));
     if (queued) {
       T.enterNode(id, node);
-      T.sessionRunning(id, queued.id);
+      if (overBudget(b)) T.stopForBudget(id, node);
+      else T.sessionRunning(id, queued.id);
       return;
     }
     if (live.length) {
-      for (const s of live) T.sessionExited(id, s.id, isAgent(b, s) ? usage() : null);
+      for (const s of live) {
+        // The forge's draft task opens the merge request (`forge.run`), recorded as it ends.
+        if (String(s.hook_point).split(".")[2] === "open_draft") T.mrOpened(id, node);
+        T.sessionExited(id, s.id, isAgent(b, s) ? usage() : null);
+      }
       T.completeNode(id, node);
       return enter(id, nextNode(b, false));
     }
@@ -189,7 +200,9 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
       const now = Date.parse(T.now());
       for (const id of board) {
         const it = S.bundles[id].item;
-        if ((it.status === "waiting" || it.status === "rate_limited") && it.retry_at && Date.parse(it.retry_at) <= now) T.reenter(id);
+        if (!it.retry_at || Date.parse(it.retry_at) > now) continue;
+        if (it.status === "waiting") T.reenter(id);
+        else if (it.status === "rate_limited") T.rateLimitRetry(id);
       }
       const active = board.filter((id) => S.bundles[id].item.status === "active");
       for (const id of active) step(id);
