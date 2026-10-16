@@ -476,12 +476,16 @@ class KraftConsole(App):
     @on(Input.Submitted, "#prompt")
     def _typed(self, event: Input.Submitted) -> None:
         if event.value.strip(" /"):
-            self.run_worker(partial(self._run_typed, event.value), group="typed")
+            # The item on screen as Enter is pressed: the view may move on before the worker runs.
+            shown = self.view.work_item_id if isinstance(self.view, Item) else None
+            self.run_worker(partial(self._run_typed, event.value, shown), group="typed")
 
-    async def _run_typed(self, line: str) -> None:
+    async def _run_typed(self, line: str, work_item_id: str | None = None) -> None:
         kind, what = runner.route(line)
-        if kind == "run" and isinstance(self.view, Item) and self.view.work_item_id:
-            what = for_item(what, self.view.work_item_id)
+        if kind == "run" and work_item_id:
+            what, refused = for_item(what, work_item_id)
+            if refused:
+                kind, what = "say", refused
         if kind == "show":
             self.show(what)
         elif kind == "say":
