@@ -514,6 +514,19 @@ def test_urls_are_redacted(home, capsys):
     assert all("hunter2" not in text for text in shown), shown
 
 
+@pytest.mark.parametrize(
+    "verb", [["list"], ["collection", "list"]], ids=["list", "collection-list"]
+)
+def test_an_unreadable_addons_yaml_is_an_error_not_a_traceback(home, capsys, verb):
+    """The shared flow refuses with `flow.Refusal`; the CLI says it as every
+    verb here does: `error: ...` and exit 1."""
+    (home.config / "addons.yaml").write_text("collections: [\n")
+
+    code, out = _run(capsys, *verb)
+
+    assert code == 1 and out.startswith("error: ") and "addons.yaml" in out, out
+
+
 def test_added_collection_json_does_not_echo_the_user(home, capsys, monkeypatch):
     real = fetch.fetch
     # An ssh URL is the one a config accepts with a user in it; fetch the local repo instead.

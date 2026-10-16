@@ -24,8 +24,19 @@ from kraft.console.screens.server import held
 
 #: The list with no collection added.
 EMPTY = "No collection is added. m adds one."
+#: What a collection never fetched says.
+NOT_FETCHED = "not fetched yet · m fetches it"
+#: The list before its first read answers.
+READING = "Reading the add-ons…"
 #: What the menu's "Add a collection" asks for.
 SOURCE = "owner/repo, a git URL, or a directory. Nothing is installed yet."
+
+
+def in_place(collection: dict) -> bool:
+    """Whether the collection is a directory read in place (its source is the
+    absolute path `addons.yaml` validates; a git URL never starts with `/`):
+    it has no auto-update and nothing to fetch."""
+    return (collection["source"] or "").startswith("/")
 
 
 def collection_line(row: dict) -> Content:
@@ -69,7 +80,8 @@ def options(collections: list[dict], addons: list[dict], waiting: set[str]) -> l
         name = collection["name"]
         found.append(Option(collection_line(collection), id=f"collection:{name}"))
         if collection["addons"] is None:
-            said = Content.styled("  not fetched yet · m fetches it", "$kraft-muted")
+            what = "collection.json unreadable" if in_place(collection) else NOT_FETCHED
+            said = Content.styled(f"  {what}", "$kraft-muted")
             found.append(Option(said, disabled=True))
         listed = [entry["name"] for entry in collection["addons"] or []]
         mine = [i.split("@", 1)[0] for i in installed if i.split("@", 1)[1] == name]
@@ -98,8 +110,11 @@ class Addons(View):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.collections: list[dict] = []
+        #: None until a read answers: an empty list is a read that found none.
+        self.collections: list[dict] | None = None
         self.addons: list[dict] = []
+        #: Why the last read was refused, drawn until a read succeeds.
+        self.refused: str | None = None
 
     def compose(self) -> ComposeResult:
         rows = OptionList(id="addon-rows", markup=False)
@@ -119,7 +134,7 @@ class Addons(View):
         return next((row for row in self.addons if row["id"] == addon_id), None)
 
     def _collection(self, name: str) -> dict | None:
-        return next((row for row in self.collections if row["name"] == name), None)
+        return next((row for row in self.collections or [] if row["name"] == name), None)
 
     def on_show(self) -> None:
         self._read()
@@ -146,17 +161,31 @@ class Addons(View):
         try:
             self.collections, self.addons = await asyncio.to_thread(_listing)
         except flow.Refusal as exc:
-            self.app.notify(str(exc), severity="error", markup=False)
+            # Written out, never obeyed: a key of addons.yaml may hold a control character.
+            self.refused = "\n".join(map(render.printable, str(exc).splitlines()))
+            self.app.notify(self.refused, severity="error", markup=False)
+            self.draw()
             return
+        self.refused = None
         self.draw()
 
     def draw(self) -> None:
         """The list again; the cursor stays on its row, else the first."""
         rows = self.query_one("#addon-rows", OptionList)
         keep = rows.highlighted_option.id if rows.highlighted_option is not None else None
-        found = options(self.collections, self.addons, held(self.app.health))
-        rows.set_options(found or [Option(Content.styled(EMPTY, "$kraft-muted"), disabled=True)])
-        ids = [option.id for option in found]
+        found = options(self.collections or [], self.addons, held(self.app.health))
+        # The sentence for no collection only after a read that found none.
+        if self.refused is not None:
+            said = Content.styled(self.refused, "$error")
+        elif self.collections is None:
+            said = Content.styled(READING, "$kraft-muted")
+        else:
+            said = Content.styled(EMPTY, "$kraft-muted")
+        said_only = self.refused is not None or not found
+        if said_only:
+            found = [Option(said, disabled=True)]
+        rows.set_options(found)
+        ids = [] if said_only else [option.id for option in found]
         rows.highlighted = (
             ids.index(keep) if keep is not None and keep in ids else (0 if ids else None)
         )
@@ -205,9 +234,15 @@ class Addons(View):
         # One read in place from a directory has no auto-update (addons.yaml
         # refuses it) and nothing to fetch. Its source is the path, validated
         # absolute; a git URL never starts with `/`.
-        git = found is not None and not (found["source"] or "").startswith("/")
+        git = found is not None and not in_place(found)
         verbs: dict[str, list[str]] = {}
-        if git and kind == "addon" and (row := self.installed(name)):
+        # A collection that auto-updates holds every add-on's: the CLI refuses their own.
+        if (
+            git
+            and kind == "addon"
+            and (row := self.installed(name))
+            and (row["auto_update"] != "collection")
+        ):
             verbs["auto"] = ["auto-update", name, "off" if row["auto_update"] == "addon" else "on"]
         elif git and kind == "collection":
             state = "off" if found["auto_update"] else "on"
