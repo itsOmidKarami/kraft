@@ -21,6 +21,7 @@ import "../templates/templates.css";
 import "./notify.css";
 import "./settings.css";
 import { usePane } from "../shell/usePane";
+import { SAMPLE_INTAKE_TITLE, ALERTS_ON_THIS_DEVICE, TEST_ALERT_SHOWN, ALERTS_IN_BACKGROUND } from "./sharedWords";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -166,7 +167,7 @@ export function NotifyPage() {
       const text = notificationText(NOTIFY_EVENTS[0], "Test alert");
       new Notification(text.title, { body: text.body, icon: "/icon.svg" });
       setBrowserTest({ at: new Date().toISOString(), error: null });
-      showToast("Test alert shown on this device");
+      showToast(TEST_ALERT_SHOWN);
     } catch (e) {
       setBrowserTest({ at: new Date().toISOString(), error: message(e) });
     }
@@ -194,14 +195,14 @@ export function NotifyPage() {
   const typing = !!url.trim();
   const channels: { id: Channel; icon: ReactNode; name: string; sub: string; active: boolean; events: string[]; extra: string; extraBad?: boolean; testing: boolean; why: string | null; quiet: boolean; test: () => void }[] = [
     {
-      id: "webhook", icon: <Webhook size={15} />, name: CHANNELS.webhook, active: webhookActive, events: notify.events,
+      id: "webhook", icon: <Webhook size={16} />, name: CHANNELS.webhook, active: webhookActive, events: notify.events,
       sub: notify.url_set ? `URL stored · links to ${link || "no address"}` : "No URL set",
       extra: notify.url_set ? (test ? (test.error ? `last attempt ${ago(test.at)} failed` : `last sent ${ago(test.at)} · ${test.status} OK`) : "never sent") : "nothing can be sent",
       extraBad: !notify.url_set || !!test?.error, testing, why: webhookWhy, quiet: !typing, test: () => void sendTest(),
     },
     {
-      id: "browser", icon: <Monitor size={15} />, name: CHANNELS.browser, active: browserActive, events: browserEvents,
-      sub: "Alerts while this tab is in the background. This device only.",
+      id: "browser", icon: <Monitor size={16} />, name: CHANNELS.browser, active: browserActive, events: browserEvents,
+      sub: `${ALERTS_IN_BACKGROUND} This device only.`,
       extra: permission === "granted" ? (browserTest ? browserTestLine.replace(/^last /, "") : browserOn ? "" : "alerts switched off") : PERMISSION_SHORT[permission],
       extraBad: permission === "denied" || !!browserTest?.error, testing: false, why: browserWhy, quiet: true, test: testBrowser,
     },
@@ -209,7 +210,7 @@ export function NotifyPage() {
 
   const sample = (events: string[]) => {
     const event = NOTIFY_EVENTS.find((e) => events.includes(e.id)) ?? NOTIFY_EVENTS[0];
-    const text = notificationText(event, "Add retry budget to the intake poller");
+    const text = notificationText(event, SAMPLE_INTAKE_TITLE);
     return (
       <div className="set-notice" role="img" aria-label={`Preview: ${text.title}. ${text.body}`}>
         <span className="set-notice-icon" aria-hidden>K</span>
@@ -242,7 +243,7 @@ export function NotifyPage() {
       <Kv k="events" v={evLine(browserEvents)} />
       <Head>A notification looks like</Head>
       {sample(browserEvents)}
-      <Note>Kept in this browser, apart from notify.yaml. Alerts show only while this tab is in the background.</Note>
+      <Note>Kept in this browser, apart from notify.yaml. {ALERTS_IN_BACKGROUND}</Note>
     </>
   ) : (
     <>
@@ -322,7 +323,7 @@ export function NotifyPage() {
           <Head>Alerts</Head>
           <div className="nt-line">
             <span className="set-event-text"><span>{channelState(browserActive)}</span><span className="set-hint">alerts on this device only</span></span>
-            <Switch label="Alerts on this device" checked={browserOn} disabled={permission !== "granted"} aria-describedby={permission === "granted" ? undefined : "nt-perm"} onChange={toggleBrowser} />
+            <Switch label={ALERTS_ON_THIS_DEVICE} checked={browserOn} disabled={permission !== "granted"} aria-describedby={permission === "granted" ? undefined : "nt-perm"} onChange={toggleBrowser} />
           </div>
           <Head>Notifies</Head>
           {eventRows(browserEvents, toggleBrowserEvent, "this browser")}

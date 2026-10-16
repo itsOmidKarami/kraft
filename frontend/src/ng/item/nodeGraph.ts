@@ -208,6 +208,10 @@ export function loopIdle(node: ApiNode, loop: "repair" | "judge", round: number,
 
 /** The same as the sentence an empty pane or screen says. The judge that skipped the first repair did not run in
  *  that round, whatever comes after. */
+/** What a task pane says of an attempt that wrote nothing, and of a loop task that did not run in the round on show. */
+export const NO_DOCUMENTS = "This attempt wrote no documents.";
+export const NOT_RUN_IN_ROUND = "Not run in this round.";
+
 export function loopIdleSentence(node: ApiNode, loop: "repair" | "judge", round: number, rounds: { latest: number; total?: number }, events?: KraftEvent[]): string {
   const words = loop === "judge" && round === 1 ? "not run in this round" : loopIdle(node, loop, round, rounds, events);
   return `${words[0].toUpperCase()}${words.slice(1)}.`;

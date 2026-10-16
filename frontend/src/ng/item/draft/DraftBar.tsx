@@ -1,3 +1,4 @@
+import { hint } from "../../ui/Tooltip";
 import { useRef } from "react";
 import { HeaderTail } from "../../shell/HeaderActions";
 import { Button } from "../../ui/Button";
@@ -30,7 +31,7 @@ export function DraftState() {
         {chip}
       </button>
       {d.issues.length > 0 && (
-        <button type="button" className="idr-problems" aria-label={bad} onClick={step} title="Step through the problems">
+        <button type="button" className="idr-problems" aria-label={bad} onClick={step} {...hint("Step through the problems")}>
           <span className="idr-full">{bad}</span>
           <span className="idr-short" aria-hidden>{d.issues.length} !</span>
         </button>

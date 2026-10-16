@@ -13,6 +13,7 @@ import { Combobox, notListed, unlisted } from "../../ui/Combobox";
 import { useProviders } from "../../harnesses/useProviders";
 import { useLibrary } from "../useLibrary";
 import { ReadOnly } from "../addon";
+import { Select } from "../../ui/Select";
 
 /** A row's `source` is absent where there is none to name (a library component's own keys): no chip, no dot, and ↺ removes the key. */
 export type Row = { field: string; value: unknown; source?: string; locked?: string; recovery?: boolean };
@@ -147,10 +148,10 @@ function Editor({ meta, field, value, label, ctx, onSave, onRefuse, onCancel }: 
   };
   if (options && options.length)
     return (
-      <select autoFocus aria-label={label} className="cfg-edit" value={text} onKeyDown={keys} onBlur={() => onSave(text)} onChange={(e) => { setText(e.target.value); onSave(e.target.value); }}>
+      <Select autoFocus aria-label={label} mono value={text} onKeyDown={keys} onBlur={() => onSave(text)} onChange={(e) => { setText(e.target.value); onSave(e.target.value); }}>
         <option value="">not set</option>
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
-      </select>
+      </Select>
     );
   if (meta.kind === "long") return <textarea autoFocus aria-label={label} className="cfg-edit is-long" rows={4} value={text} onKeyDown={keys} onBlur={() => onSave(text)} onChange={(e) => setText(e.target.value)} />;
   if (choices?.length || suggested?.length)

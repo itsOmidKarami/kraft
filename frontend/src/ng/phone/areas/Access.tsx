@@ -10,6 +10,8 @@ import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { SAVED } from "../../settings/savedWords";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, useSaves, type RowSpec } from "./kit";
+import { RESTART_KRAFT, RESTART_NEEDED } from "../../apply/sharedWords";
+import { ASKED_FOR_ON_NETWORK, SESSION_EXPIRY_HINT, NO_SIGN_IN_NEEDED, NOT_USED_ON_LOOPBACK, LOOPBACK_ONLY, REVOKE_THIS_SESSION, SESSION_EXPIRY, SESSION_REVOKED, SIGN_OUT_OF_THIS, PORT_HINT, NEW_PASSWORD_SIGNS_OUT } from "../../settings/sharedWords";
 
 const LOOPBACK = "127.0.0.1";
 const EXPIRIES = [1, 7, 30];
@@ -104,14 +106,14 @@ export function AccessScreen() {
       await loadSessions();
     });
     sheet.close();
-    if (!err) showToast(s.current ? "Signed out" : "Session revoked");
+    if (!err) showToast(s.current ? "Signed out" : SESSION_REVOKED);
   };
 
   return (
     <AreaScreen title="Access" sub={ACCESS_LEDE} status={items.length ? { label: SAVED.restart, tone: "warn" } : { label: SAVED.change }} yaml={false}>
       {items.length > 0 && (
         <Group
-          title="Restart needed"
+          title={RESTART_NEEDED}
           note={`Kraft comes back at ${address} and this screen follows. Until then it keeps running as it is.${managed ? "" : ` ${SELF_RESTART}`}`}
           rows={[
             ...items.map((i): RowSpec => ({ key: i.id, label: i.text, chips: [{ label: "pending", tone: "warn" }] })),
@@ -134,7 +136,7 @@ export function AccessScreen() {
       {envNote("bind") && <p className="ph-note">{envNote("bind")}</p>}
       <Group
         title="Port"
-        foot="Used by both binds. Takes effect on restart."
+        foot={PORT_HINT}
         rows={[{ label: "port", value: String(access.port), sub: envNote("port"), ...mark("port"), onEdit: () => edit({ kind: "text", title: "Port", help: "1024 to 65535.", value: String(access.port), set: async (v) => { const p = portProblem(v); if (p) return p; return Number(v) === access.port ? null : put("port", { port: Number(v) }); } }) }]}
       />
       {lan ? (
@@ -148,8 +150,8 @@ export function AccessScreen() {
           <Group
             title="Password"
             rows={[
-              { label: "password", value: access.password_set ? "•••••••• set" : "not set", sub: "A new password signs every session out, this one too.", ...mark("password"), onEdit: () => edit({ kind: "text", title: access.password_set ? "Change password" : "Set a password", help: "Every session is signed out, this one too.", value: "", secret: true, set: async (v) => (v ? put("password", { password: v }) : "Enter a password.") }) },
-              { label: "session expiry", value: `${access.session_expiry_days} ${access.session_expiry_days === 1 ? "day" : "days"}`, sub: "How long a sign-in lasts.", ...mark("expiry"), onEdit: () => edit({ kind: "choice", title: "Session expiry", value: String(access.session_expiry_days), options: EXPIRIES.map((d) => ({ value: String(d), label: `${d} ${d === 1 ? "day" : "days"}` })), set: (v) => put("expiry", { session_expiry_days: Number(v) }) }) },
+              { label: "password", value: access.password_set ? "•••••••• set" : "not set", sub: NEW_PASSWORD_SIGNS_OUT, ...mark("password"), onEdit: () => edit({ kind: "text", title: access.password_set ? "Change password" : "Set a password", help: "Every session is signed out, this one too.", value: "", secret: true, set: async (v) => (v ? put("password", { password: v }) : "Enter a password.") }) },
+              { label: "session expiry", value: `${access.session_expiry_days} ${access.session_expiry_days === 1 ? "day" : "days"}`, sub: SESSION_EXPIRY_HINT, ...mark("expiry"), onEdit: () => edit({ kind: "choice", title: SESSION_EXPIRY, value: String(access.session_expiry_days), options: EXPIRIES.map((d) => ({ value: String(d), label: `${d} ${d === 1 ? "day" : "days"}` })), set: (v) => put("expiry", { session_expiry_days: Number(v) }) }) },
             ]}
           />
           <Group
@@ -159,19 +161,19 @@ export function AccessScreen() {
           />
         </>
       ) : (
-        <Group title="Not used on 127.0.0.1" rows={[
-          { label: "allowed hosts", sub: "Only loopback names are accepted." },
-          { label: "password", sub: "Asked for when you pick Local network." },
-          { label: "sessions", sub: "None: there is nothing to sign in to." },
+        <Group title={NOT_USED_ON_LOOPBACK} rows={[
+          { label: "allowed hosts", sub: LOOPBACK_ONLY },
+          { label: "password", sub: ASKED_FOR_ON_NETWORK },
+          { label: "sessions", sub: NO_SIGN_IN_NEEDED },
         ]} />
       )}
       {node}
       {sheet.is("restart") && (
-        <ConfirmSheet title="Restart Kraft?" text={`${restartNote(active)} It comes back at ${address} and this screen follows.`} confirm={{ label: "Restart Kraft", danger: true, run: () => { sheet.close(); void runRestart(); } }} onClose={sheet.close} />
+        <ConfirmSheet title={RESTART_KRAFT} text={`${restartNote(active)} It comes back at ${address} and this screen follows.`} confirm={{ label: "Restart Kraft", danger: true, run: () => { sheet.close(); void runRestart(); } }} onClose={sheet.close} />
       )}
       {sheet.is("revoke") && revoking && (
         <ConfirmSheet
-          title={revoking.current ? "Sign out of this session?" : "Revoke this session?"}
+          title={revoking.current ? SIGN_OUT_OF_THIS : REVOKE_THIS_SESSION}
           text={revoking.current ? "You will be asked for the password again." : `${parseUserAgent(revoking.label)} has to sign in again.`}
           confirm={{ label: revoking.current ? "Sign out" : "Revoke", danger: true, run: () => void revoke(revoking) }}
           onClose={sheet.close}

@@ -5,6 +5,7 @@ import { Segmented } from "../ui/Segmented";
 import { themeYaml, useTheme } from "./useTheme";
 import { YamlFrame } from "./YamlFrame";
 import "./settings.css";
+import { MONO_HAS_NO_ACCENT, ACCENT_LINKS_ONLY } from "./sharedWords";
 
 const DENSITIES: { value: Theme["density"]; label: string }[] = [
   { value: "compact", label: "Compact" },
@@ -68,7 +69,7 @@ export function AppearancePage() {
                   </button>
                 ))}
               </div>
-              <p className="note">{amount === "mono" ? "Mono has no accent. Pick Subtle or Full to choose one." : "The accent colours links only. Selection, buttons and focus stay neutral."}</p>
+              <p className="note">{amount === "mono" ? MONO_HAS_NO_ACCENT : ACCENT_LINKS_ONLY}</p>
             </section>
             <section>
               <h2 className="set-h2">Density</h2>

@@ -1,6 +1,7 @@
 import type { WorkItem } from "../../types";
 import { gateName, nameOf } from "../board/rowText";
 import { FORGE_LOGIN_HINT, failedFix } from "./cause";
+import { BUDGET_RAN_OUT, LIMIT_REACHED } from "./sharedWords";
 import { budgetRaise, NOT_RAISABLE, offersRaise, RAISE_REFUSED } from "./status";
 
 /** Which frame a stop's words sit in: a gate's "Waiting for you to <name>.",
@@ -48,7 +49,7 @@ function bannerWords(item: BannerItem): Omit<BannerWords, "name"> | null {
       return { kind: "question", node, text: item.needs_context_question ?? (stop.reason ?? "").replace(/^needs_context:\s*/, ""), way: "" };
     case "cap":
     case "budget": {
-      const text = sentence(stop.reason ?? (stop.kind === "budget" ? "The budget ran out" : "A limit was reached"));
+      const text = sentence(stop.reason ?? (stop.kind === "budget" ? BUDGET_RAN_OUT : LIMIT_REACHED));
       // A budget the item cannot raise says where it is raised instead of offering a raise.
       const way = stop.kind === "budget" && !offersRaise(item) ? (budgetRaise(item) ? RAISE_REFUSED : NOT_RAISABLE) : "";
       return { kind: "limit", node, text, way };

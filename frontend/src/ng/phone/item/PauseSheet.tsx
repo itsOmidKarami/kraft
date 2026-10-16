@@ -4,15 +4,16 @@ import { act } from "../../item/actions";
 import type { ItemDetail } from "../../item/useItem";
 import { ConfirmSheet, type useSheet } from "../nav/Sheet";
 import { useDo } from "./useDo";
+import { PAUSE_THIS_ITEM } from "../../board/sharedWords";
 
-/** "Pause this item?" (the prototype's pause sheet): it asks first, says what is lost, and keeps a refusal inside the sheet. */
+/** PAUSE_THIS_ITEM (the prototype's pause sheet): it asks first, says what is lost, and keeps a refusal inside the sheet. */
 export function PauseSheet({ item, node, sheet, reload }: { item: ItemDetail; node: string | null; sheet: ReturnType<typeof useSheet>; reload: () => void }) {
   const { busy, run } = useDo(reload);
   const at = node ? nameOf(item.chain_definition.nodes, node) : null;
   const [error, setError] = useState<string | null>(null);
   return (
     <ConfirmSheet
-      title="Pause this item?"
+      title={PAUSE_THIS_ITEM}
       text={`The running attempt${node ? ` on ${at}` : ""} stops now and its work is lost. Nothing runs until you resume.`}
       busy={busy}
       error={error}

@@ -3,8 +3,9 @@ import type { TaskProgress, WorkerSession, WorkItemDocument } from "../../../typ
 import { allDone } from "../../board/rowText";
 import { FileText } from "../../icons";
 import { Menu, type MenuItem } from "../../ui/Menu";
-import { isSessionDoc, lookWord, sessionLook, statusWords } from "../nodeGraph";
+import { isSessionDoc, lookWord, NO_DOCUMENTS, sessionLook, statusWords } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
+import { LinkButton } from "../../ui/LinkButton";
 
 /** The attempt every tab shows, as a menu in the pane's subtitle (Decisions §6 Attempts): a pill
  *  reading "attempt n of m", one row per session, newest first (`inRound`: the sessions of one fix-loop
@@ -61,7 +62,7 @@ function SubTasks({ tasks, docs, onDoc }: { tasks: NonNullable<TaskProgress["tas
     <>
       <div className="ip-progress-head">
         <h3 className="ip-h">Progress · {subTasks(tasks.length)}</h3>
-        {plan && <button type="button" className="item-link" onClick={() => onDoc(plan)}>{plan.path.split("/").at(-1)} ↗</button>}
+        {plan && <LinkButton onClick={() => onDoc(plan)}>{plan.path.split("/").at(-1)} ↗</LinkButton>}
       </div>
       <div className="ip-progress-bar" aria-hidden><span style={{ width: `${(done / tasks.length) * 100}%` }} /></div>
       <ol className="ip-subtasks" aria-label="Sub-tasks">
@@ -107,7 +108,7 @@ export function TaskOverview({ path, s, docs, onDoc, progress, running }: { path
             <li key={d.document_id}><button type="button" className="ip-row" onClick={() => onDoc(d)}><FileText size={12} aria-hidden /> <span>{d.title}</span><span className="ip-row-meta">{d.kind}</span></button></li>
           ))}
         </ul>
-      ) : <p className="item-muted">This attempt wrote no documents.</p>}
+      ) : <p className="item-muted">{NO_DOCUMENTS}</p>}
     </>
   );
 }
@@ -134,8 +135,8 @@ export function TaskOutput({ item, s, docs, onDoc, produces, onProduced }: { ite
     <>
       <dl className="item-facts ip-facts">
         {fact("result", statusWords(s))}
-        {fact("wrote", produces && <button type="button" className="item-link is-strong" onClick={onProduced}>{produces.replaceAll("_", " ")}</button>)}
-        {fact("summary", summary ? <button type="button" className={`item-link${produces ? "" : " is-strong"}`} onClick={() => onDoc(summary)}>{summary.title}</button> : s.session_summary_ref && <span className="is-mono">{s.session_summary_ref}</span>)}
+        {fact("wrote", produces && <LinkButton strong onClick={onProduced}>{produces.replaceAll("_", " ")}</LinkButton>)}
+        {fact("summary", summary ? <LinkButton strong={!produces} onClick={() => onDoc(summary)}>{summary.title}</LinkButton> : s.session_summary_ref && <span className="is-mono">{s.session_summary_ref}</span>)}
       </dl>
       {judged.map((j, i) => (
         <section key={i}>

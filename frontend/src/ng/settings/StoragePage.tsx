@@ -5,6 +5,7 @@ import { humanSize } from "../../sizes";
 import type { StorageUsage } from "../../types";
 import { detailOf, request } from "../http";
 import { Button } from "../ui/Button";
+import { linkButtonClass } from "../ui/LinkButton";
 import { CleanupDialog } from "./CleanupDialog";
 import { CATEGORIES, CLEAN_SELECTED, CLEANABLE, cleanAll, HOUSEKEEPING, NOTHING_TO_CLEAN, storageNote, usageFigure } from "./storageWords";
 import { Block } from "./parts";
@@ -90,14 +91,14 @@ export function StoragePage() {
                 </div>
                 <p className="set-hint">
                   Quota {humanSize(data.quota_bytes ?? 0)} · limit {humanSize(limit)}.{" "}
-                  <Link className="set-textlink" to={HOUSEKEEPING}>Edit in Policy › Housekeeping</Link>
+                  <Link className={linkButtonClass({ inline: true })} to={HOUSEKEEPING}>Edit in Policy › Housekeeping</Link>
                 </p>
               </>
             ) : (
               data && (
                 <p className="set-hint">
                   No limit set.{" "}
-                  <Link className="set-textlink" to={HOUSEKEEPING}>Set one in Policy › Housekeeping</Link>
+                  <Link className={linkButtonClass({ inline: true })} to={HOUSEKEEPING}>Set one in Policy › Housekeeping</Link>
                 </p>
               )
             )}

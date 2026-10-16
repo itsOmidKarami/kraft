@@ -243,6 +243,7 @@ describe("ng AccessPage", () => {
       expect(card(name).querySelector(".set-block-aside")).toBeNull();
     }
     expect(within(card("Port")).getByText("Used by both binds. Takes effect on restart. 1024–65535.")).toBeInTheDocument();
+    expect(within(card("Password")).getByText("A new password signs every session out, this one too.")).toBeInTheDocument();
   });
 
   it("says in the Port card's aside, in the cue's words, when the port waits for a restart", async () => {

@@ -8,6 +8,8 @@ import { useFocusSoon } from "../useFocusSoon";
 import { sendOnModEnter } from "../../keys";
 import type { CancelPreview } from "../../../types";
 import { EndFacts, stopsNow } from "./EndFacts";
+import { GOES_IN_THE_RUN_LOG } from "../sharedWords";
+import { PAUSE_THIS_ITEM } from "../../board/sharedWords";
 
 function useSubmit(send: () => Promise<Done>, onDone: () => void) {
   const [busy, setBusy] = useState(false);
@@ -78,7 +80,7 @@ export function CompleteCard({ id, anchor, onClose, onDone }: CardProps) {
         <p className="item-muted">For work that landed somewhere else, or no longer needs the chain. It stops whatever is running and skips the remaining nodes.</p>
         <EndFacts rows={rows} />
         <label className="item-check"><input type="checkbox" checked={beads} onChange={(e) => setBeads(e.target.checked)} /> Also close its beads</label>
-        <Field label="Reason" hint="Goes in the run log." error={error}>
+        <Field label="Reason" hint={GOES_IN_THE_RUN_LOG} error={error}>
           <textarea className="item-input" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} onKeyDown={sendOnModEnter(go, !busy && !!reason.trim())} />
         </Field>
         <div className="item-actions">
@@ -95,7 +97,7 @@ export function PauseConfirm({ busy, error, onPause, onClose }: { busy: boolean;
   const first = useFocusSoon<HTMLButtonElement>();
   return (
     <div className="item-card-pop">
-      <h2 className="item-pop-title">Pause this item?</h2>
+      <h2 className="item-pop-title">{PAUSE_THIS_ITEM}</h2>
       <p className="item-muted">The running task stops where it is. Resume starts it again, with a steer if you leave one.</p>
       {error && <p className="item-error" role="alert">{error}</p>}
       <div className="item-actions">

@@ -16,6 +16,8 @@ import { useProviders } from "./useProviders";
 import { useRun } from "./ops";
 import "./harnesses.css";
 import { usePane } from "../shell/usePane";
+import { LinkButton } from "../ui/LinkButton";
+import { Empty } from "../ui/Empty";
 
 /** Below the wide-desktop breakpoint the open pane costs the lanes too much width: the floor starts on its labelled rail. */
 const narrow = () => typeof matchMedia === "function" && matchMedia("(max-width: 1279px)").matches;
@@ -126,7 +128,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
           <div className="hn-stage">
             <div className="hn-canvas" style={{ right: reserve(open) }} onClick={up}>
               {missing ? (
-                <p className="hn-empty">No {harness ? "harness" : "profile"} called {harness ?? profile}. <button type="button" className="hn-link" onClick={() => go({})}>Back to every harness</button></p>
+                <Empty className="hn-empty">No {harness ? "harness" : "profile"} called {harness ?? profile}. <LinkButton inline onClick={() => go({})}>Back to every harness</LinkButton></Empty>
               ) : (
                 <Lanes lanes={lanes} pill={pill} selected={lane} empty={empty} problems={problems} onOpen={(k) => go(h ? { harness: h.id, lane: k } : prof ? { profile: profile!, lane: k } : { harness: k })} />
               )}

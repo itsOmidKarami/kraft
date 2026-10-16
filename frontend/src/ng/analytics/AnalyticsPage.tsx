@@ -10,6 +10,8 @@ import { Menu } from "../ui/Menu";
 import { boardHref, DEFAULT_RANGE, EMPTY_RANGE, gateLabel, gateRows, HOW_COUNTED, measured, minutes, RANGES, scopeLine, stopFilter, stopLabel, waitingKpi } from "./shared";
 import { weekBuckets } from "./weeks";
 import "./analytics.css";
+import { REPAIRS_PER_ITEM, WAITING_AT_EACH_GATE, WHY_STOPPED_FOR_PERSON } from "./sharedWords";
+import { Empty } from "../ui/Empty";
 
 /** A section with nothing to show keeps its heading and says so on that line, in no panel. */
 function Section({ id, title, note, empty, bare, wide, foot, children }: { id: string; title: string; note?: string; empty?: string; bare?: boolean; wide?: boolean; foot?: React.ReactNode; children: React.ReactNode }) {
@@ -105,8 +107,8 @@ export function AnalyticsPage() {
       {filters}
       <HeaderTail><span className="an-scope">· {scopeLine(rangeLabel)}</span></HeaderTail>
       {error && <p className="an-error" role="alert">{error}</p>}
-      {!report && !error && <p className="an-empty">Loading…</p>}
-      {report && t && emptyRange && <p className="an-empty">{EMPTY_RANGE}</p>}
+      {!report && !error && <Empty className="an-empty">Loading…</Empty>}
+      {report && t && emptyRange && <Empty className="an-empty">{EMPTY_RANGE}</Empty>}
       {report && t && !emptyRange && (
         <>
           <Section id="an-overview" bare title="Overview">
@@ -115,7 +117,7 @@ export function AnalyticsPage() {
               <Kpi label="Lead time" value={measured(t.median_lead_ms, t.completed > 0)} sub="median" />
               <Kpi {...waitingKpi(t.human_wait_pct)} />
               <Kpi label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={t.completed ? `${usd(t.cost_usd / t.completed)} per completed item` : "nothing completed yet"} />
-              <Kpi label="Repairs per item" value={t.fix_cycles.toFixed(1)} sub={t.fix_cycles_capped ? `${t.fix_cycles_capped} hit their cap` : "none hit their cap"} />
+              <Kpi label={REPAIRS_PER_ITEM} value={t.fix_cycles.toFixed(1)} sub={t.fix_cycles_capped ? `${t.fix_cycles_capped} hit their cap` : "none hit their cap"} />
             </div>
           </Section>
 
@@ -137,7 +139,7 @@ export function AnalyticsPage() {
               </table>
             </Section>
 
-            <Section id="an-gates" title="Waiting at each gate" note="Where items waited on a person." empty={gates.length === 0 ? "No gate waits in this range." : undefined}>
+            <Section id="an-gates" title={WAITING_AT_EACH_GATE} note="Where items waited on a person." empty={gates.length === 0 ? "No gate waits in this range." : undefined}>
               <table className="an-table an-gates">
                 <thead><tr><th>gate</th><th>share of wait</th><th className="an-num">waits</th><th className="an-num">median</th><th className="an-num">total</th><th className="an-num">rejected</th></tr></thead>
                 <tbody>
@@ -190,7 +192,7 @@ export function AnalyticsPage() {
               </table>
             </Section>
 
-            <Section id="an-stops" title="Why items stopped for a person" foot={<p className="an-note">{t.unplanned_touches_per_item.toFixed(2)} unplanned touches per item · open MR → checks done {measured(t.open_mr_to_green_ci_ms)} median</p>} empty={report.stop_reasons.length === 0 ? "Nothing stopped for a person in this range." : undefined}>
+            <Section id="an-stops" title={WHY_STOPPED_FOR_PERSON} foot={<p className="an-note">{t.unplanned_touches_per_item.toFixed(2)} unplanned touches per item · open MR → checks done {measured(t.open_mr_to_green_ci_ms)} median</p>} empty={report.stop_reasons.length === 0 ? "Nothing stopped for a person in this range." : undefined}>
               <ul className="an-stops">
                 {report.stop_reasons.map((s) => (
                   <li key={s.label} className="an-stop" data-label={s.label}>

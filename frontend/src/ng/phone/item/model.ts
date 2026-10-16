@@ -11,6 +11,7 @@ import type { ItemDetail } from "../../item/useItem";
 import type { ChainNode } from "../../graph/layout";
 import { steerDoor } from "./steer";
 import { gateName, nameOf } from "../../board/rowText";
+import { LIMIT_REACHED, CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, MARK_COMPLETE, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, BUDGET_RAN_OUT, WAITING_ON_THE_PROVIDER } from "../../item/sharedWords";
 
 /** The item screen's decisions, pure (W17 brief C): what the state card says,
  *  which pair of buttons the bottom bar offers, what the ⋮ sheet lists, and the
@@ -90,7 +91,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
         if (stop.resume_at) fs.push(["next retry", until(stop.resume_at)]);
         if (item.rate_limit) fs.push(["retries", `${item.rate_limit.count} of ${item.rate_limit.cap} used`]);
         if (allowed.length) fs.push(["fallback", `${allowed.join(", ")} allowed`]);
-        return { tone: "info", title: "Waiting on the provider", where, text: `${str(facts.harness) ?? "The agent"} hit its rate limit. Kraft retries by itself, so nothing needs doing.`, facts: fs };
+        return { tone: "info", title: WAITING_ON_THE_PROVIDER, where, text: `${str(facts.harness) ?? "The agent"} hit its rate limit. Kraft retries by itself, so nothing needs doing.`, facts: fs };
       }
       if (stop?.kind === "wait") return { tone: "info", title: "Waiting on CI", where, text: stop.reason ?? undefined, facts: stop.resume_at ? [["next check", until(stop.resume_at)]] : [] };
       return null;
@@ -100,11 +101,11 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
       switch (stop.kind) {
         case "gate": return { tone: "warn", title: "Waiting for your approval", where: gateName(item.chain_definition.nodes, item.pending_gate ?? stop.node ?? ""), text: gateMessage(materialized(item), item.pending_gate ?? stop.node ?? ""), facts: spent(item) };
         case "budget": return {
-          tone: "bad", title: (stop.reason ?? "The budget ran out").replace(/\.$/, ""), where: stop.node ? `at ${nameOf(item.chain_definition.nodes, stop.node)}` : undefined,
+          tone: "bad", title: (stop.reason ?? BUDGET_RAN_OUT).replace(/\.$/, ""), where: stop.node ? `at ${nameOf(item.chain_definition.nodes, stop.node)}` : undefined,
           text: offersRaise(item) ? "Raising the budget resumes the item at once." : budgetRaise(item) ? RAISE_REFUSED : NOT_RAISABLE,
           facts: budgetSpent(item),
         };
-        case "cap": return { tone: "bad", title: (stop.reason ?? "A limit was reached").replace(/\.$/, ""), where: stop.node ? `at ${nameOf(item.chain_definition.nodes, stop.node)}` : undefined, text: stopLimitOf(item) ? "Raise the cap to carry on, or Steer first if it should finish sooner." : "Retry runs the node again. Steer first if it should finish sooner.", facts: [...runClock(item), ...spent(item)] };
+        case "cap": return { tone: "bad", title: (stop.reason ?? LIMIT_REACHED).replace(/\.$/, ""), where: stop.node ? `at ${nameOf(item.chain_definition.nodes, stop.node)}` : undefined, text: stopLimitOf(item) ? "Raise the cap to carry on, or Steer first if it should finish sooner." : "Retry runs the node again. Steer first if it should finish sooner.", facts: [...runClock(item), ...spent(item)] };
         case "question": {
           const q = item.needs_context_question;
           return { tone: "warn", icon: "message-square", title: "Needs you", where: `asked by ${stop.task ? taskName(stop.task) : "the agent"}${conversation(item)}${stop.node ? ` · on ${nameOf(item.chain_definition.nodes, stop.node)}` : ""}`, text: q ? `“${q}”` : (stop.reason ?? undefined), facts: [] };
@@ -112,7 +113,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
         case "conflict": {
           const unresolved = list(facts.unresolved);
           const resolved = list(facts.resolved);
-          return { tone: "warn", title: "Rebase needs you", where, text: stop.reason ?? undefined, facts: [...(unresolved.length ? [["unresolved", unresolved.join(" · ")] as [string, string]] : []), ...(resolved.length ? [["resolved", resolved.join(" · ")] as [string, string]] : []), ...spent(item)] };
+          return { tone: "warn", title: REBASE_NEEDS_YOU, where, text: stop.reason ?? undefined, facts: [...(unresolved.length ? [["unresolved", unresolved.join(" · ")] as [string, string]] : []), ...(resolved.length ? [["resolved", resolved.join(" · ")] as [string, string]] : []), ...spent(item)] };
         }
         case "mr_closed": {
           const ref = str(facts.ref) ?? (item.mr_ref ? String(item.mr_ref.number) : "");
@@ -121,7 +122,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
           return {
             tone: "warn", title: `MR !${ref} was closed on the forge`,
             where: [stop.node && nameOf(item.chain_definition.nodes, stop.node), closed ? `closed ${by ? `by ${by} ` : ""}${ago(closed.created_at)}, not merged` : "not merged"].filter(Boolean).join(" · "),
-            text: "Kraft stopped syncing the MR. The branch, the review and all findings are intact. Decide whether this work still goes ahead.", facts: [],
+            text: MR_SYNC_STOPPED, facts: [],
           };
         }
         default: return { tone: "warn", title: stop.kind === "stuck" ? "Stuck" : "Needs you", where, text: stop.reason ?? undefined, facts: spent(item) };
@@ -216,7 +217,7 @@ function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | nu
         // Retry with no raise would only stop at the same cap again, so with the stop's limit the way on is the raise.
         case "cap": return { secondary: a("steer", "Steer"), primary: stopLimitOf(item) ? a("raise", "Raise cap") : a("retry", "Retry") };
         case "question": return { secondary: a("escalate", "Escalate"), primary: a("answer", "Answer") };
-        case "conflict": return { secondary: a("cancel", "Cancel…", true), primary: a("conflicts", "Review the conflicts") };
+        case "conflict": return { secondary: a("cancel", "Cancel…", true), primary: a("conflicts", REVIEW_THE_CONFLICTS) };
         // No merge request on file to reopen: Retry, as the desktop header's `needsYouMain` falls back.
         case "mr_closed": return { secondary: a("cancel", "Cancel…", true), primary: admits(item, "reopen_mr", true) ? a("reopen-mr", "Reopen MR") : a("retry", "Retry") };
         default: return { secondary: a("escalate", "Escalate"), primary: a("retry", "Retry") };
@@ -237,12 +238,12 @@ export function kebabOf(item: ItemDetail): Act[] {
   const out: Act[] = [];
   if (hs.panel.includes("escalate") && !inBar.has("escalate") && status !== "paused") out.push(a("escalate", "Escalate"));
   // The desktop's "Check the repo settings": a failed card whose cause the repo's settings can answer (`failedFix`).
-  if (status === "failed" && failedFix(item) === "repo") out.push(a("repo", "Check the repo settings"));
+  if (status === "failed" && failedFix(item) === "repo") out.push(a("repo", CHECK_REPO_SETTINGS));
   if (item.current_node_id) out.push(a("settings", "Item settings"));
   if (item.mr_ref) out.push(a("open-mr", `Open MR !${item.mr_ref.number}`));
   out.push(a("duplicate", "Duplicate"));
   if (hs.panel.includes("archive") && archivable(item)) out.push(a("archive", "Archive"));
-  if (hs.panel.includes("complete")) out.push(a("complete", "Mark complete…"));
+  if (hs.panel.includes("complete")) out.push(a("complete", MARK_COMPLETE));
   if (hs.panel.includes("cancel") && !inBar.has("cancel")) out.push(a("cancel", "Cancel item…", true));
   return out;
 }

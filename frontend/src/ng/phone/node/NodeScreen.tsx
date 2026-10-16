@@ -32,6 +32,7 @@ import { nameOf } from "../../board/rowText";
 import "../areas/areas.css";
 import { yamlOf } from "../areas/yaml";
 import "./node.css";
+import { FIX_LOOP_ROUNDS } from "../../graph/sharedWords";
 
 export type NodeTab = "overview" | "log" | "config" | "yaml";
 const TABS: { id: NodeTab; label: string }[] = [{ id: "overview", label: "Overview" }, { id: "log", label: "Log" }, { id: "config", label: "Config" }, { id: "yaml", label: "YAML" }];
@@ -119,7 +120,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
           </div>
         )}
         {rounds && rounds.rows.length > 1 && (tab === "overview" || tab === "log") && (
-          <div className="ph-attempts" role="group" aria-label="Fix loop rounds">
+          <div className="ph-attempts" role="group" aria-label={FIX_LOOP_ROUNDS}>
             {rounds.rows.map((r) => (
               <button key={r.n} type="button" className={`ph-attempt${r.n === rounds.selected ? " ph-is-on" : ""}`} aria-pressed={r.n === rounds.selected} onClick={() => setPlace({ round: r.n === rounds.latest ? undefined : r.n })}>
                 round {r.n} · {r.outcome}

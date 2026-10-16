@@ -9,7 +9,7 @@ import type { Applied } from "../draft/applied";
 import { AppliedRows } from "../draft/AppliedRows";
 import { DraftConfig } from "../draft/DraftConfig";
 import { DraftNotes } from "../draft/DraftNotes";
-import { AUTO_REVIEW, ESCALATION, escalationsOf, FIX_LOOP, footerState, isEscalation, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, passWords, sessionLook, sessionsOf, settled, standsOn, stateWord } from "../nodeGraph";
+import { AUTO_REVIEW, ESCALATION, escalationsOf, FIX_LOOP, footerState, isEscalation, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, NOT_RUN_IN_ROUND, passWords, sessionLook, sessionsOf, settled, standsOn, stateWord } from "../nodeGraph";
 import { stepsOf, taskName } from "../paths";
 import type { ItemDetail } from "../useItem";
 import { ChainConfig, ChainOverview } from "./ChainPane";
@@ -294,7 +294,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
     // before it runs (`/skip` takes a task of the current node).
     const edit = !esc && !rev && !!a.canEdit?.(node.id);
     // The fix loop's repair and judge do not wait on a step before them: a round either ran them or did not.
-    const empty = (text: string) => <p className="item-muted">{loop && r ? loopIdleSentence(node, loop, r, rounds!, a.events) : loop ? "Not run in this round." : text}</p>;
+    const empty = (text: string) => <p className="item-muted">{loop && r ? loopIdleSentence(node, loop, r, rounds!, a.events) : loop ? NOT_RUN_IN_ROUND : text}</p>;
     const bodies: Record<string, ReactNode> = {
       thread: empty("No turns yet."),
       overview: empty("Not run yet. It starts when the step before this one finishes."),

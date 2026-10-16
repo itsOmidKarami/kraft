@@ -2,6 +2,7 @@ import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { Combobox, notListed, unlisted, type Choice } from "./Combobox";
 import "./ui.css";
 import { tip } from "./Tooltip";
+import { Empty } from "./Empty";
 
 /** A list of short names edited as pills (Decisions §11 Allowed tools): type and
  *  press Enter or comma to add; × or Backspace on an empty input removes one;
@@ -101,7 +102,7 @@ export function PillInput({ label, values, added = [], onChange, placeholder = "
         </li>
       </ul>
       {refused && <p className="pill-err" role="alert">{refused}</p>}
-      {empty && !values.length && <p id={`${id}-empty`} className="pill-empty">{empty}</p>}
+      {empty && !values.length && <Empty id={`${id}-empty`}>{empty}</Empty>}
       <span className="pill-live" role="status" aria-live="polite">{said}</span>
     </div>
   );

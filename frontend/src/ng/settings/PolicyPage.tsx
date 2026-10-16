@@ -19,6 +19,7 @@ import { policyOf } from "./policy/types";
 import "./settings.css";
 import "./policy/policy.css";
 import { usePane } from "../shell/usePane";
+import { POLICY_SECTION } from "./sharedWords";
 
 const isSection = (s: string | undefined): s is Section => SECTIONS.some((x) => x.id === s);
 export const policyUrl = (s: Section) => `/settings/policy/${s}`;
@@ -108,7 +109,7 @@ function Editor({ draft, section }: { draft: ConfigDraft; section: Section }) {
         <>
           <div className="pol-body" data-flash={flash ?? undefined} style={{ right: reserve(preview && section === "limits") }}>
             <div className="pol-page">
-              <Tabs label="Policy section" id="policy" tabs={tabs} value={section} onChange={(s) => navigate(policyUrl(s))} />
+              <Tabs label={POLICY_SECTION} id="policy" tabs={tabs} value={section} onChange={(s) => navigate(policyUrl(s))} />
               <div id="policy-panel" role="tabpanel" aria-labelledby={`policy-tab-${section}`} className="pol-panel">
               {!ctx ? (
                 <div className="tpl-note" role="alert">
@@ -116,7 +117,7 @@ function Editor({ draft, section }: { draft: ConfigDraft; section: Section }) {
                   {r.problems[0] && <p>{r.problems[0].message}</p>}
                   <p>Open YAML in the header to repair it.</p>
                 </div>
-              ) : section === "limits" ? <Limits ctx={ctx} preview={previewable && <Button aria-pressed={preview} onClick={() => setPreview((v) => !v)}><Workflow size={13} aria-hidden /> Preview on a chain</Button>} /> : section === "loops" ? <Loops ctx={ctx} /> : <Housekeeping ctx={ctx} />}
+              ) : section === "limits" ? <Limits ctx={ctx} preview={previewable && <Button aria-pressed={preview} onClick={() => setPreview((v) => !v)}><Workflow size={14} aria-hidden /> Preview on a chain</Button>} /> : section === "loops" ? <Loops ctx={ctx} /> : <Housekeeping ctx={ctx} />}
               </div>
             </div>
           </div>

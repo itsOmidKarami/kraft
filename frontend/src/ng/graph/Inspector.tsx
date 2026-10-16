@@ -5,7 +5,7 @@ import { Tabs } from "../ui/Tabs";
 import { holdsText, isEscape } from "../keys";
 import type { useResizable } from "./useResizable";
 import "./graph.css";
-import { tip } from "../ui/Tooltip";
+import { tip, hint } from "../ui/Tooltip";
 
 type Props = {
   /** The pane's id, for its tabs and their panel. */
@@ -109,8 +109,8 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
               {glyph}<ChevronDown size={10} aria-hidden />
             </button>
           ) : <span className="pane-glyph">{glyph}</span>}
-          {titleEdit ?? <h2 className={`pane-title${prose ? " is-prose" : ""}`}>{onTitle ? <button ref={titleBtn} type="button" className="pane-title-btn" title="Rename" onClick={onTitle}>{title}</button> : title}</h2>}
-          {onFocus && <button type="button" className="pane-focus" title={focusAs?.tip ?? "Open the node view (double-click)"} onClick={onFocus}>{focusAs?.label ?? "Focus"} <Maximize2 size={12} /></button>}
+          {titleEdit ?? <h2 className={`pane-title${prose ? " is-prose" : ""}`}>{onTitle ? <button ref={titleBtn} type="button" className="pane-title-btn" {...hint("Rename")} onClick={onTitle}>{title}</button> : title}</h2>}
+          {onFocus && <button type="button" className="pane-focus" {...hint(focusAs?.tip ?? "Open the node view (double-click)")} onClick={onFocus}>{focusAs?.label ?? "Focus"} <Maximize2 size={12} /></button>}
         </div>
         {sub && <p className="pane-sub">{sub}</p>}
       </div>

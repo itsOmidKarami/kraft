@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ago, elapsed, lineCount, tokenText, usd } from "../../../format";
 import type { WorkerSession } from "../../../types";
-import { escalationsOf, ESCALATION, FIX_LOOP, isSessionDoc, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, messagesThrough, passWords, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
+import { escalationsOf, ESCALATION, FIX_LOOP, isSessionDoc, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, NO_DOCUMENTS, NOT_RUN_IN_ROUND, messagesThrough, passWords, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
 import { isScopeTask, roundWords, scopeLead, scopesView } from "../../item/scopeView";
 import { placeUrl, selPath, type Place } from "../../item/url";
@@ -147,11 +147,11 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
                       </button>
                     ))}
                   </div>
-                ) : <p className="ph-note">This attempt wrote no documents.</p>}
+                ) : <p className="ph-note">{NO_DOCUMENTS}</p>}
               </Block>
             </>
           ) : unrun ? (
-            <p className="ph-note">{loop && r ? loopIdleSentence(apiNode, loop, r, rounds, events) : "Not run in this round."}</p>
+            <p className="ph-note">{loop && r ? loopIdleSentence(apiNode, loop, r, rounds, events) : NOT_RUN_IN_ROUND}</p>
           ) : (
             <Block title="When it runs">
               <p className="ph-note">{before ? `After ${before} finishes.` : "When the item starts."} It has no attempt yet.</p>

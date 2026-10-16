@@ -50,6 +50,8 @@ describe("Access (O.3)", () => {
     expect(screen.getByRole("button", { name: /^password/ })).toHaveTextContent("•••••••• set");
     expect(screen.getByRole("button", { name: /^session expiry/ })).toHaveTextContent("7 days");
     expect(screen.getByRole("button", { name: /^Mac/ })).toHaveTextContent("current");
+    expect(screen.getByText("Used by both binds. Takes effect on restart. 1024–65535.")).toBeInTheDocument();
+    expect(screen.getByText("A new password signs every session out, this one too.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^iPhone/ })).toHaveTextContent("192.168.1.31");
   });
 

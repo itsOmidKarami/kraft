@@ -1,3 +1,4 @@
+import { hint } from "../ui/Tooltip";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useResizable } from "../graph/useResizable";
@@ -26,6 +27,7 @@ import { LIBRARY_FILE } from "../templates/draft/view";
 import { addonRepo, parseRef, refUrl, SECTIONS, type PublishedLibrary, type Section } from "./types";
 import "./library.css";
 import { usePane } from "../shell/usePane";
+import { REVIEW_AND_PUBLISH } from "./sharedWords";
 
 /** The published library, for its used-by figures and its text (the YAML view's left side). */
 function usePublished() {
@@ -162,7 +164,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
           ? <span className="lib-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span>
           : <><span className="lib-published" id={publishedId}>published</span><span className="reason is-quiet" id={`${publishedId}-why`}>{NOTHING_TO_PUBLISH}</span></>}
         {n.problems > 0 && (
-          <button type="button" className="lib-problems" title="Step through the problems" onClick={stepProblems}>
+          <button type="button" className="lib-problems" {...hint("Step through the problems")} onClick={stepProblems}>
             {n.problems} {n.problems === 1 ? "PROBLEM" : "PROBLEMS"}
           </button>
         )}
@@ -171,7 +173,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         <Button aria-pressed={surface === "yaml"} disabled={surface === "yaml" && !!yamlErr} title={surface === "yaml" && yamlErr ? `Fix line ${yamlErr.line} first, or revert` : undefined} onClick={toggleYaml}>
           {surface === "yaml" ? "⇄ Canvas" : "YAML"}
         </Button>
-        {surface === "canvas" && <Button variant={review ? undefined : "primary"} disabled={!review && !draft.view!.draft} aria-describedby={draft.view!.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={() => { setReview((v) => !v); setReviewOpen(true); }}>{review ? "Back to editing" : "Review & publish"}</Button>}
+        {surface === "canvas" && <Button variant={review ? undefined : "primary"} disabled={!review && !draft.view!.draft} aria-describedby={draft.view!.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={() => { setReview((v) => !v); setReviewOpen(true); }}>{review ? "Back to editing" : REVIEW_AND_PUBLISH}</Button>}
       </HeaderActions>
       <LibraryList rows={rows} selected={id} only={only} onShowAll={() => setParams({}, { replace: true })} onSelect={(x) => navigate(go(x))} onAdd={add} />
       <div className="lib-main" ref={frame}>

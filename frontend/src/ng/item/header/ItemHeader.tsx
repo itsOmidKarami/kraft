@@ -16,6 +16,7 @@ import type { ItemDetail } from "../useItem";
 import { CancelCard } from "./CancelCard";
 import { CompleteCard, EscalateCard, PauseConfirm } from "./Dialogs";
 import { MainButton, PANEL_LABEL } from "./MainButton";
+import { PAUSE_THIS_ITEM } from "../../board/sharedWords";
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
 
@@ -176,16 +177,16 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
         </Link>
       )}
       <span className="item-elapsed" title={`Created ${new Date(item.created_at).toLocaleString()}`}>
-        <Clock size={11} aria-hidden /> {elapsedBetween(item.created_at, endedAt, now)}
+        <Clock size={12} aria-hidden /> {elapsedBetween(item.created_at, endedAt, now)}
       </span>
       <span className={`item-badge is-${hs.tone}`}>{hs.badge}</span>
       {/* Without a main button the group anchors the cards (pause, cancel, escalate) itself. */}
       <div className="item-main-group" ref={hs.main ? undefined : group}>
         {hs.main && <MainButton main={hs.main} panel={hs.panel} archivable={archivable(item)} busy={busy} onMain={onMain} onItem={onItem} groupRef={group} />}
-        <Menu label="Item menu" trigger={<EllipsisVertical size={15} aria-hidden />} items={menu} />
+        <Menu label="Item menu" trigger={<EllipsisVertical size={16} aria-hidden />} items={menu} />
       </div>
       {error && !pausing && <span className="item-error item-header-error" role="alert">{error}</span>}
-      <Popover anchor={group} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label="Pause this item?">
+      <Popover anchor={group} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label={PAUSE_THIS_ITEM}>
         <PauseConfirm busy={busy} error={error} onClose={() => setPausing(false)} onPause={async () => { if (await run(act.pause(item.id))) { setPausing(false); toMain(); } }} />
       </Popover>
       {cancelling && <CancelCard id={item.id} anchor={group} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); toMain(); }} />}

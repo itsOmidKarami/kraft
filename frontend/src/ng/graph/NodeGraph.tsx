@@ -11,7 +11,7 @@ import { useExpand, useReducedMotion, useSettled } from "./useExpand";
 import { useRoving } from "./useRoving";
 import { ZoomControls } from "./ZoomControls";
 import "./graph.css";
-import { tip } from "../ui/Tooltip";
+import { hint, tip } from "../ui/Tooltip";
 import { SEAM } from "./layout";
 
 /** A step, or a task in it, or one of an open task's scopes (its `key`). The escalation task's step is
@@ -241,7 +241,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
   );
   /** The seam under a step's tasks says what it adds: a bare "+" there read as nothing. */
   const below = (key: string, x: number, y: number, fire: (el: HTMLElement) => void) => (
-    <button key={key} type="button" className="seam-below" {...tip("Add a parallel task")} style={{ left: x, top: y - SEAM / 2 }} onClick={(e) => fire(e.currentTarget)}><span aria-hidden="true">+</span> parallel task</button>
+    <button key={key} type="button" className="seam-below" {...hint("Add a parallel task")} style={{ left: x, top: y - SEAM / 2 }} onClick={(e) => fire(e.currentTarget)}><span aria-hidden="true">+</span> parallel task</button>
   );
   // `away`: the task is open as a frame, so its box fades; the frame's own title holds its place in the keys.
   const taskButton = (s: NodeSel, t: GraphItem, x: number, y: number, kind: string, extra = "", away?: boolean) => {

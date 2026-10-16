@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Popover } from "../ui/Popover";
 import type { Rounds } from "../item/nodeGraph";
 import "./graph.css";
+import { FIX_LOOP_ROUNDS } from "./sharedWords";
 
 type Props = { rounds: Rounds; onPick: (round: number | undefined) => void; /** The node's passes, not a fix loop's rounds. */ pass?: boolean };
 
@@ -10,7 +11,7 @@ type Props = { rounds: Rounds; onPick: (round: number | undefined) => void; /** 
  *  at the foot of the canvas). The same for the node's passes, which have no dot and no limit. */
 export function RoundPicker({ rounds: { rows, selected, latest, total }, onPick, pass }: Props) {
   const word = pass ? "pass" : "round";
-  const head = pass ? "Passes of this node" : "Fix loop rounds";
+  const head = pass ? "Passes of this node" : FIX_LOOP_ROUNDS;
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const refs = useRef<Record<number, HTMLButtonElement | null>>({});

@@ -8,4 +8,6 @@ export const autoArchiveNote = (days: number | null | undefined) => (afterDays(d
 export const archivedLede = (days: number | null | undefined) =>
   `Items you archive land here${afterDays(days) ? `, and so do done and cancelled ones ${days} days after they finish` : ""}. Open one to restore it.`;
 
+export const NOTHING_ARCHIVED = "Nothing is archived.";
+
 export const ARCHIVED_READ_ERROR = (why: string) => `The archived items could not be read. ${why}`;

@@ -30,16 +30,13 @@
 .lib-filter-row:focus-within { outline: 2px solid var(--focus); outline-offset: -2px; }
 .lib-filter-row .lib-count { margin-left: auto; }
 .lib-rows { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 10px; }
-.lib-group { margin: 10px 0 4px; font-size: var(--fs-label); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.lib-group { margin: 10px 0 4px; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .lib-group-btn { display: flex; align-items: center; gap: 4px; width: 100%; padding: 2px 6px; border: 0; border-radius: 5px; background: transparent; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; text-align: left; cursor: pointer; }
 .lib-group-btn:hover { color: var(--text-sub); }
 .lib-group-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .lib-count { font-weight: 400; color: var(--text-muted); }
 .lib-only { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 4px 14px 6px; font-size: var(--fs-label); color: var(--text-muted); }
-.lib-only-all { padding: 2px 4px; border: 0; border-radius: 4px; background: transparent; font: inherit; color: var(--text-sub); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
-.lib-only-all:hover { color: var(--text); }
-.lib-only-all:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.lib-empty { margin: 10px 8px; font-size: var(--fs-label); color: var(--text-muted); }
+.lib-empty.empty { margin: 10px 8px; }
 .lib-row { min-height: 24px; display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; color: var(--text-sub); cursor: pointer; }
 .lib-row:hover { background: var(--surface-2); }
 .lib-row.is-sel { background: var(--surface-2); color: var(--text); }
@@ -83,8 +80,7 @@
 .lib-preview-title { margin: 0 0 10px; font-size: var(--fs-meta); font-weight: 600; color: var(--text); }
 .lib-preview-pick { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 10px; font-size: var(--fs-meta); color: var(--text-muted); }
 .lib-preview-pick label { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; max-width: 100%; }
-.lib-preview-pick select { max-width: min(280px, 100%); min-width: 0; min-height: 26px; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: var(--fs-label) ui-monospace, Menlo, monospace; }
-.lib-preview-pick select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.lib-preview-pick .ui-select { max-width: min(280px, 100%); min-width: 0; }
 .lib-preview-note { margin: 4px 0 10px; font-size: var(--fs-label); color: var(--text-muted); }
 .lib-preview-note.is-bad { color: var(--bad); }
 .lib-sections { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; max-width: 720px; }
@@ -94,7 +90,7 @@
 .lib-section-row:hover { background: var(--surface-2); }
 .lib-section-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .lib-section-row[aria-expanded="true"] .lib-section-chev { transform: rotate(90deg); }
-.lib-section-kind { font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.lib-section-kind { font: 500 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .lib-section-source { flex: 1 1 12ch; min-width: 0; overflow-wrap: break-word; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); }
 .lib-section-text { margin: 0; padding: 8px 12px 12px 30px; max-height: 260px; overflow: auto; font: var(--fs-label)/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-sub); }
 
@@ -113,9 +109,9 @@
 .lib-hint-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
 
 /* The landing: what the library holds, what nothing uses, what is broken, what the draft changed. */
-.lib-landing { box-sizing: border-box; width: 100%; max-width: 720px; padding: 28px 24px 32px; color: var(--text-sub); }
+.lib-landing { box-sizing: border-box; width: 100%; max-width: 720px; padding: 22px 24px 32px; color: var(--text-sub); }
 .lib-landing h1 { margin: 0 0 14px; font-size: var(--fs-h2); font-weight: 500; color: var(--text); }
-.lib-landing h2 { margin: 20px 0 6px; font-size: var(--fs-label); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.lib-landing h2 { margin: 20px 0 6px; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .lib-landing ul { margin: 0; padding: 0; list-style: none; }
 .lib-landing-counts { display: flex; flex-wrap: wrap; gap: 8px; }
 .lib-landing-counts a, .lib-landing-counts span { display: flex; flex-direction: column; min-width: 96px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: var(--fs-meta); color: var(--text-sub); text-decoration: none; }

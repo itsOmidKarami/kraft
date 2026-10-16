@@ -1,5 +1,5 @@
 /* The Chains side pane's body. Colours only through theme.css tokens. */
-.pane-group { margin: 14px 0 6px; font-size: var(--fs-label); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.pane-group { margin: 14px 0 6px; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .pane-group:first-child { margin-top: 0; }
 .pane-note { margin: 4px 0 8px; font-size: var(--fs-meta); line-height: 1.55; color: var(--text-muted); }
 .pane-note.is-bad { color: var(--bad); }
@@ -8,11 +8,10 @@
 .tpl-pf { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
 .tpl-pf-label { font-size: var(--fs-meta); color: var(--text-muted); }
 .tpl-pf-line { display: flex; align-items: center; gap: 10px; }
-.tpl-pf-input, .tpl-pf-select { box-sizing: border-box; width: 100%; min-height: 28px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: var(--fs-meta)/1.45 inherit; }
-.tpl-pf-select { flex: 1; min-width: 0; width: auto; font: var(--fs-label) ui-monospace, Menlo, monospace; cursor: pointer; }
+.tpl-pf-input { box-sizing: border-box; width: 100%; min-height: 28px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: var(--fs-meta)/1.45 inherit; }
 .tpl-pf-input.is-long { resize: vertical; }
 .tpl-pf-input.is-mono { font: var(--fs-label) ui-monospace, Menlo, monospace; }
-.tpl-pf-input.is-bad, .tpl-pf-select.is-bad { border-color: var(--bad); }
+.tpl-pf-input.is-bad { border-color: var(--bad); }
 .tpl-pf-sub { margin: 0; font-size: var(--fs-meta); color: var(--text-muted); }
 .tpl-pf-sub.is-bad { color: var(--bad); }
 .tpl-pf-check { display: flex; align-items: center; gap: 5px; flex: none; font-size: var(--fs-meta); color: var(--text-sub); cursor: pointer; }
@@ -47,6 +46,7 @@
 .cfg-gap { flex: none; width: 22px; }
 .cfg-lock { flex: none; font-size: var(--fs-label); color: var(--text-muted); }
 .cfg-edit { flex: 1; min-width: 0; min-height: 24px; box-sizing: border-box; padding: 2px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text); font: var(--fs-label) ui-monospace, Menlo, monospace; }
+.cfg-row .ui-select { flex: 1; min-width: 0; min-height: 24px; }
 .cfg-edit.is-long { flex-basis: 100%; font: var(--fs-label)/1.45 inherit; }
 .cfg-note { flex-basis: 100%; margin: 0 0 0 110px; font-size: var(--fs-meta); color: var(--text-muted); }
 .cfg-err { flex-basis: 100%; margin: 0; font-size: var(--fs-meta); color: var(--bad); }
@@ -63,7 +63,7 @@
 .tpl-rv-sum { flex: 0 1 auto; min-width: 0; margin-left: auto; font-size: var(--fs-meta); color: var(--text-muted); text-align: right; overflow-wrap: anywhere; }
 .tpl-rv-prob { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-bottom: 6px; padding: 6px 8px; border-left: 2px solid var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--surface)); font-size: var(--fs-label); color: var(--text); }
 .tpl-rv-prob > span:nth-child(2) { flex-basis: 100%; }
-.tpl-rv-fix { margin-left: auto; padding: 0 6px; border: 0; border-radius: 4px; background: none; font-size: var(--fs-meta); color: var(--text); text-decoration: underline; cursor: pointer; }
+.tpl-rv-prob > .link-btn { margin-left: auto; }
 .tpl-rv-why { flex: 1 0 100%; order: -1; margin: 0; font-size: var(--fs-body); line-height: 1.4; color: var(--text); }
 .tpl-rv-diff { margin: 4px 0 8px; padding: 6px 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font: var(--fs-label)/17px ui-monospace, Menlo, monospace; color: var(--text-sub); }
 .tpl-rv-line { display: block; padding: 0 8px; white-space: pre; }
@@ -90,6 +90,7 @@
 /* An agent task's fallback list (Overview): one row per entry, tried in order. */
 .fb-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .fb-row { display: flex; align-items: center; gap: 6px; }
+.fb-row .ui-select { flex: 1; min-width: 0; }
 .fb-n { flex: none; width: 12px; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); }
 .fb-add { align-self: flex-start; padding: 2px 0; border: 0; background: none; font-size: var(--fs-meta); color: var(--text-sub); cursor: pointer; }
 .fb-add:not(:disabled):is(:hover, :focus-visible) { color: var(--text); }

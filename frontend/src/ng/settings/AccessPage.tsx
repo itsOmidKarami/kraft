@@ -5,6 +5,7 @@ import { ago, until } from "../../format";
 import type { Access, AuthSession, Health } from "../../types";
 import { parseUserAgent } from "../../ua";
 import { SELF_RESTART, afterRestart, bindHost, useApply } from "../apply/store";
+import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
@@ -14,6 +15,7 @@ import { Block, SetRow } from "./parts";
 import { YamlFrame } from "./YamlFrame";
 import "./settings.css";
 import { tip } from "../ui/Tooltip";
+import { ASKED_FOR_ON_NETWORK, SESSION_EXPIRY_HINT, NO_SIGN_IN_NEEDED, NOT_USED_ON_LOOPBACK, LOOPBACK_ONLY, REVOKE_THIS_SESSION, SESSION_EXPIRY, SESSION_REVOKED, SIGN_OUT_OF_THIS, PORT_HINT, NEW_PASSWORD_SIGNS_OUT } from "./sharedWords";
 
 const LOOPBACK = "127.0.0.1";
 const REMOTE_ACCESS = "https://kraft-sdlc.dev/guides/remote-access";
@@ -153,7 +155,7 @@ export function AccessPage() {
     try {
       await api.revokeSession(s.id);
       await loadSessions();
-      showToast(s.current ? "Signed out" : "Session revoked");
+      showToast(s.current ? "Signed out" : SESSION_REVOKED);
     } catch (e) {
       err("sessions", message(e));
     }
@@ -187,7 +189,7 @@ export function AccessPage() {
 
         {items.length > 0 && (
           <div className="set-pending" role="status">
-            <span className="set-pending-icon" aria-hidden><RotateCw size={15} /></span>
+            <span className="set-pending-icon" aria-hidden><RotateCw size={16} /></span>
             <div className="set-pending-text">
               <strong>Restart to apply</strong>
               {items.map((i) => <span key={i.id}>{i.text}</span>)}
@@ -195,8 +197,8 @@ export function AccessPage() {
               {!managed && <span className="set-hint">{SELF_RESTART}</span>}
             </div>
             <div className="set-pending-actions">
-              <button type="button" className="set-btn" onClick={() => void undo()}>Undo</button>
-              {managed && <button type="button" className="set-btn is-primary" onClick={() => void askRestart()}><RotateCw size={12} aria-hidden /> Restart Kraft</button>}
+              <Button onClick={() => void undo()}>Undo</Button>
+              {managed && <Button variant="primary" onClick={() => void askRestart()}><RotateCw size={12} aria-hidden /> Restart Kraft</Button>}
             </div>
           </div>
         )}
@@ -206,7 +208,7 @@ export function AccessPage() {
           <div ref={reach} className="set-modes is-cards" role="radiogroup" aria-label="Reach">
             {REACHES.map((m) => (
               <button key={m.bind} type="button" role="radio" aria-checked={(m.bind === LOOPBACK) === !lan} className="set-mode is-card" onClick={() => pickBind(m.bind)}>
-                <span className="set-mode-icon" aria-hidden>{m.bind === LOOPBACK ? <Laptop size={15} /> : <Wifi size={15} />}</span>
+                <span className="set-mode-icon" aria-hidden>{m.bind === LOOPBACK ? <Laptop size={16} /> : <Wifi size={16} />}</span>
                 <span className="set-mode-text">
                   <span className="set-mode-title">{m.title}</span>
                   <span className="set-mode-addr">{m.bind}:{back.port}</span>
@@ -226,8 +228,8 @@ export function AccessPage() {
               <SetRow label="phone's host" hint={`The name or address your phone will type: it goes on Allowed hosts, and any other is refused (403).${access.lan_hosts?.length ? ` This machine is ${access.lan_hosts.join(" or ")} on the network.` : ""} Leave it empty to add one later.`}>
                 <span className="set-inline">
                   <input ref={access.password_set ? field : undefined} className="set-input" aria-label="Host or IP the phone will use" placeholder="host or IP" value={lanHost} onChange={(e) => setLanHost(e.target.value)} onKeyDown={keys(() => void saveLan())} />
-                  <button type="button" className="set-btn is-primary" onClick={() => void saveLan()}>{access.password_set ? "Switch" : "Set and switch"}</button>
-                  <button type="button" className="set-btn" onClick={closeEdit}>Cancel</button>
+                  <Button variant="primary" onClick={() => void saveLan()}>{access.password_set ? "Switch" : "Set and switch"}</Button>
+                  <Button onClick={closeEdit}>Cancel</Button>
                 </span>
               </SetRow>
             </>
@@ -238,7 +240,7 @@ export function AccessPage() {
         </section>
 
         <Block id="set-port" title="Port" card aside={items.some((i) => i.id === "access.port") ? SAVED.restart : undefined}>
-          <SetRow label="port" error={errors.port} hint="Used by both binds. Takes effect on restart. 1024–65535.">
+          <SetRow label="port" error={errors.port} hint={PORT_HINT}>
             {editing === "port" ? (
               <input ref={field} className="set-input" aria-label="Port" inputMode="numeric" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void savePort())} onBlur={() => void savePort()} />
             ) : (
@@ -260,7 +262,7 @@ export function AccessPage() {
                     {editing === "host" ? (
                       <input ref={field} className="set-input" aria-label="Add a host or IP" placeholder="host or IP" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void addHost())} onBlur={() => void addHost()} />
                     ) : (
-                      <button type="button" className="set-chip is-add" onClick={() => edit("host")}><Plus size={11} aria-hidden /> add</button>
+                      <button type="button" className="set-chip is-add" onClick={() => edit("host")}><Plus size={12} aria-hidden /> add</button>
                     )}
                   </li>
                 </ul>
@@ -268,31 +270,31 @@ export function AccessPage() {
               {access.allowed_hosts.length === 0 && (
                 <span className="set-hint is-warn">
                   {EMPTY_HOSTS}
-                  {suggested && <> <button type="button" className="set-chip is-add" onClick={() => void put("host", { allowed_hosts: [suggested] })}><Plus size={11} aria-hidden /> add {suggested}</button></>}
+                  {suggested && <> <button type="button" className="set-chip is-add" onClick={() => void put("host", { allowed_hosts: [suggested] })}><Plus size={12} aria-hidden /> add {suggested}</button></>}
                 </span>
               )}
               {notifyHost && <span className="set-hint">The notification link-back ({notifyHost}) is {access.allowed_hosts.includes(notifyHost) ? "on the list." : "not on the list: that link will be refused."}</span>}
             </Block>
 
             <Block id="set-password" title="Password" card>
-              <SetRow label="password" error={errors.password} hint="A new password signs every session out.">
+              <SetRow label="password" error={errors.password} hint={NEW_PASSWORD_SIGNS_OUT}>
                 {editing === "password" ? (
                   <span className="set-inline">
                     <input ref={field} className="set-input" type="password" aria-label="New password" placeholder="new password" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void savePassword())} />
-                    <button type="button" className="set-btn is-primary" onClick={() => void savePassword()}>Save</button>
-                    <button type="button" className="set-btn" onClick={closeEdit}>Cancel</button>
+                    <Button variant="primary" onClick={() => void savePassword()}>Save</Button>
+                    <Button onClick={closeEdit}>Cancel</Button>
                   </span>
                 ) : (
                   <span className="set-inline">
                     <span className={access.password_set ? "set-mono" : undefined}>{access.password_set ? "•••••••• set" : "not set"}</span>
                     {access.password_set
                       ? <button type="button" className="set-pencil" {...tip("Change", "Change the password")} onClick={() => edit("password")}><Pencil size={12} aria-hidden /></button>
-                      : <button type="button" className="set-btn" onClick={() => edit("password")}>Set a password</button>}
+                      : <Button onClick={() => edit("password")}>Set a password</Button>}
                   </span>
                 )}
               </SetRow>
-              <SetRow label="session expiry" error={errors.expiry} hint="How long a sign-in lasts.">
-                <Segmented label="Session expiry" options={EXPIRIES} value={String(access.session_expiry_days)} onChange={(v) => void put("expiry", { session_expiry_days: Number(v) })} />
+              <SetRow label="session expiry" error={errors.expiry} hint={SESSION_EXPIRY_HINT}>
+                <Segmented label={SESSION_EXPIRY} options={EXPIRIES} value={String(access.session_expiry_days)} onChange={(v) => void put("expiry", { session_expiry_days: Number(v) })} />
               </SetRow>
             </Block>
 
@@ -305,15 +307,15 @@ export function AccessPage() {
                     <span className="set-session-who"><span>{parseUserAgent(s.label)}{s.current && <span className="set-current"> current</span>}</span><span className="set-hint">{s.ip}</span></span>
                     <span className="set-hint">seen {ago(s.last_seen_at)}</span>
                     <span className="set-hint">expires {until(s.expires_at)}</span>
-                    <button type="button" className="set-btn is-danger" aria-label={`${s.current ? "Sign out" : "Revoke"} ${parseUserAgent(s.label)}`} onClick={() => setRevoking(s)}>{s.current ? "Sign out here" : "Revoke"}</button>
+                    <Button variant="danger" aria-label={`${s.current ? "Sign out" : "Revoke"} ${parseUserAgent(s.label)}`} onClick={() => setRevoking(s)}>{s.current ? "Sign out here" : "Revoke"}</Button>
                   </li>
                 ))}
               </ul>
             </Block>
           </>
         ) : (
-          <Block id="set-unused" title="Not used on 127.0.0.1" card="dashed">
-            {[["allowed hosts", "Only loopback names are accepted."], ["password", "Asked for when you pick Local network."], ["sessions", "None: there is nothing to sign in to."]].map(([k, v]) => (
+          <Block id="set-unused" title={NOT_USED_ON_LOOPBACK} card="dashed">
+            {[["allowed hosts", LOOPBACK_ONLY], ["password", ASKED_FOR_ON_NETWORK], ["sessions", NO_SIGN_IN_NEEDED]].map(([k, v]) => (
               <div key={k} className="set-unused"><span className="set-row-label">{k}</span><span className="set-hint">{v}</span></div>
             ))}
           </Block>
@@ -322,9 +324,9 @@ export function AccessPage() {
     </YamlFrame>
       {revoking && (
         <Dialog
-          title={revoking.current ? "Sign out of this session?" : "Revoke this session?"}
+          title={revoking.current ? SIGN_OUT_OF_THIS : REVOKE_THIS_SESSION}
           onClose={() => setRevoking(null)}
-          footer={<><button type="button" className="set-btn" onClick={() => setRevoking(null)}>Cancel</button><button type="button" className="set-btn is-danger" onClick={() => void revoke(revoking)}>{revoking.current ? "Sign out" : "Revoke"}</button></>}
+          footer={<><Button onClick={() => setRevoking(null)}>Cancel</Button><Button variant="danger" onClick={() => void revoke(revoking)}>{revoking.current ? "Sign out" : "Revoke"}</Button></>}
         >
           <p>{revoking.current ? "It signs you out here." : `${parseUserAgent(revoking.label)} has to sign in again.`}</p>
         </Dialog>

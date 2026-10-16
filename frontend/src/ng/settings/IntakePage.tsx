@@ -20,6 +20,9 @@ import { repoChoice, repoLabel, type NamedRepo } from "./intake/repos";
 import { intervalFromText, PRIORITIES, showMinutes, toMinutes } from "./intake/units";
 import "./settings.css";
 import "./intake/intake.css";
+import { SCHEDULED_ITEM, CANNOT_BE_EMPTY } from "./sharedWords";
+import { Select } from "../ui/Select";
+import { LinkButton } from "../ui/LinkButton";
 
 const CHECKS_EVERY_MS = 30_000;
 
@@ -88,7 +91,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
 
   const addSchedule = async () => {
     const repo = repos[0]?.path ?? "";
-    const a = await draft.ops([{ op: "add_schedule", cron: "0 9 * * 1", repo, chain: chains.includes("default") ? "default" : chains[0] ?? "default", title: "Scheduled item" }]);
+    const a = await draft.ops([{ op: "add_schedule", cron: "0 9 * * 1", repo, chain: chains.includes("default") ? "default" : chains[0] ?? "default", title: SCHEDULED_ITEM }]);
     if (a.status === 200) {
       const now = intakeOf((a.body as unknown as { result: typeof r }).result);
       setSel((now?.schedules.length ?? 1) - 1);
@@ -123,7 +126,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                       <Switch label="enabled" checked={data.enabled} onChange={(on) => void send(draft, { op: "set_intake", patch: { enabled: on } })} />
                     </div>
                     <p className="ink-sentence">{pickup(data)}</p>
-                    <p className="ink-note">Issues come from <a className="ink-link" href={BEADS_DOCS} target="_blank" rel="noopener noreferrer">beads</a>, the optional bd tracker; a repo without one has nothing to pick up.</p>
+                    <p className="ink-note">Issues come from <LinkButton inline href={BEADS_DOCS} target="_blank" rel="noopener noreferrer">beads</LinkButton>, the optional bd tracker; a repo without one has nothing to pick up.</p>
                     <PickupRows draft={draft} i={data} repos={repos} changes={changes} />
                   </section>
 
@@ -140,7 +143,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                   <section aria-label="Schedules">
                     <div className="ink-head">
                       <h2 className="ink-h2">Schedules</h2>
-                      <Button onClick={() => void addSchedule()}><Plus size={13} aria-hidden /> Add schedule</Button>
+                      <Button onClick={() => void addSchedule()}><Plus size={14} aria-hidden /> Add schedule</Button>
                     </div>
                     <ul className="ink-sched">
                       {schedules.map((s) => {
@@ -235,7 +238,7 @@ function ScheduleRows({ draft, s, repos, chains, changes, problems }: { draft: C
   const changed = (field: string) => changes.has(`intake.yaml|schedules.${s.index}.${field}`);
   const text = (field: keyof Schedule, label: string, k = label) => (
     <Row k={k} changed={changed(field)}>
-      <ValueCell label={label} value={String(s[field] ?? "")} display={String(s[field] ?? "") || "not set"} muted={!s[field]} onCommit={(t) => (t ? patch({ [field]: t }) : field === "description" ? patch({ description: "" }) : "This cannot be empty.")} />
+      <ValueCell label={label} value={String(s[field] ?? "")} display={String(s[field] ?? "") || "not set"} muted={!s[field]} onCommit={(t) => (t ? patch({ [field]: t }) : field === "description" ? patch({ description: "" }) : CANNOT_BE_EMPTY)} />
       {problems.filter((p) => p.field === field).map((p, n) => <span key={n} className="ink-err" role="alert">{scheduleProblemText(p, s)}</span>)}
     </Row>
   );
@@ -247,15 +250,15 @@ function ScheduleRows({ draft, s, repos, chains, changes, problems }: { draft: C
         {problems.filter((p) => p.field === "cron").map((p, n) => <span key={n} className="ink-err" role="alert">{scheduleProblemText(p, s)}</span>)}
       </Row>
       <Row k="repo" changed={changed("repo")}>
-        <select className="ink-select" aria-label="repo" value={s.repo} onChange={(e) => void patch({ repo: e.target.value })}>
+        <Select aria-label="repo" value={s.repo} onChange={(e) => void patch({ repo: e.target.value })}>
           {[...new Set([s.repo, ...repos.map((r) => r.path)])].filter(Boolean).map((p) => <option key={p} value={p}>{repoChoice(p, repos)}</option>)}
-        </select>
+        </Select>
         {problems.filter((p) => p.field === "repo").map((p, n) => <span key={n} className="ink-err" role="alert">{p.message}</span>)}
       </Row>
       <Row k="chain" changed={changed("chain")}>
-        <select className="ink-select" aria-label="chain" value={s.chain} onChange={(e) => void patch({ chain: e.target.value })}>
+        <Select aria-label="chain" value={s.chain} onChange={(e) => void patch({ chain: e.target.value })}>
           {[...new Set([s.chain, ...chains])].map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
+        </Select>
         {problems.filter((p) => p.field === "chain").map((p, n) => <span key={n} className="ink-err" role="alert">{p.message}</span>)}
       </Row>
       {text("description", "description")}
@@ -278,10 +281,10 @@ function CronPicker({ cron, onPick }: { cron: string; onPick: (cron: string) => 
   };
   return (
     <>
-      <select className="ink-select" aria-label="runs" value={custom ? CUSTOM : cron} onChange={(e) => void pick(e.target.value)}>
+      <Select aria-label="runs" value={custom ? CUSTOM : cron} onChange={(e) => void pick(e.target.value)}>
         {CRON_PRESETS.map((p) => <option key={p.cron} value={p.cron}>{p.label}</option>)}
         <option value={CUSTOM}>Custom cron…</option>
-      </select>
+      </Select>
       {custom && <ValueCell label="cron" value={cron} display={cron || "not set"} muted={!cron} onCommit={(t) => cronProblem(t) ?? onPick(t.trim().split(/\s+/).join(" "))} />}
       {error && <span className="ink-err" role="alert">{error}</span>}
       <span className="ink-says">{describeCron(cron)}</span>

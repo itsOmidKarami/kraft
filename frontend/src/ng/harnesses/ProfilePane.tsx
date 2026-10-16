@@ -11,6 +11,7 @@ import { chainLink } from "./Lanes";
 import { type HProblem, type Resolved, problemsOfProfile, taskName, entryUsers } from "./model";
 import { entryOp, useRun } from "./ops";
 import type { ProviderStatus } from "./useProviders";
+import { LinkButton } from "../ui/LinkButton";
 
 type Props = {
   draft: ConfigDraft;
@@ -113,7 +114,7 @@ export function ProfilePane(p: Props) {
       footer={footer}
     >
       <Head>Profile</Head>
-      <Note>Model and effort are per provider: click a lane. Read live at every launch. {p.onYaml ? <button type="button" className="hn-link" onClick={() => p.onYaml!("harnesses.yaml")}>Edit in YAML</button> : null}</Note>
+      <Note>Model and effort are per provider: click a lane. Read live at every launch. {p.onYaml ? <LinkButton inline onClick={() => p.onYaml!("harnesses.yaml")}>Edit in YAML</LinkButton> : null}</Note>
       {Object.keys(profile?.providers ?? {}).length === 0 && <Note>No provider entries yet.</Note>}
       <Head>Used by · {profile?.tasks.length ?? 0}</Head>
       {(profile?.tasks ?? []).map((t) => (

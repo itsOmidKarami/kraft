@@ -9,7 +9,10 @@ import { problemText } from "../../templates/problems";
 import { Button } from "../../ui/Button";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { ScreenHeader } from "../nav/ScreenHeader";
+import { ActionBar } from "../ui/Rows";
 import "./areas.css";
+import { DISCARD_THIS_DRAFT } from "../../board/sharedWords";
+import { REVIEW_AND_PUBLISH } from "../../library/sharedWords";
 
 /** What an area screen is made of (W17 brief K.2): the Back header with the YAML toggle, the title with its status chip, the content, and, when the area has a draft with changes, the bar that reviews and publishes it. */
 export function AreaScreen({ title, sub, draft, status, yaml = true, children }: {
@@ -99,14 +102,14 @@ export function AreaScreen({ title, sub, draft, status, yaml = true, children }:
         ) : children}
       </div>
       {dirty && (
-        <div className="ph-dirtybar">
+        <ActionBar className="ph-dirtybar">
           <Button className="ph-btn" onClick={() => sheet.open("discard")}>Discard</Button>
           <Button className="ph-btn ph-btn-primary" variant="primary" onClick={() => sheet.open("review")}>Review &amp; publish</Button>
-        </div>
+        </ActionBar>
       )}
       {sheet.is("review") && view && (
         <ConfirmSheet
-          title="Review & publish"
+          title={REVIEW_AND_PUBLISH}
           text={stale ? "This changed since you started. Publishing now would overwrite it, so nothing was written; your draft is kept." : problems.length || view.result.yaml_error ? "Fix the problems first: publishing waits for none." : "Applies without a restart once published."}
           busy={busy}
           error={error}
@@ -131,7 +134,7 @@ export function AreaScreen({ title, sub, draft, status, yaml = true, children }:
         </ConfirmSheet>
       )}
       {sheet.is("discard") && (
-        <ConfirmSheet title="Discard this draft?" text="Every change you made here is lost. It can't be undone." busy={busy} error={error} confirm={{ label: "Discard draft", danger: true, run: discard }} onClose={sheet.close} />
+        <ConfirmSheet title={DISCARD_THIS_DRAFT} text="Every change you made here is lost. It can't be undone." busy={busy} error={error} confirm={{ label: "Discard draft", danger: true, run: discard }} onClose={sheet.close} />
       )}
     </>
   );

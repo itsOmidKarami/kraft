@@ -12,6 +12,9 @@ import { SECTIONS, SECTION_LABEL, type Section } from "./types";
 import { tip } from "../ui/Tooltip";
 import { NoMatch } from "../ui/NoMatch";
 import { AddonBadge } from "../templates/addon";
+import { SEARCH_LIBRARY } from "./sharedWords";
+import { Empty } from "../ui/Empty";
+import { LinkButton } from "../ui/LinkButton";
 
 /** What `+ New` can add: the section, and the node's or task's kind. */
 const NEW: { label: string; section: Section; kind?: string }[] = [
@@ -101,8 +104,8 @@ export function LibraryList({ rows, selected, only, onShowAll, onSelect, onAdd }
           <input
             ref={search}
             className="lib-q"
-            aria-label="Search the library"
-            placeholder="Search the library"
+            aria-label={SEARCH_LIBRARY}
+            placeholder={SEARCH_LIBRARY}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
@@ -152,11 +155,11 @@ export function LibraryList({ rows, selected, only, onShowAll, onSelect, onAdd }
       {only && (
         <p className="lib-only">
           <span>Showing {SECTION_LABEL[only].toLowerCase()} only</span>
-          <button type="button" className="lib-only-all" onClick={onShowAll}>Show all</button>
+          <LinkButton onClick={onShowAll}>Show all</LinkButton>
         </p>
       )}
       <div className="lib-rows" role="listbox" aria-label="Library components">
-        {!rows.length && <p className="lib-empty">The library is empty. + New to add the first component.</p>}
+        {!rows.length && <Empty className="lib-empty">The library is empty. + New to add the first component.</Empty>}
         {!!rows.length && !shown.length && <NoMatch className="lib-empty" query={q} onClear={() => setQ("")} />}
         {SECTIONS.map((s) => {
           const inGroup = shown.filter((x) => x.section === s);

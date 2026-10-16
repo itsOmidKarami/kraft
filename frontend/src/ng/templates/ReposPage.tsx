@@ -18,6 +18,7 @@ import { useRepoFragment } from "./repos/useRepoFragment";
 import { NoMatch } from "../ui/NoMatch";
 import "./repos/repos.css";
 import { usePane } from "../shell/usePane";
+import { Empty } from "../ui/Empty";
 
 export const reposUrl = (repo?: string) => `/settings/repos${repo ? `/${encodeURIComponent(repo)}` : ""}`;
 
@@ -119,7 +120,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
               <>
                 <div className="rp-bar">
                   <input className="rp-search" type="search" aria-label="Search repos" placeholder="Search repos" value={q} onChange={(e) => setQ(e.target.value)} />
-                  <button ref={connectBtn} type="button" className="btn btn-secondary" onClick={() => setConnecting((c) => !c)} aria-expanded={connecting}><Plus size={13} aria-hidden /> Connect repo</button>
+                  <button ref={connectBtn} type="button" className="btn btn-secondary" onClick={() => setConnecting((c) => !c)} aria-expanded={connecting}><Plus size={14} aria-hidden /> Connect repo</button>
                 </div>
                 {connecting && (
                   <div className="rp-connect-panel" role="dialog" aria-label="Connect a repo" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setConnecting(false); connectBtn.current?.focus(); } }}>
@@ -171,7 +172,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                       </div>
                     );
                   })}
-                  {!matches.length && (repos.length ? <NoMatch className="rp-empty" query={q} onClear={() => setQ("")} /> : <p className="rp-empty">No repos connected yet. Connect one to start.</p>)}
+                  {!matches.length && (repos.length ? <NoMatch className="rp-empty" query={q} onClear={() => setQ("")} /> : <Empty className="rp-empty">No repos connected yet. Connect one to start.</Empty>)}
                 </div>
                 {data.detected.length > 0 && !q.trim() && (
                   <section className="rp-detected" aria-label="Detected, not connected">

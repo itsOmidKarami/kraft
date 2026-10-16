@@ -11,6 +11,7 @@ import { inRange, lineIndex, rangeBetween, rangeLabel, startSideOf, toward, type
 import { anchorsOf, buildRows, spans, type Anchor, type Cell, type Row, type Side } from "./rows";
 import { languageOf } from "./tokenize";
 import { tip } from "../ui/Tooltip";
+import { Empty } from "../ui/Empty";
 
 /** A picked range of one file's lines. `anchor` is where the pick started,
  *  `head` where it ends now; Shift moves only the head. Both are on `side`,
@@ -81,7 +82,7 @@ export function DiffView(p: DiffViewProps) {
     if (!p.selected || p.prefs.one_file_at_a_time) return;
     col.current?.querySelector(`[data-file="${CSS.escape(p.selected)}"]`)?.scrollIntoView?.({ block: "start" });
   }, [p.selected, p.prefs.one_file_at_a_time]);
-  if (!p.files.length) return <p className="rv-empty">No files match this comparison.</p>;
+  if (!p.files.length) return <Empty variant="block">No files match this comparison.</Empty>;
   return (
     <div ref={col} className={`rv-files${p.prefs.wrap_lines || p.prefs.layout === "split" ? " is-wrap" : ""}`} data-colours={p.prefs.colours}>
       {shown.map((f) => {
@@ -89,9 +90,9 @@ export function DiffView(p: DiffViewProps) {
         return pf ? <FileBlock key={f.path} file={f} pf={pf} {...p} /> : null;
       })}
       {p.truncated && (
-        <p className="rv-empty">
+        <Empty variant="block">
           The diff stops at {Math.round(p.truncated.bytes / 1024)} KB ({p.truncated.files} {p.truncated.files === 1 ? "file" : "files"} not shown). The rest is in the worktree.
-        </p>
+        </Empty>
       )}
     </div>
   );
@@ -302,13 +303,13 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
         <span className="rv-file-note" title={note(file, pf)} data-allow-ellipsis="">{note(file, pf)}</span>
         {collapsed && threads > 0 && <span className="rv-file-threads">{threads} {threads === 1 ? "thread" : "threads"}</span>}
         <span className="rv-spacer" />
-        {!p.readOnly && <IconButton label="Comment on this file" onClick={() => p.onFileComment(file.path)}><MessageSquare size={15} aria-hidden /></IconButton>}
+        {!p.readOnly && <IconButton label="Comment on this file" onClick={() => p.onFileComment(file.path)}><MessageSquare size={16} aria-hidden /></IconButton>}
         <label className="rv-viewed-btn">
           <input type="checkbox" checked={viewed} onChange={() => p.onViewed(file.path, !viewed)} /> Viewed
         </label>
         <Menu
           label={`File menu for ${file.path}`}
-          trigger={<EllipsisVertical size={15} aria-hidden />}
+          trigger={<EllipsisVertical size={16} aria-hidden />}
           items={[
             { label: "Copy diff", onSelect: () => void copy(pf.text, "diff") },
             { label: "Copy path", onSelect: () => void copy(file.path, "path") },
@@ -382,9 +383,9 @@ function Expander({ at, gap: { from, count }, tail, g }: { at: number; gap: Gap;
   const all = count === null ? "Show the rest of the file" : count === 1 ? `Show line ${from}` : `Show lines ${from}–${from + count - 1}`;
   return (
     <span className="rv-expand">
-      {many && at > 0 && <IconButton label={`Show ${STEP} more lines below line ${from - 1}`} onClick={g.onExpand(at, "down")}><ChevronDown size={13} aria-hidden /></IconButton>}
-      {many && !tail && <IconButton label={`Show ${STEP} more lines above line ${from + (count ?? 0)}`} onClick={g.onExpand(at, "up")}><ChevronUp size={13} aria-hidden /></IconButton>}
-      <IconButton label={all} onClick={g.onExpand(at, "all")}><ChevronsUpDown size={13} aria-hidden /></IconButton>
+      {many && at > 0 && <IconButton label={`Show ${STEP} more lines below line ${from - 1}`} onClick={g.onExpand(at, "down")}><ChevronDown size={14} aria-hidden /></IconButton>}
+      {many && !tail && <IconButton label={`Show ${STEP} more lines above line ${from + (count ?? 0)}`} onClick={g.onExpand(at, "up")}><ChevronUp size={14} aria-hidden /></IconButton>}
+      <IconButton label={all} onClick={g.onExpand(at, "all")}><ChevronsUpDown size={14} aria-hidden /></IconButton>
     </span>
   );
 }

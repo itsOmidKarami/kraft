@@ -105,7 +105,7 @@ describe("Chains page: the node view", () => {
     mount("/templates/chains/default/nodes/verification");
     // The file's first mount pays for the shell's and the chain page's imports: under a loaded CPU that ran past 1s.
     const g = await screen.findByRole("group", { name: "verification" }, { timeout: 5000 });
-    await userEvent.click(within(g).getAllByRole("button", { name: "Add a parallel task" })[0]);
+    await userEvent.click(within(g).getAllByRole("button", { name: "parallel task" })[0]);
     await userEvent.click(await screen.findByRole("menuitem", { name: "From the library…" }));
     await userEvent.type(await screen.findByRole("textbox", { name: "Search the library" }), `${typed}{Enter}`);
     await waitFor(() => expect(post.mock.calls[0][2]).toEqual([{ op: "add_task", container: "verification", step: "tests", id, extends: name }]));

@@ -5,9 +5,10 @@ import { Inspector } from "../graph/Inspector";
 import type { useResizable } from "../graph/useResizable";
 import { Head, Note, SelectRow } from "../templates/panes/controls";
 import type { ConfigDraft } from "../templates/draft/useConfigDraft";
-import { ACCESS_WORD, ITEM_HARNESS, itemHarnessNow, TOOLS_EVERY, TOOLS_RESTRICT, ESCALATION_PATH, type HProblem, type Resolved } from "./model";
+import { ACCESS_WORD, ITEM_HARNESS, itemHarnessNow, TOOLS_COMMA_SEPARATED, TOOLS_EVERY, TOOLS_RESTRICT, ESCALATION_PATH, type HProblem, type Resolved } from "./model";
 import type { Published } from "./usePublishedPolicy";
 import { problemText } from "../templates/problems";
+import { Empty } from "../ui/Empty";
 
 export type AreaTab = "overview" | "config";
 const TABS: { value: AreaTab; label: string }[] = [{ value: "overview", label: "Overview" }, { value: "config", label: "Config" }];
@@ -85,7 +86,7 @@ export function AreaPane({ draft, r, problems, published, tab, onTab, open, size
           <Head>Tools</Head>
           {r.allowed_tools == null && !restricting ? (
             <>
-              <p className="pill-empty">{TOOLS_EVERY}: no list limits the agent.</p>
+              <Empty>{TOOLS_EVERY}: no list limits the agent.</Empty>
               <Button onClick={() => setRestricting(true)}>{TOOLS_RESTRICT}</Button>
             </>
           ) : (
@@ -94,7 +95,7 @@ export function AreaPane({ draft, r, problems, published, tab, onTab, open, size
                 label="allowed tools"
                 values={r.allowed_tools ?? []}
                 added={published ? (r.allowed_tools ?? []).filter((t) => !(published.tools ?? []).includes(t)) : []}
-                empty="Empty allows no tools."
+                empty={TOOLS_COMMA_SEPARATED}
                 onChange={(tools) => void draft.ops([{ op: "set_allowed_tools", tools }])}
               />
               <Button onClick={() => { setRestricting(false); if (r.allowed_tools != null) void draft.ops([{ op: "set_allowed_tools", tools: null }]); }}>Allow {TOOLS_EVERY.toLowerCase()}</Button>

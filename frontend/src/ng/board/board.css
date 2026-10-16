@@ -5,16 +5,15 @@
 .board-list { position: absolute; inset: 0; overflow: auto; }
 .board-list-inner { max-width: 1180px; margin: 0 auto; padding: 0 6px 90px; }
 
-.board-group-head { display: flex; align-items: center; gap: 8px; margin: 0; padding: 16px 14px 6px 46px; font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.board-group-head .link-btn { font-weight: 400; }
+.board-group-head { display: flex; align-items: center; gap: 8px; margin: 0; padding: 16px 14px 6px 46px; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .board-count { padding: 0 6px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); letter-spacing: 0; font-size: var(--fs-label); }
-.board-empty { margin: 0; padding: 6px 14px 6px 54px; font-size: var(--fs-label); color: var(--text-muted); }
-.board-empty-solo { padding-left: 14px; }
+.board-empty.empty { padding: 6px 14px 6px 54px; }
+.board-empty-solo.empty { padding-left: 14px; }
 .board-page-head { flex: none; max-width: 1180px; width: 100%; box-sizing: border-box; margin: 0 auto; padding: 14px 14px 0; }
 .board-page-head h1 { margin: 0 0 2px; font-size: var(--fs-h2); font-weight: 600; }
 .board-page-head p { margin: 0; font-size: var(--fs-meta); color: var(--text-sub); }
-.board-more { all: unset; cursor: pointer; display: inline-block; margin: 2px 0 0 54px; padding: 4px 8px; border-radius: 5px; font-size: var(--fs-label); color: var(--text-sub); }
-.board-more:hover { background: var(--surface-2); color: var(--text); }
-.board-more:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.board-more { margin: 2px 0 0 54px; }
 /* `clip`, not `hidden`: no scroll box, so nothing reads it as cut-off text. */
 .board-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }
 
@@ -52,9 +51,6 @@
 .board-note a:is(:hover, :focus-visible) { color: var(--text-sub); }
 .board-note a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
 .board-head-gap { flex: 1; }
-.board-select-all { padding: 2px 8px; border: 0; border-radius: 5px; background: transparent; font: inherit; font-size: var(--fs-meta); letter-spacing: 0; text-transform: none; color: var(--text-sub); cursor: pointer; }
-.board-select-all:is(:hover, :focus-visible) { background: var(--surface-2); color: var(--text); }
-.board-select-all:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 /* A row (AreaBoard 77–86): checkbox, glyph, title and meta, ticks, one action. */
 .board-row { display: grid; grid-template-columns: 18px 30px minmax(0, 1fr) 150px 132px; gap: 4px 14px; align-items: center; padding: 8px 14px; border-radius: 8px; }
@@ -131,9 +127,6 @@ body:has(.bulk-bar) { --toast-bottom: 88px; }
 .bulk-confirm-text { max-width: 340px; line-height: 1.45; color: var(--bad); }
 .bulk-reason { width: 200px; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font: inherit; font-size: var(--fs-label); color: var(--text); }
 .bulk-reason:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.bulk-clear { padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; font: inherit; font-size: var(--fs-label); color: var(--text-sub); cursor: pointer; }
-.bulk-clear:is(:hover, :focus-visible) { color: var(--text); }
-.bulk-clear:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .bulk-results { align-items: flex-start; max-width: 640px; }
 .bulk-results-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .bulk-results ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; max-height: 120px; overflow: auto; color: var(--text-sub); }
@@ -147,8 +140,7 @@ body:has(.bulk-bar) { --toast-bottom: 88px; }
 .peek-events { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 1px; }
 .peek-events li { display: flex; gap: 10px; padding: 5px 0; font-size: var(--fs-label); line-height: 1.45; color: var(--text-sub); }
 .peek-ev-t { flex: none; width: 52px; font: var(--fs-label)/1.7 ui-monospace, Menlo, monospace; color: var(--text-muted); }
-.peek-ev-link { padding: 0; border: 0; background: transparent; font: inherit; color: var(--text); text-align: left; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; cursor: pointer; border-radius: 3px; }
-.peek-ev-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.peek-events .link-btn { text-align: left; }
 .peek-earlier { margin: 8px 0 0; }
 .peek-error { font-size: var(--fs-meta); }
 
@@ -216,14 +208,14 @@ body:has(.draft-page) { --toast-bottom: 88px; }
 .draft-chain-btn { background: var(--bg); }
 .draft-pane-body { display: flex; flex-direction: column; gap: 14px; }
 .draft-section { display: flex; flex-direction: column; gap: 4px; }
-.draft-h { margin: 6px 0 2px; padding: 0; font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.draft-h { margin: 6px 0 2px; padding: 0; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .draft-p { margin: 0; font-size: var(--fs-label); line-height: 1.55; color: var(--text-sub); }
 .draft-repo { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); }
 .draft-repo-path { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); }
 .draft-repo-sub { flex: 1; min-width: 0; font-size: var(--fs-meta); color: var(--text-muted); }
-.draft-role { font: 600 var(--fs-label)/15px ui-monospace, Menlo, monospace; letter-spacing: .04em; padding: 0 5px; border-radius: 4px; background: var(--surface-2); color: var(--text-sub); }
+.draft-role { font: 600 var(--fs-label)/15px ui-monospace, Menlo, monospace; letter-spacing: .04em; padding: 0 5px; border-radius: 5px; background: var(--surface-2); color: var(--text-sub); }
 .draft-add { align-self: flex-start; margin-top: 7px; }
-.draft-add-list { display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid var(--border); border-radius: 9px; }
+.draft-add-list { display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid var(--border); border-radius: 8px; }
 .draft-add-list input { margin: 2px 2px 4px; padding: 5px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font: inherit; font-size: var(--fs-label); color: var(--text); }
 .draft-add-row { display: flex; align-items: center; gap: 9px; }
 .draft-pointer { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -236,7 +228,7 @@ body:has(.draft-page) { --toast-bottom: 88px; }
 .draft-input { flex: none; width: 132px; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); }
 .draft-input:focus-visible, .draft-add-list input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .draft-amber { color: var(--mark-change); }
-.draft-yaml { margin: 0; padding: 10px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); font: var(--fs-label)/1.65 ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: pre-wrap; overflow-wrap: anywhere; }
+.draft-yaml { margin: 0; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); font: var(--fs-label)/1.65 ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: pre-wrap; overflow-wrap: anywhere; }
 .draft-ask { position: absolute; left: 24px; top: 12px; z-index: 29; width: 340px; box-sizing: border-box; display: flex; flex-direction: column; gap: 9px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: var(--fs-label); color: var(--text-sub); box-shadow: 0 14px 36px var(--side-shade); }
 .draft-ask b { font-weight: 500; color: var(--text); }
 @media (max-width: 1023px) { .draft-page { padding: 14px 16px; } }

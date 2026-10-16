@@ -4,10 +4,13 @@ import * as api from "../../api";
 import { ago, elapsed } from "../../format";
 import type { Access, Health } from "../../types";
 import { detailOf, jsonBody, request } from "../http";
+import { Button } from "../ui/Button";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
 import "./settings.css";
 import { installedOlder, olderServer, restartPending } from "../shell/health";
+import { COPIED_THE_COMMAND, COPIED_THE_DIAGNOSTICS, RELEASE_CHANNEL_HINT } from "./sharedWords";
+import { LinkButton } from "../ui/LinkButton";
 
 export interface UpdateState {
   installed: string;
@@ -104,7 +107,7 @@ export function AboutPage() {
           {error && <span className="set-error" role="alert">{error}</span>}
           {installedOlder(health) ? (
             <p className="set-hint is-warn" role="status">
-              An older Kraft, {health!.installed}, is installed under this {health!.version} server. If you are rolling back, stop the server and restore the database from before the upgrade before you start it: a database {health!.version} migrated will not start an older release. See <a className="set-link" href="https://kraft-sdlc.dev/get-started/install#pin-or-roll-back-a-version" target="_blank" rel="noopener noreferrer">Pin or roll back a version</a>.
+              An older Kraft, {health!.installed}, is installed under this {health!.version} server. If you are rolling back, stop the server and restore the database from before the upgrade before you start it: a database {health!.version} migrated will not start an older release. See <a className="btn btn-secondary" href="https://kraft-sdlc.dev/get-started/install#pin-or-roll-back-a-version" target="_blank" rel="noopener noreferrer">Pin or roll back a version</a>.
             </p>
           ) : restartPending(health) && (
             <p className="set-hint is-warn" role="status">
@@ -121,17 +124,17 @@ export function AboutPage() {
               <p className="set-hint">{update?.behind ? "Run this in a terminal" : "To update later, run this in a terminal"}, then restart Kraft. Read the release notes first: a minor release adds capabilities, a major release can change the CLI, the config schema or the state on disk.</p>
               <div className="set-command">
                 <code>{command}</code>
-                <button type="button" className="set-btn is-bare" onClick={() => void copy(command, "Copied the command")}><Copy size={12} aria-hidden /> Copy</button>
+                <Button onClick={() => void copy(command, COPIED_THE_COMMAND)}><Copy size={12} aria-hidden /> Copy</Button>
               </div>
             </>
           )}
           <div className="set-about-row">
-            <a className="set-link" href={RELEASES} target="_blank" rel="noopener noreferrer">Release notes ↗</a>
+            <a className="btn btn-secondary" href={RELEASES} target="_blank" rel="noopener noreferrer">Release notes ↗</a>
             <span className="set-about-gap" />
             <span className="set-hint">{checking ? "checking…" : update?.checked_at ? `checked ${ago(update.checked_at)}` : "not checked yet"}</span>
-            <button type="button" className="set-textbtn" disabled={checking} onClick={() => void load(true, channel)}>Check now</button>
+            <LinkButton inline disabled={checking} onClick={() => void load(true, channel)}>Check now</LinkButton>
           </div>
-          <div className="set-about-row" title="Which release feed Check now asks. The installed channel is the default.">
+          <div className="set-about-row" title={RELEASE_CHANNEL_HINT}>
             <span className="set-hint">Channel</span>
             <Segmented label="Channel" options={CHANNELS} value={channel ?? "stable"} onChange={(c) => { setChannel(c); void load(false, c); }} />
           </div>
@@ -139,7 +142,7 @@ export function AboutPage() {
 
         <div className="set-about-head">
           <h2>This instance</h2>
-          <button type="button" className="set-btn" onClick={() => void copy(diagnostics, "Copied the diagnostics")}><Copy size={12} aria-hidden /> Copy diagnostics</button>
+          <Button onClick={() => void copy(diagnostics, COPIED_THE_DIAGNOSTICS)}><Copy size={12} aria-hidden /> Copy diagnostics</Button>
         </div>
         <dl className="set-about-kv">
           {row("Health", <span className="set-dotted"><span className={`set-dot ${healthDot}`} aria-hidden /><span>{health ? (health.status === "ok" ? "ok · all chains and policy valid" : `degraded · ${problems} problem${problems === 1 ? "" : "s"}${held ? " · worktrees over the storage limit, starts held" : ""}`) : "…"}</span></span>)}

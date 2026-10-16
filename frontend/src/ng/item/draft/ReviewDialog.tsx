@@ -7,6 +7,8 @@ import { useApply } from "./apply";
 import { useDraft } from "./context";
 import { useSelect } from "./select";
 import { lines, PASSED } from "./view";
+import { APPLY_AND_START, DRAFT_HOLDS_CHANGES } from "../sharedWords";
+import { LinkButton } from "../../ui/LinkButton";
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
@@ -101,10 +103,10 @@ function Review() {
           {/* Focus opens on the primary, or on Back to editing while it is blocked; never on Discard draft (R10b-05). */}
           <Button data-autofocus={blocked ? true : undefined} onClick={close}>Back to editing</Button>
           {start && <Button disabled={busy} onClick={startWithout}>Start without them</Button>}
-          <Button ref={primary} data-autofocus={blocked ? undefined : true} variant="primary" disabled={blocked || busy} onClick={run}>{start ? "Apply and start" : "Apply"}</Button>
+          <Button ref={primary} data-autofocus={blocked ? undefined : true} variant="primary" disabled={blocked || busy} onClick={run}>{start ? APPLY_AND_START : "Apply"}</Button>
         </>
       )}>
-      <p className="idr-sub">{start ? "These changes are only in the item's draft. Start does not apply them: apply them now, or start without them and they stay in the draft. " : ""}Only this item changes. The chain itself and the other items stay as they are.</p>
+      <p className="idr-sub">{start ? `${DRAFT_HOLDS_CHANGES} ` : ""}Only this item changes. The chain itself and the other items stay as they are.</p>
       {blocked && (
         <ul className="idr-probs" aria-label="Problems">
           {d.issues.map((i) => (
@@ -124,7 +126,7 @@ function Review() {
         <li className={problems.length ? "is-bad" : "is-ok"}>{problems.length ? `✕ ${problems.length} ${plural(problems.length, "problem", "problems")} to fix first` : "✓ resolves"}</li>
         <li className={passed.length ? "is-bad" : "is-ok"}>
           {passed.length ? `✕ ${passed.length} ${plural(passed.length, "edit", "edits")} the run has passed, which can no longer apply` : "✓ only nodes that have not run"}
-          {passed.length > 0 && <> <button type="button" className="item-link" disabled={busy} onClick={dropPassed}>Remove {passed.length === 1 ? "it" : "them"} from the draft</button></>}
+          {passed.length > 0 && <> <LinkButton disabled={busy} onClick={dropPassed}>Remove {passed.length === 1 ? "it" : "them"} from the draft</LinkButton></>}
         </li>
         {overrides.length > 0 && (overrun.length
           ? overrun.map((i) => <li key={i.index} className="is-bad">✕ {i.message}</li>)

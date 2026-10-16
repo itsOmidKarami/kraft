@@ -38,9 +38,9 @@
 .ph-review-text { min-width: 0; overflow-wrap: anywhere; }
 .ph-problem { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-meta); }
 .ph-problem-path { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); overflow-wrap: anywhere; }
-.ph-dirtybar { flex: none; display: flex; gap: 8px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--bg); }
-.ph-dirtybar > .ph-btn { flex: none; }
-.ph-dirtybar > .ph-btn-primary { flex: 1; }
+/* The publish bar is an ActionBar whose Discard keeps its width and Review & publish takes the rest. */
+.ph-actionbar.ph-dirtybar > .ph-btn { flex: none; }
+.ph-actionbar.ph-dirtybar > .ph-btn-primary { flex: 1; }
 .ph-yaml-btn { min-height: 44px; min-width: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: transparent; font-size: var(--fs-meta); color: var(--text-sub); cursor: pointer; }
 .ph-yaml-btn[aria-pressed="true"] { background: var(--text); border-color: var(--text); color: var(--bg); }
 .ph-actions-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -54,7 +54,7 @@
 .ph-accent-dot { flex: none; width: 22px; height: 22px; box-sizing: border-box; border-radius: 50%; background: var(--accent); }
 .ph-accent-dot[data-accent="none"] { border: 1.5px dashed var(--text-muted); background: transparent; }
 .ph-notice { display: flex; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--side); }
-.ph-notice-icon { flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--text); color: var(--bg); display: grid; place-items: center; font-weight: 700; }
+.ph-notice-icon { flex: none; width: 28px; height: 28px; border-radius: 6px; background: var(--text); color: var(--bg); display: grid; place-items: center; font-weight: 700; }
 .ph-notice-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--fs-meta); line-height: 1.4; }
 .ph-notice-title { font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
 .ph-notice-body { color: var(--text-sub); overflow-wrap: anywhere; }

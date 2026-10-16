@@ -21,10 +21,12 @@ import { Markdown } from "../../ui/Markdown";
 import { Doc } from "../doc/Doc";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { capitalise, gateName, nameOf } from "../../board/rowText";
-import { ScreenHeader } from "../nav/ScreenHeader";
+import { ItemMissing } from "../nav/NotFound";
+import { ComposerHeader, ScreenHeader } from "../nav/ScreenHeader";
 import { useBack } from "../nav/trail";
 import { ActionBar } from "../ui/Rows";
 import "./review.css";
+import { LINES_COMMENTED_ON, ON_THE_WHOLE_CHANGE } from "../../review/sharedWords";
 
 /** The agent reviewer's verdict at a gate, from its own event (never invented). */
 function autoVerdict(events: KraftEvent[], gate: string) {
@@ -55,13 +57,7 @@ export function GateReviewRoute() {
         <div className="ph-content ph-skeleton" aria-busy="true"><span /><span /></div>
       </>
     );
-  if (loaded.state === "missing")
-    return (
-      <>
-        <ScreenHeader />
-        <div className="ph-content"><h1 className="ph-title">Not found</h1><p className="ph-empty">This work item does not exist.</p></div>
-      </>
-    );
+  if (loaded.state === "missing") return <ItemMissing />;
   return <GateReview item={loaded.item} events={events} />;
 }
 
@@ -153,8 +149,8 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
         )}
         {compare.state === "error" && !hasDoc && <p className="ph-error" role="alert">{compare.error}</p>}
         {whole.length > 0 && (
-          <section aria-label="On the whole change" className="ph-list">
-            <h2 className="ph-review-group">On the whole change</h2>
+          <section aria-label={ON_THE_WHOLE_CHANGE} className="ph-list">
+            <h2 className="ph-review-group">{ON_THE_WHOLE_CHANGE}</h2>
             {whole.map((t) => <ThreadNote key={t.id} thread={t} />)}
           </section>
         )}
@@ -228,7 +224,7 @@ function ThreadNote({ thread }: { thread: ReviewThread }) {
     <div className={`ph-thread${thread.state === "resolved" ? " ph-is-resolved" : ""}`}>
       <b className="ph-thread-head">{agent ? "agent" : "you"}{where && ` · ${where}`}{thread.label ? ` · ${thread.label.replace("_", " ")}` : ""}{status && ` · ${status}`}</b>
       {quote.length > 0 && (
-        <div className="ph-thread-quote" role="group" aria-label="Lines commented on">
+        <div className="ph-thread-quote" role="group" aria-label={LINES_COMMENTED_ON}>
           {quote.map((l, i) => <div key={i} className={`ph-diff-line${l[0] === "+" ? " ph-diff-add" : l[0] === "-" ? " ph-diff-del" : ""}`}>{l}</div>)}
         </div>
       )}
@@ -262,21 +258,17 @@ function ReviewComposer({ target, submit }: { target: string | null; submit: Ret
   };
   return (
     <>
-      <header className="ph-composer-head">
-        <button type="button" className="ph-back" onClick={() => (text.trim() ? sheet.open("discard") : back.go())}>Cancel</button>
-        <h1 className="ph-composer-title">{REQUEST_CHANGES}</h1>
-        <span className="ph-composer-pad" />
-      </header>
+      <ComposerHeader title={REQUEST_CHANGES} onCancel={() => (text.trim() ? sheet.open("discard") : back.go())} />
       <div className="ph-content">
         <p className="ph-help">{`${sendsBack(false)}${target ?? "the previous node"}, with your note as the first thing the agent reads.`}</p>
         <textarea className="ph-input ph-input-area" aria-label="Your note" {...noNote.attrs} placeholder="What needs to change?" value={text} onChange={(e) => setText(e.target.value)} />
         {error && <p className="ph-error" role="alert">{error}</p>}
       </div>
       {sheet.is("discard") && <ConfirmSheet title="Discard your note?" text="Your note has not been sent." confirm={{ label: "Discard", danger: true, run: back.go }} onClose={sheet.close} />}
-      <div className="ph-actionbar">
+      <ActionBar>
         {noNote.note}
         <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy} onClick={send}>{REQUEST_CHANGES}</Button>
-      </div>
+      </ActionBar>
     </>
   );
 }

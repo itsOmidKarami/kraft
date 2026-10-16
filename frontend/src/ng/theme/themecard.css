@@ -1,6 +1,6 @@
 /* The prototype's ThemeCard at 250 × 150, scaled by the card's width. */
 .theme-card-box { container-type: inline-size; }
-.theme-card { display: flex; aspect-ratio: 5 / 3; overflow: hidden; box-sizing: border-box; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); color: var(--text); font-size: 2.8cqi; }
+.theme-card { display: flex; aspect-ratio: 5 / 3; overflow: hidden; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 2.8cqi; }
 .tc-side { flex: none; width: 19%; display: flex; flex-direction: column; gap: .4em; padding: 1.1em .7em; border-right: 1px solid var(--line); background: var(--side); }
 .tc-brand { padding: 0 .4em .6em; font-weight: 600; }
 .tc-row { padding: .1em .4em; border-radius: .4em; color: var(--text-muted); }

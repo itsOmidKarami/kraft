@@ -6,6 +6,7 @@ import { AreaScreen } from "./AreaScreen";
 import type { Option } from "../nav/Sheet";
 import { Group, useEditor, type RowSpec } from "./kit";
 import { yamlOf } from "./yaml";
+import { MONO_HAS_NO_ACCENT, ACCENT_LINKS_ONLY } from "../../settings/sharedWords";
 
 const MODES: { value: ThemeMode; label: string }[] = [{ value: "light", label: "Light" }, { value: "dark", label: "Dark" }, { value: "system", label: "System" }];
 const label = (list: { value: string; label: string }[], v: string) => list.find((x) => x.value === v)?.label ?? v;
@@ -42,7 +43,7 @@ export function AppearanceScreen() {
       />
       <Group
         title="Accent"
-        foot={amount === "mono" ? "Mono has no accent. Pick Subtle or Full to choose one." : "The accent colours links only. Selection, buttons and focus stay neutral."}
+        foot={amount === "mono" ? MONO_HAS_NO_ACCENT : ACCENT_LINKS_ONLY}
         rows={ACCENTS.map((a): RowSpec => ({ key: a, label: title(a), selected: accent === a, disabled: amount === "mono", lead: <span className="ph-accent-dot" data-accent={a} data-mode={mode} data-amount="subtle" aria-hidden="true" />, onClick: () => void save({ accent: a as Accent }) }))}
       />
       {node}

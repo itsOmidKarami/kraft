@@ -6,6 +6,7 @@ import { useModal } from "../../../useModal";
 import { Maximize2 } from "../../icons";
 import { logTextUrl } from "../../../api";
 import { POLL_MS, useLogLines } from "../useLogLines";
+import { LinkButton } from "../../ui/LinkButton";
 
 const SOURCES = ["sys", "stdout", "agent", "tool"] as const;
 export { POLL_MS };
@@ -30,7 +31,7 @@ export function Log({ workItemId, sessionId, running, title, crumb }: { workItem
       </span>
       <span className="ip-follow-copy">
         <label className="item-check ip-follow"><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
-        <button type="button" className="item-link" onClick={() => navigator.clipboard?.writeText(shown.map(logLineText).join("\n"))}>copy</button>
+        <LinkButton onClick={() => navigator.clipboard?.writeText(shown.map(logLineText).join("\n"))}>copy</LinkButton>
       </span>
     </>
   );
@@ -41,11 +42,11 @@ export function Log({ workItemId, sessionId, running, title, crumb }: { workItem
       <div className="ip-log-head">
         <span className="item-muted">{count}</span>
         {controls}
-        <button type="button" className="item-link ip-full" onClick={() => setFull(true)}><Maximize2 size={11} aria-hidden /> full screen</button>
+        <LinkButton className="ip-full" onClick={() => setFull(true)}><Maximize2 size={12} aria-hidden /> full screen</LinkButton>
       </div>
       {cut?.truncated && (
         <p className="item-muted">
-          {cut.truncated.lines} earlier lines are not shown. <a className="item-link" href={logTextUrl(workItemId, sessionId)} download={`${workItemId}-${sessionId}.log`}>Download the whole log</a>
+          {cut.truncated.lines} earlier lines are not shown. <LinkButton href={logTextUrl(workItemId, sessionId)} download={`${workItemId}-${sessionId}.log`}>Download the whole log</LinkButton>
         </p>
       )}
       {body(false)}
@@ -68,7 +69,7 @@ function LogScreen({ title, crumb, count, controls, onClose, children }: { title
         <span className="ip-log-crumb">{crumb && <span className="item-muted">{crumb} › </span>}<span className="ip-log-title">{title}</span></span>
         <span className="item-muted">{count}</span>
         {controls}
-        <button type="button" className="item-link ip-full" onClick={onClose}>⤡ exit full screen</button>
+        <LinkButton className="ip-full" onClick={onClose}>⤡ exit full screen</LinkButton>
       </div>
       {children}
     </div>,

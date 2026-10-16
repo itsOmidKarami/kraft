@@ -12,9 +12,12 @@ import { useReason } from "../../ui/Reason";
 import { ADD_TITLE } from "../../ui/reasons";
 import { showToast } from "../../ui/Toast";
 import { ChoiceSheet, ConfirmSheet, EditSheet, useSheet } from "../nav/Sheet";
+import { ComposerHeader } from "../nav/ScreenHeader";
 import { useBack } from "../nav/trail";
+import { ActionBar } from "../ui/Rows";
 import { createBody, loadDraft, looksLikePath, saveDraft, type AttachKind, type NewDraft } from "./body";
 import "./new.css";
+import { BRIEF_HINT, DISCARD_THIS_DRAFT } from "../../board/sharedWords";
 
 /** `/work-items/new` (W17 brief G): title, brief, repo, chain, an optional spec and plan, and Create paused or Create and start (GAP §5.1). */
 export function NewItem() {
@@ -93,14 +96,10 @@ export function NewItem() {
 
   return (
     <>
-      <header className="ph-composer-head">
-        <button type="button" className="ph-back" onClick={() => (dirty ? sheet.open("discard") : back.go())}>Cancel</button>
-        <h1 className="ph-composer-title">New work item</h1>
-        <span className="ph-composer-pad" />
-      </header>
+      <ComposerHeader title="New work item" onCancel={() => (dirty ? sheet.open("discard") : back.go())} />
       <div className="ph-content">
         <input className="ph-input ph-new-title" aria-label="Title" placeholder="Title" value={d.title} onChange={(e) => set({ title: e.target.value })} onBlur={() => setTouched(true)} />
-        <textarea className="ph-input ph-input-area" aria-label="Brief" placeholder="A line of brief. Every node reads it." value={d.brief} onChange={(e) => set({ brief: e.target.value })} />
+        <textarea className="ph-input ph-input-area" aria-label="Brief" placeholder={BRIEF_HINT} value={d.brief} onChange={(e) => set({ brief: e.target.value })} />
         <label className="ph-field">
           <span>Repo</span>
           <select className="ph-input ph-select" value={d.repo} onChange={(e) => set({ repo: e.target.value, chain: repos.find((r) => r.path === e.target.value)?.default_chain ?? d.chain, spec: "", plan: "" })}>
@@ -119,12 +118,12 @@ export function NewItem() {
         <p className="ph-note">{FILED_PAUSED}</p>
       </div>
       {why.text && <p className={`ph-block-reason${touched ? "" : " ph-visually-hidden"}`} id={why.id}>{why.text}</p>}
-      <div className="ph-actionbar">
+      <ActionBar>
         <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy || !d.title.trim()} {...why.attrs} onClick={() => create(false)}>Create paused</Button>
         <Button className="ph-btn" disabled={busy || !d.title.trim()} {...why.attrs} onClick={() => create(true)}>Create and start</Button>
-      </div>
+      </ActionBar>
       {sheet.is("discard") && (
-        <ConfirmSheet title="Discard this draft?" text="The title and brief you typed will be lost." cancel={KEEP_EDITING} confirm={{ label: "Discard", danger: true, run: () => { saveDraft(null); sheet.goTo("/"); } }} onClose={sheet.close} />
+        <ConfirmSheet title={DISCARD_THIS_DRAFT} text="The title and brief you typed will be lost." cancel={KEEP_EDITING} confirm={{ label: "Discard", danger: true, run: () => { saveDraft(null); sheet.goTo("/"); } }} onClose={sheet.close} />
       )}
       {sheet.is("attach") && (
         <EditSheet title={`Attach a ${kind}`} text={`Search this repo's ${kind}s, or paste a repo-relative path. The file must be inside the repo: it is committed on the item's branch.`} placeholder={`search ${kind}s, or paste a path`} submitLabel="Find" error={error} onSubmit={(q) => (q.trim() ? attach(q) : setError("Type a search or paste a path."))} onClose={sheet.close} />

@@ -3,6 +3,7 @@ import { Layers } from "lucide-react";
 import { Popover } from "../../ui/Popover";
 import { useLibrary } from "../useLibrary";
 import { PickList } from "./PickList";
+import { Empty } from "../../ui/Empty";
 
 /** "extend a node from the library" (Decisions §9 Extend from library): a
  *  searchable menu of library nodes. Picking one fills the canvas with its steps. */
@@ -18,7 +19,7 @@ export function ExtendMenu({ anchor, title = "Extend a library node", note = "Ed
       <div className="task-menu">
         <p className="menu-title">{title}</p>
         <p className="tpl-menu-note">{note}</p>
-        {library === "failed" ? <p className="picklist-empty">Couldn't load the library.</p> : (
+        {library === "failed" ? <Empty className="picklist-empty">Couldn't load the library.</Empty> : (
           <PickList
             placeholder="Search library nodes"
             empty={library === "loading" ? "Loading…" : "No library node matches."}

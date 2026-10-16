@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { createRef } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -58,6 +58,7 @@ describe("item cards", () => {
     render(<CompleteCard id="w1" anchor={anchor()} onClose={() => {}} onDone={() => {}} />);
     expect(await screen.findByText("code_review, attempt 2 (41s). That attempt's work is lost.")).toBeInTheDocument();
     const card = screen.getByRole("dialog", { name: "Mark this item complete?" });
+    expect(within(card).getByText("Goes in the run log.")).toBeInTheDocument();
     expect([...card.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["stops now", "keeps", "afterwards"]);
     expect(screen.queryByText(/unless you tick below/)).toBeNull();
     expect(card).toHaveTextContent("keeps" + "branch kraft/cb59, the worktree, findings and the run log");

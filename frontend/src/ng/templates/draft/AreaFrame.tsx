@@ -1,3 +1,4 @@
+import { hint } from "../../ui/Tooltip";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useResizable, useWidth } from "../../graph/useResizable";
 import { isTextField } from "../../keys";
@@ -10,6 +11,7 @@ import type { ConfigDraft } from "./useConfigDraft";
 import type { Problem } from "./types";
 import { counts } from "./view";
 import "../templates.css";
+import { REVIEW_AND_PUBLISH } from "../../library/sharedWords";
 
 export interface FrameCtx {
   size: ReturnType<typeof useResizable>;
@@ -115,7 +117,7 @@ export function AreaFrame({ draft, area, pageKey, title, tail, actions, onFix, o
           ? <span className="tpl-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span>
           : <><span className="tpl-published" id={publishedId}>published</span><span className="reason is-quiet" id={`${publishedId}-why`}>{NOTHING_TO_PUBLISH}</span></>}
         {n.problems > 0 && (
-          <button type="button" className="tpl-problems" title="Step through the problems" onClick={step}>
+          <button type="button" className="tpl-problems" {...hint("Step through the problems")} onClick={step}>
             {n.problems} {n.problems === 1 ? "PROBLEM" : "PROBLEMS"}
           </button>
         )}
@@ -127,7 +129,7 @@ export function AreaFrame({ draft, area, pageKey, title, tail, actions, onFix, o
             {surface === "yaml" ? "⇄ Page" : "YAML"}
           </Button>
         )}
-        <Button variant={review ? undefined : "primary"} disabled={!review && n.changes === 0 && n.problems === 0} aria-describedby={view.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={toggleReview}>{review ? "Back to editing" : "Review & publish"}</Button>
+        <Button variant={review ? undefined : "primary"} disabled={!review && n.changes === 0 && n.problems === 0} aria-describedby={view.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={toggleReview}>{review ? "Back to editing" : REVIEW_AND_PUBLISH}</Button>
       </HeaderActions>
       <div className="tpl-area">
         {surface === "yaml" ? (

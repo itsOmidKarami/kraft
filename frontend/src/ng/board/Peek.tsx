@@ -26,6 +26,8 @@ import { Popover } from "../ui/Popover";
 import { groupOf } from "./model";
 import { capitalise, gateName, reasonTail } from "./rowText";
 import "../item/item.css";
+import { PAUSE_THIS_ITEM } from "./sharedWords";
+import { LinkButton } from "../ui/LinkButton";
 
 export type PeekTab = "overview" | "activity" | "config";
 
@@ -164,12 +166,12 @@ function Activity({ id, nodes, version }: { id: string; nodes: ItemDetail["chain
           return (
             <li key={e.seq}>
               <span className="peek-ev-t">{age(e.created_at, now)}</span>
-              {e.node_id ? <button type="button" className="peek-ev-link" onClick={() => navigate(placeUrl(id, { sel: { kind: "node", node: e.node_id! } }))}>{text}</button> : <span>{text}</span>}
+              {e.node_id ? <LinkButton inline onClick={() => navigate(placeUrl(id, { sel: { kind: "node", node: e.node_id! } }))}>{text}</LinkButton> : <span>{text}</span>}
             </li>
           );
         })}
       </ol>
-      {more && <button type="button" className="board-more peek-earlier" onClick={() => load(events[events.length - 1].seq, events)}>Show earlier</button>}
+      {more && <LinkButton className="board-more peek-earlier" onClick={() => load(events[events.length - 1].seq, events)}>Show earlier</LinkButton>}
     </div>
   );
 }
@@ -237,7 +239,7 @@ function Footer({ cards, item, reload, offline, onOpen, onRaise, onAnswer }: { c
       )}
       <button type="button" className="btn btn-secondary" onClick={onOpen}>Open item ↗</button>
       {error && !pausing && <span className="item-error peek-error" role="alert">{error}</span>}
-      <Popover anchor={btn} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label="Pause this item?">
+      <Popover anchor={btn} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label={PAUSE_THIS_ITEM}>
         <PauseConfirm busy={busy} error={error} onClose={() => setPausing(false)} onPause={async () => { if (await run(act.pause(item.id))) setPausing(false); }} />
       </Popover>
     </>

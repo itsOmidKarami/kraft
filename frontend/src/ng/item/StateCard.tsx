@@ -17,6 +17,9 @@ import { totals } from "./Top";
 import { FORGE_LOGIN_HINT, failedFix, failureFacts, headline, keptLine, withCode } from "./cause";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
+import { CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, WAITING_ON_THE_PROVIDER } from "./sharedWords";
+import { LinkButton, linkButtonClass } from "../ui/LinkButton";
+import { Select } from "../ui/Select";
 
 type Handlers = {
   reload: () => void;
@@ -76,7 +79,7 @@ export function StateCard({ item, files = null, ...h }: { item: ItemDetail; file
         {card.actions.map((a) => (
           <Button key={a.label} variant={a.primary ? "primary" : "secondary"} disabled={busy} aria-describedby={a.primary && card.note ? `${item.id}-card-note` : undefined} onClick={() => void a.run()}>{a.label}</Button>
         ))}
-        {card.node && <button type="button" className="item-link item-card-open" onClick={() => h.onOpenNode(card.node!)}>Open {nameOf(item.chain_definition.nodes, card.node)} →</button>}
+        {card.node && <LinkButton className="item-card-open" onClick={() => h.onOpenNode(card.node!)}>Open {nameOf(item.chain_definition.nodes, card.node)} →</LinkButton>}
       </div>
       {card.note && <p id={`${item.id}-card-note`} className="item-muted item-card-note">{card.note}</p>}
     </section>
@@ -100,7 +103,7 @@ function retryFrom(item: ItemDetail, node: ChainNode | undefined, run: Run, stee
  *  infrastructure stop, or one naming no cause, a way to the repo's settings. */
 function failedActions(item: ItemDetail, retry: ReturnType<typeof retryFrom>, h: { onRepos: () => void }) {
   const retries = when(admits(item, "retry", true), retry);
-  return failedFix(item) === "repo" ? [...retries, { label: "Check the repo settings", run: h.onRepos }] : retries;
+  return failedFix(item) === "repo" ? [...retries, { label: CHECK_REPO_SETTINGS, run: h.onRepos }] : retries;
 }
 
 function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: string) => void; files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void; logUrl: string }, events: KraftEvent[], run: Run): Card | null {
@@ -142,7 +145,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
     if (item.rate_limit) fs.push(["retries", `${item.rate_limit.count} of ${item.rate_limit.cap} used (policy: rate-limit retries)`]);
     if (allowed.length) fs.push(["fallback", `${allowed.join(", ")} ${allowed.length === 1 ? "is" : "are"} allowed by the harness list`]);
     return {
-      tone: "info", glyph: <Clock size={14} aria-hidden />, title: "Waiting on the provider", where, node: stop.node,
+      tone: "info", glyph: <Clock size={14} aria-hidden />, title: WAITING_ON_THE_PROVIDER, where, node: stop.node,
       text: `${harness ?? "The agent"} hit its rate limit. Kraft retries by itself, so nothing needs doing.`,
       facts: fs,
       // No Retry now and no "use another harness" here: /retry claims only a
@@ -160,7 +163,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
     const unresolved = list(facts.unresolved);
     const resolved = list(facts.resolved);
     return {
-      tone: "warn", glyph: <CircleHelp size={14} aria-hidden />, title: "Rebase needs you", where, node: stop.node, text: stop.reason ?? undefined,
+      tone: "warn", glyph: <CircleHelp size={14} aria-hidden />, title: REBASE_NEEDS_YOU, where, node: stop.node, text: stop.reason ?? undefined,
       facts: [
         ...(unresolved.length ? [["unresolved", unresolved.join(" · ")] as [string, ReactNode]] : []),
         ...(resolved.length ? [["resolved", resolved.join(" · ")] as [string, ReactNode]] : []),
@@ -168,7 +171,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
       ],
       actions: [
         // Decisions §14: the review page on that node.
-        { label: "Review the conflicts", primary: true, run: () => h.onReview(stop.node ?? undefined) },
+        { label: REVIEW_THE_CONFLICTS, primary: true, run: () => h.onReview(stop.node ?? undefined) },
         ...when(admits(item, "escalate", true), { label: "Send back with guidance", run: h.onEscalate }),
       ],
     };
@@ -182,7 +185,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
       tone: "warn", glyph: <CircleHelp size={14} aria-hidden />, title: `MR !${ref} was closed on the forge`,
       where: [stop.node && nameOf(item.chain_definition.nodes, stop.node), closed ? `closed ${by ? `by ${by} ` : ""}${ago(closed.created_at)}, not merged` : "not merged"].filter(Boolean).join(" · "),
       node: stop.node,
-      text: "Kraft stopped syncing the MR. The branch, the review and all findings are intact. Decide whether this work still goes ahead.",
+      text: MR_SYNC_STOPPED,
       facts: [],
       actions: [
         ...when(admits(item, "reopen_mr", true), { label: `Reopen !${ref}`, primary: true, run: () => run(act.reopenMr(item.id)) }),
@@ -219,7 +222,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
     const total = h.files?.length ? totals(h.files) : null;
     const took = item.running_time ? elapsed(item.running_time.running_s * 1000) : null;
     const facts: [string, ReactNode][] = [
-      ...(mr ? [["merge request", <><a className="item-link" href={mr.url} target="_blank" rel="noreferrer">!{mr.number}</a>{mrClosed ? " · closed on the forge" : ""}</>] as [string, ReactNode]] : []),
+      ...(mr ? [["merge request", <><LinkButton href={mr.url} target="_blank" rel="noreferrer">!{mr.number}</LinkButton>{mrClosed ? " · closed on the forge" : ""}</>] as [string, ReactNode]] : []),
       ...(h.files?.length ? [["changes", <>{plural(h.files.length, "file")} <span className="item-add">+{total!.add}</span> <span className="item-del">−{total!.del}</span></>] as [string, ReactNode]] : []),
       ...(spent ? [spent] : []),
       ...(took ? [["took", took] as [string, ReactNode]] : []),
@@ -291,7 +294,7 @@ export function ComesAfterCard({ item, reload }: { item: ItemDetail; reload: () 
       <p className="item-card-text">{!waits ? RELEASED.text : blocked ? "Kraft starts it when they complete." : "Started before they complete, it is blocked until they do."}</p>
       <dl className="item-facts item-card-facts">
         {deps.map((d) => (
-          <div key={d.id}><dt>{d.status.replace("_", " ")}</dt><dd><Link className="item-link" to={`/work-items/${encodeURIComponent(d.id)}`}>{d.title}</Link></dd></div>
+          <div key={d.id}><dt>{d.status.replace("_", " ")}</dt><dd><Link className={linkButtonClass()} to={`/work-items/${encodeURIComponent(d.id)}`}>{d.title}</Link></dd></div>
         ))}
       </dl>
       {error && <p className="item-error" role="alert">{error}</p>}
@@ -338,10 +341,10 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
       {steerable && paused.length > 1 && (
         <label className="item-check">
           steer goes to
-          <select className="item-select" value={target} onChange={(e) => setTarget(e.target.value)}>
+          <Select className="item-select" value={target} onChange={(e) => setTarget(e.target.value)}>
             <option value="">every paused task</option>
             {paused.map((s) => <option key={s.id} value={s.hook_point}>{taskName(s.hook_point)}</option>)}
-          </select>
+          </Select>
         </label>
       )}
       {error && <p className="item-error" role="alert">{error}</p>}
@@ -398,7 +401,7 @@ function Tail({ itemId, session, to }: { itemId: string; session: WorkerSession;
         : !lines ? <p className="item-muted">Reading the log…</p>
         : !last.length ? <p className="item-muted">The log is empty.</p>
         : <ul className="item-tail-lines" aria-label="Last lines of the log">{last.map((t, i) => <li key={i}>{t}</li>)}</ul>}
-      <Link className="item-link" to={to}>Open the full log →</Link>
+      <Link className={linkButtonClass()} to={to}>Open the full log →</Link>
     </div>
   );
 }

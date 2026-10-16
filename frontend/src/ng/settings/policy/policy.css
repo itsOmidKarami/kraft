@@ -33,7 +33,7 @@
 .pol-grid.has-used { grid-template-columns: minmax(80px, 130px) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr); }
 .pol-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; min-height: 30px; border-radius: 6px; font-size: var(--fs-label); }
 .pol-row.is-bad { background: color-mix(in srgb, var(--bad) 6%, transparent); }
-.pol-colh { padding: 0; font-size: var(--fs-label); letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.pol-colh { padding: 0; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .pol-k { font-size: var(--fs-label); color: var(--text-sub); overflow-wrap: anywhere; }
 .pol-k.is-bad { color: var(--bad); }
 .pol-cell { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
@@ -48,8 +48,6 @@
 .pol-loop.is-head { min-height: 0; padding-bottom: 0; }
 .pol-loop.is-default { border-bottom: 1px solid var(--line); }
 .pol-chain { margin-left: 4px; font-size: var(--fs-label); color: var(--text-muted); }
-.pol-link { padding: 0; border: 0; background: transparent; font-size: var(--fs-meta); color: var(--text-muted); text-decoration: underline; cursor: pointer; }
-.pol-link:is(:hover, :focus-visible) { color: var(--text); }
 .pol-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .pol-chip { padding: 2px 10px; border: 1px dashed var(--border); border-radius: 5px; background: transparent; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); cursor: pointer; }
 .pol-chip.is-on { border-style: solid; background: var(--surface-2); color: var(--text); }

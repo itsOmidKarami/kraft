@@ -42,8 +42,6 @@
 /* The prototype's two panels: the tree and the diff, each a rounded card. */
 .rv-body { position: relative; flex: 1 1 0; min-height: 0; display: flex; gap: 12px; padding: 0 16px; }
 .rv-diff { flex: 1 1 0; min-width: 0; overflow-x: hidden; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
-.rv-empty { padding: 28px; font-size: var(--fs-meta); color: var(--text-muted); }
-.rv-empty p { margin: 0 0 12px; }
 
 /* File tree (prototype 412–417). Under 1024 it opens over the diff (R7). */
 .rv-tree { flex: none; width: 260px; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
@@ -52,7 +50,7 @@
 .rv-tree-count { flex: 1 1 auto; }
 .rv-tree-filter { margin: 0 10px 6px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font-size: var(--fs-label); }
 .rv-tree-body { flex: 1 1 0; min-height: 0; overflow: auto; padding: 0 6px 6px; }
-.rv-tree-empty { margin: 8px 6px; font-size: var(--fs-meta); color: var(--text-muted); }
+.rv-tree-empty.empty { margin: 8px 6px; }
 .rv-folder-row > .rv-mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rv-folder-row { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font-size: var(--fs-meta); text-align: left; cursor: pointer; }
 .rv-folder-row.is-static { cursor: default; }
@@ -150,8 +148,6 @@
 .rv-reply.is-agent { border-left-color: var(--border); }
 .rv-reply-edit { display: flex; flex-direction: column; gap: 6px; }
 .rv-links { display: flex; gap: 6px; font-size: var(--fs-label); color: var(--text-muted); }
-.rv-link { padding: 0; border: 0; background: transparent; color: var(--text-muted); font-size: var(--fs-label); cursor: pointer; }
-.rv-link:is(:hover, :focus-visible) { color: var(--text); }
 .rv-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-label); }
 .rv-textarea { box-sizing: border-box; width: 100%; min-height: 64px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: var(--fs-meta)/1.5 var(--font-sans); resize: vertical; }
 .rv-textarea.rv-mono { font: var(--fs-label)/1.5 ui-monospace, Menlo, monospace; min-height: 44px; }

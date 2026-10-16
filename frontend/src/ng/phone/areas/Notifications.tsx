@@ -14,6 +14,7 @@ import { SAVED } from "../../settings/savedWords";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, useSaves, type RowSpec } from "./kit";
 import { yamlOf } from "./yaml";
+import { SAMPLE_INTAKE_TITLE, ALERTS_ON_THIS_DEVICE, TEST_ALERT_SHOWN, ALERTS_IN_BACKGROUND } from "../../settings/sharedWords";
 
 export { permissionNow };
 const AREA = "/settings/notifications";
@@ -82,7 +83,7 @@ function Preview({ link }: { link: string }) {
   const [id, setId] = useState<string>(NOTIFY_EVENTS[0].id);
   const { edit, node } = useEditor();
   const event = NOTIFY_EVENTS.find((e) => e.id === id) ?? NOTIFY_EVENTS[0];
-  const sample = notificationText(event, "Add retry budget to the intake poller");
+  const sample = notificationText(event, SAMPLE_INTAKE_TITLE);
   return (
     <>
       <Group title="What it looks like" rows={[{ label: "event", value: eventWords(id), onEdit: () => edit({ kind: "choice", title: "Event", value: id, options: NOTIFY_EVENTS.map((e) => ({ value: e.id, label: eventWords(e.id), hint: e.label })), set: async (v) => { setId(v); return null; } }) }]} />
@@ -166,7 +167,7 @@ function BrowserAlerts({ tab }: { tab: "overview" | "config" }) {
     try {
       const text = notificationText(NOTIFY_EVENTS[0], "Test alert");
       new Notification(text.title, { body: text.body, icon: "/icon.svg" });
-      showToast("Test alert shown on this device");
+      showToast(TEST_ALERT_SHOWN);
     } catch {
       showToast("This browser could not show the alert", { tone: "error" });
     }
@@ -175,7 +176,7 @@ function BrowserAlerts({ tab }: { tab: "overview" | "config" }) {
     return (
       <>
         <Group rows={[
-          { label: "status", value: channelState(browserOn(on, permission)), sub: "Alerts show only while this tab is in the background." },
+          { label: "status", value: channelState(browserOn(on, permission)), sub: ALERTS_IN_BACKGROUND },
           ...(permission === "granted" ? [] : [{ label: "permission", value: PERMISSION_SHORT[permission], sub: PERMISSION_LEAD[permission].title } as RowSpec]),
           { label: "notifies", value: evLine(events) },
         ]} />
@@ -203,7 +204,7 @@ function BrowserAlerts({ tab }: { tab: "overview" | "config" }) {
           <Group
             note="Kept in this browser only: another device is its own switch."
             rows={[
-              { label: "Alerts on this device", sw: on, disabled: permission !== "granted", onSwitch: toggle },
+              { label: ALERTS_ON_THIS_DEVICE, sw: on, disabled: permission !== "granted", onSwitch: toggle },
               { label: "Send a test", onClick: testBrowser, disabled: !!off, sub: off ? undefined : "Shows an alert on this device now." },
             ]}
           />

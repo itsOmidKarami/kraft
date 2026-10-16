@@ -6,6 +6,7 @@ import { sendBulk, useBulk } from "../board/bulk";
 import { detailOf, jsonBody, request } from "../http";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
+import { CLEAN_UP_FINISHED_WORKTREES } from "./sharedWords";
 
 /** Where usage lands against the quota and the limit. `state_after` is null without a limit. */
 function lands(p: StoragePreview, u: StorageUsage): string {
@@ -69,7 +70,7 @@ export function CleanupDialog({ ids, usage, onClose, onDone }: { ids: string[]; 
 
   return (
     <Dialog
-      title="Clean up worktrees"
+      title={CLEAN_UP_FINISHED_WORKTREES}
       onClose={onClose}
       dirty={busy}
       className="set-st-dlg"

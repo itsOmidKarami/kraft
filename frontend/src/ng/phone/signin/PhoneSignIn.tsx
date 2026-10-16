@@ -3,6 +3,7 @@ import * as api from "../../../api";
 import type { Health } from "../../../types/system";
 import { Button } from "../../ui/Button";
 import "./signin.css";
+import { SERVER_UNREACHABLE, STAY_SIGNED_IN, THIS_VISIT_ONLY, WRONG_PASSWORD } from "../../shell/sharedWords";
 
 const LOCK_FALLBACK_S = 60;
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -35,7 +36,7 @@ export function PhoneSignIn({ onSignedIn }: { onSignedIn: () => Promise<void> })
     return () => clearInterval(id);
   }, [lockedUntil]);
   useEffect(() => {
-    if (error === "Wrong password.") input.current?.select();
+    if (error === WRONG_PASSWORD) input.current?.select();
   }, [error]);
 
   const submit = async (e: FormEvent) => {
@@ -52,13 +53,13 @@ export function PhoneSignIn({ onSignedIn }: { onSignedIn: () => Promise<void> })
         await onSignedIn();
         return;
       }
-      if (res.status === 401) setError("Wrong password.");
+      if (res.status === 401) setError(WRONG_PASSWORD);
       else if (res.status === 429) {
         const retry = Number.parseInt(res.headers.get("Retry-After") ?? "", 10);
         setLockedUntil(Date.now() + (retry > 0 ? retry : LOCK_FALLBACK_S) * 1000);
       } else setError(`Sign-in failed (${res.status}).`);
     } catch (err) {
-      setError(err instanceof TypeError ? "Could not reach the Kraft server." : err instanceof Error ? err.message : String(err));
+      setError(err instanceof TypeError ? SERVER_UNREACHABLE : err instanceof Error ? err.message : String(err));
     } finally {
       sending.current = false;
       setBusy(false);
@@ -75,11 +76,11 @@ export function PhoneSignIn({ onSignedIn }: { onSignedIn: () => Promise<void> })
         <p className="ph-help">Kraft listens on the network, so every browser signs in, this machine's too.</p>
         <label className="ph-field">
           <span>Password</span>
-          <input ref={input} className="ph-input" type="password" autoComplete="current-password" autoFocus value={password} disabled={locked} aria-invalid={!locked && error === "Wrong password."} onChange={(e) => { setPassword(e.target.value); setError(null); }} />
+          <input ref={input} className="ph-input" type="password" autoComplete="current-password" autoFocus value={password} disabled={locked} aria-invalid={!locked && error === WRONG_PASSWORD} onChange={(e) => { setPassword(e.target.value); setError(null); }} />
         </label>
         {!locked && error && <p className="ph-error" role="alert">{error}</p>}
-        <div className="ph-signin-stay" role="radiogroup" aria-label="Stay signed in">
-          {([["days", days != null ? `${days} days` : "Stay signed in"], ["visit", "This visit only"]] as const).map(([v, label]) => (
+        <div className="ph-signin-stay" role="radiogroup" aria-label={STAY_SIGNED_IN}>
+          {([["days", days != null ? `${days} days` : STAY_SIGNED_IN], ["visit", THIS_VISIT_ONLY]] as const).map(([v, label]) => (
             <button key={v} type="button" role="radio" aria-checked={stay === v} disabled={locked || busy} className={`ph-signin-opt${stay === v ? " ph-is-on" : ""}`} onClick={() => setStay(v)}>{label}</button>
           ))}
         </div>

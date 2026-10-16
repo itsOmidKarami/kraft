@@ -16,6 +16,7 @@ describe("Title", () => {
     const calls = stubFetch(WRITES);
     const onSaved = vi.fn();
     render(<Title id="w1" title="Old" onSaved={onSaved} />);
+    expect(screen.getByRole("button", { name: "Old" })).toHaveAccessibleDescription("Rename");
     await userEvent.click(screen.getByRole("button", { name: "Old" }));
     const box = screen.getByRole("textbox", { name: "Title" });
     await userEvent.clear(box);

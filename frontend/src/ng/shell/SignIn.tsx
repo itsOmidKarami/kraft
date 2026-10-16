@@ -6,6 +6,7 @@ import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
 import { Segmented } from "../ui/Segmented";
 import "./signin.css";
+import { SERVER_UNREACHABLE, STAY_SIGNED_IN, THIS_VISIT_ONLY, WRONG_PASSWORD } from "./sharedWords";
 
 const LOCK_FALLBACK_S = 60;
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -46,7 +47,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
   }, [locked]);
 
   useEffect(() => {
-    if (error === "Wrong password.") input.current?.select();
+    if (error === WRONG_PASSWORD) input.current?.select();
   }, [error]);
 
   const submit = async (e: FormEvent) => {
@@ -69,13 +70,13 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
         await onSignedIn();
         return;
       }
-      if (res.status === 401) setError("Wrong password.");
+      if (res.status === 401) setError(WRONG_PASSWORD);
       else if (res.status === 429) {
         const retry = Number.parseInt(res.headers.get("Retry-After") ?? "", 10);
         setLockedUntil(Date.now() + (retry > 0 ? retry : LOCK_FALLBACK_S) * 1000);
       } else setError(`Sign-in failed (${res.status}).`);
     } catch (err) {
-      setError(err instanceof TypeError ? "Could not reach the Kraft server." : err instanceof Error ? err.message : String(err));
+      setError(err instanceof TypeError ? SERVER_UNREACHABLE : err instanceof Error ? err.message : String(err));
     } finally {
       sending.current = false;
       setBusy(false);
@@ -100,7 +101,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
             autoFocus
             value={password}
             disabled={locked}
-            aria-invalid={!locked && error === "Wrong password."}
+            aria-invalid={!locked && error === WRONG_PASSWORD}
             onChange={(e) => {
               setPassword(e.target.value);
               setError(null);
@@ -108,15 +109,15 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
           />
         </Field>
         <div className="ng-signin-stay">
-          <span className="field-label" aria-hidden>Stay signed in</span>
+          <span className="field-label" aria-hidden>{STAY_SIGNED_IN}</span>
           <Segmented
-            label="Stay signed in"
+            label={STAY_SIGNED_IN}
             value={stay}
             onChange={setStay}
             disabled={locked || busy}
             options={[
-              { value: "days", label: days != null ? `${days} days` : "Stay signed in" },
-              { value: "visit", label: "This visit only" },
+              { value: "days", label: days != null ? `${days} days` : STAY_SIGNED_IN },
+              { value: "visit", label: THIS_VISIT_ONLY },
             ]}
           />
         </div>

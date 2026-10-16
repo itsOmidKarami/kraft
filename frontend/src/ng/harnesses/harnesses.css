@@ -4,29 +4,24 @@
 .hn-crumb-sep { flex: none; color: var(--text-muted); }
 .hn-crumb { flex: none; font-size: var(--fs-label); color: var(--text-muted); }
 .hn-crumb.is-current { color: var(--text); font: var(--fs-label) ui-monospace, Menlo, monospace; }
-.hn-draft { flex: none; margin-left: 4px; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .06em; color: var(--mark-change); }
-.hn-published { flex: none; margin-left: 4px; font-size: var(--fs-meta); color: var(--text-muted); }
-.hn-problems-badge { flex: none; padding: 2px 8px; border: 1px solid var(--bad); border-radius: 10px; background: transparent; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .04em; color: var(--bad); cursor: pointer; }
-.hn-problems-badge:is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); }
-.hn-problems-badge:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 /* The list */
 .hn-list { flex: none; width: 250px; box-sizing: border-box; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--side); min-height: 0; }
 .hn-search { margin: 10px 10px 6px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: var(--fs-label); }
 .hn-search:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .hn-list-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 6px 12px; display: flex; flex-direction: column; gap: 1px; }
-.hn-head { margin: 12px 6px 4px; font-size: var(--fs-label); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.hn-head { margin: 12px 6px 4px; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .hn-row { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 3px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-label); text-align: left; cursor: pointer; }
 .hn-row:hover { background: var(--line); }
 .hn-row.is-sel { background: var(--surface-2); }
-.hn-row:focus-visible, .hn-glyph:focus-visible, .hn-lane-head:focus-visible, .hn-link:focus-visible, .hn-problem:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.hn-row:focus-visible, .hn-glyph:focus-visible, .hn-lane-head:focus-visible, .hn-problem:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .hn-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hn-row-meta { flex: none; font-size: var(--fs-meta); color: var(--text-muted); }
 .hn-row-meta[data-access="available"] { color: var(--ok); }
 .hn-row-meta[data-access="override"] { color: var(--text); }
 .hn-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--bad); }
 .hn-add { margin-top: 6px; color: var(--text-sub); }
-.hn-empty { margin: 8px 6px; font-size: var(--fs-label); color: var(--text-muted); }
+.hn-empty.empty { margin: 8px 6px; }
 
 /* The canvas and its lanes: 520px each, the canvas scrolls. */
 .hn-stage { position: relative; flex: 1; min-width: 0; }
@@ -75,7 +70,6 @@
 .hn-input { box-sizing: border-box; width: 100%; min-height: 28px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: var(--fs-label) ui-monospace, Menlo, monospace; }
 .hn-input.is-changed { border-color: var(--mark-change-line); }
 .hn-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.hn-link { padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; text-decoration: underline; cursor: pointer; }
 .hn-error { margin: 6px 0; font-size: var(--fs-meta); color: var(--bad); }
 .hn-toast { position: absolute; z-index: 8; left: 260px; top: 6px; margin: 0; }
 .hn-problems-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }

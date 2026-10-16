@@ -6,6 +6,8 @@ import { problemAt, type Ctx } from "./ctx";
 import { SectionHead } from "./SectionHead";
 import { LOOP_WINS } from "./sections";
 import { parse, raw, show, sourceWord } from "./units";
+import { LOOP_VALUE_BLANK, EVERY_FIX_LOOP, STUCK_ITEM_OFF, WHEN_STUCK, FINDINGS_BURN_A_FIX_CYCLE } from "../sharedWords";
+import { LinkButton } from "../../ui/LinkButton";
 
 /** Loops (Decisions §12): fix-loop defaults and maxima, which findings start another cycle, and what happens when an item is stuck. */
 export function Loops({ ctx }: { ctx: Ctx }) {
@@ -21,7 +23,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
   const setLoop = (key: string, field: "max_attempts" | "wall_clock_s", text: string, unit: "count" | "s-as-min") => {
     const v = parse(unit, text);
     if ("error" in v) return v.error;
-    if (v.value === null) return "A loop's own value cannot be blank: remove its entry instead.";
+    if (v.value === null) return LOOP_VALUE_BLANK;
     return draft.ops([{ op: "set_loop", key, [field]: v.value }], { quiet: true }).then((a) => (a.status === 200 ? null : detailOf(a.body)));
   };
   const toggleSeverity = (s: string) => {
@@ -51,8 +53,8 @@ export function Loops({ ctx }: { ctx: Ctx }) {
         <p className="pol-note">{LOOP_WINS}</p>
       </section>
 
-      <section className="pol-card" aria-label="Every fix loop">
-        <h3 className="pol-h2">Every fix loop</h3>
+      <section className="pol-card" aria-label={EVERY_FIX_LOOP}>
+        <h3 className="pol-h2">{EVERY_FIX_LOOP}</h3>
         <div className="pol-loops">
           <div className="pol-loop is-head" aria-hidden>
             <span className="pol-colh">loop</span><span className="pol-colh">attempts</span><span className="pol-colh">wall clock</span><span />
@@ -75,7 +77,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
                 <span className="pol-from">{sourceWord(l.wall_clock_s.source)}</span>
               </span>
               {entry(l.key)
-                ? <button type="button" className="pol-link" aria-label={`Remove the loops entry for ${l.node}`} onClick={() => void draft.ops([{ op: "remove_loop", key: l.key }])}>Remove entry</button>
+                ? <LinkButton inline aria-label={`Remove the loops entry for ${l.node}`} onClick={() => void draft.ops([{ op: "remove_loop", key: l.key }])}>Remove entry</LinkButton>
                 : <span />}
             </div>
           ))}
@@ -89,7 +91,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
                 <span className="pol-k is-bad">{e.key}</span>
                 <span className="pol-help">{show("count", e.attempts)} attempts · {show("s-as-min", e.wall_clock_s)}</span>
                 <span className="pol-help is-bad">{ctx.problems.find((x) => x.field === `loops.${e.key}` || x.path === `loops.${e.key}`)?.message ?? "names no fix loop in the library"}</span>
-                <button type="button" className="pol-link" aria-label={`Remove the loops entry ${e.key}`} onClick={() => void draft.ops([{ op: "remove_loop", key: e.key }])}>Remove</button>
+                <LinkButton inline aria-label={`Remove the loops entry ${e.key}`} onClick={() => void draft.ops([{ op: "remove_loop", key: e.key }])}>Remove</LinkButton>
               </div>
             ))}
             </div>
@@ -100,7 +102,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
       <section className="pol-card" aria-label="Findings">
         <div className="pol-one">
           <span className="pol-k">burns a cycle</span>
-          <span className="pol-chips" role="group" aria-label="Findings that burn a fix cycle">
+          <span className="pol-chips" role="group" aria-label={FINDINGS_BURN_A_FIX_CYCLE}>
             {SEVERITIES.map((s) => (
               <button key={s} type="button" className={`pol-chip${sev.includes(s) ? " is-on" : ""}${sevChange ? " is-changed" : ""}`} aria-pressed={sev.includes(s)} onClick={() => toggleSeverity(s)}>{s}</button>
             ))}
@@ -110,8 +112,8 @@ export function Loops({ ctx }: { ctx: Ctx }) {
         </div>
       </section>
 
-      <section className="pol-card" aria-label="When an item is stuck">
-        <h3 className="pol-h2">When an item is stuck</h3>
+      <section className="pol-card" aria-label={WHEN_STUCK}>
+        <h3 className="pol-h2">{WHEN_STUCK}</h3>
         <div className="pol-one">
           <span className="pol-k">auto-escalate</span>
           <span className="pol-chips" role="group" aria-label="Auto-escalate on stuck">
@@ -119,7 +121,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
               <button key={String(on)} type="button" className={`pol-chip${stuck === on ? " is-on" : ""}${changes.has(STUCK_KEY.key) ? " is-changed" : ""}`} aria-pressed={stuck === on} onClick={() => void setValue(draft, STUCK_KEY, on)}>{on ? "on" : "off"}</button>
             ))}
           </span>
-          <span className="pol-help">{stuck ? "An item that reports no progress escalates to a person on its own. A chain or an item override can turn this off or retune it for one node." : "Off: a stuck item waits until a person escalates it."}</span>
+          <span className="pol-help">{stuck ? "An item that reports no progress escalates to a person on its own. A chain or an item override can turn this off or retune it for one node." : STUCK_ITEM_OFF}</span>
         </div>
         {stuck && (
           <>

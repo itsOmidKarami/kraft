@@ -3,6 +3,7 @@ import { RotateCcw } from "lucide-react";
 import { useIconSet } from "../iconSet";
 import { Popover } from "../ui/Popover";
 import { focusSoon } from "./menus/focus";
+import { Empty } from "../ui/Empty";
 
 const COLS = 8;
 /** Enough to scan; a search narrows the rest. */
@@ -37,7 +38,7 @@ export function IconPicker({ anchor, current, onPick, onClose }: { anchor: RefOb
           }} />
           <button type="button" className="menu-item ip-default" onClick={() => onPick(null)}><RotateCcw size={12} aria-hidden /> Default</button>
         </div>
-        {!set ? <p className="picklist-empty">Loading icons…</p> : (
+        {!set ? <Empty className="picklist-empty">Loading icons…</Empty> : (
           <>
             <div className="ip-grid" role="listbox" aria-label="Icons">
               {shown.map((n, i) => (
@@ -46,7 +47,7 @@ export function IconPicker({ anchor, current, onPick, onClose }: { anchor: RefOb
                 </button>
               ))}
             </div>
-            <p className="picklist-empty">{names.length > SHOWN ? `${SHOWN} of ${names.length} · search to narrow` : names.length ? `${names.length} icon${names.length === 1 ? "" : "s"}` : "No icon matches."}</p>
+            <Empty className="picklist-empty">{names.length > SHOWN ? `${SHOWN} of ${names.length} · search to narrow` : names.length ? `${names.length} icon${names.length === 1 ? "" : "s"}` : "No icon matches."}</Empty>
           </>
         )}
       </div>

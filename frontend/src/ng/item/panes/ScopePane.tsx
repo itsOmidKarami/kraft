@@ -6,6 +6,7 @@ import type { ItemDetail } from "../useItem";
 import { Log } from "./Log";
 import type { PaneContent } from "./paneContent";
 import { AttemptMenu } from "./TaskPane";
+import { LinkButton } from "../../ui/LinkButton";
 
 const fact = (k: string, v: ReactNode) => (v == null || v === "" ? null : <div key={k}><dt>{k}</dt><dd>{v}</dd></div>);
 
@@ -46,7 +47,7 @@ export function scopePane({ item, node, step, task, scope, round, now, crumbs, t
           {fact("command", <span className="is-mono">{chip.command}</span>)}
           {fact("paths", chip.paths && <span className="is-mono" style={{ overflowWrap: "anywhere" }}>{chip.paths}</span>)}
           {fact("repo", repo.length ? <span className="is-mono">{repo[0]}</span> : null)}
-          {fact("task", <button type="button" className="item-link is-mono" onClick={toTask}>{task}</button>)}
+          {fact("task", <LinkButton mono onClick={toTask}>{task}</LinkButton>)}
           {fact("execution", <span className="is-mono">{view.execution}</span>)}
           {fact("other rounds", others.length ? others.join(" · ") : null)}
         </dl>

@@ -63,7 +63,7 @@ export function FileTree(p: {
                 const Icon = ICON[lang];
                 return (
                   <div key={f.path} className={`rv-file-row${dir ? " is-nested" : ""}${p.selected === f.path ? " is-on" : ""}${v ? " is-viewed" : ""}`}>
-                    <Icon className="rv-file-icon" data-lang={lang} size={13} aria-hidden />
+                    <Icon className="rv-file-icon" data-lang={lang} size={14} aria-hidden />
                     <button type="button" className="rv-file-name" data-allow-ellipsis="" aria-current={p.selected === f.path ? "true" : undefined} title={f.path} onClick={() => p.onSelect(f.path)}>
                       <span className="rv-mono">{f.path.slice(dir.length)}</span>
                       {p.notShown.has(f.path) && <span className="rv-muted"> not shown</span>}

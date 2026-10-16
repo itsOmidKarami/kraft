@@ -11,10 +11,11 @@ import { actionPath } from "../../item/paths";
 import type { ItemDetail } from "../../item/useItem";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
+import { ComposerHeader } from "../nav/ScreenHeader";
 import { useBack } from "../nav/trail";
-import { SwitchRow } from "../ui/Rows";
-import { Facts } from "../ui/Rows";
+import { ActionBar, Facts, SwitchRow } from "../ui/Rows";
 import { running, steerDoor, stopped } from "./steer";
+import { CANCEL_THIS_ITEM, GOES_IN_THE_RUN_LOG } from "../../item/sharedWords";
 
 export type ComposeKind = "steer" | "reject" | "answer" | "escalate" | "cancel" | "complete";
 export const COMPOSE_KINDS: ComposeKind[] = ["steer", "reject", "answer", "escalate", "cancel", "complete"];
@@ -85,16 +86,16 @@ const SPEC: Record<ComposeKind, Spec> = {
     label: "Escalate",
   },
   cancel: {
-    title: "Cancel this item?",
+    title: CANCEL_THIS_ITEM,
     help: () => "The run stops where it is. Everything it produced is kept, and a cancelled item stays cancelled.",
-    placeholder: "Why? It goes in the run log.",
+    placeholder: GOES_IN_THE_RUN_LOG,
     label: "Cancel item",
     danger: true,
   },
   complete: {
     title: "Mark complete",
     help: () => "For work that landed somewhere else, or no longer needs the chain. It stops whatever is running and skips the remaining nodes.",
-    placeholder: "Why? It goes in the run log.",
+    placeholder: GOES_IN_THE_RUN_LOG,
     label: "Mark complete",
   },
 };
@@ -157,11 +158,7 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
 
   return (
     <>
-      <header className="ph-composer-head">
-        <button type="button" className="ph-back" onClick={back.go}>Cancel</button>
-        <h1 className="ph-composer-title">{spec.title}</h1>
-        <span className="ph-composer-pad" />
-      </header>
+      <ComposerHeader title={spec.title} onCancel={back.go} />
       <div className="ph-content">
         <p className="ph-help">{spec.help(item)}</p>
         {/* Focus starts in the box, as in the desktop's dialogs: it opened on <body>, so a keyboard or switch user had to find it first (R12b-13). */}
@@ -176,10 +173,10 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
         {target && <p className="ph-target">{target}</p>}
         {error && <p className="ph-error" role="alert">{error}</p>}
       </div>
-      <div className="ph-actionbar">
+      <ActionBar>
         {noText.note}
         <Button className="ph-btn ph-btn-primary" variant={spec.danger ? "danger" : "primary"} disabled={busy} onClick={send}>{typeof spec.label === "function" ? spec.label(item) : spec.label}</Button>
-      </div>
+      </ActionBar>
     </>
   );
 }
