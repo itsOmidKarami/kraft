@@ -10,7 +10,7 @@ const s = (v: unknown) => (v == null ? "" : String(v));
 const cut = (t: string, n = 70) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 
 /** Bookkeeping that would drown the run's story in the chain pane's Recent. */
-const QUIET = new Set<EventType>(["worker_session_created", "worker_session_exited", "chain_loaded", "plan_progress", "worktree_prepared", "steer_context_set", "permission_decision", "external_wait_observed", "findings_measured"]);
+const QUIET = new Set<EventType>(["worker_session_created", "worker_session_exited", "chain_loaded", "plan_progress", "worktree_prepared", "steer_context_set", "permission_decision", "external_wait_observed", "findings_measured", "run_forked", "cap_counters_reset"]);
 
 /** One line of the chain pane's Recent (Decisions §5 Chain pane), or null for
  *  bookkeeping. An event type not listed here shows its own name. */
@@ -31,6 +31,8 @@ export function eventLine(e: KraftEvent, nodes?: Nodes): string | null {
     case "gate_requested": return `${gate} is waiting for you`;
     case "gate_approved": return `${gate} · ${p.by === "agent" || p.by === "kraft" ? "passed on its own" : "approved by you"}`;
     case "gate_rejected": return `${gate} · rejected${p.note ? `: ${cut(s(p.note), 50)}` : ""}`;
+    // An approved gate a retry, or a base-change restart after a resolved conflict, opened again: the rerun asks it anew.
+    case "gate_reopened": return `${gate} · reopened${p.reason === "retry" ? " by the retry" : p.reason === "conflict_resolved" ? " after a conflict was resolved" : ""}`;
     case "fix_cycle_started": return `${at} · fix loop round ${Number(p.cycle ?? 0) + 1}`;
     // What the round did, said once it ended; recent() folds it into the round's start line. null: git could not say.
     case "fix_cycle_finished": return `${at} · fix loop round ${Number(p.cycle ?? 0) + 1}${p.committed === true ? " · the fix committed a change" : p.committed === false ? " · the fix changed nothing" : ""}`;
@@ -39,6 +41,8 @@ export function eventLine(e: KraftEvent, nodes?: Nodes): string | null {
     case "pause_requested": return "paused";
     case "work_item_resumed": return "resumed";
     case "work_item_retried": return `retried${node ? ` ${at}` : ""}`;
+    // The walk stopped before any agent took the steer (`walk._report_if_undelivered`).
+    case "steer_undelivered": return `steer not delivered${p.steer ? `: ${cut(s(p.steer), 240)}` : ""}`;
     case "work_item_rate_limited": return `${at} hit a rate limit`;
     case "work_item_waiting": return `${at} is waiting`;
     case "work_item_cancelled": return "cancelled";

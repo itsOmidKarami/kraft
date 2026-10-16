@@ -22,6 +22,10 @@ describe("eventLine", () => {
     [ev("mr_closed", { ref: 142, by: "mara" }), "MR !142 closed by mara"],
     [ev("work_item_archived", { by: "auto" }), "archived"],
     [ev("work_item_archived", { by: "auto", kept_branch: "kraft/x", unpushed_commits: 3 }), "archived · kept kraft/x: 3 unpushed commits"],
+    [ev("gate_reopened", { gate: "spec_approval", reason: "retry" }, "spec_approval"), "approve spec · reopened by the retry"],
+    [ev("gate_reopened", { gate: "plan_approval", reason: "conflict_resolved" }, "plan_approval"), "approve plan · reopened after a conflict was resolved"],
+    [ev("gate_reopened", { gate: "plan_approval" }, "plan_approval"), "approve plan · reopened"],
+    [ev("steer_undelivered", { steer: "use the retry helper in forge/http.py" }), "steer not delivered: use the retry helper in forge/http.py"],
     [ev("beads_left_open", { beads: ["kraft-a", "kraft-b"], reason: "no change behind them; close them by hand" }), "left kraft-a, kraft-b open: no change behind them; close them by hand"],
   ])("%o → %s", (e, line) => expect(eventLine(e)).toBe(line));
 
@@ -33,6 +37,8 @@ describe("eventLine", () => {
 
   it("leaves bookkeeping out and names a type it does not know", () => {
     expect(eventLine(ev("worker_session_exited"))).toBeNull();
+    expect(eventLine(ev("run_forked", { fork: "f1", scope: "node", path: "implement", reopened: [] }))).toBeNull();
+    expect(eventLine(ev("cap_counters_reset", { by: "human", counters: {} }))).toBeNull();
     expect(eventLine(ev("sandbox_oom_killed"))).toBe("sandbox oom killed");
   });
 });
