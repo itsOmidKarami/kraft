@@ -132,10 +132,9 @@ def discard(coro) -> None:
     coro.close()
 
 
-def spawn(app: FastAPI, wid: str, coro) -> asyncio.Task:
-    if task_is_live(app, wid):
-        discard(coro)
-        raise AlreadyRunning(wid)
+def _start(app: FastAPI, wid: str, coro) -> asyncio.Task:
+    """Run `coro` as `wid`'s task, in `app.state.tasks`. The caller has
+    checked nothing else holds the key."""
     task = asyncio.ensure_future(coro)
     app.state.tasks[wid] = task
 
@@ -153,6 +152,13 @@ def spawn(app: FastAPI, wid: str, coro) -> asyncio.Task:
     return task
 
 
+def spawn(app: FastAPI, wid: str, coro) -> asyncio.Task:
+    if task_is_live(app, wid):
+        discard(coro)
+        raise AlreadyRunning(wid)
+    return _start(app, wid, coro)
+
+
 async def run_stoppable(app: FastAPI, wid: str, coro, *, stopped: str):
     """Await `coro` as `wid`'s own task, so what stops a walk stops it: pause,
     cancel and a server's shutdown all go through `app.state.tasks`. Work a
@@ -161,10 +167,10 @@ async def run_stoppable(app: FastAPI, wid: str, coro, *, stopped: str):
     A stop that lands comes back as a 409 saying `stopped`, never as the
     `CancelledError` a route has no answer for; a cancel of the route's own
     request still propagates. The task's own errors propagate as they are."""
-    try:
-        task = spawn(app, wid, coro)
-    except AlreadyRunning:
-        raise HTTPException(409, "a walk is already running for this work item") from None
+    if task_is_live(app, wid):
+        discard(coro)
+        raise HTTPException(409, "a walk is already running for this work item")
+    task = _start(app, wid, coro)
     try:
         return await task
     except asyncio.CancelledError:
