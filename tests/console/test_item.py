@@ -196,7 +196,15 @@ def test_the_header_says_where_the_item_stands(
             None,
         ),
     ],
-    ids=["question", "failed", "failed-with-a-session", "paused", "running-says-nothing", "paused-no-door", "failed-no-door"],
+    ids=[
+        "question",
+        "failed",
+        "failed-with-a-session",
+        "paused",
+        "running-says-nothing",
+        "paused-no-door",
+        "failed-no-door",
+    ],
 )
 def test_a_stopped_item_says_the_way_on_and_p_says_what_it_does(
     board, monkeypatch, row, sessions, first, p
