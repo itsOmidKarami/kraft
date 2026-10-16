@@ -67,9 +67,7 @@ def test_reaching_a_gate_pins_the_node_and_the_gate(client, gated):
 
 @_REVIEW
 def test_abandon_drops_the_items_refs(client, gated, repo):
-    assert (
-        client.post(f"/api/work-items/{gated}/abandon", json={"reason": "test"}).status_code == 200
-    )
+    assert client.post(f"/api/work-items/{gated}/abandon", json={"reason": "t"}).status_code == 200
     refs = subprocess.run(
         ["git", "for-each-ref", "--format=%(refname)", f"refs/kraft/{gated}/"],
         cwd=repo,
@@ -84,9 +82,7 @@ def test_archive_drops_the_items_refs(client, gated, repo):
     """Abandon has its own test; archive reclaims through the same
     `_remove_worktree` and must drop the attempt refs too. Abandon first (only an
     ended item can be archived), plant a ref after it, then archive."""
-    assert (
-        client.post(f"/api/work-items/{gated}/abandon", json={"reason": "test"}).status_code == 200
-    )
+    assert client.post(f"/api/work-items/{gated}/abandon", json={"reason": "t"}).status_code == 200
     subprocess.run(
         ["git", "update-ref", f"refs/kraft/{gated}/manual/1", "HEAD"], cwd=repo, check=True
     )

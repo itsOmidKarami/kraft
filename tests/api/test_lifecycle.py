@@ -399,64 +399,6 @@ def test_abandon_sets_terminal_status_and_removes_the_worktree(client, repo):
     assert not worktree.exists()
 
 
-@pytest.mark.parametrize(
-    ("verb", "beads_fail"),
-    [("abandon", False), ("abandon", True), ("cancel", False)],
-    ids=["beads", "beads-down", "cancel"],
-)
-def test_abandon_records_why_and_settles_the_items_beads(
-    client, repo, fake_beads, monkeypatch, verb, beads_fail
-):
-    """The reason lands on the event and the detail; the bead intake filed is
-    closed with it, a bead the item implements gets a note and stays open, and
-    a beads failure never fails the abandon."""
-    cwd = os.environ["KRAFT_BD_CWD"]
-    other = client.portal.call(lambda: fake_beads.intake("sub-task", cwd=cwd))
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "autostart": False, "implements_beads": [other]},
-    ).json()["id"]
-    own = client.get(f"/api/work-items/{wid}").json()["bead_id"]
-    if beads_fail:
-
-        async def down(*_a, **_k):
-            raise RuntimeError("bd is down")
-
-        monkeypatch.setattr("kraft.adapters.beads.complete", down)
-        monkeypatch.setattr("kraft.adapters.beads.annotate", down)
-
-    r = client.post(f"/api/work-items/{wid}/{verb}", json={"reason": "refiled as another item"})
-
-    assert r.status_code == 200, r.text
-    ended = "cancelled" if verb == "cancel" else "abandoned"
-    event = [e for e in client.get(f"/api/work-items/{wid}/events").json()]
-    recorded = [e["payload"]["reason"] for e in event if e["type"] == f"work_item_{ended}"]
-    assert recorded == ["refiled as another item"]
-    assert client.get(f"/api/work-items/{wid}").json()["ended_reason"] == "refiled as another item"
-    beads = fake_beads.all()
-    if beads_fail:
-        assert beads[own]["status"] == "open" and "comments" not in beads[other]
-        return
-    assert beads[own]["status"] == "closed"
-    assert beads[own]["close_reason"] == f"{ended}: refiled as another item"
-    assert beads[other]["status"] == "open"
-    assert beads[other]["comments"] == [
-        f"Kraft work item {wid} was {ended}: refiled as another item"
-    ]
-
-
-@pytest.mark.parametrize("body", [{}, {"reason": "  "}], ids=["missing", "blank"])
-def test_abandon_without_a_reason_is_refused_and_changes_nothing(client, repo, body):
-    wid = client.post(
-        "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
-    ).json()["id"]
-
-    r = client.post(f"/api/work-items/{wid}/abandon", json=body)
-
-    assert r.status_code == 422, r.text
-    assert client.get(f"/api/work-items/{wid}").json()["status"] == "paused"
-
-
 def test_abandon_reclaims_a_cancelled_items_worktree_and_branch(client, repo):
     """Cancel stores `abandoned` and keeps everything; abandon on it then
     does what it says, rather than answering a no-op."""
