@@ -1,6 +1,6 @@
 import { LIVE_SESSION_STATUSES } from "../../../src/types/vocab.generated";
 import type { ItemBundle, Scenario } from "./fixtures";
-import { pendingRewind, sinceFork, type Transitions } from "./transitions";
+import { pendingRewind, sinceFork, threadSummary, type Transitions } from "./transitions";
 
 /**
  * Live motion for the dashboard demo (`MockOptions.motion`): the board's items walk their chains on their own, as
@@ -10,7 +10,9 @@ import { pendingRewind, sinceFork, type Transitions } from "./transitions";
  * One tick every 8–15 s (jittered). Each tick first wakes the board items whose `retry_at` has passed, as their
  * pollers do: a CI wait (`waiting`) is re-entered (`waits.py`, `store.mark_reentered`, no event), a rate limit
  * (`rate_limited`) is retried on its node (`rate_limit_retry.py`: its counter up, `work_item_retried`, or past the
- * policy's retries a stop). Then it moves every board item (`S.ngBoard`) whose status is `active` one step. Every
+ * policy's retries a stop). An escalation turn on a board item ends on the second tick that sees it running, as its
+ * agent finishing does: `worker_session_exited` with its usage and the summary it wrote, filed as the item's document,
+ * and the item left as it stopped. Then it moves every board item (`S.ngBoard`) whose status is `active` one step. Every
  * node but a gate takes two ticks:
  * - an agent node runs its first agent task: `node_started`, `worker_session_created`, `worker_session_started`;
  *   on the next tick `worker_session_exited` with its usage, then `node_completed`;
@@ -51,6 +53,28 @@ export const FRESH_TITLES = [
 ];
 const FRESH_REPOS = ["kraft-core", "kraft-api", "kraft-plugins", "kraft-docs"].map((r) => `/Users/dev/code/${r}`);
 const MODEL = "claude-sonnet-4-5";
+/** The ticks an escalation turn runs before its agent answers. */
+const TURN_TICKS = 2;
+
+/** What the escalation agent found, by the kind of stop it was asked about; `task` is the stopped task's name. */
+const FOUND: Record<string, (node: string, task: string) => string> = {
+  stuck: (_, task) => `The repair rounds keep fixing what ${task} reports, not why it reports it, so the same finding comes back each round. A steer that names the cause should get it through.`,
+  failed: (_, task) => `${task} fails the same way on every attempt, for a reason outside the code, so retrying it alone will not change the answer. Fix what its log names first.`,
+  cap: (node) => `${node} was still making progress when it reached its cap. A higher cap, or a retry with a narrower steer, should let it finish.`,
+  conflict: () => "Both sides changed the conflicting files for different reasons, so neither can simply win: keep main's version and redo this item's change on top of it.",
+  mr_closed: () => "The merge request was closed on the forge without a merge. Reopen it there, or retry to open a new one.",
+  gate: () => "The document at this gate reads complete: nothing in it needs another pass before you decide.",
+};
+/** The summary an escalation turn writes on its way out: what it read, what it found, and what is the visitor's to do. */
+function reply(b: ItemBundle, s: any): string {
+  const node = s.node_id;
+  const stop = b.item.stop;
+  const task = String(stop?.task ?? node).split(".").at(-1)!;
+  const read = stop ? `I read why ${node} stopped, its last attempt's log, and the branch.` : `I read where ${node} paused, its last attempt's log, and the branch.`;
+  const found = FOUND[stop?.kind]?.(node, task) ?? "Nothing in its log points at a fault in the work itself.";
+  const next = stop?.kind === "gate" ? "Approve or reject it when you are ready" : stop ? `Retry ${node} when you are ready, with a steer if you want one` : "Resume it when you are ready";
+  return `# Escalation reply on ${node}\n\n${read}\n\n${found}\n\nI changed nothing on the branch. ${next}, or reply here and I will look further.\n`;
+}
 
 /** The positional events: the newest of these says whether the node the item stands on is behind it (completed,
  *  skipped, its gate approved) or still to run. Anything else that moves the item (a rejection, a retry, a resume
@@ -198,6 +222,27 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
     enter(id, nextNode(b, how === "again"));
   };
 
+  /** How many ticks each live escalation turn has been seen running, by item and session. */
+  let turns = new Map<string, number>();
+  /** Each live escalation turn on the board, its agent finishing on the second tick that sees it (`escalate.dispatch`
+   *  returning): its session done with its usage and its thread's summary (`store.session_exited`), which the indexer
+   *  then files as the item's document. The item stays as it stopped, for the visitor to reply, retry or decide. A
+   *  turn already stopped (Stop agent, a retry, a decision) is not live, so nothing ends it again. */
+  const answerTurns = (board: string[]) => {
+    const seen = new Map<string, number>();
+    for (const id of board) {
+      const b = S.bundles[id];
+      for (const s of b.sessions.filter((y) => y.hook_point === "escalation" && LIVE_SESSION_STATUSES.includes(y.status))) {
+        const key = `${id}/${s.id}`;
+        const n = (turns.get(key) ?? 0) + 1;
+        if (n < TURN_TICKS) { seen.set(key, n); continue; }
+        T.sessionExited(id, s.id, usage(), threadSummary(id, s.thread ?? 1));
+        T.indexSummary(id, s.id, reply(b, s));
+      }
+    }
+    turns = seen;
+  };
+
   const tick = () => {
     timer = null;
     try {
@@ -209,6 +254,7 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
         if (it.status === "waiting") T.reenter(id);
         else if (it.status === "rate_limited") T.rateLimitRetry(id);
       }
+      answerTurns(board);
       const active = board.filter((id) => S.bundles[id].item.status === "active");
       for (const id of active) step(id);
       const gated = board.some((id) => S.bundles[id].item.status === "needs_human" && S.bundles[id].item.pending_gate);

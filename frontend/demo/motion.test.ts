@@ -4,6 +4,7 @@ import { mockServer, type Answer, type MockOptions } from "../e2e/contract/mocks
 import { FRESH_TITLES } from "../e2e/contract/mocks/motion";
 import { NG_NOW } from "../e2e/contract/mocks/ngItems";
 import { RESUME_PROMPT, type Ev } from "../e2e/contract/mocks/transitions";
+import { recent } from "../src/ng/item/events";
 import { budgetRaise } from "../src/ng/item/status";
 
 /** The demo's live motion (motion.ts), on fake timers: what one tick does to the board's running items. */
@@ -387,6 +388,50 @@ describe("the clock and the purse", () => {
   });
 });
 
+describe("an escalation turn", () => {
+  it.each([
+    // The sample's turn is running when the demo opens; it is stuck on verification, which is not a failure kind.
+    ["the escalated sample's", ESCALATED, null, "verification", "needs_you", "The repair rounds keep fixing what code_review reports"],
+    ["a visitor's, on a failed item", FAILED, "why does the forge refuse the token?", "merge_request", "failed", "open_draft fails the same way on every attempt"],
+  ])("%s ends on its own on the second tick that sees it, as its agent finishing ends it", async (_, bead, message, node, shown, found) => {
+    const { S, ticks, call } = started();
+    const id = board(S, bead);
+    if (message) expect((await call("POST", `/work-items/${id}/escalate`, { message })).status).toBe(200);
+    const b = S.bundles[id];
+    const s = b.sessions.find((x) => x.hook_point === "escalation" && x.status === "running")!;
+    expect(ticks(1, id)).toEqual([]);
+    // `store.session_exited`: done, with the usage it reported and the summary it wrote in its thread's folder.
+    const ref = `items/${id}/sessions/escalation-1/out/summary.md`;
+    expect(ticks(1, id)).toEqual([["worker_session_exited", { session_id: s.id, status: "done", wall_ms: expect.any(Number), model: "claude-sonnet-4-5", tokens_in: 28_000, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: 3_000, cost_usd: 0.04 }]]);
+    expect(s).toMatchObject({ status: "done", exited_at: NG_NOW, session_summary_ref: ref, cost_usd: 0.04 });
+    // The item stays as it stopped, its thread ended with its turn.
+    expect((await call("GET", `/work-items/${id}`)).body).toMatchObject({ status: "needs_human", display_status: shown, escalation_threads: [{ thread: 1, session_id: s.id, status: "done", ended_at: NG_NOW }] });
+    // The indexer files the summary as the item's document, the one the task's Output links by its path.
+    const docs = (await call("GET", `/work-items/${id}/documents`)).body.documents;
+    expect(docs).toEqual([expect.objectContaining({ path: ref, title: `Escalation reply on ${node}`, kind: "sessions", source_kind: "session_summary", node_id: node, hook_point: "escalation", worker_session_id: s.id, session_status: "done" })]);
+    const doc = (await call("GET", `/documents/${docs[0].document_id}`)).body;
+    expect([doc.title, doc.metadata]).toEqual([`Escalation reply on ${node}`, {}]);
+    for (const words of [`# Escalation reply on ${node}\n`, found, `Retry ${node} when you are ready`]) expect(doc.content).toContain(words);
+    // Recent tells it, and the thread takes a reply: the next turn of the same thread, the answered one's summary its own again.
+    expect(recent(b.events as any).map((l) => l.line)).toContain("escalation answered");
+    expect((await call("POST", `/work-items/${id}/escalate`, { message: "go on" })).status).toBe(200);
+    expect([s.session_summary_ref, b.events.filter((e) => e.type === "escalation_message").at(-1)?.payload]).toEqual([`items/${id}/sessions/${s.id}/out/summary.md`, expect.objectContaining({ thread: 1, turn: 2 })]);
+    ticks(2, id);
+    // That turn's summary is filed at the thread's path again: one document, the newest turn's.
+    expect((await call("GET", `/work-items/${id}/documents`)).body.documents).toEqual([expect.objectContaining({ document_id: docs[0].document_id, path: ref, worker_session_id: b.sessions.at(-1)!.id })]);
+  });
+
+  it("a turn the visitor stopped (Stop agent) is not ended again", async () => {
+    const { S, ticks, call } = started();
+    const id = board(S, ESCALATED);
+    const s = S.bundles[id].sessions.find((x) => x.hook_point === "escalation" && x.status === "running")!;
+    ticks(1, id);
+    expect((await call("POST", `/work-items/${id}/escalate/stop`)).status).toBe(200);
+    expect(ticks(3, id)).toEqual([]);
+    expect([s.status, s.session_summary_ref, S.docs[id]]).toEqual(["paused", null, []]);
+  });
+});
+
 describe("when the board goes quiet", () => {
   /** Pause the running item; `gate` also ends the one waiting at a gate. */
   const quiet = async (call: ReturnType<typeof started>["call"], S: Scenario, gate: boolean) => {
@@ -455,17 +500,21 @@ describe("what never moves", () => {
   it.each([
     ["motion: false", false],
     ["motion left out, as the contract suite calls the mock", "omit"],
-  ] as const)("nothing, in a mock with %s, however long it runs", (_, motion) => {
-    const { S, serve, ticks } = started(motion);
+  ] as const)("nothing, in a mock with %s, however long it runs: an escalation turn runs on", async (_, motion) => {
+    const { S, serve, ticks, call } = started(motion);
+    // The sample's turn, and one the visitor starts.
+    expect((await call("POST", `/work-items/${board(S, FAILED)}/escalate`, { message: "help" })).status).toBe(200);
     const before = JSON.stringify(S.bundles);
     expect([serve.motion, ticks(20)]).toEqual([null, []]);
     expect(JSON.stringify(S.bundles)).toBe(before);
+    expect([ESCALATED, FAILED].map((bead) => S.bundles[board(S, bead)].item.display_status)).toEqual(["escalated", "escalated"]);
   });
 
-  it("a board item that is not active: the escalated row, its turn running", () => {
+  it("a board item that is not active: the escalated row, once its turn answered", () => {
     const { S, ticks } = started();
     const b = S.bundles[board(S, ESCALATED)];
-    expect([b.item.status, b.item.display_status]).toEqual(["needs_human", "escalated"]);
+    ticks(2);
+    expect([b.item.status, b.item.display_status]).toEqual(["needs_human", "needs_you"]);
     const before = JSON.stringify(b);
     ticks(6);
     expect(JSON.stringify(b)).toBe(before);

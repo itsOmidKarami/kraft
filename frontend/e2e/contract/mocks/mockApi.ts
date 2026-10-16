@@ -48,7 +48,7 @@ export interface MockOptions {
    *  forwards each to its open sockets; the contract suite's socket stays silent. */
   onEvent?: (e: Ev) => void;
   /** Live motion (motion.ts): the board's active items walk their chains on a timer and stop at gates, a waiting one
-   *  goes on once its retry time passes, and a fresh item is filed when the board goes quiet. Off unless set; only the demo sets it. An object paces it, for tests. */
+   *  goes on once its retry time passes, an escalation turn ends with its reply, and a fresh item is filed when the board goes quiet. Off unless set; only the demo sets it. An object paces it, for tests. */
   motion?: boolean | MotionOptions;
 }
 
@@ -547,7 +547,10 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if ((m = p.match(/^\/documents\/([^/]+)\/open$/))) return json({ document_id: m[1], path: ".engineering/specs/x.md", editor: "code" });
     if ((m = p.match(/^\/documents\/([^/]+)$/))) {
       const all = Object.values(S.docs).flat();
-      return json(documentDetail(decodeURIComponent(m[1]), all));
+      const id = decodeURIComponent(m[1]);
+      const own = S.docText?.[id];
+      // A summary with no front matter has nothing in `metadata` (`ingest.split_front_matter`).
+      return json(own != null ? { ...documentDetail(id, all), content: own, metadata: {} } : documentDetail(id, all));
     }
     if (p === "/beads/search") return json({ query: q.get("q"), beads: [
       { id: "kraft-a4js", title: "Gate card findings list pushes the split off-screen", status: "open", issue_type: "bug" },

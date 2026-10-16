@@ -164,6 +164,10 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
         ev("work_item_needs_human", { node_id: "verification", kind: "stuck", reason: "The fix loop made no progress in 2 rounds." }, 0.5);
         const e = sess("verification.escalation.escalation", "running", { hook_point: "escalation" });
         ev("escalation_message", { session_id: e.id, node_id: "verification", thread: 1, turn: 1, message: "The fix loop made no progress in 2 rounds: look at why code_review keeps finding the same race." }, 0.5);
+        // Its session, born and launched as `escalate.dispatch` launches every turn's.
+        const turn = { session_id: e.id, node_id: "verification", hook_point: "escalation", round: 0, attempt: 1, thread: 1 };
+        ev("worker_session_created", turn, 0);
+        ev("worker_session_started", { ...turn, pid: 41_200 }, 0);
         item.status = "needs_human";
         item.stop = stop("stuck", "verification.review.code_review", { attempt: 2, reason: "The fix loop made no progress in 2 rounds." });
         item.escalation_threads = [{ thread: 1, session_id: e.id, turns: 1, started_at: e.created_at, ended_at: null, status: "running" }];

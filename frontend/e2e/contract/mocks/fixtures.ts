@@ -772,6 +772,9 @@ export interface Scenario {
   ngArchived: string[];
   bundles: Record<string, ItemBundle>;
   docs: Record<string, any[]>;
+  /** A document's own body, by its id, where something wrote one (transitions.ts `indexSummary`); every other reads
+   *  `documentDetail`'s. */
+  docText?: Record<string, string>;
   settings: ReturnType<typeof settingsFor>;
   analytics: ReturnType<typeof analyticsFor>;
 }

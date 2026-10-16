@@ -46,6 +46,9 @@ export function escalationThreads(sessions: any[]) {
     thread, session_id: ss.at(-1).id, turns: ss.length, started_at: ss[0].created_at, ended_at: ss.at(-1).exited_at ?? null, status: ss.at(-1).status,
   }));
 }
+/** Where every turn of an escalation thread writes its summary (`escalate.thread_files`, `item_paths.thread_out`),
+ *  as `session_exited` records it. */
+export const threadSummary = (id: string, thread: number) => `items/${id}/sessions/escalation-${thread}/out/summary.md`;
 /** The rate-limit poller's steer for the relaunch (`rate_limit_retry.RESUME_PROMPT`). */
 export const RESUME_PROMPT = "You were working on this task when the agent hit an API rate limit and stopped. That limit has now reset \u2014 continue the work from where you left off.";
 /** `store.pending_rewind`: the newest `rewind_requested`, unless its target's `node_started` or its own
@@ -128,9 +131,8 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
   let made = 0;
   let sessions = 0;
   let forks = 0;
-  /** `store.bump_counter`'s `rate_limit:<node>` counters, per item: what `rate_limit_retry` counts relaunches by. */
-  const rateLimits = new Map<string, number>();
   let mrs = 0;
+  let indexed = 0;
   const blank = template();
 
   /** Append an event with the next seq. `node_id` defaults as `events.append` defaults it: the payload's own `node_id` or `node`. */
@@ -450,10 +452,20 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const thread = newThread || !last ? (last?.thread ?? 0) + 1 : last.thread;
       const turn = newThread || !last ? 1 : last.turns + 1;
       const from = b.sessions.at(-1) ?? {};
+      const node = it.current_node_id;
+      // `escalate._archive_last_turn`: the thread's last turn gets its summary back under its own folder before this
+      // one writes to the thread's.
+      const prev = b.sessions.filter((s) => s.hook_point === "escalation" && (s.thread ?? 1) === thread).at(-1);
+      if (prev && prev.session_summary_ref === threadSummary(id, thread)) prev.session_summary_ref = `items/${id}/sessions/${prev.id}/out/summary.md`;
       const sid = sessionId();
-      b.sessions.push({ ...from, id: sid, work_item_id: id, node_id: it.current_node_id, hook_point: "escalation", status: "running", attempt: 1, round: 0, thread, created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null });
+      // `store.create_session` counts the attempt by node and hook point.
+      const attempt = b.sessions.filter((s) => s.node_id === node && s.hook_point === "escalation").length + 1;
+      b.sessions.push({ ...from, id: sid, work_item_id: id, node_id: node, hook_point: "escalation", status: "running", attempt, round: 0, thread, created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null });
       b.logs[sid] = [...(b.logs[from.id] ?? [])];
-      append(id, "escalation_message", { session_id: sid, message: message.trim(), auto: false, thread, turn }, it.current_node_id);
+      // `escalate.dispatch`: the message first, then the turn's session, born and launched as every agent task's is.
+      append(id, "escalation_message", { session_id: sid, message: message.trim(), auto: false, thread, turn }, node);
+      append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: "escalation", round: 0, attempt, thread });
+      append(id, "worker_session_started", { session_id: sid, node_id: node, hook_point: "escalation", round: 0, attempt, thread, pid: 40_000 + sessions });
       settle(it);
       return ok({ id, status: "escalating" });
     },
@@ -599,8 +611,9 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       return ok({ id, session_id: sid });
     },
     /** `store.session_exited`: the session done, with the usage an agent reported on the way out, added to the item's
-     *  spend. A builtin, forge or command task reports none (`usage` null): only its wall time. */
-    sessionExited(id: string, sid: string, usage: { model: string; tokens_in: number; tokens_out: number; cost_usd: number } | null): Result {
+     *  spend, and the summary it wrote, if it wrote one (`summary`, its `session_summary_ref`). A builtin, forge or
+     *  command task reports none (`usage` null): only its wall time. */
+    sessionExited(id: string, sid: string, usage: { model: string; tokens_in: number; tokens_out: number; cost_usd: number } | null, summary: string | null = null): Result {
       const x = find(id, true);
       if (refused(x)) return x;
       const { b, it } = x;
@@ -609,6 +622,8 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       if (!LIVE_SESSION_STATUSES.includes(s.status)) return no(409, `session ${sid} is ${s.status}, not live`);
       const at = now();
       const wall_ms = Math.max(0, Date.parse(at) - Date.parse(s.started_at ?? s.created_at));
+      // COALESCE: no summary leaves the one already recorded.
+      if (summary) s.session_summary_ref = summary;
       if (!usage) {
         Object.assign(s, { status: "done", exited_at: at, wall_ms });
         append(id, "worker_session_exited", { session_id: sid, status: "done", wall_ms });
@@ -628,6 +643,30 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       append(id, "worker_session_exited", { session_id: sid, status: "done", wall_ms, model: usage.model, tokens_in: usage.tokens_in, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: usage.tokens_out, cost_usd: usage.cost_usd });
       settle(it);
       return ok({ id, session_id: sid });
+    },
+    /** `IndexService.ingest_session_summary`, on a session's `worker_session_exited`: the summary it recorded becomes
+     *  the item's document at that path (titled by its first heading, `ingest.derive_title`), its body `text`. A path
+     *  already filed is filed again, the newest session's: every turn of an escalation thread writes the same one. */
+    indexSummary(id: string, sid: string, text: string): Result {
+      const x = find(id);
+      if (refused(x)) return x;
+      const { b, it } = x;
+      const s = b.sessions.find((y) => y.id === sid);
+      if (!s?.session_summary_ref) return no(409, `session ${sid} recorded no summary`);
+      const path: string = s.session_summary_ref;
+      const docs = (S.docs[id] ??= []);
+      const was = docs.findIndex((d) => d.path === path);
+      const document_id = was >= 0 ? docs[was].document_id : hex(600_000 + indexed++);
+      if (was >= 0) docs.splice(was, 1);
+      const title = /^#\s+(.+)$/m.exec(text)?.[1].trim() ?? `session summary for ${id}`;
+      // Newest indexed first, as the list sorts.
+      docs.unshift({
+        document_id, repo: it.repo, title, kind: "sessions", source_kind: "session_summary", path, indexed_at: now(),
+        node_id: s.node_id, hook_point: s.hook_point, worker_session_id: sid, session_work_item_id: id, attachment_kind: null,
+        attempt: s.attempt, round: s.round, session_status: s.status,
+      });
+      (S.docText ??= {})[document_id] = text;
+      return ok({ id, document_id });
     },
     /** `store.complete_node`: the node done; the item still stands on it until the walk enters the next. Once per node
      *  per run fork, as the store writes it: a node re-entered (a resume, a rejection's rerun) and completed again
@@ -687,13 +726,11 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       if (refused(x)) return x;
       const { it } = x;
       if (it.status !== "rate_limited") return no(409, `work item is ${it.status}, not rate_limited`);
-      // The counter is kept by item and node; the item's `rate_limit` shows it only while it is rate limited
-      // (`board._rate_limit_retries`). A sample's starts where its row says it stands.
+      // The counter is kept by item and node, and never reset (`rate_limit_retry._key`); the item's `rate_limit` shows
+      // it only while it is rate limited (`board._rate_limit_retries`).
       const node = it.current_node_id;
-      const key = `${id}|rate_limit:${node}`;
       const cap = it.rate_limit?.cap ?? 5;
-      const count = (rateLimits.get(key) ?? it.rate_limit?.count ?? 0) + 1;
-      rateLimits.set(key, count);
+      const count = bumps(x.b, node) + 1;
       it.rate_limit = null;
       if (count > cap) {
         const reason = `rate_limit retries exhausted after ${count - 1} attempt(s)`;
@@ -743,6 +780,15 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       append(id, "work_item_completed");
       return ok(settle(it));
     },
+  };
+  /** The `rate_limit:<node>` counter as it stands: one bump per poll that found the item due, read off what each wrote
+   *  on that node (a relaunch, `work_item_retried` with the poller's steer, or the stop past its retries). A sample
+   *  whose events hold none starts where its row says it stands. */
+  const bumps = (b: ItemBundle, node: string) => {
+    const polled = b.events.filter((e) => e.payload.node_id === node && (
+      (e.type === "work_item_retried" && e.payload.steer === RESUME_PROMPT) ||
+      (e.type === "work_item_needs_human" && String(e.payload.reason).startsWith("rate_limit retries exhausted")))).length;
+    return polled || (b.item.rate_limit?.count ?? 0);
   };
   /** `board._summary`'s counts: the chain's nodes that completed, and how many of those are gates. */
   const tally = (b: ItemBundle) => {
