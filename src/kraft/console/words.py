@@ -416,6 +416,8 @@ QUIET = frozenset(
         "permission_decision",
         "external_wait_observed",
         "findings_measured",
+        "run_forked",
+        "cap_counters_reset",
     }
 )
 
@@ -496,6 +498,9 @@ def event_line(event: dict, nodes: list[dict] | None = None) -> str | None:
         case "gate_rejected":
             note = f": {_cut(_s(p.get('note')), 50)}" if p.get("note") else ""
             return f"{gate} · rejected{note}"
+        case "gate_reopened":
+            why = {"retry": " by the retry", "conflict_resolved": " after a conflict was resolved"}
+            return f"{gate} · reopened{why.get(p.get('reason'), '')}"
         case "fix_cycle_started":
             return f"{node} · fix loop round {_round(p.get('cycle'))}"
         case "fix_cycle_finished":
@@ -518,6 +523,9 @@ def event_line(event: dict, nodes: list[dict] | None = None) -> str | None:
             return "resumed"
         case "work_item_retried":
             return f"retried{' ' + node if node else ''}"
+        case "steer_undelivered":
+            steer = f": {_cut(_s(p.get('steer')), 240)}" if p.get("steer") else ""
+            return f"steer not delivered{steer}"
         case "work_item_rate_limited":
             return f"{node} hit a rate limit"
         case "work_item_waiting":
