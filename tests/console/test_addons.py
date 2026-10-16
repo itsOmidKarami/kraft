@@ -11,13 +11,14 @@ import threading
 from types import SimpleNamespace
 
 import pytest
-from support.addons import AGENT, chain, edit_addons_yaml, make_collection
+from support.addons import AGENT, chain, edit_addons_yaml, make_collection, publish
 from support.console_board import _settled
-from textual.widgets import Input, OptionList
+from textual.widgets import Button, Input, OptionList
 
 from kraft import client
 from kraft.addons import fetch, flow
 from kraft.addons import update as addon_update
+from kraft.addons.config import AddonsLock
 from kraft.config import write_yaml
 from kraft.console.dialogs import Confirm, Menu, Note
 from kraft.console.screens import addons as addons_view
@@ -506,3 +507,178 @@ def test_a_view_hidden_while_it_reads_draws_nothing(board, acme, monkeypatch):
             gate.set()
 
     assert console.run(scenario) == []
+
+
+def _toasts(app) -> list[tuple[str, bool]]:
+    return [(str(toast.render()), toast.has_class("-error")) for toast in app.screen.query("Toast")]
+
+
+@pytest.mark.parametrize(
+    ("entry", "change", "key", "answer", "asked", "said", "version"),
+    [
+        (
+            None,
+            None,
+            "i",
+            ["shift+tab", "enter"],
+            "release@acme new, 1.0.0",
+            ("release@acme: applied", False),
+            "1.0.0",
+        ),
+        (
+            None,
+            None,
+            "i",
+            ["escape"],
+            "release@acme new, 1.0.0",
+            ("release@acme: declined", False),
+            None,
+        ),
+        (None, "refused", "i", None, None, ("release@acme: refused", True), None),
+        (
+            True,
+            "1.1.0",
+            "u",
+            ["shift+tab", "enter"],
+            "release@acme 1.0.0 -> 1.1.0",
+            ("release@acme: applied", False),
+            "1.1.0",
+        ),
+        (True, None, "u", None, None, ("release@acme: current", False), "1.0.0"),
+    ],
+    ids=["i-applies", "i-cancelled", "i-refused", "u-applies", "u-current"],
+)
+def test_i_and_u_take_an_addon_after_its_review(
+    board, acme, entry, change, key, answer, asked, said, version
+):
+    """Spec §7.4: the CLI's own flow, its review in the console's confirm
+    (Apply or Cancel, Cancel focused); applied, the running server is asked
+    to reload, as the CLI asks it. Nothing to take, or a refusal, asks
+    nothing."""
+    if entry is not None:
+        acme.install(entry)
+    if change == "1.1.0":
+        publish(acme.repo, "release", version="1.1.0")
+    elif change == "refused":
+        publish(acme.repo, "release", library={"tasks": {"base": {**AGENT, "kind": "subprocess"}}})
+    console = board([])
+
+    async def scenario(app, pilot):
+        await _shown(console, app, pilot)
+        await pilot.press("j", key)
+        shown = None
+        if answer:
+            await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+            dialog = app.screen
+            shown = (
+                str(dialog.query_one("#question").render()),
+                str(dialog.query_one("#listing").render()).split("\n")[0],
+                str(dialog.query_one("#yes", Button).label),
+            )
+            await pilot.press(*answer)
+        await console.until(pilot, lambda: _toasts(app))
+        text, error = _toasts(app)[0]
+        return shown, (": ".join(text.split(": ")[:2]), error)
+
+    shown, head = console.run(scenario, notifications=True)
+    locked = AddonsLock.load(acme.config / "addons.lock").addons.get(ID)
+    assert (shown, head, locked and locked.version, acme.reloads) == (
+        (f"Apply {ID}?", asked, "Apply") if asked else None,
+        said,
+        version,
+        [None] if said == ("release@acme: applied", False) else [],
+    )
+
+
+def test_quitting_with_a_review_open_answers_it_no(board, acme):
+    """Spec §7.4, §8: the review's thread waits on its answer; quitting
+    answers it no, so nothing is installed and the console can exit."""
+    before = acme.written()
+    fired: list[None] = []
+    console = board([])
+
+    async def scenario(app, pilot):
+        await _shown(console, app, pilot)
+        await pilot.press("j", "i")
+        await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+        waiting = app.default_screen.query_one("#addons", addons_view.Addons).waiting
+        # Should quitting leave the thread waiting, this answers it yes after
+        # 5 s: the test then fails on what was installed instead of hanging.
+        timer = threading.Timer(5.0, lambda: (fired.append(None), waiting.give(True)))
+        timer.daemon = True
+        timer.start()
+        return waiting, timer
+
+    waiting, timer = console.run(scenario)
+    timer.cancel()
+    assert (fired, waiting.yes, acme.written(), acme.reloads) == ([], False, before, [])
+
+
+@pytest.mark.parametrize("why", ["kraft-was-updated", "one-is-running"])
+def test_install_and_update_stay_closed(board, acme, why):
+    """After an update installed another Kraft, the add-on modules would load
+    from it (spec §3); while one install runs, a second would race it."""
+    console = board([])
+
+    async def scenario(app, pilot):
+        await _shown(console, app, pilot)
+        view = app.default_screen.query_one("#addons", addons_view.Addons)
+        if why == "kraft-was-updated":
+            app.updated = True
+        else:
+            view.taking = True
+        await pilot.press("j", "i")
+        await pilot.pause()
+        return isinstance(app.screen, Confirm), view.check_action("install", ())
+
+    assert console.run(scenario) == (False, False)
+
+
+def test_the_key_closes_install_before_its_worker_starts(board, acme):
+    """`taking` is set by the key, not by the worker: with no await between
+    two presses, the second is already closed. The take is held on an Event,
+    so nothing else moves."""
+    release = threading.Event()
+    console = board([])
+
+    async def scenario(app, pilot):
+        await _shown(console, app, pilot)
+        view = app.default_screen.query_one("#addons", addons_view.Addons)
+        await pilot.press("j")
+        was = view.check_action("install", ())
+        view.action_install()  # no await: the worker has not run
+        closed = view.check_action("install", ())
+        release.set()
+        return was, closed
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(addons_view, "take", lambda *args: release.wait(5.0) and [])
+        assert console.run(scenario) == (True, False)
+
+
+def test_a_review_is_stored_before_it_is_posted(board, acme):
+    """A quit between the store and the post must find the `Waiting` to
+    answer it (ruling 12): when the post happens, it is already stored."""
+    seen: list[bool] = []
+    posted = Addons.post_message
+
+    def post(self, message):
+        if isinstance(message, addons_view.ReviewAsked):
+            seen.append(self.waiting is message.waiting)
+        return posted(self, message)
+
+    console = board([])
+
+    async def scenario(app, pilot):
+        await _shown(console, app, pilot)
+        await pilot.press("j", "i")
+        await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+        await pilot.press("escape")
+        await console.until(
+            pilot, lambda: not app.default_screen.query_one("#addons", Addons).taking
+        )
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(Addons, "post_message", post)
+        console.run(scenario)
+    assert seen == [True]

@@ -1,11 +1,13 @@
 """Add-ons (spec §7.4): each collection, what it publishes and the add-ons
 installed from it, with their version, whether they load, their auto-update
-and an update waiting where `/health` says one is. `e`, `d` and the `m` menu
-run their `kraft admin addon` verb in the output panel."""
+and an update waiting where `/health` says one is. `i` and `u` install and
+update here, after the review in the console's own dialog; `e`, `d` and the `m`
+menu run their `kraft admin addon` verb in the output panel."""
 
 from __future__ import annotations
 
 import asyncio
+import threading
 from functools import partial
 from typing import ClassVar
 
@@ -13,12 +15,13 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.content import Content
+from textual.message import Message
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
-from kraft import render
-from kraft.addons import flow
-from kraft.console.dialogs import Menu, Note
+from kraft import client, render
+from kraft.addons import flow, review
+from kraft.console.dialogs import Confirm, Menu, Note
 from kraft.console.screens import View
 from kraft.console.screens.server import held
 
@@ -97,12 +100,44 @@ def _listing() -> tuple[list[dict], list[dict]]:
     return flow.collection_rows(), flow.addon_rows()
 
 
+class Waiting:
+    """One review a thread waits on (spec §7.4): the first answer stands, the
+    dialog's or the no a quitting console gives."""
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.yes = False
+
+    def give(self, yes: bool | None) -> None:
+        if not self.done.is_set():
+            self.yes = bool(yes)
+            self.done.set()
+
+
+class ReviewAsked(Message):
+    """A review from `update`'s thread, for the console's dialog."""
+
+    def __init__(self, reviewed: review.Review, waiting: Waiting) -> None:
+        super().__init__()
+        self.reviewed = reviewed
+        self.waiting = waiting
+
+
+def take(addon_id: str, install: bool, accept) -> list:
+    """`kraft admin addon install` or `update` of one add-on, without the
+    CLI's printing or asking. Blocking: run it on a thread."""
+    entries = flow.install_entries(addon_id) if install else None
+    return flow.update([addon_id], accept, entries=entries)
+
+
 class Addons(View):
     label = "Add-ons"
     BINDINGS: ClassVar[list[BindingType]] = [
         # The view keeps the focus, so its letters act; the list only draws.
         Binding("down,j", "rows('cursor_down')", "down", show=False),
         Binding("up,k", "rows('cursor_up')", "up", show=False),
+        Binding("i", "install", "install"),
+        Binding("u", "update", "update"),
         Binding("e", "enable", "enable/disable"),
         Binding("d", "uninstall", "uninstall"),
         Binding("m", "menu", "menu"),
@@ -113,6 +148,10 @@ class Addons(View):
         #: None until a read answers: an empty list is a read that found none.
         self.collections: list[dict] | None = None
         self.addons: list[dict] = []
+        #: The review a thread waits on now; answered no if the console quits.
+        self.waiting: Waiting | None = None
+        #: An install or update is on its way: one at a time.
+        self.taking = False
         #: Why the last read was refused, drawn until a read succeeds.
         self.refused: str | None = None
 
@@ -199,6 +238,12 @@ class Addons(View):
         kind, name = self.selected or ("", "")
         if action in ("enable", "uninstall"):
             return kind == "addon" and self.installed(name) is not None
+        if action in ("install", "update"):
+            # Closed once an update installed another Kraft: they import add-on
+            # modules lazily, which would come from the new install (spec §3).
+            if self.taking or self.app.updated or kind != "addon":
+                return False
+            return (self.installed(name) is None) == (action == "install")
         return True
 
     def action_rows(self, name: str) -> None:
@@ -214,6 +259,71 @@ class Addons(View):
         kind, name = self.selected or ("", "")
         if kind == "addon" and self.installed(name):
             self.run_worker(partial(self._run, ["admin", "addon", "uninstall", name]), group="act")
+
+    def action_install(self) -> None:
+        self._take_selected(install=True)
+
+    def action_update(self) -> None:
+        self._take_selected(install=False)
+
+    def _take_selected(self, *, install: bool) -> None:
+        kind, name = self.selected or ("", "")
+        if kind == "addon":
+            # Set by the key, before the worker starts: a second press is closed now.
+            self.taking = True
+            self.refresh_bindings()
+            # Not cancelled on hide: an accepted install must still reload the server.
+            self.run_worker(partial(self._take, name, install), group="take")
+
+    async def _take(self, addon_id: str, install: bool) -> None:
+        """`i` and `u` (spec §7.4): the CLI's flow on a thread, its review
+        asked in the console's dialog; on apply the server reloads as the
+        CLI asks it."""
+        try:
+            results = await asyncio.to_thread(take, addon_id, install, self._accept)
+        except flow.Refusal as exc:
+            results = []
+            self.app.notify(str(exc), severity="error", markup=False)
+        finally:
+            self.taking = False  # a quit's cancel too
+        self.refresh_bindings()
+        if not results:
+            return
+        bad = {r.outcome for r in results} & {"refused", "failed", "unpublished"}
+        said = flow.render_results([flow.result_view(r) for r in results])
+        self.app.notify(said, severity="error" if bad else "information", markup=False)
+        if flow.applied(results):
+            try:
+                answer, error = await client.reload_addons(), None
+            except client.ClientError as exc:
+                answer, error = None, exc
+            for line in flow.reload_warnings(answer, error):
+                self.app.notify(line, severity="warning", markup=False)
+        self._read()
+
+    def _accept(self, reviewed: review.Review) -> bool:
+        """`update`'s `accept`, called on its thread: the review goes to the
+        console's dialog and the thread waits for the answer. Stored before
+        it is posted, so a quit either refuses the post or answers it."""
+        waiting = self.waiting = Waiting()
+        # Thread-safe, and False once the view is closing: the console is quitting.
+        if not self.post_message(ReviewAsked(reviewed, waiting)):
+            return False
+        waiting.done.wait()
+        return waiting.yes
+
+    def on_review_asked(self, message: ReviewAsked) -> None:
+        reviewed = message.reviewed
+        lines = review.render(reviewed).splitlines()
+        # As the CLI asks it ("Apply X? [y/N]"); Cancel has the focus.
+        dialog = Confirm(f"Apply {reviewed.addon_id}?", lines, yes="Apply")
+        self.app.push_screen(dialog, message.waiting.give)
+
+    def on_unmount(self) -> None:
+        """Quitting with a review open answers it no (spec §7.4, §8): its
+        thread then ends, and the console can exit."""
+        if self.waiting is not None:
+            self.waiting.give(False)
 
     async def _run(self, argv: list[str]) -> None:
         """The CLI verb in the output panel, after the console's confirm where

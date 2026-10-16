@@ -117,6 +117,12 @@ def test_a_long_review_scrolls_and_keeps_its_buttons_on_screen(console):
             for b in ("yes", "no")
         ]
         scrolls = dialog.query_one("#confirm-scroll").max_scroll_y > 0
-        return inside, scrolls, str(dialog.query_one("#yes", Button).label)
+        drawn = str(dialog.query_one("#listing").render()).split("\n")[0]
+        return inside, scrolls, str(dialog.query_one("#yes", Button).label), drawn
 
-    assert console.run(scenario) == ([True, True], True, "Apply")
+    assert console.run(scenario) == (
+        [True, True],
+        True,
+        "Apply",
+        "  - component tasks.t0 added [/]",
+    )
