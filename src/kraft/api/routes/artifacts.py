@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import HTTPException, Query, Request
@@ -551,12 +552,13 @@ async def _ingest_approved_gate_artifact(st, row, gate: str) -> None:
 
     Best-effort end to end: a missing or unreadable artifact is
     `_read_worktree_artifact` recording why on the item's own timeline, and an
-    indexer failure (a locked index, a read-only file) is caught and logged
-    here rather than raised -- same contract `ingest_session_summary` gives
-    the event-drain loop, just enforced at this call site instead, since
-    approval is a synchronous request a reviewer is waiting on, not a
-    background drain. A gate the agent already satisfied must not be blocked
-    from clearing by the index's own health.
+    indexer failure (a locked index, a read-only file, a model that will not
+    load) is caught and logged rather than raised -- same contract
+    `ingest_session_summary` gives the event-drain loop. The document is read
+    here, before the approval moves the chain, but the ingest itself (which
+    embeds it, and a missing model host can stall that for minutes) runs after
+    the answer: a gate the agent already satisfied must not be held from
+    clearing by the index's own health.
     """
     rel = board._gate_artifact(st, row, gate)
     if rel is None:
@@ -565,6 +567,16 @@ async def _ingest_approved_gate_artifact(st, row, gate: str) -> None:
     if result is None:
         return
     text, _truncated = result
+    task = asyncio.ensure_future(_ingest_gate_artifact(st, row, rel, text))
+    _ingest_tasks.add(task)
+    task.add_done_callback(_ingest_tasks.discard)
+
+
+#: Strong references to in-flight ingests; the loop holds tasks weakly.
+_ingest_tasks: set[asyncio.Future] = set()
+
+
+async def _ingest_gate_artifact(st, row, rel: str, text: str) -> None:
     try:
         await st.indexer.ingest_gate_artifact(
             repo=row["repo"], work_item_id=row["id"], path=rel, content=text
