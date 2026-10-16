@@ -219,16 +219,23 @@ class Connect(Dialog[list[str] | None]):
             probed = await client.probe_repo(path or None)
         except client.ClientError as exc:
             if path == self._box("path").value.strip():
-                self._say(client.reason_of(str(exc)), "$error")
+                # The server echoes the typed path: written out, never obeyed.
+                self._say(render.printable(client.reason_of(str(exc))), "$error")
             return
         if path != self._box("path").value.strip():
-            return  # an answer for a path no longer in the box
+            # An answer for a path no longer in the box; the box holds a new one.
+            self._say("Enter reads the new path")
+            return
         # Written out, never obeyed: the proposal comes from the repo's own files.
-        test, setup = (
+        proposal = [
             render.printable(probed.get(k) or "") for k in ("test_command", "setup_command")
-        )
-        self.proposed = (test, setup)
-        self._box("test").value, self._box("setup").value = test, setup
+        ]
+        self.proposed = (proposal[0], proposal[1])
+        for name, text in zip(("test", "setup"), proposal, strict=True):
+            box = self._box(name)
+            # Only a field still empty: one typed into while the probe ran is the person's.
+            if not box.value:
+                box.value = text
         self._say(
             f"Kraft proposes these for {render.printable(probed['path'])}. Keep or change them."
         )

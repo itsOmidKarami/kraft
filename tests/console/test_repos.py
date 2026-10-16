@@ -172,39 +172,34 @@ def test_c_connects_through_a_form_the_probe_fills(
 @pytest.mark.parametrize(
     ("second", "fields", "said"),
     [
-        # The first path's answer lands after the box holds another path: dropped.
-        ({"path": "/other", "test_command": "new", "setup_command": "s2"}, ("new", "s2"), "/other"),
         # What the repo's own files propose is written out, never obeyed.
         (
             {"path": "/ot\x1bher", "test_command": "a\x1b[2K", "setup_command": ""},
             ("a\\x1b[2K", ""),
-            "/ot\\x1bher",
+            "Kraft proposes these for /ot\\x1bher. Keep or change them.",
         ),
         # A refused second probe leaves no command of the first path behind.
         (NOT_GIT, ("", ""), "400: /x is not a git repository [/]"),
+        # ... and its words are written out too: the server echoes the typed path.
+        (
+            client.status_error(400, "/x\x1b[2K is not a git repository"),
+            ("", ""),
+            "400: /x\\x1b[2K is not a git repository",
+        ),
     ],
-    ids=["stale-answer-dropped", "proposal-written-out", "each-probe-empties-the-fields"],
+    ids=["proposal-written-out", "each-probe-empties-the-fields", "refusal-written-out"],
 )
-def test_the_probe_answers_only_for_the_path_in_the_box(
-    board, monkeypatch, tmp_path, second, fields, said
+def test_each_probe_starts_from_empty_fields_and_writes_out_what_it_shows(
+    board, monkeypatch, second, fields, said
 ):
-    """Each probe first empties both command fields, and an answer for a path
-    no longer in the box is dropped. The first answer is held, then released
-    after the second probe has answered, as a reply already in flight is."""
-    monkeypatch.chdir(tmp_path)
-    release = asyncio.Event()
-    first_asked = asyncio.Event()
+    """Reading a second path first empties both command fields, and what the
+    probe answers or refuses with is written out, never obeyed."""
 
     async def probe_repo(path=None, *, detect=True, test_command=None):
         if path == "/other":
             if isinstance(second, Exception):
                 raise second
             return second
-        first_asked.set()
-        try:
-            await release.wait()
-        except asyncio.CancelledError:
-            await release.wait()  # the reply is already on its way: a cancel does not recall it
         return PROBED
 
     async def repos():
@@ -217,23 +212,171 @@ def test_the_probe_answers_only_for_the_path_in_the_box(
     async def scenario(app, pilot):
         await _settled(console, app, pilot)
         await pilot.press("4", "c")
-        await console.until(pilot, lambda: isinstance(app.screen, Connect) and first_asked.is_set())
-        box = app.screen.query_one("#connect-path", Input)
-        if isinstance(second, Exception):
-            # Fill the fields from a first answer, then ask a second path.
-            release.set()
-            await console.until(pilot, lambda: _said(app) == PROPOSED)
-        box.value = "/other"
+        await console.until(pilot, lambda: _said(app) == PROPOSED)
+        app.screen.query_one("#connect-path", Input).value = "/other"
         await pilot.press("enter")
-        await console.until(pilot, lambda: said in _said(app))
-        release.set()
-        await pilot.pause()
-        await pilot.pause()
-        got = tuple(app.screen.query_one(f"#connect-{n}", Input).value for n in ("test", "setup"))
-        return got, _said(app)
+        await console.until(pilot, lambda: _said(app) == said)
+        return tuple(app.screen.query_one(f"#connect-{n}", Input).value for n in ("test", "setup"))
 
-    got, shown = console.run(scenario)
-    assert (got, said in shown) == (fields, True)
+    assert console.run(scenario) == fields
+
+
+@pytest.mark.parametrize(
+    ("edit", "fields", "said", "argv"),
+    [
+        # The box holds another path by the time the answer lands: dropped.
+        ("path", ("", ""), "Enter reads the new path", ["repo", "connect", "/other"]),
+        # A command typed meanwhile is the person's: kept, and passed.
+        ("test", ("mine", "uv sync"), PROPOSED, ["--test-command=mine"]),
+    ],
+    ids=["stale-answer-dropped", "typed-command-kept"],
+)
+def test_an_answer_that_lands_late_never_overwrites_what_the_person_did(
+    board, monkeypatch, tmp_path, edit, fields, said, argv
+):
+    """A probe can run for minutes. The person edits the path (without Enter)
+    or a command meanwhile: the old path's answer is dropped, and a typed
+    command stays."""
+    monkeypatch.chdir(tmp_path)
+    release = asyncio.Event()
+    first_asked = asyncio.Event()
+    ran: list[list[str]] = []
+
+    async def probe_repo(path=None, *, detect=True, test_command=None):
+        first_asked.set()
+        await release.wait()
+        return PROBED
+
+    async def repos():
+        return []
+
+    monkeypatch.setattr(client, "probe_repo", probe_repo)
+    monkeypatch.setattr(client, "repos", repos)
+    console = board([])
+
+    async def scenario(app, pilot):
+        async def run_command(words):
+            ran.append(words)
+
+        app.run_command = run_command
+        await _settled(console, app, pilot)
+        await pilot.press("4", "c")
+        await console.until(pilot, lambda: isinstance(app.screen, Connect) and first_asked.is_set())
+        dialog = app.screen
+        dialog.query_one(f"#connect-{edit}", Input).value = "/other" if edit == "path" else "mine"
+        release.set()
+        await console.until(pilot, lambda: _said(app) == said)
+        got = tuple(dialog.query_one(f"#connect-{n}", Input).value for n in ("test", "setup"))
+        dialog.query_one("#connect-go", Button).press()
+        await console.until(pilot, lambda: ran)
+        return got, ran[0]
+
+    got, words = console.run(scenario)
+    assert got == fields
+    assert words == (argv if edit == "path" else ["repo", "connect", os.getcwd(), *argv])
+    # words[2] for "path" is made absolute against the root: "/other" already is.
+
+
+@pytest.mark.parametrize("typed", ["-x", "sub dir"], ids=["leading-dash", "space"])
+def test_a_typed_path_reaches_the_runner_absolute_never_as_a_flag(
+    board, monkeypatch, tmp_path, typed
+):
+    """`kraft repo connect -x` would read the path as a flag: the form makes
+    it absolute against the console's directory first."""
+    monkeypatch.chdir(tmp_path)
+    ran: list[list[str]] = []
+
+    async def probe_repo(path=None, *, detect=True, test_command=None):
+        return PROBED
+
+    async def repos():
+        return []
+
+    monkeypatch.setattr(client, "probe_repo", probe_repo)
+    monkeypatch.setattr(client, "repos", repos)
+    console = board([])
+
+    async def scenario(app, pilot):
+        async def run_command(words):
+            ran.append(words)
+
+        app.run_command = run_command
+        await _settled(console, app, pilot)
+        await pilot.press("4", "c")
+        await console.until(pilot, lambda: _said(app) == PROPOSED)
+        app.screen.query_one("#connect-path", Input).value = typed
+        app.screen.query_one("#connect-go", Button).press()
+        await console.until(pilot, lambda: ran)
+        return ran[0]
+
+    assert console.run(scenario) == ["repo", "connect", os.path.join(os.getcwd(), typed)]
+
+
+@pytest.mark.parametrize(
+    ("size", "tabs"),
+    [((80, 24), 0), ((60, 16), 4)],
+    ids=["whole-at-80x24", "reachable-at-60x16"],
+)
+def test_the_connect_form_fits_a_window_or_scrolls_to_the_focused_button(
+    board, monkeypatch, size, tabs
+):
+    """At 80x24 both buttons are on screen; in a small window, Tab to Connect
+    brings it into view."""
+
+    async def probe_repo(path=None, *, detect=True, test_command=None):
+        return PROBED
+
+    async def repos():
+        return []
+
+    monkeypatch.setattr(client, "probe_repo", probe_repo)
+    monkeypatch.setattr(client, "repos", repos)
+    console = board([])
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        await pilot.press("4", "c")
+        await console.until(pilot, lambda: _said(app) == PROPOSED)
+        for _ in range(tabs):  # from the path: test, setup, Verify, Connect
+            await pilot.press("tab")
+        await pilot.pause()
+        inside = {
+            b: app.screen.region.contains_region(
+                app.screen.query_one(f"#connect-{b}", Button).region
+            )
+            for b in ("go", "no")
+        }
+        return inside, app.focused.id
+
+    inside, focus = console.run(scenario, size=size)
+    assert inside["go"] and (inside["no"] or tabs)  # at 80x24 both, at 60x16 the focused one
+    assert focus == ("connect-path" if tabs == 0 else "connect-go")
+
+
+def test_a_hidden_repos_view_stops_a_read_in_flight(board, monkeypatch):
+    """Switching away cancels a read still waiting on the server."""
+    started, stopped = asyncio.Event(), asyncio.Event()
+
+    async def repos():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            stopped.set()
+            raise
+
+    monkeypatch.setattr(client, "repos", repos)
+    console = board([])
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        await pilot.press("4")
+        await console.until(pilot, started.is_set)
+        await pilot.press("1")
+        await console.until(pilot, stopped.is_set)
+        return True
+
+    assert console.run(scenario)
 
 
 @pytest.mark.parametrize(

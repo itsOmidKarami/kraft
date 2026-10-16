@@ -295,23 +295,17 @@ Confirm, Note, Menu, Connect {
 }
 
 /* The connect form: path, test and setup, Verify, what the probe said. */
-#connect Input, #connect Checkbox {
-    margin-top: 1;
-}
-
 #connect Checkbox {
     border: none;
     height: 1;
 }
 
 #connect-said, #connect-library {
-    margin-top: 1;
     color: $kraft-muted;
 }
 
 #connect Horizontal {
     height: auto;
-    margin-top: 1;
 }
 
 #connect Button {
