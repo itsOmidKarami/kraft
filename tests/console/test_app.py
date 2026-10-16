@@ -12,7 +12,7 @@ import pytest
 from support.harness import connected_repo
 from textual.app import App
 from textual.binding import Binding
-from textual.widgets import ContentSwitcher, Footer, HelpPanel
+from textual.widgets import ContentSwitcher, Footer, HelpPanel, Input
 
 from kraft import cli, client
 from kraft.console import app as console_app
@@ -521,3 +521,52 @@ def test_live_updates_reach_the_frame_under_a_dialog(console, monkeypatch, dialo
     assert "Board 1" in tabs
     assert "Server degraded" in tabs
     assert down
+
+
+@pytest.mark.parametrize(
+    ("steps", "on_input", "ends_on"),
+    [
+        ([Link.DOWN], False, "start"),
+        ([Link.DOWN], True, "input"),
+        ([Link.DOWN, Link.LIVE], False, "view"),
+    ],
+    ids=["from-the-view", "typing-keeps-the-focus", "down-and-live-in-one-tick"],
+)
+def test_start_server_takes_the_focus_only_from_the_view(console, steps, on_input, ends_on):
+    """The button never pulls focus from where a person types; and a link that
+    drops and recovers in one tick ends on the view, not on a button that is gone."""
+
+    async def scenario(app, pilot):
+        typing = Input()
+        if on_input:
+            await app.default_screen.mount(typing)
+            app.default_screen.set_focus(typing)
+        for link in steps:
+            app._live_link(link, None)
+        await pilot.pause()
+        focused = app.default_screen.focused
+        return {typing: "input", app.view: "view", app.query_one("#start"): "start"}.get(focused)
+
+    assert console.run(scenario) == ends_on
+
+
+def test_a_confirm_survives_the_output_panel_being_asked_for(console, kraft_is):
+    """Popping a modal drops its result callback: Ctrl+O and a new command must
+    leave an open confirm to answer."""
+    kraft_is("print('x')")
+
+    async def scenario(app, pilot):
+        # The panel already open beneath it: the case a pop loop would walk through.
+        await pilot.press("ctrl+o")
+        await pilot.pause()
+        asked = app.run_worker(app.confirm("kraft admin stop"))
+        await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+        await pilot.press("ctrl+o")
+        await app.run_command(["view", "list"])
+        await pilot.pause()
+        still = isinstance(app.screen, Confirm)
+        await pilot.press("shift+tab", "enter")
+        await asked.wait()
+        return still, asked.result
+
+    assert console.run(scenario) == (True, True)

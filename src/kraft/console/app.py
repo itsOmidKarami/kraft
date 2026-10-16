@@ -218,11 +218,14 @@ class KraftConsole(App):
         done.set_result(code)
 
     async def _show_panel(self) -> None:
-        """The panel on top, once: Ctrl+P can open over it."""
+        """The panel on top, once: Ctrl+P can open over it. A confirm is never
+        popped (that drops its result callback, and the pending decision with
+        it): the panel opens above it instead, since a command needs a mounted
+        panel to write to, and Esc then shows the confirm again."""
         panel = self.get_screen("output", OutputPanel)
         if panel not in self.screen_stack:
             await self.push_screen(panel)
-        while self.screen is not panel:
+        while self.screen is not panel and not isinstance(self.screen, Confirm):
             await self.pop_screen()
 
     def stop_command(self) -> None:
@@ -231,6 +234,8 @@ class KraftConsole(App):
         if run is None:
             return
         if run is self._stopping:
+            # `end()` waits up to QUIT_GRACE_S: say so, or the press seems to do nothing.
+            self.get_screen("output", OutputPanel).note("stopping…")
             self.run_worker(run.end())
         else:
             self._stopping = run
@@ -329,8 +334,10 @@ class KraftConsole(App):
         if link is Link.DOWN:
             self.query_one("#down", Static).update(Content(down_sentence(error)))
             # Focused once, on the way down: Enter presses it (spec §6).
+            # But never from where a person is typing: only off the view or nothing.
             if no_server and not was_down and start is not None:
-                start.focus()
+                if frame.focused in (None, self.view, start):
+                    frame.set_focus(start)
         elif was_down and frame.focused in (None, start):
             # The frame's own focus, which the output panel may be covering.
             frame.set_focus(self.view)
