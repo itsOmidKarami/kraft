@@ -12,6 +12,7 @@ from support.console_board import (
     FAILED,
     FILED,
     GATE,
+    PAUSED,
     QUESTION,
     RUNNING,
     _detail,
@@ -168,21 +169,38 @@ def test_the_header_says_where_the_item_stands(
 
 
 @pytest.mark.parametrize(
-    ("row", "first"),
-    [(QUESTION, "Chain"), (FAILED, "Chain"), (RUNNING, "implement")],
-    ids=["question", "failed", "running-keeps-its-line"],
+    ("row", "sessions", "first", "p"),
+    [
+        (
+            QUESTION,
+            [],
+            ["The agent asks:", "keep [/] in titles?", "", "p answers it.", ""],
+            "answer",
+        ),
+        (FAILED, [], ["t retries it.", "", "Chain"], None),
+        (FAILED, [{"id": "s1"}], ["t retries it.", item_view.LOG_POINTER, "", "Chain"], None),
+        (PAUSED, [], ["paused at implement", "", "p resumes it.", ""], "resume"),
+        (RUNNING, [], ["implement", "", "Chain"], "pause"),
+    ],
+    ids=["question", "failed", "failed-with-a-session", "paused", "running-keeps-its-line"],
 )
-def test_the_overview_does_not_repeat_the_stop_banner(board, monkeypatch, row, first):
-    """The banner says why a stopped item stopped, whole; the body starts at
-    the chain. An item with no banner keeps its one line of where it stands."""
-    _serve(monkeypatch, _detail(row), calls=[])
+def test_a_stopped_item_says_the_way_on_and_p_says_what_it_does(
+    board, monkeypatch, row, sessions, first, p
+):
+    """The banner says why a stopped item stopped; the body says what moves it
+    on, in the peek's own sentences (`acts.way_on`): an agent's question
+    whole and `p` to answer it, `t` and the Log for a failed one, `p` for a
+    paused one. The footer's `p` names what it does now."""
+    _serve(monkeypatch, _detail(row, worker_sessions=sessions), calls=[])
     console = board([row])
 
     async def scenario(app, pilot):
         await _opened(console, app, pilot, row["id"])
-        return _overview(app)[0]
+        await pilot.pause()
+        shown = app.screen.active_bindings.get("p")
+        return _overview(app)[: len(first)], shown and shown.binding.description
 
-    assert console.run(scenario).startswith(first)
+    assert console.run(scenario) == (first, p)
 
 
 @pytest.mark.parametrize("keys", [["enter"], ["a"]], ids=["enter", "a"])

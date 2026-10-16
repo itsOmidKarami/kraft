@@ -149,7 +149,7 @@ class Board(View):
         Binding("pagedown", "rows('page_down')", "page down", show=False),
         Binding("a", "approve", "approve"),
         Binding("r", "reject", "reject"),
-        Binding("p", "pause_or_resume", "pause/resume"),
+        *acts.P_KEYS,
         Binding("t", "retry", "retry"),
         Binding("v", "peek", "peek"),
         Binding("s", "scope", "this repo or all"),
@@ -306,7 +306,7 @@ class Board(View):
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action in acts.DOORS:
-            return acts.opens(action, self.selected)
+            return acts.opens(action, self.selected, parameters)
         # `s` only where there is a repo to come back to.
         if action == "open":  # folds Done, or opens the item
             option = self.query_one("#rows", OptionList).highlighted_option
@@ -368,7 +368,7 @@ class Board(View):
         if row := self.selected:
             self.run_worker(partial(acts.reject, self.app, row), group="act")
 
-    def action_pause_or_resume(self) -> None:
+    def action_pause_or_resume(self, _word: str = "") -> None:
         if row := self.selected:
             self.run_worker(partial(acts.pause_or_resume, self.app, row), group="act")
 
@@ -438,6 +438,7 @@ class Board(View):
                 body.write(line, scroll_end=False)
 
         tail_words = words.reason_tail(item, now)
+        way = ["", *found] if (found := acts.way_on(item)) else []
         if status == "needs_you" and stop.get("kind") == "gate":
             chain = self.query_one("#peek-chain", Static)
             chain.update(chain_line(words.chain_marks(item), self.size.width - 2))
@@ -454,19 +455,11 @@ class Board(View):
                 return
             say("", *(document.get("content") or "").splitlines()[:PEEK_DOC_LINES])
         elif status == "needs_you" and stop.get("kind") == "question":
-            say("The agent asks:", item.get("needs_context_question") or tail_words)
-            if "resume" in doors:
-                say("", "p answers it.")
+            say("The agent asks:", item.get("needs_context_question") or tail_words, *way)
         elif status in ("failed", "needs_you"):
-            say(stop.get("reason") or tail_words)
-            if "retry" in doors:
-                say("", "t retries it.")
-            if "raise_budget" in doors:
-                say(f"/item raise-budget {work_item_id} --usd N raises its budget.")
+            say(stop.get("reason") or tail_words, *way)
         elif status == "paused":
-            say(f"{tail_words} · {words.ago(item.get('updated_at'), now)}")
-            if "resume" in doors:
-                say("", "p resumes it.")
+            say(f"{tail_words} · {words.ago(item.get('updated_at'), now)}", *way)
         elif status in ("blocked", "queued"):
             waits = [d for d in item.get("dependencies") or [] if not d.get("met")]
             say(tail_words, *(["It comes after:"] if waits else []))

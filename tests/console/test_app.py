@@ -356,12 +356,13 @@ def test_the_palette_switches_kraft_looks_not_textuals(console):
 def test_no_key_does_two_things_on_one_view(name):
     """Spec §6: no key means two things on one view, and no upper and lower
     pair (`R` and `r`) shares one. `R,shift+r` is one binding: kitty's name
-    for the same key."""
+    for the same key. One action under several words (`p`'s pause, resume
+    and answer, `acts.P_KEYS`) is one thing: its parameters are not compared."""
     actions: dict[str, set[str]] = {}
     for owner in (App, KraftConsole, VIEWS[name]):
         for binding in Binding.make_bindings(owner.BINDINGS):
             key = binding.key.removeprefix("shift+").lower()
-            actions.setdefault(key, set()).add(binding.action)
+            actions.setdefault(key, set()).add(binding.action.partition("(")[0])
     assert {key: found for key, found in actions.items() if len(found) > 1} == {}
 
 

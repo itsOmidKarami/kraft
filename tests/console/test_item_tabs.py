@@ -254,9 +254,9 @@ def _diff(app) -> list[tuple[str, str]]:
             | TRAILER,
             [
                 (render.landed_head({"landed": {"commits": ["c1", "c2"]}}), "muted"),
-                ("diff --git a/x b/x", ""),
-                ("--- a/x", ""),
-                ("+++ b/x", ""),
+                ("diff --git a/x b/x", "muted"),
+                ("--- a/x", "muted"),
+                ("+++ b/x", "muted"),
                 ("@@ -1 +1 @@", "info"),
                 ("-old [/]", "error"),
                 ("+new [/]", "success"),

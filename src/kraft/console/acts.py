@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 
 from textual.app import App
+from textual.binding import Binding
 
 from kraft import answers, client
 from kraft.console import words
@@ -38,9 +39,41 @@ async def approve_waits(work_item_id: str) -> str | None:
     return f"Approve waits on {must} open must-fix thread{'s' if must != 1 else ''}."
 
 
-def opens(action: str, row: dict | None) -> bool:
-    """Whether the server lists a door that `action`'s key goes through."""
+def opens(action: str, row: dict | None, parameters: tuple[object, ...] = ()) -> bool:
+    """Whether the server lists a door that `action`'s key goes through. `p`
+    is bound once per word it can have (`P_KEYS`): only the binding for what
+    it does now is open, so the footer names that."""
+    if action == "pause_or_resume" and parameters:
+        return p_word(row) == parameters[0]
     return bool(row) and any(door in (row.get("actions") or []) for door in DOORS[action])
+
+
+def p_word(row: dict | None) -> str | None:
+    """What `p` does for `row` now, as the footer says it: an agent's question
+    takes an answer, a paused item resumes, a running one pauses."""
+    doors = (row or {}).get("actions") or []
+    if "resume" in doors:
+        return "answer" if ((row or {}).get("stop") or {}).get("kind") == "question" else "resume"
+    return "pause" if "pause" in doors else None
+
+
+#: `p` on the Board and the Item, one binding per word: one action, so one key
+#: still does one thing.
+P_KEYS = [
+    Binding("p", f"pause_or_resume('{word}')", word) for word in ("pause", "resume", "answer")
+]
+
+
+def way_on(item: dict) -> list[str]:
+    """The keys that move a stopped or paused item on, a sentence each: the
+    peek's and the Item's Overview's, from one place."""
+    doors = item.get("actions") or []
+    lines = {"answer": ["p answers it."], "resume": ["p resumes it."]}.get(p_word(item) or "", [])
+    if "retry" in doors:
+        lines.append("t retries it.")
+    if "raise_budget" in doors:
+        lines.append(f"/item raise-budget {item['id']} --usd N raises its budget.")
+    return lines
 
 
 async def reject(app: App, row: dict, note_dialog: Dialog | None = None) -> None:
