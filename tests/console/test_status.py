@@ -213,3 +213,24 @@ def test_with_no_server_the_line_keeps_only_its_key(console, monkeypatch):
         return _text(app, "#status-text"), app.query_one("#status-spin").display
 
     assert console.run(scenario, size=(79, 24)) == ("? keys", False)
+
+
+def test_rows_shown_before_the_line_composes_are_drawn_once_it_has(board, monkeypatch):
+    """The Board can hand rows over before the line's own children mount: no
+    raise then (one in a handler ends the app), and they are drawn after."""
+    _answers(monkeypatch, REFUSED, REFUSED)
+    console = board([RUNNING])  # the live reads hand the line the board's rows again
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        old = app.query_one(status.StatusLine)
+        parent = old.parent
+        await old.remove()
+        line = status.StatusLine()
+        line.show_rows([RUNNING])
+        await parent.mount(line)
+        with contextlib.suppress(TimeoutError):
+            await console.until(pilot, lambda: _text(app, "#status-text") != "")
+        return _text(app, "#status-text")
+
+    assert console.run(scenario) == "1 running on their own"

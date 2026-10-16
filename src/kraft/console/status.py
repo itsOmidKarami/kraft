@@ -110,9 +110,12 @@ class StatusLine(Horizontal):
         self.draw()
 
     def draw(self) -> None:
+        spin = self.query_one_optional("#status-spin", pulse.Spinner)
+        text = self.query_one_optional("#status-text", Static)
+        if spin is None or text is None:
+            return  # not composed yet: the Resize after mount draws the rows stored
         # With no server, what it last said is not said as now.
         up = getattr(self.app, "link", None) is not Link.DOWN
-        spin = self.query_one("#status-spin", pulse.Spinner)
         # Only for work that is happening: a queued item counts, but does not spin.
         spin.display = up and any(pulse.spins(row) for row in self.rows)
         spin.set(spin.display)
@@ -126,8 +129,7 @@ class StatusLine(Horizontal):
         room = self.size.width - 2 - (3 if spin.display else 0) - 1
         while len(parts) > 1 and self._joined([*parts, *tail]).cell_length > room:
             parts.pop()
-        line = self._joined([*parts, *tail])
-        self.query_one("#status-text", Static).update(line)
+        text.update(self._joined([*parts, *tail]))
 
     @staticmethod
     def _joined(parts: list[str | Content]) -> Content:
