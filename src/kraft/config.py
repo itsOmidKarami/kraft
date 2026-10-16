@@ -200,7 +200,8 @@ def write_preserving(path: str | Path, data: dict) -> None:
     try:
         text = Path(path).read_text() if Path(path).is_file() else None
         write_text(path, preserve.rewrite(text, data))
-    except (OSError, preserve.RewriteError):
+    except (OSError, preserve.RewriteError) as exc:
+        logger.warning("%s: written without its comments: %s", path, exc)
         write_yaml(path, data)
 
 

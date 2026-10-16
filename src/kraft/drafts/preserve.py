@@ -21,9 +21,11 @@ from collections.abc import Mapping
 import yaml as pyyaml
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
+from ruamel.yaml.constructor import RoundTripConstructor
 from ruamel.yaml.emitter import RoundTripEmitter
 from ruamel.yaml.error import CommentMark, YAMLError
 from ruamel.yaml.events import MappingEndEvent, SequenceEndEvent
+from ruamel.yaml.representer import RoundTripRepresenter
 from ruamel.yaml.scalarstring import ScalarString, SingleQuotedScalarString
 from ruamel.yaml.tokens import CommentToken
 
@@ -141,18 +143,35 @@ class _Emitter(RoundTripEmitter):
             self.no_newline = False
 
 
+_NULL = "tag:yaml.org,2002:null"
+
+
+class _Constructor(RoundTripConstructor):
+    """Reads a null as `_Null`. On a subclass: `add_constructor` writes to the
+    class it is called on, and `RoundTripConstructor` is every round-trip
+    load's."""
+
+
+_Constructor.add_constructor(_NULL, lambda c, node: _Null(node.value))
+
+
+class _Representer(RoundTripRepresenter):
+    """ruamel writes None as nothing (`project:`); every other writer here,
+    and the operator's own file, says `null`. A null the file already has
+    keeps its own spelling (`_Null`)."""
+
+
+_Representer.add_representer(type(None), lambda r, _: r.represent_scalar(_NULL, "null"))
+_Representer.add_representer(_Null, lambda r, n: r.represent_scalar(_NULL, n.text))
+
+
 def _yaml() -> YAML:
     yaml = YAML()
     yaml.Emitter = _Emitter
+    yaml.Constructor = _Constructor
+    yaml.Representer = _Representer
     yaml.preserve_quotes = True
     yaml.width = 4096  # never re-wrap a long line an author laid out
-    # ruamel writes None as nothing (`project:`); every other writer here,
-    # and the operator's own file, says `null`. A null the file already has
-    # keeps its own spelling (`_Null`).
-    null = "tag:yaml.org,2002:null"
-    yaml.representer.add_representer(type(None), lambda r, _: r.represent_scalar(null, "null"))
-    yaml.representer.add_representer(_Null, lambda r, n: r.represent_scalar(null, n.text))
-    yaml.constructor.add_constructor(null, lambda c, node: _Null(node.value))
     return yaml
 
 
