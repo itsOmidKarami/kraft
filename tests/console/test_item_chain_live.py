@@ -310,3 +310,21 @@ def test_one_of_a_keys_two_actions_is_live_at_a_time(board, monkeypatch, keys):
         return view.check_action("left", ()), view.check_action("close_node", ())
 
     assert console.run(scenario) == ((True, False) if not keys else (False, True))
+
+
+def test_the_cursor_starts_in_view_on_a_chain_longer_than_the_pane(board, monkeypatch):
+    """A done item of thirty nodes at 80×24 opens with the cursor, on the last
+    node, on screen: nobody scrolls to find where they are."""
+    nodes = [{"id": f"node{n:02d}"} for n in range(30)]
+    row = _row(ID, "done", current_node_id="node29", chain_definition={"nodes": nodes})
+    _serve(monkeypatch, _detail(row), calls=[])
+    _serve_events(monkeypatch, [])
+    console = board([_detail(row)])
+
+    async def scenario(app, pilot):
+        await _chain_tab(console, app, pilot)
+        await pilot.pause(0.2)
+        log = app.query_one("#chain", RichLog)
+        return log.scroll_y <= 29 < log.scroll_y + log.scrollable_content_region.height
+
+    assert console.run(scenario, size=(80, 24)) is True

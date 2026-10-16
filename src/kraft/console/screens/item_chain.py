@@ -113,7 +113,10 @@ class ChainTab:
             high = top
         elif reveal == "cursor":
             high = min(max(scrolled, on - height + 1), on)
-        log.scroll_to(y=high, animate=False, immediate=True)
+        if reveal:  # after layout: a pane just sized has not its scroll range yet
+            log.call_after_refresh(log.scroll_to, y=high, animate=False)
+        else:
+            log.scroll_to(y=high, animate=False, immediate=True)
         if self._running_in_node():
             self.app.pulse.wake()
 
