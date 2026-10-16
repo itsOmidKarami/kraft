@@ -273,6 +273,11 @@ def elapsed(seconds: float) -> str:
     return f"{d}d {h % 24}h" if h % 24 else f"{d}d"
 
 
+def usd(amount: float) -> str:
+    """`format.ts`'s `usd`: cents from a dollar up, a tenth of a cent below."""
+    return f"${amount:.2f}" if amount >= 1 else f"${amount:.3f}"
+
+
 #: `status.ts`: a budget stop the item could raise, but not now.
 RAISE_REFUSED = "Kraft takes no raise for it right now."
 #: `status.ts`: a budget stop the item cannot raise.
