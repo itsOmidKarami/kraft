@@ -3,6 +3,7 @@ import { buildScenario, type ItemBundle, type Scenario } from "../e2e/contract/m
 import { mockServer, type Answer } from "../e2e/contract/mocks/mockApi";
 import { ngDryRun } from "../e2e/contract/mocks/ngBoard";
 import { NG_NOW } from "../e2e/contract/mocks/ngItems";
+import { recent } from "../src/ng/item/events";
 import { displayStatus, escalationThreads, RESUME_PROMPT, transitions, type Ev, type Transitions } from "../e2e/contract/mocks/transitions";
 
 /** The mock's item transitions (transitions.ts): what each door changes, the events it appends, the words it refuses in. */
@@ -434,17 +435,22 @@ describe("samples and answers as the server shapes them", () => {
   });
 
   it.each([
-    // A time cap stops its session (`session_exited`, capped_out); a spend cap lets it finish, its usage reported.
-    ["kraft-7d21, stopped by its running-time cap", "kraft-7d21", { status: "capped_out" }],
-    ["kraft-58e2, stopped by its spend cap", "kraft-58e2", { status: "done", model: "claude-sonnet-4-5", tokens_cache_write: 0, tokens_cache_read: 0 }],
-  ])("%s: its last session's exit is on the timeline, just before the stop", (_name, bead, payload) => {
+    // A time cap stops its session (`session_exited`, capped_out); a spend cap, a stuck fix loop and a question let the
+    // attempt finish first. Each exit reports the agent's usage.
+    ["kraft-7d21, stopped by its running-time cap", "kraft-7d21", "capped_out"],
+    ["kraft-58e2, stopped by its spend cap", "kraft-58e2", "done"],
+    ["kraft-2c77, stuck, its fix loop making no progress", "kraft-2c77", "done"],
+    ["kraft-a3f0, stopped on its agent's question", "kraft-a3f0", "done"],
+  ])("%s: its last attempt's exit is on the timeline before the stop, and Recent has it ended", (_name, bead, status) => {
     const { S } = server();
     const b = S.bundles[idOf(S, bead)];
-    const last = b.sessions.at(-1);
-    const [exit, stop] = b.events.slice(-2);
-    expect([exit.type, stop.type, last.status]).toEqual(["worker_session_exited", "work_item_needs_human", payload.status]);
-    expect(exit.payload).toEqual({ session_id: last.id, wall_ms: last.wall_ms, ...(last.status === "done" ? { tokens_in: last.tokens_in, tokens_out: last.tokens_out, cost_usd: last.cost_usd } : { node_id: "verification" }), ...payload });
-    expect([last.exited_at, exit.seq]).toEqual([exit.created_at, stop.seq - 1]);
+    const last = b.sessions.filter((s) => s.hook_point === "verification.review.code_review").at(-1);
+    const exit = b.events.find((e) => e.type === "worker_session_exited" && e.payload.session_id === last.id)!;
+    const stop = b.events.filter((e) => e.type === "work_item_needs_human").at(-1)!;
+    expect(last.status).toBe(status);
+    expect(exit.payload).toEqual({ session_id: last.id, status, wall_ms: last.wall_ms, model: "claude-sonnet-4-5", tokens_in: last.tokens_in, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: last.tokens_out, cost_usd: last.cost_usd });
+    expect([last.exited_at, exit.seq < stop.seq]).toEqual([exit.created_at, true]);
+    expect(recent(b.events as any).map((l) => l.line)).not.toContain("a session is running on verification");
   });
 
   it("kraft-a3f0's escalation turns count their attempts as `store.create_session` does", () => {

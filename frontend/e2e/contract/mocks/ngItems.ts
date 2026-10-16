@@ -138,6 +138,12 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
     display_status: "running", stop: null,
     summary: { nodes_done: Math.min(cur, NG_NODES.length), nodes_total: NG_NODES.length, gates_passed: NG_NODES.slice(0, cur).filter((n) => n.kind === "gate").length, step: null },
   };
+  /** `store.session_exited` for `s` as it stands, `dm` minutes on: its status, its wall time and, from an agent that
+   *  reported it, its usage, in the server's payload (no node). Its `exited_at` is that moment. */
+  const exited = (s: any, dm: number, usage = true) => {
+    ev("worker_session_exited", { session_id: s.id, status: s.status, wall_ms: s.wall_ms, ...(usage && s.model ? { model: s.model, tokens_in: s.tokens_in, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: s.tokens_out, cost_usd: s.cost_usd } : {}) }, dm);
+    s.exited_at = events.at(-1).created_at;
+  };
   const stop = (kind: string, task: string | null, more: Record<string, unknown> = {}) => ({ kind, node: currentNode, task, attempt: 1, resume_at: null, reason: null, facts: {}, ...more });
 
   // The verification node at its third step, attempt 2 of the fix loop (the prototype's running chain).
@@ -153,6 +159,8 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
     sess("verification.review.code_review", "done", { round: 0 });
     const cr = sess("verification.review.code_review", review, { attempt: 2, round: 1 });
     ev("worker_session_started", { session_id: cr.id, node_id: n.id }, 0.5);
+    // An attempt that finished before the item stopped (stuck, or asked a question) exited first.
+    if (review === "done") exited(cr, 0.5);
     item.summary.step = { index: 3, count: 3 };
     return cr;
   };
@@ -205,8 +213,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
     case "capped": {
       // The time cap stops its running session (`session_exited`, capped_out), then the item.
       const cr = verificationAt("capped_out");
-      ev("worker_session_exited", { session_id: cr.id, node_id: "verification", status: "capped_out", wall_ms: cr.wall_ms }, 0.5);
-      cr.exited_at = events.at(-1).created_at;
+      exited(cr, 0.5);
       ev("work_item_needs_human", { node_id: "verification", reason: "Running time hit its 8h cap", kind: "cap" }, 0.5);
       item.status = "needs_human"; item.display_status = "needs_you";
       item.stop = stop("cap", "verification.review.code_review", { attempt: 2, reason: "Running time hit its 8h cap", facts: { field: "running_time", cap_s: 28_800 } });
@@ -218,8 +225,8 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
       let cr = verificationAt("rate_limited");
       for (let k = 0; k < 3; k++) {
         // Each attempt exits rate limited (`session_exited`), and the item waits for the reset.
-        ev("worker_session_exited", { session_id: cr.id, node_id: "verification", status: "rate_limited", wall_ms: cr.wall_ms }, 0.3);
-        cr.exited_at = events.at(-1).created_at;
+        // A launch the provider refused reports no usage.
+        exited(cr, 0.3, false);
         ev("work_item_rate_limited", { node_id: "verification", retry_at: k < 2 ? t(m + 2) : t(133.7) }, 0);
         if (k === 2) break;
         ev("work_item_retried", { node_id: "verification", loop: null, steer: RESUME_PROMPT, escalated: false, seeded: false }, 2);
