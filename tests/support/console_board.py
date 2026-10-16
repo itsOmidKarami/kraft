@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 
 from textual.widgets import OptionList, RichLog
 
+from kraft import client
+
 CHAIN = {
     "template_id": "default",
     "nodes": [
@@ -106,3 +108,44 @@ PAUSED = _row("p1p1p1p1", "paused", 12, actions=["resume"])
 def _detail(row: dict, **fields) -> dict:
     """The detail read (`get_work_item(full=True)`) of `row`."""
     return {**row, "status": "active", "worker_sessions": [], "dependencies": [], **fields}
+
+
+DOC = {"content": "\n".join(f"line {n} [/]" for n in range(60)), "digest": "d1g3st"}
+
+
+def _overview(app) -> list[str]:
+    return [line.text.rstrip() for line in app.query_one("#overview", RichLog).lines]
+
+
+def _serve(monkeypatch, detail, *, document=DOC, threads=(), calls=None):
+    """The item's reads, and every action recorded into `calls`."""
+
+    async def get_work_item(work_item_id=None, *, full=False):
+        if isinstance(detail, Exception):
+            raise detail
+        return detail
+
+    async def artifact(work_item_id=None):
+        if document is None:
+            raise client.status_error(404, "no document")
+        return document
+
+    async def list_threads(work_item_id=None, open_only=False):
+        return list(threads)
+
+    monkeypatch.setattr(client, "get_work_item", get_work_item)
+    monkeypatch.setattr(client, "artifact", artifact)
+    monkeypatch.setattr(client, "threads", list_threads)
+    for name in ("approve_gate", "reject_gate", "retry", "pause", "resume"):
+
+        async def call(*args, _name=name, **kwargs):
+            calls.append((_name, args, kwargs))
+            return {"id": detail["id"], "node_id": "implement"}
+
+        monkeypatch.setattr(client, name, call)
+
+
+async def _opened(console, app, pilot, work_item_id: str) -> None:
+    await _settled(console, app, pilot)
+    app.open_item(work_item_id)
+    await console.until(pilot, lambda: app.view.item is not None and _overview(app))

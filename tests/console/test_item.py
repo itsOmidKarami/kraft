@@ -8,12 +8,16 @@ import asyncio
 import pytest
 from support.console_board import (
     CHAIN,
+    DOC,
     FAILED,
     FILED,
     GATE,
     RUNNING,
     _detail,
+    _opened,
+    _overview,
     _row,
+    _serve,
     _settled,
     _text,
 )
@@ -49,51 +53,12 @@ STUCK = _row(
         "reason": "the fix loop made no progress in 3 rounds",
     },
 )
-DOC = {"content": "\n".join(f"line {n} [/]" for n in range(60)), "digest": "d1g3st"}
-
-
-def _overview(app) -> list[str]:
-    return [line.text.rstrip() for line in app.query_one("#overview", RichLog).lines]
-
-
-def _serve(monkeypatch, detail, *, document=DOC, threads=(), calls=None):
-    """The item's reads, and every action recorded into `calls`."""
-
-    async def get_work_item(work_item_id=None, *, full=False):
-        if isinstance(detail, Exception):
-            raise detail
-        return detail
-
-    async def artifact(work_item_id=None):
-        if document is None:
-            raise client.status_error(404, "no document")
-        return document
-
-    async def list_threads(work_item_id=None, open_only=False):
-        return list(threads)
-
-    monkeypatch.setattr(client, "get_work_item", get_work_item)
-    monkeypatch.setattr(client, "artifact", artifact)
-    monkeypatch.setattr(client, "threads", list_threads)
-    for name in ("approve_gate", "reject_gate", "retry", "pause", "resume"):
-
-        async def call(*args, _name=name, **kwargs):
-            calls.append((_name, args, kwargs))
-            return {"id": detail["id"], "node_id": "implement"}
-
-        monkeypatch.setattr(client, name, call)
 
 
 async def _read_done(console, app, pilot) -> None:
     """The Item's read workers have all finished (the app's own stream worker
     never does, so not `workers.wait_for_complete`)."""
     await console.until(pilot, lambda: all(w.is_finished for w in app.workers if w.group == "read"))
-
-
-async def _opened(console, app, pilot, work_item_id: str) -> None:
-    await _settled(console, app, pilot)
-    app.open_item(work_item_id)
-    await console.until(pilot, lambda: app.view.item is not None and _overview(app))
 
 
 @pytest.mark.parametrize(
