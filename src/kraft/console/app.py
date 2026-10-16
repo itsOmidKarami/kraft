@@ -86,6 +86,9 @@ def _theme(name: str, tokens: dict[str, str], *, dark: bool) -> Theme:
             "scrollbar-hover": tokens["text-muted"],
             "scrollbar-active": tokens["text-muted"],
             "scrollbar-background": tokens["bg"],
+            # A focused button's label tinted and underlined, not inverted: an
+            # inverted pill inside the button read as a drawing glitch.
+            "button-focus-text-style": "bold underline",
         },
     )
 

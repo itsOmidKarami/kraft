@@ -137,3 +137,17 @@ def test_a_toggle_says_on_and_off_by_its_mark_not_only_its_colour(console):
         return before, marks()
 
     assert console.run(scenario) == (["▐✓▌", "▐·▌"], ["▐·▌", "▐✓▌"])
+
+
+def test_a_focused_button_is_underlined_not_inverted(console):
+    """Textual's focused label is reversed: an inverted pill inside the button
+    that reads as a drawing glitch."""
+
+    async def scenario(app, pilot):
+        app.run_worker(partial(app.push_screen_wait, DIALOGS["confirm"]()))
+        await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+        await pilot.pause()
+        return str(app.screen.query_one("#no").styles.text_style)
+
+    style = console.run(scenario)
+    assert "underline" in style and "reverse" not in style

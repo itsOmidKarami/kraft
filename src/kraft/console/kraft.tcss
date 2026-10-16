@@ -240,9 +240,19 @@ Confirm, Note, Menu, Connect, NewItem, Keys {
     border: solid $kraft-line;
 }
 
-/* After the dialogs' shared width: the keys need less. */
+/* After the dialogs' shared width: the keys need less, and scroll in a
+ * window too short for them. */
 #keys {
     width: 52;
+}
+
+/* Its frame and padding take 4 rows: three quarters leaves them room down to 16. */
+#keys-scroll {
+    height: auto;
+    max-height: 75vh;
+    scrollbar-background: $surface;
+    scrollbar-background-hover: $surface;
+    scrollbar-background-active: $surface;
 }
 
 #listing, #note-lines {

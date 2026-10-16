@@ -301,7 +301,7 @@ def test_question_mark_lists_this_screens_keys_and_kraft_s_own(console, view, cl
     """`?` is Kraft's dialog, not Textual's panel: the shown view's keys that
     act now (none to approve on an empty Board), then the frame's, in the
     footer's words, with none of Textual's own (focus next, copy text). It
-    squeezes nothing, and `?` or Esc closes it."""
+    squeezes nothing, fits the window, and `?` or Esc closes it."""
 
     async def scenario(app, pilot):
         app.show(view)
@@ -317,16 +317,20 @@ def test_question_mark_lists_this_screens_keys_and_kraft_s_own(console, view, cl
             for part in ("here", "everywhere")
         ]
         squeezed = app.view.size.width != width
+        fits = app.screen.region.contains_region(app.screen.query_one("#keys").region) and (
+            view != "board" or app.screen.query_one("#keys-scroll").max_scroll_y > 0
+        )
         await pilot.press(close)
         await pilot.pause()
-        return listed, squeezed, isinstance(app.screen, Keys)
+        return listed, squeezed, fits, isinstance(app.screen, Keys)
 
-    (mine, everywhere), squeezed, still = console.run(scenario)
+    (mine, everywhere), squeezed, fits, still = console.run(scenario)
     assert set(here) <= set(mine)
     assert not set(shut) & set(mine)
     assert {"^p palette", "? keys", "esc back"} <= set(everywhere)
     assert not any("Focus" in line or "Copy" in line for line in mine + everywhere)
-    assert (squeezed, still) == (False, False)
+    # At 80x24 it scrolls rather than run off the screen (the Board's keys need to).
+    assert (squeezed, fits, still) == (False, True, False)
 
 
 @pytest.mark.parametrize(

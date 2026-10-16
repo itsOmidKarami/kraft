@@ -120,7 +120,8 @@ class Keys(Dialog[None]):
                 for keys, label in rows
             )
 
-        with Vertical(id="keys"):
+        # Scrolled in a short window: the list must not run off the screen.
+        with Vertical(id="keys"), VerticalScroll(id="keys-scroll"):
             if self.here:
                 yield Static("This screen", classes="keys-head")
                 yield Static(listed(self.here), id="keys-here")
