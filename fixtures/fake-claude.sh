@@ -208,7 +208,7 @@ fi
 # first line and the rest, so a test can read the log while the child still runs.
 sleep "${KRAFT_FAKE_CLAUDE_STREAM_DELAY:-0}"
 # Tokens follow the cost, so a dearer run reads as a bigger one (0.035 is 1000 in, 200 out).
-tin="$(awk -v c="$cost" 'BEGIN { printf "%d", 1000 * c / 0.035 }')"
-tout="$(awk -v c="$cost" 'BEGIN { printf "%d", 200 * c / 0.035 }')"
+tin="$(awk -v c="$cost" 'BEGIN { printf "%.0f", 1000 * c / 0.035 }')"
+tout="$(awk -v c="$cost" 'BEGIN { printf "%.0f", 200 * c / 0.035 }')"
 printf '{"type":"assistant","request_id":"req_1","message":{"model":"fake-agent","usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":500}}}\n'
 printf '{"type":"result","is_error":false,"total_cost_usd":%s,"modelUsage":{"fake-agent":{"inputTokens":%s,"outputTokens":%s,"cacheReadInputTokens":500}},"usage":{"input_tokens":%s,"output_tokens":%s,"cache_read_input_tokens":500}}\n' "$cost" "$tin" "$tout" "$tin" "$tout"
