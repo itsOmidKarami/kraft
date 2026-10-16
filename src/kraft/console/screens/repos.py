@@ -12,15 +12,17 @@ from typing import ClassVar
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.content import Content
-from textual.widgets import OptionList
+from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
 
 from kraft import client, render
 from kraft.console.dialogs import Connect
 from kraft.console.screens import View
 
+#: The list's heading: what it lists, and the key that adds to it.
+HEAD = Content.assemble(("Connected repos", "$kraft-muted"), (" · c connects one", "$kraft-faint"))
 #: The list with nothing connected.
-EMPTY = "No repo is connected. c connects one."
+EMPTY = "No repo is connected yet."
 
 
 def command_words(command: str | None) -> str:
@@ -65,6 +67,7 @@ class Repos(View):
         self.repos: list[dict] = []
 
     def compose(self) -> ComposeResult:
+        yield Static(HEAD, id="repos-head")
         rows = OptionList(id="repo-rows", markup=False)
         rows.can_focus = False
         yield rows

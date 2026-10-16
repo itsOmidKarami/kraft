@@ -86,9 +86,10 @@ def test_the_list_shows_each_repo_with_its_commands(board, monkeypatch, listed, 
         await _settled(console, app, pilot)
         await pilot.press("4")
         await console.until(pilot, lambda: len(_rows(app)) == len(lines))
-        return _rows(app)
+        return _rows(app), _text(app, "#repos-head")
 
-    assert console.run(scenario) == lines
+    # The heading says what the list is and how to add to it, with repos or none.
+    assert console.run(scenario) == (lines, "Connected repos · c connects one")
 
 
 @pytest.mark.parametrize(
