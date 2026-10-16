@@ -9,6 +9,11 @@ const sess = (node_id: string, over: Partial<WorkerSession> = {}) => ({ id: `${n
 const approved = (gate: string, by: string): KraftEvent => ({ seq: 1, work_item_id: "w1", type: "gate_approved", payload: { gate, by }, node_id: gate, created_at: "t" });
 
 describe("chainGraph", () => {
+  it("names the node a rebase bounces to, not its id", () => {
+    const item = detail({ chain_definition: { nodes: V1.map((n) => (n.id === "verification" ? { ...n, rebase_bounce_to: "merge_request" } : n)) } as never });
+    expect(chainGraph(item, [], NOW).arcs(undefined).find((a) => a.kind === "rebase")).toMatchObject({ label: "rebase → merge request" });
+  });
+
   it("marks done, current and not started from the current node, with durations and who passed each gate", () => {
     const item = detail({
       worker_sessions: [sess("plan"), sess("verification", { attempt: 2, round: 1, status: "running", started_at: "2026-09-13T10:07:00Z" }), sess("verification", { started_at: "2026-09-13T09:30:00Z" })],

@@ -1,3 +1,5 @@
+import { useReason } from "../../ui/Reason";
+import { ADD_NOTE, WRITE_FIRST } from "../../ui/reasons";
 import { REQUEST_CHANGES, sendsBack } from "../../review/finish";
 import { nameOf } from "../../board/rowText";
 import { useEffect, useState } from "react";
@@ -69,7 +71,6 @@ const SPEC: Record<ComposeKind, Spec> = {
     help: (i) => `${sendsBack(false)}${rejectName(i)}, with your note as the first thing the agent reads.`,
     placeholder: "What needs to change?",
     label: REQUEST_CHANGES,
-    target: (i) => `Goes back to: ${rejectName(i)}`,
   },
   answer: {
     title: "Answer",
@@ -98,7 +99,7 @@ const SPEC: Record<ComposeKind, Spec> = {
   },
 };
 
-/** A full-screen composer (W17 brief C.7): help, a 16px textarea, a target line, one primary, disabled until it has what it needs. */
+/** A full-screen composer (W17 brief C.7): help, a 16px textarea, a target line, one primary that says what is missing when pressed without it. */
 export function Composer({ item, kind, reload }: { item: ItemDetail; kind: ComposeKind; reload: () => void }) {
   const back = useBack();
   const spec = SPEC[kind];
@@ -121,9 +122,12 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
     : null;
   const target = spec.target?.(item) ?? null;
 
+  const [tried, setTried] = useState(false);
+  // Said after a press with nothing written, and gone once there is something.
+  const noText = useReason(tried && !text.trim() ? (kind === "reject" ? ADD_NOTE : WRITE_FIRST) : null);
   const send = async () => {
     const t = text.trim();
-    if (!t) return;
+    if (!t) return setTried(true);
     setBusy(true);
     setError(null);
     let r: Done & { paused?: boolean };
@@ -161,7 +165,7 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
       <div className="ph-content">
         <p className="ph-help">{spec.help(item)}</p>
         {/* Focus starts in the box, as in the desktop's dialogs: it opened on <body>, so a keyboard or switch user had to find it first (R12b-13). */}
-        <textarea autoFocus className="ph-input ph-input-area" aria-label={kind === "cancel" || kind === "complete" ? "Reason" : "Your note"} placeholder={spec.placeholder} value={text} onChange={(e) => setText(e.target.value)} />
+        <textarea autoFocus className="ph-input ph-input-area" aria-label={kind === "cancel" || kind === "complete" ? "Reason" : "Your note"} {...noText.attrs} placeholder={spec.placeholder} value={text} onChange={(e) => setText(e.target.value)} />
         {flagLabel && <div className="ph-list"><SwitchRow label={flagLabel} on={flag} onChange={setFlag} /></div>}
         {kind === "cancel" && preview && (
           <Facts rows={[
@@ -173,7 +177,8 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
         {error && <p className="ph-error" role="alert">{error}</p>}
       </div>
       <div className="ph-actionbar">
-        <Button className="ph-btn ph-btn-primary" variant={spec.danger ? "danger" : "primary"} disabled={busy || !text.trim()} onClick={send}>{typeof spec.label === "function" ? spec.label(item) : spec.label}</Button>
+        {noText.note}
+        <Button className="ph-btn ph-btn-primary" variant={spec.danger ? "danger" : "primary"} disabled={busy} onClick={send}>{typeof spec.label === "function" ? spec.label(item) : spec.label}</Button>
       </div>
     </>
   );

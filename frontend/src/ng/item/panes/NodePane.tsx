@@ -1,5 +1,6 @@
 import { tokenText, tokenTip, usd } from "../../../format";
 import type { ChainNode } from "../../../types";
+import { nameOf } from "../../board/rowText";
 import { stepsOf, taskName } from "../paths";
 import { loopRounds, sessionsOf, settled } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
@@ -54,8 +55,8 @@ export function NodeConfig({ item, node, onReset, controls }: { item: ItemDetail
   const rows: [string, string | null | undefined][] = [
     ["kind", node.kind ?? "exec"],
     ["fix loop", node.fix_loop],
-    ["reject to", node.reject_to],
-    ["rebase back to", node.rebase_bounce_to],
+    ["reject to", node.reject_to && nameOf(item.chain_definition.nodes, node.reject_to)],
+    ["rebase back to", node.rebase_bounce_to && nameOf(item.chain_definition.nodes, node.rebase_bounce_to)],
     ["auto-escalate", node.auto_escalate == null ? null : node.auto_escalate ? "on" : "off"],
     ["on failure", node.on_failure?.map(taskName).join(", ")],
   ];

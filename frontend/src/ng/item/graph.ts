@@ -1,3 +1,4 @@
+import { nameOf } from "../board/rowText";
 import { elapsed, elapsedBetween } from "../../format";
 import type { ChainNode as ApiNode, KraftEvent, WorkerSession } from "../../types";
 import type { ChainArc, ChainNode } from "../graph/layout";
@@ -81,7 +82,7 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
     if (!n.fix_loop || rounds < 1 || i > cur) return [];
     return [{ kind: "loop", node: n.id, tone: capped === n.id ? "red" : i === cur ? "active" : "idle", label: `round ${rounds + 1}` }];
   });
-  const rebases: ChainArc[] = api.flatMap((n) => (n.rebase_bounce_to ? [{ kind: "rebase", from: n.id, to: n.rebase_bounce_to, label: `rebase → ${n.rebase_bounce_to}` }] : []));
+  const rebases: ChainArc[] = api.flatMap((n) => (n.rebase_bounce_to ? [{ kind: "rebase", from: n.id, to: n.rebase_bounce_to, label: `rebase → ${nameOf(api, n.rebase_bounce_to)}` }] : []));
   return {
     nodes,
     arcs: (selected) => {

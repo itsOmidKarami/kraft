@@ -1,3 +1,4 @@
+import { gateName } from "../board/rowText";
 import { elapsed, elapsedBetween } from "../../format";
 import type { ChainNode as ApiNode, KraftEvent, NodePass, SessionStatus, WorkerSession, WorkItemDocument } from "../../types";
 import type { NodeStep } from "../graph/nodeLayout";
@@ -37,8 +38,8 @@ export function passOf(item: ItemDetail, node: string): WorkerSession[] {
 export const passesOf = (item: ItemDetail, node: string): NodePass[] => item.node_passes?.[node] ?? [];
 
 /** What sent the chain back to start a pass, in words; nothing for a node's first pass. */
-export const passWhy = (p: NodePass | undefined): string =>
-  p?.reason === "reject" ? `after a reject at ${p.gate}` : p?.reason === "fixed" ? `after a fix at ${p.gate}` : p?.reason === "retry" ? "after a retry" : p?.reason === "base_change" ? "after a base change" : p && p.pass > 1 ? "started over" : "";
+export const passWhy = (p: NodePass | undefined, nodes?: ApiNode[]): string =>
+  p?.reason === "reject" ? `after changes were requested${p.gate ? ` at ${gateName(nodes, p.gate)}` : ""}` : p?.reason === "fixed" ? `after a fix${p.gate ? ` at ${gateName(nodes, p.gate)}` : ""}` : p?.reason === "retry" ? "after a retry" : p?.reason === "base_change" ? "after a base change" : p && p.pass > 1 ? "started over" : "";
 
 /** The pass a node's view shows: the one picked when the node has it, else the newest. Undefined for a node with one pass. */
 export const passShown = (item: ItemDetail, node: string, picked?: number): number | undefined => {
@@ -256,7 +257,7 @@ export type Rounds = { rows: RoundRow[]; selected: number; latest: number; total
 export function passList(item: ItemDetail, node: string, picked?: number): Rounds | undefined {
   const selected = passShown(item, node, picked);
   const all = passesOf(item, node);
-  return selected ? { rows: all.map((p) => ({ n: p.pass, outcome: passWhy(p) || "first run" })), selected, latest: all.length, total: all.length } : undefined;
+  return selected ? { rows: all.map((p) => ({ n: p.pass, outcome: passWhy(p, item.chain_definition.nodes) || "first run" })), selected, latest: all.length, total: all.length } : undefined;
 }
 
 /** One row per round that ran, oldest first: its dot and what became of it. A round the loop moved on from was

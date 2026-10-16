@@ -8,6 +8,8 @@ import { rejectTarget } from "../../item/graph";
 import { admits } from "../../item/status";
 import { useEvents } from "../../item/useEvents";
 import { useItem, type ItemDetail } from "../../item/useItem";
+import { useReason } from "../../ui/Reason";
+import { ADD_NOTE } from "../../ui/reasons";
 import { REQUEST_CHANGES, approveBlock, drafts, gateConsequence, sendsBack } from "../../review/finish";
 import { useSubmit } from "../../review/FinishReview";
 import { parsePatch, type PatchFile } from "../../review/patch";
@@ -247,7 +249,11 @@ function ReviewComposer({ target, submit }: { target: string | null; submit: Ret
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tried, setTried] = useState(false);
+  // Said after a press with no note, and gone once there is one (the review page does the same).
+  const noNote = useReason(tried && !text.trim() ? ADD_NOTE : null);
   const send = async () => {
+    if (!text.trim()) return setTried(true);
     setBusy(true);
     setError(null);
     const e = await submit("request_changes", text.trim());
@@ -263,13 +269,13 @@ function ReviewComposer({ target, submit }: { target: string | null; submit: Ret
       </header>
       <div className="ph-content">
         <p className="ph-help">{`${sendsBack(false)}${target ?? "the previous node"}, with your note as the first thing the agent reads.`}</p>
-        <textarea className="ph-input ph-input-area" aria-label="Your note" placeholder="What needs to change?" value={text} onChange={(e) => setText(e.target.value)} />
-        {target && <p className="ph-target">Goes back to: {target}</p>}
+        <textarea className="ph-input ph-input-area" aria-label="Your note" {...noNote.attrs} placeholder="What needs to change?" value={text} onChange={(e) => setText(e.target.value)} />
         {error && <p className="ph-error" role="alert">{error}</p>}
       </div>
       {sheet.is("discard") && <ConfirmSheet title="Discard your note?" text="Your note has not been sent." confirm={{ label: "Discard", danger: true, run: back.go }} onClose={sheet.close} />}
       <div className="ph-actionbar">
-        <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy || !text.trim()} onClick={send}>{REQUEST_CHANGES}</Button>
+        {noNote.note}
+        <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy} onClick={send}>{REQUEST_CHANGES}</Button>
       </div>
     </>
   );

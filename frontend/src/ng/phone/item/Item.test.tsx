@@ -212,7 +212,9 @@ describe("Steer (C.8, R66)", () => {
     const calls = mount(item("running"), "/work-items/w1?compose=steer");
     expect(await screen.findByText(/Steering pauses the item\. The running attempt on verification stops now/)).toBeInTheDocument();
     const send = screen.getByRole("button", { name: "Send steer" });
-    expect(send).toBeDisabled();
+    await userEvent.click(send);
+    expect(screen.getByText("Write something first.")).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
     await userEvent.type(screen.getByRole("textbox", { name: "Your note" }), "skip the flaky suite");
     await userEvent.click(send);
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toEqual([
@@ -252,9 +254,13 @@ describe("the other composers (C.7)", () => {
 
   it("Reject names its target and needs a note", async () => {
     const calls = mount(gateItem(), "/work-items/w1?compose=reject");
-    expect(await screen.findByText("Goes back to: plan")).toBeInTheDocument();
+    // The target is said once, in the help line.
+    expect(await screen.findByText(/Sends your note back to plan, with your note/)).toBeInTheDocument();
+    expect(screen.queryByText(/Goes back to/)).not.toBeInTheDocument();
     const send = screen.getByRole("button", { name: "Request changes" });
-    expect(send).toBeDisabled();
+    await userEvent.click(send);
+    expect(screen.getByText("Write what needs to change first.")).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
     await userEvent.type(screen.getByRole("textbox"), "the plan skips the cache bound");
     await userEvent.click(send);
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/gates/plan_approval/reject", body: { note: "the plan skips the cache bound" } }]));
@@ -285,7 +291,9 @@ describe("the other composers (C.7)", () => {
     });
     expect(await screen.findByText(/branch kraft\/x, the worktree until it is archived, 2 findings, 1 threads/)).toBeInTheDocument();
     await userEvent.click(await screen.findByRole("switch", { name: "Also close !142 on the forge" }));
-    expect(screen.getByRole("button", { name: "Cancel item" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel item" }));
+    expect(screen.getByText("Write something first.")).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
     await userEvent.type(screen.getByRole("textbox", { name: "Reason" }), "wrong repo");
     await userEvent.click(screen.getByRole("button", { name: "Cancel item" }));
     await waitFor(() => expect(lastPost(calls)).toEqual({ method: "POST", path: "/work-items/w1/cancel", body: { reason: "wrong repo", close_mr: true } }));

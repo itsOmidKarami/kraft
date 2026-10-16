@@ -10,7 +10,7 @@ type Props = {
   reviewer?: Reviewer;
   message?: string;
   doc?: { label: string; onClick?: () => void };
-  reject?: { id: string; icon?: string; onClick?: () => void };
+  reject?: { id: string; label?: string; icon?: string; onClick?: () => void };
   note?: string;
   youSub?: string;
   /** Px the docked pane takes on the right. */
@@ -62,7 +62,7 @@ export function GateView({ gate, reviewer: r, message, doc, reject, note, youSub
           <div className="gateview-reject">
             <span className="gateview-reject-line" aria-hidden="true" />
             <span className="gateview-reject-word" aria-hidden="true">reject</span>
-            <button type="button" className="gateview-target" aria-label={`reject to ${reject.id}`} title="Open the target node" onClick={reject.onClick}><NodeIcon name={reject.icon} size={13} />{reject.id}</button>
+            <button type="button" className="gateview-target" aria-label={`reject to ${reject.label ?? reject.id}`} title="Open the target node" onClick={reject.onClick}><NodeIcon name={reject.icon} size={13} />{reject.label ?? reject.id}</button>
           </div>
         )}
         {note && <p className="gateview-note">{note}</p>}

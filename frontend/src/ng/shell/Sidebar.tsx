@@ -20,6 +20,8 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   const mode = useSyncExternalStore(subscribeSidebar, effectiveSidebar);
   const connection = useStore((s) => s.connection);
   const word = connectionWord(connection, useStore((s) => s.loadError));
+  // Red comes with the banner (a failed read, a dropped socket); the first connect is not a failure.
+  const tone = word === "live" ? "ok" : word === "connecting…" ? "neutral" : "bad";
   // The board's own Needs you count: failed and paused mid-chain included.
   const needsYou = useGroupCount("needs");
   const health = useHealth();
@@ -97,9 +99,9 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
       <div className="ng-side-edge" aria-hidden />
       <aside className="ng-sidebar" aria-label="Sidebar" onKeyDown={onSideKey}>
         <div className="ng-side-head">
-          <span className={`ng-side-live-dot ${word === "live" ? "ok" : "warn"}`} role="img" aria-label={word} />
+          <span className={`ng-side-live-dot ${tone}`} role="img" aria-label={word} />
           <span className="ng-side-brand ng-side-label">Kraft</span>
-          <span className={`ng-side-live ng-side-label ${word === "live" ? "ok" : "warn"}`}>{word}</span>
+          <span className={`ng-side-live ng-side-label ${tone}`}>{word}</span>
           <button
             type="button"
             className="ng-side-pin"

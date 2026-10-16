@@ -220,9 +220,11 @@ describe("Request changes (F.3)", () => {
     const calls = mount(gateItem(), "/work-items/w1/review", { "POST /work-items/w1/gates/plan_approval/review": [200, { outcome: "request_changes", gate: "plan_approval" }] });
     await userEvent.click(await screen.findByRole("button", { name: "Request changes" }));
     expect(where()).toBe("/work-items/w1/review?compose=reject");
-    expect(screen.getByText("Goes back to: plan")).toBeInTheDocument();
+    expect(screen.getByText(/Sends your note back to plan, with your note/)).toBeInTheDocument();
     const send = screen.getByRole("button", { name: "Request changes" });
-    expect(send).toBeDisabled();
+    await userEvent.click(send);
+    expect(screen.getByText("Write what needs to change first.")).toBeInTheDocument();
+    expect(posts(calls)).toEqual([]);
     await userEvent.type(screen.getByRole("textbox", { name: "Your note" }), "bound the cache");
     await userEvent.click(send);
     await waitFor(() => expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/gates/plan_approval/review", body: { outcome: "request_changes", summary: "bound the cache" } }]));
@@ -231,13 +233,13 @@ describe("Request changes (F.3)", () => {
   });
 
   it.each([
-    ["a server with no fix target: none named", gateItem({ fix_target: null }), "/work-items/w1/review?compose=reject", null],
-    ["an older server sending no fix_target: the chain's guess", gateItem({ fix_target: undefined, chain_definition: { nodes: [{ id: "plan", kind: "exec" }, { id: "plan_approval", kind: "gate" }] } }), "/work-items/w1/review?compose=reject", "Goes back to: plan"],
-  ] as [string, ReturnType<typeof gateItem>, string, string | null][])("names the target the server sends: %s", async (_id, item, path, line) => {
+    ["a server with no fix target: none named", gateItem({ fix_target: null }), "/work-items/w1/review?compose=reject", "Sends your note back to the previous node"],
+    ["an older server sending no fix_target: the chain's guess", gateItem({ fix_target: undefined, chain_definition: { nodes: [{ id: "plan", kind: "exec" }, { id: "plan_approval", kind: "gate" }] } }), "/work-items/w1/review?compose=reject", "Sends your note back to plan"],
+  ] as [string, ReturnType<typeof gateItem>, string, string][])("names the target once, in the help line: %s", async (_id, item, path, line) => {
     mount(item, path);
     await screen.findByRole("textbox", { name: "Your note" });
-    if (line) expect(screen.getByText(line)).toBeInTheDocument();
-    else expect(screen.queryByText(/Goes back to/)).not.toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`^${line}, with your note`))).toBeInTheDocument();
+    expect(screen.queryByText(/Goes back to/)).not.toBeInTheDocument();
   });
 
   it.each([
