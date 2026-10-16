@@ -6,6 +6,7 @@ server did not give; a missing field is left out."""
 from __future__ import annotations
 
 import json
+import textwrap
 
 from rich.text import Text
 
@@ -175,7 +176,7 @@ def _state_line(item: dict, node_id: str, state: str, is_gate: bool) -> str:
     return STATE_WORDS[state]
 
 
-def node_detail(item, events, k, state, at, now, colour) -> tuple[list[Text], int]:
+def node_detail(item, events, k, state, at, now, colour, width=80) -> tuple[list[Text], int]:
     """The open node `k`'s lines, indented under its row, and which of them
     the session cursor `at` sits on (-1: none)."""
     nodes = words.nodes_of(item) or []
@@ -184,7 +185,11 @@ def node_detail(item, events, k, state, at, now, colour) -> tuple[list[Text], in
     out: list[Text] = []
 
     def add(text: str, style: str = "") -> None:
-        out.append(Text(INDENT + text, style=style))
+        # A long line wraps under its own start, not at the pane's edge.
+        for line in textwrap.wrap(
+            text.strip() and INDENT + text, max(width, 20), subsequent_indent=INDENT + "  "
+        ) or [INDENT]:
+            out.append(Text(line, style=style))
 
     passes = (item.get("node_passes") or {}).get(node_id) or []
     add(_state_line(item, node_id, state, node.get("kind") == "gate"), "bold")
@@ -257,7 +262,7 @@ def chain_lines(item, events, cursor, opened, session_at, width, now, colour):
             on = top = len(out)
         out.append(row)
         if lit and opened:
-            lines, at = node_detail(item, events, k, state, session_at, now, colour)
+            lines, at = node_detail(item, events, k, state, session_at, now, colour, width)
             on = top + 1 + at if at >= 0 else top
             out += lines
     return out, on, top
