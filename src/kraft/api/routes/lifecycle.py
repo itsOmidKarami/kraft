@@ -1246,7 +1246,14 @@ _STOPPED_DURING_REFRESH = (
 )
 
 
-async def refresh_base(request: Request, wid: str, row, node_id: str | None) -> str | None:
+async def refresh_base(
+    request: Request,
+    wid: str,
+    row,
+    node_id: str | None,
+    *,
+    stopped: str = _STOPPED_DURING_REFRESH,
+) -> str | None:
     """`builtins_mod.refresh_worktree_base` for `wid`'s worktree, run as the
     item's own task (`deps.run_stoppable`) under the tightest time cap its item
     and node carry, so a pause, a cancel or a server stop ends the rebase
@@ -1266,7 +1273,7 @@ async def refresh_base(request: Request, wid: str, row, node_id: str | None) -> 
         # (and the resume then undoes) stays what it was.
         status = deps._work_item_row(st, wid)["status"]
         if status == WorkItemStatus.PAUSED or status in ENDED:
-            raise HTTPException(409, _STOPPED_DURING_REFRESH)
+            raise HTTPException(409, stopped)
 
     # No await between this read and the spawn: a stop from here on finds the task.
     active()
@@ -1281,7 +1288,7 @@ async def refresh_base(request: Request, wid: str, row, node_id: str | None) -> 
                 base=base,
                 timeout=timeout,
             ),
-            stopped=_STOPPED_DURING_REFRESH,
+            stopped=stopped,
         )
     except RuntimeError:
         # A conflict or a failure of an item stopped meanwhile is not the

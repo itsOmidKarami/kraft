@@ -215,6 +215,12 @@ def _decided_by(request: Request) -> str:
     return "human"
 
 
+_STOPPED_AFTER_APPROVAL = (
+    "the gate was approved, but the work item was stopped while its branch was being "
+    "brought up to date, so the chain did not go on"
+)
+
+
 def _before_any_push(nodes, gate: str) -> bool:
     """Whether nothing of the item can have been pushed when `gate` is
     approved: no node up to and including it has a forge task, the only
@@ -238,7 +244,7 @@ async def _refresh_base_at_gate(request, wid: str, row, gate: str) -> None:
     node = row["current_node_id"]
     reason = None
     try:
-        new_base = await refresh_base(request, wid, row, gate)
+        new_base = await refresh_base(request, wid, row, gate, stopped=_STOPPED_AFTER_APPROVAL)
     except HTTPException:
         # Stopped (paused, cancelled, a walk already there): not a refusal of
         # the approval, and not ours to continue after.
