@@ -5,6 +5,7 @@ import { useLibrary } from "../useLibrary";
 import { focusSoon } from "./focus";
 import { PickList } from "./PickList";
 import { SEARCH_LIBRARY } from "../../library/sharedWords";
+import { Empty } from "../../ui/Empty";
 
 export type TaskChoice = { kind: TaskKind } | { extends: string };
 const KINDS: TaskKind[] = ["agent", "builtin", "subprocess", "forge"];
@@ -23,7 +24,7 @@ export function TaskMenu({ anchor, title, agentOnly, onPick, onClose }: { anchor
       <div className="task-menu">
         <p className="menu-title">{title}</p>
         {lib ? (
-          library === "failed" ? <p className="picklist-empty">Couldn't load the library.</p> : (
+          library === "failed" ? <Empty className="picklist-empty">Couldn't load the library.</Empty> : (
             <PickList
               placeholder={SEARCH_LIBRARY}
               empty={library === "loading" ? "Loading…" : "No library task matches."}

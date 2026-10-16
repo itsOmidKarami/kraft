@@ -3,7 +3,7 @@
 .tpl-note h1 { margin: 0 0 6px; font-size: var(--fs-h2); font-weight: 500; color: var(--text); }
 .tpl-page { position: relative; height: calc(100vh - 44px); overflow: hidden; }
 .tpl-area { position: absolute; inset: 0; }
-.tpl-empty-chain { position: absolute; left: 50%; top: 54%; transform: translateX(-50%); margin: 0; font-size: var(--fs-meta); color: var(--text-muted); pointer-events: none; }
+.tpl-empty-chain { position: absolute; left: 50%; top: 54%; transform: translateX(-50%); pointer-events: none; }
 
 /* Header tail (brief Decided 8): the chain, its node, the draft state, the problems badge. */
 .tpl-crumb-sep { color: var(--text-muted); }
@@ -40,7 +40,7 @@
 .picklist-item > span { display: flex; flex-direction: column; min-width: 0; }
 .picklist-name { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); }
 .picklist-sub { font-size: var(--fs-meta); color: var(--text-muted); overflow-wrap: anywhere; }
-.picklist-empty { margin: 6px; font-size: var(--fs-meta); color: var(--text-muted); }
+.picklist-empty.empty { margin: 6px; }
 
 /* The node view: the strip on top, the node's canvas under it. */
 .tpl-area > .strip { position: absolute; left: 0; right: 0; top: 0; z-index: 3; }

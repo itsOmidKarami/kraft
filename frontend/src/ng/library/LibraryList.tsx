@@ -13,6 +13,7 @@ import { tip } from "../ui/Tooltip";
 import { NoMatch } from "../ui/NoMatch";
 import { AddonBadge } from "../templates/addon";
 import { SEARCH_LIBRARY } from "./sharedWords";
+import { Empty } from "../ui/Empty";
 
 /** What `+ New` can add: the section, and the node's or task's kind. */
 const NEW: { label: string; section: Section; kind?: string }[] = [
@@ -157,7 +158,7 @@ export function LibraryList({ rows, selected, only, onShowAll, onSelect, onAdd }
         </p>
       )}
       <div className="lib-rows" role="listbox" aria-label="Library components">
-        {!rows.length && <p className="lib-empty">The library is empty. + New to add the first component.</p>}
+        {!rows.length && <Empty className="lib-empty">The library is empty. + New to add the first component.</Empty>}
         {!!rows.length && !shown.length && <NoMatch className="lib-empty" query={q} onClear={() => setQ("")} />}
         {SECTIONS.map((s) => {
           const inGroup = shown.filter((x) => x.section === s);

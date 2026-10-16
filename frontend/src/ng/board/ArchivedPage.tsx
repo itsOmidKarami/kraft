@@ -14,6 +14,7 @@ import { Row } from "./Row";
 import "./board.css";
 import "../item/item.css";
 import { LinkButton } from "../ui/LinkButton";
+import { Empty } from "../ui/Empty";
 
 type Sort = "archived" | "created" | "title";
 const SORT_LABEL: Record<Sort, string> = { archived: "Recently archived", created: "Created", title: "Title" };
@@ -87,7 +88,7 @@ export function ArchivedPage() {
         <div className="board-list">
           <div className="board-list-inner">
             {error && <p className="item-error board-empty board-empty-solo" role="alert">{ARCHIVED_READ_ERROR(error)}</p>}
-            {items && !shown.length && (q.trim() ? <NoMatch className="board-empty board-empty-solo" query={q} onClear={() => set("q", "")} /> : <p className="board-empty board-empty-solo">{NOTHING_ARCHIVED}</p>)}
+            {items && !shown.length && (q.trim() ? <NoMatch className="board-empty board-empty-solo" query={q} onClear={() => set("q", "")} /> : <Empty className="board-empty board-empty-solo">{NOTHING_ARCHIVED}</Empty>)}
             {shown.length > 0 && (
               <section className="board-group" aria-label="Archived">
                 <h2 className="board-group-head"><span>Archived</span><span className="board-count">{shown.length}</span></h2>

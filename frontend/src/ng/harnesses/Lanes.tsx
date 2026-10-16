@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { NodeGlyph } from "../graph/NodeGlyph";
 import { NodeIcon, TriangleAlert } from "../icons";
 import { type HProblem, type Lane, type TaskRef, problemsOfTask, taskName, taskTile } from "./model";
+import { Empty } from "../ui/Empty";
 
 const nodeOf = (path: string) => path.split(".")[0];
 export const chainLink = (t: TaskRef) => `/templates/chains/${encodeURIComponent(t.chain)}/nodes/${encodeURIComponent(nodeOf(t.path))}`;
@@ -43,7 +44,7 @@ export function Lanes({ lanes, pill, selected, empty, problems, onOpen }: {
   return (
     <>
       <span className="hn-pill">{pill}</span>
-      {lanes.length === 0 && <p className="hn-empty">{empty}</p>}
+      {lanes.length === 0 && <Empty className="hn-empty">{empty}</Empty>}
       {lanes.map((l) => (
         <section
           key={l.key}

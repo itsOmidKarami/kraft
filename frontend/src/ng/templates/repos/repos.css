@@ -26,7 +26,7 @@
 .rp-ready.is-no { color: var(--warn); }
 .rp-row.is-off .rp-ready { color: var(--text-muted); }
 .rp-state.is-on { color: var(--ok); }
-.rp-empty { margin: 14px 10px; font-size: var(--fs-label); color: var(--text-muted); }
+.rp-empty.empty { margin: 14px 10px; }
 .rp-detected { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
 .rp-h2 { margin: 0 0 4px 10px; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .rp-det { display: flex; align-items: center; gap: 12px; padding: 4px 10px; font-size: var(--fs-label); }

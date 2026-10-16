@@ -7,8 +7,8 @@
 
 .board-group-head { display: flex; align-items: center; gap: 8px; margin: 0; padding: 16px 14px 6px 46px; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .board-count { padding: 0 6px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); letter-spacing: 0; font-size: var(--fs-label); }
-.board-empty { margin: 0; padding: 6px 14px 6px 54px; font-size: var(--fs-label); color: var(--text-muted); }
-.board-empty-solo { padding-left: 14px; }
+.board-empty.empty { padding: 6px 14px 6px 54px; }
+.board-empty-solo.empty { padding-left: 14px; }
 .board-page-head { flex: none; max-width: 1180px; width: 100%; box-sizing: border-box; margin: 0 auto; padding: 14px 14px 0; }
 .board-page-head h1 { margin: 0 0 2px; font-size: var(--fs-h2); font-weight: 600; }
 .board-page-head p { margin: 0; font-size: var(--fs-meta); color: var(--text-sub); }

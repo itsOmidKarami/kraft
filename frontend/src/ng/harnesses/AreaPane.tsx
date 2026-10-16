@@ -8,6 +8,7 @@ import type { ConfigDraft } from "../templates/draft/useConfigDraft";
 import { ACCESS_WORD, ITEM_HARNESS, itemHarnessNow, TOOLS_COMMA_SEPARATED, TOOLS_EVERY, TOOLS_RESTRICT, ESCALATION_PATH, type HProblem, type Resolved } from "./model";
 import type { Published } from "./usePublishedPolicy";
 import { problemText } from "../templates/problems";
+import { Empty } from "../ui/Empty";
 
 export type AreaTab = "overview" | "config";
 const TABS: { value: AreaTab; label: string }[] = [{ value: "overview", label: "Overview" }, { value: "config", label: "Config" }];
@@ -85,7 +86,7 @@ export function AreaPane({ draft, r, problems, published, tab, onTab, open, size
           <Head>Tools</Head>
           {r.allowed_tools == null && !restricting ? (
             <>
-              <p className="pill-empty">{TOOLS_EVERY}: no list limits the agent.</p>
+              <Empty>{TOOLS_EVERY}: no list limits the agent.</Empty>
               <Button onClick={() => setRestricting(true)}>{TOOLS_RESTRICT}</Button>
             </>
           ) : (

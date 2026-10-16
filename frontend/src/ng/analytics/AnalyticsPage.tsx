@@ -11,6 +11,7 @@ import { boardHref, DEFAULT_RANGE, EMPTY_RANGE, gateLabel, gateRows, HOW_COUNTED
 import { weekBuckets } from "./weeks";
 import "./analytics.css";
 import { REPAIRS_PER_ITEM, WAITING_AT_EACH_GATE, WHY_STOPPED_FOR_PERSON } from "./sharedWords";
+import { Empty } from "../ui/Empty";
 
 /** A section with nothing to show keeps its heading and says so on that line, in no panel. */
 function Section({ id, title, note, empty, bare, wide, foot, children }: { id: string; title: string; note?: string; empty?: string; bare?: boolean; wide?: boolean; foot?: React.ReactNode; children: React.ReactNode }) {
@@ -106,8 +107,8 @@ export function AnalyticsPage() {
       {filters}
       <HeaderTail><span className="an-scope">· {scopeLine(rangeLabel)}</span></HeaderTail>
       {error && <p className="an-error" role="alert">{error}</p>}
-      {!report && !error && <p className="an-empty">Loading…</p>}
-      {report && t && emptyRange && <p className="an-empty">{EMPTY_RANGE}</p>}
+      {!report && !error && <Empty className="an-empty">Loading…</Empty>}
+      {report && t && emptyRange && <Empty className="an-empty">{EMPTY_RANGE}</Empty>}
       {report && t && !emptyRange && (
         <>
           <Section id="an-overview" bare title="Overview">

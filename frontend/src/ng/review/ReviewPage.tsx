@@ -27,6 +27,7 @@ import { useArtifact, useCompare, useExpanded, useThreads, useViewed } from "./u
 // The item header's styles live with it; this page can be the first one loaded.
 import "../item/item.css";
 import "./review.css";
+import { Empty } from "../ui/Empty";
 
 const NO_THREADS: ReviewThread[] = [];
 
@@ -178,10 +179,9 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
         )}
         <section className="rv-diff" aria-label="Diff" aria-busy={compare.state === "loading"}>
           {compare.state === "error" && (
-            <div className="rv-empty" role="alert">
-              <p>{compare.error}</p>
-              <Button onClick={() => setPlace({ from: "base", to: "latest" })}>Compare from base</Button>
-            </div>
+            <Empty variant="block" role="alert" action={<Button onClick={() => setPlace({ from: "base", to: "latest" })}>Compare from base</Button>}>
+              {compare.error}
+            </Empty>
           )}
           {compare.state === "ready" && comments.whole}
           {compare.state === "ready" && (

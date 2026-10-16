@@ -10,6 +10,7 @@ import { isOpen } from "../board/counts";
 import type { Addon } from "../../types";
 import { AddonBadge } from "./addon";
 import { NoMatch } from "../ui/NoMatch";
+import { Empty } from "../ui/Empty";
 
 type Row = { id: string; nodes: number; open: number; draft: boolean; addon?: Addon | null };
 export type SwitchTo = { kind: "switch"; id: string } | { kind: "new"; id: string } | { kind: "dup"; id: string };
@@ -83,7 +84,7 @@ export function Switcher({ chain, renamedTo, onGo, startDup, copy }: { chain: st
               if (e.key === "Enter" && shown[0]) go({ kind: "switch", id: shown[0].id });
             }} />
             <div className="picklist-items" role="listbox" aria-label="Chains">
-              {rows === null && <p className="picklist-empty">Loading…</p>}
+              {rows === null && <Empty className="picklist-empty">Loading…</Empty>}
               {rows !== null && !shown.length && q && <NoMatch className="picklist-empty" query={q} onClear={() => setQ("")} />}
               {shown.map((r, k) => (
                 <button key={r.id} ref={(el) => void (refs.current[k] = el)} type="button" role="option" aria-selected={r.id === chain} className="menu-item sw-row" onKeyDown={(e) => move(e, k)} onClick={() => go({ kind: "switch", id: r.id })}>

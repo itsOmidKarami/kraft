@@ -125,7 +125,6 @@
 .pill-x:focus-visible, .pill-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .pill-add { flex: 1 1 90px; min-width: 90px; }
 .pill-input { width: 100%; box-sizing: border-box; padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text); font: var(--fs-label) ui-monospace, Menlo, monospace; }
-.pill-empty { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-muted); }
 .pill-err { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--bad); }
 .pill-live { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }
 
@@ -144,6 +143,12 @@
 
 .tip { position: fixed; z-index: 80; max-width: 240px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: var(--fs-meta); line-height: 1.4; pointer-events: none; box-shadow: 0 4px 12px var(--side-shade); }
 
+/* Empty: a muted line in a list or pane, or a pane's own empty state. Call sites add layout margin only. */
+.empty { color: var(--text-muted); line-height: 1.5; }
+.empty-inline { margin: 0; font-size: var(--fs-meta); }
+.empty-block { padding: 28px; font-size: var(--fs-label); }
+.empty-block p { margin: 0 0 12px; }
+.empty-block > :last-child { margin-bottom: 0; }
 
 /* Why a control is disabled (useReason): plain text next to it, so touch and screen readers get it too. */
 .reason { min-width: 0; font-size: var(--fs-meta); line-height: 1.4; color: var(--text-muted); text-align: right; }
