@@ -267,7 +267,7 @@
 .graph-node.is-away .glyph { opacity: 0; transition: opacity .08s linear; }
 .graph-node .glyph { transition: opacity .2s linear .3s; }
 .graph-node.is-away .graph-label, .graph-node.is-away .graph-meta { opacity: 0; }
-.scope-frame { position: absolute; z-index: 3; box-sizing: border-box; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 10px 30px color-mix(in oklab, var(--side) 70%, transparent); opacity: 1; cursor: default; }
+.scope-frame { position: absolute; z-index: 3; box-sizing: border-box; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 10px 30px var(--side-shade); opacity: 1; cursor: default; }
 .scope-frame.is-out { opacity: 0; pointer-events: none; transition: opacity .15s linear .42s; }
 .scope-head { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px 0 14px; box-sizing: border-box; }
 .scope-body { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 0 14px 14px; }
