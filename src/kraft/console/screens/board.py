@@ -1,5 +1,6 @@
 """The Board (spec §7.1): every item in the web's groups and order, one line
-each, in the repo the console was opened in or in all of them."""
+each, in the repo the console was opened in or in all of them, and the peek
+under it."""
 
 from __future__ import annotations
 
@@ -7,15 +8,20 @@ import os
 import time
 from typing import ClassVar
 
+from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
+from textual.containers import Vertical
 from textual.content import Content
-from textual.widgets import Input, OptionList
+from textual.timer import Timer
+from textual.widgets import Input, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
 
-from kraft.console import words
+from kraft import client, logs
+from kraft.console import tail, words
 from kraft.console.screens import View
+from kraft.vocab import ThreadLabel
 
 #: A row's columns besides the title and the tail: the repo-and-chain column
 #: and the age. The bar, the id and the gaps take 1 + 8 + 2 + 2 more.
@@ -33,6 +39,13 @@ BAR = {
     "not_started": "$kraft-faint",
     "done": "$success",
 }
+#: The peek reads the selected item this long after the cursor stops, so
+#: holding `j` does not read every row it passes (spec §7.1).
+PEEK_WAIT_S = 0.15
+#: Under this many rows the peek starts closed (spec §7.1).
+PEEK_MIN_HEIGHT = 30
+#: How much of a gate's document the peek shows: its opening.
+PEEK_DOC_LINES = 40
 #: The Board with no item in scope. `n` files one once New item exists.
 EMPTY = "Nothing filed yet. /item create files one."
 
@@ -134,6 +147,7 @@ class Board(View):
         Binding("end", "rows('last')", "last", show=False),
         Binding("pageup", "rows('page_up')", "page up", show=False),
         Binding("pagedown", "rows('page_down')", "page down", show=False),
+        Binding("v", "peek", "peek"),
         Binding("s", "scope", "this repo or all"),
         Binding("f", "filter", "filter"),
     ]
@@ -143,15 +157,27 @@ class Board(View):
         self.rows: list[dict] = []
         self.filter_text = ""
         self.done_open = False
+        #: What the peek shows: `(id, updated_at)`, None for `server.log`, or
+        #: `()` for nothing yet, so the next look always reads.
+        self._peeked: tuple | None = ()
+        self._timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
         yield Input(placeholder="filter by title or id · Esc clears", id="board-filter")
         rows = OptionList(id="rows", markup=False)
         rows.can_focus = False
         yield rows
+        with Vertical(id="peek"):
+            yield Static(id="peek-head")
+            yield Static(id="peek-chain")
+            # Focus stays with the Board and the prompt, never the peek.
+            body = RichLog(id="peek-body", wrap=True, max_lines=500)
+            body.can_focus = False
+            yield body
 
     def on_mount(self) -> None:
         self.query_one("#board-filter").display = False
+        self.query_one("#peek").display = self.app.size.height >= PEEK_MIN_HEIGHT
 
     @property
     def selected(self) -> dict | None:
@@ -163,6 +189,8 @@ class Board(View):
 
     def rows_changed(self, rows: list[dict], events: list[dict]) -> None:
         self.rows = rows
+        if not events:  # the stream reconnected: read the peek again too
+            self._peeked = ()
         self.draw()
 
     def on_resize(self) -> None:
@@ -205,6 +233,7 @@ class Board(View):
         if rows.highlighted is not None:
             rows.scroll_to_highlight()
         self.refresh_bindings()
+        self._peek_soon()
 
     def _matches(self, row: dict) -> bool:
         text = self.filter_text.strip().lower()
@@ -239,6 +268,20 @@ class Board(View):
                 ]
         return options
 
+    def select(self, work_item_id: str) -> None:
+        """Put the cursor on an item wherever it is, out of the filter, Done's
+        fold or the repo scope, and open the peek on it."""
+        row = next((row for row in self.rows if row["id"] == work_item_id), None)
+        if row is None:
+            return
+        self._clear_filter()
+        if self.app.repo not in (None, row.get("repo")):
+            self.app.widen(True)
+        if words.group_of(row) == "done":
+            self.done_open = True
+        self.query_one("#peek").display = True
+        self.draw(keep=work_item_id)
+
     def back(self) -> bool:
         if self.filter_text or self.query_one("#board-filter").display:
             self._clear_filter()
@@ -253,10 +296,17 @@ class Board(View):
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         # `s` only where there is a repo to come back to.
-        if action == "open":  # Enter only folds Done in 3a
+        if action == "open":  # folds Done, or opens a closed peek on an item
             option = self.query_one("#rows", OptionList).highlighted_option
-            return option is not None and option.id == "group:done"
+            if option is not None and option.id == "group:done":
+                return True
+            return self.selected is not None and not self.query_one("#peek").display
         return self.app.scope is not None if action == "scope" else True
+
+    @on(OptionList.OptionHighlighted, "#rows")
+    def _moved(self) -> None:
+        self.refresh_bindings()
+        self._peek_soon()
 
     @on(Input.Changed, "#board-filter")
     def _filtered(self, event: Input.Changed) -> None:
@@ -271,11 +321,23 @@ class Board(View):
         getattr(self.query_one("#rows", OptionList), f"action_{name}")()
 
     def action_open(self) -> None:
-        """Enter on Done's heading folds and unfolds it."""
+        """Enter on Done's heading folds and unfolds it; on an item it opens
+        the peek, until the Item screen (PR 4) takes Enter over."""
         option = self.query_one("#rows", OptionList).highlighted_option
         if option is not None and option.id == "group:done":
             self.done_open = not self.done_open
             self.draw()
+        elif self.selected is not None and not self.query_one("#peek").display:
+            self.action_peek()
+
+    def action_peek(self) -> None:
+        peek = self.query_one("#peek")
+        peek.display = not peek.display
+        self._peeked = ()
+        if peek.display:
+            self._peek_soon()
+        else:
+            self.workers.cancel_group(self, "peek")
 
     def action_scope(self) -> None:
         self.app.widen(self.app.repo is not None)
@@ -285,3 +347,110 @@ class Board(View):
         box = self.query_one("#board-filter", Input)
         box.display = True
         box.focus()
+
+    def _peek_soon(self) -> None:
+        """Look again once the cursor has stopped for `PEEK_WAIT_S`."""
+        if self._timer is not None:
+            self._timer.stop()
+        self._timer = self.set_timer(PEEK_WAIT_S, self._peek_now)
+
+    def _peek_now(self) -> None:
+        if not self.query_one("#peek").display:
+            return
+        row = self.selected
+        key = (row["id"], row.get("updated_at")) if row else None
+        if key == self._peeked:
+            return
+        self._peeked = key
+        # Exclusive: a log still being followed for the last selection stops.
+        self.run_worker(self._peek(row), group="peek", exclusive=True)
+
+    async def _peek(self, row: dict | None) -> None:
+        head = self.query_one("#peek-head", Static)
+        body = self.query_one("#peek-body", RichLog)
+        body.clear()
+        self.query_one("#peek-chain").display = False
+        if row is None:
+            head.update(Content.styled("server.log", "$kraft-muted"))
+            async for line in tail.follow(tail.server_log()):
+                body.write(line)
+            return
+        now = time.time()
+        bead = f" · {row['bead_id']}" if row.get("bead_id") else ""
+        said = f"{row['id'][:8]}{bead} · {words.chain_of(row)} · {words.reason_tail(row, now)}"
+        head.update(Content.styled(said, "$kraft-muted"))
+        try:
+            await self._peek_item(row["id"], body, now)
+        except client.ClientError as exc:
+            gone = exc.kind == client.Failure.NOT_FOUND
+            body.write("This item no longer exists." if gone else client.reason_of(str(exc)))
+
+    async def _peek_item(self, work_item_id: str, body: RichLog, now: float) -> None:
+        """Spec §7.1's table: the first line that matches the item wins."""
+        item = await client.get_work_item(work_item_id, full=True)
+        status, stop = item.get("display_status"), item.get("stop") or {}
+        doors = item.get("actions") or []
+
+        def say(*lines: str) -> None:
+            # From the top: a document opens at its start, not its end.
+            for line in lines:
+                body.write(line, scroll_end=False)
+
+        tail_words = words.reason_tail(item, now)
+        if status == "needs_you" and stop.get("kind") == "gate":
+            chain = self.query_one("#peek-chain", Static)
+            chain.update(chain_line(words.chain_marks(item), self.size.width - 2))
+            chain.display = True
+            say(f"{item.get('pending_gate') or stop.get('node')} is waiting on your decision.")
+            if "approve" not in doors:
+                threads = await client.threads(work_item_id, open_only=True)
+                must = sum(thread.get("label") == ThreadLabel.MUST_FIX for thread in threads)
+                if must:
+                    say(f"Approve waits on {must} open must-fix thread{'s' if must != 1 else ''}.")
+            try:
+                document = await client.artifact(work_item_id)
+            except client.ClientError as exc:
+                if exc.kind != client.Failure.NOT_FOUND:
+                    raise
+                say("", "This gate has no document.")
+                return
+            say("", *(document.get("content") or "").splitlines()[:PEEK_DOC_LINES])
+        elif status == "needs_you" and stop.get("kind") == "question":
+            say("The agent asks:", item.get("needs_context_question") or tail_words)
+            if "resume" in doors:
+                say("", "p answers it.")
+        elif status in ("failed", "needs_you"):
+            say(stop.get("reason") or tail_words)
+            if "retry" in doors:
+                say("", "t retries it.")
+            if "raise_budget" in doors:
+                say(f"/item raise-budget {work_item_id} --usd N raises its budget.")
+        elif status == "paused":
+            say(f"{tail_words} · {words.ago(item.get('updated_at'), now)}")
+            if "resume" in doors:
+                say("", "p resumes it.")
+        elif status in ("blocked", "queued"):
+            waits = [d for d in item.get("dependencies") or [] if not d.get("met")]
+            say(tail_words, *(["It comes after:"] if waits else []))
+            say(*(f"  {d['id'][:8]}  {d.get('status')}  {d.get('title')}" for d in waits))
+        elif status in ("running", "waiting", "escalated"):
+            await self._follow(item, body)
+        else:
+            mr = item.get("mr_ref") or {}
+            say(tail_words, *([mr["url"]] if mr.get("url") else []))
+
+    async def _follow(self, item: dict, body: RichLog) -> None:
+        """The newest session's log, followed: "waiting for output" until it
+        writes, "session ended" when it stops, until the next refresh."""
+        session, _passed_over = logs.pick_session(item, follow=True)
+        body.write("waiting for output")
+        if session is None:
+            return
+        fresh = True
+        async for entry in client.stream_log(item["id"], session["id"]):
+            if fresh:
+                body.clear()
+                fresh = False
+            # As `kraft view logs` reads a line: its summary, else its text.
+            body.write(str(entry.get("summary") or entry.get("text") or ""))
+        body.write(Text("session ended", style=self.app.theme_variables["kraft-muted"]))
