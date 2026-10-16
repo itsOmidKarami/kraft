@@ -109,6 +109,8 @@ class Item(ChainTab, MenuActions, View):
         #: `(updated_at, actions)` of the last read: a live event that leaves
         #: them alone reads nothing.
         self._key: tuple | None = None
+        #: The diff payload last drawn in full: read again unchanged, it is kept as drawn.
+        self._diff_drawn: dict | None = None
         #: The item answered 404: nothing is read until `open` shows another.
         self._dead = False
         #: What the Overview draws, kept for when its pane is shown.
@@ -178,6 +180,7 @@ class Item(ChainTab, MenuActions, View):
         self.session_id = None
         self._reset_chain()
         self._sync_edge()
+        self._diff_drawn = None
         self.query_one("#item-gone").display = False
         self.query_one("#item-title", Static).update(Content(f"{self.crumb} › {work_item_id[:8]}"))
         for part in ("#item-where", "#item-status", "#item-spent", "#item-chain"):
@@ -201,6 +204,8 @@ class Item(ChainTab, MenuActions, View):
         # An older page asked for before the tab was left must not land on the
         # list this visit rereads: its boundary is gone.
         self.workers.cancel_group(self, "older")
+        if tab == "diff":  # a visit always draws afresh
+            self._diff_drawn = None
         if self.work_item_id is not None and not self._dead:
             work = {
                 "chain": (self._chain_first, "tab"),
@@ -498,9 +503,12 @@ class Item(ChainTab, MenuActions, View):
             payload = await client.diff(self.work_item_id)
         except client.ClientError as exc:
             if self._shown("diff"):
+                self._diff_drawn = None
                 log.clear()
                 log.write(client.reason_of(str(exc)))
             return
+        if payload == self._diff_drawn and self._shown("diff"):
+            return  # a row change that left the diff as it was: no clear, scroll kept
         colour = self.app.theme_variables
         muted, warn = colour["kraft-muted"], colour["warning"]
         lines: list[Text] = []
@@ -520,6 +528,7 @@ class Item(ChainTab, MenuActions, View):
         if not self._shown("diff"):  # drawn again by the next visit
             return
         scrolled = log.scroll_y
+        self._diff_drawn = None
         log.clear()
         for start in range(0, len(lines), DIFF_PART):
             if start:
@@ -529,6 +538,7 @@ class Item(ChainTab, MenuActions, View):
             for line in lines[start : start + DIFF_PART]:
                 log.write(line, scroll_end=False)
             log.scroll_to(y=scrolled, animate=False, immediate=True)
+        self._diff_drawn = payload
 
     def _diff_line(self, line: str) -> Text:
         style = next((style for start, style in DIFF_STYLE if line.startswith(start)), "")
