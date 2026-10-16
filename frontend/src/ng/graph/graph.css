@@ -354,3 +354,5 @@
 .canvas-fade { position: absolute; top: 0; bottom: 0; z-index: 2; width: 40px; pointer-events: none; }
 .canvas-fade.is-left { left: 0; background: linear-gradient(to right, var(--bg), transparent); }
 .canvas-fade.is-right { right: 0; background: linear-gradient(to left, var(--bg), transparent); }
+/* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
+.round-row { padding-block: calc(6px + var(--row-pad-add)); }

@@ -10,16 +10,16 @@ import { acceptWrites, detail, stubFetch } from "./testkit";
 const WRITES = acceptWrites("PATCH /work-items/w1", "POST /work-items/w1/resume", "POST /work-items/w1/retry");
 
 afterEach(() => vi.unstubAllGlobals());
-// The banner's Review and decide navigates: every render is inside a router.
+// The banner's Review navigates: every render is inside a router.
 const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter });
 const Where = () => <span data-testid="where">{useLocation().pathname + useLocation().search}</span>;
 const stop = (kind: string, over = {}) => ({ kind, node: "verification", task: null, resume_at: null, reason: null, ...over }) as never;
 
 describe("Banner", () => {
-  it("shows a gate stop with Review and decide, which opens that gate's review with its brief (GR-5)", async () => {
+  it("shows a gate stop with Review, which opens that gate's review with its brief (GR-5)", async () => {
     render(<><Banner item={detail({ display_status: "needs_you", stop: stop("gate", { node: "final_review" }), pending_gate: "final_review" })} onRaise={() => {}} reload={() => {}} /><Where /></>);
     expect(screen.getByRole("status")).toHaveTextContent("Waiting for you to approve final review.");
-    await userEvent.click(screen.getByRole("button", { name: "Review and decide" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1/review?gate=final_review&doc=1");
   });
 

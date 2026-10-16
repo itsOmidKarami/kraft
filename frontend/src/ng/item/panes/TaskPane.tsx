@@ -1,9 +1,8 @@
 import { elapsed, tokenText, tokenTip, usd } from "../../../format";
 import type { TaskProgress, WorkerSession, WorkItemDocument } from "../../../types";
-import { allDone } from "../../board/rowText";
 import { FileText } from "../../icons";
 import { Menu, type MenuItem } from "../../ui/Menu";
-import { isSessionDoc, lookWord, NO_DOCUMENTS, sessionLook, statusWords } from "../nodeGraph";
+import { isSessionDoc, lookWord, NO_DOCUMENTS, progressWords, sessionLook, statusWords, subTasks } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 import { LinkButton } from "../../ui/LinkButton";
 
@@ -45,14 +44,6 @@ function turnWords(sessions: WorkerSession[], at: WorkerSession): string {
 }
 
 const fact = (k: string, v: React.ReactNode) => (v == null || v === "" ? null : <div key={k}><dt>{k}</dt><dd>{v}</dd></div>);
-
-const subTasks = (n: number) => `${n} sub-task${n === 1 ? "" : "s"}`;
-
-/** The plan task's place in its plan (`item.progress`), in a few words: what the fact row reads. */
-function progressWords(p: TaskProgress, running: boolean): string {
-  if (allDone(p)) return `${p.total} of ${subTasks(p.total)} · done`;
-  return running ? `${p.current} of ${p.total} · ${p.title}` : `${p.current} of ${subTasks(p.total)}`;
-}
 
 /** The plan's sub-tasks under the plan task's facts: a bar, then one row each with its state and commit. */
 function SubTasks({ tasks, docs, onDoc }: { tasks: NonNullable<TaskProgress["tasks"]>; docs: WorkItemDocument[]; onDoc: (d: WorkItemDocument) => void }) {

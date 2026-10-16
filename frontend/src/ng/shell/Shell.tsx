@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { ErrorBoundary } from "../ui/ErrorBoundary";
 import { ApplyDialogs } from "../apply/ApplyChip";
 import { DocViewer } from "../item/DocViewer";
 import { dialogOpen, isBareKey } from "../keys";
@@ -72,7 +73,7 @@ export function Shell() {
             <Header actionsRef={setActions} tailRef={setTail} />
             <OfflineBanner />
             <main id="ng-main" tabIndex={-1} className="ng-main">
-              <Outlet />
+              <ErrorBoundary resetKey={pathname}><Outlet /></ErrorBoundary>
             </main>
           </div>
         </div>

@@ -44,6 +44,8 @@ const firstSentence = (s: string) => s.split(/\.(?:\s|$)/)[0];
 /** The reason tail after the meta: one short line per status and stop kind. */
 export function reasonTail(i: Row, now = Date.now()): string {
   const node = nameOf(i.chain_definition?.nodes, nodeOf(i));
+  // An item with no node to name reads without "at …" and without a leading separator.
+  const where = node ? ` at ${node}` : "";
   const tail = (() => {
     switch (i.display_status) {
       case "needs_you":
@@ -52,11 +54,11 @@ export function reasonTail(i: Row, now = Date.now()): string {
           case "question": return `agent asks: ${(i.stop.reason ?? "").replace(/^needs_context:\s*/, "")}`.trim();
           // A cap or budget stop's reason goes on to what was not interrupted: the row keeps its first sentence.
           case "cap":
-          case "budget": return i.stop.reason ? firstSentence(i.stop.reason) : `waiting for you at ${node}`;
-          default: return i.stop?.reason ?? `waiting for you at ${node}`;
+          case "budget": return i.stop.reason ? firstSentence(i.stop.reason) : `waiting for you${where}`;
+          default: return i.stop?.reason ?? `waiting for you${where}`;
         }
-      case "failed": return `failed at ${node}`;
-      case "paused": return i.current_node_id ? `paused at ${node}` : "created paused";
+      case "failed": return `failed${where}`;
+      case "paused": return i.current_node_id ? `paused${where}` : "created paused";
       case "running":
         if (i.step) return i.step.name && i.step.task ? `${i.step.index} of ${i.step.count} · ${i.step.name} › ${i.step.task}` : `${node} · step ${i.step.index} of ${i.step.count}`;
         // A finished plan (the detail keeps it past the node) has no task left to count.
@@ -64,7 +66,7 @@ export function reasonTail(i: Row, now = Date.now()): string {
       case "waiting": {
         const at = i.stop?.resume_at ?? i.retry_at;
         // A CI wait checks again; only a rate limit retries (R11b-05).
-        return at ? `${node} · ${i.stop?.kind === "wait" ? "next check" : "retry"} ${until(at, now)}` : `waiting at ${node}`;
+        return at ? `${node ? `${node} · ` : ""}${i.stop?.kind === "wait" ? "next check" : "retry"} ${until(at, now)}` : `waiting${where}`;
       }
       case "queued": return "waiting to start";
       case "blocked": return "waiting on another item";
@@ -145,7 +147,7 @@ export function rowAction(i: Row): RowAction | null {
   if (i.display_status === "paused") return i.current_node_id ? { label: "Resume", kind: "resume" } : null;
   if (i.display_status !== "needs_you") return null;
   switch (i.stop?.kind) {
-    case "gate": return { label: "Review to approve", kind: "gate", gate: i.pending_gate ?? nodeOf(i) };
+    case "gate": return { label: "Review", kind: "gate", gate: i.pending_gate ?? nodeOf(i) };
     case "question": return { label: "Answer", kind: "peek", tab: "overview" };
     case "cap": return { label: "Raise cap", kind: "peek", tab: "config" };
     // A row carries neither the stop's limit nor its scope: the peek it opens picks the editor that raises this

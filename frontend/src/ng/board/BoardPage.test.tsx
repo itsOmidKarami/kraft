@@ -394,7 +394,7 @@ describe("BoardPage", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Resume" }));
     expect(calls.find((c) => c.path === "/work-items/p2/resume")).toMatchObject({ method: "POST" });
     expect(await screen.findByRole("alert")).toHaveTextContent("work item is active, not paused");
-    await userEvent.click(screen.getByRole("button", { name: "Review to approve" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review" }));
     expect(where()).toBe("/work-items/g1/review?gate=plan_approval&doc=1");
   });
 

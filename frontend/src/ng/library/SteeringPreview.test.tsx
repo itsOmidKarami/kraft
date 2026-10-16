@@ -43,6 +43,21 @@ describe("Library: a steering profile", () => {
     await waitFor(() => expect(calls[2]).toContain("chain=quick-task&task=build.main.go&repo=other"));
   });
 
+  it("moves on to the next use when the server says the first is not an agent task, and keeps one the person picked", async () => {
+    const u = userEvent.setup();
+    const calls: string[] = [];
+    served.preview = (url) => {
+      calls.push(decodeURIComponent(url));
+      return url.includes("implementation.main.implement") ? { status: 422, body: { detail: "implementation.main.implement is a subprocess task, not an agent task" } } : { status: 200, body: { sections: [] } };
+    };
+    open();
+    await waitFor(() => expect(calls.at(-1)).toContain("task=build.main.go"));
+    expect(screen.getByLabelText("Use")).toHaveValue("1");
+    expect(screen.queryByRole("alert")).toBeNull();
+    await u.selectOptions(screen.getByLabelText("Use"), "default · implementation.main.implement");
+    expect(await screen.findByRole("alert")).toHaveTextContent("not an agent task");
+  });
+
   it("says the preview is the published text when the profile has draft changes", async () => {
     draftWith({ changes: [{ path: "steering.project-standards", kind: "change", summary: "instructions" }] }, true);
     open();

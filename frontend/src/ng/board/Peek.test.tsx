@@ -50,8 +50,30 @@ describe("Peek", () => {
   it("shows the card the item page would: the gate banner, a failure, a question, a pause", async () => {
     mount({ status: "needs_human", display_status: "needs_you", stop: stop("gate"), pending_gate: "plan_approval" });
     expect(await screen.findByText(/Waiting for you to approve/)).toBeInTheDocument();
-    fireEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Review and decide" }));
+    fireEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Review" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1/review?gate=plan_approval&doc=1");
+  });
+
+  it("names a gate's door once: the banner's Review, with no Open gate in the footer and no second way to the full page", async () => {
+    mount({ status: "needs_human", display_status: "needs_you", stop: stop("gate"), pending_gate: "plan_approval" });
+    await screen.findByText(/Waiting for you to approve/);
+    expect(screen.getAllByRole("button", { name: "Review" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /Open gate/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Full page/ })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /Open item/ })).toHaveLength(1);
+  });
+
+  it("keeps Open gate out of the footer on the other tabs too", async () => {
+    mount({ status: "needs_human", display_status: "needs_you", stop: stop("gate"), pending_gate: "plan_approval" }, { start: "activity" });
+    await screen.findByRole("button", { name: /Open item/ });
+    expect(screen.queryByRole("button", { name: /Open gate/ })).toBeNull();
+  });
+
+  it("words a queued item's pause as leaving the queue", async () => {
+    mount({ display_status: "queued" });
+    fireEvent.click(await screen.findByRole("button", { name: "Remove from queue" }));
+    expect(screen.getByRole("dialog", { name: "Remove this item from the queue?" })).toHaveTextContent("has not started");
+    expect(screen.queryByText(/running task stops/)).toBeNull();
   });
 
   it("explains the waiting gate: its place among the gates, the change, its open threads; and names the chain and repo (BD-4)", async () => {
@@ -173,12 +195,6 @@ describe("Peek", () => {
     expect(screen.getByRole("dialog", { name: "Pause this item?" })).toBeInTheDocument();
     expect(calls.some((c) => c.method === "POST")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Open item ↗" }));
-    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1");
-  });
-
-  it("names the header's full-page button for what it does", async () => {
-    mount({ display_status: "running" });
-    fireEvent.click(await screen.findByRole("button", { name: /Full page/ }));
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1");
   });
 

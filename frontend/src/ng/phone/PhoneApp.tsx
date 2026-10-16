@@ -27,6 +27,7 @@ import { OfflineBanner } from "./nav/OfflineBanner";
 import { TabBar } from "./nav/TabBar";
 import { Toaster } from "./nav/Toaster";
 import { Tooltip } from "../ui/Tooltip";
+import { ErrorBoundary } from "../ui/ErrorBoundary";
 import { useTrail } from "./nav/trail";
 import { screenKey } from "./nav/route";
 import { useDocumentTitle, useFocusHeading } from "../shell/usePageChrome";
@@ -41,7 +42,7 @@ function Frame() {
     <div className="ph-app">
       <OfflineBanner />
       <main id="ph-main" tabIndex={-1} className="ph-screen">
-        <Outlet />
+        <ErrorBoundary resetKey={pathname}><Outlet /></ErrorBoundary>
       </main>
       <TabBar />
     </div>

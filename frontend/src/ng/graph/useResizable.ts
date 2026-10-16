@@ -1,3 +1,4 @@
+import { useMedia } from "../useMedia";
 import { useEffect, useState, type KeyboardEvent, type PointerEvent as RPointerEvent } from "react";
 
 export const PANE = { MIN: 300, RESERVE: 460, DEFAULT: 380, STEP: 16 } as const;
@@ -22,19 +23,7 @@ function save(page: string, w: number) {
 }
 
 /** True under 1024px, live: the pane overlays the canvas there (R7). */
-export function useOverlay() {
-  const query = "(max-width: 1023px)";
-  const [on, setOn] = useState(() => typeof matchMedia === "function" && matchMedia(query).matches);
-  useEffect(() => {
-    if (typeof matchMedia !== "function") return;
-    const mq = matchMedia(query);
-    const change = () => setOn(mq.matches);
-    change();
-    mq.addEventListener("change", change);
-    return () => mq.removeEventListener("change", change);
-  }, []);
-  return on;
-}
+export const useOverlay = () => useMedia("(max-width: 1023px)");
 
 /** An element's width, kept current. */
 export function useWidth() {

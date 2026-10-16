@@ -11,7 +11,7 @@ export function TestsLine({ workItemId, result, linkClass = linkButtonClass({ mo
   return (
     <>
       ✗ {red.length} of {n} {n === 1 ? "scope" : "scopes"}
-      {red.map((s) => <span key={s.session_id}> · <a className={linkClass} href={logTextUrl(workItemId, s.session_id)} target="_blank" rel="noreferrer">{s.scope ?? s.command}</a></span>)}
+      {red.map((s) => <span key={s.session_id}> · <a className={linkClass} href={logTextUrl(workItemId, s.session_id)} target="_blank" rel="noreferrer">{s.command}</a></span>)}
     </>
   );
 }

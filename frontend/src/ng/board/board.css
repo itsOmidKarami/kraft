@@ -225,3 +225,5 @@ body:has(.draft-page) { --toast-bottom: 88px; }
 .draft-ask { position: absolute; left: 24px; top: 12px; z-index: 29; width: 340px; box-sizing: border-box; display: flex; flex-direction: column; gap: 9px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: var(--fs-label); color: var(--text-sub); box-shadow: 0 14px 36px var(--side-shade); }
 .draft-ask b { font-weight: 500; color: var(--text); }
 @media (max-width: 1023px) { .draft-page { padding: 14px 16px; } }
+/* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
+.board-row, .sk-row { padding-block: calc(8px + var(--row-pad-add)); }

@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import * as api from "../../../api";
 import { elapsed, repoName, usd } from "../../../format";
@@ -22,7 +22,8 @@ export function Analytics() {
   const [chain, setChain] = useState("");
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const items = useStore((s) => Object.values(s.workItems));
+  const byId = useStore((s) => s.workItems);
+  const items = useMemo(() => Object.values(byId), [byId]);
   useEffect(() => {
     let live = true;
     setError(null);

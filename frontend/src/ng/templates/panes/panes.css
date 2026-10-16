@@ -98,3 +98,5 @@
 .pane-fold-body { display: contents; }
 .pane-fold-body[hidden] { display: none; }
 .tpl-rv-key { flex-basis: 100%; font: var(--fs-meta) ui-monospace, Menlo, monospace; color: var(--text-muted); overflow-wrap: anywhere; }
+/* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
+.cfg-row { padding-block: calc(2px + var(--row-pad-add)); }
