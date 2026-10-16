@@ -29,13 +29,19 @@ FOLLOWING = "following · f filter"
 HELD = "paused · End follows · f filter"
 
 
+def held(health: dict | None) -> set[str]:
+    """The add-ons whose update waits for a person: `/health`'s held
+    `addon_updates`."""
+    return {
+        addon_id
+        for addon_id, entry in ((health or {}).get("addon_updates") or {}).items()
+        if entry.get("outcome") == "held"
+    }
+
+
 def updates_waiting(health: dict | None) -> int:
-    """How many add-on updates wait for a person: `/health`'s held
-    `addon_updates`. The Add-ons tab's count and the Server's line."""
-    return sum(
-        entry.get("outcome") == "held"
-        for entry in ((health or {}).get("addon_updates") or {}).values()
-    )
+    """How many: the Add-ons tab's count and the Server's line."""
+    return len(held(health))
 
 
 def _mark(bad: object) -> tuple[str, str]:

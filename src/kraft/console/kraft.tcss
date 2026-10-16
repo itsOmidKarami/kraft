@@ -118,7 +118,7 @@ Screen.-tiny #tiny {
     background: $kraft-side;
 }
 
-#rows, #repo-rows {
+#rows, #repo-rows, #addon-rows {
     height: 1fr;
     max-height: 100%;
     border: none;
@@ -127,7 +127,9 @@ Screen.-tiny #tiny {
     background: $background;
 }
 
-#rows > .option-list--option-highlighted, #repo-rows > .option-list--option-highlighted {
+#rows > .option-list--option-highlighted,
+#repo-rows > .option-list--option-highlighted,
+#addon-rows > .option-list--option-highlighted {
     background: $primary 12%;
     text-style: bold;
 }
