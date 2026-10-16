@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ABORT, HANG, type MockServer, type Reply } from "../e2e/contract/mocks/mockApi";
-import { DemoSocket, patchFetch, patchWebSocket, restoreAddress, serveApiLinks, shiftClock } from "./shim";
+import { DemoSocket, patchFetch, patchWebSocket, restoreAddress, serveApiLinks, shiftClock, watch } from "./shim";
 
 /** A server that answers every request with `reply` and records what it was asked. */
 const recording = (reply: Reply) => {
@@ -81,6 +81,22 @@ describe("patchFetch", () => {
     patchFetch(serve);
     expect(await (await fetch(url)).text()).toBe("net");
     expect(seen).toEqual([]);
+  });
+});
+
+describe("watch", () => {
+  it.each([
+    ["tells its listener each request and the answer it got", () => {}],
+    ["still answers when its listener throws", () => { throw new Error("a broken tick"); }],
+  ])("%s", async (_, listen) => {
+    vi.stubGlobal("fetch", vi.fn());
+    const seen: [string, number][] = [];
+    patchFetch(watch(recording({ status: 409, contentType: "application/json", body: '{"detail":"no"}' }).serve, (req, reply) => {
+      seen.push([req.method + " " + new URL(req.url).pathname, typeof reply === "object" ? reply.status : 0]);
+      listen();
+    }));
+    const res = await fetch("/api/work-items/w1/pause", { method: "POST" });
+    expect([res.status, seen]).toEqual([409, [["POST /api/work-items/w1/pause", 409]]]);
   });
 });
 

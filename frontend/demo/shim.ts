@@ -1,4 +1,4 @@
-import { ABORT, HANG, type Answer, type MockServer } from "../e2e/contract/mocks/mockApi";
+import { ABORT, HANG, type Answer, type MockRequest, type MockServer, type Reply } from "../e2e/contract/mocks/mockApi";
 
 /**
  * What puts the mocked API (e2e/contract/mocks/mockApi.ts) under the page, so the
@@ -15,6 +15,18 @@ const toResponse = (a: Answer) =>
     status: a.status,
     headers: { ...(a.contentType ? { "content-type": a.contentType } : {}), ...a.headers },
   });
+
+/**
+ * `serve`, telling `see` each request it answered and how, once it has: what the
+ * things-to-try list ticks from (tries.ts). A listener that throws loses the tick, not the answer.
+ */
+export function watch(serve: MockServer, see: (req: MockRequest, reply: Reply) => void): MockServer {
+  return async (req) => {
+    const reply = await serve(req);
+    try { see(req, reply); } catch { /* the page still gets its answer */ }
+    return reply;
+  };
+}
 
 /** `fetch` for /api/** answered by `serve`; anything else goes to the network. */
 export function patchFetch(serve: MockServer, win: Window & typeof globalThis = window) {

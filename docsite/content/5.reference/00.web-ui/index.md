@@ -12,7 +12,8 @@ here too. Four verbs are CLI-only for a person: `kraft item abandon`,
 These pages name each screen, what it is for, and the buttons on it. To look
 around before you install, open [the demo](/demo/): this
 web UI on sample data, running in your browser with no server and no agents.
-Nothing you change there is saved.
+Nothing you change there is saved. Its corner badge opens five things to try,
+each with a Show me that takes you to where it is done.
 
 ## In this section
 

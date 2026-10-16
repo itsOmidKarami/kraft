@@ -520,7 +520,7 @@ jobs:
     # and the icon-only audit, which fails an icon-only control with no name
     # or tooltip. No Kraft server and no Python: the suite builds the SPA and
     # serves it with `vite preview`. Same image as `playwright`, whose browsers
-    # match the exact "@playwright/test" pin.
+    # match the exact "@playwright/test" pin. The demo's smoke suite runs after.
     name: ui contract
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
@@ -532,6 +532,11 @@ jobs:
       - run: npm ci
         working-directory: frontend
       - run: npx playwright test -c e2e/contract/playwright.config.ts
+        working-directory: frontend
+      # The dashboard demo's smoke suite (frontend/e2e/demo/): the demo boots, and
+      # every things-to-try Show me finds its target. Same job, same browsers, a
+      # few seconds more: the build is the demo's, and tsc -b is already warm.
+      - run: npx playwright test -c e2e/demo/playwright.config.ts
         working-directory: frontend
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

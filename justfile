@@ -295,6 +295,15 @@ demo:
     cd frontend && [ -d node_modules ] || npm ci
     cd frontend && npm run demo
 
+# The dashboard demo's smoke suite: builds the demo, serves it with `vite preview` on :4328
+# (DEMO_PORT moves it), boots it, and follows every things-to-try Show me to its target.
+# Pass Playwright flags after it: -g "gate".
+[doc("Dashboard demo smoke: it boots, and every Show me finds its target")]
+demo-smoke *args:
+    cd frontend && [ -d node_modules ] || npm ci
+    cd frontend && npx playwright install chromium
+    cd frontend && npx playwright test -c e2e/demo/playwright.config.ts {{args}}
+
 # Playwright e2e against a fixture server you started (frontend/e2e/README.md)
 e2e:
     cd frontend && npm run e2e

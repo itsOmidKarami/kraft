@@ -66,6 +66,29 @@ build's base (`import.meta.env.BASE_URL`), `/` everywhere but here. A change to
 what the demo shows is a change to the contract's mocks, so it is checked
 there.
 
+The demo adds one thing to the page, outside the React tree and drawn in the
+app's tokens: `demo/badge.ts`, the corner badge, which opens a list of five
+things to try. Nothing for it lives in `src/`. Its × hides the badge for the
+visit. The list opens by itself once, on a desktop's first visit, and after
+that stays as the visitor left it (`localStorage`). Phones start with it shut.
+
+- `demo/tries.ts` holds the five entries. Each is ticked by the request that
+  does it: `shim.ts`'s `watch` hands every answered request to `tickOf`. Each
+  has a Show me: a real link to where it can be done now, such as whichever
+  item waits at a gate. The page is found by reading the mock directly, so the
+  look itself ticks nothing.
+- A Show me's click goes by `pushState` and a `popstate`, so the demo is not
+  reloaded. A click already handled, such as the draft page's leave guard, is
+  left alone, and so is a click asking for a new tab.
+- `demo/ring.ts` then finds the target by role and accessible name, as
+  Playwright does, and rings it. On the phone layout, where the target is not
+  on screen, there is no ring.
+
+`e2e/demo/` is the demo's smoke suite: the built demo on `vite preview`, booted,
+and every Show me followed to its target on the desktop layout. A rename that
+strands an entry fails it. `just demo-smoke` runs it (`npm run demo:smoke`
+without `just`), and so does CI's `ui contract` job.
+
 ## Layout of `src/`
 
 ```text
@@ -236,6 +259,7 @@ test in the PR) are in [`docs/testing.md`](../docs/testing.md).
 | **vitest** | component and pure-logic tests in jsdom, with `fetch` stubbed | **Every change.** New behaviour gets a test beside it. CI's `frontend` job runs `npm run build` and `npm test` | `just test-ui` |
 | **Playwright** (`e2e/`) | a real browser against a real orchestrator with the fake agent: the UI↔server contract, addresses, and layout jsdom cannot show (media queries, tap-target size, sideways overflow) | A change to what the page sends or reads, to an address, or to phone layout. CI's `playwright` job runs it on every code pull request | `just e2e-ci`; see [`e2e/README.md`](e2e/README.md) |
 | **UI contract** (`e2e/contract/`) | the built SPA in a browser on a **mocked** `/api`: what a screen does (the sidebar's pin and reveal, Esc and focus order, the item header's cards, review, the document viewer, tooltips) and that every icon-only control has a name and a tooltip | A change to how a screen behaves, or a new icon-only control. CI's `ui contract` job runs it on every code pull request | `just ui-contract`; see [`e2e/contract/README.md`](e2e/contract/README.md) |
+| **Demo smoke** (`e2e/demo/`) | the built dashboard demo in a browser: it boots, and each things-to-try Show me lands on its target | A change to `demo/`, or to a control a Show me rings (its name is in `demo/tries.ts`). CI's `ui contract` job runs it after the contract | `just demo-smoke`; see "The dashboard demo" above |
 
 Playwright proves the contract and vitest proves component behaviour; do not
 pin the same thing in both.
