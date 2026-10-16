@@ -4,6 +4,7 @@ pushed screen, so the prompt and the top line stay; Esc goes back."""
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from functools import partial
@@ -53,6 +54,9 @@ DIFF_STYLE = (
     ("-", "error"),
     ("@@", "kraft-info"),
 )
+#: Diff lines one draw writes before it lets the loop run: a full-size diff
+#: (~40k lines) written at once holds every key for over a second.
+DIFF_PART = 500
 #: How long the node an approve moved the item to stays lit.
 LIT_S = 1.5
 #: A failed item's Overview, after its keys: where to read what happened.
@@ -517,9 +521,14 @@ class Item(ChainTab, MenuActions, View):
             return
         scrolled = log.scroll_y
         log.clear()
-        for line in lines:
-            log.write(line, scroll_end=False)
-        log.scroll_to(y=scrolled, animate=False, immediate=True)
+        for start in range(0, len(lines), DIFF_PART):
+            if start:
+                await asyncio.sleep(0)
+                if not self._shown("diff"):  # left mid-draw: the next visit draws it again
+                    return
+            for line in lines[start : start + DIFF_PART]:
+                log.write(line, scroll_end=False)
+            log.scroll_to(y=scrolled, animate=False, immediate=True)
 
     def _diff_line(self, line: str) -> Text:
         style = next((style for start, style in DIFF_STYLE if line.startswith(start)), "")

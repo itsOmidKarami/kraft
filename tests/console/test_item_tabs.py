@@ -298,6 +298,32 @@ def test_the_diff_shows_what_landed_then_what_did_not_then_its_trailer(
     assert console.run(scenario) == lines
 
 
+def test_a_huge_diff_lets_keys_through_while_it_draws(board, monkeypatch):
+    """Drawn a part at a time, not all at once: a key gets through, the draw left behind stops."""
+    _serve(monkeypatch, _detail(RUNNING), calls=[])
+    _serve_events(monkeypatch, [])
+    huge = {"base_ref": "main", "diff": "\n".join(f"+line {n}" for n in range(20_000))}
+    monkeypatch.setattr(client, "diff", lambda *args, **kwargs: asyncio.sleep(0, huge))
+    console = board([RUNNING])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, RUNNING["id"])
+        log, pressed = app.query_one("#diff", RichLog), []
+        write = log.write
+
+        def first_line(*args, **kwargs):  # the key comes while the draw has just begun
+            log.write = write
+            pressed.append(asyncio.create_task(pilot.press("right_square_bracket")))
+            return write(*args, **kwargs)
+
+        log.write = first_line
+        await pilot.press("left_square_bracket")  # round to the Diff
+        await console.until(pilot, lambda: pressed and pressed[0].done())
+        return app.view.tab, len(log.lines) < 20_000
+
+    assert console.run(scenario) == ("overview", True)
+
+
 def test_the_diff_reads_again_only_when_shown_and_its_row_changed(board, monkeypatch):
     """A change to the item's row while the Diff is shown reads it again; the
     same row, or any change while the Item is hidden, reads nothing."""
