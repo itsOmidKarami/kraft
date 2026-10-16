@@ -549,8 +549,8 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       const all = Object.values(S.docs).flat();
       const id = decodeURIComponent(m[1]);
       const own = S.docText?.[id];
-      // A summary with no front matter has nothing in `metadata` (`ingest.split_front_matter`).
-      return json(own != null ? { ...documentDetail(id, all), content: own, metadata: {} } : documentDetail(id, all));
+      // A summary with no front matter has nothing in `metadata` (`ingest.split_front_matter`), and no source times.
+      return json(own != null ? { ...documentDetail(id, all), content: own, metadata: {}, source_created_at: null, source_updated_at: null } : documentDetail(id, all));
     }
     if (p === "/beads/search") return json({ query: q.get("q"), beads: [
       { id: "kraft-a4js", title: "Gate card findings list pushes the split off-screen", status: "open", issue_type: "bug" },

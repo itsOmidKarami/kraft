@@ -64,15 +64,20 @@ const FOUND: Record<string, (node: string, task: string) => string> = {
   conflict: () => "Both sides changed the conflicting files for different reasons, so neither can simply win: keep main's version and redo this item's change on top of it.",
   mr_closed: () => "The merge request was closed on the forge without a merge. Reopen it there, or retry to open a new one.",
   gate: () => "The document at this gate reads complete: nothing in it needs another pass before you decide.",
+  question: () => "It is waiting on the question its agent asked, and only you can answer that: nothing in the log or the branch decides it.",
 };
 /** The summary an escalation turn writes on its way out: what it read, what it found, and what is the visitor's to do. */
 function reply(b: ItemBundle, s: any): string {
   const node = s.node_id;
   const stop = b.item.stop;
   const task = String(stop?.task ?? node).split(".").at(-1)!;
-  const read = stop ? `I read why ${node} stopped, its last attempt's log, and the branch.` : `I read where ${node} paused, its last attempt's log, and the branch.`;
+  const read = stop?.kind === "gate" ? `I read the document at ${node} and the change it is about.`
+    : stop ? `I read why ${node} stopped, its last attempt's log, and the branch.` : `I read where ${node} paused, its last attempt's log, and the branch.`;
   const found = FOUND[stop?.kind]?.(node, task) ?? "Nothing in its log points at a fault in the work itself.";
-  const next = stop?.kind === "gate" ? "Approve or reject it when you are ready" : stop ? `Retry ${node} when you are ready, with a steer if you want one` : "Resume it when you are ready";
+  // Each stop's own door: a gate is decided, a question answered by a resume that carries the answer, the rest retried.
+  const next = stop?.kind === "gate" ? "Approve or reject it when you are ready"
+    : stop?.kind === "question" ? "Answer it by resuming the item with your answer as the steer"
+    : stop ? `Retry ${node} when you are ready, with a steer if you want one` : "Resume it when you are ready";
   return `# Escalation reply on ${node}\n\n${read}\n\n${found}\n\nI changed nothing on the branch. ${next}, or reply here and I will look further.\n`;
 }
 

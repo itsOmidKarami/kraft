@@ -1,5 +1,6 @@
 import type { EventType } from "../../../src/types/vocab.generated";
 import { hex, logLines, LONG_DESCRIPTION, t, type ItemBundle, type Variant } from "./fixtures";
+import { RESUME_PROMPT } from "./poller";
 
 /**
  * Items for the item page (ux2-W5): the prototype's 15-node V1 chain in
@@ -192,7 +193,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
       verificationAt("done");
       // Two turns of one thread, as the thread says: the first answered, the second waiting on a person.
       const first = sess("verification.escalation.escalation", "done", { hook_point: "escalation", created_at: t(m - 40), started_at: t(m - 40), exited_at: t(m - 36) });
-      const e = sess("verification.escalation.escalation", "needs_context", { hook_point: "escalation", exited_at: null });
+      const e = sess("verification.escalation.escalation", "needs_context", { hook_point: "escalation", exited_at: null, attempt: 2 });
       const q = "The race needs a reindex API change the plan froze. Allow the change, or accept the finding and move on?";
       ev("escalation_message", { session_id: e.id, node_id: "verification", thread: 1, turn: 2, message: q }, 1);
       ev("work_item_needs_human", { node_id: "verification", reason: `needs_context: ${q}`, kind: "question" }, 0.5);
@@ -202,18 +203,33 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
       break;
     }
     case "capped": {
-      verificationAt("capped_out");
-      ev("work_item_needs_human", { node_id: "verification", reason: "Running time hit its 8h cap", kind: "cap" }, 1);
+      // The time cap stops its running session (`session_exited`, capped_out), then the item.
+      const cr = verificationAt("capped_out");
+      ev("worker_session_exited", { session_id: cr.id, node_id: "verification", status: "capped_out", wall_ms: cr.wall_ms }, 0.5);
+      cr.exited_at = events.at(-1).created_at;
+      ev("work_item_needs_human", { node_id: "verification", reason: "Running time hit its 8h cap", kind: "cap" }, 0.5);
       item.status = "needs_human"; item.display_status = "needs_you";
       item.stop = stop("cap", "verification.review.code_review", { attempt: 2, reason: "Running time hit its 8h cap", facts: { field: "running_time", cap_s: 28_800 } });
       break;
     }
     case "waiting": {
-      const cr = verificationAt("rate_limited");
-      ev("work_item_rate_limited", { node_id: "verification", retry_at: t(133.7) }, 0.3);
+      // Rate limited three times on code_review: the poller relaunched it twice (`rate_limit_retry`, its counter at 2),
+      // and the third attempt waits for its limit to reset.
+      let cr = verificationAt("rate_limited");
+      for (let k = 0; k < 3; k++) {
+        // Each attempt exits rate limited (`session_exited`), and the item waits for the reset.
+        ev("worker_session_exited", { session_id: cr.id, node_id: "verification", status: "rate_limited", wall_ms: cr.wall_ms }, 0.3);
+        cr.exited_at = events.at(-1).created_at;
+        ev("work_item_rate_limited", { node_id: "verification", retry_at: k < 2 ? t(m + 2) : t(133.7) }, 0);
+        if (k === 2) break;
+        ev("work_item_retried", { node_id: "verification", loop: null, steer: RESUME_PROMPT, escalated: false, seeded: false }, 2);
+        ev("node_started", { node_id: "verification" }, 0);
+        cr = sess("verification.review.code_review", "rate_limited", { attempt: cr.attempt + 1, round: 1 });
+        ev("worker_session_started", { session_id: cr.id, node_id: "verification" }, 0.5);
+      }
       item.status = "rate_limited"; item.display_status = "waiting"; item.retry_at = t(133.7);
       item.rate_limit = { count: 2, cap: 5 };
-      item.stop = stop("rate_limit", cr.hook_point, { attempt: 2, resume_at: t(133.7), reason: "claude-code hit its rate limit", facts: { harness: "claude-code", fallback: ["codex"], fallback_allowed: ["codex"] } });
+      item.stop = stop("rate_limit", cr.hook_point, { attempt: cr.attempt, resume_at: t(133.7), reason: "claude-code hit its rate limit", facts: { harness: "claude-code", fallback: ["codex"], fallback_allowed: ["codex"] } });
       break;
     }
     case "needs-gate": {

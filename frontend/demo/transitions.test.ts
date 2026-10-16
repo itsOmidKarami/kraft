@@ -209,28 +209,45 @@ describe("the rate-limit poller's count", () => {
   const relaunched = (T: Transitions, id: string, n: number, node = "verification") => {
     for (let k = 0; k < n; k++) T.append(id, "work_item_retried", { node_id: node, loop: null, steer: RESUME_PROMPT, escalated: false, seeded: false });
   };
-  const RETRIED = { type: "work_item_retried", payload: { node_id: "verification", steer: RESUME_PROMPT } };
   const stopped = (n: number) => ({ type: "work_item_needs_human", payload: { node_id: "verification", reason: `rate_limit retries exhausted after ${n} attempt(s)`, kind: "cap" } });
-  it.each<[string, (T: Transitions, id: string) => void, Record<string, unknown>]>([
-    // kraft-e410's row says 2 of 5, and its events hold none of them.
-    ["the sample's own count, its events naming none", () => {}, RETRIED],
-    ["the poller's relaunches on its node, read off its events", (T, id) => relaunched(T, id, 5), stopped(5)],
+  // Each row's cap is the count it should read, so the poll stops and its reason says the count.
+  it.each<[string, (T: Transitions, id: string) => void, number]>([
+    // kraft-e410's row says 2 of 5: the two relaunches its events hold.
+    ["the sample's two relaunches", () => {}, 2],
+    ["more relaunches on its node, read off its events", (T, id) => relaunched(T, id, 3), 5],
     // The counter is never reset: a stop past the retries is a bump too, and a person's retry is none.
     ["a stop past its retries, then a person's retry", (T, id) => {
-      relaunched(T, id, 5);
+      relaunched(T, id, 3);
       T.append(id, "work_item_needs_human", { node_id: "verification", reason: "rate_limit retries exhausted after 5 attempt(s)", kind: "cap" });
       T.append(id, "work_item_retried", { node_id: "verification", loop: null, steer: "try again", escalated: false, seeded: false });
-    }, stopped(6)],
-    ["another node's relaunches", (T, id) => relaunched(T, id, 5, "implementation"), RETRIED],
-  ])("%s", (_name, setup, want) => {
+    }, 6],
+    ["another node's relaunches", (T, id) => relaunched(T, id, 5, "implementation"), 2],
+  ])("%s", (_name, setup, count) => {
     const { S, T } = fresh();
     const id = idOf(S, "kraft-e410");
+    const it = S.bundles[id].item;
+    expect(it.rate_limit).toEqual({ count: 2, cap: 5 });
     setup(T, id);
-    expect(S.bundles[id].item.rate_limit).toEqual({ count: 2, cap: 5 });
+    it.rate_limit.cap = count;
     expect(T.rateLimitRetry(id).status).toBe(200);
-    expect(S.bundles[id].events.at(-1)).toMatchObject(want);
+    expect(S.bundles[id].events.at(-1)).toMatchObject(stopped(count));
     // Shown only while it is rate limited.
-    expect(S.bundles[id].item.rate_limit).toBeNull();
+    expect(it.rate_limit).toBeNull();
+  });
+
+  it("goes up by one a poll, so the sample stops on the fourth: past its 2 of 5", () => {
+    const { S, T } = fresh();
+    const id = idOf(S, "kraft-e410");
+    const it = S.bundles[id].item;
+    const polls: string[] = [];
+    for (let k = 0; k < 6 && it.status !== "needs_human"; k++) {
+      // Limited again on the same node, as the relaunch it was given would be.
+      Object.assign(it, { status: "rate_limited", retry_at: AT });
+      T.rateLimitRetry(id);
+      polls.push(S.bundles[id].events.at(-1)!.type);
+    }
+    expect(polls).toEqual(["work_item_retried", "work_item_retried", "work_item_retried", "work_item_needs_human"]);
+    expect(S.bundles[id].events.at(-1)).toMatchObject(stopped(5));
   });
 });
 
@@ -414,8 +431,25 @@ describe("samples and answers as the server shapes them", () => {
     expect(b.sessions.filter((s) => s.status !== "done")).toEqual([]);
     const last = b.sessions.at(-1);
     expect([last.hook_point, last.attempt, last.session_summary_ref, b.item.stop.task, b.item.stop.attempt]).toEqual(["verification.review.code_review", 2, `.engineering/sessions/${last.id}.md`, "verification.review.code_review", 2]);
-    expect(b.events.slice(-2).map((e) => [e.type, e.payload.session_id ?? null, e.payload.status ?? null])).toEqual([["worker_session_exited", last.id, "done"], ["work_item_needs_human", null, null]]);
-    expect(b.events.map((e) => e.seq)).toEqual(b.events.map((_, k) => k + 1));
+  });
+
+  it.each([
+    // A time cap stops its session (`session_exited`, capped_out); a spend cap lets it finish, its usage reported.
+    ["kraft-7d21, stopped by its running-time cap", "kraft-7d21", { status: "capped_out" }],
+    ["kraft-58e2, stopped by its spend cap", "kraft-58e2", { status: "done", model: "claude-sonnet-4-5", tokens_cache_write: 0, tokens_cache_read: 0 }],
+  ])("%s: its last session's exit is on the timeline, just before the stop", (_name, bead, payload) => {
+    const { S } = server();
+    const b = S.bundles[idOf(S, bead)];
+    const last = b.sessions.at(-1);
+    const [exit, stop] = b.events.slice(-2);
+    expect([exit.type, stop.type, last.status]).toEqual(["worker_session_exited", "work_item_needs_human", payload.status]);
+    expect(exit.payload).toEqual({ session_id: last.id, wall_ms: last.wall_ms, ...(last.status === "done" ? { tokens_in: last.tokens_in, tokens_out: last.tokens_out, cost_usd: last.cost_usd } : { node_id: "verification" }), ...payload });
+    expect([last.exited_at, exit.seq]).toEqual([exit.created_at, stop.seq - 1]);
+  });
+
+  it("kraft-a3f0's escalation turns count their attempts as `store.create_session` does", () => {
+    const { S } = server();
+    expect(S.bundles[idOf(S, "kraft-a3f0")].sessions.filter((s) => s.hook_point === "escalation").map((s) => s.attempt)).toEqual([1, 2]);
   });
 });
 

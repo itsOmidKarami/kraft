@@ -1,6 +1,7 @@
 import { FAILURE_STOP_KINDS, LIVE_SESSION_STATUSES, WORK_ITEM_TRAITS, type DisplayStatus, type EventType, type SessionStatus, type StopKind, type WorkItemStatus } from "../../../src/types/vocab.generated";
 import { documentsFor, hex, logLines, type ItemBundle, type Scenario } from "./fixtures";
 import { ngDryRun } from "./ngBoard";
+import { RESUME_PROMPT } from "./poller";
 import { buildNeverStarted } from "./ngItems";
 
 /**
@@ -49,8 +50,7 @@ export function escalationThreads(sessions: any[]) {
 /** Where every turn of an escalation thread writes its summary (`escalate.thread_files`, `item_paths.thread_out`),
  *  as `session_exited` records it. */
 export const threadSummary = (id: string, thread: number) => `items/${id}/sessions/escalation-${thread}/out/summary.md`;
-/** The rate-limit poller's steer for the relaunch (`rate_limit_retry.RESUME_PROMPT`). */
-export const RESUME_PROMPT = "You were working on this task when the agent hit an API rate limit and stopped. That limit has now reset \u2014 continue the work from where you left off.";
+export { RESUME_PROMPT };
 /** `store.pending_rewind`: the newest `rewind_requested`, unless its target's `node_started` or its own
  *  `rewind_cancelled` came after it. The server's walk writes that `node_started` as soon as the resume or retry
  *  that honoured the rewind starts there; the doors here are not a walk, so the honouring `work_item_resumed` or
@@ -782,14 +782,11 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     },
   };
   /** The `rate_limit:<node>` counter as it stands: one bump per poll that found the item due, read off what each wrote
-   *  on that node (a relaunch, `work_item_retried` with the poller's steer, or the stop past its retries). A sample
-   *  whose events hold none starts where its row says it stands. */
-  const bumps = (b: ItemBundle, node: string) => {
-    const polled = b.events.filter((e) => e.payload.node_id === node && (
-      (e.type === "work_item_retried" && e.payload.steer === RESUME_PROMPT) ||
-      (e.type === "work_item_needs_human" && String(e.payload.reason).startsWith("rate_limit retries exhausted")))).length;
-    return polled || (b.item.rate_limit?.count ?? 0);
-  };
+   *  on that node (a relaunch, `work_item_retried` with the poller's steer, or the stop past its retries). The sample
+   *  data carries the relaunches its row counts. */
+  const bumps = (b: ItemBundle, node: string) => b.events.filter((e) => e.payload.node_id === node && (
+    (e.type === "work_item_retried" && e.payload.steer === RESUME_PROMPT) ||
+    (e.type === "work_item_needs_human" && String(e.payload.reason).startsWith("rate_limit retries exhausted")))).length;
   /** `board._summary`'s counts: the chain's nodes that completed, and how many of those are gates. */
   const tally = (b: ItemBundle) => {
     const it = b.item;
