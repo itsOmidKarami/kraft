@@ -20,12 +20,14 @@ from textual.widgets import Input, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
 
 from kraft import client, logs
-from kraft.console import acts, moments, tail, words
+from kraft.console import acts, moments, panels, pulse, tail, words
+from kraft.console.panels import END, Rows
+from kraft.console.pulse import Working
 from kraft.console.screens import View
 from kraft.console.screens.server import log_line
 
 #: A row's columns besides the title and the tail: the repo-and-chain column
-#: and the age. The bar, the id and the gaps take 1 + 8 + 2 + 2 more.
+#: and the age. The bar and its gap, the id and the gaps take 2 + 8 + 2 + 2 more.
 META_WIDTH = 14
 #: The same column in one repo, where it holds only a chain's name.
 META_ONE_REPO = 8
@@ -49,6 +51,10 @@ PEEK_MIN_HEIGHT = 30
 PEEK_DOC_LINES = 40
 #: The Board with no item in scope (spec §7.1).
 EMPTY = "Nothing filed yet. n files one."
+#: Where the cursor row's second line starts: under the title.
+DETAIL_INDENT = 2 + 8 + 2
+#: The panel's top edge over an empty Board, which has no heading to carry it.
+TOP = "group:top"
 
 
 def cell(text: str, width: int, style: str = "") -> Content:
@@ -58,7 +64,7 @@ def cell(text: str, width: int, style: str = "") -> Content:
 
 
 def _is_item(option_id: str | None) -> bool:
-    return bool(option_id) and not option_id.startswith("group:")
+    return bool(option_id) and not option_id.startswith(panels.GROUP)
 
 
 def bar_of(row: dict) -> str:
@@ -81,15 +87,22 @@ def row_line(row: dict, width: int, now: float, *, everywhere: bool, narrow: boo
     age. A narrow window drops the last two."""
     colour = bar_of(row)
     meta_width = META_WIDTH if everywhere else META_ONE_REPO
-    rest = width - (1 + 8 + 2 + 2) - (0 if narrow else 2 + meta_width + 1 + AGE_WIDTH)
+    rest = width - (2 + 8 + 2 + 2) - (0 if narrow else 2 + meta_width + 1 + AGE_WIDTH)
     title_width = max(rest * (100 - TAIL_SHARE) // 100, 1)
     chain = words.chain_of(row)
     repo = os.path.basename(row.get("repo", "").rstrip("/")) if everywhere else ""
-    meta = " · ".join(part for part in (repo, "" if chain == "default" else chain) if part)
-    age = words.ago(row.get("updated_at"), now).removesuffix(" ago")
+    meta = chips(repo, "" if chain == "default" else chain)
+    # A row whose work is happening reads its time at the node, to the second.
+    start = pulse.since(row) if pulse.spins(row) else None
+    age = (
+        pulse.clock(now - start)
+        if start is not None
+        else words.ago(row.get("updated_at"), now).removesuffix(" ago")
+    )
     tail_style = colour if words.group_of(row) == "needs" else "$kraft-muted"
     parts: list[str | Content | tuple[str, str]] = [
         ("▌", colour),
+        " ",
         (row["id"][:8], "$kraft-muted"),
         "  ",
         cell(row.get("title") or "", title_width),
@@ -97,9 +110,39 @@ def row_line(row: dict, width: int, now: float, *, everywhere: bool, narrow: boo
         cell(words.reason_tail(row, now), max(rest - title_width, 1), tail_style),
     ]
     if not narrow:
-        parts += ["  ", cell(meta, meta_width, "$kraft-faint"), " "]
-        parts.append((age.rjust(AGE_WIDTH), "$kraft-faint"))
+        parts += ["  ", meta.truncate(meta_width, ellipsis=True, pad=True), " "]
+        parts.append((age.rjust(AGE_WIDTH), "$kraft-muted" if start else "$kraft-faint"))
     return Content.assemble(*parts)
+
+
+def chips(repo: str, chain: str) -> Content:
+    """The repo and the chain, each in its own colour: what kind of thing a
+    word is, read before the word."""
+    shown = [(repo, "$kraft-accent-muted"), (chain, "$kraft-info")]
+    parts: list[tuple[str, str]] = []
+    for text, style in ((t, st) for t, st in shown if t):
+        parts += [(" · ", "$kraft-faint"), (text, style)] if parts else [(text, style)]
+    return Content.assemble(*parts)
+
+
+def detail_line(row: dict, width: int) -> Content:
+    """The cursor row's second line, under its title: its repo, its chain
+    (the default named too) and where it stands on it."""
+    head = chips(os.path.basename(row.get("repo", "").rstrip("/")), words.chain_of(row))
+    lead = Content.assemble(" " * DETAIL_INDENT, head, (" · ", "$kraft-faint"))
+    marks = chain_line(words.chain_marks(row), max(width - lead.cell_length, 1))
+    return Content.assemble(lead, marks).truncate(width, ellipsis=True)
+
+
+def heading(key: str, label: str, members: list[dict], folded: bool) -> Content:
+    """A group's title on its separator: its name in the accent and its count
+    in the group's colour, `›` where Done is folded."""
+    return Content.assemble(
+        (label, "$kraft-accent"),
+        " ",
+        (str(len(members)), BAR[key] if members else "$kraft-faint"),
+        (" ›" if folded and members else "", "$kraft-muted"),
+    )
 
 
 def chain_line(marks: list[dict], width: int, *, lit: bool = False) -> Content:
@@ -130,7 +173,7 @@ def chain_line(marks: list[dict], width: int, *, lit: bool = False) -> Content:
             hi, grown = hi + 1, True
         if lo > 0 and size(lo - 1, hi) <= width:
             lo, grown = lo - 1, True
-    here = "bold $background on $primary" if lit else "bold $primary"
+    here = "bold $background on $kraft-accent" if lit else "bold $kraft-accent"
     style = {"done": "$kraft-faint", "current": here, "hot": here, "todo": ""}
     parts: list[str | tuple[str, str]] = [(f"+{lo} … ", "$kraft-faint")] if lo else []
     for k in range(lo, hi + 1):
@@ -170,14 +213,18 @@ class Board(View):
         #: `()` for nothing yet, so the next look always reads.
         self._peeked: tuple | None = ()
         self._timer: Timer | None = None
+        #: The rows drawn, by id; and the one whose second line is open.
+        self._by_id: dict[str, dict] = {}
+        self._expanded: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Input(placeholder="filter by title or id · Esc clears", id="board-filter")
-        rows = OptionList(id="rows", markup=False)
+        rows = Rows(id="rows", markup=False)
         rows.can_focus = False
         yield rows
         with Vertical(id="peek"):
             yield Static(id="peek-head")
+            yield Working(id="peek-work")
             yield Static(id="peek-chain")
             # Focus stays with the Board and the prompt, never the peek.
             body = RichLog(id="peek-body", wrap=True, max_lines=500, min_width=1)
@@ -186,7 +233,7 @@ class Board(View):
 
     def on_mount(self) -> None:
         self.query_one("#board-filter").display = False
-        self.query_one("#peek").display = self.app.size.height >= PEEK_MIN_HEIGHT
+        self._open_peek(self.app.size.height >= PEEK_MIN_HEIGHT)
 
     @property
     def selected(self) -> dict | None:
@@ -219,7 +266,18 @@ class Board(View):
             and self.app.repo in (None, row.get("repo"))
             and self._matches(row)
         ]
-        options = self._options(shown, rows.scrollable_content_region.width)
+        rows.framed = not self.screen.has_class("-compact")
+        narrow = self.screen.has_class("-narrow")
+        rows.age_width = 0 if narrow else AGE_WIDTH
+        self._expanded = None
+        options = self._options(shown, rows.inner)
+        rows.live = {
+            k: pulse.since(self._by_id[o.id])
+            for k, o in enumerate(options)
+            if o.id in self._by_id and pulse.spins(self._by_id[o.id])
+        }
+        if rows.live:
+            self.app.pulse.wake()
         scrolled = rows.scroll_y
         rows.set_options(options)
         ids = [option.id for option in options]
@@ -239,35 +297,67 @@ class Board(View):
         # set_options resets the scroll: put the reader back where they were,
         # unless that would hide the cursor.
         rows.scroll_to(y=scrolled, animate=False, immediate=True)
-        if rows.highlighted is not None:
+        self._expand()
+        if rows.highlighted is not None and rows.highlighted == first and not scrolled:
+            rows.scroll_home(animate=False, immediate=True)  # its heading stays in sight
+        elif rows.highlighted is not None:
             rows.scroll_to_highlight()
         self.refresh_bindings()
         self._peek_soon()
+
+    def _expand(self) -> None:
+        """Only the cursor's row opens its second line: the list stays dense."""
+        rows = self.query_one("#rows", Rows)
+        option = rows.highlighted_option
+        wanted = option.id if option is not None and option.id in self._by_id else None
+        if wanted == self._expanded:
+            return
+        now, narrow = time.time(), self.screen.has_class("-narrow")
+        everywhere = self.app.repo is None
+        for wid, open_ in ((self._expanded, False), (wanted, True)):
+            if wid is None or wid not in self._by_id:
+                continue
+            row = self._by_id[wid]
+            line = row_line(row, rows.inner, now, everywhere=everywhere, narrow=narrow)
+            if open_:
+                line = Content.assemble(line, "\n", detail_line(row, rows.inner))
+            rows.replace_option_prompt(wid, line)
+        self._expanded = wanted
+        rows.refresh(layout=True)  # one line more or less: the panel's height follows
 
     def _matches(self, row: dict) -> bool:
         text = self.filter_text.strip().lower()
         return not text or text in (row.get("title") or "").lower() or text in row["id"].lower()
 
     def _options(self, shown: list[dict], width: int) -> list[Option]:
+        """Each group under its heading, Needs you first. A heading with
+        nothing under it (an empty group, Done folded) joins the next one's
+        line, so it costs no row: `Not started 0 ─ Done 12 ›`."""
+        self._by_id = {row["id"]: row for row in shown}
+        framed = self.query_one("#rows", Rows).framed
+        end = [Option(Content(""), id=END, disabled=True)] if framed else []
         if not shown:
             said = "nothing here for this filter" if self.filter_text.strip() else EMPTY
-            return [Option(Content.styled(said, "$kraft-muted"), disabled=True)]
+            top = [Option(Content(""), id=TOP, disabled=True)] if framed else []
+            return [*top, Option(Content.styled(said, "$kraft-muted"), disabled=True), *end]
         now, narrow = time.time(), self.screen.has_class("-narrow")
         grouped: dict[str, list[dict]] = {key: [] for key, _ in words.GROUPS}
         for row in words.sort_rows(shown):
             grouped[words.group_of(row)].append(row)
         options: list[Option] = []
+        waiting: list[Content] = []
+        last = words.GROUPS[-1][0]
         for key, label in words.GROUPS:
             members = grouped[key]
             folded = key == "done" and not self.done_open
-            # Muted caps and the count in the group's colour: the rows outweigh it.
-            heading = Content.assemble(
-                (label.upper(), "$kraft-muted"),
-                " ",
-                (str(len(members)), BAR[key] if members else "$kraft-faint"),
-                (" ›" if folded and members else "", "$kraft-muted"),
-            )
-            options.append(Option(heading, id=f"group:{key}"))
+            title = heading(key, label, members, folded)
+            # Needs you keeps its line when empty: it says what runs without you.
+            if not (members and not folded) and key not in ("needs", last):
+                waiting.append(title)
+                continue
+            joined = [part for t in waiting for part in (t, (" ─ ", "$kraft-frame"))]
+            options.append(Option(Content.assemble(*joined, title), id=f"group:{key}"))
+            waiting = []
             if key == "needs" and not members:
                 # One calm line, the quit line's own sentence (moments.at_rest).
                 calm = moments.empty_needs_you(len(grouped["running"]))
@@ -281,7 +371,7 @@ class Board(View):
                     )
                     for row in members
                 ]
-        return options
+        return options + end
 
     def select(self, work_item_id: str) -> None:
         """Put the cursor on an item wherever it is, out of the filter, Done's
@@ -294,7 +384,7 @@ class Board(View):
             self.app.widen(True)
         if words.group_of(row) == "done":
             self.done_open = True
-        self.query_one("#peek").display = True
+        self._open_peek(True)
         self.draw(keep=work_item_id)
 
     def back(self) -> bool:
@@ -320,6 +410,7 @@ class Board(View):
 
     @on(OptionList.OptionHighlighted, "#rows")
     def _moved(self) -> None:
+        self._expand()
         self.refresh_bindings()
         self._peek_soon()
 
@@ -353,12 +444,17 @@ class Board(View):
 
     def action_peek(self) -> None:
         peek = self.query_one("#peek")
-        peek.display = not peek.display
+        self._open_peek(not peek.display)
         self._peeked = ()
         if peek.display:
             self._peek_soon()
         else:
             self.workers.cancel_group(self, "peek")
+
+    def _open_peek(self, on: bool) -> None:
+        """The peek open or shut; open, it takes what the rows leave."""
+        self.query_one("#peek").display = on
+        self.set_class(on, "-peek")
 
     def action_scope(self) -> None:
         self.app.widen(self.app.repo is not None)
@@ -414,16 +510,22 @@ class Board(View):
     async def _peek(self, row: dict | None) -> None:
         head = self.query_one("#peek-head", Static)
         body = self.query_one("#peek-body", RichLog)
+        peek = self.query_one("#peek")
         body.clear()
         self.query_one("#peek-chain").display = False
+        self.query_one("#peek-work", Working).show_item(None)
         if row is None:
+            peek.border_title = "server.log"
             head.update(Content.styled("server.log", "$kraft-muted"))
             async for line in tail.follow(tail.server_log()):
                 body.write(log_line(line, self.app.theme_variables))
             return
         now = time.time()
-        bead = f" · {row['bead_id']}" if row.get("bead_id") else ""
-        said = f"{row['id'][:8]}{bead} · {words.chain_of(row)} · {words.reason_tail(row, now)}"
+        peek.border_title = f"{row['id'][:8]} · {words.status_words(row)}"
+        # The id is the panel's title: the line says the rest.
+        said = " · ".join(
+            p for p in (row.get("bead_id"), words.chain_of(row), words.reason_tail(row, now)) if p
+        )
         head.update(Content.styled(said, "$kraft-muted"))
         try:
             await self._peek_item(row["id"], body, now)
@@ -470,6 +572,7 @@ class Board(View):
             say(tail_words, *(["It comes after:"] if waits else []))
             say(*(f"  {d['id'][:8]}  {d.get('status')}  {d.get('title')}" for d in waits))
         elif status in ("running", "waiting", "escalated"):
+            self.query_one("#peek-work", Working).show_item(item)
             await self._follow(item, body)
         else:
             mr = item.get("mr_ref") or {}
