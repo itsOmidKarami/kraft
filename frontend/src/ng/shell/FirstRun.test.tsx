@@ -194,6 +194,7 @@ describe("FirstRun", () => {
       ...PROBE,
       test_command: "just test",
       setup_command: "just setup",
+      test_markers: ["justfile"],
       candidates: [
         { ...cand, role: "test", command: "just test", source: "justfile recipe `test`", chosen: true },
         { ...cand, role: "setup", command: "just setup", source: "justfile recipe `setup`", chosen: true },
@@ -207,6 +208,7 @@ describe("FirstRun", () => {
     await reveal();
     expect(screen.getByText("just test — from justfile recipe `test`")).toBeInTheDocument();
     expect(screen.getByText("just setup — from justfile recipe `setup`")).toBeInTheDocument();
+    expect(screen.getByText("Test files").nextSibling).toHaveTextContent("justfile");
     // The others are alternatives, not results: folded behind a count, under results that take the card's full width.
     const also = screen.getByText("Also found (1)").closest("details")!;
     expect(also).not.toHaveAttribute("open");

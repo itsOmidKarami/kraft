@@ -87,8 +87,8 @@ const ROWS: Row[] = [
     run: async (p) => { await app(p, item("needs-gate", "/review"), { ready: (pg) => pg.locator(".review-page").waitFor() }); await p.keyboard.press("Escape"); await pause(p); expect(p.url()).not.toContain("/review"); },
   },
   {
-    name: "review: the board's Review to approve opens the gate's review",
-    run: async (p) => { await app(p, "/"); await p.getByRole("button", { name: "Review to approve" }).first().click(); await pause(p, 800); expect(p.url()).toMatch(/\/review/); await expect(p.getByRole("button", { name: /^Approve/ }).first()).toBeVisible(); },
+    name: "review: the board's Review opens the gate's review",
+    run: async (p) => { await app(p, "/"); await p.getByRole("button", { name: "Review", exact: true }).first().click(); await pause(p, 800); expect(p.url()).toMatch(/\/review/); await expect(p.getByRole("button", { name: /^Approve/ }).first()).toBeVisible(); },
   },
 
   {

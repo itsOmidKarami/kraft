@@ -444,9 +444,10 @@ class KraftConsole(App):
         self.default_screen.remove_class("-since")
 
     def _draw_since(self) -> None:
-        if self.seen is not None and self.default_screen.has_class("-since"):
+        since = self.query_one_optional("#since", Static)  # none once the frame is down
+        if since and self.seen is not None and self.default_screen.has_class("-since"):
             line = moments.since_line(self._in_scope(self.rows), self.seen, time.time())
-            self.query_one("#since", Static).update(Content.styled(line, "$kraft-muted"))
+            since.update(Content.styled(line, "$kraft-muted"))
 
     def action_prompt(self) -> None:
         prompt = self.query_one(Prompt)
@@ -574,7 +575,9 @@ class KraftConsole(App):
     def _live_event(self, rows: list[dict], events: list[dict]) -> None:
         before, first = self.rows, not self._read_once
         self.rows, self._read_once = rows, True
-        status = self.query_one(StatusLine)
+        status = self.query_one_optional(StatusLine)
+        if status is None:
+            return  # the frame is coming down: the rows are kept, nothing is drawn
         if not events:  # reconnected, or read again: so are the spend and the agents
             self.run_worker(status.read, group="status", exclusive=True)
         elif any(event.get("type") == "worker_session_exited" for event in events):
@@ -614,7 +617,8 @@ class KraftConsole(App):
         frame.set_class(no_server, "-no-server")
         start = self.query_one_optional("#start", Button)
         if link is Link.DOWN:
-            self.query_one("#down", Static).update(Content(down_sentence(error)))
+            if down := self.query_one_optional("#down", Static):  # none once the frame is down
+                down.update(Content(down_sentence(error)))
             # Focused once, on the way down: Enter presses it (spec §6).
             # But never from where a person is typing: only off the view or nothing.
             if no_server and not was_down and start is not None:
@@ -640,7 +644,8 @@ class KraftConsole(App):
             return  # read again on the next reconnect
         self._scoped = True
         self._draw_top()
-        self.query_one("#board", Board).draw()
+        if board := self.query_one_optional("#board", Board):  # none once the frame is down
+            board.draw()
 
     async def _rescope(self) -> None:
         await self._resolve_scope()
@@ -659,8 +664,8 @@ class KraftConsole(App):
         self.release = found
         self.update_waiting = bool(found.get("behind"))
         self._draw_top()
-        server = self.query_one("#server", View)
-        if server.display:  # it arrived while the Server is shown: say so now
+        server = self.query_one_optional("#server", View)  # none once the frame is down
+        if server is not None and server.display:  # it arrived while the Server is shown
             server.draw()
 
     def _after_update(self) -> None:
@@ -680,13 +685,18 @@ class KraftConsole(App):
         self._lit = True
         self._draw_top()
         # The top line's own timer: it goes with the line when the frame comes down.
-        self.query_one("#tabs").set_timer(1 / pulse.FPS, self._unlight_dot)
+        if tabs := self.query_one_optional("#tabs"):
+            tabs.set_timer(1 / pulse.FPS, self._unlight_dot)
 
     def _unlight_dot(self) -> None:
         self._lit = False
         self._draw_top()
 
     def _draw_top(self, width: int | None = None) -> None:
+        top = self.query_one_optional("#tabs", Static)
+        place = self.query_one_optional("#where", Static)
+        if top is None or place is None:
+            return  # the frame is not up yet, or is coming down: an event or a beat can land then
         self._draw_since()
         # The scope may have moved (resolved, or `s`): the count follows it.
         if status := self.query_one_optional(StatusLine):  # none once the frame is down
@@ -709,7 +719,7 @@ class KraftConsole(App):
             " ",
             *tabs,
         ).rstrip()
-        self.query_one("#tabs", Static).update(head)
+        top.update(head)
         where = home_relative(self.repo) if self.repo else "all repos"
         # `width` from a resize: inside one, `self.size` is still the old size.
         total = width or self.size.width
@@ -723,7 +733,7 @@ class KraftConsole(App):
         while len(where) > room and len(parts) > 1:
             parts.pop(0)
             where = "…/" + "/".join(parts)
-        self.query_one("#where", Static).update(Content(f"{where}{tail}"))
+        place.update(Content(f"{where}{tail}"))
 
     def _tabs(self) -> list[tuple[str, str | tuple[str, str]]]:
         """Each top view's tab with its count (spec §5.4): how many need you

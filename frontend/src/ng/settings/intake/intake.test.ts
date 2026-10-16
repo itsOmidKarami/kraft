@@ -55,7 +55,7 @@ describe("Auto-intake", () => {
   });
 
   it("says what a check found, with every skip reason in its own words", () => {
-    const c = (skipped: string[]) => ({ id: 1, at: "2026-10-01T10:05:00Z", ready: 4, started: ["kraft-d71a"], skipped: skipped.map((reason, i) => ({ bead_id: `b${i}`, reason })) });
+    const c = (skipped: string[]) => ({ id: 1, at: "2026-10-01T10:05:00Z", ready: 4, started: ["kraft-d71a"], skipped: skipped.map((reason, i) => ({ bead: reason === "invalid_config" ? null : `b${i}`, reason })) });
     expect(checkText(c(["above_priority_ceiling", "above_priority_ceiling", "already_item"]), 2)).toBe("4 ready · started kraft-d71a · 2 above P2 · 1 already an item");
     expect(checkText({ ...c([]), started: [], ready: 0 }, 2)).toBe("0 ready · none started");
     const words = ["above_priority_ceiling", "already_item", "epic", "max_concurrent", "daily_budget", "invalid_config"].map((r) => checkText(c([r]), 3));

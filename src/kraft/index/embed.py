@@ -15,12 +15,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "BAAI/bge-small-en-v1.5"
 DIMENSIONS = 384
+
+#: How long a failed model load is remembered. fastembed retries a download
+#: with its own sleeps, so without this every ingest and search pays for it.
+LOAD_FAILURE_TTL = 300.0
 
 
 def cache_dir() -> Path:
@@ -56,6 +61,8 @@ class Embedder:
         self.model_name = model_name
         self.reason: str | None = None
         self._model = None
+        self._load_failed_at: float | None = None
+        self._load_error: str | None = None
 
     def available(self) -> bool:
         """Whether the library is importable. Says nothing about whether the
@@ -75,11 +82,22 @@ class Embedder:
     def _load(self):
         if self._model is not None:
             return self._model
+        if (
+            self._load_failed_at is not None
+            and time.monotonic() - self._load_failed_at < LOAD_FAILURE_TTL
+        ):
+            raise RuntimeError(self._load_error)
         from fastembed import TextEmbedding
 
         target = cache_dir()
         target.mkdir(parents=True, exist_ok=True)
-        self._model = TextEmbedding(model_name=self.model_name, cache_dir=str(target))
+        try:
+            self._model = TextEmbedding(model_name=self.model_name, cache_dir=str(target))
+        except Exception as exc:
+            self._load_failed_at = time.monotonic()
+            self._load_error = str(exc) or type(exc).__name__
+            raise
+        self._load_failed_at = None
         self.reason = None
         return self._model
 

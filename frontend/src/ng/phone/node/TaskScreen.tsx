@@ -5,8 +5,9 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ago, elapsed, lineCount, tokenText, usd } from "../../../format";
 import type { WorkerSession } from "../../../types";
-import { escalationsOf, ESCALATION, FIX_LOOP, isSessionDoc, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, NO_DOCUMENTS, NOT_RUN_IN_ROUND, messagesThrough, passWords, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
+import { escalationsOf, ESCALATION, FIX_LOOP, isSessionDoc, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, NO_DOCUMENTS, progressWords, subTasks, NOT_RUN_IN_ROUND, messagesThrough, passWords, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
+import { materialized, planTaskPath } from "../../item/chainValues";
 import { isScopeTask, roundWords, scopeLead, scopesView } from "../../item/scopeView";
 import { placeUrl, selPath, type Place } from "../../item/url";
 import { useEventLog } from "../../item/useEvents";
@@ -63,6 +64,8 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
   const si = steps.findIndex((s) => s.id === place.sel.step);
   const before = si > 0 ? `step ${steps[si - 1].id}` : (() => { const i = item.chain_definition.nodes.findIndex((n) => n.id === nodeId); return i > 0 ? item.chain_definition.nodes[i - 1].id : null; })();
   const judged = (item.judge_stop_note ?? []).filter((j) => j.node_id === nodeId);
+  // The plan's sub-tasks sit on the one task that works through it, as the desktop's pane has them.
+  const plan = !esc && !loop && planTaskPath(materialized(item)) === path ? item.progress : null;
   const summary = at?.session_summary_ref ? docs.find((d) => d.path === at.session_summary_ref) : undefined;
 
   return (
@@ -123,9 +126,23 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
                 ...(at.harness ? ([["harness", <span key="h" className="ph-mono">{at.harness}</span>]] as [string, React.ReactNode][]) : []),
                 ...(at.model ? ([["model", <span key="m" className="ph-mono">{at.model}</span>]] as [string, React.ReactNode][]) : []),
                 ["path", <span key="p" className="ph-mono">{path}</span>],
+                ...(plan ? ([["progress", progressWords(plan, !!look.running)]] as [string, React.ReactNode][]) : []),
                 ...(at.wall_ms != null ? ([["duration", elapsed(at.wall_ms)]] as [string, React.ReactNode][]) : []),
                 ...(r && !loop ? ([["round", `${r}${rounds.total ? ` of ${rounds.total}` : ""}`]] as [string, React.ReactNode][]) : []),
               ]} />
+              {plan?.tasks?.length ? (
+                <Block title={`Progress · ${subTasks(plan.tasks.length)}`}>
+                  <ol className="ph-subtasks" aria-label="Sub-tasks">
+                    {plan.tasks.map((t) => (
+                      <li key={t.n} className={`ph-subtask ph-is-${t.state}`} aria-current={t.state === "current" ? "step" : undefined}>
+                        <span className="ph-subtask-n ph-mono">{t.n}</span>
+                        <span className="ph-subtask-title">{t.title}</span>
+                        <span className="ph-subtask-meta">{t.state === "current" ? "current" : t.state === "done" ? (t.sha ? <span className="ph-mono">{t.sha}</span> : "done") : null}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </Block>
+              ) : null}
               <Block title="Result">
                 <Facts rows={[
                   ...(at.tokens_in != null ? ([["tokens", tokenText(at)]] as [string, React.ReactNode][]) : []),

@@ -157,4 +157,39 @@ def _serve(monkeypatch, detail, *, document=DOC, threads=(), calls=None):
 async def _opened(console, app, pilot, work_item_id: str) -> None:
     await _settled(console, app, pilot)
     app.open_item(work_item_id)
-    await console.until(pilot, lambda: app.view.item is not None and _overview(app))
+    # The read has answered: an item with nothing to say on its Overview draws no line.
+    await console.until(
+        pilot,
+        lambda: (
+            app.view.item is not None
+            and not any(w.group == "read" and w.is_running for w in app.view.workers)
+        ),
+    )
+
+
+def _event(seq: int, kind: str, minutes_ago: float, **payload) -> dict:
+    return {
+        "seq": seq,
+        "work_item_id": GATE["id"],
+        "type": kind,
+        "node_id": payload.pop("node", None),
+        "payload": payload,
+        "created_at": _iso(minutes_ago),
+    }
+
+
+def _serve_events(monkeypatch, history: list[dict], hold=None) -> list[dict]:
+    """`client.events` over `history`, as the server pages it; returns the reads.
+    `hold` maps a `before_seq` to an Event its read waits for."""
+    reads: list[dict] = []
+
+    async def events(work_item_id=None, after_seq=0, *, limit=None, before_seq=None):
+        if before_seq in (hold or {}):
+            await hold[before_seq].wait()
+        reads.append({"after_seq": after_seq, "limit": limit, "before_seq": before_seq})
+        if before_seq is not None:
+            return [e for e in history if e["seq"] < before_seq][-limit:]
+        return [e for e in history if e["seq"] > after_seq][:limit]
+
+    monkeypatch.setattr(client, "events", events)
+    return reads

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { CircleAlert } from "lucide-react";
 import * as api from "../../../api";
 import type { Health } from "../../../types/system";
 import { Button } from "../../ui/Button";
@@ -78,8 +79,9 @@ export function PhoneSignIn({ onSignedIn }: { onSignedIn: () => Promise<void> })
           <span>Password</span>
           <input ref={input} className="ph-input" type="password" autoComplete="current-password" autoFocus value={password} disabled={locked} aria-invalid={!locked && error === WRONG_PASSWORD} onChange={(e) => { setPassword(e.target.value); setError(null); }} />
         </label>
-        {!locked && error && <p className="ph-error" role="alert">{error}</p>}
-        <div className="ph-signin-stay" role="radiogroup" aria-label={STAY_SIGNED_IN}>
+        {!locked && error && <p className="ph-error" role="alert"><CircleAlert size={12} aria-hidden />{error}</p>}
+        <span className="ph-signin-label" id="ph-signin-stay">{STAY_SIGNED_IN}</span>
+        <div className="ph-signin-stay" role="radiogroup" aria-labelledby="ph-signin-stay">
           {([["days", days != null ? `${days} days` : STAY_SIGNED_IN], ["visit", THIS_VISIT_ONLY]] as const).map(([v, label]) => (
             <button key={v} type="button" role="radio" aria-checked={stay === v} disabled={locked || busy} className={`ph-signin-opt${stay === v ? " ph-is-on" : ""}`} onClick={() => setStay(v)}>{label}</button>
           ))}

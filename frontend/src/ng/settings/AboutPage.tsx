@@ -8,6 +8,7 @@ import { Button } from "../ui/Button";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
 import "./settings.css";
+import { docsUrl } from "./docsUrl";
 import { installedOlder, olderServer, restartPending } from "../shell/health";
 import { COPIED_THE_COMMAND, COPIED_THE_DIAGNOSTICS, RELEASE_CHANNEL_HINT } from "./sharedWords";
 import { LinkButton } from "../ui/LinkButton";
@@ -23,7 +24,6 @@ export interface UpdateState {
 }
 const CHANNELS = ["stable", "rc", "beta", "alpha"].map((c) => ({ value: c, label: c }));
 const RELEASES = "https://github.com/itsOmidKarami/kraft/releases";
-const DOCS = "https://kraft-sdlc.dev/";
 const SUPPORT = "https://kraft-sdlc.dev/project/status-and-support";
 
 /** What the update feed said, in words. A feed that did not answer is "unknown": it
@@ -154,7 +154,7 @@ export function AboutPage() {
         </dl>
 
         <div className="set-about-links">
-          <a className="set-linkrow" href={DOCS} target="_blank" rel="noopener noreferrer"><BookOpen size={16} aria-hidden /><span>Documentation</span><ExternalLink size={14} aria-hidden /></a>
+          <a className="set-linkrow" href={docsUrl(health?.version, update?.latest)} target="_blank" rel="noopener noreferrer"><BookOpen size={16} aria-hidden /><span>Documentation</span><ExternalLink size={14} aria-hidden /></a>
           <a className="set-linkrow" href={SUPPORT} target="_blank" rel="noopener noreferrer"><LifeBuoy size={16} aria-hidden /><span>Status and support</span><ExternalLink size={14} aria-hidden /></a>
         </div>
         <span className="set-hint">macOS and Linux{update?.python && ` · Python ${update.python}`} · Only the latest release gets fixes.</span>

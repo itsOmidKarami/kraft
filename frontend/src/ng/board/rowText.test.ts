@@ -43,6 +43,10 @@ describe("reasonTail", () => {
       [row("waiting", { stop: stop("wait") }), "waiting at verification"],
       [row("waiting", { stop: stop("wait", { resume_at: "2026-09-13T10:04:00Z" }) }), "verification · next check in 4m"],
       [row("waiting", { current_node_id: "post_merge_ci", stop: stop("wait", { node: undefined, resume_at: "2026-09-13T10:04:00Z" }) }), "post merge ci · next check in 4m"],
+      // No node to name: no "at …", no leading separator.
+      [row("waiting", { current_node_id: null, stop: stop("rate_limit", { node: undefined, resume_at: "2026-09-13T10:04:00Z" }) }), "retry in 4m"],
+      [row("failed", { current_node_id: null, stop: stop("failed", { node: undefined }) }), "failed"],
+      [row("paused", { current_node_id: null, stop: stop("failed", { node: undefined }) }), "created paused"],
       [row("escalated"), "escalation running"],
       [row("done"), "completed"],
       [row("done", { mr_ref: { number: 139, url: "https://forge.example/mr/139" } }), "merged !139"],
@@ -62,7 +66,7 @@ describe("reasonTail", () => {
 describe("rowAction", () => {
   it("offers one action per needs-you kind, failed and a mid-chain pause, and none otherwise", () => {
     const a = (i: WorkItem) => rowAction(i);
-    expect(a(row("needs_you", { stop: stop("gate"), pending_gate: "final_review" }))).toEqual({ label: "Review to approve", kind: "gate", gate: "final_review" });
+    expect(a(row("needs_you", { stop: stop("gate"), pending_gate: "final_review" }))).toEqual({ label: "Review", kind: "gate", gate: "final_review" });
     expect(a(row("needs_you", { stop: stop("question") }))).toMatchObject({ label: "Answer", kind: "peek", tab: "overview" });
     expect(a(row("needs_you", { stop: stop("cap") }))).toMatchObject({ label: "Raise cap", kind: "peek", tab: "config" });
     // The row cannot tell a cap the server raises from one it refuses; the peek's banner can.
@@ -89,7 +93,7 @@ describe("admittedRowAction: rowAction, only through a door the server's actions
     // The peek offers Retry when it can't raise: the row still goes there.
     ["a budget, retry without raise_budget", row("needs_you", { stop: stop("budget"), actions: ["retry"] }), raise],
     ["a budget, neither", row("needs_you", { stop: stop("budget"), actions: ["cancel"] }), null],
-    ["a gate, reject alone", row("needs_you", { stop: stop("gate"), pending_gate: "final_review", actions: ["reject"] }), { label: "Review to approve", kind: "gate", gate: "final_review" }],
+    ["a gate, reject alone", row("needs_you", { stop: stop("gate"), pending_gate: "final_review", actions: ["reject"] }), { label: "Review", kind: "gate", gate: "final_review" }],
     ["a gate, the server refusing both", row("needs_you", { stop: stop("gate"), pending_gate: "final_review", actions: ["cancel"] }), null],
     // Open goes to the peek, which decides its own doors.
     ["any other stop, nothing listed", row("needs_you", { stop: stop("mr_closed"), actions: [] }), { label: "Open", kind: "peek", tab: "overview" }],

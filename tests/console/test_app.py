@@ -4,6 +4,7 @@ windows, the no-server state, and `kraft console`'s own refusals."""
 from __future__ import annotations
 
 import asyncio
+import inspect
 import tomllib
 from fnmatch import fnmatch
 from pathlib import Path
@@ -16,7 +17,7 @@ from textual.binding import Binding
 from textual.widgets import ContentSwitcher, Footer, Input
 
 from kraft import cli, client
-from kraft.console import acts, live, pulse
+from kraft.console import acts, live, moments, pulse
 from kraft.console import app as console_app
 from kraft.console.app import TABS, KraftConsole
 from kraft.console.dialogs import EVERYWHERE, Confirm, Keys, Note
@@ -408,6 +409,11 @@ def test_no_key_does_two_things_on_one_view(name):
     actions: dict[str, set[str]] = {}
     for owner in (App, KraftConsole, VIEWS[name]):
         for binding in Binding.make_bindings(owner.BINDINGS):
+            # An open Chain node's close shares ← and Esc with the key that is
+            # live when none is open; `check_action` shuts one of the two
+            # (pinned in tests/console/test_item_chain_live.py).
+            if binding.action == "close_node":
+                continue
             # `shift+r` is kitty's name for `R`; `shift+tab` is a key of its own.
             key = binding.key.lower()
             if len(key.removeprefix("shift+")) == 1:
@@ -739,3 +745,43 @@ def test_the_top_line_leads_with_the_brand_and_lights_the_dot_one_beat(board):
         "$success",
         "bold $kraft-live-lit",
     )
+
+
+_EVENT = [{"seq": 9, "type": "node_started"}]
+
+
+@pytest.mark.parametrize(
+    ("gone", "lands"),
+    [
+        pytest.param("#where", lambda app: app._unlight_dot(), id="dot-where"),
+        pytest.param("#tabs", lambda app: app._unlight_dot(), id="dot-tabs"),
+        pytest.param("#since", lambda app: app._unlight_dot(), id="dot-since"),
+        pytest.param("#status", lambda app: app._live_event([GATE], _EVENT), id="event-status"),
+        pytest.param("#tabs", lambda app: app._live_event([GATE], _EVENT), id="event-tabs"),
+        pytest.param("#down", lambda app: app._live_link(Link.DOWN, None), id="link-down"),
+        pytest.param("#board", lambda app: app._resolve_scope(), id="scope-board"),
+        pytest.param("#server", lambda app: app.check_update(), id="update-server"),
+    ],
+)
+def test_nothing_that_lands_while_the_frame_comes_down_raises(board, monkeypatch, gone, lands):
+    """Quitting takes the frame down a widget at a time while a lit dot's timer,
+    the server's events and answers can still land: none of them may raise
+    then (one in a handler ends the app with a traceback)."""
+    console = board([GATE])
+
+    async def update_available(channel=None):
+        return {"behind": 1}
+
+    monkeypatch.setattr(client, "update_available", update_available)
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        app.default_screen.add_class("-since")
+        app.seen = moments.Seen(at=0.0, done=frozenset())
+        await app.query_one(gone).remove()
+        if inspect.isawaitable(landed := lands(app)):  # a worker's coroutine
+            await landed
+        app._draw_top()
+        return True
+
+    assert console.run(scenario)

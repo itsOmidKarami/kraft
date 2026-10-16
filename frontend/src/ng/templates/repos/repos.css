@@ -65,3 +65,6 @@
 }
 /* A path is cut from the left: the end of it is what names the repo. */
 .rp-path { display: block; direction: rtl; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
+.rp-row { padding-block: var(--row-pad-add); }
+.rp-row-cfg { padding-block: calc(5px + var(--row-pad-add)); }

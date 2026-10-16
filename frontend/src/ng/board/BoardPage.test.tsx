@@ -9,6 +9,7 @@ import type { DisplayStatus, WorkItem } from "../../types";
 import { detail, stubFetch } from "../item/testkit";
 import { SIDEBAR_KEY } from "../shell/sidebarPref";
 import { Shell } from "../shell/Shell";
+import { Toaster } from "../ui/Toast";
 import { reload } from "../offline";
 import { BoardPage } from "./BoardPage";
 import { useBulk } from "./bulk";
@@ -126,14 +127,14 @@ describe("BoardPage", () => {
     expect(localStorage.getItem("kraft.firstRun")).toBeNull();
   });
 
-  // The board guide: the wizard shows while no repo is connected, items or not (#504 review).
-  it("keeps first-run while no repo is connected, though items exist", async () => {
+  // Disconnecting the only repo must not hide the work already filed behind the wizard.
+  it("shows the board, not first-run, when items exist though no repo is connected", async () => {
     vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
     put(item("w1", "done"));
     board();
-    expect(await screen.findByRole("heading", { name: "Nothing on the board yet" })).toBeInTheDocument();
     await act(async () => {});
-    expect(screen.getByRole("heading", { name: "Nothing on the board yet" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Nothing on the board yet" })).toBeNull();
+    expect(screen.getByText("Item w1")).toBeInTheDocument();
   });
 
   it("drops a kept first-run whose repo is no longer connected, and keeps the board", async () => {
@@ -290,6 +291,73 @@ describe("BoardPage", () => {
     expect(screen.getByRole("searchbox", { name: "Filter" })).toHaveFocus();
   });
 
+  it("is one Tab stop: the focused row tabs, the other rows' boxes and actions do not", async () => {
+    put(item("n1", "needs_you"), item("p2", "paused"));
+    board();
+    await screen.findByRole("button", { name: /Item n1/ });
+    const [first, second] = [...document.querySelectorAll<HTMLElement>(".board-row-main")] as [HTMLElement, HTMLElement];
+    expect([first.tabIndex, second.tabIndex]).toEqual([0, -1]);
+    expect(screen.getAllByRole("checkbox").map((c) => c.tabIndex)).toEqual([-1, -1]);
+    expect(screen.getByRole("button", { name: "Resume" }).tabIndex).toBe(-1);
+    act(() => second.focus());
+    expect([first.tabIndex, second.tabIndex]).toEqual([-1, 0]);
+  });
+
+  it.each([
+    ["j", "k"],
+    ["ArrowDown", "ArrowUp"],
+  ])("moves between rows with %s/%s, and Home and End go to the ends", async (down, up) => {
+    put(item("n1", "needs_you"), item("r2", "running"), item("r3", "running"));
+    board();
+    await screen.findByRole("button", { name: /Item n1/ });
+    const rows = [...document.querySelectorAll<HTMLElement>(".board-row-main")];
+    rows[0]!.focus();
+    fireEvent.keyDown(rows[0]!, { key: down });
+    expect(rows[1]).toHaveFocus();
+    fireEvent.keyDown(rows[1]!, { key: up });
+    expect(rows[0]).toHaveFocus();
+    fireEvent.keyDown(rows[0]!, { key: "End" });
+    expect(rows[2]).toHaveFocus();
+    fireEvent.keyDown(rows[2]!, { key: "Home" });
+    expect(rows[0]).toHaveFocus();
+  });
+
+  it("g jumps to the first Needs you row, and a runs the focused row's action", async () => {
+    put(item("r1", "running"), item("p2", "paused"), item("f3", "failed", { stop: { kind: "failed", node: "build", reason: null, resume_at: null } as WorkItem["stop"] }));
+    const calls = stubFetch({ "POST /work-items/p2/resume": [200, {}] });
+    render(<Toaster />);
+    board();
+    await screen.findByRole("button", { name: /Item f3/ });
+    const row = (t: string) => [...document.querySelectorAll<HTMLElement>(".board-row-main")].find((r) => r.textContent?.includes(t))!;
+    fireEvent.keyDown(document.body, { key: "g" });
+    expect(row("Item f3")).toHaveFocus();
+    row("Item p2").focus();
+    fireEvent.keyDown(row("Item p2"), { key: "a" });
+    await waitFor(() => expect(calls.find((c) => c.path === "/work-items/p2/resume")).toMatchObject({ method: "POST" }));
+    expect(await screen.findByText("Resumed.")).toBeInTheDocument();
+  });
+
+  it("Escape clears the checked rows once the peek is closed, and closes the bulk cancel confirm first", async () => {
+    put(item("r1", "running"), item("r2", "running"));
+    board();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Select Item r1" }));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^Cancel 1/ }));
+    const reason = screen.getByRole("textbox", { name: /Reason/ });
+    fireEvent.keyDown(reason, { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: /Reason/ })).toBeNull();
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByText("1 selected")).toBeNull();
+    expect(screen.getByRole("checkbox", { name: "Select Item r1" })).not.toBeChecked();
+  });
+
+  it("says the header's NEED YOU is the unfiltered total while a filter is on", async () => {
+    put(item("n1", "needs_you", { title: "Alpha" }), item("r2", "running", { title: "Beta" }));
+    board("/?q=Beta");
+    expect(await screen.findByText("1 NEED YOU · UNFILTERED")).toBeInTheDocument();
+  });
+
   it("hints / in the empty filter, and adds its rows to the shortcut help", async () => {
     put(item("r1", "running"));
     board();
@@ -326,7 +394,7 @@ describe("BoardPage", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Resume" }));
     expect(calls.find((c) => c.path === "/work-items/p2/resume")).toMatchObject({ method: "POST" });
     expect(await screen.findByRole("alert")).toHaveTextContent("work item is active, not paused");
-    await userEvent.click(screen.getByRole("button", { name: "Review to approve" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review" }));
     expect(where()).toBe("/work-items/g1/review?gate=plan_approval&doc=1");
   });
 

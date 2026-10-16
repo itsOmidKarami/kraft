@@ -608,6 +608,10 @@ COLOURS = {"warning": "W", "error": "E", "kraft-faint": "F"}
         ),
         ("                             extra is not installed ERROR", []),
         ("kraft: http://127.0.0.1:8766", []),
+        (
+            "2026-10-16 12:04:58 WARNING embed.py:114 embedding unavailable: see x.py:3 now",
+            [("W", "WARNING"), ("F", "embed.py:114")],
+        ),
     ],
     ids=[
         "warning",
@@ -616,6 +620,7 @@ COLOURS = {"warning": "W", "error": "E", "kraft-faint": "F"}
         "info-stays-plain",
         "continuation",
         "plain",
+        "one-line-record",
     ],
 )
 def test_server_log_colours_its_level_word_and_dims_the_source(line, styled):

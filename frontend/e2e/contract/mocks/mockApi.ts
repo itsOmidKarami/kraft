@@ -1,8 +1,9 @@
 import { NG_CHAINS, NG_REPOS, NG_WORKSPACES, ngDryRun } from "./ngBoard";
 import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, type Scenario } from "./fixtures";
 import { makeAreas } from "./areasMock";
-import { NG_NOW, ngThreads } from "./ngItems";
+import { ngThreads } from "./ngItems";
 import { harnessesServer, PROVIDER_STATUS } from "./ngHarnesses";
+import { listRow, transitions, type Ev } from "./transitions";
 import draftViews from "./draftViews.json" with { type: "json" };
 
 /**
@@ -25,7 +26,7 @@ export interface MockOptions {
   locked?: boolean;
   /** What POST /login answers while locked: 200, a 401, or a 429 with Retry-After (default 200). */
   login?: "ok" | "wrong" | "locked";
-  /** ux2-W6: GET /work-items answers the board's fixtures (`S.ngBoard`, `S.ngArchived`); "empty" answers none. */
+  /** ux2-W6: GET /work-items answers the board's fixtures (`S.ngBoard`, `S.ngArchived`, each row read from its bundle); "empty" answers none. */
   ngBoard?: boolean | "empty";
   /** ux2-W6 board states. `loading`: boot's list read fails, every later one never answers.
    *  `offline`: boot's read answers, every later one, and every draft read, fails to connect, and the event socket closes. */
@@ -40,6 +41,11 @@ export interface MockOptions {
   ngLibrary?: "draft";
   /** The release the server says it runs, in /health and /update, up to date. Unset: the scenario's, an update behind. */
   version?: string;
+  /** The instant an action's events and `updated_at` record (transitions.ts). Unset: the page's clock. */
+  now?: () => string;
+  /** Told of every event an action appends (transitions.ts), as the server's event socket would send it. The demo
+   *  forwards each to its open sockets; the contract suite's socket stays silent. */
+  onEvent?: (e: Ev) => void;
 }
 
 /** The ops each `itemDraft` state starts from (the running item stands on `verification`). */
@@ -229,8 +235,9 @@ function applyOps(view: ReturnType<typeof chainView>, ops: Record<string, unknow
 const json = (body: unknown, status = 200): Answer => ({ status, contentType: "application/json", body: JSON.stringify(body) });
 
 /**
- * Serve the whole /api surface from the scenario. Mutating verbs return a
- * plausible 200 so a composer's Submit never crashes, but nothing changes.
+ * Serve the whole /api surface from the scenario. A work item's actions change it as the server would
+ * (transitions.ts), for the page's life: the list, the detail and the events all read the one bundle.
+ * Most other mutating verbs return a plausible 200 so a Submit never crashes, and change nothing.
  */
 export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
   let restarted = 0;
@@ -257,6 +264,10 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
   const treeOrder = (a: string, b: string) => dirOf(a).localeCompare(dirOf(b)) || a.localeCompare(b);
   const findThread = (tid: string) => Object.values(threads).flat().find((t) => t.id === tid);
   const findComment = (cid: string) => Object.values(threads).flat().flatMap((t) => t.comments).find((c) => c.id === cid);
+  const mustFix = (wid: string) => threadsOf(wid).filter((t) => t.label === "must_fix" && t.state !== "resolved").map((t) => t.id);
+  // Every item action, the bulk door's included, goes through these: one item, read by the list and the detail alike.
+  const T = transitions(S, { now: opts.now, mustFix, onEvent: opts.onEvent });
+  const send = (r: { status: number; body: unknown }) => json(r.body, r.status);
   let seq = 0;
   return async (req) => {
     const url = new URL(req.url);
@@ -291,16 +302,17 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
     }
     if (p === "/work-items" && method === "GET") {
       const arch = q.get("archived") === "true";
-      const list = opts.ngBoard ? (opts.ngBoard === "empty" ? [] : arch ? S.ngArchived : S.ngBoard) : arch ? S.archived : S.items;
-      return json({ items: list, cursor: 4242 });
+      const ids = opts.ngBoard === "empty" ? [] : arch ? S.ngArchived : S.ngBoard;
+      const list = opts.ngBoard ? ids.map((id) => listRow(S.bundles[id].item)) : arch ? S.archived : S.items;
+      return json({ items: list, cursor: T.cursor() });
     }
     if (p === "/work-items" && method === "POST" && q.get("dry_run") && opts.ngBoard) {
       const r = ngDryRun(req.json() ?? {});
       return json(r.body, r.status);
     }
-    // ux2-W6: a create from the composer lands on the board's never-started row, which has a detail for the peek.
+    // ux2-W6: a create from the composer files a new item, on the chain its dry run showed.
     if (p === "/work-items" && method === "POST" && !q.get("dry_run") && opts.ngBoard) {
-      return json({ id: S.ngBoard.find((i) => i.bead_id === "kraft-f5d3")?.id ?? S.ngBoard[0]?.id, status: "paused" }, 201);
+      return send(T.create(req.json() ?? {}));
     }
     if (p === "/work-items" && method === "POST" && q.get("dry_run")) {
       const nodes = S.items[0]?.chain_definition?.nodes ?? [];
@@ -314,25 +326,21 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
     }
     if (p === "/work-items" && method === "POST") return json({ id: S.items[0]?.id ?? "00000000000000000000000000000000" });
     if (method === "POST" && p === "/work-items/bulk") {
-      // B9: each id through its own route's door, with that door's words (lifecycle.py).
+      // B9: each id through its own route's door (`lifecycle._bulk_one`), its refusal a result rather than the end.
       const { action, ids = [], reason } = req.json() ?? {};
       if (action === "cancel" && !String(reason ?? "").trim()) return json({ detail: "reason: cancel needs a non-blank reason" }, 422);
-      const known = [...S.ngBoard, ...S.ngArchived, ...S.items, ...S.archived];
+      const door = (id: string) => action === "pause" ? T.pause(id) : action === "cancel" ? T.end(id, "cancel", reason) : action === "archive" ? T.archive(id) : T.restore(id);
       return json({ results: (ids as string[]).map((id) => {
-        const i = known.find((x) => x.id === id);
-        const status = i?.status ?? "active";
-        const ended = status === "completed" || status === "abandoned";
-        const error = action === "pause" && !["active", "waiting"].includes(status) ? `work item is ${status}, not running`
-          : action === "cancel" && ended ? `work item is ${status}; its chain does not run again`
-          : action === "archive" && !ended ? "only a completed or abandoned item can be archived"
-          : action === "restore" && !i?.archived_at ? "work item is not archived" : null;
-        return error ? { id, ok: false, status, error } : { id, ok: true, status: action === "pause" ? "paused" : action === "cancel" ? "abandoned" : status };
+        const r = door(id);
+        const status = S.bundles[id]?.item.status;
+        if (r.status === 404) return { id, ok: false, error: "not found" };
+        return r.status < 300 ? { id, ok: true, status } : { id, ok: false, status, error: r.body.detail };
       }) });
     }
     if ((m = p.match(/^\/work-items\/([^/]+)$/))) {
       const b = S.bundles[m[1]];
-      if (!b) return json({ detail: "work item not found" }, 404);
-      if (method === "PATCH") return json({ id: m[1], ...(req.json() ?? {}) });
+      if (!b) return json({ detail: "unknown work item" }, 404);
+      if (method === "PATCH") return send(T.patch(m[1], req.json() ?? {}));
       return json({ ...b.item, worker_sessions: b.sessions });
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/events$/))) {
@@ -386,24 +394,31 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
       if ("label" in b) t.label = b.label;
       return json(t);
     }
-    // A submitted review publishes the drafts; request_changes and approve move the item as the gate call would.
+    // A submitted review publishes the drafts (`review._submit`); at a gate, approve and request_changes are that
+    // gate's approve and reject, and with none pending request_changes reruns the node it names.
     if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)(?:\/gates\/([^/]+))?\/review$/))) {
-      const b = S.bundles[m[1]];
-      if (!b) return json({ detail: "work item not found" }, 404);
-      const it = b.item;
-      const { outcome } = req.json() ?? {};
-      if (m[2] && it.pending_gate !== m[2]) return json({ detail: `gate '${m[2]}' is not pending` }, 409);
-      const list = threadsOf(m[1]);
-      if (outcome === "approve" && list.some((t) => t.label === "must_fix" && t.state !== "resolved"))
-        return json({ detail: `must-fix review threads are not resolved: ${list.filter((t) => t.label === "must_fix" && t.state !== "resolved").map((t) => t.id).join(", ")}` }, 409);
-      for (const t of list) { t.draft = false; for (const c of t.comments) if (c.draft) Object.assign(c, { draft: false, review_id: "r2" }); }
-      const gate = m[2] ?? null;
-      if (outcome === "comment") return json({ review_id: "r2", outcome, gate, reply_agent: !!gate });
-      const target = outcome === "approve" ? null : it.fix_target?.node ?? fixTargetFor(null).node;
-      Object.assign(it, { status: "active", display_status: "running", stop: null, pending_gate: null, gate_artifact: null, fix_target: null, attempts: [] });
-      if (target) it.current_node_id = target;
-      if (gate) return json({ id: it.id, status: "active" });
-      return json({ review_id: "r2", outcome, gate: null, target, target_reason: "current node", action: "rerun" });
+      const wid = m[1];
+      const stop = T.reviewRefusal(wid, m[2] && decodeURIComponent(m[2]));
+      if (stop) return send(stop);
+      const it = S.bundles[wid].item;
+      const { outcome, summary, node } = req.json() ?? {};
+      const gate: string | null = m[2] ? decodeURIComponent(m[2]) : it.pending_gate ?? null;
+      if (!gate && outcome === "approve") return json({ detail: "nothing to approve: no gate is pending" }, 409);
+      const publish = () => {
+        for (const t of threadsOf(wid)) { t.draft = false; for (const c of t.comments) if (c.draft) Object.assign(c, { draft: false, review_id: "r2" }); }
+        T.append(wid, "review_submitted", { review_id: "r2", gate, outcome }, gate);
+      };
+      if (outcome === "comment") { publish(); return json({ review_id: "r2", outcome, gate, reply_agent: !!gate }); }
+      if (gate) {
+        const r = outcome === "approve" ? T.approve(wid, gate) : T.reject(wid, gate, summary || "Changes requested.", node);
+        if (r.status === 200) publish();
+        return send(r);
+      }
+      const target = node ?? it.fix_target?.node ?? fixTargetFor(null).node;
+      const r = T.requestChanges(wid, target, summary || "Changes requested.");
+      if (r.status !== 200) return send(r);
+      publish();
+      return json({ review_id: "r2", outcome, gate: null, target, target_reason: "current node", action: r.body.action });
     }
     if ((m = p.match(/^\/comments\/([^/]+)$/))) {
       const c = findComment(m[1]);
@@ -421,7 +436,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/cancel-preview$/))) {
       const b = S.bundles[m[1]];
-      if (!b) return json({ detail: "work item not found" }, 404);
+      if (!b) return json({ detail: "unknown work item" }, 404);
       const it = b.item;
       return json({
         running: it.current_node_id ? { node: it.current_node_id, task: it.current_node_id, attempt: 1 } : null,
@@ -437,7 +452,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
     /* the item chain draft (B15, ux2-W11): none unless `opts.itemDraft` seeds the running item's; then a small stateful server */
     if ((m = p.match(/^\/work-items\/([^/]+)\/draft(\/apply)?$/))) {
       const b = S.bundles[m[1]];
-      if (!b) return json({ detail: "work item not found" }, 404);
+      if (!b) return json({ detail: "unknown work item" }, 404);
       const cur = b.item.current_node_id ?? null;
       const stored = (): any[] => {
         if (!itemDrafts.has(m![1])) itemDrafts.set(m![1], opts.itemDraft && opts.itemDraft !== "none" && m![1] === S.ng.running ? clone(ITEM_DRAFT_SEEDS[opts.itemDraft]) : []);
@@ -461,42 +476,37 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
         if (passed.length) return json({ detail: "the item has moved past some of this draft's ops; remove them or move them after the current node", passed }, 409);
         if (v.problems.length) return json({ detail: `${v.problems.length} problem(s) to fix before applying`, problems: v.problems }, 422);
         b.item.chain_definition.nodes = v.nodes;
-        b.events.push({ seq: Math.max(0, ...b.events.map((e: any) => e.seq)) + 1, work_item_id: m[1], type: "chain_revised", payload: { gate: null, changes: ops, diff: [], source: "draft" }, node_id: null, created_at: NG_NOW });
+        T.append(m[1], "chain_revised", { gate: null, changes: ops, diff: [], source: "draft" });
         itemDrafts.set(m[1], []);
         return json(answer([]));
       }
       return json(answer(stored()));
     }
-    // The four mutations post-action frames need (W6.3): the scenario changes
-    // so the next GET shows the state the action produced. Everything else
-    // below stays a static 200.
-    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/(pause|resume|gates\/[^/]+\/(?:approve|reject))$/))) {
-      const b = S.bundles[m[1]];
-      if (b) {
-        const it = b.item;
-        const body = req.json() ?? {};
-        if (m[2].endsWith("/approve")) Object.assign(it, { status: "active", pending_gate: null, gate_artifact: null });
-        else if (m[2].endsWith("/reject")) {
-          const node = it.chain_definition.nodes.find((n: any) => n.id === it.current_node_id);
-          Object.assign(it, { status: "active", pending_gate: null, gate_artifact: null, current_node_id: node?.reject_to ?? it.current_node_id });
-        } else if (m[2] === "pause") it.status = "paused";
-        else {
-          it.status = "active";
-          if (body.steer) {
-            const last = b.sessions.at(-1) ?? {};
-            b.sessions.push({ ...last, id: `${last.id ?? "0".repeat(32)}`.slice(0, 31) + String(b.sessions.length % 10), node_id: it.current_node_id, status: "pending", attempt: (last.attempt ?? 0) + 1, created_at: new Date().toISOString(), started_at: null, exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null });
-          }
-        }
-        it.updated_at = new Date().toISOString();
+    // The item's doors, each a transition (transitions.ts): what it changes, its event, its refusal.
+    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/(pause|resume|retry|skip|cancel|complete|abandon|archive|restore|escalate|budget\/raise|gates\/([^/]+)\/(approve|reject))$/))) {
+      const [, wid, door, gate, verdict] = m;
+      const b = req.json() ?? {};
+      if (verdict) return send(verdict === "approve" ? T.approve(wid, decodeURIComponent(gate)) : T.reject(wid, decodeURIComponent(gate), b.note ?? "", b.node));
+      switch (door) {
+        case "pause": return send(T.pause(wid));
+        case "resume": return send(T.resume(wid, b.steer || null));
+        case "retry": return send(T.retry(wid, b.steer || null));
+        case "skip": return send(T.skip(wid, b.path, b.note ?? null));
+        case "cancel": case "complete": return send(T.end(wid, door, b.reason));
+        case "abandon": return send(T.abandon(wid));
+        case "archive": return send(T.archive(wid));
+        case "restore": return send(T.restore(wid));
+        case "escalate": return send(T.escalate(wid, b.message, !!b.new_thread));
+        default: return send(T.raiseBudget(wid, b.budget_usd ?? null));
       }
     }
-    // ux2-W5: cancel and complete end the item (the page reads display_status).
-    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/(cancel|complete)$/))) {
-      const b = S.bundles[m[1]];
-      if (b) Object.assign(b.item, m[2] === "cancel" ? { status: "abandoned", display_status: "cancelled", stop: null } : { status: "completed", display_status: "done", stop: null });
-      return json({ id: m[1], status: m[2] === "cancel" ? "abandoned" : "completed" });
+    // Reopen MR: its event, and the answer it always had (the item stays where its stop left it).
+    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/reopen-mr$/)) && S.bundles[m[1]]) {
+      const mr = S.bundles[m[1]].item.mr_ref;
+      T.append(m[1], "mr_reopened", { ref: mr?.number ?? null, url: mr?.url ?? null });
     }
-    if ((m = p.match(/^\/work-items\/([^/]+)\/(pause|resume|retry|reopen-mr|skip|abandon|archive|restore|escalate|open-worktree|budget\/raise|escalate\/stop|gates\/[^/]+\/(approve|reject))$/))) {
+    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/escalate\/stop$/))) return send(T.stopEscalation(m[1]));
+    if ((m = p.match(/^\/work-items\/([^/]+)\/(reopen-mr|open-worktree)$/))) {
       return json({ id: m[1], status: "active", node_id: "implement", loop: "verify_fix_loop", steer: null, path: "/tmp", editor: "code" });
     }
 
@@ -681,7 +691,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
     if ((m = p.match(/^\/steering\/([^/]+)$/))) return method === "DELETE" ? json({ deleted: m[1] }) : json(st.steeringBody(decodeURIComponent(m[1])));
     if (p === "/intake/checks" && opts.areas) return json(areas.checks());
     if (p === "/intake/checks") return json([
-      { id: 3, at: new Date(Date.now() - 60_000).toISOString(), ready: 2, started: ["w-2"], skipped: [{ bead_id: "B-9", reason: "max_concurrent" }] },
+      { id: 3, at: new Date(Date.now() - 60_000).toISOString(), ready: 2, started: ["w-2"], skipped: [{ bead: "B-9", reason: "max_concurrent" }] },
       { id: 2, at: new Date(Date.now() - 360_000).toISOString(), ready: 0, started: [], skipped: [] },
     ]);
     if (p === "/apply" || p === "/apply/reload") {
@@ -700,9 +710,32 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
     if (p === "/sessions") return json(st.sessions);
     if ((m = p.match(/^\/sessions\/[^/]+$/))) return { status: 204 };
     if (p === "/analytics") return json(S.analytics);
+    if (p === "/storage") return json(storageFor([...S.ngBoard, ...S.ngArchived]));
+    if (p === "/storage/preview" && method === "POST") {
+      const usage = storageFor([...S.ngBoard, ...S.ngArchived]);
+      const picked = usage.items.filter((i) => ((req.json() ?? {}).ids ?? []).includes(i.id));
+      const freed = picked.reduce((n, i) => n + i.bytes, 0);
+      return json({ freed_bytes: freed, used_after_bytes: usage.used_bytes - freed, state_after: "ok",
+        items: picked.map((i, k) => ({ id: i.id, title: i.title, bytes: i.bytes, archivable: true, refusal: null, uncommitted_files: k === 0 ? 2 : 0, unpushed_commits: 0, branch_kept: false })) });
+    }
+    if (p === "/editors") return json({ available: ["code", "cursor"], system: true, default: null });
     if (p === "/login") return json({ ok: true });
     if (p === "/logout") return { status: 204 };
 
     return json({ detail: `mock: unhandled ${method} ${p}` }, 404);
   };
+}
+
+const GB = 1024 ** 3;
+/** `GET /storage` for the demo's own items: each worktree 0.4–2G, the finished ones what a clean-up would free, under a 40G quota. */
+function storageFor(items: any[]) {
+  const rows = items.map((i, k) => {
+    const ended = i.status === "completed" || i.status === "abandoned";
+    return { id: i.id, title: i.title, status: i.status, archived: !!i.archived_at, bytes: i.archived_at ? 0 : ((k * 7) % 5 + 1) * 0.4 * GB, documents_bytes: 3 * 1024 ** 2, updated_at: i.updated_at, reclaimable: ended && !i.archived_at };
+  }).sort((a, b) => b.bytes - a.bytes);
+  const worktrees = rows.reduce((n, r) => n + r.bytes, 0);
+  const categories = { worktrees, sandboxes: 0, documents: rows.length * 3 * 1024 ** 2, logs: 180 * 1024 ** 2, results: 12 * 1024 ** 2, databases: 40 * 1024 ** 2, attachments: 0, other: 0 };
+  const used = Object.values(categories).reduce((n, b) => n + b, 0);
+  return { measured_at: new Date(Date.now() - 120_000).toISOString(), state: "ok", used_bytes: used, quota_bytes: 40 * GB, limit_bytes: 50 * GB,
+    reclaimable_bytes: rows.filter((r) => r.reclaimable).reduce((n, r) => n + r.bytes, 0), categories, items: rows, orphans: [] };
 }

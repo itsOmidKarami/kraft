@@ -41,12 +41,12 @@ describe("ItemPage", () => {
     expect(screen.getByLabelText("Loading the work item")).toHaveAttribute("aria-busy", "true");
   });
 
-  it("opens the gate's review from the banner's Review and decide", async () => {
+  it("opens the gate's review from the banner's Review", async () => {
     const gated = detail({ status: "needs_human", display_status: "needs_you", current_node_id: "plan_approval", pending_gate: "plan_approval", stop: { kind: "gate", node: "plan_approval", task: null, resume_at: null, reason: null } as never });
     stubFetch({ "GET /work-items/w1": [200, gated] });
     mount();
     await screen.findByText(/Waiting for you to approve/);
-    await userEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Review and decide" }));
+    await userEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Review" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1/review?gate=plan_approval&doc=1");
   });
 
@@ -91,7 +91,7 @@ describe("ItemPage", () => {
 
   // One primary per state: the banner or card carries it; the header shows state and the ⋮, the diff line the fact.
   it.each([
-    ["a gate", { status: "needs_human", display_status: "needs_you", pending_gate: "plan_approval", stop: { kind: "gate", node: "plan_approval", task: null, resume_at: null, reason: null } }, "Review and decide", 0],
+    ["a gate", { status: "needs_human", display_status: "needs_you", pending_gate: "plan_approval", stop: { kind: "gate", node: "plan_approval", task: null, resume_at: null, reason: null } }, "Review", 0],
     ["a failed item", { status: "needs_human", display_status: "failed", stop: { kind: "failed", node: "verification", task: null, attempt: 1, resume_at: null, reason: "Tests failed.", facts: {} } }, "Retry", 1],
   ])("%s has one primary action, in the banner or card", async (_name, over, primary, diffLink) => {
     stubFetch({ "GET /work-items/w1": [200, detail({ ...over, worktree_exists: true } as never)], "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 2, deletions: 1 }] }] });

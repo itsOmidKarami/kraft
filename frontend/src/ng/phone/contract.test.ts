@@ -14,6 +14,8 @@ const ALLOWED = [
   "graph/types",
   "graph/layout", // the ChainNode type only
   "icons",
+  "useMedia", // one live media-query hook, for both layouts
+  "settings/docsUrl", // the docs for the running version, one rule for both About pages
   "http",
   "live",
   "shell/aliases", // the shipped addresses that moved, and the #hash fixer (W18 PR 1)

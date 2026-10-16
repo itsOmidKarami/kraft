@@ -1,4 +1,5 @@
 import { ABORT, HANG, type Answer, type MockRequest, type MockServer, type Reply } from "../e2e/contract/mocks/mockApi";
+import { LIVE_SESSION_STATUSES, type SessionStatus } from "../src/types/vocab.generated";
 
 /**
  * The demo's things to try: five entries, each ticked when the shim sees the request that does it
@@ -41,25 +42,28 @@ export function lookIn(serve: MockServer, origin = location.origin): Look {
   };
 }
 
-/** The first board item, by its detail (the board's row can lag it), that passes the first test any item passes. */
-async function first(look: Look, ...tests: ((i: Item) => boolean)[]): Promise<Item | null> {
-  const items = (await Promise.all((await look.list()).map((r) => look.item(r.id)))).filter((i): i is Item => !!i);
-  for (const test of tests) {
-    const hit = items.find(test);
-    if (hit) return hit;
-  }
+/** How an entry picks its item: by the board's row, which is the item as it is now, less its sessions. */
+type Test = (row: Item, look: Look) => boolean | Promise<boolean>;
+
+/** The first board row that passes the first test any row passes. */
+async function first(look: Look, ...tests: Test[]): Promise<Item | null> {
+  const rows = (await look.list()) as Item[];
+  for (const test of tests) for (const row of rows) if (await test(row, look)) return row;
   return null;
 }
 
 /**
- * Really running: active, on a node that is not a gate, with a session running there. An item whose
- * gate was just approved is active but still stands on the gate, and its page draws no running node.
+ * Really running: active, on a node that is not a gate, with a live session there (running, or pending as
+ * a resumed one is until it starts: the page draws that node running too). An item whose gate was just
+ * approved is active but still stands on the gate, and its page draws no running node.
  */
 export const running = (i: Item) =>
   i.status === "active" &&
   !!i.current_node_id &&
   i.chain_definition?.nodes?.find((n) => n.id === i.current_node_id)?.kind !== "gate" &&
-  !!i.worker_sessions?.some((s) => s.node_id === i.current_node_id && s.status === "running");
+  !!i.worker_sessions?.some((s) => s.node_id === i.current_node_id && LIVE_SESSION_STATUSES.includes(s.status as SessionStatus));
+/** `running`, for a board row: the sessions it needs are on the detail, read only for a row that could pass. */
+const runningRow: Test = async (row, look) => row.status === "active" && running((await look.item(row.id)) ?? row);
 const atGate = (i: Item) => !!i.pending_gate;
 const begunPause = (i: Item) => i.status === "paused" && !!i.current_node_id;
 const page = (i: Item) => `/work-items/${encodeURIComponent(i.id)}`;
@@ -69,7 +73,7 @@ export const TRIES: Try[] = [
   {
     id: "open", title: "Open a running item", detail: "Its chain, and the node it is on.", none: `Nothing is running right now; ${ON_ITS_WAY}.`,
     where: async (look) => {
-      const i = await first(look, running);
+      const i = await first(look, runningRow);
       return i && { path: page(i), role: "button", name: /, node, running\b/ };
     },
   },
@@ -77,7 +81,7 @@ export const TRIES: Try[] = [
     id: "gate", title: "Approve a gate", detail: "Read what it waits on, then approve it.", none: `No item waits at a gate right now; ${ON_ITS_WAY}.`,
     where: async (look) => {
       const i = await first(look, atGate);
-      return i && { path: page(i), role: "button", name: "Review and decide" };
+      return i && { path: page(i), role: "button", name: "Review" };
     },
   },
   {
@@ -85,18 +89,18 @@ export const TRIES: Try[] = [
     // At a gate the review page's bar has Request changes; with none waiting, a running item's diff still
     // takes a comment, which ticks it too (the bar only draws Request changes at a gate).
     where: async (look) => {
-      const i = await first(look, atGate, running);
+      const i = await first(look, atGate, runningRow);
       if (!i) return null;
       return { path: `${page(i)}/review`, role: "button", name: atGate(i) ? "Request changes" : "Comment on this file" };
     },
   },
   {
     id: "steer", title: "Steer an agent", detail: "Pause it, then resume with a steer.", none: `Nothing is running right now; ${ON_ITS_WAY}.`,
-    // A paused one first, where the steer box is already open: half the way there.
+    // A running one first, as the entry says: Pause, then the paused card's steer box. Else one already paused.
     where: async (look) => {
-      const i = await first(look, begunPause, running);
+      const i = await first(look, runningRow, begunPause);
       if (!i) return null;
-      return running(i) ? { path: page(i), role: "button", name: "Pause" } : { path: page(i), role: "textbox", name: "Steer" };
+      return begunPause(i) ? { path: page(i), role: "textbox", name: "Steer" } : { path: page(i), role: "button", name: "Pause" };
     },
   },
   {

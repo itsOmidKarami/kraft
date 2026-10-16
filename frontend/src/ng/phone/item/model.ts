@@ -11,7 +11,7 @@ import type { ItemDetail } from "../../item/useItem";
 import type { ChainNode } from "../../graph/layout";
 import { steerDoor } from "./steer";
 import { gateName, nameOf } from "../../board/rowText";
-import { LIMIT_REACHED, CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, MARK_COMPLETE, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, BUDGET_RAN_OUT, WAITING_ON_THE_PROVIDER } from "../../item/sharedWords";
+import { LIMIT_REACHED, CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, MARK_COMPLETE, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, BUDGET_RAN_OUT, WAITING_ON_THE_PROVIDER, REMOVE_FROM_QUEUE } from "../../item/sharedWords";
 
 /** The item screen's decisions, pure (W17 brief C): what the state card says,
  *  which pair of buttons the bottom bar offers, what the ⋮ sheet lists, and the
@@ -205,13 +205,13 @@ function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | nu
     // Kraft retries a waiting item by itself; /retry would answer it 409 (R10b-01).
     case "waiting": return { secondary: a("pause", "Pause"), primary: null };
     // Queued for a slot: Kraft starts it; Pause takes it out of the queue.
-    case "queued": return { secondary: null, primary: a("pause", "Pause") };
+    case "queued": return { secondary: null, primary: a("pause", REMOVE_FROM_QUEUE) };
     // Blocked behind another item: Kraft starts it; Pause takes it out, Unblock starts it without them.
     case "blocked": return { secondary: item.dependencies?.some((d) => !d.met) ? a("unblock", "Unblock") : null, primary: a("pause", "Pause") };
     case "failed": return { secondary: a("escalate", "Escalate"), primary: a("retry", "Retry") };
     case "needs_you":
       switch (stop?.kind) {
-        case "gate": return { secondary: a("reject", `${REQUEST_CHANGES}…`), primary: a("review", "Review and decide") };
+        case "gate": return { secondary: a("reject", `${REQUEST_CHANGES}…`), primary: a("review", "Review") };
         // No Steer: a retry with one would only stop at the same cap again.
         case "budget": return { secondary: null, primary: offersRaise(item) ? a("raise", "Raise budget") : a("retry", "Retry") };
         // Retry with no raise would only stop at the same cap again, so with the stop's limit the way on is the raise.

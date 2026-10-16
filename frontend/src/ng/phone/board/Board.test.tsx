@@ -262,13 +262,13 @@ describe("the phone board (B)", () => {
 });
 
 describe("a card's inline actions (B.4)", () => {
-  it("gate stop: one Review to approve button opens the gate's review and sends nothing", async () => {
+  it("gate stop: one Review button opens the gate's review and sends nothing", async () => {
     put(gate("g1"));
     const calls = stubFetch();
     mount();
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Request changes…" })).toBeNull();
-    const review = await screen.findByRole("button", { name: "Review to approve" });
+    const review = await screen.findByRole("button", { name: "Review" });
     // Outlined, as on the desktop row: the filled button is for retry and resume.
     expect(review).toHaveClass("btn-secondary");
     expect(review).not.toHaveClass("btn-primary");
@@ -320,6 +320,6 @@ describe("a card's inline actions (B.4)", () => {
     stubFetch();
     vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("down"));
     mount();
-    expect(await screen.findByRole("button", { name: "Review to approve" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Review" })).toBeDisabled();
   });
 });

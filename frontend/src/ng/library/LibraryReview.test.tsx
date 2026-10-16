@@ -19,7 +19,7 @@ const CHANGES: Result["changes"] = [
 const IMPACT = { chains: ["default", "quick-task"], repos: ["kraft"] };
 
 const review = async (u: ReturnType<typeof userEvent.setup>) => {
-  await screen.findByRole("listbox", { name: "Library components" });
+  await screen.findByRole("group", { name: "Library components" });
   await u.click(screen.getByRole("button", { name: /Review & publish/ }));
   return screen.findByRole("heading", { name: /Draft ·/ });
 };
@@ -28,7 +28,7 @@ describe("Library: Review & publish", () => {
   it("is off while the library has no draft: there is nothing to publish", async () => {
     draftWith({}, false);
     mount();
-    await screen.findByRole("listbox", { name: "Library components" });
+    await screen.findByRole("group", { name: "Library components" });
     expect(screen.getByRole("button", { name: /Review & publish/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Review & publish/ })).toHaveAccessibleDescription("published nothing to publish");
   });

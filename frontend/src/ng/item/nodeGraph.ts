@@ -1,6 +1,6 @@
-import { gateName } from "../board/rowText";
+import { allDone, gateName } from "../board/rowText";
 import { elapsed, elapsedBetween } from "../../format";
-import type { ChainNode as ApiNode, KraftEvent, NodePass, SessionStatus, WorkerSession, WorkItemDocument } from "../../types";
+import type { ChainNode as ApiNode, KraftEvent, NodePass, SessionStatus, TaskProgress, WorkerSession, WorkItemDocument } from "../../types";
 import type { NodeStep } from "../graph/nodeLayout";
 import type { GlyphState, GraphItem } from "../graph/types";
 import { attemptsAt, loopPaths, materialized, taskKindAt } from "./chainValues";
@@ -145,7 +145,8 @@ export function loopRounds(item: ItemDetail, node: ApiNode): { first?: number; l
   const ran = passOf(item, node.id).filter((s) => own.has(s.hook_point)).map((s) => s.round + 1);
   if (!ran.length) return;
   const m = materialized(item);
-  const max = m ? Number(attemptsAt(m, node.id, item.policy_override)?.value) : NaN;
+  // The item's own count for the node outranks the chain's, as the phone's round line reads it.
+  const max = Number(item.node_overrides?.[node.id]?.attempts ?? (m ? attemptsAt(m, node.id, item.policy_override)?.value : NaN));
   // A pass that kept the count of the one before it (an agent's retry) starts at the round it resumed on.
   const first = Math.min(...ran);
   return { ...(first > 1 && { first }), latest: Math.max(...ran), total: Number.isFinite(max) ? max + 1 : undefined };
@@ -304,4 +305,12 @@ export function lookWord(look: ReturnType<typeof sessionLook>): string {
   if (look.meta === "skipped") return "skipped";
   if ((look.state === "current" || look.state === "amber") && look.meta) return look.meta;
   return stateWord(look.state);
+}
+
+export const subTasks = (n: number) => `${n} sub-task${n === 1 ? "" : "s"}`;
+
+/** The plan task's place in its plan (`item.progress`), in a few words: what the fact row reads, on both layouts. */
+export function progressWords(p: TaskProgress, running: boolean): string {
+  if (allDone(p)) return `${p.total} of ${subTasks(p.total)} · done`;
+  return running ? `${p.current} of ${p.total} · ${p.title}` : `${p.current} of ${subTasks(p.total)}`;
 }

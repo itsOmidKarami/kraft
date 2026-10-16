@@ -51,6 +51,7 @@ describe("Chains page: the chain canvas", () => {
     })));
     mount();
     const g = await canvas();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Chain default");
     const names = within(g).getAllByRole("button", { pressed: false }).map((b) => b.getAttribute("aria-label"));
     expect(names).toEqual(["spec, node", "spec_approval, gate", "implementation, node", "verification, node", "local_review, gate", "merge_request_feedback, node"]);
     const verification = within(g).getByRole("button", { name: "verification, node" });

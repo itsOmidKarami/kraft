@@ -79,6 +79,8 @@ export interface RepoProbe {
   candidates?: ProbeCandidate[];
   /** The commit the proposal was read from (`refs/remotes/origin/main`). */
   read_from?: string | null;
+  /** The marker file each proposed test command was read from ("justfile", "frontend/package.json"). */
+  test_markers?: string[];
   /** Directories with tests and nothing to prepare them: `setup_command` is left undecided. */
   missing_setup?: string[];
   /** Why no test command was proposed, by directory. */

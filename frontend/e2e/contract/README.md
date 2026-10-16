@@ -35,7 +35,7 @@ Results print as a list. A failure's trace and screenshot land in
 | `phone.spec.ts` | every phone screen that needs seeded data is reached by tapping from the board, and a resize swaps the phone and desktop apps in place |
 | `icons.spec.ts`, `screens.ts` | the icon-only audit: on every screen in `screens.ts`, a control with no letter or digit needs an accessible name and a `data-tip` |
 | `kit.ts` | `app()` (the SPA on its mocked API), `contract()` (one test per row) and the helpers rows share |
-| `mocks/` | the mocked API (`mockApi.ts`, put on Playwright's routes by `playwright.ts`) and the scenario it answers from (`fixtures.ts` and the files beside it). The dashboard demo (`frontend/demo/`) serves the same answers in the page, so a change here shows there too |
+| `mocks/` | the mocked API (`mockApi.ts`, put on Playwright's routes by `playwright.ts`) and the scenario it answers from (`fixtures.ts` and the files beside it). A work item's actions are `transitions.ts`: each changes the item's bundle as the server would, appends its event and refuses in the server's words, so a row that acts and then reads the board, the item or its events sees what it did. The board's list (`S.ngBoard`, `S.ngArchived`) holds ids, each row read from its bundle. The dashboard demo (`frontend/demo/`) serves the same answers in the page, so a change here shows there too; its unit rows are `frontend/demo/transitions.test.ts` |
 
 ## Add a row
 
@@ -44,6 +44,11 @@ Results print as a list. A failure's trace and screenshot land in
 2. When the row needs data the base scenario lacks, add a seed beside the
    other `with*` helpers in `mocks/fixtures.ts` and pass it as `tweak`:
    `app(page, url, { tweak: withReviewer })`. Do not build data in the spec.
+   An action's events and `updated_at` record the frozen page clock's
+   instant (`MockOptions.now`, which `playwright.ts` sets to `NG_NOW`). The
+   events go nowhere here: the socket stays silent, so a row reads what an
+   action did by reading again. The demo hands them to its socket
+   (`MockOptions.onEvent`).
 3. A new screen or state that can hold an icon-only control goes in
    `screens.ts`.
 4. Prove the row: break the code it covers, see that row fail, restore the

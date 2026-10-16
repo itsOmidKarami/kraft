@@ -161,7 +161,7 @@ describe("Repos page: connecting", () => {
 
   it("shows each nested scope's command it will save", async () => {
     const scopes = [{ paths: ["README.md", "src/**"], command: "pytest" }, { paths: ["web/**"], command: "sh -c 'cd web && npm test'" }];
-    vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe" ? ok(probe({ test_scopes: scopes })) : ok([{ id: "default" }]))) as never);
+    vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe" ? ok(probe({ test_scopes: scopes, test_markers: ["justfile", "web/package.json", "justfile"] })) : ok([{ id: "default" }]))) as never);
     mount();
     await screen.findByRole("listbox", { name: "Repos" });
     await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
@@ -169,6 +169,7 @@ describe("Repos page: connecting", () => {
     await userEvent.click(screen.getByRole("button", { name: "Check" }));
     const found = await screen.findByLabelText("What was found");
     expect(found).toHaveTextContent("web/**sh -c 'cd web && npm test'");
+    expect(found).toHaveTextContent("test filesjustfile, web/package.json");
   });
 
   it("says why it proposes no tests, what it cannot prepare, and which commit it read", async () => {

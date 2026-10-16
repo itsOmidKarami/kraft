@@ -4,15 +4,15 @@ import { showBadge } from "./badge";
 import { RING_MS, WAIT_MS } from "./ring";
 import { Tries, type Look } from "./tries";
 
-/** A board of one item, `w1`, its detail `item`. */
-const lookAt = (item: Record<string, unknown>): Look => ({ list: async () => [{ id: "w1" }], item: async () => ({ id: "w1", ...item }) });
+/** A board of one item, `w1`: its row and its detail are both `item`. */
+const lookAt = (item: Record<string, unknown>): Look => ({ list: async () => [{ id: "w1", ...item }], item: async () => ({ id: "w1", ...item }) });
 const AT_GATE = lookAt({ status: "needs_human", display_status: "needs_you", pending_gate: "spec_approval" });
 
 const post = (path: string, body: unknown = null) => ({ method: "POST", url: `${location.origin}/api${path}`, json: () => body });
 /** A board whose one item, at a gate, can be swapped for another: `board.at = "w2"`. */
 const movable = () => {
   const board = { at: "w1", reads: 0 };
-  const look: Look = { list: async () => (board.reads++, [{ id: board.at }]), item: async (id) => ({ id, pending_gate: "spec_approval" }) };
+  const look: Look = { list: async () => (board.reads++, [{ id: board.at, pending_gate: "spec_approval" }]), item: async (id) => ({ id, pending_gate: "spec_approval" }) };
   return { board, look };
 };
 const boxed = (el: HTMLElement, top = 50) =>
@@ -145,7 +145,7 @@ describe("Show me", () => {
     window.addEventListener("popstate", popped);
     vi.useFakeTimers();
     go("gate").click();
-    const target = document.body.appendChild(Object.assign(document.createElement("button"), { textContent: "Review and decide" }));
+    const target = document.body.appendChild(Object.assign(document.createElement("button"), { textContent: "Review" }));
     boxed(target);
     vi.advanceTimersByTime(150);
     window.removeEventListener("popstate", popped);
@@ -178,7 +178,7 @@ describe("Show me", () => {
     vi.useFakeTimers();
     go("gate").click();
     // jsdom lays nothing out: a target left as it is has no box, as one display:none'd on a phone has none.
-    const target = Object.assign(document.createElement("button"), { textContent: "Review and decide" });
+    const target = Object.assign(document.createElement("button"), { textContent: "Review" });
     if (drawn) target.getBoundingClientRect = () => ({ x: 40, y: 50, left: 40, top: 50, width: 120, height: 30, right: 160, bottom: 80, toJSON: () => ({}) });
     document.body.append(target);
     vi.advanceTimersByTime(150);

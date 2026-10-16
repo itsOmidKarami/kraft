@@ -311,8 +311,8 @@ export function makeAreas() {
       return [200, view(area)];
     },
     checks: () => [
-      { id: "c3", at: "2026-10-01T10:05:00Z", ready: 4, started: ["kraft-d71a"], skipped: [{ bead_id: "kraft-e1", reason: "above_priority_ceiling" }, { bead_id: "kraft-e2", reason: "above_priority_ceiling" }, { bead_id: "kraft-e3", reason: "already_item" }] },
-      { id: "c2", at: "2026-10-01T10:00:00Z", ready: 3, started: [], skipped: [{ bead_id: "kraft-f1", reason: "max_concurrent" }, { bead_id: "kraft-f2", reason: "max_concurrent" }, { bead_id: "kraft-f3", reason: "max_concurrent" }] },
+      { id: "c3", at: "2026-10-01T10:05:00Z", ready: 4, started: ["kraft-d71a"], skipped: [{ bead: "kraft-e1", reason: "above_priority_ceiling" }, { bead: "kraft-e2", reason: "above_priority_ceiling" }, { bead: "kraft-e3", reason: "already_item" }] },
+      { id: "c2", at: "2026-10-01T10:00:00Z", ready: 3, started: [], skipped: [{ bead: "kraft-f1", reason: "max_concurrent" }, { bead: "kraft-f2", reason: "max_concurrent" }, { bead: "kraft-f3", reason: "max_concurrent" }] },
     ],
     /** GET /policy: the shipped route, for the slot count. */
     activeCount: () => 3,

@@ -178,6 +178,16 @@ describe("Pause (C.5)", () => {
     expect(await screen.findByText("Paused at verification.")).toBeInTheDocument();
   });
 
+  it("words a queued item's pause as leaving the queue", async () => {
+    const calls = mount(item("queued"));
+    await userEvent.click(await screen.findByRole("button", { name: "Remove from queue" }));
+    const sheet = screen.getByRole("dialog", { name: "Remove this item from the queue?" });
+    expect(sheet).not.toHaveTextContent(/running attempt/);
+    await userEvent.click(within(sheet).getByRole("button", { name: "Remove from queue" }));
+    await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/pause"]));
+    expect(await screen.findByText("Removed from the queue.")).toBeInTheDocument();
+  });
+
   it("a Cancel while the pause is still being answered does not let the answer close the screen under it (Kraft-9d8b2.54)", async () => {
     let answer = () => {};
     const gate = new Promise<void>((r) => (answer = r));

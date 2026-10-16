@@ -121,6 +121,35 @@ def test_the_last_encode_failure_is_kept_until_a_later_success(monkeypatch):
     assert e.reason is None
 
 
+def test_a_failed_model_load_is_not_retried_within_the_window(monkeypatch):
+    """fastembed retries its download with its own sleeps, so a host that
+    refuses it made every ingest and search pay that again."""
+    import types
+
+    from kraft.index import embed
+
+    loads = []
+
+    class _Text:
+        def __init__(self, **kwargs):
+            loads.append(kwargs)
+            raise OSError("403 from the model host")
+
+    monkeypatch.setitem(sys.modules, "fastembed", types.SimpleNamespace(TextEmbedding=_Text))
+    monkeypatch.setenv("KRAFT_EMBED_CACHE", "/nonexistent-kraft-test-cache")
+    monkeypatch.setattr(Path, "mkdir", lambda *a, **k: None)
+    clock = [1000.0]
+    monkeypatch.setattr(embed.time, "monotonic", lambda: clock[0])
+    e = Embedder()
+    assert e.try_encode(["a"]) is None
+    assert e.try_encode(["b"]) is None
+    assert len(loads) == 1
+    assert "403" in (e.reason or "")
+    clock[0] += embed.LOAD_FAILURE_TTL + 1
+    assert e.try_encode(["c"]) is None
+    assert len(loads) == 2
+
+
 def test_available_is_true_with_the_extra_installed():
     pytest.importorskip("fastembed")
     assert Embedder().available() is True

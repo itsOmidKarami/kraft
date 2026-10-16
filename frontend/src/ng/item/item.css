@@ -248,3 +248,7 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .rl-dialog.dialog { box-sizing: border-box; width: min(420px, 100%); }
 .rl-form { display: flex; flex-direction: column; gap: 12px; }
 .item-select { margin-left: 6px; }
+/* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
+.ip-row { padding-block: calc(8px + var(--row-pad-add)); }
+.ip-subtask { padding-block: calc(4px + var(--row-pad-add)); }
+.ip-recent { gap: calc(4px + var(--row-pad-add)); }

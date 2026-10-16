@@ -54,8 +54,6 @@ const seamKey = (at: number) => `s:${at}`;
 export const OVERVIEW_PAST = 800;
 /** Whether a chain is drawn with the overview above it. */
 export const overviewFor = (nodes: ChainNode[]) => layout(nodes).W > OVERVIEW_PAST;
-/** Under the overview, the row's boxes sit this far down the canvas: room for a loop arc and its label above them. */
-const ROW_TOP = 60;
 
 /** The chain canvas: a chain in one row (StageGraph.dc.html), a long one under its overview. */
 export function StageGraph({ name, nodes, selected, arcs = [], seams: chainSeams = [], opening = "fit", focus, reserve = 0, cover = 0, fit, overview = false, names = false, onDrag, onSelect, onOpen, onFocusNode, onEscape, onBackground, onSeam }: Props) {
@@ -79,8 +77,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams: chainSeams
     const nextCol = lay.items.find((c) => c.cx > cur.cx);
     return [...edge(gates[0] && (gates[1] ?? end)), ...edge(gates[0] ?? end), ...edge(nextCol)];
   }, [focus, cur, lay]);
-  const runFit = fit && mapped ? { ...fit, top: ROW_TOP } : fit;
-  const camera = useCamera({ canvas: "chain", world: lay, opening, cover, fit: runFit && focusAt != null ? { ...runFit, focus: focusAt, reach } : runFit, current: cur && { cx: cur.cx, cy: L.CY } });
+  const camera = useCamera({ canvas: "chain", world: lay, opening, cover, fit: fit && focusAt != null ? { ...fit, focus: focusAt, reach } : fit, current: cur && { cx: cur.cx, cy: L.CY } });
 
   // Keyboard stops in visual order: a seam at `at` sits before node `at`.
   const stops = useMemo(() => {

@@ -28,3 +28,13 @@
 .ph-turn-head { display: flex; justify-content: space-between; gap: 8px; font-size: var(--fs-label); color: var(--text-muted); }
 .ph-turn-who { font-size: var(--fs-label); color: var(--text-muted); }
 .ph-turn-text { font-size: var(--fs-meta); line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
+.ph-subtasks { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-meta); }
+.ph-subtask { display: grid; grid-template-columns: 22px 1fr auto; align-items: baseline; gap: 8px; padding: 6px 8px; border-radius: 6px; }
+.ph-subtask-n { color: var(--text-muted); text-align: right; }
+.ph-subtask-title { min-width: 0; overflow-wrap: anywhere; color: var(--text-sub); }
+.ph-subtask-meta { color: var(--text-muted); }
+.ph-subtask.ph-is-done .ph-subtask-title { color: var(--text-muted); }
+.ph-subtask.ph-is-current { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.ph-subtask.ph-is-current .ph-subtask-title { color: var(--text); }
+/* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
+.ph-subtask { padding-block: calc(6px + var(--row-pad-add)); }

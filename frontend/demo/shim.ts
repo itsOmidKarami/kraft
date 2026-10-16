@@ -55,7 +55,11 @@ export function patchFetch(serve: MockServer, win: Window & typeof globalThis = 
   };
 }
 
-/** The events socket with no server behind it: it opens, stays silent, and closes when asked, so the shell reads "live". */
+/** The open DemoSockets: where `broadcast` sends. One joins when it opens and leaves when it starts to close. */
+const sockets = new Set<DemoSocket>();
+
+/** The events socket with no server behind it: it opens, closes when asked, and carries the events the mock's
+ *  actions append (`broadcast`), so the shell reads "live" and the board moves when an item does. */
 export class DemoSocket extends EventTarget {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
@@ -76,6 +80,7 @@ export class DemoSocket extends EventTarget {
     setTimeout(() => {
       if (this.readyState !== DemoSocket.CONNECTING) return;
       this.readyState = DemoSocket.OPEN;
+      sockets.add(this);
       this.fire(new Event("open"));
     }, 0);
   }
@@ -85,16 +90,43 @@ export class DemoSocket extends EventTarget {
   close() {
     if (this.readyState >= DemoSocket.CLOSING) return;
     this.readyState = DemoSocket.CLOSING;
+    sockets.delete(this);
     setTimeout(() => {
       this.readyState = DemoSocket.CLOSED;
       this.fire(new CloseEvent("close", { code: 1000, wasClean: true }));
     }, 0);
   }
 
+  /** One frame from the server, as a `message`. A listener that throws is reported, as a browser reports it, and
+   *  stops nothing else: not the other sockets, and never the action that sent the frame. */
+  receive(data: string) {
+    try {
+      this.fire(new MessageEvent("message", { data }));
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
   private fire(e: Event) {
     this.dispatchEvent(e);
     (this[`on${e.type}` as "onopen"] as ((e: Event) => void) | null)?.(e);
   }
+}
+
+/** An event row to every open DemoSocket, as the server's socket sends it; one connecting or closing gets nothing.
+ *  Sent on a later task, as a frame arrives: the action's own answer lands first, and nothing a listener does can
+ *  reach back into the mock halfway through an action. */
+export function broadcast(event: unknown) {
+  // One task for everything sent until it runs: an action's frames arrive together, each its own message, so
+  // nothing the first one sets off (a re-read) runs between them and stores the next one twice.
+  if (!queued.length) setTimeout(flush, 0);
+  queued.push(JSON.stringify(event));
+}
+
+/** The frames `broadcast` has sent and the next task delivers, in order. */
+const queued: string[] = [];
+function flush() {
+  for (const data of queued.splice(0)) for (const s of [...sockets]) s.receive(data);
 }
 
 /** `new WebSocket(...)` for /api/** makes a DemoSocket; any other (Vite's dev reload socket) is the real one. */

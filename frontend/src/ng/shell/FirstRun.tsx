@@ -92,6 +92,7 @@ function probeRows(p: RepoProbe): [string, string][] {
     ["Test command", testsLine(p)],
     // A monorepo's other scopes: without them the one command above reads as the repo's whole suite.
     ...(p.test_scopes ?? []).filter((s) => s.paths.length === 1 && s.paths[0] !== "**").map((s) => [`Tests in ${s.paths[0]}`, s.command] as [string, string]),
+    ...(p.test_markers?.length ? [["Test files", [...new Set(p.test_markers)].join(", ")] as [string, string]] : []),
     ["Setup command", setupLine(p)],
     ["Forge remote", p.forge ? `${p.forge}${p.project ? ` · ${p.project}` : ""}` : "none"],
     ...also(p, "test", "Also found for tests"),

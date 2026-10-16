@@ -3,7 +3,7 @@ import { mockServer } from "../e2e/contract/mocks/mockApi";
 import { NG_NOW } from "../e2e/contract/mocks/ngItems";
 import { withoutBase } from "../src/ng/base";
 import { showBadge } from "./badge";
-import { patchFetch, patchWebSocket, restoreAddress, serveApiLinks, shiftClock, watch } from "./shim";
+import { broadcast, patchFetch, patchWebSocket, restoreAddress, serveApiLinks, shiftClock, watch } from "./shim";
 import { lookIn, Tries } from "./tries";
 
 /**
@@ -12,7 +12,8 @@ import { lookIn, Tries } from "./tries";
  * it; `npm run build:demo` builds it, and each docs version serves its own at <base>demo/.
  */
 // The release this demo was built from, up to date, instead of the scenario's old version and its update notice.
-const serve = mockServer(buildScenario("default"), { ngBoard: true, areas: "default", harnesses: "floor", version: __KRAFT_DEMO_VERSION__ });
+// Each event an action appends goes out on the events socket, so the board moves as the item does.
+const serve = mockServer(buildScenario("default"), { ngBoard: true, areas: "default", harnesses: "floor", version: __KRAFT_DEMO_VERSION__, onEvent: broadcast });
 
 // The things-to-try list ticks from what the page asks the mock, on the page the visitor is on.
 const tries = new Tries(() => ({ pathname: withoutBase(location.pathname) ?? location.pathname, search: location.search }));

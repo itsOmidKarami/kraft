@@ -41,7 +41,8 @@ function Kpi({ label, value, sub }: { label: string; value: string; sub: string 
  *  recorded worker sessions and event history. Every section the shipped page
  *  has, and the filters it has (repo, chain). */
 export function AnalyticsPage() {
-  const items = useStore((s) => Object.values(s.workItems));
+  const byId = useStore((s) => s.workItems);
+  const items = useMemo(() => Object.values(byId), [byId]);
   const [repo, setRepo] = useState<string | null>(null);
   const [chain, setChain] = useState<string | null>(null);
   const [range, setRange] = useState(DEFAULT_RANGE);

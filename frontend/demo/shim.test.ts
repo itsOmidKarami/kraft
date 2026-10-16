@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ABORT, HANG, type MockServer, type Reply } from "../e2e/contract/mocks/mockApi";
-import { DemoSocket, patchFetch, patchWebSocket, restoreAddress, serveApiLinks, shiftClock, watch } from "./shim";
+import { buildScenario } from "../e2e/contract/mocks/fixtures";
+import { ABORT, HANG, mockServer, type MockServer, type Reply } from "../e2e/contract/mocks/mockApi";
+import { useStore } from "../src/store";
+import { connectEvents } from "../src/ws";
+import { broadcast, DemoSocket, patchFetch, patchWebSocket, restoreAddress, serveApiLinks, shiftClock, watch } from "./shim";
 
 /** A server that answers every request with `reply` and records what it was asked. */
 const recording = (reply: Reply) => {
@@ -145,6 +148,89 @@ describe("patchWebSocket", () => {
     patchWebSocket();
     new WebSocket("ws://localhost:5174/?token=x");
     expect(Real).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("broadcast", () => {
+  it.each([
+    ["an open socket gets the event", "open", ['{"seq":4243,"type":"pause_requested"}']],
+    ["a socket still connecting when the frame is sent gets nothing", "connecting", []],
+    ["a closed socket gets nothing", "closed", []],
+    ["a socket closing gets nothing", "closing", []],
+  ])("%s", async (_, state, want) => {
+    const send = () => broadcast({ seq: 4243, type: "pause_requested" });
+    // Connecting: made after the send, so it opens before the frame is delivered, and still was not open when it was sent.
+    if (state === "connecting") send();
+    const ws = new DemoSocket("ws://localhost/api/ws/events");
+    const got: string[] = [];
+    ws.onmessage = (e) => got.push(e.data);
+    if (state !== "connecting") await new Promise((r) => (ws.onopen = r));
+    if (state === "closed") {
+      const closed = new Promise((r) => (ws.onclose = r));
+      ws.close();
+      await closed;
+    }
+    if (state === "closing") ws.close();
+    if (state !== "connecting") send();
+    // A frame arrives on a later task, never inside the call that sent it.
+    expect(got).toEqual([]);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(got).toEqual(want);
+    ws.close();
+  });
+
+  it("delivers one action's frames in one task, before anything the first sets off", async () => {
+    const ws = new DemoSocket("ws://localhost/api/ws/events");
+    await new Promise((r) => (ws.onopen = r));
+    const order: string[] = [];
+    ws.onmessage = (e) => { const { type } = JSON.parse(e.data); order.push(type); queueMicrotask(() => order.push(`after ${type}`)); };
+    broadcast({ seq: 4243, type: "pause_requested" });
+    broadcast({ seq: 4244, type: "worker_session_paused" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(order).toEqual(["pause_requested", "worker_session_paused", "after pause_requested", "after worker_session_paused"]);
+    ws.close();
+  });
+
+  it("answers the action before any frame, and a listener that throws harms neither", async () => {
+    const S = buildScenario("default");
+    const serve = mockServer(S, { ngBoard: true, onEvent: broadcast });
+    const id = S.ngBoard.find((x) => S.bundles[x].item.bead_id === "kraft-91bc")!;
+    const ws = new DemoSocket("ws://localhost/api/ws/events");
+    await new Promise((r) => (ws.onopen = r));
+    const order: string[] = [];
+    ws.onmessage = (e) => { order.push(JSON.parse(e.data).type); throw new Error("a listener broke"); };
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = (await serve({ method: "POST", url: `http://localhost/api/work-items/${id}/pause`, json: () => ({}) })) as { status: number };
+    order.push(`answer ${r.status}`);
+    await new Promise((res) => setTimeout(res, 0));
+    expect(order).toEqual(["answer 200", "pause_requested", "worker_session_paused"]);
+    expect([S.bundles[id].item.status, S.bundles[id].events.slice(-2).map((e) => e.type)]).toEqual(["paused", ["pause_requested", "worker_session_paused"]]);
+    expect(logged).toHaveBeenCalledTimes(2);
+    logged.mockRestore();
+    ws.close();
+  });
+
+  it("moves the board's row when an action's event is forwarded", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    vi.stubGlobal("WebSocket", vi.fn());
+    const S = buildScenario("default");
+    patchFetch(mockServer(S, { ngBoard: true, onEvent: broadcast }));
+    patchWebSocket();
+    await useStore.getState().bootstrap();
+    const id = S.ngBoard.find((x) => S.bundles[x].item.bead_id === "kraft-91bc")!;
+    const shown = () => useStore.getState().workItems[id].display_status;
+    expect(shown()).toBe("running");
+    const stop = connectEvents();
+    await vi.waitFor(() => expect(useStore.getState().connection).toBe("open"));
+    // The page's own write, as the peek's Pause makes it: nothing re-reads the list after it.
+    await fetch(`/api/work-items/${id}/pause`, { method: "POST", body: "{}" });
+    await vi.waitFor(() => expect(shown()).toBe("paused"));
+    // Every re-read the frames set off has landed: each event is held once, not once per read and frame.
+    await new Promise((r) => setTimeout(r, 50));
+    const seqs = useStore.getState().eventsByItem[id].map((e) => e.seq);
+    expect(seqs.length).toBe(new Set(seqs).size);
+    expect(useStore.getState().eventsByItem[id].slice(-2).map((e) => e.type)).toEqual(["pause_requested", "worker_session_paused"]);
+    stop();
   });
 });
 

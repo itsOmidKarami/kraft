@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useMedia } from "../useMedia";
 
 /** Where the open/close of a task's frame is. `mounted`: the frame is in the page; `layout`: the canvas is
  *  laid out for it open (the frame grows from the box, the rest moves aside); `content`: its rows show;
@@ -41,19 +42,7 @@ export function useExpand(open: boolean, reduced: boolean): Phase {
 }
 
 /** Whether the person asked for less motion, live. */
-export function useReducedMotion() {
-  const query = "(prefers-reduced-motion: reduce)";
-  const [on, setOn] = useState(() => typeof matchMedia === "function" && matchMedia(query).matches);
-  useEffect(() => {
-    if (typeof matchMedia !== "function") return;
-    const mq = matchMedia(query);
-    const change = () => setOn(mq.matches);
-    change();
-    mq.addEventListener?.("change", change);
-    return () => mq.removeEventListener?.("change", change);
-  }, []);
-  return on;
-}
+export const useReducedMotion = () => useMedia("(prefers-reduced-motion: reduce)");
 
 /** `value`, held back while `hold` is true: the camera measures the world after the move, not during it. */
 export function useSettled<T>(value: T, hold: boolean): T {

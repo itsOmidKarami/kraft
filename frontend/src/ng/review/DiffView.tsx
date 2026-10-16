@@ -282,6 +282,11 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
     const at = picked ? lines.findIndex((r) => on(r, picked.side)?.line === picked.head) : -1;
     const step = e.key === "ArrowDown" ? 1 : -1;
     let i = at < 0 ? 0 : at + step;
+    // Alt and Shift step through every line, across sides as Shift-click does: a removed line, then its replacement.
+    if (e.shiftKey && e.altKey && picked) {
+      if (lines[i]) pick(toward(lines[i].at, anchorOf(picked), index), true);
+      return;
+    }
     // Shift extends on the pick's side: a context line counts there, the other side's lines are skipped.
     if (e.shiftKey && picked) {
       while (lines[i] && !on(lines[i], picked.side)) i += step;
@@ -326,7 +331,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
           ) : !pf.hunks.length ? (
             <p className="rv-file-msg">{pf.status === "renamed" ? "Renamed with no changes" : "No changes to show"}</p>
           ) : (
-            <div className={`rv-lines is-${p.prefs.layout}`} tabIndex={0} role="group" aria-label={`Lines of ${file.path}: arrows pick a line, Shift and the arrows move the end of the range, Enter comments, n and p change file`} onKeyDown={onKey} onMouseOver={gutter.onOver} onMouseLeave={gutter.onLeave}>
+            <div className={`rv-lines is-${p.prefs.layout}`} tabIndex={0} role="group" aria-label={`Lines of ${file.path}: arrows pick a line, Shift and the arrows move the end of the range, Alt and Shift cross to the other side, Enter comments, n and p change file`} onKeyDown={onKey} onMouseOver={gutter.onOver} onMouseLeave={gutter.onLeave}>
               {rows.map((r, i) => (
                 <RowView
                   key={i}

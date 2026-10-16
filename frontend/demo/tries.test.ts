@@ -44,6 +44,7 @@ describe("tickOf", () => {
     ["a paused item's page reading it", req("GET", "/work-items/w1"), answer({ ...RUNNING, status: "paused" }), at("/work-items/w1"), []],
     ["an item just past its gate, still standing on it", req("GET", "/work-items/w1"), answer({ ...RUNNING, current_node_id: "spec_approval", worker_sessions: [{ node_id: "spec_approval", status: "running" }] }), at("/work-items/w1"), []],
     ["an active item with no session running", req("GET", "/work-items/w1"), answer({ ...RUNNING, worker_sessions: [{ node_id: "implement", status: "done" }] }), at("/work-items/w1"), []],
+    ["a resumed item whose session has not started yet", req("GET", "/work-items/w1"), answer({ ...RUNNING, worker_sessions: [{ node_id: "implement", status: "pending" }] }), at("/work-items/w1"), ["open"]],
     ["the Chains editor's read", req("GET", "/drafts/chains/default"), answer(), at("/templates/chains"), ["shape"]],
     ["the Library's read", req("GET", "/drafts/library/library"), answer(), at("/templates/library"), ["shape"]],
     ["the composer's list of chains", req("GET", "/templates/chains"), answer(), at("/work-items/new"), []],
@@ -67,14 +68,14 @@ describe("Tries", () => {
 });
 
 describe("TRIES' Show me", () => {
-  it("goes to the item waiting at a gate on the sample data, and rings its Review and decide", async () => {
+  it("goes to the item waiting at a gate on the sample data, and rings its banner's Review", async () => {
     const { serve, look } = sample();
     const items: { id: string; pending_gate: string | null }[] = JSON.parse(((await serve(req("GET", "/work-items"))) as { body: string }).body).items;
     const waiting = items.find((i) => i.pending_gate)!;
-    expect(await where("gate", look)).toEqual({ path: `/work-items/${waiting.id}`, role: "button", name: "Review and decide" });
+    expect(await where("gate", look)).toEqual({ path: `/work-items/${waiting.id}`, role: "button", name: "Review" });
   });
 
-  it("finds no gate once the only one is approved, though the board's row still names it", async () => {
+  it("finds no gate once the only one is approved", async () => {
     const { serve, look } = sample();
     const spot = await where("gate", look);
     await serve(req("POST", `${spot!.path}/gates/final_review/approve`));
@@ -93,7 +94,7 @@ describe("TRIES' Show me", () => {
   it.each<[TryId, RegExp, string, string | RegExp]>([
     ["open", /^\/work-items\/[0-9a-f]{32}$/, "button", /, node, running\b/],
     ["review", /^\/work-items\/[0-9a-f]{32}\/review$/, "button", "Request changes"],
-    ["steer", /^\/work-items\/[0-9a-f]{32}$/, "textbox", "Steer"],
+    ["steer", /^\/work-items\/[0-9a-f]{32}$/, "button", "Pause"],
     ["shape", /^\/templates\/chains$/, "button", "Add a node or gate here"],
   ])("%s goes where it can be done on the sample data", async (id, path, role, name) => {
     const spot = await where(id, sample().look);

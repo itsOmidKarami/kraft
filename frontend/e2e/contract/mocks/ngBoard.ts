@@ -6,7 +6,8 @@ import { buildNgItem, NG_NODES, type NgScenario } from "./ngItems";
  * draws, each built on ngItems.ts's chain so the peek has a full detail. Served
  * by GET /work-items only when a case asks (`MockOptions.ngBoard`), so no
  * shipped cell and no ng-item cell changes. Ages count back from NG_NOW
- * (T0 + 130 minutes); the list's `stop` carries no `facts`, as W4's list sends it.
+ * (T0 + 130 minutes). The list holds ids: GET /work-items reads each row from its bundle
+ * (transitions.ts `listRow`, whose `stop` carries no `facts`, as W4's list sends it).
  */
 
 type Row = { sc: NgScenario; title: string; repo: string; bead: string; age: number; chain?: string; tweak?: (i: any) => void };
@@ -49,7 +50,7 @@ const ARCHIVED: Row[] = [
 
 const LONG_TAIL = " so the board has to ellipsize a title that runs far past the row's width without pushing the ticks or the action off it";
 
-function build(rows: Row[], variant: Variant, seed0: number, bundles: Record<string, ItemBundle>): any[] {
+function build(rows: Row[], variant: Variant, seed0: number, bundles: Record<string, ItemBundle>): string[] {
   const long = variant === "long";
   return rows.map((r, n) => {
     const b = buildNgItem(r.sc, seed0 + n, long ? "long" : "default");
@@ -67,13 +68,12 @@ function build(rows: Row[], variant: Variant, seed0: number, bundles: Record<str
     for (const s of b.sessions) s.work_item_id = i.id;
     for (const e of b.events) e.work_item_id = i.id;
     bundles[i.id] = b;
-    // The list's row: W4 sends `stop` without facts, task or attempt.
-    return { ...i, stop: i.stop ? { kind: i.stop.kind, node: i.stop.node, resume_at: i.stop.resume_at, reason: i.stop.reason } : null };
+    return i.id;
   });
 }
 
-/** The list GET /work-items answers for an ng-board case, and the archived list. */
-export function buildNgBoard(variant: Variant, bundles: Record<string, ItemBundle>): { list: any[]; archived: any[] } {
+/** The ids of the list GET /work-items answers for an ng-board case, and of the archived list, in order. */
+export function buildNgBoard(variant: Variant, bundles: Record<string, ItemBundle>): { list: string[]; archived: string[] } {
   if (variant === "empty") return { list: [], archived: [] };
   const list = build(ROWS, variant, 1300, bundles);
   if (variant === "many")

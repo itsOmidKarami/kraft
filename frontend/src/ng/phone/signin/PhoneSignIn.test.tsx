@@ -33,7 +33,12 @@ describe("PhoneSignIn (G.3)", () => {
     window.addEventListener("kraft:unauthenticated", lost);
     render(<PhoneSignIn onSignedIn={async () => {}} />);
     await userEvent.type(screen.getByLabelText("Password"), "nope{Enter}");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Wrong password.");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Wrong password.");
+    expect(alert.querySelector("svg")).not.toBeNull();
+    // The choice is named on screen, not only by aria-label.
+    expect(screen.getByRole("radiogroup", { name: "Stay signed in" })).toHaveAccessibleName("Stay signed in");
+    expect(screen.getByText("Stay signed in", { selector: "span" })).toBeVisible();
     expect(lost).not.toHaveBeenCalled();
     window.removeEventListener("kraft:unauthenticated", lost);
   });

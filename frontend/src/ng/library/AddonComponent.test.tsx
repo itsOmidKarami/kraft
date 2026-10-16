@@ -26,7 +26,7 @@ describe("An add-on's component in the Library", () => {
     mount(REF);
     // `tasks.release%3Abase` in the URL is the component `tasks.release:base`.
     expect(await screen.findByRole("heading", { name: "release:base" })).toBeInTheDocument();
-    const list = screen.getByRole("listbox", { name: "Library components" });
+    const list = screen.getByRole("group", { name: "Library components" });
     await waitFor(() => expect(within(list).getByRole("option", { name: /release:base/ })).toHaveTextContent("release@acme 1.0.0"));
     expect(within(list).getByRole("option", { name: /^implementer/ })).not.toHaveTextContent("release@acme");
 
@@ -62,7 +62,7 @@ describe("An add-on's component in the Library", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(listed), { status: 200 })));
     mount("/templates/library/tasks.app%3Abase");
     expect(await screen.findByRole("heading", { name: "app:base" })).toBeInTheDocument();
-    const list = screen.getByRole("listbox", { name: "Library components" });
+    const list = screen.getByRole("group", { name: "Library components" });
     await waitFor(() => expect(within(list).getByRole("option", { name: /app:base/ })).toHaveTextContent("repo library app"));
     const pane = screen.getByRole("complementary", { name: "app:base pane" });
     expect(within(pane).getByText("Write the release notes.")).toBeInTheDocument();
@@ -77,7 +77,7 @@ describe("An add-on's component in the Library", () => {
     await userEvent.keyboard("{Meta>}z{/Meta}");
     expect(undo).not.toHaveBeenCalled();
 
-    await userEvent.click(within(screen.getByRole("listbox", { name: "Library components" })).getByRole("option", { name: /^implementer/ }));
+    await userEvent.click(within(screen.getByRole("group", { name: "Library components" })).getByRole("option", { name: /^implementer/ }));
     await screen.findByRole("complementary", { name: "implementer pane" });
     await userEvent.keyboard("{Meta>}z{/Meta}");
     await waitFor(() => expect(undo).toHaveBeenCalled());

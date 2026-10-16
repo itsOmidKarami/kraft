@@ -11,9 +11,9 @@ test.use({ viewport: { width: 1440, height: 900 } });
 /** Each entry: the page it lands on, and the control its ring is around, as a person names it. */
 const SHOW_ME: [string, RegExp, "button" | "textbox", string | RegExp][] = [
   ["Open a running item", /\/work-items\/[0-9a-f]{32}$/, "button", /, node, running\b/],
-  ["Approve a gate", /\/work-items\/[0-9a-f]{32}$/, "button", "Review and decide"],
+  ["Approve a gate", /\/work-items\/[0-9a-f]{32}$/, "button", "Review"],
   ["Review the changes", /\/work-items\/[0-9a-f]{32}\/review$/, "button", "Request changes"],
-  ["Steer an agent", /\/work-items\/[0-9a-f]{32}$/, "textbox", "Steer"],
+  ["Steer an agent", /\/work-items\/[0-9a-f]{32}$/, "button", "Pause"],
   ["Shape the process", /\/templates\/chains(\/[^/]+)?$/, "button", "Add a node or gate here"],
 ];
 
@@ -49,7 +49,7 @@ for (const [entry, url, role, name] of SHOW_ME) {
     const before = await page.evaluate(() => performance.getEntriesByType("navigation").length + ":" + performance.timeOrigin);
     await page.getByRole("link", { name: `Show me: ${entry}` }).click();
     await expect(page).toHaveURL(url);
-    const target = page.getByRole(role, { name }).first();
+    const target = page.getByRole(role, { name, exact: true }).first();
     await expect(target).toBeVisible();
     await ringsAround(page, target);
     // Opening the running item is the visit that ticks it, through the shim's watch and the router's address.
@@ -63,7 +63,7 @@ for (const [entry, url, role, name] of SHOW_ME) {
 test("once the only gate is approved, Open and Review still ring a real target, or say none is there", async ({ page }) => {
   const errors = await boot(page);
   await page.getByRole("link", { name: "Show me: Approve a gate" }).click();
-  await page.getByRole("button", { name: "Review and decide" }).click();
+  await page.getByRole("button", { name: "Review", exact: true }).click();
   await page.getByRole("button", { name: "Approve", exact: true }).first().click();
   await expect(page.getByRole("button", { name: /^Things to try, [2-5] of/ })).toBeVisible();
   await expect(page.locator('[data-try="gate"] .kd-try-none')).toBeVisible();

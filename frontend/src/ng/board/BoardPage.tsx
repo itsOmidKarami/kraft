@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import * as api from "../../api";
 import { repoName } from "../../format";
@@ -18,7 +18,8 @@ import { NoMatch } from "../ui/NoMatch";
 import { chainOf, groupsOf, type GroupBy, type SortBy } from "./model";
 import { useBoardPrefs } from "./prefs";
 import { Row } from "./Row";
-import { ALL_GATES, ALL_STOPS, gateChip, nodeWords, stopChip, stopFilterOptions, stopWords, type RowAction } from "./rowText";
+import { showToast } from "../ui/Toast";
+import { admittedRowAction, ALL_GATES, ALL_STOPS, gateChip, nodeWords, stopChip, stopFilterOptions, stopWords, type RowAction } from "./rowText";
 import { useBoardQuery } from "./url";
 import { BulkBar } from "./BulkBar";
 import { Composer } from "./Composer";
@@ -29,7 +30,7 @@ import { usePeekFocus } from "./peekFocus";
 import "./board.css";
 import { autoArchiveNote } from "../ui/archivedWords";
 import { countIn } from "./counts";
-import { isTextField, mod, openShortcutHelp, useShortcutRows, type ShortcutRow } from "../keys";
+import { holdsText, isTextField, mod, openShortcutHelp, useShortcutRows, type ShortcutRow } from "../keys";
 import { Skeleton } from "./Skeleton";
 import { LinkButton } from "../ui/LinkButton";
 import { Empty } from "../ui/Empty";
@@ -41,11 +42,14 @@ const SORT_LABEL: Record<SortBy, string> = { attention: "Needs attention", updat
 /** What the board adds to the shared shortcut help. */
 const BOARD_KEYS: ShortcutRow[] = [
   { keys: ["/"], does: "Focus the filter" },
-  { keys: ["↑", "↓"], does: "Move between rows" },
+  { keys: ["↑", "↓", "J", "K"], does: "Move between rows (the list is one Tab stop)" },
+  { keys: ["Home", "End"], does: "First or last row" },
+  { keys: ["G"], does: "Jump to the first Needs you row" },
+  { keys: ["A"], does: "Run the focused row's action" },
   { keys: ["↵"], does: "Open the row in the side panel" },
   { keys: ["Space"], does: "Select or unselect the row" },
   { keys: [mod("↵")], does: "Open the row's full page" },
-  { keys: ["Esc"], does: "Close the side panel" },
+  { keys: ["Esc"], does: "Close the side panel, then clear the selected rows" },
 ];
 
 type Load = { state: "loading" | "ok" } | { state: "error"; error: string };
@@ -92,6 +96,7 @@ export function BoardPage() {
   const [allDone, setAllDone] = useState(false);
   const [archiveDays, setArchiveDays] = useState<number | null>(null);
   const [checked, setChecked] = useState<Set<string>>(() => new Set());
+  const [stopId, setStopId] = useState("");
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const filterRef = useRef<HTMLInputElement>(null);
   const [peekTab, setPeekTab] = useState<PeekTab>("overview");
@@ -118,25 +123,20 @@ export function BoardPage() {
       // or skipped; one whose repo is no longer connected starts over.
       const saved = savedFirstRun();
       if (saved && !r.repos.some((x) => x.path === saved.path)) clearFirstRun();
-      // Items already loaded and a repo connected: no first-run to flash up before the effect below takes it away.
-      if (r.repos.length > 0 && Object.keys(useStore.getState().workItems).length > 0) return clearFirstRun();
+      // Items already loaded: no first-run to flash up before the effect below takes it away.
+      if (Object.keys(useStore.getState().workItems).length > 0) return clearFirstRun();
       setFresh(r.repos.length === 0 || savedFirstRun() != null);
     }).catch(() => {});
     api.getPolicy().then((p) => setArchiveDays(p.archive?.after_days ?? null)).catch(() => {});
   }, []);
 
-  // Any item at all, archived too, once a repo is connected: the board has something to say, and the
-  // wizard's saved step is done with. With no repo connected the wizard stays, its first step undone.
+  // Any item at all, archived too: the board has something to say, and the wizard (and its saved step) is done
+  // with, a repo connected or not. The wizard is for an install with nothing on it.
   const anyItem = Object.keys(itemsById).length > 0;
   useEffect(() => {
     if (!fresh || !anyItem) return;
-    let live = true;
-    api.getRepos().then((r) => {
-      if (!live || r.repos.length === 0) return;
-      clearFirstRun();
-      setFresh(false);
-    }).catch(() => {});
-    return () => void (live = false);
+    clearFirstRun();
+    setFresh(false);
   }, [fresh, anyItem]);
 
   const groups = useMemo(
@@ -170,6 +170,7 @@ export function BoardPage() {
     if (a.kind === "gate") return navigate(gateReviewUrl(item.id, a.gate));
     if (a.kind === "peek") return peek(item.id, a.tab, a.budget);
     const r = await act.resume(item.id);
+    if (r.ok) showToast("Resumed.");
     setRowErrors((e) => {
       const { [item.id]: _, ...rest } = e;
       return r.ok ? rest : { ...rest, [item.id]: r.error };
@@ -194,11 +195,19 @@ export function BoardPage() {
       if (e.key === "/" && !isTextField(e.target)) {
         e.preventDefault();
         filterRef.current?.focus();
-      } else if (e.key === "Escape" && query.sel) closePeek();
+      } else if (e.key === "g" && !isTextField(e.target) && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const first = bodyEl.current?.querySelector<HTMLElement>('.board-group[aria-label="Needs you"] .board-row-main');
+        if (!first) return;
+        e.preventDefault();
+        first.focus();
+      } else if (e.key === "Escape") {
+        if (query.sel) closePeek();
+        else if (checked.size && !holdsText(e.target)) setChecked(new Set());
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [query.sel, closePeek]);
+  }, [query.sel, closePeek, checked.size]);
 
   // A press anywhere outside the peek closes it: the list, the header, the
   // sidebar. A row picks its own item, and a menu, popover, dialog or toast
@@ -220,15 +229,32 @@ export function BoardPage() {
   // What the peek covers leaves the tab order, and Tab from the selected row goes into it.
   usePeekFocus(bodyEl, query.sel, size.width);
 
-  // ↑/↓ move between rows, across groups.
+  // The list is one Tab stop: ↑/↓ (or K/J) move between rows across groups, Home/End go to the ends, and A runs
+  // the focused row's action, as its button would.
   const onListKey = (e: KeyboardEvent) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
     const rows = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>(".board-row-main")];
     const at = rows.indexOf(document.activeElement as HTMLElement);
     if (at < 0) return;
-    e.preventDefault();
-    rows[Math.max(0, Math.min(rows.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))]?.focus();
+    const to = { ArrowDown: at + 1, j: at + 1, ArrowUp: at - 1, k: at - 1, Home: 0, End: rows.length - 1 }[e.key];
+    if (to !== undefined) {
+      e.preventDefault();
+      rows[Math.max(0, Math.min(rows.length - 1, to))]?.focus();
+    } else if (e.key === "a" && !offline) {
+      const item = itemsById[rows[at]!.closest<HTMLElement>("[data-row]")?.dataset.row ?? ""];
+      const action = item && admittedRowAction(item);
+      if (!action) return;
+      e.preventDefault();
+      void onAction(item, action);
+    }
   };
+  const rowIds = groups.flatMap((g) => g.rows.map((r) => r.id));
+  const stop = rowIds.includes(stopId) ? stopId : rowIds.includes(query.sel) ? query.sel : rowIds[0];
+  const onListFocus = (e: FocusEvent) => {
+    const id = (e.target as HTMLElement).closest<HTMLElement>("[data-row]")?.dataset.row;
+    if (id) setStopId(id);
+  };
+  const oneRepo = !!query.repo || new Set(groups.flatMap((g) => g.rows.map((r) => r.repo))).size === 1;
 
   // Over first-run as over the board: a server older than its interface says so either way (R11a-11).
   const restart = olderServer(health) && (
@@ -272,7 +298,7 @@ export function BoardPage() {
         />
       </HeaderTail>
       <HeaderActions>
-        {needsN > 0 && load.state !== "loading" && <Badge tone="warn" mono>{needsN} NEED YOU</Badge>}
+        {needsN > 0 && load.state !== "loading" && <Badge tone="warn" mono>{needsN} NEED YOU{filtered && " · UNFILTERED"}</Badge>}
         {offline && <Badge tone="bad" mono>OFFLINE</Badge>}
         <button type="button" className="btn btn-primary" disabled={offline} onClick={() => setQuery({ new: true, sel: "" })}>+ New work item</button>
       </HeaderActions>
@@ -332,7 +358,7 @@ export function BoardPage() {
 
       <div className="board-body" ref={bodyRef}>
         {/* The peek overlays the list: the list keeps its width with it open. */}
-        <div className="board-list" onKeyDown={onListKey}>
+        <div className="board-list" onKeyDown={onListKey} onFocus={onListFocus}>
           <div className="board-list-inner">
             {query.new && <Composer repoFilter={query.repo} onClose={() => setQuery({ new: false })} onCreated={(id) => peek(id)} />}
             {load.state === "loading" && items.length === 0 ? <Skeleton label="Loading the board" /> : groups.length === 0 ? (
@@ -359,6 +385,9 @@ export function BoardPage() {
                   <Row
                     key={i.id}
                     item={i}
+                    stop={i.id === stop}
+                    hideRepo={oneRepo}
+                    hideChain={query.group === "chain"}
                     now={now}
                     selected={query.sel === i.id}
                     checked={checked.has(i.id)}

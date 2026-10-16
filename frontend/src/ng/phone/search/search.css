@@ -7,3 +7,5 @@
 .ph-search-icon { flex: none; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-sub); }
 .ph-row-hint.ph-search-hot { color: var(--warn); }
 .ph-row-hint.ph-search-hot.ph-is-failed { color: var(--bad); }
+/* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
+.ph-search-row { padding-block: calc(6px + var(--row-pad-add)); }
