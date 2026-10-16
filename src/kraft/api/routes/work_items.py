@@ -1126,23 +1126,20 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         repo_entry = deps.connected_or_422(st, row["repo"])
         new_chain = deps.scoped_chain_or_422(st, repo_entry, body.chain_template)
         try:
-            new_materialized = (
-                new_chain.materialize(
-                    target=target or entry.single_repo_target(row["repo"]),
-                    # The instance and repository layers, never
-                    # `previous.policy`: that one already carries the old
-                    # chain's own override, and layering the new chain's on
-                    # top of it stacks the two (Kraft-yaq99).
-                    effective_policy=deps.item_policy(st, row["repo"], target),
-                    repository_policies=deps.repository_policies(st, target),
-                    # Not the chain's: the repositories' steering the item was
-                    # filed with stays frozen across a template switch.
-                    repository_steering=previous.repository_steering if previous else None,
-                    attachment_kinds=kinds,
-                    skip_nodes=_kept_skips(st, row, repo_entry, previous, filed_kinds, new_chain),
-                )
-                .to_json()
-            )
+            new_materialized = new_chain.materialize(
+                target=target or entry.single_repo_target(row["repo"]),
+                # The instance and repository layers, never
+                # `previous.policy`: that one already carries the old
+                # chain's own override, and layering the new chain's on
+                # top of it stacks the two (Kraft-yaq99).
+                effective_policy=deps.item_policy(st, row["repo"], target),
+                repository_policies=deps.repository_policies(st, target),
+                # Not the chain's: the repositories' steering the item was
+                # filed with stays frozen across a template switch.
+                repository_steering=previous.repository_steering if previous else None,
+                attachment_kinds=kinds,
+                skip_nodes=_kept_skips(st, row, repo_entry, previous, filed_kinds, new_chain),
+            ).to_json()
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
     elif body.attachments is not None:
