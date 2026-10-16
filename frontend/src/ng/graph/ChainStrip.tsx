@@ -33,7 +33,7 @@ export function ChainStrip({ nodes, viewing, names = false, onOpen, onBack }: Pr
   };
   return (
     <div className="strip">
-      <button type="button" className="strip-back" aria-label="Back to the chain" title="Back to the chain (Esc)" onClick={onBack}>← chain</button>
+      <button type="button" className="strip-back" aria-label="Back to the chain" data-tip="Back to the chain (Esc)" onClick={onBack}>← chain</button>
       <div className="strip-scroll">
         <div ref={world} role="group" aria-label="Chain" className="strip-map" onKeyDown={onKeyDown}>
           {nodes.map((n, i) => (

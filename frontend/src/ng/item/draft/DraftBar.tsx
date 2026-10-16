@@ -30,7 +30,7 @@ export function DraftState() {
         {chip}
       </button>
       {d.issues.length > 0 && (
-        <button type="button" className="idr-problems" aria-label={bad} onClick={step} title="Step through the problems">
+        <button type="button" className="idr-problems" aria-label={bad} onClick={step} data-tip="Step through the problems">
           <span className="idr-full">{bad}</span>
           <span className="idr-short" aria-hidden>{d.issues.length} !</span>
         </button>

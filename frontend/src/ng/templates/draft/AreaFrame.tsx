@@ -115,7 +115,7 @@ export function AreaFrame({ draft, area, pageKey, title, tail, actions, onFix, o
           ? <span className="tpl-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span>
           : <><span className="tpl-published" id={publishedId}>published</span><span className="reason is-quiet" id={`${publishedId}-why`}>{NOTHING_TO_PUBLISH}</span></>}
         {n.problems > 0 && (
-          <button type="button" className="tpl-problems" title="Step through the problems" onClick={step}>
+          <button type="button" className="tpl-problems" data-tip="Step through the problems" onClick={step}>
             {n.problems} {n.problems === 1 ? "PROBLEM" : "PROBLEMS"}
           </button>
         )}

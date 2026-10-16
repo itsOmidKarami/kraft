@@ -162,7 +162,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
           ? <span className="lib-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span>
           : <><span className="lib-published" id={publishedId}>published</span><span className="reason is-quiet" id={`${publishedId}-why`}>{NOTHING_TO_PUBLISH}</span></>}
         {n.problems > 0 && (
-          <button type="button" className="lib-problems" title="Step through the problems" onClick={stepProblems}>
+          <button type="button" className="lib-problems" data-tip="Step through the problems" onClick={stepProblems}>
             {n.problems} {n.problems === 1 ? "PROBLEM" : "PROBLEMS"}
           </button>
         )}

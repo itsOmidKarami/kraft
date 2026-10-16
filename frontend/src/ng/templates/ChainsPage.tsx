@@ -311,7 +311,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
           <button
             type="button"
             className="tpl-problems"
-            title="Step through the problems"
+            data-tip="Step through the problems"
             onClick={() => {
               const list = r.problems;
               if (!list.length) return;

@@ -5,6 +5,7 @@ import { ago, until } from "../../format";
 import type { Access, AuthSession, Health } from "../../types";
 import { parseUserAgent } from "../../ua";
 import { SELF_RESTART, afterRestart, bindHost, useApply } from "../apply/store";
+import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
@@ -195,8 +196,8 @@ export function AccessPage() {
               {!managed && <span className="set-hint">{SELF_RESTART}</span>}
             </div>
             <div className="set-pending-actions">
-              <button type="button" className="set-btn" onClick={() => void undo()}>Undo</button>
-              {managed && <button type="button" className="set-btn is-primary" onClick={() => void askRestart()}><RotateCw size={12} aria-hidden /> Restart Kraft</button>}
+              <Button onClick={() => void undo()}>Undo</Button>
+              {managed && <Button variant="primary" onClick={() => void askRestart()}><RotateCw size={12} aria-hidden /> Restart Kraft</Button>}
             </div>
           </div>
         )}
@@ -226,8 +227,8 @@ export function AccessPage() {
               <SetRow label="phone's host" hint={`The name or address your phone will type: it goes on Allowed hosts, and any other is refused (403).${access.lan_hosts?.length ? ` This machine is ${access.lan_hosts.join(" or ")} on the network.` : ""} Leave it empty to add one later.`}>
                 <span className="set-inline">
                   <input ref={access.password_set ? field : undefined} className="set-input" aria-label="Host or IP the phone will use" placeholder="host or IP" value={lanHost} onChange={(e) => setLanHost(e.target.value)} onKeyDown={keys(() => void saveLan())} />
-                  <button type="button" className="set-btn is-primary" onClick={() => void saveLan()}>{access.password_set ? "Switch" : "Set and switch"}</button>
-                  <button type="button" className="set-btn" onClick={closeEdit}>Cancel</button>
+                  <Button variant="primary" onClick={() => void saveLan()}>{access.password_set ? "Switch" : "Set and switch"}</Button>
+                  <Button onClick={closeEdit}>Cancel</Button>
                 </span>
               </SetRow>
             </>
@@ -279,15 +280,15 @@ export function AccessPage() {
                 {editing === "password" ? (
                   <span className="set-inline">
                     <input ref={field} className="set-input" type="password" aria-label="New password" placeholder="new password" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void savePassword())} />
-                    <button type="button" className="set-btn is-primary" onClick={() => void savePassword()}>Save</button>
-                    <button type="button" className="set-btn" onClick={closeEdit}>Cancel</button>
+                    <Button variant="primary" onClick={() => void savePassword()}>Save</Button>
+                    <Button onClick={closeEdit}>Cancel</Button>
                   </span>
                 ) : (
                   <span className="set-inline">
                     <span className={access.password_set ? "set-mono" : undefined}>{access.password_set ? "•••••••• set" : "not set"}</span>
                     {access.password_set
                       ? <button type="button" className="set-pencil" {...tip("Change", "Change the password")} onClick={() => edit("password")}><Pencil size={12} aria-hidden /></button>
-                      : <button type="button" className="set-btn" onClick={() => edit("password")}>Set a password</button>}
+                      : <Button onClick={() => edit("password")}>Set a password</Button>}
                   </span>
                 )}
               </SetRow>
@@ -305,7 +306,7 @@ export function AccessPage() {
                     <span className="set-session-who"><span>{parseUserAgent(s.label)}{s.current && <span className="set-current"> current</span>}</span><span className="set-hint">{s.ip}</span></span>
                     <span className="set-hint">seen {ago(s.last_seen_at)}</span>
                     <span className="set-hint">expires {until(s.expires_at)}</span>
-                    <button type="button" className="set-btn is-danger" aria-label={`${s.current ? "Sign out" : "Revoke"} ${parseUserAgent(s.label)}`} onClick={() => setRevoking(s)}>{s.current ? "Sign out here" : "Revoke"}</button>
+                    <Button variant="danger" aria-label={`${s.current ? "Sign out" : "Revoke"} ${parseUserAgent(s.label)}`} onClick={() => setRevoking(s)}>{s.current ? "Sign out here" : "Revoke"}</Button>
                   </li>
                 ))}
               </ul>
@@ -324,7 +325,7 @@ export function AccessPage() {
         <Dialog
           title={revoking.current ? "Sign out of this session?" : "Revoke this session?"}
           onClose={() => setRevoking(null)}
-          footer={<><button type="button" className="set-btn" onClick={() => setRevoking(null)}>Cancel</button><button type="button" className="set-btn is-danger" onClick={() => void revoke(revoking)}>{revoking.current ? "Sign out" : "Revoke"}</button></>}
+          footer={<><Button onClick={() => setRevoking(null)}>Cancel</Button><Button variant="danger" onClick={() => void revoke(revoking)}>{revoking.current ? "Sign out" : "Revoke"}</Button></>}
         >
           <p>{revoking.current ? "It signs you out here." : `${parseUserAgent(revoking.label)} has to sign in again.`}</p>
         </Dialog>

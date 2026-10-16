@@ -1,5 +1,5 @@
 /* The new UI's primitives. Colours only through theme.css tokens. */
-.btn { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid transparent; font-size: var(--fs-meta); cursor: pointer; background: transparent; }
+.btn { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid transparent; font-size: var(--fs-meta); cursor: pointer; background: transparent; text-decoration: none; }
 .btn:disabled { opacity: .5; cursor: default; }
 .btn-primary { background: var(--text); color: var(--bg); }
 .btn-primary:not(:disabled):is(:hover, :focus-visible) { background: var(--text-sub); }

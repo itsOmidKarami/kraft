@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Popover } from "../ui/Popover";
 import { RefreshCw, RotateCw, TriangleAlert, ExternalLink } from "../icons";
@@ -39,7 +40,7 @@ export function ApplyChip() {
               {restart.map((i) => <div key={i.id} className="apply-row"><span className="apply-src">{i.file}</span><span>{i.text}</span></div>)}
               <div className="apply-actions">
                 {managed ? (
-                  <button type="button" className="apply-btn is-primary" onClick={() => { setOpen(false); void askRestart(); }}><RotateCw size={14} aria-hidden />Restart Kraft</button>
+                  <Button variant="primary" onClick={() => { setOpen(false); void askRestart(); }}><RotateCw size={14} aria-hidden />Restart Kraft</Button>
                 ) : (
                   <span className="apply-muted">{SELF_RESTART}</span>
                 )}
@@ -57,7 +58,7 @@ export function ApplyChip() {
                 </div>
               ))}
               <div className="apply-actions">
-                <button type="button" className="apply-btn" disabled={phase === "reloading"} onClick={() => void doReload()}><RefreshCw size={14} aria-hidden />{bad ? "Reload again" : "Reload"}</button>
+                <Button disabled={phase === "reloading"} onClick={() => void doReload()}><RefreshCw size={14} aria-hidden />{bad ? "Reload again" : "Reload"}</Button>
                 <span className="apply-muted">rereads the library and policy from disk</span>
               </div>
             </section>
@@ -79,7 +80,7 @@ export function ApplyDialogs() {
       <Dialog
         title="Restart Kraft?"
         onClose={cancel}
-        footer={<><button type="button" className="apply-btn" onClick={cancel}>Cancel</button><button type="button" className="apply-btn is-primary" onClick={() => void restart()}><RotateCw size={14} aria-hidden />Restart</button></>}
+        footer={<><Button onClick={cancel}>Cancel</Button><Button variant="primary" onClick={() => void restart()}><RotateCw size={14} aria-hidden />Restart</Button></>}
       >
         <p>{restartNote(active)} It comes back at <code>{address}</code> and this page follows.</p>
         <p className="apply-muted">same as: kraft admin restart</p>
@@ -89,7 +90,7 @@ export function ApplyDialogs() {
     return (
       <Dialog title={phase === "stuck" ? "Kraft did not come back" : "Restarting Kraft…"} onClose={() => useApply.setState({ phase: "idle" })}>
         <p>{phase === "stuck" ? error : <>Waiting for <code>{address}</code>. This page follows as soon as it answers.</>}</p>
-        {phase === "restarting" && address && address !== location.origin && <a className="apply-btn" href={address}><ExternalLink size={14} aria-hidden />Open the new address</a>}
+        {phase === "restarting" && address && address !== location.origin && <a className="btn btn-secondary" href={address}><ExternalLink size={14} aria-hidden />Open the new address</a>}
       </Dialog>
     );
   return null;

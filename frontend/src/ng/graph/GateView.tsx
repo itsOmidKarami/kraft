@@ -32,7 +32,7 @@ export function GateView({ gate, reviewer: r, message, doc, reject, note, youSub
         <div className="gateview-row">
           {r && (
             <>
-              <button type="button" className={`gateview-item${r.sel ? " is-sel" : ""}`} aria-label={accessibleName({ ...r, id: r.id ?? "auto_review" }, "reviewer task")} title="The gate's auto_review task · runs before you decide" onClick={onReviewer}>
+              <button type="button" className={`gateview-item${r.sel ? " is-sel" : ""}`} aria-label={accessibleName({ ...r, id: r.id ?? "auto_review" }, "reviewer task")} data-tip="The gate's auto_review task · runs before you decide" onClick={onReviewer}>
                 <NodeGlyph size="gv" icon={r.icon ?? "bot"} state={r.state} mark={r.mark} prob={r.prob} sel={r.sel} running={r.state === "current"} />
                 <span className={`gateview-label${r.mark === "add" ? " is-add" : ""}`}>{r.id ?? "auto_review"}</span>
                 <span className={r.chipTone ? `gateview-chip tone-${r.chipTone}` : "gateview-chip"}>{r.chip ?? "runs first, before you"}</span>
@@ -42,7 +42,7 @@ export function GateView({ gate, reviewer: r, message, doc, reject, note, youSub
           )}
           {!r && onAdd && (
             <>
-              <button type="button" className="gateview-item is-add" title="Add an agent task that reviews this gate before you do" onClick={onAdd}>
+              <button type="button" className="gateview-item is-add" data-tip="Add an agent task that reviews this gate before you do" onClick={onAdd}>
                 <NodeGlyph kind="slot" size="gv" />
                 <span className="gateview-label is-add">add a reviewer</span>
                 <span className="gateview-chip">optional · agent task</span>
@@ -62,7 +62,7 @@ export function GateView({ gate, reviewer: r, message, doc, reject, note, youSub
           <div className="gateview-reject">
             <span className="gateview-reject-line" aria-hidden="true" />
             <span className="gateview-reject-word" aria-hidden="true">reject</span>
-            <button type="button" className="gateview-target" aria-label={`reject to ${reject.label ?? reject.id}`} title="Open the target node" onClick={reject.onClick}><NodeIcon name={reject.icon} size={14} />{reject.label ?? reject.id}</button>
+            <button type="button" className="gateview-target" aria-label={`reject to ${reject.label ?? reject.id}`} data-tip="Open the target node" onClick={reject.onClick}><NodeIcon name={reject.icon} size={14} />{reject.label ?? reject.id}</button>
           </div>
         )}
         {note && <p className="gateview-note">{note}</p>}
