@@ -18,8 +18,9 @@ from textual.timer import Timer
 from textual.widgets import Input, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
 
-from kraft import client, logs
+from kraft import answers, client, logs
 from kraft.console import tail, words
+from kraft.console.dialogs import Note
 from kraft.console.screens import View
 from kraft.vocab import ThreadLabel
 
@@ -46,6 +47,11 @@ PEEK_WAIT_S = 0.15
 PEEK_MIN_HEIGHT = 30
 #: How much of a gate's document the peek shows: its opening.
 PEEK_DOC_LINES = 40
+#: The keys that act on the selected item, and the doors (`actions`) that
+#: open each: a key is bound only while the server lists one (spec §6).
+DOORS = {"reject": ("reject",), "pause_or_resume": ("pause", "resume"), "retry": ("retry",)}
+#: What a steer's dialog says: the retry and resume routes take one or none.
+STEER = "A steer for the agent, or Enter for none."
 #: The Board with no item in scope. `n` files one once New item exists.
 EMPTY = "Nothing filed yet. /item create files one."
 
@@ -147,6 +153,9 @@ class Board(View):
         Binding("end", "rows('last')", "last", show=False),
         Binding("pageup", "rows('page_up')", "page up", show=False),
         Binding("pagedown", "rows('page_down')", "page down", show=False),
+        Binding("r", "reject", "reject"),
+        Binding("p", "pause_or_resume", "pause/resume"),
+        Binding("t", "retry", "retry"),
         Binding("v", "peek", "peek"),
         Binding("s", "scope", "this repo or all"),
         Binding("f", "filter", "filter"),
@@ -295,6 +304,9 @@ class Board(View):
         self.focus()
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if action in DOORS:
+            row = self.selected
+            return bool(row) and any(door in (row.get("actions") or []) for door in DOORS[action])
         # `s` only where there is a repo to come back to.
         if action == "open":  # folds Done, or opens a closed peek on an item
             option = self.query_one("#rows", OptionList).highlighted_option
@@ -347,6 +359,72 @@ class Board(View):
         box = self.query_one("#board-filter", Input)
         box.display = True
         box.focus()
+
+    def action_reject(self) -> None:
+        if row := self.selected:
+            self.run_worker(self._reject(row), group="act")
+
+    def action_pause_or_resume(self) -> None:
+        if row := self.selected:
+            resume = "resume" in (row.get("actions") or [])
+            self.run_worker(self._resume(row) if resume else self._pause(row), group="act")
+
+    def action_retry(self) -> None:
+        if row := self.selected:
+            self.run_worker(self._retry(row), group="act")
+
+    async def _reject(self, row: dict) -> None:
+        gate = row.get("pending_gate") or "the gate"
+        note = await self.app.push_screen_wait(
+            Note(
+                f"Reject {gate} on {row['id'][:8]}",
+                ["Say what is wrong: the note goes to the agent that redoes it."],
+                required=True,
+            )
+        )
+        if note:
+            await self._act(
+                client.reject_gate(note, row.get("pending_gate"), row["id"]),
+                answers.item_action(f"rejected {gate} on {{id}}"),
+            )
+
+    async def _pause(self, row: dict) -> None:
+        said = answers.item_action("paused {id}", small=answers.paused)
+        await self._act(client.pause(row["id"]), said)
+
+    async def _resume(self, row: dict) -> None:
+        """An agent's question takes an answer; a paused item a steer, only
+        where the server offers one (a steer it refuses is a 409)."""
+        asked = None
+        if (row.get("stop") or {}).get("kind") == "question":
+            asked = Note("Answer the agent", [words.reason_tail(row, time.time())], required=True)
+        elif "steer" in (row.get("actions") or []):
+            asked = Note(f"Resume {row['id'][:8]}", [STEER], required=False)
+        steer = await self.app.push_screen_wait(asked) if asked else ""
+        if steer is not None:
+            said = answers.item_action("resumed {id}", small=answers.resumed)
+            await self._act(client.resume(steer or None, row["id"]), said)
+
+    async def _retry(self, row: dict) -> None:
+        steer = await self.app.push_screen_wait(
+            Note(f"Retry {row['id'][:8]}", [STEER], required=False)
+        )
+        if steer is not None:
+            said = answers.item_action("retried {id}", small=answers.retried)
+            await self._act(client.retry(steer or None, row["id"]), said)
+
+    async def _act(self, call, said) -> None:
+        """Send one action and toast what the server answered, in the CLI's
+        sentence (`kraft.answers`). A refusal is toasted in the server's words
+        and the item read again (spec §8)."""
+        try:
+            result = await call
+        except client.ClientError as exc:
+            self.app.notify_refusal(exc)
+            self._peeked = ()
+            self._peek_soon()
+            return
+        self.app.notify(said(result), markup=False)
 
     def on_hide(self) -> None:
         """Another view is shown (this one stays mounted): stop polling

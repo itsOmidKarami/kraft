@@ -4,117 +4,34 @@
 from __future__ import annotations
 
 import asyncio
-import time
-from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from support.console_board import (
+    BOARD,
+    DONE,
+    ELSEWHERE,
+    FAILED,
+    FILED,
+    GATE,
+    NOW,
+    PAUSED,
+    QUESTION,
+    RUNNING,
+    _ids,
+    _iso,
+    _lines,
+    _peek,
+    _row,
+    _settled,
+)
 from support.harness import connected_repo
-from textual.widgets import OptionList, RichLog
+from textual.widgets import OptionList
 
 from kraft import client
 from kraft.console import tail
+from kraft.console.dialogs import Note
 from kraft.console.screens import board as board_view
-
-CHAIN = {
-    "template_id": "default",
-    "nodes": [
-        {"id": "spec", "kind": "exec"},
-        {"id": "spec_approval", "kind": "gate"},
-        {"id": "plan", "kind": "exec"},
-        {"id": "implement", "kind": "exec"},
-    ],
-}
-
-
-#: The Board's clock in these tests: ages read the same however late a test runs.
-NOW = float(int(time.time()))  # whole seconds: an ISO round trip keeps them exact
-
-
-def _iso(minutes_ago: float) -> str:
-    return datetime.fromtimestamp(NOW - minutes_ago * 60, UTC).isoformat()
-
-
-def _row(wid: str, status: str, minutes: float = 1, **fields) -> dict:
-    """A board row as `GET /work-items` sends it, cut to what the Board reads."""
-    return {
-        "id": wid,
-        "title": f"item {wid}",
-        "repo": "/r",
-        "display_status": status,
-        "current_node_id": "implement",
-        "chain_template": None,
-        "chain_definition": CHAIN,
-        "updated_at": _iso(minutes),
-        "actions": [],
-        **fields,
-    }
-
-
-GATE = _row(
-    "a91c03fe",
-    "needs_you",
-    12,
-    title="Board critique fixes [/]",
-    bead_id="Kraft-x1y2",
-    current_node_id="spec_approval",
-    pending_gate="spec_approval",
-    stop={"kind": "gate", "node": "spec_approval", "reason": None},
-    actions=["approve", "reject"],
-)
-FAILED = _row(
-    "m03d77b1",
-    "failed",
-    60,
-    current_node_id="verification",
-    stop={"kind": "failed", "node": "verification", "reason": "tests failed: 3 of 120"},
-    actions=["retry"],
-)
-RUNNING = _row(
-    "k7f2e9a0", "running", 4, title="Docs per major", chain_template="docs", actions=["pause"]
-)
-ELSEWHERE = _row("e1e1e1e1", "running", 2, repo="/src/other")
-FILED = _row("n0n0n0n0", "paused", 30, current_node_id=None, actions=["resume", "steer"])
-DONE = _row("d0d0d0d0", "done", 600, mr_ref={"number": 42, "url": "https://example.com/mr/42"})
-ARCHIVED = _row("z9z9z9z9", "archived", 900)
-BOARD = [RUNNING, DONE, GATE, ARCHIVED, ELSEWHERE, FILED, FAILED]
-
-
-@pytest.fixture
-def board(console, monkeypatch):
-    """`board(rows, repo)`: the console over these rows, opened in `repo`."""
-
-    def serve(rows: list[dict], repo: str | None = "/r"):
-        async def board_rows(**kwargs):
-            return rows, 0
-
-        async def resolve_repo(cwd=None):
-            return repo
-
-        monkeypatch.setattr(client, "board_rows", board_rows)
-        monkeypatch.setattr(client, "resolve_repo", resolve_repo)
-        monkeypatch.setattr(board_view, "time", SimpleNamespace(time=lambda: NOW))
-        return console
-
-    return serve
-
-
-def _lines(app) -> list[str]:
-    return [option.prompt.plain for option in app.query_one("#rows", OptionList).options]
-
-
-def _ids(app) -> list[str]:
-    options = app.query_one("#rows", OptionList).options
-    return [o.id for o in options if o.id and not o.id.startswith("group:")]
-
-
-def _peek(app) -> list[str]:
-    return [line.text.rstrip() for line in app.query_one("#peek-body", RichLog).lines]
-
-
-async def _settled(console, app, pilot) -> None:
-    """Until the Board is drawn for the repo the console was opened in."""
-    await console.until(pilot, lambda: app._scoped and _lines(app))
 
 
 @pytest.mark.parametrize(
@@ -427,13 +344,6 @@ def _detail(row: dict, **fields) -> dict:
     return {**row, "status": "active", "worker_sessions": [], "dependencies": [], **fields}
 
 
-QUESTION = _row(
-    "q1q1q1q1",
-    "needs_you",
-    stop={"kind": "question", "node": "implement", "reason": "needs_context: keep [/] in titles?"},
-    actions=["resume", "steer"],
-)
-PAUSED = _row("p1p1p1p1", "paused", 12, actions=["resume"])
 BLOCKED = _row("b1b1b1b1", "blocked", current_node_id=None)
 OVER_BUDGET = _row(
     "u1u1u1u1",
@@ -729,3 +639,123 @@ def test_a_live_refresh_rereads_the_peek_only_when_its_item_changed(board, monke
         return quiet, app.focused is app.view
 
     assert board([RUNNING]).run(scenario, size=(80, 40)) == ([RUNNING["id"]], True)
+
+
+#: What a lifecycle route answers with the item's whole row (`is_item_row`).
+WHOLE = {"status": "active", "chain_definition": {}}
+PAUSED_STEER = PAUSED | {"actions": ["resume", "steer"]}
+
+
+@pytest.mark.parametrize(
+    ("row", "keys", "answer", "sent", "said"),
+    [
+        (
+            GATE,
+            ["r", *"vague", "enter"],
+            GATE | WHOLE,
+            ("reject_gate", ("vague", "spec_approval", "a91c03fe")),
+            "rejected spec_approval on a91c03fe; the item is now running",
+        ),
+        (GATE, ["r", "enter"], None, None, None),
+        (GATE, ["r", *"vague", "escape"], None, None, None),
+        (
+            RUNNING,
+            ["p"],
+            {"id": "k7f2e9a0", "paused_sessions": ["s1"]},
+            ("pause", ("k7f2e9a0",)),
+            "paused k7f2e9a0, stopping 1 running session; kraft item resume k7f2e9a0 carries on",
+        ),
+        (
+            PAUSED_STEER,
+            ["p", *"sqlite", "enter"],
+            {"id": "p1p1p1p1", "node_id": "implement", "steered": ["implement.main.author"]},
+            ("resume", ("sqlite", "p1p1p1p1")),
+            "resumed p1p1p1p1 at implement; steered implement.main.author",
+        ),
+        (
+            PAUSED,
+            ["p"],
+            {"id": "p1p1p1p1", "status": "queued", "slots": {"busy": 3, "limit": 3}},
+            ("resume", (None, "p1p1p1p1")),
+            "queued p1p1p1p1: 3 of 3 slots are busy. It starts when one frees; "
+            "kraft item pause p1p1p1p1 takes it out of the queue",
+        ),
+        (
+            QUESTION,
+            ["p", "enter", *"postgres", "enter"],
+            {"id": "q1q1q1q1", "node_id": "implement", "steered": []},
+            ("resume", ("postgres", "q1q1q1q1")),
+            "resumed q1q1q1q1 at implement",
+        ),
+        (
+            FAILED,
+            ["t", "enter"],
+            {"id": "m03d77b1", "node_id": "verification", "attempt": 2},
+            ("retry", (None, "m03d77b1")),
+            "retried m03d77b1 at verification, attempt 2",
+        ),
+        (RUNNING, ["r"], None, None, None),
+        (
+            FAILED,
+            ["t", "enter"],
+            client.status_error(409, "the item moved on: [/] it is running"),
+            ("retry", (None, "m03d77b1")),
+            "409: the item moved on: [/] it is running",
+        ),
+    ],
+    ids=[
+        "reject",
+        "reject-needs-a-note",
+        "esc-sends-nothing",
+        "pause",
+        "resume-with-a-steer",
+        "resume-that-queued",
+        "answer-a-question",
+        "retry",
+        "not-open",
+        "refused",
+    ],
+)
+def test_a_key_acts_through_its_dialog_and_says_what_the_server_did(
+    board, monkeypatch, row, keys, answer, sent, said
+):
+    """`r`, `p` and `t` send what their dialog collected and toast the CLI's
+    sentence for the answer: "queued" for a resume the board had no slot for,
+    never "resumed". A note is required where the server needs one; Esc sends
+    nothing; a key the server does not list does nothing at all; a refusal is
+    the server's own words, `[/]` and all."""
+    calls: list[tuple] = []
+
+    def fake(name):
+        async def call(*args, **kwargs):
+            calls.append((name, args))
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        return call
+
+    for name in ("reject_gate", "pause", "resume", "retry"):
+        monkeypatch.setattr(client, name, fake(name))
+
+    async def scenario(app, pilot):
+        await _settled(board([row]), app, pilot)
+        for k, key in enumerate(keys):
+            await pilot.press(key)
+            if key in "rpt" and keys[k + 1 :]:  # what follows is typed into its dialog
+                await board([row]).until(pilot, lambda: isinstance(app.screen, Note))
+        toasts = lambda: [str(toast.render()) for toast in app.screen.query("Toast")]  # noqa: E731
+        if said:
+            await board([row]).until(pilot, lambda: toasts())
+        else:  # nothing to wait for: let the keys be handled, then look
+            await pilot.pause()
+            await pilot.pause()
+        return calls, toasts(), isinstance(app.screen, Note)
+
+    # Only an empty note leaves its dialog open: Enter does not send it.
+    waiting = keys == ["r", "enter"]
+    assert board([row]).run(scenario, notifications=True) == (
+        [sent] if sent else [],
+        [said] if said else [],
+        waiting,
+    )
