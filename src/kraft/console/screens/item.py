@@ -18,7 +18,7 @@ from textual.widgets import ContentSwitcher, RichLog, Static
 
 from kraft import answers, client, logs, render
 from kraft.console import acts, words
-from kraft.console.dialogs import Menu, Note, Reject
+from kraft.console.dialogs import Menu, Note, Reject, reject_asks
 from kraft.console.screens import View
 from kraft.console.screens.board import bar_of, chain_line
 
@@ -661,7 +661,7 @@ class Item(View):
             return None
         return Reject(
             f"Reject {gate} on {item['id'][:8]}",
-            ["Say what is wrong: the note goes to the agent that redoes it, at the node below."],
+            [reject_asks(to)],
             nodes=before,
             to=to,
         )

@@ -174,6 +174,14 @@ class Note(Dialog[str | None]):
         self.query_one("#note-error", Static).update("")
 
 
+def reject_asks(node: str | None) -> str:
+    """What a reject's note asks, naming the node whose agent redoes the work
+    when it is known."""
+    if node:
+        return f"What is wrong? The agent at {node} gets this note and redoes it."
+    return "What is wrong? The agent that redoes it gets this note."
+
+
 class Reject(Note):
     """The reject note on the Item (spec §7.2), with where the work goes back
     to: the nodes before the gate, its fix target chosen. Answers
@@ -190,6 +198,11 @@ class Reject(Note):
         options = [(Text(node), node) for node in self.nodes]
         picker = Select(options, allow_blank=False, value=self.to, id="reject-to")
         self.query_one("#note").mount(picker, before=self.query_one(Input))
+
+    @on(Select.Changed, "#reject-to")
+    def _picked(self, event: Select.Changed) -> None:
+        # The sentence names the node picked: its agent is the one that redoes it.
+        self.query_one("#note-lines", Static).update(Content(reject_asks(str(event.value))))
 
     def _answer(self, value) -> None:
         super()._answer(None if value is None else (value, self.query_one(Select).value))
@@ -306,10 +319,16 @@ class Connect(Dialog[list[str] | None]):
         # The repo by its last path component: the full path is on the row above.
         name = render.printable(probed["path"].rstrip("/").rpartition("/")[2] or probed["path"])
         self._say(
-            f"Kraft proposes these for {name}. Keep or change them."
+            f"Proposed for {name}: keep or change them."
             if any(proposal)
-            else f"Kraft found no test or setup command in {name}; type them, or leave them empty."
+            else f"No test or setup command found in {name}: type them, or leave them empty."
         )
+
+    @on(Input.Blurred, "#connect-path")
+    def _path_left(self, event: Input.Blurred) -> None:
+        """A path not being typed in shows its start, not wherever the cursor
+        last left it scrolled."""
+        event.input.cursor_position = 0
 
     @on(Input.Changed, "#connect-path")
     def _path_edited(self, event: Input.Changed) -> None:

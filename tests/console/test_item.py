@@ -30,6 +30,7 @@ from kraft.console import words
 from kraft.console.dialogs import Note, Reject
 from kraft.console.screens import item as item_view
 
+AT = "What is wrong? The agent at {} gets this note and redoes it."
 OVER_BUDGET = FAILED | {
     "id": "u1u1u1u1",
     "title": "Cap [/] it",
@@ -313,36 +314,40 @@ def test_a_key_on_the_item_acts_through_the_shared_flow(
 
 
 @pytest.mark.parametrize(
-    ("fix", "keys", "sent", "picker"),
+    ("fix", "keys", "sent", "picker", "said"),
     [
         (
             {"node": "plan"},
             ["w", "h", "y", "enter"],
             [("reject_gate", ("why", "spec_approval", "a91c03fe"), {"node": "plan"})],
             True,
+            AT.format("plan"),
         ),
         (
             {"node": "plan"},
             ["shift+tab", "down", "up", "enter", "tab", "w", "h", "y", "enter"],
             [("reject_gate", ("why", "spec_approval", "a91c03fe"), {"node": "spec"})],
             True,
+            AT.format("spec"),
         ),
-        ({"node": "plan"}, ["w", "h", "y", "escape"], [], True),
+        ({"node": "plan"}, ["w", "h", "y", "escape"], [], True, AT.format("plan")),
         (
             None,
             ["w", "h", "y", "enter"],
             [("reject_gate", ("why", "spec_approval", "a91c03fe"), {})],
             False,
+            "What is wrong? The agent that redoes it gets this note.",
         ),
     ],
     ids=["to-the-fix-target", "to-a-node-picked", "esc-sends-nothing", "no-fix-target"],
 )
 def test_reject_on_the_item_sends_the_work_back_where_it_was_picked(
-    board, monkeypatch, fix, keys, sent, picker
+    board, monkeypatch, fix, keys, sent, picker, said
 ):
     """Spec §7.2: the reject note's node starts on the gate's fix target (not
     the first node) and can be any node before the gate; with no fix target
-    the plain note is asked and the server's own target applies."""
+    the plain note is asked and the server's own target applies. The note
+    names the node whose agent gets it, and follows the pick."""
     calls: list[tuple] = []
     chain = CHAIN | {
         "nodes": [*CHAIN["nodes"][:1], {"id": "plan", "kind": "exec"}, *CHAIN["nodes"][1:2]]
@@ -356,14 +361,16 @@ def test_reject_on_the_item_sends_the_work_back_where_it_was_picked(
         await pilot.press("r")
         await console.until(pilot, lambda: isinstance(app.screen, Note))
         asked = isinstance(app.screen, Reject)
-        for key in keys:
+        for key in keys[:-1]:
             await pilot.press(key)
+        asks = str(app.screen.query_one("#note-lines").render())
+        await pilot.press(keys[-1])
         if sent:
             await console.until(pilot, lambda: calls)
         await console.until(pilot, lambda: not isinstance(app.screen, Note))
-        return calls, asked
+        return calls, asked, asks
 
-    assert console.run(scenario) == (sent, picker)
+    assert console.run(scenario) == (sent, picker, said)
 
 
 def test_an_item_that_goes_away_while_open_says_so(board, monkeypatch):

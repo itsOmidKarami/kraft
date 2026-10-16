@@ -14,7 +14,7 @@ from textual.binding import Binding
 
 from kraft import answers, client
 from kraft.console import words
-from kraft.console.dialogs import Dialog, Note
+from kraft.console.dialogs import Dialog, Note, reject_asks
 from kraft.vocab import ThreadLabel
 
 #: The keys that act on an item, and the doors (`actions`) that open each: a
@@ -82,7 +82,7 @@ async def reject(app: App, row: dict, note_dialog: Dialog | None = None) -> None
     gate = row.get("pending_gate") or "the gate"
     asked = note_dialog or Note(
         f"Reject {gate} on {row['id'][:8]}",
-        ["Say what is wrong: the note goes to the agent that redoes it."],
+        [reject_asks((row.get("fix_target") or {}).get("node"))],
         required=True,
     )
     answer = await app.push_screen_wait(asked)
