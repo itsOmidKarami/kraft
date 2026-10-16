@@ -18,6 +18,7 @@ import { mod, sendOnModEnter, useShortcutRows, type ShortcutRow } from "../keys"
 import { useReason } from "../ui/Reason";
 import { ADD_TITLE, CHOOSE_REPO } from "../ui/reasons";
 import { tip, hint } from "../ui/Tooltip";
+import { BRIEF_HINT } from "./sharedWords";
 
 type Kind = "spec" | "plan";
 /** B33's answer: the chain as it would be filed, and what the attachments and skips dropped. */
@@ -191,7 +192,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
         <span className="composer-hint">{mod("↵")} create paused</span>
       </div>
       <div className="composer-indent">
-        <textarea className="composer-brief" aria-label="Brief" placeholder="A line of brief. Every node reads it." rows={1} value={d.brief} onChange={(e) => set({ brief: e.target.value })} />
+        <textarea className="composer-brief" aria-label="Brief" placeholder={BRIEF_HINT} rows={1} value={d.brief} onChange={(e) => set({ brief: e.target.value })} />
       </div>
       <div className="composer-indent composer-chips">
         <Menu

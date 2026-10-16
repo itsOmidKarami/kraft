@@ -9,6 +9,7 @@ import { useProviders } from "../../harnesses/useProviders";
 import { effortsFor, useHarnessOptions } from "./useHarnessOptions";
 import { autoEscalates } from "../escalateWords";
 import { ROUTE_LABEL, routeOf } from "../fields";
+import { STEPS_IN_ORDER } from "../../library/sharedWords";
 
 export type PaneCtx = {
   r: Result;
@@ -128,7 +129,7 @@ function NodeOverview({ ctx }: { ctx: PaneCtx }) {
   const lone = steps.length === 1 && steps[0].id === "main";
   return (
     <>
-      <Head>{steps.length ? "Steps, in order" : "Steps"}</Head>
+      <Head>{steps.length ? STEPS_IN_ORDER : "Steps"}</Head>
       {!steps.length && <Note>No steps yet. Open the node to add the first one, or extend a library node.</Note>}
       {steps.map((s) => (
         <Kv

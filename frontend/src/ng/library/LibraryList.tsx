@@ -12,6 +12,7 @@ import { SECTIONS, SECTION_LABEL, type Section } from "./types";
 import { tip } from "../ui/Tooltip";
 import { NoMatch } from "../ui/NoMatch";
 import { AddonBadge } from "../templates/addon";
+import { SEARCH_LIBRARY } from "./sharedWords";
 
 /** What `+ New` can add: the section, and the node's or task's kind. */
 const NEW: { label: string; section: Section; kind?: string }[] = [
@@ -101,8 +102,8 @@ export function LibraryList({ rows, selected, only, onShowAll, onSelect, onAdd }
           <input
             ref={search}
             className="lib-q"
-            aria-label="Search the library"
-            placeholder="Search the library"
+            aria-label={SEARCH_LIBRARY}
+            placeholder={SEARCH_LIBRARY}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {

@@ -25,6 +25,7 @@ import { cardOf, kebabOf, limitPatch, limitWords, pairOf, stopLimitOf, type Act,
 import { useDo } from "./useDo";
 import "./item.css";
 import { tip } from "../../ui/Tooltip";
+import { APPLY_AND_START, BUDGET_IN_DOLLARS, BUDGET_RAN_OUT } from "../../item/sharedWords";
 
 const TAG_TONE = { running: "info", waiting: "info", queued: "info", blocked: "info", escalated: "warn", needs_you: "warn", failed: "bad", paused: "muted", done: "ok", cancelled: "muted", archived: "muted" } as const;
 
@@ -193,7 +194,7 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
       <ChoiceSheet
         title="Start with unapplied changes?"
         text="This item's draft holds changes Start does not apply. Apply them now, or start without them and they stay in the draft."
-        options={[{ value: "apply", label: "Apply and start" }, { value: "without", label: "Start without them" }]}
+        options={[{ value: "apply", label: APPLY_AND_START }, { value: "without", label: "Start without them" }]}
         children={startLines.length > 0 && <pre className="ph-start-lines" aria-label="Changes">{startLines.join("\n")}</pre>}
         onPick={async (v) => {
           if (starting.current) return;
@@ -251,7 +252,7 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
     return (
       <ChoiceSheet
         title="Raise budget"
-        text={`${(item.stop?.reason ?? "The budget ran out").replace(/\.+$/, "")}. Raising it applies to this item only, and resumes it at once.`}
+        text={`${(item.stop?.reason ?? BUDGET_RAN_OUT).replace(/\.+$/, "")}. Raising it applies to this item only, and resumes it at once.`}
         options={[
           { value: "5", label: `+$5`, hint: `$${cap + 5}` },
           { value: "10", label: `+$10`, hint: `$${cap + 10}` },
@@ -273,7 +274,7 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
   if (sheet.is("raise-amount"))
     return (
       <EditSheet
-        title="Budget in dollars"
+        title={BUDGET_IN_DOLLARS}
         inputMode="decimal"
         text="The item's new spend cap. It can't go above the policy maximum."
         initial={cap ? String(cap) : ""}

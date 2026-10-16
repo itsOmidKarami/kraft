@@ -20,6 +20,7 @@ import { repoChoice, repoLabel, type NamedRepo } from "./intake/repos";
 import { intervalFromText, PRIORITIES, showMinutes, toMinutes } from "./intake/units";
 import "./settings.css";
 import "./intake/intake.css";
+import { SCHEDULED_ITEM, CANNOT_BE_EMPTY } from "./sharedWords";
 
 const CHECKS_EVERY_MS = 30_000;
 
@@ -88,7 +89,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
 
   const addSchedule = async () => {
     const repo = repos[0]?.path ?? "";
-    const a = await draft.ops([{ op: "add_schedule", cron: "0 9 * * 1", repo, chain: chains.includes("default") ? "default" : chains[0] ?? "default", title: "Scheduled item" }]);
+    const a = await draft.ops([{ op: "add_schedule", cron: "0 9 * * 1", repo, chain: chains.includes("default") ? "default" : chains[0] ?? "default", title: SCHEDULED_ITEM }]);
     if (a.status === 200) {
       const now = intakeOf((a.body as unknown as { result: typeof r }).result);
       setSel((now?.schedules.length ?? 1) - 1);
@@ -235,7 +236,7 @@ function ScheduleRows({ draft, s, repos, chains, changes, problems }: { draft: C
   const changed = (field: string) => changes.has(`intake.yaml|schedules.${s.index}.${field}`);
   const text = (field: keyof Schedule, label: string, k = label) => (
     <Row k={k} changed={changed(field)}>
-      <ValueCell label={label} value={String(s[field] ?? "")} display={String(s[field] ?? "") || "not set"} muted={!s[field]} onCommit={(t) => (t ? patch({ [field]: t }) : field === "description" ? patch({ description: "" }) : "This cannot be empty.")} />
+      <ValueCell label={label} value={String(s[field] ?? "")} display={String(s[field] ?? "") || "not set"} muted={!s[field]} onCommit={(t) => (t ? patch({ [field]: t }) : field === "description" ? patch({ description: "" }) : CANNOT_BE_EMPTY)} />
       {problems.filter((p) => p.field === field).map((p, n) => <span key={n} className="ink-err" role="alert">{scheduleProblemText(p, s)}</span>)}
     </Row>
   );

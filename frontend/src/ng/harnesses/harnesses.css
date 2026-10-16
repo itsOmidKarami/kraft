@@ -4,11 +4,6 @@
 .hn-crumb-sep { flex: none; color: var(--text-muted); }
 .hn-crumb { flex: none; font-size: var(--fs-label); color: var(--text-muted); }
 .hn-crumb.is-current { color: var(--text); font: var(--fs-label) ui-monospace, Menlo, monospace; }
-.hn-draft { flex: none; margin-left: 4px; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .06em; color: var(--mark-change); }
-.hn-published { flex: none; margin-left: 4px; font-size: var(--fs-meta); color: var(--text-muted); }
-.hn-problems-badge { flex: none; padding: 2px 8px; border: 1px solid var(--bad); border-radius: 10px; background: transparent; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .04em; color: var(--bad); cursor: pointer; }
-.hn-problems-badge:is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); }
-.hn-problems-badge:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 /* The list */
 .hn-list { flex: none; width: 250px; box-sizing: border-box; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--side); min-height: 0; }

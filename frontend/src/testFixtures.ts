@@ -1,4 +1,3 @@
-import { vi } from "vitest";
 import type { ChainNode, WorkerSession, WorkItem } from "./types";
 
 /** Shared test factories and stubs — not a `.test.*` file itself so
@@ -8,14 +7,6 @@ import type { ChainNode, WorkerSession, WorkItem } from "./types";
  *  The older shared set: a few tests still import it. New helpers go in the
  *  area's own testkit (`ng/<area>/testkit.tsx` or `fixture.ts`), see
  *  frontend/README.md. */
-
-/** Forces `usePhone()`/every media query to `matches` for the test. */
-export function setPhoneWidth(matches = true) {
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn((query: string) => ({ matches, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
-  );
-}
 
 export const NODES: ChainNode[] = [
   { id: "spec", tasks: ["on.spec.requested"], gate_after: "spec_approval" },

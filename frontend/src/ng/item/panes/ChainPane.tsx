@@ -18,6 +18,7 @@ import { notStarted } from "../chainValues";
 import { ItemAgentRows } from "./ItemOverrides";
 import { limitPolicy } from "../limitPolicy";
 import { tip } from "../../ui/Tooltip";
+import { BUDGET_IN_DOLLARS } from "../sharedWords";
 
 const statusLine = (item: ItemDetail) => {
   const st = item.display_status ?? "running";
@@ -153,7 +154,7 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
           Raise cap and ✎ open needs no pointer (R10a-05). */}
       <form className="item-actions" onSubmit={(e) => { e.preventDefault(); if (amount > 0) void send(amount); }}>
         {/* The cap in force is selected on focus, so what is typed replaces it: typing 0.03 after the caret saved $100.03 (R11a-03). */}
-        <label className="item-check">$ <input autoFocus aria-label="Budget in dollars" className="item-input meter-input" inputMode="decimal" value={value} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } }} /></label>
+        <label className="item-check">$ <input autoFocus aria-label={BUDGET_IN_DOLLARS} className="item-input meter-input" inputMode="decimal" value={value} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } }} /></label>
         <Button type="submit" variant="primary" disabled={!(amount > 0)}>Save</Button>
         <Button onClick={onCancel}>Cancel</Button>
       </form>

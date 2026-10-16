@@ -9,6 +9,7 @@ import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
 import "./settings.css";
 import { installedOlder, olderServer, restartPending } from "../shell/health";
+import { COPIED_THE_COMMAND, COPIED_THE_DIAGNOSTICS, RELEASE_CHANNEL_HINT } from "./sharedWords";
 
 export interface UpdateState {
   installed: string;
@@ -122,7 +123,7 @@ export function AboutPage() {
               <p className="set-hint">{update?.behind ? "Run this in a terminal" : "To update later, run this in a terminal"}, then restart Kraft. Read the release notes first: a minor release adds capabilities, a major release can change the CLI, the config schema or the state on disk.</p>
               <div className="set-command">
                 <code>{command}</code>
-                <Button onClick={() => void copy(command, "Copied the command")}><Copy size={12} aria-hidden /> Copy</Button>
+                <Button onClick={() => void copy(command, COPIED_THE_COMMAND)}><Copy size={12} aria-hidden /> Copy</Button>
               </div>
             </>
           )}
@@ -132,7 +133,7 @@ export function AboutPage() {
             <span className="set-hint">{checking ? "checking…" : update?.checked_at ? `checked ${ago(update.checked_at)}` : "not checked yet"}</span>
             <button type="button" className="set-textbtn" disabled={checking} onClick={() => void load(true, channel)}>Check now</button>
           </div>
-          <div className="set-about-row" title="Which release feed Check now asks. The installed channel is the default.">
+          <div className="set-about-row" title={RELEASE_CHANNEL_HINT}>
             <span className="set-hint">Channel</span>
             <Segmented label="Channel" options={CHANNELS} value={channel ?? "stable"} onChange={(c) => { setChannel(c); void load(false, c); }} />
           </div>
@@ -140,7 +141,7 @@ export function AboutPage() {
 
         <div className="set-about-head">
           <h2>This instance</h2>
-          <Button onClick={() => void copy(diagnostics, "Copied the diagnostics")}><Copy size={12} aria-hidden /> Copy diagnostics</Button>
+          <Button onClick={() => void copy(diagnostics, COPIED_THE_DIAGNOSTICS)}><Copy size={12} aria-hidden /> Copy diagnostics</Button>
         </div>
         <dl className="set-about-kv">
           {row("Health", <span className="set-dotted"><span className={`set-dot ${healthDot}`} aria-hidden /><span>{health ? (health.status === "ok" ? "ok · all chains and policy valid" : `degraded · ${problems} problem${problems === 1 ? "" : "s"}${held ? " · worktrees over the storage limit, starts held" : ""}`) : "…"}</span></span>)}

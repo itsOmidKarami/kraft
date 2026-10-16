@@ -11,6 +11,7 @@ import { ChoiceSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
 import { Block } from "../ui/Rows";
 import "./analytics.css";
+import { REPAIRS_PER_ITEM, WAITING_AT_EACH_GATE, WHY_STOPPED_FOR_PERSON } from "../../analytics/sharedWords";
 
 /** `/analytics` (W17 brief J): four tiles, each read from one field of the report, and the gate, node, repo and stop lists. The range, repo and chain choices are the desktop's. What the API cannot feed is not drawn: no spend per day, no spend delta (R66). */
 export function Analytics() {
@@ -58,10 +59,10 @@ export function Analytics() {
                 <Tile label="Lead time" value={measured(t.median_lead_ms, t.completed > 0)} sub="median" />
                 <Tile {...waitingKpi(t.human_wait_pct)} />
                 <Tile label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={t.completed ? `${usd(t.cost_usd / t.completed)} per completed item` : "nothing completed yet"} />
-                <Tile label="Repairs per item" value={t.fix_cycles.toFixed(1)} sub={t.fix_cycles_capped ? `${t.fix_cycles_capped} hit their cap` : "none hit their cap"} />
+                <Tile label={REPAIRS_PER_ITEM} value={t.fix_cycles.toFixed(1)} sub={t.fix_cycles_capped ? `${t.fix_cycles_capped} hit their cap` : "none hit their cap"} />
                 </div>
 
-                <Block title="Waiting at each gate">
+                <Block title={WAITING_AT_EACH_GATE}>
                   {gates.length === 0 ? <p className="ph-note">No gate waits in this range.</p> : (
                     <div className="ph-list">
                       {gates.map((g) => (
@@ -100,7 +101,7 @@ export function Analytics() {
                     </div>
                   )}
                 </Block>
-                <Block title="Why items stopped for a person">
+                <Block title={WHY_STOPPED_FOR_PERSON}>
                   {report.stop_reasons.length === 0 ? <p className="ph-note">Nothing stopped for a person in this range.</p> : (
                     <div className="ph-list">
                       {report.stop_reasons.map((s) => (

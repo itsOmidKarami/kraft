@@ -7,6 +7,7 @@ import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
 import { Group, type RowSpec } from "../areas/kit";
 import "../areas/areas.css";
+import { RESTART_FAILED, RESTARTING_KRAFT, RESTART_KRAFT } from "../../apply/sharedWords";
 
 const TEMPLATES: { to: string; label: string; icon: LucideIcon }[] = [
   { to: "/templates/chains", label: "Chains", icon: Workflow },
@@ -41,7 +42,7 @@ export function More() {
       <RootHeader title="More" />
       <div className="ph-content">
         {(pending > 0 || apply.phase !== "idle") && (
-          <Group title="Apply" note={apply.phase === "restarting" ? "Restarting Kraft…" : apply.phase === "stuck" ? "Kraft did not come back. Run kraft admin health, or read server.log in the run directory." : undefined}>
+          <Group title="Apply" note={apply.phase === "restarting" ? RESTARTING_KRAFT : apply.phase === "stuck" ? RESTART_FAILED : undefined}>
             <div className="ph-list">
               {[...apply.reload.map((i) => ({ ...i, kind: "reload" as const })), ...apply.restart.map((i) => ({ ...i, kind: "restart" as const }))].map((i) => (
                 <div key={i.id} className="ph-row ph-row-static">
@@ -66,7 +67,7 @@ export function More() {
       </div>
       {sheet.is("restart") && (
         <ConfirmSheet
-          title="Restart Kraft?"
+          title={RESTART_KRAFT}
           text={`${apply.restart.map((i) => i.text).join(" · ") || "Pending changes"} apply after the restart. ${restartNote(apply.active)}`}
           confirm={{ label: "Restart now", danger: true, run: () => { sheet.close(); void apply.runRestart(); } }}
           onClose={() => { apply.cancelRestart(); sheet.close(); }}

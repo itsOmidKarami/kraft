@@ -11,6 +11,7 @@ import type { ConfigDraft } from "./useConfigDraft";
 import type { Problem } from "./types";
 import { counts } from "./view";
 import "../templates.css";
+import { REVIEW_AND_PUBLISH } from "../../library/sharedWords";
 
 export interface FrameCtx {
   size: ReturnType<typeof useResizable>;
@@ -128,7 +129,7 @@ export function AreaFrame({ draft, area, pageKey, title, tail, actions, onFix, o
             {surface === "yaml" ? "⇄ Page" : "YAML"}
           </Button>
         )}
-        <Button variant={review ? undefined : "primary"} disabled={!review && n.changes === 0 && n.problems === 0} aria-describedby={view.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={toggleReview}>{review ? "Back to editing" : "Review & publish"}</Button>
+        <Button variant={review ? undefined : "primary"} disabled={!review && n.changes === 0 && n.problems === 0} aria-describedby={view.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={toggleReview}>{review ? "Back to editing" : REVIEW_AND_PUBLISH}</Button>
       </HeaderActions>
       <div className="tpl-area">
         {surface === "yaml" ? (

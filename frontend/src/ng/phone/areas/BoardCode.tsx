@@ -7,6 +7,7 @@ import { title } from "../../theme/looks";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, type RowSpec } from "./kit";
 import { yamlOf } from "./yaml";
+import { ADDED_AND_REMOVED_COLOURS } from "../../settings/sharedWords";
 
 type Scheme = NonNullable<Theme["code_scheme"]>;
 const label = (list: { value: string; label: string }[], v: string) => list.find((x) => x.value === v)?.label ?? v;
@@ -36,7 +37,7 @@ export function BoardCodeScreen() {
         title="Review diff"
         rows={[
           { label: "Layout", value: label(LAYOUTS, diff.layout), onEdit: choose("Layout", diff.layout, LAYOUTS, (v) => ({ diff: { ...diff, layout: v as DiffPrefs["layout"] } })) },
-          { label: "Added and removed colours", value: label(DIFF_COLOURS, diff.colours), onEdit: choose("Added and removed colours", diff.colours, DIFF_COLOURS.map((c) => ({ value: c.value, label: c.label, hint: c.note })), (v) => ({ diff: { ...diff, colours: v as DiffPrefs["colours"] } })) },
+          { label: ADDED_AND_REMOVED_COLOURS, value: label(DIFF_COLOURS, diff.colours), onEdit: choose(ADDED_AND_REMOVED_COLOURS, diff.colours, DIFF_COLOURS.map((c) => ({ value: c.value, label: c.label, hint: c.note })), (v) => ({ diff: { ...diff, colours: v as DiffPrefs["colours"] } })) },
           ...TOGGLES.map((t): RowSpec => ({ key: t.key, label: t.label, sub: t.sub, sw: diff[t.key], onSwitch: (on) => setDiff({ [t.key]: on }) })),
         ]}
       />

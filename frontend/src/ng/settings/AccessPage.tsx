@@ -15,6 +15,7 @@ import { Block, SetRow } from "./parts";
 import { YamlFrame } from "./YamlFrame";
 import "./settings.css";
 import { tip } from "../ui/Tooltip";
+import { ASKED_FOR_ON_NETWORK, SESSION_EXPIRY_HINT, NO_SIGN_IN_NEEDED, NOT_USED_ON_LOOPBACK, LOOPBACK_ONLY, REVOKE_THIS_SESSION, SESSION_EXPIRY, SESSION_REVOKED, SIGN_OUT_OF_THIS } from "./sharedWords";
 
 const LOOPBACK = "127.0.0.1";
 const REMOTE_ACCESS = "https://kraft-sdlc.dev/guides/remote-access";
@@ -154,7 +155,7 @@ export function AccessPage() {
     try {
       await api.revokeSession(s.id);
       await loadSessions();
-      showToast(s.current ? "Signed out" : "Session revoked");
+      showToast(s.current ? "Signed out" : SESSION_REVOKED);
     } catch (e) {
       err("sessions", message(e));
     }
@@ -292,8 +293,8 @@ export function AccessPage() {
                   </span>
                 )}
               </SetRow>
-              <SetRow label="session expiry" error={errors.expiry} hint="How long a sign-in lasts.">
-                <Segmented label="Session expiry" options={EXPIRIES} value={String(access.session_expiry_days)} onChange={(v) => void put("expiry", { session_expiry_days: Number(v) })} />
+              <SetRow label="session expiry" error={errors.expiry} hint={SESSION_EXPIRY_HINT}>
+                <Segmented label={SESSION_EXPIRY} options={EXPIRIES} value={String(access.session_expiry_days)} onChange={(v) => void put("expiry", { session_expiry_days: Number(v) })} />
               </SetRow>
             </Block>
 
@@ -313,8 +314,8 @@ export function AccessPage() {
             </Block>
           </>
         ) : (
-          <Block id="set-unused" title="Not used on 127.0.0.1" card="dashed">
-            {[["allowed hosts", "Only loopback names are accepted."], ["password", "Asked for when you pick Local network."], ["sessions", "None: there is nothing to sign in to."]].map(([k, v]) => (
+          <Block id="set-unused" title={NOT_USED_ON_LOOPBACK} card="dashed">
+            {[["allowed hosts", LOOPBACK_ONLY], ["password", ASKED_FOR_ON_NETWORK], ["sessions", NO_SIGN_IN_NEEDED]].map(([k, v]) => (
               <div key={k} className="set-unused"><span className="set-row-label">{k}</span><span className="set-hint">{v}</span></div>
             ))}
           </Block>
@@ -323,7 +324,7 @@ export function AccessPage() {
     </YamlFrame>
       {revoking && (
         <Dialog
-          title={revoking.current ? "Sign out of this session?" : "Revoke this session?"}
+          title={revoking.current ? SIGN_OUT_OF_THIS : REVOKE_THIS_SESSION}
           onClose={() => setRevoking(null)}
           footer={<><Button onClick={() => setRevoking(null)}>Cancel</Button><Button variant="danger" onClick={() => void revoke(revoking)}>{revoking.current ? "Sign out" : "Revoke"}</Button></>}
         >

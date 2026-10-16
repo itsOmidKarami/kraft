@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { LogLine } from "../../../types";
 import { logUrl } from "../../../api";
 import { request } from "../../http";
+import { NO_LOG_YET, LOG_UNREADABLE } from "../../item/sharedWords";
 
 export const LOG_POLL_MS = 3000;
 
@@ -20,7 +21,7 @@ export function useLog(workItemId: string, sessionId: string | null, running: bo
       request<{ lines: LogLine[] }>(`${logUrl(workItemId, sessionId)}?format=jsonl`).then((r) => {
         if (!live) return;
         if (r.status === 200) { setLines(r.body.lines.filter((l) => !l.truncated)); setError(null); }
-        else setError(r.status === 404 ? "No log for this attempt yet." : "The log could not be read.");
+        else setError(r.status === 404 ? NO_LOG_YET : LOG_UNREADABLE);
       });
     void read();
     const t = running ? setInterval(read, LOG_POLL_MS) : undefined;

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { useStore } from "../../store";
 import { jsonBody, request } from "../http";
 import { showToast } from "../ui/Toast";
+import { RESTART_FAILED } from "./sharedWords";
 
 export interface ApplyItem {
   id: string;
@@ -166,7 +167,7 @@ export const useApply = create<ApplyState>((set, get) => ({
         return;
       }
     }
-    set({ phase: "stuck", error: "Kraft did not come back. Run kraft admin health, or read server.log in the run directory." });
+    set({ phase: "stuck", error: RESTART_FAILED });
   },
 }));
 

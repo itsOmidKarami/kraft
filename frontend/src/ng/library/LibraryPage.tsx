@@ -27,6 +27,7 @@ import { LIBRARY_FILE } from "../templates/draft/view";
 import { addonRepo, parseRef, refUrl, SECTIONS, type PublishedLibrary, type Section } from "./types";
 import "./library.css";
 import { usePane } from "../shell/usePane";
+import { REVIEW_AND_PUBLISH } from "./sharedWords";
 
 /** The published library, for its used-by figures and its text (the YAML view's left side). */
 function usePublished() {
@@ -172,7 +173,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         <Button aria-pressed={surface === "yaml"} disabled={surface === "yaml" && !!yamlErr} title={surface === "yaml" && yamlErr ? `Fix line ${yamlErr.line} first, or revert` : undefined} onClick={toggleYaml}>
           {surface === "yaml" ? "⇄ Canvas" : "YAML"}
         </Button>
-        {surface === "canvas" && <Button variant={review ? undefined : "primary"} disabled={!review && !draft.view!.draft} aria-describedby={draft.view!.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={() => { setReview((v) => !v); setReviewOpen(true); }}>{review ? "Back to editing" : "Review & publish"}</Button>}
+        {surface === "canvas" && <Button variant={review ? undefined : "primary"} disabled={!review && !draft.view!.draft} aria-describedby={draft.view!.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={() => { setReview((v) => !v); setReviewOpen(true); }}>{review ? "Back to editing" : REVIEW_AND_PUBLISH}</Button>}
       </HeaderActions>
       <LibraryList rows={rows} selected={id} only={only} onShowAll={() => setParams({}, { replace: true })} onSelect={(x) => navigate(go(x))} onAdd={add} />
       <div className="lib-main" ref={frame}>

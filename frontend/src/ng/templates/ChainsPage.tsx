@@ -27,6 +27,7 @@ import { AddonBadge, ReadOnly } from "./addon";
 import { pathOf, selOf, type TSel } from "./sel";
 import "./templates.css";
 import { usePane } from "../shell/usePane";
+import { REVIEW_AND_PUBLISH } from "../library/sharedWords";
 
 /** An element's width and height, kept current. */
 export function useBox() {
@@ -334,7 +335,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         {/* A repo library's chain is edited in its repository's `.kraft/`: the server refuses a copy. */}
         {readOnly
           ? (addonRepo(addon) ? null : <Button variant="primary" onClick={() => setDupTick((k) => k + 1)}>Copy to my library</Button>)
-          : <Button variant={review ? undefined : "primary"} disabled={!review && !view.draft} aria-describedby={view.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={review ? endReview : startReview}>{review ? "Back to editing" : "Review & publish"}</Button>}
+          : <Button variant={review ? undefined : "primary"} disabled={!review && !view.draft} aria-describedby={view.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={review ? endReview : startReview}>{review ? "Back to editing" : REVIEW_AND_PUBLISH}</Button>}
       </HeaderActions>
       <div className={`tpl-area${s.level === "node" ? " has-strip" : ""}${s.level === "node" && selNode && kindOf(r, selNode) === "exec" ? " has-bottom" : ""}`}>
         {s.level === "chain" ? (

@@ -6,6 +6,7 @@ import { Markdown } from "../ui/Markdown";
 import { languageOf, tokenizeSide } from "./tokenize";
 import { sendOnModEnter } from "../keys";
 import { lineRef, rangeName, threadRange } from "./range";
+import { LINES_COMMENTED_ON } from "./sharedWords";
 
 /** Fenced code in a comment, coloured by the review's own tokenizer. */
 export function codeBlock(text: string, lang: string | undefined): ReactNode {
@@ -29,7 +30,7 @@ export { lineRef, rangeName, threadRange };
 /** The lines a range covers, as the diff draws them. */
 export function Quote({ lines }: { lines: string[] }) {
   return (
-    <div className="rv-suggest rv-quote" role="group" aria-label="Lines commented on">
+    <div className="rv-suggest rv-quote" role="group" aria-label={LINES_COMMENTED_ON}>
       {lines.map((l, i) => {
         const k = l[0];
         return (

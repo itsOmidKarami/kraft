@@ -6,6 +6,7 @@ import { problemAt, type Ctx } from "./ctx";
 import { SectionHead } from "./SectionHead";
 import { LOOP_WINS } from "./sections";
 import { parse, raw, show, sourceWord } from "./units";
+import { LOOP_VALUE_BLANK, EVERY_FIX_LOOP, STUCK_ITEM_OFF, WHEN_STUCK } from "../sharedWords";
 
 /** Loops (Decisions §12): fix-loop defaults and maxima, which findings start another cycle, and what happens when an item is stuck. */
 export function Loops({ ctx }: { ctx: Ctx }) {
@@ -21,7 +22,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
   const setLoop = (key: string, field: "max_attempts" | "wall_clock_s", text: string, unit: "count" | "s-as-min") => {
     const v = parse(unit, text);
     if ("error" in v) return v.error;
-    if (v.value === null) return "A loop's own value cannot be blank: remove its entry instead.";
+    if (v.value === null) return LOOP_VALUE_BLANK;
     return draft.ops([{ op: "set_loop", key, [field]: v.value }], { quiet: true }).then((a) => (a.status === 200 ? null : detailOf(a.body)));
   };
   const toggleSeverity = (s: string) => {
@@ -51,7 +52,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
         <p className="pol-note">{LOOP_WINS}</p>
       </section>
 
-      <section className="pol-card" aria-label="Every fix loop">
+      <section className="pol-card" aria-label={EVERY_FIX_LOOP}>
         <h3 className="pol-h2">Every fix loop</h3>
         <div className="pol-loops">
           <div className="pol-loop is-head" aria-hidden>
@@ -110,7 +111,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
         </div>
       </section>
 
-      <section className="pol-card" aria-label="When an item is stuck">
+      <section className="pol-card" aria-label={WHEN_STUCK}>
         <h3 className="pol-h2">When an item is stuck</h3>
         <div className="pol-one">
           <span className="pol-k">auto-escalate</span>
@@ -119,7 +120,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
               <button key={String(on)} type="button" className={`pol-chip${stuck === on ? " is-on" : ""}${changes.has(STUCK_KEY.key) ? " is-changed" : ""}`} aria-pressed={stuck === on} onClick={() => void setValue(draft, STUCK_KEY, on)}>{on ? "on" : "off"}</button>
             ))}
           </span>
-          <span className="pol-help">{stuck ? "An item that reports no progress escalates to a person on its own. A chain or an item override can turn this off or retune it for one node." : "Off: a stuck item waits until a person escalates it."}</span>
+          <span className="pol-help">{stuck ? "An item that reports no progress escalates to a person on its own. A chain or an item override can turn this off or retune it for one node." : STUCK_ITEM_OFF}</span>
         </div>
         {stuck && (
           <>
