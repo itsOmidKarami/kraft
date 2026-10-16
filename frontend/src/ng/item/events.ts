@@ -49,6 +49,8 @@ export function eventLine(e: KraftEvent, nodes?: Nodes): string | null {
     case "mr_closed": return `MR !${s(p.ref)} closed${p.by && p.by !== "cancel" ? ` by ${s(p.by)}` : ""}`;
     case "mr_reopened": return `MR !${s(p.ref)} reopened`;
     case "budget_raised": case "budget_changed": return `budget set to $${s(p.budget_usd)}`;
+    // Nothing was merged behind the item, so its beads stay open for the operator to close by hand.
+    case "beads_left_open": return `left ${Array.isArray(p.beads) ? p.beads.join(", ") : "its beads"} open: ${cut(s(p.reason), 240)}`;
     case "work_item_title_edited": return "title edited";
     case "work_item_description_edited": return "brief edited";
     default: return e.type.replaceAll("_", " ");

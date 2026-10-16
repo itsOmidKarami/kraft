@@ -240,7 +240,7 @@
       "name": "failed-with-no-node-at-all",
       "row": {"display_status": "failed", "stop": null},
       "group": "needs",
-      "tail": "failed at "
+      "tail": "failed"
     },
     {
       "name": "needs-you-with-no-stop",

@@ -295,7 +295,7 @@ export function DraftItemPage() {
           {tab === "overview" && node && (
             <NodeOverview node={node} full={full} covered={covered.get(node.id) ?? null} skippedByYou={d.skip.includes(node.id)} onToggle={() => set({ skip: d.skip.includes(node.id) ? d.skip.filter((x) => x !== node.id) : [...d.skip, node.id] })} />
           )}
-          {tab === "config" && !node && <ChainConfig d={d} set={set} caps={run?.caps ?? null} />}
+          {tab === "config" && !node && <ChainConfig d={d} set={set} caps={run?.caps ?? null} reviewers={ran.some((n) => n.kind === "gate" && n.auto_escalate === true)} />}
           {tab === "config" && node && (
             <NodeConfig d={d} set={set} node={node} covered={covered.get(node.id) ?? null} cap={run?.caps.nodes[node.id] ?? null} />
           )}
@@ -404,12 +404,12 @@ const field = (label: string, value: string, ph: string, on: (v: string) => void
   <input className="draft-input" aria-label={label} placeholder={ph} value={value} disabled={disabled} inputMode="decimal" onChange={(e) => on(e.target.value)} />
 );
 
-function ChainConfig({ d, set, caps }: { d: DraftState; set: (p: Partial<DraftState>) => void; caps: DryRun["caps"] | null }) {
+function ChainConfig({ d, set, caps, reviewers }: { d: DraftState; set: (p: Partial<DraftState>) => void; caps: DryRun["caps"] | null; reviewers: boolean }) {
   const loop = caps ? Object.values(caps.nodes)[0] : undefined;
   return (
     <div className="draft-pane-body">
       <h3 className="draft-h">Overrides for this item</h3>
-      <Row label="Auto-escalate every gate" hint="Gates with a reviewer escalate before you see them."><Switch label="Auto-escalate every gate" checked={d.autoEscalate} onChange={(v) => set({ autoEscalate: v })} /></Row>
+      <Row label="Auto-escalate every gate" hint={reviewers ? "Gates with a reviewer escalate before you see them." : "No gate in this chain has a reviewer, so nothing would escalate."} dim={!reviewers}><Switch label="Auto-escalate every gate" checked={d.autoEscalate && reviewers} disabled={!reviewers} onChange={(v) => set({ autoEscalate: v })} /></Row>
       <Row label="Agent reviews first" hint="An agent reads an escalation before it reaches you."><Switch label="Agent reviews first" checked={d.autoGate} onChange={(v) => set({ autoGate: v })} /></Row>
       <Row label="Budget" hint="Blank uses the Policy default.">{field("Budget", d.budget, caps?.budget_usd != null ? `$${caps.budget_usd.toFixed(2)} · ${caps.budget_source}` : "policy", (v) => set({ budget: v }))}</Row>
       <Row label="Fix attempts" hint="Every fix-loop node without its own value.">{field("Fix attempts", d.attempts, loop ? `${loop.attempts} · policy` : "policy", (v) => set({ attempts: v }))}</Row>

@@ -146,6 +146,8 @@ def reason_tail(row: dict, now: float) -> str:
 
 
 def _tail(row: dict, stop: dict, node: str, now: float) -> str:
+    # An item with no node to name reads without "at ...", and without a leading separator.
+    where = f" at {node}" if node else ""
     match row.get("display_status"):
         case "needs_you":
             reason = stop.get("reason")
@@ -158,13 +160,13 @@ def _tail(row: dict, stop: dict, node: str, now: float) -> str:
                 # A cap or budget stop's reason goes on to what was not
                 # interrupted: the row keeps its first sentence.
                 case "cap" | "budget":
-                    return _first_sentence(reason) if reason else f"waiting for you at {node}"
+                    return _first_sentence(reason) if reason else f"waiting for you{where}"
                 case _:
-                    return _or(reason, f"waiting for you at {node}")
+                    return _or(reason, f"waiting for you{where}")
         case "failed":
-            return f"failed at {node}"
+            return f"failed{where}"
         case "paused":
-            return f"paused at {node}" if row.get("current_node_id") else "created paused"
+            return f"paused{where}" if row.get("current_node_id") else "created paused"
         case "running":
             step, progress = row.get("step"), row.get("progress")
             if step:
@@ -178,10 +180,10 @@ def _tail(row: dict, stop: dict, node: str, now: float) -> str:
         case "waiting":
             at = _or(stop.get("resume_at"), row.get("retry_at"))
             if not at:
-                return f"waiting at {node}"
+                return f"waiting{where}"
             # A CI wait checks again; only a rate limit retries.
             again = "next check" if stop.get("kind") == "wait" else "retry"
-            return f"{node} · {again} {until(at, now)}"
+            return f"{node + ' · ' if node else ''}{again} {until(at, now)}"
         case "queued":
             return "waiting to start"
         case "blocked":

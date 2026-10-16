@@ -22,6 +22,7 @@ describe("eventLine", () => {
     [ev("mr_closed", { ref: 142, by: "mara" }), "MR !142 closed by mara"],
     [ev("work_item_archived", { by: "auto" }), "archived"],
     [ev("work_item_archived", { by: "auto", kept_branch: "kraft/x", unpushed_commits: 3 }), "archived · kept kraft/x: 3 unpushed commits"],
+    [ev("beads_left_open", { beads: ["kraft-a", "kraft-b"], reason: "no change behind them; close them by hand" }), "left kraft-a, kraft-b open: no change behind them; close them by hand"],
   ])("%o → %s", (e, line) => expect(eventLine(e)).toBe(line));
 
   it("names the nodes and gates it is given as the chain does", () => {

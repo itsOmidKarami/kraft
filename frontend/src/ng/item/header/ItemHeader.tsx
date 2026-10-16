@@ -17,6 +17,7 @@ import { CancelCard } from "./CancelCard";
 import { CompleteCard, EscalateCard, PauseConfirm } from "./Dialogs";
 import { MainButton, PANEL_LABEL } from "./MainButton";
 import { PAUSE_THIS_ITEM } from "../../board/sharedWords";
+import { REMOVE_FROM_QUEUE_TITLE } from "../sharedWords";
 import { Badge } from "../../ui/Badge";
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
@@ -127,6 +128,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
   // Once a card's action is done the card is gone, and the button in it that had the
   // focus with it: the focus goes to the main button, which is the next way on (R12b-08).
   const toMain = () => requestAnimationFrame(() => group.current?.querySelector<HTMLElement>(".item-main-action, .icon-btn")?.focus());
+  const queued = item.display_status === "queued";
   const itemUrl = `/work-items/${encodeURIComponent(item.id)}`;
   const onMain = () => {
     if (hs.main === "pause") return setPausing(true);
@@ -183,12 +185,12 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
       <Badge tone={hs.tone} mono>{hs.badge}</Badge>
       {/* Without a main button the group anchors the cards (pause, cancel, escalate) itself. */}
       <div className="item-main-group" ref={hs.main ? undefined : group}>
-        {hs.main && <MainButton main={hs.main} panel={hs.panel} archivable={archivable(item)} busy={busy} onMain={onMain} onItem={onItem} groupRef={group} />}
+        {hs.main && <MainButton main={hs.main} panel={hs.panel} archivable={archivable(item)} queued={queued} busy={busy} onMain={onMain} onItem={onItem} groupRef={group} />}
         <Menu label="Item menu" trigger={<EllipsisVertical size={16} aria-hidden />} items={menu} />
       </div>
       {error && !pausing && <span className="item-error item-header-error" role="alert">{error}</span>}
-      <Popover anchor={group} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label={PAUSE_THIS_ITEM}>
-        <PauseConfirm busy={busy} error={error} onClose={() => setPausing(false)} onPause={async () => { if (await run(act.pause(item.id))) { setPausing(false); toMain(); } }} />
+      <Popover anchor={group} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label={queued ? REMOVE_FROM_QUEUE_TITLE : PAUSE_THIS_ITEM}>
+        <PauseConfirm queued={queued} busy={busy} error={error} onClose={() => setPausing(false)} onPause={async () => { if (await run(act.pause(item.id))) { setPausing(false); toMain(); } }} />
       </Popover>
       {cancelling && <CancelCard id={item.id} anchor={group} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); toMain(); }} />}
       {escalating && <EscalateCard id={item.id} anchor={group} threads={item.escalation_threads} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); toMain(); }} />}

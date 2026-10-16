@@ -8,7 +8,7 @@ import { useFocusSoon } from "../useFocusSoon";
 import { sendOnModEnter } from "../../keys";
 import type { CancelPreview } from "../../../types";
 import { EndFacts, stopsNow } from "./EndFacts";
-import { GOES_IN_THE_RUN_LOG } from "../sharedWords";
+import { GOES_IN_THE_RUN_LOG, REMOVE_FROM_QUEUE, REMOVE_FROM_QUEUE_TEXT, REMOVE_FROM_QUEUE_TITLE } from "../sharedWords";
 import { PAUSE_THIS_ITEM } from "../../board/sharedWords";
 
 function useSubmit(send: () => Promise<Done>, onDone: () => void) {
@@ -93,15 +93,15 @@ export function CompleteCard({ id, anchor, onClose, onDone }: CardProps) {
 }
 
 /** Pause asks first (prototype line 32). */
-export function PauseConfirm({ busy, error, onPause, onClose }: { busy: boolean; error: string | null; onPause: () => void; onClose: () => void }) {
+export function PauseConfirm({ queued, busy, error, onPause, onClose }: { queued?: boolean; busy: boolean; error: string | null; onPause: () => void; onClose: () => void }) {
   const first = useFocusSoon<HTMLButtonElement>();
   return (
     <div className="item-card-pop">
-      <h2 className="item-pop-title">{PAUSE_THIS_ITEM}</h2>
-      <p className="item-muted">The running task stops where it is. Resume starts it again, with a steer if you leave one.</p>
+      <h2 className="item-pop-title">{queued ? REMOVE_FROM_QUEUE_TITLE : PAUSE_THIS_ITEM}</h2>
+      <p className="item-muted">{queued ? REMOVE_FROM_QUEUE_TEXT : "The running task stops where it is. Resume starts it again, with a steer if you leave one."}</p>
       {error && <p className="item-error" role="alert">{error}</p>}
       <div className="item-actions">
-        <button ref={first} type="button" className="btn btn-primary" disabled={busy} onClick={onPause}>Pause now</button>
+        <button ref={first} type="button" className="btn btn-primary" disabled={busy} onClick={onPause}>{queued ? REMOVE_FROM_QUEUE : "Pause now"}</button>
         <Button onClick={onClose}>Cancel</Button>
       </div>
     </div>

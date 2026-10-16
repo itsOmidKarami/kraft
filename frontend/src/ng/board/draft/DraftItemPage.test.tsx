@@ -131,6 +131,17 @@ describe("DraftItemPage", () => {
     expect(calls.filter((c) => c.url.includes("dry_run=1")).at(-1)?.body.skip_nodes).toEqual(["final_review"]);
   });
 
+  it.each([["declares no reviewer", false], ["declares a reviewer", true]])("offers the auto-escalate toggle only when a gate %s", async (_, reviewer) => {
+    stub();
+    vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: NODES.map((n) => (n.id === "final_review" && reviewer ? { ...n, auto_escalate: true } : n)), gates: 2 }]);
+    mount({ draft: { title: "t", repo: "/code/kraft-plugins", chain: "default" } });
+    await settle();
+    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
+    const toggle = screen.getByRole("switch", { name: "Auto-escalate every gate" });
+    expect(toggle.hasAttribute("disabled") || toggle.getAttribute("aria-disabled") === "true").toBe(!reviewer);
+    expect(screen.queryByText(/No gate in this chain has a reviewer/) !== null).toBe(!reviewer);
+  });
+
   it("asks before leaving a draft with text by the Board crumb or Esc, and leaves at once without", async () => {
     stub();
     mount({ draft: { title: "half an idea", repo: "/code/kraft-plugins", chain: "default" } });

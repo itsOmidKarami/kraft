@@ -74,7 +74,7 @@ ui:
 :::::landing-shot
 ---
 src: /assets/item.png
-alt: "The spec_approval gate on an item's page: waiting for you, the files it decides on, an open thread, reject to spec, and Read spec.md, Review changes, Approve and Request changes buttons"
+alt: "The spec_approval gate on an item's page: waiting for you, the files it decides on, an open thread, reject to spec, and Read spec.md, Review gate, Approve and Request changes buttons"
 crop: 1034 214 384 474
 width: 1440
 ---
@@ -94,7 +94,7 @@ width: 1440
 :::::landing-shot
 ---
 src: /assets/mobile.png
-alt: 'The board at a 390px phone viewport: an item waiting at approve spec with a Review to approve button on the card, and a failed item with a Retry button'
+alt: 'The board at a 390px phone viewport: an item waiting at approve spec with a Review button on the card, and a failed item with a Retry button'
 crop: 0 366 390 358
 width: 390
 ---

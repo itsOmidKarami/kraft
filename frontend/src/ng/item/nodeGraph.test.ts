@@ -293,6 +293,11 @@ describe("a fix loop inside one pass", () => {
     expect(states(nodeGraph(again, node, NOW))[0]).toBe("lint:done");
   });
 
+  it("takes the total from the item's own node attempts over the chain's", () => {
+    const first = looped({ worker_sessions: [s("verification.checks.lint", { round: 0, status: "failed" })], node_overrides: { verification: { attempts: 5 } } });
+    expect(loopRounds(first, node)).toEqual({ latest: 1, total: 6 });
+  });
+
   it("keeps the rounds before a fix cycle that was paused and refunded, which measures a round it had already measured", () => {
     const resumed = looped({ worker_sessions: [...LOOP_RUN, s("verification.checks.lint", { round: 1, attempt: 3, status: "running", wall_ms: null })] });
     expect(loopRounds(resumed, node)).toEqual({ latest: 2, total: 3 });

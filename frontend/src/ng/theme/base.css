@@ -10,11 +10,15 @@
   /* What a "needs you" surface (the gate strip, the phone gate card) is painted with. A few percent of amber over the page
      reads as amber on dark, but on light it greys to beige and the hairline vanishes, so light mixes more over the paper. */
   --warn-wash: color-mix(in oklab, var(--warn) 8%, var(--bg)); --warn-edge: color-mix(in oklab, var(--warn) 45%, transparent);
+  /* Density: compact is the look as designed. Comfortable adds 2px to each row's vertical padding and 1px to every
+     body type step, so a row rule reads `--row-pad-add` and the type tokens read their own. */
+  --row-pad-add: 0px;
   /* The one column every settings page (Appearance to Auto-intake) sits in. */
   --set-page-w: 820px;
 }
 :root[data-mode="light"] { --warn-wash: color-mix(in oklab, var(--warn) 12%, var(--surface)); --warn-edge: color-mix(in oklab, var(--warn) 75%, transparent); }
-body { margin: 0; font: 14px/1.5 var(--font-sans); background: var(--bg); color: var(--text); }
+:root[data-density="comfortable"] { --row-pad-add: 2px; --fs-meta: 14px; --fs-label: 13px; --fs-body: 15px; }
+body { margin: 0; font: var(--fs-body)/1.5 var(--font-sans); background: var(--bg); color: var(--text); }
 a { color: var(--accent); }
 button, input, select, textarea { font: inherit; color: inherit; }
 /* The browser's own placeholder grey is 3.5:1; every field uses the muted text colour. */

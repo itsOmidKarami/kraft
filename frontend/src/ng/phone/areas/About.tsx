@@ -7,6 +7,7 @@ import { detailOf, jsonBody, request } from "../../http";
 import { showToast } from "../../ui/Toast";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, type RowSpec } from "./kit";
+import { docsUrl } from "../../settings/docsUrl";
 import { COPIED_THE_COMMAND, COPIED_THE_DIAGNOSTICS, RELEASE_CHANNEL_HINT } from "../../settings/sharedWords";
 
 interface UpdateState {
@@ -18,7 +19,6 @@ interface UpdateState {
 }
 const CHANNELS = ["stable", "rc", "beta", "alpha"].map((c) => ({ value: c, label: c }));
 const RELEASES = "https://github.com/itsOmidKarami/kraft/releases";
-const DOCS = "https://kraft-sdlc.dev/";
 const SUPPORT = "https://kraft-sdlc.dev/project/status-and-support";
 
 /** What the update feed said, in words. A feed that did not answer is "unknown", never "up to date": the server sends null, not false (W16 E). */
@@ -101,7 +101,7 @@ export function AboutScreen() {
         ]}
       />
       <Group rows={[
-        { label: "Documentation", icon: BookOpen, onClick: () => window.open(DOCS, "_blank", "noopener,noreferrer") } as RowSpec,
+        { label: "Documentation", icon: BookOpen, onClick: () => window.open(docsUrl(health?.version, update?.latest), "_blank", "noopener,noreferrer") } as RowSpec,
         { label: "Status and support", icon: LifeBuoy, sub: "macOS and Linux. Only the latest release gets fixes.", onClick: () => window.open(SUPPORT, "_blank", "noopener,noreferrer") } as RowSpec,
       ]} />
       {node}

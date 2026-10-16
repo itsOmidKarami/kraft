@@ -127,7 +127,7 @@ export function GateFooter({ item, gate, reload, onRead }: { item: ItemDetail; g
     <div className="ip-footer">
       {item.gate_artifact && <Button onClick={onRead}><FileText size={12} aria-hidden /> Read {item.gate_artifact.split("/").pop()}</Button>}
       {/* The review page (W8): the gate review overlay first when the gate has a document (it opens only at the pending gate). */}
-      <Button onClick={() => navigate(`/work-items/${encodeURIComponent(item.id)}/review?gate=${encodeURIComponent(gate.id)}${item.gate_artifact ? "&doc=1" : ""}`)}>Review changes</Button>
+      <Button onClick={() => navigate(`/work-items/${encodeURIComponent(item.id)}/review?gate=${encodeURIComponent(gate.id)}${item.gate_artifact ? "&doc=1" : ""}`)}>Review gate</Button>
       <Button variant="primary" disabled={busy} onClick={() => run(act.approve(item.id, gate.id))}>Approve</Button>
       <Button ref={rejectButton} disabled={busy} onClick={() => setRejecting(true)}>{REQUEST_CHANGES}…</Button>
       {error && <span className="item-error" role="alert">{error}</span>}

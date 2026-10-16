@@ -87,3 +87,5 @@
   .hn-list { width: auto; border-right: 0; border-bottom: 1px solid var(--line); max-height: 220px; }
   .hn-stage { min-height: 520px; }
 }
+/* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
+.hn-row { padding-block: calc(3px + var(--row-pad-add)); }

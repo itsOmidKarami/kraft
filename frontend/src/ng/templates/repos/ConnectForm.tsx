@@ -18,6 +18,7 @@ export interface Probe {
   project: string | null;
   candidates?: ProbeCandidate[];
   read_from?: string | null;
+  test_markers?: string[];
   missing_setup?: string[];
   stopped?: ProbeStop[];
   missing_tools?: MissingTool[];
@@ -140,6 +141,7 @@ export function ConnectForm({ draft, known, entries = {}, onDone }: { draft: Con
           {(probe.test_scopes ?? []).filter((s) => s.paths.length === 1 && s.paths[0] !== "**").map((s) => (
             <Kv key={s.paths[0]} k={s.paths[0]} v={s.command} mono />
           ))}
+          {probe.test_markers?.length ? <Kv k="test files" v={[...new Set(probe.test_markers)].join(", ")} mono muted /> : null}
           <Kv k="setup" v={setupLine(probe)} mono muted={!probe.setup_command} />
           {(probe.stopped ?? []).map((s) => <Kv key={s.dir} k="no tests" v={stopLine(s)} muted />)}
           {probe.missing_setup?.length ? <Kv k="no setup" v="the first work item stops until a setup command is set, or No setup needed is turned on, in Settings › Repos" muted /> : null}

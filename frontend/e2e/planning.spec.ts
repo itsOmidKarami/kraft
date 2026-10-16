@@ -14,8 +14,8 @@ test("spec gate: read, reject and send back, then approve into the plan gate", a
   await page.goto(`/work-items/${id}`);
   await expect(waitingAt(page, "spec")).toBeVisible({ timeout: scaledTimeout(100_000) });
 
-  // The banner's Review and decide opens the gate's review with its brief beside the diff.
-  await waitingAt(page, "spec").getByRole("button", { name: "Review and decide" }).click();
+  // The banner's Review opens the gate's review with its brief beside the diff.
+  await waitingAt(page, "spec").getByRole("button", { name: "Review", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/work-items/${id}/review\\?gate=spec_approval&doc=1$`));
   await expect(page.getByRole("dialog", { name: "Gate review: spec_approval" })).toContainText("fake spec body");
 
