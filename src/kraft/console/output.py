@@ -70,6 +70,11 @@ class OutputPanel(ModalScreen[None]):
         self.query_one(RichLog).write(Text(f"exit {code}", style=colour))
         self.query_one("#stop", Button).disabled = True
 
+    def note(self, text: str) -> None:
+        """A muted line of the console's own, among the command's."""
+        self._flush()
+        self.query_one(RichLog).write(Text(text, style=self.app.theme_variables["kraft-muted"]))
+
     def action_stop(self) -> None:
         self.app.stop_command()
 

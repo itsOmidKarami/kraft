@@ -8,9 +8,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import shlex
 import signal
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import ClassVar
 from urllib.parse import urlsplit
 
@@ -21,13 +22,16 @@ from textual.containers import Horizontal
 from textual.content import Content
 from textual.screen import Screen
 from textual.theme import Theme
-from textual.widgets import Button, ContentSwitcher, Footer, HelpPanel, Static
+from textual.widgets import Button, ContentSwitcher, Footer, HelpPanel, Input, Static
 
-from kraft import client, config, update
+from kraft import answers, client, config, update
 from kraft.console import runner, theme
+from kraft.console.dialogs import Confirm
 from kraft.console.live import Link, Live
 from kraft.console.output import OutputPanel
+from kraft.console.prompt import Prompt
 from kraft.console.screens import VIEWS, View
+from kraft.vocab import WorkItemStatus
 
 #: The top views, in tab order: the number keys `1`-`4` follow it.
 TABS = ("board", "server", "addons", "repos")
@@ -36,6 +40,9 @@ MIN_SIZE = (60, 16)
 #: Below this many columns the rows drop chain and age, and the footer keeps
 #: only `? keys`: the console still works as a side pane.
 NARROW = 80
+#: How long a confirm waits for the server to list its running items before
+#: it asks without them, as `kraft admin stop` does (`cli.admin._LIST_TIMEOUT`).
+CONFIRM_LIST_S = 2.0
 
 
 def _theme(name: str, tokens: dict[str, str], *, dark: bool) -> Theme:
@@ -106,6 +113,7 @@ class KraftConsole(App):
         Binding("escape", "back", "back", show=False),
         Binding("q", "back(True)", "back or quit", show=False),
         Binding("question_mark", "keys", "keys"),
+        Binding("slash", "prompt", "command", show=False),
         Binding("ctrl+o", "output", "output", show=False),
     ]
 
@@ -145,6 +153,7 @@ class KraftConsole(App):
         with ContentSwitcher(initial="board"):
             for name, view in VIEWS.items():
                 yield view(id=name)
+        yield Prompt()
         yield Footer(show_command_palette=False)
         # Textual's Footer cannot hide one key, so a narrow frame swaps it for this.
         yield Static("? keys", id="narrow-keys")
@@ -213,11 +222,14 @@ class KraftConsole(App):
         done.set_result(code)
 
     async def _show_panel(self) -> None:
-        """The panel on top, once: Ctrl+P can open over it."""
+        """The panel on top, once: Ctrl+P can open over it. A confirm is never
+        popped (that drops its result callback, and the pending decision with
+        it): the panel opens above it instead, since a command needs a mounted
+        panel to write to, and Esc then shows the confirm again."""
         panel = self.get_screen("output", OutputPanel)
         if panel not in self.screen_stack:
             await self.push_screen(panel)
-        while self.screen is not panel:
+        while self.screen is not panel and not isinstance(self.screen, Confirm):
             await self.pop_screen()
 
     def stop_command(self) -> None:
@@ -226,18 +238,64 @@ class KraftConsole(App):
         if run is None:
             return
         if run is self._stopping:
+            # `end()` waits up to QUIT_GRACE_S: say so, or the press seems to do nothing.
+            self.get_screen("output", OutputPanel).note("stopping…")
             self.run_worker(run.end())
         else:
             self._stopping = run
             run.stop()
+
+    async def confirm(
+        self, question: str, lines: Sequence[str] = (), *, running: str | None = None
+    ) -> bool:
+        """Ask before what cannot be undone (spec §7.8). With `running`, the
+        word for what ends the agents ("restarting"), the running items are
+        listed too. Await it from a worker: it waits for the answer."""
+        lines = list(lines)
+        if running is not None:
+            try:
+                async with asyncio.timeout(CONFIRM_LIST_S):
+                    items = await client.list_work_items(WorkItemStatus.ACTIVE)
+            except (client.ClientError, TimeoutError):
+                items = []  # a server that does not answer has none to list
+            lines += answers.running_agents_warning(running, items)
+        return await self.push_screen_wait(Confirm(question, lines))
 
     async def on_unmount(self) -> None:
         # Quitting with a command running (spec §8): SIGINT, a bounded wait, SIGKILL.
         if self.command is not None:
             await self.command.end()
 
+    def action_prompt(self) -> None:
+        prompt = self.query_one(Prompt)
+        prompt.value = "/"
+        prompt.cursor_position = 1
+        prompt.focus()
+
     def action_output(self) -> None:
         self.run_worker(self._show_panel())
+
+    @on(Input.Submitted, "#prompt")
+    def _typed(self, event: Input.Submitted) -> None:
+        if event.value.strip(" /"):
+            self.run_worker(self._run_typed(event.value), group="typed")
+
+    async def _run_typed(self, line: str) -> None:
+        kind, what = runner.route(line)
+        if kind == "show":
+            self.show(what)
+        elif kind == "say":
+            self.notify(what, markup=False)
+        elif self.command is not None:
+            # Before the question: its answer would be thrown away.
+            self.notify("A command is still running: Ctrl+O shows it, x stops it.", markup=False)
+        else:
+            asked = runner.ask(what)
+            if asked is not None:
+                sentence, doing = asked
+                if not await self.confirm(f"kraft {shlex.join(what)}", [sentence], running=doing):
+                    return
+            await self.run_command(what)
 
     @on(Button.Pressed, "#start")
     def _start(self) -> None:
@@ -308,8 +366,14 @@ class KraftConsole(App):
         if link is Link.DOWN:
             self.query_one("#down", Static).update(Content(down_sentence(error)))
             # Focused once, on the way down: Enter presses it (spec §6).
+            # But never from where a person is typing: only off the view or nothing.
             if no_server and not was_down and start is not None:
-                start.focus()
+                if (
+                    frame.focused is None
+                    or frame.focused is start
+                    or self.view in frame.focused.ancestors_with_self
+                ):
+                    frame.set_focus(start)
         elif was_down and frame.focused in (None, start):
             # The frame's own focus, which the output panel may be covering.
             frame.set_focus(self.view)

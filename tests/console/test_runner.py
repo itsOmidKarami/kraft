@@ -1,6 +1,6 @@
-"""`kraft.console.runner`: the child that runs a command. The children are
-`python -c` scripts standing in for `kraft`, except one real
-`python -m kraft` with no server."""
+"""`kraft.console.runner`: what a typed line means, and the child that runs
+it. The children are `python -c` scripts standing in for `kraft`, except one
+real `python -m kraft` with no server."""
 
 from __future__ import annotations
 
@@ -11,6 +11,131 @@ import signal
 import pytest
 
 from kraft.console import runner
+
+
+@pytest.mark.parametrize(
+    ("line", "does"),
+    [
+        ("/item resume a91c", ("run", ["item", "resume", "a91c"])),
+        ("kraft item resume a91c", ("run", ["item", "resume", "a91c"])),
+        ("/kraft view show", ("run", ["view", "show"])),
+        ('/item create "two words"', ("run", ["item", "create", "two words"])),
+        ('/item create "unclosed', ("say", "That line does not parse: No closing quotation.")),
+        ("/admin", ("show", "server")),
+        ("/repo", ("show", "repos")),
+        ("/addon", ("show", "addons")),
+        ("/admin addon", ("show", "addons")),
+        ("/view", ("show", "board")),
+        ("/item", ("show", "board")),
+        ("/admin start", ("say", runner.ATTACHED)),
+        ("kraft", ("say", runner.ATTACHED)),
+        ("/admin start --detach", ("run", ["admin", "start", "--detach"])),
+        ("/admin mcp", ("say", runner.REFUSED[("admin", "mcp")])),
+        ("/admin permission-hook codex", ("say", runner.REFUSED[("admin", "permission-hook")])),
+        ("/console", ("say", runner.REFUSED[("console",)])),
+        ("/view watch", ("show", "board")),
+        ("/view logs -f a91c", ("say", runner.FOLLOW_LATER)),
+        ("/view events a91c --follow", ("say", runner.FOLLOW_LATER)),
+        ("/view logs a91c", ("run", ["view", "logs", "a91c"])),
+        ("/admin update -y --restart --yes", ("run", ["admin", "update", "--restart"])),
+        ("/admin update --ye --restart", ("run", ["admin", "update", "--restart"])),
+        ("/view logs a91c --fol", ("say", runner.FOLLOW_LATER)),
+        ("/admin start --det", ("run", ["admin", "start", "--det"])),
+        ("/view logs x -fn 5", ("say", runner.FOLLOW_LATER)),
+        ("/view logs x -fn5", ("say", runner.FOLLOW_LATER)),
+        ("/admin update -yy --restart", ("run", ["admin", "update", "--restart"])),
+        ("/admin start -dd", ("run", ["admin", "start", "-dd"])),
+    ],
+    ids=[
+        "slash",
+        "pasted-kraft",
+        "slash-and-kraft",
+        "quoted",
+        "unclosed-quote",
+        "bare-admin",
+        "bare-repo",
+        "bare-addon",
+        "bare-admin-addon",
+        "bare-view",
+        "bare-item",
+        "start-attached",
+        "bare-kraft-serves",
+        "start-detached",
+        "mcp",
+        "permission-hook",
+        "console",
+        "watch",
+        "logs-follow",
+        "events-follow",
+        "logs-without-follow",
+        "update-never-yes",
+        "update-yes-abbrev",
+        "follow-abbrev",
+        "detach-abbrev",
+        "follow-bundled",
+        "follow-bundled-attached",
+        "update-yes-bundled",
+        "detach-bundled",
+    ],
+)
+def test_a_typed_line_runs_opens_a_view_or_says_why_not(line, does):
+    """Spec §4.7 and §7.7. A server started inside the console would stop
+    when it quits; `admin update -y` would skip the refusals a person must
+    see; a followed stream belongs in a view, not an endless panel."""
+    assert runner.route(line) == does
+
+
+@pytest.mark.parametrize(
+    ("argv", "asked"),
+    [
+        (["admin", "restart", "-y"], ("This stops the server and starts it again.", "restarting")),
+        (["admin", "stop"], ("This stops the server.", "stopping")),
+        (["admin", "update"], ("This installs the newest Kraft release.", None)),
+        (
+            ["admin", "update", "--restart"],
+            ("This installs the newest Kraft release.", "restarting"),
+        ),
+        (["repo", "disconnect"], ("This disconnects the repo from Kraft.", None)),
+        (
+            ["item", "cancel", "a91c"],
+            ("This cancels the item; its worktree and branch stay.", None),
+        ),
+        (["item", "abandon", "a91c"], None),
+        (["item", "abandon", "a91c", "--yes"], runner.CONFIRMS[("item", "abandon")]),
+        (["item", "abandon", "a91c", "--ye"], runner.CONFIRMS[("item", "abandon")]),
+        (["item", "archive", "--y"], runner.CONFIRMS[("item", "archive")]),
+        (
+            ["admin", "update", "--res"],
+            ("This installs the newest Kraft release.", "restarting"),
+        ),
+        (["item", "archive", "--yes"], runner.CONFIRMS[("item", "archive")]),
+        (["admin", "addon", "uninstall", "x@y"], ("This uninstalls the add-on.", None)),
+        (["admin", "addon", "list"], None),
+        (["view", "show"], None),
+    ],
+    ids=[
+        "restart",
+        "stop",
+        "update",
+        "update-restart",
+        "disconnect",
+        "cancel",
+        "abandon-preview",
+        "abandon",
+        "abandon-abbrev",
+        "archive-abbrev",
+        "update-restart-abbrev",
+        "archive",
+        "addon-uninstall",
+        "addon-list",
+        "a-read",
+    ],
+)
+def test_the_console_asks_before_what_cannot_be_undone(argv, asked):
+    """Spec §7.8: the CLI's own question is skipped without a terminal. A
+    stop lists the running items it ends; `abandon` and `archive` without
+    `--yes` only preview, so they need no question."""
+    assert runner.ask(argv) == asked
 
 
 async def _started(run: runner.Run, lines: list[str], count: int) -> asyncio.Task:

@@ -12,13 +12,15 @@ import pytest
 from support.harness import connected_repo
 from textual.app import App
 from textual.binding import Binding
-from textual.widgets import ContentSwitcher, Footer, HelpPanel
+from textual.widgets import ContentSwitcher, Footer, HelpPanel, Input
 
 from kraft import cli, client
 from kraft.console import app as console_app
 from kraft.console import live
 from kraft.console.app import TABS, KraftConsole
+from kraft.console.dialogs import Confirm
 from kraft.console.live import Link
+from kraft.console.prompt import Prompt
 from kraft.console.screens import VIEWS, View
 
 OTHER_INSTANCE = client.ClientError(
@@ -486,7 +488,10 @@ def test_a_link_change_under_the_palette_still_marks_the_frame(console):
 
 
 #: Each dialog the console pushes over its frame, opened.
-DIALOGS = {"output": lambda app: app.action_output()}
+DIALOGS = {
+    "output": lambda app: app.action_output(),
+    "confirm": lambda app: app.push_screen(Confirm("kraft admin stop", [])),
+}
 
 
 @pytest.mark.parametrize("dialog", list(DIALOGS))
@@ -517,3 +522,67 @@ def test_live_updates_reach_the_frame_under_a_dialog(console, monkeypatch, dialo
     assert "Board 1" in tabs
     assert "Server degraded" in tabs
     assert down
+
+
+@pytest.mark.parametrize(
+    ("steps", "on_input", "ends_on"),
+    [
+        ([Link.DOWN], False, "start"),
+        ([Link.DOWN], True, "input"),
+        ([Link.DOWN, Link.LIVE], False, "view"),
+        ([Link.DOWN], "in-view", "start"),
+    ],
+    ids=[
+        "from-the-view",
+        "typing-keeps-the-focus",
+        "down-and-live-in-one-tick",
+        "from-in-the-view",
+    ],
+)
+def test_start_server_takes_the_focus_only_from_the_view(console, steps, on_input, ends_on):
+    """The button never pulls focus from where a person types; and a link that
+    drops and recovers in one tick ends on the view, not on a button that is gone."""
+
+    async def scenario(app, pilot):
+        typing = Input()
+        if on_input == "in-view":  # a focusable child of the view, as PR 3 adds
+            await app.view.mount(typing)
+            app.default_screen.set_focus(typing)
+        elif on_input:  # the real prompt, which sits outside the view
+            typing = app.query_one(Prompt)
+            app.default_screen.set_focus(typing)
+        for link in steps:
+            app._live_link(link, None)
+        await pilot.pause()
+        focused = app.default_screen.focused
+        return {typing: "input", app.view: "view", app.query_one("#start"): "start"}.get(focused)
+
+    assert console.run(scenario) == ends_on
+
+
+@pytest.mark.parametrize("panel_open_first", [True, False], ids=["panel-beneath", "panel-new"])
+def test_a_confirm_survives_the_output_panel_being_asked_for(console, kraft_is, panel_open_first):
+    """Popping a modal drops its result callback: Ctrl+O and a new command must
+    leave an open confirm to answer."""
+    kraft_is("print('x')")
+
+    async def scenario(app, pilot):
+        # The panel already open beneath it: the case a pop loop would walk through.
+        if panel_open_first:
+            await pilot.press("ctrl+o")
+            await pilot.pause()
+        asked = app.run_worker(app.confirm("kraft admin stop"))
+        await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+        await pilot.press("ctrl+o")
+        async with asyncio.timeout(5):
+            await app.run_command(["view", "list"])
+        await pilot.pause()
+        if not isinstance(app.screen, Confirm):  # the panel opened above it: Esc closes it
+            await pilot.press("escape")
+            await pilot.pause()
+        still = isinstance(app.screen, Confirm)
+        await pilot.press("shift+tab", "enter")
+        await console.until(pilot, lambda: asked.is_finished)
+        return still, asked.result
+
+    assert console.run(scenario) == (True, True)

@@ -97,7 +97,7 @@ def test_a_second_stop_kills_a_command_that_ignores_the_first(console, kraft_is,
 
     still_running, lines = console.run(scenario)
     assert still_running
-    assert lines == ["kraft repo connect --verify", "up", f"exit {-signal.SIGKILL}"]
+    assert lines == ["kraft repo connect --verify", "up", "stopping…", f"exit {-signal.SIGKILL}"]
 
 
 def test_quitting_stops_a_running_command(console, kraft_is, tmp_path):
@@ -199,6 +199,8 @@ def test_a_hangup_or_terminate_stops_the_command_and_leaves(console, kraft_is, t
         app.run_worker(app.run_command(["repo", "connect", "--verify"]))
         await console.until(pilot, lambda: "up" in console.output(app))
         pid = app.command.process.pid
+        # A missing handler would kill this worker, not fail this test.
+        assert signal.getsignal(sig) not in (signal.SIG_DFL, signal.SIG_IGN, None)
         os.kill(os.getpid(), sig)
         await console.until(pilot, lambda: not app.is_running)
         return pid
