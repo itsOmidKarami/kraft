@@ -21,6 +21,15 @@ from textual.widgets.option_list import Option
 from kraft import client, render
 
 
+class Toggle(Checkbox):
+    """A checkbox whose mark says its state, not only its colour (colour
+    never carries meaning alone): `✓` on, `·` off."""
+
+    @property
+    def BUTTON_INNER(self) -> str:  # noqa: N802 - Textual's own name for the mark
+        return "✓" if self.value else "·"
+
+
 class Dialog[R](ModalScreen[R]):
     """A question someone awaits the answer to. The output panel never pops
     one (`KraftConsole._show_panel`): a pop drops its result callback, and
@@ -39,10 +48,16 @@ class Dialog[R](ModalScreen[R]):
             self.dismiss(value)
 
 
+#: What every dialog's dismiss button says: Esc's word, never "Cancel", which
+#: on the Item is something done to an item ("Cancel item").
+BACK = "Back"
+
+
 class Confirm(Dialog[bool]):
     """Go on or not (spec §7.8), and an add-on's review, Apply or not (spec
     §7.4): `question`, then `lines` saying what going on does, scrolled when
-    they run long. Cancel has the focus, so Enter alone never goes on."""
+    they run long; `yes` names the verb it goes on with. Back has the focus,
+    so Enter alone never goes on."""
 
     def __init__(self, question: str, lines: Sequence[str], *, yes: str = "Go on") -> None:
         super().__init__()
@@ -58,7 +73,7 @@ class Confirm(Dialog[bool]):
                 yield Static(Content("\n".join(self.lines)), id="listing")
             with Horizontal():
                 yield Button(self.yes, id="yes")
-                yield Button("Cancel", id="no")
+                yield Button(BACK, id="no")
 
     def on_mount(self) -> None:
         self.query_one("#no").focus()
@@ -191,12 +206,12 @@ class Connect(Dialog[list[str] | None]):
                 box = Input(value, id=box_id)
                 box.border_title = title
                 yield box
-            yield Checkbox("Verify: run them once in a throwaway worktree", id="connect-verify")
+            yield Toggle("Verify: run them once in a throwaway worktree", id="connect-verify")
             yield Static(id="connect-said")
             yield Static(Content(LIBRARY), id="connect-library")
             with Horizontal():
                 yield Button("Connect", id="connect-go")
-                yield Button("Cancel", id="connect-no")
+                yield Button(BACK, id="connect-no")
 
     def on_mount(self) -> None:
         self._box("path").focus()

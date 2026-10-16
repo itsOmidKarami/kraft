@@ -5,6 +5,25 @@ Screen {
     background: $background;
 }
 
+/* A dialog keeps the screen it was opened over in sight, dimmed: the spec
+ * you reject stays readable while you say why. After `Screen`, which a
+ * ModalScreen also is. */
+ModalScreen {
+    background: $background 60%;
+}
+
+/* One cell, in the faint colour (the theme's `scrollbar`): never louder than
+ * what it scrolls. */
+* {
+    scrollbar-size-vertical: 1;
+}
+
+#peek-body, #output-log, #confirm-scroll {
+    scrollbar-background: $surface;
+    scrollbar-background-hover: $surface;
+    scrollbar-background-active: $surface;
+}
+
 #top {
     height: 1;
     background: $kraft-side;
@@ -318,12 +337,13 @@ Confirm, Note, Menu, Connect, NewItem {
     border-title-color: $foreground;
 }
 
-#connect Checkbox > .toggle--button {
+/* The mark is `✓` or `·` (`Toggle`); its colour only repeats it. */
+Toggle > .toggle--button {
     color: $kraft-muted;
     background: $surface;
 }
 
-#connect Checkbox.-on > .toggle--button {
+Toggle.-on > .toggle--button {
     color: $success;
 }
 

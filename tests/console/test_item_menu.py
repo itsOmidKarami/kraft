@@ -69,7 +69,7 @@ def _record(monkeypatch, name: str, answer) -> list[tuple]:
 @pytest.mark.parametrize(
     ("actions", "entries"),
     [
-        (["retry", "skip", "cancel", "complete", "pause"], ["Skip", "Complete…", "Cancel…"]),
+        (["retry", "skip", "cancel", "complete", "pause"], ["Skip", "Complete…", "Cancel item…"]),
         (["retry", "pause"], None),
     ],
     ids=["open-doors-only", "none-open"],

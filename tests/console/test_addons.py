@@ -557,7 +557,7 @@ def test_i_and_u_take_an_addon_after_its_review(
     board, acme, entry, change, key, answer, asked, said, version
 ):
     """Spec §7.4: the CLI's own flow, its review in the console's confirm
-    (Apply or Cancel, Cancel focused); applied, the running server is asked
+    (Apply or Back, Back focused); applied, the running server is asked
     to reload, as the CLI asks it. Nothing to take, or a refusal, asks
     nothing."""
     if entry is not None:

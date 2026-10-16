@@ -317,7 +317,7 @@ class Addons(View):
     def on_review_asked(self, message: ReviewAsked) -> None:
         reviewed = message.reviewed
         lines = review.render(reviewed).splitlines()
-        # As the CLI asks it ("Apply X? [y/N]"); Cancel has the focus.
+        # As the CLI asks it ("Apply X? [y/N]"); Back has the focus.
         dialog = Confirm(f"Apply {reviewed.addon_id}?", lines, yes="Apply")
         self.app.push_screen(dialog, message.waiting.give)
 

@@ -255,8 +255,14 @@ class Board(View):
         for key, label in words.GROUPS:
             members = grouped[key]
             folded = key == "done" and not self.done_open
-            heading = f"{label.upper()} {len(members)}" + (" ›" if folded and members else "")
-            options.append(Option(Content.styled(heading, "bold $kraft-muted"), id=f"group:{key}"))
+            # Muted caps and the count in the group's colour: the rows outweigh it.
+            heading = Content.assemble(
+                (label.upper(), "$kraft-muted"),
+                " ",
+                (str(len(members)), BAR[key] if members else "$kraft-faint"),
+                (" ›" if folded and members else "", "$kraft-muted"),
+            )
+            options.append(Option(heading, id=f"group:{key}"))
             if key == "needs" and not members:
                 options.append(
                     Option(Content.styled("Nothing needs you", "$success"), disabled=True)

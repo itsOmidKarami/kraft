@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 from support.console_board import _text
-from textual.widgets import RichLog
+from textual.widgets import Button, RichLog
 
 from kraft import client, update
 from kraft.console import tail
@@ -194,6 +194,7 @@ def test_the_servers_keys_run_their_verbs_after_the_consoles_confirm(
             question = (
                 str(app.screen.query_one("#question").render()),
                 "Fix the [/] parser" in listing,
+                str(app.screen.query_one("#yes", Button).label),
             )
             await pilot.press(*keys[1:])
             await console.until(pilot, lambda: not isinstance(app.screen, Confirm))
@@ -202,7 +203,9 @@ def test_the_servers_keys_run_their_verbs_after_the_consoles_confirm(
         await pilot.pause()
         return question, console.output(app)
 
-    assert console.run(scenario) == ((asked, True) if asked else None, ran)
+    # The button that goes on names the verb (`runner.CONFIRMS`), never "Go on".
+    verb = {"kraft admin restart": "Restart", "kraft admin update --restart": "Update"}
+    assert console.run(scenario) == ((asked, True, verb[asked]) if asked else None, ran)
 
 
 @pytest.mark.parametrize(

@@ -14,7 +14,7 @@ from textual.content import Content
 from textual.widgets import Button, Checkbox, Input, Static, TextArea
 
 from kraft import answers, client, render
-from kraft.console.dialogs import Dialog
+from kraft.console.dialogs import BACK, Dialog, Toggle
 
 #: The answer's fields that warn: said once it is filed, since the server
 #: knows them only then (spec §7.6).
@@ -55,7 +55,7 @@ def said(result: dict) -> tuple[str, str]:
 
 
 class NewItem(Dialog[dict | None]):
-    """The form. Enter in a one-line field, or File it, sends it; a refusal
+    """The form. Enter in a one-line field, or File, sends it; a refusal
     shows under the fields in the server's words and the form stays. Answers
     the create's answer, or None for Esc."""
 
@@ -76,17 +76,17 @@ class NewItem(Dialog[dict | None]):
                     else:
                         value = self.repo if name == "repo" else ""
                         yield Input(value, placeholder=HINTS[name], compact=True, id=f"new-{name}")
-            yield Checkbox(
+            yield Toggle(
                 "Auto-gate: an agent reviews gates first",
                 True,
                 compact=True,
                 id="new-auto-gate",
             )
-            yield Checkbox("Start now (off: it is filed paused)", compact=True, id="new-start")
+            yield Toggle("Start now (off: it is filed paused)", compact=True, id="new-start")
             yield Static(id="new-said")
             with Horizontal(id="new-buttons"):
-                yield Button("File it", id="new-go")
-                yield Button("Cancel", id="new-no")
+                yield Button("File", id="new-go")
+                yield Button(BACK, id="new-no")
 
     def on_mount(self) -> None:
         self.query_one("#new-title", Input).focus()

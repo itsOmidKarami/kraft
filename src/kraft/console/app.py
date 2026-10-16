@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 from textual import events, on
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding, BindingType
+from textual.color import Color
 from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Horizontal
 from textual.content import Content
@@ -73,6 +74,16 @@ def _theme(name: str, tokens: dict[str, str], *, dark: bool) -> Theme:
             "kraft-info": tokens["info"],
             "kraft-muted": tokens["text-muted"],
             "kraft-faint": tokens["text-faint"],
+            # A field's frame: the accent at half strength when focused, so the
+            # field is not the loudest thing in a dialog; the web's border else,
+            # so a field not focused still reads as one to type in.
+            "border": Color.parse(tokens["surface"]).blend(Color.parse(tokens["accent"]), 0.5).hex,
+            "border-blurred": tokens["border"],
+            # Scrollbars stay quieter than what they scroll.
+            "scrollbar": tokens["text-faint"],
+            "scrollbar-hover": tokens["text-muted"],
+            "scrollbar-active": tokens["text-muted"],
+            "scrollbar-background": tokens["bg"],
         },
     )
 
@@ -340,11 +351,17 @@ class KraftConsole(App):
             run.stop()
 
     async def confirm(
-        self, question: str, lines: Sequence[str] = (), *, running: str | None = None
+        self,
+        question: str,
+        lines: Sequence[str] = (),
+        *,
+        running: str | None = None,
+        yes: str = "Go on",
     ) -> bool:
-        """Ask before what cannot be undone (spec §7.8). With `running`, the
-        word for what ends the agents ("restarting"), the running items are
-        listed too. Await it from a worker: it waits for the answer."""
+        """Ask before what cannot be undone (spec §7.8), `yes` on the button
+        that goes on. With `running`, the word for what ends the agents
+        ("restarting"), the running items are listed too. Await it from a
+        worker: it waits for the answer."""
         lines = list(lines)
         if running is not None:
             try:
@@ -353,7 +370,7 @@ class KraftConsole(App):
             except (client.ClientError, TimeoutError):
                 items = []  # a server that does not answer has none to list
             lines += answers.running_agents_warning(running, items)
-        return await self.push_screen_wait(Confirm(question, lines))
+        return await self.push_screen_wait(Confirm(question, lines, yes=yes))
 
     async def on_unmount(self) -> None:
         # Quitting with a command running (spec §8): SIGINT, a bounded wait, SIGKILL.
@@ -407,8 +424,9 @@ class KraftConsole(App):
             return
         asked = runner.ask(argv)
         if asked is not None:
-            sentence, doing = asked
-            if not await self.confirm(f"kraft {shlex.join(argv)}", [sentence], running=doing):
+            sentence, doing, verb = asked
+            question = f"kraft {shlex.join(argv)}"
+            if not await self.confirm(question, [sentence], running=doing, yes=verb):
                 return
         await self.run_command(argv)
 

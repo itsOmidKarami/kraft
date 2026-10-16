@@ -30,12 +30,14 @@ PAGE = 50
 NEWEST = 2**63 - 1
 #: What the view says once its item is gone (spec §7.2).
 GONE = "This item no longer exists. Esc goes back."
-#: A diff line's colour by how it starts, the first match winning: the web's
-#: add and delete colours, git's bold headers and hunk colour.
+#: A diff line's colour by how it starts, the first match winning: git's file
+#: headers muted, so the change outweighs them; the web's add and delete
+#: colours; the hunk colour.
 DIFF_STYLE = (
-    ("+++", "bold"),
-    ("---", "bold"),
-    ("diff --git", "bold"),
+    ("+++", "kraft-muted"),
+    ("---", "kraft-muted"),
+    ("diff --git", "kraft-muted"),
+    ("index ", "kraft-muted"),
     ("+", "success"),
     ("-", "error"),
     ("@@", "kraft-info"),
@@ -48,7 +50,7 @@ MENU = (
     ("raise_budget", "Raise budget…"),
     ("escalate", "Escalate…"),
     ("complete", "Complete…"),
-    ("cancel", "Cancel…"),
+    ("cancel", "Cancel item…"),
     ("archive", "Archive…"),
 )
 #: What each of the menu's dialogs asks.

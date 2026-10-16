@@ -88,28 +88,37 @@ def test_a_typed_line_runs_opens_a_view_or_says_why_not(line, does):
 @pytest.mark.parametrize(
     ("argv", "asked"),
     [
-        (["admin", "restart", "-y"], ("This stops the server and starts it again.", "restarting")),
-        (["admin", "stop"], ("This stops the server.", "stopping")),
-        (["admin", "update"], ("This installs the newest Kraft release.", None)),
+        (
+            ["admin", "restart", "-y"],
+            ("This stops the server and starts it again.", "restarting", "Restart"),
+        ),
+        (["admin", "stop"], ("This stops the server.", "stopping", "Stop")),
+        (["admin", "update"], ("This installs the newest Kraft release.", None, "Update")),
         (
             ["admin", "update", "--restart"],
-            ("This installs the newest Kraft release.", "restarting"),
+            ("This installs the newest Kraft release.", "restarting", "Update"),
         ),
-        (["repo", "disconnect"], ("This disconnects the repo from Kraft.", None)),
+        (["repo", "disconnect"], ("This disconnects the repo from Kraft.", None, "Disconnect")),
         (
             ["item", "cancel", "a91c"],
-            ("This cancels the item; its worktree and branch stay.", None),
+            ("This cancels the item; its worktree and branch stay.", None, "Cancel item"),
         ),
         (["item", "abandon", "a91c"], None),
-        (["item", "abandon", "a91c", "--yes"], runner.CONFIRMS[("item", "abandon")]),
+        (
+            ["item", "abandon", "a91c", "--yes"],
+            (runner.CONFIRMS[("item", "abandon")][0], None, "Abandon"),
+        ),
         (["item", "abandon", "a91c", "--ye"], runner.CONFIRMS[("item", "abandon")]),
         (["item", "archive", "--y"], runner.CONFIRMS[("item", "archive")]),
         (
             ["admin", "update", "--res"],
-            ("This installs the newest Kraft release.", "restarting"),
+            ("This installs the newest Kraft release.", "restarting", "Update"),
         ),
-        (["item", "archive", "--yes"], runner.CONFIRMS[("item", "archive")]),
-        (["admin", "addon", "uninstall", "x@y"], ("This uninstalls the add-on.", None)),
+        (["item", "archive", "--yes"], (runner.CONFIRMS[("item", "archive")][0], None, "Archive")),
+        (
+            ["admin", "addon", "uninstall", "x@y"],
+            ("This uninstalls the add-on.", None, "Uninstall"),
+        ),
         (["admin", "addon", "list"], None),
         (["view", "show"], None),
     ],
