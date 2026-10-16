@@ -287,7 +287,8 @@ def banner_of(item: dict) -> dict | None:
     if item["display_status"] == "failed":
         fix = _failed_fix(stop)
         way = {"forge_login": FORGE_LOGIN_HINT, "repo": REPO_FIX}.get(fix, "")
-        return {"kind": "failed", "node": node, "text": _or(stop.get("reason"), ""), "way": way}
+        text = sentence(reason) if (reason := _or(stop.get("reason"), "")) else ""
+        return {"kind": "failed", "node": node, "text": text, "way": way}
     kind = stop.get("kind")
     if kind == "gate":
         return {"kind": "gate", "node": _or(item.get("pending_gate"), node), "text": "", "way": ""}
@@ -304,4 +305,5 @@ def banner_of(item: dict) -> dict | None:
         if kind == "budget" and not _offers_raise(item):
             way = RAISE_REFUSED if _budget_raise(stop) else NOT_RAISABLE
         return {"kind": "limit", "node": node, "text": text, "way": way}
-    return {"kind": "stop", "node": node, "text": _or(stop.get("reason"), ""), "way": ""}
+    text = sentence(reason) if (reason := _or(stop.get("reason"), "")) else ""
+    return {"kind": "stop", "node": node, "text": text, "way": ""}

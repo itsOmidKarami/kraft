@@ -383,12 +383,12 @@
     {
       "name": "failed",
       "item": { "display_status": "failed", "stop": { "kind": "failed", "node": "verification", "reason": "tests failed: 3 of 120" } },
-      "banner": { "kind": "failed", "node": "verification", "text": "tests failed: 3 of 120", "way": "" }
+      "banner": { "kind": "failed", "node": "verification", "text": "Tests failed: 3 of 120.", "way": "" }
     },
     {
       "name": "failed-on-a-forge-login",
       "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "gh: authentication failed", "facts": { "cause": "forge_auth" } } },
-      "banner": { "kind": "failed", "node": "draft_merge_request", "text": "gh: authentication failed", "way": "Sign the forge CLI in on the server's machine: `gh auth login`, or `glab auth login` for GitLab. If git itself can't authenticate, check its credentials there too (`gh auth setup-git`, your SSH key or credential helper). Then Retry." }
+      "banner": { "kind": "failed", "node": "draft_merge_request", "text": "Gh: authentication failed.", "way": "Sign the forge CLI in on the server's machine: `gh auth login`, or `glab auth login` for GitLab. If git itself can't authenticate, check its credentials there too (`gh auth setup-git`, your SSH key or credential helper). Then Retry." }
     },
     {
       "name": "failed-stranded",
@@ -398,7 +398,7 @@
     {
       "name": "failed-in-the-repo",
       "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "implement", "reason": "the worktree could not be made" } },
-      "banner": { "kind": "failed", "node": "implement", "text": "the worktree could not be made", "way": "Check the repo settings." }
+      "banner": { "kind": "failed", "node": "implement", "text": "The worktree could not be made.", "way": "Check the repo settings." }
     },
     {
       "name": "a-stop-on-a-paused-item",
@@ -408,7 +408,7 @@
     {
       "name": "stuck",
       "item": { "display_status": "needs_you", "stop": { "kind": "stuck", "node": "verification", "reason": "the fix loop made no progress in 3 rounds" } },
-      "banner": { "kind": "stop", "node": "verification", "text": "the fix loop made no progress in 3 rounds", "way": "" }
+      "banner": { "kind": "stop", "node": "verification", "text": "The fix loop made no progress in 3 rounds.", "way": "" }
     }
   ]
 }

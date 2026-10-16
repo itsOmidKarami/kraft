@@ -30,7 +30,7 @@ export function bannerOf(item: BannerItem): BannerWords | null {
   const node = stop.node ?? "";
   if (item.display_status === "failed") {
     const fix = failedFix(item);
-    return { kind: "failed", node, text: stop.reason ?? "", way: fix === "forge_login" ? FORGE_LOGIN_HINT : fix === "repo" ? REPO_FIX : "" };
+    return { kind: "failed", node, text: stop.reason ? sentence(stop.reason) : "", way: fix === "forge_login" ? FORGE_LOGIN_HINT : fix === "repo" ? REPO_FIX : "" };
   }
   switch (stop.kind) {
     case "gate":
@@ -45,6 +45,6 @@ export function bannerOf(item: BannerItem): BannerWords | null {
       return { kind: "limit", node, text, way };
     }
     default:
-      return { kind: "stop", node, text: stop.reason ?? "", way: "" };
+      return { kind: "stop", node, text: stop.reason ? sentence(stop.reason) : "", way: "" };
   }
 }

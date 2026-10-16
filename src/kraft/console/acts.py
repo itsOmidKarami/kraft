@@ -56,8 +56,6 @@ async def reject(app: App, row: dict, note_dialog: Dialog | None = None) -> None
     if not answer:
         return
     note, node = answer if isinstance(answer, tuple) else (answer, None)
-    if not note:  # a blank note is no answer, whatever node came with it
-        return
     await act(
         app,
         client.reject_gate(

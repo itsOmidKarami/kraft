@@ -56,7 +56,7 @@ def banner_line(item: dict) -> str | None:
         "question": f"The agent asks: {text}",
         "failed": f"Failed at {node}. {text}" if node else f"Failed. {text}",
         "limit": at + text,
-        "stop": at + (text or words.reason_tail(item, time.time())),
+        "stop": (at + text) if text else (f"Stopped at {node}." if node else "Stopped."),
     }[banner["kind"]]
     return f"{said} {way}".strip()
 
@@ -91,6 +91,8 @@ class Item(View):
         #: `(updated_at, actions)` of the last read: a live event that leaves
         #: them alone reads nothing.
         self._key: tuple | None = None
+        #: The item answered 404: nothing is read until `open` shows another.
+        self._dead = False
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="item-top"):
@@ -114,7 +116,10 @@ class Item(View):
 
     def open(self, work_item_id: str) -> None:
         """Show `work_item_id`, on the Overview, read afresh."""
+        # The read still answering for the item shown before must not draw it.
+        self.workers.cancel_group(self, "read")
         self.work_item_id, self.item, self._key = work_item_id, None, None
+        self._dead = False
         # Where it was opened from: the top view showing, never a guess.
         from kraft.console.screens import VIEWS  # defined after this module loads
 
@@ -139,7 +144,7 @@ class Item(View):
 
     def rows_changed(self, rows: list[dict], events: list[dict]) -> None:
         # A hidden Item still hears every event: it reads nothing then.
-        if not self.display or self.work_item_id is None:
+        if not self.display or self.work_item_id is None or self._dead:
             return
         row = next((r for r in rows if r["id"] == self.work_item_id), None)
         key = (row.get("updated_at"), tuple(row.get("actions") or ())) if row else None
@@ -156,6 +161,8 @@ class Item(View):
             else:
                 self.app.notify_refusal(exc)
             return
+        if item.get("id") != self.work_item_id:  # an answer for another item
+            return
         self.item = item
         self._key = (item.get("updated_at"), tuple(item.get("actions") or ()))
         self._draw_head(item)
@@ -169,7 +176,8 @@ class Item(View):
 
     def _gone(self) -> None:
         """Archived or abandoned while open (spec §7.2): say so; nothing acts."""
-        self.item = None
+        # Further events read nothing for an item that is not there.
+        self.item, self._dead = None, True
         self.query_one("#item-gone").display = True
         self.query_one("#item-panes").display = False
         self.refresh_bindings()
@@ -294,7 +302,11 @@ class Item(View):
 
     def action_approve(self) -> None:
         if item := self.item:
-            self.run_worker(partial(self._approve, item, self.digest), group="act")
+            digest = self.digest
+            # Shut until the next read answers: a second `a` would approve twice.
+            self.read_gate = self.digest = None
+            self.refresh_bindings()
+            self.run_worker(partial(self._approve, item, digest), group="act")
 
     async def _approve(self, item: dict, digest: str | None) -> None:
         gate = item["pending_gate"]

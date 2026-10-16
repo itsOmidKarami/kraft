@@ -3,14 +3,10 @@ dialogs, to the item they opened for, and the server's own sentence back."""
 
 from __future__ import annotations
 
-import asyncio
-from types import SimpleNamespace
-
 import pytest
 from support.console_board import FAILED, GATE, PAUSED, QUESTION, RUNNING, _detail, _settled
 
 from kraft import client
-from kraft.console import acts
 from kraft.console.dialogs import Note
 from kraft.console.screens import board as board_view
 
@@ -319,20 +315,3 @@ def test_a_is_offered_on_the_board_only_where_approve_is_open(board, row, offere
         return app.view.check_action("approve", ())
 
     assert board([row]).run(scenario) is offered
-
-
-def test_a_blank_note_with_a_node_sends_nothing(monkeypatch):
-    """The Item's reject dialog answers `(note, node)`: a blank note is no
-    answer, whatever node was picked."""
-    sent: list = []
-
-    async def reject_gate(*args, **kwargs):
-        sent.append(args)
-
-    async def push_screen_wait(dialog):
-        return ("", "spec")
-
-    monkeypatch.setattr(client, "reject_gate", reject_gate)
-    app = SimpleNamespace(push_screen_wait=push_screen_wait)
-    asyncio.run(acts.reject(app, GATE, note_dialog=object()))
-    assert sent == []

@@ -17,6 +17,7 @@ from kraft import client
 from kraft.console import live, runner
 from kraft.console.app import KraftConsole
 from kraft.console.screens import board as board_view
+from kraft.console.screens import item as item_view
 
 
 class FakeStream:
@@ -110,6 +111,7 @@ def board(console, monkeypatch):
         monkeypatch.setattr(client, "board_rows", board_rows)
         monkeypatch.setattr(client, "resolve_repo", resolve_repo)
         monkeypatch.setattr(board_view, "time", SimpleNamespace(time=lambda: NOW))
+        monkeypatch.setattr(item_view, "time", SimpleNamespace(time=lambda: NOW))
         return console
 
     return serve

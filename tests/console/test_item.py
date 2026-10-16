@@ -6,7 +6,17 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from support.console_board import CHAIN, FAILED, GATE, RUNNING, _detail, _settled, _text
+from support.console_board import (
+    CHAIN,
+    FAILED,
+    FILED,
+    GATE,
+    RUNNING,
+    _detail,
+    _row,
+    _settled,
+    _text,
+)
 from textual.widgets import RichLog
 
 from kraft import client
@@ -28,6 +38,17 @@ OVER_BUDGET = FAILED | {
     "actions": ["retry"],
     "budget_cap": {"spent_usd": 5.1, "cap_usd": 5},
 }
+STUCK = _row(
+    "s5s5s5s5",
+    "needs_you",
+    5,
+    current_node_id="verification",
+    stop={
+        "kind": "stuck",
+        "node": "verification",
+        "reason": "the fix loop made no progress in 3 rounds",
+    },
+)
 DOC = {"content": "\n".join(f"line {n} [/]" for n in range(60)), "digest": "d1g3st"}
 
 
@@ -76,52 +97,107 @@ async def _opened(console, app, pilot, work_item_id: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("row", "title", "status", "banner"),
+    ("row", "title", "status", "banner", "tone", "spent", "where", "chain"),
     [
         (
             GATE,
             "Board › a91c03fe  Board critique fixes [/]",
             "● Needs you · approve spec",
             "▌ Waiting for your approval at spec_approval.",
+            "$warning",
+            "12m",
+            "r · default",
+            "spec → spec_approval ● → plan → implement",
         ),
         (
             OVER_BUDGET,
             "Board › u1u1u1u1  Cap [/] it",
             "● Needs you · spent $5.10 [/] of $5",
             f"▌ Stopped at implement. Spent $5.10 [/] of $5. {words.NOT_RAISABLE}",
+            "$warning",
+            "$5.10 of $5.00 · 1h",
+            "r · default",
+            "spec → spec_approval → plan → implement ●",
         ),
-        (RUNNING, "Board › k7f2e9a0  Docs per major", "● Running · implement", None),
+        (
+            RUNNING,
+            "Board › k7f2e9a0  Docs per major",
+            "● Running · implement",
+            None,
+            None,
+            "4m",
+            "r · docs",
+            "spec → spec_approval → plan → implement ●",
+        ),
+        (
+            FAILED,
+            "Board › m03d77b1  item m03d77b1",
+            "● Failed · failed at verification",
+            "▌ Failed at verification. Tests failed: 3 of 120.",
+            "$error",
+            "1h",
+            "r · default",
+            "spec → spec_approval → plan → implement",
+        ),
+        (
+            STUCK,
+            "Board › s5s5s5s5  item s5s5s5s5",
+            "● Needs you · the fix loop made no progress in 3 rounds",
+            "▌ Stopped at verification. The fix loop made no progress in 3 rounds.",
+            "$warning",
+            "5m",
+            "r · default",
+            "spec → spec_approval → plan → implement",
+        ),
+        (
+            FILED,
+            "Board › n0n0n0n0  item n0n0n0n0",
+            "● Not started · created paused",
+            None,
+            None,
+            "30m",
+            "r · default",
+            "spec → spec_approval → plan → implement",
+        ),
     ],
-    ids=["gate", "budget-it-cannot-raise", "running"],
+    ids=["gate", "budget-it-cannot-raise", "running", "failed", "stuck", "not-started"],
 )
-def test_the_header_says_where_the_item_stands(board, monkeypatch, row, title, status, banner):
+def test_the_header_says_where_the_item_stands(
+    board, monkeypatch, row, title, status, banner, tone, spent, where, chain
+):
     """Spec §7.2: id and title, status in the web's words with the reason, the
-    banner with the server's reason and the way on only when stopped, `[/]`
-    drawn as typed; and the chain's window, the item's place in the accent."""
+    banner with the server's reason and the way on only when stopped (amber
+    when it needs you, red when it failed), `[/]` drawn as typed; spend, age,
+    repo and chain; and the chain's window, the item's place in the accent."""
     _serve(monkeypatch, _detail(row), calls=[])
     console = board([row])
 
     async def scenario(app, pilot):
         await _opened(console, app, pilot, row["id"])
         shown = app.query_one("#item-banner")
-        chain = app.query_one("#item-chain").render()
-        place = next(span for span in chain.spans if "●" in chain.plain[span.start : span.end])
+        line = app.query_one("#item-chain").render()
+        place = next((s for s in line.spans if "●" in line.plain[s.start : s.end]), None)
+        marker = shown.render().spans[0].style if shown.display else None
         return (
             _text(app, "#item-title"),
             _text(app, "#item-status"),
             _text(app, "#item-banner") if shown.display else None,
-            chain.plain,
-            str(place.style),
+            str(marker) if marker else None,
+            _text(app, "#item-spent"),
+            _text(app, "#item-where"),
+            line.plain,
+            str(place.style) if place else None,
         )
 
     assert console.run(scenario) == (
         title,
         status,
         banner,
-        "spec → spec_approval ● → plan → implement"
-        if row is GATE
-        else "spec → spec_approval → plan → implement ●",
-        "bold $primary",
+        tone,
+        spent,
+        where,
+        chain,
+        "bold $primary" if "●" in chain else None,
     )
 
 
@@ -194,8 +270,20 @@ def test_the_gate_document_is_read_whole_and_scrolls_by_keys(board, monkeypatch)
             [("retry", (None, "m03d77b1"), {})],
             None,
         ),
+        (
+            _detail(GATE),
+            (),
+            ["a", "a"],
+            [("approve_gate", ("spec_approval", "a91c03fe", "d1g3st"), {})],
+            None,
+        ),
     ],
-    ids=["approve-with-the-digest-read", "must-fix-keeps-approve-shut", "retry"],
+    ids=[
+        "approve-with-the-digest-read",
+        "must-fix-keeps-approve-shut",
+        "retry",
+        "a-second-a-sends-nothing",
+    ],
 )
 def test_a_key_on_the_item_acts_through_the_shared_flow(
     board, monkeypatch, detail, threads, keys, sent, said
@@ -223,43 +311,57 @@ def test_a_key_on_the_item_acts_through_the_shared_flow(
 
 
 @pytest.mark.parametrize(
-    ("keys", "sent"),
+    ("fix", "keys", "sent", "picker"),
     [
         (
+            {"node": "plan"},
             ["w", "h", "y", "enter"],
-            [("reject_gate", ("why", "spec_approval", "a91c03fe"), {"node": "spec"})],
+            [("reject_gate", ("why", "spec_approval", "a91c03fe"), {"node": "plan"})],
+            True,
         ),
         (
-            ["shift+tab", "down", "down", "enter", "tab", "w", "h", "y", "enter"],
-            [("reject_gate", ("why", "spec_approval", "a91c03fe"), {"node": "plan"})],
+            {"node": "plan"},
+            ["shift+tab", "down", "up", "enter", "tab", "w", "h", "y", "enter"],
+            [("reject_gate", ("why", "spec_approval", "a91c03fe"), {"node": "spec"})],
+            True,
         ),
-        (["w", "h", "y", "escape"], []),
+        ({"node": "plan"}, ["w", "h", "y", "escape"], [], True),
+        (
+            None,
+            ["w", "h", "y", "enter"],
+            [("reject_gate", ("why", "spec_approval", "a91c03fe"), {})],
+            False,
+        ),
     ],
-    ids=["to-the-fix-target", "to-a-node-picked", "esc-sends-nothing"],
+    ids=["to-the-fix-target", "to-a-node-picked", "esc-sends-nothing", "no-fix-target"],
 )
-def test_reject_on_the_item_sends_the_work_back_where_it_was_picked(board, monkeypatch, keys, sent):
-    """Spec §7.2: the reject note's node starts on the gate's fix target and
-    can be any node before the gate."""
+def test_reject_on_the_item_sends_the_work_back_where_it_was_picked(
+    board, monkeypatch, fix, keys, sent, picker
+):
+    """Spec §7.2: the reject note's node starts on the gate's fix target (not
+    the first node) and can be any node before the gate; with no fix target
+    the plain note is asked and the server's own target applies."""
     calls: list[tuple] = []
     chain = CHAIN | {
         "nodes": [*CHAIN["nodes"][:1], {"id": "plan", "kind": "exec"}, *CHAIN["nodes"][1:2]]
     }
-    detail = _detail(GATE, chain_definition=chain, fix_target={"node": "spec"})
+    detail = _detail(GATE, chain_definition=chain, fix_target=fix)
     _serve(monkeypatch, detail, calls=calls)
     console = board([GATE])
 
     async def scenario(app, pilot):
         await _opened(console, app, pilot, GATE["id"])
         await pilot.press("r")
-        await console.until(pilot, lambda: isinstance(app.screen, Reject))
+        await console.until(pilot, lambda: isinstance(app.screen, Note))
+        asked = isinstance(app.screen, Reject)
         for key in keys:
             await pilot.press(key)
         if sent:
             await console.until(pilot, lambda: calls)
         await console.until(pilot, lambda: not isinstance(app.screen, Note))
-        return calls
+        return calls, asked
 
-    assert console.run(scenario) == sent
+    assert console.run(scenario) == (sent, picker)
 
 
 def test_an_item_that_goes_away_while_open_says_so(board, monkeypatch):
@@ -272,17 +374,22 @@ def test_an_item_that_goes_away_while_open_says_so(board, monkeypatch):
     async def scenario(app, pilot):
         await _opened(console, app, pilot, FAILED["id"])
 
+        reads: list[str] = []
+
         async def gone(work_item_id=None, *, full=False):
+            reads.append(work_item_id)
             raise client.status_error(404, "no such work item")
 
         monkeypatch.setattr(client, "get_work_item", gone)
         app.view.rows_changed([], [{"seq": 1}])
         await console.until(pilot, lambda: app.query_one("#item-gone").display)
         keys = app.view.check_action("retry", ())
+        app.view.rows_changed([], [{"seq": 2}])  # an item that is gone is not read again
+        await pilot.pause()
         await pilot.press("escape")
-        return _text(app, "#item-gone"), keys, app.view.id
+        return _text(app, "#item-gone"), keys, app.view.id, reads
 
-    assert console.run(scenario) == (item_view.GONE, False, "board")
+    assert console.run(scenario) == (item_view.GONE, False, "board", [FAILED["id"]])
 
 
 def test_the_item_reads_again_only_when_shown_and_its_row_changed(board, monkeypatch):
@@ -413,3 +520,46 @@ def test_the_title_names_the_view_the_item_was_opened_from(board, monkeypatch):
         return _text(app, "#item-title")
 
     assert console.run(scenario) == "Server › k7f2e9a0  Docs per major"
+
+
+def test_a_read_for_the_item_shown_before_is_dropped(board, monkeypatch):
+    """Ctrl+P from an open item lands while its live read is in flight: the
+    answer for the old item must not draw its header or open `a` for its gate,
+    even when the new item's own read fails."""
+    other = GATE | {"id": "b2b2b2b2", "title": "Second", "pending_gate": "plan_review"}
+    calls: list[tuple] = []
+    _serve(monkeypatch, _detail(other), calls=calls)
+    console = board([GATE, other])
+
+    async def scenario(app, pilot):
+        asked, release, broken = asyncio.Event(), asyncio.Event(), [True]
+
+        async def get_work_item(work_item_id=None, *, full=False):
+            if work_item_id == GATE["id"]:
+                asked.set()
+                await release.wait()
+                return _detail(GATE)
+            if broken:
+                raise client.status_error(500, "down")
+            return _detail(other)
+
+        monkeypatch.setattr(client, "get_work_item", get_work_item)
+        await _settled(console, app, pilot)
+        app.open_item(GATE["id"])
+        await console.until(pilot, asked.is_set)
+        app.open_item(other["id"])
+        release.set()
+        await _read_done(console, app, pilot)
+        await pilot.pause()
+        stale = (_text(app, "#item-title"), app.view.check_action("approve", ()))
+        broken.clear()
+        app.view.rows_changed([], [])
+        await console.until(pilot, lambda: app.view.item is not None and _overview(app))
+        await pilot.press("a")
+        await console.until(pilot, lambda: calls)
+        return stale, _text(app, "#item-title"), calls
+
+    stale, title, sent = console.run(scenario)
+    assert stale == ("Board › b2b2b2b2", False)
+    assert title == "Board › b2b2b2b2  Second"
+    assert sent == [("approve_gate", ("plan_review", "b2b2b2b2", "d1g3st"), {})]
