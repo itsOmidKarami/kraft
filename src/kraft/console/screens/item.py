@@ -18,11 +18,12 @@ from textual.content import Content
 from textual.widgets import ContentSwitcher, RichLog, Static
 
 from kraft import answers, client, logs, render
-from kraft.console import acts, chain, words
+from kraft.console import acts, words
 from kraft.console.dialogs import Reject, reject_asks
 from kraft.console.pulse import Working, spins
 from kraft.console.screens import View
 from kraft.console.screens.board import bar_of, chain_line
+from kraft.console.screens.item_chain import ChainPane, ChainTab
 from kraft.console.screens.item_menu import MenuActions
 from kraft.console.words import status_words, usd
 
@@ -58,15 +59,7 @@ LIT_S = 1.5
 LOG_POINTER = "The Log tab holds the session it failed in."
 
 
-class ChainPane(RichLog):
-    """The Chain tab's pane: it draws again when its width changes, because a
-    row is padded to the width it was written at and a RichLog keeps its lines."""
-
-    def on_resize(self) -> None:
-        self.query_ancestor(Item)._write_chain()
-
-
-class Item(MenuActions, View):
+class Item(ChainTab, MenuActions, View):
     label = "Item"
     BINDINGS: ClassVar[list[BindingType]] = [
         # Long content scrolls by keys: the view keeps the focus (spec §6).
@@ -78,7 +71,10 @@ class Item(MenuActions, View):
         Binding("end", "scroll('end')", "end", show=False),
         # Arrows and Tab are what people try first; the brackets stay. One
         # footer entry (←'s); →'s blank key_display keeps `?` from listing it twice.
-        Binding("left", "tab(-1)", "tabs", key_display="←→"),
+        # ← closes an open node and switches tabs otherwise: two bindings, so
+        # the footer and `?` name the one that acts.
+        Binding("left", "left", "tabs", key_display="←→"),
+        Binding("left", "close_node", "close", show=False),
         Binding("right", "tab(1)", "tabs", show=False, key_display=" "),
         Binding("left_square_bracket", "tab(-1)", "tabs", show=False),
         Binding("right_square_bracket", "tab(1)", "tabs", show=False),
@@ -91,6 +87,7 @@ class Item(MenuActions, View):
         Binding("s", "session", "session"),
         # On the Chain tab: a node opens, then a session's log opens.
         Binding("enter", "open", "open"),
+        Binding("escape", "close_node", "close"),
         Binding("m", "menu", "menu"),
     ]
 
@@ -121,15 +118,7 @@ class Item(MenuActions, View):
         self._approved: tuple[str, str] | None = None
         #: The chain's new place drawn lit, for `LIT_S` after that read.
         self._lit = False
-        #: The Chain tab: the item's newest events (oldest first), the node the
-        #: cursor is on (None until the first draw), whether that node is open,
-        #: and the session the cursor is on inside it.
-        self.chain_events: list[dict] = []
-        self.chain_at: int | None = None
-        self.chain_open = False
-        self.chain_session = 0
-        #: A node was just opened: the pane shows it from its row, once.
-        self._opening = False
+        self._init_chain()
 
     def compose(self) -> ComposeResult:
         with Vertical(id="item-head"):
@@ -165,7 +154,8 @@ class Item(MenuActions, View):
     def on_mount(self) -> None:
         self.query_one("#item-gone").display = False
         # The tabs' keys, on the panel's edge beside them.
-        self.query_one("#item-head").border_subtitle = "← → tabs"
+        self._sync_edge()
+        self.app.pulse.add(self._chain_beat)
 
     def open(self, work_item_id: str) -> None:
         """Show `work_item_id`, on the Overview, read afresh."""
@@ -182,8 +172,8 @@ class Item(MenuActions, View):
         self.events, self.more = [], False
         self._lines = []
         self.session_id = None
-        self.chain_events, self.chain_at = [], None
-        self.chain_open, self.chain_session = False, 0
+        self._reset_chain()
+        self._sync_edge()
         self.query_one("#item-gone").display = False
         self.query_one("#item-title", Static).update(Content(f"{self.crumb} › {work_item_id[:8]}"))
         for part in ("#item-where", "#item-status", "#item-spent", "#item-chain"):
@@ -202,6 +192,7 @@ class Item(MenuActions, View):
         self.tab = tab
         self.query_one("#item-panes", ContentSwitcher).current = tab
         self._draw_tabs()
+        self._sync_edge()
         self.refresh_bindings()
         # An older page asked for before the tab was left must not land on the
         # list this visit rereads: its boundary is gone.
@@ -219,6 +210,9 @@ class Item(MenuActions, View):
                 self.call_after_refresh(self._write_overview)
         if tab != "log" or self._dead:  # a log nobody sees is not followed
             self.workers.cancel_group(self, "log")
+
+    def _now(self) -> float:
+        return time.time()
 
     def _shown(self, tab: str) -> bool:
         """Whether `tab`'s pane is on screen: a RichLog written while it is not
@@ -251,7 +245,7 @@ class Item(MenuActions, View):
             mine = [e for e in events if e.get("work_item_id") == self.work_item_id]
             # A reread (no events) or a line of this item's: read what is newer.
             if mine or not events:
-                newer = self._activity_newer if self.tab == "activity" else self._chain_first
+                newer = self._activity_newer if self.tab == "activity" else self._chain_newer
                 self.run_worker(newer, group="tab", exclusive=True)
         row = next((r for r in rows if r["id"] == self.work_item_id), None)
         key = (row.get("updated_at"), tuple(row.get("actions") or ())) if row else None
@@ -429,68 +423,6 @@ class Item(MenuActions, View):
         # A live read redraws it: the reader stays where they were.
         log.scroll_to(y=scrolled, animate=False, immediate=True)
 
-    async def _chain_first(self) -> None:
-        """The newest events, for the Chain tab's decisions and skips."""
-        page = await self._events(limit=chain.EVENTS, before_seq=NEWEST)
-        if page is not None:
-            self.chain_events = page
-            self._write_chain()
-
-    def _write_chain(self) -> None:
-        """Draw the Chain tab, once its pane is on screen: kept until then,
-        and drawn again when the tab or the view is shown."""
-        item = self.item
-        if not self._shown("chain") or item is None:
-            return
-        nodes = words.nodes_of(item) or []
-        log = self.query_one("#chain", RichLog)
-        if not log.size.width:  # not laid out yet: its resize draws it
-            return
-        log.clear()
-        if not nodes:
-            log.write(
-                Text(
-                    "This item's chain has no nodes.", style=self.app.theme_variables["kraft-muted"]
-                )
-            )
-            return
-        if self.chain_at is None:
-            self.chain_at = chain.first_cursor(item, chain.node_states(item, self.chain_events))
-        self.chain_at = min(self.chain_at, len(nodes) - 1)
-        self.chain_session = min(self.chain_session, max(len(self._node_sessions()) - 1, 0))
-        colour = self.app.theme_variables
-        width = log.scrollable_content_region.width
-        lines, on, top = chain.chain_lines(
-            item,
-            self.chain_events,
-            self.chain_at,
-            self.chain_open,
-            self.chain_session,
-            width,
-            time.time(),
-            colour,
-        )
-        for line in lines:  # at the pane's width: a row is padded to it
-            log.write(line, width=width, scroll_end=False)
-        # An open node shows from its row; else the cursor stays on screen.
-        high = log.scroll_y
-        height = max(log.scrollable_content_region.height, 1)
-        if self.chain_open and self._opening:
-            high = top
-        elif on < high:
-            high = on
-        elif on >= high + height:
-            high = on - height + 1
-        self._opening = False
-        log.scroll_to(y=high, animate=False, immediate=True)
-
-    def _node_sessions(self) -> list[dict]:
-        """The open node's sessions, as the tab lists them; none when closed."""
-        nodes = words.nodes_of(self.item or {}) or []
-        if not (self.chain_open and self.chain_at is not None and self.chain_at < len(nodes)):
-            return []
-        return chain.sessions_of(self.item, nodes[self.chain_at]["id"])
-
     async def _activity_first(self) -> None:
         """The newest page of the item's events (spec §7.2)."""
         page = await self._events(limit=PAGE, before_seq=NEWEST)
@@ -658,52 +590,16 @@ class Item(MenuActions, View):
             return bool(self._menu_entries())
         if action == "session":
             return self.tab == "log" and len(self._sessions()) > 1
-        if action == "open":
-            # A node opens from the list; an open node's session opens its log.
-            return self.tab == "chain" and (not self.chain_open or bool(self._node_sessions()))
+        if (chain_says := self.check_chain_action(action)) is not None:
+            return chain_says
         return True
 
     def back(self) -> bool:
-        """Esc on the Chain tab closes an open node before it leaves the item."""
+        """`q` on the Chain tab closes an open node before it leaves the item."""
         if self.tab == "chain" and self.chain_open:
             self._close_node()
             return True
         return False
-
-    def _close_node(self) -> None:
-        self.chain_open = False
-        self._write_chain()
-        self.refresh_bindings()
-
-    def action_open(self) -> None:
-        """Enter on the Chain tab: open the node under the cursor; in an open
-        node, the Log on the session under the cursor."""
-        if not self.chain_open:
-            self.chain_open, self.chain_session, self._opening = True, 0, True
-            self._write_chain()
-            self.refresh_bindings()
-        elif sessions := self._node_sessions():
-            self.session_id = sessions[self.chain_session]["id"]
-            self.show_tab("log")
-
-    def _move_cursor(self, how: str) -> None:
-        """↑ and ↓ on the Chain tab: the node under the cursor, or in an open
-        node its session; Home and End go to the first and last."""
-        count = (
-            len(self._node_sessions())
-            if self.chain_open
-            else len(words.nodes_of(self.item or {}) or [])
-        )
-        if not count:
-            return
-        at = self.chain_session if self.chain_open else self.chain_at or 0
-        at = {"up": at - 1, "down": at + 1, "home": 0, "end": count - 1}[how]
-        at = max(0, min(at, count - 1))
-        if self.chain_open:
-            self.chain_session = at
-        else:
-            self.chain_at = at
-        self._write_chain()
 
     def action_scroll(self, how: str) -> None:
         if self.tab == "chain" and how in ("up", "down", "home", "end"):
@@ -726,9 +622,6 @@ class Item(MenuActions, View):
                 return
 
     def action_tab(self, step: int) -> None:
-        if step < 0 and self.tab == "chain" and self.chain_open:  # ← goes back out of a node
-            self._close_node()
-            return
         keys = [key for key, _ in TABS]
         self.show_tab(keys[(keys.index(self.tab) + step) % len(keys)])
 

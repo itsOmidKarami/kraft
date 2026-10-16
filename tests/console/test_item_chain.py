@@ -6,94 +6,21 @@ from __future__ import annotations
 import json
 
 import pytest
-from support.console_board import (
-    GATE,
-    _detail,
-    _event,
-    _iso,
-    _opened,
-    _row,
-    _serve,
-    _serve_events,
+from support.console_board import GATE, _detail, _event, _iso, _opened, _row, _serve, _serve_events
+from support.console_chain import (
+    FROZEN,
+    ID,
+    REVIEWED,
+    _chain_tab,
+    _done,
+    _flow,
+    _rejected,
+    _run,
+    _session,
+    _words,
 )
-from textual.widgets import RichLog
 
 from kraft.console import chain
-
-ID = GATE["id"]
-#: The chain the items run, as the server freezes it: `implement` holds the
-#: one agent task with no skill, so it is where the plan's tasks are.
-FROZEN = json.dumps(
-    {
-        "chain": {
-            "nodes": [
-                {"id": "spec", "tasks": [{"kind": "agent", "skill": "kraft:spec"}], "steps": None},
-                {"id": "spec_approval", "kind": "gate"},
-                {"id": "plan", "tasks": [{"kind": "agent", "skill": "kraft:plan"}], "steps": None},
-                {"id": "implement", "tasks": [{"kind": "agent", "skill": None}], "steps": None},
-            ]
-        }
-    }
-)
-
-
-def _session(node: str, task: str, n: int, minutes: float, **fields) -> dict:
-    return {
-        "id": f"s-{node}-{task}-{n}",
-        "node_id": node,
-        "hook_point": f"{node}.main.{task}",
-        "status": "done",
-        "attempt": 1,
-        "created_at": _iso(minutes),
-        "started_at": _iso(minutes),
-        "exited_at": _iso(minutes - 1),
-        "wall_ms": 60_000,
-        "cost_usd": 0.5,
-        **fields,
-    }
-
-
-def _done(**fields) -> dict:
-    """A finished item: every node done, what each cost, the plan's tasks."""
-    row = _row(ID, "done", 600, current_node_id="implement", materialized_chain=FROZEN)
-    by_node = [
-        {"node": "spec", "sessions": 1, "cost_usd": 0.4, "cost_complete": True, "wall_ms": 240_000},
-        {
-            "node": "implement",
-            "sessions": 2,
-            "cost_usd": 2.41,
-            "cost_complete": False,
-            "wall_ms": 7_200_000,
-        },
-    ]
-    return _detail(row, usage={"by_node": by_node}, **fields)
-
-
-def _words(app) -> list[str]:
-    """The Chain tab's lines, their runs of spaces folded to one."""
-    return [" ".join(line.text.split()) for line in app.query_one("#chain", RichLog).lines]
-
-
-async def _chain_tab(console, app, pilot) -> None:
-    await _opened(console, app, pilot, ID)
-    app.view.show_tab("chain")
-    await console.until(pilot, lambda: _words(app))
-    await pilot.pause()
-
-
-def _run(board, monkeypatch, detail, events=(), keys=(), size=(120, 40)):
-    """The Chain tab of `detail` after `keys`: its lines and the view."""
-    _serve(monkeypatch, detail, calls=[])
-    _serve_events(monkeypatch, list(events))
-    console = board([detail])
-
-    async def scenario(app, pilot):
-        await _chain_tab(console, app, pilot)
-        for key in keys:
-            await pilot.press(key)
-        return _words(app), app.view
-
-    return console.run(scenario, size=size)
 
 
 @pytest.mark.parametrize(
@@ -106,13 +33,13 @@ def _run(board, monkeypatch, detail, events=(), keys=(), size=(120, 40)):
                 "✓ spec $0.400 · 4m",
                 "✓ approve spec (gate)",
                 "✓ plan",
-                "▸✓ implement ≥$2.41 · 2h",
+                "▸ ✓ implement ≥$2.41 · 2h",
             ],
         ),
         (
             _detail(_row(ID, "running", current_node_id="plan")),
             [],
-            ["✓ spec", "✓ approve spec (gate)", "▸● plan", "· implement"],
+            ["✓ spec", "✓ approve spec (gate)", "▸ ● plan", "· implement"],
         ),
         (
             _detail(
@@ -124,15 +51,38 @@ def _run(board, monkeypatch, detail, events=(), keys=(), size=(120, 40)):
                 )
             ),
             [],
-            ["✓ spec", "✓ approve spec (gate)", "▸✗ plan", "· implement"],
+            ["✓ spec", "✓ approve spec (gate)", "▸ ✗ plan", "· implement"],
         ),
         (
             _detail(_row(ID, "running", current_node_id="plan")),
             [_event(4, "node_skipped", 30, node="spec_approval")],
-            ["✓ spec", "↷ approve spec (gate)", "▸● plan", "· implement"],
+            ["✓ spec", "↷ approve spec (gate)", "▸ ● plan", "· implement"],
+        ),
+        (
+            _detail(_row(ID, "cancelled", current_node_id="plan")),
+            [],
+            ["✓ spec", "✓ approve spec (gate)", "▸ plan cancelled", "· implement"],
+        ),
+        (
+            _detail(_row(ID, "running", current_node_id="plan")),
+            [_event(4, "node_skipped", 30, node="implement")],
+            ["✓ spec", "✓ approve spec (gate)", "▸ ● plan", "· implement"],
+        ),
+        (
+            _done(worker_sessions=[_session("implement", "author", 1, 5, cost_usd=None)]),
+            [_event(4, "node_skipped", 30, node="implement")],
+            ["✓ spec $0.400 · 4m", "✓ approve spec (gate)", "✓ plan", "▸ ✓ implement ≥$2.41 · 2h"],
         ),
     ],
-    ids=["done-with-spend", "running", "failed", "skipped-gate"],
+    ids=[
+        "done-with-spend",
+        "running",
+        "failed",
+        "skipped-gate",
+        "cancelled-stops-the-done-marks",
+        "skipped-then-not-reached",
+        "skipped-then-run-again",
+    ],
 )
 def test_a_row_a_node_with_its_mark_gate_and_spend(board, monkeypatch, detail, events, rows):
     """One row per node of the chain, named as the web names it, a gate marked,
@@ -148,7 +98,7 @@ def test_a_node_id_is_drawn_as_typed(board, monkeypatch):
         ID, "running", current_node_id="a[/]b", chain_definition={"nodes": [{"id": "a[/]b"}]}
     )
     lines, _ = _run(board, monkeypatch, _detail(row))
-    assert lines == ["▸● a[/]b"]
+    assert lines == ["▸ ● a[/]b"]
 
 
 @pytest.mark.parametrize(
@@ -177,10 +127,6 @@ def test_the_cursor_moves_by_keys(board, monkeypatch, keys, at):
     detail = _detail(_row(ID, "running", current_node_id="plan"))
     lines, _ = _run(board, monkeypatch, detail, keys=keys)
     assert [line for line in lines if "▸" in line][0].endswith(at)
-
-
-def _flow(*sessions, **fields) -> dict:
-    return _done(worker_sessions=list(sessions), **fields)
 
 
 def test_enter_opens_a_node_and_left_or_escape_close_it_before_the_tabs_move(board, monkeypatch):
@@ -236,15 +182,16 @@ def test_enter_opens_a_node_and_left_or_escape_close_it_before_the_tabs_move(boa
                 node_passes={
                     "implement": [
                         {"pass": 1},
-                        {"pass": 2, "reason": "reject", "gate": "spec_approval"},
+                        {"pass": 2, "reason": "reject", "gate": "final_review"},
                     ]
                 },
+                chain_definition=REVIEWED,
             ),
-            [_event(5, "gate_rejected", 15, gate="spec_approval", note="too [/] vague")],
+            [_rejected(5, 15, "implement", "too [/] vague")],
             [
                 "done",
-                "pass 2 of 2 after changes were requested at approve spec: too [/] vague",
-                "▸ author · attempt 1 · running · 10m",
+                "pass 2 of 2 after changes were requested at approve final review: too [/] vague",
+                "▸ author · attempt 1 · * running · 10m 0s",
                 "pass 1 of 2",
                 "author · attempt 2 · done · 1m",
                 "author · attempt 1 · done · 1m · $0.500",
@@ -253,7 +200,11 @@ def test_enter_opens_a_node_and_left_or_escape_close_it_before_the_tabs_move(boa
             ],
         ),
         (
-            _flow(_session("implement", "author", 1, 40), _session("implement", "author", 2, 20)),
+            _flow(
+                _session("implement", "author", 1, 40),
+                _session("implement", "author", 2, 20),
+                chain_definition=REVIEWED,
+            ),
             [],
             [
                 "done",
@@ -261,9 +212,17 @@ def test_enter_opens_a_node_and_left_or_escape_close_it_before_the_tabs_move(boa
                 "author · attempt 1 · done · 1m · $0.500",
             ],
         ),
-        (_done(), [], ["done"]),
+        (_done(chain_definition=REVIEWED), [], ["done"]),
+        (
+            _flow(
+                _session("implement", "author", 1, 20, status="done_with_concerns"),
+                chain_definition=REVIEWED,
+            ),
+            [],
+            ["done", "▸ author · attempt 1 · done with concerns · 1m · $0.500"],
+        ),
     ],
-    ids=["two-passes", "one-pass", "no-session"],
+    ids=["two-passes", "one-pass", "no-session", "status-in-words"],
 )
 def test_an_open_node_lists_its_passes_and_sessions_newest_first(
     board, monkeypatch, detail, events, shown
@@ -272,8 +231,9 @@ def test_an_open_node_lists_its_passes_and_sessions_newest_first(
     what sent it back and the rejection's note whole; its sessions are
     `task · attempt · status · time · cost`; a field the server left out is
     left out."""
-    lines, _ = _run(board, monkeypatch, detail, events, keys=["enter"])
+    lines, _ = _run(board, monkeypatch, detail, events, keys=["up", "enter"])
     after = lines[lines.index(next(line for line in lines if "implement" in line)) + 1 :]
+    after = after[: after.index("✓ approve final review (gate)")]
     assert [line for line in after if line] == shown
 
 
@@ -307,7 +267,8 @@ def test_an_implement_node_shows_the_plans_tasks_and_those_not_started(board, mo
     ]
     detail = _done(progress={"current": 2, "total": 3, "title": "Draw it", "tasks": tasks})
     lines, _ = _run(board, monkeypatch, detail, keys=["enter"])
-    assert lines[lines.index("✓ implement ≥$2.41 · 2h") + 1 :] == [
+    # The open node's row keeps its mark: it is the one the detail belongs to.
+    assert lines[lines.index("▸ ✓ implement ≥$2.41 · 2h") + 1 :] == [
         "done",
         "",
         "Plan tasks · 1 of 3 done",
@@ -333,7 +294,7 @@ def test_a_node_that_is_not_the_implementing_one_has_no_tasks(board, monkeypatch
             _detail(GATE),
             [],
             ["enter"],
-            ["waiting for you · a approves it, r requests changes"],
+            ["waiting for you · a shows its document to approve, r requests changes"],
         ),
         (
             _done(),
@@ -404,32 +365,66 @@ def test_a_hidden_item_draws_nothing_and_draws_again_when_shown(board, monkeypat
         await console.until(pilot, lambda: _words(app) != before)
         return hidden == before, [line for line in _words(app) if "▸" in line]
 
-    assert console.run(scenario) == (True, ["▸✓ spec $0.400 · 4m"])
+    assert console.run(scenario) == (True, ["▸ ✓ spec $0.400 · 4m"])
 
 
-def test_a_rejection_note_belongs_to_the_pass_it_sent_back_even_when_older_events_are_cut(
-    board, monkeypatch
-):
-    """Notes are matched to passes from the newest back: with only the newest
-    rejection read, the older pass says nothing rather than the wrong note."""
-    detail = _flow(
-        _session("implement", "author", 1, 40, **{"pass": 2}),
-        _session("implement", "author", 2, 20, **{"pass": 3}),
-        node_passes={
-            "implement": [
-                {"pass": 1},
-                {"pass": 2, "reason": "reject", "gate": "spec_approval"},
-                {"pass": 3, "reason": "reject", "gate": "spec_approval"},
-            ]
-        },
+@pytest.mark.parametrize(
+    ("node", "events", "heads"),
+    [
+        (
+            "implement",
+            [_rejected(9, 25, "implement", "the newest")],
+            [
+                "pass 3 of 3 after changes were requested at approve final review: the newest",
+                "pass 2 of 3 after changes were requested at approve final review",
+            ],
+        ),
+        (
+            "plan",
+            [
+                _rejected(6, 50, "plan", "back to plan"),
+                _rejected(7, 30, "implement", "back to implement"),
+            ],
+            [
+                "pass 2 of 2 after changes were requested at approve final review: back to plan",
+                "pass 1 of 2",
+            ],
+        ),
+    ],
+    ids=["older-events-cut", "other-target-is-not-its-note"],
+)
+def test_a_rejection_note_belongs_to_the_pass_it_sent_back(board, monkeypatch, node, events, heads):
+    """A pass takes the note of the newest rejection before its first session
+    that covers the node: with the older ones cut it says nothing rather than
+    the wrong note, and a rejection back to a later node is not a plan pass's."""
+    passes = {
+        "implement": [
+            {"pass": 1},
+            {"pass": 2, "reason": "reject", "gate": "final_review"},
+            {"pass": 3, "reason": "reject", "gate": "final_review"},
+        ],
+        "plan": [{"pass": 1}, {"pass": 2, "reason": "reject", "gate": "final_review"}],
+    }
+    sessions = {
+        "implement": [
+            _session("implement", "author", 1, 40, **{"pass": 2}),
+            _session("implement", "author", 2, 20, **{"pass": 3}),
+        ],
+        "plan": [
+            _session("plan", "author", 1, 70, **{"pass": 1}),
+            _session("plan", "author", 2, 45, **{"pass": 2}),
+        ],
+    }
+    detail = _flow(*sessions[node], node_passes={node: passes[node]}, chain_definition=REVIEWED)
+    keys = ["enter"] if node == "plan" else ["up", "enter"]
+    lines, _ = _run(
+        board,
+        monkeypatch,
+        detail,
+        events,
+        keys=[*(["home", "j", "j"] if node == "plan" else []), *keys],
     )
-    events = [_event(9, "gate_rejected", 15, gate="spec_approval", note="the newest")]
-    lines, _ = _run(board, monkeypatch, detail, events, keys=["enter"])
-    heads = [line for line in lines if line.startswith("pass")]
-    assert heads == [
-        "pass 3 of 3 after changes were requested at approve spec: the newest",
-        "pass 2 of 3 after changes were requested at approve spec",
-    ]
+    assert [line for line in lines if line.startswith("pass")] == heads
 
 
 def test_a_live_read_redraws_the_open_node(board, monkeypatch):
@@ -454,7 +449,7 @@ def test_a_live_read_redraws_the_open_node(board, monkeypatch):
         )
         return first
 
-    assert console.run(scenario) == ["▸ author · attempt 1 · running · 5m"]
+    assert console.run(scenario) == ["▸ author · attempt 1 · * running · 5m 0s"]
 
 
 def test_the_keys_dialog_lists_the_chain_tabs_keys_only_there(board, monkeypatch):
