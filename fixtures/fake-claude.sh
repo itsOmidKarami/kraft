@@ -41,8 +41,19 @@ for arg in "$@"; do
     # break: the title reaches this script twice (-p and --append-system-prompt),
     # and sleeping once per copy doubles the delay the seed script waits on.
     *KRAFT_SLOW*) sleep "${KRAFT_FAKE_CLAUDE_DELAY:-15}"; break ;;
+    # Long enough that the item is still running when someone looks at it.
+    *KRAFT_HANG*) sleep "${KRAFT_FAKE_CLAUDE_HANG:-1800}"; break ;;
   esac
 done
+
+# Keywords that shape what a run produces rather than whether it runs. Read off
+# every argument at once (a title may carry several), unlike the arm above.
+cost="0.035"
+case "$*" in
+  *KRAFT_COST_[0-9]*) cost="$(printf '%s' "$*" | sed -n 's/.*KRAFT_COST_\([0-9][0-9.]*[0-9]\).*/\1/p' | head -1)" ;;
+esac
+many_files=""
+case "$*" in *KRAFT_MANY_FILES*) many_files=1 ;; esac
 
 # The adapter runs the real CLI with `--output-format stream-json --verbose`,
 # which opens with an init line, before any work -- so a session paused
@@ -60,6 +71,21 @@ if [ "$mode" = "fix" ] && [ -f calc.py ]; then
   # portable in-place edit: rewrite the file
   tmp="$(mktemp)"
   sed 's/a - b/a + b/' calc.py > "$tmp" && mv "$tmp" calc.py
+fi
+
+# A change wide enough to stress a review page: dozens of files, one on a long
+# path, one renamed, one deleted, one binary, one long enough to scroll.
+if [ -n "$many_files" ]; then
+  long_dir="src/kraft_polish/internationalization/translations/right_to_left_languages/pluralization_rules"
+  mkdir -p "$long_dir" src/pkg docs/guide assets
+  for n in $(seq -w 1 36); do
+    printf 'def handler_%s(value):\n    """Handle case %s."""\n    return value + %s\n' "$n" "$n" "$((10#$n))" > "src/pkg/module_$n.py"
+  done
+  awk 'BEGIN { for (i = 1; i <= 220; i++) printf "RULE_%03d = \"rule %d of the pluralization table\"\n", i, i }' \
+    > "$long_dir/very_long_module_name_for_checking_truncation_in_the_file_tree_sidebar.py"
+  if [ -f legacy.txt ]; then rm legacy.txt; fi
+  if [ -f docs/old-notes.md ]; then mv docs/old-notes.md docs/guide/notes.md; fi
+  printf '\211PNG\r\n\032\n\000\000\000\rIHDRfake-claude\000\377\000\377' > assets/logo.png
 fi
 
 # The agent adapter injects the work-item/node/session linkage through
@@ -181,5 +207,8 @@ fi
 # last line). KRAFT_FAKE_CLAUDE_STREAM_DELAY holds the stream open between the
 # first line and the rest, so a test can read the log while the child still runs.
 sleep "${KRAFT_FAKE_CLAUDE_STREAM_DELAY:-0}"
+# Tokens follow the cost, so a dearer run reads as a bigger one (0.035 is 1000 in, 200 out).
+tin="$(awk -v c="$cost" 'BEGIN { printf "%.0f", 1000 * c / 0.035 }')"
+tout="$(awk -v c="$cost" 'BEGIN { printf "%.0f", 200 * c / 0.035 }')"
 printf '{"type":"assistant","request_id":"req_1","message":{"model":"fake-agent","usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":500}}}\n'
-printf '{"type":"result","is_error":false,"total_cost_usd":0.035,"modelUsage":{"fake-agent":{"inputTokens":1000,"outputTokens":200,"cacheReadInputTokens":500}},"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":500}}\n'
+printf '{"type":"result","is_error":false,"total_cost_usd":%s,"modelUsage":{"fake-agent":{"inputTokens":%s,"outputTokens":%s,"cacheReadInputTokens":500}},"usage":{"input_tokens":%s,"output_tokens":%s,"cache_read_input_tokens":500}}\n' "$cost" "$tin" "$tout" "$tin" "$tout"

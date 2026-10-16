@@ -88,9 +88,9 @@ dev: _dev-home
     done
     wait
 
-# Fill a running dev instance with work items in every interesting state
-dev-seed: _dev-home
-    {{dev_env}} uv run python dev/seed.py
+# Fill a running dev instance with work items in every interesting state; --rich for ~40 items, extreme text, a 30-node chain, three repos and a wide review
+dev-seed *args: _dev-home
+    {{dev_env}} uv run python dev/seed.py {{args}}
 
 # Throw the dev instance away (DB, logs, worktrees, seed repo, config)
 dev-reset:
