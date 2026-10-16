@@ -305,3 +305,38 @@ def test_the_diff_shows_what_landed_then_what_did_not_then_its_trailer(
         return [(text, names.get(colour.lower(), colour)) for text, colour in _diff(app)]
 
     assert console.run(scenario) == lines
+
+
+def test_the_diff_reads_again_only_when_shown_and_its_row_changed(board, monkeypatch):
+    """A change to the item's row while the Diff is shown reads it again; the
+    same row, or any change while the Item is hidden, reads nothing."""
+    _serve(monkeypatch, _detail(RUNNING), calls=[])
+    _serve_events(monkeypatch, [])
+    reads: list[str] = []
+
+    async def diff(work_item_id=None, ignore_whitespace=False):
+        reads.append(work_item_id)
+        return {"base_ref": "main", "diff": "+x"}
+
+    monkeypatch.setattr(client, "diff", diff)
+    console = board([RUNNING])
+    moved = RUNNING | {"updated_at": "2026-10-16T00:00:00+00:00"}
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, RUNNING["id"])
+        view = app.view
+        await pilot.press("left_square_bracket")  # round to the Diff
+        await console.until(pilot, lambda: reads)
+        view.rows_changed([RUNNING], [{"seq": 1}])
+        await pilot.pause()
+        same = len(reads)
+        app.show("server")
+        view.rows_changed([moved], [{"seq": 2}])
+        await pilot.pause()
+        hidden = len(reads)
+        app.show("item")
+        view.rows_changed([moved], [{"seq": 3}])
+        await console.until(pilot, lambda: len(reads) == 2)
+        return same, hidden
+
+    assert console.run(scenario) == (1, 1)
