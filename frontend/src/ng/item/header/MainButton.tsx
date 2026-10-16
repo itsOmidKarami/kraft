@@ -100,7 +100,7 @@ export function MainButton({ main, panel: all, archivable, busy, onMain, onItem,
       {/* aria-disabled, not disabled, while busy: a browser takes focus off a button it
           disables, and the focus of Start, Apply and start or Resume fell to the page (R10b-04). */}
       <button ref={button} type="button" className={`item-main-action is-${main}`} aria-disabled={busy || undefined} onClick={() => { quiet.current = true; close(); act(); }}>
-        <Icon size={13} aria-hidden />
+        <Icon size={14} aria-hidden />
         {/* Every row's label in one cell, only the main one shown: the button is as wide as its widest row, so the menu over it fits at its width. */}
         <span className="item-main-label">
           <span>{MAIN_LABEL[main]}</span>
@@ -118,7 +118,7 @@ export function MainButton({ main, panel: all, archivable, busy, onMain, onItem,
       }} role="menu" label="Item actions" focusIn={false}>
         <div ref={list} className="menu item-panel" onMouseEnter={() => hover(true)} onMouseLeave={left}>
           <button ref={(el) => void (refs.current[0] = el)} type="button" role="menuitem" tabIndex={-1} aria-disabled={busy || undefined} className={`menu-item item-panel-item item-panel-main is-${main}`} onClick={() => { quiet.current = true; close(); button.current?.focus(); act(); }}>
-            <Icon size={13} aria-hidden /> <span className="item-main-label">{MAIN_LABEL[main]}</span>
+            <Icon size={14} aria-hidden /> <span className="item-main-label">{MAIN_LABEL[main]}</span>
             {/* Over ▾: a press there, meant to open the menu, must not run the action. */}
             <span className="item-panel-caret" aria-hidden onClick={(e) => e.stopPropagation()}><ChevronUp size={12} /></span>
           </button>
@@ -135,7 +135,7 @@ export function MainButton({ main, panel: all, archivable, busy, onMain, onItem,
                 className={`menu-item item-panel-item${tone ? ` is-${tone}` : ""}`}
                 onClick={() => { close(); toggle.current?.focus(); onItem(it); }}
               >
-                <I size={13} aria-hidden /> {label}
+                <I size={14} aria-hidden /> {label}
               </button>
             );
           })}

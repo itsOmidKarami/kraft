@@ -302,13 +302,13 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
         <span className="rv-file-note" title={note(file, pf)} data-allow-ellipsis="">{note(file, pf)}</span>
         {collapsed && threads > 0 && <span className="rv-file-threads">{threads} {threads === 1 ? "thread" : "threads"}</span>}
         <span className="rv-spacer" />
-        {!p.readOnly && <IconButton label="Comment on this file" onClick={() => p.onFileComment(file.path)}><MessageSquare size={15} aria-hidden /></IconButton>}
+        {!p.readOnly && <IconButton label="Comment on this file" onClick={() => p.onFileComment(file.path)}><MessageSquare size={16} aria-hidden /></IconButton>}
         <label className="rv-viewed-btn">
           <input type="checkbox" checked={viewed} onChange={() => p.onViewed(file.path, !viewed)} /> Viewed
         </label>
         <Menu
           label={`File menu for ${file.path}`}
-          trigger={<EllipsisVertical size={15} aria-hidden />}
+          trigger={<EllipsisVertical size={16} aria-hidden />}
           items={[
             { label: "Copy diff", onSelect: () => void copy(pf.text, "diff") },
             { label: "Copy path", onSelect: () => void copy(file.path, "path") },
@@ -382,9 +382,9 @@ function Expander({ at, gap: { from, count }, tail, g }: { at: number; gap: Gap;
   const all = count === null ? "Show the rest of the file" : count === 1 ? `Show line ${from}` : `Show lines ${from}–${from + count - 1}`;
   return (
     <span className="rv-expand">
-      {many && at > 0 && <IconButton label={`Show ${STEP} more lines below line ${from - 1}`} onClick={g.onExpand(at, "down")}><ChevronDown size={13} aria-hidden /></IconButton>}
-      {many && !tail && <IconButton label={`Show ${STEP} more lines above line ${from + (count ?? 0)}`} onClick={g.onExpand(at, "up")}><ChevronUp size={13} aria-hidden /></IconButton>}
-      <IconButton label={all} onClick={g.onExpand(at, "all")}><ChevronsUpDown size={13} aria-hidden /></IconButton>
+      {many && at > 0 && <IconButton label={`Show ${STEP} more lines below line ${from - 1}`} onClick={g.onExpand(at, "down")}><ChevronDown size={14} aria-hidden /></IconButton>}
+      {many && !tail && <IconButton label={`Show ${STEP} more lines above line ${from + (count ?? 0)}`} onClick={g.onExpand(at, "up")}><ChevronUp size={14} aria-hidden /></IconButton>}
+      <IconButton label={all} onClick={g.onExpand(at, "all")}><ChevronsUpDown size={14} aria-hidden /></IconButton>
     </span>
   );
 }

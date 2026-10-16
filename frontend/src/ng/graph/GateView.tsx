@@ -57,12 +57,12 @@ export function GateView({ gate, reviewer: r, message, doc, reject, note, youSub
           </button>
         </div>
         <p className={`gateview-msg${message ? "" : " is-empty"}`}>{message ?? "No message yet."}</p>
-        {doc && <button type="button" className="gateview-doc" onClick={doc.onClick} disabled={!doc.onClick}><FileText size={13} />{doc.label}</button>}
+        {doc && <button type="button" className="gateview-doc" onClick={doc.onClick} disabled={!doc.onClick}><FileText size={14} />{doc.label}</button>}
         {reject && (
           <div className="gateview-reject">
             <span className="gateview-reject-line" aria-hidden="true" />
             <span className="gateview-reject-word" aria-hidden="true">reject</span>
-            <button type="button" className="gateview-target" aria-label={`reject to ${reject.label ?? reject.id}`} title="Open the target node" onClick={reject.onClick}><NodeIcon name={reject.icon} size={13} />{reject.label ?? reject.id}</button>
+            <button type="button" className="gateview-target" aria-label={`reject to ${reject.label ?? reject.id}`} title="Open the target node" onClick={reject.onClick}><NodeIcon name={reject.icon} size={14} />{reject.label ?? reject.id}</button>
           </div>
         )}
         {note && <p className="gateview-note">{note}</p>}

@@ -52,7 +52,7 @@ function RowBody({ r }: { r: RowSpec }) {
   return (
     <>
       {r.lead}
-      {Icon && <span className="ph-row-icon"><Icon size={15} aria-hidden="true" /></span>}
+      {Icon && <span className="ph-row-icon"><Icon size={16} aria-hidden="true" /></span>}
       <span className="ph-row-text">
         <span className={`ph-row-label${r.mono ? " ph-mono" : ""}`}>{r.mono ? breakable(r.label) : r.label}</span>
         {r.sub && <span className={`ph-row-hint${r.subCut ? " ph-row-cut" : ""}${r.subMono ? " ph-mono" : ""}`} title={r.subCut ? (r.subFull ?? r.sub) : undefined}>{r.subCut ? breakable(r.sub) : r.sub}</span>}

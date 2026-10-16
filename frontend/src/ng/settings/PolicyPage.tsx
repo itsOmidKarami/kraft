@@ -116,7 +116,7 @@ function Editor({ draft, section }: { draft: ConfigDraft; section: Section }) {
                   {r.problems[0] && <p>{r.problems[0].message}</p>}
                   <p>Open YAML in the header to repair it.</p>
                 </div>
-              ) : section === "limits" ? <Limits ctx={ctx} preview={previewable && <Button aria-pressed={preview} onClick={() => setPreview((v) => !v)}><Workflow size={13} aria-hidden /> Preview on a chain</Button>} /> : section === "loops" ? <Loops ctx={ctx} /> : <Housekeeping ctx={ctx} />}
+              ) : section === "limits" ? <Limits ctx={ctx} preview={previewable && <Button aria-pressed={preview} onClick={() => setPreview((v) => !v)}><Workflow size={14} aria-hidden /> Preview on a chain</Button>} /> : section === "loops" ? <Loops ctx={ctx} /> : <Housekeeping ctx={ctx} />}
               </div>
             </div>
           </div>

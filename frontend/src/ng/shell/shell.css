@@ -24,7 +24,7 @@
 .ng-main { flex: 1 1 auto; min-width: 0; }
 .ng-main:focus { outline: none; }
 .ng-main h1:focus { outline: none; }
-.ng-placeholder { max-width: 560px; padding: 28px 24px; }
+.ng-placeholder { max-width: 560px; padding: 22px 24px; }
 .ng-placeholder h1 { margin: 0 0 6px; font-size: var(--fs-h2); font-weight: 500; }
 .ng-placeholder p { margin: 0 0 12px; font-size: var(--fs-meta); color: var(--text-sub); }
 
@@ -66,7 +66,7 @@
 .ng-side-dot.is-draft { box-sizing: border-box; background: transparent; border: 1.5px solid var(--mark-change-line); }
 .ng-side-badges .ng-side-dot { margin-left: 0; }
 .ng-side-count { min-width: 14px; font-size: var(--fs-label); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; color: var(--bad); }
-.ng-side-group { flex: none; margin-top: 6px; padding: 8px 12px 4px; border-top: 1px solid var(--line); font-size: var(--fs-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.ng-side-group { flex: none; margin-top: 6px; padding: 8px 12px 4px; border-top: 1px solid var(--line); font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .ng-side-foot { flex: none; display: flex; padding: 6px 0 8px; border-top: 1px solid var(--line); }
 .ng-side-meta { min-width: 0; display: flex; align-items: center; gap: 10px; flex: 1; padding: 3px 12px; font-size: var(--fs-meta); color: var(--text-muted); text-decoration: none; }
 .ng-side-meta:hover { color: var(--text); }

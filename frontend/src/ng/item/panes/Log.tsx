@@ -41,7 +41,7 @@ export function Log({ workItemId, sessionId, running, title, crumb }: { workItem
       <div className="ip-log-head">
         <span className="item-muted">{count}</span>
         {controls}
-        <button type="button" className="item-link ip-full" onClick={() => setFull(true)}><Maximize2 size={11} aria-hidden /> full screen</button>
+        <button type="button" className="item-link ip-full" onClick={() => setFull(true)}><Maximize2 size={12} aria-hidden /> full screen</button>
       </div>
       {cut?.truncated && (
         <p className="item-muted">
