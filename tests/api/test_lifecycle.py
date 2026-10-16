@@ -399,9 +399,13 @@ def test_abandon_sets_terminal_status_and_removes_the_worktree(client, repo):
     assert not worktree.exists()
 
 
-@pytest.mark.parametrize("beads_fail", [False, True], ids=["beads", "beads-down"])
+@pytest.mark.parametrize(
+    ("verb", "beads_fail"),
+    [("abandon", False), ("abandon", True), ("cancel", False)],
+    ids=["beads", "beads-down", "cancel"],
+)
 def test_abandon_records_why_and_settles_the_items_beads(
-    client, repo, fake_beads, monkeypatch, beads_fail
+    client, repo, fake_beads, monkeypatch, verb, beads_fail
 ):
     """The reason lands on the event and the detail; the bead intake filed is
     closed with it, a bead the item implements gets a note and stays open, and
@@ -421,22 +425,23 @@ def test_abandon_records_why_and_settles_the_items_beads(
         monkeypatch.setattr("kraft.adapters.beads.complete", down)
         monkeypatch.setattr("kraft.adapters.beads.annotate", down)
 
-    r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "refiled as another item"})
+    r = client.post(f"/api/work-items/{wid}/{verb}", json={"reason": "refiled as another item"})
 
     assert r.status_code == 200, r.text
+    ended = "cancelled" if verb == "cancel" else "abandoned"
     event = [e for e in client.get(f"/api/work-items/{wid}/events").json()]
-    abandoned = [e["payload"] for e in event if e["type"] == "work_item_abandoned"]
-    assert abandoned == [{"reason": "refiled as another item"}]
+    recorded = [e["payload"]["reason"] for e in event if e["type"] == f"work_item_{ended}"]
+    assert recorded == ["refiled as another item"]
     assert client.get(f"/api/work-items/{wid}").json()["ended_reason"] == "refiled as another item"
     beads = fake_beads.all()
     if beads_fail:
         assert beads[own]["status"] == "open" and "comments" not in beads[other]
         return
     assert beads[own]["status"] == "closed"
-    assert beads[own]["close_reason"] == "abandoned: refiled as another item"
+    assert beads[own]["close_reason"] == f"{ended}: refiled as another item"
     assert beads[other]["status"] == "open"
     assert beads[other]["comments"] == [
-        f"Kraft work item {wid} was abandoned: refiled as another item"
+        f"Kraft work item {wid} was {ended}: refiled as another item"
     ]
 
 

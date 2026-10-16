@@ -474,22 +474,23 @@ async def close_beads(db, row, bd_cwd: str | None, run_dirs, *, by_hand: bool = 
             logger.warning("bead close failed for %s: %r", one, exc)
 
 
-async def settle_beads_on_abandon(row, bd_cwd: str | None, reason: str) -> None:
-    """Abandoning is not finishing: the bead intake filed for the item is
-    closed with the reason, and the beads it implements stay open with a note
-    saying why the item was dropped. A failure is logged, never raised -- one
-    bad bead must not fail the abandon, nor stop the others."""
+async def settle_beads_on_abandon(
+    row, bd_cwd: str | None, reason: str, *, ended: str = "abandoned"
+) -> None:
+    """Abandoning or cancelling (`ended` says which) is not finishing: the bead
+    intake filed for the item is closed with the reason, and the beads it
+    implements stay open with a note saying why the item was dropped. A failure is
+    logged, never raised -- one bad bead must not fail the abandon, nor stop the
+    others."""
     cwd = row["bead_cwd"] or bd_cwd
     if row["bead_id"]:
         try:
-            await beads.complete(row["bead_id"], cwd=cwd, reason=f"abandoned: {reason}")
+            await beads.complete(row["bead_id"], cwd=cwd, reason=f"{ended}: {reason}")
         except Exception as exc:  # noqa: BLE001
             logger.warning("bead close failed for %s: %r", row["bead_id"], exc)
     for one in _implements_beads(row):
         try:
-            await beads.annotate(
-                one, f"Kraft work item {row['id']} was abandoned: {reason}", cwd=cwd
-            )
+            await beads.annotate(one, f"Kraft work item {row['id']} was {ended}: {reason}", cwd=cwd)
         except Exception as exc:  # noqa: BLE001
             logger.warning("bead note failed for %s: %r", one, exc)
 

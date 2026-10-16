@@ -101,7 +101,7 @@ export async function offerWarnings(deps: FileWorkDeps, id: string, warnings: st
     if (ok !== "Abandon") return;
     // The server has the last word: a 409 shows its detail.
     try {
-      await api.abandon(id);
+      await api.abandon(id, `Abandoned from VS Code right after filing: ${warnings.join(" ")}`);
       await store.refresh(id).catch(() => {}); // abandoned: a failed re-read is not a failed abandon
     } catch (e) {
       await reportError(e, store, id);

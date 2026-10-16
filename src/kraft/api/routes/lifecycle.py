@@ -2072,13 +2072,18 @@ async def complete_work_item(wid: str, body: CompleteWorkItem, request: Request)
 @api_router.post("/work-items/{wid}/cancel")
 async def cancel_work_item(wid: str, body: CancelWorkItem, request: Request):
     """Cancel the item, with a reason. Unlike `abandon` the worktree stays:
-    archiving reclaims it later, the same as for any ended item.
+    archiving reclaims it later, the same as for any ended item. The item's
+    bead is closed with the reason, and the beads it implements are noted, as
+    for `abandon`.
 
     `body.close_mr` closes the item's open merge request once the cancel
     itself has landed -- a forge failure never undoes it, it only shows up in
     the response's `close_mr`.
     """
     row = await _end_work_item(request, wid, "cancel", body.reason)
+    await executor.settle_beads_on_abandon(
+        row, deps.bd_cwd(), body.reason.strip(), ended="cancelled"
+    )
     result = deps.work_item_answer(request.app.state, wid)
     if body.close_mr:
         result["close_mr"] = await _close_cancelled_mr(request.app.state, wid, row)

@@ -107,12 +107,6 @@ export const raiseBudget = (id: string, budgetUsd: number | null) =>
     json("POST", { budget_usd: budgetUsd }),
   );
 
-export const abandonWorkItem = (id: string) =>
-  req<{ id: string; status: string; worktree_removed: boolean }>(
-    `/work-items/${id}/abandon`,
-    json("POST", {}),
-  );
-
 export const listArchivedWorkItems = () =>
   // include_abandoned=true: the archived view is the only way to restore an
   // abandoned item (the auto-archive poller and the Done group's Archive

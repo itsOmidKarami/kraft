@@ -246,7 +246,7 @@ export class Api {
     }
     return results;
   }
-  abandon = (id: string) => this.req("POST", this.item(id, "/abandon"), {});
+  abandon = (id: string, reason: string) => this.req("POST", this.item(id, "/abandon"), { reason });
 
   listThreads = (id: string) => this.req<ReviewThread[]>("GET", this.item(id, "/threads"));
   createThread = (id: string, t: ThreadIn) => this.req<ReviewThread>("POST", this.item(id, "/threads"), t);
