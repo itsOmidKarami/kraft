@@ -19,12 +19,13 @@ class Confirm(ModalScreen[bool]):
     """Go on or not (spec §7.8): `question`, then `lines` saying what going
     on does. Cancel has the focus, so Enter alone never goes on."""
 
-    BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "dismiss(False)", "cancel")]
+    BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "cancel", "cancel")]
 
     def __init__(self, question: str, lines: Sequence[str]) -> None:
         super().__init__()
         self.question = question
         self.lines = lines
+        self._answered = False
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm"):
@@ -38,6 +39,15 @@ class Confirm(ModalScreen[bool]):
     def on_mount(self) -> None:
         self.query_one("#no").focus()
 
+    def action_cancel(self) -> None:
+        self._answer(False)
+
     @on(Button.Pressed)
-    def _answer(self, event: Button.Pressed) -> None:
-        self.dismiss(event.button.id == "yes")
+    def _pressed(self, event: Button.Pressed) -> None:
+        self._answer(event.button.id == "yes")
+
+    def _answer(self, go_on: bool) -> None:
+        # Esc and a button before the pop completes: the first answer stands.
+        if not self._answered:
+            self._answered = True
+            self.dismiss(go_on)

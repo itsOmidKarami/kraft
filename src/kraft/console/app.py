@@ -336,7 +336,11 @@ class KraftConsole(App):
             # Focused once, on the way down: Enter presses it (spec §6).
             # But never from where a person is typing: only off the view or nothing.
             if no_server and not was_down and start is not None:
-                if frame.focused in (None, self.view, start):
+                if (
+                    frame.focused is None
+                    or frame.focused is start
+                    or self.view in frame.focused.ancestors_with_self
+                ):
                     frame.set_focus(start)
         elif was_down and frame.focused in (None, start):
             # The frame's own focus, which the output panel may be covering.

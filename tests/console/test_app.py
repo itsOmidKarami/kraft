@@ -529,8 +529,14 @@ def test_live_updates_reach_the_frame_under_a_dialog(console, monkeypatch, dialo
         ([Link.DOWN], False, "start"),
         ([Link.DOWN], True, "input"),
         ([Link.DOWN, Link.LIVE], False, "view"),
+        ([Link.DOWN], "in-view", "start"),
     ],
-    ids=["from-the-view", "typing-keeps-the-focus", "down-and-live-in-one-tick"],
+    ids=[
+        "from-the-view",
+        "typing-keeps-the-focus",
+        "down-and-live-in-one-tick",
+        "from-in-the-view",
+    ],
 )
 def test_start_server_takes_the_focus_only_from_the_view(console, steps, on_input, ends_on):
     """The button never pulls focus from where a person types; and a link that
@@ -538,7 +544,10 @@ def test_start_server_takes_the_focus_only_from_the_view(console, steps, on_inpu
 
     async def scenario(app, pilot):
         typing = Input()
-        if on_input:
+        if on_input == "in-view":  # a focusable child of the view, as PR 3 adds
+            await app.view.mount(typing)
+            app.default_screen.set_focus(typing)
+        elif on_input:
             await app.default_screen.mount(typing)
             app.default_screen.set_focus(typing)
         for link in steps:
@@ -550,23 +559,29 @@ def test_start_server_takes_the_focus_only_from_the_view(console, steps, on_inpu
     assert console.run(scenario) == ends_on
 
 
-def test_a_confirm_survives_the_output_panel_being_asked_for(console, kraft_is):
+@pytest.mark.parametrize("panel_open_first", [True, False], ids=["panel-beneath", "panel-new"])
+def test_a_confirm_survives_the_output_panel_being_asked_for(console, kraft_is, panel_open_first):
     """Popping a modal drops its result callback: Ctrl+O and a new command must
     leave an open confirm to answer."""
     kraft_is("print('x')")
 
     async def scenario(app, pilot):
         # The panel already open beneath it: the case a pop loop would walk through.
-        await pilot.press("ctrl+o")
-        await pilot.pause()
+        if panel_open_first:
+            await pilot.press("ctrl+o")
+            await pilot.pause()
         asked = app.run_worker(app.confirm("kraft admin stop"))
         await console.until(pilot, lambda: isinstance(app.screen, Confirm))
         await pilot.press("ctrl+o")
-        await app.run_command(["view", "list"])
+        async with asyncio.timeout(5):
+            await app.run_command(["view", "list"])
         await pilot.pause()
+        if not isinstance(app.screen, Confirm):  # the panel opened above it: Esc closes it
+            await pilot.press("escape")
+            await pilot.pause()
         still = isinstance(app.screen, Confirm)
         await pilot.press("shift+tab", "enter")
-        await asked.wait()
+        await console.until(pilot, lambda: asked.is_finished)
         return still, asked.result
 
     assert console.run(scenario) == (True, True)

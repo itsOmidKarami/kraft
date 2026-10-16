@@ -65,7 +65,20 @@ def test_a_confirm_lists_what_a_restart_ends_and_goes_on_only_when_told(
         await pilot.pause()
         shown = str(app.screen.query_one("#listing").render())
         await pilot.press(*keys)
-        await asked.wait()
+        await console.until(pilot, lambda: asked.is_finished)
         return shown, asked.result
 
     assert console.run(scenario) == (listed, answer)
+
+
+def test_a_second_answer_before_the_pop_completes_is_ignored(console):
+    async def scenario(app, pilot):
+        asked = app.run_worker(app.confirm("kraft admin stop"))
+        await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+        dialog = app.screen
+        dialog.action_cancel()
+        dialog._answer(True)
+        await console.until(pilot, lambda: asked.is_finished)
+        return asked.result
+
+    assert console.run(scenario) is False
