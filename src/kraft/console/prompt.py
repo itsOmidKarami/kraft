@@ -113,10 +113,6 @@ def _parsed(argv: list[str]) -> dict | None:
             return None
 
 
-def _rest(parsed: dict) -> dict:
-    return {k: v for k, v in parsed.items() if k not in ("id", "ids")}
-
-
 def for_item(argv: list[str], work_item_id: str) -> tuple[list[str], str | None]:
     """`argv` acting on `work_item_id`, where an `item` verb takes an item and
     none was typed: as its `id` positional, its `--id`, or its `ids`. Else the
@@ -141,11 +137,10 @@ def for_item(argv: list[str], work_item_id: str) -> tuple[list[str], str | None]
     tries = [[*head, flag[0], work_item_id, *rest]] if flag else []
     tries += [[*head, work_item_id, *rest], [*argv, work_item_id]]
     for tried in tries:
+        # The first place the CLI reads it as the item, argparse filling positionals in order.
         got = _parsed(tried)
-        # Placed as the item and nothing else: every other argument reads as typed.
         if got and work_item_id in (got.get("id"), *(got.get("ids") or [])):
-            if _rest(got) == _rest(parsed):
-                return tried, None
+            return tried, None
     return argv, refused
 
 

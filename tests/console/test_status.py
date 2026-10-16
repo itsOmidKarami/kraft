@@ -109,12 +109,13 @@ def test_the_status_line_says_its_parts_and_leaves_out_what_failed(
         ([], None),
         (None, None),
         ({"claude": True}, None),
+        (7, None),
         ([*AGENTS, "cursor"], None),
         ([{"id": "claude"}], None),
         ([{"id": 3, "executable_found": True}], None),
     ],
     ids=["found-first", "at-most-three", "none-listed", "unread"]
-    + ["a-dict", "an-entry-not-a-dict", "no-found-flag", "no-name"],
+    + ["a-dict", "a-number", "an-entry-not-a-dict", "no-found-flag", "no-name"],
 )
 def test_the_agents_part_names_found_ones_first_by_mark(harnesses, said):
     """`●` found, `○` missing: the mark's shape carries it, not the colour."""
