@@ -448,9 +448,7 @@ class Board(View):
             chain = self.query_one("#peek-chain", Static)
             chain.update(chain_line(words.chain_marks(item), self.size.width - 2))
             chain.display = True
-            gate = item.get("pending_gate") or stop.get("node") or ""
-            gate = words.gate_name(words.nodes_of(item), gate)
-            say(f"{words.capitalise(gate)} is waiting on your decision.")
+            say(words.banner_line(item) or "")
             if "approve" not in doors and (waits := await acts.approve_waits(work_item_id)):
                 say(waits)
             try:

@@ -341,6 +341,24 @@ def banner_of(item: dict) -> dict | None:
     return {**words, "name": named(nodes, node) if node else ""}
 
 
+def banner_line(item: dict) -> str | None:
+    """The stop banner (spec §7.2): the server's reason and the way on, in
+    `banner_of`'s words and each kind's frame, as the web draws it."""
+    banner = banner_of(item)
+    if banner is None:
+        return None
+    node, text, way = banner["name"], banner["text"], banner["way"]
+    at = f"Stopped at {node}. " if node else ""
+    said = {
+        "gate": f"Waiting for you to {node}.",
+        "question": f"The agent asks: {text}",
+        "failed": f"Failed at {node}. {text}" if node else f"Failed. {text}",
+        "limit": at + text,
+        "stop": (at + text) if text else (f"Stopped at {node}." if node else "Stopped."),
+    }[banner["kind"]]
+    return f"{said} {way}".strip()
+
+
 def _banner_words(item: dict) -> dict | None:
     stop = item.get("stop")
     if not stop or item.get("display_status") not in ("needs_you", "failed"):

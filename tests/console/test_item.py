@@ -371,7 +371,7 @@ def test_reject_on_the_item_sends_the_work_back_where_it_was_picked(
         return calls, asked, asks, question
 
     # Either dialog names the gate as the web does.
-    assert console.run(scenario) == (sent, picker, said, "Reject approve spec on a91c03fe")
+    assert console.run(scenario) == (sent, picker, said, "Request changes: approve spec · a91c03fe")
 
 
 def test_an_item_that_goes_away_while_open_says_so(board, monkeypatch):

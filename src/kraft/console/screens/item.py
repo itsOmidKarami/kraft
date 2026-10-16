@@ -101,24 +101,6 @@ def cancel_lines(preview: dict) -> list[str]:
     ]
 
 
-def banner_line(item: dict) -> str | None:
-    """The stop banner (spec §7.2): the server's reason and the way on, in
-    `words.banner_of`'s words and each kind's frame, as the web draws it."""
-    banner = words.banner_of(item)
-    if banner is None:
-        return None
-    node, text, way = banner["name"], banner["text"], banner["way"]
-    at = f"Stopped at {node}. " if node else ""
-    said = {
-        "gate": f"Waiting for you to {node}.",
-        "question": f"The agent asks: {text}",
-        "failed": f"Failed at {node}. {text}" if node else f"Failed. {text}",
-        "limit": at + text,
-        "stop": (at + text) if text else (f"Stopped at {node}." if node else "Stopped."),
-    }[banner["kind"]]
-    return f"{said} {way}".strip()
-
-
 class Item(View):
     label = "Item"
     BINDINGS: ClassVar[list[BindingType]] = [
@@ -349,7 +331,7 @@ class Item(View):
             money = f"{usd(cap['spent_usd'])}{of} · "
         age = words.ago(item.get("updated_at"), now).removesuffix(" ago")
         self.query_one("#item-spent", Static).update(Content.styled(money + age, "$kraft-muted"))
-        said = banner_line(item)
+        said = words.banner_line(item)
         banner = self.query_one("#item-banner", Static)
         banner.display = said is not None
         if said is not None:
@@ -686,7 +668,7 @@ class Item(View):
         if to not in before:
             return None
         return Reject(
-            f"Reject {words.gate_name(nodes, gate or '')} on {item['id'][:8]}",
+            f"Request changes: {words.gate_name(nodes, gate or '')} · {item['id'][:8]}",
             [reject_asks(to)],
             nodes=before,
             to=to,

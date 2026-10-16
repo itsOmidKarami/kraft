@@ -379,7 +379,7 @@ DOC = {"content": "# Spec\nGoal: fix the eleven findings.", "digest": None}
             _detail(GATE, actions=["reject"]),
             "spec → spec_approval ● → plan → implement",
             [
-                "Approve spec is waiting on your decision.",
+                "Waiting for you to approve spec.",
                 "Approve waits on 2 open must-fix threads.",
                 "",
                 "# Spec",
