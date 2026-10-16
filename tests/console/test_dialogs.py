@@ -4,8 +4,10 @@ lists, and that only a deliberate answer goes on."""
 from __future__ import annotations
 
 import asyncio
+from functools import partial
 
 import pytest
+from textual.widgets import Button
 
 from kraft import client
 from kraft.console import app as console_app
@@ -97,3 +99,30 @@ def test_a_required_note_that_is_blank_says_so_and_keeps_asking(console):
         return said, still, asked.result
 
     assert console.run(scenario) == ("A note is required.", True, "w")
+
+
+def test_a_long_review_scrolls_and_keeps_its_buttons_on_screen(console):
+    """An add-on's review can run past the window (spec §7.4): the listing
+    scrolls, Apply and Cancel stay in sight at 80x24, and `[/]` in it is
+    drawn as written."""
+    lines = [f"  - component tasks.t{n} added [/]" for n in range(40)]
+
+    async def scenario(app, pilot):
+        app.run_worker(partial(app.push_screen_wait, Confirm("Apply x@y?", lines, yes="Apply")))
+        await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+        await pilot.pause()
+        dialog = app.screen
+        inside = [
+            dialog.region.contains_region(dialog.query_one(f"#{b}", Button).region)
+            for b in ("yes", "no")
+        ]
+        scrolls = dialog.query_one("#confirm-scroll").max_scroll_y > 0
+        drawn = str(dialog.query_one("#listing").render()).split("\n")[0]
+        return inside, scrolls, str(dialog.query_one("#yes", Button).label), drawn
+
+    assert console.run(scenario) == (
+        [True, True],
+        True,
+        "Apply",
+        "  - component tasks.t0 added [/]",
+    )

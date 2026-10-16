@@ -5,13 +5,15 @@ exits. A refusal is a `Refusal`, which the CLI says as `error: ...` with exit
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from kraft import paths
-from kraft.addons import fetch, load, manifest
+from kraft.addons import fetch, load, manifest, review
 from kraft.addons import update as addon_update
-from kraft.addons.config import AddonsConfig, AddonsLock
+from kraft.addons.config import AddonEntry, AddonsConfig, AddonsLock
 from kraft.config import ConfigError
+from kraft.policy import PolicyError
 
 
 class Refusal(Exception):
@@ -115,3 +117,110 @@ def addon_rows() -> list[dict]:
             }
         )
     return rows
+
+
+def install_entries(
+    addon_id: str,
+    *,
+    alias: str | None = None,
+    auto_update: bool = False,
+    re_install: bool = False,
+) -> dict[str, AddonEntry] | None:
+    """The `addons.yaml` entry an install writes once accepted, or None when
+    the one already there stands. Refused for an add-on already installed,
+    unless `re_install`."""
+    config_dir, _addons_dir = home()
+    try:
+        locked = AddonsLock.load(config_dir / AddonsLock.FILE).addons
+        config = AddonsConfig.load(config_dir / AddonsConfig.FILE)
+    except ConfigError as exc:
+        raise refusal(str(exc)) from exc
+    if addon_id in locked and not re_install:
+        raise refusal(
+            f"{addon_id} is already installed; `update` it, or pass --re-install to take the "
+            "newest commit"
+        )
+    if addon_id in config.addons and not alias and not auto_update:
+        return None
+    was = config.entry(addon_id) if addon_id in config.addons else AddonEntry()
+    return {
+        addon_id: AddonEntry(
+            **{
+                "as": alias or was.as_,
+                "enabled": was.enabled,
+                "auto_update": True if auto_update else was.auto_update,
+            }
+        )
+    }
+
+
+def update(
+    ids: Sequence[str] | None,
+    accept: Callable[[review.Review], bool],
+    *,
+    re_install: bool = False,
+    entries: dict | None = None,
+) -> list[addon_update.Result]:
+    """`addon_update.update` on this instance, `accept` asked once for each
+    review. Blocking: it reads git and the store, and waits on `accept`."""
+    config_dir, addons_dir = home()
+    try:
+        return addon_update.update(
+            ids,
+            accept=accept,
+            re_install=re_install,
+            entries=entries,
+            config_dir=config_dir,
+            addons_root=addons_dir,
+        )
+    except addon_update.Refused as exc:
+        raise refusal("; ".join(exc.problems)) from exc
+    except (ConfigError, PolicyError) as exc:
+        raise refusal(str(exc)) from exc
+
+
+def applied(results: Sequence[addon_update.Result]) -> bool:
+    """Whether any add-on was taken: then the running server reloads."""
+    return any(r.outcome == "applied" for r in results)
+
+
+def reload_warnings(answer: dict | None, error: Exception | None = None) -> list[str]:
+    """What asking a running server to load the new lock leaves to say: why
+    it did not, unless no server runs (the next start reads it); else each
+    add-on a reload that answered still left out."""
+    if error is not None:
+        if "no Kraft server" in str(error):
+            return []
+        return [f"warning: the running server did not reload: {error}"]
+    return [
+        f"warning: the running server did not load {what}: {why}"
+        for what, why in ((answer or {}).get("invalid_templates") or {}).items()
+        if what == "addons.yaml" or what.startswith("add-on ")
+    ]
+
+
+def result_view(result: addon_update.Result) -> dict:
+    reviewed = result.review
+    return {
+        "addon": result.addon_id,
+        "outcome": result.outcome,
+        "kind": result.kind,
+        "problems": [review.escape(fetch.redact(p)) for p in result.problems],
+        "note": result.note,
+        "review": None
+        if reviewed is None
+        else {
+            "old_version": reviewed.old_version,
+            "new_version": reviewed.new_version,
+            "reach": [review.escape(line) for line in reviewed.reach],
+            "content": [review.escape(line) for line in reviewed.content],
+        },
+    }
+
+
+def render_results(views: list[dict]) -> str:
+    lines = []
+    for view in views:
+        said = "; ".join(view["problems"]) or view["note"] or ""
+        lines.append(f"{view['addon']}: {view['outcome']}{': ' + said if said else ''}")
+    return "\n".join(lines) or "no add-ons installed"

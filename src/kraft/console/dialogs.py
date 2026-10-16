@@ -12,7 +12,7 @@ from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.content import Content
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, OptionList, Select, Static
@@ -40,21 +40,24 @@ class Dialog[R](ModalScreen[R]):
 
 
 class Confirm(Dialog[bool]):
-    """Go on or not (spec §7.8): `question`, then `lines` saying what going
-    on does. Cancel has the focus, so Enter alone never goes on."""
+    """Go on or not (spec §7.8), and an add-on's review, Apply or not (spec
+    §7.4): `question`, then `lines` saying what going on does, scrolled when
+    they run long. Cancel has the focus, so Enter alone never goes on."""
 
-    def __init__(self, question: str, lines: Sequence[str]) -> None:
+    def __init__(self, question: str, lines: Sequence[str], *, yes: str = "Go on") -> None:
         super().__init__()
         self.question = question
         self.lines = lines
+        self.yes = yes
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm"):
             # Content, not markup: a title in the listing may hold `[/]`.
             yield Static(Content(self.question), id="question")
-            yield Static(Content("\n".join(self.lines)), id="listing")
+            with VerticalScroll(id="confirm-scroll"):
+                yield Static(Content("\n".join(self.lines)), id="listing")
             with Horizontal():
-                yield Button("Go on", id="yes")
+                yield Button(self.yes, id="yes")
                 yield Button("Cancel", id="no")
 
     def on_mount(self) -> None:
