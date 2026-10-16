@@ -25,6 +25,11 @@ describe("GateView", () => {
     expect([cb.onGate, cb.onReviewer, cb.doc, cb.reject].map((f) => f.mock.calls.length)).toEqual([1, 1, 1, 1]);
   });
 
+  it("names the reject target by its label, not its id", () => {
+    render(<GateView gate={{ id: "approve_plan" }} reject={{ id: "write_plan", label: "write plan" }} />);
+    expect(screen.getByRole("button", { name: "reject to write plan" })).toHaveTextContent("write plan");
+  });
+
   it("names the diamond by the gate without a reviewer or a slot", () => {
     render(<GateView gate={{ id: "approve_plan" }} />);
     expect(screen.getByRole("button", { name: "approve_plan, gate" })).toBeInTheDocument();

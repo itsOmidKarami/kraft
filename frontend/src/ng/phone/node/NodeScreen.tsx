@@ -136,7 +136,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
                     ...(message ? [["message", message]] : []),
                     ...(item.test_result ? [["tests", <TestsLine key="t" workItemId={item.id} result={item.test_result} linkClass="ph-linkbtn ph-mono" />]] as [string, React.ReactNode][] : []),
                     ...(doc ? [["document", <button key="d" type="button" className="ph-linkbtn ph-mono" onClick={() => navigate(`${placeUrl(item.id, { node: nodeId, sel: { kind: "node", node: nodeId } })}?doc=${encodeURIComponent(doc.document_id)}`)}>{doc.path.split("/").at(-1)}</button>]] as [string, React.ReactNode][] : []),
-                    ["reject to", rejectTarget(item.chain_definition.nodes, nodeId) ? <button key="r" type="button" className="ph-linkbtn ph-mono" onClick={() => setPlace({ node: rejectTarget(item.chain_definition.nodes, nodeId)!, sel: { kind: "node", node: rejectTarget(item.chain_definition.nodes, nodeId)! } })}>{rejectTarget(item.chain_definition.nodes, nodeId)}</button> : "reopens the gate"],
+                    ["reject to", rejectTarget(item.chain_definition.nodes, nodeId) ? <button key="r" type="button" className="ph-linkbtn" onClick={() => setPlace({ node: rejectTarget(item.chain_definition.nodes, nodeId)!, sel: { kind: "node", node: rejectTarget(item.chain_definition.nodes, nodeId)! } })}>{nameOf(item.chain_definition.nodes, rejectTarget(item.chain_definition.nodes, nodeId)!)}</button> : "reopens the gate"],
                   ] as [string, React.ReactNode][])
                 : ([
                     ...(api.fix_loop ? [["fix loop", fixLoopWords(seen, api)]] : []),
@@ -214,7 +214,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
             <Facts rows={[
               ["chain", `${chainName(item)} · frozen at intake`],
               ...(api.fix_loop ? ([["fix loop", fixLoopWords(seen, api)]] as [string, React.ReactNode][]) : []),
-              ["on failure", api.on_failure?.length ? `${api.on_failure.map(plainName).join(", ")}, once` : gate ? `reject to ${rejectTarget(item.chain_definition.nodes, nodeId) ?? "this gate"}` : "—"],
+              ["on failure", api.on_failure?.length ? `${api.on_failure.map(plainName).join(", ")}, once` : gate ? `reject to ${nameOf(item.chain_definition.nodes, rejectTarget(item.chain_definition.nodes, nodeId) ?? nodeId)}` : "—"],
               ["overrides", overridden ? [mine && `${mine} · changed for this item`, ...drafted].filter(Boolean).join(" · ") : "none"],
             ]} />
             <p className="ph-note">{overridden ? "An override applies to this item only. The chain file is unchanged." : "No item override on this node."}</p>

@@ -2,6 +2,7 @@ import type { ComponentProps } from "react";
 import type { ChainNode, KraftEvent } from "../../types";
 import type { GateView } from "../graph/GateView";
 import type { Sel } from "../graph/usePaneSelection";
+import { nameOf } from "../board/rowText";
 import { rejectTarget } from "./graph";
 import { AUTO_REVIEW, sessionLook, sessionsOf } from "./nodeGraph";
 import { gateSkipped } from "./events";
@@ -42,7 +43,7 @@ export function gateView(item: ItemDetail, gate: ChainNode, events: KraftEvent[]
       : undefined,
     message: gateMessage(frozen, gate.id),
     doc: pending && item.gate_artifact ? { label: item.gate_artifact.split("/").pop()!, onClick: on.doc } : undefined,
-    reject: to ? { id: to, onClick: () => on.reject(to) } : undefined,
+    reject: to ? { id: to, label: nameOf(item.chain_definition.nodes, to), onClick: () => on.reject(to) } : undefined,
     youSub: pending ? "waiting" : decided ? decided.by : gateSkipped(events, gate.id) ? "skipped" : undefined,
   };
 }

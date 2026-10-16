@@ -17,9 +17,10 @@
 .tc-card { display: flex; flex-direction: column; gap: .7em; padding: .85em 1em; border: 1px solid var(--border); border-radius: .85em; background: var(--surface); }
 .tc-txt { color: var(--text-sub); }
 .tc-link { color: var(--accent); text-decoration: underline; }
+.tc-actions { flex-wrap: wrap; }
 .tc-actions .tc-chip { margin-left: auto; }
-.tc-btn { padding: .1em .85em; border-radius: .4em; background: var(--text); color: var(--bg); font-weight: 600; }
-.tc-ghost { padding: .1em .85em; border: 1px solid var(--border); border-radius: .4em; color: var(--text-sub); }
+.tc-btn { white-space: nowrap; padding: .1em .85em; border-radius: .4em; background: var(--text); color: var(--bg); font-weight: 600; }
+.tc-ghost { white-space: nowrap; padding: .1em .85em; border: 1px solid var(--border); border-radius: .4em; color: var(--text-sub); }
 .tc-chip { padding: 0 .55em; border-radius: .4em; font-weight: 600; white-space: nowrap; }
 .tc-ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, transparent); }
 .tc-warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }

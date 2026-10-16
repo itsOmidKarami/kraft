@@ -171,7 +171,7 @@ describe("a node the chain ran again", () => {
     expect(sub("lint")).toBe("subprocess task · round 1 of 3 · done 12s");
     // The passes say what started them, newest first.
     await userEvent.click(screen.getByRole("button", { name: /^pass \d/ }));
-    expect(screen.getAllByRole("menuitemradio").map((r) => r.textContent)).toEqual(["Pass 2 · nowafter a reject at local_review", "Pass 1first run"]);
+    expect(screen.getAllByRole("menuitemradio").map((r) => r.textContent)).toEqual(["Pass 2 · nowafter changes were requested at approve local review", "Pass 1first run"]);
   });
 
   it("follows the pass picked: its rounds, its tasks and their runs, and back to the newest", async () => {

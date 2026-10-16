@@ -221,7 +221,7 @@ describe("the node screen (D)", () => {
   it("picks a pass of a node the chain ran again: its rounds, its tasks and their runs, with the pass in the URL", async () => {
     mount(twice(), "/work-items/w1/nodes/verification");
     const passes = await screen.findByRole("group", { name: "Passes" });
-    expect(within(passes).getAllByRole("button").map((b) => b.textContent)).toEqual(["pass 1 · first run", "pass 2 · after a reject at local_review"]);
+    expect(within(passes).getAllByRole("button").map((b) => b.textContent)).toEqual(["pass 1 · first run", "pass 2 · after changes were requested at approve local review"]);
     const task = (name: string) => screen.getByText(name).closest("button")!;
     // The newest pass is on its first round: it has no rounds to pick between, and counts none of the pass before.
     expect(screen.queryByRole("group", { name: "Fix loop rounds" })).toBeNull();

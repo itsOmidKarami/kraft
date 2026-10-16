@@ -1,3 +1,5 @@
+import { gateName } from "../board/rowText";
+import { REQUEST_CHANGES } from "../review/finish";
 import type { Accent, ColourAmount, Surface } from "../../types";
 import "./themecard.css";
 
@@ -30,10 +32,10 @@ export function ThemeCard({ surface, accent, amount, mode }: { surface: Surface;
             <span className="tc-node tc-todo" />
           </div>
           <div className="tc-card">
-            <span className="tc-txt">plan_approval is waiting · <span className="tc-link">spec.md</span></span>
+            <span className="tc-txt">{gateName(undefined, "plan_approval")} is waiting · <span className="tc-link">spec.md</span></span>
             <div className="tc-actions">
               <span className="tc-btn">Approve</span>
-              <span className="tc-ghost">Reject</span>
+              <span className="tc-ghost">{REQUEST_CHANGES}</span>
               <span className="tc-chip tc-warn">needs you</span>
             </div>
           </div>

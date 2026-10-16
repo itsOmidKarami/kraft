@@ -221,7 +221,6 @@ export const entryUsers = (r: Resolved, profile: string, provider: string): numb
   new Set(r.harnesses.filter((h) => h.provider === provider).flatMap((h) => h.tasks.filter((t) => t.profile === profile).map((t) => `${t.chain}/${t.path}`))).size;
 /** The line under a profile entry's model: how many tasks run on it. */
 export const usedBy = (n: number): string => `Used by ${n} ${n === 1 ? "task" : "tasks"}.`;
-export const taskLeaf = (t: { path: string }) => t.path.split(".").pop() ?? t.path;
 
 /** What the allowed-tools list says, on both trees: `null` is unset and allows every tool, `[]` allows none. */
 export const TOOLS_EVERY = "Every tool";

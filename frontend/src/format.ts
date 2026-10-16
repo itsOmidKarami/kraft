@@ -64,7 +64,7 @@ export function elapsed(ms: number): string {
 }
 
 /** The span between two timestamps; `to = null` means now. Every duration on
- *  the item page (hero, split header, stage-graph tooltip, phone stage list)
+ *  the item page (hero, split header, node-graph tooltip, phone node list)
  *  goes through this with the same inputs, so they cannot disagree. */
 export function elapsedBetween(
   fromIso: string | null | undefined,

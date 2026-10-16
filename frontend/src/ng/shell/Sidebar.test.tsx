@@ -227,6 +227,9 @@ describe("ng Sidebar", () => {
     mount();
     expect(screen.getByText("offline")).toBeInTheDocument();
     expect(screen.queryByText("live")).toBeNull();
+    // Offline is a fault, not a wait for a person: red like the banner, never amber.
+    expect(screen.getByText("offline")).toHaveClass("bad");
+    expect(screen.getByText("offline")).not.toHaveClass("warn");
     useStore.setState({ loadError: null } as never);
   });
 
