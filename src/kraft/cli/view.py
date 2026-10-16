@@ -7,7 +7,7 @@ import asyncio
 import json
 import sys
 
-from kraft import client, render, usage
+from kraft import client, logs, render, usage
 from kraft.cli import common
 from kraft.vocab import StopKind, WorkItemEvent, WorkItemStatus
 
@@ -182,44 +182,17 @@ def _print_event(event: dict, as_json: bool) -> None:
 
 
 async def _logs_session(work_item_id: str | None, follow: bool) -> tuple[str, str]:
-    """The session `view logs` reads with no `--session`: the newest one, or,
-    while the item is stopped, the one that stopped it, as the board's stop
-    card names it. An auto-escalation starts the moment an item stops, so the
-    newest log was the escalation's and not why it stopped (R12a-03). `-f`
-    still follows the newest, the one that can still write. Whichever of the
-    two it passes over is named on stderr, with how to read it.
-
-    Returns `(work item id, session id)`: the item's whole id, as the server
-    answers it, since a session id is unique only within its item."""
+    """The session `view logs` reads with no `--session` (`logs.pick_session`),
+    with the one it passed over named on stderr. Returns `(work item id,
+    session id)`: the item's whole id, as the server answers it, since a
+    session id is unique only within its item."""
     item = await client.get_work_item(work_item_id, full=True)
-    wid = item["id"]
-    sessions = item.get("worker_sessions") or []
-    if not sessions:
+    session, note = logs.pick_session(item, follow=follow)
+    if session is None:
         raise ValueError("no worker session has run for this work item yet")
-    newest = sessions[-1]
-    stop = item.get("stop") if item.get("status") == WorkItemStatus.NEEDS_HUMAN else None
-    stopped = newest
-    if stop:
-        named = (stop.get("facts") or {}).get("session_id")
-        stopped = next((s for s in sessions if s["id"] == named), None) or next(
-            (
-                s
-                for s in reversed(sessions)
-                if s["node_id"] == stop.get("node") and s["hook_point"] != "escalation"
-            ),
-            newest,
-        )
-    if stopped is newest:
-        return wid, newest["id"]
-    shown, other = (newest, stopped) if follow else (stopped, newest)
-    print(
-        f"showing {shown['hook_point']} ({shown['status']}); "
-        f"the session that stopped the item is {stopped['hook_point']} ({stopped['status']}), "
-        f"the newest is {newest['hook_point']} ({newest['status']}): "
-        f"kraft view logs {wid} --session {other['id']}",
-        file=sys.stderr,
-    )
-    return wid, shown["id"]
+    if note:
+        print(note, file=sys.stderr)
+    return item["id"], session["id"]
 
 
 def _cmd_logs(ns: argparse.Namespace) -> None:
