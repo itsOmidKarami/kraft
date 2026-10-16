@@ -164,6 +164,18 @@ describe("broadcast", () => {
     ws.close();
   });
 
+  it("delivers one action's frames in one task, before anything the first sets off", async () => {
+    const ws = new DemoSocket("ws://localhost/api/ws/events");
+    await new Promise((r) => (ws.onopen = r));
+    const order: string[] = [];
+    ws.onmessage = (e) => { const { type } = JSON.parse(e.data); order.push(type); queueMicrotask(() => order.push(`after ${type}`)); };
+    broadcast({ seq: 4243, type: "pause_requested" });
+    broadcast({ seq: 4244, type: "worker_session_paused" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(order).toEqual(["pause_requested", "worker_session_paused", "after pause_requested", "after worker_session_paused"]);
+    ws.close();
+  });
+
   it("answers the action before any frame, and a listener that throws harms neither", async () => {
     const S = buildScenario("default");
     const serve = mockServer(S, { ngBoard: true, onEvent: broadcast });
@@ -198,7 +210,11 @@ describe("broadcast", () => {
     // The page's own write, as the peek's Pause makes it: nothing re-reads the list after it.
     await fetch(`/api/work-items/${id}/pause`, { method: "POST", body: "{}" });
     await vi.waitFor(() => expect(shown()).toBe("paused"));
-    expect(useStore.getState().eventsByItem[id].at(-1)?.type).toBe("worker_session_paused");
+    // Every re-read the frames set off has landed: each event is held once, not once per read and frame.
+    await new Promise((r) => setTimeout(r, 50));
+    const seqs = useStore.getState().eventsByItem[id].map((e) => e.seq);
+    expect(seqs.length).toBe(new Set(seqs).size);
+    expect(useStore.getState().eventsByItem[id].slice(-2).map((e) => e.type)).toEqual(["pause_requested", "worker_session_paused"]);
     stop();
   });
 

@@ -47,13 +47,17 @@ export function escalationThreads(sessions: any[]) {
   }));
 }
 /** `store.pending_rewind`: the newest `rewind_requested`, unless its target's `node_started` or its own
- *  `rewind_cancelled` came after it. Resume and retry start there; the demo's walk (motion.ts) goes back there
- *  once the node it stands on completes, as `walk.run_once` does. */
+ *  `rewind_cancelled` came after it. The server's walk writes that `node_started` as soon as the resume or retry
+ *  that honoured the rewind starts there; the doors here are not a walk, so the honouring `work_item_resumed` or
+ *  `work_item_retried` stands in for it, and spends the rewind too. Resume and retry start there; the demo's walk
+ *  (motion.ts) goes back there once the node it stands on completes, as `walk.run_once` does. */
 export function pendingRewind(b: ItemBundle): { target: string; note: string | null } | null {
   const at = b.events.map((e) => e.type).lastIndexOf("rewind_requested");
   if (at < 0) return null;
   const p = b.events[at].payload as { review_id: string; target: string; note: string | null };
-  const spent = b.events.slice(at + 1).some((e) => (e.type === "node_started" && e.payload.node_id === p.target) || (e.type === "rewind_cancelled" && e.payload.review_id === p.review_id));
+  const spent = b.events.slice(at + 1).some((e) =>
+    (e.type === "node_started" && e.payload.node_id === p.target) || (e.type === "rewind_cancelled" && e.payload.review_id === p.review_id) ||
+    e.type === "work_item_resumed" || e.type === "work_item_retried");
   return spent ? null : p;
 }
 const ENDED = (s: string) => WORK_ITEM_TRAITS[s as WorkItemStatus]?.ended ?? false;
@@ -155,7 +159,8 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
   const nodeIds = (it: any): string[] => (it.chain_definition?.nodes ?? []).map((n: any) => n.id);
   /** Mark the current node's live sessions paused (`store.pause_work_item`); the caller narrates them with `paused`. */
   const stopSessions = (b: ItemBundle): string[] => {
-    const live = b.sessions.filter((s) => s.node_id === b.item.current_node_id && LIVE_SESSION_STATUSES.includes(s.status));
+    // `store.running_sessions_for_node`: the current node's, and an escalation turn's on any node.
+    const live = b.sessions.filter((s) => (s.node_id === b.item.current_node_id || s.hook_point === "escalation") && LIVE_SESSION_STATUSES.includes(s.status));
     for (const s of live) Object.assign(s, { status: "paused", exited_at: now() });
     return live.map((s) => s.id);
   };
@@ -252,10 +257,14 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const busy = running(b);
       if (busy) return busy;
       const rewind = pendingRewind(b);
+      // The answer names the node as the row read before the claim: none for a never-started item.
+      const was = it.current_node_id ?? null;
+      // `store.take_steer`: the request's steer replaces a queued one (`set_steer`); either is taken, and cleared.
+      const taken = steer || it.pending_steer_context || null;
       run(it);
       it.pending_steer_context = null;
       it.current_node_id = rewind?.target ?? it.current_node_id ?? nodeIds(it)[0] ?? null;
-      const carried = joined(rewind?.note, steer);
+      const carried = joined(rewind?.note, taken);
       if (steer) {
         // The next attempt of the node's own last task, waiting to start (an escalation turn is not one).
         const node = it.current_node_id;
@@ -268,7 +277,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       }
       append(id, "work_item_resumed", { steer: carried });
       settle(it);
-      return ok({ id, node_id: it.current_node_id, steer: carried, steered: [] });
+      return ok({ id, node_id: was, steer: carried, steered: [] });
     },
     /** POST /work-items/{id}/retry: a stopped item, on its current node or where a pending rewind points (its note
      *  carried with the steer). A person's retry outranks a live escalation turn: it stops it first. */
@@ -281,7 +290,8 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
         return no(409, it.status === "paused" ? "work item is paused, not stopped: resume it instead, or skip what it would run" : "work item is not stopped");
       const rewind = pendingRewind(b);
       const steer = joined(rewind?.note, given);
-      stopLive(b, false);
+      // Only a live escalation turn is stopped: a person's retry outranks it.
+      if (liveTurn(b)) stopLive(b, false);
       if (rewind) it.current_node_id = rewind.target;
       const attempt = Math.max(0, ...b.sessions.filter((s) => s.node_id === it.current_node_id).map((s) => s.attempt ?? 0)) + 1;
       run(it);
