@@ -331,9 +331,9 @@
 .graph-node.is-clipped { opacity: 0; pointer-events: none; }
 
 /* The chain overview (StageGraph `overview`): every node small over a long chain's canvas, a frame on the part in
-   view. The block is as tall as its content. */
-.chain-mapped { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; }
-.chain-mapped > .canvas { position: relative; inset: auto; flex: none; height: 268px; border-top: 1px solid var(--line); }
+   view. The canvas under it takes the rest of the pane. */
+.chain-mapped { position: absolute; left: 0; top: 0; bottom: 0; display: flex; flex-direction: column; }
+.chain-mapped > .canvas { position: relative; inset: auto; flex: 1; min-height: 0; border-top: 1px solid var(--line); }
 .minimap { position: relative; flex: none; margin: 8px 0 6px; cursor: pointer; touch-action: none; user-select: none; }
 .minimap-svg { position: absolute; left: 0; top: 0; pointer-events: none; }
 .minimap-edge { stroke: var(--stroke); stroke-width: 1; }

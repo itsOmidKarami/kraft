@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as RPointerEvent, type MouseEvent as RMouseEvent } from "react";
-import { currentCam, DRAG_THRESHOLD, fitCam, revealCam, STEP_IN, STEP_OUT, wheelFactor, zoomAt, type Cam, type CanvasKind, type FitRule, type Size } from "./camera";
+import { clampCam, currentCam, DRAG_THRESHOLD, fitCam, revealCam, STEP_IN, STEP_OUT, wheelFactor, zoomAt, type Cam, type CanvasKind, type FitRule, type Size } from "./camera";
 
 export type CameraMode = "fit" | "current" | "free";
 type Opts = {
@@ -21,7 +21,8 @@ type Opts = {
 };
 
 /** Pan and zoom for one canvas viewport: pinch or ⌘-scroll zooms at the cursor,
- *  scroll or a background drag pans, fit and current re-frame. */
+ *  scroll or a background drag pans (a world as short as the view scrolls along, not up and down), fit and current
+ *  re-frame. A pan or zoom keeps the world in view. */
 export function useCamera({ canvas, world, current, opening, reserve = 0, cover = 0, fit, clearBottom = 0 }: Opts) {
   const [el, setEl] = useState<HTMLElement | null>(null);
   const [size, setSize] = useState<Size | null>(null);
@@ -33,6 +34,16 @@ export function useCamera({ canvas, world, current, opening, reserve = 0, cover 
   const dragged = useRef(false);
   const camRef = useRef(cam);
   camRef.current = cam;
+  const bounds = useRef({ world, view });
+  bounds.current = { world, view };
+  /** A pan or zoom by hand: kept on the world, and fit or current let go. */
+  const free = useCallback((f: (c: Cam) => Cam) => {
+    setCam((c) => {
+      const { world: w, view: v } = bounds.current;
+      return v ? clampCam(f(c), w, v) : f(c);
+    });
+    setMode("free");
+  }, []);
 
   useEffect(() => {
     if (!el) return;
@@ -56,15 +67,22 @@ export function useCamera({ canvas, world, current, opening, reserve = 0, cover 
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      // Firefox reports a mouse wheel in lines.
+      const line = e.deltaMode === 1 ? 16 : 1;
+      const dx = e.deltaX * line, dy = e.deltaY * line;
       if (e.ctrlKey || e.metaKey) {
         const r = el.getBoundingClientRect();
-        setCam((c) => zoomAt(c, e.clientX - r.left, e.clientY - r.top, wheelFactor(e.deltaY), canvas));
-      } else setCam((c) => ({ ...c, tx: c.tx - e.deltaX, ty: c.ty - e.deltaY }));
-      setMode("free");
+        free((c) => zoomAt(c, e.clientX - r.left, e.clientY - r.top, wheelFactor(dy), canvas));
+      } else free((c) => {
+        const { world: w, view: v } = bounds.current;
+        // Nowhere to go up or down: a mouse wheel walks along the chain instead.
+        const along = v != null && w.H * c.s <= v.h && Math.abs(dy) > Math.abs(dx);
+        return along ? { ...c, tx: c.tx - dy } : { ...c, tx: c.tx - dx, ty: c.ty - dy };
+      });
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [el, canvas]);
+  }, [el, canvas, free]);
 
   const onPointerDown = useCallback((e: RPointerEvent) => {
     if (e.button !== 0) return;
@@ -75,13 +93,12 @@ export function useCamera({ canvas, world, current, opening, reserve = 0, cover 
       const dx = ev.clientX - x0, dy = ev.clientY - y0;
       if (!dragged.current && Math.hypot(dx, dy) <= DRAG_THRESHOLD) return;
       dragged.current = true;
-      setCam({ ...start, tx: start.tx + dx, ty: start.ty + dy });
-      setMode("free");
+      free(() => ({ ...start, tx: start.tx + dx, ty: start.ty + dy }));
     };
     const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
-  }, []);
+  }, [free]);
   /** A drag is never a click: swallow the click that ends one. */
   const onClickCapture = useCallback((e: RMouseEvent) => {
     if (dragged.current) { e.stopPropagation(); dragged.current = false; }
@@ -89,8 +106,7 @@ export function useCamera({ canvas, world, current, opening, reserve = 0, cover 
 
   const zoomCentre = (f: number) => {
     if (!view) return;
-    setCam((c) => zoomAt(c, view.w / 2, view.h / 2, f, canvas));
-    setMode("free");
+    free((c) => zoomAt(c, view.w / 2, view.h / 2, f, canvas));
   };
   return {
     cam, mode, view,
@@ -98,16 +114,11 @@ export function useCamera({ canvas, world, current, opening, reserve = 0, cover 
     zoomIn: () => zoomCentre(STEP_IN),
     zoomOut: () => zoomCentre(STEP_OUT),
     /** Slide the view `dx` px, as the off-screen cues do. */
-    pan: (dx: number) => {
-      setCam((c) => ({ ...c, tx: c.tx + dx }));
-      setMode("free");
-    },
+    pan: (dx: number) => free((c) => ({ ...c, tx: c.tx + dx })),
     reset: () => zoomCentre(1 / cam.s),
     /** Centre the view across on world x, as the chain overview does. */
     centre: (x: number) => {
-      if (!view) return;
-      setCam((c) => ({ ...c, tx: view.w / 2 - x * c.s }));
-      setMode("free");
+      if (view) free((c) => ({ ...c, tx: view.w / 2 - x * c.s }));
     },
     fit: () => { setAsked(true); setMode("fit"); },
     toCurrent: current ? () => setMode("current") : undefined,

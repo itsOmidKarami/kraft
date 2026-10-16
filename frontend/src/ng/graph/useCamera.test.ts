@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { currentCam, EDITOR_FIT, fitCam, revealCam, wheelFactor, zoomAt, ZOOM } from "./camera";
+import { clampCam, currentCam, EDITOR_FIT, fitCam, revealCam, wheelFactor, zoomAt, ZOOM } from "./camera";
 import { useCamera } from "./useCamera";
 
 describe("camera maths", () => {
@@ -37,15 +37,10 @@ describe("camera maths", () => {
     ["letting the start mark go when the reach would not fit beside it", { floor: 0.45, left: 12, focus: 600, start: 27, reach: [1550] }, { W: 2600, H: 250 }, 678 - 1550 * 0.45],
     ["with no focus, from the left as before", { floor: 0.45, left: 12 }, { W: 2600, H: 250 }, 12],
     ["whole at the floor: centred, the focus ignored", { floor: 0.45, left: 12, focus: 100 }, { W: 1000, H: 250 }, (690 - 650) / 2],
-    ["under the chain overview: from the left even when it fits whole", { floor: 0.45, left: 12, top: 60 }, { W: 1000, H: 250 }, 12],
   ])("fits to a floor %s", (_, rule, world, tx) => {
     const cam = fitCam(world, { w: 690, h: 700 }, "chain", rule);
     expect(cam.s).toBeGreaterThanOrEqual(0.45);
     expect(cam.tx).toBeCloseTo(tx);
-  });
-  it("puts the row under the chain overview at the top, its boxes `top` px down, not centred in the view", () => {
-    // Boxes start 69px into the world (L.CY − L.BOX / 2).
-    expect(fitCam({ W: 600, H: 250 }, { w: 690, h: 700 }, "chain", { floor: 0.95, left: 12, top: 60 }).ty).toBe(60 - 69);
   });
   it("centres the current node across and 30% down at 100%", () => {
     expect(currentCam(500, 96, { w: 800, h: 401 })).toEqual({ s: 1, tx: -100, ty: 120 - 96 });
@@ -64,6 +59,15 @@ describe("camera maths", () => {
   });
   it("zooms the wheel by exp(−deltaY · 0.0025)", () => {
     expect(wheelFactor(-400)).toBeCloseTo(Math.E);
+  });
+  // A moved view stays on its world (the item page's chain drifted off its canvas on a mouse wheel).
+  it.each([
+    ["a world shorter than the view stays wholly inside it, top to bottom", { tx: -50, ty: 500, s: 1 }, { tx: -50, ty: 440 - 250 }],
+    ["a world wider than the view shows at most 40px of empty canvas past an edge", { tx: 300, ty: 0, s: 1 }, { tx: 40, ty: 0 }],
+    ["…at either edge", { tx: -5000, ty: 0, s: 1 }, { tx: 1040 - 2000 - 40, ty: 0 }],
+    ["a view inside its bounds is left alone", { tx: -500, ty: 100, s: 1 }, { tx: -500, ty: 100 }],
+  ])("bounds a pan: %s", (_, cam, want) => {
+    expect(clampCam(cam, { W: 2000, H: 250 }, { w: 1040, h: 440 })).toEqual({ ...want, s: 1 });
   });
   it("pans just enough to show a box, 24px in from the edge, and not at all when it shows", () => {
     const cam = { tx: 0, ty: 0, s: 0.5 }, view = { w: 400, h: 300 };
@@ -90,29 +94,30 @@ const move = (x: number) => act(() => void window.dispatchEvent(Object.assign(ne
 
 describe("useCamera", () => {
   it("opens fitted, and a pan past 4px frees it and swallows the click", () => {
-    const { h } = mount({ canvas: "chain", world: { W: 2000, H: 250 }, opening: "fit" });
-    expect(h.result.current.cam.s).toBe(0.5);
+    // 4000px at the 0.3 floor is 1200px, wider than the 1040px view, so it has room to pan; fitted, it starts at −80.
+    const { h } = mount({ canvas: "chain", world: { W: 4000, H: 250 }, opening: "fit" });
+    expect(h.result.current.cam.s).toBe(0.3);
     down(h, 0);
     move(4);
     expect(h.result.current.mode).toBe("fit");
     move(30);
     expect(h.result.current.mode).toBe("free");
-    expect(h.result.current.cam.tx).toBe(20 + 30);
+    expect(h.result.current.cam.tx).toBe(-80 + 30);
     const click = { stopPropagation: () => (click.stopped = true), stopped: false };
     h.result.current.bind.onClickCapture(click as never);
     expect(click.stopped).toBe(true);
   });
   it("centres the view across on a world x at the zoom it has, as the chain overview asks, which frees fit", () => {
-    const { h } = mount({ canvas: "chain", world: { W: 2000, H: 250 }, opening: "fit" });
-    act(() => h.result.current.centre(1200));
-    expect(h.result.current.cam.tx).toBe(1040 / 2 - 1200 * 0.5);
+    const { h } = mount({ canvas: "chain", world: { W: 4000, H: 250 }, opening: "fit" });
+    act(() => h.result.current.centre(2000));
+    expect(h.result.current.cam.tx).toBe(1040 / 2 - 2000 * 0.3);
     expect(h.result.current.mode).toBe("free");
   });
   it("slides the view by a pan, which frees fit", () => {
-    const { h } = mount({ canvas: "chain", world: { W: 2000, H: 250 }, opening: "fit" });
+    const { h } = mount({ canvas: "chain", world: { W: 4000, H: 250 }, opening: "fit" });
     act(() => h.result.current.pan(-100));
     expect(h.result.current.mode).toBe("free");
-    expect(h.result.current.cam.tx).toBe(20 - 100);
+    expect(h.result.current.cam.tx).toBe(-80 - 100);
   });
   it("keeps the current node clear of an overlaid pane, while fit keeps the full width (Kraft-gvfm2)", () => {
 
@@ -149,11 +154,23 @@ describe("useCamera", () => {
     expect(h.result.current.cam.ty + 200).toBeLessThanOrEqual(440 - 100);
     expect(mount({ canvas: "node", world: { W: 400, H: 200 }, opening: "fit" }).h.result.current.cam.ty).toBe(120);
   });
-  it("zooms at the cursor on ⌘-wheel and pans on a plain wheel", () => {
+  const wheel = (el: HTMLElement, e: Partial<WheelEvent>) => act(() => void el.dispatchEvent(Object.assign(new Event("wheel", { cancelable: true }), { deltaX: 0, deltaY: 0, deltaMode: 0, ...e })));
+  it("zooms at the cursor on ⌘-wheel", () => {
     const { el, h } = mount({ canvas: "chain", world: { W: 100, H: 100 }, opening: "fit" });
-    act(() => void el.dispatchEvent(Object.assign(new Event("wheel", { cancelable: true }), { deltaX: 0, deltaY: 50, metaKey: false })));
-    expect(h.result.current.cam.ty).toBe(220 - 108 - 50);
-    act(() => void el.dispatchEvent(Object.assign(new Event("wheel", { cancelable: true }), { deltaX: 0, deltaY: -400, ctrlKey: true, clientX: 0, clientY: 0 })));
+    wheel(el, { deltaY: -400, ctrlKey: true, clientX: 0, clientY: 0 });
     expect(h.result.current.cam.s).toBe(2);
+  });
+  // A chain as short as its canvas has nowhere to go up or down: a mouse wheel walks along it (fitted at −80, 1200px wide).
+  it.each([
+    ["walks along a short world on a vertical wheel", { W: 4000, H: 250 }, { deltaY: 50 }, { tx: -80 - 50, dty: 0 }],
+    ["still pans across on a horizontal swipe", { W: 4000, H: 250 }, { deltaX: 30, deltaY: 5 }, { tx: -80 - 30, dty: -5 }],
+    ["counts a wheel in lines (Firefox) as 16px a line", { W: 4000, H: 250 }, { deltaY: 3, deltaMode: 1 }, { tx: -80 - 48, dty: 0 }],
+    ["scrolls a world taller than the view up and down", { W: 4000, H: 3000 }, { deltaY: 50 }, { tx: null, dty: -50 }],
+  ])("on a plain wheel, %s", (_, world, e, want) => {
+    const { el, h } = mount({ canvas: "chain", world, opening: "fit" });
+    const before = h.result.current.cam;
+    wheel(el, e);
+    if (want.tx !== null) expect(h.result.current.cam.tx).toBe(want.tx);
+    expect(h.result.current.cam.ty - before.ty).toBe(want.dty);
   });
 });
