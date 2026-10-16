@@ -34,8 +34,12 @@ describe("displayStatus", () => {
     const S = buildScenario("default");
     const off = Object.values(S.bundles).filter((b) => b.item.display_status !== displayStatus(b.item)).map((b) => `${b.item.id} ${b.item.status} ${b.item.display_status}`);
     expect(off).toEqual([]);
-    const escalated = S.bundles[S.ng.escalated];
-    expect([escalated.item.display_status, escalated.item.escalation_threads]).toEqual(["escalated", escalationThreads(escalated.sessions)]);
+    // Every item that carries threads (the legacy board's items, from before the field, carry none).
+    const carrying = Object.values(S.bundles).filter((b) => "escalation_threads" in b.item);
+    expect(carrying.length).toBe(Object.values(S.ng).length + S.ngBoard.length + S.ngArchived.length);
+    const apart = carrying.filter((b) => JSON.stringify(b.item.escalation_threads) !== JSON.stringify(escalationThreads(b.sessions))).map((b) => b.item.id);
+    expect(apart).toEqual([]);
+    expect(S.bundles[S.ng.escalated].item.display_status).toBe("escalated");
   });
 });
 
@@ -60,7 +64,13 @@ describe("transitions", () => {
     ["pause stops the node's running session", "running", (T, id) => T.pause(id), { status: "paused", display_status: "paused" },
       [["pause_requested", { sessions: [expect.any(String)] }, null], ["worker_session_paused", { session_id: expect.any(String) }, null]]],
     ["resume runs a paused item again, its steer taken", "paused", (T, id, b) => ((b.item.pending_steer_context = "look at the race"), T.resume(id)), { status: "active", display_status: "running", current_node_id: "verification", pending_steer_context: null },
-      [["work_item_resumed", { steer: null }, null]]],
+      [["work_item_resumed", { steer: "look at the race" }, null]]],
+    ["resume with a steer of its own replaces a queued one", "paused", (T, id, b) => ((b.item.pending_steer_context = "look at the race"), T.resume(id, "look at the lock")), { pending_steer_context: null },
+      [["work_item_resumed", { steer: "look at the lock" }, null]]],
+    ["a rewind is used up by the resume that honoured it", "paused", (T, id) => (T.requestChanges(id, "implementation", "redo the cache"), T.resume(id), T.pause(id), T.resume(id)), { status: "active", current_node_id: "implementation" },
+      [["rewind_requested"], ["work_item_resumed", { steer: "redo the cache" }], ["pause_requested"], ["work_item_resumed", { steer: null }]]],
+    ["a rewind is used up by the retry that honoured it", "failed", (T, id, b) => (T.append(id, "rewind_requested", { review_id: "r1", target: "implementation", note: "redo it" }), T.retry(id), Object.assign(b.item, { status: "needs_human", current_node_id: "verification" }), T.retry(id)), { status: "active", current_node_id: "verification" },
+      [["rewind_requested"], ["work_item_retried", { node_id: "implementation", steer: "redo it" }], ["work_item_retried", { node_id: "verification", steer: null }]]],
     ["resume starts a never-started item at its first node", "kraft-f5d3", (T, id) => T.resume(id), { status: "active", display_status: "running", current_node_id: "spec" }, [["work_item_resumed", { steer: null }, null]]],
     ["resume honours a queued rewind, its note carried with the steer", "paused", (T, id) => (T.requestChanges(id, "implementation", "redo the cache"), T.resume(id, "and bound it")), { status: "active", current_node_id: "implementation" },
       [["rewind_requested", { target: "implementation", note: "redo the cache" }, "implementation"], ["work_item_resumed", { steer: "redo the cache\n\nand bound it" }, null]]],
@@ -76,6 +86,8 @@ describe("transitions", () => {
       [["escalation_message"], ["pause_requested"], ["worker_session_paused"], ["gate_rejected"]]],
     ["a thread no session stands for holds nothing up, and goes", "paused", (T, id, b) => ((b.item.escalation_threads = [{ thread: 1, session_id: "f".repeat(32), turns: 1, status: "running", ended_at: null }]), T.resume(id)), { status: "active", escalation_threads: [] },
       [["work_item_resumed"]]],
+    ["an end stops an escalation turn on another node too", "failed", (T, id, b) => (T.escalate(id, "look"), (b.item.current_node_id = "summary"), T.end(id, "cancel", "dup")), { status: "abandoned", escalation_threads: [expect.objectContaining({ status: "paused" })] },
+      [["escalation_message"], ["worker_session_paused"], ["work_item_cancelled", { node_id: "summary" }], ["work_item_abandoned"]]],
     ["abandon twice reclaims again with no second event", "failed", (T, id) => (T.abandon(id), T.abandon(id)), { status: "abandoned" }, [["work_item_abandoned", {}, null]]],
     ["retry runs a stopped item on its node", "failed", (T, id) => T.retry(id, "use the new token"), { status: "active", display_status: "running", stop: null, current_node_id: "merge_request" },
       [["work_item_retried", { node_id: "merge_request", steer: "use the new token", escalated: false }, "merge_request"]]],
@@ -119,6 +131,14 @@ describe("transitions", () => {
     expect(added.map((e) => [e.seq, e.work_item_id, e.created_at])).toEqual(want.map((_, k) => [from + k + 1, id, AT]));
     expect(T.cursor()).toBe(from + want.length);
     expect(told).toEqual(added);
+  });
+
+  it.each([
+    ["a never-started item: no node yet", "kraft-f5d3", (T: Transitions, id: string) => T.resume(id), { node_id: null, steer: null }],
+    ["a pending rewind: the node it was paused on", "paused", (T: Transitions, id: string) => (T.requestChanges(id, "implementation", "redo"), T.resume(id)), { node_id: "verification", steer: "redo" }],
+  ])("resume answers the node as it read before the claim: %s", (_name, at, act, body) => {
+    const { S, T } = fresh();
+    expect(act(T, idOf(S, at)).body).toMatchObject(body);
   });
 
   it("resume with a steer queues the node's own next attempt, under an id of its own", () => {

@@ -105,8 +105,16 @@ export class DemoSocket extends EventTarget {
  *  Sent on a later task, as a frame arrives: the action's own answer lands first, and nothing a listener does can
  *  reach back into the mock halfway through an action. */
 export function broadcast(event: unknown) {
-  const data = JSON.stringify(event);
-  setTimeout(() => { for (const s of [...sockets]) s.receive(data); }, 0);
+  // One task for everything sent until it runs: an action's frames arrive together, each its own message, so
+  // nothing the first one sets off (a re-read) runs between them and stores the next one twice.
+  if (!queued.length) setTimeout(flush, 0);
+  queued.push(JSON.stringify(event));
+}
+
+/** The frames `broadcast` has sent and the next task delivers, in order. */
+const queued: string[] = [];
+function flush() {
+  for (const data of queued.splice(0)) for (const s of [...sockets]) s.receive(data);
 }
 
 /** `new WebSocket(...)` for /api/** makes a DemoSocket; any other (Vite's dev reload socket) is the real one. */

@@ -186,12 +186,14 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
     }
     case "needs-you": {
       verificationAt("done");
-      const e = sess("verification.escalation.escalation", "needs_context", { hook_point: "escalation" });
+      // Two turns of one thread, as the thread says: the first answered, the second waiting on a person.
+      const first = sess("verification.escalation.escalation", "done", { hook_point: "escalation", created_at: t(m - 40), started_at: t(m - 40), exited_at: t(m - 36) });
+      const e = sess("verification.escalation.escalation", "needs_context", { hook_point: "escalation", exited_at: null });
       const q = "The race needs a reindex API change the plan froze. Allow the change, or accept the finding and move on?";
       ev("escalation_message", { session_id: e.id, node_id: "verification", thread: 1, turn: 2, message: q }, 1);
       ev("work_item_needs_human", { node_id: "verification", reason: `needs_context: ${q}`, kind: "question" }, 0.5);
       item.status = "needs_human"; item.display_status = "needs_you"; item.needs_context_question = q;
-      item.escalation_threads = [{ thread: 1, session_id: e.id, turns: 2, started_at: t(m - 40), ended_at: null, status: "needs_context" }];
+      item.escalation_threads = [{ thread: 1, session_id: e.id, turns: 2, started_at: first.created_at, ended_at: null, status: "needs_context" }];
       item.stop = stop("question", "verification.escalation.escalation", { reason: `needs_context: ${q}` });
       break;
     }
