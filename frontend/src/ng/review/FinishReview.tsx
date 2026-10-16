@@ -82,7 +82,7 @@ export function BottomBar({ item, gate, threads, readOnly, onFinish, submit }: {
   return (
     <div className="rv-bar">
       <span className="rv-bar-title">{bar.title}</span>
-      <span className="rv-muted">{bar.text}</span>
+      <span className="rv-muted" title={bar.text} data-allow-ellipsis="">{bar.text}</span>
       {bar.agent && <><span aria-hidden="true" className="rv-muted">·</span><span className="rv-muted">{bar.agent}</span></>}
       {error && <span className="rv-error" role="alert">{error}</span>}
       <span className="rv-spacer" />
