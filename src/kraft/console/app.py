@@ -444,9 +444,10 @@ class KraftConsole(App):
         self.default_screen.remove_class("-since")
 
     def _draw_since(self) -> None:
-        if self.seen is not None and self.default_screen.has_class("-since"):
+        since = self.query_one_optional("#since", Static)  # none once the frame is down
+        if since and self.seen is not None and self.default_screen.has_class("-since"):
             line = moments.since_line(self._in_scope(self.rows), self.seen, time.time())
-            self.query_one("#since", Static).update(Content.styled(line, "$kraft-muted"))
+            since.update(Content.styled(line, "$kraft-muted"))
 
     def action_prompt(self) -> None:
         prompt = self.query_one(Prompt)
@@ -687,6 +688,10 @@ class KraftConsole(App):
         self._draw_top()
 
     def _draw_top(self, width: int | None = None) -> None:
+        top = self.query_one_optional("#tabs", Static)
+        place = self.query_one_optional("#where", Static)
+        if top is None or place is None:
+            return  # the frame is not up yet, or is coming down: an event or a beat can land then
         self._draw_since()
         # The scope may have moved (resolved, or `s`): the count follows it.
         if status := self.query_one_optional(StatusLine):  # none once the frame is down
@@ -709,7 +714,7 @@ class KraftConsole(App):
             " ",
             *tabs,
         ).rstrip()
-        self.query_one("#tabs", Static).update(head)
+        top.update(head)
         where = home_relative(self.repo) if self.repo else "all repos"
         # `width` from a resize: inside one, `self.size` is still the old size.
         total = width or self.size.width
@@ -723,7 +728,7 @@ class KraftConsole(App):
         while len(where) > room and len(parts) > 1:
             parts.pop(0)
             where = "…/" + "/".join(parts)
-        self.query_one("#where", Static).update(Content(f"{where}{tail}"))
+        place.update(Content(f"{where}{tail}"))
 
     def _tabs(self) -> list[tuple[str, str | tuple[str, str]]]:
         """Each top view's tab with its count (spec §5.4): how many need you

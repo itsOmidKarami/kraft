@@ -16,7 +16,7 @@ from textual.binding import Binding
 from textual.widgets import ContentSwitcher, Footer, Input
 
 from kraft import cli, client
-from kraft.console import acts, live, pulse
+from kraft.console import acts, live, moments, pulse
 from kraft.console import app as console_app
 from kraft.console.app import TABS, KraftConsole
 from kraft.console.dialogs import EVERYWHERE, Confirm, Keys, Note
@@ -744,3 +744,22 @@ def test_the_top_line_leads_with_the_brand_and_lights_the_dot_one_beat(board):
         "$success",
         "bold $kraft-live-lit",
     )
+
+
+@pytest.mark.parametrize("gone", ["#where", "#tabs", "#since"])
+def test_the_top_line_draws_nothing_once_its_frame_is_coming_down(board, gone):
+    """Quitting takes the frame down a widget at a time while a lit dot's timer,
+    an event or a beat can still land: a draw then must not raise (one in a
+    handler ends the app with a traceback)."""
+    console = board([GATE])
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        app.default_screen.add_class("-since")
+        app.seen = moments.Seen(at=0.0, done=frozenset())
+        await app.query_one(gone).remove()
+        app._unlight_dot()
+        app._draw_top()
+        return True
+
+    assert console.run(scenario)
