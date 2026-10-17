@@ -122,6 +122,10 @@ describe("recent", () => {
     ["a session a skip stopped drops out, the skip tells it",
       [at("node_started", {}, "verification"), started("s1", "verification.checks.lint"), at("node_skipped", { node_id: "verification", gate: null }, "verification"), paused("s1")],
       ["verification skipped"]],
+    // `store.skip_node` with an escalation turn running on the node: the skip, then the turn's stop.
+    ["a skip with an escalation turn running reads the turn stopped",
+      [at("escalation_message", { message: "why?" }, "verification"), started("s3", "escalation"), at("node_skipped", { node_id: "verification", gate: null }, "verification"), paused("s3")],
+      ["escalation stopped", "verification skipped", "escalation on verification: why?"]],
     // `store.stop_escalation_session` (Stop agent): the turn ends, the item stays as it stopped.
     ["an escalation's turn a person stopped reads stopped",
       [at("escalation_message", { message: "why?" }, "verification"), started("s3", "escalation"), paused("s3")],
@@ -137,10 +141,12 @@ describe("recent", () => {
     ["a stop after the turn's exit adds nothing",
       [started("s3", "escalation"), exited("s3", "done"), paused("s3")],
       ["escalation answered"]],
+    // Defensive: the server cannot write this order (`store.session_exited` returns early on a paused row).
     ["a failed exit after a stop adds nothing",
       [started("s1", "verification.checks.lint"), at("pause_requested", { sessions: ["s1"] }), paused("s1"), exited("s1", "failed")],
       ["paused"]],
-    // `store.session_running` appends its start even when a pause already settled the row.
+    // A start that lands after the session's end, as an older server's `store.session_running` wrote one when a pause
+    // had already settled the row.
     ["a start after the session was stopped adds nothing",
       [at("pause_requested", { sessions: ["s1"] }), paused("s1"), started("s1", "verification.review.code_review")],
       ["paused"]],

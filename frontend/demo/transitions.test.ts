@@ -459,7 +459,7 @@ describe("samples and answers as the server shapes them", () => {
     ["kraft-4e19, paused", "kraft-4e19", ["pause_requested", "worker_session_paused"]],
     ["kraft-7c40, paused, then queued on resume", "kraft-7c40", ["pause_requested", "worker_session_paused"]],
     ["kraft-b2e7, paused, then blocked on resume", "kraft-b2e7", ["pause_requested", "worker_session_paused"]],
-    ["kraft-88ca, cancelled", "kraft-88ca", ["worker_session_paused", "work_item_cancelled"]],
+    ["kraft-88ca, cancelled", "kraft-88ca", ["worker_session_paused", "work_item_cancelled", "work_item_abandoned"]],
   ])("%s: its stopped attempt is paused on the timeline as the store writes it, and Recent has it ended", (_name, bead, order) => {
     const { S } = server();
     const b = S.bundles[idOf(S, bead)];
@@ -468,6 +468,8 @@ describe("samples and answers as the server shapes them", () => {
     expect([last.status, ends.map((e) => [e.type, e.payload]), last.exited_at]).toEqual(["paused", [["worker_session_paused", { session_id: last.id }]], ends[0]?.created_at]);
     // No writer sets a paused row's wall time: it is its stamps' span (`_common.session_wall_ms`).
     expect(last.wall_ms).toBe(Date.parse(last.exited_at) - Date.parse(last.started_at));
+    // `toBe` passes NaN against NaN: a span of missing stamps would slip through without this.
+    expect(last.wall_ms).toBeGreaterThan(0);
     expect(b.events.filter((e) => order.includes(e.type)).map((e) => [e.type, e.type === "pause_requested" ? e.payload.sessions : undefined])).toEqual(order.map((t) => [t, t === "pause_requested" ? [last.id] : undefined]));
     expect(recent(b.events as any).map((l) => l.line)).not.toContain("a session is running on verification");
   });
