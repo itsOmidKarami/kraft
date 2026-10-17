@@ -376,7 +376,7 @@ class _Recording(forge.FakeForge):
         # reruns checks on ready-for-review sees the head it is about to
         # check. Then push, then describe (Kraft-nh5m): the description and
         # the branch the reviewer's forge shows describe the same head.
-        ("sync_mr", ["mark_ready", "push", "update_mr"]),
+        ("sync_mr", ["mark_ready", "push", "update_mr", "ci_status"]),
         # `_assert_pushed` refuses a head the remote never saw, and a retry of
         # `merge` alone never re-runs `mr_sync`, so merge pushes first itself.
         ("merge", ["push", "ci_status", "merge"]),

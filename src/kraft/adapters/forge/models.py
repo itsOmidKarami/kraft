@@ -209,6 +209,7 @@ class Forge(Protocol):
     async def mark_ready(self, *, repo: Path, branch: str, mr: MR) -> None: ...
     async def push(self, *, repo: Path, branch: str) -> None: ...
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None: ...
+    async def mr_body(self, *, repo: Path, branch: str) -> str: ...
     async def ci_status(
         self, *, repo: Path, mr: MR, branch: str, pipeline_id: str = ""
     ) -> CIStatus: ...
@@ -389,6 +390,11 @@ class FakeForge:
 
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
         self.bodies[branch] = body
+
+    async def mr_body(self, *, repo: Path, branch: str) -> str:
+        if branch in self.bodies:
+            return self.bodies[branch]
+        return next((b for n, b in self.opened_bodies.items() if self.opened[n] == branch), "")
 
     async def ci_status(
         self, *, repo: Path, mr: MR, branch: str = "", pipeline_id: str = ""

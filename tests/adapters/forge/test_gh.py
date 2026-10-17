@@ -349,3 +349,10 @@ async def test_gh_retry_jobs_reruns_the_actions_run_behind_the_failed_check(cli,
     )
 
     assert cli.argv("gh") == ["run", "rerun", "123456", "--failed"]
+
+
+async def test_gh_mr_body_reads_the_live_description(cli, tmp_path):
+    cli.stub("gh", routes={"pr view": '{"body":"the live body"}'})
+
+    assert await forge.GhCli().mr_body(repo=tmp_path, branch="b") == "the live body"
+    assert cli.argv("gh") == ["pr", "view", "--json", "body"]

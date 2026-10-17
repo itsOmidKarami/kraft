@@ -125,6 +125,10 @@ class GlabCli(mr_ops.CliWaits):
         # checked-out branch, the way merge and ci already do.
         await git.run_git(repo, ["glab", "mr", "update", "--description", body])
 
+    async def mr_body(self, *, repo: Path, branch: str) -> str:
+        data = await self._json(repo, ["mr", "view", "-F", "json"], "glab mr view")
+        return str(data.get("description") or "")
+
     async def _merge_state(self, repo: Path, branch: str = "") -> str:
         """The merge request's own view of whether it can merge.
 

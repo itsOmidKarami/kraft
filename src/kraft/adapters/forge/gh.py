@@ -121,6 +121,10 @@ class GhCli(mr_ops.CliWaits):
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
         await git.run_git(repo, ["gh", "pr", "edit", "--body", body])
 
+    async def mr_body(self, *, repo: Path, branch: str) -> str:
+        data = await self._json(repo, ["pr", "view", "--json", "body"], "gh pr view")
+        return str(data.get("body") or "")
+
     async def ci_status(
         self, *, repo: Path, mr: MR, branch: str = "", pipeline_id: str = ""
     ) -> CIStatus:

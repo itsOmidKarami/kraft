@@ -21,7 +21,12 @@ rewrites the title or description after you: write it for the reviewer, not for 
   label of a given kind (a release or change-type label, say). If this one
   does, you must pick one: its CONTRIBUTING, or the CI job that checks, is
   where the choices are written down. If it states no label rule, there is
-  none to satisfy.
+  none to satisfy. The same goes for **a section the description must
+  carry**: a project can fail a merge request whose body lacks one (a
+  removed-tests list, a changelog), and a template may show it commented out,
+  which does not make it optional. Look in CONTRIBUTING, the whole template
+  (comments included) and the CI job that reads the body. If the repo ships a
+  checker for the body, run it on your draft before you finish.
 - `CODEOWNERS` for who reviews the paths this diff touches.
 - What the project already does: `git log --oneline -30` for the title
   pattern (Conventional Commits or not), `glab mr list --merged` / `gh
@@ -53,8 +58,9 @@ describes the change that was planned, not the one that was made.
 - Do not invent a reviewer or a label. Empty is correct unless the repo names
   one, and a label that does not already exist in this project is a failed
   API call, not a new label.
-- A label the project's rules require is not optional: every one of them goes
-  in `labels`, or the merge request fails CI before anyone reads it.
+- A label or description section the project's rules require is not optional:
+  every label goes in `labels` and every section in the description, or the
+  merge request fails CI before anyone reads it.
 - Three lines is a fine description for a three-line diff.
 - Scope deliberately left out belongs in the description -- it is most of
   what gets rejected.
@@ -68,5 +74,6 @@ describes the change that was planned, not the one that was made.
 ## Before you finish
 
 Check that every label the project's rules require is in `labels` and exists in
-its label list, and that the description describes `git diff <base>...HEAD`, the
+its label list, that every section they require is in the description (and the
+repo's body checker, if it has one, passes on it), and that the description describes `git diff <base>...HEAD`, the
 change that was made, not the plan.
