@@ -71,7 +71,7 @@ def test_a_fixture_agent_and_an_ordinary_subprocess_are_untouched(tmp_path):
         # test does not supply -- proof the guard let it through, with no
         # subprocess actually spawned. A `TypeError` here and an `AssertionError`
         # above is the whole distinction.
-        with pytest.raises(TypeError, match="missing 4 required keyword-only"):
+        with pytest.raises(TypeError, match=r"run_task\(\) missing \d+ required keyword-only"):
             asyncio.run(sp_mod.run_task(None, None, cmd=cmd, cwd=tmp_path))
 
 
@@ -81,7 +81,7 @@ def test_the_real_executor_marker_opts_out(tmp_path, real_binary_guard):
     §5 regression test drives the real executor on purpose). It turns the
     whole guard off: the launch gets through, and no stub is on `PATH`.
     `KRAFT_E2E` still gates the tests that mean to reach a real agent."""
-    with pytest.raises(TypeError, match="missing 4 required keyword-only"):
+    with pytest.raises(TypeError, match=r"run_task\(\) missing \d+ required keyword-only"):
         asyncio.run(sp_mod.run_task(None, None, cmd=["claude", "-p", "hello"], cwd=tmp_path))
     assert real_binary_guard is None
     assert real_binaries.ACTIVE is None
