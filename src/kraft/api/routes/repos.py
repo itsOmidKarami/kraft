@@ -59,6 +59,7 @@ class RepoBody(BaseModel):
     models: dict[str, str] | None = None
     deny_tools: list[str] | None = None
     steering: list[str] | None = None
+    worktrees: bool | None = None
 
 
 class ProbeBody(BaseModel):
@@ -273,10 +274,11 @@ def _validate_repos(
         candidate = Path(tmp) / "repos.yaml"
         candidate.write_text(yaml.safe_dump({"repos": repos, "workspaces": workspaces}))
         try:
-            if steering:
-                # Against the library's profiles; with no library loaded
-                # there is nothing to name, and intake refuses the item.
-                config_mod.load_repos(candidate, steering=deps.library_steering(st))
+            # Against the library's profiles when `steering`; with no library
+            # loaded there is nothing to name, and intake refuses the item.
+            config_mod.load_repos(
+                candidate, steering=deps.library_steering(st) if steering else None
+            )
             config_mod.load_workspaces(candidate)
         except config_mod.ConfigError as exc:
             raise HTTPException(422, str(exc)) from exc
@@ -558,6 +560,7 @@ async def _add_repo(body: RepoBody, st) -> dict:
         "models": body.models or {},
         "deny_tools": body.deny_tools or [],
         "steering": body.steering or [],
+        "worktrees": body.worktrees,
         # A human typed this path. Set here rather than defaulted in the
         # loader, because `_auto_connect_children` below writes entries
         # through the same file and must NOT get this value.
@@ -620,6 +623,7 @@ class RepoPatch(BaseModel):
     local_files: list[str] | None = None
     intent_dir: str | None = None
     library_auto_update: bool | None = None
+    worktrees: bool | None = None
 
 
 def _has_tests(entry: dict) -> bool:

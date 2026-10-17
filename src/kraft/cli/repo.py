@@ -506,13 +506,22 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
     interactive = not (ns.json or ns.yes) and sys.stdin.isatty() and sys.stdout.isatty()
     if interactive and test_command is None and setup_command is None:
         test_command, setup_command = _choose_interactively(ns.path)
+    worktrees = False if ns.in_place else None
     result = asyncio.run(
-        client.ensure_repo(ns.path, test_command=test_command, setup_command=setup_command)
+        client.ensure_repo(
+            ns.path, test_command=test_command, setup_command=setup_command, worktrees=worktrees
+        )
     )
     if result.get("already_connected"):
         result = _connect_again(
             result, test_command, setup_command, ask=interactive, say=not ns.json
         )
+        # `_connect_again` fills only what is undecided; this is a decision.
+        if ns.in_place and result.get("worktrees") is not False:
+            saved = asyncio.run(client.update_repo(result["path"], {"worktrees": False}))
+            result = {**result, **saved}
+            if not ns.json:
+                _print("saved worktrees: false: its items run in place")
     elif not ns.json:
         _say_connected(result)
     if not ns.json and not os.environ.get("KRAFT_WORK_ITEM_ID"):
@@ -586,6 +595,12 @@ def _add_repo(subs, common: argparse.ArgumentParser) -> None:
         "--no-tests",
         action="store_true",
         help='the repo has no tests to run (saves test_command: "", and the repo enabled)',
+    )
+    connect.add_argument(
+        "--in-place",
+        action="store_true",
+        help="run its items in this checkout rather than in a worktree each "
+        "(saves worktrees: false)",
     )
     connect.add_argument(
         "-y",
