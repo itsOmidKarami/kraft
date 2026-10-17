@@ -4,6 +4,7 @@ which is at its line budget."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -56,20 +57,28 @@ async def test_a_stopped_sessions_processes_hold_the_checkout_until_they_are_gon
     ids=["waiter-via-link", "holder-via-link", "waiter-in-another-case"],
 )
 async def test_the_lease_is_the_folder_not_its_spelling(
-    item_on, run_dirs, database, repo, linked, spelling
+    item_on, run_dirs, database, repo, monkeypatch, linked, spelling
 ):
     """Two `repos.yaml` spellings of one checkout share its lease: through a
     link, or, on a case-insensitive volume (macOS's default), in another case."""
     chain = v1_named_chain(run_dirs.base / "t")
     if spelling == "case":
         link = Path(str(repo).swapcase())
-        if not link.exists():
-            pytest.skip("this volume tells the cases of a name apart")
     else:
         link = repo.parent / "link"
         link.symlink_to(repo)
     await item_on(chain, wid="a", target=IN_PLACE, repo=link if linked == "a" else repo)
     await item_on(chain, wid="b", target=IN_PLACE, repo=link if linked == "b" else repo)
     await database.write(lambda c: store.pause_work_item(c, "b", []))
+    if spelling == "case":
+        real = os.stat
+
+        def folded(path, *a, **kw):  # a case-insensitive volume, on any OS
+            try:
+                return real(path, *a, **kw)
+            except FileNotFoundError:
+                return real(str(path).swapcase(), *a, **kw)
+
+        monkeypatch.setattr(work_items.os, "stat", folded)
 
     assert database.read(lambda c: store.checkout_holder(c, "b")) == "a"
