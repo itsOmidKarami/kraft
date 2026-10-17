@@ -6,13 +6,12 @@ import asyncio
 import json
 
 import pytest
-from support.harness import commit_all, git, write
+from support.harness import IN_PLACE, commit_all, git, write
 
 from kraft import events, store
 from kraft.executor import context, dispatch
 from kraft.executor.context import BASE_MOVED
 from kraft.findings import Finding
-from kraft.templates.environment import WorkItemTarget
 
 
 def _agent(task_id, **fields):
@@ -184,7 +183,7 @@ async def test_measure_node_reuses_a_done_session_at_the_current_head(
     `test_reconcile_reuses_a_done_measuring_session_after_a_crash` is the same
     rule through `executor.resume`.) In place the item's head is its branch's
     tip, whatever the person has checked out."""
-    target = WorkItemTarget.for_repository("sample", in_place=True) if in_place else None
+    target = IN_PLACE if in_place else None
     it = await item_on(
         [{"id": "verify", "kind": "exec", "tasks": [_builtin("suite"), _agent("review")]}],
         target=target,

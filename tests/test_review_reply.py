@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from support.addons import drop_store, install_release, pinned_chain
 from support.harness import (
+    IN_PLACE,
     entry_of,
     git,
     make_repo,
@@ -20,7 +21,6 @@ from support.harness import (
 )
 
 from kraft import executor, inplace, review_reply, store
-from kraft.templates.environment import WorkItemTarget
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 FAKE_AGENT_COMMAND = f"{sys.executable} {_FAKE_AGENT}"
@@ -350,10 +350,9 @@ async def test_no_reply_agent_starts_without_its_checkout(
     """Refused where its session would be written, or where the checkout is
     switched to the item's branch (here, gone); the caller queues or skips it."""
     _seed(tmp_path, monkeypatch)
-    in_place = WorkItemTarget.for_repository("sample", in_place=True)
     if busy:
-        await item_on(NODES, GATE, wid="a", target=in_place, title="A")
-    it = await item_on(NODES, GATE, wid="b", target=in_place, status="needs_human")
+        await item_on(NODES, GATE, wid="a", target=IN_PLACE, title="A")
+    it = await item_on(NODES, GATE, wid="b", target=IN_PLACE, status="needs_human")
     await _published_unanswered_thread(it)
 
     with pytest.raises(refusal, match=match):
@@ -377,8 +376,7 @@ async def test_an_in_place_reply_agent_that_writes_nothing_did_not_write(
     person on their own branch is not a write by the reply agent."""
     _seed(tmp_path, monkeypatch)
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    target = WorkItemTarget.for_repository("sample", in_place=True)
-    it = await item_on(NODES, GATE, target=target, status="needs_human")
+    it = await item_on(NODES, GATE, target=IN_PLACE, status="needs_human")
     git(repo, "branch", store.branch_for(it.row()))
     write(repo, "MINE", "the person's own commit\n")
     git(repo, "add", "MINE")

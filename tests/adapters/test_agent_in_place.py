@@ -6,11 +6,10 @@ itself, as `dispatch` does around a walk task."""
 from pathlib import Path
 
 import pytest
-from support.harness import git, v1_node, write
+from support.harness import IN_PLACE, git, v1_node, write
 
 from kraft import inplace, store
 from kraft.adapters import agent
-from kraft.templates.environment import WorkItemTarget
 
 from .test_agent import PY_FAKE, _system_prompt
 
@@ -31,9 +30,6 @@ def test_an_in_place_agent_is_told_whose_checkout_it_is(run, in_place):
     assert prompt.count("Commit everything you change before you exit") == 1
 
 
-_IN_PLACE = WorkItemTarget.for_repository("sample", in_place=True)
-
-
 @pytest.mark.parametrize(
     ("script", "stop"),
     [
@@ -51,7 +47,7 @@ async def test_an_in_place_session_outside_the_walk_takes_marks_and_checks_its_c
 ):
     """An escalation, reply or gate-review agent runs the steps a walk task
     does: the checkout switched to the item's branch, marked, checked after."""
-    it = await item_on([v1_node()], status="needs_human", target=_IN_PLACE)
+    it = await item_on([v1_node()], status="needs_human", target=IN_PLACE)
     branch = store.branch_for(it.row())
     git(it.repo, "branch", branch)
     write(it.repo, "calc.py", "# the person's edit\n")
@@ -77,7 +73,7 @@ async def test_an_in_place_session_outside_the_walk_takes_marks_and_checks_its_c
 async def test_an_in_place_session_refused_its_checkout_never_launches(item_on, monkeypatch):
     """The branch is gone: nothing switches, the agent never runs, and the
     refusal is the session's log for the caller to stop or skip on."""
-    it = await item_on([v1_node()], status="needs_human", target=_IN_PLACE)
+    it = await item_on([v1_node()], status="needs_human", target=IN_PLACE)
     monkeypatch.setenv("KRAFT_FAKE_AGENT_SHELL", "touch ran")
 
     with pytest.raises(inplace.CheckoutRefused, match="is gone"):

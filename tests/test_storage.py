@@ -11,10 +11,9 @@ from types import SimpleNamespace
 import pytest
 from support.archive import days_ago, seed_completed_item
 from support.deep_tree import deep_chain, opens_during
-from support.harness import v1_named_chain
+from support.harness import IN_PLACE, v1_named_chain
 
 from kraft import item_paths, policy, storage
-from kraft.templates.environment import WorkItemTarget
 
 MB = 1024**2
 
@@ -271,7 +270,7 @@ async def test_only_a_start_that_would_make_a_worktree_is_held(item_on, database
     """An in-place item never makes one: its folder is the person's checkout."""
     chain = v1_named_chain(run_dirs.base / "t")
     await item_on(chain, wid="new")
-    await item_on(chain, wid="here", target=WorkItemTarget.for_repository("sample", in_place=True))
+    await item_on(chain, wid="here", target=IN_PLACE)
     (run_dirs.worktrees / "has").mkdir(parents=True)
     st = SimpleNamespace(
         policy=_policy(100, 80), storage_usage=_usage(101), run_dirs=run_dirs, db=database
@@ -441,7 +440,7 @@ async def test_an_in_place_item_is_never_measured_or_auto_archived(
     here = await item_on(
         v1_named_chain(run_dirs.base / "t"),
         wid="here",
-        target=WorkItemTarget.for_repository("sample", in_place=True),
+        target=IN_PLACE,
         status="completed",
     )
     _fill(repo / "the-person-s-own.bin")

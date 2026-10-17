@@ -6,6 +6,11 @@ family; they live here only to keep that file under its line budget."""
 
 from __future__ import annotations
 
+from kraft.templates.environment import WorkItemTarget
+
+#: An item that runs in place: in the `repo` fixture's own checkout ("sample").
+IN_PLACE = WorkItemTarget.for_repository("sample", in_place=True)
+
 #: What a task of each kind needs to validate when the caller does not say:
 #: an agent goes on the `fake` harness, which `seed_v1_library` neuters.
 _V1_TASK_DEFAULTS: dict[str, dict[str, str]] = {

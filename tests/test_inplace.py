@@ -9,18 +9,16 @@ import sys
 from pathlib import Path
 
 import pytest
-from support.harness import commit_all, entry_of, git, v1_named_chain, write
+from support.harness import IN_PLACE, commit_all, entry_of, git, v1_named_chain, write
 
 from kraft import builtins, inplace, store
-from kraft.templates.environment import WorkItemTarget
 
 
 async def test_the_item_folder_is_the_repo_in_place_and_the_worktree_otherwise(
     item_on, run_dirs, repo
 ):
     chain = v1_named_chain(run_dirs.base / "t")
-    target = WorkItemTarget.for_repository("sample", in_place=True)
-    in_place = await item_on(chain, wid="here", target=target)
+    in_place = await item_on(chain, wid="here", target=IN_PLACE)
     worktree = await item_on(chain, wid="apart")
 
     assert inplace.item_folder(run_dirs, in_place.row()) == Path(repo)
@@ -30,12 +28,9 @@ async def test_the_item_folder_is_the_repo_in_place_and_the_worktree_otherwise(
     ), "a row with no snapshot reads as a worktree item"
 
 
-_IN_PLACE = WorkItemTarget.for_repository("sample", in_place=True)
-
-
 async def _prepared(item_on, database, run_dirs, repo):
     """An in-place item whose branch ref `prepare` made, the person still on `main`."""
-    it = await item_on(v1_named_chain(run_dirs.base / "t"), wid="w1", target=_IN_PLACE)
+    it = await item_on(v1_named_chain(run_dirs.base / "t"), wid="w1", target=IN_PLACE)
     await inplace.prepare(database, run_dirs, it.row(), base="main")
     return it, store.branch_for(it.row())
 
@@ -177,7 +172,7 @@ async def test_take_looks_at_the_lease_again_before_it_switches(
     not switch a checkout another item has taken since."""
     it, branch = await _prepared(item_on, database, run_dirs, repo)
     if other:
-        await item_on(v1_named_chain(run_dirs.base / "t"), wid="other", target=_IN_PLACE)
+        await item_on(v1_named_chain(run_dirs.base / "t"), wid="other", target=IN_PLACE)
     await database.write(lambda c: store.pause_work_item(c, "w1", []))
 
     with pytest.raises(inplace.NotRunning if walk else inplace.CheckoutRefused, match=refused):
@@ -234,7 +229,7 @@ async def test_take_stops_on_an_unsettled_checkout(
 @pytest.mark.parametrize("on", ["main", "feature"], ids=["on-main", "on-another-branch"])
 async def test_prepare_never_runs_setup_or_writes_git_config(item_on, database, run_dirs, repo, on):
     """The branch forks from the base, never from whatever the person has out."""
-    it = await item_on(v1_named_chain(run_dirs.base / "t"), wid="w1", target=_IN_PLACE)
+    it = await item_on(v1_named_chain(run_dirs.base / "t"), wid="w1", target=IN_PLACE)
     main = git(repo, "rev-parse", "main")
     if on != "main":
         git(repo, "checkout", "-q", "-b", on)

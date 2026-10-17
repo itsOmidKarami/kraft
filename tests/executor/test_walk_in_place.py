@@ -4,16 +4,13 @@ task that needs the folder, never on the walk's entry, and never by force."""
 from __future__ import annotations
 
 import pytest
-from support.harness import commit_all, entry_of, git, write
+from support.harness import IN_PLACE, commit_all, entry_of, git, write
 
 from kraft import inplace, store
 from kraft.adapters import forge as _forge
 from kraft.executor import dispatch
-from kraft.templates.environment import WorkItemTarget
 
 from .test_walk import FORGE_REPO, _agent, _exec, _forge_task, _stop_reason, _walk
-
-_IN_PLACE = WorkItemTarget.for_repository("sample", in_place=True)
 
 
 @pytest.mark.parametrize("read_only", [False, True], ids=["plain", "read-only-node"])
@@ -23,7 +20,7 @@ async def test_a_ci_wait_reentry_does_not_move_the_checkout(item_on, repo, monke
         "mr_checks", _forge_task("ci_poll", "mr.ci"), **({"read_only": True} if read_only else {})
     )
     chain = [_exec("implementation", _agent()), ci]
-    it = await item_on(chain, "mr_checks", target=_IN_PLACE)
+    it = await item_on(chain, "mr_checks", target=IN_PLACE)
 
     assert await _walk(it, repo_entry=FORGE_REPO) == "waiting"
     assert git(repo, "symbolic-ref", "HEAD") == "refs/heads/main"
@@ -31,7 +28,7 @@ async def test_a_ci_wait_reentry_does_not_move_the_checkout(item_on, repo, monke
 
 
 async def test_a_refused_take_stops_the_item_as_checkout(item_on, fake_agent, repo):
-    it = await item_on(fake_agent.quick_task, target=_IN_PLACE)
+    it = await item_on(fake_agent.quick_task, target=IN_PLACE)
     branch = store.branch_for(it.row())
     git(repo, "checkout", "-q", "-b", branch)
     write(repo, "calc.py", "the item's version\n")
@@ -53,7 +50,7 @@ async def test_a_refused_take_stops_the_item_as_checkout(item_on, fake_agent, re
 
 
 async def test_a_sandbox_added_after_filing_stops_as_config(item_on, fake_agent, repo):
-    it = await item_on(fake_agent.quick_task, target=_IN_PLACE)
+    it = await item_on(fake_agent.quick_task, target=IN_PLACE)
     sandboxed = entry_of({"setup_command": "", "sandbox": {"kind": "docker", "image": "x"}})
 
     assert await _walk(it, repo_entry=sandboxed) == "needs_human"
@@ -66,7 +63,7 @@ async def test_a_sandbox_added_after_filing_stops_as_config(item_on, fake_agent,
 
 @pytest.mark.parametrize("dirty", [False, True], ids=["clean", "the-persons-edit"])
 async def test_an_agent_task_runs_on_the_items_branch(item_on, fake_agent, repo, dirty):
-    it = await item_on(fake_agent.quick_task, target=_IN_PLACE)
+    it = await item_on(fake_agent.quick_task, target=IN_PLACE)
     branch = store.branch_for(it.row())
     git(repo, "checkout", "-q", "-b", branch)
     write(repo, "ITEM", "already on the item's branch\n")
@@ -101,7 +98,7 @@ async def test_an_agent_task_runs_on_the_items_branch(item_on, fake_agent, repo,
 async def test_no_sweep_after_an_in_place_task_moves_or_commits_anything(item_on, run_dirs, repo):
     """The straggler sweep forces the branch back and commits with `add -A`:
     in the person's checkout it would discard their switch and take their edits."""
-    it = await item_on([_exec("implementation", _agent())], target=_IN_PLACE)
+    it = await item_on([_exec("implementation", _agent())], target=IN_PLACE)
     git(repo, "branch", store.branch_for(it.row()))
     write(repo, "calc.py", "# the person's edit\n")
     head = git(repo, "rev-parse", "HEAD")
@@ -125,7 +122,7 @@ async def test_no_sweep_after_an_in_place_task_moves_or_commits_anything(item_on
 async def test_a_branch_deleted_while_the_item_waits_is_a_checkout_stop(
     item_on, fake_agent, database, run_dirs, repo
 ):
-    it = await item_on(fake_agent.quick_task, target=_IN_PLACE)
+    it = await item_on(fake_agent.quick_task, target=IN_PLACE)
     await inplace.prepare(database, run_dirs, it.row(), base="main")
     branch = store.branch_for(it.row())
     git(repo, "branch", "-D", branch)
@@ -142,7 +139,7 @@ async def test_a_soft_pause_between_steps_ends_the_walk_before_its_take(
 ):
     """A broken base's pause stops no walk mid-node: the next take sees it,
     and the walk ends paused, never as a stop, with the checkout untouched."""
-    it = await item_on(fake_agent.quick_task, target=_IN_PLACE)
+    it = await item_on(fake_agent.quick_task, target=IN_PLACE)
     take = inplace.take
 
     async def paused_first(db, *args, **kwargs):

@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 from support.addons import with_origin
 from support.api import _force_node, _paused, _poll_events, _set_status
-from support.harness import commit_all, git, v1_named_chain, write
-from test_inplace import _IN_PLACE, _head, _on_branch, _prepared
+from support.harness import IN_PLACE, commit_all, git, v1_named_chain, write
+from test_inplace import _head, _on_branch, _prepared
 
 from kraft import builtins, inplace, store
 
@@ -344,7 +344,7 @@ async def test_a_rebase_waits_for_the_checkouts_lock(item_on, database, run_dirs
 
 
 async def test_rebase_of_an_item_not_yet_started_does_nothing(item_on, run_dirs, repo):
-    it = await item_on(v1_named_chain(run_dirs.base / "t"), wid="w1", target=_IN_PLACE)
+    it = await item_on(v1_named_chain(run_dirs.base / "t"), wid="w1", target=IN_PLACE)
 
     assert await inplace.rebase(run_dirs, it.row(), base="main") is None
     assert git(repo, "branch", "--list", store.branch_for(it.row())) == ""

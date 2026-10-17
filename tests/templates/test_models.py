@@ -1,8 +1,6 @@
 """Typed V1 template schema: task kinds, execution shapes, gates, identifiers,
 and the canonical execution paths a resolved chain assigns."""
 
-import json
-
 import pytest
 from pydantic import ValidationError
 
@@ -789,23 +787,3 @@ def test_a_skip_that_orphans_a_reject_target_clears_it_rather_than_dangling():
             InstancePolicy.from_input(InstancePolicyInput()),
         ).to_json()
     )
-
-
-@pytest.mark.parametrize("in_place", [False, True], ids=["worktree", "in-place"])
-def test_a_snapshot_names_in_place_only_when_it_is(in_place):
-    """An older build forbids unknown target keys: a worktree item's snapshot
-    keeps the target it had before in-place items, so a rollback reads it."""
-    resolved = _resolved(
-        [
-            {
-                "id": "build",
-                "kind": "exec",
-                "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}],
-            }
-        ]
-    )
-    target = WorkItemTarget.for_repository("target", in_place=in_place)
-    raw = resolved.materialize(target, InstancePolicy.from_input(InstancePolicyInput())).to_json()
-
-    assert ("in_place" in json.loads(raw)["target"]) is in_place
-    assert tm.MaterializedChain.from_json(raw).target.in_place is in_place

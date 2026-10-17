@@ -22,7 +22,7 @@ from support.api import (
 from support.api import (
     _queue_tick as _tick,
 )
-from support.harness import v1_named_chain
+from support.harness import IN_PLACE, v1_named_chain
 
 from kraft import start_queue
 
@@ -235,12 +235,10 @@ async def test_a_start_put_back_by_a_shutdown_still_says_who_has_the_checkout(
     item_on, run_dirs, database
 ):
     from kraft import store
-    from kraft.templates.environment import WorkItemTarget
 
-    in_place = WorkItemTarget.for_repository("sample", in_place=True)
     chain = v1_named_chain(run_dirs.base / "t")
-    await item_on(chain, wid="a", target=in_place)
-    b = await item_on(chain, wid="b", target=in_place)
+    await item_on(chain, wid="a", target=IN_PLACE)
+    b = await item_on(chain, wid="b", target=IN_PLACE)
     await database.write(lambda c: store.pause_work_item(c, "b", []))
     saved = {"verb": "resume", "body": {}, "headers": {}, "from": "paused", "at": "2026-01-01"}
 

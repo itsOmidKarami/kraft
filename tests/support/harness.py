@@ -14,7 +14,8 @@ from typing import Any
 
 import yaml
 
-from support.chain_builders import (  # re-exported: the v1_* family
+from support.chain_builders import (  # re-exported: the v1_* family, and IN_PLACE
+    IN_PLACE,  # noqa: F401
     v1_fix_loop_node,  # noqa: F401
     v1_node,  # noqa: F401
     v1_task,  # noqa: F401

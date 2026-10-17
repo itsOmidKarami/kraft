@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -6,7 +7,9 @@ from pydantic import ValidationError
 from support.addons import edit_and_forge, edit_store, installed
 
 from kraft import harness
+from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.templates import environment as te
+from kraft.templates import models as tm
 
 
 @pytest.fixture
@@ -139,6 +142,27 @@ def test_an_in_place_target_round_trips_and_an_older_snapshot_reads_as_a_worktre
     raw = te.WorkItemTarget.for_repository("api").model_dump()
     del raw["in_place"]
     assert te.WorkItemTarget.model_validate(raw).in_place is False
+
+
+@pytest.mark.parametrize("in_place", [False, True], ids=["worktree", "in-place"])
+def test_a_snapshot_names_in_place_only_when_it_is(in_place):
+    """An older build forbids unknown target keys: a worktree item's snapshot
+    keeps the target it had before in-place items, so a rollback reads it."""
+    task = {"id": "t", "kind": "subprocess", "command": "true"}
+    chain = tm.Chain.model_validate(
+        {"id": "c", "nodes": [{"id": "b", "kind": "exec", "tasks": [task]}]}
+    )
+    raw = (
+        tm.ResolvedChain.from_chain(chain)
+        .materialize(
+            te.WorkItemTarget.for_repository("api", in_place=in_place),
+            InstancePolicy.from_input(InstancePolicyInput()),
+        )
+        .to_json()
+    )
+
+    assert ("in_place" in json.loads(raw)["target"]) is in_place
+    assert tm.MaterializedChain.from_json(raw).target.in_place is in_place
 
 
 def test_work_item_target_round_trips_through_a_decoded_json_dict(workspace):
