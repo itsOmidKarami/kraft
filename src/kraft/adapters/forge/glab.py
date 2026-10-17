@@ -93,7 +93,7 @@ class GlabCli(mr_ops.CliWaits):
                 "create",
                 # Every MR Kraft opens starts as a draft: `human_review` is
                 # the gate that decides it's ready, not this call (draft-MR
-                # workflow spec). `mr_sync` un-drafts it after the gate.
+                # workflow spec). `mark_ready` un-drafts it after the gate.
                 "--draft",
                 "--target-branch",
                 base,
