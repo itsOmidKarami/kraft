@@ -9,7 +9,7 @@ import type { ChainNode, DiffFile, KraftEvent, WorkerSession } from "../../types
 import { Ban, ChevronDown, ChevronRight, CircleCheck, CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
-import { nameOf } from "../board/rowText";
+import { capitalise, nameOf, waitingForCheckout } from "../board/rowText";
 import { admits, neverStarted, RELEASED, spentLine } from "./status";
 import { actionPath, taskName } from "./paths";
 import { pathSel, placeUrl } from "./url";
@@ -231,6 +231,14 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
         ...when(admits(item, "retry", true), retryFrom(item, node, run)),
         ...when(admits(item, "escalate", true), { label: "Escalate…", run: h.onEscalate }),
       ],
+    };
+  }
+  const checkoutWait = status === "queued" && waitingForCheckout(item.queued);
+  if (checkoutWait) {
+    return {
+      tone: "info", glyph: <Clock size={14} aria-hidden />, title: "Queued",
+      text: `${capitalise(checkoutWait)}. It starts when the checkout frees.`,
+      facts: [], actions: [],
     };
   }
   if (status === "queued" && item.queued?.storage) {

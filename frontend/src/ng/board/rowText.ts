@@ -7,7 +7,7 @@ import { gateOf, groupOf, stopOf } from "./model";
 /** What a board row says and offers (W6 brief B.4, B.5, B.7), from the
  *  server's `display_status` and `stop` and the raw row, one table each. */
 
-type Row = Pick<WorkItem, "display_status" | "stop" | "current_node_id" | "progress" | "step" | "mr_ref" | "fallback" | "pending_gate" | "chain_definition" | "retry_at"> & { status?: WorkItem["status"] };
+type Row = Pick<WorkItem, "display_status" | "stop" | "current_node_id" | "progress" | "step" | "mr_ref" | "fallback" | "pending_gate" | "chain_definition" | "retry_at" | "queued"> & { status?: WorkItem["status"] };
 
 const nodeOf = (i: Row) => i.stop?.node ?? i.current_node_id ?? "";
 
@@ -38,6 +38,13 @@ export const capitalise = (s: string) => s.replace(/^./, (c) => c.toUpperCase())
 /** Every sub-task of the plan done: a list with nothing left on it, not an empty or a board-only one. */
 export const allDone = (p: Pick<TaskProgress, "tasks">) => !!p.tasks?.length && p.tasks.every((t) => t.state === "done");
 
+/** Why a queued item waits, when it is another in-place item's use of its checkout rather than a slot. */
+export const waitingForCheckout = (q?: { why?: unknown; held_by_title?: unknown } | null) => (q?.why === "checkout" ? `waiting for the checkout: ${String(q.held_by_title ?? "another item")} is using it` : null);
+
+/** The start a queued request makes, in words: `self_retry` is an escalation agent's own retry. */
+const QUEUED_VERB: Record<string, string> = { resume: "resume", retry: "retry", continue: "continue past its gate", self_retry: "retry, as its escalation asked", escalate: "escalate", reply: "answer its review" };
+export const queuedVerbWords = (verb: string) => QUEUED_VERB[verb] ?? nodeWords(verb);
+
 /** Up to the first full stop that ends a sentence, not one inside "$0.04". */
 const firstSentence = (s: string) => s.split(/\.(?:\s|$)/)[0];
 
@@ -54,7 +61,9 @@ export function reasonTail(i: Row, now = Date.now()): string {
           case "question": return `agent asks: ${(i.stop.reason ?? "").replace(/^needs_context:\s*/, "")}`.trim();
           // A cap or budget stop's reason goes on to what was not interrupted: the row keeps its first sentence.
           case "cap":
-          case "budget": return i.stop.reason ? firstSentence(i.stop.reason) : `waiting for you${where}`;
+          case "budget":
+          // A checkout stop goes on to what the person should do; the item page says it whole.
+          case "checkout": return i.stop.reason ? firstSentence(i.stop.reason) : `waiting for you${where}`;
           default: return i.stop?.reason ?? `waiting for you${where}`;
         }
       case "failed": return `failed${where}`;
@@ -68,7 +77,7 @@ export function reasonTail(i: Row, now = Date.now()): string {
         // A CI wait checks again; only a rate limit retries (R11b-05).
         return at ? `${node ? `${node} · ` : ""}${i.stop?.kind === "wait" ? "next check" : "retry"} ${until(at, now)}` : `waiting${where}`;
       }
-      case "queued": return "waiting to start";
+      case "queued": return waitingForCheckout(i.queued) ?? "waiting to start";
       case "blocked": return "waiting on another item";
       case "escalated": return "escalation running";
       case "done": return i.mr_ref ? `merged !${i.mr_ref.number}` : "completed";

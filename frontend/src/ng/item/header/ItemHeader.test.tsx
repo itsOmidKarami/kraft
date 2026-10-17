@@ -70,6 +70,14 @@ describe("ItemHeader", () => {
     expect(writes(calls)).toEqual([{ method: "POST", path: "/work-items/w1/retry", body: { path: "merge_request.open.open_draft" } }]);
   });
 
+  it("says an in-place item runs in your checkout, beside the status", () => {
+    const { unmount } = show({ display_status: "running", in_place: true, worktree_path: "/src/app" });
+    expect(screen.getByText("in your checkout")).toHaveAttribute("title", "/src/app");
+    unmount();
+    show({ display_status: "running" });
+    expect(screen.queryByText("in your checkout")).toBeNull();
+  });
+
   it("calls a never-started item NOT STARTED with Start, which resumes it from the first node", async () => {
     const calls = stubFetch(WRITES);
     const reload = vi.fn();

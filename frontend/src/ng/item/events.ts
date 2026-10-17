@@ -1,7 +1,7 @@
 import type { KraftEvent } from "../../types";
 import type { EventType } from "../../types/vocab.generated";
 import { elapsed } from "../../format";
-import { gateName, nameOf } from "../board/rowText";
+import { gateName, nameOf, queuedVerbWords, waitingForCheckout } from "../board/rowText";
 import { taskName } from "./paths";
 
 type Nodes = Parameters<typeof nameOf>[0];
@@ -59,6 +59,10 @@ export function eventLine(e: KraftEvent, nodes?: Nodes, before?: KraftEvent): st
     case "steer_undelivered": return `steer not delivered${p.steer ? `: ${cut(s(p.steer), 240)}` : ""}`;
     case "work_item_rate_limited": return `${at} hit a rate limit`;
     case "work_item_waiting": return `${at} is waiting`;
+    case "work_item_queued": {
+      const wait = waitingForCheckout(p);
+      return `queued to ${queuedVerbWords(s(p.verb))}${wait ? ` · ${wait}` : ""}`;
+    }
     case "work_item_cancelled": return "cancelled";
     case "work_item_completed": return "finished";
     // Mark complete: the reason is said nowhere else. The `work_item_completed` after it still reads "finished".

@@ -282,15 +282,25 @@ export interface WorkItem {
   /** Whether `worktree_path` is on disk: false once it was reclaimed or
    *  deleted (and before the item first ran). On the list rows and the detail. */
   worktree_exists?: boolean;
-  /** The branch the item's worktree lives on (detail only): `kraft/<slug>-<id>`, or `kraft/<id>` on an older row. */
+  /** The item's branch: `kraft/<slug>-<id>`, or `kraft/<id>` on an older row (null on an older detail row). */
   branch?: string | null;
+  /** It runs in its repo's own checkout, not a worktree: `worktree_path` is the repo. On the list rows and the detail. */
+  in_place?: boolean;
   /** The worktree's current HEAD (Kraft-lu2), so the gate can tell a
    *  measurement taken on this commit from one taken before it. Only on the
    *  detail endpoint. */
   head_sha?: string | null;
-  /** While queued: the start it waits to make and since when. `storage` is set when the
-   *  worktree storage limit, not a busy slot, is what it waits on. Detail only. */
-  queued?: { verb: string; since: string; storage: { used_bytes: number; limit_bytes: number } | null } | null;
+  /** While queued: the start it waits to make and since when. `storage` (detail only) is set when the
+   *  worktree storage limit, not a busy slot, is what it waits on; `why: "checkout"` when another in-place
+   *  item, `held_by`, is using its checkout. */
+  queued?: {
+    verb: string;
+    since: string;
+    storage?: { used_bytes: number; limit_bytes: number } | null;
+    why?: "checkout";
+    held_by?: string;
+    held_by_title?: string;
+  } | null;
   /** why the item is stopped, from the `work_item_needs_human` it sits on */
   stop_reason?: string | null;
   /** Why a person cancelled or abandoned it, from the reason on that event. Null for any other item, and for an abandon from before reasons were kept. */
