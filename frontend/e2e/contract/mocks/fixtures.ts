@@ -682,7 +682,7 @@ export function serverKeys(b: ItemBundle): ItemBundle {
     judge_stop_note: [], needs_context_question: null, node_passes: {}, pending_rewind: null, pending_steer_context: null, policy_override: null,
     queued: null, queued_request: null, reject_default: null, retry_at: null, root_merge_policy: null, run_chain: null,
     running_time: { running_s: Math.round(ran / 1000), cap_minutes: null }, scope_runs: [], skipped_paths: [], step: null, stop_kind: null, stop_reason: null,
-    submodules: null, suggested_action: null, test_result: null, worktree_exists: true,
+    submodules: null, suggested_action: null, test_result: null, worktree_exists: true, in_place: false,
   });
   if (it.budget_cap && !("key" in it.budget_cap)) it.budget_cap.key = "budget_usd";
   const run = `/Users/dev/.kraft/run/items/${it.id}/sessions`;

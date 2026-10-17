@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { DisplayStatus, WorkItem } from "../../types";
 import { detail } from "../item/testkit";
@@ -36,6 +36,12 @@ describe("Row", () => {
     expect(meta.firstElementChild).toHaveClass("board-meta-tail");
     expect(meta.querySelector(".board-meta-repo, .board-meta-chain")).toBeNull();
     expect(meta).toHaveTextContent(/\d+ of \d+ nodes done/);
+  });
+
+  it("says an in-place item runs in your checkout, and a worktree item nothing of the kind", () => {
+    expect(mount("running", { in_place: true }).main.querySelector(".board-meta")).toHaveTextContent("in your checkout");
+    cleanup();
+    expect(mount("running", { in_place: false }).main.querySelector(".board-meta")).not.toHaveTextContent("in your checkout");
   });
 
   it("offers the row's one action and hands it over, none for a running or done row", () => {

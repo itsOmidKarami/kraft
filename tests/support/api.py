@@ -499,6 +499,11 @@ def _in_state(client, repo, state: dict, **body) -> str:
         _create_escalation_session(
             wid, f"agent-{wid}", state["node"], hook_point=task.path, status="paused"
         )
+    if body.get("in_place") and state["node"]:
+        # Started in place: its branch is there, as taking the checkout leaves it.
+        from support.harness import git
+
+        git(Path(repo), "branch", "-f", client.get(f"/api/work-items/{wid}").json()["branch"])
     return wid
 
 

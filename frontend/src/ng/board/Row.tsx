@@ -5,6 +5,7 @@ import { NodeGlyph } from "../graph/NodeGlyph";
 import { CUE_ICON } from "./cue";
 import { chainOf, groupOf } from "./model";
 import { actionVariant, admittedRowAction, glyphOf, reasonTail, stopCueOf, ticksOf, type RowAction } from "./rowText";
+import { IN_YOUR_CHECKOUT } from "./sharedWords";
 import { Ticks } from "./Ticks";
 
 export interface RowProps {
@@ -65,6 +66,7 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
             <span className="board-tail-text">{own?.tail ?? reasonTail(item, now)}</span>
           </span>
           {!hideRepo && <><span className="board-sep" aria-hidden>·</span><span className="board-meta-repo" title={item.repo}>{repoName(item.repo)}</span></>}
+          {item.in_place && <><span className="board-sep" aria-hidden>·</span><span className="board-meta-inplace" title={item.repo}>{IN_YOUR_CHECKOUT}</span></>}
           <span className="board-sep" aria-hidden>·</span>
           <span className="board-meta-id">{id}</span>
           {!hideChain && <><span className="board-sep" aria-hidden>·</span><span className="board-meta-chain">{chainOf(item)}</span></>}

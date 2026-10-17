@@ -355,13 +355,14 @@ async def list_work_items(request: Request):
             gate_types,
         ).fetchall()
         # The latest fallback switch and session start per item: the card
-        # marks an item whose last launch ran on a fallback (Kraft-0a3h8).
+        # marks an item whose last launch ran on a fallback (Kraft-0a3h8). And
+        # the latest queueing, which says when it waits for a checkout.
         launches = c.execute(
             "SELECT work_item_id, type, payload FROM events WHERE seq IN ("
             "  SELECT MAX(seq) FROM events"
-            "  WHERE type IN (?, ?)"
+            "  WHERE type IN (?, ?, ?)"
             "  GROUP BY work_item_id, type)",
-            (LimitEvent.LAUNCH_FALLBACK, SessionEvent.WORKER_SESSION_STARTED),
+            (LimitEvent.LAUNCH_FALLBACK, SessionEvent.WORKER_SESSION_STARTED, WorkItemEvent.QUEUED),
         ).fetchall()
         # The latest `_STOP_BOUNDARY` event per item, and the latest
         # `escalation_message` per item -- `display_status`/`stop` (B.4) need
@@ -494,6 +495,7 @@ async def list_work_items(request: Request):
 
     def _item(r) -> dict:
         folder = inplace.folder_for(st.run_dirs, r, parsed[r["id"]])
+        in_place = parsed[r["id"]] is not None and parsed[r["id"]].target.in_place
         mr_ref = _pick_mr_ref(
             r["id"] in root_mr_by_item,
             root_mr_by_item.get(r["id"]),
@@ -519,7 +521,7 @@ async def list_work_items(request: Request):
             "retry_at": r["retry_at"],
             "archived_at": r["archived_at"],
             "archived_by": r["archived_by"],
-            "progress": _board_progress(st, r, folder),
+            "progress": _board_progress(st, r, folder, in_place),
             "fallback": _ran_on_fallback(latest, r["id"]),
             "display_status": display_status(
                 r,
@@ -540,12 +542,40 @@ async def list_work_items(request: Request):
             # One `is_dir` per row: the VS Code board offers Open Worktree only
             # while the directory is there, without a detail fetch per row.
             "worktree_exists": folder.is_dir(),
+            # Runs in the repo's own checkout; `kraft` run there finds it by `branch`.
+            "in_place": in_place,
+            "branch": store.branch_for(r),
+            "queued": _queued(r, latest.get((r["id"], WorkItemEvent.QUEUED))),
         }
 
     # Each row's chain parsed once, for the stage bar and `actions` both.
     parsed = {r["id"]: store.materialized_chain_of(r) for r in rows}
     chains = {r["id"]: store.chain_view(r, parsed[r["id"]]) for r in rows}
     return {"items": [_item(r) for r in rows], "cursor": cursor}
+
+
+def _queued(row, event: dict | None, **more) -> dict | None:
+    """While queued: which start it waits to make and since when, and, from the
+    queued event, `why`, `held_by` and `held_by_title` when what it waits for
+    is another in-place item's checkout rather than a slot."""
+    q = store.queued_request_of(row) if row["status"] == WorkItemStatus.QUEUED else None
+    if q is None:
+        return None
+    held = event if event and event.get("why") == "checkout" else {}
+    return {
+        "verb": q["verb"],
+        "since": q["at"],
+        **more,
+        **{k: held[k] for k in ("why", "held_by", "held_by_title") if k in held},
+    }
+
+
+def _latest_payload(c, wid: str, event_type: str) -> dict | None:
+    hit = c.execute(
+        "SELECT payload FROM events WHERE work_item_id = ? AND type = ? ORDER BY seq DESC LIMIT 1",
+        (wid, event_type),
+    ).fetchone()
+    return json.loads(hit["payload"]) if hit else None
 
 
 def _boundary_payload(boundary) -> dict | None:
@@ -599,9 +629,9 @@ def _detail_fallback(st, wid: str) -> dict | None:
     return _ran_on_fallback({(wid, r["type"]): json.loads(r["payload"]) for r in rows}, wid)
 
 
-def _board_progress(st, row, folder) -> dict | None:
+def _board_progress(st, row, folder, in_place: bool) -> dict | None:
     """The board's share of `progress`: position and title, not the task list."""
-    p = progress_mod.for_item(st.db, row, folder, st.run_dirs)
+    p = progress_mod.for_item(st.db, row, folder, st.run_dirs, in_place=in_place)
     return {"current": p.current, "total": p.total, "title": p.title} if p else None
 
 
@@ -1255,7 +1285,9 @@ async def get_work_item(wid: str, request: Request):
     payload = store.work_item_payload(row)
     node_overrides = payload["node_overrides"]
     folder = inplace.item_folder(st.run_dirs, row)
-    progress = progress_mod.for_detail(st.db, row, folder, st.run_dirs)
+    progress = progress_mod.for_detail(
+        st.db, row, folder, st.run_dirs, in_place=inplace.is_in_place(row)
+    )
     mr_ref = _mr_ref(st, wid)
     status = row["status"]
     # What it still comes after: unblock, and resume or retry past an abandoned one.
@@ -1334,8 +1366,13 @@ async def get_work_item(wid: str, request: Request):
         "worktree_exists": folder.is_dir(),
         # What the *diff on screen* is, so the gate can tell a measurement taken
         # on this commit from one taken three commits ago (Kraft-lu2).
-        # `git_read` returns None for a worktree that does not exist yet.
-        "head_sha": config_mod.git_read(folder, "rev-parse", "HEAD"),
+        # `git_read` returns None for a worktree, or an in-place branch, that
+        # does not exist yet. In place, the branch's tip: the checkout's HEAD
+        # may be the person's.
+        "head_sha": config_mod.git_read(
+            folder, "rev-parse", "--verify", "-q", inplace.head_ref(row), expected_failure=True
+        ),
+        "in_place": inplace.is_in_place(row),
         # The gate actually waiting on a person. Inferring it client-side from
         # "the node has a gate_after and its sessions are done" cannot see a
         # rejection, and offers Approve on a gate the API will 409 (Kraft).
@@ -1356,15 +1393,15 @@ async def get_work_item(wid: str, request: Request):
         # Why the item is stopped, when it is: the detail screen has to tell a
         # loop escalation from an unrelated crash on the same node (Kraft-esc).
         "stop_reason": stop_payload["reason"] if stop_payload else None,
-        # Set while queued: which start it is waiting to make, and since when.
+        # Set while queued (`_queued`). `storage` is set when the storage
+        # limit, not a busy slot, is what it waits on.
         "queued": (
-            {
-                "verb": q["verb"],
-                "since": q["at"],
-                # Set when the storage limit, not a busy slot, is what it waits on.
-                "storage": storage.figures(st) if storage.holds(st, wid) else None,
-            }
-            if row["status"] == WorkItemStatus.QUEUED and (q := store.queued_request_of(row))
+            _queued(
+                row,
+                st.db.read(lambda c: _latest_payload(c, wid, WorkItemEvent.QUEUED)),
+                storage=storage.figures(st) if storage.holds(st, wid) else None,
+            )
+            if row["status"] == WorkItemStatus.QUEUED
             else None
         ),
         # What the item comes after, declared at intake: id, title, status, met.

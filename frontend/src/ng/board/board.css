@@ -67,6 +67,7 @@
    shrink (R10). The meta line clips at the very end for a row narrower than that. */
 .board-meta-repo { flex: none; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; }
 .board-meta-chain { flex: none; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; }
+.board-meta-inplace { flex: none; }
 .board-meta-age { flex: none; }
 .board-meta-id { flex: none; } /* never shrinks: the id is whole at any width (R10) */
 .board-meta-tail { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-sub); display: flex; align-items: center; gap: 4px; }

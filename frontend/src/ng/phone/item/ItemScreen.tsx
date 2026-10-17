@@ -27,6 +27,7 @@ import "./item.css";
 import { tip } from "../../ui/Tooltip";
 import { APPLY_AND_START, DRAFT_HOLDS_CHANGES, BUDGET_IN_DOLLARS, BUDGET_RAN_OUT } from "../../item/sharedWords";
 import { Badge } from "../ui/Badge";
+import { IN_YOUR_CHECKOUT } from "../../board/sharedWords";
 
 const TAG_TONE = { running: "info", waiting: "info", queued: "info", blocked: "info", escalated: "warn", needs_you: "warn", failed: "bad", paused: "muted", done: "ok", cancelled: "muted", archived: "muted" } as const;
 
@@ -120,7 +121,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
         <div className="ph-item-top">
           <div className="ph-item-tagline">
             <Badge tone={TAG_TONE[status]}>{hs.badge}</Badge>
-            <span className="ph-item-meta">{elapsedBetween(item.created_at, ended ? item.updated_at : null, now)} · {item.repo.split("/").filter(Boolean).at(-1)}</span>
+            <span className="ph-item-meta">{elapsedBetween(item.created_at, ended ? item.updated_at : null, now)} · {item.repo.split("/").filter(Boolean).at(-1)}{item.in_place ? ` · ${IN_YOUR_CHECKOUT}` : ""}</span>
           </div>
           <h1 className="ph-item-title">{item.title}</h1>
           {text && <p className={`ph-brief${brief ? " ph-is-open" : ""}`}>{text}</p>}

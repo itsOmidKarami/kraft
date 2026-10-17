@@ -29,7 +29,12 @@ const Where = () => {
 const routed = (ui: ReactElement) => render(<MemoryRouter initialEntries={["/work-items/w1"]}>{ui}<Where /></MemoryRouter>);
 const show = (over: Parameters<typeof detail>[0], h = handlers()) => ({ h, ...routed(<StateCard item={detail(over)} {...h} />) });
 
-describe("StateCard: queued for storage", () => {
+describe("StateCard: queued", () => {
+  it("says whose use of the checkout it waits on, and that it starts when the checkout frees", () => {
+    show({ display_status: "queued", status: "queued", queued: { verb: "resume", since: "2026-10-10T09:00:00+00:00", storage: null, why: "checkout", held_by: "w2", held_by_title: "Cache the index" } });
+    expect(screen.getByRole("region", { name: "Queued" })).toHaveTextContent("Waiting for the checkout: Cache the index is using it. It starts when the checkout frees.");
+  });
+
   it("says the worktrees are over the limit and that it starts when space frees", () => {
     show({ display_status: "queued", status: "queued", queued: { verb: "resume", since: "2026-10-10T09:00:00+00:00", storage: { used_bytes: Math.floor(12.1 * 1024 ** 3), limit_bytes: 10 * 1024 ** 3 } } });
     expect(screen.getByRole("region", { name: "Queued" })).toHaveTextContent("Waiting for space: 12.1 GB counted against the 10 GB limit. It starts when space frees.");

@@ -62,7 +62,7 @@ async def create_work_item(
     applies; `None` is an explicit "no cap".
     """
     if repo is None:
-        work_item_id, _origin = context.resolve_context()
+        work_item_id, _origin = await context.standing_item()
         if work_item_id is not None:
             repo = (await reads.get_work_item(work_item_id)).get("repo")
     if repo is None:
@@ -288,7 +288,7 @@ async def approve_gate(
 ) -> dict:
     """Approve the gate a work item is waiting on. A chain revision's approval
     needs the `digest` its artifact carried (Kraft-ec66w)."""
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     gate = gate or await _pending_gate_of(target)
     return await transport._act(
         f"/work-items/{transport.segment(target)}/gates/{transport.segment(gate)}/approve",
@@ -312,7 +312,7 @@ async def reject_gate(
         raise transport.ClientError(
             "a reject note is required: say what is wrong", kind=transport.Failure.REFUSED
         )
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     gate = gate or await _pending_gate_of(target)
     payload: dict = {"note": note.strip()}
     if node:
@@ -324,14 +324,14 @@ async def reject_gate(
 
 async def pause(work_item_id: str | None = None) -> dict:
     """Stop the running node's sessions. Only an active item can be paused."""
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     return await transport._act(f"/work-items/{transport.segment(target)}/pause")
 
 
 async def unblock(work_item_id: str | None = None, dependency: str | None = None) -> dict:
     """Drop what a blocked or paused item still comes after, or the one
     dependency named, so it no longer waits for it."""
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     return await transport._act(
         f"/work-items/{transport.segment(target)}/unblock",
         {"dependency": dependency} if dependency else {},
@@ -341,7 +341,7 @@ async def unblock(work_item_id: str | None = None, dependency: str | None = None
 async def abandon(reason: str | None, work_item_id: str | None = None) -> dict:
     """Terminal. Removes the worktree, destroying anything uncommitted in it.
     The reason, when given, is recorded."""
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     return await transport._act(
         f"/work-items/{transport.segment(target)}/abandon", {"reason": reason} if reason else {}
     )
@@ -364,7 +364,7 @@ async def archive(ids: list[str]) -> dict:
 async def restore(work_item_id: str | None = None) -> dict:
     """Put an archived item back under Done. The worktree archive removed does
     not come back."""
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     return await transport._act(f"/work-items/{transport.segment(target)}/restore")
 
 
@@ -380,7 +380,7 @@ async def resume(
     This is also how a created-paused item is started for the first time: a NULL
     current_node_id resolves to node zero (design §6 rule 1).
     """
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     payload: dict = {"steer": steer.strip()} if steer and steer.strip() else {}
     if steers:
         payload["steers"] = steers
@@ -402,7 +402,7 @@ async def retry(
     rather than `resolve_work_item`, because a retry restarts the node that is
     running you.
     """
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     payload: dict = {"steer": steer.strip()} if steer and steer.strip() else {}
     if path:
         payload["path"] = path
@@ -416,7 +416,7 @@ async def raise_budget(budget_usd: float | None, work_item_id: str | None = None
     Raise budget button. `None` means no cap. The route takes a `needs_human`
     stop the item's own cap made, or the item-wide `budget_usd` of its
     policy, which it merges into the item's policy override."""
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     return await transport._act(
         f"/work-items/{transport.segment(target)}/budget/raise", {"budget_usd": budget_usd}
     )
@@ -430,7 +430,7 @@ async def skip(
     `node.step.task` inside the current node, stopping nothing beside it.
     Works whether the item is running, paused, or stopped for a human.
     """
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     payload: dict = {"note": note.strip()} if note and note.strip() else {}
     if path:
         payload["path"] = path
@@ -440,7 +440,7 @@ async def skip(
 async def complete(reason: str, work_item_id: str | None = None, close_beads: bool = False) -> dict:
     """End the item as completed by hand. A reason is required and recorded;
     its beads close only with `close_beads`."""
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     payload: dict = {"reason": reason}
     if close_beads:
         payload["close_beads"] = True
@@ -449,7 +449,7 @@ async def complete(reason: str, work_item_id: str | None = None, close_beads: bo
 
 async def cancel(reason: str, work_item_id: str | None = None) -> dict:
     """Cancel the item. A reason is required and recorded; the worktree stays."""
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     return await transport._act(
         f"/work-items/{transport.segment(target)}/cancel", {"reason": reason}
     )
@@ -483,7 +483,7 @@ async def escalate(message: str, work_item_id: str | None = None, new_thread: bo
     the CLI's own `--autocompact` rather than anything Kraft does -- unless
     `new_thread` starts a fresh one instead (Kraft-dkb6g).
     """
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     return await transport._act(
         f"/work-items/{transport.segment(target)}/escalate",
         {"message": message, "new_thread": new_thread},
@@ -548,7 +548,7 @@ async def set_attachments(
         raise transport.ClientError(
             "kraft: set-attachments needs --spec, --plan or --drop", kind=transport.Failure.REFUSED
         )
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     return await transport._patch(
         f"/work-items/{transport.segment(target)}", {"attachments": changes, "cwd": str(Path.cwd())}
     )
@@ -571,7 +571,7 @@ async def set_agent_overrides(
     worker dialing its own model/effort mid-run is exactly the kind of
     self-action the other verbs already refuse.
     """
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     if clear:
         overrides: dict = {}
     else:
@@ -619,7 +619,7 @@ async def set_node_overrides(
     `_forbid_self_action`, not `resolve_work_item` (Kraft-g1ebw): same
     self-action door every other mutating verb here already goes through.
     """
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     if clear:
         fields: dict = {}
     else:
@@ -659,7 +659,7 @@ async def set_work_item_policy(
     On a running or waiting item it binds from the next node entered and the
     next observation of a wait. `_forbid_self_action`: a worker raising its
     own caps is exactly the self-action the other verbs refuse."""
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     if not clear and not policy:
         raise transport.ClientError(
             "kraft: set-policy needs --policy FIELD=VALUE or --clear",
@@ -696,7 +696,7 @@ async def add_review_comment(
     if thread_id:
         payload = {"body": body}
         return await transport._act(f"/threads/{transport.segment(thread_id)}/comments", payload)
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     payload: dict = {"body": body, "file_path": file_path, "label": label}
     if start_line is not None:
         end = end_line or start_line
@@ -737,7 +737,7 @@ async def submit_review(
 ) -> dict:
     """Send your drafts with an outcome: comment, request_changes, or approve
     (approve needs a pending gate). Only a person should decide this."""
-    target = context._forbid_self_action(work_item_id)
+    target = await context._forbid_self_action(work_item_id)
     payload = {"outcome": outcome, "summary": summary, "node": node}
     return await transport._act(
         f"/work-items/{transport.segment(target)}/review",

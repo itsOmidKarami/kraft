@@ -2,6 +2,12 @@
  *  Every parser answers `{value}` for the patch (null clears the key) or `{error}`. */
 export type Parsed = { value: unknown } | { error: string };
 
+/** A setting that is on unless the entry says `false`: on clears the key back to its default. */
+export const onByDefault = (on: string, off: string) => ({
+  show: (v: unknown) => (v === false ? off : on),
+  parse: (text: string): Parsed => ({ value: text === off ? false : null }),
+});
+
 const items = (text: string) => text.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
 
 export const list = {

@@ -118,7 +118,7 @@ async def get_work_item(work_item_id: str | None = None, *, full: bool = False) 
     `full` keeps the detail endpoint's whole payload, which is what
     `kraft view show --json` prints (Kraft-w17d)."""
     if work_item_id is None:
-        work_item_id, _origin = context.resolve_context()
+        work_item_id, _origin = await context.standing_item()
     if work_item_id is None:
         worktrees = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).worktrees
         raise transport.ClientError(

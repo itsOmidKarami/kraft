@@ -53,9 +53,57 @@ def test_resolve_work_item_returns_the_standing_item(run_dir, monkeypatch):
     the session's own item answers."""
     import asyncio
 
+    monkeypatch.chdir(run_dir)  # not a checkout on a `kraft/` branch
     assert asyncio.run(client.resolve_work_item("explicit-id")) == "explicit-id"
     monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "abc123")
     assert asyncio.run(client.resolve_work_item(None)) == "abc123"
     monkeypatch.delenv("KRAFT_WORK_ITEM_ID")
     with pytest.raises(ValueError, match="no work item"):
         asyncio.run(client.resolve_work_item(None))
+
+
+@pytest.mark.parametrize("in_place", [True, False], ids=["in-place", "worktree-item"])
+def test_in_place_item_resolves_from_its_checked_out_branch(wired, tmp_path, in_place):
+    """`kraft view show` run in an in-place repo's folder finds the item whose
+    branch is checked out there; a worktree item's branch, checked out in the
+    repo by hand, is not that item standing there."""
+    from support.api import run_with_app
+    from support.harness import git, make_repo
+
+    repo = make_repo(tmp_path)
+
+    async def scenario():
+        await client.ensure_repo(str(repo))
+        item = await client.create_work_item("t", repo=str(repo), in_place=in_place)
+        git(
+            repo,
+            "checkout",
+            "-q",
+            "-b",
+            (await client.get_work_item(item["id"], full=True))["branch"],
+        )
+        return item["id"], await client.context.standing_item(repo)
+
+    wid, found = run_with_app(wired, scenario)
+    assert found == (wid if in_place else None, "user")
+
+
+@pytest.mark.parametrize(
+    "branch", ["main", "kraft/someone-elses", None], ids=["main", "no-item", "another-repo"]
+)
+def test_another_branch_resolves_to_nothing(wired, tmp_path, branch):
+    """`None`: another connected repo has the item's branch checked out."""
+    from support.api import run_with_app
+    from support.harness import git, make_repo
+
+    repo, other = make_repo(tmp_path), make_repo(tmp_path, "other")
+
+    async def scenario():
+        await client.ensure_repo(str(repo))
+        await client.ensure_repo(str(other))
+        item = await client.create_work_item("t", repo=str(repo), in_place=True)
+        mine = (await client.get_work_item(item["id"], full=True))["branch"]
+        git(other if branch is None else repo, "checkout", "-q", "-B", branch or mine)
+        return await client.context.standing_item(repo if branch else other)
+
+    assert run_with_app(wired, scenario) == (None, "user")

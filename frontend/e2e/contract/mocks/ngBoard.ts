@@ -57,7 +57,22 @@ function checkoutMoved(i: any, b: ItemBundle) {
   const last = [...b.events].reverse().find((e) => e.type === "work_item_needs_human")!;
   last.payload = { node_id: last.payload.node_id, reason, kind: "checkout", facts, session_id: s.id };
   i.stop = { ...i.stop, kind: "checkout", reason, facts };
-  i.worktree_path = i.repo;
+  Object.assign(i, { in_place: true, worktree_path: i.repo });
+}
+
+/** The running row, in kraft-vscode's own checkout: what `waitsForCheckout` waits behind. */
+function runsInPlace(i: any) {
+  i.progress = { current: 2, total: 3, title: "Thread findings into the prompt" };
+  i.step = { index: 2, count: 3, name: "review", task: "code_review" };
+  Object.assign(i, { in_place: true, worktree_path: i.repo });
+}
+
+/** An in-place item resumed while the running row (`runsInPlace`, ROWS[6], by its seed) uses the same checkout:
+ *  `store.checkout_reason` on its queued event and its `queued`. */
+function waitsForCheckout(i: any, b: ItemBundle) {
+  const held = { why: "checkout", held_by: hex(1306), held_by_title: "Bump the VS Code extension to schema v4" };
+  Object.assign(b.events.find((e) => e.type === "work_item_queued")!.payload, held);
+  Object.assign(i, { in_place: true, worktree_path: i.repo, queued: { ...i.queued, ...held } });
 }
 
 const ROWS: Row[] = [
@@ -67,10 +82,7 @@ const ROWS: Row[] = [
   { sc: "capped", title: "Migrate the config loader to pydantic v2", repo: "kraft-core", bead: "kraft-58e2", age: 120, tweak: spendCapped },
   { sc: "failed", title: "Retry on 429 from the forge API", repo: "kraft-api", bead: "kraft-b108", age: 40 },
   { sc: "paused", title: "Trim the review prompts for the docs chain", repo: "kraft-docs", bead: "kraft-4e19", age: 75, chain: "docs_only" },
-  { sc: "running", title: "Bump the VS Code extension to schema v4", repo: "kraft-vscode", bead: "kraft-91bc", age: 6, tweak: (i) => {
-    i.progress = { current: 2, total: 3, title: "Thread findings into the prompt" };
-    i.step = { index: 2, count: 3, name: "review", task: "code_review" };
-  } },
+  { sc: "running", title: "Bump the VS Code extension to schema v4", repo: "kraft-vscode", bead: "kraft-91bc", age: 6, tweak: runsInPlace },
   { sc: "waiting", title: "Document the policy sandbox settings", repo: "kraft-docs", bead: "kraft-e410", age: 14, chain: "docs_only" },
   { sc: "escalated", title: "Lint fan-out for multi-repo chains", repo: "kraft-plugins", bead: "kraft-2c77", age: 31 },
   { sc: "paused", title: "Spike: stream logs over SSE", repo: "kraft-core", bead: "kraft-f5d3", age: 180, fresh: true },
@@ -85,6 +97,7 @@ const ROWS: Row[] = [
   { sc: "queued", title: "Index the review threads for search", repo: "kraft-api", bead: "kraft-7c40", age: 3 },
   { sc: "blocked", title: "Tail worker logs in the console", repo: "kraft-core", bead: "kraft-b2e7", age: 9 },
   { sc: "capped", title: "Cache the search index in place", repo: "kraft-plugins", bead: "kraft-e3c1", age: 17, tweak: checkoutMoved },
+  { sc: "queued", title: "Tidy the extension's settings page", repo: "kraft-vscode", bead: "kraft-6a2f", age: 2, tweak: waitsForCheckout },
 ];
 
 const ARCHIVED: Row[] = [

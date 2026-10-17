@@ -145,6 +145,32 @@ def reason_tail(row: dict, now: float) -> str:
     return f"{tail} · on {on}" if on else tail
 
 
+def waiting_for_checkout(queued: dict | None) -> str | None:
+    """`waitingForCheckout`: why a queued item waits, when another in-place
+    item is using its checkout rather than a slot being busy."""
+    if not queued or queued.get("why") != "checkout":
+        return None
+    return (
+        f"waiting for the checkout: {_or(queued.get('held_by_title'), 'another item')} is using it"
+    )
+
+
+#: `rowText.ts`'s `QUEUED_VERB`: the start a queued request makes, in words.
+_QUEUED_VERB = {
+    "resume": "resume",
+    "retry": "retry",
+    "continue": "continue past its gate",
+    "self_retry": "retry, as its escalation asked",
+    "escalate": "escalate",
+    "reply": "answer its review",
+}
+
+
+def queued_verb_words(verb: str) -> str:
+    """`queuedVerbWords`."""
+    return _QUEUED_VERB.get(verb) or node_words(verb)
+
+
 def _tail(row: dict, stop: dict, node: str, now: float) -> str:
     # An item with no node to name reads without "at ...", and without a leading separator.
     where = f" at {node}" if node else ""
@@ -158,8 +184,9 @@ def _tail(row: dict, stop: dict, node: str, now: float) -> str:
                     asked = re.sub(r"^needs_context:\s*", "", _or(reason, ""))
                     return f"agent asks: {asked}".strip()
                 # A cap or budget stop's reason goes on to what was not
-                # interrupted: the row keeps its first sentence.
-                case "cap" | "budget":
+                # interrupted, a checkout stop's to what to do: the row keeps
+                # its first sentence.
+                case "cap" | "budget" | "checkout":
                     return _first_sentence(reason) if reason else f"waiting for you{where}"
                 case _:
                     return _or(reason, f"waiting for you{where}")
@@ -185,7 +212,7 @@ def _tail(row: dict, stop: dict, node: str, now: float) -> str:
             again = "next check" if stop.get("kind") == "wait" else "retry"
             return f"{node + ' · ' if node else ''}{again} {until(at, now)}"
         case "queued":
-            return "waiting to start"
+            return waiting_for_checkout(row.get("queued")) or "waiting to start"
         case "blocked":
             return "waiting on another item"
         case "escalated":
@@ -558,6 +585,11 @@ def event_line(
             return f"{node} hit a rate limit"
         case "work_item_waiting":
             return f"{node} is waiting"
+        case "work_item_queued":
+            wait = waiting_for_checkout(p)
+            return f"queued to {queued_verb_words(_s(p.get('verb')))}" + (
+                f" · {wait}" if wait else ""
+            )
         case "work_item_cancelled":
             return "cancelled"
         case "work_item_completed":

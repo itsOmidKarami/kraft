@@ -164,6 +164,11 @@ class Indexer:
             return self._run_dirs.worktrees / work_item_id
         return inplace.item_folder(self._run_dirs, row)
 
+    def _worktree(self, work_item_id: str) -> Path | None:
+        """`_folder` for the readers that scan it; None in place, where the
+        folder is the person's checkout and holds files no worker wrote."""
+        return None if self._in_place_branch(work_item_id) else self._folder(work_item_id)
+
     def _worktree_file(self, ref: str, base: Path | None, *, markdown: bool = False) -> Path | None:
         """Resolve a ref into the item's own worktree. Untrusted input: a
         worker reports a summary ref, and absolute paths and anything escaping
@@ -244,7 +249,7 @@ class Indexer:
         thread = row["thread"] if row["hook_point"] == "escalation" else None
         wid = row["work_item_id"]
         text = await asyncio.to_thread(
-            self._read_summary, ref, wid, self._folder(wid), session_id, thread
+            self._read_summary, ref, wid, self._worktree(wid), session_id, thread
         )
         if text is None:
             logger.warning("session %s summary ref %r not readable; skipping", session_id, ref)
@@ -849,7 +854,15 @@ class Indexer:
         # then takes for the worktree (R11F-02 review). The stored copy is
         # never offered either: editing it would change what the item is
         # filed with behind `kraft item set-attachments`' back.
-        path = self._worktree_file(attachment["path"], self._folder(work_item_id))
+        folder = self._folder(work_item_id)
+        branch = self._in_place_branch(work_item_id)
+        if branch is not None and branch != config_mod.git_read(
+            folder, "symbolic-ref", "--short", "-q", "HEAD", expected_failure=True
+        ):
+            # In place, the file in the checkout is the item's only while its
+            # branch is checked out; otherwise it is the person's, or nothing.
+            return None
+        path = self._worktree_file(attachment["path"], folder)
         return path if path is not None and path.is_file() else None
 
     def _get_synthetic_attachment_document(self, doc_id: str) -> dict | None:

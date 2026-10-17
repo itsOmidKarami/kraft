@@ -64,6 +64,39 @@ def resolve_context(cwd: Path | None = None) -> tuple[str | None, str]:
     return None, "user"
 
 
+async def in_place_item(cwd: Path | None = None) -> str | None:
+    """The in-place item of the cwd's connected repo whose branch is checked
+    out there, or None. Kraft names every item's branch `kraft/...`, so on any
+    other branch the server is not asked."""
+    branch = config.git_read(
+        cwd or Path.cwd(), "symbolic-ref", "--short", "-q", "HEAD", expected_failure=True
+    )
+    if not branch or not branch.startswith("kraft/"):
+        return None
+    repo = await resolve_repo(cwd)
+    if repo is None:
+        return None
+    # shortcut: reads the whole board to find one row; a `?branch=` filter on
+    # the list route if boards grow large enough for that to matter.
+    items = (await transport._get("/work-items"))["items"]
+    # `.get`: an older server's rows carry no `in_place`.
+    return next(
+        (
+            i["id"]
+            for i in items
+            if i.get("in_place") and i.get("branch") == branch and i["repo"] == repo
+        ),
+        None,
+    )
+
+
+async def standing_item(cwd: Path | None = None) -> tuple[str | None, str]:
+    """`resolve_context`, else the in-place item checked out where the
+    session stands (`in_place_item`)."""
+    wid, origin = resolve_context(cwd)
+    return (wid, origin) if wid else (await in_place_item(cwd), origin)
+
+
 async def resolve_repo(cwd: Path | None = None) -> str | None:
     """The connected repo the cwd is inside, or None.
 
@@ -103,7 +136,7 @@ async def resolve_repo(cwd: Path | None = None) -> str | None:
 _MIN_PREFIX = 4
 
 
-def _forbid_self_action(work_item_id: str | None) -> str:
+async def _forbid_self_action(work_item_id: str | None) -> str:
     """Resolve the target of an act call, refusing a worker's own item.
 
     Design §6 rule 2. A worker session approving its own gate would collapse the
@@ -116,7 +149,7 @@ def _forbid_self_action(work_item_id: str | None) -> str:
     starts the same way, and no other id is the whole of it, since intake
     refuses a new id that is the start of an existing one.
     """
-    resolved, origin = resolve_context()
+    resolved, origin = resolve_context() if work_item_id else await standing_item()
     target = work_item_id or resolved
     if target is None:
         raise transport.ClientError(
@@ -144,7 +177,7 @@ async def resolve_work_item(work_item_id: str | None) -> str:
     """
     if work_item_id:
         return work_item_id
-    resolved, _origin = resolve_context()
+    resolved, _origin = await standing_item()
     if resolved is None:
         raise transport.ClientError(
             "no work item: pass an id, or run from a Kraft worktree", kind=transport.Failure.REFUSED

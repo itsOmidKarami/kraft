@@ -192,14 +192,25 @@ def active_implementation_node(row) -> str | None:
     return None
 
 
-def read_tasks(run_dirs, row, worktree: Path) -> list[tuple[str, bool]]:
+def read_tasks(run_dirs, row, worktree: Path, *, in_place: bool = False) -> list[tuple[str, bool]]:
     """The attached plan's tasks if there is one, else the plan node's
     document's (`item_paths.document`, the new place first). Never through a
     link, and never blocking on a FIFO: a worker can plant either in its
-    worktree or its item's `docs/`."""
+    worktree or its item's `docs/`. `in_place`: the checkout may be on another
+    branch, or hold the person's copy, so the plan is the one committed on the
+    item's branch, else the copy filed at intake (`Indexer._read_attachment`)."""
     attachments = json.loads(row["attachments"] or "[]")
-    rel = next((a["path"] for a in attachments if a.get("kind") == "plan"), None)
-    if rel is not None:
+    plan = next((a for a in attachments if a.get("kind") == "plan"), None)
+    rel = plan["path"] if plan else None
+    if rel is not None and in_place:
+        text = git_read(
+            worktree, "show", f"{_head(row, True)}:{rel}", expected_failure=True, strip=False
+        )
+        stored = item_paths.filed_copy(run_dirs, row["id"], plan.get("source"))
+        if text is None and stored:
+            read, _reason = read_worktree_file(*stored, item_paths.DOC_MAX_BYTES)
+            text = read.text if read is not None else None
+    elif rel is not None:
         read, _reason = read_worktree_file(Path(worktree), rel, item_paths.DOC_MAX_BYTES)
         text = read.text if read is not None else None
     else:
@@ -212,8 +223,13 @@ def read_tasks(run_dirs, row, worktree: Path) -> list[tuple[str, bool]]:
     return parse_tasks(text) if text is not None else []
 
 
-def tasks_for(row, worktree: Path, run_dirs) -> list[tuple[str, bool]]:
-    return read_tasks(run_dirs, row, worktree)
+def tasks_for(row, worktree: Path, run_dirs, *, in_place: bool = False) -> list[tuple[str, bool]]:
+    return read_tasks(run_dirs, row, worktree, in_place=in_place)
+
+
+def _head(row, in_place: bool) -> str:
+    """`inplace.head_ref` for a caller that already knows whether it is in place."""
+    return f"refs/heads/{_store.branch_for(row)}" if in_place else "HEAD"
 
 
 def run_state(evs: list[dict], node_id: str) -> int:
@@ -286,7 +302,7 @@ def rework_run(db, row) -> bool:
     )
 
 
-def for_item(db, row, worktree: Path, run_dirs) -> ProgressReport | None:
+def for_item(db, row, worktree: Path, run_dirs, *, in_place: bool = False) -> ProgressReport | None:
     """The API's `progress`, or None when there is nothing honest to show."""
     node_id = active_implementation_node(row)
     if node_id is None:
@@ -297,26 +313,31 @@ def for_item(db, row, worktree: Path, run_dirs) -> ProgressReport | None:
     evs = db.read(lambda c: events.read_after(c, 0, row["id"]))
     if is_rework(evs, node_id):
         return None
-    tasks = tasks_for(row, worktree, run_dirs)
+    tasks = tasks_for(row, worktree, run_dirs, in_place=in_place)
     if not tasks:
         return None
     reported = run_state(evs, node_id)
-    return combine(tasks, reported, committed_task([s for _, s in branch_log(row, worktree)]))
+    log = branch_log(row, worktree, in_place=in_place)
+    return combine(tasks, reported, committed_task([s for _, s in log]))
 
 
-def branch_log(row, worktree: Path) -> list[tuple[str, str]]:
+def branch_log(row, worktree: Path, *, in_place: bool = False) -> list[tuple[str, str]]:
     """`(short sha, subject)` of every commit this item has made, newest first.
 
     The item's branch base, not a run's dispatch HEAD. `base_ref` is set at
     worktree creation and re-set after every rebase, so this range is exactly
     the commits this item has made -- across a reject bounce, which is when
-    the per-run range was empty by construction and floored `current` at 1."""
+    the per-run range was empty by construction and floored `current` at 1.
+    `in_place`: the checkout's HEAD may be the person's, so the branch is read."""
     base = row["base_ref"]
-    log = git_read(worktree, "log", "--format=%h %s", f"{base}..HEAD") if base else None
+    head = _head(row, in_place)
+    log = git_read(worktree, "log", "--format=%h %s", f"{base}..{head}") if base else None
     return [(line.partition(" ")[0], line.partition(" ")[2]) for line in (log or "").splitlines()]
 
 
-def for_detail(db, row, worktree: Path, run_dirs) -> ProgressReport | None:
+def for_detail(
+    db, row, worktree: Path, run_dirs, *, in_place: bool = False
+) -> ProgressReport | None:
     """The detail read's `progress`: `for_item`'s, kept once the item stops on
     the implementing node or moves past it, with each task's commit.
 
@@ -347,10 +368,10 @@ def for_detail(db, row, worktree: Path, run_dirs) -> ProgressReport | None:
     started = last(ChainEvent.NODE_STARTED)
     if started < 0:
         return None
-    tasks = tasks_for(row, worktree, run_dirs)
+    tasks = tasks_for(row, worktree, run_dirs, in_place=in_place)
     if not tasks:
         return None
-    log = branch_log(row, worktree)
+    log = branch_log(row, worktree, in_place=in_place)
     # A skipped node moved the item on without its plan being done: settled all
     # the same, as the board's other readers treat a skipped node as passed.
     if max(last(ChainEvent.NODE_COMPLETED), last(ChainEvent.NODE_SKIPPED)) > started or is_rework(

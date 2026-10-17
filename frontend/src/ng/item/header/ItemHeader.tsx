@@ -16,7 +16,7 @@ import type { ItemDetail } from "../useItem";
 import { CancelCard } from "./CancelCard";
 import { CompleteCard, EscalateCard, PauseConfirm } from "./Dialogs";
 import { MainButton, PANEL_LABEL } from "./MainButton";
-import { PAUSE_THIS_ITEM } from "../../board/sharedWords";
+import { IN_YOUR_CHECKOUT, PAUSE_THIS_ITEM } from "../../board/sharedWords";
 import { REMOVE_FROM_QUEUE_TITLE } from "../sharedWords";
 import { withBase } from "../../base";
 import { Badge } from "../../ui/Badge";
@@ -183,6 +183,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
       <span className="item-elapsed" title={`Created ${new Date(item.created_at).toLocaleString()}`}>
         <Clock size={12} aria-hidden /> {elapsedBetween(item.created_at, endedAt, now)}
       </span>
+      {item.in_place && <Badge title={item.worktree_path}>{IN_YOUR_CHECKOUT}</Badge>}
       <Badge tone={hs.tone} mono>{hs.badge}</Badge>
       {/* Without a main button the group anchors the cards (pause, cancel, escalate) itself. */}
       <div className="item-main-group" ref={hs.main ? undefined : group}>

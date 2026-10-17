@@ -43,6 +43,13 @@ def folder_for(run_dirs, row, chain) -> Path:
     return Path(row["repo"]) if in_place else run_dirs.worktrees / row["id"]
 
 
+def head_ref(row) -> str:
+    """What a reader that shows the item takes as its tip: `HEAD` in its
+    worktree, or in place its branch, since the checkout's HEAD and working
+    tree may be the person's."""
+    return f"refs/heads/{store.branch_for(row)}" if is_in_place(row) else "HEAD"
+
+
 class CheckoutRefused(RuntimeError):
     """The checkout cannot be taken without forcing it: a `checkout` stop
     (`StopKind.CHECKOUT`), never a failure and never auto-escalated. The

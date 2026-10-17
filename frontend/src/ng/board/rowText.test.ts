@@ -12,8 +12,10 @@ describe("reasonTail", () => {
     expect(reasonTail(row("blocked"), NOW)).toBe("waiting on another item");
   });
 
-  it("says a queued item is waiting for a slot", () => {
+  it("says a queued item is waiting for a slot, or for the checkout and who is using it", () => {
     expect(reasonTail(row("queued"), NOW)).toBe("waiting to start");
+    const queued = { verb: "resume", since: "2026-09-13T09:00:00Z", why: "checkout" as const, held_by: "w2", held_by_title: "Cache the index" };
+    expect(reasonTail(row("queued", { queued }), NOW)).toBe("waiting for the checkout: Cache the index is using it");
   });
 
   it("says one short thing per status and stop kind", () => {
@@ -26,6 +28,8 @@ describe("reasonTail", () => {
       // A budget stop's reason is two sentences; the row keeps the first, cents and all.
       [row("needs_you", { stop: stop("budget", { reason: "budget cap reached: $0.035 spent on this work item, cap $0.030. Nothing new was started; a running agent was not interrupted." }) }), "budget cap reached: $0.035 spent on this work item, cap $0.030"],
       [row("needs_you", { stop: stop("conflict") }), "waiting for you at verification"],
+      // A checkout stop goes on to what to do about it; the row keeps what happened.
+      [row("needs_you", { stop: stop("checkout", { reason: "the checkout /r moved to main during the run of review. Kraft did not switch it back: resume once /r may go back to kraft/x" }) }), "the checkout /r moved to main during the run of review"],
       [row("failed", { stop: stop("failed", { node: "merge_request" }) }), "failed at merge request"],
       [row("needs_you", { stop: stop("gate"), pending_gate: "spec-approval" }), "approve spec"],
       [row("failed", { stop: stop("failed", { node: "post-merge-ci2" }) }), "failed at post merge ci2"],

@@ -107,6 +107,14 @@ describe("the phone board (B)", () => {
     expect(gated).not.toHaveClass("ph-is-failed");
   });
 
+  it("says on its card that an in-place item runs in your checkout, and a worktree item nothing of the kind", async () => {
+    put({ ...item("p1", "running"), in_place: true }, item("w2", "running"));
+    mount();
+    await act(async () => {});
+    expect(document.querySelector('[data-row="p1"] .ph-card-meta')).toHaveTextContent("in your checkout");
+    expect(document.querySelector('[data-row="w2"] .ph-card-meta')).not.toHaveTextContent("in your checkout");
+  });
+
   it("a paused card's tail is neutral: ph-is-hot (amber) is only for a stop that needs a human", async () => {
     put(item("p1", "paused"), gate("g2"));
     mount();

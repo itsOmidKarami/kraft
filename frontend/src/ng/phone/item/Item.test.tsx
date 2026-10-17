@@ -54,6 +54,11 @@ describe("the item screen (C)", () => {
     expect(ticks.some((c) => c.includes("ph-tick-hot"))).toBe(false);
   });
 
+  it("says an in-place item runs in your checkout", async () => {
+    mount({ ...item("running"), in_place: true });
+    expect(await screen.findByText(/in your checkout/)).toHaveClass("ph-item-meta");
+  });
+
   it("shows the brief, the chain with done nodes collapsed, a log preview and the pair", async () => {
     mount(item("running"));
     expect(await screen.findByRole("heading", { level: 1, name: "Design the cache" })).toBeInTheDocument();

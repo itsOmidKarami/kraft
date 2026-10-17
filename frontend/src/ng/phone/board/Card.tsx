@@ -3,6 +3,7 @@ import type { WorkItem } from "../../../types";
 import { chainOf, groupOf } from "../../board/model";
 import { CUE_ICON } from "../../board/cue";
 import { reasonTail, stopCueOf, ticksOf } from "../../board/rowText";
+import { IN_YOUR_CHECKOUT } from "../../board/sharedWords";
 import { NodeGlyph } from "../../graph/NodeGlyph";
 import { Button } from "../../ui/Button";
 import { cardButtons, type CardButton } from "./actions";
@@ -33,7 +34,7 @@ export function Card({ item, now, offline, busy, error, onOpen, onButton }: Card
           <NodeGlyph kind={g.kind} size="sm" state={g.state} icon={g.icon} />
           <span className="ph-card-text">
             <span className="ph-card-title">{item.title}</span>
-            <span className="ph-card-meta">{repoName(item.repo)} · {item.bead_id || shortId(item.id)} · {chainOf(item)} · {ago(item.updated_at, now)}</span>
+            <span className="ph-card-meta">{repoName(item.repo)}{item.in_place ? ` · ${IN_YOUR_CHECKOUT}` : ""} · {item.bead_id || shortId(item.id)} · {chainOf(item)} · {ago(item.updated_at, now)}</span>
           </span>
         </span>
         <span className="ph-ticks" aria-hidden="true">

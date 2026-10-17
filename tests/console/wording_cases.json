@@ -57,6 +57,12 @@
       "tail": "Spent $0.04 of a $0.03 cap on implement"
     },
     {
+      "name": "checkout",
+      "row": { "display_status": "needs_you", "current_node_id": "implement", "stop": { "kind": "checkout", "node": "implement", "reason": "the checkout /r moved to main during the run of review. Kraft did not switch it back: resume once /r may go back to kraft/x" } },
+      "group": "needs",
+      "tail": "the checkout /r moved to main during the run of review"
+    },
+    {
       "name": "budget-without-reason",
       "row": { "display_status": "needs_you", "current_node_id": "implement", "stop": { "kind": "budget", "node": "implement", "reason": null } },
       "group": "needs",
@@ -172,6 +178,12 @@
       "row": { "display_status": "queued", "current_node_id": null },
       "group": "running",
       "tail": "waiting to start"
+    },
+    {
+      "name": "queued-for-the-checkout",
+      "row": { "display_status": "queued", "current_node_id": "implement", "queued": { "verb": "resume", "since": "2026-10-15T11:00:00Z", "why": "checkout", "held_by": "w2", "held_by_title": "Cache the index" } },
+      "group": "running",
+      "tail": "waiting for the checkout: Cache the index is using it"
     },
     {
       "name": "escalated",
@@ -548,6 +560,13 @@
     { "name": "rate-limited", "event": { "type": "work_item_rate_limited", "node_id": "plan", "payload": {} }, "line": "plan hit a rate limit" },
     { "name": "waiting", "event": { "type": "work_item_waiting", "node_id": "merge_request_feedback", "payload": {} }, "line": "merge request feedback is waiting" },
     { "name": "cancelled", "event": { "type": "work_item_cancelled", "node_id": null, "payload": {} }, "line": "cancelled" },
+    { "name": "queued-to-resume", "event": { "type": "work_item_queued", "node_id": null, "payload": { "verb": "resume", "from": "paused" } }, "line": "queued to resume" },
+    { "name": "queued-to-retry", "event": { "type": "work_item_queued", "node_id": null, "payload": { "verb": "retry", "from": "needs_human" } }, "line": "queued to retry" },
+    { "name": "queued-to-continue-for-the-checkout", "event": { "type": "work_item_queued", "node_id": null, "payload": { "verb": "continue", "from": "needs_human", "why": "checkout", "held_by": "w2", "held_by_title": "Cache the index" } }, "line": "queued to continue past its gate · waiting for the checkout: Cache the index is using it" },
+    { "name": "queued-to-self-retry", "event": { "type": "work_item_queued", "node_id": null, "payload": { "verb": "self_retry", "from": "needs_human" } }, "line": "queued to retry, as its escalation asked" },
+    { "name": "queued-to-escalate", "event": { "type": "work_item_queued", "node_id": null, "payload": { "verb": "escalate", "from": "needs_human" } }, "line": "queued to escalate" },
+    { "name": "queued-to-reply", "event": { "type": "work_item_queued", "node_id": null, "payload": { "verb": "reply", "from": "needs_human" } }, "line": "queued to answer its review" },
+    { "name": "queued-to-an-unknown-verb", "event": { "type": "work_item_queued", "node_id": null, "payload": { "verb": "rerun_all" } }, "line": "queued to rerun all" },
     { "name": "completed", "event": { "type": "work_item_completed", "node_id": null, "payload": {} }, "line": "finished" },
     { "name": "marked-complete", "event": { "type": "work_item_manually_completed", "node_id": null, "payload": { "reason": "landed by hand in !140", "node_id": "merge_request" } }, "line": "marked complete: landed by hand in !140" },
     { "name": "marked-complete-without-a-reason", "event": { "type": "work_item_manually_completed", "node_id": null, "payload": { "node_id": null } }, "line": "marked complete" },

@@ -183,7 +183,7 @@ async def create_thread(wid: str, body: ThreadIn, request: Request):
     row = deps._live_work_item_row(st, wid)
     gate = board._pending_gate(st, wid)
     anchor = body.anchor_sha or config_mod.git_read(
-        inplace.item_folder(st.run_dirs, row), "rev-parse", "HEAD"
+        inplace.item_folder(st.run_dirs, row), "rev-parse", inplace.head_ref(row)
     )
     if not anchor:
         raise HTTPException(409, "this work item has no commit to anchor a thread to")
@@ -379,7 +379,8 @@ async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
             409,
             "nothing ahead in this chain will read these threads; use `kraft item retry --steer`",
         )
-    head = config_mod.git_read(inplace.item_folder(st.run_dirs, row), "rev-parse", "HEAD")
+    folder = inplace.item_folder(st.run_dirs, row)
+    head = config_mod.git_read(folder, "rev-parse", inplace.head_ref(row))
     if not head:
         # A review's `head_sha` is what `last_review` compares from; never ''.
         raise HTTPException(409, "git could not read this work item's HEAD; nothing was recorded")

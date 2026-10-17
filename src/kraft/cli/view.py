@@ -201,7 +201,7 @@ def _cmd_logs(ns: argparse.Namespace) -> None:
             # A session id is unique only within its item: the one named, or
             # the one this worktree is. With neither, the flat route, which
             # answers an id only one session has.
-            wid, session_id = ns.id or client.resolve_context()[0], ns.session
+            wid, session_id = ns.id or (await client.context.standing_item())[0], ns.session
         else:
             wid, session_id = await _logs_session(ns.id, ns.follow)
         lines = await client.log_backlog(wid, session_id, ns.n)
@@ -462,7 +462,11 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
     watch.add_argument("--repo", help="default: the repo you are standing in")
     watch.set_defaults(func=_cmd_watch, all=False)
 
-    diff = subs.add_parser("diff", parents=[common], help="what the agent changed")
+    diff = subs.add_parser(
+        "diff",
+        parents=[common],
+        help="what the agent changed; an in-place item's is its commits only, never your own edits",
+    )
     diff.add_argument("id", nargs="?")
     diff.add_argument("--stat", action="store_true", help="per-file counts only")
     diff.add_argument("--name-only", action="store_true", help="changed and untracked paths")
