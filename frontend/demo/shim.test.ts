@@ -1,3 +1,5 @@
+import v8 from "node:v8";
+import vm from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildScenario } from "../e2e/contract/mocks/fixtures";
 import { ABORT, HANG, mockServer, type MockServer, type Reply } from "../e2e/contract/mocks/mockApi";
@@ -54,6 +56,9 @@ describe("patchFetch", () => {
     const ctl = new AbortController();
     const pending = fetch("/api/work-items", { signal: ctl.signal });
     const raced = await Promise.race([pending.then(() => "settled"), new Promise((r) => setTimeout(() => r("pending"), 20))]);
+    // A collection before the abort, as one may land in that wait: nothing holds the Request the shim built by now.
+    v8.setFlagsFromString("--expose-gc");
+    vm.runInNewContext("gc")();
     ctl.abort();
     expect(raced).toBe("pending");
     await expect(pending).rejects.toBeDefined();

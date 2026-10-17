@@ -46,9 +46,12 @@ export function patchFetch(serve: MockServer, win: Window & typeof globalThis = 
     // What a refused connection rejects with, so api.ts says the server is unreachable as it would.
     if (reply === ABORT) throw new TypeError("Failed to fetch");
     if (reply === HANG) {
+      // The caller's signal, not the Request's: undici follows it through a WeakRef, so once nothing holds the
+      // Request a GC drops the link and the abort never arrives.
+      const signal = init?.signal ?? (input instanceof Request ? input.signal : request.signal);
       return new Promise<Response>((_, reject) => {
-        if (request.signal.aborted) reject(request.signal.reason);
-        else request.signal.addEventListener("abort", () => reject(request.signal.reason));
+        if (signal.aborted) reject(signal.reason);
+        else signal.addEventListener("abort", () => reject(signal.reason));
       });
     }
     return toResponse(reply);
