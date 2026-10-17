@@ -83,6 +83,8 @@ async def tick(app) -> list[str]:
             # write another `work_item_storage_held`). A start behind it that
             # has a worktree still goes.
             continue
+        if st.db.read(lambda c, wid=wid: store.checkout_holder(c, wid)):
+            continue  # keeps its place until the in-place item using its checkout stops
         if await _start_one(app, wid):
             started.append(wid)
     return started

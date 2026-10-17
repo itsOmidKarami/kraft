@@ -534,9 +534,10 @@ async def review_gates(
                         )
                     )
                     return "needs_human"
-                await db.write(
+                if not await db.write(
                     lambda c, gate=gate: store.approve_gate(c, work_item_id, gate, by="agent")
-                )
+                ) and db.read(lambda c: store.checkout_holder(c, work_item_id)):
+                    return status_of(db, work_item_id)  # approved, queued for the checkout
                 start, steer = gate_node_index(approved, gate) + 1, None
             else:
                 # `fixed` is a rejection that repaired something on its way out, so
@@ -1067,6 +1068,20 @@ async def auto_escalate_stuck(
     )
 
 
+def _queued_retry(payload: dict) -> dict:
+    """A deferred self-retry as the `/retry` body the start queue makes it
+    with. A seeded steer is left out: that retry seeds it again."""
+    carried = payload.get("override") or {}
+    body = {
+        "steer": None if payload.get("seeded") else payload["steer"],
+        "path": None if payload.get("restart") else payload.get("path") or payload["node_id"],
+        "restart": payload.get("restart", False),
+        "task_config": carried.get("task_config"),
+        "policy": carried.get("policy"),
+    }
+    return {k: v for k, v in body.items() if v}
+
+
 async def resume_after_escalation(
     db,
     run_dirs,
@@ -1164,6 +1179,20 @@ async def resume_after_escalation(
             lambda c: store.claim_for_run(c, work_item_id, from_statuses=admitting(Verb.RETRY))
         )
         if not claimed:
+            if holder := db.read(lambda c: store.checkout_holder(c, work_item_id)):
+                # The retry stands, queued until the checkout frees.
+                await db.write(
+                    lambda c: store.queue_work_item(
+                        c,
+                        work_item_id,
+                        verb="retry",
+                        body=_queued_retry(payload),
+                        headers={},
+                        from_statuses=admitting(Verb.RETRY),
+                        held_by=holder,
+                    )
+                )
+                return status_of(db, work_item_id)
             status = status_of(db, work_item_id)
             await db.write(
                 lambda c: events.append(

@@ -882,10 +882,13 @@ async def slots_answer(st, wid: str) -> dict:
     return slots
 
 
-async def queued_answer(request: Request, wid: str, verb: str, body, from_statuses) -> dict:
-    """Hold a start request that passed every check but capacity, and answer
-    for it. `kraft.start_queue` makes the same request again when a slot
-    frees, so `body` is saved as the caller sent it."""
+async def queued_answer(
+    request: Request, wid: str, verb: str, body, from_statuses, *, held_by: str | None = None
+) -> dict:
+    """Hold a start request that passed every check but capacity, or whose
+    checkout the in-place item `held_by` is using, and answer for it.
+    `kraft.start_queue` makes the same request again when a slot or the
+    checkout frees, so `body` is saved as the caller sent it."""
     st = request.app.state
     queued = await st.db.write(
         lambda c: store.queue_work_item(
@@ -895,13 +898,30 @@ async def queued_answer(request: Request, wid: str, verb: str, body, from_status
             body=body.model_dump(mode="json", exclude_defaults=True),
             headers=deps.caller_headers(request),
             from_statuses=from_statuses,
+            held_by=held_by,
         )
     )
     if not queued:
         raise HTTPException(
             409, "work item is not stopped" if verb == "retry" else "work item is not paused"
         )
-    return {"id": wid, "status": WorkItemStatus.QUEUED, "slots": await slots_answer(st, wid)}
+    held = st.db.read(lambda c: store.checkout_reason(c, held_by)) if held_by else {}
+    return {
+        "id": wid,
+        "status": WorkItemStatus.QUEUED,
+        "slots": await slots_answer(st, wid),
+        **held,
+    }
+
+
+def checkout_refusal(st, wid: str) -> HTTPException | None:
+    """The 409 for a door that cannot queue, when another in-place item is
+    using this item's checkout."""
+    holder = st.db.read(lambda c: store.checkout_holder(c, wid))
+    if holder is None:
+        return None
+    title = st.db.read(lambda c: store.checkout_reason(c, holder))["held_by_title"]
+    return HTTPException(409, f"the checkout is in use by {title}; try again when it stops")
 
 
 def blocked_refusal(row) -> str:
@@ -1139,6 +1159,10 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             lambda c: store.claim_for_run(c, wid, from_statuses=from_statuses, limit=limit)
         )
         if not claimed:
+            if holder := st.db.read(lambda c: store.checkout_holder(c, wid)):
+                return await queued_answer(
+                    request, wid, "resume", body, from_statuses, held_by=holder
+                )
             if st.db.read(store.active_count) >= limit:
                 return await queued_answer(request, wid, "resume", body, from_statuses)
             raise HTTPException(409, "work item is not paused")
@@ -1561,6 +1585,10 @@ async def _retry(wid: str, body: Retry, request: Request):
             lambda c: store.claim_for_run(c, wid, from_statuses=admitting(Verb.RETRY), limit=limit)
         )
         if not claimed:
+            if holder := st.db.read(lambda c: store.checkout_holder(c, wid)):
+                return await queued_answer(
+                    request, wid, "retry", asked, admitting(Verb.RETRY), held_by=holder
+                )
             if st.db.read(store.active_count) >= limit:
                 return await queued_answer(request, wid, "retry", asked, admitting(Verb.RETRY))
             raise HTTPException(409, "work item is not stopped")
@@ -2000,7 +2028,9 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
                 lambda c: store.claim_for_run(c, wid, from_statuses=admitting(Verb.SKIP))
             )
             if not claimed:
-                raise HTTPException(409, "work item status changed; try again")
+                raise checkout_refusal(st, wid) or HTTPException(
+                    409, "work item status changed; try again"
+                )
             note = (body.note or "").strip() or None
             session_ids = [s["id"] for s in sessions]
             # mark first, then signal: same race pause_work_item guards against —
@@ -2094,7 +2124,9 @@ async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPa
             )
         )
         if not claimed:
-            raise HTTPException(409, "work item status changed; try again")
+            raise checkout_refusal(st, wid) or HTTPException(
+                409, "work item status changed; try again"
+            )
         await st.db.write(lambda c: store.skip_scope(c, wid, target.path, note))
         try:
             deps.spawn(

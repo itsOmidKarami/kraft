@@ -419,13 +419,14 @@ def _create_escalation_session(
         conn.close()
 
 
-def _in_state(client, repo, state: dict) -> str:
-    """A default-chain item put in `state` (a `lifecycle_doors.json` row) directly."""
+def _in_state(client, repo, state: dict, **body) -> str:
+    """A default-chain item put in `state` (a `lifecycle_doors.json` row)
+    directly. `body` adds to the create body (`in_place`, `title`, ...)."""
     from kraft import events, store
     from kraft.templates.models import AgentTask
     from kraft.vocab import ThreadLabel
 
-    wid = _paused(client, repo, chain_template="default")
+    wid = _paused(client, repo, chain_template="default", **body)
     dep = _paused(client, repo, chain_template="default") if state.get("depends_on") else None
     with closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")) as c, c:
         c.execute(

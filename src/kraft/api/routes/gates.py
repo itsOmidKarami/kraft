@@ -330,7 +330,7 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
         )
 
     # Bracketed from *before* the claim to the hand-off. `store.approve_gate` is
-    # an unconditional `UPDATE work_items SET status = 'active'` -- a claim like
+    # an `UPDATE work_items SET status = 'active'` -- a claim like
     # any other, which `api/deps.py`'s `task_is_live` docstring already names:
     # "calling `store.approve_gate`/`apply_rejection` and only then discovering
     # `spawn` refuses would leave the gate cleared and the item `active` with no
@@ -346,7 +346,12 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
         reason="gate approval cleared the gate but could not start a walk",
         handed_off=lambda: deps.task_is_live(request.app, wid),
     ):
-        await st.db.write(lambda c: store.approve_gate(c, wid, gate, by=_decided_by(request)))
+        if not await st.db.write(
+            lambda c: store.approve_gate(c, wid, gate, by=_decided_by(request))
+        ) and (holder := st.db.read(lambda c: store.checkout_holder(c, wid))):
+            # Approved, and queued to go on once the checkout frees.
+            reason = st.db.read(lambda c: store.checkout_reason(c, holder))
+            return deps.work_item_answer(st, wid) | reason
         start = board._gate_node_index(nodes, gate) + 1
         # Not item_folder: an in-place item's checkout is never rebased here.
         if _before_any_push(nodes, gate) and (st.run_dirs.worktrees / wid).is_dir():

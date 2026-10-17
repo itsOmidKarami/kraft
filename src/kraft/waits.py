@@ -264,7 +264,7 @@ async def _re_enter_one(app, row) -> bool:
         # wait's timeout is its own, and the observation this re-entry makes
         # is what checks it (`observe`).
         if not await st.db.write(lambda c: store.mark_reentered(c, wid)):
-            return False  # ended since `tick` selected it (Kraft-dncfg)
+            return False  # ended since `tick` selected it (Kraft-dncfg), or its checkout is busy
         # `store.node_index`, not `chain["nodes"]`: a V1 row's
         # `chain_definition` is `"{}"`. `None` means this node is not in this
         # item's chain at all -- a stop (the bracket's), not a restart at zero.

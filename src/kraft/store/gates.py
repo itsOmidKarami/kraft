@@ -8,6 +8,7 @@ from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store import chain
 from kraft.store._common import write_status
 from kraft.store.counters import reset_fix_loops
+from kraft.store.work_items import checkout_holder, queue_work_item
 from kraft.vocab import ChainEvent, GateEvent, WorkItemEvent
 
 
@@ -21,8 +22,13 @@ def request_gate(conn: sqlite3.Connection, work_item_id, node_id, gate) -> None:
     events.append(conn, work_item_id, GateEvent.REQUESTED, {"gate": gate, "node_id": node_id})
 
 
-def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "human") -> None:
-    """Clear the gate and set the item running again.
+def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "human") -> bool:
+    """Clear the gate and set the item running again. True when it is running.
+
+    False, with the approval still recorded, while another in-place item
+    works in this item's checkout (`checkout_holder`): the item is paused past
+    the gate and queued to resume, which `kraft.start_queue` does once the
+    checkout frees. False, and nothing written, for an ended item.
 
     Also closes the gate node's own `node_started`/`node_completed` pair. A V1
     gate *is* a node (`gate-is-an-ordered-node`) and `gates.maybe_gate` enters
@@ -37,14 +43,29 @@ def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "hum
     completion: the gate reopens, and `gate_rejected` already says so.
     `complete_node` is idempotent, so re-approving writes one event.
     """
+    holder = checkout_holder(conn, work_item_id)
     if not write_status(
         conn,
-        "UPDATE work_items SET status = 'active', updated_at = ? WHERE id = ?",
+        "UPDATE work_items SET status = 'active', updated_at = ? WHERE id = ?"
+        if holder is None
+        else "UPDATE work_items SET status = 'paused', updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     ):
-        return
+        return False
     events.append(conn, work_item_id, GateEvent.APPROVED, {"gate": gate, "by": by}, node_id=gate)
     chain.complete_node(conn, work_item_id, gate)
+    if holder is None:
+        return True
+    queue_work_item(
+        conn,
+        work_item_id,
+        verb="resume",
+        body={},
+        headers={},
+        from_statuses=["paused"],
+        held_by=holder,
+    )
+    return False
 
 
 def pass_unchanged_revision(conn: sqlite3.Connection, work_item_id, gate, rationale) -> None:

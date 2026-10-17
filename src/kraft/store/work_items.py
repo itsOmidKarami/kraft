@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 from collections.abc import Iterable
@@ -8,9 +9,11 @@ from collections.abc import Iterable
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import write_status
+from kraft.store.chain import materialized_chain_of
 from kraft.vocab import (
     ENDED,
     HOLDS_SLOT,
+    LIVE,
     STOP_TRAITS,
     SessionEvent,
     SessionStatus,
@@ -362,10 +365,11 @@ def queue_work_item(
     body: dict,
     headers: dict[str, str],
     from_statuses,
+    held_by: str | None = None,
 ) -> bool:
-    """Hold a start request the board had no slot for (`kraft.start_queue`).
-    True when it queued; False when the item is not in a status the door
-    starts from.
+    """Hold a start request the board had no slot for (`kraft.start_queue`),
+    or whose checkout another in-place item, `held_by`, is using. True when it
+    queued; False when the item is not in a status the door starts from.
 
     The request is saved, not a prepared run: the rebase, the counter clearing
     and the steer all happen when the item starts, against the code as it is
@@ -383,8 +387,46 @@ def queue_work_item(
         (json.dumps(request), request["at"], work_item_id),
     ):
         return False
-    events.append(conn, work_item_id, WorkItemEvent.QUEUED, {"verb": verb, "from": request["from"]})
+    payload = {"verb": verb, "from": request["from"]}
+    if held_by is not None:
+        payload |= checkout_reason(conn, held_by)
+    events.append(conn, work_item_id, WorkItemEvent.QUEUED, payload)
     return True
+
+
+def checkout_holder(conn: sqlite3.Connection, work_item_id: str) -> str | None:
+    """The other in-place item working in this item's checkout folder: one
+    that is `active`, or has a live session there. None for a worktree item,
+    and for an item already `active`, which holds the checkout itself.
+
+    Read from the rows, not kept in a lock of its own, so a restart neither
+    loses nor doubles it. The folder is compared resolved: two spellings of
+    one checkout are one lease."""
+    row = conn.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    if row is None or row["status"] == WorkItemStatus.ACTIVE or not _in_place(row):
+        return None
+    folder = os.path.realpath(row["repo"])
+    working = conn.execute(
+        "SELECT * FROM work_items w WHERE id != ? AND (status = ? OR EXISTS ("
+        "SELECT 1 FROM worker_sessions s WHERE s.work_item_id = w.id "
+        f"AND s.status IN ({in_list(LIVE)}))) ORDER BY id",
+        (work_item_id, WorkItemStatus.ACTIVE),
+    )
+    return next(
+        (o["id"] for o in working if _in_place(o) and os.path.realpath(o["repo"]) == folder),
+        None,
+    )
+
+
+def checkout_reason(conn: sqlite3.Connection, holder: str) -> dict:
+    """Why an item waits for its checkout, as its queued event and answer say it."""
+    title = conn.execute("SELECT title FROM work_items WHERE id = ?", (holder,)).fetchone()
+    return {"why": "checkout", "held_by": holder, "held_by_title": title["title"]}
+
+
+def _in_place(row) -> bool:
+    chain = materialized_chain_of(row)
+    return chain is not None and chain.target.in_place
 
 
 #: Where a queued item goes back to. A literal each, like `MANUAL_ENDS`, so no
@@ -676,8 +718,11 @@ def mark_reentered(conn: sqlite3.Connection, work_item_id: str) -> bool:
     the row stop looking due, not something a human reads.
 
     False, and nothing written, for an item an operator ended after the
-    poller selected it (Kraft-dncfg).
+    poller selected it (Kraft-dncfg), or whose checkout another in-place item
+    is using (`checkout_holder`): the poller tries again next tick.
     """
+    if checkout_holder(conn, work_item_id) is not None:
+        return False
     return write_status(
         conn,
         "UPDATE work_items SET status = 'active', retry_at = NULL, updated_at = ? WHERE id = ?",
@@ -1079,9 +1124,15 @@ def claim_for_run(
     `work_item_retried`, `node_skipped`, ...); this owns only the status
     column, so a caller that loses the race can 409 before writing anything
     else.
+
+    False too while another in-place item works in this item's checkout
+    (`checkout_holder`); a caller tells that apart by reading it again.
     """
     from_statuses = [WorkItemStatus(s) for s in from_statuses]
     to_status = WorkItemStatus(to_status)
+    # Atomic with the UPDATE below: the caller runs this whole on Kraft's one writer connection.
+    if to_status == WorkItemStatus.ACTIVE and checkout_holder(conn, work_item_id) is not None:
+        return False
     placeholders = marks(from_statuses)
     capacity_clause = ""
     params: tuple = (to_status, _now(), work_item_id, *from_statuses)

@@ -4,6 +4,7 @@ queue a start are pinned beside the doors themselves."""
 import asyncio
 import dataclasses
 import json
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from support.api import (
     _paused,
     _poll_events,
     _post_default,
+    _set_status,
 )
 
 DOORS = json.loads((Path(__file__).parent / "lifecycle_doors.json").read_text())
@@ -162,3 +164,51 @@ def test_an_item_with_a_worktree_is_not_held_by_the_storage_limit(client, repo):
     assert r.status_code == 200, r.text
     assert r.json().get("status") != "queued"
     assert client.get(f"/api/work-items/{wid}").json()["queued"] is None
+
+
+@pytest.mark.parametrize(
+    ("door", "state", "came_from"),
+    [("resume", "paused", "paused"), ("retry", "failed", "needs_human")],
+    ids=["resume", "retry"],
+)
+def test_resuming_behind_a_working_in_place_item_queues_and_says_who(
+    client, repo, door, state, came_from
+):
+    from kraft import start_queue
+
+    client.portal.call(client.app.state.queue_task.cancel)
+    tick = partial(client.portal.call, partial(start_queue.tick, client.app))
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"][state], in_place=True)
+
+    r = client.post(f"/api/work-items/{wid}/{door}", json={})
+
+    held = {"why": "checkout", "held_by": working, "held_by_title": "A"}
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "queued"
+    assert r.json().items() >= held.items()
+
+    def queued():
+        return [
+            e
+            for e in _poll_events(client, wid, "work_item_queued")
+            if e["type"] == "work_item_queued"
+        ]
+
+    assert queued()[-1]["payload"] == {"verb": door, "from": came_from, **held}
+    assert tick() == []
+    assert len(queued()) == 1, "kept its place, not asked again"
+
+    _set_status(working, "paused")
+
+    assert tick() == [wid]
+
+
+def test_skipping_behind_a_working_in_place_item_is_refused(client, repo):
+    _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"]["failed"], in_place=True)
+
+    r = client.post(f"/api/work-items/{wid}/skip", json={})
+
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "the checkout is in use by A; try again when it stops"

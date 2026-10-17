@@ -1,11 +1,14 @@
 import json
+import os
 import subprocess
 
 import pytest
 from support import schema
+from support.harness import v1_named_chain
 from support.store_fixtures import CHAIN, mk_item
 
 from kraft import db, events, store
+from kraft.templates.environment import WorkItemTarget
 
 
 @pytest.fixture
@@ -443,6 +446,91 @@ async def test_claim_for_run_limit_admits_when_a_slot_is_free(database):
     )
     assert claimed is True
     assert _row(database)["status"] == "active"
+
+
+IN_PLACE = WorkItemTarget.for_repository("sample", in_place=True)
+_NOW = "2000-01-01T00:00:00+00:00"
+
+#: Each store write that moves an item to `active`: where it starts from, and the move.
+_CLAIMS = {
+    "claim_for_run": (
+        lambda c, wid: store.pause_work_item(c, wid, []),
+        lambda c, wid: store.claim_for_run(c, wid, from_statuses=["paused"]),
+    ),
+    "mark_reentered": (
+        lambda c, wid: store.mark_waiting(c, wid, "n", _NOW),
+        lambda c, wid: store.mark_reentered(c, wid),
+    ),
+    "approve_gate": (
+        lambda c, wid: store.request_gate(c, wid, "n", "g"),
+        lambda c, wid: store.approve_gate(c, wid, "g"),
+    ),
+}
+
+
+@pytest.mark.parametrize("claim", list(_CLAIMS))
+async def test_a_second_in_place_item_in_one_checkout_is_not_claimed(
+    item_on, run_dirs, database, claim
+):
+    chain = v1_named_chain(run_dirs.base / "t")
+    await item_on(chain, wid="a", target=IN_PLACE)  # active: it holds the checkout
+    b = await item_on(chain, wid="b", target=IN_PLACE)
+    c = await item_on(chain, wid="c")
+    park, take = _CLAIMS[claim]
+    for wid in ("b", "c"):
+        await database.write(lambda conn, wid=wid: park(conn, wid))
+
+    assert await database.write(lambda conn: take(conn, "b")) is False
+    assert b.status() != "active"
+    assert await database.write(lambda conn: take(conn, "c")) is True, "a worktree item"
+    assert c.status() == "active"
+
+
+async def test_the_lease_is_the_folder_not_its_spelling(item_on, run_dirs, database, repo):
+    chain = v1_named_chain(run_dirs.base / "t")
+    link = repo.parent / "link"
+    link.symlink_to(repo)
+    await item_on(chain, wid="a", target=IN_PLACE)
+    await item_on(chain, wid="b", target=IN_PLACE, repo=link)
+    await database.write(lambda c: store.pause_work_item(c, "b", []))
+
+    assert database.read(lambda c: store.checkout_holder(c, "b")) == "a"
+
+
+@pytest.mark.parametrize(
+    "park",
+    [
+        pytest.param(
+            lambda c: store.mark_needs_human(c, "a", "n", "stop", kind="failed"), id="needs-human"
+        ),
+        pytest.param(lambda c: store.pause_work_item(c, "a", []), id="paused"),
+        pytest.param(lambda c: store.mark_waiting(c, "a", "n", _NOW), id="waiting"),
+        pytest.param(lambda c: store.request_gate(c, "a", "n", "g"), id="at-a-gate"),
+    ],
+)
+async def test_a_parked_in_place_item_holds_no_checkout(item_on, run_dirs, database, park):
+    chain = v1_named_chain(run_dirs.base / "t")
+    await item_on(chain, wid="a", target=IN_PLACE)
+    await item_on(chain, wid="b", target=IN_PLACE)
+    await item_on(chain, wid="c")  # active, in a worktree of the same repository
+    await database.write(park)
+    await database.write(lambda c: store.pause_work_item(c, "b", []))
+
+    assert await database.write(lambda c: store.claim_for_run(c, "b", from_statuses=["paused"])), (
+        "nothing works in the checkout"
+    )
+
+
+async def test_a_live_escalation_session_holds_the_checkout(item_on, run_dirs, database):
+    chain = v1_named_chain(run_dirs.base / "t")
+    a = await item_on(chain, "implementation", wid="a", target=IN_PLACE)
+    await item_on(chain, wid="b", target=IN_PLACE)
+    await database.write(lambda c: store.mark_needs_human(c, "a", "n", "stop", kind="failed"))
+    await a.session("esc", "escalation", running=(os.getpid(), 0.0))
+    await database.write(lambda c: store.pause_work_item(c, "b", []))
+
+    assert not await database.write(lambda c: store.claim_for_run(c, "b", from_statuses=["paused"]))
+    assert database.read(lambda c: store.checkout_holder(c, "b")) == "a"
 
 
 async def test_pause_for_broken_base_pauses_and_records_who_and_what(database):

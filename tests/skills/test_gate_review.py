@@ -27,6 +27,7 @@ from kraft import policy as _policy
 from kraft.db import Database
 from kraft.executor import walk
 from kraft.paths import RunDirs
+from kraft.templates.environment import WorkItemTarget
 
 
 @pytest.fixture(autouse=True)
@@ -285,13 +286,15 @@ async def test_a_reviewer_on_an_unavailable_profile_launches_nothing_and_claims_
     assert "gate_approved" not in types and "gate_rejected" not in types, types
 
 
-def _chain2(rd, *, auto_review=True):
+def _chain2(rd, *, auto_review=True, target=None):
     """implementation (exec) -> human_review_approval (gate, reject_to
     implementation, reviewed unless `auto_review=False`)."""
     gate = v1_node("human_review_approval", "gate", reject_to="implementation")
     if auto_review:
         gate["auto_review"] = _reviewer()
-    return v1_chain([v1_node("implementation", tasks=[v1_task("build")]), gate], repo=rd.base)
+    return v1_chain(
+        [v1_node("implementation", tasks=[v1_task("build")]), gate], repo=rd.base, target=target
+    )
 
 
 POLICY = _policy.Policy(loops={}, default=_policy.Cap(attempts=2, wall_clock_s=3600))
@@ -384,6 +387,19 @@ async def test_verdict_reenters_the_walk_at_the_right_node(
         assert calls[0][1] is None
     else:
         assert calls[0][1] == "because the migration is missing"
+
+
+async def test_an_agent_approval_behind_a_working_in_place_item_is_queued(
+    monkeypatch, database, run_dirs
+):
+    calls = []
+    _stub_review(monkeypatch, "approve")
+    _stub_walk(monkeypatch, calls)
+    chain = _chain2(run_dirs, target=WorkItemTarget.for_repository("sample", in_place=True))
+    await v1_item(database, chain, repo=run_dirs.base, wid="a")  # active in the checkout
+
+    assert await _review_from_gate(database, run_dirs, chain, auto_gate=True) == "queued"
+    assert calls == [], "walked on past the gate"
 
 
 async def test_undecided_leaves_the_gate_pending(monkeypatch, database, run_dirs):
