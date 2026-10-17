@@ -40,8 +40,11 @@ is reverted. Keep its front matter, change only the body, and take the
 section's format from CONTRIBUTING, the PR template or the job's own checker
 (run it on the new body if the repo ships one). Fill it from the diff, never
 from guesswork; if you cannot tell what it should say, leave it. The `sync`
-step after you writes the description to the forge and re-runs the failed jobs,
-so the CI wait reads the fixed one.
+step after you writes the description to the forge and starts the failed
+checks again (on GitLab as a new pipeline). A check that reads the description
+when it runs sees the fix; one that reads it from its triggering event does
+only if it re-runs on edits. If neither works the item stops for a person, as
+before: do not push a commit or touch CI config to force a run.
 
 ## When the trace names something else
 

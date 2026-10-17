@@ -563,6 +563,9 @@ async def _run_one(
             # the old one (a required section, say) stays red until its jobs
             # run again. Only when the body changed AND the current head's
             # checks are red: a sync after new commits sees a pending pipeline.
+            # shortcut: re-runs whenever the live description differs, including
+            # edits by a bot or a person, not only a repair; key it on the body
+            # Kraft last wrote if that costs CI.
             if live_body is not None and live_body.strip() != body.strip():
                 try:
                     head_ci = await forge.ci_status(
@@ -570,7 +573,12 @@ async def _run_one(
                     )
                     head_sha = await git._head_sha(repo)
                     if head_ci.state == "failed" and head_ci.sha in ("", head_sha):
-                        await forge.retry_jobs(repo=repo, ci=head_ci)
+                        if await forge.rerun_after_description_change(
+                            repo=repo, branch=branch, ci=head_ci
+                        ):
+                            # A new pipeline: the CI wait pins `head:pipeline`,
+                            # and would keep reading the old one.
+                            await db.write(lambda c: store.set_ci_pipeline_ref(c, work_item_id, ""))
                         log += "description changed: re-ran the failed jobs\n"
                 except ForgeError:
                     pass  # shortcut: best-effort re-run, the CI wait still reports the truth

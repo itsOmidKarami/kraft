@@ -479,12 +479,25 @@ class GlabCli(mr_ops.CliWaits):
         for label in drop:
             args += ["--unlabel", label]
         await git.run_git(repo, args)
+        await self._new_mr_pipeline(repo, number)
+
+    async def _new_mr_pipeline(self, repo: Path, number: int) -> None:
         # `projects/:id` is glab's own placeholder for the repo the command is
         # run in, so this stays as repo-agnostic as every other call here.
         await git.run_git(
             repo,
             ["glab", "api", "-X", "POST", f"projects/:id/merge_requests/{number}/pipelines"],
         )
+
+    async def rerun_after_description_change(
+        self, *, repo: Path, branch: str, ci: CIStatus
+    ) -> bool:
+        """`CI_MERGE_REQUEST_DESCRIPTION` is fixed when a pipeline is created,
+        so retrying jobs would re-read the old body: start a new pipeline, as
+        `set_labels` does for labels."""
+        raw = await git.run_git(repo, ["glab", "mr", "view", "-F", "json"])
+        await self._new_mr_pipeline(repo, int(mr_ops.parse_json(raw, "glab mr view")["iid"]))
+        return True
 
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
         await git._assert_pushed(repo, branch)

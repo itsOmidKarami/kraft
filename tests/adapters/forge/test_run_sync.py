@@ -56,3 +56,29 @@ async def test_sync_mr_still_describes_when_the_live_body_cannot_be_read(run_for
 
     assert fake.bodies["kraft/w1"] != "old"
     assert fake.retried == []
+
+
+@pytest.mark.parametrize(
+    "new_pipeline, pinned",
+    [(True, ""), (False, "555")],
+    ids=["new-pipeline-unpins-the-old-one", "same-pipeline-stays-pinned"],
+)
+async def test_sync_mr_drops_the_pinned_pipeline_only_when_it_made_a_new_one(
+    run_forge, repo, new_pipeline, pinned
+):
+    fake = forge.FakeForge(
+        ci_states=["pending", "failed"],
+        ci_failed_jobs=[RED],
+        ci_pipeline_refs=["555"],
+        edit_makes_new_pipeline=new_pipeline,
+    )
+    await fake.open_mr(repo=repo, branch="kraft/w1", base="main", title="t", body="old")
+    await run_forge(fake, "ci_poll", "s1", repo=repo)  # pins head:555
+
+    await run_forge(fake, "sync_mr", "s2", repo=repo)
+
+    ref = run_forge.database.read(
+        lambda c: c.execute("SELECT ci_pipeline_ref FROM work_items WHERE id = 'w1'").fetchone()
+    )["ci_pipeline_ref"]
+    assert ref.split(":")[-1] == pinned
+    assert len(fake.retried) == 1
