@@ -97,7 +97,7 @@ async def get_work_item_diff(wid: str, request: Request, ignore_whitespace: bool
         )
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
-    head = inplace.head_ref(row)
+    head = _branch_tip(st, row) if inplace.is_in_place(row) else "HEAD"
     # In place the working tree is the person's: the uncommitted part is the
     # empty range `head..head`, never their files.
     change = review.read_change(
@@ -151,11 +151,7 @@ def _resolve_target(st, row, gate: str | None, target: str) -> tuple[str | None,
         if not inplace.is_in_place(row):
             return None, base
         # In place the working tree is the person's: latest is the branch's tip.
-        folder = inplace.item_folder(st.run_dirs, row)
-        tip = config_mod.git_read(folder, "rev-parse", "--verify", "-q", inplace.head_ref(row))
-        if not tip:
-            raise HTTPException(409, "this work item's branch has no commit yet")
-        return tip, base
+        return _branch_tip(st, row), base
     if target == "last_review":
         rev = st.db.read(lambda c: store.last_review(c, wid))
         if rev is None:
@@ -168,6 +164,22 @@ def _resolve_target(st, row, gate: str | None, target: str) -> tuple[str | None,
             raise HTTPException(404, f"no attempt {n} for this gate")
         return hit["sha"], hit["base_sha"]
     raise HTTPException(400, f"unknown compare target {target!r}")
+
+
+def _branch_tip(st, row) -> str:
+    """An in-place item's branch tip; a 404 once an abandon or archive has
+    deleted the branch (the checkout itself is still there)."""
+    tip = config_mod.git_read(
+        inplace.item_folder(st.run_dirs, row),
+        "rev-parse",
+        "--verify",
+        "-q",
+        inplace.head_ref(row),
+        expected_failure=True,
+    )
+    if not tip:
+        raise HTTPException(404, "this work item's branch is gone")
+    return tip
 
 
 def _readable_worktree(st, row):

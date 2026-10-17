@@ -364,3 +364,9 @@ def test_diff_in_place_shows_only_the_branchs_commits(client, tmp_path):
     assert [f["path"] for f in compare["files"]] == ["feature.py"]
     assert compare["untracked"] == []
     assert "the person's" not in str(diff) + str(compare)
+    # An abandon or archive deleted the branch: gone, not a git failure.
+    git(repo, "branch", "-D", branch)
+    gone = [client.get(f"/api/work-items/{wid}/{route}") for route in ("diff", "compare")]
+    assert [(r.status_code, r.json()["detail"]) for r in gone] == [
+        (404, "this work item's branch is gone")
+    ] * 2
