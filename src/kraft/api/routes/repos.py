@@ -559,12 +559,14 @@ async def _add_repo(body: RepoBody, st) -> dict:
         "models": body.models or {},
         "deny_tools": body.deny_tools or [],
         "steering": body.steering or [],
-        "worktrees": body.worktrees,
         # A human typed this path. Set here rather than defaulted in the
         # loader, because `_auto_connect_children` below writes entries
         # through the same file and must NOT get this value.
         "managed": True,
     }
+    if body.worktrees is not None:
+        # Only when given: the answer is read back as a `RepoEntry`, where None is no bool.
+        entry["worktrees"] = body.worktrees
     had = {id(r) for r in repos}
     repos.append(entry)
     children = _auto_connect_children(repos, entry, child_probes)
