@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 from support.harness import entry_of, fake_harness_home
 
-from kraft import executor, store
+from kraft import executor, inplace, store
 from kraft import policy as _policy
 from kraft.adapters import agent as agent_mod
 from kraft.api.routes import gates as gates_route
@@ -173,8 +173,13 @@ async def test_a_gate_with_only_unanswered_questions_opens_with_the_reply_agent(
     )
 
 
+@pytest.mark.parametrize(
+    "refusal",
+    [store.CheckoutBusy("a", "A"), inplace.CheckoutRefused("the checkout is in use by A")],
+    ids=["another-item-uses-it", "it-cannot-be-taken"],
+)
 async def test_a_reply_agent_refused_its_checkout_leaves_the_gate_open_and_says_why(
-    item_on, tmp_path, monkeypatch
+    item_on, tmp_path, monkeypatch, refusal
 ):
     it = await item_on(
         [
@@ -192,7 +197,7 @@ async def test_a_reply_agent_refused_its_checkout_leaves_the_gate_open_and_says_
 
     async def _busy_reply(_db, _rd, **kw):
         if kw["hook_point"] == "review.reply":
-            raise store.CheckoutBusy("a", "A")
+            raise refusal
         return "done"
 
     monkeypatch.setattr(agent_mod, "run_agent_task", _busy_reply)

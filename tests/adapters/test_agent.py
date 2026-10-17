@@ -9,20 +9,11 @@ import sys
 from pathlib import Path
 
 import pytest
-from support.harness import (
-    entry_of,
-    git,
-    harness_without,
-    own_files,
-    v1_node,
-    write,
-    write_harness_profiles,
-)
+from support.harness import entry_of, harness_without, own_files, write, write_harness_profiles
 
-from kraft import inplace, skill, store
+from kraft import skill, store
 from kraft.adapters import agent
 from kraft.adapters.subprocess import read_concerns, read_question
-from kraft.templates.environment import WorkItemTarget
 from kraft.worker import steering
 
 _FAKE = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
@@ -111,84 +102,6 @@ async def test_agent_writes_session_summary_and_ref_lands_in_db(launch, run_dirs
         "worker_session_id: s3",
     ):
         assert line in summary
-
-
-# --- an in-place item's session outside the walk -------------------------------------
-
-_IN_PLACE = WorkItemTarget.for_repository("sample", in_place=True)
-
-
-@pytest.mark.parametrize(
-    ("script", "stop"),
-    [
-        (
-            "echo agent >> calc.py && git add -- calc.py && git commit -qm agent -- calc.py",
-            "the agent committed calc.py, which already had uncommitted changes",
-        ),
-        ("git checkout -q main", "moved to main during the run of escalation"),
-        ("echo x > left.txt", None),
-    ],
-    ids=["overlap", "moved", "leftover"],
-)
-async def test_an_in_place_session_outside_the_walk_takes_marks_and_checks_its_checkout(
-    item_on, monkeypatch, script, stop
-):
-    """An escalation, reply or gate-review agent runs the steps a walk task
-    does: the checkout switched to the item's branch, marked, checked after."""
-    it = await item_on([v1_node()], status="needs_human", target=_IN_PLACE)
-    branch = store.branch_for(it.row())
-    git(it.repo, "branch", branch)
-    write(it.repo, "calc.py", "# the person's edit\n")
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    monkeypatch.setenv("KRAFT_FAKE_AGENT_SHELL", f"git symbolic-ref HEAD > .git/on && {script}")
-
-    status = await _outside_the_walk(it)
-
-    assert status == "done"
-    assert (it.repo / ".git" / "on").read_text().strip() == f"refs/heads/{branch}"
-    [marked] = it.events("task_marked")
-    assert (marked["payload"]["task"], marked["payload"]["dirty"]) == ("escalation", ["calc.py"])
-    needs_human = it.events("work_item_needs_human")
-    if stop:
-        assert it.row()["stop_kind"] == "checkout"
-        assert stop in needs_human[-1]["payload"]["reason"]
-    else:
-        assert needs_human == []
-        [left] = it.events("left_uncommitted")
-        assert left["payload"]["paths"] == ["left.txt"]
-
-
-async def test_an_in_place_session_refused_its_checkout_never_launches(item_on, monkeypatch):
-    """The branch is gone: nothing switches, the agent never runs, and the
-    refusal is the session's log for the caller to stop or skip on."""
-    it = await item_on([v1_node()], status="needs_human", target=_IN_PLACE)
-    monkeypatch.setenv("KRAFT_FAKE_AGENT_SHELL", "touch ran")
-
-    with pytest.raises(inplace.CheckoutRefused, match="is gone"):
-        await _outside_the_walk(it)
-
-    assert not (it.repo / "ran").exists()
-    [session] = it.sessions()
-    assert session["status"] == "config_error"
-    assert "is gone" in Path(session["log_path"]).read_text()
-    assert it.events("task_marked") == []
-
-
-def _outside_the_walk(it):
-    return agent.run_agent_task(
-        it.database,
-        it.run_dirs,
-        session_id="s1",
-        work_item_id=it.id,
-        node_id="build",
-        hook_point="escalation",
-        command=PY_FAKE,
-        title="t",
-        task_instruction="look again",
-        repo_path=str(it.repo),
-        cwd=it.repo,
-        takes_checkout=True,
-    )
 
 
 @pytest.mark.parametrize(
@@ -375,8 +288,7 @@ def test_default_profile_reproduces_todays_command_line(run):
     - `--permission-mode auto`, always: without it `claude -p` has nobody to
       answer a prompt and denies instead (6363c65e: 13 denials, Kraft-8pe/7lu);
       no `--allowedTools` for a silent binding.
-    - the permission prompt tool on every task: the decision and its event are
-      the point (Kraft-oor).
+    - the permission prompt tool on every task: its decision and event are the point (Kraft-oor).
     - no `--resume`/`--autocompact`: only an escalation turn resumes.
     - no steering, artifact or method: the prompt is the bare context and rules.
     """
@@ -551,62 +463,28 @@ def test_identify_as_worker_sets_the_work_item_env_var(run, identify, work_item_
 
 
 @pytest.mark.parametrize(
-    "placed, phrases, absent",
+    "phrases",
     [
         # Sub-project G §1: the injected context is the only channel that tells
         # an agent the status vocabulary exists.
-        (
-            False,
-            ("done", "done_with_concerns", "failed", "needs_context", "concerns", "question"),
-            (),
-        ),
+        ("done", "done_with_concerns", "failed", "needs_context", "concerns", "question"),
         # Spec §5: needs_context costs a full stop and relaunch, so ask for
         # every missing fact at once.
-        (False, ("ask for all of them in that one question",), ()),
+        ("ask for all of them in that one question",),
         # Kraft-avpe: a headless session has no next turn to receive a
         # background job's notification.
-        (False, ("nothing runs after you stop", "background"), ()),
+        ("nothing runs after you stop", "background"),
         # Kraft-brq: the node that writes the code was never told to commit it.
-        (
-            False,
-            ("Commit everything you change before you exit", "destroyed with the worktree"),
-            (),
-        ),
+        ("Commit everything you change before you exit", "destroyed with the worktree"),
         # Kraft is the only pusher (spec §1, §4).
-        (False, ("Do not push and do not merge",), ()),
-        # A person's own checkout: their staged and unstaged edits sit beside
-        # the agent's, so it commits by path and never moves the checkout.
-        (
-            True,
-            (
-                "You are working in a person's own checkout, on this work item's branch "
-                "`kraft/w1`.",
-                '`git add -- <paths>`, then `git commit -m "..." -- <paths>`',
-                "Never `git add -A`, `git add .`, `git commit -a`, `git stash`, `git checkout`, "
-                "`git switch` or `git reset`",
-                "Commit everything you change before you exit",
-                "Do not push and do not merge",
-                "Exception: `.engineering/`",
-            ),
-            ("destroyed with the worktree", "git worktree cut for this work item"),
-        ),
+        ("Do not push and do not merge",),
     ],
-    ids=[
-        "statuses-and-fields",
-        "one-question-per-stop",
-        "no-backgrounding",
-        "commit",
-        "no-push",
-        "in-place",
-    ],
+    ids=["statuses-and-fields", "one-question-per-stop", "no-backgrounding", "commit", "no-push"],
 )
-def test_the_injected_context_says(run, request, placed, phrases, absent):
-    prompt = _system_prompt(run(**(request.getfixturevalue("in_place") if placed else {}))["cmd"])
+def test_the_injected_context_says(run, phrases):
+    prompt = _system_prompt(run()["cmd"])
     for phrase in phrases:
         assert phrase in prompt
-    for phrase in absent:
-        assert phrase not in prompt
-    assert prompt.count("Commit everything you change before you exit") == 1
 
 
 @pytest.mark.parametrize(

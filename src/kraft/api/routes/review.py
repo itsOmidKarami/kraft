@@ -489,6 +489,8 @@ async def _start_reply(st, request: Request, row, gate: str, nodes) -> dict:
                     held_by=holder,
                 )
             )
+        except inplace.CheckoutRefused as exc:
+            await inplace.stop_refused(st.db, wid, gate, exc)
 
     try:
         deps.spawn(request.app, wid, reply())

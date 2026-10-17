@@ -23,7 +23,7 @@ from support.harness import (
 )
 
 from kraft import caps as _caps
-from kraft import events, executor, gate_review, item_paths, store
+from kraft import events, executor, gate_review, inplace, item_paths, store
 from kraft import policy as _policy
 from kraft.db import Database
 from kraft.executor import walk
@@ -404,15 +404,26 @@ async def test_an_agent_verdict_behind_a_working_in_place_item_is_queued(
     assert calls == [], "walked on past the gate"
 
 
+@pytest.mark.parametrize(
+    "refused", [None, "the branch is gone"], ids=["another-item-uses-it", "it-cannot-be-taken"]
+)
 async def test_a_review_behind_a_working_in_place_item_leaves_the_gate_to_a_person(
-    database, run_dirs, tmp_path
+    database, run_dirs, tmp_path, monkeypatch, refused
 ):
-    """No reviewer starts in a checkout another in-place item is using; the
-    attempt closes with why, and the gate waits for a person."""
+    """No reviewer starts in a checkout another in-place item is using, or one
+    that cannot be switched to the item's branch; the attempt closes with why,
+    and the gate waits for a person."""
     fake_harness_home(tmp_path, ["true"])
     in_place = WorkItemTarget.for_repository("sample", in_place=True)
     chain = _chain2(run_dirs, target=in_place, harness="fake")
-    await v1_item(database, chain, repo=run_dirs.base, wid="a", title="A")
+    if refused:
+
+        async def take_refused(*a, **kw):
+            raise inplace.CheckoutRefused(refused)
+
+        monkeypatch.setattr(gate_review, "review", take_refused)
+    else:
+        await v1_item(database, chain, repo=run_dirs.base, wid="a", title="A")
 
     assert await _review_from_gate(database, run_dirs, chain, auto_gate=True) == "awaiting_gate"
 
@@ -421,7 +432,7 @@ async def test_a_review_behind_a_working_in_place_item_leaves_the_gate_to_a_pers
         {
             "gate": "human_review_approval",
             "reason": "checkout",
-            "note": "the checkout is in use by A",
+            "note": refused or "the checkout is in use by A",
         }
     ]
     assert not database.read(

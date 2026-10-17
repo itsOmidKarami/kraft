@@ -592,3 +592,12 @@ async def check_task(db, run_dirs, row, folder: Path, node_id: str, task_path: s
         )
     )
     return reason
+
+
+async def stop_refused(db, wid: str, node_id: str, exc: CheckoutRefused) -> None:
+    """A person's request for an agent (an escalation, a reply) whose
+    checkout could not be taken: the item stops for them, as a walk task's
+    refused take does. Never `stuck`: an escalation would only take it again."""
+    await db.write(
+        lambda c: store.mark_needs_human(c, wid, node_id, str(exc), kind=StopKind.CHECKOUT)
+    )

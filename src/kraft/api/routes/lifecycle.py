@@ -2469,6 +2469,9 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
                 )
             )
             return
+        except inplace.CheckoutRefused as exc:
+            await inplace.stop_refused(st.db, wid, row["current_node_id"], exc)
+            return
         # The agent may have called `kraft item retry` on itself mid-turn
         # (lifecycle.py's `work_item_self_retry_requested` deferral above) --
         # consume it the same way `gates.auto_escalate_stuck` does, or a

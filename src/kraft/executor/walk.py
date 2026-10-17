@@ -2204,7 +2204,7 @@ async def run_once(
                         nodes=nodes,
                         launch=launch,
                     )
-                except store.CheckoutBusy as exc:
+                except (store.CheckoutBusy, inplace.CheckoutRefused) as exc:
                     await db.write(
                         lambda c, why=str(exc), gate=node.id: events.append(
                             c,

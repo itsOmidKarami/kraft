@@ -360,6 +360,54 @@ def test_a_checkout_taken_after_the_doors_look_still_gets_no_second_session(
 
 
 @pytest.mark.parametrize(
+    ("state", "door", "body"),
+    [
+        ("failed", "escalate", {"message": "look again"}),
+        ("gate", "gates/spec_approval/review", {"outcome": "comment"}),
+    ],
+    ids=["escalate", "reply"],
+)
+def test_a_session_outside_the_walk_refused_its_checkout_stops_the_item_as_checkout(
+    client, repo, monkeypatch, state, door, body
+):
+    """The checkout could not be switched to the item's branch: no agent
+    starts, and the item stops for the person whose checkout it is."""
+    from kraft import inplace
+
+    async def refused(*a, **kw):
+        raise inplace.CheckoutRefused("git would not switch the checkout")
+
+    monkeypatch.setattr(inplace, "take", refused)
+    wid = _in_state(client, repo, DOORS["states"][state], in_place=True)
+    if door.endswith("review"):
+        client.post(
+            f"/api/work-items/{wid}/threads",
+            json={
+                "body": "why?",
+                "file_path": "a.py",
+                "side": "new",
+                "start_line": 1,
+                "end_line": 1,
+                "label": "question",
+            },
+        )
+
+    stops = len(_of(client, wid, "work_item_needs_human"))
+
+    r = client.post(f"/api/work-items/{wid}/{door}", json=body)
+
+    assert r.status_code == 200, r.text
+    _poll_events(client, wid, "work_item_needs_human", count=stops + 1)
+    stop = _of(client, wid, "work_item_needs_human")[-1]["payload"]
+    assert (stop["kind"], stop["reason"]) == ("checkout", "git would not switch the checkout")
+    with _orchestrator_db() as c:
+        assert [
+            r[0]
+            for r in c.execute("SELECT status FROM worker_sessions WHERE work_item_id = ?", (wid,))
+        ] == ["config_error"]
+
+
+@pytest.mark.parametrize(
     "body", [{}, {"path": "implementation.main.implement"}], ids=["node", "task"]
 )
 def test_skipping_behind_a_working_in_place_item_is_refused(client, repo, body):
