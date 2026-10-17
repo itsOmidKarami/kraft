@@ -274,11 +274,10 @@ def _validate_repos(
         candidate = Path(tmp) / "repos.yaml"
         candidate.write_text(yaml.safe_dump({"repos": repos, "workspaces": workspaces}))
         try:
-            # Against the library's profiles when `steering`; with no library
-            # loaded there is nothing to name, and intake refuses the item.
-            config_mod.load_repos(
-                candidate, steering=deps.library_steering(st) if steering else None
-            )
+            if steering:
+                # Against the library's profiles; with no library loaded
+                # there is nothing to name, and intake refuses the item.
+                config_mod.load_repos(candidate, steering=deps.library_steering(st))
             config_mod.load_workspaces(candidate)
         except config_mod.ConfigError as exc:
             raise HTTPException(422, str(exc)) from exc

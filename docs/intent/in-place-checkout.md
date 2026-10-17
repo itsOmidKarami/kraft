@@ -2,7 +2,8 @@
 
 A repository may run its work items in place, in its own checkout, rather than
 each in a git worktree of its own: `worktrees: false` on its `repos.yaml`
-entry. An in-place item's changes land in the folder the person works in, so
+entry. An item filed there may say otherwise, and what it is filed as stays
+fixed. An in-place item's changes land in the folder the person works in, so
 it is never sandboxed.
 
 ## REQ in-place-repo-entry-refuses-a-sandbox
