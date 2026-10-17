@@ -39,7 +39,7 @@ origin: src/kraft/templates/environment.py §WorkItemTarget._kind_owns_its_field
 WHILE an in-place item of a repository is active, the system SHALL queue any
 other in-place item of that repository that would become active, with a reason
 naming the item holding the checkout.
-enforced-by: tests/api/test_lifecycle_queue.py::test_resuming_behind_a_working_in_place_item_queues_and_says_who[resume], tests/api/test_lifecycle_queue.py::test_resuming_behind_a_working_in_place_item_queues_and_says_who[retry], tests/api/test_lifecycle_queue.py::test_a_gate_decision_behind_a_working_in_place_item_is_kept_and_goes_on_later[approve], tests/api/test_lifecycle_queue.py::test_a_gate_decision_behind_a_working_in_place_item_is_kept_and_goes_on_later[reject], tests/api/test_lifecycle_queue.py::test_a_held_rejection_paused_and_resumed_by_hand_keeps_its_re_run, tests/api/test_lifecycle_queue.py::test_a_self_retry_queued_for_the_checkout_is_replayed_as_the_agents, tests/api/test_lifecycle_queue.py::test_an_autostart_behind_a_working_in_place_item_is_filed_queued, tests/test_intake.py::test_a_pickup_behind_a_working_in_place_item_is_queued_not_started, tests/executor/test_escalation.py::test_a_self_retry_behind_a_working_in_place_item_is_queued, tests/skills/test_gate_review.py::test_an_agent_verdict_behind_a_working_in_place_item_is_queued[approve], tests/skills/test_gate_review.py::test_an_agent_verdict_behind_a_working_in_place_item_is_queued[reject], tests/store/test_work_items.py::test_the_lease_is_the_folder_not_its_spelling, tests/store/test_work_items.py::test_a_live_escalation_session_holds_the_checkout
+enforced-by: tests/api/test_lifecycle_queue.py::test_resuming_behind_a_working_in_place_item_queues_and_says_who[resume], tests/api/test_lifecycle_queue.py::test_resuming_behind_a_working_in_place_item_queues_and_says_who[retry], tests/api/test_lifecycle_queue.py::test_a_gate_decision_behind_a_working_in_place_item_is_kept_and_goes_on_later[approve], tests/api/test_lifecycle_queue.py::test_a_gate_decision_behind_a_working_in_place_item_is_kept_and_goes_on_later[reject], tests/api/test_lifecycle_queue.py::test_a_held_rejection_paused_and_resumed_by_hand_keeps_its_re_run, tests/api/test_lifecycle_queue.py::test_a_self_retry_queued_for_the_checkout_is_replayed_as_the_agents, tests/api/test_lifecycle_queue.py::test_an_autostart_behind_a_working_in_place_item_is_filed_queued, tests/test_intake.py::test_a_pickup_behind_a_working_in_place_item_is_queued_not_started, tests/executor/test_escalation.py::test_a_self_retry_behind_a_working_in_place_item_is_queued, tests/skills/test_gate_review.py::test_an_agent_verdict_behind_a_working_in_place_item_is_queued[approve], tests/skills/test_gate_review.py::test_an_agent_verdict_behind_a_working_in_place_item_is_queued[reject], tests/store/test_work_items.py::test_the_lease_is_the_folder_not_its_spelling[waiter-via-link], tests/store/test_work_items.py::test_the_lease_is_the_folder_not_its_spelling[holder-via-link], tests/store/test_work_items.py::test_a_live_escalation_session_holds_the_checkout
 origin: src/kraft/store/work_items.py §checkout_holder
 
 ## REQ in-place-gate-holds-no-checkout
@@ -88,13 +88,13 @@ origin: src/kraft/inplace.py §take
 ## REQ in-place-never-runs-setup
 
 The system SHALL NOT run the repository's setup command for an in-place item.
-enforced-by: tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config, tests/executor/test_walk_in_place.py::test_a_refused_take_stops_the_item_as_checkout
+enforced-by: tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config[on-main], tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config[on-another-branch], tests/executor/test_walk_in_place.py::test_a_refused_take_stops_the_item_as_checkout
 origin: src/kraft/inplace.py §prepare
 
 ## REQ in-place-never-writes-git-config
 
 The system SHALL NOT write the checkout's git config for an in-place item.
-enforced-by: tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config
+enforced-by: tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config[on-main], tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config[on-another-branch]
 origin: src/kraft/inplace.py §prepare
 
 ## REQ in-place-never-sweeps-stragglers
@@ -154,7 +154,7 @@ origin: src/kraft/inplace.py §rebase_in_checkout
 IF applying the stashed changes back after an in-place rebase leaves unmerged
 paths, THEN the system SHALL stop the item as `checkout`, name the paths, and
 record the stash's commit, and SHALL NOT drop the stash.
-enforced-by: tests/test_inplace_rebase.py::test_an_autostash_clash_raises_with_the_stash_and_leaves_it, tests/test_inplace_rebase.py::test_an_autostash_clash_stops_the_item_as_checkout[resume-autostash-clash], tests/test_inplace_rebase.py::test_an_autostash_clash_stops_the_item_as_checkout[retry-autostash-clash], tests/test_inplace_rebase.py::test_an_autostash_clash_stops_the_item_as_checkout[resume-clash-as-a-pause-lands], tests/test_inplace_rebase.py::test_a_cancel_mid_rebase_in_the_checkout_waits_for_git[clash-named-over-the-cancel], tests/api/test_gates_refresh.py::test_an_in_place_refresh_that_clashes_stops_the_approved_item_as_checkout, tests/executor/test_escalation.py::test_a_self_retry_whose_in_place_rebase_clashes_stops_as_checkout, tests/executor/test_mr_rebase_dispatch.py::test_an_in_place_rebase_that_clashes_is_a_checkout_stop, tests/adapters/forge/test_waits.py::test_an_in_place_conflict_rebase_that_clashes_stops_the_item_as_checkout[ci_poll]
+enforced-by: tests/test_inplace_rebase.py::test_an_autostash_clash_raises_with_the_stash_and_leaves_it[clash], tests/test_inplace_rebase.py::test_an_autostash_clash_raises_with_the_stash_and_leaves_it[put-back-refused], tests/test_inplace_rebase.py::test_an_autostash_clash_stops_the_item_as_checkout[resume-autostash-clash], tests/test_inplace_rebase.py::test_an_autostash_clash_stops_the_item_as_checkout[retry-autostash-clash], tests/test_inplace_rebase.py::test_an_autostash_clash_stops_the_item_as_checkout[resume-clash-as-a-pause-lands], tests/test_inplace_rebase.py::test_a_cancel_mid_rebase_in_the_checkout_waits_for_git[clash-named-over-the-cancel], tests/api/test_gates_refresh.py::test_an_in_place_refresh_that_clashes_stops_the_approved_item_as_checkout, tests/executor/test_escalation.py::test_a_self_retry_whose_in_place_rebase_clashes_stops_as_checkout, tests/executor/test_mr_rebase_dispatch.py::test_an_in_place_rebase_that_clashes_is_a_checkout_stop, tests/adapters/forge/test_waits.py::test_an_in_place_conflict_rebase_that_clashes_stops_the_item_as_checkout[ci_poll]
 origin: src/kraft/inplace.py §rebase_in_checkout
 
 ## REQ in-place-git-only-rebase-leaves-the-checkout
