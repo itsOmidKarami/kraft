@@ -513,6 +513,29 @@ def test_a_gate_decision_behind_a_working_in_place_item_is_kept_and_goes_on_late
         assert len(_of(client, wid, "gate_requested")) == 1, "the gate was asked again"
 
 
+def test_a_held_approval_refreshes_the_base_before_it_goes_on(client, repo, monkeypatch):
+    """As a direct approval does: a rebase that left the person's checkout
+    clashing stops the item for them, and the walk does not go on."""
+    from kraft import inplace
+
+    client.portal.call(client.app.state.queue_task.cancel)
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"]["gate"], in_place=True)
+    client.post(f"/api/work-items/{wid}/gates/spec_approval/approve", json={})
+
+    async def clash(*_, **__):
+        raise inplace.AutostashClash("your edits to f clash", ["f"], "5ca1ab1e")
+
+    monkeypatch.setattr(inplace, "rebase", clash)
+    _set_status(working, "paused")
+
+    assert _queue_tick(client) == [wid]
+    _poll_events(client, wid, "work_item_needs_human")
+    stop = _of(client, wid, "work_item_needs_human")[-1]["payload"]
+    assert (stop["kind"], stop["facts"]) == ("checkout", {"paths": ["f"], "stash": "5ca1ab1e"})
+    assert _of(client, wid, "node_started") == []
+
+
 def test_a_held_rejection_paused_and_resumed_by_hand_keeps_its_re_run(client, repo):
     """The queued request goes with the pause; the re-run does not."""
     client.portal.call(client.app.state.queue_task.cancel)

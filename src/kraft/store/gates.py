@@ -57,7 +57,8 @@ def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "hum
     chain.complete_node(conn, work_item_id, gate)
     if holder is None:
         return True
-    hold_for_checkout(conn, work_item_id, holder, {"node": gate})
+    # `approved`: its replay refreshes the base first, as a direct approval does.
+    hold_for_checkout(conn, work_item_id, holder, {"node": gate, "approved": True})
     return holder
 
 

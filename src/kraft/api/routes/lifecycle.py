@@ -986,6 +986,16 @@ async def continue_held(wid: str, body: dict, request: Request) -> None:
             )
             return
         nodes = store.effective_nodes(executor.chain_of(row), store.node_overrides_of(row))
+        if body.get("approved"):
+            from kraft.api.routes import gates as gates_route
+
+            # As a direct approval: a clash or a refused checkout stops it.
+            if (
+                gates_route._before_any_push(nodes, body["node"])
+                and inplace.item_folder(st.run_dirs, row).is_dir()
+                and await gates_route._refresh_base_at_gate(request, wid, row, body["node"])
+            ):
+                return
         steer = await st.db.write(lambda c: store.take_steer(c, wid))
         try:
             deps.spawn(
