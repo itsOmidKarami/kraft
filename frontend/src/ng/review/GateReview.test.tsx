@@ -40,6 +40,11 @@ describe("GateReview", () => {
     expect(screen.queryByRole("button", { name: /^Viewed / })).toBeNull();
   });
 
+  it("colours a fenced block in the document", async () => {
+    render(<GateReview item={AT} gate="final_review" doc={{ state: "ready", data: { ...DOC, content: "```ruby\ndef x = 1\n```" } }} files={FILES} threads={[]} isViewed={() => true} approve={vi.fn(async () => null)} onReviewChanges={vi.fn()} onRequestChanges={vi.fn()} onClose={vi.fn()} />);
+    expect(await screen.findByText("def", {}, { timeout: 3000 })).toHaveClass("tok-kw");
+  });
+
   it("shows the document's title once and who wrote it (GR-6)", async () => {
     const p = { approve: vi.fn(async () => null), onReviewChanges: vi.fn(), onRequestChanges: vi.fn(), onClose: vi.fn() };
     render(<GateReview item={AT} gate="final_review" doc={{ state: "ready", data: { ...DOC, content: "# Review brief\n\n## Summary\n\nAdds it." } }} by="work_item_summary.main.author" files={FILES} threads={[]} isViewed={() => true} {...p} />);

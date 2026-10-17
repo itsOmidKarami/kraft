@@ -3,22 +3,29 @@ import type { ReviewComment, ReviewThread, Suggestion, ThreadLabel } from "../..
 import { detailOf, jsonBody, request } from "../http";
 import { Button } from "../ui/Button";
 import { Markdown } from "../ui/Markdown";
-import { languageOf, tokenizeSide } from "./tokenize";
+import { aliasOf } from "./languages";
+import { useLineTokens } from "./useHighlight";
 import { sendOnModEnter } from "../keys";
 import { lineRef, rangeName, threadRange } from "./range";
 import { LINES_COMMENTED_ON } from "./sharedWords";
 import { LinkButton } from "../ui/LinkButton";
 import { Badge, type Tone } from "../ui/Badge";
 
-/** Fenced code in a comment, coloured by the review's own tokenizer. */
-export function codeBlock(text: string, lang: string | undefined): ReactNode {
-  return tokenizeSide(text.split("\n"), languageOf(`x.${lang ?? ""}`)).map((line, i) => (
-    <span key={i}>
-      {i > 0 && "\n"}
-      {line.map((t, j) => <span key={j} className={t.cls ? `tok-${t.cls}` : undefined}>{t.text}</span>)}
-    </span>
-  ));
+/** Fenced code in a comment: plain at first, coloured once its grammar has loaded. */
+function CodeBlock({ text, lang }: { text: string; lang: string | undefined }) {
+  const tokens = useLineTokens(text, aliasOf(lang));
+  return (
+    <>
+      {(tokens ?? text.split("\n").map((l) => (l ? [{ text: l }] : []))).map((line, i) => (
+        <span key={i}>
+          {i > 0 && "\n"}
+          {line.map((t, j) => <span key={j} className={t.cls ? `tok-${t.cls}` : undefined}>{t.text}</span>)}
+        </span>
+      ))}
+    </>
+  );
 }
+export const codeBlock = (text: string, lang: string | undefined): ReactNode => <CodeBlock text={text} lang={lang} />;
 const Body = ({ text }: { text: string }) => <Markdown text={text} code={codeBlock} />;
 
 export const LABELS: [ThreadLabel | null, string][] = [[null, "No label"], ["must_fix", "Must fix"], ["question", "Question"], ["nit", "Nit"]];

@@ -23,6 +23,24 @@ const show = (t: ReviewThread) => {
   return { onChanged, onEdit };
 };
 
+describe("a fenced block in a comment", () => {
+  const body = (b: string) => show(thread({ comments: [comment({ body: b })] }));
+  it("is coloured by its language once the grammar has loaded", async () => {
+    body("```ruby\ndef x = 1\n```");
+    expect(document.querySelector(".md-pre [class*=tok-]")).toBeNull();
+    await waitFor(() => expect(screen.getByText("def")).toHaveClass("tok-kw"));
+  });
+
+  it.each([["```\nx = 1\n```"], ["```foo\nx = 1\n```"]])("stays plain, quietly, with no or an unknown language: %s", async (b) => {
+    const warn = vi.spyOn(console, "warn");
+    body(b);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(document.querySelector(".md-pre")?.textContent).toBe("x = 1");
+    expect(document.querySelector(".md-pre [class*=tok-]")).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
 describe("Thread", () => {
   it("names the lines and the side it sits on; a file thread names none", () => {
     show(thread({ side: "old", start_line: 4, end_line: 6 }));
