@@ -7,7 +7,6 @@ Whether an item runs in place is frozen on its chain snapshot at intake
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import os
 import shutil
 import subprocess
@@ -103,28 +102,34 @@ async def take(db, run_dirs, row, *, attachments) -> None:
         builtins.stored_attachments(run_dirs, row["id"], attachments, row["repo"]) if first else []
     )
     base = await builtins.base_branch(db, row["id"], folder) if attachments else ""
-    moved = None
     running = asyncio.ensure_future(
         asyncio.to_thread(_take, folder, branch, row["base_ref"], attachments, row["id"], base)
     )
-    try:
-        moved = await asyncio.shield(running)
-    except CheckoutRefused as exc:
-        moved = exc.moved_from
-        raise
-    except asyncio.CancelledError:
-        # A cancel (a pause) cannot stop the thread: let git finish, and
-        # record a switch it made before giving the task up.
-        with contextlib.suppress(Exception):
-            moved = await running
-        raise
-    finally:
-        if moved is not None:
-            await db.write(
-                lambda c: events.append(
-                    c, row["id"], ChainEvent.CHECKOUT_SWITCHED, {**moved, "to": branch}
-                )
+    # A cancel (a pause) cannot stop git in its thread, and a checkout left to
+    # finish never loses the person's work: wait it out, however many cancels
+    # arrive, so a switch it made is recorded; then honour the cancel.
+    cancelled = False
+    while not running.done():
+        try:
+            await asyncio.shield(running)
+        except asyncio.CancelledError:
+            cancelled = True
+        except Exception:  # read off `running` below
+            pass
+    failed = running.exception()
+    moved = failed.moved_from if isinstance(failed, CheckoutRefused) else None
+    if failed is None:
+        moved = running.result()
+    if moved is not None:
+        await db.write(
+            lambda c: events.append(
+                c, row["id"], ChainEvent.CHECKOUT_SWITCHED, {**moved, "to": branch}
             )
+        )
+    if cancelled:
+        raise asyncio.CancelledError
+    if failed is not None:
+        raise failed
 
 
 #: One lock per checkout: co-tasks of one step take it at once, and git's
@@ -204,13 +209,10 @@ def _take(folder, branch, base_ref, attachments, wid, base) -> dict | None:
 def _switch(folder: Path, branch: str) -> dict:
     """A plain `git checkout <branch>`: never `-f`, and refused before it
     would overwrite an ignored file the branch tracks, which git itself
-    would replace without a word. A checkout stopped part way (a hung hook or
-    filter) is put back to exactly what it was (`_put_back`)."""
-    from kraft import builtins
-
+    would replace without a word."""
     head = git_read(folder, "symbolic-ref", "--quiet", "HEAD", expected_failure=True)
     moved_from = (head or "").removeprefix("refs/heads/") or git_read(folder, "rev-parse", "HEAD")
-    changed = _git_lines(folder, "diff", "--name-only", "HEAD", branch)
+    changed = _git_lines(folder, "diff", "--name-only", "--no-renames", "HEAD", branch)
     ignored = _ignored_in_the_way(folder, changed)
     if ignored:
         raise CheckoutRefused(
@@ -219,30 +221,19 @@ def _switch(folder: Path, branch: str) -> dict:
             "yourself, then retry the item",
             ignored,
         )
-    before = _Before.of(folder, changed)
-    try:
-        done = builtins._run_git_group(
-            ["git", "-c", "core.quotePath=false", "checkout", branch, "--"],
-            timeout=builtins.WORKTREE_ADD_TIMEOUT_S,
-            env={**os.environ, "LC_ALL": "C"},
-            cwd=folder,
-        )
-    except builtins._GroupTimedOut:
-        stopped = f"stopped after {builtins.WORKTREE_ADD_TIMEOUT_S:.0f}s"
-        if _on(folder, branch):
-            # Only a post-checkout hook was left: the switch itself finished.
-            return {"from": moved_from, "output": f"a checkout hook was {stopped}"}
-        left = _put_back(folder, before)
-        what = (
-            "Kraft put back the files it had already switched: the checkout is as it was"
-            if not left
-            else f"Kraft could not put back {', '.join(left)}, which it had written"
-        )
-        raise CheckoutRefused(
-            f"Kraft's switch of {folder} to {branch} was {stopped} (a hook or a filter such "
-            f"as an LFS smudge hung), and {what}. Find what hung, then retry the item",
-            left,
-        ) from None
+    # Run to the end, never killed: git refuses before it would overwrite an
+    # edit, so only a checkout stopped part way could leave a tree half one
+    # branch and half the other. A hung filter or hook holds this checkout's
+    # lock alone.
+    done = subprocess.run(
+        ["git", "-c", "core.quotePath=false", "checkout", branch, "--"],
+        cwd=folder,
+        capture_output=True,
+        text=True,
+        errors="surrogateescape",
+        env={**os.environ, "LC_ALL": "C"},
+        stdin=subprocess.DEVNULL,
+    )
     said = done.stderr.strip() or done.stdout.strip()
     if done.returncode == 0:
         return {"from": moved_from}
@@ -276,11 +267,19 @@ def _ignored_in_the_way(folder: Path, changed: list[str]) -> list[str]:
             folder, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"
         )
     ]
+    # On a case-insensitive filesystem `Gen.txt` on the branch is `gen.txt` here.
+    insensitive = (
+        git_read(folder, "config", "--bool", "core.ignorecase", expected_failure=True) == "true"
+    )
+    fold = str.casefold if insensitive else str
     hits = []
     for c in changed:
         blocker = _first_on_disk(folder, c)
-        if blocker and any(blocker == e or blocker.startswith(e + "/") for e in ignored):
-            hits.append(blocker)
+        for e in ignored if blocker else []:
+            if fold(blocker) == fold(e):
+                hits.append(e)  # the person's own spelling
+            elif fold(blocker).startswith(fold(e) + "/"):
+                hits.append(blocker)
     return sorted(set(hits))
 
 
@@ -296,51 +295,6 @@ def _first_on_disk(folder: Path, path: str) -> str | None:
         if i == len(parts) or full.is_symlink() or not full.is_dir():
             return p
     return None
-
-
-class _Before:
-    """What the checkout held, before a switch, of the paths it writes."""
-
-    def __init__(self, changed, dirty, existed, lock, gitdir):
-        self.changed, self.dirty, self.existed = changed, dirty, existed
-        self.lock, self.gitdir = lock, gitdir
-
-    @classmethod
-    def of(cls, folder: Path, changed: list[str]) -> _Before:
-        gitdir = Path(git_read(folder, "rev-parse", "--absolute-git-dir") or folder / ".git")
-        dirty = set(_git_lines(folder, "diff", "--name-only", "HEAD"))
-        dirty |= set(_git_lines(folder, "ls-files", "--others", "--exclude-standard"))
-        existed = {c for c in changed if os.path.lexists(folder / c)}
-        return cls(changed, dirty, existed, (gitdir / "index.lock").exists(), gitdir)
-
-
-def _put_back(folder: Path, before: _Before) -> list[str]:
-    """Undo a killed checkout, and only it: its `index.lock`, and each path it
-    writes that was clean before, from HEAD, or gone if HEAD lacks it and it
-    was not there. A path that was the person's (dirty) is never touched.
-    Returns what still differs, `index.lock` included."""
-    if not before.lock:
-        (before.gitdir / "index.lock").unlink(missing_ok=True)
-    ours = [c for c in before.changed if c not in before.dirty]
-    # Whole listings, intersected here: a pathspec per path could pass ARG_MAX.
-    tracked = set(_git_lines(folder, "ls-tree", "-r", "--name-only", "HEAD")) & set(ours)
-    restore = [c for c in ours if c in tracked]
-    if restore:
-        subprocess.run(
-            ["git", "checkout", "HEAD", "--pathspec-from-file=-", "--pathspec-file-nul"],
-            cwd=folder,
-            input="\0".join(restore),
-            capture_output=True,
-            text=True,
-        )
-    for c in ours:
-        if c not in tracked and c not in before.existed and os.path.lexists(folder / c):
-            (folder / c).unlink()
-    left = set(_git_lines(folder, "diff", "--name-only", "HEAD")) & set(ours)
-    left |= {c for c in ours if c not in tracked and os.path.lexists(folder / c)}
-    if not before.lock and (before.gitdir / "index.lock").exists():
-        left.add(str(before.gitdir / "index.lock"))
-    return sorted(left)
 
 
 def _attach(folder: Path, attachments: list[dict], wid: str, base: str) -> None:

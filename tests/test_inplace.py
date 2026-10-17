@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 from pathlib import Path
@@ -99,6 +100,22 @@ def _ignored_where_the_branch_has_a_directory(repo, branch, name):
     git(repo, "checkout", "-q", "main")
 
 
+def _ignored_in_another_case(repo, branch, name):
+    """`name` ignored on `main`; `branch` tracks it as `name.title()`, the same
+    file on a case-insensitive filesystem."""
+    if not (repo / "CALC.PY").exists():
+        pytest.skip("the filesystem is case-sensitive")
+    git(repo, "config", "core.ignorecase", "true")
+    write(repo, ".gitignore", f"{name}\n")
+    commit_all(repo, "ignore it")
+    git(repo, "checkout", "-q", branch)
+    write(repo, name.title(), "the item's version\n")
+    git(repo, "add", "-f", name.title())
+    git(repo, "commit", "-qm", "track it")
+    (repo / name.title()).unlink()
+    git(repo, "checkout", "-q", "main")
+
+
 def _checked_out_elsewhere(repo, branch, name):
     git(repo, "worktree", "add", "-q", str(repo.parent / "other"), branch)
 
@@ -110,6 +127,7 @@ def _checked_out_elsewhere(repo, branch, name):
         ("notes.txt", _item_writes),
         ("gen.txt", _ignored_on_main),
         ("logs", _ignored_where_the_branch_has_a_directory),
+        ("gen.txt", _ignored_in_another_case),
         ("calc.py", _checked_out_elsewhere),
     ],
     ids=[
@@ -117,6 +135,7 @@ def _checked_out_elsewhere(repo, branch, name):
         "untracked",
         "ignored",
         "ignored-file-where-a-directory-goes",
+        "ignored-in-another-case",
         "checked-out-elsewhere",
     ],
 )
@@ -249,57 +268,34 @@ async def test_the_first_take_commits_the_attachment_by_path(
     assert git(repo, "status", "--porcelain") == "M calc.py", "only the attachment was committed"
 
 
-async def test_a_stopped_switch_puts_back_only_what_it_wrote(
-    item_on, database, run_dirs, repo, monkeypatch
+async def test_a_glob_like_path_on_the_branch_leaves_the_persons_file_alone(
+    item_on, database, run_dirs, repo
 ):
-    """A hung filter: the checkout is killed part way. What it wrote goes, and
-    the person's own edits and files stay exactly as they were."""
-    write(repo, "a.txt", "a on main\n")
-    write(repo, "b.txt", "b on main\n")
-    commit_all(repo, "two more files")
+    """`f[1].txt` read as a pathspec glob matches `f1.txt`."""
+    write(repo, "f1.txt", "on main\n")
+    commit_all(repo, "f1")
     it, branch = await _prepared(item_on, database, run_dirs, repo)
-    git(repo, "checkout", "-q", branch)
-    write(repo, "a.txt", "a on the branch\n")
-    (repo / "b.txt").unlink()
-    write(repo, "n.txt", "new on the branch\n")
-    commit_all(repo, "the item's work")
-    git(repo, "checkout", "-q", "main")
-    write(repo, "calc.py", "# the person's edit\n")
-    write(repo, "mine.txt", "the person's own file\n")
-    status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True).stdout
-
-    def half_a_checkout(args, *, timeout, cwd, **kw):
-        write(cwd, "a.txt", "a on the branch\n")
-        (cwd / "b.txt").unlink()
-        write(cwd, "n.txt", "new on the branch\n")
-        write(cwd, ".git/index.lock", "")
-        raise builtins._GroupTimedOut(args, timeout, True)
-
-    monkeypatch.setattr(builtins, "_run_git_group", half_a_checkout)
-
-    with pytest.raises(inplace.CheckoutRefused, match="checkout is as it was"):
-        await inplace.take(database, run_dirs, it.row(), attachments=[])
-
-    assert (
-        subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True).stdout
-        == status
-    )
-    assert not (repo / ".git" / "index.lock").exists()
-    assert (repo / "calc.py").read_text() == "# the person's edit\n"
-    assert (repo / "mine.txt").read_text() == "the person's own file\n"
-    assert _head(repo) == "refs/heads/main"
-    assert it.events("checkout_switched") == []
-
-
-async def test_a_hung_hook_after_the_switch_still_records_it(
-    item_on, database, run_dirs, repo, monkeypatch
-):
-    it, branch = await _prepared(item_on, database, run_dirs, repo)
-    write(repo, ".git/hooks/post-checkout", "#!/bin/sh\nsleep 30\n").chmod(0o755)
-    monkeypatch.setattr(builtins, "WORKTREE_ADD_TIMEOUT_S", 1.0)
+    _on_branch(repo, branch, "f[1].txt", "the item's\n")
+    write(repo, "f1.txt", "the person's edit\n")
 
     await inplace.take(database, run_dirs, it.row(), attachments=[])
 
+    assert (repo / "f1.txt").read_bytes() == b"the person's edit\n"
+
+
+async def test_a_cancel_mid_switch_waits_for_git_and_records_the_switch(
+    item_on, database, run_dirs, repo
+):
+    it, branch = await _prepared(item_on, database, run_dirs, repo)
+    write(repo, ".git/hooks/post-checkout", "#!/bin/sh\nsleep 1\n").chmod(0o755)
+    taking = asyncio.ensure_future(inplace.take(database, run_dirs, it.row(), attachments=[]))
+    await asyncio.sleep(0.3)
+    taking.cancel()
+    await asyncio.sleep(0.1)
+    taking.cancel()  # a second cancel loses nothing either
+
+    with pytest.raises(asyncio.CancelledError):
+        await taking
+
     assert _head(repo) == f"refs/heads/{branch}"
-    [switched] = [e["payload"] for e in it.events("checkout_switched")]
-    assert switched["from"] == "main" and "stopped" in switched["output"]
+    assert [e["payload"]["to"] for e in it.events("checkout_switched")] == [branch]
