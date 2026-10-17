@@ -89,7 +89,30 @@ async def test_an_in_place_session_refused_its_checkout_never_launches(item_on, 
     assert it.events("task_marked") == []
 
 
-def _outside_the_walk(it):
+@pytest.mark.parametrize("busy", [False, True], ids=["holds-it", "another-item-uses-it"])
+async def test_a_sessions_own_record_waits_for_its_session(item_on, monkeypatch, busy):
+    """`on_session` runs once the session is written and holds the checkout,
+    before the agent; never for one refused it, which started nothing."""
+    it = await item_on([v1_node()], status="needs_human", target=IN_PLACE)
+    git(it.repo, "branch", store.branch_for(it.row()))
+    if busy:
+        await item_on([v1_node()], wid="a", target=IN_PLACE, title="A")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    seen = []
+
+    async def on_session():
+        seen.append(len(it.sessions()))
+
+    if busy:
+        with pytest.raises(store.CheckoutBusy):
+            await _outside_the_walk(it, on_session=on_session)
+    else:
+        assert await _outside_the_walk(it, on_session=on_session) == "done"
+
+    assert seen == ([] if busy else [1])
+
+
+def _outside_the_walk(it, **kw):
     return agent.run_agent_task(
         it.database,
         it.run_dirs,
@@ -103,4 +126,5 @@ def _outside_the_walk(it):
         repo_path=str(it.repo),
         cwd=it.repo,
         takes_checkout=True,
+        **kw,
     )

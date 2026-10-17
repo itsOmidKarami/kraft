@@ -617,17 +617,23 @@ async def dispatch(
                 db, run_dirs, session_id=session_id, row=row, log=f"not started: {hit.reason}\n"
             )
         time_cap = caps.Deadline(caps.monotonic() + hit.remaining_s, hit) if hit else None
-    await _record_message(
-        db,
-        work_item_id,
-        session_id,
-        message,
-        auto,
-        thread,
-        turn,
-        runtime,
-        node_id=row["current_node_id"],
-    )
+    recorded = False
+
+    async def record() -> None:
+        nonlocal recorded
+        recorded = True
+        await _record_message(
+            db,
+            work_item_id,
+            session_id,
+            message,
+            auto,
+            thread,
+            turn,
+            runtime,
+            node_id=row["current_node_id"],
+        )
+
     files = thread_files(db, run_dirs, work_item_id, thread, session_id)
     await _archive_last_turn(db, run_dirs, work_item_id, files)
     try:
@@ -662,8 +668,17 @@ async def dispatch(
             files=files,
             time_cap=time_cap,
             takes_checkout=True,
+            # Recorded once the session holds the checkout: a turn refused it
+            # has started nothing, and its queued replay records the message.
+            on_session=record,
         )
-    except _agent.LaunchRefused as exc:
+    except store.CheckoutBusy:
+        raise
+    except Exception as exc:
+        if not recorded:
+            await record()  # a refused launch counts as a turn all the same
+        if not isinstance(exc, _agent.LaunchRefused):
+            raise
         return await _refused(db, run_dirs, session_id=session_id, row=row, log=f"{exc}\n")
 
     # The thread's own harness's reader: `inv.harness` is the provider the turn

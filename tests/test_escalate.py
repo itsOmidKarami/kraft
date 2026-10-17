@@ -236,6 +236,7 @@ async def test_dispatch_default_continues_the_latest_thread(monkeypatch, databas
                 thread=kw["thread"],
             )
         )
+        await kw["on_session"]()  # the session is written
         log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
@@ -282,6 +283,7 @@ async def test_dispatch_new_thread_starts_fresh_and_bumps_thread_number(
                 thread=kw["thread"],
             )
         )
+        await kw["on_session"]()  # the session is written
         log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
@@ -337,8 +339,16 @@ async def test_dispatch_new_thread_on_first_ever_escalation_is_still_thread_one(
     assert seen["kwargs"]["resume_session_id"] is None  # same as it would have been either way
 
 
-async def test_dispatch_records_the_message_as_an_event(monkeypatch, database, run_dirs):
+@pytest.mark.parametrize("refused", [False, True], ids=["launched", "refused"])
+async def test_dispatch_records_the_message_as_an_event(monkeypatch, database, run_dirs, refused):
+    """Once, a launch refused before its session was written included: it
+    counts as a turn all the same."""
+    from kraft.adapters import agent
+
     async def fake_run_agent_task(db, run_dirs, *, session_id, cwd, task_instruction, **kw):
+        if refused:
+            raise agent.LaunchRefused("no such tool")
+        await kw["on_session"]()  # the session is written
         log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
@@ -416,6 +426,7 @@ async def test_dispatch_manual_is_unchanged_by_the_auto_param(monkeypatch, datab
 
 async def test_dispatch_auto_tags_the_event(monkeypatch, database, run_dirs):
     async def fake_run_agent_task(db, run_dirs, *, session_id, **kw):
+        await kw["on_session"]()  # the session is written
         log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
@@ -766,6 +777,7 @@ async def test_a_resumed_escalation_keeps_its_original_runtime(
     launches = []
 
     async def fake_run_agent_task(db, run_dirs, *, session_id, **kw):
+        await kw["on_session"]()  # the session is written
         launches.append(kw)
         log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)

@@ -7,7 +7,7 @@ import logging
 import os
 import secrets
 import shlex
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
@@ -989,6 +989,10 @@ async def run_agent_task(
     #: An agent outside the walk: `store.CheckoutBusy` while another in-place
     #: item uses the checkout (`store.create_session`).
     takes_checkout: bool = False,
+    #: Awaited once the session is written, before anything else: what the
+    #: caller records only for a session that holds its checkout, never for
+    #: one `CheckoutBusy` refused (an escalation's message, a review's start).
+    on_session: Callable[[], Awaitable[None]] | None = None,
 ) -> str:
     # A snapshot frozen before Kraft-9i6xy may still carry a rule: it reads
     # (`policy.FROZEN`), but it never reaches an agent (Kraft-9ct4q).
@@ -1255,9 +1259,14 @@ async def run_agent_task(
     # holds its lease, mark it, and check it after.
     borrows = takes_checkout and in_place
 
-    async def take_and_mark() -> None:
-        await inplace.take(db, run_dirs, item_row, attachments=inplace.attachments_of(item_row))
-        await inplace.mark_task(db, run_dirs, item_row, Path(cwd), node_id, hook_point)
+    async def before_launch() -> None:
+        if on_session is not None:
+            await on_session()
+        if borrows:
+            await inplace.take(
+                db, run_dirs, item_row, attachments=inplace.attachments_of(item_row)
+            )
+            await inplace.mark_task(db, run_dirs, item_row, Path(cwd), node_id, hook_point)
 
     status = await _subprocess.run_task(
         db,
@@ -1306,7 +1315,7 @@ async def run_agent_task(
         takes_checkout=takes_checkout,
         model=model,
         ro_paths=rules_files,
-        before_launch=take_and_mark if borrows else None,
+        before_launch=before_launch if borrows or on_session else None,
     )
     if borrows:
         await inplace.check_task(db, run_dirs, item_row, Path(cwd), node_id, hook_point)

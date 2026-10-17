@@ -391,6 +391,7 @@ def test_a_checkout_taken_after_the_doors_look_still_gets_no_second_session(
             ).fetchone()[0]
             == 0
         )
+    assert not _of(client, wid, "escalation_message"), "its replay records the message"
 
 
 @pytest.mark.parametrize(
