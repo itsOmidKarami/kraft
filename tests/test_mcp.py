@@ -318,8 +318,14 @@ def test_every_tool_hands_the_agent_a_refusals_reason(monkeypatch):
         assert text.endswith(": kraft: 409: refused for the test"), (tool, text)
 
 
-def test_create_work_item_forwards_the_base_branch(monkeypatch):
-    """Kraft-v9gbi: the MCP door names an item's base branch too."""
+@pytest.mark.parametrize(
+    "field, value",
+    [("base_branch", "release"), ("in_place", True)],
+    ids=["base-branch", "in-place"],
+)
+def test_create_work_item_forwards_the_targets_fields(monkeypatch, field, value):
+    """Kraft-v9gbi: the MCP door names an item's base branch too, and whether
+    it runs in place."""
     seen = {}
 
     async def fake(*args, **kwargs):
@@ -328,11 +334,9 @@ def test_create_work_item_forwards_the_base_branch(monkeypatch):
 
     monkeypatch.setattr(mcp.client, "create_work_item", fake)
     asyncio.run(
-        mcp.build().call_tool(
-            "create_work_item", {"title": "t", "repo": "/r", "base_branch": "release"}
-        )
+        mcp.build().call_tool("create_work_item", {"title": "t", "repo": "/r", field: value})
     )
-    assert seen["base_branch"] == "release"
+    assert seen[field] == value
 
 
 def test_create_work_item_forwards_skip_nodes_budget_and_node_overrides(monkeypatch):

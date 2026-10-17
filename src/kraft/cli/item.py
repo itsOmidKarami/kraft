@@ -74,6 +74,7 @@ def _cmd_create(ns: argparse.Namespace) -> None:
                 depends_on=ns.after or None,
                 policy=_policy(ns.policy),
                 base_branch=ns.base_branch,
+                in_place=ns.in_place,
                 skip_nodes=[n for v in ns.skip_nodes for n in v.split(",") if n] or None,
                 budget_usd=ns.budget,
                 node_overrides=_node_overrides(ns.node_override),
@@ -502,6 +503,21 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         metavar="BRANCH",
         help="the branch the work starts from and its merge request targets "
         "(default: the repo's default branch); must exist on origin",
+    )
+    checkout = create.add_mutually_exclusive_group()
+    checkout.add_argument(
+        "--in-place",
+        dest="in_place",
+        action="store_const",
+        const=True,
+        help="run the item in the repo's own checkout (default: the repo's worktrees setting)",
+    )
+    checkout.add_argument(
+        "--worktree",
+        dest="in_place",
+        action="store_const",
+        const=False,
+        help="run the item in a worktree of its own",
     )
     # Two flags rather than a repeatable `--attach kind=path`: there are exactly
     # two kinds, the server refuses a duplicate kind, and these document

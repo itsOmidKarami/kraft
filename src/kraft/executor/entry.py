@@ -56,7 +56,9 @@ def one_line_title(title: str, description: str | None) -> tuple[str, str | None
     return head, f"{rest}\n\n{description}" if description else rest
 
 
-def single_repo_target(repo: str, *, base_branch: str | None = None) -> WorkItemTarget:
+def single_repo_target(
+    repo: str, *, base_branch: str | None = None, in_place: bool = False
+) -> WorkItemTarget:
     """The immutable target of an item filed against one repository.
 
     The id is the constant `"target"`, not the repository's own configured id:
@@ -68,7 +70,7 @@ def single_repo_target(repo: str, *, base_branch: str | None = None) -> WorkItem
     materialization before it files a bead -- two copies of this would let the
     dry run and the real one disagree about what gets trimmed.
     """
-    return WorkItemTarget.for_repository("target", base_branch=base_branch)
+    return WorkItemTarget.for_repository("target", base_branch=base_branch, in_place=in_place)
 
 
 def work_item_id_taken_on_disk(run_dirs, repo: str, candidate: str) -> bool:

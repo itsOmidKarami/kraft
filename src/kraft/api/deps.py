@@ -880,6 +880,47 @@ async def base_branch_or_422(repo: str, branch: str | None) -> str | None:
     return branch
 
 
+def _entry_or_none(st, repo: str) -> RepoEntry | None:
+    try:
+        return _connected(config_mod.load_repos(repos_path(st)), repo)
+    except config_mod.ConfigError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def in_place_or_422(st, repo: str, asked: bool | None, *, workspace: str | None) -> bool:
+    """Whether an item filed in `repo` runs in place: what it `asked`, else
+    its repository's `worktrees` (`in-place-is-frozen-at-intake`). An
+    unconnected repo reads as a worktree one; filing it is refused later."""
+    if asked is None:
+        entry = _entry_or_none(st, repo)
+        asked = entry is not None and not entry.worktrees
+    if asked and workspace is not None:
+        raise HTTPException(422, "a workspace item cannot run in place; file it without --in-place")
+    return asked
+
+
+def refuse_sandboxed_in_place(st, repo: str, target: WorkItemTarget, materialized) -> None:
+    """Refuse an in-place item a sandbox would wrap (`in-place-refuses-a-
+    sandbox`): it would land the agent's files in the person's own folder,
+    which the sandbox promises never to do. Names the setting that turns the
+    sandbox on."""
+    if not target.in_place:
+        return
+    entry = _entry_or_none(st, repo)
+    if entry is not None and entry.effective_sandbox:
+        where = f"'sandbox' on {repo}'s repos.yaml entry"
+    elif materialized.chain.scope_sandboxes(materialized.policy):
+        where = f"chain {materialized.chain.id}'s policy"
+    elif materialized.item_sandbox():
+        where = "the item's own policy"
+    else:
+        return
+    raise HTTPException(
+        422,
+        "this item would run in place and sandboxed; in-place items cannot be sandboxed: " + where,
+    )
+
+
 def workspace_target(
     st,
     repo: str,

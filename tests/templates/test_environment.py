@@ -125,6 +125,22 @@ def test_workspace_target_must_name_a_workspace_and_no_repository():
         te.WorkItemTarget(kind="workspace", workspace="product", repository="api")
 
 
+def test_a_workspace_target_cannot_run_in_place(workspace):
+    raw = te.WorkItemTarget.from_selection(workspace, members=["api"]).model_dump()
+    with pytest.raises(ValidationError, match="cannot run in place"):
+        te.WorkItemTarget.model_validate({**raw, "in_place": True})
+
+
+def test_an_in_place_target_round_trips_and_an_older_snapshot_reads_as_a_worktree():
+    """`in-place-is-frozen-at-intake`: the flag survives the stored snapshot,
+    and one stored before it existed has no key, which reads False."""
+    target = te.WorkItemTarget.for_repository("api", in_place=True)
+    assert te.WorkItemTarget.model_validate(target.model_dump()).in_place is True
+    raw = te.WorkItemTarget.for_repository("api").model_dump()
+    del raw["in_place"]
+    assert te.WorkItemTarget.model_validate(raw).in_place is False
+
+
 def test_work_item_target_round_trips_through_a_decoded_json_dict(workspace):
     """`model_validate_json` relaxes list-to-tuple coercion for `members`, but
     a target stored as one column inside a larger row is decoded with the row

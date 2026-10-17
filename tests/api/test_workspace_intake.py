@@ -55,6 +55,7 @@ def test_a_workspace_intake_freezes_its_selected_members_and_pointer_policy(
         "include_root": True,
         "root_pointer_policy": expected,
         "base_branch": None,
+        "in_place": False,
     }
     assert body["repos"] == []
 
@@ -65,8 +66,14 @@ def test_a_workspace_intake_freezes_its_selected_members_and_pointer_policy(
         ({"workspace": "nope", "members": ["a"]}, "no workspace 'nope'"),
         ({"workspace": "ws", "members": ["b"]}, "does not mount"),
         ({"members": ["a"]}, "names no workspace"),
+        ({"workspace": "ws", "members": ["a"], "in_place": True}, "cannot run in place"),
     ],
-    ids=["an-undeclared-workspace", "a-member-it-does-not-mount", "members-without-a-workspace"],
+    ids=[
+        "an-undeclared-workspace",
+        "a-member-it-does-not-mount",
+        "members-without-a-workspace",
+        "in-place",
+    ],
 )
 def test_a_workspace_selection_that_cannot_assemble_is_a_422(client, tmp_path, body, match):
     root = _workspace(client, tmp_path)

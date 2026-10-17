@@ -88,6 +88,9 @@ class NewWorkItem(_OneChain):
     #: None is the repository's default branch. Refused (422) unless origin
     #: has it.
     base_branch: str | None = None
+    #: Whether the item runs in its repository's own checkout, frozen into its
+    #: target; None is the repository's `worktrees` (`deps.in_place_or_422`).
+    in_place: bool | None = None
     #: spec/plan documents that already exist — they trim the gates they satisfy
     attachments: list[Attachment] = []
     #: the caller's working directory, sent only when there are attachment paths
@@ -361,6 +364,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     # materialize from the same policy (`repository-policy-cannot-relax-
     # instance-safety`).
     base_branch = await deps.base_branch_or_422(body.repo, body.base_branch)
+    in_place = deps.in_place_or_422(st, body.repo, body.in_place, workspace=body.workspace)
     target = deps.workspace_target(
         st,
         body.repo,
@@ -368,7 +372,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         members=body.members,
         root_pointer_policy=body.root_pointer_policy,
         base_branch=base_branch,
-    ) or entry.single_repo_target(body.repo, base_branch=base_branch)
+    ) or entry.single_repo_target(body.repo, base_branch=base_branch, in_place=in_place)
     policy = deps.item_policy_or_422(st, body.repo, target)
     per_repository = deps.repository_policies_or_422(st, target)
     repo_steering = deps.repository_steering_or_422(st, body.repo, target)
@@ -383,6 +387,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         item_policy = materialized.item_policy
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    deps.refuse_sandboxed_in_place(st, body.repo, target, materialized)
     _check_node_overrides(
         body.node_overrides,
         node_ids,
