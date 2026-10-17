@@ -1844,11 +1844,16 @@ class MaterializedChain:
                 else {p: dict(t) for p, t in self.repository_steering.items()}
             ),
         ).model_dump_json(
-            # A single-repository item with no attachment keeps its exact shape.
-            exclude=({"repository_policies"} if not self.repository_policies else set())
-            | ({"untrimmed"} if self.untrimmed is None else set())
-            | ({"repository_steering"} if self.repository_steering is None else set())
-            | ({"addons"} if not self.chain.addons else set())
+            # A single-repository item with no attachment keeps its exact shape,
+            # and a worktree item's target its pre-in-place one: an older build,
+            # which forbids unknown target keys, still reads it.
+            exclude={
+                **({"repository_policies": True} if not self.repository_policies else {}),
+                **({"untrimmed": True} if self.untrimmed is None else {}),
+                **({"repository_steering": True} if self.repository_steering is None else {}),
+                **({"addons": True} if not self.chain.addons else {}),
+                **({"target": {"in_place": True}} if not self.target.in_place else {}),
+            }
         )
 
     @classmethod
