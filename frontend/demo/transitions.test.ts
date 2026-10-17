@@ -543,3 +543,20 @@ describe("onEvent", () => {
     expect([after, after - before]).toEqual([told.at(-1)!.seq, told.length]);
   });
 });
+
+describe("the chain draft's ops", () => {
+  const nodeIn = (nodes: { id: string }[], id: string) => nodes.find((n) => n.id === id) as Record<string, unknown>;
+  it.each<[string, string, string | undefined]>([
+    ["sets a field", "verification", "verification"],
+    ["clears it with an empty value", "", undefined],
+  ])("set_field %s", async (_, value, read) => {
+    const serve = mockServer(buildScenario("default"));
+    const op = { op: "set_field", path: "security_approval", field: "reject_to", value };
+    const r = JSON.parse(((await serve({ method: "POST", url: "http://demo.test/api/drafts/chains/default/ops", json: () => ({ ops: [op] }) })) as Answer).body!);
+    expect([
+      nodeIn(r.result.model["chains/default.yaml"].nodes, "security_approval").reject_to,
+      nodeIn(r.result.resolved.chain.nodes, "security_approval").reject_to,
+      r.result.sources.security_approval.reject_to,
+    ]).toEqual([read, read, undefined]);
+  });
+});

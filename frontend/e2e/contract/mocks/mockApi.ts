@@ -200,10 +200,15 @@ const yamlOf = (v: unknown, ind = ""): string => {
 };
 /** The authored component at a canonical path in a view's model, as the fragment route answers it. */
 function fragmentOf(view: ReturnType<typeof chainView>, path: string) {
+  const at = componentAt(view.result.model[`chains/${view.key}.yaml`].nodes as Record<string, any>[], path);
+  return at ? yamlOf(at) : `id: ${path.split(".").pop()}\n`;
+}
+/** The component at a canonical path (`node`, `node.step`, `node.step.task`) in a chain's nodes. */
+function componentAt(nodes: Record<string, any>[], path: string) {
   const [id, ...rest] = path.split(".");
-  let at = (view.result.model[`chains/${view.key}.yaml`].nodes as Record<string, any>[]).find((n) => n.id === id);
+  let at = nodes.find((n) => n.id === id);
   for (const seg of rest) at = at?.[seg] ?? at?.steps?.find((s: { id: string }) => s.id === seg) ?? at?.tasks?.find((x: { id: string }) => x.id === seg);
-  return at ? yamlOf(at) : `id: ${rest.pop() ?? id}\n`;
+  return at;
 }
 /** An op answered as the server would, for the ops the contract's rows send. */
 function applyOps(view: ReturnType<typeof chainView>, ops: Record<string, unknown>[]) {
@@ -218,6 +223,18 @@ function applyOps(view: ReturnType<typeof chainView>, ops: Record<string, unknow
         view.result.resolved = null;
         view.result.sources = {};
       }
+    }
+    if (o.op === "set_field") {
+      // The authored and the resolved component both, so the field reads back set either way; `sources` would win over both.
+      const [path, field] = [String(o.path), String(o.field)];
+      for (const list of [nodes, view.result.resolved?.chain.nodes]) {
+        const at = list && componentAt(list as Record<string, any>[], path);
+        if (!at) continue;
+        if (o.value === null || o.value === "") delete at[field];
+        else at[field] = o.value;
+      }
+      delete view.result.sources[path]?.[field];
+      view.result.changes.push({ path, kind: "change", summary: field, fields: [field] });
     }
   }
   for (const o of ops) {
