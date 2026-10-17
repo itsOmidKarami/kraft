@@ -613,3 +613,26 @@ def test_an_autostart_behind_a_working_in_place_item_is_filed_queued(client, rep
     assert r.json()["held_by"] == working
     [queued] = _of(client, r.json()["id"], "work_item_queued")
     assert queued["payload"]["held_by"] == working
+
+
+def test_a_held_decision_refused_beside_a_live_walk_keeps_its_steer(client, repo):
+    """The replay is refused, and the rejection's note waits on the item for
+    whatever starts it next."""
+    client.portal.call(client.app.state.queue_task.cancel)
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"]["gate"], in_place=True)
+    client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "redo it"})
+    _set_status(working, "paused")
+
+    async def live():
+        client.app.state.tasks[wid] = asyncio.get_running_loop().create_future()
+
+    client.portal.call(live)
+
+    assert _queue_tick(client) == []
+    [dequeued] = _of(client, wid, "work_item_dequeued")
+    assert dequeued["payload"]["why"] == "refused"
+    with _orchestrator_db() as c:
+        assert c.execute(
+            "SELECT status, pending_steer_context FROM work_items WHERE id = ?", (wid,)
+        ).fetchone() == ("paused", "redo it")

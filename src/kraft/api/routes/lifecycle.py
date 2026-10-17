@@ -966,6 +966,10 @@ async def continue_held(wid: str, body: dict, request: Request) -> None:
     row = deps._live_work_item_row(st, wid)
     limit = st.policy.max_concurrent if st.policy else 1
     paused = [WorkItemStatus.PAUSED]
+    if deps.task_is_live(request.app, wid):
+        # Before the claim and the steer, as `resume` checks: a refusal after
+        # them would spend the decision's steer on a walk that never ran.
+        raise HTTPException(409, "a walk is already running for this work item")
     async with stops.claimed_or_stopped(
         st.db,
         wid,
