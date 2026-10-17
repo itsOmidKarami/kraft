@@ -542,13 +542,16 @@ def test_a_held_approval_refreshes_the_base_before_it_goes_on(client, repo, monk
 
 
 @pytest.mark.parametrize(
-    ("by", "source"), [("human", "human"), ("agent", "gate_review")], ids=["person", "agent"]
+    ("by", "rewind", "source"),
+    [("human", None, "human"), ("agent", None, "gate_review"), ("agent", "mine", "human")],
+    ids=["person", "agent", "agent-with-rewind"],
 )
 def test_a_held_rejection_paused_and_resumed_by_hand_keeps_its_re_run(
-    client, repo, monkeypatch, by, source
+    client, repo, monkeypatch, by, rewind, source
 ):
     """The queued request goes with the pause; the re-run does not, nor whose
-    note it carries: an agent's stays an agent's."""
+    note it carries: an agent's stays an agent's, unless a person's review
+    note (a pending rewind) is joined onto it."""
     from kraft import executor, store
 
     client.portal.call(client.app.state.queue_task.cancel)
@@ -565,6 +568,9 @@ def test_a_held_rejection_paused_and_resumed_by_hand_keeps_its_re_run(
     [rejected] = _of(client, wid, "gate_rejected")
     _set_status(working, "paused")
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
+    if rewind:
+        with _orchestrator_db() as c, c:
+            store.request_rewind(c, wid, review_id="r1", target="spec", note=rewind)
     sources, real_run = [], executor.run
     monkeypatch.setattr(
         executor, "run", lambda *a, **kw: sources.append(kw["steer_source"]) or real_run(*a, **kw)
@@ -573,7 +579,7 @@ def test_a_held_rejection_paused_and_resumed_by_hand_keeps_its_re_run(
     r = client.post(f"/api/work-items/{wid}/resume", json={})
 
     assert r.status_code == 200, r.text
-    assert r.json()["steer"] == "redo it"
+    assert r.json()["steer"] == ("mine\n\nredo it" if rewind else "redo it")
     assert sources == [source]
     evts = _poll_events(client, wid, "node_started")
     after = [e for e in evts if e["seq"] > rejected["seq"]]

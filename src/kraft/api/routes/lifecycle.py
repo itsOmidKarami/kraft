@@ -1333,7 +1333,12 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         if steer_text is not None:
             await st.db.write(lambda c: store.set_steer(c, wid, steer_text))
         steer = await st.db.write(lambda c: store.take_steer(c, wid))
-        steer_source = st.db.read(lambda c: store.steer_source(c, wid, steer))
+        # A person's review note joined onto it makes the steer theirs.
+        steer_source = (
+            "human"
+            if rewind is not None and rewind["note"]
+            else st.db.read(lambda c: store.steer_source(c, wid, steer))
+        )
         start_index = None
         if rewind is not None:
             steer = "\n\n".join(filter(None, [rewind["note"], steer]))
