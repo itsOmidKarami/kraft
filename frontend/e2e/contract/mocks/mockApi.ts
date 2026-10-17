@@ -294,6 +294,13 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
 
   const viewedMarks = new Set<string>();
   const lib = opts.ngLibrary ? libraryState() : null;
+  // Each chain's draft as its first read builds it, then kept for the server's life (a page's, a test's) so edits add up;
+  // `undo` holds the draft as it was before each change.
+  const chainDrafts = new Map<string, { view: ReturnType<typeof chainView>; undo: string[] }>();
+  const chainDraft = (key: string) => {
+    if (!chainDrafts.has(key)) chainDrafts.set(key, { view: chainView(key), undo: [] });
+    return chainDrafts.get(key)!;
+  };
   // ux2-W8: review threads per item, seeded for a needs-gate item on first read.
   const threads: Record<string, any[]> = {};
   // W5b's gate-pane thread (the bundle's) comes first, in the full thread shape, then W8's review set.
@@ -652,23 +659,37 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       const [status, body] = areas.handle(m[1], m[2], m[3], method, req.json() ?? {}, q) ?? [404, { detail: "no" }];
       return status === 204 ? { status: 204 } : json(body, status);
     }
-    /* config drafts. Chains: the real answers above; ops apply the few the flows send; `stale` publishes to a 409. */
+    /* config drafts. Chains: the real answers above, each kept once read; ops apply the few the flows send; `stale` publishes to a 409. */
     if ((m = p.match(/^\/drafts\/chains\/([^/]+)(?:\/(undo|publish|ops|rebase|fragment)|\/files\/(.+))?$/))) {
       const [, key, action, file] = m;
-      if (method === "DELETE") return { status: 204 };
+      // Discarding drops the draft: the next read builds it again from the sample.
+      if (method === "DELETE") return chainDrafts.delete(key), { status: 204 };
+      const draft = chainDraft(key);
+      const { view } = draft;
       if (action === "publish") {
         if (key === "stale") return json(DRAFTS.stale409, 409);
-        if (key === "broken" || key === "yaml-error") return json({ detail: "1 problem(s) to fix before publishing", problems: chainView(key).result.problems }, 422);
-        return json({ published: [`chains/${key}.yaml`], result: { ...chainView(key).result, changes: [] } });
+        if (key === "broken" || key === "yaml-error") return json({ detail: "1 problem(s) to fix before publishing", problems: view.result.problems }, 422);
+        Object.assign(view, { draft: false, published: { ...view.published, ...view.files } });
+        view.result.changes = [];
+        draft.undo = [];
+        return json({ published: [`chains/${key}.yaml`], result: view.result });
       }
-      if (action === "fragment") return json({ path: q.get("path"), text: fragmentOf(chainView(key), String(q.get("path"))) });
-      const view = chainView(key);
-      if (file) view.files[file] = req.json()?.text ?? "";
+      if (action === "fragment") return json({ path: q.get("path"), text: fragmentOf(view, String(q.get("path"))) });
+      if (action === "undo") {
+        if (!draft.undo.length) return json({ detail: "Nothing to undo" }, 409);
+        draft.view = JSON.parse(draft.undo.pop()!);
+        return json(draft.view);
+      }
+      if (file && method === "PUT") {
+        draft.undo.push(JSON.stringify(view));
+        view.files[file] = req.json()?.text ?? "";
+      }
       if (action === "ops") {
         if (key === "yaml-error") return json({ detail: "fix the YAML first" }, 409);
         const ops: Record<string, unknown>[] = req.json()?.ops ?? [];
-        // change_base's preview: what the new base keeps and drops (W9's {kept, dropped}).
+        // change_base's preview: what the new base keeps and drops (W9's {kept, dropped}); a preview changes nothing.
         if (q.get("preview")) return json({ ...view, ops: ops.map((o) => ({ op: o.op, result: o.op === "change_base" ? { kept: ["skippable"], dropped: [{ key: "steps", why: `${o.base} has no step tests` }] } : undefined })) });
+        draft.undo.push(JSON.stringify(view));
         return json({ ...applyOps(view, ops), ops: ops.map((o) => ({ op: o.op })) });
       }
       return json(view);

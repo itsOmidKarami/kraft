@@ -567,3 +567,36 @@ describe("the chain draft's ops", () => {
       .toEqual([keys, read, read, source, 1]);
   });
 });
+
+describe("a chain draft, kept for the server's life", () => {
+  const BASE = "http://demo.test/api/drafts/chains/default";
+  const kept = () => {
+    const serve = mockServer(buildScenario("default"));
+    const call = async (method: string, path = "", body: unknown = null) => {
+      const a = (await serve({ method, url: BASE + path, json: () => body })) as Answer;
+      return { status: a.status, body: a.body ? JSON.parse(a.body) : null };
+    };
+    const set = (field: string, value: unknown) => call("POST", "/ops", { ops: [{ op: "set_field", path: "security_approval", field, value }] });
+    const gate = async () => (await call("GET")).body.result.model["chains/default.yaml"].nodes.find((n: { id: string }) => n.id === "security_approval");
+    return { call, set, gate };
+  };
+
+  it.each<[string, (k: ReturnType<typeof kept>) => Promise<unknown>, Record<string, unknown>]>([
+    ["two edits in two requests both stick", async ({ set }) => { await set("reject_to", "work_brief"); await set("timeout", "2d"); }, { reject_to: "work_brief", timeout: "2d" }],
+    ["a preview changes nothing", async ({ call }) => call("POST", "/ops?preview=1", { ops: [{ op: "set_field", path: "security_approval", field: "reject_to", value: "spec" }] }), {}],
+    ["undo puts back the draft before the last edit", async ({ set, call }) => { await set("reject_to", "work_brief"); await set("timeout", "2d"); await call("POST", "/undo"); }, { reject_to: "work_brief" }],
+    ["a discard drops the draft, so the next read is the sample", async ({ set, call }) => { await set("reject_to", "work_brief"); await call("DELETE"); }, {}],
+  ])("%s", async (_, act, fields) => {
+    const k = kept();
+    await act(k);
+    expect(await k.gate()).toEqual({ id: "security_approval", kind: "gate", message: "Approve the security scan.", ...fields });
+  });
+
+  it("publishes the draft: no changes left, nothing to undo", async () => {
+    const { set, call } = kept();
+    await set("reject_to", "work_brief");
+    await call("POST", "/publish");
+    const after = (await call("GET")).body;
+    expect([after.draft, after.result.changes, (await call("POST", "/undo")).status]).toEqual([false, [], 409]);
+  });
+});
