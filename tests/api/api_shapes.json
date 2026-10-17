@@ -628,6 +628,7 @@
       "mr_ref": "_",
       "pending_gate": "_",
       "progress": "_",
+      "queued": "_",
       "repo": "_",
       "retry_at": "_",
       "status": "_",

@@ -199,6 +199,10 @@ def test_resuming_behind_a_working_in_place_item_queues_and_says_who(
         ]
 
     assert queued()[-1]["payload"] == {"verb": door, "from": came_from, **held}
+    # The board row and the item page say who has the checkout.
+    listed = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
+    assert listed["queued"].items() >= {"verb": door, **held}.items()
+    assert client.get(f"/api/work-items/{wid}").json()["queued"].items() >= held.items()
     assert tick() == []
     assert len(queued()) == 1, "kept its place, not asked again"
 

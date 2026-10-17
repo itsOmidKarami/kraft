@@ -355,13 +355,14 @@ async def list_work_items(request: Request):
             gate_types,
         ).fetchall()
         # The latest fallback switch and session start per item: the card
-        # marks an item whose last launch ran on a fallback (Kraft-0a3h8).
+        # marks an item whose last launch ran on a fallback (Kraft-0a3h8). And
+        # the latest queueing, which says when it waits for a checkout.
         launches = c.execute(
             "SELECT work_item_id, type, payload FROM events WHERE seq IN ("
             "  SELECT MAX(seq) FROM events"
-            "  WHERE type IN (?, ?)"
+            "  WHERE type IN (?, ?, ?)"
             "  GROUP BY work_item_id, type)",
-            (LimitEvent.LAUNCH_FALLBACK, SessionEvent.WORKER_SESSION_STARTED),
+            (LimitEvent.LAUNCH_FALLBACK, SessionEvent.WORKER_SESSION_STARTED, WorkItemEvent.QUEUED),
         ).fetchall()
         # The latest `_STOP_BOUNDARY` event per item, and the latest
         # `escalation_message` per item -- `display_status`/`stop` (B.4) need
@@ -543,12 +544,37 @@ async def list_work_items(request: Request):
             # Runs in the repo's own checkout; `kraft` run there finds it by `branch`.
             "in_place": parsed[r["id"]] is not None and parsed[r["id"]].target.in_place,
             "branch": store.branch_for(r),
+            "queued": _queued(r, latest.get((r["id"], WorkItemEvent.QUEUED))),
         }
 
     # Each row's chain parsed once, for the stage bar and `actions` both.
     parsed = {r["id"]: store.materialized_chain_of(r) for r in rows}
     chains = {r["id"]: store.chain_view(r, parsed[r["id"]]) for r in rows}
     return {"items": [_item(r) for r in rows], "cursor": cursor}
+
+
+def _queued(row, event: dict | None, **more) -> dict | None:
+    """While queued: which start it waits to make and since when, and, from the
+    queued event, `why`, `held_by` and `held_by_title` when what it waits for
+    is another in-place item's checkout rather than a slot."""
+    q = store.queued_request_of(row) if row["status"] == WorkItemStatus.QUEUED else None
+    if q is None:
+        return None
+    held = event if event and event.get("why") == "checkout" else {}
+    return {
+        "verb": q["verb"],
+        "since": q["at"],
+        **more,
+        **{k: held[k] for k in ("why", "held_by", "held_by_title") if k in held},
+    }
+
+
+def _latest_payload(c, wid: str, event_type: str) -> dict | None:
+    hit = c.execute(
+        "SELECT payload FROM events WHERE work_item_id = ? AND type = ? ORDER BY seq DESC LIMIT 1",
+        (wid, event_type),
+    ).fetchone()
+    return json.loads(hit["payload"]) if hit else None
 
 
 def _boundary_payload(boundary) -> dict | None:
@@ -1364,15 +1390,15 @@ async def get_work_item(wid: str, request: Request):
         # Why the item is stopped, when it is: the detail screen has to tell a
         # loop escalation from an unrelated crash on the same node (Kraft-esc).
         "stop_reason": stop_payload["reason"] if stop_payload else None,
-        # Set while queued: which start it is waiting to make, and since when.
+        # Set while queued (`_queued`). `storage` is set when the storage
+        # limit, not a busy slot, is what it waits on.
         "queued": (
-            {
-                "verb": q["verb"],
-                "since": q["at"],
-                # Set when the storage limit, not a busy slot, is what it waits on.
-                "storage": storage.figures(st) if storage.holds(st, wid) else None,
-            }
-            if row["status"] == WorkItemStatus.QUEUED and (q := store.queued_request_of(row))
+            _queued(
+                row,
+                st.db.read(lambda c: _latest_payload(c, wid, WorkItemEvent.QUEUED)),
+                storage=storage.figures(st) if storage.holds(st, wid) else None,
+            )
+            if row["status"] == WorkItemStatus.QUEUED
             else None
         ),
         # What the item comes after, declared at intake: id, title, status, met.
