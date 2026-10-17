@@ -204,8 +204,8 @@ async def _start(app, repo: config_mod.RepoEntry, row: dict) -> str | None:
         lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
     )
     if filed["status"] != WorkItemStatus.ACTIVE:
-        # Filed paused behind the in-place item using its checkout; the start
-        # queue starts it when that stops.
+        # Filed paused behind the in-place item using its checkout, or for a
+        # slot; the start queue starts it when that frees.
         holder = st.db.read(lambda c: store.checkout_holder(c, wid))
         await st.db.write(
             lambda c: store.queue_work_item(
@@ -218,7 +218,8 @@ async def _start(app, repo: config_mod.RepoEntry, row: dict) -> str | None:
                 held_by=holder,
             )
         )
-        logger.info("auto-intake: queued %s from %s behind %s", wid, row["id"], holder)
+        behind = f"behind {holder}'s checkout" if holder else "for a free slot"
+        logger.info("auto-intake: queued %s from %s %s", wid, row["id"], behind)
         return wid
     logger.info("auto-intake: started %s from %s", wid, row["id"])
     try:

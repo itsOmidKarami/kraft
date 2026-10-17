@@ -471,11 +471,11 @@ def _raise_clash(checkout: Path, base: str, before: str | None) -> None:
         return
     message = (
         f"your edits to {', '.join(unmerged)} clash with the newer {base}; your original "
-        f"edits are safe in the stash as {stash}; resolve the file, then resume"
+        f"edits are safe in the stash as {stash}; resolve the file, then retry the item"
         if unmerged
         else f"your edits could not be put back in {checkout} after rebasing it onto the newer "
         f"{base} (something wrote those files meanwhile); they are safe in the stash as "
-        f"{stash}: apply it yourself (`git stash apply {stash}`), then resume"
+        f"{stash}: apply it yourself (`git stash apply {stash}`), then retry the item"
     )
     raise AutostashClash(message, unmerged, stash)
 
@@ -961,7 +961,7 @@ async def check_task(
     left uncommitted, and stop the item as `checkout` when the checkout moved
     or the task committed a path the person had changed. Never a repair: no
     switch back, no commit, no undo. Answers the stop's reason, or None.
-    After a `command` the stop reruns it on resume, since its verdict was
+    After a `command` the stop reruns it on a retry, since its verdict was
     measured on whatever the checkout held, and only paths no earlier task
     left as they are now are reported left uncommitted."""
     wid = row["id"]
@@ -993,32 +993,32 @@ async def check_task(
             reasons.append(
                 f"the checkout {folder} moved to {found.moved_to} during the run of "
                 f"{task_path}{'; ' + made if made else ''}. Kraft did not switch it back, "
-                f"nor move those commits: resume once {folder} may go back to {branch}"
+                f"nor move those commits: retry the item once {folder} may go back to {branch}"
             )
         elif stray:
             # Switched away, committed and switched back: the work may be elsewhere.
             reasons.append(
                 f"{task_path} left {made}. Kraft did not move them: check where that work "
-                "belongs, then resume"
+                "belongs, then retry the item"
             )
         if found.overlap:
             reasons.append(
                 f"the agent committed {', '.join(found.overlap)}, which already had uncommitted "
                 "changes before it started; check that the commit holds only the item's work, "
-                "then resume"
+                "then retry the item"
             )
         reason = "; ".join(reasons)
     if not reason:
         return None
     last = db.read(lambda c: store.latest_session_per_task(c, wid, node_id, [task_path]))
-    # Resume goes on past the task, unless its work may be on another branch.
+    # A retry goes on past the task, unless its work may be on another branch.
     facts = {"task": task_path, "rerun": command or bool(stray)}
     if last:
         facts |= {"session": last[0]["id"], "round": last[0]["round"]}
 
     def stop(c) -> None:
         if facts["rerun"] and last:
-            # Its work or its verdict may be about another branch: a resume
+            # Its work or its verdict may be about another branch: a retry
             # runs it again, never reuses it at the branch's unmoved tip.
             c.execute(
                 "UPDATE worker_sessions SET head_sha = NULL WHERE work_item_id = ? "

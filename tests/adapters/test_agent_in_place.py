@@ -64,7 +64,9 @@ async def test_an_in_place_session_outside_the_walk_takes_marks_and_checks_its_c
     needs_human = it.events("work_item_needs_human")
     if stop:
         assert it.row()["stop_kind"] == "checkout"
-        assert stop in needs_human[-1]["payload"]["reason"]
+        reason = needs_human[-1]["payload"]["reason"]
+        assert stop in reason
+        assert "retry the item" in reason, "names a verb a checkout stop refuses"
     else:
         assert needs_human == []
         [left] = it.events("left_uncommitted")
