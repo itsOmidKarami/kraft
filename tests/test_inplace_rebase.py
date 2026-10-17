@@ -47,10 +47,19 @@ def _contains_origin_main(repo, branch) -> bool:
     return done.returncode == 0
 
 
-async def test_rebase_in_the_checkout_keeps_the_persons_edits(item_on, database, run_dirs, repo):
+#: Another worktree's `git stash push`, landing mid-rebase: the stash is shared.
+_THEIR_STASH = "echo theirs > other.txt; git stash push -q -u -- other.txt"
+
+
+@pytest.mark.parametrize("hook", [None, _THEIR_STASH], ids=["plain", "another-stash-meanwhile"])
+async def test_rebase_in_the_checkout_keeps_the_persons_edits(
+    item_on, database, run_dirs, repo, hook
+):
     it, branch = await _behind_origin(item_on, database, run_dirs, repo)
     git(repo, "checkout", "-q", branch)
     write(repo, "f", "the person's edit\n")
+    if hook is not None:
+        write(repo, ".git/hooks/post-rewrite", f"#!/bin/sh\n{hook}\n").chmod(0o755)
     git(repo, "config", "rebase.updateRefs", "true")
     git(repo, "branch", "theirs", branch)  # never moved along with the item's
 
@@ -62,26 +71,31 @@ async def test_rebase_in_the_checkout_keeps_the_persons_edits(item_on, database,
     assert (repo / "main.txt").is_file() and (repo / "item.txt").is_file()
     assert (repo / "f").read_text() == "the person's edit\n"
     assert git(repo, "status", "--porcelain") == "M f"
-    assert git(repo, "stash", "list") == ""
+    assert len(git(repo, "stash", "list").splitlines()) == (hook is not None)
     assert not _contains_origin_main(repo, "theirs")
 
 
 @pytest.mark.parametrize(
     ("main_writes", "hook", "unmerged"),
-    [("f", None, ["f"]), ("main.txt", "echo the hook >> f", [])],
-    ids=["clash", "put-back-refused"],
+    [
+        ("f", None, ["f"]),
+        ("main.txt", ("post-rewrite", "echo the hook >> f"), []),
+        ("main.txt", ("pre-rebase", "echo the hook >> f; exit 1"), []),
+    ],
+    ids=["clash", "put-back-refused", "never-started-put-back-refused"],
 )
 async def test_an_autostash_clash_raises_with_the_stash_and_leaves_it(
     item_on, database, run_dirs, repo, main_writes, hook, unmerged
 ):
     """The 2026-10-17 experiment: git exits 0, leaves `f` unmerged and keeps
     the person's edit as a stash entry. A hook that writes `f` mid-rebase
-    makes git refuse the put-back outright: exit 0, and nothing unmerged."""
+    makes git refuse the put-back outright: exit 0, and nothing unmerged;
+    one that refuses the rebase too leaves the branch where it was."""
     it, branch = await _behind_origin(item_on, database, run_dirs, repo, main_writes=main_writes)
     git(repo, "checkout", "-q", branch)
     write(repo, "f", "the person's edit\n")
     if hook is not None:
-        write(repo, ".git/hooks/post-rewrite", f"#!/bin/sh\n{hook}\n").chmod(0o755)
+        write(repo, f".git/hooks/{hook[0]}", f"#!/bin/sh\n{hook[1]}\n").chmod(0o755)
 
     with pytest.raises(inplace.AutostashClash) as raised:
         await inplace.rebase(run_dirs, it.row(), base="main")
@@ -91,6 +105,8 @@ async def test_an_autostash_clash_raises_with_the_stash_and_leaves_it(
     assert git(repo, "show", f"{raised.value.stash}:f") == "the person's edit"
     assert git(repo, "stash", "list") == "stash@{0}: autostash"
     assert raised.value.stash in str(raised.value) and "f" in str(raised.value)
+    assert str(raised.value).endswith("then retry the item")
+    assert "after rebasing" not in str(raised.value), "the branch may not have moved"
 
 
 async def test_a_conflicting_rebase_in_the_checkout_aborts_and_puts_the_edits_back(

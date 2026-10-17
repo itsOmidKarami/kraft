@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -414,7 +415,7 @@ def _rebase_in_checkout(checkout: Path, branch: str, head: str, base: str, env) 
     # their branch. `updateRefs` off: no other branch of theirs moves along.
     if not _on(checkout, branch):
         raise _left(checkout, branch)
-    stash = _stash(checkout)
+    stash, since = _stash(checkout), int(time.time())
     done = run("-c", "rebase.updateRefs=false", "rebase", "--autostash", head)
     if done.returncode != 0:
         onto = _rebase_onto(checkout)
@@ -424,7 +425,7 @@ def _rebase_in_checkout(checkout: Path, branch: str, head: str, base: str, env) 
                 "yourself, then retry the item"
             )
         if onto is None:  # never started: git put the autostash back, or kept it
-            _raise_clash(checkout, base, stash)
+            _raise_clash(checkout, base, stash, since)
         builtins._refuse_unstarted_rebase(checkout, done)
         detail = "\n".join(filter(None, [done.stdout.strip(), done.stderr.strip()]))
         unmerged = _git_lines(checkout, "diff", "--name-only", "--diff-filter=U")
@@ -437,12 +438,12 @@ def _rebase_in_checkout(checkout: Path, branch: str, head: str, base: str, env) 
                 "for you to finish or abort"
             )
         else:
-            _raise_clash(checkout, base, stash)
+            _raise_clash(checkout, base, stash, since, conflict=detail)
         raise builtins.RebaseConflict(
             f"git rebase failed for {checkout}: {detail}", tuple(unmerged)
         )
     # git exits 0 when putting the autostash back clashed, or failed: never trust it.
-    _raise_clash(checkout, base, stash)
+    _raise_clash(checkout, base, stash, since)
 
 
 def _rebase_onto(checkout: Path) -> str | None:
@@ -460,22 +461,45 @@ def _stash(checkout: Path) -> str | None:
     )
 
 
-def _raise_clash(checkout: Path, base: str, before: str | None) -> None:
-    """The autostash git could not put back, read by the stash it left: a
-    clash leaves unmerged paths, but a put-back git refused outright (a hook
-    or an editor wrote one of those files meanwhile) leaves none, and only
-    the moved `refs/stash` says the person's edits are not in the checkout."""
+def _autostash(checkout: Path, before: str | None, since: int) -> str | None:
+    """The autostash this rebase left in the stash: the newest entry since
+    `before` (and since `since`, the rebase's start) whose reflog subject is
+    git's own `autostash`. The stash is shared by every worktree of the
+    repository: another's entry, pushed meanwhile, is never it."""
+    if _stash(checkout) is None:
+        return None
+    for line in _git_lines(
+        checkout, "log", "-g", "--date=unix", "--format=%H %gd %gs", "refs/stash"
+    ):
+        sha, selector, subject = line.split(" ", 2)
+        if sha == before or int(selector.rsplit("{", 1)[1].rstrip("}")) < since:
+            return None
+        if subject == "autostash":
+            return sha
+    return None
+
+
+def _raise_clash(
+    checkout: Path, base: str, before: str | None, since: int, *, conflict: str | None = None
+) -> None:
+    """The autostash git could not put back: a clash leaves unmerged paths,
+    but a put-back git refused outright (a hook or an editor wrote one of
+    those files meanwhile) leaves none, and only the autostash's own stash
+    entry says the person's edits are not in the checkout. `conflict`: the
+    rebase was undone after one, which the person still needs to hear of."""
     unmerged = _git_lines(checkout, "diff", "--name-only", "--diff-filter=U")
-    stash = _stash(checkout)
-    if not unmerged and stash == before:
+    stash = _autostash(checkout, before, since)
+    if not unmerged and stash is None:
         return
+    kept = f"as {stash}" if stash else "(`git stash list`)"
+    undone = f" hit a conflict and was undone (git said: {conflict}), and" if conflict else ""
     message = (
         f"your edits to {', '.join(unmerged)} clash with the newer {base}; your original "
-        f"edits are safe in the stash as {stash}; resolve the file, then retry the item"
+        f"edits are safe in the stash {kept}; resolve the file, then retry the item"
         if unmerged
-        else f"your edits could not be put back in {checkout} after rebasing it onto the newer "
-        f"{base} (something wrote those files meanwhile); they are safe in the stash as "
-        f"{stash}: apply it yourself (`git stash apply {stash}`), then retry the item"
+        else f"Kraft's rebase of {checkout} onto the newer {base}{undone} could not put your "
+        f"edits back (something wrote those files meanwhile); they are safe in the stash "
+        f"{kept}: apply it yourself (`git stash apply {stash}`), then retry the item"
     )
     raise AutostashClash(message, unmerged, stash)
 
