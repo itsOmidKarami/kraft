@@ -7,9 +7,10 @@ import { TRIES, type Look, type Spot, type Tries, type TryId } from "./tries";
  * The demo's one addition to the page: a corner badge that says the data is sample data
  * and nothing is saved, links to the install guide, and opens a list of things to try.
  * Bottom left of the page on a desktop, past the sidebar and lifted over a bottom bar as the
- * toasts are (`--toast-bottom`, except over the gate review, which hides the bar), clear of the actions kept bottom right (the review page's
- * Request changes and Approve); above the bottom navigation on a phone. Only its cards take
- * clicks: the box around them lets them through to the page.
+ * toasts are (`--toast-bottom`; not under the gate review, which covers the bar), clear of the
+ * actions kept bottom right (the review page's Request changes and Approve); above the bottom
+ * navigation on a phone. Only its cards take clicks: the box around them lets them through to
+ * the page.
  * Outside the React tree, so the app renders exactly as it ships; the × hides it all for
  * the rest of the visit. The list opens by itself once, on a first visit on a desktop;
  * after that it stays as the visitor last left it.
