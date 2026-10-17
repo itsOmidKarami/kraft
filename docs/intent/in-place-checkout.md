@@ -63,3 +63,36 @@ item, the system SHALL take the checkout lease and run the same checks as a
 walk task.
 enforced-by: tests/api/test_lifecycle_queue.py::test_a_session_outside_the_walk_waits_for_the_checkout[escalate], tests/api/test_lifecycle_queue.py::test_a_session_outside_the_walk_waits_for_the_checkout[reply], tests/api/test_lifecycle_queue.py::test_a_checkout_taken_after_the_doors_look_still_gets_no_second_session[escalate], tests/api/test_lifecycle_queue.py::test_a_checkout_taken_after_the_doors_look_still_gets_no_second_session[reply], tests/store/test_session_checkout.py::test_an_agent_outside_the_walk_gets_no_session_beside_a_working_in_place_item[outside-the-walk], tests/store/test_session_checkout.py::test_an_agent_outside_the_walk_gets_no_session_beside_a_working_in_place_item[any-other-session], tests/skills/test_gate_review.py::test_a_review_behind_a_working_in_place_item_leaves_the_gate_to_a_person, tests/test_review_reply.py::test_no_reply_agent_starts_behind_a_working_in_place_item, tests/executor/test_gates_feedback.py::test_a_reply_agent_refused_its_checkout_leaves_the_gate_open_and_says_why, tests/executor/test_escalation.py::test_an_auto_escalation_refused_its_checkout_is_skipped
 origin: src/kraft/store/sessions.py §create_session
+
+## REQ in-place-never-forces-a-checkout
+
+The system SHALL NOT run `git checkout -f` in an in-place item's checkout.
+enforced-by: tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/test_inplace.py::test_take_switches_with_plain_checkout_and_keeps_edits
+origin: src/kraft/inplace.py §_take
+
+## REQ in-place-switch-refusal-stops
+
+IF switching the checkout to the item's branch would overwrite uncommitted
+changes, THEN the system SHALL stop the item as `checkout` naming the files,
+and SHALL leave the changes untouched.
+enforced-by: tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/executor/test_walk_in_place.py::test_a_refused_take_stops_the_item_as_checkout
+origin: src/kraft/inplace.py §_take
+
+## REQ in-place-uncommitted-edits-do-not-stop
+
+WHILE an in-place checkout has uncommitted changes that the switch does not
+overwrite, the system SHALL start the item's task without stopping.
+enforced-by: tests/test_inplace.py::test_take_switches_with_plain_checkout_and_keeps_edits, tests/test_inplace.py::test_the_first_take_commits_the_attachment_by_path[absent]
+origin: src/kraft/inplace.py §take
+
+## REQ in-place-never-runs-setup
+
+The system SHALL NOT run the repository's setup command for an in-place item.
+enforced-by: tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config, tests/executor/test_walk_in_place.py::test_a_refused_take_stops_the_item_as_checkout
+origin: src/kraft/inplace.py §prepare
+
+## REQ in-place-never-writes-git-config
+
+The system SHALL NOT write the checkout's git config for an in-place item.
+enforced-by: tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config
+origin: src/kraft/inplace.py §prepare
