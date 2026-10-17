@@ -462,7 +462,11 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
     watch.add_argument("--repo", help="default: the repo you are standing in")
     watch.set_defaults(func=_cmd_watch, all=False)
 
-    diff = subs.add_parser("diff", parents=[common], help="what the agent changed")
+    diff = subs.add_parser(
+        "diff",
+        parents=[common],
+        help="what the agent changed; an in-place item's is its commits only, never your own edits",
+    )
     diff.add_argument("id", nargs="?")
     diff.add_argument("--stat", action="store_true", help="per-file counts only")
     diff.add_argument("--name-only", action="store_true", help="changed and untracked paths")
