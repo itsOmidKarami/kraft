@@ -601,3 +601,11 @@ async def stop_refused(db, wid: str, node_id: str, exc: CheckoutRefused) -> None
     await db.write(
         lambda c: store.mark_needs_human(c, wid, node_id, str(exc), kind=StopKind.CHECKOUT)
     )
+
+
+def stopped(db, wid: str) -> bool:
+    """Whether a session's after-check (`check_task`) has stopped the item: what
+    a gate's reviewer or a walk at its gate must not go on past."""
+    row = db.read(lambda c: c.execute("SELECT stop_kind FROM work_items WHERE id = ?", (wid,)))
+    found = row.fetchone()
+    return found is not None and found["stop_kind"] == StopKind.CHECKOUT

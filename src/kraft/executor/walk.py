@@ -2214,7 +2214,8 @@ async def run_once(
                             node_id=gate,
                         )
                     )
-            return "awaiting_gate"
+            # The reply's after-check (`inplace.check_task`) may have stopped it.
+            return "needs_human" if inplace.stopped(db, work_item_id) else "awaiting_gate"
         if isinstance(node.node, GateNode):
             # Cleared: its approval already completed it (`store.approve_gate`),
             # and entering it again would stamp a second `node_started` on a

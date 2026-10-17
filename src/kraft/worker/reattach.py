@@ -443,6 +443,24 @@ async def _sweep_after(db, run_dirs, row, launch_factory) -> None:
         (t for n in snapshot.chain.nodes for t in n.tasks() if t.path == row["hook_point"]),
         None,
     )
+    if task is None and store.is_in_place(item):
+        # An agent outside the walk (an escalation, a reply): the after-check
+        # its own launch runs, from the mark it left under its hook point.
+        try:
+            await inplace.check_task(
+                db,
+                run_dirs,
+                item,
+                inplace.item_folder(run_dirs, item),
+                row["node_id"],
+                row["hook_point"],
+            )
+        except Exception:  # noqa: BLE001 -- never at the cost of the adoption itself
+            logger.exception(
+                "in-place check after re-adopted session %s failed",
+                ids.session_ref(row["work_item_id"], row["id"]),
+            )
+        return
     if task is None or not isinstance(task.task, AgentTask):
         return
     if task.task.scope is TaskScope.EACH_REPOSITORY and snapshot.target.kind == "workspace":
@@ -560,6 +578,8 @@ async def _adopt(
         work_item_id=work_item_id,
     )
     if row["hook_point"] == ESCALATION_HOOK and run_dirs is not None:
+        # Checked before the retry it may have asked for is consumed.
+        await _sweep_after(db, run_dirs, row, launch_factory)
         await _resume_adopted_escalation(
             db,
             run_dirs,
@@ -673,7 +693,9 @@ async def _guarded_adopt(
                 (work_item_id, session_id),
             ).fetchone()
         )
-        await _sweep_after(db, run_dirs, row, launch_factory)
+        # An escalation's ran in `_adopt`, before its self-retry.
+        if row["hook_point"] != ESCALATION_HOOK:
+            await _sweep_after(db, run_dirs, row, launch_factory)
 
 
 async def _oom_killed(

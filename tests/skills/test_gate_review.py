@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -298,14 +299,15 @@ def _chain2(rd, *, auto_review=True, target=None, harness="claude"):
     )
 
 
+_IN_PLACE = WorkItemTarget.for_repository("sample", in_place=True)
 POLICY = _policy.Policy(loops={}, default=_policy.Cap(attempts=2, wall_clock_s=3600))
 
 
-async def _seed_at_gate(database, rd, wid, chain, *, auto_gate):
+async def _seed_at_gate(database, rd, wid, chain, *, auto_gate, repo=None):
     await v1_item(
         database,
         chain,
-        repo=rd.base,
+        repo=repo or rd.base,
         wid=wid,
         title="the widget",
         description="make it stop throwing",
@@ -328,7 +330,11 @@ async def _review_from_gate(
     """Enter `kraft.executor.gates.review_gates` exactly as `run` does when
     its walk stopped at a gate."""
     await _seed_at_gate(database, rd, wid, chain or _chain2(rd), auto_gate=auto_gate)
-    return await executor.review_gates(
+    return await _review_gates(database, rd, wid=wid, on_approve=on_approve)
+
+
+def _review_gates(database, rd, *, wid="w1", on_approve=_passthrough_approve):
+    return executor.review_gates(
         "awaiting_gate",
         database,
         rd,
@@ -414,8 +420,7 @@ async def test_a_review_behind_a_working_in_place_item_leaves_the_gate_to_a_pers
     that cannot be switched to the item's branch; the attempt closes with why,
     and the gate waits for a person."""
     fake_harness_home(tmp_path, ["true"])
-    in_place = WorkItemTarget.for_repository("sample", in_place=True)
-    chain = _chain2(run_dirs, target=in_place, harness="fake")
+    chain = _chain2(run_dirs, target=_IN_PLACE, harness="fake")
     if refused:
 
         async def take_refused(*a, **kw):
@@ -438,6 +443,50 @@ async def test_a_review_behind_a_working_in_place_item_leaves_the_gate_to_a_pers
     assert not database.read(
         lambda c: c.execute("SELECT 1 FROM worker_sessions WHERE work_item_id = 'w1'").fetchall()
     )
+
+
+async def test_a_reviewer_that_moves_the_checkout_stops_the_item_and_its_verdict_is_dropped(
+    database, run_dirs, tmp_path, repo
+):
+    """In place, the reviewer's after-check (`inplace.check_task`) stops the
+    item as `checkout`; its approval must not then clear the gate."""
+    approve = '{"status": "done", "verdict": "approve"}'
+    fake_harness_home(
+        tmp_path, ["sh", "-c", f"git checkout -q main; printf '{approve}' > \"$KRAFT_RESULT_PATH\""]
+    )
+    chain = _chain2(run_dirs, target=_IN_PLACE, harness="fake")
+    await _seed_at_gate(database, run_dirs, "w1", chain, auto_gate=True, repo=repo)
+    branch = database.read(lambda c: store.branch_of(c, "w1"))
+    subprocess.run(["git", "branch", branch], cwd=repo, check=True)
+
+    status = await _review_gates(database, run_dirs)
+
+    row = database.read(lambda c: c.execute("SELECT * FROM work_items").fetchone())
+    assert (status, row["status"], row["stop_kind"]) == ("needs_human", "needs_human", "checkout")
+    types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
+    assert "gate_approved" not in types
+    assert "gate_auto_review_discarded" in types
+
+
+async def test_no_reviewer_starts_at_a_gate_its_checkout_stopped(database, run_dirs, monkeypatch):
+    """A reply's after-check stopped it at the gate: no reviewer takes the checkout back."""
+    calls = []
+
+    async def reviewed(db, rd, **kw):
+        calls.append(kw)
+        return "approve", ""
+
+    monkeypatch.setattr(gate_review, "review", reviewed)
+    await _seed_at_gate(database, run_dirs, "w1", _chain2(run_dirs), auto_gate=True)
+    await database.write(
+        lambda c: store.mark_needs_human(
+            c, "w1", "human_review_approval", "the agent committed a.py", kind="checkout"
+        )
+    )
+
+    status = await _review_gates(database, run_dirs)
+
+    assert (status, calls) == ("needs_human", [])
 
 
 async def test_undecided_leaves_the_gate_pending(monkeypatch, database, run_dirs):

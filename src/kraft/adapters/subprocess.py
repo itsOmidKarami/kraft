@@ -784,7 +784,7 @@ async def run_task(
             await before_launch()
         except BaseException as exc:
             # A row left pending would hold the checkout lease for good.
-            log_path.write_text(f"kraft: {exc or 'cancelled before launch'}\n")
+            log_path.write_text(f"kraft: {str(exc) or 'cancelled before launch'}\n")
             await db.write(
                 lambda c: store.session_exited(
                     c, session_id, "config_error", work_item_id=work_item_id

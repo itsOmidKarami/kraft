@@ -5,6 +5,8 @@ mid-task, stops the item."""
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 from support.harness import git, write
 
@@ -253,3 +255,30 @@ async def test_a_checkout_stop_is_never_auto_escalated(
     )
     assert status == "needs_human"
     assert dispatched == []
+
+
+@pytest.mark.parametrize("task", ["escalation", "implementation.reviewer"])
+async def test_a_checkout_stop_from_a_session_outside_the_walk_keeps_no_node_task(
+    item_on, fake_agent, repo, task
+):
+    """Stopped by an escalation's or a reviewer's after-check: its task is not
+    one of the node's, so a resume keeps none of them past it and runs them."""
+    it = await item_on(fake_agent.quick_task, "implementation", target=_IN_PLACE)
+    await inplace.prepare(it.database, it.run_dirs, it.row(), base="main")
+    await inplace.take(it.database, it.run_dirs, it.row(), attachments=[])
+    await it.session("s0", "implementation.main.implement", "done")
+    write(repo, "calc.py", "# the person's edit\n")
+    await inplace.mark_task(it.database, it.run_dirs, it.row(), repo, "implementation", task)
+    await it.session("s1", task, "done", node="implementation")  # the session it checks
+    # At the real time, as an agent's: the check reads a timed reflog.
+    subprocess.run(["git", "commit", "-q", "-m", "agent", "--", "calc.py"], cwd=repo, check=True)
+    await inplace.check_task(it.database, it.run_dirs, it.row(), repo, "implementation", task)
+    assert it.row()["stop_kind"] == "checkout"
+
+    kept = it.database.read(
+        lambda c: dispatch.kept_past_checkout_stop(
+            c, it.id, "implementation", "implementation.main.implement", 0
+        )
+    )
+
+    assert kept is None

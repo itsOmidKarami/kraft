@@ -411,6 +411,10 @@ async def review_gates(
         )
         if gate is None or not row["auto_gate"]:
             return status
+        if row["stop_kind"] == StopKind.CHECKOUT:
+            # A reply agent's after-check stopped it: a reviewer would take the
+            # checkout straight back from the person.
+            return row["status"]
         # The item's own chain, node overrides folded in (UI v2 · 04 point 1):
         # an `auto_escalate` override must suppress review here the same way it
         # does the Config tab's read, not just the gate's own declaration.
@@ -472,13 +476,16 @@ async def review_gates(
 
         # The agent may have worked for minutes. A decision a person made in the
         # meantime outranks a verdict computed against the state before it.
-        if pending_gate(db, work_item_id) != gate:
+        # Nor does a verdict outrank the reviewer's own after-check stopping it.
+        checkout = inplace.stopped(db, work_item_id)
+        if checkout or pending_gate(db, work_item_id) != gate:
+            why = "checkout stop" if checkout else "gate no longer pending"
             await db.write(
-                lambda c, gate=gate, verdict=verdict: events.append(
+                lambda c, gate=gate, verdict=verdict, why=why: events.append(
                     c,
                     work_item_id,
                     GateEvent.AUTO_REVIEW_DISCARDED,
-                    {"gate": gate, "verdict": verdict, "reason": "gate no longer pending"},
+                    {"gate": gate, "verdict": verdict, "reason": why},
                     node_id=gate,
                 )
             )

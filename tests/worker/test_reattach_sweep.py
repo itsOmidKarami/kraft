@@ -12,7 +12,7 @@ import pytest
 from support import worktree as wtree
 from support.harness import git, write
 
-from kraft import inplace
+from kraft import events, inplace
 from kraft.config import git_read
 from kraft.executor import dispatch, resuming
 from kraft.templates.environment import WorkItemTarget
@@ -114,3 +114,49 @@ async def test_a_reattached_in_place_task_is_checked_not_swept(
         assert git(repo, "symbolic-ref", "HEAD") == "refs/heads/main"
         assert git(repo, "rev-parse", "main") in stop["reason"]
         assert kept is None, "a resume would go on past work that may be on main"
+
+
+@pytest.mark.parametrize("found", ["adopted", "dead"])
+async def test_a_reattached_in_place_escalation_is_checked_before_its_self_retry(
+    item_on, database, run_dirs, repo, found
+):
+    """An escalation turn re-adopted across a restart is checked from the mark
+    it left, as its own launch would have, before the retry it asked for is
+    consumed: the checkout stop stands, and the retry is dropped."""
+    it = await item_on(_CHAIN, "implementation", target=_IN_PLACE, status="needs_human")
+    await inplace.prepare(database, run_dirs, it.row(), base="main")
+    await inplace.take(database, run_dirs, it.row(), attachments=[])
+    write(repo, "calc.py", "# the person's edit\n")
+    await inplace.mark_task(database, run_dirs, it.row(), repo, "implementation", "escalation")
+    await database.write(
+        lambda c: events.append(c, it.id, "escalation_message", {"session_id": "s1"})
+    )
+    _agent_commits(repo, "commit", "-q", "-m", "agent", "--", "calc.py")
+    retry = {"node_id": "implementation", "key": None, "gate_key": None, "steer": "fixed it"}
+    await database.write(lambda c: events.append(c, it.id, "work_item_self_retry_requested", retry))
+    (run_dirs.results / "s1.json").write_text('{"status": "done"}')
+
+    if found == "adopted":
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdin.read()"],
+            stdin=subprocess.PIPE,
+            start_new_session=True,
+        )
+        await it.session(
+            "s1", "escalation", running=(child.pid, psutil.Process(child.pid).create_time())
+        )
+        _summary, adopted = await reattach.reattach(database, run_dirs)
+        child.stdin.close()
+        child.wait()
+    else:
+        await it.session("s1", "escalation", running=(2_000_000_000, 123.0))
+        _summary, adopted = await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
+    for task in adopted.values():
+        await task
+
+    assert it.row()["stop_kind"] == "checkout"
+    assert (
+        "the agent committed calc.py" in it.events("work_item_needs_human")[-1]["payload"]["reason"]
+    )
+    assert len(it.events("work_item_self_retry_dropped")) == 1
+    assert not it.events("work_item_retried")
