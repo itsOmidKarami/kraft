@@ -400,7 +400,9 @@ async def test_documents_for_work_item_shows_an_unindexed_attachment(
 
 
 @pytest.mark.parametrize(
-    "worktree", ["with-the-file", "without-it", None], ids=["worktree", "file-gone", "not-started"]
+    "worktree",
+    ["with-the-file", "without-it", None, "in-place-on-its-branch", "in-place-elsewhere"],
+    ids=["worktree", "file-gone", "not-started", "in-place-on-its-branch", "in-place-elsewhere"],
 )
 async def test_resolve_attachment_path_reads_from_the_worktree_not_the_main_repo(
     tmp_path, database, conn, repo, worktree
@@ -409,7 +411,9 @@ async def test_resolve_attachment_path_reads_from_the_worktree_not_the_main_repo
     `_synthesize_attachment_doc` already resolves content from — the file is
     on the item's branch, not the registered repo's checkout. Only a file
     that is there: before the item starts, an editor saving to the path
-    would create the worktree's directory as a plain one (R11F-02 review)."""
+    would create the worktree's directory as a plain one (R11F-02 review).
+    In place, the checkout's file is the item's only while its branch is
+    checked out there; on main it is the person's copy."""
     from kraft.paths import RunDirs
 
     await database.write(
@@ -422,14 +426,29 @@ async def test_resolve_attachment_path_reads_from_the_worktree_not_the_main_repo
     )
     rd = RunDirs(tmp_path / "run").ensure()
     wt = rd.worktrees / "w1" / ".engineering" / "plans"
-    if worktree is not None:
+    if worktree is not None and worktree.startswith("in-place"):
+        task = {"id": "t", "kind": "subprocess", "command": "true"}
+        target = WorkItemTarget.for_repository("s", in_place=True)
+        chain = v1_chain([{"id": "n", "kind": "exec", "tasks": [task]}], repo=repo, target=target)
+        await database.write(
+            lambda c: c.execute("UPDATE work_items SET materialized_chain = ?", (chain.to_json(),))
+        )
+        git(repo, "checkout", "-q", "-b", "kraft/w1")
+        write(repo, ".engineering/plans/p.md", "# Attached plan\nbody\n")
+        commit_all(repo, "attach")
+        if worktree == "in-place-elsewhere":
+            git(repo, "checkout", "-q", "main")
+            write(repo, ".engineering/plans/p.md", "# The person's own\n")
+        wt = repo / ".engineering" / "plans"
+    elif worktree is not None:
         wt.mkdir(parents=True)
     if worktree == "with-the-file":
         (wt / "p.md").write_text("# Attached plan\nbody\n")
 
     ix = Indexer(conn, database, repos_env=str(repo), run_dirs=rd)
     resolved = ix.resolve_attachment_path("attachment:w1:plan")
-    assert resolved == ((wt / "p.md").resolve() if worktree == "with-the-file" else None)
+    found = worktree in ("with-the-file", "in-place-on-its-branch")
+    assert resolved == ((wt / "p.md").resolve() if found else None)
     assert ix.resolve_attachment_path("attachment:w1:spec") is None
     assert ix.resolve_attachment_path("attachment:nope:plan") is None
 

@@ -854,7 +854,15 @@ class Indexer:
         # then takes for the worktree (R11F-02 review). The stored copy is
         # never offered either: editing it would change what the item is
         # filed with behind `kraft item set-attachments`' back.
-        path = self._worktree_file(attachment["path"], self._folder(work_item_id))
+        folder = self._folder(work_item_id)
+        branch = self._in_place_branch(work_item_id)
+        if branch is not None and branch != config_mod.git_read(
+            folder, "symbolic-ref", "--short", "-q", "HEAD", expected_failure=True
+        ):
+            # In place, the file in the checkout is the item's only while its
+            # branch is checked out; otherwise it is the person's, or nothing.
+            return None
+        path = self._worktree_file(attachment["path"], folder)
         return path if path is not None and path.is_file() else None
 
     def _get_synthetic_attachment_document(self, doc_id: str) -> dict | None:
