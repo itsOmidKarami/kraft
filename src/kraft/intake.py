@@ -205,13 +205,14 @@ async def _start(app, repo: config_mod.RepoEntry, row: dict) -> str | None:
     )
     if filed["status"] != WorkItemStatus.ACTIVE:
         # Filed paused behind the in-place item using its checkout, or for a
-        # slot; the start queue starts it when that frees.
+        # slot; the start queue starts it when that frees, as Kraft's own
+        # start (`start`), not a person's resume.
         holder = st.db.read(lambda c: store.checkout_holder(c, wid))
         await st.db.write(
             lambda c: store.queue_work_item(
                 c,
                 wid,
-                verb="resume",
+                verb="start",
                 body={},
                 headers={},
                 from_statuses=[WorkItemStatus.PAUSED],

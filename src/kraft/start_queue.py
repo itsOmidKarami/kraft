@@ -121,7 +121,7 @@ async def _take_and_start(app, wid: str) -> bool:
     try:
         if saved["verb"] == "retry":
             await lifecycle._retry(wid, lifecycle.Retry(**saved["body"]), request)
-        elif saved["verb"] == "continue":
+        elif saved["verb"] in ("continue", "start"):
             await lifecycle.continue_held(wid, saved["body"], request)
         elif saved["verb"] == "self_retry":
             await lifecycle.self_retry_held(wid, saved["body"], request)

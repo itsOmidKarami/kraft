@@ -959,9 +959,10 @@ def checkout_refusal(st, wid: str) -> HTTPException | None:
 async def continue_held(wid: str, body: dict, request: Request) -> None:
     """Kraft's own replay of a gate decision that waited for the checkout
     (`store.hold_for_checkout`): the walk from `body["node"]`, with the
-    decision's steer (the item's pending one). Not a person's resume, so no
-    run boundary. Queued again, for its place, while the slot or the checkout
-    is still taken."""
+    decision's steer (the item's pending one). Also an auto-intaken item's
+    first start (`start`, no `node`): the walk from its cursor. Not a
+    person's resume, so no run boundary. Queued again, for its place, while
+    the slot or the checkout is still taken."""
     st = request.app.state
     row = deps._live_work_item_row(st, wid)
     limit = st.policy.max_concurrent if st.policy else 1
@@ -984,7 +985,7 @@ async def continue_held(wid: str, body: dict, request: Request) -> None:
                 lambda c: store.queue_work_item(
                     c,
                     wid,
-                    verb="continue",
+                    verb="continue" if "node" in body else "start",
                     body=body,
                     headers={},
                     from_statuses=paused,
@@ -1016,7 +1017,9 @@ async def continue_held(wid: str, body: dict, request: Request) -> None:
                         st.run_dirs,
                         work_item_id=wid,
                         bd_cwd=deps.bd_cwd(),
-                        start_index=next(i for i, n in enumerate(nodes) if n.id == body["node"]),
+                        start_index=next(i for i, n in enumerate(nodes) if n.id == body["node"])
+                        if "node" in body
+                        else None,
                         policy=st.policy,
                         steer=steer,
                         steer_source=body.get("steer_source", "human"),

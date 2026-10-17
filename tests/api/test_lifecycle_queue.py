@@ -636,6 +636,25 @@ def test_an_autostart_behind_a_working_in_place_item_is_filed_queued(client, rep
     assert queued["payload"]["held_by"] == working
 
 
+def test_a_pickup_queued_for_the_checkout_starts_as_krafts_own(client, repo):
+    """Auto-intake's queued start (`start`) is not a person's resume."""
+    from kraft import store
+
+    client.portal.call(client.app.state.queue_task.cancel)
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _paused(client, repo, in_place=True)
+    with _orchestrator_db() as c, c:
+        c.row_factory = sqlite3.Row
+        assert store.queue_work_item(
+            c, wid, verb="start", body={}, headers={}, from_statuses=["paused"], held_by=working
+        )
+    _set_status(working, "paused")
+
+    assert _queue_tick(client) == [wid]
+    _poll_events(client, wid, "node_started")
+    assert not _of(client, wid, "work_item_resumed"), "replayed as a person's resume"
+
+
 def test_a_held_decision_refused_beside_a_live_walk_keeps_its_steer(client, repo):
     """The replay is refused, and the rejection's note waits on the item for
     whatever starts it next."""

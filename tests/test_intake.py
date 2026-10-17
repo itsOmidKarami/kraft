@@ -29,4 +29,4 @@ async def test_a_pickup_behind_a_working_in_place_item_is_queued_not_started(
         for e in app.state.db.read(lambda c: events.read_after(c, 0, wid))
         if e["type"] == "work_item_queued"
     ]
-    assert queued["held_by"] == "a"
+    assert (queued["verb"], queued["held_by"]) == ("start", "a"), "Kraft's own start"
