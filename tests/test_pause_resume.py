@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
+import subprocess
 import time
 from pathlib import Path
 
@@ -666,6 +667,21 @@ def test_pause_interrupts_the_agent_rather_than_terminating_it(
     lifecycle._terminate(None, started=None)
 
     assert sent == ([(4242, signal.SIGINT)] if signalled else [])
+
+
+def test_pause_interrupts_a_real_agent_kraft_launched():
+    """The identity and group checks pass for the child Kraft really launched."""
+    import psutil
+
+    from kraft.api.routes import lifecycle
+
+    child = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    try:
+        lifecycle._terminate(child.pid, started=psutil.Process(child.pid).create_time())
+        assert child.wait(timeout=5) == -signal.SIGINT
+    finally:
+        child.kill()
+        child.wait()
 
 
 def test_resume_leaves_the_position_to_the_walk(monkeypatch, repo, client):
