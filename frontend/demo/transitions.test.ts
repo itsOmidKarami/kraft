@@ -466,6 +466,8 @@ describe("samples and answers as the server shapes them", () => {
     const last = b.sessions.filter((s) => s.hook_point === "verification.review.code_review").at(-1);
     const ends = b.events.filter((e) => e.payload.session_id === last.id && e.type !== "worker_session_started");
     expect([last.status, ends.map((e) => [e.type, e.payload]), last.exited_at]).toEqual(["paused", [["worker_session_paused", { session_id: last.id }]], ends[0]?.created_at]);
+    // No writer sets a paused row's wall time: it is its stamps' span (`_common.session_wall_ms`).
+    expect(last.wall_ms).toBe(Date.parse(last.exited_at) - Date.parse(last.started_at));
     expect(b.events.filter((e) => order.includes(e.type)).map((e) => [e.type, e.type === "pause_requested" ? e.payload.sessions : undefined])).toEqual(order.map((t) => [t, t === "pause_requested" ? [last.id] : undefined]));
     expect(recent(b.events as any).map((l) => l.line)).not.toContain("a session is running on verification");
   });

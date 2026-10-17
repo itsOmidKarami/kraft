@@ -170,10 +170,13 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
       const held = sc === "paused" || sc === "queued" || sc === "blocked";
       const cr = verificationAt(held || sc === "cancelled" ? "paused" : sc === "escalated" ? "done" : "running");
       /** A person's stop of the running attempt, as the store writes it: the row paused at that moment, and a
-       *  `worker_session_paused` and never an exit (`store.session_exited` writes none for a paused row). */
+       *  `worker_session_paused` and never an exit (`store.session_exited` writes none for a paused row). Nothing
+       *  writes a paused row's `wall_ms`: it is read off its stamps (`_common.session_wall_ms`). */
       const stopped = (dm: number) => {
         ev("worker_session_paused", { session_id: cr.id }, dm);
-        cr.exited_at = events.at(-1).created_at;
+        const at: string = events.at(-1).created_at;
+        cr.exited_at = at;
+        cr.wall_ms = Date.parse(at) - Date.parse(cr.started_at);
       };
       if (sc === "escalated") {
         // Stuck on verification, an escalation agent's turn running on it: what `display_status` calls escalated.
@@ -210,7 +213,8 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
         item.pending_steer_context = long ? "Look at the invalidation path first: the race only shows when reindex and search overlap." : null;
       }
       if (sc === "cancelled") {
-        // `store.end_work_item`: the running sessions stopped first, then the end.
+        // `store.end_work_item`: the running sessions stopped first, then the end. The store follows the cancel with
+        // `work_item_abandoned`, which this sample leaves out: Recent has no words for it yet and would show it raw.
         stopped(1);
         ev("work_item_cancelled", { reason: long ? "Superseded by kraft-cb61, which moves the cache into the index service; this item's branch stays for reference." : "", node_id: currentNode }, 0);
         item.status = "abandoned"; item.display_status = "cancelled";

@@ -72,37 +72,47 @@ export type RecentLine = { e: KraftEvent; line: string };
  *  A session a person stopped ends with `worker_session_paused`, never an exit (`store.session_exited` writes
  *  none for a paused row): it drops out, and the pause, cancel, completion or skip that stopped it tells the story,
  *  except an escalation's turn, which reads "escalation stopped" (Stop agent, or a decision that outranked it).
- *  A session a restart could not confirm (`session_unknown`) says so as a failed one does: "code_review unconfirmed
- *  on verification". A paused task that resumes (`agent_session_resumed`) runs as a new session with its own start,
- *  so the resume adds no line of its own: the item's "resumed" says it. */
+ *  A session a restart could not confirm (`session_unknown`) says so as a failed one does: "code_review was lost in
+ *  a restart on verification" ("escalation was lost in a restart"). A session ends once: a second end for it (a stop
+ *  racing a turn that just finished) and a start that lands after its end (`store.session_running` on a row a pause
+ *  already settled) add nothing. A paused task that resumes (`agent_session_resumed`) runs as a new session with its
+ *  own start, so the resume adds no line of its own: the item's "resumed" says it. */
 export function recent(events: KraftEvent[], nodes?: Nodes): RecentLine[] {
   const nm = (id: string) => (id ? nameOf(nodes, id) : id);
   const out: (RecentLine & { node?: string; session?: string })[] = [];
   const started = new Map<string, { node: string; task: string }>();
-  const nodeStart = new Map<string, number>();
   const drop = (keep: (x: (typeof out)[number]) => boolean) => out.splice(0, out.length, ...out.filter(keep));
+  // Sessions already ended, by any road: a start or an end that comes after reads nothing.
+  const ended = new Set<string>();
+  /** The session `sid` ends here: its running line goes, and what it was, the first time only. */
+  const end = (sid: string) => {
+    const at = started.get(sid);
+    started.delete(sid);
+    ended.add(sid);
+    drop((x) => x.session !== sid);
+    return at;
+  };
+  const nodeStart = new Map<string, number>();
   for (const e of events) {
     const p = e.payload ?? {};
     const node = s(e.node_id ?? p.node_id);
     if (e.type === "worker_session_started") {
+      if (ended.has(s(p.session_id))) continue;
       const task = p.hook_point ? taskName(s(p.hook_point)) : "a session";
       started.set(s(p.session_id), { node, task });
       drop((x) => !(x.node === node && x.e.type === "node_started"));
       out.push({ e, node, session: s(p.session_id), line: `${task} is running on ${nm(node)}` });
     } else if (e.type === "worker_session_exited") {
-      const at = started.get(s(p.session_id));
-      drop((x) => x.session !== s(p.session_id));
+      const at = end(s(p.session_id));
       if (!at) continue;
       const ok = s(p.status).startsWith("done");
       if (at.task === "escalation") out.push({ e: { ...e, node_id: at.node || null }, node: at.node, line: ok ? "escalation answered" : `escalation ${s(p.status).replaceAll("_", " ")}` });
       else if (!ok && p.status !== "paused") out.push({ e: { ...e, node_id: at.node || null }, node: at.node, line: `${at.task} ${s(p.status).replaceAll("_", " ")} on ${nm(at.node)}` });
     } else if (e.type === "worker_session_paused" || e.type === "session_unknown") {
       // A session that ends with no exit: stopped by a person, or lost to a restart (`reattach`).
-      const sid = s(p.session_id);
-      const at = started.get(sid);
-      drop((x) => x.session !== sid);
+      const at = end(s(p.session_id));
       if (!at) continue;
-      const how = e.type === "session_unknown" ? "unconfirmed" : "stopped";
+      const how = e.type === "session_unknown" ? "was lost in a restart" : "stopped";
       const here = { e: { ...e, node_id: at.node || null }, node: at.node };
       if (at.task === "escalation") out.push({ ...here, line: `escalation ${how}` });
       else if (e.type === "session_unknown") out.push({ ...here, line: `${at.task} ${how} on ${nm(at.node)}` });
