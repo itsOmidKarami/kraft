@@ -141,24 +141,31 @@ async def test_glab_ci_status_asks_for_this_branch_only(cli, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "for_head, expected",
+    "pipeline_on, expected",
     [
         # For a few seconds after a push `glab ci list -P 1` still returns the
         # *previous* commit's pipeline, which may be green (Kraft-bxj8).
-        (False, "pending"),
-        (True, "success"),
+        ("older", "pending"),
+        ("branch", "success"),
+        # An in-place item's checkout may be on another branch: its HEAD is
+        # not the head being checked.
+        ("checkout", "pending"),
     ],
-    ids=["older-commit-is-not-a-result", "current-head-accepted"],
+    ids=["older-commit-is-not-a-result", "current-head-accepted", "not-the-checkouts-head"],
 )
 async def test_glab_ci_status_only_trusts_a_pipeline_for_the_current_head(
-    cli, repo, for_head, expected
+    cli, repo, pipeline_on, expected
 ):
-    cli.stub("glab", _pipeline(_head(repo) if for_head else "1" * 40))
+    subprocess.run(["git", "branch", "kraft/abc"], cwd=repo, check=True)
+    branch_head = _head(repo)
+    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "theirs"], cwd=repo, check=True)
+    sha = {"older": "1" * 40, "branch": branch_head, "checkout": _head(repo)}[pipeline_on]
+    cli.stub("glab", _pipeline(sha))
 
     status = await forge.GlabCli().ci_status(repo=repo, mr=NO_MR, branch="kraft/abc")
 
     assert status.state == expected
-    assert ("no pipeline for" in status.jobs[0]) is not for_head, status.jobs
+    assert ("no pipeline for" in status.jobs[0]) is (expected == "pending"), status.jobs
 
 
 async def test_glab_branch_ci_status_never_resolves_a_merge_request(cli, repo):
@@ -533,7 +540,10 @@ async def test_glab_set_labels_labels_the_mr_and_starts_a_new_pipeline(cli, tmp_
     cli.stub("glab", routes={"mr view": GLAB_MR_VIEW, "mr update": "", "api": "{}"})
 
     await forge.GlabCli().set_labels(
-        repo=tmp_path, mr=forge.MR(number=54, url="u"), labels=("release::patch",)
+        repo=tmp_path,
+        branch="kraft/abc",
+        mr=forge.MR(number=54, url="u"),
+        labels=("release::patch",),
     )
 
     argv = cli.argv("glab")
@@ -557,7 +567,10 @@ async def test_glab_set_labels_replaces_an_existing_same_scope_label(cli, tmp_pa
     cli.stub("glab", routes={"mr view": view, "mr update": "", "api": "{}"})
 
     await forge.GlabCli().set_labels(
-        repo=tmp_path, mr=forge.MR(number=54, url="u"), labels=("release::patch",)
+        repo=tmp_path,
+        branch="kraft/abc",
+        mr=forge.MR(number=54, url="u"),
+        labels=("release::patch",),
     )
 
     argv = cli.argv("glab")
@@ -573,7 +586,9 @@ async def test_glab_set_labels_re_creates_the_pipeline_for_the_sentinel_number(c
     pipeline."""
     cli.stub("glab", routes={"mr update": "", "mr view": GLAB_MR_VIEW, "api": "{}"})
 
-    await forge.GlabCli().set_labels(repo=tmp_path, mr=NO_MR, labels=("release::patch",))
+    await forge.GlabCli().set_labels(
+        repo=tmp_path, branch="kraft/abc", mr=NO_MR, labels=("release::patch",)
+    )
 
     argv = cli.argv("glab")
     assert "POST" in argv, "the pipeline was never re-created"

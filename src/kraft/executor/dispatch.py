@@ -1262,9 +1262,9 @@ async def _dispatch_task(
             repo_forge=launch.repo_entry.forge if launch and launch.repo_entry else None,
             automated_review=_automated_review(launch),
             ci_checks=launch.repo_entry.ci_checks if launch and launch.repo_entry else True,
-            # The worktree, not the repo: every forge CLI resolves the merge
-            # request from the *current branch*, and the repo is on whatever
-            # the human has checked out.
+            # The item's folder: for a worktree item, not the repo, whose
+            # checkout is on whatever the human has. Every forge call names
+            # the branch, so an in-place item's folder serves as well.
             repo=worktree,
             # The original repo path, not the worktree: a confirmed-conflict
             # rebase (Kraft-9h7v) needs origin's current default branch tip,
@@ -1277,6 +1277,7 @@ async def _dispatch_task(
             # of re-verifying the rebased head itself (`merge`'s conflict
             # rebase leans on this).
             has_rebase_bounce=getattr(node.node, "on_base_changed", None) is not None,
+            check_clean=not inplace.is_in_place(work_item_row),
             # Resolved through this task's own policy (Kraft-5p69g); already
             # checked against its maximum when the item was filed.
             wait=t.wait_bounds(task_policy) if t.target.waits else None,

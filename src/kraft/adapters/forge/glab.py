@@ -75,8 +75,10 @@ class GlabCli(mr_ops.CliWaits):
         title: str,
         body: str,
         meta: mr_ops.MRMeta | None = None,
+        check_clean: bool = True,
     ) -> MR:
-        await git.assert_clean(repo, base)
+        if check_clean:
+            await git.assert_clean(repo, base)
         # Both forges refuse to create against an unpushed branch. `--fill --yes`
         # would push too, but pushing explicitly keeps the failure legible when
         # it is the push that fails rather than the create.
@@ -95,6 +97,8 @@ class GlabCli(mr_ops.CliWaits):
                 # the gate that decides it's ready, not this call (draft-MR
                 # workflow spec). `mr_sync` un-drafts it after the gate.
                 "--draft",
+                "--source-branch",
+                branch,
                 "--target-branch",
                 base,
                 "--title",
@@ -106,7 +110,7 @@ class GlabCli(mr_ops.CliWaits):
             ],
         )
         # Read the MR back rather than parsing create's human-formatted output.
-        raw = await git.run_git(repo, ["glab", "mr", "view", "-F", "json"])
+        raw = await git.run_git(repo, ["glab", "mr", "view", branch, "-F", "json"])
         data = mr_ops.parse_json(raw, "glab mr view")
         return MR(number=int(data["iid"]), url=str(data["web_url"]))
 
@@ -114,25 +118,23 @@ class GlabCli(mr_ops.CliWaits):
         """Un-draft the merge request. `--ready` is a no-op on an
         already-ready MR (glab's own docs), so this is safe to call
         unconditionally rather than reading the MR back first to check."""
-        target = [str(mr.number)] if mr.number > 0 else []
+        target = mr_ops.target(mr.number, branch)
         await git.run_git(repo, ["glab", "mr", "update", *target, "--ready"])
 
     async def push(self, *, repo: Path, branch: str) -> None:
         await git.push(repo, branch)
 
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
-        # No iid: `glab mr update` resolves the merge request from the
-        # checked-out branch, the way merge and ci already do.
-        await git.run_git(repo, ["glab", "mr", "update", "--description", body])
+        await git.run_git(repo, ["glab", "mr", "update", branch, "--description", body])
 
     async def _merge_state(self, repo: Path, branch: str = "") -> str:
         """The merge request's own view of whether it can merge.
 
-        `glab mr view -F json` is the call `open_mr` already makes, resolved
-        from the checked-out branch. `detailed_merge_status` says *why*;
-        `merge_status` is the older, coarser field, kept as a fallback for an
-        older GitLab. Anything else — including a payload that is not an object
-        — is "the forge did not say", which `mr.mergeable` reads as undecided.
+        `glab mr view <branch> -F json` is the call `open_mr` already makes.
+        `detailed_merge_status` says *why*; `merge_status` is the older,
+        coarser field, kept as a fallback for an older GitLab. Anything else
+        — including a payload that is not an object — is "the forge did not
+        say", which `mr.mergeable` reads as undecided.
 
         A merge request already merged out-of-band -- a person merges it in
         the GitLab UI while this node is still polling -- reads `"state":
@@ -146,7 +148,9 @@ class GlabCli(mr_ops.CliWaits):
         failure still raises rather than being read as "someone merged it".
         """
         try:
-            raw = await git.run_git(repo, ["glab", "mr", "view", "-F", "json"])
+            raw = await git.run_git(
+                repo, ["glab", "mr", "view", *mr_ops.target(0, branch), "-F", "json"]
+            )
             data = mr_ops.parse_json(raw, "glab mr view")
         except ForgeError:
             ref = await self.find_mr(repo=repo, branch=branch) if branch else None
@@ -183,7 +187,7 @@ class GlabCli(mr_ops.CliWaits):
             )
         mergeable = mr_ops.mergeable(detail)
         block_reason = mr_ops.classify_block_reason(detail)
-        expected_sha = await git._head_sha(repo)
+        expected_sha = await git._head_sha(repo, branch)
         pipeline = await self._pipeline_on_ref(repo, branch, pipeline_id, expected_sha)
         return replace(
             pipeline, mergeable=mergeable, merge_detail=detail, block_reason=block_reason
@@ -266,7 +270,7 @@ class GlabCli(mr_ops.CliWaits):
             # the hot path, and a pipeline that is not for this head is not a
             # result. Same answer as no pipeline at all: pending. Guarded
             # against `expected_sha`, the caller's own reference commit --
-            # `ci_status` passes this checkout's local HEAD (correct: it is
+            # `ci_status` passes the item branch's local tip (correct: it is
             # the branch being checked), `branch_ci_status` passes the
             # upstream head it fetched, never this checkout's possibly-stale
             # local HEAD (plan-review finding, second half).
@@ -374,13 +378,13 @@ class GlabCli(mr_ops.CliWaits):
     async def _json(self, repo: Path, args: list[str], what: str):
         return mr_ops.parse_json(await git.run_git(repo, ["glab", *args]), what)
 
-    async def _bot_review(self, repo: Path, bot: str) -> ReviewResult:
+    async def _bot_review(self, repo: Path, branch: str, bot: str) -> ReviewResult:
         """GitLab has no review state: `bot`'s unresolved discussions are
         actionable, one finding each; its approval is clean; neither yet is
         pending."""
         # ponytail: an approval is not tied to a head here -- a project that
         # keeps approvals across pushes lets an old approval settle a new head.
-        mr = await self._json(repo, ["mr", "view", "-F", "json"], "glab mr view")
+        mr = await self._json(repo, ["mr", "view", branch, "-F", "json"], "glab mr view")
         iid = mr["iid"]
         discussions = await self._json(
             repo,
@@ -411,10 +415,10 @@ class GlabCli(mr_ops.CliWaits):
             return ReviewResult("clean", detail=f"{bot}: approved")
         return ReviewResult("pending", detail=f"waiting for {bot} to review")
 
-    async def _check_review(self, repo: Path, check: str) -> ReviewResult:
+    async def _check_review(self, repo: Path, branch: str, check: str) -> ReviewResult:
         """The commit status (a CI job or an external status) named `check`
         on the MR's head, its latest if it ran more than once."""
-        mr = await self._json(repo, ["mr", "view", "-F", "json"], "glab mr view")
+        mr = await self._json(repo, ["mr", "view", branch, "-F", "json"], "glab mr view")
         head = mr["sha"]
         statuses = await self._json(
             repo,
@@ -444,7 +448,7 @@ class GlabCli(mr_ops.CliWaits):
             repo, ["glab", "api", "-X", "POST", f"projects/:id/pipelines/{ci.pipeline_ref}/retry"]
         )
 
-    async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None:
+    async def set_labels(self, *, repo: Path, branch: str, mr: MR, labels: tuple[str, ...]) -> None:
         """Label the merge request, then start a pipeline that can see it.
 
         `CI_MERGE_REQUEST_LABELS` is fixed when a pipeline is created, so a job
@@ -462,7 +466,7 @@ class GlabCli(mr_ops.CliWaits):
         """
         if not labels:
             return
-        target = [str(mr.number)] if mr.number > 0 else []
+        target = mr_ops.target(mr.number, branch)
         # Also the read that used to be sentinel-only (`mr.number <= 0`, to
         # resolve the number for the pipeline re-create below): every caller
         # now needs the MR's current labels too, so one `mr view` serves both.
@@ -485,9 +489,9 @@ class GlabCli(mr_ops.CliWaits):
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
         await git._assert_pushed(repo, branch)
         # number 0 is "not known": `run_task` does not thread the MR between
-        # nodes, and both CLIs resolve it from the checked-out branch. Passing
-        # a literal 0 would target a merge request that does not exist.
-        target = [str(mr.number)] if mr.number > 0 else []
+        # nodes, so the branch names it. Passing a literal 0 would target a
+        # merge request that does not exist.
+        target = mr_ops.target(mr.number, branch)
         await git.run_git(repo, ["glab", "mr", "merge", *target, "--yes"])
 
     async def close_mr(self, *, repo: Path, mr: MRRef) -> None:

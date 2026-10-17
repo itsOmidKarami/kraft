@@ -2559,7 +2559,12 @@ async def set_mr_labels(wid: str, body: MrLabels, request: Request):
     try:
         backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
         forge = forge_mod.resolve(backend)
-        await forge.set_labels(repo=worktree, mr=forge_mod.MR(number=0, url=""), labels=labels)
+        await forge.set_labels(
+            repo=worktree,
+            branch=store.branch_for(row),
+            mr=forge_mod.MR(number=0, url=""),
+            labels=labels,
+        )
     except forge_mod.ForgeError as exc:
         raise HTTPException(502, str(exc)) from exc
 

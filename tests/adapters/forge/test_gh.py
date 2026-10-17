@@ -304,7 +304,7 @@ async def test_gh_set_labels_edits_the_pull_request(cli, tmp_path):
     cli.stub("gh", routes={"pr view": '{"labels":[]}', "pr edit": ""})
 
     await forge.GhCli().set_labels(
-        repo=tmp_path, mr=forge.MR(7, "u"), labels=("release::patch", "bug")
+        repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, "u"), labels=("release::patch", "bug")
     )
 
     (edit,) = [c for c in cli.calls("gh") if c.startswith("pr edit")]
@@ -330,7 +330,9 @@ async def test_gh_set_labels_replaces_an_existing_same_scope_label(cli, tmp_path
     `scope::` prefix is removed in the same edit; other labels stay."""
     cli.stub("gh", routes={"pr view": f'{{"labels":{current}}}', "pr edit": ""})
 
-    await forge.GhCli().set_labels(repo=tmp_path, mr=forge.MR(7, "u"), labels=("release::minor",))
+    await forge.GhCli().set_labels(
+        repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, "u"), labels=("release::minor",)
+    )
 
     assert cli.calls("gh") == ["pr view 7 --json labels", edit]
 

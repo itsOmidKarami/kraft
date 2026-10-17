@@ -244,6 +244,8 @@ async def _run_one(
     moved: list[Path] | None = None,
     #: For `_rebase_conflict_away`'s in-place rebase.
     run_dirs=None,
+    #: `run_task`'s, for `open_mr`.
+    check_clean: bool = True,
 ) -> tuple[str, str, list[dict] | None]:
     """One forge handler against one repo. Extracted from `run_task` so the
     multi-repo loop there can call it once per `work_item_repos` row; a
@@ -313,6 +315,7 @@ async def _run_one(
                     title=mr_ops.mr_title_for(title, meta),
                     body=body,
                     meta=meta,
+                    check_clean=check_clean,
                 )
                 number, url = mr.number, mr.url
                 log, status = f"opened {url}\n", "done"
@@ -361,7 +364,7 @@ async def _run_one(
             # wait back to the scheduler (Kraft-ru98, `kraft.waits`); a
             # coroutine that sat here held an intake slot and could not be
             # cancelled.
-            head_sha = await git._head_sha(repo)
+            head_sha = await git._head_sha(repo, branch)
             # Pin to the pipeline the last poll of this same head already
             # saw, instead of re-resolving "latest on branch" every re-entry
             # (Kraft-ivh1). A rebase or a repair's push moves head_sha, which
@@ -651,7 +654,7 @@ async def _run_one(
                 # human committed while reviewing -- re-arms a required
                 # pipeline for a head nothing has seen finish (Kraft-266b,
                 # Kraft-x10m). Read it before handing forge.merge() that head.
-                head_sha = await git._head_sha(repo)
+                head_sha = await git._head_sha(repo, branch)
                 ci_status = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
                 log, gate_status = await ci.render_ci(
                     ci_status, forge=forge, repo=repo, branch=branch, head_sha=head_sha
@@ -677,7 +680,7 @@ async def _run_one(
                         # Nothing will re-verify the rebased head, so this
                         # node reads its pipeline again itself and merges only
                         # if it is green (code-review).
-                        head_sha = await git._head_sha(repo)
+                        head_sha = await git._head_sha(repo, branch)
                         ci_status = await forge.ci_status(
                             repo=repo, mr=MR(number=0, url=""), branch=branch
                         )
@@ -1021,6 +1024,9 @@ async def run_task(
     #: the safe assumption for any caller (a test, a future handler) that
     #: does not know any better.
     has_rebase_bounce: bool = False,
+    #: False for an in-place item: `open_mr` does not refuse the person's
+    #: own uncommitted edits in their checkout.
+    check_clean: bool = True,
 ) -> str:
     """One forge node -- against every repo `work_item_repos` names for this
     item, deepest submodule first, root last (design 3a), or just `repo` when
@@ -1262,6 +1268,7 @@ async def run_task(
                     automated_review=automated_review,
                     ci_checks=ci_checks,
                     merge_requested=requested,
+                    check_clean=check_clean,
                     repo_row_id=row_id,
                     moved=moved if member else None,
                     run_dirs=run_dirs,

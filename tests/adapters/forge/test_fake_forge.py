@@ -90,7 +90,7 @@ async def test_fake_forge_records_labels_and_retries():
     f = forge.FakeForge()
     mr = await _opened(f)
 
-    await f.set_labels(repo="/r", mr=mr, labels=("release::patch",))
+    await f.set_labels(repo="/r", branch="b", mr=mr, labels=("release::patch",))
     await f.retry_jobs(repo="/r", ci=forge.CIStatus(state="failed", url="http://x/1"))
 
     assert (f.labels, f.retried) == (["release::patch"], ["http://x/1"])

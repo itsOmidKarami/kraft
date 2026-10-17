@@ -1107,8 +1107,9 @@ def promptless_git_env(repo: Path) -> dict[str, str]:
 
 async def upstream_head(repo: Path, branch: str) -> str | None:
     """The tip of origin's `branch` -- the item's `base_branch` -- fetched now;
-    the last fetched tip when the fetch fails; `repo`'s own HEAD only for the
-    default branch when there is no `origin` or it was never fetched. A named
+    the last fetched tip when the fetch fails; `repo`'s own copy of the
+    default branch (its HEAD only when it has none) when there is no `origin`
+    or it was never fetched. A named
     branch origin cannot give -- gone from it, or never fetched and no origin
     to fetch from -- raises `BaseBranchMissing` instead (Kraft-wz6vz).
 
@@ -1151,15 +1152,19 @@ async def upstream_head(repo: Path, branch: str) -> str | None:
         tip = git_read(repo, "rev-parse", "--verify", "--quiet", ref, expected_failure=True)
         if tip and not gone:
             return tip
-    # The checkout's HEAD stands in only for the default branch, as it always
-    # has. A named base branch has no stand-in: the checkout may be on any
-    # branch at all.
+    # The checkout stands in only for the default branch, as it always has. A
+    # named base branch has no stand-in: the checkout may be on any branch at
+    # all. Its local default branch, not its HEAD, which an in-place item may
+    # have left on its own branch (base-prefers-the-default-branch-ref-over-head).
     if branch != await git.default_branch(repo):
         raise BaseBranchMissing(
             f"base branch {branch!r} cannot be read from origin of {repo} ({detail}); "
             "push it back, or retry the work item on a branch origin has"
         )
-    return git_read(repo, "rev-parse", "HEAD")
+    local = f"refs/heads/{branch}"
+    return git_read(
+        repo, "rev-parse", "--verify", "--quiet", local, expected_failure=True
+    ) or git_read(repo, "rev-parse", "HEAD")
 
 
 def item_identity(db, work_item_id: str) -> dict[str, str]:
