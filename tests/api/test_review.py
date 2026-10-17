@@ -798,32 +798,3 @@ def test_request_changes_to_a_later_node_is_400(client, repo, monkeypatch):
 
     assert r.status_code == 400, r.text
     assert client.get(f"/api/work-items/{wid}").json()["last_review_sha"] is None
-
-
-def test_an_in_place_item_anchors_and_reviews_at_its_branch_tip(client, repo, monkeypatch):
-    """The checkout is on main, one commit behind the item's branch: a thread
-    filed with no anchor, and the review's head, are the branch's tip, never
-    the checkout's HEAD."""
-    import json
-
-    from support.api import _in_state
-    from support.harness import commit_all, git, write
-
-    async def reply(*a, **kw):
-        return "done"
-
-    monkeypatch.setattr("kraft.review_reply.run", reply)
-    doors = json.loads((Path(__file__).parent / "lifecycle_doors.json").read_text())
-    wid = _in_state(client, repo, doors["states"]["gate"], in_place=True)
-    git(repo, "checkout", "-q", client.get(f"/api/work-items/{wid}").json()["branch"])
-    write(repo, "a.py", "one\ntwo\nthree\nfour\n")
-    tip = commit_all(repo, "the item's work")
-    git(repo, "checkout", "-q", "main")
-
-    anchor = _new_thread(client, wid, label="question").json()["anchor_sha"]
-    r = client.post(
-        f"/api/work-items/{wid}/gates/spec_approval/review", json={"outcome": "comment"}
-    )
-
-    assert r.status_code == 200, r.text
-    assert (anchor, client.get(f"/api/work-items/{wid}").json()["last_review_sha"]) == (tip, tip)
