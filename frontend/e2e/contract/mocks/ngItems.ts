@@ -168,7 +168,13 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
   switch (sc) {
     case "running": case "escalated": case "paused": case "cancelled": case "waiting-ci": case "queued": case "blocked": {
       const held = sc === "paused" || sc === "queued" || sc === "blocked";
-      verificationAt(held ? "paused" : sc === "escalated" ? "done" : "running");
+      const cr = verificationAt(held || sc === "cancelled" ? "paused" : sc === "escalated" ? "done" : "running");
+      /** A person's stop of the running attempt, as the store writes it: the row paused at that moment, and a
+       *  `worker_session_paused` and never an exit (`store.session_exited` writes none for a paused row). */
+      const stopped = (dm: number) => {
+        ev("worker_session_paused", { session_id: cr.id }, dm);
+        cr.exited_at = events.at(-1).created_at;
+      };
       if (sc === "escalated") {
         // Stuck on verification, an escalation agent's turn running on it: what `display_status` calls escalated.
         ev("work_item_needs_human", { node_id: "verification", kind: "stuck", reason: "The fix loop made no progress in 2 rounds." }, 0.5);
@@ -183,7 +189,8 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
         item.escalation_threads = [{ thread: 1, session_id: e.id, turns: 1, started_at: e.created_at, ended_at: null, status: "running" }];
         item.display_status = "escalated";
       }
-      if (held) ev("pause_requested", { sessions: [] }, 1);
+      // `store.pause_work_item`: the pause, naming the sessions it stops, then each of them.
+      if (held) { ev("pause_requested", { sessions: [cr.id] }, 1); stopped(0); }
       if (sc === "queued") {
         // Resumed with every slot busy: `store.queue_work_item` holds the start until one frees.
         ev("work_item_queued", { verb: "resume", from: "paused" }, 20);
@@ -203,7 +210,9 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
         item.pending_steer_context = long ? "Look at the invalidation path first: the race only shows when reindex and search overlap." : null;
       }
       if (sc === "cancelled") {
-        ev("work_item_cancelled", { reason: long ? "Superseded by kraft-cb61, which moves the cache into the index service; this item's branch stays for reference." : "", node_id: currentNode }, 1);
+        // `store.end_work_item`: the running sessions stopped first, then the end.
+        stopped(1);
+        ev("work_item_cancelled", { reason: long ? "Superseded by kraft-cb61, which moves the cache into the index service; this item's branch stays for reference." : "", node_id: currentNode }, 0);
         item.status = "abandoned"; item.display_status = "cancelled";
       }
       if (sc === "waiting-ci") {

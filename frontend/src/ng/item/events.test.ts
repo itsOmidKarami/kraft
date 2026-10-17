@@ -42,6 +42,10 @@ describe("recent", () => {
   const at = (type: EventType, payload: Record<string, unknown> = {}, node_id: string | null = null): KraftEvent => ({ seq: ++seq, work_item_id: "w", type, payload, node_id, created_at: "t" });
   const started = (id: string, hook: string) => at("worker_session_started", { session_id: id, hook_point: hook, node_id: hook === "escalation" ? "verification" : hook.split(".")[0] }, hook === "escalation" ? "verification" : hook.split(".")[0]);
   const exited = (id: string, status: string) => at("worker_session_exited", { session_id: id, status });
+  // `store`'s ends with no exit: a person's stop (pause, cancel, complete, skip, Stop agent) and reattach's lost session.
+  const paused = (id: string) => at("worker_session_paused", { session_id: id });
+  const unknown = (id: string) => at("session_unknown", { session_id: id, reason: "pid reused" });
+  const lost = at("work_item_needs_human", { node_id: "verification", reason: "reattach: running session, PID identity unconfirmed, no result (pid reused)", kind: "infra" }, "verification");
   const story = (events: KraftEvent[]) => recent(events).map((r) => r.line);
   const stamped = (created_at: string, e: KraftEvent): KraftEvent => ({ ...e, created_at });
   it.each([
@@ -89,6 +93,38 @@ describe("recent", () => {
     ["an escalation's turn that ends reads answered",
       [at("escalation_message", { message: "why?" }, "verification"), started("s3", "escalation"), exited("s3", "done")],
       ["escalation answered", "escalation on verification: why?"]],
+    // `store.pause_work_item`: the pause, then each session it stopped, with no exit after (`session_exited` writes none for a paused row).
+    ["a session a pause stopped drops out, the pause tells it",
+      [at("node_started", {}, "verification"), started("s1", "verification.review.code_review"), at("pause_requested", { sessions: ["s1"] }), paused("s1")],
+      ["paused"]],
+    // A resumed task is a new session (`dispatch._launch_agent`): its own start, after `agent_session_resumed` names the paused one.
+    ["a paused task that resumes runs as a new session",
+      [started("s1", "verification.review.code_review"), at("pause_requested", { sessions: ["s1"] }), paused("s1"),
+        at("work_item_resumed"), at("agent_session_resumed", { task: "verification.review.code_review", session_id: "s1" }, "verification"), started("s2", "verification.review.code_review")],
+      ["code_review is running on verification", "resumed", "paused"]],
+    ["a resumed session that ends well drops out like any other",
+      [started("s1", "verification.review.code_review"), at("pause_requested", { sessions: ["s1"] }), paused("s1"),
+        at("work_item_resumed"), at("agent_session_resumed", { task: "verification.review.code_review", session_id: "s1" }, "verification"), started("s2", "verification.review.code_review"), exited("s2", "done")],
+      ["resumed", "paused"]],
+    // `store.end_work_item`: the sessions stopped first, then the end.
+    ["a session a cancel stopped drops out, the cancel tells it",
+      [started("s1", "verification.review.code_review"), paused("s1"), at("work_item_cancelled", { reason: "superseded", node_id: "verification" }, "verification")],
+      ["cancelled"]],
+    // `store.skip_node`: the skip, then the sessions it stopped.
+    ["a session a skip stopped drops out, the skip tells it",
+      [at("node_started", {}, "verification"), started("s1", "verification.checks.lint"), at("node_skipped", { node_id: "verification", gate: null }, "verification"), paused("s1")],
+      ["verification skipped"]],
+    // `store.stop_escalation_session` (Stop agent): the turn ends, the item stays as it stopped.
+    ["an escalation's turn a person stopped reads stopped",
+      [at("escalation_message", { message: "why?" }, "verification"), started("s3", "escalation"), paused("s3")],
+      ["escalation stopped", "escalation on verification: why?"]],
+    // `reattach`: a session a restart could not confirm, then the stop that names why.
+    ["a session a restart could not confirm says so",
+      [started("s1", "verification.checks.lint"), unknown("s1"), lost],
+      ["stopped at verification: reattach: running session, PID identity unconfirmed, no result (pid reused)", "lint unconfirmed on verification"]],
+    ["an unconfirmed session goes, as a failed one does, once its node finishes",
+      [started("s1", "verification.checks.lint"), unknown("s1"), lost, at("work_item_retried", {}, "verification"), started("s2", "verification.checks.lint"), exited("s2", "done"), at("node_completed", {}, "verification")],
+      ["verification finished", "retried verification", "stopped at verification: reattach: running session, PID identity unconfirmed, no result (pid reused)"]],
   ] as [string, KraftEvent[], string[]][])("%s", (_, events, lines) => expect(story(events)).toEqual(lines));
 });
 

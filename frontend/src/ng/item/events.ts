@@ -68,7 +68,13 @@ export type RecentLine = { e: KraftEvent; line: string };
  *  one that ended well drops out, the node's next line tells it; one that failed says so at
  *  its end; a gate's decision takes the place of its request; a fix round's outcome joins its start line; an escalation's turn that ends reads "escalation answered". A node's start drops
  *  once a session on it starts, and its finish takes the place of everything that ran in it, with how long it ran.
- *  A gate reads once, by its decision (CG-4), and an item's end reads once, in its last node's line. */
+ *  A gate reads once, by its decision (CG-4), and an item's end reads once, in its last node's line.
+ *  A session a person stopped ends with `worker_session_paused`, never an exit (`store.session_exited` writes
+ *  none for a paused row): it drops out, and the pause, cancel, completion or skip that stopped it tells the story,
+ *  except an escalation's turn, which reads "escalation stopped" (Stop agent, or a decision that outranked it).
+ *  A session a restart could not confirm (`session_unknown`) says so as a failed one does: "code_review unconfirmed
+ *  on verification". A paused task that resumes (`agent_session_resumed`) runs as a new session with its own start,
+ *  so the resume adds no line of its own: the item's "resumed" says it. */
 export function recent(events: KraftEvent[], nodes?: Nodes): RecentLine[] {
   const nm = (id: string) => (id ? nameOf(nodes, id) : id);
   const out: (RecentLine & { node?: string; session?: string })[] = [];
@@ -90,6 +96,18 @@ export function recent(events: KraftEvent[], nodes?: Nodes): RecentLine[] {
       const ok = s(p.status).startsWith("done");
       if (at.task === "escalation") out.push({ e: { ...e, node_id: at.node || null }, node: at.node, line: ok ? "escalation answered" : `escalation ${s(p.status).replaceAll("_", " ")}` });
       else if (!ok && p.status !== "paused") out.push({ e: { ...e, node_id: at.node || null }, node: at.node, line: `${at.task} ${s(p.status).replaceAll("_", " ")} on ${nm(at.node)}` });
+    } else if (e.type === "worker_session_paused" || e.type === "session_unknown") {
+      // A session that ends with no exit: stopped by a person, or lost to a restart (`reattach`).
+      const sid = s(p.session_id);
+      const at = started.get(sid);
+      drop((x) => x.session !== sid);
+      if (!at) continue;
+      const how = e.type === "session_unknown" ? "unconfirmed" : "stopped";
+      const here = { e: { ...e, node_id: at.node || null }, node: at.node };
+      if (at.task === "escalation") out.push({ ...here, line: `escalation ${how}` });
+      else if (e.type === "session_unknown") out.push({ ...here, line: `${at.task} ${how} on ${nm(at.node)}` });
+    } else if (e.type === "agent_session_resumed") {
+      // The resumed task runs as a new session with a start line of its own; the item's "resumed" tells the resume.
     } else {
       let line = eventLine(e, nodes);
       if (!line) continue;
@@ -97,7 +115,7 @@ export function recent(events: KraftEvent[], nodes?: Nodes): RecentLine[] {
       // A round's outcome joins its start line; with no start left to join, it stands alone.
       const round = e.type === "fix_cycle_finished" && [...out].reverse().find((x) => x.e.type === "fix_cycle_started" && x.node === node && x.e.payload?.cycle === p.cycle);
       if (round) { round.line = line; continue; }
-      const ran = (x: (typeof out)[number]) => x.e.type === "node_started" || (x.e.type.startsWith("worker_session") && !x.line.startsWith("escalation"));
+      const ran = (x: (typeof out)[number]) => x.e.type === "node_started" || ((x.e.type.startsWith("worker_session") || x.e.type === "session_unknown") && !x.line.startsWith("escalation"));
       if (e.type === "node_completed" || e.type === "node_skipped") drop((x) => x.node !== node || !ran(x));
       if (e.type === "node_completed") {
         // A gate that was decided says so once: its own finish repeats the decision (CG-4).
