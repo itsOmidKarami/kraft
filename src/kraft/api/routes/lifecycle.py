@@ -1305,6 +1305,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         if steer_text is not None:
             await st.db.write(lambda c: store.set_steer(c, wid, steer_text))
         steer = await st.db.write(lambda c: store.take_steer(c, wid))
+        steer_source = st.db.read(lambda c: store.steer_source(c, wid, steer))
         start_index = None
         if rewind is not None:
             steer = "\n\n".join(filter(None, [rewind["note"], steer]))
@@ -1391,6 +1392,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                         # Addressed to the paused agent tasks when there are
                         # any; otherwise the note the next agent launch takes.
                         steer=None if targets else steer,
+                        steer_source=steer_source,
                         steer_to=targets,
                         launch=deps.launch(st, row["repo"]),
                         on_approve=deps._on_approve(st),

@@ -215,6 +215,17 @@ _REJECTION_SPENT = (
 )
 
 
+def steer_source(conn: sqlite3.Connection, work_item_id: str, steer: str | None) -> str:
+    """Who wrote `steer`, the item's pending steer (`walk.run`'s
+    `steer_source`): `gate_review` when it is the note of an agent's rejection
+    the item still sits on (a re-run `reject_gate` held for the checkout),
+    `human` otherwise. Read off the rejection itself, so a person who pauses
+    the held item and resumes it does not make the agent's note theirs."""
+    rejected = last_rejection(conn, work_item_id)
+    by_agent = rejected is not None and rejected.get("by") == "agent"
+    return "gate_review" if steer and by_agent and rejected.get("note") == steer else "human"
+
+
 def last_rejection(conn: sqlite3.Connection, work_item_id: str) -> dict | None:
     """The `gate_rejected` payload the item is currently sitting on, or None.
 

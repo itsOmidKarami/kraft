@@ -540,20 +540,40 @@ def test_a_held_approval_refreshes_the_base_before_it_goes_on(client, repo, monk
     assert _of(client, wid, "node_started") == []
 
 
-def test_a_held_rejection_paused_and_resumed_by_hand_keeps_its_re_run(client, repo):
-    """The queued request goes with the pause; the re-run does not."""
+@pytest.mark.parametrize(
+    ("by", "source"), [("human", "human"), ("agent", "gate_review")], ids=["person", "agent"]
+)
+def test_a_held_rejection_paused_and_resumed_by_hand_keeps_its_re_run(
+    client, repo, monkeypatch, by, source
+):
+    """The queued request goes with the pause; the re-run does not, nor whose
+    note it carries: an agent's stays an agent's."""
+    from kraft import executor, store
+
     client.portal.call(client.app.state.queue_task.cancel)
     working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
     wid = _in_state(client, repo, DOORS["states"]["gate"], in_place=True)
-    client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "redo it"})
+    if by == "human":
+        client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "redo it"})
+    else:
+        with _orchestrator_db() as c, c:
+            c.row_factory = sqlite3.Row
+            store.reject_gate(
+                c, wid, "spec_approval", "redo it", reopen=True, node="spec", by="agent"
+            )
     [rejected] = _of(client, wid, "gate_rejected")
     _set_status(working, "paused")
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
+    sources, real_run = [], executor.run
+    monkeypatch.setattr(
+        executor, "run", lambda *a, **kw: sources.append(kw["steer_source"]) or real_run(*a, **kw)
+    )
 
     r = client.post(f"/api/work-items/{wid}/resume", json={})
 
     assert r.status_code == 200, r.text
     assert r.json()["steer"] == "redo it"
+    assert sources == [source]
     evts = _poll_events(client, wid, "node_started")
     after = [e for e in evts if e["seq"] > rejected["seq"]]
     first = next(e for e in after if e["type"] in ("node_started", "gate_requested"))
