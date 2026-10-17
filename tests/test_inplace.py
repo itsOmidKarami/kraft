@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -276,6 +277,25 @@ async def test_the_first_take_commits_the_attachment_by_path(
         "M calc.py",
         *([" M docs/spec1.md"] if already == "glob-like" else []),
     ], "only the attachment was committed"
+
+
+async def test_the_take_runs_its_git_writes_in_their_own_session(
+    item_on, database, run_dirs, repo, tmp_path
+):
+    """A terminal's Ctrl-C or a service stop's group kill must not cut the
+    switch or the attachment's commit off part way through the checkout."""
+    it, _ = await _prepared(item_on, database, run_dirs, repo)
+    for hook in ("post-checkout", "post-commit"):
+        sid = f"{sys.executable} -c 'import os; print(os.getsid(0))' > {tmp_path / hook}"
+        write(repo, f".git/hooks/{hook}", f"#!/bin/sh\n{sid}\n").chmod(0o755)
+    stored = write(tmp_path / "filed", "spec.md", "# Spec\n")
+    attachment = {"kind": "spec", "path": "docs/spec.md", "source": str(stored)}
+
+    await inplace.take(database, run_dirs, it.row(), attachments=[attachment])
+
+    ours = str(os.getsid(0))
+    for hook in ("post-checkout", "post-commit"):
+        assert (tmp_path / hook).read_text().strip() != ours, f"{hook} ran in Kraft's session"
 
 
 async def test_a_glob_like_path_on_the_branch_leaves_the_persons_file_alone(

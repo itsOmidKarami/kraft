@@ -99,7 +99,11 @@ async def prepare(db, run_dirs, row, *, base: str) -> Path:
     branch = store.branch_for(row)
     if _ref(folder, branch) is None:
         done = subprocess.run(
-            ["git", "branch", branch, base_ref], cwd=folder, capture_output=True, text=True
+            ["git", "branch", branch, base_ref],
+            cwd=folder,
+            capture_output=True,
+            text=True,
+            start_new_session=True,
         )
         if done.returncode != 0:
             raise RuntimeError(f"could not make {branch} in {folder}: {done.stderr.strip()}")
@@ -281,7 +285,11 @@ def _drop_scratch(checkout: Path, scratches) -> None:
             logger.warning("git worktree remove timed out for %s", scratch)
         shutil.rmtree(scratch, ignore_errors=True)
     subprocess.run(
-        ["git", "worktree", "prune"], cwd=checkout, capture_output=True, stdin=subprocess.DEVNULL
+        ["git", "worktree", "prune"],
+        cwd=checkout,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
     )
 
 
@@ -503,6 +511,9 @@ def _switch(folder: Path, branch: str) -> dict:
         errors="surrogateescape",
         env={**os.environ, "LC_ALL": "C"},
         stdin=subprocess.DEVNULL,
+        # Its own session: a terminal's Ctrl-C or a service stop's group kill
+        # must not cut it off either.
+        start_new_session=True,
     )
     said = done.stderr.strip() or done.stdout.strip()
     if done.returncode == 0:
@@ -557,7 +568,11 @@ def _drop_branch(repo: Path, branch: str, wid: str, keep: bool) -> str | None:
             return "unpushed"
         if _ref(repo, branch):
             done = subprocess.run(
-                ["git", "branch", "-D", "--", branch], cwd=repo, capture_output=True, text=True
+                ["git", "branch", "-D", "--", branch],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                start_new_session=True,
             )
             if done.returncode != 0:
                 logger.warning("drop %s: branch kept: %s", wid, done.stderr.strip())
@@ -567,6 +582,7 @@ def _drop_branch(repo: Path, branch: str, wid: str, keep: bool) -> str | None:
             ["git", "update-ref", "-d", f"{git.PUSHED_REFS}/{branch}"],
             cwd=repo,
             capture_output=True,
+            start_new_session=True,
         )
         return None
     finally:

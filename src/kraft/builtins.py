@@ -111,6 +111,9 @@ def _commit_paths(worktree: Path, paths: list[str], message: str, base: str) -> 
                 cwd=str(worktree),
                 capture_output=True,
                 text=True,
+                # In place the checkout is a person's: a Ctrl-C or a group
+                # kill must not cut a commit off part way.
+                start_new_session=True,
             )
 
         added = git("add", "--", *paths)
