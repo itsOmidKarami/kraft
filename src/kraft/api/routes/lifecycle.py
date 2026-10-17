@@ -927,8 +927,9 @@ def checkout_refusal(st, wid: str) -> HTTPException | None:
 async def continue_held(wid: str, body: dict, request: Request) -> None:
     """Kraft's own replay of a gate decision that waited for the checkout
     (`store.hold_for_checkout`): the walk from `body["node"]`, with the
-    decision's steer. Not a person's resume, so no run boundary. Queued again,
-    for its place, while the slot or the checkout is still taken."""
+    decision's steer (the item's pending one). Not a person's resume, so no
+    run boundary. Queued again, for its place, while the slot or the checkout
+    is still taken."""
     st = request.app.state
     row = deps._live_work_item_row(st, wid)
     limit = st.policy.max_concurrent if st.policy else 1
@@ -956,26 +957,30 @@ async def continue_held(wid: str, body: dict, request: Request) -> None:
             )
             return
         nodes = store.effective_nodes(executor.chain_of(row), store.node_overrides_of(row))
-        deps.spawn(
-            request.app,
-            wid,
-            deps.guard(
-                st.db,
+        steer = await st.db.write(lambda c: store.take_steer(c, wid))
+        try:
+            deps.spawn(
+                request.app,
                 wid,
-                executor.run(
+                deps.guard(
                     st.db,
-                    st.run_dirs,
-                    work_item_id=wid,
-                    bd_cwd=deps.bd_cwd(),
-                    start_index=next(i for i, n in enumerate(nodes) if n.id == body["node"]),
-                    policy=st.policy,
-                    steer=body.get("steer"),
-                    steer_source=body.get("steer_source", "human"),
-                    launch=deps.launch(st, row["repo"]),
-                    on_approve=deps._on_approve(st),
+                    wid,
+                    executor.run(
+                        st.db,
+                        st.run_dirs,
+                        work_item_id=wid,
+                        bd_cwd=deps.bd_cwd(),
+                        start_index=next(i for i, n in enumerate(nodes) if n.id == body["node"]),
+                        policy=st.policy,
+                        steer=steer,
+                        steer_source=body.get("steer_source", "human"),
+                        launch=deps.launch(st, row["repo"]),
+                        on_approve=deps._on_approve(st),
+                    ),
                 ),
-            ),
-        )
+            )
+        except deps.AlreadyRunning:
+            raise HTTPException(409, "a walk is already running for this work item") from None
 
 
 async def self_retry_held(wid: str, body: dict, request: Request) -> None:

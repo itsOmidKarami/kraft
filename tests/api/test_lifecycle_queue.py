@@ -274,6 +274,27 @@ def test_a_gate_decision_behind_a_working_in_place_item_is_kept_and_goes_on_late
         assert len(_of(client, wid, "gate_requested")) == 1, "the gate was asked again"
 
 
+def test_a_held_rejection_paused_and_resumed_by_hand_keeps_its_re_run(client, repo):
+    """The queued request goes with the pause; the re-run does not."""
+    client.portal.call(client.app.state.queue_task.cancel)
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"]["gate"], in_place=True)
+    client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "redo it"})
+    [rejected] = _of(client, wid, "gate_rejected")
+    _set_status(working, "paused")
+    assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
+
+    r = client.post(f"/api/work-items/{wid}/resume", json={})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["steer"] == "redo it"
+    evts = _poll_events(client, wid, "node_started")
+    after = [e for e in evts if e["seq"] > rejected["seq"]]
+    first = next(e for e in after if e["type"] in ("node_started", "gate_requested"))
+    assert first["type"] == "node_started", "the gate was asked again"
+    assert first["payload"]["node_id"] == rejected["payload"]["node"]
+
+
 def test_a_self_retry_queued_for_the_checkout_is_replayed_as_the_agents(client, repo):
     """`only-a-person-resets-a-cap-counter`: the replay is the escalation's own retry."""
     from kraft import events, store

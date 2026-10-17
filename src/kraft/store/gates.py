@@ -8,7 +8,7 @@ from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store import chain
 from kraft.store._common import write_status
 from kraft.store.counters import reset_fix_loops
-from kraft.store.work_items import checkout_holder, queue_work_item
+from kraft.store.work_items import checkout_holder, queue_work_item, set_steer
 from kraft.vocab import ChainEvent, GateEvent, WorkItemEvent
 
 
@@ -63,8 +63,9 @@ def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "hum
 
 def hold_for_checkout(conn: sqlite3.Connection, work_item_id, holder: str, body: dict) -> None:
     """Queue a paused item's gate decision to go on as Kraft's own walk from
-    `body["node"]` (`continue`, `kraft.start_queue`), not as a person's resume:
-    the decision is already recorded, and its replay is not a new one."""
+    `body["node"]`, with the item's pending steer (`continue`,
+    `kraft.start_queue`), not as a person's resume: the decision is already
+    recorded, and its replay is not a new one."""
     queue_work_item(
         conn,
         work_item_id,
@@ -185,9 +186,19 @@ def reject_gate(
     if reopen:
         reset_fix_loops(conn, work_item_id, list(rerun), by)
     if holder is not None:
+        # The re-run is kept on the row, not only in the queued request, so a
+        # person who pauses the held item and resumes it by hand gets it too:
+        # the cursor at its target, the note as the next steer.
+        if node is not None:
+            conn.execute(
+                "UPDATE work_items SET current_node_id = ?, current_step = 0 WHERE id = ?",
+                (node, work_item_id),
+            )
+        if note:
+            set_steer(conn, work_item_id, note)
         # An agent's note is not a person's steer (`walk.run`'s `steer_source`).
         source = {"steer_source": "gate_review"} if by == "agent" else {}
-        hold_for_checkout(conn, work_item_id, holder, {"node": node, "steer": note, **source})
+        hold_for_checkout(conn, work_item_id, holder, {"node": node, **source})
     return holder
 
 
