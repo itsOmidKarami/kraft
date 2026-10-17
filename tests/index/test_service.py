@@ -198,19 +198,28 @@ def _markdown_link_to_env(repo, wt):
 
 @pytest.mark.parametrize(
     "plant",
-    [_in_main_checkout_only, _not_markdown, _markdown_link_to_env],
-    ids=["main-checkout", "not-markdown", "md-link-to-env"],
+    [_in_main_checkout_only, _in_main_checkout_only, _not_markdown, _markdown_link_to_env],
+    ids=["main-checkout", "in-place-checkout", "not-markdown", "md-link-to-env"],
 )
 async def test_a_summary_ref_reads_only_a_markdown_file_in_its_own_worktree(
-    tmp_path, database, conn, plant
+    request, tmp_path, database, conn, plant
 ):
     """A worker reports the ref. What it names lands in the index every
     repo's agents search, so it may not name the main checkout's files (an
-    ignored `.env` among them) or anything but a summary."""
+    ignored `.env` among them) or anything but a summary. An in-place item's
+    folder is that checkout, so it reads none."""
     from kraft.paths import RunDirs
 
     repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nx\n"})
     await _seed_work_item(database, str(repo))
+    if request.node.callspec.id == "in-place-checkout":
+        target = WorkItemTarget.for_repository("s", in_place=True)
+        task = {"id": "t", "kind": "subprocess", "command": "true"}
+        node = {"id": "n", "kind": "exec", "tasks": [task]}
+        chain = v1_chain([node], repo=repo, target=target).to_json()
+        await database.write(
+            lambda c: c.execute("UPDATE work_items SET materialized_chain = ?", (chain,))
+        )
     rd = RunDirs(tmp_path / "run").ensure()
     wt = rd.worktrees / "w1"
     wt.mkdir()
