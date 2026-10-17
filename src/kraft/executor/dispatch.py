@@ -1965,13 +1965,7 @@ async def measure_node(
     # the resume cursor a later measuring pass reads back.
     own = steps is None
     if own:
-        await node_runs.entered(
-            db,
-            Path(worktree) if worktree else None,
-            work_item_id,
-            node.id,
-            branch=store.branch_for(row) if store.is_in_place(row) else None,
-        )
+        await node_runs.entered(db, Path(worktree) if worktree else None, work_item_id, node.id)
 
     # Kraft-37myi: read per dispatch, not once per node. The old single read
     # above this loop carried the comment "the worktree's HEAD does not move

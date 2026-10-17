@@ -16,6 +16,7 @@ async def reconcile_current_node(
     node: ResolvedNode,
     adopted: dict,
     worktree: Path | None = None,
+    run_dirs=None,
 ) -> str | None:
     """Settle what a crash left running on the current node, and read its
     outcome when the sessions alone can answer it.
@@ -67,7 +68,7 @@ async def reconcile_current_node(
     measured = [t.path for step in node.steps for t in step.tasks]
     final = db.read(lambda c: store.latest_session_per_task(c, work_item_id, node_id, measured))
     if len(final) == len(measured) and all(r["status"] in _ADVANCING for r in final):
-        await node_runs.completed(db, worktree, work_item_id, node_id)
+        await node_runs.completed(db, worktree, work_item_id, node_id, run_dirs=run_dirs)
         return "ok"
     if len(final) < len(measured) and all(r["status"] in _ADVANCING for r in final):
         # A crash between two of the step's tasks starting: the ones with no
@@ -197,7 +198,12 @@ async def resume_once(
     start_index = None
     if current is not None:
         settled = await reconcile_current_node(
-            db, work_item_id, nodes[current], adopted, worktree=inplace.item_folder(run_dirs, row)
+            db,
+            work_item_id,
+            nodes[current],
+            adopted,
+            worktree=inplace.item_folder(run_dirs, row),
+            run_dirs=run_dirs,
         )
         if settled == "needs_human":
             return "needs_human"

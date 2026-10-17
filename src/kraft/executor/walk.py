@@ -1141,7 +1141,9 @@ async def _walk_node_once(
                     **(_forge_cause(db, work_item_id, node, failed) or {}),
                 }
                 return _Stuck(reason, kind=StopKind.FAILED, facts=facts or None)
-        await node_runs.completed(db, Path(worktree) if worktree else None, work_item_id, node.id)
+        await node_runs.completed(
+            db, Path(worktree) if worktree else None, work_item_id, node.id, run_dirs=run_dirs
+        )
         return "ok"
 
     if policy is None:
@@ -1281,7 +1283,7 @@ async def _walk_node_once(
                 return await _moved_base(db, work_item_id, node)
             if r_verdict == "ok":
                 await node_runs.completed(
-                    db, Path(worktree) if worktree else None, work_item_id, node.id
+                    db, Path(worktree) if worktree else None, work_item_id, node.id, run_dirs=run_dirs
                 )
                 return "ok"
             # Only "failed" reaches here, and that fall-through is deliberate:
@@ -1413,7 +1415,7 @@ async def _walk_node_once(
 
         if not enters_loop:
             await node_runs.completed(
-                db, Path(worktree) if worktree else None, work_item_id, node.id
+                db, Path(worktree) if worktree else None, work_item_id, node.id, run_dirs=run_dirs
             )
             return "ok"
 
@@ -1538,7 +1540,7 @@ async def _walk_node_once(
             # treated as clean here.
             if verdict == "stop_downgrade" and not failed:
                 await node_runs.completed(
-                    db, Path(worktree) if worktree else None, work_item_id, node.id
+                    db, Path(worktree) if worktree else None, work_item_id, node.id, run_dirs=run_dirs
                 )
                 return "ok"
 
@@ -2075,11 +2077,7 @@ async def run_once(
         reason = str(exc)
         kind = StopKind.CONFIG if isinstance(exc, _config.ConfigError) else StopKind.INFRA
         await node_runs.entered(
-            db,
-            inplace.item_folder(run_dirs, row),
-            work_item_id,
-            failing_node,
-            branch=store.branch_for(row) if inplace.is_in_place(row) else None,
+            db, inplace.item_folder(run_dirs, row), work_item_id, failing_node
         )
         await db.write(
             lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason, kind=kind)

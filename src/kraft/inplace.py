@@ -874,6 +874,15 @@ def leftovers(run_dirs, wid: str) -> dict[str, str]:
         return {}
 
 
+def still_left(run_dirs, wid: str, checkout: Path) -> bool:
+    """Whether anything the item's tasks left uncommitted is still there as
+    they left it: the item's own uncommitted work, never the person's."""
+    left = leftovers(run_dirs, wid)
+    now = [p for p in _dirty(checkout) if p in left] if left else []
+    hashes = _hashes(checkout, now)
+    return any(hashes[p] == left[p] for p in now)
+
+
 def mark(
     checkout: Path,
     branch: str,

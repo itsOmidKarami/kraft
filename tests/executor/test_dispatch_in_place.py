@@ -57,6 +57,13 @@ async def test_an_edited_file_the_agent_never_touched_stays_uncommitted_and_unst
     }
     [marked] = [e for e in it.events("task_marked") if e["payload"]["task"].endswith("implement")]
     assert marked["payload"]["dirty"] == ["test_calc.py"]
+    run = it.database.read(
+        lambda c: c.execute(
+            "SELECT dirty FROM node_runs WHERE work_item_id = ? AND node_id = 'implementation'",
+            (it.id,),
+        ).fetchone()
+    )
+    assert run["dirty"] == 1, "the run's leftover is the item's own uncommitted work"
 
 
 async def test_a_large_dirty_set_is_sampled_on_the_event_and_kept_whole_in_a_file(

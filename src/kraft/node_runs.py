@@ -23,10 +23,6 @@ logger = logging.getLogger(__name__)
 REF_ROOT = "refs/kraft"
 
 
-def head(worktree: Path) -> str | None:
-    return _config.git_read(worktree, "rev-parse", "HEAD")
-
-
 def is_dirty(worktree: Path) -> bool:
     out = _config.git_read(worktree, "status", _sandbox.SUBMODULES_UNENTERED, "--porcelain")
     return bool(out)
@@ -70,14 +66,9 @@ def _base(c, wid: str, fallback: str) -> str:
     return (row["base_ref"] if row else None) or fallback
 
 
-async def entered(db, worktree, wid: str, node_id: str, branch: str | None = None) -> None:
-    """`branch` for an in-place item: its checkout's HEAD may be the person's
-    until a task takes it."""
+async def entered(db, worktree, wid: str, node_id: str) -> None:
     wt = _live(worktree)
-    if wt and branch:
-        sha = _config.git_read(wt, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
-    else:
-        sha = head(wt) if wt else None
+    sha = _tip(_row(db, wid), wt) if wt else None
 
     def write(c):
         store.enter_node(c, wid, node_id)
@@ -87,20 +78,37 @@ async def entered(db, worktree, wid: str, node_id: str, branch: str | None = Non
     await db.write(write)
 
 
-def _tip(db, wt: Path, wid: str) -> str | None:
+def _row(db, wid: str):
+    return db.read(lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone())
+
+
+def _tip(row, wt: Path) -> str | None:
     """The item's tip (`inplace.head_ref`): in place its branch, never the
-    checkout's HEAD, which may be the person's."""
+    checkout's HEAD, which may be the person's until a task takes it."""
     from kraft import inplace
 
-    row = db.read(lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone())
     ref = inplace.head_ref(row) if row is not None else "HEAD"
     return _config.git_read(wt, "rev-parse", "--verify", "--quiet", ref)
 
 
-async def completed(db, worktree, wid: str, node_id: str) -> None:
+def _dirty(row, wt: Path, run_dirs) -> bool:
+    """In place, whether the item's own leftovers are still there: the
+    checkout's other uncommitted paths are the person's."""
+    from kraft import inplace
+
+    if row is None or not inplace.is_in_place(row):
+        return is_dirty(wt)
+    try:
+        return run_dirs is not None and inplace.still_left(run_dirs, row["id"], wt)
+    except inplace.CheckoutRefused:
+        return False
+
+
+async def completed(db, worktree, wid: str, node_id: str, *, run_dirs=None) -> None:
     wt = _live(worktree)
-    sha = _tip(db, wt, wid) if wt else None
-    dirty = is_dirty(wt) if wt else False
+    row = _row(db, wid)
+    sha = _tip(row, wt) if wt else None
+    dirty = _dirty(row, wt, run_dirs) if wt else False
 
     def write(c):
         store.complete_node(c, wid, node_id)
@@ -111,10 +119,11 @@ async def completed(db, worktree, wid: str, node_id: str) -> None:
         await asyncio.to_thread(pin_ref, wt, wid, node_id, attempt, sha)
 
 
-async def gate_requested(db, worktree, wid: str, gate: str) -> None:
+async def gate_requested(db, worktree, wid: str, gate: str, *, run_dirs=None) -> None:
     wt = _live(worktree)
-    sha = _tip(db, wt, wid) if wt else None
-    dirty = is_dirty(wt) if wt else False
+    row = _row(db, wid)
+    sha = _tip(row, wt) if wt else None
+    dirty = _dirty(row, wt, run_dirs) if wt else False
     # The ref goes first: `gate_requested` ends the walk, and anything still
     # awaited after it keeps the walk's task live past the point a person can
     # already see the gate. The walk is this item's only writer, so the attempt

@@ -6,7 +6,7 @@ import pytest
 from support.harness import IN_PLACE, commit_all, git, make_repo, v1_named_chain, write
 from support.store_fixtures import mk_item
 
-from kraft import node_runs, store
+from kraft import inplace, node_runs, store
 
 
 async def test_completed_pins_a_ref_that_survives_a_reset(database, tmp_path):
@@ -29,7 +29,7 @@ async def test_in_place_the_items_branch_is_pinned_not_the_persons_head(
     it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation", target=IN_PLACE)
     branch = store.branch_for(it.row())
     git(repo, "checkout", "-q", "-b", branch)
-    await node_runs.entered(it.database, repo, it.id, "implementation", branch=branch)
+    await node_runs.entered(it.database, repo, it.id, "implementation")
     tip = commit_all(repo, "the item's")
     git(repo, "checkout", "-q", "main")
     write(repo, "theirs.txt", "the person's\n")
@@ -39,6 +39,37 @@ async def test_in_place_the_items_branch_is_pinned_not_the_persons_head(
 
     pinned = git(repo, "for-each-ref", "--format=%(objectname)", f"refs/kraft/{it.id}/")
     assert pinned == tip
+
+
+def _dirty_flag(it) -> int:
+    """The run's, or the gate's pin's, whichever ended last."""
+    return it.database.read(
+        lambda c: c.execute(
+            "SELECT dirty FROM node_runs WHERE work_item_id = ? AND end_sha IS NOT NULL "
+            "ORDER BY attempt DESC LIMIT 1",
+            (it.id,),
+        ).fetchone()["dirty"]
+    )
+
+
+@pytest.mark.parametrize("end", ["completed", "gate_requested"])
+@pytest.mark.parametrize("left", [False, True], ids=["the-persons-edit", "the-items-leftover"])
+async def test_in_place_dirty_is_the_items_leftovers_not_the_persons_edits(
+    item_on, run_dirs, repo, end, left
+):
+    """The person's uncommitted edit in the shared checkout never marks the
+    item's run dirty; what its own tasks left there, unchanged since, does."""
+    it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation", target=IN_PLACE)
+    git(repo, "checkout", "-q", "-b", store.branch_for(it.row()))
+    await node_runs.entered(it.database, repo, it.id, "implementation")
+    write(repo, "calc.py", "# the person's edit\n")
+    if left:
+        write(repo, "left.txt", "a task left this\n")
+        inplace.save_leftovers(run_dirs, it.id, {"left.txt": git(repo, "hash-object", "left.txt")})
+
+    await getattr(node_runs, end)(it.database, repo, it.id, "implementation", run_dirs=run_dirs)
+
+    assert _dirty_flag(it) == left
 
 
 async def test_drop_refs_removes_only_this_items_refs(database, tmp_path):
