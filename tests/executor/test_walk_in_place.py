@@ -56,3 +56,20 @@ async def test_a_sandbox_added_after_filing_stops_as_config(item_on, fake_agent,
     assert "in-place items run unsandboxed" in _stop_reason(it)
     assert fake_agent.prompts() == []
     assert git(repo, "symbolic-ref", "HEAD") == "refs/heads/main"
+
+
+async def test_an_agent_task_runs_on_the_items_branch(item_on, fake_agent, repo):
+    it = await item_on(fake_agent.quick_task, target=_IN_PLACE)
+    branch = store.branch_for(it.row())
+    git(repo, "checkout", "-q", "-b", branch)
+    write(repo, "ITEM", "already on the item's branch\n")
+    tip = commit_all(repo, "on the item's branch")
+    git(repo, "checkout", "-q", "main")
+
+    await _walk(it)
+
+    assert git(repo, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"
+    assert [e["payload"] for e in it.events("checkout_switched")] == [
+        {"from": "main", "to": branch}
+    ]
+    assert it.sessions("implementation")[0]["head_sha"] == tip

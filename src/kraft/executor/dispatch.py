@@ -1159,6 +1159,8 @@ async def _dispatch_task(
         except inplace.CheckoutRefused as exc:
             await config_error_session(db, run_dirs, common, f"{exc}\n")
             return CHECKOUT_REFUSED
+        # The take may have moved HEAD onto the branch.
+        common["head_sha"] = _config.git_read(Path(worktree), "rev-parse", "HEAD")
     if isinstance(t, BuiltinTask):
         # Exhaustive on purpose (`builtin-task-references-code-owned-actions`:
         # Kraft owns this vocabulary): a third `BuiltinAction` member added
