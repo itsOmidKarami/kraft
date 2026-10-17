@@ -41,6 +41,12 @@ describe("nodeGraph", () => {
     expect(nodeGraph(item, node, NOW).onFailure).toBeUndefined();
   });
 
+  it("names the on-failure handler only in the round of a fix-loop node that it followed", () => {
+    // The handler's re-measure is stamped -1 and reads in the round of the session before it: here round 2.
+    const item = looped({ worker_sessions: [...LOOP_RUN.slice(0, 5), s("verification.repair.repair_pass", { round: -1 })] });
+    expect([1, 2].map((r) => nodeGraph(item, node, NOW, [], r).onFailure)).toEqual([undefined, "repair_pass"]);
+  });
+
   it("draws a skipped task as skipped, whether the skip cut its session short or it never ran", () => {
     const item = detail({ skipped_paths: ["verification.checks"], worker_sessions: [s("verification.checks.lint", { status: "paused", skipped: true })] });
     const g = nodeGraph(item, node, NOW);
