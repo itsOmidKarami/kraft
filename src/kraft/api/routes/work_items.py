@@ -813,6 +813,16 @@ async def fire_trigger(body: TriggerBody, request: Request):
     policy = deps.item_policy_or_422(st, body.repo)
     repo_steering = deps.repository_steering_or_422(st, body.repo)
     in_place_by = deps.in_place_or_422(st, body.repo, None, workspace=None)
+    if in_place_by is not None:
+        # Refused as the other doors refuse it, not as a failed intake.
+        try:
+            materialized = chain.materialize(
+                target=entry.single_repo_target(body.repo, in_place=True), effective_policy=policy
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if problem := entry.in_place_sandbox_problem(materialized, policy, in_place_by):
+            raise HTTPException(422, problem)
     try:
         wid = await executor.intake(
             st.db,

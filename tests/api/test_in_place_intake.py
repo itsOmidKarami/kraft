@@ -64,25 +64,36 @@ def _sandboxed_chain(templates_dir):
     )
 
 
+_ITEM = {"autostart": False, "in_place": True}
+_BY_ENTRY = "'worktrees: false' on its repos.yaml entry"
+
+
 @pytest.mark.api_client(edit_templates=_sandboxed_chain)
 @pytest.mark.parametrize(
-    "entry, body, names",
+    "door, entry, body, names, by",
     [
-        ({"sandbox": _SANDBOX}, {}, "'sandbox' on its repos.yaml entry"),
-        ({}, {"chain_template": "boxed"}, "chain boxed's policy"),
-        ({}, {"policy": {"sandbox": _SANDBOX}}, "the item's own policy"),
+        ("work-items", {"sandbox": _SANDBOX}, _ITEM, "'sandbox' on its repos.yaml entry", None),
+        ("work-items", {}, {**_ITEM, "chain_template": "boxed"}, "chain boxed's policy", None),
+        (
+            "work-items",
+            {},
+            {**_ITEM, "policy": {"sandbox": _SANDBOX}},
+            "the item's own policy",
+            None,
+        ),
+        ("triggers", {"worktrees": False}, {"chain": "boxed"}, "chain boxed's policy", _BY_ENTRY),
     ],
-    ids=["repo-entry", "chain", "item-policy"],
+    ids=["repo-entry", "chain", "item-policy", "trigger"],
 )
-def test_intake_refuses_a_sandboxed_in_place_item(client, repo, entry, body, names):
+def test_intake_refuses_a_sandboxed_in_place_item(client, repo, door, entry, body, names, by):
     connect_repo(repo, **entry)
 
-    r = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "autostart": False, "in_place": True, **body},
-    )
+    r = client.post(f"/api/{door}", json={"title": "t", "repo": str(repo), **body})
 
     assert r.status_code == 422, r.text
     assert r.json()["detail"].startswith("this item would run in place and sandboxed; ")
-    assert f"{names} turns the sandbox on, and --in-place runs it in place" in r.json()["detail"]
+    assert (
+        f"{names} turns the sandbox on, and {by or '--in-place'} runs it in place"
+        in r.json()["detail"]
+    )
     assert client.get("/api/work-items").json()["items"] == [], "nothing was filed"
