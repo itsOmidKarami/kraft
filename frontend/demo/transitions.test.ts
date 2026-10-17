@@ -545,18 +545,25 @@ describe("onEvent", () => {
 });
 
 describe("the chain draft's ops", () => {
-  const nodeIn = (nodes: { id: string }[], id: string) => nodes.find((n) => n.id === id) as Record<string, unknown>;
-  it.each<[string, string, string | undefined]>([
-    ["sets a field", "verification", "verification"],
-    ["clears it with an empty value", "", undefined],
-  ])("set_field %s", async (_, value, read) => {
+  const dig = (o: unknown, field: string) => field.split(".").reduce<any>((a, k) => a?.[k], o);
+  const at = (chain: { nodes: { id: string }[] }, path: string) => (path ? chain.nodes.find((n) => n.id === path) : chain) as Record<string, unknown>;
+  const set = (path: string, field: string, value: unknown) => ({ op: "set_field", path, field, value });
+  it.each<[string, Record<string, unknown>[], string, string, string[], unknown, unknown]>([
+    ["sets a field, its Config row now the chain's", [set("security_approval", "reject_to", "verification")], "security_approval", "reject_to",
+      ["id", "kind", "message", "reject_to"], "verification", { value: "verification", source: "chain" }],
+    ["clears one the chain set, its row back to the default", [set("security_approval", "message", null)], "security_approval", "message",
+      ["id", "kind"], undefined, { value: null, source: "default" }],
+    ["sets a dotted field nested", [set("spec", "policy.time_cap_minutes", 30)], "spec", "policy.time_cap_minutes",
+      ["id", "kind", "steps", "policy"], 30, { value: 30, source: "chain" }],
+    ["unsets a dotted field and the mapping it empties", [set("spec", "policy.time_cap_minutes", 30), set("spec", "policy.time_cap_minutes", "")], "spec", "policy.time_cap_minutes",
+      ["id", "kind", "steps"], undefined, { value: null, source: "default" }],
+    ["sets the chain's own field at the empty path", [set("", "description", "Ships it.")], "", "description",
+      ["id", "nodes", "description"], "Ships it.", undefined],
+  ])("set_field %s", async (_, ops, path, field, keys, read, source) => {
     const serve = mockServer(buildScenario("default"));
-    const op = { op: "set_field", path: "security_approval", field: "reject_to", value };
-    const r = JSON.parse(((await serve({ method: "POST", url: "http://demo.test/api/drafts/chains/default/ops", json: () => ({ ops: [op] }) })) as Answer).body!);
-    expect([
-      nodeIn(r.result.model["chains/default.yaml"].nodes, "security_approval").reject_to,
-      nodeIn(r.result.resolved.chain.nodes, "security_approval").reject_to,
-      r.result.sources.security_approval.reject_to,
-    ]).toEqual([read, read, undefined]);
+    const r = JSON.parse(((await serve({ method: "POST", url: "http://demo.test/api/drafts/chains/default/ops", json: () => ({ ops }) })) as Answer).body!).result;
+    const authored = at(r.model["chains/default.yaml"], path);
+    expect([Object.keys(authored), dig(authored, field), dig(at(r.resolved.chain, path), field), r.sources[path]?.[field], r.changes.filter((c: { path: string }) => c.path === path).length])
+      .toEqual([keys, read, read, source, 1]);
   });
 });

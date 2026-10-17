@@ -210,6 +210,19 @@ function componentAt(nodes: Record<string, any>[], path: string) {
   for (const seg of rest) at = at?.[seg] ?? at?.steps?.find((s: { id: string }) => s.id === seg) ?? at?.tasks?.find((x: { id: string }) => x.id === seg);
   return at;
 }
+/** Set dotted `field` on a component, or unset it (`undefined`) and each mapping above it that it empties, as ops.py's `_unset`. */
+function putField(at: Record<string, any>, field: string, value: unknown) {
+  const keys = field.split(".");
+  const last = keys.pop()!;
+  const trail = [at];
+  for (const k of keys) {
+    if (value === undefined && typeof trail.at(-1)![k] !== "object") return;
+    trail.push((trail.at(-1)![k] ??= {}));
+  }
+  if (value !== undefined) return void (trail.at(-1)![last] = value);
+  delete trail.at(-1)![last];
+  for (let i = keys.length - 1; i >= 0 && !Object.keys(trail[i + 1]).length; i--) delete trail[i][keys[i]];
+}
 /** An op answered as the server would, for the ops the contract's rows send. */
 function applyOps(view: ReturnType<typeof chainView>, ops: Record<string, unknown>[]) {
   const file = `chains/${view.key}.yaml`;
@@ -225,16 +238,24 @@ function applyOps(view: ReturnType<typeof chainView>, ops: Record<string, unknow
       }
     }
     if (o.op === "set_field") {
-      // The authored and the resolved component both, so the field reads back set either way; `sources` would win over both.
+      // As ops.py's set_field: `field` dotted, "" the chain itself, an empty value (or artifact_required false) unsets.
       const [path, field] = [String(o.path), String(o.field)];
-      for (const list of [nodes, view.result.resolved?.chain.nodes]) {
-        const at = list && componentAt(list as Record<string, any>[], path);
+      const clear = o.value === null || o.value === "" || (field === "artifact_required" && o.value === false);
+      // The authored and the resolved component both, so the field reads back set either way.
+      for (const root of [view.result.model[file], view.result.resolved?.chain] as Record<string, any>[]) {
+        const at = root && (path ? componentAt(root.nodes, path) : root);
         if (!at) continue;
-        if (o.value === null || o.value === "") delete at[field];
-        else at[field] = o.value;
+        putField(at, field, clear ? undefined : o.value);
+        if (clear && field === "artifact") putField(at, "artifact_required", undefined);
       }
-      delete view.result.sources[path]?.[field];
-      view.result.changes.push({ path, kind: "change", summary: field, fields: [field] });
+      // `sources` wins over both, and the Config tab lists its rows, so the row stays and says where its value comes from.
+      const src = view.result.sources[path];
+      if (src && !clear) src[field] = { value: o.value, source: "chain" };
+      else if (src?.[field] && src[field].source !== "default") src[field] = { value: null, source: "default" };
+      // One entry a path, its fields the union, as resolve.py keeps them.
+      const seen = view.result.changes.find((c: { path: string }) => c.path === path);
+      if (!seen) view.result.changes.push({ path, kind: "change", summary: field, fields: [field] });
+      else if (!seen.fields?.includes(field)) seen.fields = [...(seen.fields ?? []), field];
     }
   }
   for (const o of ops) {
