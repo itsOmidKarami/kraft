@@ -1,12 +1,17 @@
 """What the server does to existing state as it starts."""
 
+import asyncio
 import json
+import subprocess
 import sys
 
+import psutil
 import pytest
-from support.harness import git, make_repo, write
+from support.harness import IN_PLACE, git, make_item, make_repo, v1_named_chain, write
 
+from kraft import db, store
 from kraft.adapters import hook_install
+from kraft.paths import RunDirs
 
 _OLD = [sys.executable, "-m", "kraft", "admin", "permission-hook", "cursor"]
 
@@ -73,3 +78,34 @@ def test_start_up_removes_the_rebase_worktrees_a_killed_server_left(stale_scratc
     scratch = stale_scratch.parent / "run/scratch"
     assert [p.name for p in scratch.iterdir()] == ["w3-0dead0ff"], "a link is never Kraft's"
     assert (stale_scratch.parent / "mine/keep.txt").exists()
+
+
+@pytest.fixture
+def left_running(tmp_path, repo):
+    """An in-place agent a server stopped between its pause's write and its
+    kill: still running, its session written paused."""
+    agent = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    started = psutil.Process(agent.pid).create_time()
+
+    async def seed():
+        run_dirs = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(run_dirs.db)
+        try:
+            chain = v1_named_chain(run_dirs.base / "t")
+            it = await make_item(
+                database, run_dirs, chain, "implementation", repo=repo, target=IN_PLACE
+            )
+            await it.session("s1", "implementation.main.implement", running=(agent.pid, started))
+            await database.write(lambda c: store.pause_work_item(c, it.id, ["s1"]))
+        finally:
+            await database.close()
+
+    asyncio.run(seed())
+    yield agent
+    agent.kill()
+    agent.wait()
+
+
+def test_start_up_stops_an_in_place_agent_a_stopped_server_left(left_running, client):
+    """Nothing else ends it, and it writes in the checkout with the lease free."""
+    assert left_running.wait(timeout=5) is not None
