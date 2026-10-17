@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -371,10 +372,12 @@ SAMPLE = 50
 
 
 def _write(path: Path, data: dict) -> None:
+    """Atomic, and safe for co-tasks writing the same file at once."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data))
-    tmp.replace(path)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    with os.fdopen(fd, "w") as f:
+        f.write(json.dumps(data))
+    os.replace(tmp, path)
 
 
 def save_mark(run_dirs, wid: str, task_path: str, m: TaskMark) -> None:

@@ -1730,17 +1730,22 @@ async def _check_in_place(db, run_dirs, row, folder: Path, node_id: str, task_pa
             payload["paths"] = left[: inplace.SAMPLE]
             await db.write(lambda c: events.append(c, wid, ChainEvent.LEFT_UNCOMMITTED, payload))
         reasons = []
+        made = (
+            f"commits made or moved onto during it that are not on {branch}: " + ", ".join(stray)
+            if stray
+            else ""
+        )
         if found.moved_to:
-            made = (
-                f"; commits made or moved onto during it that are not on {branch}: "
-                + ", ".join(stray)
-                if stray
-                else ""
-            )
             reasons.append(
                 f"the checkout {folder} moved to {found.moved_to} during the run of "
-                f"{task_path}{made}. Kraft did not switch it back, nor move those commits: "
-                f"resume once {folder} may go back to {branch}"
+                f"{task_path}{'; ' + made if made else ''}. Kraft did not switch it back, "
+                f"nor move those commits: resume once {folder} may go back to {branch}"
+            )
+        elif stray:
+            # Switched away, committed and switched back: the work may be elsewhere.
+            reasons.append(
+                f"{task_path} left {made}. Kraft did not move them: check where that work "
+                "belongs, then resume"
             )
         if found.overlap:
             reasons.append(
@@ -1753,7 +1758,9 @@ async def _check_in_place(db, run_dirs, row, folder: Path, node_id: str, task_pa
         return None
     last = db.read(lambda c: store.latest_session_per_task(c, wid, node_id, [task_path]))
     # Resume goes on past the task, unless its work may be on another branch.
-    facts = {"task": task_path, "session": last[0]["id"] if last else None, "rerun": bool(stray)}
+    facts = {"task": task_path, "rerun": bool(stray)}
+    if last:
+        facts |= {"session": last[0]["id"], "round": last[0]["round"]}
     # Never `stuck`: an escalation would take the checkout straight back.
     await db.write(
         lambda c: store.mark_needs_human(
@@ -1763,10 +1770,11 @@ async def _check_in_place(db, run_dirs, row, folder: Path, node_id: str, task_pa
     return reason
 
 
-def kept_past_checkout_stop(c, wid: str, node_id: str, task_path: str) -> str | None:
+def kept_past_checkout_stop(c, wid: str, node_id: str, task_path: str, round: int) -> str | None:
     """The status a resume keeps for an in-place task its after-task check
-    stopped (`_check_in_place`) without asking it to run again: only while
-    that stop is the item's last and the walk has not moved on since."""
+    stopped (`_check_in_place`) without asking it to run again: once, for the
+    same round's measurement, while that stop is the item's last and the walk
+    has not moved on since -- a fix cycle started after it is moving on."""
     stop = c.execute(
         "SELECT seq, payload FROM events WHERE work_item_id = ? AND type = ? "
         "ORDER BY seq DESC LIMIT 1",
@@ -1781,13 +1789,14 @@ def kept_past_checkout_stop(c, wid: str, node_id: str, task_path: str) -> str | 
         or p.get("node_id") != node_id
         or facts.get("task") != task_path
         or facts.get("rerun", True)
+        or facts.get("round") != round
     ):
         return None
     moved_on = c.execute(
         "SELECT 1 FROM events WHERE work_item_id = ? AND seq > ? AND ("
         "(type = ? AND json_extract(payload, '$.node_id') != ?) "
         "OR (type = ? AND json_extract(payload, '$.node_id') = ?) "
-        "OR type IN (?, ?, ?)) LIMIT 1",
+        "OR type IN (?, ?, ?, ?)) LIMIT 1",
         (
             wid,
             stop["seq"],
@@ -1798,6 +1807,7 @@ def kept_past_checkout_stop(c, wid: str, node_id: str, task_path: str) -> str | 
             GateEvent.REJECTED,
             ChainEvent.RUN_FORKED,
             ChainEvent.BASE_CHANGE_RESTART,
+            ChainEvent.FIX_CYCLE_STARTED,
         ),
     ).fetchone()
     if moved_on:
@@ -2031,7 +2041,9 @@ async def measure_node(
 
     async def _measure_task(task: ResolvedTask, *, retry: bool = False) -> str:
         if store.is_in_place(row) and not retry:
-            kept = db.read(lambda c: kept_past_checkout_stop(c, work_item_id, node.id, task.path))
+            kept = db.read(
+                lambda c: kept_past_checkout_stop(c, work_item_id, node.id, task.path, round)
+            )
             if kept is not None:
                 return kept
         if task.path in preserve and not retry:

@@ -13,7 +13,7 @@ from kraft import policy as _policy
 from kraft.executor import dispatch, gates
 from kraft.templates.environment import WorkItemTarget
 
-from .test_walk import _agent, _exec, _stop_reason, _walk
+from .test_walk import _agent, _exec, _loop_policy, _stop_reason, _sub, _walk
 
 _IN_PLACE = WorkItemTarget.for_repository("sample", in_place=True)
 
@@ -145,20 +145,47 @@ async def test_a_later_task_committing_an_earlier_tasks_leftover_does_not_stop(
     assert [e["payload"]["task"] for e in it.events("left_uncommitted")] == ["first.main.implement"]
 
 
+@pytest.mark.parametrize("back", [False, True], ids=["stays-away", "switched-back"])
 async def test_a_branch_switch_mid_task_stops_and_never_switches_back(
-    item_on, fake_agent, agent_runs, repo
+    item_on, fake_agent, agent_runs, repo, back
 ):
     it = await item_on(fake_agent.quick_task, target=_IN_PLACE)
-    agent_runs("git checkout -q main && echo stray >> calc.py && git commit -q -am stray")
+    away = "git checkout -q main && echo stray >> calc.py && git commit -q -am stray"
+    agent_runs(away + (" && git checkout -q -" if back else ""))
 
     assert await _walk(it) == "needs_human"
 
     stray = git(repo, "rev-parse", "main")
-    assert git(repo, "symbolic-ref", "HEAD") == "refs/heads/main"
+    on = f"refs/heads/{store.branch_for(it.row())}" if back else "refs/heads/main"
+    assert git(repo, "symbolic-ref", "HEAD") == on, "Kraft switched the checkout"
     assert git(repo, "log", "-1", "--format=%s", "main") == "stray", "Kraft moved the commit"
     assert it.row()["stop_kind"] == "checkout"
-    assert "moved to main during the run" in _stop_reason(it)
+    assert back or "moved to main during the run" in _stop_reason(it)
     assert stray in _stop_reason(it)
+
+
+async def test_resume_after_a_fix_loop_tasks_checkout_stop_runs_its_next_round(
+    item_on, agent_runs, repo, tmp_path
+):
+    """The stopped task is kept once, for its own round: the fix loop's next
+    cycle still runs its repair."""
+    node = _exec("checks", _sub("suite", ["false"]), fix_loop={"tasks": [_agent("repair")]})
+    it = await item_on([node], target=_IN_PLACE)
+    write(repo, "test_calc.py", "# the person's edit\n")
+    commit_once = "touch .git/repaired && echo agent >> test_calc.py && " + _COMMIT.format(
+        f="test_calc.py"
+    )
+    agent_runs(f"[ -e .git/repaired ] || {{ {commit_once}; }}")
+    policy = _loop_policy(tmp_path, attempts=3)
+    assert await _walk(it, policy=policy) == "needs_human"
+    assert it.row()["stop_kind"] == "checkout"
+
+    await it.database.write(lambda c: store.claim_for_run(c, it.id, from_statuses=["needs_human"]))
+    await it.database.write(lambda c: store.resume_work_item(c, it.id, None))
+    await _walk(it, policy=policy)
+
+    repairs = [s for s in it.sessions("checks") if s["hook_point"].endswith("repair")]
+    assert len(repairs) > 1, "the next fix cycle reused the stopped repair"
 
 
 async def test_a_checkout_stop_is_never_auto_escalated(

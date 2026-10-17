@@ -105,7 +105,7 @@ async def test_a_reattached_in_place_task_is_checked_not_swept(
     assert list(it.events("left_uncommitted")[-1]["payload"]["paths"]) == ["work.txt"]
     stop = it.events("work_item_needs_human")[-1]["payload"]
     kept = database.read(
-        lambda c: dispatch.kept_past_checkout_stop(c, it.id, "implementation", path)
+        lambda c: dispatch.kept_past_checkout_stop(c, it.id, "implementation", path, 0)
     )
     if what == "overlap":
         assert "the agent committed calc.py" in stop["reason"]
