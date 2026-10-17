@@ -73,11 +73,22 @@ describe("a repo (M.2)", () => {
   it("shows every field the desktop's Config tab edits, with where each value comes from", async () => {
     open("platform");
     expect(await screen.findByRole("heading", { level: 1, name: "platform" })).toBeInTheDocument();
-    for (const f of FIELDS) expect(within(screen.getByRole("region", { name: f.group })).getByRole("button", { name: (n) => n.startsWith(f.label) })).toBeInTheDocument();
+    for (const f of FIELDS) expect(within(screen.getByRole("region", { name: f.group })).getByRole(f.choice === "bool" ? "switch" : "button", { name: (n) => n.startsWith(f.label) })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^tasks running cap/ })).toHaveTextContent("60");
     expect(screen.getByRole("button", { name: /^tasks running cap/ })).toHaveTextContent("this repo");
     expect(screen.getByRole("button", { name: /^deny tools/ })).toHaveTextContent("default");
     expect(screen.getByText("open items")).toBeInTheDocument();
+  });
+
+  it.each([
+    { id: "off", entry: {}, want: false },
+    { id: "back on", entry: { worktrees: false }, want: null },
+  ])("worktrees is a switch sending the desktop's values: $id", async ({ entry, want }) => {
+    const r = repo("platform", entry);
+    const { calls } = open("platform", ans(reposView({ resolved: { repos: [r], detected: [] } as never })));
+    await userEvent.click(await screen.findByRole("switch", { name: /^worktrees/ }));
+    const op = { op: "set_repo", path: r.path, patch: patchFor(r, FIELDS.find((f) => f.key === "worktrees")!, want) };
+    await waitFor(() => expect(ops(calls)).toEqual([op, op]));
   });
 
   it("an edit sends the desktop's set_repo patch, checked first with a preview", async () => {
