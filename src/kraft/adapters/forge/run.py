@@ -553,14 +553,17 @@ async def _run_one(
             # The description `open_mr` wrote predates every commit verify
             # and mr_checks added, so it is rewritten from the branch head
             # before a human is asked to read it (Kraft-c09h).
-            live_body = await forge.mr_body(repo=repo, branch=branch)
+            try:
+                live_body: str | None = await forge.mr_body(repo=repo, branch=branch)
+            except ForgeError:
+                live_body = None  # shortcut: best-effort read, the sync itself goes on
             await forge.update_mr(repo=repo, branch=branch, body=body)
             log, status = "pushed and synced the merge request description\n", "done"
             # Editing a description triggers no workflow, so a check that read
             # the old one (a required section, say) stays red until its jobs
             # run again. Only when the body changed AND the current head's
             # checks are red: a sync after new commits sees a pending pipeline.
-            if live_body.strip() != body.strip():
+            if live_body is not None and live_body.strip() != body.strip():
                 try:
                     head_ci = await forge.ci_status(
                         repo=repo, mr=MR(number=0, url=""), branch=branch

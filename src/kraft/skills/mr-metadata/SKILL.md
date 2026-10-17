@@ -75,5 +75,5 @@ describes the change that was planned, not the one that was made.
 
 Check that every label the project's rules require is in `labels` and exists in
 its label list, that every section they require is in the description (and the
-repo's body checker, if it has one, passes on it), and that the description describes `git diff <base>...HEAD`, the
-change that was made, not the plan.
+repo's body checker, if it has one, passes on it), and that the description describes
+`git diff <base>...HEAD`, the change that was made, not the plan.
