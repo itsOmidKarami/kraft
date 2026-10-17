@@ -4,6 +4,7 @@ queue a start are pinned beside the doors themselves."""
 import asyncio
 import dataclasses
 import json
+import os
 import sqlite3
 import time
 from functools import partial
@@ -22,6 +23,7 @@ from support.api import (
     _set_status,
     _status_of,
 )
+from support.harness import git
 
 DOORS = json.loads((Path(__file__).parent / "lifecycle_doors.json").read_text())
 
@@ -298,6 +300,30 @@ def test_a_second_comment_while_the_reply_waits_queues_nothing_more(client, repo
     while not launched and time.monotonic() < deadline:
         time.sleep(0.05)
     assert len(launched) == 1
+
+
+def test_a_comment_on_an_item_queued_for_anything_but_a_reply_starts_the_reply(
+    client, repo, monkeypatch
+):
+    """Only a waiting reply stands in for the reply agent: a worktree item
+    queued for a retry still gets its threads answered now."""
+    launched = []
+
+    async def spy(*a, **kw):
+        launched.append(kw)
+        return "done"
+
+    monkeypatch.setattr("kraft.review_reply.run", spy)
+    wid = _in_state(client, repo, DOORS["states"]["queued_at_gate"])
+    worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
+    git(repo, "worktree", "add", "-q", "-b", f"kraft/{wid}", str(worktree))
+
+    r = client.post(
+        f"/api/work-items/{wid}/gates/spec_approval/review", json={"outcome": "comment"}
+    )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["reply_agent"] is True
 
 
 @pytest.mark.parametrize(
