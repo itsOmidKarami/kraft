@@ -1315,7 +1315,7 @@ def _cmd_stop(ns: argparse.Namespace, *, warn: bool = True) -> None:
         time.sleep(0.1)
 
 
-def _rebase_under_way(*roots: Path, checkouts: list[Path] = ()) -> bool:
+def _rebase_under_way(*roots: Path, checkouts: tuple[Path, ...] = ()) -> bool:
     """Whether any worktree under `roots` (the items' and the in-place
     rebases' throwaway ones), or any of `checkouts`, is mid-rebase (a
     `rebase-merge` or `rebase-apply` in its git dir), which a stopping server
@@ -1351,14 +1351,14 @@ def _git_dir(folder: Path) -> Path | None:
     return folder / pointer.removeprefix("gitdir:").strip()
 
 
-def _connected_checkouts() -> list[Path]:
+def _connected_checkouts() -> tuple[Path, ...]:
     """Every connected repository's own checkout, where an in-place item
     rebases: not only `worktrees: false` ones, since one item may be filed in
     place in any repository. None when `repos.yaml` cannot be read."""
     try:
-        return [Path(r.path) for r in config.load_repos(config_dir() / "repos.yaml")]
+        return tuple(Path(r.path) for r in config.load_repos(config_dir() / "repos.yaml"))
     except (config.ConfigError, OSError):
-        return []
+        return ()
 
 
 def _service_installed() -> bool:
