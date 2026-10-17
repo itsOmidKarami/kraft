@@ -1217,7 +1217,9 @@ async def resume_after_escalation(
         claimed = await db.write(
             lambda c: store.claim_for_run(c, work_item_id, from_statuses=admitting(Verb.RETRY))
         )
-        if not claimed:
+        if claimed:
+            store.replay_claimed()  # a queued `self_retry` has started (`start_queue`)
+        else:
             if holder := db.read(lambda c: store.checkout_holder(c, work_item_id)):
                 # The retry stands, queued until the checkout frees.
                 # Replayed by this function, as Kraft's own retry (`self_retry`).

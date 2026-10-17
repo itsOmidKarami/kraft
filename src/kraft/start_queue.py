@@ -18,10 +18,14 @@ fresh request would, against the item as it is now. Four ends:
 * it starts, and the door writes its own event;
 * the door now refuses it, or fails: the item stays where it came from, and
   `work_item_dequeued` carries the refusal or the error;
-* another request took the slot first: the door queues it again, and it is
-  given back the place it had;
-* the server shuts down before the door claims it: it is queued again, in its
+* another request took the slot or the checkout first: it is queued again,
+  and given back the place it had;
+* the server shuts down before it is claimed: it is queued again, in its
   place, and the next server starts it.
+
+A door that spawns its work before that work claims the item or writes its
+session (an escalation, a reply, an escalation's own retry) has not started
+it when it returns: the queue waits for the claim or the session (`_SPAWNS`).
 """
 
 from __future__ import annotations
@@ -110,31 +114,30 @@ async def _start_one(app, wid: str) -> bool:
 
 
 async def _take_and_start(app, wid: str) -> bool:
-    # deferred: kraft.api starts this module's poller
-    from kraft.api.routes import lifecycle, review
-
     st = app.state
     saved = await st.db.write(lambda c: store.take_queued(c, wid))
     if saved is None:
         return False  # paused, ended or started since `tick` selected it
     request = _request(app, saved["headers"])
+    claimed = asyncio.Event()
+    replay = store.REPLAY_CLAIMED.set(claimed) if saved["verb"] in _SPAWNS else None
+    work = None
     try:
-        if saved["verb"] == "retry":
-            await lifecycle._retry(wid, lifecycle.Retry(**saved["body"]), request)
-        elif saved["verb"] in ("continue", "start"):
-            await lifecycle.continue_held(wid, saved["body"], request)
-        elif saved["verb"] == "self_retry":
-            await lifecycle.self_retry_held(wid, saved["body"], request)
-        elif saved["verb"] == "escalate":
-            await lifecycle.escalate_work_item(wid, lifecycle.Escalate(**saved["body"]), request)
-        elif saved["verb"] == "reply":
-            await review.reply_held(wid, saved["body"], request)
-        else:
-            await lifecycle.resume_work_item(wid, lifecycle.Resume(**saved["body"]), request)
+        try:
+            await _replay(wid, saved, request)
+        finally:
+            if replay is not None:
+                store.REPLAY_CLAIMED.reset(replay)
+        work = st.tasks.get(wid) if replay is not None else None
+        if work is not None:
+            await _until_claimed(work, claimed)
     except asyncio.CancelledError:
         # The server is shutting down mid-start. An item the door has not
         # claimed goes back in the queue, in its place, for the next server to
         # start: left where it came from, its request would be lost unsaid.
+        # Work it spawned that has not claimed it is stopped with it.
+        if work is not None and not claimed.is_set():
+            work.cancel()
         await st.db.write(lambda c: _requeue(c, wid, saved))
         raise
     except HTTPException as exc:
@@ -150,11 +153,46 @@ async def _take_and_start(app, wid: str) -> bool:
         ]
     )
     if status == WorkItemStatus.QUEUED:
-        # Another request took the slot between `tick`'s look and the door's
-        # claim, and the door queued this one again: not to the back.
+        # Another request took the slot or the checkout between `tick`'s look
+        # and the claim, and the request was queued again: not to the back.
         await st.db.write(lambda c: store.keep_place(c, wid, saved["at"]))
         return False
     return True
+
+
+#: Verbs whose door spawns the work and returns before that work claims the
+#: item or writes its session. The queue waits for one or the other
+#: (`store.replay_claimed`), or for the work to end, before it counts the
+#: item started: a claim lost meanwhile keeps its place, and a shutdown
+#: meanwhile puts the request back.
+_SPAWNS = ("self_retry", "escalate", "reply")
+
+
+async def _until_claimed(work: asyncio.Task, claimed: asyncio.Event) -> None:
+    waiting = asyncio.ensure_future(claimed.wait())
+    try:
+        await asyncio.wait({work, waiting}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        waiting.cancel()
+
+
+async def _replay(wid: str, saved: dict, request: Request) -> None:
+    """Make the saved request again through the door that queued it."""
+    # deferred: kraft.api starts this module's poller
+    from kraft.api.routes import lifecycle, review
+
+    if saved["verb"] == "retry":
+        await lifecycle._retry(wid, lifecycle.Retry(**saved["body"]), request)
+    elif saved["verb"] in ("continue", "start"):
+        await lifecycle.continue_held(wid, saved["body"], request)
+    elif saved["verb"] == "self_retry":
+        await lifecycle.self_retry_held(wid, saved["body"], request)
+    elif saved["verb"] == "escalate":
+        await lifecycle.escalate_work_item(wid, lifecycle.Escalate(**saved["body"]), request)
+    elif saved["verb"] == "reply":
+        await review.reply_held(wid, saved["body"], request)
+    else:
+        await lifecycle.resume_work_item(wid, lifecycle.Resume(**saved["body"]), request)
 
 
 def _requeue(conn, wid: str, saved: dict) -> None:

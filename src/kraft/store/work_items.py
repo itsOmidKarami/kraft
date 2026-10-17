@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 import sqlite3
 from collections.abc import Iterable
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 
 from kraft import events
@@ -548,6 +550,19 @@ def dequeue_work_item(
         {"why": why, "detail": detail or _dropped(request), "to": request["from"]},
     )
     return True
+
+
+#: Set by the start queue while it replays a request whose door spawns the
+#: work before that work claims the item or writes its session
+#: (`start_queue._SPAWNS`). The work's task inherits it, and `replay_claimed`
+#: says the replay has started, so the queue does not count it started sooner.
+REPLAY_CLAIMED: ContextVar[asyncio.Event | None] = ContextVar("replay_claimed", default=None)
+
+
+def replay_claimed() -> None:
+    """The replay running in this task now holds its claim or its session."""
+    if (claimed := REPLAY_CLAIMED.get()) is not None:
+        claimed.set()
 
 
 def keep_place(conn: sqlite3.Connection, work_item_id: str, at: str) -> None:

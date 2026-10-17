@@ -779,6 +779,7 @@ async def run_task(
             takes_checkout=takes_checkout,
         )
     )
+    store.replay_claimed()  # a queued replay holds its session (`start_queue`)
     if before_launch is not None:
         try:
             await before_launch()
