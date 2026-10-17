@@ -254,26 +254,46 @@ def test_only_a_fixes_or_closes_trailer_names_a_bead_to_close(messages, beads):
     assert executor.entry._trailer_beads(messages) == beads
 
 
+_SANDBOXED = {"sandbox": {"kind": "docker", "image": "img"}}
+
+
+@pytest.mark.parametrize(
+    ("chain_policy", "maxima", "kwargs", "match"),
+    [
+        (
+            {"allowed_tools": ["git", "rm_rf"]},
+            {"allowed_tools": ["git"]},
+            {},
+            "cannot widen the inherited safety ceiling",
+        ),
+        (
+            _SANDBOXED,
+            {},
+            {"in_place_by": "'worktrees: false' on its repos.yaml entry"},
+            "chain quick-task's policy turns the sandbox on, and 'worktrees: false'",
+        ),
+    ],
+    ids=["past-the-ceiling", "in-place-and-sandboxed"],
+)
 async def test_a_chain_policy_over_the_ceiling_is_refused_before_any_side_effect(
-    database, run_dirs, tmp_path, monkeypatch
+    database, run_dirs, tmp_path, monkeypatch, chain_policy, maxima, kwargs, match
 ):
     """Kraft-ib2af: the refusal is a `ValueError` every intake door already
     turns into a legible answer, and it comes before the bead is filed and the
     attachments are copied -- a trigger filing an orphaned bead every due
     minute was the failure. The chain's own `policy:` widens `allowed_tools`
-    past a ceiling of `[git]`."""
+    past a ceiling of `[git]`, or sandboxes an item its repository runs in
+    place (`in-place-refuses-a-sandbox`, at every door)."""
     from kraft.policy import InstancePolicy, InstancePolicyInput, TemplatePolicyOverride
 
     chain = _quick_task()
     chain = dataclasses.replace(
         chain,
         chain=chain.chain.model_copy(
-            update={"policy": TemplatePolicyOverride(allowed_tools=["git", "rm_rf"])}
+            update={"policy": TemplatePolicyOverride.model_validate(chain_policy)}
         ),
     )
-    ceiling = InstancePolicy.from_input(
-        InstancePolicyInput.model_validate({"maxima": {"allowed_tools": ["git"]}})
-    )
+    ceiling = InstancePolicy.from_input(InstancePolicyInput.model_validate({"maxima": maxima}))
     filed = []
 
     async def record(*a, **kw):
@@ -284,7 +304,7 @@ async def test_a_chain_policy_over_the_ceiling_is_refused_before_any_side_effect
     doc = tmp_path / "plan.md"
     doc.write_text("# plan\n")
 
-    with pytest.raises(ValueError, match="cannot widen the inherited safety ceiling"):
+    with pytest.raises(ValueError, match=match):
         await _intake(
             database,
             run_dirs,
@@ -293,6 +313,7 @@ async def test_a_chain_policy_over_the_ceiling_is_refused_before_any_side_effect
             bd_cwd=None,
             effective_policy=ceiling,
             attachments=[{"kind": "plan", "path": "p.md", "source": str(doc)}],
+            **kwargs,
         )
 
     assert database.read(lambda c: c.execute("SELECT id FROM work_items").fetchall()) == []

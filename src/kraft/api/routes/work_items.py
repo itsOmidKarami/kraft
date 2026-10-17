@@ -364,7 +364,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     # materialize from the same policy (`repository-policy-cannot-relax-
     # instance-safety`).
     base_branch = await deps.base_branch_or_422(body.repo, body.base_branch)
-    in_place = deps.in_place_or_422(st, body.repo, body.in_place, workspace=body.workspace)
+    in_place_by = deps.in_place_or_422(st, body.repo, body.in_place, workspace=body.workspace)
     target = deps.workspace_target(
         st,
         body.repo,
@@ -372,7 +372,9 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         members=body.members,
         root_pointer_policy=body.root_pointer_policy,
         base_branch=base_branch,
-    ) or entry.single_repo_target(body.repo, base_branch=base_branch, in_place=in_place)
+    ) or entry.single_repo_target(
+        body.repo, base_branch=base_branch, in_place=in_place_by is not None
+    )
     policy = deps.item_policy_or_422(st, body.repo, target)
     per_repository = deps.repository_policies_or_422(st, target)
     repo_steering = deps.repository_steering_or_422(st, body.repo, target)
@@ -387,7 +389,9 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         item_policy = materialized.item_policy
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    deps.refuse_sandboxed_in_place(st, body.repo, target, materialized)
+    # Before the dry run returns, so a preview is refused as the filing would be.
+    if problem := entry.in_place_sandbox_problem(materialized, policy, in_place_by):
+        raise HTTPException(422, problem)
     _check_node_overrides(
         body.node_overrides,
         node_ids,
@@ -467,6 +471,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             policy_override=item_policy.model_dump(exclude_none=True, exclude_defaults=True)
             if item_policy is not None
             else None,
+            in_place_by=in_place_by,
         )
     except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
         # No longer reachable for a bd failure — `executor.intake` degrades
@@ -668,19 +673,28 @@ async def duplicate_work_item(wid: str, request: Request):
     # /work-items` falling back to a plain `single_repo_target` when nothing
     # selected a workspace (`_duplicate_target` returns `None` for exactly
     # that case, `workspace_target`'s own convention).
-    target = _duplicate_target(st, row) or entry.single_repo_target(row["repo"])
+    # The copy runs where the original was frozen to, whatever its repository
+    # says now (`in-place-is-frozen-at-intake`).
+    filed = store.materialized_chain_of(row)
+    in_place_by = "the item it duplicates" if filed is not None and filed.target.in_place else None
+    target = _duplicate_target(st, row) or entry.single_repo_target(
+        row["repo"], in_place=in_place_by is not None
+    )
     policy = deps.item_policy_or_422(st, row["repo"], target)
     per_repository = deps.repository_policies_or_422(st, target)
     repo_steering = deps.repository_steering_or_422(st, row["repo"], target)
     try:
-        item_policy = chain.materialize(
+        materialized = chain.materialize(
             target=target,
             effective_policy=policy,
             repository_policies=per_repository,
             attachment_kinds=attachment_kinds,
-        ).item_policy
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    item_policy = materialized.item_policy
+    if problem := entry.in_place_sandbox_problem(materialized, policy, in_place_by):
+        raise HTTPException(422, problem)
     # A title 1.4 stored on several lines, or blank, is folded as a cron
     # trigger's is (`entry.one_line_title`); one with no text anywhere is refused.
     title, description = entry.one_line_title(row["title"], row["description"] or "")
@@ -707,6 +721,7 @@ async def duplicate_work_item(wid: str, request: Request):
             policy_override=item_policy.model_dump(exclude_none=True, exclude_defaults=True)
             if item_policy is not None
             else None,
+            in_place_by=in_place_by,
         )
     except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
         raise HTTPException(502, f"intake failed: {exc}") from exc
@@ -794,6 +809,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
     policy = deps.item_policy_or_422(st, body.repo)
     repo_steering = deps.repository_steering_or_422(st, body.repo)
+    in_place_by = deps.in_place_or_422(st, body.repo, None, workspace=None)
     try:
         wid = await executor.intake(
             st.db,
@@ -807,6 +823,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
             chain_template=chain_template,
             bd_cwd=deps.bd_cwd(),
             status=WorkItemStatus.PAUSED,
+            in_place_by=in_place_by,
         )
     except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
         raise HTTPException(502, f"intake failed: {exc}") from exc

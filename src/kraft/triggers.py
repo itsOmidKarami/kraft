@@ -126,6 +126,7 @@ async def tick(app, *, now: datetime | None = None) -> list[str]:
                 repository_steering=api_deps.repository_steering(st, trig.repo),
                 chain_template=trig.chain,
                 status=WorkItemStatus.PAUSED,
+                in_place_by=executor.in_place_by(entry, None),
             )
         except ValueError as exc:
             # Intake's own refusal (a chain `policy:` past the instance maxima,

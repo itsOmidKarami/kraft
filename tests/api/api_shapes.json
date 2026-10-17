@@ -414,7 +414,8 @@
       "setup_command": "_",
       "steering": [],
       "test_command": "_",
-      "test_scopes": "_"
+      "test_scopes": "_",
+      "worktrees": "_"
      }
     ],
     "suggested": "_",

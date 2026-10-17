@@ -11,11 +11,11 @@ from pathlib import Path
 
 from kraft import events, ids, item_paths, store
 from kraft.adapters import beads
-from kraft.config import git_read
+from kraft.config import RepoEntry, git_read
 from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.render import plain_text
 from kraft.templates.environment import WorkItemTarget
-from kraft.templates.models import ResolvedChain
+from kraft.templates.models import MaterializedChain, ResolvedChain
 from kraft.vocab import HOLDS_SLOT, ChainEvent, WorkItemStatus
 
 logger = logging.getLogger(__name__)
@@ -71,6 +71,41 @@ def single_repo_target(
     dry run and the real one disagree about what gets trimmed.
     """
     return WorkItemTarget.for_repository("target", base_branch=base_branch, in_place=in_place)
+
+
+def in_place_by(repo_entry: RepoEntry | None, asked: bool | None) -> str | None:
+    """The setting that runs an item in place (`in-place-is-frozen-at-intake`):
+    its own `asked`, else its repository's `worktrees`; None for a worktree
+    item. An unconnected repository (`repo_entry` None) runs worktree items."""
+    if asked is None:
+        if repo_entry is not None and not repo_entry.worktrees:
+            return "'worktrees: false' on its repos.yaml entry"
+        return None
+    return "--in-place" if asked else None
+
+
+def in_place_sandbox_problem(
+    materialized: MaterializedChain, effective_policy: InstancePolicy, in_place_by: str | None
+) -> str | None:
+    """Why an in-place item cannot be filed sandboxed (`in-place-refuses-a-
+    sandbox`): its files would land in the person's own folder, which the
+    sandbox promises never to do. Names both settings; None when nothing
+    clashes. `effective_policy` is the door's instance and repository layers,
+    and the instance one carries no sandbox, so one there is the repo's."""
+    if not materialized.target.in_place:
+        return None
+    if effective_policy.sandbox is not None:
+        where = "'sandbox' on its repos.yaml entry"
+    elif materialized.chain.scope_sandboxes(materialized.policy):
+        where = f"chain {materialized.chain.id}'s policy"
+    elif materialized.item_sandbox():
+        where = "the item's own policy"
+    else:
+        return None
+    return (
+        "this item would run in place and sandboxed; in-place items cannot be sandboxed: "
+        f"{where} turns the sandbox on, and {in_place_by or 'its target'} runs it in place"
+    )
 
 
 def work_item_id_taken_on_disk(run_dirs, repo: str, candidate: str) -> bool:
@@ -175,6 +210,9 @@ async def intake(
     #: (`api.deps.repository_steering`). `None` freezes none, and the item's
     #: launches read its repository's names against the live library.
     repository_steering: Mapping[str, Mapping[str, str]] | None = None,
+    #: `in_place_by`'s answer for this item: with no `target`, whether the
+    #: single-repository one runs in place, and the words a refusal names.
+    in_place_by: str | None = None,
 ) -> str:
     title, description = one_line_title(title, description)
     # Drawn before the row is written, since attachments are stored under it
@@ -198,13 +236,11 @@ async def intake(
     # `artifact:` and the producing node's `produces:`, never a kind-to-gate-
     # name table this layer looks up -- and it happens in the same drop as
     # `skip_nodes`, so a chain the two together would empty is refused once.
+    if effective_policy is None:
+        effective_policy = InstancePolicy.from_input(InstancePolicyInput())
     materialized = chain.materialize(
-        target=target or single_repo_target(repo),
-        effective_policy=(
-            effective_policy
-            if effective_policy is not None
-            else InstancePolicy.from_input(InstancePolicyInput())
-        ),
+        target=target or single_repo_target(repo, in_place=in_place_by is not None),
+        effective_policy=effective_policy,
         # Derived from the attachments themselves, never passed in beside
         # them: the kinds that trim the chain and the documents that justify
         # the trim have to be the same list, and a caller holding both is a
@@ -214,6 +250,12 @@ async def intake(
         repository_policies=repository_policies,
         repository_steering=repository_steering,
     )
+    if materialized.target.in_place and (
+        problem := in_place_sandbox_problem(
+            materialized.with_item_policy(policy_override), effective_policy, in_place_by
+        )
+    ):
+        raise ValueError(problem)
     # Everything above is pure; everything below has a side effect. A chain
     # the instance policy refuses (`PolicyError`, a `ValueError`) is refused
     # here, before a bead is filed or an attachment copied -- a trigger used to
