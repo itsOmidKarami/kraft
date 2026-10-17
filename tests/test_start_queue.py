@@ -367,13 +367,23 @@ def test_removing_the_limit_releases_a_held_start(client, repo, board):
     assert _tick(client) == [new]
 
 
-@pytest.mark.parametrize("lost", ["checkout", "shutdown"])
+@pytest.mark.parametrize(
+    ("lost", "left", "queued"),
+    [
+        ("checkout", [], True),
+        ("shutdown", None, True),
+        ("shutdown-after-its-session", "running", False),
+    ],
+    ids=["checkout", "shutdown", "shutdown-after-its-session"],
+)
 def test_a_spawned_replay_is_started_only_once_it_holds_its_session(
-    client, repo, quiet, monkeypatch, lost
+    client, repo, quiet, monkeypatch, lost, left, queued
 ):
     """An escalation's door returns before its session is written. Its
     checkout taken meanwhile, it is queued again in its place; the server
-    shutting down meanwhile, it goes back in its place and no agent starts."""
+    shutting down meanwhile, it goes back in its place and no agent starts.
+    Once its session is written it has started: a shutdown then asks for it
+    no second time."""
     import sqlite3
 
     from kraft import executor, store
@@ -398,33 +408,33 @@ def test_a_spawned_replay_is_started_only_once_it_holds_its_session(
         if lost == "checkout":
             _set_status(working, "active")
             return
+        if lost == "shutdown-after-its-session":
+            store.replay_claimed()  # as `run_task` says once the session is written
         reached.set()
         await asyncio.Event().wait()
 
     monkeypatch.setattr(executor, "restore_pins", before_the_session)
 
     async def tick():
-        if lost == "checkout":
-            return await start_queue.tick(client.app)
         ticking = asyncio.ensure_future(start_queue.tick(client.app))
+        if lost == "checkout":
+            return await ticking
         await reached.wait()
         ticking.cancel()
         await asyncio.gather(ticking, return_exceptions=True)
         await asyncio.sleep(0)
-        return client.app.state.tasks.get(wid)
+        work = client.app.state.tasks.get(wid)
+        return "running" if work is not None and not work.done() else work
 
-    assert client.portal.call(tick) in ([], None)
+    assert client.portal.call(tick) == left
     with _db() as c:
         held = c.execute(
             "SELECT id, queued_request FROM work_items WHERE status = 'queued' "
             "ORDER BY json_extract(queued_request, '$.at'), id"
         ).fetchall()
-        sessions = c.execute(
-            "SELECT COUNT(*) FROM worker_sessions WHERE work_item_id = ?", (wid,)
-        ).fetchone()[0]
-    assert [i for i, _ in held] == [wid, later]
-    assert json.loads(held[0][1])["at"] == json.loads(at)["at"]
-    assert sessions == 0
+    assert [i for i, _ in held] == ([wid, later] if queued else [later])
+    if queued:
+        assert json.loads(held[0][1])["at"] == json.loads(at)["at"]
 
 
 @pytest.mark.parametrize(
@@ -432,14 +442,16 @@ def test_a_spawned_replay_is_started_only_once_it_holds_its_session(
     [
         ("escalate", {"message": "look"}, ("kraft.escalate", "_record_message")),
         ("self_retry", None, ("kraft.executor.retry", "retry")),
+        ("escalate", {"message": "look"}, ("kraft.executor", "restore_pins")),
     ],
-    ids=["escalate", "self_retry"],
+    ids=["escalate", "self_retry", "never-claims"],
 )
 def test_a_spawned_replay_counts_as_started_once_it_holds_its_claim(
     client, repo, quiet, monkeypatch, verb, body, runs_on
 ):
     """Its session written, or its claim made: started, while its work runs
-    on. The queue does not wait out an agent's whole turn."""
+    on. The queue does not wait out an agent's whole turn, nor, for one stuck
+    before its session, longer than `_CLAIM_WAIT_S`."""
     import importlib
     import sqlite3
 
@@ -466,8 +478,48 @@ def test_a_spawned_replay_counts_as_started_once_it_holds_its_claim(
         await asyncio.Event().wait()
 
     monkeypatch.setattr(importlib.import_module(runs_on[0]), runs_on[1], runs_on_and_on)
+    monkeypatch.setattr(start_queue, "_CLAIM_WAIT_S", 0.5)
 
     async def tick():
         return await asyncio.wait_for(start_queue.tick(client.app), 10)
 
     assert client.portal.call(tick) == [wid]
+
+
+@pytest.mark.parametrize(
+    ("state", "verb", "body", "started", "why"),
+    [
+        ("gate", "reply", {"gate": "spec_approval"}, True, None),
+        ("failed", "follow_up", {}, False, "refused"),
+        ("failed", "self_retry", {"cursor": 0}, False, "refused"),
+    ],
+    ids=["reply", "follow_up", "self_retry"],
+)
+def test_a_replay_beside_a_walk_already_running_is_not_waited_on(
+    client, repo, quiet, state, verb, body, started, why
+):
+    """A reply's door spawns nothing beside a live auto-review (its threads
+    wait for the next comment), and the queue does not wait out that walk.
+    Kraft's own replays that cannot spawn are refused, not failed."""
+    import sqlite3
+
+    from kraft import store
+
+    wid = _in_state(client, repo, DOORS["states"][state], in_place=True)
+    with _db() as c, c:
+        c.row_factory = sqlite3.Row
+        assert store.queue_work_item(
+            c, wid, verb=verb, body=body, headers={}, from_statuses=["needs_human"]
+        )
+
+    async def tick():
+        client.app.state.tasks[wid] = asyncio.get_running_loop().create_future()
+        return await asyncio.wait_for(start_queue.tick(client.app), 10)
+
+    assert client.portal.call(tick) == ([wid] if started else [])
+    dequeued = [
+        e["payload"]["why"]
+        for e in client.get(f"/api/work-items/{wid}/events").json()
+        if e["type"] == "work_item_dequeued"
+    ]
+    assert dequeued == ([why] if why else [])
