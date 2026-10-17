@@ -56,17 +56,21 @@ def _end_overtaken_holds(conn) -> None:
             conn,
             wid,
             WorkItemEvent.DEQUEUED,
-            {"why": "superseded", "detail": _dropped(saved), "to": status},
+            {"why": "superseded", "detail": dropped(json.loads(saved)), "to": status},
         )
 
 
-def _dropped(saved: str) -> str:
-    """What an overtaken hold was holding, for its timeline: the verb, and the
-    steer a person attached to it, which reaches no agent now."""
-    request = json.loads(saved)
-    steer = (request.get("body") or {}).get("steer")
+def dropped(request: dict) -> str:
+    """What a dropped hold was holding, for its timeline: the verb, and what a
+    person attached to it, which reaches no agent now: a steer, or the message
+    of an escalation that was never sent, which nothing else records."""
+    body = request.get("body") or {}
     said = f"the queued {request.get('verb', 'start')} was dropped"
-    return f"{said}, with its steer: {steer}" if steer else said
+    if steer := body.get("steer"):
+        return f"{said}, with its steer: {steer}"
+    if message := body.get("message"):
+        return f"{said}, with its message: {message}"
+    return said
 
 
 def _now() -> str:
