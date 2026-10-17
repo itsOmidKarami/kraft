@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 from support.addons import with_origin
-from support.api import _force_node, _paused, _poll_events
+from support.api import _force_node, _paused, _poll_events, _set_status
 from support.harness import commit_all, entry_of, git, v1_named_chain, write
 
 from kraft import builtins, inplace, store
@@ -547,8 +548,13 @@ async def test_a_conflicting_rebase_in_the_checkout_aborts_and_puts_the_edits_ba
     assert git(repo, "stash", "list") == ""
 
 
-async def test_a_cancel_mid_rebase_in_the_checkout_waits_for_git(item_on, database, run_dirs, repo):
-    it, branch = await _behind_origin(item_on, database, run_dirs, repo)
+@pytest.mark.parametrize("clashes", [False, True], ids=["clean", "clash-named-over-the-cancel"])
+async def test_a_cancel_mid_rebase_in_the_checkout_waits_for_git(
+    item_on, database, run_dirs, repo, clashes
+):
+    it, branch = await _behind_origin(
+        item_on, database, run_dirs, repo, main_writes="f" if clashes else "main.txt"
+    )
     git(repo, "checkout", "-q", branch)
     write(repo, "f", "the person's edit\n")
     write(repo, ".git/hooks/pre-rebase", "#!/bin/sh\nsleep 1\n").chmod(0o755)
@@ -556,12 +562,95 @@ async def test_a_cancel_mid_rebase_in_the_checkout_waits_for_git(item_on, databa
     await asyncio.sleep(0.5)
     rebasing.cancel()
 
-    with pytest.raises(asyncio.CancelledError):
+    with pytest.raises(inplace.AutostashClash if clashes else asyncio.CancelledError):
         await rebasing
 
     assert _contains_origin_main(repo, branch), "git was cut off, or left running"
-    assert git(repo, "status", "--porcelain") == "M f"
+    assert git(repo, "status", "--porcelain") == ("UU f" if clashes else "M f")
     assert not inplace._lock(repo).locked()
+
+
+def _ignored_file_the_base_tracks(repo, branch) -> str:
+    write(repo, ".git/info/exclude", "secret.env\n")
+    write(repo, "secret.env", "MY SECRET\n")
+    return "secret.env"
+
+
+def _side_branch(repo, branch, name, body) -> None:
+    """`side`, forked where `branch` did, writing `name`."""
+    git(repo, "checkout", "-q", "-b", "side", f"{branch}~1")
+    write(repo, name, body)
+    commit_all(repo, "side")
+    git(repo, "checkout", "-q", branch)
+
+
+def _the_persons_merge_under_way(repo, branch) -> str:
+    _side_branch(repo, branch, "side.txt", "side\n")
+    git(repo, "merge", "-q", "--no-ff", "--no-commit", "side")
+    return "operation in progress"
+
+
+def _unmerged_after_a_stash_pop(repo, branch) -> str:
+    write(repo, "f", "the person's edit\n")
+    git(repo, "stash", "push", "-q")
+    write(repo, "f", "committed meanwhile\n")
+    commit_all(repo, "f again")
+    subprocess.run(["git", "stash", "pop", "-q"], cwd=repo, capture_output=True)
+    return "unmerged paths: f"
+
+
+@pytest.mark.parametrize(
+    "arrange",
+    [_ignored_file_the_base_tracks, _the_persons_merge_under_way, _unmerged_after_a_stash_pop],
+    ids=["ignored-file-the-base-tracks", "the-persons-merge", "unmerged-path"],
+)
+async def test_a_rebase_in_the_checkout_refuses_what_it_would_force(
+    item_on, database, run_dirs, repo, arrange
+):
+    it, branch = await _behind_origin(item_on, database, run_dirs, repo, main_writes="secret.env")
+    git(repo, "checkout", "-q", branch)
+    named = arrange(repo, branch)
+    before = _head(repo), git(repo, "rev-parse", branch), git(repo, "status", "--porcelain")
+    files = {p: (repo / p).read_bytes() for p in ("f", "secret.env") if (repo / p).exists()}
+
+    with pytest.raises(inplace.CheckoutRefused, match=named):
+        await inplace.rebase(run_dirs, it.row(), base="main")
+
+    assert (_head(repo), git(repo, "rev-parse", branch), git(repo, "status", "--porcelain")) == (
+        before
+    )
+    assert {p: (repo / p).read_bytes() for p in files} == files
+
+
+async def test_a_failed_rebase_never_aborts_the_persons_own(item_on, database, run_dirs, repo):
+    """Theirs, started between Kraft's check and its rebase: left alone."""
+    it, branch = await _behind_origin(item_on, database, run_dirs, repo)
+    git(repo, "checkout", "-q", branch)
+    _side_branch(repo, branch, "item.txt", "side's\n")
+    subprocess.run(["git", "rebase", "side"], cwd=repo, capture_output=True)
+    theirs = git(repo, "rev-parse", "side")
+    head = git(repo, "rev-parse", "refs/remotes/origin/main")
+
+    with pytest.raises(inplace.CheckoutRefused, match="did not start"):
+        inplace._rebase_in_checkout(repo, head, "main", None)
+
+    gitdir = Path(git(repo, "rev-parse", "--absolute-git-dir"))
+    assert (gitdir / "rebase-merge" / "onto").read_text().strip() == theirs
+
+
+async def test_a_slow_throwaway_checkout_does_not_hold_up_the_server(
+    item_on, database, run_dirs, repo
+):
+    it, branch = await _behind_origin(item_on, database, run_dirs, repo)
+    write(repo, ".git/hooks/post-checkout", "#!/bin/sh\nsleep 1\n").chmod(0o755)
+    rebasing = asyncio.ensure_future(inplace.rebase(run_dirs, it.row(), base="main"))
+    longest, last = 0.0, time.monotonic()
+    while not rebasing.done():
+        await asyncio.sleep(0.05)
+        longest, last = max(longest, time.monotonic() - last), time.monotonic()
+
+    await rebasing
+    assert longest < 0.8, "the loop stood still while git checked the branch out"
 
 
 async def test_a_rebase_waits_for_the_checkouts_lock(item_on, database, run_dirs, repo):
@@ -595,13 +684,19 @@ def _snapshot(repo) -> tuple:
     return _head(repo), git(repo, "rev-parse", "HEAD"), git(repo, "status", "--porcelain"), files
 
 
-@pytest.mark.parametrize("conflicts", [False, True], ids=["rebased", "conflict"])
+@pytest.mark.parametrize(
+    ("conflicts", "left_by_a_killed_server"),
+    [(False, False), (True, False), (False, True)],
+    ids=["rebased", "conflict", "after-a-killed-server"],
+)
 async def test_rebase_off_the_branch_never_moves_the_checkout(
-    item_on, database, run_dirs, repo, conflicts
+    item_on, database, run_dirs, repo, conflicts, left_by_a_killed_server
 ):
     it, branch = await _behind_origin(
         item_on, database, run_dirs, repo, main_writes="item.txt" if conflicts else "main.txt"
     )
+    if left_by_a_killed_server:  # it holds the branch: git checks it out once
+        git(repo, "worktree", "add", "-q", str(run_dirs.scratch / "w1-0dead0ff"), branch)
     write(repo, "calc.py", "# the person's edit\n")
     write(repo, "mine.txt", "the person's own file\n")
     before, tip = _snapshot(repo), git(repo, "rev-parse", branch)
@@ -620,20 +715,25 @@ async def test_rebase_off_the_branch_never_moves_the_checkout(
 
 
 @pytest.mark.parametrize(
-    "error",
+    ("error", "paused_meanwhile"),
     [
-        lambda: inplace.AutostashClash("your edits to f clash", ["f"], "5ca1ab1e"),
-        lambda: inplace.CheckoutRefused("the branch is gone", ["g"]),
+        (lambda: inplace.AutostashClash("your edits to f clash", ["f"], "5ca1ab1e"), False),
+        (lambda: inplace.CheckoutRefused("the branch is gone", ["g"]), False),
+        (lambda: inplace.AutostashClash("your edits to f clash", ["f"], "5ca1ab1e"), True),
     ],
-    ids=["autostash-clash", "checkout-refused"],
+    ids=["autostash-clash", "checkout-refused", "clash-as-a-pause-lands"],
 )
 @pytest.mark.parametrize("verb", ["resume", "retry"])
-def test_an_autostash_clash_stops_the_item_as_checkout(client, repo, monkeypatch, verb, error):
+def test_an_autostash_clash_stops_the_item_as_checkout(
+    client, repo, monkeypatch, verb, error, paused_meanwhile
+):
     raised = error()
     wid = _paused(client, repo, in_place=True)
     _force_node(wid, "implementation", "paused" if verb == "resume" else "needs_human")
 
     async def clash(*_, **__):
+        if paused_meanwhile:  # the stash is named all the same
+            _set_status(wid, "paused")
         raise raised
 
     monkeypatch.setattr(inplace, "rebase", clash)

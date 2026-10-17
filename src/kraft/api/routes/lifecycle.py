@@ -1421,6 +1421,9 @@ async def refresh_base(
     )
     try:
         moved = await deps.run_stoppable(request.app, wid, rebasing, stopped=stopped)
+    except inplace.AutostashClash:
+        # Even over a stop: the person's edits are in a stash only this names.
+        raise
     except RuntimeError:
         # A conflict or a failure of an item stopped meanwhile is not the
         # walk's to be handed.
