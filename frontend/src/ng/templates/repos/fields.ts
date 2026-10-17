@@ -40,7 +40,7 @@ export const FIELDS: RepoField[] = [
   { key: "test_scopes", group: "Tests", label: "test scopes", ...scopes, placeholder: "paths => command; …" },
   { key: "setup_command", group: "Running", label: "setup command", ...command, none: "No setup needed", empty: "none" },
   { key: "intent_dir", group: "Running", label: "intent dir", ...text },
-  { key: "worktrees", group: "Running", label: "worktrees", choice: "bool", ...onByDefault("each item in its own worktree", "items run in this repo's checkout") },
+  { key: "worktrees", group: "Running", label: "worktrees", choice: "bool", ...onByDefault("Each item in its own worktree", "Items run in this repo's checkout") },
   { key: "steering", group: "Agents", label: "steering", ...list, source: "steering", choices: "steering", placeholder: "profile, profile" },
   { key: "models", group: "Agents", label: "models", ...models, source: "models", placeholder: "profile=model; …" },
   { key: "deny_tools", group: "Agents", label: "deny tools", ...list, source: "deny_tools", placeholder: "tool, tool" },

@@ -371,7 +371,7 @@ describe("Repos page: the Config rows", () => {
     await showDefaults();
     const on = screen.getByRole("switch", { name: "worktrees" });
     expect(on).toBeChecked();
-    expect(screen.getByText("each item in its own worktree")).toBeInTheDocument();
+    expect(screen.getByText("Each item in its own worktree")).toBeInTheDocument();
     await userEvent.click(on);
     await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(2));
     expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { worktrees: false } }]);
@@ -381,7 +381,7 @@ describe("Repos page: the Config rows", () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ resolved: { repos, detected: DETECTED } as never })));
     mount();
     await openConfig();
-    expect(screen.getByText("items run in this repo's checkout")).toBeInTheDocument();
+    expect(screen.getByText("Items run in this repo's checkout")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("switch", { name: "worktrees" }));
     await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(2));
     expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { worktrees: null } }]);
