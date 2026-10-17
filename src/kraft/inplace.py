@@ -555,6 +555,16 @@ def _switch(folder: Path, branch: str) -> dict:
     would replace without a word."""
     head = git_read(folder, "symbolic-ref", "--quiet", "HEAD", expected_failure=True)
     moved_from = (head or "").removeprefix("refs/heads/") or git_read(folder, "rev-parse", "HEAD")
+    # Detached: what only HEAD holds would be left to the reflog.
+    held = "--branches", "--remotes", "--tags"
+    only = [] if head else _git_lines(folder, "log", "--format=%H", "HEAD", "--not", *held)
+    if only:
+        raise CheckoutRefused(
+            f"{folder} is on a detached HEAD with commits no branch holds "
+            f"({', '.join(c[:12] for c in only[:5])}{', ...' if len(only) > 5 else ''}): "
+            "switching away would leave them only in the reflog. Put a branch on them "
+            "(`git branch <name>`), then retry the item"
+        )
     changed = _git_lines(folder, "diff", "--name-only", "--no-renames", "HEAD", branch)
     ignored = _ignored_in_the_way(folder, changed)
     if ignored:

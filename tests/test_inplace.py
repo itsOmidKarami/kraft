@@ -182,6 +182,25 @@ async def test_take_looks_at_the_lease_again_before_it_switches(
     assert it.events("checkout_switched") == []
 
 
+@pytest.mark.parametrize("own", [True, False], ids=["commits-only-head-holds", "at-a-branch"])
+async def test_take_never_leaves_detached_commits_to_the_reflog(
+    item_on, database, run_dirs, repo, own
+):
+    it, branch = await _prepared(item_on, database, run_dirs, repo)
+    git(repo, "checkout", "-q", "--detach")
+    if own:
+        git(repo, "commit", "-q", "--allow-empty", "-m", "the person's, on no branch")
+    detached = git(repo, "rev-parse", "HEAD")
+
+    if own:
+        with pytest.raises(inplace.CheckoutRefused, match=detached[:12]):
+            await inplace.take(database, run_dirs, it.row(), attachments=[])
+    else:
+        await inplace.take(database, run_dirs, it.row(), attachments=[])
+
+    assert git(repo, "rev-parse", "HEAD") == (detached if own else git(repo, "rev-parse", branch))
+
+
 async def test_take_stops_when_the_branch_is_gone(item_on, database, run_dirs, repo):
     it, branch = await _prepared(item_on, database, run_dirs, repo)
     git(repo, "branch", "-D", branch)
