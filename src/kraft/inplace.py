@@ -831,7 +831,7 @@ def _hashes(checkout: Path, paths: list[str]) -> dict[str, str]:
 
 
 async def mark_task(db, run_dirs, row, folder: Path, node_id: str, task_path: str) -> None:
-    """Before an in-place agent task: what `check_task` compares against,
+    """Before an in-place agent or command task: what `check_task` compares against,
     kept in the item's folder so a restart's reattach reads the same mark."""
     wid = row["id"]
     m = await asyncio.to_thread(mark, folder, store.branch_for(row), leftovers(run_dirs, wid))
@@ -842,11 +842,16 @@ async def mark_task(db, run_dirs, row, folder: Path, node_id: str, task_path: st
     await db.write(lambda c: events.append(c, wid, ChainEvent.TASK_MARKED, payload))
 
 
-async def check_task(db, run_dirs, row, folder: Path, node_id: str, task_path: str):
+async def check_task(
+    db, run_dirs, row, folder: Path, node_id: str, task_path: str, *, command: bool = False
+):
     """After an in-place agent task, in place of the sweep: record what it
     left uncommitted, and stop the item as `checkout` when the checkout moved
     or the task committed a path the person had changed. Never a repair: no
-    switch back, no commit, no undo. Answers the stop's reason, or None."""
+    switch back, no commit, no undo. Answers the stop's reason, or None.
+    After a `command` the stop reruns it on resume, since its verdict was
+    measured on whatever the checkout held, and only paths no earlier task
+    left as they are now are reported left uncommitted."""
     wid = row["id"]
     m = load_mark(run_dirs, wid, task_path)
     if m is None:  # launched before marks were recorded
@@ -859,9 +864,10 @@ async def check_task(db, run_dirs, row, folder: Path, node_id: str, task_path: s
         reason = str(exc)
     else:
         stray = found.stray_commits
-        if found.leftovers:
+        before = leftovers(run_dirs, wid) if command else {}
+        left = sorted(p for p, sha in found.leftovers.items() if before.get(p) != sha)
+        if left:
             save_leftovers(run_dirs, wid, found.leftovers)
-            left = sorted(found.leftovers)
             payload = {"node_id": node_id, "task": task_path, "count": len(left)}
             payload["paths"] = left[:SAMPLE]
             await db.write(lambda c: events.append(c, wid, ChainEvent.LEFT_UNCOMMITTED, payload))
@@ -894,15 +900,22 @@ async def check_task(db, run_dirs, row, folder: Path, node_id: str, task_path: s
         return None
     last = db.read(lambda c: store.latest_session_per_task(c, wid, node_id, [task_path]))
     # Resume goes on past the task, unless its work may be on another branch.
-    facts = {"task": task_path, "rerun": bool(stray)}
+    facts = {"task": task_path, "rerun": command or bool(stray)}
     if last:
         facts |= {"session": last[0]["id"], "round": last[0]["round"]}
-    # Never `stuck`: an escalation would take the checkout straight back.
-    await db.write(
-        lambda c: store.mark_needs_human(
-            c, wid, node_id, reason, kind=StopKind.CHECKOUT, facts=facts
-        )
-    )
+
+    def stop(c) -> None:
+        if command and last:
+            # What it measured was not the item's tip: never reused for it.
+            c.execute(
+                "UPDATE worker_sessions SET head_sha = NULL WHERE work_item_id = ? "
+                "AND node_id = ? AND hook_point = ? AND round = ?",
+                (wid, node_id, task_path, last[0]["round"]),
+            )
+        # Never `stuck`: an escalation would take the checkout straight back.
+        store.mark_needs_human(c, wid, node_id, reason, kind=StopKind.CHECKOUT, facts=facts)
+
+    await db.write(stop)
     return reason
 
 

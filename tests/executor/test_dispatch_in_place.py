@@ -5,10 +5,11 @@ mid-task, stops the item."""
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 
 import pytest
-from support.harness import git, write
+from support.harness import entry_of, git, write
 
 from kraft import events, executor, inplace, store
 from kraft import policy as _policy
@@ -54,7 +55,7 @@ async def test_an_edited_file_the_agent_never_touched_stays_uncommitted_and_unst
     assert inplace.leftovers(it.run_dirs, it.id) == {
         "left.txt": git(repo, "hash-object", "left.txt")
     }
-    [marked] = it.events("task_marked")
+    [marked] = [e for e in it.events("task_marked") if e["payload"]["task"].endswith("implement")]
     assert marked["payload"]["dirty"] == ["test_calc.py"]
 
 
@@ -306,3 +307,36 @@ async def test_open_mr_refuses_a_dirty_folder_only_for_a_worktree_item(
 
     assert await _dispatch_one(it) == "done"
     assert seen["check_clean"] is check_clean
+
+
+_AWAY = ["sh", "-c", "git checkout -q main"]
+
+
+@pytest.mark.parametrize(
+    ("task", "test_command"),
+    [
+        (_sub("suite", _AWAY), None),
+        ({"id": "suite", "kind": "builtin", "ref": "kraft.verify_changed_test_scopes"}, _AWAY),
+    ],
+    ids=["command", "changed-test-scopes"],
+)
+async def test_a_branch_switch_during_a_command_task_stops_and_its_pass_never_counts(
+    item_on, repo, task, test_command
+):
+    """A passing verdict measured on the person's branch is no verdict on the
+    item's: the walk stops as `checkout`, and a resume runs the command again."""
+    it = await item_on([_exec("checks", task)], target=_IN_PLACE)
+    entry = {"setup_command": ""} | (
+        {"test_command": shlex.join(test_command)} if test_command else {}
+    )
+
+    assert await _walk(it, repo_entry=entry_of(entry)) == "needs_human"
+
+    assert git(repo, "symbolic-ref", "HEAD") == "refs/heads/main", "Kraft switched it back"
+    assert it.row()["stop_kind"] == "checkout"
+    assert "moved to main during the run of checks.main.suite" in _stop_reason(it)
+    assert it.events("node_completed") == []
+
+    await _resume(it)
+
+    assert len(it.sessions("checks")) == 2, "the resume kept the command's pass"

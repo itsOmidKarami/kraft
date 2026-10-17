@@ -1171,6 +1171,27 @@ async def _dispatch_task(
             return CHECKOUT_REFUSED
         # The take may have moved HEAD onto the branch.
         common["head_sha"] = _config.git_read(Path(worktree), "rev-parse", "HEAD")
+    # A command checked like an agent task: a checkout moved under it was
+    # measured on someone else's code, so its verdict never counts.
+    after_check = (
+        inplace.is_in_place(work_item_row)
+        and _takes_the_checkout(t)
+        and not isinstance(t, AgentTask)
+    )
+    if after_check:
+        try:
+            await inplace.mark_task(db, run_dirs, work_item_row, Path(worktree), node.id, task.path)
+        except inplace.CheckoutRefused as exc:
+            await config_error_session(db, run_dirs, common, f"{exc}\n")
+            return CHECKOUT_REFUSED
+
+    async def checked(verdict):
+        if after_check and await inplace.check_task(
+            db, run_dirs, work_item_row, Path(worktree), node.id, task.path, command=True
+        ):
+            return CHECKOUT_REFUSED
+        return verdict
+
     if isinstance(t, BuiltinTask):
         # Exhaustive on purpose (`builtin-task-references-code-owned-actions`:
         # Kraft owns this vocabulary): a third `BuiltinAction` member added
@@ -1210,20 +1231,22 @@ async def _dispatch_task(
                     await inplace.stop_refused(db, work_item_row["id"], node.id, exc)
                     return CHECKOUT_REFUSED
             case BuiltinAction.VERIFY_CHANGED_TEST_SCOPES:
-                return await _run_changed_test_scopes(
-                    db,
-                    run_dirs,
-                    task,
-                    node,
-                    work_item_row,
-                    worktree,
-                    common=common,
-                    execution=t.execution,
-                    launch=launch,
-                    round=round,
-                    sandbox=sandbox,
-                    checkout=checkout,
-                    time_cap=time_cap,
+                return await checked(
+                    await _run_changed_test_scopes(
+                        db,
+                        run_dirs,
+                        task,
+                        node,
+                        work_item_row,
+                        worktree,
+                        common=common,
+                        execution=t.execution,
+                        launch=launch,
+                        round=round,
+                        sandbox=sandbox,
+                        checkout=checkout,
+                        time_cap=time_cap,
+                    )
                 )
             case _:  # pragma: no cover -- the type already refuses this
                 raise RuntimeError(f"{task.path}: no dispatch branch for builtin ref {t.ref!r}")
@@ -1237,17 +1260,19 @@ async def _dispatch_task(
             return await config_error_session(
                 db, run_dirs, common, f"{task.path}: cannot parse command {t.command!r}: {exc}\n"
             )
-        return await _subprocess.run_task(
-            db,
-            run_dirs,
-            cmd=cmd,
-            cwd=worktree,
-            repo_entry=launch.repo_entry if launch else None,
-            env=TEST_ENV,
-            sandbox=sandbox,
-            checkout=checkout,
-            time_cap=time_cap,
-            **common,
+        return await checked(
+            await _subprocess.run_task(
+                db,
+                run_dirs,
+                cmd=cmd,
+                cwd=worktree,
+                repo_entry=launch.repo_entry if launch else None,
+                env=TEST_ENV,
+                sandbox=sandbox,
+                checkout=checkout,
+                time_cap=time_cap,
+                **common,
+            )
         )
 
     if isinstance(t, ForgeTask):
