@@ -312,7 +312,11 @@ def branch_log(row, worktree: Path) -> list[tuple[str, str]]:
     the commits this item has made -- across a reject bounce, which is when
     the per-run range was empty by construction and floored `current` at 1."""
     base = row["base_ref"]
-    log = git_read(worktree, "log", "--format=%h %s", f"{base}..HEAD") if base else None
+    # The folder is the repo itself only in place (`inplace.folder_for`), whose
+    # HEAD may be the person's: read the branch. Saves a chain parse per row.
+    in_place = Path(worktree) == Path(row["repo"])
+    head = f"refs/heads/{_store.branch_for(row)}" if in_place else "HEAD"
+    log = git_read(worktree, "log", "--format=%h %s", f"{base}..{head}") if base else None
     return [(line.partition(" ")[0], line.partition(" ")[2]) for line in (log or "").splitlines()]
 
 

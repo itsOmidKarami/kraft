@@ -97,8 +97,13 @@ async def get_work_item_diff(wid: str, request: Request, ignore_whitespace: bool
         )
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
-    change = review.read_change(worktree, "HEAD", ignore_whitespace=ignore_whitespace)
-    landed = review.read_change(worktree, base, head="HEAD", ignore_whitespace=ignore_whitespace)
+    head = inplace.head_ref(row)
+    # In place the working tree is the person's: the uncommitted part is the
+    # empty range `head..head`, never their files.
+    change = review.read_change(
+        worktree, head, head=None if head == "HEAD" else head, ignore_whitespace=ignore_whitespace
+    )
+    landed = review.read_change(worktree, base, head=head, ignore_whitespace=ignore_whitespace)
     if change is None or landed is None:
         # None means git itself failed (and git_read has already logged the
         # command and stderr). Returning an empty diff here would be
@@ -143,7 +148,14 @@ def _resolve_target(st, row, gate: str | None, target: str) -> tuple[str | None,
         return row["base_ref"], row["base_ref"]
     if target == "latest":
         base = attempts[-1]["base_sha"] if attempts else row["base_ref"]
-        return None, base
+        if not inplace.is_in_place(row):
+            return None, base
+        # In place the working tree is the person's: latest is the branch's tip.
+        folder = inplace.item_folder(st.run_dirs, row)
+        tip = config_mod.git_read(folder, "rev-parse", "--verify", "-q", inplace.head_ref(row))
+        if not tip:
+            raise HTTPException(409, "this work item's branch has no commit yet")
+        return tip, base
     if target == "last_review":
         rev = st.db.read(lambda c: store.last_review(c, wid))
         if rev is None:

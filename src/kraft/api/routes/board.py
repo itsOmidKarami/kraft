@@ -540,6 +540,9 @@ async def list_work_items(request: Request):
             # One `is_dir` per row: the VS Code board offers Open Worktree only
             # while the directory is there, without a detail fetch per row.
             "worktree_exists": folder.is_dir(),
+            # Runs in the repo's own checkout; `kraft` run there finds it by `branch`.
+            "in_place": parsed[r["id"]] is not None and parsed[r["id"]].target.in_place,
+            "branch": store.branch_for(r),
         }
 
     # Each row's chain parsed once, for the stage bar and `actions` both.
@@ -1335,7 +1338,9 @@ async def get_work_item(wid: str, request: Request):
         # What the *diff on screen* is, so the gate can tell a measurement taken
         # on this commit from one taken three commits ago (Kraft-lu2).
         # `git_read` returns None for a worktree that does not exist yet.
-        "head_sha": config_mod.git_read(folder, "rev-parse", "HEAD"),
+        # In place, the branch's tip: the checkout's HEAD may be the person's.
+        "head_sha": config_mod.git_read(folder, "rev-parse", inplace.head_ref(row)),
+        "in_place": inplace.is_in_place(row),
         # The gate actually waiting on a person. Inferring it client-side from
         # "the node has a gate_after and its sessions are done" cannot see a
         # rejection, and offers Approve on a gate the API will 409 (Kraft).

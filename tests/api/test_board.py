@@ -12,6 +12,7 @@ import pytest
 from support.api import (
     WALK_TIMEOUT,
     _force_node,
+    _paused,
     _poll_events,
     _post_default,
     _set_status,
@@ -122,6 +123,26 @@ def test_list_hides_abandoned_items(client, repo):
 
     assert wid not in [i["id"] for i in visible]
     assert wid in [i["id"] for i in everything]
+
+
+@pytest.mark.parametrize("in_place", [False, True], ids=["worktree", "in-place"])
+def test_an_item_says_whether_it_runs_in_the_checkout(client, repo, in_place):
+    """In place, the board and the item page mark the item, its folder is the
+    repo, and its head is its branch's tip even while the person's checkout is
+    on another branch."""
+    from support.harness import commit_all, git
+
+    wid = _paused(client, repo, in_place=in_place)
+    listed = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
+    git(repo, "checkout", "-q", "-b", listed["branch"])
+    tip = commit_all(repo, "the item's commit")
+    git(repo, "checkout", "-q", "main")
+
+    detail = client.get(f"/api/work-items/{wid}").json()
+
+    assert listed["in_place"] is detail["in_place"] is in_place
+    assert (detail["worktree_path"] == str(repo)) is in_place
+    assert detail["head_sha"] == (tip if in_place else None)
 
 
 def _seed_repo(client, wid, **kwargs):

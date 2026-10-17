@@ -335,3 +335,32 @@ def test_diff_ignore_whitespace_drops_whitespace_only_files(client, seeded_item,
     assert "ws.txt" not in quiet["diff"]
     assert "doc.md" in {f["path"] for f in plain["landed"]["files"]}
     assert "doc.md" in {f["path"] for f in quiet["landed"]["files"]}  # added, not whitespace-only
+
+
+def test_diff_in_place_shows_only_the_branchs_commits(client, tmp_path):
+    """An in-place item's folder is the person's own checkout: its diff is the
+    branch's commits since base, read even while the checkout is on another
+    branch, and never the person's uncommitted or untracked files."""
+    from support.api import _paused
+
+    repo = connected_repo(tmp_path)
+    wid = _paused(client, repo, in_place=True)
+    branch = client.get(f"/api/work-items/{wid}").json()["branch"]
+    base = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-q", "-b", branch)
+    write(repo, "feature.py", "the item's work\n")
+    commit_all(repo, "the item's commit")
+    git(repo, "checkout", "-q", "main")
+    write(repo, "calc.py", "the person's edit\n")
+    write(repo, "scratch.txt", "the person's note\n")
+    with sqlite3.connect(RunDirs(tmp_path / "run").db) as conn:
+        conn.execute("UPDATE work_items SET base_ref = ? WHERE id = ?", (base, wid))
+
+    diff = client.get(f"/api/work-items/{wid}/diff").json()
+    compare = client.get(f"/api/work-items/{wid}/compare").json()
+
+    assert (diff["files"], diff["diff"], diff["untracked"]) == ([], "", [])
+    assert [f["path"] for f in diff["landed"]["files"]] == ["feature.py"]
+    assert [f["path"] for f in compare["files"]] == ["feature.py"]
+    assert compare["untracked"] == []
+    assert "the person's" not in str(diff) + str(compare)
