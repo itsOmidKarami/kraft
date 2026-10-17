@@ -51,12 +51,25 @@ def _contains_origin_main(repo, branch) -> bool:
 _THEIR_STASH = "echo theirs > other.txt; git stash push -q -u -- other.txt"
 
 
-@pytest.mark.parametrize("hook", [None, _THEIR_STASH], ids=["plain", "another-stash-meanwhile"])
+@pytest.mark.parametrize(
+    ("hook", "older"),
+    [(None, False), (_THEIR_STASH, False), ("git stash drop -q", True)],
+    ids=["plain", "another-stash-meanwhile", "an-older-autostash-uncovered-meanwhile"],
+)
 async def test_rebase_in_the_checkout_keeps_the_persons_edits(
-    item_on, database, run_dirs, repo, hook
+    item_on, database, run_dirs, repo, hook, older
 ):
+    """`older`: an autostash an earlier rebase kept, under another stash that
+    is dropped mid-rebase; older than this rebase, so never taken for its own."""
     it, branch = await _behind_origin(item_on, database, run_dirs, repo)
     git(repo, "checkout", "-q", branch)
+    if older:
+        write(repo, "f", "an earlier edit\n")
+        kept = git(repo, "stash", "create")
+        git(repo, "checkout", "-q", "--", "f")
+        git(repo, "stash", "store", "-m", "autostash", kept)
+        write(repo, "other.txt", "theirs\n")
+        git(repo, "stash", "push", "-q", "-u", "--", "other.txt")
     write(repo, "f", "the person's edit\n")
     if hook is not None:
         write(repo, ".git/hooks/post-rewrite", f"#!/bin/sh\n{hook}\n").chmod(0o755)
