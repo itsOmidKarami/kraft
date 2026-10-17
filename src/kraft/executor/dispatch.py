@@ -15,7 +15,7 @@ from pathlib import Path
 from kraft import builtins as _builtins
 from kraft import caps as _caps
 from kraft import config as _config
-from kraft import events, item_paths, node_runs, store
+from kraft import events, inplace, item_paths, node_runs, store
 from kraft import findings as _findings
 from kraft import harness as _harness
 from kraft import overrides as _overrides
@@ -35,6 +35,7 @@ from kraft.executor.context import (
     _ADVANCING,
     BASE_MOVED,
     BUDGET,
+    CHECKOUT_REFUSED,
     CONFIG_ERROR,
     CONFLICT,
     INFRA_STOP,
@@ -350,12 +351,26 @@ class SandboxUnresolved(RuntimeError):
     never a host launch and never an unattributed crash."""
 
 
+class InPlaceSandboxed(SandboxUnresolved, _config.ConfigError):
+    """A sandbox reached an in-place item after filing, from a repository's
+    live entry: refused like an unresolved one at every launch door, and a
+    `config` stop on the walk."""
+
+
 def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
     """`_item_policy` as every launch runs it: a `kind: kit` lowered from
     the cache to the `kind: docker` policy that runs it, plus `kit: <ref>`
     (spec §9.4). A Kit never fetched (`ensure_kit`) or refused is
     `SandboxUnresolved` naming it, so nothing launches."""
     policy = _item_policy(row, launch)
+    if policy is not None and store.is_in_place(row):
+        snapshot = store.materialized_chain_of(row)
+        where = (
+            "its chain or its own policy"
+            if snapshot is not None and snapshot.item_sandbox() is not None
+            else "'sandbox' on its repos.yaml entry"
+        )
+        raise InPlaceSandboxed(f"in-place items run unsandboxed; {where} turns a sandbox on")
     if policy is None or policy.kind != "kit":
         return policy.model_dump() if policy is not None else None
     try:
@@ -1131,6 +1146,19 @@ async def _dispatch_task(
         # The whole checkout a sandboxed launch mounts, members included:
         # exactly the one the drift check above passed, not a second reading.
         checkout = verified if sandbox else None
+    # Right before a task that needs the folder, never on the walk's entry; a
+    # forge task or a rebase does not run in it here.
+    if inplace.is_in_place(work_item_row) and (
+        isinstance(t, AgentTask | SubprocessTask)
+        or (isinstance(t, BuiltinTask) and t.ref is BuiltinAction.VERIFY_CHANGED_TEST_SCOPES)
+    ):
+        try:
+            await inplace.take(
+                db, run_dirs, work_item_row, attachments=entry.attachments_of(work_item_row)
+            )
+        except inplace.CheckoutRefused as exc:
+            await config_error_session(db, run_dirs, common, f"{exc}\n")
+            return CHECKOUT_REFUSED
     if isinstance(t, BuiltinTask):
         # Exhaustive on purpose (`builtin-task-references-code-owned-actions`:
         # Kraft owns this vocabulary): a third `BuiltinAction` member added
@@ -2025,6 +2053,8 @@ async def measure_node(
     # could not even start (Kraft-579).
     if any(r == CONFIG_ERROR for r in results):
         return CONFIG_ERROR, [t for t, r in outcomes if r == CONFIG_ERROR], []
+    if any(r == CHECKOUT_REFUSED for r in results):
+        return CHECKOUT_REFUSED, [t for t, r in outcomes if r == CHECKOUT_REFUSED], []
     # A scope's time ran out (Ruling 194): nothing about the code failed, and
     # no recovery or fix cycle may spend more of the time that is gone.
     if any(r == TIME_CAPPED for r in results):

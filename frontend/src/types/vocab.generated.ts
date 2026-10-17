@@ -3,7 +3,7 @@
 export const DISPLAY_STATUSES = ["archived", "done", "cancelled", "paused", "running", "waiting", "queued", "blocked", "needs_you", "escalated", "failed"] as const;
 export type DisplayStatus = (typeof DISPLAY_STATUSES)[number];
 
-export const STOP_KINDS = ["gate", "question", "cap", "budget", "failed", "conflict", "mr_closed", "config", "infra", "stuck", "wait", "rate_limit"] as const;
+export const STOP_KINDS = ["gate", "question", "cap", "budget", "failed", "conflict", "mr_closed", "config", "infra", "stuck", "wait", "rate_limit", "checkout"] as const;
 export type StopKind = (typeof STOP_KINDS)[number];
 
 export const FAILURE_STOP_KINDS: readonly StopKind[] = ["failed", "config", "infra"];
@@ -21,6 +21,7 @@ export const STOP_TRAITS: Record<StopKind, { status: string; stored: boolean; fa
   "stuck": { status: "needs_human", stored: true, failure: false },
   "wait": { status: "waiting", stored: true, failure: false },
   "rate_limit": { status: "rate_limited", stored: true, failure: false },
+  "checkout": { status: "needs_human", stored: true, failure: false },
 };
 
 export const WORK_ITEM_STATUSES = ["active", "needs_human", "completed", "paused", "abandoned", "rate_limited", "waiting", "queued", "blocked"] as const;
@@ -106,7 +107,7 @@ export type DiffSide = (typeof DIFF_SIDES)[number];
 export const WORK_ITEM_EVENTS = ["work_item_created", "work_item_attachments", "work_item_resumed", "pause_requested", "work_item_queued", "work_item_dequeued", "work_item_storage_held", "work_item_blocked", "work_item_unblocked", "work_item_dependencies_dropped", "work_item_blocked_by_dependency", "paused_by_broken_base", "work_item_needs_human", "work_item_waiting", "work_item_rate_limited", "work_item_retried", "work_item_completed", "work_item_manually_completed", "work_item_cancelled", "work_item_abandoned", "work_item_archived", "work_item_restored", "work_item_title_edited", "work_item_description_edited", "plan_progress", "steer_context_set", "steer_undelivered"] as const;
 export type WorkItemEvent = (typeof WORK_ITEM_EVENTS)[number];
 
-export const CHAIN_EVENTS = ["chain_loaded", "worktree_prepared", "node_started", "node_completed", "node_skipped", "scope_skipped", "node_recovery_started", "run_forked", "base_change_restart", "worktree_rebase_verified", "worktree_refresh_skipped", "read_only_violated", "fix_cycle_started", "fix_cycle_finished", "fix_cycle_refunded", "findings_measured", "test_scopes_selected", "judge_verdict", "sweep_failed", "sweep_left_out", "bead_not_filed", "beads_left_open"] as const;
+export const CHAIN_EVENTS = ["chain_loaded", "worktree_prepared", "checkout_switched", "node_started", "node_completed", "node_skipped", "scope_skipped", "node_recovery_started", "run_forked", "base_change_restart", "worktree_rebase_verified", "worktree_refresh_skipped", "read_only_violated", "fix_cycle_started", "fix_cycle_finished", "fix_cycle_refunded", "findings_measured", "test_scopes_selected", "judge_verdict", "sweep_failed", "sweep_left_out", "bead_not_filed", "beads_left_open"] as const;
 export type ChainEvent = (typeof CHAIN_EVENTS)[number];
 
 export const GATE_EVENTS = ["gate_requested", "gate_approved", "gate_rejected", "gate_reopened", "gate_auto_review_started", "gate_auto_review_skipped", "gate_auto_review_discarded", "chain_revision_shown", "chain_revision_unchanged", "chain_revised", "artifact_refused", "review_submitted", "thread_updated", "rewind_requested", "rewind_cancelled", "reply_agent_wrote", "reply_agent_skipped", "reply_agent_failed"] as const;

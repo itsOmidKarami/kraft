@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from kraft import caps as _caps
-from kraft import events, item_paths, logs, store
+from kraft import events, inplace, item_paths, logs, store
 from kraft import harness as _harness
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git
@@ -618,6 +618,25 @@ def _add_worktree(repo: Path, path: Path, branch: str, start: str | None) -> Non
         raise RuntimeError(done.stderr.strip() or done.stdout.strip())
 
 
+def stored_attachments(run_dirs, work_item_id: str, attachments, repo) -> list[dict]:
+    """`attachments` with each `source` where it is read from now
+    (`item_paths.stored_attachment`): a run folder moved since filing leaves
+    the row naming the old place. `FileNotFoundError` for one that is gone."""
+    resolved = [
+        {**a, "source": str(item_paths.stored_attachment(run_dirs, work_item_id, a, repo))}
+        for a in attachments or []
+    ]
+    for a in resolved:
+        src = Path(a["source"])
+        if not src.is_file():
+            raise FileNotFoundError(
+                f"the {a['kind']} attachment for {work_item_id} is missing from Kraft's "
+                f"storage at {src}; its gate was trimmed at intake, so put the "
+                f"{a['kind']} back at {src} and retry the work item"
+            )
+    return resolved
+
+
 async def ensure_worktree(
     db,
     run_dirs,
@@ -652,6 +671,13 @@ async def ensure_worktree(
     removes the worktree but keeps the branch) is checked out rather than
     re-created.
     """
+    item = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    if item is not None and inplace.is_in_place(item):
+        return await inplace.prepare(
+            db, run_dirs, item, base=await base_branch(db, work_item_id, Path(repo))
+        )
     worktree = run_dirs.worktrees / work_item_id
     if worktree.is_dir():
         return worktree
@@ -693,18 +719,7 @@ async def ensure_worktree(
     # retry and run without the document (Kraft-s7c04.29).
     # Each read where it is now (`item_paths.stored_attachment`): a run folder
     # moved since filing leaves the row naming the old place.
-    attachments = [
-        {**a, "source": str(item_paths.stored_attachment(run_dirs, work_item_id, a, repo))}
-        for a in attachments or []
-    ]
-    for a in attachments:
-        src = Path(a["source"])
-        if not src.is_file():
-            raise FileNotFoundError(
-                f"the {a['kind']} attachment for {work_item_id} is missing from Kraft's "
-                f"storage at {src}; its gate was trimmed at intake, so put the "
-                f"{a['kind']} back at {src} and retry the work item"
-            )
+    attachments = stored_attachments(run_dirs, work_item_id, attachments, repo)
     try:
         await asyncio.to_thread(_add_worktree, Path(repo), worktree, branch, head)
     except RuntimeError as exc:

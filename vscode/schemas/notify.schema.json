@@ -44,6 +44,7 @@
           "chain_revision_shown",
           "chain_revision_unchanged",
           "chain_template_changed",
+          "checkout_switched",
           "ci_infra_exhausted",
           "ci_not_configured",
           "ci_run_abandoned",

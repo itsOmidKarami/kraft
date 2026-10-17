@@ -23,6 +23,7 @@ class StopKind(StrEnum):
     STUCK = "stuck"
     WAIT = "wait"
     RATE_LIMIT = "rate_limit"
+    CHECKOUT = "checkout"
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ STOP_TRAITS = total(
         StopKind.STUCK: StopTraits(_NH),
         StopKind.WAIT: StopTraits("waiting"),
         StopKind.RATE_LIMIT: StopTraits("rate_limited"),
+        StopKind.CHECKOUT: StopTraits(_NH),
     },
     name="STOP_TRAITS",
 )

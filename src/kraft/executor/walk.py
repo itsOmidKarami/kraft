@@ -18,6 +18,7 @@ from kraft.executor.context import (
     _ADVANCING,
     BASE_MOVED,
     BUDGET,
+    CHECKOUT_REFUSED,
     CONFIG_ERROR,
     CONFLICT,
     CONFLICT_RESOLVED,
@@ -511,6 +512,15 @@ async def _sentinel_stop(
         return "paused"
     if verdict == CONFIG_ERROR:
         return await _stop_for_config_error(db, work_item_id, node, failed)
+    if verdict == CHECKOUT_REFUSED:
+        # Never `stuck`: an escalation would take the checkout straight back.
+        reason = "; ".join(_task_log(db, work_item_id, node, t).strip() for t in failed)
+        await db.write(
+            lambda c: store.mark_needs_human(
+                c, work_item_id, node.id, reason, kind=StopKind.CHECKOUT
+            )
+        )
+        return "needs_human"
     if verdict == RATE_LIMITED:
         return await stops.stop_for_rate_limit(db, work_item_id, node)
     if verdict == WAITING:
@@ -2047,7 +2057,8 @@ async def run_once(
                 # Its members now exist, checked out by Kraft just above.
                 checkout=stops.sandbox_checkout(row, launch, worktree) if sandbox else None,
             )
-            if start_index == 0
+            # Never in place: the person's checkout is already set up.
+            if start_index == 0 and not inplace.is_in_place(row)
             else None
         )
     except (RuntimeError, _config.ConfigError) as exc:

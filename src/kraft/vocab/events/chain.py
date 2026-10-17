@@ -13,6 +13,7 @@ __all__ = ["ChainEvent", "CHAIN_EVENT_TRAITS"]
 class ChainEvent(StrEnum):
     CHAIN_LOADED = "chain_loaded"
     WORKTREE_PREPARED = "worktree_prepared"
+    CHECKOUT_SWITCHED = "checkout_switched"
     NODE_STARTED = "node_started"
     NODE_COMPLETED = "node_completed"
     NODE_SKIPPED = "node_skipped"
@@ -42,6 +43,7 @@ CHAIN_EVENT_TRAITS = total(
     {
         ChainEvent.CHAIN_LOADED: _PLAIN,
         ChainEvent.WORKTREE_PREPARED: _PLAIN,
+        ChainEvent.CHECKOUT_SWITCHED: _PLAIN,
         ChainEvent.NODE_STARTED: _PLAIN,
         ChainEvent.NODE_COMPLETED: _PLAIN,
         ChainEvent.NODE_SKIPPED: EventTraits(closes_gate=True),
