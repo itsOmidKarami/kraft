@@ -82,8 +82,8 @@ def test_a_repo_with_no_forge_is_told_the_remedy_v1_actually_reads():
 async def test_the_dev_fake_forge_remembers_an_mr_across_nodes(item_on, database, run_dirs, repo):
     """Ruling 147, round 3: a repo on `forge: fake` resolves afresh at every
     forge node, so the fake must be one instance per process -- otherwise the
-    draft MR `open_mr` created is gone by the time `sync_mr` (and later
-    `mark_ready`, `merge`) look for it. Nothing is monkeypatched: each
+    draft MR `open_mr` created is gone by the time `sync_mr`, `mark_ready` (and later
+    `merge`) look for it. Nothing is monkeypatched: each
     `run_task` below goes through the real `backend_for`/`resolve`."""
     branch = f"kraft/{repo.parent.name}"
     subprocess.run(["git", "checkout", "-qb", branch], cwd=repo, check=True)
@@ -105,10 +105,10 @@ async def test_the_dev_fake_forge_remembers_an_mr_across_nodes(item_on, database
             branch=branch,
             title="t",
         )
-        for handler in ("open_mr", "sync_mr")
+        for handler in ("open_mr", "sync_mr", "mark_ready")
     ]
 
-    assert statuses == ["done", "done"]
+    assert statuses == ["done", "done", "done"]
     fake = forge.resolve(forge.backend_for("auto", "fake"))
     found = await fake.find_mr(repo=repo, branch=branch)
     assert found is not None and found.state == "open"
@@ -371,17 +371,15 @@ class _Recording(forge.FakeForge):
         # Kraft-bxj8: the worker commits and is told not to push, so ci_poll
         # polled the previous head's pipeline -- the same id on every retry.
         ("ci_poll", ["push", "ci_status"]),
-        # `mr_sync` is the one node every chain shape runs before `merge`, so
-        # the draft comes off there -- before the push, so a project that
-        # reruns checks on ready-for-review sees the head it is about to
-        # check. Then push, then describe (Kraft-nh5m): the description and
-        # the branch the reviewer's forge shows describe the same head.
-        ("sync_mr", ["mark_ready", "push", "update_mr", "ci_status"]),
+        # sync pushes, then describes (Kraft-nh5m): the description and the
+        # branch the reviewer's forge shows describe the same head. It leaves
+        # the draft alone: `mark_ready` publishes, after the final gate.
+        ("sync_mr", ["push", "update_mr", "ci_status"]),
         # `_assert_pushed` refuses a head the remote never saw, and a retry of
         # `merge` alone never re-runs `mr_sync`, so merge pushes first itself.
         ("merge", ["push", "ci_status", "merge"]),
     ],
-    ids=["ci_poll-pushes-then-polls", "sync_mr-undrafts-pushes-describes", "merge-pushes-first"],
+    ids=["ci_poll-pushes-then-polls", "sync_mr-pushes-describes", "merge-pushes-first"],
 )
 async def test_a_node_pushes_before_it_acts_on_the_head(run_forge, tmp_path, handler, expected):
     fake = await _opened(_Recording(ci_states=["success"]), tmp_path)
@@ -389,6 +387,7 @@ async def test_a_node_pushes_before_it_acts_on_the_head(run_forge, tmp_path, han
     assert await run_forge(fake, handler, "b1") == ("done", "done")
 
     assert list(dict.fromkeys(fake.order)) == expected, "first call of each kind, in order"
+    assert fake.opened_draft == {1: True}, "only mark_ready publishes"
     assert fake.pushed == ["kraft/w1"]
 
 

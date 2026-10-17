@@ -535,17 +535,9 @@ async def _run_one(
                 return f"already merged (!{existing.number}); nothing to sync\n", "done", findings
             if await git.commits_ahead(repo, branch, base) == 0:
                 return empty, "config_error", findings
-            # Undraft before anything else: every MR opens as a draft now
-            # (open_mr always does), and mr_sync is the one node every
-            # chain shape runs before merge, gated or not -- see the
-            # draft-MR workflow spec's "Undraft" decision. A no-op on an
-            # MR that is already ready (both CLIs' own docs), so calling
-            # it unconditionally costs nothing on a re-entry.
-            await forge.mark_ready(
-                repo=repo,
-                branch=branch,
-                mr=MR(number=existing.number if existing else 0, url=""),
-            )
+            # Stays a draft: publication is `mark_ready`'s, after the chain's final
+            # gate. sync also runs in on_failure and fix_loop, i.e. before that
+            # gate, so undrafting here published the MR mid-repair.
             # Push first: every commit after `open_mr` -- verify's fixes,
             # mr_checks' findings -- is local only until this runs, and
             # `merge` refuses a branch ahead of its remote (Kraft-nh5m).
