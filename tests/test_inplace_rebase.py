@@ -51,6 +51,8 @@ async def test_rebase_in_the_checkout_keeps_the_persons_edits(item_on, database,
     it, branch = await _behind_origin(item_on, database, run_dirs, repo)
     git(repo, "checkout", "-q", branch)
     write(repo, "f", "the person's edit\n")
+    git(repo, "config", "rebase.updateRefs", "true")
+    git(repo, "branch", "theirs", branch)  # never moved along with the item's
 
     head = await inplace.rebase(run_dirs, it.row(), base="main")
 
@@ -61,21 +63,30 @@ async def test_rebase_in_the_checkout_keeps_the_persons_edits(item_on, database,
     assert (repo / "f").read_text() == "the person's edit\n"
     assert git(repo, "status", "--porcelain") == "M f"
     assert git(repo, "stash", "list") == ""
+    assert not _contains_origin_main(repo, "theirs")
 
 
+@pytest.mark.parametrize(
+    ("main_writes", "hook", "unmerged"),
+    [("f", None, ["f"]), ("main.txt", "echo the hook >> f", [])],
+    ids=["clash", "put-back-refused"],
+)
 async def test_an_autostash_clash_raises_with_the_stash_and_leaves_it(
-    item_on, database, run_dirs, repo
+    item_on, database, run_dirs, repo, main_writes, hook, unmerged
 ):
     """The 2026-10-17 experiment: git exits 0, leaves `f` unmerged and keeps
-    the person's edit as a stash entry."""
-    it, branch = await _behind_origin(item_on, database, run_dirs, repo, main_writes="f")
+    the person's edit as a stash entry. A hook that writes `f` mid-rebase
+    makes git refuse the put-back outright: exit 0, and nothing unmerged."""
+    it, branch = await _behind_origin(item_on, database, run_dirs, repo, main_writes=main_writes)
     git(repo, "checkout", "-q", branch)
     write(repo, "f", "the person's edit\n")
+    if hook is not None:
+        write(repo, ".git/hooks/post-rewrite", f"#!/bin/sh\n{hook}\n").chmod(0o755)
 
     with pytest.raises(inplace.AutostashClash) as raised:
         await inplace.rebase(run_dirs, it.row(), base="main")
 
-    assert raised.value.paths == ["f"]
+    assert raised.value.paths == unmerged
     assert git(repo, "rev-parse", "refs/stash") == raised.value.stash
     assert git(repo, "show", f"{raised.value.stash}:f") == "the person's edit"
     assert git(repo, "stash", "list") == "stash@{0}: autostash"
@@ -206,9 +217,12 @@ async def test_a_rebase_in_the_checkout_refuses_what_it_would_force(
     assert {p: (repo / p).read_bytes() for p in files} == files
 
 
-async def test_a_failed_rebase_never_aborts_the_persons_own(item_on, database, run_dirs, repo):
+async def test_a_failed_rebase_never_aborts_the_persons_own(
+    item_on, database, run_dirs, repo, monkeypatch
+):
     """Theirs, started between Kraft's check and its rebase: left alone."""
     it, branch = await _behind_origin(item_on, database, run_dirs, repo)
+    monkeypatch.setattr(inplace, "_on", lambda *_: True)  # theirs began after the look
     git(repo, "checkout", "-q", branch)
     _side_branch(repo, branch, "item.txt", "side's\n")
     subprocess.run(["git", "rebase", "side"], cwd=repo, capture_output=True)
@@ -216,10 +230,23 @@ async def test_a_failed_rebase_never_aborts_the_persons_own(item_on, database, r
     head = git(repo, "rev-parse", "refs/remotes/origin/main")
 
     with pytest.raises(inplace.CheckoutRefused, match="did not start"):
-        inplace._rebase_in_checkout(repo, head, "main", None)
+        inplace._rebase_in_checkout(repo, branch, head, "main", None)
 
     gitdir = Path(git(repo, "rev-parse", "--absolute-git-dir"))
     assert (gitdir / "rebase-merge" / "onto").read_text().strip() == theirs
+
+
+async def test_the_rebase_in_the_checkout_never_rebases_the_branch_it_moved_to(
+    item_on, database, run_dirs, repo
+):
+    """Switched off the item's branch after Kraft chose to rebase in place."""
+    it, branch = await _behind_origin(item_on, database, run_dirs, repo)
+    head, tip = git(repo, "rev-parse", "refs/remotes/origin/main"), git(repo, "rev-parse", "main")
+
+    with pytest.raises(inplace.CheckoutRefused, match=f"left {branch}"):
+        inplace._rebase_in_checkout(repo, branch, head, "main", None)
+
+    assert (_head(repo), git(repo, "rev-parse", "main")) == ("refs/heads/main", tip)
 
 
 async def test_a_branch_deleted_at_the_throwaway_add_is_never_made_again(
@@ -270,7 +297,7 @@ async def test_a_cancel_reports_nothing_but_the_cancel(
         running = inplace.take(database, run_dirs, it.row(), attachments=[])
     else:
         monkeypatch.setattr(inplace, "_rebase_in_checkout", _slow_conflict)
-        running = inplace.rebase_in_checkout(repo, "HEAD", "main", None)
+        running = inplace.rebase_in_checkout(repo, branch, "HEAD", "main", None)
     task = asyncio.ensure_future(running)
     await asyncio.sleep(0.1)
     task.cancel()

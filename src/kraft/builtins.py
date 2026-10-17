@@ -1306,7 +1306,7 @@ async def refresh_worktree_base(
     # Kraft never rebases over, or aborts, an operation it did not start.
     git.assert_on_branch(worktree, branch)
     if autostash:
-        await inplace.rebase_in_checkout(worktree, head, base, _committer_env(identity))
+        await inplace.rebase_in_checkout(worktree, branch, head, base, _committer_env(identity))
         return head
     lock_before = os.path.lexists(_index_lock(worktree))
     aside = await _set_aside_setup_lockfiles(worktree)
