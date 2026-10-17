@@ -808,8 +808,8 @@ async def report_progress(wid: str, body: Progress, request: Request):
         raise HTTPException(
             409, "this run is rework after a gate rejection: it follows the note, not the plan"
         )
-    worktree = inplace.item_folder(st.run_dirs, row)
-    tasks = progress_mod.tasks_for(row, worktree, st.run_dirs)
+    worktree, in_place = inplace.item_folder(st.run_dirs, row), inplace.is_in_place(row)
+    tasks = progress_mod.tasks_for(row, worktree, st.run_dirs, in_place=in_place)
     if not tasks:
         raise HTTPException(400, "this work item's plan has no '## Task N' headings")
     if not 1 <= body.task <= len(tasks):
@@ -821,7 +821,7 @@ async def report_progress(wid: str, body: Progress, request: Request):
         "title": tasks[body.task - 1][0],
     }
     await st.db.write(lambda c: events.append(c, wid, WorkItemEvent.PLAN_PROGRESS, payload))
-    p = progress_mod.for_item(st.db, row, worktree, st.run_dirs)
+    p = progress_mod.for_item(st.db, row, worktree, st.run_dirs, in_place=in_place)
     return {"id": wid, "progress": p.model_dump() if p else None}
 
 

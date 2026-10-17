@@ -495,6 +495,7 @@ async def list_work_items(request: Request):
 
     def _item(r) -> dict:
         folder = inplace.folder_for(st.run_dirs, r, parsed[r["id"]])
+        in_place = parsed[r["id"]] is not None and parsed[r["id"]].target.in_place
         mr_ref = _pick_mr_ref(
             r["id"] in root_mr_by_item,
             root_mr_by_item.get(r["id"]),
@@ -520,7 +521,7 @@ async def list_work_items(request: Request):
             "retry_at": r["retry_at"],
             "archived_at": r["archived_at"],
             "archived_by": r["archived_by"],
-            "progress": _board_progress(st, r, folder),
+            "progress": _board_progress(st, r, folder, in_place),
             "fallback": _ran_on_fallback(latest, r["id"]),
             "display_status": display_status(
                 r,
@@ -542,7 +543,7 @@ async def list_work_items(request: Request):
             # while the directory is there, without a detail fetch per row.
             "worktree_exists": folder.is_dir(),
             # Runs in the repo's own checkout; `kraft` run there finds it by `branch`.
-            "in_place": parsed[r["id"]] is not None and parsed[r["id"]].target.in_place,
+            "in_place": in_place,
             "branch": store.branch_for(r),
             "queued": _queued(r, latest.get((r["id"], WorkItemEvent.QUEUED))),
         }
@@ -628,9 +629,9 @@ def _detail_fallback(st, wid: str) -> dict | None:
     return _ran_on_fallback({(wid, r["type"]): json.loads(r["payload"]) for r in rows}, wid)
 
 
-def _board_progress(st, row, folder) -> dict | None:
+def _board_progress(st, row, folder, in_place: bool) -> dict | None:
     """The board's share of `progress`: position and title, not the task list."""
-    p = progress_mod.for_item(st.db, row, folder, st.run_dirs)
+    p = progress_mod.for_item(st.db, row, folder, st.run_dirs, in_place=in_place)
     return {"current": p.current, "total": p.total, "title": p.title} if p else None
 
 
@@ -1284,7 +1285,9 @@ async def get_work_item(wid: str, request: Request):
     payload = store.work_item_payload(row)
     node_overrides = payload["node_overrides"]
     folder = inplace.item_folder(st.run_dirs, row)
-    progress = progress_mod.for_detail(st.db, row, folder, st.run_dirs)
+    progress = progress_mod.for_detail(
+        st.db, row, folder, st.run_dirs, in_place=inplace.is_in_place(row)
+    )
     mr_ref = _mr_ref(st, wid)
     status = row["status"]
     # What it still comes after: unblock, and resume or retry past an abandoned one.

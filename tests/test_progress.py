@@ -240,6 +240,34 @@ def test_read_tasks_prefers_the_plan_attachment(tmp_path, run_dirs, attached, wr
     assert progress.read_tasks(run_dirs, _row(rows), worktree) == [(title, False)]
 
 
+@pytest.mark.parametrize("committed", [True, False], ids=["on-its-branch", "filed-copy"])
+def test_an_in_place_item_reads_its_plan_and_commits_from_its_branch(
+    tmp_path, run_dirs, committed
+):
+    """The checkout is on main and holds the person's own copy of the plan: an
+    in-place item's tasks are the plan on its branch, else the copy filed at
+    intake, and its commits are its branch's, not the checkout's HEAD's."""
+    from support.harness import commit_all, git, make_repo
+
+    repo = make_repo(tmp_path)
+    base = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-q", "-b", "kraft/w1")
+    if committed:
+        write(repo, "docs/p.md", "## Task 1 — on the branch\n")
+    tip = commit_all(repo, "Task 1: the item's commit")
+    git(repo, "checkout", "-q", "main")
+    write(repo, "docs/p.md", "## Task 1 — the person's\n")
+    write(item_paths.filed_dir(run_dirs, "w1"), "p.md", "## Task 1 — filed\n")
+    plan = {"kind": "plan", "path": "docs/p.md", "source": "/old/filed/p.md"}
+    row = {**_row([plan]), "branch": "kraft/w1", "base_ref": base}
+
+    tasks = progress.read_tasks(run_dirs, row, repo, in_place=True)
+    log = progress.branch_log(row, repo, in_place=True)
+
+    assert tasks == [("on the branch" if committed else "filed", False)]
+    assert log == [(tip[:7], "Task 1: the item's commit")]
+
+
 @pytest.mark.parametrize("planted", [None, "symlink", "fifo"], ids=["none", "symlink", "fifo"])
 def test_read_tasks_without_a_plan_file_is_empty(tmp_path, run_dirs, planted):
     """A worker writes `docs/`: a link there is not followed, and a FIFO does
