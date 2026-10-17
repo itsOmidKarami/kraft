@@ -12,8 +12,8 @@ export interface Token {
   cls?: TokenClass;
 }
 
-/** Per file (both sides together), more lines than this stay plain. Tokenizing runs on the main thread:
- *  TSX, the slowest grammar measured, takes about 0.09 ms a line, so this keeps one file near 100 ms. */
+/** Per block (one hunk side, or one fenced block), more lines than this stay plain. Tokenizing runs on the main
+ *  thread, one block per task: TSX, the slowest grammar measured, takes about 0.035 ms a line in Chromium, so this keeps one task near 35 ms, under the 50 ms a browser calls a long task. */
 export const HIGHLIGHT_MAX_LINES = 1000;
 
 /** Kraft's theme paints no colours, only markers: each stands for one class. */
@@ -66,6 +66,17 @@ const ready = (lang: LangId) => {
   return p;
 };
 
+let queue: Promise<unknown> = Promise.resolve();
+// Not scheduler.yield(): its continuation jumps the queue ahead of timers, which then wait out the whole page.
+const yieldToBrowser = () => new Promise<void>((r) => setTimeout(r, 0));
+/** Every tokenize runs through here: one block, then a yield, so a page of files never holds the main thread
+ *  for more than one block at a time. (Awaiting a loaded grammar is a microtask; without this they all run back to back.) */
+const turn = <T>(job: () => T): Promise<T> => {
+  const run = queue.then(job);
+  queue = run.then(yieldToBrowser, yieldToBrowser);
+  return run;
+};
+
 /** One block of code, its lines in order: what a line leaves open carries to
  *  the next. `null` when the grammar or the tokenizer fails (logged once). */
 export async function highlightLines(lines: string[], lang: LangId): Promise<Token[][] | null> {
@@ -73,7 +84,7 @@ export async function highlightLines(lines: string[], lang: LangId): Promise<Tok
     await ready(lang);
     if (!lines.length) return [];
     const h = await core();
-    const out = h.codeToTokensBase(lines.join("\n"), { lang, theme: "kraft" });
+    const out = await turn(() => h.codeToTokensBase(lines.join("\n"), { lang, theme: "kraft" }));
     return lines.map((line, i) => {
       const tokens: Token[] = [];
       const push = (text: string, cls?: TokenClass) => {
@@ -99,17 +110,14 @@ export async function highlightLines(lines: string[], lang: LangId): Promise<Tok
 /** Per hunk, per line of that hunk's old (`kind !== "+"`) or new (`kind !== "-"`) side. */
 export type FileTokens = { old: Token[][][]; new: Token[][][] };
 
-/** Each hunk side is one block. `null` past the line cap, or on failure. */
+/** Each hunk side is one block. A block past the line cap stays plain (`[]`) with no Shiki work; the file's
+ *  other blocks are coloured. `null` on failure. */
 export async function highlightFile(file: PatchFile, lang: LangId): Promise<FileTokens | null> {
   const sides = (keep: "+" | "-") => file.hunks.map((h) => h.lines.filter((l) => l.kind !== keep).map((l) => l.text));
-  const olds = sides("+");
-  const news = sides("-");
-  const total = [...olds, ...news].reduce((n, s) => n + s.length, 0);
-  if (total > HIGHLIGHT_MAX_LINES) return null;
   const run = async (blocks: string[][]) => {
-    const r = await Promise.all(blocks.map((b) => highlightLines(b, lang)));
+    const r = await Promise.all(blocks.map((b) => (b.length > HIGHLIGHT_MAX_LINES ? [] : highlightLines(b, lang))));
     return r.every((x) => x) ? (r as Token[][][]) : null;
   };
-  const [old, nu] = await Promise.all([run(olds), run(news)]);
+  const [old, nu] = await Promise.all([run(sides("+")), run(sides("-"))]);
   return old && nu ? { old, new: nu } : null;
 }

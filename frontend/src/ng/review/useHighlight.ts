@@ -3,7 +3,7 @@ import { HIGHLIGHT_MAX_LINES, highlightFile, highlightLines, type FileTokens, ty
 import type { LangId } from "./languages";
 import type { PatchFile } from "./patch";
 
-/** A file's tokens, once its grammar has loaded; `null` until then, past the size cap, or on a failure.
+/** A file's tokens, once its grammar has loaded; `null` until then or on a failure; a hunk side past the size cap stays plain.
  *  A result is kept with the file it was made from, so one that lands late never paints another file's rows. */
 export function useFileTokens(file: PatchFile, lang: LangId | null): FileTokens | null {
   const [made, setMade] = useState<{ file: PatchFile; tokens: FileTokens } | null>(null);

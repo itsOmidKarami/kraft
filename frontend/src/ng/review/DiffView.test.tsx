@@ -451,12 +451,13 @@ describe("syntax colours", () => {
     expect(document.querySelector("[class*=tok-]")).toBeNull();
   });
 
-  it("leaves a file past the cap plain, still marking its changed words", async () => {
+  it("leaves a hunk side past the cap plain, still marking its changed words", async () => {
     const n = HIGHLIGHT_MAX_LINES + 1;
     const body = `@@ -1,1 +1,${n} @@\n-def a\n+def b\n` + "+x = 1\n".repeat(n - 1);
     render(<View {...one("big.rb", body)} />);
-    await new Promise((r) => setTimeout(r, 100));
-    expect(document.querySelector("[class*=tok-]")).toBeNull();
+    // The old side is one line and colours; the new side is past the cap and does not.
+    await vi.waitFor(() => expect(kw()).toEqual(["def"]));
+    expect(document.querySelector(".tok-num")).toBeNull();
     expect([...document.querySelectorAll(".rv-word-change")].map((e) => e.textContent)).toEqual(["a", "b"]);
   });
 

@@ -66,10 +66,31 @@ describe("highlightFile", () => {
     expect(classed(t.new[0][0])).toEqual([["def", "kw"], ["a", "name"]]);
   });
 
-  it("does no Shiki work past the line cap", async () => {
+  it("colours a file's other hunks when one hunk side is past the line cap", async () => {
+    const n = HIGHLIGHT_MAX_LINES + 1;
+    const big = `@@ -1,0 +1,${n} @@\n` + "+x\n".repeat(n);
+    const t = (await highlightFile(diff("big.rb", big + "@@ -3000,1 +3000,1 @@\n-def a\n+def b\n"), "ruby"))!;
+    expect(t.new[0]).toEqual([]);
+    expect(classed(t.new[1][0])).toEqual([["def", "kw"], ["b", "name"]]);
+  });
+
+  it("does no Shiki work for a block past the line cap", async () => {
     const body = "@@ -1,0 +1,N @@\n".replace("N", String(HIGHLIGHT_MAX_LINES + 1)) + "+x\n".repeat(HIGHLIGHT_MAX_LINES + 1);
     const load = vi.spyOn(LANGS, "ruby");
-    expect(await highlightFile(diff("big.rb", body), "ruby")).toBeNull();
+    const t = (await highlightFile(diff("big.rb", body), "ruby"))!;
+    expect(t.new).toEqual([[]]);
     expect(load).not.toHaveBeenCalled();
+  });
+});
+
+describe("tokenizing", () => {
+  it("yields between blocks, so a timer scheduled first fires before the last of 20 blocks finishes", async () => {
+    await highlightLines(["x = 1"], "ruby"); // grammar loaded: from here every block is only microtasks apart
+    let done = 0;
+    let atTimer = -1;
+    setTimeout(() => (atTimer = done), 0);
+    await Promise.all(Array.from({ length: 20 }, () => highlightLines(["def a", "  1", "end"], "ruby").then(() => done++)));
+    expect(atTimer).toBeGreaterThanOrEqual(0);
+    expect(atTimer).toBeLessThan(20);
   });
 });
