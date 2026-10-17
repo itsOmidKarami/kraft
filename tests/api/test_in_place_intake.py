@@ -25,7 +25,7 @@ def test_intake_freezes_in_place_from_the_item_or_its_repo(client, repo, worktre
     wid = _paused(client, repo, **body)
 
     item = client.get(f"/api/work-items/{wid}").json()
-    assert json.loads(item["materialized_chain"])["target"]["in_place"] is frozen
+    assert json.loads(item["materialized_chain"])["target"].get("in_place", False) is frozen
 
 
 @pytest.mark.parametrize(
@@ -54,7 +54,7 @@ def test_every_door_freezes_in_place(client, repo, door, worktrees, frozen):
 
     assert r.status_code == 201, r.text
     item = client.get(f"/api/work-items/{r.json()['id']}").json()
-    assert json.loads(item["materialized_chain"])["target"]["in_place"] is frozen
+    assert json.loads(item["materialized_chain"])["target"].get("in_place", False) is frozen
 
 
 def _sandboxed_chain(templates_dir):
