@@ -142,15 +142,30 @@ def test_a_start_the_door_now_refuses_puts_the_item_back_and_says_why(
     )
 
 
+@pytest.mark.parametrize(
+    ("verb", "stop"),
+    [
+        ("resume", "resume claimed this item but could not start a walk"),
+        ("start", "a queued start claimed this item but could not start a walk"),
+    ],
+    ids=["resume", "start"],
+)
 def test_a_start_that_fails_after_its_claim_reports_the_stop_it_left(
-    client, repo, board, monkeypatch
+    client, repo, board, monkeypatch, verb, stop
 ):
-    """The door's bracket stopped the item. The event names that status, which
-    an open board shows, not the one the item was queued from."""
+    """The door's bracket stopped the item, saying which start it was. The
+    event names that status, which an open board shows, not the one the item
+    was queued from."""
+    import sqlite3
+
     from kraft import store
 
     wid = _paused(client, repo, chain_template="default")
-    assert client.post(f"/api/work-items/{wid}/resume", json={}).json()["status"] == "queued"
+    with _db() as c, c:
+        c.row_factory = sqlite3.Row
+        assert store.queue_work_item(
+            c, wid, verb=verb, body={}, headers={}, from_statuses=["paused"]
+        )
 
     def boom(*_):
         raise RuntimeError("boom")
@@ -161,8 +176,10 @@ def test_a_start_that_fails_after_its_claim_reports_the_stop_it_left(
     assert _tick(client) == []
 
     assert _status_of(client, wid) == "needs_human"
-    last = client.get(f"/api/work-items/{wid}/events").json()[-1]
-    assert (last["type"], last["payload"]["to"]) == ("work_item_dequeued", "needs_human")
+    evts = client.get(f"/api/work-items/{wid}/events").json()
+    assert (evts[-1]["type"], evts[-1]["payload"]["to"]) == ("work_item_dequeued", "needs_human")
+    [stopped] = [e for e in evts if e["type"] == "work_item_needs_human"]
+    assert stopped["payload"]["reason"].startswith(stop)
 
 
 def test_an_autostart_filed_on_a_full_board_starts_when_a_slot_frees(client, repo, board):

@@ -975,7 +975,8 @@ async def continue_held(wid: str, body: dict, request: Request) -> None:
         st.db,
         wid,
         row["current_node_id"],
-        reason="a held gate decision claimed this item but could not start a walk",
+        reason=f"{'a held gate decision' if 'node' in body else 'a queued start'} claimed "
+        "this item but could not start a walk",
         handed_off=lambda: deps.task_is_live(request.app, wid),
     ):
         if not await st.db.write(
