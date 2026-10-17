@@ -197,9 +197,10 @@ async def test_a_paused_row_and_its_event_never_disagree(database):
 
 async def test_a_pause_catches_a_session_still_in_its_pending_window(database):
     """A row is inserted before Popen returns. A pause landing in that window has
-    to mark it, and the launch finishing must not undo the mark."""
+    to mark it, and the launch finishing must neither undo the mark nor say it
+    started."""
 
-    from kraft import store
+    from kraft import events, store
 
     await database.write(
         lambda c: c.execute(
@@ -222,9 +223,15 @@ async def test_a_pause_catches_a_session_still_in_its_pending_window(database):
     pending = database.read(lambda c: store.running_sessions_for_node(c, "w"))
     await database.write(lambda c: store.pause_work_item(c, "w", [r["id"] for r in pending]))
     # the launch completes a moment later
-    await database.write(lambda c: store.session_running(c, "s1", 999, 1.0, work_item_id="w"))
+    started = await database.write(
+        lambda c: store.session_running(c, "s1", 999, 1.0, work_item_id="w")
+    )
     assert [r["id"] for r in pending] == ["s1"]
     assert database.read(lambda c: store.session_status(c, "s1", work_item_id="w")) == "paused"
+    # nor followed by a start: a reader taking the latest event would show it running
+    types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w"))]
+    assert (started, types[-1]) == (False, "worker_session_paused")
+    assert "worker_session_started" not in types
 
 
 @_PAST_THE_RESUME_WAIT

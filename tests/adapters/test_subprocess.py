@@ -255,27 +255,6 @@ async def test_run_task_leaves_the_exit_file_beside_the_result(run, run_dirs):
     assert (sp._resolve_result_file(files.result), files.exit.read_text()) == (None, "4")
 
 
-async def test_run_task_aborts_before_popen_if_the_row_was_stopped_first(
-    run, run_dirs, monkeypatch
-):
-    """Kraft-qx1q: a row marked paused/stopped between `create_session` and
-    Popen must never launch -- nothing SIGTERMs a session with no pid yet."""
-    original = store.create_session
-
-    def create_then_stop(conn, **kwargs):
-        original(conn, **kwargs)
-        conn.execute("UPDATE worker_sessions SET status = 'paused' WHERE id = ?", (kwargs["id"],))
-
-    def _boom(*a, **kw):
-        raise AssertionError("Popen must not run once the row is no longer pending")
-
-    monkeypatch.setattr(store, "create_session", create_then_stop)
-    monkeypatch.setattr(sp.subprocess, "Popen", _boom)
-
-    assert (await run(["true"]))[0] == "paused"
-    assert not own_files(run_dirs, "s1").log.exists(), "aborted before the log was even opened"
-
-
 # --- the log, live -------------------------------------------------------------------
 
 
