@@ -38,6 +38,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from kraft import events, storage, store
+from kraft.store._common import joined
 from kraft.vocab import WorkItemEvent, WorkItemStatus
 
 logger = logging.getLogger(__name__)
@@ -142,11 +143,11 @@ async def _take_and_start(app, wid: str) -> bool:
         await st.db.write(lambda c: _requeue(c, wid, saved))
         raise
     except HTTPException as exc:
-        await _dequeued(st, wid, "refused", str(exc.detail))
+        await _dequeued(st, wid, "refused", str(exc.detail), saved)
         return False
     except Exception as exc:  # noqa: BLE001 -- it has left the queue: say so, and let the pass go on
         logger.exception("start queue: starting %s failed", wid)
-        await _dequeued(st, wid, "failed", f"{type(exc).__name__}: {exc}")
+        await _dequeued(st, wid, "failed", f"{type(exc).__name__}: {exc}", saved)
         return False
     status = st.db.read(
         lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()[
@@ -213,10 +214,13 @@ def _requeue(conn, wid: str, saved: dict) -> None:
         store.keep_place(conn, wid, saved["at"])
 
 
-async def _dequeued(st, wid: str, why: str, detail: str) -> None:
-    """The item was put back and did not start: its timeline says why. `to` is
-    the status it is in now, which an open board shows: where it came from, or
-    the stop of a door that failed after its claim (`stops.claimed_or_stopped`)."""
+async def _dequeued(st, wid: str, why: str, detail: str, saved: dict) -> None:
+    """The item was put back and did not start: its timeline says why, and
+    what was dropped with it (`saved`, a person's steer or message included).
+    `to` is the status it is in now, which an open board shows: where it came
+    from, or the stop of a door that failed after its claim
+    (`stops.claimed_or_stopped`)."""
+    detail = joined(detail, saved)
 
     def write(c):
         to = c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()["status"]

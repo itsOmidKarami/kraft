@@ -47,7 +47,7 @@ async def test_a_blocked_item_goes_back_when_what_it_comes_after_is_abandoned(da
     assert database.read(_item_status) == "paused"
     last = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
     assert (last["type"], last["payload"]["why"]) == ("work_item_dequeued", "dependency_abandoned")
-    assert "d1" in last["payload"]["detail"]
+    assert last["payload"]["detail"] == "d1 (t); the queued resume was dropped"
     # Its dependency is still declared: a person drops it or abandons the item.
     assert [d["id"] for d in database.read(lambda c: store.dependencies_of(c, "w1"))] == ["d1"]
 

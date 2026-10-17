@@ -60,6 +60,12 @@ def _end_overtaken_holds(conn) -> None:
         )
 
 
+def joined(detail: str | None, request: dict) -> str:
+    """A dequeue's `detail` (a refusal, an error, what it came after), then
+    what was dropped with it (`dropped`)."""
+    return "; ".join(filter(None, [detail, dropped(request)]))
+
+
 def dropped(request: dict) -> str:
     """What a dropped hold was holding, for its timeline: the verb, and what a
     person attached to it, which reaches no agent now: a steer, or the message

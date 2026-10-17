@@ -120,9 +120,11 @@ def test_a_start_the_door_now_refuses_puts_the_item_back_and_says_why(
     client, repo, stopped, board, monkeypatch, breaks, why, detail
 ):
     """Refused or failed, the item is back where it came from with the reason
-    in its timeline, and the pass goes on to the next queued item."""
+    in its timeline, and the steer it was asked with, and the pass goes on to
+    the next queued item."""
     wid = stopped
-    assert client.post(f"/api/work-items/{wid}/retry", json={}).json()["status"] == "queued"
+    queued = client.post(f"/api/work-items/{wid}/retry", json={"steer": "keep it"})
+    assert queued.json()["status"] == "queued"
     after = _paused(client, repo, chain_template="default")
     assert client.post(f"/api/work-items/{after}/resume", json={}).json()["status"] == "queued"
     breaks(wid, monkeypatch)
@@ -135,6 +137,9 @@ def test_a_start_the_door_now_refuses_puts_the_item_back_and_says_why(
     assert last["type"] == "work_item_dequeued"
     assert last["payload"]["why"] == why
     assert detail in last["payload"]["detail"]
+    assert last["payload"]["detail"].endswith(
+        "; the queued retry was dropped, with its steer: keep it"
+    )
 
 
 def test_a_start_that_fails_after_its_claim_reports_the_stop_it_left(
