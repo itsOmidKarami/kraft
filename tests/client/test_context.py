@@ -88,17 +88,22 @@ def test_in_place_item_resolves_from_its_checked_out_branch(wired, tmp_path, in_
     assert found == (wid if in_place else None, "user")
 
 
-@pytest.mark.parametrize("branch", ["main", "kraft/someone-elses"], ids=["main", "no-item"])
+@pytest.mark.parametrize(
+    "branch", ["main", "kraft/someone-elses", None], ids=["main", "no-item", "another-repo"]
+)
 def test_another_branch_resolves_to_nothing(wired, tmp_path, branch):
+    """`None`: another connected repo has the item's branch checked out."""
     from support.api import run_with_app
     from support.harness import git, make_repo
 
-    repo = make_repo(tmp_path)
+    repo, other = make_repo(tmp_path), make_repo(tmp_path, "other")
 
     async def scenario():
         await client.ensure_repo(str(repo))
-        await client.create_work_item("t", repo=str(repo), in_place=True)
-        git(repo, "checkout", "-q", "-B", branch)
-        return await client.context.standing_item(repo)
+        await client.ensure_repo(str(other))
+        item = await client.create_work_item("t", repo=str(repo), in_place=True)
+        mine = (await client.get_work_item(item["id"], full=True))["branch"]
+        git(other if branch is None else repo, "checkout", "-q", "-B", branch or mine)
+        return await client.context.standing_item(repo if branch else other)
 
     assert run_with_app(wired, scenario) == (None, "user")

@@ -65,16 +65,29 @@ def resolve_context(cwd: Path | None = None) -> tuple[str | None, str]:
 
 
 async def in_place_item(cwd: Path | None = None) -> str | None:
-    """The in-place item whose branch is checked out in the cwd's folder, or
-    None. Kraft names every item's branch `kraft/...`, so on any other branch
-    the server is not asked."""
+    """The in-place item of the cwd's connected repo whose branch is checked
+    out there, or None. Kraft names every item's branch `kraft/...`, so on any
+    other branch the server is not asked."""
     branch = config.git_read(
         cwd or Path.cwd(), "symbolic-ref", "--short", "-q", "HEAD", expected_failure=True
     )
     if not branch or not branch.startswith("kraft/"):
         return None
+    repo = await resolve_repo(cwd)
+    if repo is None:
+        return None
+    # shortcut: reads the whole board to find one row; a `?branch=` filter on
+    # the list route if boards grow large enough for that to matter.
     items = (await transport._get("/work-items"))["items"]
-    return next((i["id"] for i in items if i["in_place"] and i["branch"] == branch), None)
+    # `.get`: an older server's rows carry no `in_place`.
+    return next(
+        (
+            i["id"]
+            for i in items
+            if i.get("in_place") and i.get("branch") == branch and i["repo"] == repo
+        ),
+        None,
+    )
 
 
 async def standing_item(cwd: Path | None = None) -> tuple[str | None, str]:
