@@ -24,8 +24,9 @@ fresh request would, against the item as it is now. Four ends:
   place, and the next server starts it.
 
 A door that spawns its work before that work claims the item or writes its
-session (an escalation, a reply, an escalation's own retry) has not started
-it when it returns: the queue waits for the claim or the session (`_SPAWNS`).
+session (an escalation, a reply, an escalation's own retry, Kraft's own
+agents at a stop) has not started it when it returns: the queue waits for
+the claim or the session (`_SPAWNS`).
 """
 
 from __future__ import annotations
