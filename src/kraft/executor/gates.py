@@ -331,11 +331,11 @@ async def maybe_gate(db, work_item_id: str, node: ResolvedNode, run_dirs=None) -
             await db.write(lambda c: store.pass_unchanged_revision(c, work_item_id, node.id, why))
             return False
     folder = None
-    if run_dirs is not None:
+    if run_dirs:
         row = db.read(
             lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
         )
-        folder = inplace.item_folder(run_dirs, row)
+        folder = inplace.item_folder(run_dirs, row) if row else run_dirs.worktrees / work_item_id
     await node_runs.gate_requested(db, folder, work_item_id, node.id)
     return True
 

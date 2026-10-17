@@ -21,4 +21,10 @@ def is_in_place(row) -> bool:
 def item_folder(run_dirs, row) -> Path:
     """The folder the item's work happens in: its repository's checkout when
     it runs in place, else its worktree."""
-    return Path(row["repo"]) if is_in_place(row) else run_dirs.worktrees / row["id"]
+    return folder_for(run_dirs, row, store.materialized_chain_of(row))
+
+
+def folder_for(run_dirs, row, chain) -> Path:
+    """`item_folder` for a caller that already parsed the row's snapshot."""
+    in_place = chain is not None and chain.target.in_place
+    return Path(row["repo"]) if in_place else run_dirs.worktrees / row["id"]

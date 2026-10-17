@@ -493,7 +493,8 @@ async def abandon_work_item(wid: str, request: Request, body: AbandonWorkItem | 
     if row["status"] != WorkItemStatus.ABANDONED:
         await st.db.write(lambda c: store.abandon_work_item(c, wid, reason))
         await executor.settle_beads_on_abandon(row, deps.bd_cwd(), reason)
-    worktree = inplace.item_folder(st.run_dirs, row)
+    # Not item_folder: an in-place item's checkout is never removed here.
+    worktree = st.run_dirs.worktrees / wid
     killed = await asyncio.to_thread(_kill_orphans_under, worktree)
     if killed:
         logger.warning("abandon %s: killed orphaned process(es) %s under worktree", wid, killed)
@@ -559,7 +560,8 @@ async def _archive_one(app, row, by: str, *, reason: str | None = None) -> dict:
             return {"worktree_removed": False, "archived_by": current and current["archived_by"]}
         repo, branch = Path(row["repo"]), store.branch_for(row)
         members = _connected_members(st, row)
-        worktree = inplace.item_folder(st.run_dirs, row)
+        # Not item_folder: an in-place item's checkout is never removed here.
+        worktree = st.run_dirs.worktrees / wid
         kept = await asyncio.to_thread(_branches_to_keep, repo, branch, members)
         extra = {"kept_branch": branch, "unpushed_commits": sum(kept.values())} if kept else {}
         extra |= await asyncio.to_thread(_rescue_detached_head, repo, worktree, wid)
@@ -1155,7 +1157,8 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             start_index = next(
                 (i for i, n in enumerate(target_nodes) if n.id == rewind["target"]), None
             )
-        worktree = inplace.item_folder(st.run_dirs, row)
+        # Not item_folder: an in-place item's checkout is never rebased here.
+        worktree = st.run_dirs.worktrees / wid
         conflict = None
         try:
             # The refresh runs host git in the worktree and its members (Kraft-ju36l).
@@ -1291,7 +1294,8 @@ async def refresh_base(
             request.app,
             wid,
             builtins_mod.refresh_worktree_base(
-                inplace.item_folder(st.run_dirs, row),
+                # Not item_folder: an in-place item's checkout is never rebased here.
+                st.run_dirs.worktrees / wid,
                 repo,
                 store.branch_for(row),
                 base=base,
@@ -1560,7 +1564,8 @@ async def _retry(wid: str, body: Retry, request: Request):
             if st.db.read(store.active_count) >= limit:
                 return await queued_answer(request, wid, "retry", asked, admitting(Verb.RETRY))
             raise HTTPException(409, "work item is not stopped")
-        worktree = inplace.item_folder(st.run_dirs, row)
+        # Not item_folder: an in-place item's checkout is never rebased here.
+        worktree = st.run_dirs.worktrees / wid
         conflict = None
         try:
             # The refresh runs host git in the worktree and its members (Kraft-ju36l).

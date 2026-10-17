@@ -493,6 +493,7 @@ async def list_work_items(request: Request):
         )
 
     def _item(r) -> dict:
+        folder = inplace.folder_for(st.run_dirs, r, parsed[r["id"]])
         mr_ref = _pick_mr_ref(
             r["id"] in root_mr_by_item,
             root_mr_by_item.get(r["id"]),
@@ -518,7 +519,7 @@ async def list_work_items(request: Request):
             "retry_at": r["retry_at"],
             "archived_at": r["archived_at"],
             "archived_by": r["archived_by"],
-            "progress": _board_progress(st, r),
+            "progress": _board_progress(st, r, folder),
             "fallback": _ran_on_fallback(latest, r["id"]),
             "display_status": display_status(
                 r,
@@ -538,7 +539,7 @@ async def list_work_items(request: Request):
             "actions": _list_actions(r, mr_ref, parsed[r["id"]]),
             # One `is_dir` per row: the VS Code board offers Open Worktree only
             # while the directory is there, without a detail fetch per row.
-            "worktree_exists": inplace.item_folder(st.run_dirs, r).is_dir(),
+            "worktree_exists": folder.is_dir(),
         }
 
     # Each row's chain parsed once, for the stage bar and `actions` both.
@@ -598,9 +599,9 @@ def _detail_fallback(st, wid: str) -> dict | None:
     return _ran_on_fallback({(wid, r["type"]): json.loads(r["payload"]) for r in rows}, wid)
 
 
-def _board_progress(st, row) -> dict | None:
+def _board_progress(st, row, folder) -> dict | None:
     """The board's share of `progress`: position and title, not the task list."""
-    p = progress_mod.for_item(st.db, row, inplace.item_folder(st.run_dirs, row), st.run_dirs)
+    p = progress_mod.for_item(st.db, row, folder, st.run_dirs)
     return {"current": p.current, "total": p.total, "title": p.title} if p else None
 
 
