@@ -120,6 +120,36 @@ async def test_a_persons_edit_during_an_in_place_read_only_step_is_not_a_violati
     assert git(it.repo, "status", "--porcelain") == "M calc.py"
 
 
+def _commits_the_persons_file(cwd: Path) -> None:
+    write(cwd, "test_calc.py", "the agent's\n")
+    git(cwd, "commit", "-qm", "agent", "--", "test_calc.py")
+
+
+@pytest.mark.parametrize(
+    "during",
+    [lambda cwd: git(cwd, "checkout", "-q", "main"), _commits_the_persons_file],
+    ids=["person-switches-branch", "agent-commits-a-persons-file"],
+)
+async def test_an_in_place_checkout_stop_in_a_read_only_step_is_never_a_read_only_failure(
+    item_on, monkeypatch, fake_agent, during
+):
+    """The branch's tip is what is compared, never the checkout's HEAD, which a
+    person may move; and the after-task check's `checkout` stop, which names
+    what happened, is the stop the item keeps."""
+    step = {"id": "check", "read_only": True, "tasks": [_agent()]}
+    it = await item_on([v1_node(steps=[step])], target=_IN_PLACE)
+    git(it.repo, "branch", store.branch_for(it.row()))
+    write(it.repo, "MINE", "the person's own commit\n")
+    git(it.repo, "add", "MINE")
+    git(it.repo, "commit", "-qm", "mine")
+    write(it.repo, "test_calc.py", "the person's\n")
+    _launches(monkeypatch, during)
+
+    assert await _walk(it) == "needs_human"
+
+    assert it.row()["stop_kind"] == "checkout"
+
+
 @pytest.mark.parametrize(
     ("name", "stops"), [("new.txt", True), ("run.log", False)], ids=["untracked", "ignored"]
 )

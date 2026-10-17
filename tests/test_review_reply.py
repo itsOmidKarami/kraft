@@ -10,7 +10,14 @@ from pathlib import Path
 
 import pytest
 from support.addons import drop_store, install_release, pinned_chain
-from support.harness import entry_of, git, make_repo, seed_v1_library, write_harness_profiles
+from support.harness import (
+    entry_of,
+    git,
+    make_repo,
+    seed_v1_library,
+    write,
+    write_harness_profiles,
+)
 
 from kraft import executor, inplace, review_reply, store
 from kraft.templates.environment import WorkItemTarget
@@ -361,3 +368,31 @@ async def test_no_reply_agent_starts_without_its_checkout(
 
     assert [s["status"] for s in it.sessions()] == ([] if busy else ["config_error"])
     assert not it.events("reply_agent_failed")
+
+
+async def test_an_in_place_reply_agent_that_writes_nothing_did_not_write(
+    item_on, repo, tmp_path, monkeypatch
+):
+    """Its snapshot reads the item's branch, not the checkout's HEAD: the
+    person on their own branch is not a write by the reply agent."""
+    _seed(tmp_path, monkeypatch)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    target = WorkItemTarget.for_repository("sample", in_place=True)
+    it = await item_on(NODES, GATE, target=target, status="needs_human")
+    git(repo, "branch", store.branch_for(it.row()))
+    write(repo, "MINE", "the person's own commit\n")
+    git(repo, "add", "MINE")
+    git(repo, "commit", "-qm", "mine")
+    await _published_unanswered_thread(it)
+
+    status = await review_reply.run(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        gate=GATE,
+        nodes=it.chain.chain.nodes,
+        launch=LAUNCH,
+    )
+
+    assert status == "replied"
+    assert it.events("reply_agent_wrote") == []
