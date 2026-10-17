@@ -1283,7 +1283,11 @@ async def _walk_node_once(
                 return await _moved_base(db, work_item_id, node)
             if r_verdict == "ok":
                 await node_runs.completed(
-                    db, Path(worktree) if worktree else None, work_item_id, node.id, run_dirs=run_dirs
+                    db,
+                    Path(worktree) if worktree else None,
+                    work_item_id,
+                    node.id,
+                    run_dirs=run_dirs,
                 )
                 return "ok"
             # Only "failed" reaches here, and that fall-through is deliberate:
@@ -1540,7 +1544,11 @@ async def _walk_node_once(
             # treated as clean here.
             if verdict == "stop_downgrade" and not failed:
                 await node_runs.completed(
-                    db, Path(worktree) if worktree else None, work_item_id, node.id, run_dirs=run_dirs
+                    db,
+                    Path(worktree) if worktree else None,
+                    work_item_id,
+                    node.id,
+                    run_dirs=run_dirs,
                 )
                 return "ok"
 
@@ -2076,9 +2084,7 @@ async def run_once(
         failing_node = nodes[start_index].id
         reason = str(exc)
         kind = StopKind.CONFIG if isinstance(exc, _config.ConfigError) else StopKind.INFRA
-        await node_runs.entered(
-            db, inplace.item_folder(run_dirs, row), work_item_id, failing_node
-        )
+        await node_runs.entered(db, inplace.item_folder(run_dirs, row), work_item_id, failing_node)
         await db.write(
             lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason, kind=kind)
         )

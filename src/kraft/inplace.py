@@ -570,7 +570,7 @@ def _settled(folder: Path) -> None:
     over either."""
     if _operation(folder):
         raise _under_way(folder)
-    unmerged =_git_lines(folder, "diff", "--name-only", "--diff-filter=U")
+    unmerged = _git_lines(folder, "diff", "--name-only", "--diff-filter=U")
     if unmerged:
         raise CheckoutRefused(
             f"{folder} has unmerged paths: {', '.join(unmerged)}; resolve them yourself, "

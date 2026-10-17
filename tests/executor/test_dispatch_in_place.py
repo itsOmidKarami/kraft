@@ -204,7 +204,9 @@ async def test_a_branch_switch_mid_task_stops_and_never_switches_back(
     item_on, fake_agent, agent_runs, repo, back, commit
 ):
     it = await item_on(fake_agent.quick_task, target=_IN_PLACE)
-    away = "git checkout -q main" + (" && echo stray >> calc.py && git commit -q -am stray" * commit)
+    away = "git checkout -q main" + (
+        " && echo stray >> calc.py && git commit -q -am stray" * commit
+    )
     agent_runs(away + (" && git checkout -q -" if back else ""))
 
     assert await _walk(it) == "needs_human"
