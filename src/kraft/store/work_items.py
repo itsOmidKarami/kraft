@@ -844,18 +844,26 @@ def open_counts_by_repo(conn: sqlite3.Connection) -> dict[str, int]:
 
 
 def abandon_work_item(
-    conn: sqlite3.Connection, work_item_id: str, reason: str | None = None
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    reason: str | None = None,
+    *,
+    branch_kept: str | None = None,
 ) -> None:
     """Terminal. The row stays — its events and sessions are still the record of
     what happened — but it is out of the running set for good, and off the board.
-    `reason` is why a person dropped it, kept on the event when given.
+    `reason` is why a person dropped it, kept on the event when given;
+    `branch_kept` why an in-place item's branch stayed (`inplace.drop_branch`).
     """
     conn.execute(
         "UPDATE work_items SET status = 'abandoned', queued_request = NULL, updated_at = ? "
         "WHERE id = ?",
         (_now(), work_item_id),
     )
-    events.append(conn, work_item_id, WorkItemEvent.ABANDONED, {"reason": reason} if reason else {})
+    payload = {"reason": reason} if reason else {}
+    if branch_kept is not None:
+        payload["branch_kept"] = branch_kept
+    events.append(conn, work_item_id, WorkItemEvent.ABANDONED, payload)
 
 
 def archive_work_item(
@@ -868,6 +876,7 @@ def archive_work_item(
     rescued_branch: str | None = None,
     rescued_commits: int | None = None,
     worktree_kept: str | None = None,
+    branch_kept: str | None = None,
     reason: str | None = None,
 ) -> None:
     """Marks a completed/abandoned item archived without touching `status`
@@ -881,7 +890,8 @@ def archive_work_item(
     archive left the item's branch in place because nothing else held its
     commits; `rescued_branch` and `rescued_commits` when it named a detached
     HEAD's commits; `worktree_kept` (the reason) when that failed and the
-    worktree stayed. `reason` is `"storage"` when the storage limit's automatic
+    worktree stayed; `branch_kept` why an in-place item's branch stayed
+    (`inplace.drop_branch`). `reason` is `"storage"` when the storage limit's automatic
     clean-up archived it (`kraft.storage.tick`).
     """
     now = _now()
@@ -896,6 +906,8 @@ def archive_work_item(
         payload |= {"rescued_branch": rescued_branch, "rescued_commits": rescued_commits}
     if worktree_kept is not None:
         payload["worktree_kept"] = worktree_kept
+    if branch_kept is not None:
+        payload["branch_kept"] = branch_kept
     if reason is not None:
         payload["reason"] = reason
     events.append(conn, work_item_id, WorkItemEvent.ARCHIVED, payload)

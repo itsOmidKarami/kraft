@@ -11,8 +11,10 @@ from types import SimpleNamespace
 import pytest
 from support.archive import days_ago, seed_completed_item
 from support.deep_tree import deep_chain, opens_during
+from support.harness import v1_named_chain
 
 from kraft import item_paths, policy, storage
+from kraft.templates.environment import WorkItemTarget
 
 MB = 1024**2
 
@@ -265,15 +267,18 @@ def test_state_is_none_without_a_limit():
     assert storage.state_of(_policy(), _usage(10**12)) is None
 
 
-def test_only_a_start_that_would_make_a_worktree_is_held(tmp_path):
-    (tmp_path / "worktrees" / "has").mkdir(parents=True)
+async def test_only_a_start_that_would_make_a_worktree_is_held(item_on, database, run_dirs):
+    """An in-place item never makes one: its folder is the person's checkout."""
+    chain = v1_named_chain(run_dirs.base / "t")
+    await item_on(chain, wid="new")
+    await item_on(chain, wid="here", target=WorkItemTarget.for_repository("sample", in_place=True))
+    (run_dirs.worktrees / "has").mkdir(parents=True)
     st = SimpleNamespace(
-        policy=_policy(100, 80),
-        storage_usage=_usage(101),
-        run_dirs=SimpleNamespace(worktrees=tmp_path / "worktrees"),
+        policy=_policy(100, 80), storage_usage=_usage(101), run_dirs=run_dirs, db=database
     )
     assert storage.holds(st, "new") is True
     assert storage.holds(st, "has") is False
+    assert storage.holds(st, "here") is False
     st.storage_usage = _usage(100)
     assert storage.holds(st, "new") is False
 
@@ -423,6 +428,33 @@ def _measures(monkeypatch, governed, each=40):
         "measure",
         lambda base, stop=None: _usage(governed, {"old": each, "mid": each, "new": each}),
     )
+
+
+async def test_an_in_place_item_is_never_measured_or_auto_archived(
+    tmp_path, repo, stub_app, item_on, run_dirs
+):
+    """Its folder is the person's checkout, outside the run folder: the walk
+    never reaches it, and the clean-up never picks the item."""
+    app = stub_app(**_state(tmp_path, limit=1, quota=0, min_age_s=0))
+    old = await seed_completed_item(app, repo, updated_at=days_ago(2), wid="old")
+    _fill(old / "big")
+    here = await item_on(
+        v1_named_chain(run_dirs.base / "t"),
+        wid="here",
+        target=WorkItemTarget.for_repository("sample", in_place=True),
+        status="completed",
+    )
+    _fill(repo / "the-person-s-own.bin")
+    await app.state.db.write(
+        lambda c: c.execute(
+            "UPDATE work_items SET updated_at = ? WHERE id = 'here'", (days_ago(3),)
+        )
+    )
+
+    assert await storage.tick(app) == ["old"]
+
+    assert here.row()["archived_at"] is None
+    assert "here" not in storage.usage(app.state).items
 
 
 async def test_tick_over_limit_archives_oldest_first_down_to_quota(
@@ -611,7 +643,13 @@ async def test_two_kicks_while_one_runs_start_one_tick_and_the_task_is_kept(monk
 
 
 def _row(status="completed", archived_at=None, title="t", updated_at="2026-01-01T00:00:00+00:00"):
-    return {"title": title, "status": status, "archived_at": archived_at, "updated_at": updated_at}
+    return {
+        "title": title,
+        "status": status,
+        "archived_at": archived_at,
+        "updated_at": updated_at,
+        "in_place": None,
+    }
 
 
 @pytest.mark.parametrize(

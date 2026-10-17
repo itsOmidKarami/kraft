@@ -490,20 +490,29 @@ async def abandon_work_item(wid: str, request: Request, body: AbandonWorkItem | 
     # and keeps everything) or a second call: either way it is reclaimed
     # again, without a second `work_item_abandoned`. A second call finds
     # nothing left and answers `worktree_removed: false`.
+    in_place = inplace.is_in_place(row)
+    if in_place:
+        # The person's checkout: nothing in it is killed or removed. Before the
+        # write, so the event says whether the branch stayed.
+        removed = {"worktree_removed": False, "in_place": True}
+        removed |= await asyncio.to_thread(
+            inplace.drop_branch, Path(row["repo"]), store.branch_for(row), wid, keep=False
+        )
     if row["status"] != WorkItemStatus.ABANDONED:
-        await st.db.write(lambda c: store.abandon_work_item(c, wid, reason))
+        kept = removed["branch_kept"] if in_place else None
+        await st.db.write(lambda c: store.abandon_work_item(c, wid, reason, branch_kept=kept))
         await executor.settle_beads_on_abandon(row, deps.bd_cwd(), reason)
-    # Not item_folder: an in-place item's checkout is never removed here.
-    worktree = st.run_dirs.worktrees / wid
-    killed = await asyncio.to_thread(_kill_orphans_under, worktree)
-    if killed:
-        logger.warning("abandon %s: killed orphaned process(es) %s under worktree", wid, killed)
-    await asyncio.to_thread(_forget_sandbox, st.run_dirs, worktree, wid)
-    removed = await _remove_worktree(
-        Path(row["repo"]), worktree, store.branch_for(row), wid, _connected_members(st, row)
-    )
-    if not worktree.exists():
-        storage.forget(st, wid)
+    if not in_place:
+        worktree = st.run_dirs.worktrees / wid
+        killed = await asyncio.to_thread(_kill_orphans_under, worktree)
+        if killed:
+            logger.warning("abandon %s: killed orphaned process(es) %s under worktree", wid, killed)
+        await asyncio.to_thread(_forget_sandbox, st.run_dirs, worktree, wid)
+        removed = await _remove_worktree(
+            Path(row["repo"]), worktree, store.branch_for(row), wid, _connected_members(st, row)
+        )
+        if not worktree.exists():
+            storage.forget(st, wid)
     # Best-effort, like the worktree removal beside it: the row is already
     # abandoned, and a failure to delete a directory must not leave the item in
     # a state the board cannot show. In a thread: a large folder must not hold
@@ -560,12 +569,21 @@ async def _archive_one(app, row, by: str, *, reason: str | None = None) -> dict:
             return {"worktree_removed": False, "archived_by": current and current["archived_by"]}
         repo, branch = Path(row["repo"]), store.branch_for(row)
         members = _connected_members(st, row)
-        # Not item_folder: an in-place item's checkout is never removed here.
+        in_place = inplace.is_in_place(row)
         worktree = st.run_dirs.worktrees / wid
         kept = await asyncio.to_thread(_branches_to_keep, repo, branch, members)
         extra = {"kept_branch": branch, "unpushed_commits": sum(kept.values())} if kept else {}
-        extra |= await asyncio.to_thread(_rescue_detached_head, repo, worktree, wid)
+        if in_place:  # before the write, so the event says whether the branch stayed
+            dropped = await asyncio.to_thread(
+                inplace.drop_branch, repo, branch, wid, keep=bool(kept)
+            )
+            if dropped["branch_kept"] is not None:
+                extra["branch_kept"] = dropped["branch_kept"]
+        else:  # an in-place checkout's HEAD is the person's, not the item's
+            extra |= await asyncio.to_thread(_rescue_detached_head, repo, worktree, wid)
         await st.db.write(lambda c: store.archive_work_item(c, wid, by, reason=reason, **extra))
+        if in_place:
+            return {"worktree_removed": False, "in_place": True, **dropped, **extra}
         for where, count in kept.items():
             logger.info(
                 "archive %s kept branch %s in %s: %d unpushed commit(s)", wid, branch, where, count

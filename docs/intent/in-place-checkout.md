@@ -179,3 +179,17 @@ default branch's ref, and SHALL read the checkout's HEAD only where that ref
 does not exist.
 enforced-by: tests/test_base_branch.py::test_the_base_fallback_reads_the_default_branch_ref_not_head[on-an-items-branch]
 origin: src/kraft/builtins.py §upstream_head
+
+## REQ in-place-abandon-keeps-the-checkout
+
+WHEN an in-place item is abandoned or archived, the system SHALL NOT delete the
+checkout folder or signal any process running in it.
+enforced-by: tests/api/test_lifecycle.py::test_abandon_kills_a_process_left_running_from_the_worktree[in-place-checkout-kept], tests/api/test_abandon_item_folder.py::test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it[deleted], tests/api/test_archive.py::test_archive_in_place_follows_the_same_rule[deleted]
+origin: src/kraft/api/routes/lifecycle.py §abandon_work_item
+
+## REQ in-place-abandon-keeps-a-checked-out-branch
+
+IF an in-place item is abandoned or archived while the checkout is on its
+branch, THEN the system SHALL keep the branch and say so.
+enforced-by: tests/api/test_abandon_item_folder.py::test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it[checked-out-kept], tests/api/test_abandon_item_folder.py::test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it[in-use-kept], tests/api/test_abandon_item_folder.py::test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it[git-refused-kept], tests/api/test_archive.py::test_archive_in_place_follows_the_same_rule[checked-out-kept]
+origin: src/kraft/inplace.py §drop_branch

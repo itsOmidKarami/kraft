@@ -11,13 +11,18 @@ from typing import Annotated
 from fastapi import Request
 from pydantic import BaseModel, Field
 
-from kraft import inplace, storage, store
+from kraft import storage, store
 from kraft.api import api_router, item_ids
 from kraft.api.routes import lifecycle
 from kraft.config import git_read
 
 #: Only what the join reads: the rows carry the frozen chain, 30 KB apiece.
-_ITEM_COLUMNS = "SELECT id, title, status, archived_at, updated_at FROM work_items"
+#: `in_place` from it as `store.is_in_place` reads it, the run fork's copy first.
+_ITEM_COLUMNS = (
+    "SELECT id, title, status, archived_at, updated_at, json_extract("
+    "COALESCE(NULLIF(run_chain, ''), materialized_chain), '$.target.in_place') AS in_place "
+    "FROM work_items"
+)
 
 
 class StoragePreview(BaseModel):
@@ -57,9 +62,13 @@ def _preview_one(st, wid: str, row, size: int, members: list[Path]) -> dict:
         "unpushed_commits": 0,
         "branch_kept": False,
     }
+    if why is None and store.is_in_place(row):
+        # Its folder is the person's checkout: never read here.
+        why = "it runs in its repository's checkout: no worktree to reclaim"
+        item |= {"archivable": False, "refusal": why}
     if why is not None:
         return item
-    worktree = inplace.item_folder(st.run_dirs, row)
+    worktree = st.run_dirs.worktrees / wid
     if worktree.is_dir():
         # null when git cannot say, as when there is no worktree
         status = git_read(worktree, "status", "--porcelain")

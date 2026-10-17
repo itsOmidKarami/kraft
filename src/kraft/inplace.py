@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from kraft import events, item_paths, store
+from kraft import events, item_paths, node_runs, store
 from kraft.adapters.forge import git
 from kraft.config import ConfigError, git_read
 from kraft.vocab import ChainEvent, StopKind
@@ -517,6 +517,53 @@ def _switch(folder: Path, branch: str) -> dict:
 def _on(folder: Path, branch: str) -> bool:
     head = git_read(folder, "symbolic-ref", "--quiet", "HEAD", expected_failure=True)
     return head == f"refs/heads/{branch}"
+
+
+def drop_branch(repo: Path, branch: str, wid: str, *, keep: bool) -> dict:
+    """Abandon's and archive's end of an in-place item's branch, which leaves
+    the checkout and whatever runs in it alone. The branch, and Kraft's record
+    of pushing it, stay when the checkout is on it (`checked out`), when a take
+    or rebase holds the checkout right now or git refuses the delete, as for a
+    branch another worktree has out (`in use`), or when `keep` (archive found
+    commits only it holds: `unpushed`). The item's per-attempt refs go
+    regardless. Returns `branch_kept`: the reason, or None when it went. Never
+    raises on git: the caller may already have flipped the row."""
+    if not repo.is_dir():
+        return {"branch_kept": None, "repo_missing": str(repo)}
+    try:
+        kept = _drop_branch(repo, branch, wid, keep)
+        node_runs.drop_refs(repo, wid)
+    except OSError as exc:
+        logger.warning("drop %s: git failed: %s", wid, exc)
+        return {"branch_kept": "git failed"}
+    return {"branch_kept": kept}
+
+
+def _drop_branch(repo: Path, branch: str, wid: str, keep: bool) -> str | None:
+    lock = _lock(repo)
+    if not lock.acquire(blocking=False):
+        return "in use"
+    try:
+        if _on(repo, branch):
+            return "checked out"
+        if keep:
+            return "unpushed"
+        if _ref(repo, branch):
+            done = subprocess.run(
+                ["git", "branch", "-D", "--", branch], cwd=repo, capture_output=True, text=True
+            )
+            if done.returncode != 0:
+                logger.warning("drop %s: branch kept: %s", wid, done.stderr.strip())
+                return "in use"
+        # Absent (a never-started item never pushed) is fine.
+        subprocess.run(
+            ["git", "update-ref", "-d", f"{git.PUSHED_REFS}/{branch}"],
+            cwd=repo,
+            capture_output=True,
+        )
+        return None
+    finally:
+        lock.release()
 
 
 def _ignored_in_the_way(folder: Path, changed: list[str]) -> list[str]:
