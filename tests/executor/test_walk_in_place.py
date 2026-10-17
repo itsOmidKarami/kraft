@@ -3,7 +3,7 @@ task that needs the folder, never on the walk's entry, and never by force."""
 
 from __future__ import annotations
 
-from support.harness import commit_all, entry_of, git, make_repo, write
+from support.harness import commit_all, entry_of, git, write
 
 from kraft import store
 from kraft.adapters import forge as _forge
@@ -48,7 +48,6 @@ async def test_a_refused_take_stops_the_item_as_checkout(item_on, fake_agent, re
 
 async def test_a_sandbox_added_after_filing_stops_as_config(item_on, fake_agent, repo):
     it = await item_on(fake_agent.quick_task, target=_IN_PLACE)
-    make_repo(repo, "a-clone-of-the-persons")
     sandboxed = entry_of({"setup_command": "", "sandbox": {"kind": "docker", "image": "x"}})
 
     assert await _walk(it, repo_entry=sandboxed) == "needs_human"

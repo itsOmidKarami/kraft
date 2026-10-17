@@ -387,8 +387,7 @@ def refuse_planted_repos(
 
     Returns the checkout it checked (`sandbox_checkout`), for the launch to
     mount exactly that; None for an item it did not check."""
-    # An in-place item is never sandboxed; `item_sandbox` refuses one that is.
-    if worktree is None or not worktree.is_dir() or store.is_in_place(row):
+    if worktree is None or not worktree.is_dir():
         return None
     unresolved = None
     try:
