@@ -89,6 +89,7 @@ export function RepoView() {
     const v = valueOf(repo!, f);
     const shown = (v === "" && f.empty) || f.show(f.key === "steering" ? repo!.resolved.steering : v) || f.fallback || "not set";
     const base: RowSpec = { key: f.key, label: f.label, value: shown, sub: sourceOf(repo!, f), changed: changed(f.key.replace(/^policy\./, "policy")) };
+    if (f.choice === "bool") return { ...base, sw: v !== false, onSwitch: (on) => void setRepo(draft, repo!, patchFor(repo!, f, on ? null : false)).then((e) => e && showToast(e)) };
     if (f.choice) {
       const options = (f.choice === "chain" ? chains : forgeOptions(v)).map((x) => ({ value: x, label: x }));
       return { ...base, onEdit: () => edit({ kind: "choice", title: f.label, value: typeof v === "string" ? v : null, options, set: (x) => sendTo(draft, repo!, f)(x) }) };
