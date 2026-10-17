@@ -348,6 +348,7 @@ def test_mark_counts_the_persons_edits_and_not_the_items_own_leftovers(repo):
 def test_check_names_a_moved_checkout_and_the_commits_made_off_the_branch(repo):
     branch = _on_item_branch(repo)
     m = inplace.mark(repo, branch, {})
+    _git_now(repo, "commit", "-q", "--allow-empty", "-m", "on the item's branch: not stray")
     _git_now(repo, "checkout", "-q", "main")
     write(repo, "calc.py", "# onto the person's branch\n")
     _git_now(repo, "commit", "-q", "-am", "stray")
