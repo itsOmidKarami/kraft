@@ -643,7 +643,9 @@ def test_approve_gate_stops_a_live_auto_review_session_first(client, repo, monke
     SIGTERM'd before the approval's own executor.run spawns."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     terminated = []
-    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(
+        "kraft.api.routes.lifecycle._terminate", lambda pid, **_: terminated.append(pid)
+    )
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
     # V1: the gate is its own node, so its review session sits on it.
@@ -660,7 +662,9 @@ def test_approve_gate_stops_a_live_auto_review_session_first(client, repo, monke
 def test_reject_gate_stops_a_live_auto_review_session_first(client, repo, monkeypatch):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     terminated = []
-    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(
+        "kraft.api.routes.lifecycle._terminate", lambda pid, **_: terminated.append(pid)
+    )
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
     # V1: the gate is its own node, so its review session sits on it.
@@ -684,7 +688,9 @@ def test_reject_with_a_bad_node_leaves_a_live_auto_review_running(client, repo, 
     its own refusals."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     terminated = []
-    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(
+        "kraft.api.routes.lifecycle._terminate", lambda pid, **_: terminated.append(pid)
+    )
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
     # V1: the gate is its own node, so its review session sits on it.

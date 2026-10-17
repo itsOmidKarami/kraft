@@ -185,7 +185,9 @@ def test_retry_kills_a_running_escalation_turn_and_proceeds(client, repo, monkey
     (test_lifecycle.py's test_retry_kills_a_strangers_running_escalation_and_proceeds
     pins the self-retry-vs-stranger distinction from the other side)."""
     terminated = []
-    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(
+        "kraft.api.routes.lifecycle._terminate", lambda pid, **_: terminated.append(pid)
+    )
     wid = _needs_human_item(client, repo)
     _seed_running_escalation(client, wid, pid=4242)
 
@@ -233,7 +235,9 @@ def test_a_strangers_retry_refuses_before_it_kills_the_escalation_turn(
     human who gets the error must find the turn still running. `merge` is
     the chain's last node and forge-only, so a steer there reaches nothing."""
     terminated = []
-    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(
+        "kraft.api.routes.lifecycle._terminate", lambda pid, **_: terminated.append(pid)
+    )
     wid = _stopped_with_a_running_escalation(client, repo, node_id)
     body = setup(client, repo) or {}
 
@@ -252,7 +256,9 @@ def test_a_strangers_retry_on_a_full_board_is_queued_and_leaves_the_turn_running
     """The kill belongs to the start. Queued, the retry has changed nothing
     yet, so the escalation turn keeps working."""
     terminated = []
-    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(
+        "kraft.api.routes.lifecycle._terminate", lambda pid, **_: terminated.append(pid)
+    )
     wid = _stopped_with_a_running_escalation(client, repo, "implementation")
     _full_board(client, repo)
 
@@ -271,7 +277,9 @@ def test_a_strangers_retry_cancels_the_escalation_task_not_just_its_pid(client, 
     ever kill the pid (`_stop_live_sessions`), never the coroutine. Sharing
     `wid` means that same preemption now actually cancels it."""
     terminated = []
-    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(
+        "kraft.api.routes.lifecycle._terminate", lambda pid, **_: terminated.append(pid)
+    )
     wid = _needs_human_item(client, repo)
     _seed_running_escalation(client, wid)
 

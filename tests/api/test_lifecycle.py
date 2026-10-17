@@ -323,7 +323,9 @@ def test_retry_kills_a_strangers_running_escalation_and_proceeds(client, repo, m
     distinct from the self-retry deferral path above, which stays a defer,
     not a kill."""
     terminated = []
-    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(
+        "kraft.api.routes.lifecycle._terminate", lambda pid, **_: terminated.append(pid)
+    )
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
     _force_node(wid, "implementation", "needs_human")
@@ -365,7 +367,7 @@ def test_a_door_takes_only_the_states_this_table_lists(client, repo, monkeypatch
     monkeypatch.setattr(
         lifecycle.forge_mod, "resolve", lambda _b: SimpleNamespace(reopen_mr=reopened)
     )
-    monkeypatch.setattr(lifecycle, "_terminate", lambda pid: None)
+    monkeypatch.setattr(lifecycle, "_terminate", lambda pid, **_: None)
     row, spec = DOORS["states"][state], DOORS["doors"][door]
     wid = _in_state(client, repo, row)
     if row.get("walk"):

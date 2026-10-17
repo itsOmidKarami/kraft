@@ -52,7 +52,7 @@ from kraft.vocab import (
     WorkItemStatus,
     admitting,
 )
-from kraft.worker import backends
+from kraft.worker import backends, reattach
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +146,7 @@ def chain_or_409(row):
     return chain
 
 
-def _terminate(pid: int | None) -> None:
+def _terminate(pid: int | None, *, started: float | None) -> None:
     """SIGINT the session's whole process group.
 
     Sessions are launched with `start_new_session=True`, so the child is its own
@@ -167,8 +167,17 @@ def _terminate(pid: int | None) -> None:
     """
     if pid is None:
         return
+    # Only the process Kraft launched, leading its own group: a row left
+    # live after it died may name a pid reused by anyone, a person included.
     try:
-        os.killpg(os.getpgid(pid), signal.SIGINT)
+        ours = reattach._identity_ok(pid, started) and os.getpgid(pid) == pid
+    except OSError:
+        ours = False
+    if not ours:
+        logger.warning("session pid %s is no longer the process Kraft launched; not signalled", pid)
+        return
+    try:
+        os.killpg(pid, signal.SIGINT)
     except (ProcessLookupError, PermissionError):
         pass  # already gone, or not ours — the row still moves to paused
 
@@ -239,7 +248,7 @@ async def _stop_live_sessions(st, wid: str, *, pause_item: bool = True) -> list[
             for sid in ids:
                 await st.db.write(lambda c, sid=sid: store.stop_escalation_session(c, wid, sid))
         for s in sessions:
-            _terminate(s["pid"])
+            _terminate(s["pid"], started=s["pid_start_time"])
     return ids
 
 
@@ -498,7 +507,7 @@ async def abandon_work_item(wid: str, request: Request, body: AbandonWorkItem | 
         # write, so the event says whether the branch stayed.
         for s in st.db.read(lambda c: store.live_sessions(c, wid)):
             await st.db.write(lambda c, sid=s["id"]: store.stop_escalation_session(c, wid, sid))
-            _terminate(s["pid"])
+            _terminate(s["pid"], started=s["pid_start_time"])
         removed = {"worktree_removed": False, "in_place": True}
         removed |= await asyncio.to_thread(
             inplace.drop_branch, Path(row["repo"]), store.branch_for(row), wid, keep=False
@@ -751,7 +760,7 @@ async def pause_work_item(wid: str, request: Request):
     # a SIGTERM that lands before the row is paused would resolve as 'failed'
     await st.db.write(lambda c: store.pause_work_item(c, wid, ids))
     for s in sessions:
-        _terminate(s["pid"])
+        _terminate(s["pid"], started=s["pid_start_time"])
     # Bounded (Kraft-c5ui): pause spawns nothing, so it would rather return
     # late than block the whole request on a git/forge call the old task
     # happens to be parked in -- the sessions above are already SIGTERM'd
@@ -2173,7 +2182,7 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
                 lambda c: store.skip_node(c, wid, node_id, gate, note, session_ids=session_ids)
             )
             for s in sessions:
-                _terminate(s["pid"])
+                _terminate(s["pid"], started=s["pid_start_time"])
 
             try:
                 deps.spawn(
@@ -2243,7 +2252,7 @@ async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPa
             lambda c: store.skip_scope(c, wid, target.path, note, session_ids=session_ids)
         )
         for s in sessions:
-            _terminate(s["pid"])
+            _terminate(s["pid"], started=s["pid_start_time"])
         return deps.work_item_answer(st, wid)
     async with stops.claimed_or_stopped(
         st.db,
@@ -2418,7 +2427,7 @@ async def _end_work_item(request: Request, wid: str, action: str, reason: str):
     ids = [s["id"] for s in sessions]
     await st.db.write(lambda c: store.end_work_item(c, wid, action, reason, session_ids=ids))
     for s in sessions:
-        _terminate(s["pid"])
+        _terminate(s["pid"], started=s["pid_start_time"])
     # Bounded, as pause's is: the status is already terminal, so a walk that
     # outlives the wait stops at its next node on its own.
     await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
@@ -2558,11 +2567,12 @@ async def stop_escalation(wid: str, request: Request):
         raise HTTPException(409, "no escalation turn is running")
     row = st.db.read(
         lambda c: c.execute(
-            "SELECT pid FROM worker_sessions WHERE work_item_id = ? AND id = ?", (wid, running)
+            "SELECT pid, pid_start_time FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+            (wid, running),
         ).fetchone()
     )
     await st.db.write(lambda c: store.stop_escalation_session(c, wid, running))
-    _terminate(row["pid"] if row else None)
+    _terminate(row and row["pid"], started=row and row["pid_start_time"])
     return {"id": wid, "session_id": running, "status": WorkItemStatus.PAUSED}
 
 

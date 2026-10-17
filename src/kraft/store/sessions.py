@@ -969,7 +969,8 @@ def running_sessions_for_node(conn: sqlite3.Connection, work_item_id: str) -> li
     # caller would kill nothing and then rebase and spawn into a worktree an
     # agent is still writing in (code review finding).
     return conn.execute(
-        "SELECT s.id, s.pid FROM worker_sessions s JOIN work_items w ON w.id = s.work_item_id "
+        "SELECT s.id, s.pid, s.pid_start_time FROM worker_sessions s "
+        "JOIN work_items w ON w.id = s.work_item_id "
         f"WHERE s.work_item_id = ? AND s.status IN ({in_list(LIVE)}) "
         "AND (s.node_id = w.current_node_id OR s.hook_point = 'escalation') ORDER BY s.rowid",
         (work_item_id,),
@@ -977,10 +978,10 @@ def running_sessions_for_node(conn: sqlite3.Connection, work_item_id: str) -> li
 
 
 def live_sessions(conn: sqlite3.Connection, work_item_id: str) -> list[sqlite3.Row]:
-    """`(id, pid)` of every session of this item still running or just
+    """`(id, pid, pid_start_time)` of every session of this item still running or just
     started, whatever its node or task."""
     return conn.execute(
-        "SELECT id, pid FROM worker_sessions WHERE work_item_id = ? "
+        "SELECT id, pid, pid_start_time FROM worker_sessions WHERE work_item_id = ? "
         f"AND status IN ({in_list(LIVE)}) ORDER BY rowid",
         (work_item_id,),
     ).fetchall()
@@ -1053,7 +1054,7 @@ def running_sessions_under(conn: sqlite3.Connection, work_item_id: str, path: st
     every task under a step path -- what a skip of that scope stops, and
     nothing beside it."""
     return conn.execute(
-        "SELECT id, pid, hook_point FROM worker_sessions WHERE work_item_id = ? "
+        "SELECT id, pid, pid_start_time, hook_point FROM worker_sessions WHERE work_item_id = ? "
         f"AND status IN ({in_list(LIVE)}) "
         "AND (hook_point = ? OR substr(hook_point, 1, length(?)) = ?) ORDER BY rowid",
         (work_item_id, path, path + ".", path + "."),

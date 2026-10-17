@@ -371,7 +371,7 @@ def test_skipping_a_task_stops_only_its_own_session(client, repo, monkeypatch):
     from kraft.api.routes import lifecycle
 
     signalled = []
-    monkeypatch.setattr(lifecycle, "_terminate", signalled.append)
+    monkeypatch.setattr(lifecycle, "_terminate", lambda pid, **_: signalled.append(pid))
     wid = _stopped_in_verification(client, repo)
     db = client.app.state.db
 

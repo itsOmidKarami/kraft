@@ -637,20 +637,29 @@ def test_two_concurrent_resumes_produce_one_two_hundred_and_one_409(monkeypatch,
     assert len(client.app.state.tasks) <= 1
 
 
-def test_pause_interrupts_the_agent_rather_than_terminating_it(monkeypatch):
+@pytest.mark.parametrize(
+    ("identity", "group", "signalled"),
+    [(True, 4242, True), (False, 4242, False), (True, 1, False)],
+    ids=["its-own-process", "pid-reused", "not-a-group-leader"],
+)
+def test_pause_interrupts_the_agent_rather_than_terminating_it(
+    monkeypatch, identity, group, signalled
+):
     """Kraft-s7c04.18: SIGTERM kills a claude process mid-turn without a word.
     SIGINT makes it flush the result envelope carrying total_cost_usd, which is
     the only cost figure Kraft will ever have for a session a human stopped.
-    Measured against claude 2.1.273."""
+    Measured against claude 2.1.273. Only the process Kraft launched, leading
+    its own group, is signalled: a reused pid may be anyone's."""
     from kraft.api.routes import lifecycle
 
     sent = []
-    monkeypatch.setattr(lifecycle.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(lifecycle.reattach, "_identity_ok", lambda pid, started: identity)
+    monkeypatch.setattr(lifecycle.os, "getpgid", lambda pid: group)
     monkeypatch.setattr(lifecycle.os, "killpg", lambda pgid, sig: sent.append((pgid, sig)))
 
-    lifecycle._terminate(4242)
+    lifecycle._terminate(4242, started=1.0)
 
-    assert sent == [(4242, signal.SIGINT)]
+    assert sent == ([(4242, signal.SIGINT)] if signalled else [])
 
 
 def test_terminate_still_swallows_a_process_that_is_already_gone(monkeypatch):
@@ -660,11 +669,12 @@ def test_terminate_still_swallows_a_process_that_is_already_gone(monkeypatch):
     def boom(pgid, sig):
         raise ProcessLookupError
 
+    monkeypatch.setattr(lifecycle.reattach, "_identity_ok", lambda pid, started: True)
     monkeypatch.setattr(lifecycle.os, "getpgid", lambda pid: pid)
     monkeypatch.setattr(lifecycle.os, "killpg", boom)
 
-    lifecycle._terminate(4242)  # must not raise
-    lifecycle._terminate(None)  # must not raise
+    lifecycle._terminate(4242, started=1.0)  # must not raise
+    lifecycle._terminate(None, started=None)  # must not raise
 
 
 def test_resume_leaves_the_position_to_the_walk(monkeypatch, repo, client):

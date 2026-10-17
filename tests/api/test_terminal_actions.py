@@ -67,7 +67,7 @@ def test_a_terminal_action_stops_active_work(client, repo, monkeypatch, verb):
     from kraft.api.routes import lifecycle
 
     signalled = []
-    monkeypatch.setattr(lifecycle, "_terminate", signalled.append)
+    monkeypatch.setattr(lifecycle, "_terminate", lambda pid, **_: signalled.append(pid))
     wid = _stopped(client, repo)
     db = client.app.state.db
 
