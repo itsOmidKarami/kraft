@@ -83,6 +83,14 @@
 .item-card.is-warn .item-card-head svg { color: var(--warn); }
 .item-card.is-bad .item-card-head svg { color: var(--bad); }
 .item-card.is-info .item-card-head svg { color: var(--info); }
+/* The head folds the card to one line; the body keeps the card's column. */
+.item-card-fold { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; margin: -4px -6px; padding: 4px 6px; border: 0; border-radius: 6px; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.item-card-fold:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+.item-card .item-card-head svg.item-card-chevron { flex: none; margin-left: auto; color: var(--text-muted); }
+.item-card .item-card-fold:is(:hover, :focus-visible) svg.item-card-chevron { color: var(--text); }
+.item-card-body { display: flex; flex-direction: column; gap: 10px; }
+.item-card-body[hidden] { display: none; }
+.item-card.is-folded { padding-block: 8px; }
 .item-quote { margin: 0; font-size: var(--fs-meta); color: var(--text); }
 .item-card.is-muted { border-color: var(--border); background: var(--surface); }
 .item-card.is-muted .item-card-title { color: var(--text-sub); }

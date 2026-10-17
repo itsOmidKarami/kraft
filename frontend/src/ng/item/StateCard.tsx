@@ -1,11 +1,12 @@
 import { doneText } from "./chainValues";
-import { Link, useNavigate } from "react-router-dom";
-import { useEffect, useState, type ReactNode } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { create } from "zustand";
 import * as api from "../../api";
 import { ago, elapsed, logLineText, plural, until, usd } from "../../format";
 import { countedAgainst } from "../settings/storageWords";
 import type { ChainNode, DiffFile, KraftEvent, WorkerSession } from "../../types";
-import { Ban, CircleCheck, CircleHelp, Clock, Pause, X } from "../icons";
+import { Ban, ChevronDown, ChevronRight, CircleCheck, CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { nameOf } from "../board/rowText";
@@ -60,11 +61,7 @@ export function StateCard({ item, files = null, ...h }: { item: ItemDetail; file
   });
   if (!card) return null;
   return (
-    <section className={`item-card is-${card.tone}`} aria-label={card.title}>
-      <h2 className="item-card-head">
-        {card.glyph} <span className="item-card-title">{card.title}</span>
-        {card.where && <span className="item-card-where">{card.where}</span>}
-      </h2>
+    <FoldingCard id={item.id} tone={card.tone} glyph={card.glyph} title={card.title} where={card.where}>
       {card.text && <p className="item-card-text">{card.text}</p>}
       {card.facts.length > 0 && (
         <dl className="item-facts item-card-facts">
@@ -82,6 +79,36 @@ export function StateCard({ item, files = null, ...h }: { item: ItemDetail; file
         {card.node && <LinkButton className="item-card-open" onClick={() => h.onOpenNode(card.node!)}>Open {nameOf(item.chain_definition.nodes, card.node)} →</LinkButton>}
       </div>
       {card.note && <p id={`${item.id}-card-note`} className="item-muted item-card-note">{card.note}</p>}
+    </FoldingCard>
+  );
+}
+
+/** The cards the person folded or opened, kept for the session as the pane is.
+ *  Keyed by the card's head, so a new stop, attempt or wait starts from the default again. */
+export const useFolded = create<{ choice: ReadonlyMap<string, boolean>; set: (key: string, folded: boolean) => void }>((set) => ({
+  choice: new Map(),
+  set: (key, folded) => set(({ choice }) => ({ choice: new Map(choice).set(key, folded) })),
+}));
+
+/** A card under the brief whose head folds it to one line. Folded by default in
+ *  a node's view, as the brief is hidden there: the canvas is what it is for. */
+function FoldingCard({ id, tone, glyph, title, where, children }: { id: string; tone: Card["tone"]; glyph: ReactNode; title: string; where?: string; children: ReactNode }) {
+  const key = [id, title, where ?? ""].join("\n");
+  const { node: nodeView } = useParams();
+  const folded = useFolded((s) => s.choice.get(key)) ?? !!nodeView;
+  const setFolded = useFolded((s) => s.set);
+  const body = useId();
+  const Chevron = folded ? ChevronRight : ChevronDown;
+  return (
+    <section className={`item-card is-${tone}${folded ? " is-folded" : ""}`} aria-label={title}>
+      <h2 className="item-card-head">
+        <button type="button" className="item-card-fold" aria-expanded={!folded} aria-controls={body} onClick={() => setFolded(key, !folded)}>
+          {glyph} <span className="item-card-title">{title}</span>
+          {where && <span className="item-card-where">{where}</span>}
+          <Chevron size={14} aria-hidden className="item-card-chevron" />
+        </button>
+      </h2>
+      <div id={body} className="item-card-body" hidden={folded}>{children}</div>
     </section>
   );
 }
@@ -301,11 +328,7 @@ export function ComesAfterCard({ item, reload }: { item: ItemDetail; reload: () 
     else setError(r.error);
   };
   return (
-    <section className={`item-card is-${blocked ? "info" : "neutral"}`} aria-label={blocked ? "Blocked" : "Comes after"}>
-      <h2 className="item-card-head">
-        <Clock size={14} aria-hidden /> <span className="item-card-title">{blocked ? "Blocked" : "Comes after"}</span>
-        <span className="item-card-where">{waits ? `waiting on ${plural(waits, "item")}` : RELEASED.where}</span>
-      </h2>
+    <FoldingCard id={item.id} tone={blocked ? "info" : "neutral"} glyph={<Clock size={14} aria-hidden />} title={blocked ? "Blocked" : "Comes after"} where={waits ? `waiting on ${plural(waits, "item")}` : RELEASED.where}>
       <p className="item-card-text">{!waits ? RELEASED.text : blocked ? "Kraft starts it when they complete." : "Started before they complete, it is blocked until they do."}</p>
       <dl className="item-facts item-card-facts">
         {deps.map((d) => (
@@ -318,7 +341,7 @@ export function ComesAfterCard({ item, reload }: { item: ItemDetail; reload: () 
           <Button disabled={busy} onClick={unblock}>Unblock</Button>
         </div>
       )}
-    </section>
+    </FoldingCard>
   );
 }
 
@@ -350,8 +373,7 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
     else setError(r.error);
   };
   return (
-    <section className="item-card is-neutral" aria-label="Paused">
-      <h2 className="item-card-head"><Pause size={14} aria-hidden /> <span className="item-card-title">Paused</span><span className="item-card-where">{what.trim()}</span></h2>
+    <FoldingCard id={item.id} tone="neutral" glyph={<Pause size={14} aria-hidden />} title="Paused" where={what.trim()}>
       {steerable && <textarea aria-label="Steer" className="item-input" rows={2} placeholder="Steer the next agent (optional)" value={steer} onChange={(e) => setSteer(e.target.value)} onKeyDown={sendOnModEnter(() => resume(true), !busy && !!steer.trim())} />}
       {steerable && paused.length > 1 && (
         <label className="item-check">
@@ -366,7 +388,7 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
       <div className="item-actions">
         {resumes && <Button variant="primary" disabled={busy} onClick={() => resume(steered)}>{steered ? "Resume with steer" : "Resume"}</Button>}
       </div>
-    </section>
+    </FoldingCard>
   );
 }
 

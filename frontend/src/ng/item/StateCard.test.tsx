@@ -1,19 +1,24 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DiffFile, ItemAction, WorkerSession } from "../../types";
-import { ComesAfterCard, PausedCard, StateCard } from "./StateCard";
+import { ComesAfterCard, PausedCard, StateCard, useFolded } from "./StateCard";
 import { acceptWrites, detail, stubFetch, type Call } from "./testkit";
 
 /** The writes these pages send; any other write is refused. */
 const WRITES = acceptWrites("POST /work-items/w1/reopen-mr", "POST /work-items/w1/resume", "POST /work-items/w1/retry", "POST /work-items/w1/unblock");
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  useFolded.setState({ choice: new Map() });
+});
 
 const stop = (kind: string, over = {}) => ({ kind, node: "merge_request", task: "merge_request.open.open_draft", attempt: 3, resume_at: null, reason: "The forge refused.", facts: {}, ...over }) as never;
 const handlers = () => ({ reload: vi.fn(), onCancel: vi.fn(), onEscalate: vi.fn(), onDuplicate: vi.fn(), onOpenNode: vi.fn() });
+/** A card's action buttons: every button but the head that folds it. */
+const acts = (card: HTMLElement) => within(card).queryAllByRole("button").filter((b) => !b.hasAttribute("aria-expanded")).map((b) => b.textContent);
 const posts = (calls: Call[]) => calls.filter((c) => c.method === "POST");
 let where = "";
 const Where = () => {
@@ -83,7 +88,7 @@ describe("ComesAfterCard", () => {
     const card = screen.getByRole("region", { name: "Blocked" });
     expect(card).toHaveTextContent("nothing left to wait for");
     expect(card).toHaveTextContent("Kraft queues it within seconds.");
-    expect(within(card).queryByRole("button")).toBeNull();
+    expect(acts(card)).toEqual([]);
   });
 });
 
@@ -103,6 +108,27 @@ describe("StateCard", () => {
     expect(h.onEscalate).toHaveBeenCalled();
     await userEvent.click(within(card).getByRole("button", { name: "Open merge request →" }));
     expect(h.onOpenNode).toHaveBeenCalledWith("merge_request");
+  });
+
+  it("its head folds it to one line, kept across a remount, and a new attempt opens it again", async () => {
+    const failed = (attempt: number) => ({ display_status: "failed", stop: stop("failed", { attempt }) }) as const;
+    const { unmount } = show(failed(3));
+    await userEvent.click(screen.getByRole("button", { name: /^Failed/ }));
+    expect(screen.getByRole("button", { name: /^Failed/ })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: "Escalate…" })).toBeNull();
+    unmount();
+    show(failed(3));
+    expect(screen.queryByText("The forge refused.")).not.toBeVisible();
+    cleanup();
+    show(failed(4));
+    expect(screen.getByText("The forge refused.")).toBeVisible();
+  });
+
+  it("starts folded in a node's view, where the brief is hidden too, and its head opens it", async () => {
+    render(<MemoryRouter initialEntries={["/work-items/w1/nodes/merge_request"]}><Routes><Route path="/work-items/:id/nodes/:node" element={<StateCard item={detail({ display_status: "failed", stop: stop("failed") })} {...handlers()} />} /></Routes></MemoryRouter>);
+    expect(screen.getByText("The forge refused.")).not.toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: /^Failed/ }));
+    expect(screen.getByText("The forge refused.")).toBeVisible();
   });
 
   // R11a-01: a stuck loop had no card, so its only Retry was at the foot of the node's pane.
@@ -136,7 +162,7 @@ describe("StateCard", () => {
     stubFetch();
     show({ display_status: "failed", stop: stop("infra", { facts: cause ? { cause } : {} }) });
     const card = screen.getByRole("region", { name: "Failed" });
-    expect(within(card).getAllByRole("button").map((b) => b.textContent)).toEqual(labels);
+    expect(acts(card)).toEqual(labels);
     // A cause with words says them as a fact; the others are not a fact of their own.
     expect(card).not.toHaveTextContent("cause");
     if (why) expect(within(card).getByText("why").nextSibling).toHaveTextContent(why);
@@ -306,7 +332,7 @@ describe("StateCard", () => {
     expect(card).toHaveTextContent("changes2 files +13 −3");
     expect(card).toHaveTextContent("spent$2.50 of $10.00");
     expect(card).toHaveTextContent("took12m");
-    expect(within(card).getAllByRole("button").map((b) => b.textContent)).toEqual(["Archive"]);
+    expect(acts(card)).toEqual(["Archive"]);
     expect(within(card).getByRole("button", { name: "Archive" })).toHaveClass("btn-secondary");
     await userEvent.click(within(card).getByRole("button", { name: "Archive" }));
     await waitFor(() => expect(posts(calls)).toHaveLength(1));
@@ -351,7 +377,7 @@ describe("StateCard", () => {
   ])("%s", (_name, over, title, labels) => {
     stubFetch();
     show(over);
-    expect(within(screen.getByRole("region", { name: title })).getAllByRole("button").map((b) => b.textContent)).toEqual(labels);
+    expect(acts(screen.getByRole("region", { name: title }))).toEqual(labels);
   });
 
   it.each([["running", null], ["needs_you", "gate"], ["needs_you", "question"], ["needs_you", "cap"], ["paused", null]])("renders nothing for %s (%s)", (display_status, kind) => {
