@@ -11,7 +11,7 @@ from typing import Annotated
 from fastapi import Request
 from pydantic import BaseModel, Field
 
-from kraft import storage, store
+from kraft import inplace, storage, store
 from kraft.api import api_router, item_ids
 from kraft.api.routes import lifecycle
 from kraft.config import git_read
@@ -59,7 +59,7 @@ def _preview_one(st, wid: str, row, size: int, members: list[Path]) -> dict:
     }
     if why is not None:
         return item
-    worktree = st.run_dirs.worktrees / wid
+    worktree = inplace.item_folder(st.run_dirs, row)
     if worktree.is_dir():
         # null when git cannot say, as when there is no worktree
         status = git_read(worktree, "status", "--porcelain")

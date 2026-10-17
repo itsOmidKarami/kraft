@@ -880,6 +880,22 @@ async def base_branch_or_422(repo: str, branch: str | None) -> str | None:
     return branch
 
 
+def _entry_or_none(st, repo: str) -> RepoEntry | None:
+    try:
+        return _connected(config_mod.load_repos(repos_path(st)), repo)
+    except config_mod.ConfigError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def in_place_or_422(st, repo: str, asked: bool | None, *, workspace: str | None) -> str | None:
+    """`executor.in_place_by` for an item filed in `repo`: the setting that
+    runs it in place, or None. A workspace item never runs in place."""
+    by = executor.in_place_by(_entry_or_none(st, repo), asked)
+    if by is not None and workspace is not None:
+        raise HTTPException(422, "a workspace item cannot run in place; file it with --worktree")
+    return by
+
+
 def workspace_target(
     st,
     repo: str,

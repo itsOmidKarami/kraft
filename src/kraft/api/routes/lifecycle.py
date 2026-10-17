@@ -19,6 +19,7 @@ from kraft import (
     escalate,
     events,
     executor,
+    inplace,
     item_paths,
     node_runs,
     start_queue,
@@ -492,6 +493,7 @@ async def abandon_work_item(wid: str, request: Request, body: AbandonWorkItem | 
     if row["status"] != WorkItemStatus.ABANDONED:
         await st.db.write(lambda c: store.abandon_work_item(c, wid, reason))
         await executor.settle_beads_on_abandon(row, deps.bd_cwd(), reason)
+    # Not item_folder: an in-place item's checkout is never removed here.
     worktree = st.run_dirs.worktrees / wid
     killed = await asyncio.to_thread(_kill_orphans_under, worktree)
     if killed:
@@ -558,6 +560,7 @@ async def _archive_one(app, row, by: str, *, reason: str | None = None) -> dict:
             return {"worktree_removed": False, "archived_by": current and current["archived_by"]}
         repo, branch = Path(row["repo"]), store.branch_for(row)
         members = _connected_members(st, row)
+        # Not item_folder: an in-place item's checkout is never removed here.
         worktree = st.run_dirs.worktrees / wid
         kept = await asyncio.to_thread(_branches_to_keep, repo, branch, members)
         extra = {"kept_branch": branch, "unpushed_commits": sum(kept.values())} if kept else {}
@@ -787,7 +790,7 @@ async def report_progress(wid: str, body: Progress, request: Request):
         raise HTTPException(
             409, "this run is rework after a gate rejection: it follows the note, not the plan"
         )
-    worktree = st.run_dirs.worktrees / wid
+    worktree = inplace.item_folder(st.run_dirs, row)
     tasks = progress_mod.tasks_for(row, worktree, st.run_dirs)
     if not tasks:
         raise HTTPException(400, "this work item's plan has no '## Task N' headings")
@@ -1154,6 +1157,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             start_index = next(
                 (i for i, n in enumerate(target_nodes) if n.id == rewind["target"]), None
             )
+        # Not item_folder: an in-place item's checkout is never rebased here.
         worktree = st.run_dirs.worktrees / wid
         conflict = None
         try:
@@ -1290,6 +1294,7 @@ async def refresh_base(
             request.app,
             wid,
             builtins_mod.refresh_worktree_base(
+                # Not item_folder: an in-place item's checkout is never rebased here.
                 st.run_dirs.worktrees / wid,
                 repo,
                 store.branch_for(row),
@@ -1318,7 +1323,7 @@ async def open_worktree(wid: str, body: OpenDocument, request: Request):
     """
     st = request.app.state
     row = deps._work_item_row(st, wid)
-    path = st.run_dirs.worktrees / wid
+    path = inplace.item_folder(st.run_dirs, row)
     if not path.is_dir():
         raise deps.worktree_missing(row)
     return search._launch_editor(request, body.editor, path)
@@ -1559,6 +1564,7 @@ async def _retry(wid: str, body: Retry, request: Request):
             if st.db.read(store.active_count) >= limit:
                 return await queued_answer(request, wid, "retry", asked, admitting(Verb.RETRY))
             raise HTTPException(409, "work item is not stopped")
+        # Not item_folder: an in-place item's checkout is never rebased here.
         worktree = st.run_dirs.worktrees / wid
         conflict = None
         try:
@@ -2163,7 +2169,7 @@ async def _close_cancelled_mr(st, wid: str, row) -> dict:
         return {"ok": False, "error": str(exc)}
     if state != "open":
         return {"ok": False, "error": "no open merge request"}
-    worktree = st.run_dirs.worktrees / wid
+    worktree = inplace.item_folder(st.run_dirs, row)
     mr_ref = forge_mod.MRRef(number=ref["number"], url=ref["url"], state="open")
     repo_entry = deps.launch(st, row["repo"]).repo_entry
     backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
@@ -2208,7 +2214,7 @@ async def reopen_mr(wid: str, request: Request):
         raise HTTPException(409, "work item has no merge request to reopen")
     # Before the forge: `_retry` refuses a legacy row, after the reopen.
     chain_or_409(row)
-    worktree = st.run_dirs.worktrees / wid
+    worktree = inplace.item_folder(st.run_dirs, row)
     mr_ref = forge_mod.MRRef(number=ref["number"], url=ref["url"], state="closed")
     repo_entry = deps.launch(st, row["repo"]).repo_entry
     try:
@@ -2385,7 +2391,7 @@ async def set_mr_labels(wid: str, body: MrLabels, request: Request):
     """
     st = request.app.state
     row = deps._work_item_row(st, wid)
-    worktree = st.run_dirs.worktrees / wid
+    worktree = inplace.item_folder(st.run_dirs, row)
     if not worktree.is_dir():
         raise deps.worktree_missing(row)
     labels = tuple(label.strip() for label in body.labels if label.strip())

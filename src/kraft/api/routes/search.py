@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from kraft import analytics as analytics_mod
 from kraft import config as config_mod
+from kraft import inplace
 from kraft.adapters import beads as beads_mod
 from kraft.api import api_router, deps, perimeter
 
@@ -234,7 +235,11 @@ async def open_document(doc_id: str, body: OpenDocument, request: Request):
         # (`Indexer._worktree_file`), so there is no separate escape check here.
         path = st.indexer.resolve_attachment_path(doc_id)
         _, wid, kind = doc_id.split(":", 2)
-        if path is None and not (st.run_dirs.worktrees / wid).exists():
+        row = st.db.read(
+            lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+        )
+        folder = inplace.item_folder(st.run_dirs, row) if row else st.run_dirs.worktrees / wid
+        if path is None and not folder.exists():
             # Before the item starts, an editor saving here would create the
             # worktree's directory as a plain one (R11F-02 review).
             raise HTTPException(

@@ -13,7 +13,7 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, field_validator, model_validator
 
 from kraft import config as config_mod
-from kraft import executor, review_reply, store
+from kraft import executor, inplace, review_reply, store
 from kraft import review as review_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import board, lifecycle
@@ -183,7 +183,7 @@ async def create_thread(wid: str, body: ThreadIn, request: Request):
     row = deps._live_work_item_row(st, wid)
     gate = board._pending_gate(st, wid)
     anchor = body.anchor_sha or config_mod.git_read(
-        st.run_dirs.worktrees / wid, "rev-parse", "HEAD"
+        inplace.item_folder(st.run_dirs, row), "rev-parse", "HEAD"
     )
     if not anchor:
         raise HTTPException(409, "this work item has no commit to anchor a thread to")
@@ -216,7 +216,7 @@ async def _quote(st, row, body: ThreadIn, anchor: str) -> str | None:
     and never host git in a sandboxed worktree a live session can write."""
     if body.start_line is None or not row["base_ref"]:
         return None
-    worktree = st.run_dirs.worktrees / row["id"]
+    worktree = inplace.item_folder(st.run_dirs, row)
     if not worktree.is_dir():
         return None
     try:
@@ -379,7 +379,7 @@ async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
             409,
             "nothing ahead in this chain will read these threads; use `kraft item retry --steer`",
         )
-    head = config_mod.git_read(st.run_dirs.worktrees / wid, "rev-parse", "HEAD")
+    head = config_mod.git_read(inplace.item_folder(st.run_dirs, row), "rev-parse", "HEAD")
     if not head:
         # A review's `head_sha` is what `last_review` compares from; never ''.
         raise HTTPException(409, "git could not read this work item's HEAD; nothing was recorded")
@@ -506,7 +506,7 @@ async def _request_changes_now(st, request, row, body, head, base):
         runs = st.db.read(lambda c: store.node_run_rows(c, wid))
         try:
             idx, why = review_mod.changes_target(
-                st.run_dirs.worktrees / wid, nodes, current, threads, runs
+                inplace.item_folder(st.run_dirs, row), nodes, current, threads, runs
             )
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc

@@ -331,6 +331,11 @@
           ],
           "default": null,
           "title": "Test Scopes"
+        },
+        "worktrees": {
+          "default": true,
+          "title": "Worktrees",
+          "type": "boolean"
         }
       },
       "required": [

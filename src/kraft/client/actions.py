@@ -23,6 +23,7 @@ async def create_work_item(
     depends_on: list[str] | None = None,
     policy: dict | None = None,
     base_branch: str | None = None,
+    in_place: bool | None = None,
     skip_nodes: list[str] | None = None,
     budget_usd: float | None | EllipsisType = ...,
     node_overrides: dict | None = None,
@@ -51,7 +52,9 @@ async def create_work_item(
     so it hands over no directory either.
 
     `base_branch` is the branch the work starts from and its merge request
-    targets; unset, the repo's default branch (Kraft-v9gbi).
+    targets; unset, the repo's default branch (Kraft-v9gbi). `in_place`
+    runs the item in the repo's own checkout, or (False) in a worktree;
+    unset, the repo's `worktrees` decides.
 
     `skip_nodes`, `budget_usd` and `node_overrides` are POST /work-items' own
     intake fields (Kraft-s7c04.33), validated there. `budget_usd` keeps the
@@ -81,6 +84,7 @@ async def create_work_item(
             **({"depends_on": depends_on} if depends_on else {}),
             **({"policy": policy} if policy else {}),
             **({"base_branch": base_branch} if base_branch else {}),
+            **({"in_place": in_place} if in_place is not None else {}),
             **({"skip_nodes": skip_nodes} if skip_nodes else {}),
             **({"budget_usd": budget_usd} if budget_usd is not ... else {}),
             **({"node_overrides": node_overrides} if node_overrides else {}),
@@ -148,6 +152,7 @@ async def ensure_repo(
     test_command: str | None = None,
     setup_command: str | None = None,
     enabled: bool | None = None,
+    worktrees: bool | None = None,
 ) -> dict:
     """Register a repo with Kraft if it is not already connected.
 
@@ -158,7 +163,12 @@ async def ensure_repo(
     `enabled` None lets the server decide (enabled when it has a test).
     """
     path = context.absolute_path(path or os.getcwd())
-    fields = {"test_command": test_command, "setup_command": setup_command, "enabled": enabled}
+    fields = {
+        "test_command": test_command,
+        "setup_command": setup_command,
+        "enabled": enabled,
+        "worktrees": worktrees,
+    }
     payload = {"path": path, **{k: v for k, v in fields.items() if v is not None}}
     try:
         status, body = await transport._post("/repos", payload, timeout=CONNECT_TIMEOUT_S)

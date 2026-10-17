@@ -177,6 +177,33 @@ def test_create_after_sends_what_the_item_comes_after(tmp_path, monkeypatch):
     assert sent["depends_on"] == ["a1", "b2"]
 
 
+@pytest.mark.parametrize(
+    ("flag", "sent_in_place"),
+    [([], "unsent"), (["--in-place"], True), (["--worktree"], False)],
+    ids=["the-repos-setting", "in-place", "worktree"],
+)
+def test_create_sends_whether_the_item_runs_in_place(tmp_path, monkeypatch, flag, sent_in_place):
+    """Unsent, the repo's `worktrees` decides; `--worktree` is sent, not
+    dropped as falsy, since it overrides a repo that runs in place."""
+    from kraft.client import transport
+
+    sent = {}
+
+    async def post(path, payload=None, **kw):
+        sent.update(payload)
+        return 201, {"id": "w1", "status": "paused"}
+
+    monkeypatch.setattr(transport, "_post", post)
+    cli.main(["item", "create", "t", "--repo", str(tmp_path), *flag])
+    assert sent.get("in_place", "unsent") == sent_in_place
+
+
+def test_create_takes_in_place_or_worktree_not_both(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["item", "create", "t", "--repo", "/r", "--in-place", "--worktree"])
+    assert "not allowed with argument" in capsys.readouterr().err
+
+
 def test_unblock_names_the_dependency_it_drops(monkeypatch, capsys):
     from kraft.client import transport
 

@@ -6,7 +6,7 @@ from datetime import datetime
 
 from fastapi import HTTPException, Request
 
-from kraft import caps, escalate, events, executor, storage, store
+from kraft import caps, escalate, events, executor, inplace, storage, store
 from kraft import config as config_mod
 from kraft import policy as policy_mod
 from kraft import progress as progress_mod
@@ -493,6 +493,7 @@ async def list_work_items(request: Request):
         )
 
     def _item(r) -> dict:
+        folder = inplace.folder_for(st.run_dirs, r, parsed[r["id"]])
         mr_ref = _pick_mr_ref(
             r["id"] in root_mr_by_item,
             root_mr_by_item.get(r["id"]),
@@ -518,7 +519,7 @@ async def list_work_items(request: Request):
             "retry_at": r["retry_at"],
             "archived_at": r["archived_at"],
             "archived_by": r["archived_by"],
-            "progress": _board_progress(st, r),
+            "progress": _board_progress(st, r, folder),
             "fallback": _ran_on_fallback(latest, r["id"]),
             "display_status": display_status(
                 r,
@@ -538,7 +539,7 @@ async def list_work_items(request: Request):
             "actions": _list_actions(r, mr_ref, parsed[r["id"]]),
             # One `is_dir` per row: the VS Code board offers Open Worktree only
             # while the directory is there, without a detail fetch per row.
-            "worktree_exists": (st.run_dirs.worktrees / r["id"]).is_dir(),
+            "worktree_exists": folder.is_dir(),
         }
 
     # Each row's chain parsed once, for the stage bar and `actions` both.
@@ -598,9 +599,9 @@ def _detail_fallback(st, wid: str) -> dict | None:
     return _ran_on_fallback({(wid, r["type"]): json.loads(r["payload"]) for r in rows}, wid)
 
 
-def _board_progress(st, row) -> dict | None:
+def _board_progress(st, row, folder) -> dict | None:
     """The board's share of `progress`: position and title, not the task list."""
-    p = progress_mod.for_item(st.db, row, st.run_dirs.worktrees / row["id"], st.run_dirs)
+    p = progress_mod.for_item(st.db, row, folder, st.run_dirs)
     return {"current": p.current, "total": p.total, "title": p.title} if p else None
 
 
@@ -755,7 +756,7 @@ async def _mr_state(st, row) -> str | None:
     close-on-cancel check: the recorded ref is only `{number, url}`, so this is
     one `find_mr` call. None when the forge no longer knows it. Raises
     `ForgeError`; the preview catches it, the close reports it."""
-    worktree = st.run_dirs.worktrees / row["id"]
+    worktree = inplace.item_folder(st.run_dirs, row)
     repo_entry = deps.launch(st, row["repo"]).repo_entry
     backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
     found = await forge_mod.resolve(backend).find_mr(repo=worktree, branch=store.branch_for(row))
@@ -818,7 +819,7 @@ async def cancel_preview(wid: str, request: Request):
         "running": _running_session(st, wid),
         "kept": {
             "branch": store.branch_for(row),
-            "worktree": str(st.run_dirs.worktrees / wid),
+            "worktree": str(inplace.item_folder(st.run_dirs, row)),
             "findings": len(_deferred_findings(st, wid)),
             "threads": _open_thread_count(st, wid),
         },
@@ -1155,7 +1156,7 @@ async def get_fix_target(
         runs = st.db.read(lambda c: store.node_run_rows(c, wid))
         try:
             idx, why = review_mod.changes_target(
-                st.run_dirs.worktrees / wid, nodes, current, threads, runs
+                inplace.item_folder(st.run_dirs, row), nodes, current, threads, runs
             )
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -1253,7 +1254,8 @@ async def get_work_item(wid: str, request: Request):
     passes = st.db.read(lambda c: store.session_passes(c, wid, [n["id"] for n in chain["nodes"]]))
     payload = store.work_item_payload(row)
     node_overrides = payload["node_overrides"]
-    progress = progress_mod.for_detail(st.db, row, st.run_dirs.worktrees / wid, st.run_dirs)
+    folder = inplace.item_folder(st.run_dirs, row)
+    progress = progress_mod.for_detail(st.db, row, folder, st.run_dirs)
     mr_ref = _mr_ref(st, wid)
     status = row["status"]
     # What it still comes after: unblock, and resume or retry past an abandoned one.
@@ -1326,14 +1328,14 @@ async def get_work_item(wid: str, request: Request):
         # scanning every session/event itself.
         "escalation_threads": st.db.read(lambda c: store.escalation_threads(c, wid)),
         # local-only: the checkout the agents are editing, for "Open worktree"
-        "worktree_path": str(st.run_dirs.worktrees / wid),
+        "worktree_path": str(folder),
         # Whether that directory is there: a reclaimed or deleted worktree
         # leaves the path above pointing at nothing.
-        "worktree_exists": (st.run_dirs.worktrees / wid).is_dir(),
+        "worktree_exists": folder.is_dir(),
         # What the *diff on screen* is, so the gate can tell a measurement taken
         # on this commit from one taken three commits ago (Kraft-lu2).
         # `git_read` returns None for a worktree that does not exist yet.
-        "head_sha": config_mod.git_read(st.run_dirs.worktrees / wid, "rev-parse", "HEAD"),
+        "head_sha": config_mod.git_read(folder, "rev-parse", "HEAD"),
         # The gate actually waiting on a person. Inferring it client-side from
         # "the node has a gate_after and its sessions are done" cannot see a
         # rejection, and offers Approve on a gate the API will 409 (Kraft).

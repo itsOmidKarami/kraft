@@ -11,7 +11,7 @@ from pathlib import Path
 
 import psutil
 
-from kraft import caps, events, ids, item_paths, store
+from kraft import caps, events, ids, inplace, item_paths, store
 from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import usage as _usage
@@ -447,7 +447,7 @@ async def _sweep_after(db, run_dirs, row, launch_factory) -> None:
         return
     if task.task.scope is TaskScope.EACH_REPOSITORY and snapshot.target.kind == "workspace":
         return
-    worktree = run_dirs.worktrees / item["id"]
+    worktree = inplace.item_folder(run_dirs, item)
     if not worktree.is_dir():
         return
     try:

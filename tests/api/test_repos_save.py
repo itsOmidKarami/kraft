@@ -42,3 +42,14 @@ def test_a_save_keeps_the_files_comments_and_quoting(client, templates_dir, tmp_
         assert "# the other one\n" in text and "setup_command: uv sync" in text
     if verb == "delete":
         assert [e["path"] for e in yaml.safe_load(text)["repos"]] == ["/r"]
+
+
+def test_a_save_turning_a_sandboxed_repo_in_place_is_refused(client, templates_dir):
+    sandbox = {"kind": "docker", "image": "kraft-worker:node"}
+    (templates_dir / "repos.yaml").write_text(
+        yaml.safe_dump({"repos": [{"path": "/r", "sandbox": sandbox}]})
+    )
+    reply = client.patch("/api/repos?path=/r", json={"worktrees": False})
+    assert reply.status_code == 422, reply.text
+    assert "'worktrees: false'" in reply.json()["detail"]
+    assert "drop 'sandbox'" in reply.json()["detail"]

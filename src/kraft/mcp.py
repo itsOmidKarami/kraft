@@ -138,6 +138,7 @@ def build() -> MCPServer:
         depends_on: list[str] | None = None,
         policy: dict | None = None,
         base_branch: str | None = None,
+        in_place: bool | None = None,
         skip_nodes: list[str] | None = None,
         budget_usd: float | None = None,
         node_overrides: dict | None = None,
@@ -178,6 +179,10 @@ def build() -> MCPServer:
         targets -- a release branch, say. Unset, it is the repo's default
         branch. It must already exist on the repo's origin.
 
+        `in_place` runs the item in the repo's own checkout instead of a
+        worktree of its own (False: a worktree); unset, the repo's `worktrees`
+        setting decides. Leave it out unless a human asked for one.
+
         `skip_nodes` drops named nodes from the item's chain; `budget_usd` caps
         its spend in dollars (unset, the policy's cap applies -- this door can
         set a cap but not lift one); `node_overrides` is `{node_id: {field:
@@ -195,6 +200,7 @@ def build() -> MCPServer:
             depends_on=depends_on,
             policy=policy,
             base_branch=base_branch,
+            in_place=in_place,
             skip_nodes=skip_nodes,
             node_overrides=node_overrides,
             **({"budget_usd": budget_usd} if budget_usd is not None else {}),

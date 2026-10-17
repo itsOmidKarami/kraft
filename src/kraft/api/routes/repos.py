@@ -59,6 +59,7 @@ class RepoBody(BaseModel):
     models: dict[str, str] | None = None
     deny_tools: list[str] | None = None
     steering: list[str] | None = None
+    worktrees: bool | None = None
 
 
 class ProbeBody(BaseModel):
@@ -563,6 +564,9 @@ async def _add_repo(body: RepoBody, st) -> dict:
         # through the same file and must NOT get this value.
         "managed": True,
     }
+    if body.worktrees is not None:
+        # Only when given: the answer is read back as a `RepoEntry`, where None is no bool.
+        entry["worktrees"] = body.worktrees
     had = {id(r) for r in repos}
     repos.append(entry)
     children = _auto_connect_children(repos, entry, child_probes)
@@ -620,6 +624,7 @@ class RepoPatch(BaseModel):
     local_files: list[str] | None = None
     intent_dir: str | None = None
     library_auto_update: bool | None = None
+    worktrees: bool | None = None
 
 
 def _has_tests(entry: dict) -> bool:

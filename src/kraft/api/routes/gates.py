@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
-from kraft import events, executor, store
+from kraft import events, executor, inplace, store
 from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
 from kraft.api.routes.lifecycle import (
@@ -262,7 +262,7 @@ async def _refresh_base_at_gate(request, wid: str, row, gate: str) -> None:
             )
         )
     elif new_base and new_base != row["base_ref"]:
-        worktree = st.run_dirs.worktrees / wid
+        worktree = inplace.item_folder(st.run_dirs, row)
         head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
         await st.db.write(
             lambda c: events.append(
@@ -348,6 +348,7 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
     ):
         await st.db.write(lambda c: store.approve_gate(c, wid, gate, by=_decided_by(request)))
         start = board._gate_node_index(nodes, gate) + 1
+        # Not item_folder: an in-place item's checkout is never rebased here.
         if _before_any_push(nodes, gate) and (st.run_dirs.worktrees / wid).is_dir():
             await _refresh_base_at_gate(request, wid, row, gate)
         try:

@@ -317,6 +317,9 @@ class RepoEntry(BaseModel):
     #: Where this repository's tasks run (`kraft.worker.backends`). `false` is
     #: an explicit "none", kept as written so a re-save round-trips.
     sandbox: SandboxPolicy | Literal[False] | None = None
+    #: `false`: this repository's items run in place, in its own checkout,
+    #: rather than each in a git worktree of its own. An item may say otherwise.
+    worktrees: bool = True
     #: The repository policy layer (`repository-policy-cannot-relax-instance-
     #: safety`): applied after the instance policy and before everything a
     #: work item or chain adds, and allowed only to tighten what it inherits.
@@ -416,6 +419,18 @@ class RepoEntry(BaseModel):
         if self.sandbox and self.policy is not None and self.policy.sandbox is not None:
             raise ValueError(
                 f"repos.yaml: {self.path}: set 'sandbox' or 'policy.sandbox', not both"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _in_place_is_never_sandboxed(self) -> RepoEntry:
+        """Refused, never resolved: a sandbox keeps the agent's files off the
+        host until a person reviews them, and in place they land in the very
+        folder the person works in."""
+        if not self.worktrees and self.effective_sandbox:
+            raise ValueError(
+                f"repos.yaml: {self.path}: 'worktrees: false' runs items in the checkout "
+                "itself, which cannot be sandboxed; drop 'sandbox' or set 'worktrees: true'"
             )
         return self
 

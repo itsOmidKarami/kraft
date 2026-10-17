@@ -248,9 +248,20 @@ async def test_a_trigger_naming_an_unconnected_repo_is_skipped_not_the_whole_tic
     )
 
 
-async def test_a_triggered_item_is_bound_by_its_repositorys_policy(tmp_path, stub_app):
+@pytest.mark.parametrize(
+    ("fields", "frozen"),
+    [
+        ({"deny_tools": ["WebFetch"]}, lambda m: m.policy.deny_tools == ("WebFetch",)),
+        ({"worktrees": False}, lambda m: m.target.in_place),
+    ],
+    ids=["deny-tools", "in-place"],
+)
+async def test_a_triggered_item_is_bound_by_its_repositorys_policy(
+    tmp_path, stub_app, fields, frozen
+):
     """`repository-policy-cannot-relax-instance-safety` at the cron door: the
-    repository layer is frozen into what the trigger files."""
+    repository layer is frozen into what the trigger files, and so is its
+    `worktrees` (`in-place-is-frozen-at-intake`)."""
     import yaml
 
     from kraft import store
@@ -263,7 +274,7 @@ async def test_a_triggered_item_is_bound_by_its_repositorys_policy(tmp_path, stu
     )
     app = stub_app(**_state(tmp_path, policy_obj=pol))
     (tmp_path / "templates" / "repos.yaml").write_text(
-        yaml.safe_dump({"repos": [{"path": str(repo), "deny_tools": ["WebFetch"]}]})
+        yaml.safe_dump({"repos": [{"path": str(repo), **fields}]})
     )
 
     (wid,) = await triggers.tick(app, now=datetime(2026, 9, 10, 14, 30, tzinfo=UTC))
@@ -271,7 +282,7 @@ async def test_a_triggered_item_is_bound_by_its_repositorys_policy(tmp_path, stu
     row = app.state.db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone()
     )
-    assert store.materialized_chain_of(row).policy.deny_tools == ("WebFetch",)
+    assert frozen(store.materialized_chain_of(row))
 
 
 @pytest.fixture

@@ -82,7 +82,7 @@ export function repo(path: string, i: number, long = false) {
     allow_cross_repo: i === 2,
     // The rest of a `repos.yaml` entry, at config.RepoEntry's defaults, with a setup command so none warns.
     setup_command: "uv sync", managed: true, ci_checks: true, automated_review: null, sandbox: null, policy: null, intent_dir: null,
-    areas: {}, env: {}, env_passthrough: [], local_files: [], library_auto_update: false,
+    areas: {}, env: {}, env_passthrough: [], local_files: [], library_auto_update: false, worktrees: true,
     submodules: long && i === 0
       ? [
           { path: "vendor/kraft-lite", enabled: true, test_command: "pytest -q", chain_override: null },

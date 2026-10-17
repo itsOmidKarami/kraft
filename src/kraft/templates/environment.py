@@ -229,6 +229,11 @@ class WorkItemTarget(BaseModel):
     #: every validation -- a snapshot rehydrated or a target built by any door
     #: is checked, not only intake's (Kraft-j4adz).
     base_branch: BranchName | None = None
+    #: Whether the item runs in its repository's own checkout rather than a
+    #: worktree of its own, frozen at intake (`in-place-is-frozen-at-intake`):
+    #: the item's own choice, else its repository's `worktrees`. A snapshot
+    #: from before it existed has no key, and reads as a worktree item.
+    in_place: bool = False
 
     @model_validator(mode="after")
     def _kind_owns_its_fields(self) -> WorkItemTarget:
@@ -247,6 +252,8 @@ class WorkItemTarget(BaseModel):
                 raise ValueError("a workspace target must name a workspace")
             if self.repository is not None:
                 raise ValueError("a workspace target has no repository")
+            if self.in_place:
+                raise ValueError("a workspace target cannot run in place")
             if set(self.mounts) != set(self.members):
                 raise ValueError(
                     f"a workspace target mounts exactly its selected members: selected "
@@ -261,9 +268,13 @@ class WorkItemTarget(BaseModel):
         return ((self.root,) if self.root else ()) + members
 
     @classmethod
-    def for_repository(cls, repository: str, *, base_branch: str | None = None) -> WorkItemTarget:
+    def for_repository(
+        cls, repository: str, *, base_branch: str | None = None, in_place: bool = False
+    ) -> WorkItemTarget:
         """A single-repository target, by the repository's id."""
-        return cls(kind="repository", repository=repository, base_branch=base_branch)
+        return cls(
+            kind="repository", repository=repository, base_branch=base_branch, in_place=in_place
+        )
 
     @classmethod
     def from_selection(

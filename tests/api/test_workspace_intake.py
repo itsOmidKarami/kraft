@@ -55,21 +55,35 @@ def test_a_workspace_intake_freezes_its_selected_members_and_pointer_policy(
         "include_root": True,
         "root_pointer_policy": expected,
         "base_branch": None,
+        "in_place": False,
     }
     assert body["repos"] == []
 
 
 @pytest.mark.parametrize(
-    ("body", "match"),
+    ("body", "root_in_place", "match"),
     [
-        ({"workspace": "nope", "members": ["a"]}, "no workspace 'nope'"),
-        ({"workspace": "ws", "members": ["b"]}, "does not mount"),
-        ({"members": ["a"]}, "names no workspace"),
+        ({"workspace": "nope", "members": ["a"]}, False, "no workspace 'nope'"),
+        ({"workspace": "ws", "members": ["b"]}, False, "does not mount"),
+        ({"members": ["a"]}, False, "names no workspace"),
+        ({"workspace": "ws", "members": ["a"], "in_place": True}, False, "cannot run in place"),
+        ({"workspace": "ws", "members": ["a"]}, True, "file it with --worktree"),
     ],
-    ids=["an-undeclared-workspace", "a-member-it-does-not-mount", "members-without-a-workspace"],
+    ids=[
+        "an-undeclared-workspace",
+        "a-member-it-does-not-mount",
+        "members-without-a-workspace",
+        "in-place",
+        "in-an-in-place-root",
+    ],
 )
-def test_a_workspace_selection_that_cannot_assemble_is_a_422(client, tmp_path, body, match):
+def test_a_workspace_selection_that_cannot_assemble_is_a_422(
+    client, tmp_path, body, root_in_place, match
+):
     root = _workspace(client, tmp_path)
+    if root_in_place:
+        saved = client.patch("/api/repos", params={"path": str(root)}, json={"worktrees": False})
+        assert saved.status_code == 200, saved.text
     r = client.post(
         "/api/work-items", json={"title": "t", "repo": str(root), "autostart": False, **body}
     )

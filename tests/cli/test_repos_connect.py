@@ -235,6 +235,19 @@ def test_connect_says_the_commands_it_was_given_not_the_probes_advice(app, capsy
 
 
 @pytest.mark.parametrize(
+    "before",
+    [pytest.param([], id="a-first-connect"), pytest.param(["--no-tests"], id="connected-already")],
+)
+def test_in_place_saves_worktrees_off(app, capsys, repo, before):
+    """A reconnect fills only what is undecided (`_gains`), so `--in-place`
+    on a connected repo is its own save."""
+    if before:
+        cli.main(["repo", "connect", str(repo), *before, "-y"])
+    cli.main(["repo", "connect", str(repo), "--in-place", "--no-tests", "-y"])
+    assert asyncio.run(client.repos())[0]["worktrees"] is False
+
+
+@pytest.mark.parametrize(
     "flags, terminal, typed, outcome, says",
     [
         pytest.param(

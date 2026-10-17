@@ -21,7 +21,7 @@ import asyncio
 import json
 import logging
 
-from kraft import caps, events, executor, store
+from kraft import caps, events, executor, inplace, store
 from kraft import overrides as _overrides
 from kraft.adapters import agent as _agent
 from kraft.executor import read_only
@@ -122,7 +122,7 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
-    worktree = run_dirs.worktrees / work_item_id
+    worktree = inplace.item_folder(run_dirs, row)
     # The `comment` review that launched this, whose summary is part of what was asked.
     review = db.read(lambda c: store.last_review(c, work_item_id))
     summary = review["summary"] if review else None
