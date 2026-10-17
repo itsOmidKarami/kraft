@@ -21,7 +21,7 @@ from pathlib import Path
 from kraft import events, item_paths, store
 from kraft.adapters.forge import git
 from kraft.config import ConfigError, git_read
-from kraft.vocab import ChainEvent
+from kraft.vocab import ChainEvent, StopKind
 
 is_in_place = store.is_in_place
 
@@ -71,7 +71,7 @@ async def prepare(db, run_dirs, row, *, base: str) -> Path:
         return folder
     # Before the first take commits them: a missing stored copy fails the
     # item here, as `ensure_worktree` does, not as a failed task.
-    builtins.stored_attachments(run_dirs, row["id"], _attachments_of(row), row["repo"])
+    builtins.stored_attachments(run_dirs, row["id"], attachments_of(row), row["repo"])
     branch = store.branch_for(row)
     if _ref(folder, branch) is None:
         done = subprocess.run(
@@ -341,7 +341,7 @@ def _attach(folder: Path, attachments: list[dict], wid: str, base: str) -> None:
     )
 
 
-def _attachments_of(row) -> list[dict]:
+def attachments_of(row) -> list[dict]:
     from kraft.executor import entry
 
     return entry.attachments_of(row)
@@ -516,3 +516,79 @@ def _hashes(checkout: Path, paths: list[str]) -> dict[str, str]:
             for p in chunk:
                 out.update(_hashes(checkout, [p]))
     return out
+
+
+async def mark_task(db, run_dirs, row, folder: Path, node_id: str, task_path: str) -> None:
+    """Before an in-place agent task: what `check_task` compares against,
+    kept in the item's folder so a restart's reattach reads the same mark."""
+    wid = row["id"]
+    m = await asyncio.to_thread(mark, folder, store.branch_for(row), leftovers(run_dirs, wid))
+    save_mark(run_dirs, wid, task_path, m)
+    dirty = sorted(m.dirty)
+    payload = {"node_id": node_id, "task": task_path, "tip": m.tip, "started_at": m.started_at}
+    payload |= {"dirty_count": len(dirty), "dirty": dirty[:SAMPLE]}
+    await db.write(lambda c: events.append(c, wid, ChainEvent.TASK_MARKED, payload))
+
+
+async def check_task(db, run_dirs, row, folder: Path, node_id: str, task_path: str):
+    """After an in-place agent task, in place of the sweep: record what it
+    left uncommitted, and stop the item as `checkout` when the checkout moved
+    or the task committed a path the person had changed. Never a repair: no
+    switch back, no commit, no undo. Answers the stop's reason, or None."""
+    wid = row["id"]
+    m = load_mark(run_dirs, wid, task_path)
+    if m is None:  # launched before marks were recorded
+        return None
+    branch = store.branch_for(row)
+    stray: list[str] = []
+    try:
+        found = await asyncio.to_thread(check, folder, branch, m)
+    except CheckoutRefused as exc:
+        reason = str(exc)
+    else:
+        stray = found.stray_commits
+        if found.leftovers:
+            save_leftovers(run_dirs, wid, found.leftovers)
+            left = sorted(found.leftovers)
+            payload = {"node_id": node_id, "task": task_path, "count": len(left)}
+            payload["paths"] = left[:SAMPLE]
+            await db.write(lambda c: events.append(c, wid, ChainEvent.LEFT_UNCOMMITTED, payload))
+        reasons = []
+        made = (
+            f"commits made or moved onto during it that are not on {branch}: " + ", ".join(stray)
+            if stray
+            else ""
+        )
+        if found.moved_to:
+            reasons.append(
+                f"the checkout {folder} moved to {found.moved_to} during the run of "
+                f"{task_path}{'; ' + made if made else ''}. Kraft did not switch it back, "
+                f"nor move those commits: resume once {folder} may go back to {branch}"
+            )
+        elif stray:
+            # Switched away, committed and switched back: the work may be elsewhere.
+            reasons.append(
+                f"{task_path} left {made}. Kraft did not move them: check where that work "
+                "belongs, then resume"
+            )
+        if found.overlap:
+            reasons.append(
+                f"the agent committed {', '.join(found.overlap)}, which already had uncommitted "
+                "changes before it started; check that the commit holds only the item's work, "
+                "then resume"
+            )
+        reason = "; ".join(reasons)
+    if not reason:
+        return None
+    last = db.read(lambda c: store.latest_session_per_task(c, wid, node_id, [task_path]))
+    # Resume goes on past the task, unless its work may be on another branch.
+    facts = {"task": task_path, "rerun": bool(stray)}
+    if last:
+        facts |= {"session": last[0]["id"], "round": last[0]["round"]}
+    # Never `stuck`: an escalation would take the checkout straight back.
+    await db.write(
+        lambda c: store.mark_needs_human(
+            c, wid, node_id, reason, kind=StopKind.CHECKOUT, facts=facts
+        )
+    )
+    return reason

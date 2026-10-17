@@ -15,6 +15,10 @@ HEAD is part of the record because the straggler sweep commits whatever an
 agent left behind before the step settles, so a write shows up as a commit.
 A git that cannot answer is a change too: unverified is not read-only.
 
+An in-place item's checkout is a person's own, and their edits mid-step are
+not the step's: there only HEAD is compared, so a commit still violates and an
+uncommitted write goes to the after-task leftovers event instead.
+
 On a sandboxed item no host git runs while a session is live or once the
 worktree holds a repository Kraft did not create (`stops.refuse_planted_repos`,
 `refuse_live_sandboxed_session`): before the step that skips the check, and
@@ -52,7 +56,11 @@ def _guard(db, row, launch: LaunchContext | None, worktree: Path) -> str | None:
     return None
 
 
-def _read(cwd: Path) -> tuple[str | None, str | None, str | None]:
+def _read(cwd: Path, *, in_place: bool = False) -> tuple[str | None, str | None, str | None]:
+    if in_place:
+        # A person's own checkout: their edits mid-step are not the step's
+        # writes, so HEAD alone is compared (the leftovers event names the rest).
+        return (_config.git_read(cwd, "rev-parse", "HEAD"), "", "")
     unentered = _sandbox.SUBMODULES_UNENTERED
     diff = _config.git_read(cwd, "diff", unentered, "HEAD", strip=False)
     return (
@@ -67,7 +75,11 @@ def snapshot(db, row, launch: LaunchContext | None, worktree) -> Snapshot | None
     tasks' own dispatch then stops on the same guard)."""
     if worktree is None or _guard(db, row, launch, Path(worktree)) is not None:
         return None
-    return {rel: _read(Path(worktree) / rel) for rel in ["", *_builtins.item_mounts(row)]}
+    placed = store.is_in_place(row)
+    return {
+        rel: _read(Path(worktree) / rel, in_place=placed)
+        for rel in ["", *_builtins.item_mounts(row)]
+    }
 
 
 def _entries(status: str) -> set[tuple[str, str]]:
@@ -107,7 +119,8 @@ def changed(db, row, launch: LaunchContext | None, worktree, before: Snapshot) -
     files = []
     for rel, was in before.items():
         cwd = Path(worktree) / rel
-        files += [f"{rel}/{f}" if rel else f for f in _changed_in(cwd, was, _read(cwd))]
+        now = _read(cwd, in_place=store.is_in_place(row))
+        files += [f"{rel}/{f}" if rel else f for f in _changed_in(cwd, was, now)]
     return files
 
 

@@ -44,3 +44,11 @@ def run(monkeypatch):
         return dict(seen)
 
     return go
+
+
+@pytest.fixture
+def in_place(monkeypatch):
+    """`run` overrides for an item that runs in place: its row, read off the
+    launch's database, is the one row the launch reads."""
+    monkeypatch.setattr("kraft.store.is_in_place", lambda row: True)
+    return {"db": SimpleNamespace(read=lambda fn: {"id": "w1", "branch": None})}

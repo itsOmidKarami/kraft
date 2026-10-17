@@ -44,7 +44,7 @@ async def reconcile_current_node(
         if task is not None:
             await task
     # A re-adopted in-place task's check may have stopped the item
-    # (`dispatch._check_in_place`): the stop stands, the node is not done.
+    # (`inplace.check_task`): the stop stands, the node is not done.
     stopped = db.read(
         lambda c: c.execute(
             "SELECT status, stop_kind FROM work_items WHERE id = ?", (work_item_id,)

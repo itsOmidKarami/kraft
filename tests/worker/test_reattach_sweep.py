@@ -83,7 +83,7 @@ async def test_a_reattached_in_place_task_is_checked_not_swept(
     await inplace.take(database, run_dirs, it.row(), attachments=[])
     write(repo, "calc.py", "# the person's edit\n")
     path = "implementation.main.implement"
-    await dispatch.mark_in_place(database, run_dirs, it.row(), repo, "implementation", path)
+    await inplace.mark_task(database, run_dirs, it.row(), repo, "implementation", path)
     write(repo, "work.txt", "the agent's, never committed\n")
     if what == "overlap":
         _agent_commits(repo, "commit", "-q", "-m", "agent", "--", "calc.py")
