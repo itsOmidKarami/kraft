@@ -460,7 +460,8 @@ def named_beads(row, run_dirs, bead_id: str | None = None) -> list[str]:
     would close."""
     worktree = inplace.item_folder(run_dirs, row)
     base = row["base_ref"]
-    log = git_read(worktree, "log", "--format=%B%x00", f"{base}..HEAD") if base else None
+    head = inplace.head_ref(row)
+    log = git_read(worktree, "log", "--format=%B%x00", f"{base}..{head}") if base else None
     own = bead_id or row["bead_id"]
     ids = [b for b in (own, *_implements_beads(row)) if b]
     return list(dict.fromkeys([*ids, *_trailer_beads(log.split("\0") if log else [])]))
@@ -504,7 +505,9 @@ async def close_beads(db, row, bd_cwd: str | None, run_dirs, *, by_hand: bool = 
     # `base_ref`, reads as no change at all.
     base = row["base_ref"]
     worktree = inplace.item_folder(run_dirs, row)
-    changed = git_read(worktree, "diff", "--name-only", base, "HEAD") if base else None
+    changed = (
+        git_read(worktree, "diff", "--name-only", base, inplace.head_ref(row)) if base else None
+    )
     ids = named_beads(row, run_dirs, bead_id)
     if not by_hand and not _carries_a_change(db, row, changed):
         if ids:

@@ -203,6 +203,24 @@ async def _a_merged_submodule(database, wid, worktree):
     await database.write(add)
 
 
+async def _in_place_the_persons_branch_carries_a_fixes_trailer(database, wid, worktree):
+    # In place the checkout is the person's: its HEAD, on their own branch,
+    # is not the item's tip.
+    row = database.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+    chain = json.loads(row["materialized_chain"])
+    chain["target"]["in_place"] = True
+    await database.write(
+        lambda c: c.execute(
+            "UPDATE work_items SET materialized_chain = ? WHERE id = ?", (json.dumps(chain), wid)
+        )
+    )
+    repo = Path(row["repo"])
+    write(repo, "calc.py", "def add(a, b):\n    return a + b\n")
+    commit_all(repo, "the person's own work\n\nFixes: Kraft-person1")
+
+
 @pytest.mark.parametrize(
     ("change", "by_hand", "closes"),
     [
@@ -211,6 +229,7 @@ async def _a_merged_submodule(database, wid, worktree):
         (_someone_elses_change_rebased_in, False, False),
         (_a_code_change, False, True),
         (_a_merged_submodule, False, True),
+        (_in_place_the_persons_branch_carries_a_fixes_trailer, False, False),
         # Ruling 167: a person completing by hand and asking for the close has
         # said where the work landed; Kraft has nothing of its own to check.
         (_nothing, True, True),
@@ -221,6 +240,7 @@ async def _a_merged_submodule(database, wid, worktree):
         "someone-elses-change-rebased-in",
         "a-code-change",
         "a-merged-submodule",
+        "in-place-the-persons-branch-carries-a-fixes-trailer",
         "by-hand-when-asked",
     ],
 )
