@@ -491,12 +491,13 @@ async def test_a_second_in_place_item_in_one_checkout_is_not_claimed(
     assert c.status() == "active"
 
 
-async def test_the_lease_is_the_folder_not_its_spelling(item_on, run_dirs, database, repo):
+@pytest.mark.parametrize("linked", ["b", "a"], ids=["waiter-via-link", "holder-via-link"])
+async def test_the_lease_is_the_folder_not_its_spelling(item_on, run_dirs, database, repo, linked):
     chain = v1_named_chain(run_dirs.base / "t")
     link = repo.parent / "link"
     link.symlink_to(repo)
-    await item_on(chain, wid="a", target=IN_PLACE)
-    await item_on(chain, wid="b", target=IN_PLACE, repo=link)
+    await item_on(chain, wid="a", target=IN_PLACE, repo=link if linked == "a" else repo)
+    await item_on(chain, wid="b", target=IN_PLACE, repo=link if linked == "b" else repo)
     await database.write(lambda c: store.pause_work_item(c, "b", []))
 
     assert database.read(lambda c: store.checkout_holder(c, "b")) == "a"
@@ -536,6 +537,27 @@ async def test_a_live_escalation_session_holds_the_checkout(item_on, run_dirs, d
 
     assert not await database.write(lambda c: store.claim_for_run(c, "b", from_statuses=["paused"]))
     assert database.read(lambda c: store.checkout_holder(c, "b")) == "a"
+
+
+async def test_a_stopped_sessions_processes_hold_the_checkout_until_they_are_gone(
+    item_on, run_dirs, database
+):
+    """A pause writes its sessions stopped before their processes die (a
+    flush, then a group kill): until then they still write in the checkout."""
+    chain = v1_named_chain(run_dirs.base / "t")
+    a = await item_on(chain, "implementation", wid="a", target=IN_PLACE)
+    await item_on(chain, wid="b", target=IN_PLACE)
+    dying = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    await a.session("s1", "implementation.main.implement", running=(dying.pid, 0.0))
+    await database.write(lambda c: store.pause_work_item(c, "a", ["s1"]))
+    await database.write(lambda c: store.pause_work_item(c, "b", []))
+
+    try:
+        assert database.read(lambda c: store.checkout_holder(c, "b")) == "a"
+    finally:
+        dying.kill()
+        dying.wait()
+    assert database.read(lambda c: store.checkout_holder(c, "b")) is None
 
 
 async def test_an_active_item_keeps_its_own_checkout(item_on, run_dirs, database):

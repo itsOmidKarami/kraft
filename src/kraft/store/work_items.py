@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 from collections.abc import Iterable
+from datetime import UTC, datetime, timedelta
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
@@ -413,25 +414,51 @@ def checkout_holder(conn: sqlite3.Connection, work_item_id: str) -> str | None:
     return folder_holder(conn, row["repo"], work_item_id)
 
 
+#: How long after its row stopped a session's processes are looked for: a
+#: stop is written before they are killed (a 2s flush, then a 10s group kill).
+REAP_WINDOW_S = 120
+
+
+def _group_alive(pgid: int) -> bool:
+    """Whether the process group a session leads (`start_new_session`) has a
+    member left: `PermissionError` is macOS's answer for a zombie-only group."""
+    try:
+        os.killpg(pgid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
+
+
 def folder_holder(conn: sqlite3.Connection, folder: str, other_than: str) -> str | None:
     """The in-place item, other than `other_than`, working in `folder`: one
-    that is `active`, or has a live session.
+    that is `active`, or has a live session, or one whose row has stopped
+    but whose processes are not yet gone, still writing in the checkout.
 
-    Read from the rows, not kept in a lock of its own, so a restart neither
-    loses nor doubles it. The folder is compared resolved: two spellings of
-    one checkout are one lease."""
+    Read from the rows and the process table, not kept in a lock of its own,
+    so a restart neither loses nor doubles it. The folder is compared
+    resolved: two spellings of one checkout are one lease."""
     folder = os.path.realpath(folder)
+    since = (datetime.now(UTC) - timedelta(seconds=REAP_WINDOW_S)).isoformat()
     working = conn.execute(
         "SELECT * FROM work_items w WHERE id != ? AND (status = ? OR EXISTS ("
         "SELECT 1 FROM worker_sessions s WHERE s.work_item_id = w.id "
         f"AND s.status IN ({in_list(LIVE)}))) ORDER BY id",
         (other_than, WorkItemStatus.ACTIVE),
     )
+    stopping = conn.execute(
+        "SELECT w.*, s.pid AS session_pid FROM work_items w JOIN worker_sessions s "
+        "ON s.work_item_id = w.id WHERE w.id != ? AND s.pid IS NOT NULL "
+        "AND s.exited_at >= ? ORDER BY w.id",
+        (other_than, since),
+    )
+
+    def here(o) -> bool:
+        return is_in_place(o) and os.path.realpath(o["repo"]) == folder
+
     # shortcut: parses each working item's chain inside the writer; fine for a
     # board of tens of items, a stored `in_place` column when it is hundreds.
-    return next(
-        (o["id"] for o in working if is_in_place(o) and os.path.realpath(o["repo"]) == folder),
-        None,
+    return next((o["id"] for o in working if here(o)), None) or next(
+        (o["id"] for o in stopping if here(o) and _group_alive(o["session_pid"])), None
     )
 
 
