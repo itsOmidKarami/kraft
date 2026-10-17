@@ -495,7 +495,9 @@ def session_running(
     """Mark a launched session running, and say whether it was. False when a
     pause landed after the adapter's pre-launch check and before this: the row
     stays paused, no `worker_session_started` follows its
-    `worker_session_paused`, and the caller stops the child it just launched."""
+    `worker_session_paused`, and the caller stops the child it just launched.
+    Raises `LookupError` for a session `work_item_id` has no row for: that is a
+    caller's bug, not a pause, and must not read as one."""
     # `status != 'paused'`: a pause that landed while this session was still
     # pending must not be undone by the launch finishing.
     cur = conn.execute(
@@ -504,6 +506,9 @@ def session_running(
         (pid, pid_start_time, _now(), work_item_id, session_id, SessionStatus.PAUSED),
     )
     if cur.rowcount == 0:
+        # The guard's only miss on a row that exists is a paused one.
+        if session_status(conn, session_id, work_item_id=work_item_id) != SessionStatus.PAUSED:
+            raise LookupError(f"no worker session {session_id!r} on {work_item_id!r}")
         return False
     row = conn.execute(
         "SELECT work_item_id, node_id, hook_point, round, attempt, thread FROM worker_sessions "

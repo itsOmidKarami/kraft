@@ -1290,7 +1290,7 @@ async def refresh_worktree_base(
             # next walk stops on its `rebase-merge` (`assert_no_operation`).
             git_left_running = not exc.group_gone
             if exc.group_gone:
-                note = await _uncancellable(
+                note = await _subprocess.uncancellable(
                     _try_abort_rebase(
                         worktree,
                         stale_lock=None if lock_before else _lock_identity(worktree),
@@ -1609,7 +1609,7 @@ async def _git_group(
         # A stop that failed reads as a git that may be alive, never as an
         # ordinary error the caller would clean up beside it.
         with contextlib.suppress(BaseException):
-            await _uncancellable(stopping)
+            await _subprocess.uncancellable(stopping)
         gone = not stopping.cancelled() and stopping.exception() is None and stopping.result()
         raise _GitCancelled(gone) from None
 
@@ -1667,25 +1667,6 @@ def end_running_git_groups() -> None:
     deadline = _caps.monotonic() + GIT_STOP_GRACE_S
     left = [p for p in pgids if not _group_gone(p, max(0.0, deadline - _caps.monotonic()))]
     _signal_groups(left, signal.SIGKILL)
-
-
-async def _uncancellable(awaitable):
-    """Await `awaitable` to its end through any cancel, then raise the cancel:
-    a clean-up cut short is the mid-operation state it was there to undo."""
-    task = asyncio.ensure_future(awaitable)
-    cancelled = False
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            cancelled = True
-        except BaseException:  # noqa: BLE001 - read from `task` below
-            pass
-    if cancelled:
-        if not task.cancelled() and task.exception() is not None:
-            logger.warning("clean-up after a cancel failed: %r", task.exception())
-        raise asyncio.CancelledError
-    return task.result()
 
 
 def _kill_group(pgid: int) -> None:
@@ -1836,7 +1817,7 @@ async def _try_abort_rebase(
     when no rebase had started (a `pre-rebase` hook killed at the time cap
     left nothing to abort); otherwise why it is left mid-rebase.
 
-    The abort runs to its end through a cancel (`_uncancellable`): a pause
+    The abort runs to its end through a cancel (`_subprocess.uncancellable`): a pause
     that only cut the await short put the setup's lockfiles back while the
     abort was still checking the branch out.
 
@@ -1862,7 +1843,7 @@ async def _try_abort_rebase(
         return done
 
     try:
-        done = await _uncancellable(abort())
+        done = await _subprocess.uncancellable(abort())
     except subprocess.TimeoutExpired:
         return (
             f"`git rebase --abort` also timed out after {REBASE_ABORT_TIMEOUT_S:.0f}s; "

@@ -195,10 +195,15 @@ async def test_a_paused_row_and_its_event_never_disagree(database):
     assert "worker_session_exited" not in types
 
 
-async def test_a_pause_catches_a_session_still_in_its_pending_window(database):
+@pytest.mark.parametrize(
+    ("sid", "wid"),
+    [("s1", "w"), ("s2", "w"), ("s1", "w2")],
+    ids=["paused", "no-such-session", "wrong-work-item"],
+)
+async def test_a_pause_catches_a_session_still_in_its_pending_window(database, sid, wid):
     """A row is inserted before Popen returns. A pause landing in that window has
     to mark it, and the launch finishing must neither undo the mark nor say it
-    started."""
+    started. A launch naming no row is a caller's bug: it raises, not reads paused."""
 
     from kraft import events, store
 
@@ -222,10 +227,15 @@ async def test_a_pause_catches_a_session_still_in_its_pending_window(database):
     )
     pending = database.read(lambda c: store.running_sessions_for_node(c, "w"))
     await database.write(lambda c: store.pause_work_item(c, "w", [r["id"] for r in pending]))
+
     # the launch completes a moment later
-    started = await database.write(
-        lambda c: store.session_running(c, "s1", 999, 1.0, work_item_id="w")
-    )
+    launch = database.write(lambda c: store.session_running(c, sid, 999, 1.0, work_item_id=wid))
+    if (sid, wid) == ("s1", "w"):
+        started = await launch
+    else:
+        with pytest.raises(LookupError, match=f"no worker session '{sid}' on '{wid}'"):
+            await launch
+        started = False
     assert [r["id"] for r in pending] == ["s1"]
     assert database.read(lambda c: store.session_status(c, "s1", work_item_id="w")) == "paused"
     # nor followed by a start: a reader taking the latest event would show it running

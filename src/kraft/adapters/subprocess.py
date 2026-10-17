@@ -509,6 +509,25 @@ def _rate_limit_rejection(log_path: Path, *, reader: str | None) -> _usage.RateL
     return _usage.READERS[reader].rate_limit(log_path)
 
 
+async def uncancellable(awaitable):
+    """Await `awaitable` to its end through any cancel, then raise the cancel:
+    a clean-up cut short is the mid-operation state it was there to undo."""
+    task = asyncio.ensure_future(awaitable)
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = True
+        except BaseException:  # noqa: BLE001 - read from `task` below
+            pass
+    if cancelled:
+        if not task.cancelled() and task.exception() is not None:
+            logger.warning("clean-up after a cancel failed: %r", task.exception())
+        raise asyncio.CancelledError
+    return task.result()
+
+
 async def _kill_group(pgid: int, grace: float, reap: Callable[[], object] | None = None) -> None:
     """SIGTERM `pgid` (again at the first liveness check), then SIGKILL
     whatever is still there after `grace` seconds. `frontend/e2e/serve.py`'s
@@ -1050,70 +1069,10 @@ async def run_task(
     oom: _backends.OomKill | None = None
     started = False
 
-    try:
-        try:
-            pid_start_time = psutil.Process(proc.pid).create_time()
-        except psutil.Error:
-            pid_start_time = None
-        started = await db.write(
-            lambda c: store.session_running(
-                c, session_id, proc.pid, pid_start_time, work_item_id=work_item_id
-            )
-        )
-        if not started:
-            # The pre-launch check above, one step later: a pause landed
-            # between it and here, while the row still had no pid for the
-            # pause to signal. The `finally` below stops the child just
-            # launched, as it does for a pause that cancels the poll loop.
-            return SessionStatus.PAUSED
-
-        # Poll instead of `await asyncio.to_thread(proc.wait)`: a blocked thread is
-        # uncancellable, so on SIGTERM the executor task's cancel() could not
-        # interrupt it and uvicorn fell back to a hard exit (same fix as
-        # reattach._adopt).
-        #
-        # The same loop, with a second job: read the log forward from our own byte
-        # offset every `progress_s` and write the running usage onto the session
-        # row. Before this the row held NULL tokens and a NULL model for the whole
-        # run, so `usage_rollup` reported 0 for exactly the node a human was
-        # watching (Kraft-54dk, Kraft-2r8s).
-        seen_usage: dict[str, _usage.Usage] = {}
-        log_offset = 0
-        next_progress = time.monotonic() + progress_s
-        capped = False
-        while proc.poll() is None:
-            await asyncio.sleep(poll_s)
-            if time_cap is not None and caps.monotonic() >= time_cap.at:
-                # Left through the `finally` below, which kills the group and
-                # tears down a sandbox's container.
-                capped = True
-                break
-            if time.monotonic() < next_progress:
-                continue
-            next_progress = time.monotonic() + progress_s
-            # A bad line or a write hiccup here must not kill this task: the child
-            # keeps running and writing its own log fd regardless, so losing this
-            # loop silently freezes tokens_in/out for the rest of the session with
-            # nothing to show it happened (Kraft-41f7).
-            try:
-                log_offset, live = _progress_usage(log_path, log_offset, seen_usage, reader)
-                if live is not None:
-                    await db.write(
-                        lambda c, u=live: store.session_progress(
-                            c, session_id, u, work_item_id=work_item_id
-                        )
-                    )
-            except Exception:
-                logger.exception("usage progress tick failed for session %s", session_id)
-    finally:
-        # A pause or skip cancels this task from inside the poll loop above
-        # (deps.cancel -> CancelledError), which used to skip straight past
-        # the stop/join pair that only ever sat after the loop -- leaking the
-        # watcher thread, and its two open fds, for the rest of the server's
-        # life. `finally` runs on that path too, so the watcher stops however
-        # this function leaves the loop.
-        stop.set()
-        watcher.join(timeout=2)
+    async def wind_down() -> None:
+        """The `finally` below, past stopping the watcher: every way out of the
+        poll loop ends with it."""
+        nonlocal oom
         # A paused row means a human interrupted this session and `_terminate`
         # SIGINT'd it rather than SIGTERM'ing it, so the agent CLI would flush
         # the result envelope that carries its cost (Kraft-s7c04.18). The wait
@@ -1182,6 +1141,80 @@ async def run_task(
                     work_item_id=work_item_id,
                 )
             )
+
+    try:
+        try:
+            pid_start_time = psutil.Process(proc.pid).create_time()
+        except psutil.Error:
+            pid_start_time = None
+        started = await db.write(
+            lambda c: store.session_running(
+                c, session_id, proc.pid, pid_start_time, work_item_id=work_item_id
+            )
+        )
+        if not started:
+            # The pre-launch check above, one step later: a pause landed
+            # between it and here, while the row still had no pid for the
+            # pause to signal. The `finally` below stops the child just
+            # launched, as it does for a pause that cancels the poll loop.
+            return SessionStatus.PAUSED
+
+        # Poll instead of `await asyncio.to_thread(proc.wait)`: a blocked thread is
+        # uncancellable, so on SIGTERM the executor task's cancel() could not
+        # interrupt it and uvicorn fell back to a hard exit (same fix as
+        # reattach._adopt).
+        #
+        # The same loop, with a second job: read the log forward from our own byte
+        # offset every `progress_s` and write the running usage onto the session
+        # row. Before this the row held NULL tokens and a NULL model for the whole
+        # run, so `usage_rollup` reported 0 for exactly the node a human was
+        # watching (Kraft-54dk, Kraft-2r8s).
+        seen_usage: dict[str, _usage.Usage] = {}
+        log_offset = 0
+        next_progress = time.monotonic() + progress_s
+        capped = False
+        while proc.poll() is None:
+            await asyncio.sleep(poll_s)
+            if time_cap is not None and caps.monotonic() >= time_cap.at:
+                # Left through the `finally` below, which kills the group and
+                # tears down a sandbox's container.
+                capped = True
+                break
+            if time.monotonic() < next_progress:
+                continue
+            next_progress = time.monotonic() + progress_s
+            # A bad line or a write hiccup here must not kill this task: the child
+            # keeps running and writing its own log fd regardless, so losing this
+            # loop silently freezes tokens_in/out for the rest of the session with
+            # nothing to show it happened (Kraft-41f7).
+            try:
+                log_offset, live = _progress_usage(log_path, log_offset, seen_usage, reader)
+                if live is not None:
+                    await db.write(
+                        lambda c, u=live: store.session_progress(
+                            c, session_id, u, work_item_id=work_item_id
+                        )
+                    )
+            except Exception:
+                logger.exception("usage progress tick failed for session %s", session_id)
+    finally:
+        # A pause or skip cancels this task from inside the poll loop above
+        # (deps.cancel -> CancelledError), which used to skip straight past
+        # the stop/join pair that only ever sat after the loop -- leaking the
+        # watcher thread, and its two open fds, for the rest of the server's
+        # life. `finally` runs on that path too, so the watcher stops however
+        # this function leaves the loop.
+        stop.set()
+        watcher.join(timeout=2)
+        # A launch whose session never read running leaves the `try` above
+        # with no await, so the cancel that stops it lands in here instead:
+        # retry's `_stop_live_sessions` writes each live session, then cancels
+        # the walk. Cut short at the first await below, nothing would kill the
+        # child or tear its sandbox down; it runs to its end, then the cancel.
+        if started:
+            await wind_down()
+        else:
+            await uncancellable(wind_down())
     if capped:
         hit = time_cap.hit
 
