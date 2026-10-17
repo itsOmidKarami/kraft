@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from kraft import config as config_mod
-from kraft import events, inplace, item_paths
+from kraft import events, inplace, item_paths, store
 from kraft.events import _now
 from kraft.index import ingest
 from kraft.index.embed import Embedder
@@ -586,14 +586,31 @@ class Indexer:
         worktree will get), and after its worktree is removed (what it was
         filed with). Never the main checkout, which holds files no one
         attached (R11F-02). While the worktree exists it is the only source,
-        so a worker's edit, or its deletion, is what shows."""
+        so a worker's edit, or its deletion, is what shows. An in-place
+        item's is the one committed on its branch, else the stored copy."""
         if self._run_dirs is None:
             return None
         folder = self._folder(work_item_id)
-        if folder.exists():
+        branch = self._in_place_branch(work_item_id)
+        if branch is not None:
+            # The checkout exists before the item starts, and need not be on
+            # its branch: the committed attachment, else the stored copy.
+            text = config_mod.git_read(
+                folder, "show", f"{branch}:{attachment['path']}", expected_failure=True, strip=False
+            )
+            if text is not None:
+                return text
+        elif folder.exists():
             return self._read_worktree_file(attachment["path"], folder)
         stored = item_paths.filed_copy(self._run_dirs, work_item_id, attachment.get("source"))
         return ingest.read_inside(*stored) if stored else None
+
+    def _in_place_branch(self, work_item_id: str) -> str | None:
+        """An in-place item's branch; None for any other id."""
+        row = self._state.read(
+            lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+        )
+        return store.branch_for(row) if row is not None and inplace.is_in_place(row) else None
 
     def _synthesize_attachment_doc(
         self, work_item_id: str, repo: str, attachment: dict

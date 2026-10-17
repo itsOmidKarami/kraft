@@ -288,8 +288,7 @@ def test_default_profile_reproduces_todays_command_line(run):
     - `--permission-mode auto`, always: without it `claude -p` has nobody to
       answer a prompt and denies instead (6363c65e: 13 denials, Kraft-8pe/7lu);
       no `--allowedTools` for a silent binding.
-    - the permission prompt tool on every task: the decision and its event are
-      the point (Kraft-oor).
+    - the permission prompt tool on every task: its decision and event are the point (Kraft-oor).
     - no `--resume`/`--autocompact`: only an escalation turn resumes.
     - no steering, artifact or method: the prompt is the bare context and rules.
     """
@@ -302,6 +301,7 @@ def test_default_profile_reproduces_todays_command_line(run):
         hook_point="on.implementation.start",
         session_id="s1",
         summary_path="/kraft/run/items/w1/sessions/s1/out/summary.md",
+        checkout=agent._WORKTREE,
     )
 
     assert run()["cmd"] == [

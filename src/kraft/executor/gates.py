@@ -411,6 +411,10 @@ async def review_gates(
         )
         if gate is None or not row["auto_gate"]:
             return status
+        if row["stop_kind"] == StopKind.CHECKOUT:
+            # A reply agent's after-check stopped it: a reviewer would take the
+            # checkout straight back from the person.
+            return row["status"]
         # The item's own chain, node overrides folded in (UI v2 · 04 point 1):
         # an `auto_escalate` override must suppress review here the same way it
         # does the Config tab's read, not just the gate's own declaration.
@@ -457,7 +461,7 @@ async def review_gates(
                 node=node,
                 launch=launch,
             )
-        except store.CheckoutBusy as exc:
+        except (store.CheckoutBusy, inplace.CheckoutRefused) as exc:
             # Closes the attempt its `_started` opened: the gate is the person's.
             await db.write(
                 lambda c, gate=gate, note=str(exc): events.append(
@@ -472,13 +476,16 @@ async def review_gates(
 
         # The agent may have worked for minutes. A decision a person made in the
         # meantime outranks a verdict computed against the state before it.
-        if pending_gate(db, work_item_id) != gate:
+        # Nor does a verdict outrank the reviewer's own after-check stopping it.
+        checkout = inplace.stopped(db, work_item_id)
+        if checkout or pending_gate(db, work_item_id) != gate:
+            why = "checkout stop" if checkout else "gate no longer pending"
             await db.write(
-                lambda c, gate=gate, verdict=verdict: events.append(
+                lambda c, gate=gate, verdict=verdict, why=why: events.append(
                     c,
                     work_item_id,
                     GateEvent.AUTO_REVIEW_DISCARDED,
-                    {"gate": gate, "verdict": verdict, "reason": "gate no longer pending"},
+                    {"gate": gate, "verdict": verdict, "reason": why},
                     node_id=gate,
                 )
             )
@@ -1075,7 +1082,7 @@ async def auto_escalate_stuck(
             auto=True,
             evts=evts,
         )
-    except store.CheckoutBusy:
+    except (store.CheckoutBusy, inplace.CheckoutRefused):
         await db.write(
             lambda c: events.append(
                 c,
@@ -1146,6 +1153,22 @@ async def resume_after_escalation(
     # Absent on an event written before this field existed, or on a
     # hand-built test payload -- default False rather than KeyError either way.
     seeded = payload.get("seeded", False)
+    if any(
+        e["type"] == WorkItemEvent.NEEDS_HUMAN and e["payload"].get("kind") == StopKind.CHECKOUT
+        for e in new_evts
+    ):
+        # The turn's own after-check (`inplace.check_task`) stopped it: the
+        # person's to look at before anything takes their checkout again.
+        status = status_of(db, work_item_id)
+        await db.write(
+            lambda c: events.append(
+                c,
+                work_item_id,
+                EscalationEvent.WORK_ITEM_SELF_RETRY_DROPPED,
+                {"node_id": node_id, "status": status},
+            )
+        )
+        return status
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )

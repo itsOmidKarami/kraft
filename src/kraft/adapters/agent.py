@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from kraft import harness as _harness
-from kraft import ids, item_paths, store
+from kraft import ids, inplace, item_paths, store
 from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
 from kraft import registration as _registration
@@ -80,18 +80,34 @@ _CTX = (
     "tests your change touches, by path or name as this repo's own instructions "
     "say, not the whole suite: the verification after you runs that.\n"
     "\n"
-    "You are working in a git worktree cut for this work item, on its own "
-    "branch. Commit everything you change before you exit — `git add` and "
-    "`git commit`, in this worktree. Work left uncommitted never reaches the "
-    "merge request this chain opens, and is destroyed with the worktree. Do "
-    "not push and do not merge: Kraft pushes the branch and opens, updates "
-    "and merges the merge request itself.\n"
+    "{checkout}"
     "\n"
     "Exception: `.engineering/` (any spec/plan/review document an earlier "
     "run left there) is gitignored on purpose. Kraft reads those files "
     "straight off disk, never from git, so they must not reach the merge "
     "request. If `git add` refuses one of those paths, that is git working as "
     "intended — do not `git add -f` it or otherwise force it in."
+)
+
+#: Where an item's agent works: `_CTX`'s `{checkout}`, a worktree's or a person's own.
+_WORKTREE = (
+    "You are working in a git worktree cut for this work item, on its own "
+    "branch. Commit everything you change before you exit — `git add` and "
+    "`git commit`, in this worktree. Work left uncommitted never reaches the "
+    "merge request this chain opens, and is destroyed with the worktree. Do "
+    "not push and do not merge: Kraft pushes the branch and opens, updates "
+    "and merges the merge request itself.\n"
+)
+_IN_PLACE = (
+    "You are working in a person's own checkout, on this work item's branch "
+    "`{branch}`. They may have uncommitted changes here that are not yours. "
+    "Commit only the files you changed, with a pathspec: `git add -- <paths>`, "
+    'then `git commit -m "..." -- <paths>`. Never `git add -A`, `git add .`, '
+    "`git commit -a`, `git stash`, `git checkout`, `git switch` or `git reset`, "
+    "and never touch a file you did not change. Commit everything you change "
+    "before you exit: work left uncommitted never reaches the merge request. Do "
+    "not push and do not merge: Kraft pushes the branch and opens, updates and "
+    "merges the merge request itself.\n"
 )
 
 #: Intent-process design §4. Kraft-authored, and its only input is the repo's
@@ -583,6 +599,9 @@ def context_sections(
     document_path: str | None = None,
     #: The item's documents so far (`documents_note`), "" for none.
     documents: str = "",
+    #: The item runs in a person's own checkout, on `branch`.
+    in_place: bool = False,
+    branch: str = "<branch>",
 ) -> list[tuple[str, str, str]]:
     """A launch's context as `(kind, source, text)` sections, in the order the
     agent reads them; joined, they are exactly `build_context`'s text."""
@@ -599,6 +618,7 @@ def context_sections(
                 hook_point=hook_point,
                 session_id=session_id,
                 summary_path=summary_path or "<session summary path>",
+                checkout=_IN_PLACE.format(branch=branch) if in_place else _WORKTREE,
             ),
         )
     ]
@@ -888,13 +908,21 @@ def _install_hook(
     deny: tuple[str, ...],
     grants: tuple[str, ...],
     sandbox: dict | None,
+    *,
+    in_place: bool = False,
 ) -> None:
     """Kraft's pre-tool hook in the worktree when there is policy to enforce
     (Kraft-4in7z). The entry is the same for every launch and never removed:
     fail-closed is per session (`FAIL_CLOSED_ENV`), so a sibling launch in the
-    same worktree cannot loosen or drop another's hook."""
+    same worktree cannot loosen or drop another's hook. Never written into a
+    person's own checkout: refused instead."""
     if not _hook_install.needs_hook(allowed, deny, grants):
         return
+    if h.permission_hook == "cursor" and in_place:
+        raise LaunchRefused(
+            "cursor's permission hook writes .cursor/hooks.json into the folder it runs in; "
+            "an in-place item cannot use it. Pick another harness for this item."
+        )
     # ponytail: a hook `allow` does not outrank cursor's --auto-review
     # (Task 1, probe B), so a grant beyond git-commit is enforced only as
     # far as the gate's denies go; its launch-time allow rule is Kraft-4in7z.6.
@@ -981,6 +1009,7 @@ async def run_agent_task(
     item_row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
+    in_place = item_row is not None and store.is_in_place(item_row)
     ctx = build_context(
         usage_source=h.capabilities["usage"].source,
         context_channel=h.capabilities["context"].channel,
@@ -999,6 +1028,8 @@ async def run_agent_task(
         summary_path=str(files.summary),
         document_path=str(artifact_path(run_dirs, artifact, work_item_id)) if artifact else None,
         documents=documents_note(run_dirs, item_row, worktree=Path(cwd)),
+        in_place=in_place,
+        branch=store.branch_for(item_row) if in_place else "<branch>",
     )
     options = {
         k: v
@@ -1133,7 +1164,7 @@ async def run_agent_task(
         if options.get("permission_mode") in (None, *defaults):
             options["permission_mode"] = h.container_permission_mode
     if hooked:
-        _install_hook(h, Path(cwd), allowed_tools, deny_tools, grants, sandbox)
+        _install_hook(h, Path(cwd), allowed_tools, deny_tools, grants, sandbox, in_place=in_place)
     hook_argv: tuple[str, ...] = ()
     if h.permission_hook == "codex" and _hook_install.needs_hook(allowed_tools, deny_tools, grants):
         exe = shlex.split(command) if command else [h.command[0]]
@@ -1217,7 +1248,16 @@ async def run_agent_task(
         if sandbox and h.config_env is not None
         else None,
     )
-    return await _subprocess.run_task(
+    # An agent outside the walk does, in place, what the walk does around a
+    # task (`dispatch._dispatch_task`): take the checkout once the session
+    # holds its lease, mark it, and check it after.
+    borrows = takes_checkout and in_place
+
+    async def take_and_mark() -> None:
+        await inplace.take(db, run_dirs, item_row, attachments=inplace.attachments_of(item_row))
+        await inplace.mark_task(db, run_dirs, item_row, Path(cwd), node_id, hook_point)
+
+    status = await _subprocess.run_task(
         db,
         run_dirs,
         session_id=session_id,
@@ -1264,4 +1304,8 @@ async def run_agent_task(
         takes_checkout=takes_checkout,
         model=model,
         ro_paths=rules_files,
+        before_launch=take_and_mark if borrows else None,
     )
+    if borrows:
+        await inplace.check_task(db, run_dirs, item_row, Path(cwd), node_id, hook_point)
+    return status

@@ -18,6 +18,7 @@ from kraft.executor.context import (
     _ADVANCING,
     BASE_MOVED,
     BUDGET,
+    CHECKOUT_REFUSED,
     CONFIG_ERROR,
     CONFLICT,
     CONFLICT_RESOLVED,
@@ -511,6 +512,24 @@ async def _sentinel_stop(
         return "paused"
     if verdict == CONFIG_ERROR:
         return await _stop_for_config_error(db, work_item_id, node, failed)
+    if verdict == CHECKOUT_REFUSED:
+        # The after-task check (`inplace.check_task`) stops the item
+        # itself; a refused take leaves its reason in a session's log.
+        status = db.read(
+            lambda c: c.execute(
+                "SELECT status FROM work_items WHERE id = ?", (work_item_id,)
+            ).fetchone()["status"]
+        )
+        if status == "needs_human":
+            return "needs_human"
+        # Never `stuck`: an escalation would take the checkout straight back.
+        reason = "; ".join(_task_log(db, work_item_id, node, t).strip() for t in failed)
+        await db.write(
+            lambda c: store.mark_needs_human(
+                c, work_item_id, node.id, reason, kind=StopKind.CHECKOUT
+            )
+        )
+        return "needs_human"
     if verdict == RATE_LIMITED:
         return await stops.stop_for_rate_limit(db, work_item_id, node)
     if verdict == WAITING:
@@ -2047,14 +2066,21 @@ async def run_once(
                 # Its members now exist, checked out by Kraft just above.
                 checkout=stops.sandbox_checkout(row, launch, worktree) if sandbox else None,
             )
-            if start_index == 0
+            # Never in place: the person's checkout is already set up.
+            if start_index == 0 and not inplace.is_in_place(row)
             else None
         )
     except (RuntimeError, _config.ConfigError) as exc:
         failing_node = nodes[start_index].id
         reason = str(exc)
         kind = StopKind.CONFIG if isinstance(exc, _config.ConfigError) else StopKind.INFRA
-        await node_runs.entered(db, inplace.item_folder(run_dirs, row), work_item_id, failing_node)
+        await node_runs.entered(
+            db,
+            inplace.item_folder(run_dirs, row),
+            work_item_id,
+            failing_node,
+            branch=store.branch_for(row) if inplace.is_in_place(row) else None,
+        )
         await db.write(
             lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason, kind=kind)
         )
@@ -2178,7 +2204,7 @@ async def run_once(
                         nodes=nodes,
                         launch=launch,
                     )
-                except store.CheckoutBusy as exc:
+                except (store.CheckoutBusy, inplace.CheckoutRefused) as exc:
                     await db.write(
                         lambda c, why=str(exc), gate=node.id: events.append(
                             c,
@@ -2188,7 +2214,8 @@ async def run_once(
                             node_id=gate,
                         )
                     )
-            return "awaiting_gate"
+            # The reply's after-check (`inplace.check_task`) may have stopped it.
+            return "needs_human" if inplace.stopped(db, work_item_id) else "awaiting_gate"
         if isinstance(node.node, GateNode):
             # Cleared: its approval already completed it (`store.approve_gate`),
             # and entering it again would stamp a second `node_started` on a

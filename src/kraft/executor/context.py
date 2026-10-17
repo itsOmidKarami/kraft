@@ -85,6 +85,12 @@ REPAIR_DOUBTED = "repair_doubted"
 #: fix loop or recovery writing more would not make the check true.
 READ_ONLY_VIOLATED = "read_only_violated"
 
+#: An in-place item's checkout could not be taken without forcing it
+#: (`inplace.CheckoutRefused`): the task never launched, and the person's
+#: checkout is theirs to sort out. Its session is the `config_error` row whose
+#: log is the reason.
+CHECKOUT_REFUSED = "checkout_refused"
+
 
 #: The tier that handles each status, in one place so a new status cannot be
 #: added without declaring where it is handled.
@@ -111,6 +117,7 @@ SCOPE: dict[str, str] = {
     INFRA_STOP: "stop",  # forge's own fault; a fix loop cannot fix it
     REPAIR_DOUBTED: "stop",  # a repair doubts itself; a person decides
     READ_ONLY_VIOLATED: "stop",  # a read_only scope wrote; a person looks
+    CHECKOUT_REFUSED: "stop",  # the person's checkout; never forced, never retried
     TIME_CAPPED: "stop",  # a scope's time ran out; a person decides (Ruling 194)
     BASE_MOVED: "chain",  # the bounce, taken by run_once
     CONFLICT_RESOLVED: "chain",  # the same restart, reopening the span's gates

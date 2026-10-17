@@ -8,10 +8,12 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
 from support.addons import drop_store, install_release, pinned_chain
 from support.harness import entry_of, git, make_repo, seed_v1_library, write_harness_profiles
 
-from kraft import executor, review_reply, store
+from kraft import executor, inplace, review_reply, store
+from kraft.templates.environment import WorkItemTarget
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 FAKE_AGENT_COMMAND = f"{sys.executable} {_FAKE_AGENT}"
@@ -330,21 +332,24 @@ async def test_the_comment_reviews_summary_reaches_the_reply_agent(
     assert "Mostly fine; one question." in prompts.read_text()
 
 
-async def test_no_reply_agent_starts_behind_a_working_in_place_item(
-    item_on, run_dirs, tmp_path, monkeypatch
+@pytest.mark.parametrize(
+    ("busy", "refusal", "match"),
+    [(True, store.CheckoutBusy, "in use by A"), (False, inplace.CheckoutRefused, "is gone")],
+    ids=["another-item-uses-it", "it-cannot-be-taken"],
+)
+async def test_no_reply_agent_starts_without_its_checkout(
+    item_on, run_dirs, tmp_path, monkeypatch, busy, refusal, match
 ):
-    """Refused where its session would be written; the caller queues or skips it."""
-    import pytest
-
-    from kraft.templates.environment import WorkItemTarget
-
+    """Refused where its session would be written, or where the checkout is
+    switched to the item's branch (here, gone); the caller queues or skips it."""
     _seed(tmp_path, monkeypatch)
     in_place = WorkItemTarget.for_repository("sample", in_place=True)
-    await item_on(NODES, GATE, wid="a", target=in_place, title="A")
+    if busy:
+        await item_on(NODES, GATE, wid="a", target=in_place, title="A")
     it = await item_on(NODES, GATE, wid="b", target=in_place, status="needs_human")
     await _published_unanswered_thread(it)
 
-    with pytest.raises(store.CheckoutBusy, match="in use by A"):
+    with pytest.raises(refusal, match=match):
         await review_reply.run(
             it.database,
             it.run_dirs,
@@ -354,5 +359,5 @@ async def test_no_reply_agent_starts_behind_a_working_in_place_item(
             launch=LAUNCH,
         )
 
-    assert it.sessions() == []
+    assert [s["status"] for s in it.sessions()] == ([] if busy else ["config_error"])
     assert not it.events("reply_agent_failed")

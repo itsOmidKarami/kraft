@@ -21,8 +21,10 @@ from kraft import store
 from kraft.executor import dispatch, walk
 from kraft.executor.context import READ_ONLY_VIOLATED, LaunchContext
 from kraft.templates import models as tm
+from kraft.templates.environment import WorkItemTarget
 
 NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}))
+_IN_PLACE = WorkItemTarget.for_repository("sample", in_place=True)
 
 
 def _launches(monkeypatch, during=None) -> list:
@@ -61,20 +63,35 @@ def _reason(it) -> str:
 # -- the check -------------------------------------------------------------------------
 
 
+def _commits(cwd: Path) -> None:
+    write(cwd, "calc.py", "edited\n")
+    git(cwd, "commit", "-qm", "agent", "--", "calc.py")
+
+
+@pytest.mark.parametrize(
+    ("target", "during"),
+    [(None, lambda cwd: write(cwd, "calc.py", "edited\n")), (_IN_PLACE, _commits)],
+    ids=["worktree-edit-swept", "in-place-commit"],
+)
 async def test_a_read_only_step_whose_agent_edits_a_tracked_file_stops_naming_it(
-    item_on, monkeypatch, fake_agent
+    item_on, monkeypatch, fake_agent, target, during
 ):
     """The straggler sweep commits the edit, so it shows as HEAD moving; the
-    step's own on_failure never runs, since no code failed."""
+    step's own on_failure never runs, since no code failed. In place nothing
+    is swept, and the agent's own commit moves HEAD."""
     step = {
         "id": "check",
         "read_only": True,
         "tasks": [_agent()],
         "on_failure": {"tasks": [_sub("fix")]},
     }
-    it = await item_on([v1_node(steps=[step])])
-    git(it.repo, "checkout", "-qb", store.branch_for(it.row()))  # a worktree is on its branch
-    launched = _launches(monkeypatch, lambda cwd: write(cwd, "calc.py", "edited\n"))
+    it = await item_on([v1_node(steps=[step])], target=target)
+    branch = store.branch_for(it.row())
+    if target is None:
+        git(it.repo, "checkout", "-qb", branch)  # a worktree is on its branch
+    else:
+        git(it.repo, "branch", branch)  # the take switches the checkout onto it
+    launched = _launches(monkeypatch, during)
 
     assert await _walk(it) == "needs_human"
 
@@ -85,6 +102,22 @@ async def test_a_read_only_step_whose_agent_edits_a_tracked_file_stops_naming_it
     assert _reason(it) == "build.check is read_only, but it changed the worktree: calc.py"
     [event] = it.events("read_only_violated")
     assert event["payload"] == {"node_id": "build", "scope": "build.check", "files": ["calc.py"]}
+
+
+async def test_a_persons_edit_during_an_in_place_read_only_step_is_not_a_violation(
+    item_on, monkeypatch, fake_agent
+):
+    """The person's own checkout: an uncommitted edit there is theirs as far as
+    the check can tell, so only HEAD is compared."""
+    step = {"id": "check", "read_only": True, "tasks": [_agent()]}
+    it = await item_on([v1_node(steps=[step])], target=_IN_PLACE)
+    git(it.repo, "branch", store.branch_for(it.row()))
+    _launches(monkeypatch, lambda cwd: write(cwd, "calc.py", "the person's\n"))
+
+    assert await _walk(it) == "ok"
+
+    assert it.events("read_only_violated") == []
+    assert git(it.repo, "status", "--porcelain") == "M calc.py"
 
 
 @pytest.mark.parametrize(
@@ -238,3 +271,24 @@ def test_git_failing_the_same_way_twice_still_counts_as_a_change(tmp_path):
 
     failed = (None, None, None)
     assert read_only._changed_in(tmp_path, failed, failed) == ["(git could not read it)"]
+
+
+async def test_an_in_place_take_is_not_the_read_only_steps_write(item_on, monkeypatch):
+    """The take switches the person's checkout to the item's branch right
+    before the task: Kraft's move, read before the step's snapshot."""
+    it = await item_on(
+        [v1_node(steps=[{"id": "check", "read_only": True, "tasks": [_sub("t")]}])],
+        target=_IN_PLACE,
+    )
+    branch = store.branch_for(it.row())
+    git(it.repo, "checkout", "-qb", branch)
+    write(it.repo, "ITEM", "on the item's branch\n")
+    git(it.repo, "add", "ITEM")
+    git(it.repo, "commit", "-qm", "item")
+    git(it.repo, "checkout", "-q", "main")
+    _launches(monkeypatch)
+
+    assert await _walk(it) != "needs_human"
+
+    assert git(it.repo, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"
+    assert it.events("read_only_violated") == []

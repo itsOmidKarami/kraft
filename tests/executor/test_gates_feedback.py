@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 from support.harness import entry_of, fake_harness_home
 
-from kraft import executor, store
+from kraft import executor, inplace, store
 from kraft import policy as _policy
 from kraft.adapters import agent as agent_mod
 from kraft.api.routes import gates as gates_route
@@ -173,8 +173,16 @@ async def test_a_gate_with_only_unanswered_questions_opens_with_the_reply_agent(
     )
 
 
+@pytest.mark.parametrize(
+    ("refusal", "reason"),
+    [
+        (store.CheckoutBusy("a", "A"), "the checkout is in use by A"),
+        (inplace.CheckoutRefused("git would not switch it"), "git would not switch it"),
+    ],
+    ids=["another-item-uses-it", "it-cannot-be-taken"],
+)
 async def test_a_reply_agent_refused_its_checkout_leaves_the_gate_open_and_says_why(
-    item_on, tmp_path, monkeypatch
+    item_on, tmp_path, monkeypatch, refusal, reason
 ):
     it = await item_on(
         [
@@ -192,7 +200,7 @@ async def test_a_reply_agent_refused_its_checkout_leaves_the_gate_open_and_says_
 
     async def _busy_reply(_db, _rd, **kw):
         if kw["hook_point"] == "review.reply":
-            raise store.CheckoutBusy("a", "A")
+            raise refusal
         return "done"
 
     monkeypatch.setattr(agent_mod, "run_agent_task", _busy_reply)
@@ -201,8 +209,43 @@ async def test_a_reply_agent_refused_its_checkout_leaves_the_gate_open_and_says_
     assert await _walk(it) == "awaiting_gate"
 
     assert [e["payload"] for e in it.events("reply_agent_skipped")] == [
-        {"gate": "review", "reason": "the checkout is in use by A"}
+        {"gate": "review", "reason": reason}
     ]
+
+
+async def test_a_reply_agents_checkout_stop_ends_the_walk_at_the_gate(
+    item_on, tmp_path, monkeypatch
+):
+    """Its after-check (`inplace.check_task`) stopped the item: the walk says
+    so, rather than a gate still waiting for its reviewer."""
+    it = await item_on(
+        [
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [
+                    {"id": "build", "kind": "agent", "harness": "fake", "prompt": "implement"}
+                ],
+            },
+            {"id": "review", "kind": "gate", "reject_to": "implementation"},
+        ]
+    )
+    fake_harness_home(tmp_path, ["true"])
+
+    async def _stopping_reply(db, _rd, **kw):
+        if kw["hook_point"] == "review.reply":
+            await db.write(
+                lambda c: store.mark_needs_human(
+                    c, it.id, "review", "the agent committed a.py", kind="checkout"
+                )
+            )
+        return "done"
+
+    monkeypatch.setattr(agent_mod, "run_agent_task", _stopping_reply)
+    await _published_thread(it, gate="review", label="question")
+
+    assert await _walk(it) == "needs_human"
+    assert it.row()["stop_kind"] == "checkout"
 
 
 async def test_an_earlier_gates_must_fix_still_blocks_a_later_gate(item_on, script):

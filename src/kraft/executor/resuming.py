@@ -7,7 +7,7 @@ from kraft import policy as _policy
 from kraft.executor import gates, walk
 from kraft.executor.context import _ADVANCING, LaunchContext, OnApprove
 from kraft.templates.models import ExecNode, ResolvedNode
-from kraft.vocab import ENDED, SessionStatus
+from kraft.vocab import ENDED, SessionStatus, StopKind
 
 
 async def reconcile_current_node(
@@ -43,6 +43,15 @@ async def reconcile_current_node(
         task = adopted.get(ids.qualified(work_item_id, s["id"]))
         if task is not None:
             await task
+    # A re-adopted in-place task's check may have stopped the item
+    # (`inplace.check_task`): the stop stands, the node is not done.
+    stopped = db.read(
+        lambda c: c.execute(
+            "SELECT status, stop_kind FROM work_items WHERE id = ?", (work_item_id,)
+        ).fetchone()
+    )
+    if stopped is not None and tuple(stopped) == ("needs_human", StopKind.CHECKOUT):
+        return "needs_human"
     exec_node = node.node if isinstance(node.node, ExecNode) else None
     if (
         exec_node is None

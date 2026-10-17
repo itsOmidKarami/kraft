@@ -39,6 +39,27 @@ function spendCapped(i: any, b: ItemBundle) {
   }
 }
 
+/** An in-place item whose checkout moved to main while its review ran (`inplace.check_task`): Kraft switched the
+ *  person's checkout onto the item's branch before the task (`checkout_switched`), the session ran to its end, and the
+ *  item stopped for the person instead of switching the checkout back. Built on the capped sample's attempt. */
+function checkoutMoved(i: any, b: ItemBundle) {
+  const s = b.sessions.find((x) => x.status === "capped_out")!;
+  Object.assign(s, { status: "done", session_summary_ref: `.engineering/sessions/${s.id}.md` });
+  const exit = b.events.find((e) => e.type === "worker_session_exited" && e.payload.session_id === s.id)!;
+  exit.payload = { ...exit.payload, status: "done" };
+  const branch = `kraft/${i.id}`;
+  const started = b.events.findIndex((e) => e.type === "worker_session_started" && e.payload.session_id === s.id);
+  b.events.splice(started, 0, { ...b.events[started], type: "checkout_switched", payload: { from: "main", to: branch }, node_id: null });
+  b.events.forEach((e, n) => { e.seq = n + 1; });
+  const task = s.hook_point;
+  const reason = `the checkout ${i.repo} moved to main during the run of ${task}. Kraft did not switch it back, nor move those commits: resume once ${i.repo} may go back to ${branch}`;
+  const facts = { task, rerun: false, session: s.id, round: s.round };
+  const last = [...b.events].reverse().find((e) => e.type === "work_item_needs_human")!;
+  last.payload = { node_id: last.payload.node_id, reason, kind: "checkout", facts, session_id: s.id };
+  i.stop = { ...i.stop, kind: "checkout", reason, facts };
+  i.worktree_path = i.repo;
+}
+
 const ROWS: Row[] = [
   { sc: "needs-gate", title: "Design the caching layer for document search", repo: "kraft-plugins", bead: "kraft-cb59", age: 4 },
   { sc: "capped", title: "Fix flaky retry test in the worker pool", repo: "kraft-core", bead: "kraft-7d21", age: 22 },
@@ -63,6 +84,7 @@ const ROWS: Row[] = [
   // Last, so every row above keeps its seed and so its id.
   { sc: "queued", title: "Index the review threads for search", repo: "kraft-api", bead: "kraft-7c40", age: 3 },
   { sc: "blocked", title: "Tail worker logs in the console", repo: "kraft-core", bead: "kraft-b2e7", age: 9 },
+  { sc: "capped", title: "Cache the search index in place", repo: "kraft-plugins", bead: "kraft-e3c1", age: 17, tweak: checkoutMoved },
 ];
 
 const ARCHIVED: Row[] = [

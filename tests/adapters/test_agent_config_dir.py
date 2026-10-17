@@ -74,6 +74,21 @@ def test_a_cursor_launch_under_a_tool_allowlist_runs_fail_closed(run, tmp_path):
     assert entry["command"].endswith("permission-hook cursor")
 
 
+def test_cursor_is_refused_in_place(run, tmp_path, in_place):
+    """Its hook is a file in the folder it runs in: in a person's own checkout
+    that is a change to their repository, so the launch never starts."""
+    from kraft.adapters.agent import LaunchRefused
+
+    cwd = _repo(tmp_path)
+    with pytest.raises(LaunchRefused) as refused:
+        _cursor(run, tmp_path, cwd, allowed_tools=("Read", *WEB), **in_place)
+    assert str(refused.value) == (
+        "cursor's permission hook writes .cursor/hooks.json into the folder it runs in; "
+        "an in-place item cannot use it. Pick another harness for this item."
+    )
+    assert not (cwd / ".cursor").exists()
+
+
 def test_a_cursor_launch_with_only_deny_tools_is_fail_open(run, tmp_path):
     cwd = _repo(tmp_path)
     seen = _cursor(run, tmp_path, cwd, deny_tools=("Bash",))

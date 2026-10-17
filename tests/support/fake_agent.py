@@ -3,6 +3,7 @@
        --output-format stream-json --verbose
 CWD is the worktree. Mode via KRAFT_FAKE_AGENT: fix (default) | noop | error |
 rate_limit (rejects with KRAFT_FAKE_AGENT_RESETS_AT, default 1788968400).
+KRAFT_FAKE_AGENT_SHELL, when set, is run with `sh -c` before it reports.
 KRAFT_FAKE_AGENT_RATE_LIMIT_MODELS (comma-separated `--model` values, `-` for a
 launch that names none) puts only those launches in rate_limit mode.
 
@@ -186,6 +187,9 @@ def main() -> int:
             subprocess.run(["git", "rebase", target.group(1)], env=env)
             subprocess.run(["git", "add", "-A"], env=env)
             subprocess.run(["git", "rebase", "--continue"], env=env)
+    if os.environ.get("KRAFT_FAKE_AGENT_SHELL"):
+        # A test's own agent work, e.g. a commit: `sh -c` in the checkout.
+        subprocess.run(["sh", "-c", os.environ["KRAFT_FAKE_AGENT_SHELL"]])
     result_path = os.environ.get("KRAFT_RESULT_PATH")
     if mode not in ("error", "rate_limit") and result_path:
         _write_artifact(sys.argv)

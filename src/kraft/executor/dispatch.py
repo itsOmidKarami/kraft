@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import fnmatch
 import json
 import logging
@@ -15,7 +16,7 @@ from pathlib import Path
 from kraft import builtins as _builtins
 from kraft import caps as _caps
 from kraft import config as _config
-from kraft import events, item_paths, node_runs, store
+from kraft import events, inplace, item_paths, node_runs, store
 from kraft import findings as _findings
 from kraft import harness as _harness
 from kraft import overrides as _overrides
@@ -35,6 +36,7 @@ from kraft.executor.context import (
     _ADVANCING,
     BASE_MOVED,
     BUDGET,
+    CHECKOUT_REFUSED,
     CONFIG_ERROR,
     CONFLICT,
     INFRA_STOP,
@@ -69,10 +71,13 @@ from kraft.vocab import (
     LIVE,
     UNFINISHED,
     ChainEvent,
+    GateEvent,
     LimitEvent,
     SandboxEvent,
     SessionEvent,
     SessionStatus,
+    StopKind,
+    WorkItemEvent,
 )
 from kraft.worker import kit as _kit
 from kraft.worker import sandbox as _sandbox
@@ -350,12 +355,26 @@ class SandboxUnresolved(RuntimeError):
     never a host launch and never an unattributed crash."""
 
 
+class InPlaceSandboxed(SandboxUnresolved, _config.ConfigError):
+    """A sandbox reached an in-place item after filing, from a repository's
+    live entry: refused like an unresolved one at every launch door, and a
+    `config` stop on the walk."""
+
+
 def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
     """`_item_policy` as every launch runs it: a `kind: kit` lowered from
     the cache to the `kind: docker` policy that runs it, plus `kit: <ref>`
     (spec §9.4). A Kit never fetched (`ensure_kit`) or refused is
     `SandboxUnresolved` naming it, so nothing launches."""
     policy = _item_policy(row, launch)
+    if policy is not None and store.is_in_place(row):
+        snapshot = store.materialized_chain_of(row)
+        where = (
+            "its chain or its own policy"
+            if snapshot is not None and snapshot.item_sandbox() is not None
+            else "'sandbox' on its repos.yaml entry"
+        )
+        raise InPlaceSandboxed(f"in-place items run unsandboxed; {where} turns a sandbox on")
     if policy is None or policy.kind != "kit":
         return policy.model_dump() if policy is not None else None
     try:
@@ -1015,6 +1034,15 @@ async def _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, 
         )
 
 
+def _takes_the_checkout(t) -> bool:
+    """Whether an in-place item's task runs in its checkout, so takes it
+    first: an agent, a command or the changed-test-scopes builtin; never a
+    forge task, which a CI poll re-enters."""
+    return isinstance(t, AgentTask | SubprocessTask) or (
+        isinstance(t, BuiltinTask) and t.ref is BuiltinAction.VERIFY_CHANGED_TEST_SCOPES
+    )
+
+
 async def _dispatch_task(
     db,
     run_dirs,
@@ -1131,6 +1159,18 @@ async def _dispatch_task(
         # The whole checkout a sandboxed launch mounts, members included:
         # exactly the one the drift check above passed, not a second reading.
         checkout = verified if sandbox else None
+    # Right before a task that needs the folder, never on the walk's entry; a
+    # forge task or a rebase does not run in it here.
+    if inplace.is_in_place(work_item_row) and _takes_the_checkout(t):
+        try:
+            await inplace.take(
+                db, run_dirs, work_item_row, attachments=entry.attachments_of(work_item_row)
+            )
+        except inplace.CheckoutRefused as exc:
+            await config_error_session(db, run_dirs, common, f"{exc}\n")
+            return CHECKOUT_REFUSED
+        # The take may have moved HEAD onto the branch.
+        common["head_sha"] = _config.git_read(Path(worktree), "rev-parse", "HEAD")
     if isinstance(t, BuiltinTask):
         # Exhaustive on purpose (`builtin-task-references-code-owned-actions`:
         # Kraft owns this vocabulary): a third `BuiltinAction` member added
@@ -1370,6 +1410,12 @@ async def _dispatch_task(
         # revision, and the steer note below must name the `docs/` copy this
         # seeds from an older worktree's.
         item_paths.keep_version(run_dirs, work_item_row["id"], t.produces, worktree=worktree)
+    if inplace.is_in_place(work_item_row):
+        try:
+            await inplace.mark_task(db, run_dirs, work_item_row, Path(worktree), node.id, task.path)
+        except inplace.CheckoutRefused as exc:
+            await config_error_session(db, run_dirs, common, f"{exc}\n")
+            return CHECKOUT_REFUSED
     cands = _fallback.candidates(t, table)
     listed = len(cands) > 1
     tried = _fallback.Attempts(
@@ -1490,7 +1536,7 @@ async def _dispatch_task(
                 f"{task.path}: no launch candidate is available:\n"
                 + "".join(f"  - {why}\n" for why in tried.unavailable),
             )
-    await sweep_stragglers(
+    refused = await sweep_stragglers(
         db,
         work_item_row,
         worktree,
@@ -1499,7 +1545,11 @@ async def _dispatch_task(
         launch=launch,
         sandboxed=bool(sandbox),
         repository=repository,
+        run_dirs=run_dirs,
     )
+    # Even over a pause: both need a person, and only this stop names what it found.
+    if refused:
+        return CHECKOUT_REFUSED
     return status
 
 
@@ -1513,18 +1563,29 @@ async def sweep_stragglers(
     launch: LaunchContext | None,
     sandboxed: bool,
     repository: str | None = None,
-) -> None:
+    run_dirs=None,
+) -> str | None:
     """Commit what an agent task left uncommitted in `worktree`, and name
     what the commit left out. Run after every agent task `_dispatch_task`
     launches, and after one a restart re-adopted
     (`worker.reattach`): its work is no less the item's for the server
-    having restarted under it (R11E-03)."""
+    having restarted under it (R11E-03).
+
+    In place it commits nothing (`inplace.check_task`) and answers the reason
+    for a `checkout` stop, or None."""
     # The agent is told to commit everything it changes before it exits.
     # When it does not, the work is still on disk -- so verification passes,
     # and only `_assert_clean` two nodes later notices, by which point the
     # failure names a task rather than the cause and a human has to type
     # `git commit` in someone else's worktree (Kraft-7fip). Kraft owns the
     # worktree, so it takes the work rather than reporting it missing.
+    #
+    # Never in place: the person's own edits sit in the checkout beside the
+    # agent's, and `restore_branch` forces a checkout.
+    if store.is_in_place(work_item_row):
+        return await inplace.check_task(
+            db, run_dirs, work_item_row, Path(worktree), node_id, task_path
+        )
     #
     # Never at the cost of the run itself: an index lock a co-task holds, a
     # submodule that `add -A` finds nothing to stage in -- either of those
@@ -1565,7 +1626,7 @@ async def sweep_stragglers(
                 {"node_id": node_id, "task": task_path, "error": f"deferred: {exc}"},
             )
         )
-        return
+        return None
     try:
         if sandboxed:
             stops.refuse_planted_repos(
@@ -1588,7 +1649,7 @@ async def sweep_stragglers(
                 },
             )
         )
-        return
+        return None
     try:
         _builtins.restore_branch(Path(worktree), store.branch_for(work_item_row), base)
         await _forge.commit_stragglers(
@@ -1629,6 +1690,55 @@ async def sweep_stragglers(
                 {"node_id": node_id, "task": task_path, "error": str(exc)},
             )
         )
+
+
+def kept_past_checkout_stop(c, wid: str, node_id: str, task_path: str, round: int) -> str | None:
+    """The status a resume keeps for an in-place task its after-task check
+    stopped (`inplace.check_task`) without asking it to run again: once, for the
+    same round's measurement, while that stop is the item's last and the walk
+    has not moved on since -- a fix cycle started after it is moving on."""
+    stop = c.execute(
+        "SELECT seq, payload FROM events WHERE work_item_id = ? AND type = ? "
+        "ORDER BY seq DESC LIMIT 1",
+        (wid, WorkItemEvent.NEEDS_HUMAN),
+    ).fetchone()
+    if stop is None:
+        return None
+    p = json.loads(stop["payload"])
+    facts = p.get("facts") or {}
+    if (
+        p.get("kind") != StopKind.CHECKOUT
+        or p.get("node_id") != node_id
+        or facts.get("task") != task_path
+        or facts.get("rerun", True)
+        or facts.get("round") != round
+    ):
+        return None
+    moved_on = c.execute(
+        "SELECT 1 FROM events WHERE work_item_id = ? AND seq > ? AND ("
+        "(type = ? AND json_extract(payload, '$.node_id') != ?) "
+        "OR (type = ? AND json_extract(payload, '$.node_id') = ?) "
+        "OR type IN (?, ?, ?, ?)) LIMIT 1",
+        (
+            wid,
+            stop["seq"],
+            ChainEvent.NODE_STARTED,
+            node_id,
+            ChainEvent.NODE_COMPLETED,
+            node_id,
+            GateEvent.REJECTED,
+            ChainEvent.RUN_FORKED,
+            ChainEvent.BASE_CHANGE_RESTART,
+            ChainEvent.FIX_CYCLE_STARTED,
+        ),
+    ).fetchone()
+    if moved_on:
+        return None
+    s = c.execute(
+        "SELECT status FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+        (wid, facts.get("session")),
+    ).fetchone()
+    return s["status"] if s is not None and s["status"] in _ADVANCING else None
 
 
 def _last_left_out(db, work_item_id: str) -> list[str] | None:
@@ -1818,7 +1928,13 @@ async def measure_node(
     # the resume cursor a later measuring pass reads back.
     own = steps is None
     if own:
-        await node_runs.entered(db, Path(worktree) if worktree else None, work_item_id, node.id)
+        await node_runs.entered(
+            db,
+            Path(worktree) if worktree else None,
+            work_item_id,
+            node.id,
+            branch=store.branch_for(row) if store.is_in_place(row) else None,
+        )
 
     # Kraft-37myi: read per dispatch, not once per node. The old single read
     # above this loop carried the comment "the worktree's HEAD does not move
@@ -1846,6 +1962,12 @@ async def measure_node(
         return "done" if verdict == "paused" and _skipped(task) else verdict
 
     async def _measure_task(task: ResolvedTask, *, retry: bool = False) -> str:
+        if store.is_in_place(row) and not retry:
+            kept = db.read(
+                lambda c: kept_past_checkout_stop(c, work_item_id, node.id, task.path, round)
+            )
+            if kept is not None:
+                return kept
         if task.path in preserve and not retry:
             # A task retry's completed sibling (`RunFork.preserved`): its latest
             # outcome stands, whatever HEAD the retried task later moves.
@@ -1903,13 +2025,20 @@ async def measure_node(
             db, row, launch, worktree, before, node_id=node.id, scope=scope
         )
 
-    def _snapshot(flagged: bool):
-        return _read_only.snapshot(db, row, launch, worktree) if flagged else None
+    async def _snapshot(flagged: bool, tasks):
+        if not flagged:
+            return None
+        if store.is_in_place(row) and any(_takes_the_checkout(t.task) for t in tasks):
+            # The take is Kraft's own move, not the scope's write; a refusal
+            # is the task's to report, from its own take.
+            with contextlib.suppress(inplace.CheckoutRefused):
+                await inplace.take(db, run_dirs, row, attachments=entry.attachments_of(row))
+        return _read_only.snapshot(db, row, launch, worktree)
 
     async def _settle(tasks, step: ResolvedStep, *, retry: bool = False) -> list:
         # A read_only step is checked around every run of its tasks, a
         # recovery's retry included; the handler itself runs outside it.
-        before = _snapshot(step.read_only)
+        before = await _snapshot(step.read_only, tasks)
         results = await asyncio.gather(
             *(_measure(t, retry=retry) for t in tasks), return_exceptions=True
         )
@@ -1984,7 +2113,9 @@ async def measure_node(
 
     # A read_only node is checked around its own steps, a step around its
     # tasks (`_settle`); recovery and fix loops run outside either check.
-    node_before = _snapshot(own and getattr(node.node, "read_only", False))
+    node_before = await _snapshot(
+        own and getattr(node.node, "read_only", False), [t for g in groups for t in g.tasks]
+    )
     outcomes: list[tuple[ResolvedTask, object]] = []
     for index, step in enumerate(groups):
         # A resumed node skips the steps before `start_step` -- they already
@@ -2025,6 +2156,8 @@ async def measure_node(
     # could not even start (Kraft-579).
     if any(r == CONFIG_ERROR for r in results):
         return CONFIG_ERROR, [t for t, r in outcomes if r == CONFIG_ERROR], []
+    if any(r == CHECKOUT_REFUSED for r in results):
+        return CHECKOUT_REFUSED, [t for t, r in outcomes if r == CHECKOUT_REFUSED], []
     # A scope's time ran out (Ruling 194): nothing about the code failed, and
     # no recovery or fix cycle may spend more of the time that is gone.
     if any(r == TIME_CAPPED for r in results):

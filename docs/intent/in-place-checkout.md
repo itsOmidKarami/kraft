@@ -61,5 +61,82 @@ origin: src/kraft/store/work_items.py §checkout_holder
 WHEN an escalation, review-reply or gate-review agent starts for an in-place
 item, the system SHALL take the checkout lease and run the same checks as a
 walk task.
-enforced-by: tests/api/test_lifecycle_queue.py::test_a_session_outside_the_walk_waits_for_the_checkout[escalate], tests/api/test_lifecycle_queue.py::test_a_session_outside_the_walk_waits_for_the_checkout[reply], tests/api/test_lifecycle_queue.py::test_a_checkout_taken_after_the_doors_look_still_gets_no_second_session[escalate], tests/api/test_lifecycle_queue.py::test_a_checkout_taken_after_the_doors_look_still_gets_no_second_session[reply], tests/store/test_session_checkout.py::test_an_agent_outside_the_walk_gets_no_session_beside_a_working_in_place_item[outside-the-walk], tests/store/test_session_checkout.py::test_an_agent_outside_the_walk_gets_no_session_beside_a_working_in_place_item[any-other-session], tests/skills/test_gate_review.py::test_a_review_behind_a_working_in_place_item_leaves_the_gate_to_a_person, tests/test_review_reply.py::test_no_reply_agent_starts_behind_a_working_in_place_item, tests/executor/test_gates_feedback.py::test_a_reply_agent_refused_its_checkout_leaves_the_gate_open_and_says_why, tests/executor/test_escalation.py::test_an_auto_escalation_refused_its_checkout_is_skipped
+enforced-by: tests/api/test_lifecycle_queue.py::test_a_session_outside_the_walk_waits_for_the_checkout[escalate], tests/api/test_lifecycle_queue.py::test_a_session_outside_the_walk_waits_for_the_checkout[reply], tests/api/test_lifecycle_queue.py::test_a_checkout_taken_after_the_doors_look_still_gets_no_second_session[escalate], tests/api/test_lifecycle_queue.py::test_a_checkout_taken_after_the_doors_look_still_gets_no_second_session[reply], tests/store/test_session_checkout.py::test_an_agent_outside_the_walk_gets_no_session_beside_a_working_in_place_item[outside-the-walk], tests/store/test_session_checkout.py::test_an_agent_outside_the_walk_gets_no_session_beside_a_working_in_place_item[any-other-session], tests/skills/test_gate_review.py::test_a_review_behind_a_working_in_place_item_leaves_the_gate_to_a_person[another-item-uses-it], tests/test_review_reply.py::test_no_reply_agent_starts_without_its_checkout[another-item-uses-it], tests/executor/test_gates_feedback.py::test_a_reply_agent_refused_its_checkout_leaves_the_gate_open_and_says_why[another-item-uses-it], tests/executor/test_escalation.py::test_an_auto_escalation_refused_its_checkout_is_skipped[another-item-uses-it], tests/adapters/test_agent_in_place.py::test_an_in_place_session_outside_the_walk_takes_marks_and_checks_its_checkout[overlap], tests/adapters/test_agent_in_place.py::test_an_in_place_session_outside_the_walk_takes_marks_and_checks_its_checkout[moved], tests/adapters/test_agent_in_place.py::test_an_in_place_session_outside_the_walk_takes_marks_and_checks_its_checkout[leftover], tests/adapters/test_agent_in_place.py::test_an_in_place_session_refused_its_checkout_never_launches, tests/api/test_lifecycle_queue.py::test_a_session_outside_the_walk_refused_its_checkout_stops_the_item_as_checkout[escalate], tests/api/test_lifecycle_queue.py::test_a_session_outside_the_walk_refused_its_checkout_stops_the_item_as_checkout[reply], tests/test_review_reply.py::test_no_reply_agent_starts_without_its_checkout[it-cannot-be-taken], tests/skills/test_gate_review.py::test_a_review_behind_a_working_in_place_item_leaves_the_gate_to_a_person[it-cannot-be-taken], tests/executor/test_gates_feedback.py::test_a_reply_agent_refused_its_checkout_leaves_the_gate_open_and_says_why[it-cannot-be-taken], tests/executor/test_escalation.py::test_an_auto_escalation_refused_its_checkout_is_skipped[it-cannot-be-taken], tests/skills/test_gate_review.py::test_a_reviewer_that_moves_the_checkout_stops_the_item_and_its_verdict_is_dropped, tests/skills/test_gate_review.py::test_no_reviewer_starts_at_a_gate_its_checkout_stopped, tests/executor/test_gates_feedback.py::test_a_reply_agents_checkout_stop_ends_the_walk_at_the_gate, tests/worker/test_reattach_sweep.py::test_a_reattached_in_place_escalation_is_checked_before_its_self_retry[adopted], tests/worker/test_reattach_sweep.py::test_a_reattached_in_place_escalation_is_checked_before_its_self_retry[dead], tests/executor/test_dispatch_in_place.py::test_a_checkout_stop_from_a_session_outside_the_walk_keeps_no_node_task[escalation], tests/executor/test_dispatch_in_place.py::test_a_checkout_stop_from_a_session_outside_the_walk_keeps_no_node_task[implementation.reviewer]
 origin: src/kraft/store/sessions.py §create_session
+
+## REQ in-place-never-forces-a-checkout
+
+The system SHALL NOT run `git checkout -f` in an in-place item's checkout.
+enforced-by: tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/test_inplace.py::test_take_switches_with_plain_checkout_and_keeps_edits[plain], tests/executor/test_walk_in_place.py::test_no_sweep_after_an_in_place_task_moves_or_commits_anything
+origin: src/kraft/inplace.py §_take
+
+## REQ in-place-switch-refusal-stops
+
+IF switching the checkout to the item's branch would overwrite uncommitted
+changes, THEN the system SHALL stop the item as `checkout` naming the files,
+and SHALL leave the changes untouched.
+enforced-by: tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[ignored], tests/executor/test_walk_in_place.py::test_a_refused_take_stops_the_item_as_checkout
+origin: src/kraft/inplace.py §_take
+
+## REQ in-place-uncommitted-edits-do-not-stop
+
+WHILE an in-place checkout has uncommitted changes that the switch does not
+overwrite, the system SHALL start the item's task without stopping.
+enforced-by: tests/test_inplace.py::test_take_switches_with_plain_checkout_and_keeps_edits[plain], tests/test_inplace.py::test_the_first_take_commits_the_attachment_by_path[absent], tests/executor/test_walk_in_place.py::test_an_agent_task_runs_on_the_items_branch[the-persons-edit]
+origin: src/kraft/inplace.py §take
+
+## REQ in-place-never-runs-setup
+
+The system SHALL NOT run the repository's setup command for an in-place item.
+enforced-by: tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config, tests/executor/test_walk_in_place.py::test_a_refused_take_stops_the_item_as_checkout
+origin: src/kraft/inplace.py §prepare
+
+## REQ in-place-never-writes-git-config
+
+The system SHALL NOT write the checkout's git config for an in-place item.
+enforced-by: tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config
+origin: src/kraft/inplace.py §prepare
+
+## REQ in-place-never-sweeps-stragglers
+
+WHEN an in-place item's task ends, the system SHALL NOT commit files the task
+left uncommitted.
+enforced-by: tests/executor/test_dispatch_in_place.py::test_an_edited_file_the_agent_never_touched_stays_uncommitted_and_unstopped, tests/executor/test_walk_in_place.py::test_no_sweep_after_an_in_place_task_moves_or_commits_anything, tests/worker/test_reattach_sweep.py::test_a_reattached_in_place_task_is_checked_not_swept[overlap]
+origin: src/kraft/executor/dispatch.py §sweep_stragglers
+
+## REQ in-place-records-leftovers
+
+WHEN an in-place item's task ends with uncommitted paths that were not dirty
+when it started, the system SHALL record those paths on the item's history.
+enforced-by: tests/executor/test_dispatch_in_place.py::test_an_edited_file_the_agent_never_touched_stays_uncommitted_and_unstopped, tests/test_inplace.py::test_check_leftovers_are_only_what_the_task_left[plain]
+origin: src/kraft/inplace.py §check_task
+
+## REQ in-place-moved-branch-stops
+
+IF an in-place checkout is not on the item's branch when a task ends, THEN the
+system SHALL stop the item as `checkout`, list the task's commits not on the
+item's branch, and SHALL NOT switch the branch back.
+enforced-by: tests/executor/test_dispatch_in_place.py::test_a_branch_switch_mid_task_stops_and_never_switches_back[stays-away], tests/executor/test_dispatch_in_place.py::test_a_branch_switch_mid_task_stops_and_never_switches_back[switched-back], tests/test_inplace.py::test_check_names_a_moved_checkout_and_the_commits_made_off_the_branch, tests/worker/test_reattach_sweep.py::test_a_reattached_in_place_task_is_checked_not_swept[moved-with-a-stray-commit], tests/executor/test_dispatch_in_place.py::test_resume_after_a_checkout_stop_reruns_the_task_only_for_stray_commits[stray-commit-reruns]
+origin: src/kraft/inplace.py §check_task
+
+## REQ in-place-overlap-stops
+
+IF an in-place task's commits touch a path that had uncommitted changes when
+the task started, THEN the system SHALL stop the item as `checkout` and name
+the paths.
+enforced-by: tests/executor/test_dispatch_in_place.py::test_the_agent_committing_a_persons_edited_file_stops_as_checkout[done], tests/executor/test_dispatch_in_place.py::test_the_agent_committing_a_persons_edited_file_stops_as_checkout[paused-as-it-ended], tests/executor/test_dispatch_in_place.py::test_a_large_dirty_set_is_sampled_on_the_event_and_kept_whole_in_a_file, tests/worker/test_reattach_sweep.py::test_a_reattached_in_place_task_is_checked_not_swept[overlap], tests/test_inplace.py::test_check_overlap_is_the_tasks_own_commits_not_a_merged_main[commit], tests/test_inplace.py::test_check_overlap_is_the_tasks_own_commits_not_a_merged_main[merge]
+origin: src/kraft/inplace.py §check
+
+## REQ in-place-leftovers-stay-the-items
+
+WHEN a later task of an in-place item commits a path an earlier task left
+uncommitted and its content is unchanged since, the system SHALL NOT stop the
+item for overlap.
+enforced-by: tests/executor/test_dispatch_in_place.py::test_a_later_task_committing_an_earlier_tasks_leftover_does_not_stop, tests/test_inplace.py::test_mark_counts_the_persons_edits_and_not_the_items_own_leftovers
+origin: src/kraft/inplace.py §mark
+
+## REQ in-place-checkout-stop-never-auto-escalates
+
+The system SHALL NOT auto-escalate a `checkout` stop.
+enforced-by: tests/executor/test_dispatch_in_place.py::test_a_checkout_stop_is_never_auto_escalated, tests/executor/test_escalation.py::test_resume_after_escalation_drops_a_self_retry_on_a_moved_item[checkout-stop]
+origin: src/kraft/executor/walk.py §_sentinel_stop

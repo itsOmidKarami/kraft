@@ -70,8 +70,8 @@ async def run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> s
         return await _run(
             db, run_dirs, work_item_id=work_item_id, gate=gate, nodes=nodes, launch=launch
         )
-    except (asyncio.CancelledError, AssertionError, store.CheckoutBusy):
-        raise  # CheckoutBusy: nothing started; the caller queues or skips it
+    except (asyncio.CancelledError, AssertionError, store.CheckoutBusy, inplace.CheckoutRefused):
+        raise  # nothing started: the caller queues, skips or stops on it
     except Exception as exc:  # noqa: BLE001
         logger.exception("reply agent failed for %s at gate %s", work_item_id, gate)
         error = repr(exc)

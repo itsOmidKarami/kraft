@@ -4,12 +4,13 @@ import json
 import os
 
 import pytest
-from support.harness import make_repo_with_engineering
+from support.harness import commit_all, git, make_repo_with_engineering, v1_chain, write
 from support.index import seed_session as _seed_session
 from support.index import seed_work_item as _seed_work_item
 
 from kraft.index import db as index_db
 from kraft.index.service import Indexer
+from kraft.templates.environment import WorkItemTarget
 
 
 async def test_repos_union_of_work_items_and_env(tmp_path, database, conn):
@@ -298,6 +299,8 @@ async def test_documents_for_work_item_includes_intake_attachments(tmp_path, dat
         ("", "# As filed\nbody\n", None),
         (None, "# Attached plan\nbody\n", "Attached plan"),
         (None, "# Attached plan\nbody\n", "Attached plan"),
+        (None, "# Attached plan\nbody\n", "Attached plan"),
+        ("# Attached plan\nbody\n", "# As filed\nbody\n", "Attached plan"),
     ],
     ids=[
         "worktree",
@@ -306,6 +309,8 @@ async def test_documents_for_work_item_includes_intake_attachments(tmp_path, dat
         "gone-from-worktree",
         "stored-before-the-upgrade",
         "stored-under-a-moved-run-dir",
+        "in-place-before-the-take",
+        "in-place-committed-on-its-branch",
     ],
 )
 async def test_documents_for_work_item_shows_an_unindexed_attachment(
@@ -318,7 +323,9 @@ async def test_documents_for_work_item_shows_an_unindexed_attachment(
     it was filed with: 1.4 listed it there, read from the main checkout
     (R11F-02). Once the worktree exists, it alone is read: a stored copy must
     not stand in for a file a worker removed. `in_worktree` "" is a worktree
-    without the file, None no worktree at all."""
+    without the file, None no worktree at all. An in-place item's folder is
+    the checkout, which always exists: its stored copy is read until the
+    attachment is committed on the item's branch, `in_worktree` there."""
     from kraft.paths import RunDirs
 
     rd = RunDirs(tmp_path / "run").ensure()
@@ -340,7 +347,26 @@ async def test_documents_for_work_item_shows_an_unindexed_attachment(
             ("w1", str(repo), json.dumps([attachment])),
         )
     )
-    if in_worktree is not None:
+    if request.node.callspec.id.startswith("in-place"):
+        node = {
+            "id": "n",
+            "kind": "exec",
+            "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}],
+        }
+        chain = v1_chain(
+            [node], repo=repo, target=WorkItemTarget.for_repository("s", in_place=True)
+        )
+        await database.write(
+            lambda c: c.execute(
+                "UPDATE work_items SET materialized_chain = ? WHERE id = 'w1'", (chain.to_json(),)
+            )
+        )
+    if in_worktree is not None and request.node.callspec.id.startswith("in-place"):
+        git(repo, "checkout", "-q", "-b", "kraft/w1")
+        write(repo, attachment["path"], in_worktree)
+        commit_all(repo, "attach")
+        git(repo, "checkout", "-q", "main")
+    elif in_worktree is not None:
         wt = rd.worktrees / "w1" / ".engineering" / "plans"
         wt.mkdir(parents=True)
         if in_worktree:
