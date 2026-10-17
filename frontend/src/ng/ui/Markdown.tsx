@@ -48,7 +48,7 @@ function RemoteImage({ src, alt }: { src: string; alt?: string }) {
 
 /** Links stay plain anchors (a new tab, nothing executed); a remote image is a
  *  link to it, opened only on a click; fenced code is <pre><code>, where the
- *  review page's tokenizer plugs in (W8). */
+ *  review page's highlighter plugs in. */
 const components: Components = {
   a: ({ href, children }) => (
     <a href={href} target="_blank" rel="noopener noreferrer">

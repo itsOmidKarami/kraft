@@ -3,6 +3,7 @@ import type { ReviewComment, ReviewThread, Suggestion, ThreadLabel } from "../..
 import { detailOf, jsonBody, request } from "../http";
 import { Button } from "../ui/Button";
 import { Markdown } from "../ui/Markdown";
+import type { Token } from "./highlight";
 import { aliasOf } from "./languages";
 import { useLineTokens } from "./useHighlight";
 import { sendOnModEnter } from "../keys";
@@ -13,10 +14,10 @@ import { Badge, type Tone } from "../ui/Badge";
 
 /** Fenced code in a comment: plain at first, coloured once its grammar has loaded. */
 function CodeBlock({ text, lang }: { text: string; lang: string | undefined }) {
-  const tokens = useLineTokens(text, aliasOf(lang));
+  const tokens: Token[][] = useLineTokens(text, aliasOf(lang)) ?? text.split("\n").map((l) => (l ? [{ text: l }] : []));
   return (
     <>
-      {(tokens ?? text.split("\n").map((l) => (l ? [{ text: l }] : []))).map((line, i) => (
+      {tokens.map((line, i) => (
         <span key={i}>
           {i > 0 && "\n"}
           {line.map((t, j) => <span key={j} className={t.cls ? `tok-${t.cls}` : undefined}>{t.text}</span>)}
