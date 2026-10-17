@@ -634,9 +634,9 @@ async def dispatch(
             node_id=row["current_node_id"],
         )
 
-    files = thread_files(db, run_dirs, work_item_id, thread, session_id)
-    await _archive_last_turn(db, run_dirs, work_item_id, files)
     try:
+        files = thread_files(db, run_dirs, work_item_id, thread, session_id)
+        await _archive_last_turn(db, run_dirs, work_item_id, files)
         status = await _agent.run_agent_task(
             db,
             run_dirs,

@@ -7,6 +7,7 @@ no chain. `escalate.dispatch`'s only external dependency is
 
 from __future__ import annotations
 
+import contextlib
 import json
 
 import pytest
@@ -339,14 +340,22 @@ async def test_dispatch_new_thread_on_first_ever_escalation_is_still_thread_one(
     assert seen["kwargs"]["resume_session_id"] is None  # same as it would have been either way
 
 
-@pytest.mark.parametrize("refused", [False, True], ids=["launched", "refused"])
-async def test_dispatch_records_the_message_as_an_event(monkeypatch, database, run_dirs, refused):
-    """Once, a launch refused before its session was written included: it
-    counts as a turn all the same."""
+@pytest.mark.parametrize(
+    "fails", [None, "launch", "archive"], ids=["launched", "refused", "archive-fails"]
+)
+async def test_dispatch_records_the_message_as_an_event(monkeypatch, database, run_dirs, fails):
+    """Once, a launch refused before its session was written included, or one
+    whose turn failed before its launch: it counts as a turn all the same."""
     from kraft.adapters import agent
 
+    async def archive_fails(*a, **kw):
+        raise RuntimeError("disk full")
+
+    if fails == "archive":
+        monkeypatch.setattr(escalate, "_archive_last_turn", archive_fails)
+
     async def fake_run_agent_task(db, run_dirs, *, session_id, cwd, task_instruction, **kw):
-        if refused:
+        if fails == "launch":
             raise agent.LaunchRefused("no such tool")
         await kw["on_session"]()  # the session is written
         log_path = kw["files"].log
@@ -361,9 +370,10 @@ async def test_dispatch_records_the_message_as_an_event(monkeypatch, database, r
     wid = "w1"
     await _seed_needs_human(database, run_dirs, wid)
     launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
-    await escalate.dispatch(
-        database, run_dirs, work_item_id=wid, message="look at src/widget.py", launch=launch
-    )
+    with pytest.raises(RuntimeError) if fails == "archive" else contextlib.nullcontext():
+        await escalate.dispatch(
+            database, run_dirs, work_item_id=wid, message="look at src/widget.py", launch=launch
+        )
     from kraft import events as events_mod
 
     evs = database.read(lambda c: events_mod.read_after(c, 0, wid))
