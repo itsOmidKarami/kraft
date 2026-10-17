@@ -86,7 +86,7 @@ kraft view logs [ID] [-f] [-n N]            # a worker session's log; --json is 
 kraft view storage                          # worktree disk use against the quota and limit, item by item
 kraft view events [ID] [--after N] [--type T]
 kraft view watch                            # live board, needs a terminal
-kraft view diff [ID] [--stat|--name-only] [-w]   # truncation and untracked always shown
+kraft view diff [ID] [--stat|--name-only] [-w]   # truncation and untracked always shown (in place: commits only, no untracked)
 kraft view docs [ID] [--attachment spec|plan] / kraft view doc DOC_ID [--open [EDITOR]]  # --attachment: what it was filed with
 kraft view artifact [ID]                    # the doc the pending gate is about
 kraft repo list                             # `*` marks the repo you are in

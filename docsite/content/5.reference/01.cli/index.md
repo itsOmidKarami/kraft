@@ -14,7 +14,8 @@ server. Typing an old flat verb (`kraft list`) prints where it moved.
 `kraft <group> <verb> --help` prints every flag for one verb. Each group page
 describes its verbs and the flags that change what they do. Wherever a
 command takes a [work item](/concepts/vocabulary#work-item) ID, you can omit it when you run the command from
-inside that item's worktree.
+inside that item's worktree, or from a repo's own checkout while an
+[in-place item](/guides/run/run-items-in-place)'s branch is checked out there.
 
 You can also give the start of an ID instead of all of it: 4 characters or
 more, as long as no other item's ID starts the same way. A worker inside a
