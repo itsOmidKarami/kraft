@@ -231,8 +231,15 @@ async def test_take_stops_on_an_unsettled_checkout(
     assert _head(repo) == "refs/heads/main"
 
 
-async def test_prepare_never_runs_setup_or_writes_git_config(item_on, database, run_dirs, repo):
+@pytest.mark.parametrize("on", ["main", "feature"], ids=["on-main", "on-another-branch"])
+async def test_prepare_never_runs_setup_or_writes_git_config(item_on, database, run_dirs, repo, on):
+    """The branch forks from the base, never from whatever the person has out."""
     it = await item_on(v1_named_chain(run_dirs.base / "t"), wid="w1", target=_IN_PLACE)
+    main = git(repo, "rev-parse", "main")
+    if on != "main":
+        git(repo, "checkout", "-q", "-b", on)
+        write(repo, "theirs.txt", "the person's own commit\n")
+        commit_all(repo, "theirs")
     config = (repo / ".git" / "config").read_bytes()
 
     folder = await builtins.ensure_worktree(
@@ -247,19 +254,85 @@ async def test_prepare_never_runs_setup_or_writes_git_config(item_on, database, 
     assert not (repo / "SETUP_RAN").exists()
     assert (repo / ".git" / "config").read_bytes() == config
     assert not (run_dirs.worktrees / it.id).exists()
-    head = git(repo, "rev-parse", "HEAD")
-    assert it.row()["base_ref"] == head
-    assert git(repo, "rev-parse", store.branch_for(it.row())) == head
-    assert _head(repo) == "refs/heads/main"
+    assert it.row()["base_ref"] == main
+    assert git(repo, "rev-parse", store.branch_for(it.row())) == main
+    assert (git(repo, "rev-parse", "HEAD") == main) is (on == "main")
+    assert _head(repo) == f"refs/heads/{on}"
+
+
+def _spec(tmp_path, name="docs/spec.md") -> dict:
+    stored = write(tmp_path / "filed", "spec.md", "# Spec\n")
+    return {"kind": "spec", "path": name, "source": str(stored)}
+
+
+def _theirs_there(repo, tmp_path, monkeypatch) -> str:
+    write(repo, "docs/spec.md", "# Someone else's\n")
+    return "docs/spec.md"
+
+
+def _no_identity(repo, tmp_path, monkeypatch) -> str:
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    git(repo, "config", "--unset", "user.email")
+    return "user.email"
+
+
+def _symlink_at_dest(repo, tmp_path, monkeypatch) -> str:
+    """To a file in the checkout that reads the same: only the link refuses it."""
+    write(repo, "other.md", "# Spec\n")
+    (repo / "docs").mkdir()
+    (repo / "docs/spec.md").symlink_to("../other.md")
+    return "docs/spec.md"
+
+
+def _parent_dir_escapes(repo, tmp_path, monkeypatch) -> str:
+    (repo / "docs").symlink_to((tmp_path / "outside").resolve(), target_is_directory=True)
+    (tmp_path / "outside").mkdir()
+    return "docs/spec.md"
+
+
+def _a_hook_switches_back(repo, tmp_path, monkeypatch) -> str:
+    hook = "[ -f .git/back ] || { touch .git/back; git checkout -q main; }"
+    write(repo, ".git/hooks/post-checkout", f"#!/bin/sh\n{hook}\n").chmod(0o755)
+    return "left"
 
 
 @pytest.mark.parametrize(
-    "already",
-    [None, "# Spec\n", "# Someone else's\n", "no identity", "glob-like"],
-    ids=["absent", "same", "different", "no-identity", "glob-like-name"],
+    "arrange",
+    [_theirs_there, _no_identity, _symlink_at_dest, _parent_dir_escapes, _a_hook_switches_back],
+    ids=[
+        "different",
+        "no-identity",
+        "symlink-at-dest",
+        "symlink-parent-dir-escapes",
+        "a-hook-switches-back",
+    ],
+)
+async def test_the_first_take_refuses_an_attachment_it_would_put_over_anything(
+    item_on, database, run_dirs, repo, tmp_path, monkeypatch, arrange
+):
+    it, branch = await _prepared(item_on, database, run_dirs, repo)
+    named = arrange(repo, tmp_path, monkeypatch)
+    there, main = repo / "docs/spec.md", git(repo, "rev-parse", "main")
+    before = there.read_bytes() if there.exists() else None
+
+    with pytest.raises(inplace.CheckoutRefused, match=named):
+        await inplace.take(database, run_dirs, it.row(), attachments=[_spec(tmp_path)])
+
+    assert (there.read_bytes() if there.exists() else None) == before
+    assert git(repo, "rev-parse", branch) == it.row()["base_ref"]
+    assert git(repo, "rev-parse", "main") == main
+    assert not (tmp_path / "outside" / "spec.md").exists()
+    assert [e["payload"] for e in it.events("checkout_switched")] == [
+        {"from": "main", "to": branch}
+    ], "the checkout moved before the refusal, and nothing says so"
+
+
+@pytest.mark.parametrize(
+    "already", [None, "# Spec\n", "glob-like"], ids=["absent", "same", "glob-like-name"]
 )
 async def test_the_first_take_commits_the_attachment_by_path(
-    item_on, database, run_dirs, repo, tmp_path, monkeypatch, already
+    item_on, database, run_dirs, repo, tmp_path, already
 ):
     # `docs/spec[1].md` read as a pathspec glob would commit the person's `docs/spec1.md`.
     name = "docs/spec[1].md" if already == "glob-like" else "docs/spec.md"
@@ -267,32 +340,13 @@ async def test_the_first_take_commits_the_attachment_by_path(
         write(repo, "docs/spec1.md", "on main\n")
         commit_all(repo, "spec1")
     it, branch = await _prepared(item_on, database, run_dirs, repo)
-    stored = write(tmp_path / "filed", "spec.md", "# Spec\n")
-    attachment = {"kind": "spec", "path": name, "source": str(stored)}
-    if already == "no identity":
-        monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
-        monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-        git(repo, "config", "--unset", "user.email")
-    elif already == "glob-like":
+    if already == "glob-like":
         write(repo, "docs/spec1.md", "the person's edit\n")
     elif already is not None:
         write(repo, "docs/spec.md", already)
     write(repo, "calc.py", "# the person's edit\n")
+    attachment = _spec(tmp_path, name)
 
-    if already in ("# Someone else's\n", "no identity"):
-        with pytest.raises(inplace.CheckoutRefused) as refused:
-            await inplace.take(database, run_dirs, it.row(), attachments=[attachment])
-        if already == "no identity":
-            assert "user.email" in str(refused.value)
-            assert not (repo / "docs/spec.md").exists()
-        else:
-            assert refused.value.paths == ["docs/spec.md"]
-            assert (repo / "docs/spec.md").read_text() == already
-        assert git(repo, "rev-parse", branch) == it.row()["base_ref"]
-        assert [e["payload"] for e in it.events("checkout_switched")] == [
-            {"from": "main", "to": branch}
-        ], "the checkout moved before the refusal, and nothing says so"
-        return
     await inplace.take(database, run_dirs, it.row(), attachments=[attachment])
     await inplace.take(database, run_dirs, it.row(), attachments=[attachment])
 

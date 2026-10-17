@@ -515,7 +515,7 @@ def _take(folder, branch, base_ref, attachments, wid, base) -> dict | None:
             moved = _switch(folder, branch)
         if attachments and base_ref and _ref(folder, branch) == base_ref:
             try:
-                _attach(folder, attachments, wid, base)
+                _attach(folder, branch, attachments, wid, base)
             except CheckoutRefused as exc:
                 exc.moved_from = moved
                 raise
@@ -695,7 +695,7 @@ def _first_on_disk(folder: Path, path: str) -> str | None:
     return None
 
 
-def _attach(folder: Path, attachments: list[dict], wid: str, base: str) -> None:
+def _attach(folder: Path, branch: str, attachments: list[dict], wid: str, base: str) -> None:
     """Copy the attachments in and commit them on the branch, by path. A file
     already there with other content is the person's, and refuses; so does a
     checkout with no identity to commit as."""
@@ -721,6 +721,12 @@ def _attach(folder: Path, attachments: list[dict], wid: str, base: str) -> None:
                 "and Kraft will not overwrite it: move it aside, then retry the item",
                 [a["path"]],
             )
+    # A post-checkout hook may have moved it on: never commit on their branch.
+    if not _on(folder, branch):
+        raise CheckoutRefused(
+            f"{folder} left {branch} right after Kraft switched to it, so Kraft did not commit "
+            "the item's attachments there: retry the item"
+        )
     for a in attachments:
         dest = folder / a["path"]
         if not dest.exists():
