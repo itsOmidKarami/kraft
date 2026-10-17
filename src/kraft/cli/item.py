@@ -99,7 +99,7 @@ async def _gate_of(ns: argparse.Namespace) -> str:
     names: resolved here rather than in the client, the same one read."""
     if ns.gate:
         return ns.gate
-    return await client.actions._pending_gate_of(client.context._forbid_self_action(ns.id))
+    return await client.actions._pending_gate_of(await client.context._forbid_self_action(ns.id))
 
 
 def _cmd_approve(ns: argparse.Namespace) -> None:
@@ -188,7 +188,7 @@ def _archive_ids(ns: argparse.Namespace) -> tuple[list[str], int]:
             raise ValueError("give IDs or --reclaimable, not both")
         found = [i["id"] for i in asyncio.run(client.storage_usage())["items"] if i["reclaimable"]]
         return found[:_ARCHIVE_MAX], len(found)
-    ids = [client.context._forbid_self_action(i) for i in ns.ids or [None]]
+    ids = [asyncio.run(client.context._forbid_self_action(i)) for i in ns.ids or [None]]
     return ids, len(ids)
 
 
