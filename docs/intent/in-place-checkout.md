@@ -55,3 +55,11 @@ The system SHALL NOT queue a worktree item behind an in-place item's checkout
 lease.
 enforced-by: tests/store/test_work_items.py::test_a_second_in_place_item_in_one_checkout_is_not_claimed[claim_for_run], tests/store/test_work_items.py::test_a_second_in_place_item_in_one_checkout_is_not_claimed[mark_reentered], tests/store/test_work_items.py::test_a_second_in_place_item_in_one_checkout_is_not_claimed[approve_gate], tests/store/test_work_items.py::test_a_second_in_place_item_in_one_checkout_is_not_claimed[reject_gate]
 origin: src/kraft/store/work_items.py §checkout_holder
+
+## REQ in-place-sessions-take-the-lease
+
+WHEN an escalation, review-reply or gate-review agent starts for an in-place
+item, the system SHALL take the checkout lease and run the same checks as a
+walk task.
+enforced-by: tests/api/test_lifecycle_queue.py::test_a_session_outside_the_walk_waits_for_the_checkout[escalate], tests/api/test_lifecycle_queue.py::test_a_session_outside_the_walk_waits_for_the_checkout[reply]
+origin: src/kraft/api/routes/lifecycle.py §escalate_work_item

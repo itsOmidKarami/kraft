@@ -435,14 +435,32 @@ async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
             "gate": None,
             "reply_agent": False,
         }
+    return {
+        "review_id": rid,
+        "outcome": ReviewOutcome.COMMENT,
+        "gate": gate,
+        **await _start_reply(st, request, row, gate, nodes),
+    }
+
+
+class HeldReply(BaseModel):
+    """A reply agent queued for the checkout: the gate whose threads it answers."""
+
+    gate: str
+
+
+async def _start_reply(st, request: Request, row, gate: str, nodes) -> dict:
+    """Spawn the reply agent for `gate`'s threads; queued as `reply` while
+    another in-place item is using the item's checkout."""
+    wid = row["id"]
     launch = deps.launch(st, row["repo"])
     if await review_reply.refused_without_channel(st.db, row, launch, gate):
-        return {
-            "review_id": rid,
-            "outcome": ReviewOutcome.COMMENT,
-            "gate": gate,
-            "reply_agent": False,
-        }
+        return {"reply_agent": False}
+    if holder := st.db.read(lambda c: store.checkout_holder(c, wid)):
+        held = await lifecycle.queued_answer(
+            request, wid, "reply", HeldReply(gate=gate), [row["status"]], held_by=holder
+        )
+        return {"reply_agent": False, **held}
     try:
         deps.spawn(
             request.app,
@@ -459,12 +477,18 @@ async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
         spawned = True
     except deps.AlreadyRunning:
         spawned = False  # an auto-review is still running; the threads wait for the next comment
-    return {
-        "review_id": rid,
-        "outcome": ReviewOutcome.COMMENT,
-        "gate": gate,
-        "reply_agent": spawned,
-    }
+    return {"reply_agent": spawned}
+
+
+async def reply_held(wid: str, body: dict, request: Request) -> None:
+    """The start queue's replay of a reply agent that waited for the checkout
+    (`HeldReply`): the review is already published, so only the agent runs."""
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    gate = HeldReply(**body).gate
+    if board._pending_gate(st, wid) != gate:
+        raise HTTPException(409, f"gate {gate!r} is not pending")
+    await _start_reply(st, request, row, gate, gate_routes.gate_nodes(st, row))
 
 
 async def _request_changes_now(st, request, row, body, head, base):

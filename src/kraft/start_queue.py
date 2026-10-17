@@ -99,7 +99,8 @@ async def _start_one(app, wid: str) -> bool:
 
 
 async def _take_and_start(app, wid: str) -> bool:
-    from kraft.api.routes import lifecycle  # deferred: kraft.api starts this module's poller
+    # deferred: kraft.api starts this module's poller
+    from kraft.api.routes import lifecycle, review
 
     st = app.state
     saved = await st.db.write(lambda c: store.take_queued(c, wid))
@@ -113,6 +114,10 @@ async def _take_and_start(app, wid: str) -> bool:
             await lifecycle.continue_held(wid, saved["body"], request)
         elif saved["verb"] == "self_retry":
             await lifecycle.self_retry_held(wid, saved["body"], request)
+        elif saved["verb"] == "escalate":
+            await lifecycle.escalate_work_item(wid, lifecycle.Escalate(**saved["body"]), request)
+        elif saved["verb"] == "reply":
+            await review.reply_held(wid, saved["body"], request)
         else:
             await lifecycle.resume_work_item(wid, lifecycle.Resume(**saved["body"]), request)
     except asyncio.CancelledError:

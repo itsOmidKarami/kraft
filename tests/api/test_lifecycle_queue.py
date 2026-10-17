@@ -5,6 +5,7 @@ import asyncio
 import dataclasses
 import json
 import sqlite3
+import time
 from functools import partial
 from pathlib import Path
 
@@ -203,6 +204,67 @@ def test_resuming_behind_a_working_in_place_item_queues_and_says_who(
     _set_status(working, "paused")
 
     assert tick() == [wid]
+
+
+@pytest.mark.parametrize(
+    ("state", "door", "body", "verb", "launch", "asked"),
+    [
+        (
+            "failed",
+            "escalate",
+            {"message": "look again"},
+            "escalate",
+            "kraft.escalate.dispatch",
+            ("message", "look again"),
+        ),
+        (
+            "gate",
+            "gates/spec_approval/review",
+            {"outcome": "comment"},
+            "reply",
+            "kraft.review_reply.run",
+            ("gate", "spec_approval"),
+        ),
+    ],
+    ids=["escalate", "reply"],
+)
+def test_a_session_outside_the_walk_waits_for_the_checkout(
+    client, repo, monkeypatch, state, door, body, verb, launch, asked
+):
+    """`in-place-sessions-take-the-lease`: no agent starts in a checkout another
+    in-place item is using; the request waits, queued, and runs as asked once
+    the checkout frees."""
+    client.portal.call(client.app.state.queue_task.cancel)
+    launched = []
+
+    async def spy(*a, **kw):
+        launched.append(kw)
+        return "done"
+
+    monkeypatch.setattr(launch, spy)
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"][state], in_place=True)
+
+    r = client.post(f"/api/work-items/{wid}/{door}", json=body)
+
+    held = {"why": "checkout", "held_by": working, "held_by_title": "A"}
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "queued"
+    assert r.json().items() >= held.items()
+    assert [e["payload"] for e in _of(client, wid, "work_item_queued")] == [
+        {"verb": verb, "from": "needs_human", **held}
+    ]
+    assert _queue_tick(client) == []
+    assert launched == []
+
+    _set_status(working, "paused")
+
+    assert _queue_tick(client) == [wid]
+    deadline = time.monotonic() + 10
+    while not launched and time.monotonic() < deadline:
+        time.sleep(0.05)
+    [kw] = launched
+    assert kw[asked[0]] == asked[1]
 
 
 @pytest.mark.parametrize(

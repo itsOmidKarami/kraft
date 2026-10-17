@@ -2429,6 +2429,10 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     # got two agents committing to one worktree.
     if deps.task_is_live(request.app, wid):
         raise HTTPException(409, "a walk is already running for this work item")
+    if holder := st.db.read(lambda c: store.checkout_holder(c, wid)):
+        return await queued_answer(
+            request, wid, "escalate", body, admitting(Verb.ESCALATE), held_by=holder
+        )
 
     async def _run_escalation() -> None:
         cursor_evts = st.db.read(lambda c: events.read_after(c, 0, wid))
