@@ -109,6 +109,19 @@ test("once the only gate is approved, the gate says one is on its way, and Open 
   expect(errors).toEqual([]);
 });
 
+test("the badge clears the review page's bottom bar, but not under the gate review that covers it", async ({ page }) => {
+  const errors = await boot(page);
+  const gap = () => page.locator(".kd-pill").evaluate((e) => Math.round(innerHeight - e.getBoundingClientRect().bottom));
+  await page.getByRole("link", { name: "Show me: Approve a gate" }).click();
+  await page.getByRole("button", { name: "Review", exact: true }).click();
+  await expect(page.locator(".rv-gate")).toBeVisible();
+  await expect.poll(gap).toBe(16);
+  await page.getByRole("button", { name: "Review changes", exact: true }).click();
+  await expect(page.locator(".rv-bar")).toBeVisible();
+  await expect.poll(gap).toBe(88);
+  expect(errors).toEqual([]);
+});
+
 test("on a phone, once the gate is approved, its Show me is gone from the list, not just covered", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const errors = await boot(page);

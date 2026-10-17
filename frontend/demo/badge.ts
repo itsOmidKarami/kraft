@@ -7,7 +7,7 @@ import { TRIES, type Look, type Spot, type Tries, type TryId } from "./tries";
  * The demo's one addition to the page: a corner badge that says the data is sample data
  * and nothing is saved, links to the install guide, and opens a list of things to try.
  * Bottom left of the page on a desktop, past the sidebar and lifted over a bottom bar as the
- * toasts are (`--toast-bottom`), clear of the actions kept bottom right (the review page's
+ * toasts are (`--toast-bottom`, except over the gate review, which hides the bar), clear of the actions kept bottom right (the review page's
  * Request changes and Approve); above the bottom navigation on a phone. Only its cards take
  * clicks: the box around them lets them through to the page.
  * Outside the React tree, so the app renders exactly as it ships; the × hides it all for
@@ -18,9 +18,11 @@ const HIDDEN = "kraft.demo.badge.hidden";
 const OPEN = "kraft.demo.tries";
 
 const CSS = `
-.kd-badge { position: fixed; z-index: 2147483000; left: calc(var(--ng-side-w, 0px) + 16px); bottom: var(--toast-bottom, 16px);
+.kd-badge { --kd-bottom: var(--toast-bottom, 16px); position: fixed; z-index: 2147483000; left: calc(var(--ng-side-w, 0px) + 16px); bottom: var(--kd-bottom);
   display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: calc(100vw - var(--ng-side-w, 0px) - 32px); box-sizing: border-box;
   color: var(--text-sub); font: 12px/1.4 var(--font-sans, system-ui, sans-serif); pointer-events: none; }
+/* The gate review covers the review page's bottom bar; its only bottom action is right, under the toasts, so they stay lifted and the badge does not. */
+body:has(.rv-gate) .kd-badge { --kd-bottom: 16px; }
 .kd-badge > * { pointer-events: auto; }
 .kd-badge * { box-sizing: border-box; }
 .kd-pill { display: flex; align-items: center; gap: 10px; max-width: 100%; padding: 6px 6px 6px 12px; border: 1px solid var(--border); border-radius: 999px;
@@ -37,7 +39,7 @@ const CSS = `
 .kd-toggle .kd-count { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .kd-toggle .kd-chev { color: var(--text-muted); transition: transform 120ms; }
 .kd-toggle[aria-expanded="true"] .kd-chev { transform: rotate(180deg); }
-.kd-tries { width: 340px; max-width: 100%; max-height: calc(100vh - var(--toast-bottom, 16px) - 64px); overflow: auto; padding: 14px 14px 10px; border: 1px solid var(--border); border-radius: 12px;
+.kd-tries { width: 340px; max-width: 100%; max-height: calc(100vh - var(--kd-bottom) - 64px); overflow: auto; padding: 14px 14px 10px; border: 1px solid var(--border); border-radius: 12px;
   background: var(--surface); box-shadow: 0 10px 32px rgb(0 0 0 / 0.32); }
 /* Every hidden part stays hidden, whatever display a layout gives it (the phone's Show me is a flex box). */
 .kd-badge [hidden] { display: none !important; }
