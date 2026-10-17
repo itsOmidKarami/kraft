@@ -15,7 +15,6 @@ from support.api import (
     _REVIEW_EARLY,
     _approve_gate,
     _await_gate,
-    _in_state,
     _poll_events,
     _poll_node_started,
     _post_default,
@@ -782,30 +781,3 @@ def test_the_mcp_transport_announces_itself_and_the_bare_cli_does_not(monkeypatc
 
     monkeypatch.setenv("KRAFT_CLIENT", "mcp")
     assert transport.http().headers["X-Kraft-Client"] == "mcp"
-
-
-def test_approving_a_gate_behind_a_working_in_place_item_keeps_the_approval_and_queues(
-    client, repo
-):
-    states = json.loads((Path(__file__).parent / "lifecycle_doors.json").read_text())["states"]
-    working = _in_state(client, repo, states["running"], in_place=True, title="A")
-    wid = _in_state(client, repo, states["gate"], in_place=True)
-
-    r = _approve_gate(client, wid, "spec_approval")
-
-    assert r.status_code == 200, r.text
-    assert r.json()["status"] == "queued"
-    assert r.json()["held_by"] == working
-    evts = client.get(f"/api/work-items/{wid}/events").json()
-    approved = [e for e in evts if e["type"] == "gate_approved"]
-    assert [e["payload"]["gate"] for e in approved] == ["spec_approval"]
-    queued = [e["payload"] for e in evts if e["type"] == "work_item_queued"]
-    assert queued == [
-        {
-            "verb": "resume",
-            "from": "paused",
-            "why": "checkout",
-            "held_by": working,
-            "held_by_title": "A",
-        }
-    ]

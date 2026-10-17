@@ -33,3 +33,25 @@ IF a workspace item would run in place, THEN the system SHALL refuse to file
 it.
 enforced-by: tests/api/test_workspace_intake.py::test_a_workspace_selection_that_cannot_assemble_is_a_422[in-place], tests/api/test_workspace_intake.py::test_a_workspace_selection_that_cannot_assemble_is_a_422[in-an-in-place-root], tests/templates/test_environment.py::test_a_workspace_target_cannot_run_in_place
 origin: src/kraft/templates/environment.py §WorkItemTarget._kind_owns_its_fields
+
+## REQ one-in-place-item-works-per-repo
+
+WHILE an in-place item of a repository is active, the system SHALL queue any
+other in-place item of that repository that would become active, with a reason
+naming the item holding the checkout.
+enforced-by: tests/api/test_lifecycle_queue.py::test_resuming_behind_a_working_in_place_item_queues_and_says_who[resume], tests/api/test_lifecycle_queue.py::test_resuming_behind_a_working_in_place_item_queues_and_says_who[retry], tests/api/test_lifecycle_queue.py::test_approving_a_gate_behind_a_working_in_place_item_keeps_the_approval_and_queues, tests/executor/test_escalation.py::test_a_self_retry_behind_a_working_in_place_item_is_queued, tests/skills/test_gate_review.py::test_an_agent_approval_behind_a_working_in_place_item_is_queued, tests/store/test_work_items.py::test_the_lease_is_the_folder_not_its_spelling, tests/store/test_work_items.py::test_a_live_escalation_session_holds_the_checkout
+origin: src/kraft/store/work_items.py §checkout_holder
+
+## REQ in-place-gate-holds-no-checkout
+
+WHILE an in-place item waits at a gate, is paused, waits, or is stopped, the
+system SHALL NOT hold the checkout against another in-place item.
+enforced-by: tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[needs-human], tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[paused], tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[waiting], tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[at-a-gate]
+origin: src/kraft/store/work_items.py §checkout_holder
+
+## REQ worktree-items-ignore-the-checkout-lease
+
+The system SHALL NOT queue a worktree item behind an in-place item's checkout
+lease.
+enforced-by: tests/store/test_work_items.py::test_a_second_in_place_item_in_one_checkout_is_not_claimed[claim_for_run], tests/store/test_work_items.py::test_a_second_in_place_item_in_one_checkout_is_not_claimed[mark_reentered], tests/store/test_work_items.py::test_a_second_in_place_item_in_one_checkout_is_not_claimed[approve_gate]
+origin: src/kraft/store/work_items.py §checkout_holder

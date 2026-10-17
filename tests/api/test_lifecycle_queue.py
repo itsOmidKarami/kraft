@@ -204,11 +204,40 @@ def test_resuming_behind_a_working_in_place_item_queues_and_says_who(
     assert tick() == [wid]
 
 
-def test_skipping_behind_a_working_in_place_item_is_refused(client, repo):
+@pytest.mark.parametrize(
+    "body", [{}, {"path": "implementation.main.implement"}], ids=["node", "task"]
+)
+def test_skipping_behind_a_working_in_place_item_is_refused(client, repo, body):
     _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
     wid = _in_state(client, repo, DOORS["states"]["failed"], in_place=True)
 
-    r = client.post(f"/api/work-items/{wid}/skip", json={})
+    r = client.post(f"/api/work-items/{wid}/skip", json=body)
 
     assert r.status_code == 409, r.text
     assert r.json()["detail"] == "the checkout is in use by A; try again when it stops"
+
+
+def test_approving_a_gate_behind_a_working_in_place_item_keeps_the_approval_and_queues(
+    client, repo
+):
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"]["gate"], in_place=True)
+
+    r = client.post(f"/api/work-items/{wid}/gates/spec_approval/approve", json={})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "queued"
+    assert r.json()["held_by"] == working
+    evts = client.get(f"/api/work-items/{wid}/events").json()
+    approved = [e for e in evts if e["type"] == "gate_approved"]
+    assert [e["payload"]["gate"] for e in approved] == ["spec_approval"]
+    queued = [e["payload"] for e in evts if e["type"] == "work_item_queued"]
+    assert queued == [
+        {
+            "verb": "resume",
+            "from": "paused",
+            "why": "checkout",
+            "held_by": working,
+            "held_by_title": "A",
+        }
+    ]
