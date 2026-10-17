@@ -165,7 +165,7 @@ async def _take_and_start(app, wid: str) -> bool:
 #: (`store.replay_claimed`), or for the work to end, before it counts the
 #: item started: a claim lost meanwhile keeps its place, and a shutdown
 #: meanwhile puts the request back.
-_SPAWNS = ("self_retry", "escalate", "reply")
+_SPAWNS = ("self_retry", "escalate", "reply", "follow_up")
 
 
 async def _until_claimed(work: asyncio.Task, claimed: asyncio.Event) -> None:
@@ -189,6 +189,8 @@ async def _replay(wid: str, saved: dict, request: Request) -> None:
         await lifecycle.self_retry_held(wid, saved["body"], request)
     elif saved["verb"] == "escalate":
         await lifecycle.escalate_work_item(wid, lifecycle.Escalate(**saved["body"]), request)
+    elif saved["verb"] == "follow_up":
+        await lifecycle.follow_up_held(wid, saved["body"], request)
     elif saved["verb"] == "reply":
         await review.reply_held(wid, saved["body"], request)
     else:

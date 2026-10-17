@@ -551,24 +551,33 @@ async def test_a_self_retry_applies_the_override_it_carried(item_on, run_dirs, n
 
 
 @pytest.mark.parametrize(
-    "refusal",
-    [store.CheckoutBusy("a", "A"), inplace.CheckoutRefused("the branch is gone")],
+    ("refusal", "then"),
+    [
+        (store.CheckoutBusy("a", "A"), "queued"),
+        (inplace.CheckoutRefused("the branch is gone"), "needs_human"),
+    ],
     ids=["another-item-uses-it", "it-cannot-be-taken"],
 )
-async def test_an_auto_escalation_refused_its_checkout_is_skipped(item_on, monkeypatch, refusal):
-    """`escalate.dispatch` started nothing: another in-place item took the
-    checkout (`store.create_session`), or it could not be switched to the
-    item's branch (`inplace.take`). The stop stays the person's."""
+async def test_an_auto_escalation_refused_its_checkout_waits_or_is_skipped(
+    item_on, monkeypatch, refusal, then
+):
+    """`escalate.dispatch` started nothing. Another in-place item took the
+    checkout (`store.create_session`): the turn waits for it, queued as Kraft's
+    own follow-up. It could not be switched to the item's branch
+    (`inplace.take`): skipped, and the stop stays the person's."""
 
     async def busy(*a, **kw):
         raise refusal
 
     monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", busy)
     it = await _stuck(item_on)
+    await item_on(_CHAIN, wid="a", repo="/r", title="A")
 
-    assert await _escalate(it) == "needs_human"
+    assert await _escalate(it) == then
 
-    assert [e["payload"] for e in it.events("work_item_auto_escalate_skipped")] == [
-        {"reason": "checkout"}
-    ]
+    skipped = [e["payload"] for e in it.events("work_item_auto_escalate_skipped")]
+    queued = [e["payload"]["verb"] for e in it.events("work_item_queued")]
+    assert (skipped, queued) == (
+        ([], ["follow_up"]) if then == "queued" else ([{"reason": "checkout"}], [])
+    )
     assert not it.events("work_item_retried")

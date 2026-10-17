@@ -2191,29 +2191,9 @@ async def run_once(
             # reject cap stopped the bounce above -- either way, the reply
             # agent (the one that wrote the code) answers every unanswered
             # thread the gate opens carrying.
-            if launch is not None and db.read(lambda c: store.unanswered(c, work_item_id)):
-                # local: avoids an import cycle through kraft.executor
-                from kraft import review_reply
-
-                try:
-                    await review_reply.run(
-                        db,
-                        run_dirs,
-                        work_item_id=work_item_id,
-                        gate=node.id,
-                        nodes=nodes,
-                        launch=launch,
-                    )
-                except (store.CheckoutBusy, inplace.CheckoutRefused) as exc:
-                    await db.write(
-                        lambda c, why=str(exc), gate=node.id: events.append(
-                            c,
-                            work_item_id,
-                            GateEvent.REPLY_AGENT_SKIPPED,
-                            {"gate": gate, "reason": why},
-                            node_id=gate,
-                        )
-                    )
+            await gates.reply_at_gate(
+                db, run_dirs, work_item_id=work_item_id, gate=node.id, nodes=nodes, launch=launch
+            )
             # The reply's after-check (`inplace.check_task`) may have stopped it.
             return "needs_human" if inplace.stopped(db, work_item_id) else "awaiting_gate"
         if isinstance(node.node, GateNode):

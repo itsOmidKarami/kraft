@@ -413,12 +413,11 @@ async def test_an_agent_verdict_behind_a_working_in_place_item_is_queued(
 @pytest.mark.parametrize(
     "refused", [None, "the branch is gone"], ids=["another-item-uses-it", "it-cannot-be-taken"]
 )
-async def test_a_review_behind_a_working_in_place_item_leaves_the_gate_to_a_person(
+async def test_a_review_refused_its_checkout_waits_or_leaves_the_gate_to_a_person(
     database, run_dirs, tmp_path, monkeypatch, refused
 ):
-    """No reviewer starts in a checkout another in-place item is using, or one
-    that cannot be switched to the item's branch; the attempt closes with why,
-    and the gate waits for a person."""
+    """In a checkout another in-place item uses, no reviewer starts: it waits as
+    Kraft's follow-up, no attempt spent. In one that cannot be switched, the gate is a person's."""
     fake_harness_home(tmp_path, ["true"])
     chain = _chain2(run_dirs, target=_IN_PLACE, harness="fake")
     if refused:
@@ -430,16 +429,17 @@ async def test_a_review_behind_a_working_in_place_item_leaves_the_gate_to_a_pers
     else:
         await v1_item(database, chain, repo=run_dirs.base, wid="a", title="A")
 
-    assert await _review_from_gate(database, run_dirs, chain, auto_gate=True) == "awaiting_gate"
+    status = await _review_from_gate(database, run_dirs, chain, auto_gate=True)
 
-    evts = database.read(lambda c: events.read_after(c, 0, "w1"))
-    assert [e["payload"] for e in evts if e["type"] == "gate_auto_review_skipped"] == [
-        {
-            "gate": "human_review_approval",
-            "reason": "checkout",
-            "note": refused or "the checkout is in use by A",
-        }
+    told = ("gate_auto_review_skipped", "gate_auto_review_started", "work_item_queued")
+    seen = [
+        (e["type"], e["payload"].get("note") or e["payload"].get("verb"))
+        for e in database.read(lambda c: events.read_after(c, 0, "w1"))
+        if e["type"] in told
     ]
+    assert (status, seen) == (
+        ("awaiting_gate", [(told[0], refused)]) if refused else ("queued", [(told[2], "follow_up")])
+    )
     assert not database.read(
         lambda c: c.execute("SELECT 1 FROM worker_sessions WHERE work_item_id = 'w1'").fetchall()
     )

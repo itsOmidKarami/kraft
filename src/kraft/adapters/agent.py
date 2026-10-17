@@ -1263,9 +1263,7 @@ async def run_agent_task(
         if on_session is not None:
             await on_session()
         if borrows:
-            await inplace.take(
-                db, run_dirs, item_row, attachments=inplace.attachments_of(item_row)
-            )
+            await inplace.take(db, run_dirs, item_row, attachments=inplace.attachments_of(item_row))
             await inplace.mark_task(db, run_dirs, item_row, Path(cwd), node_id, hook_point)
 
     status = await _subprocess.run_task(

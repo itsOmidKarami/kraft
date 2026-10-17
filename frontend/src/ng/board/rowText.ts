@@ -42,7 +42,7 @@ export const allDone = (p: Pick<TaskProgress, "tasks">) => !!p.tasks?.length && 
 export const waitingForCheckout = (q?: { why?: unknown; held_by_title?: unknown } | null) => (q?.why === "checkout" ? `waiting for the checkout: ${String(q.held_by_title ?? "another item")} is using it` : null);
 
 /** The start a queued request makes, in words: `self_retry` is an escalation agent's own retry. */
-const QUEUED_VERB: Record<string, string> = { resume: "resume", start: "start", retry: "retry", continue: "continue past its gate", self_retry: "retry, as its escalation asked", escalate: "escalate", reply: "answer its review" };
+const QUEUED_VERB: Record<string, string> = { resume: "resume", start: "start", retry: "retry", continue: "continue past its gate", self_retry: "retry, as its escalation asked", escalate: "escalate", reply: "answer its review", follow_up: "run its agents at the stop" };
 export const queuedVerbWords = (verb: string) => QUEUED_VERB[verb] ?? nodeWords(verb);
 
 /** Up to the first full stop that ends a sentence, not one inside "$0.04". */

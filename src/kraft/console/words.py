@@ -164,6 +164,7 @@ _QUEUED_VERB = {
     "self_retry": "retry, as its escalation asked",
     "escalate": "escalate",
     "reply": "answer its review",
+    "follow_up": "run its agents at the stop",
 }
 
 

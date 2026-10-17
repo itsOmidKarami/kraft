@@ -215,15 +215,24 @@ async def review(
         ),
     )
 
-    await db.write(
-        lambda c: events.append(
-            c,
-            work_item_id,
-            GateEvent.AUTO_REVIEW_STARTED,
-            {"gate": gate, "session_id": session_id},
-            node_id=node.id,
-        )
-    )
+    started = False
+
+    async def start() -> None:
+        # The attempt (`_gate_review_attempts`): written once the session holds
+        # the checkout, or with the refused session that stands for it, never
+        # for a review `CheckoutBusy` refused, which started nothing and waits.
+        nonlocal started
+        if not started:
+            started = True
+            await db.write(
+                lambda c: events.append(
+                    c,
+                    work_item_id,
+                    GateEvent.AUTO_REVIEW_STARTED,
+                    {"gate": gate, "session_id": session_id},
+                    node_id=node.id,
+                )
+            )
 
     try:
         # The item's sandbox, as for every launch of it (Ruling 189).
@@ -231,6 +240,7 @@ async def review(
     except executor.SandboxUnresolved as exc:
         # Recorded as the reviewer's own session, so the pending gate names
         # why no review ran (Kraft-9t2dp); nothing launches.
+        await start()
         await executor.config_error_session(
             db,
             run_dirs,
@@ -250,6 +260,7 @@ async def review(
     # at the deadline.
     hit = db.read(lambda c: caps.at_launch(c, row, auto_review))
     if hit is not None and hit.remaining_s <= 0:
+        await start()
         await executor.time_capped_session(
             db,
             run_dirs,
@@ -270,6 +281,7 @@ async def review(
     # same rule here, before it reaches the reviewer's command line.
     refusal = _overrides.stored_model_refusal(work_item_id, item_override)
     if refusal is not None:
+        await start()
         await executor.config_error_session(
             db,
             run_dirs,
@@ -310,6 +322,7 @@ async def review(
         # reviewer's own session, so the pending gate names why no review ran,
         # and `gate_auto_review_started` above is not left dangling with no
         # terminal event for `_gate_review_attempts` to count.
+        await start()
         await executor.config_error_session(
             db,
             run_dirs,
@@ -324,6 +337,9 @@ async def review(
             f"{auto_review.path}: {exc}\n",
         )
         return "undecided", str(exc)
+    except Exception:
+        await start()  # a disabled profile (`HarnessUnavailable`) is an attempt too
+        raise
     try:
         status = await _agent.run_agent_task(
             db,
@@ -354,8 +370,14 @@ async def review(
             time_cap=time_cap,
             harness_id=auto_review.task.harness,
             takes_checkout=True,
+            on_session=start,
         )
-    except _agent.LaunchRefused as exc:
+    except store.CheckoutBusy:
+        raise
+    except Exception as exc:
+        await start()  # an attempt all the same
+        if not isinstance(exc, _agent.LaunchRefused):
+            raise
         # Refused before anything started: recorded as the reviewer's own
         # session, so the pending gate names why no review ran.
         await executor.config_error_session(

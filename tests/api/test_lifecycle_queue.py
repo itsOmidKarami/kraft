@@ -655,6 +655,32 @@ def test_a_pickup_queued_for_the_checkout_starts_as_krafts_own(client, repo):
     assert not _of(client, wid, "work_item_resumed"), "replayed as a person's resume"
 
 
+def test_krafts_own_agents_queued_for_the_checkout_run_when_it_frees(client, repo, monkeypatch):
+    """A gate's reply or review, or a stop's auto-escalation, that found the
+    checkout in use (`store.queue_follow_up`) runs as Kraft's, not a person's."""
+    from kraft import executor, store
+
+    client.portal.call(client.app.state.queue_task.cancel)
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"]["failed"], in_place=True)
+    with _orchestrator_db() as c, c:
+        c.row_factory = sqlite3.Row
+        assert store.queue_follow_up(c, wid, working)
+    ran = []
+
+    async def follow_up(db, run_dirs, **kw):
+        ran.append(kw["work_item_id"])
+
+    monkeypatch.setattr(executor, "follow_up", follow_up)
+    assert _queue_tick(client) == []
+
+    _set_status(working, "paused")
+
+    assert _queue_tick(client) == [wid]
+    assert ran == [wid]
+    assert _status_of(client, wid) == "needs_human"
+
+
 def test_a_held_decision_refused_beside_a_live_walk_keeps_its_steer(client, repo):
     """The replay is refused, and the rejection's note waits on the item for
     whatever starts it next."""

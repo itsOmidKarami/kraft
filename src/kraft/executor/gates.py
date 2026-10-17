@@ -22,6 +22,7 @@ from kraft.vocab import (
     ThreadLabel,
     Verb,
     WorkItemEvent,
+    WorkItemStatus,
     admitting,
 )
 from kraft.worker.worktree_read import read_worktree_file
@@ -411,9 +412,10 @@ async def review_gates(
         )
         if gate is None or not row["auto_gate"]:
             return status
-        if row["stop_kind"] == StopKind.CHECKOUT:
+        if row["stop_kind"] == StopKind.CHECKOUT or row["status"] == WorkItemStatus.QUEUED:
             # A reply agent's after-check stopped it: a reviewer would take the
-            # checkout straight back from the person.
+            # checkout straight back from the person. Or its reply waits for
+            # the checkout (`follow_up`), and the review runs after it.
             return row["status"]
         # The item's own chain, node overrides folded in (UI v2 · 04 point 1):
         # an `auto_escalate` override must suppress review here the same way it
@@ -461,7 +463,11 @@ async def review_gates(
                 node=node,
                 launch=launch,
             )
-        except (store.CheckoutBusy, inplace.CheckoutRefused) as exc:
+        except store.CheckoutBusy as exc:
+            # Started nothing, so no attempt: it waits for the checkout.
+            await db.write(lambda c, h=exc.holder: store.queue_follow_up(c, work_item_id, h))
+            return status_of(db, work_item_id)
+        except inplace.CheckoutRefused as exc:
             # Closes the attempt its `_started` opened: the gate is the person's.
             await db.write(
                 lambda c, gate=gate, note=str(exc): events.append(
@@ -610,6 +616,65 @@ async def review_gates(
                 steer_source="gate_review",
             )
     return status
+
+
+async def reply_at_gate(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> None:
+    """The reply agent for every thread left unanswered at `gate`, which the
+    walk opening the gate runs (`walk.run_once`), and its queued replay
+    (`follow_up`). While another in-place item uses the checkout it waits for
+    it, queued; a checkout that cannot be switched is said and skipped."""
+    from kraft import review_reply  # local: avoids an import cycle through kraft.executor
+
+    if launch is None or not db.read(lambda c: store.unanswered(c, work_item_id)):
+        return
+    try:
+        await review_reply.run(
+            db, run_dirs, work_item_id=work_item_id, gate=gate, nodes=nodes, launch=launch
+        )
+    except store.CheckoutBusy as exc:
+        await db.write(lambda c, h=exc.holder: store.queue_follow_up(c, work_item_id, h))
+    except inplace.CheckoutRefused as exc:
+        await db.write(
+            lambda c, why=str(exc): events.append(
+                c,
+                work_item_id,
+                GateEvent.REPLY_AGENT_SKIPPED,
+                {"gate": gate, "reason": why},
+                node_id=gate,
+            )
+        )
+
+
+async def follow_up(
+    db,
+    run_dirs,
+    *,
+    work_item_id: str,
+    policy: _policy.Policy | None = None,
+    launch: LaunchContext | None = None,
+    bd_cwd: str | None = None,
+    on_approve: OnApprove | None = None,
+) -> str:
+    """Kraft's own replay of what a walk does once it stops (`walk.run`),
+    queued as `follow_up` while another in-place item used the checkout: the
+    reply agent at a pending gate, the gate's review, the stop's
+    auto-escalation. Each checks again what is due, and waits again if the
+    checkout is taken. None of it is a person's, so nothing resets a count."""
+    from kraft.executor import walk
+
+    gate = pending_gate(db, work_item_id)
+    if gate is not None:
+        row = db.read(
+            lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+        )
+        nodes = store.effective_nodes(walk.chain_of(row), store.node_overrides_of(row))
+        await reply_at_gate(
+            db, run_dirs, work_item_id=work_item_id, gate=gate, nodes=nodes, launch=launch
+        )
+    kw = dict(policy=policy, launch=launch, bd_cwd=bd_cwd, on_approve=on_approve)
+    status = "awaiting_gate" if gate is not None else "needs_human"
+    status = await review_gates(status, db, run_dirs, work_item_id=work_item_id, **kw)
+    return await auto_escalate_stuck(status, db, run_dirs, work_item_id=work_item_id, **kw)
 
 
 def status_of(db, work_item_id: str) -> str:
@@ -1082,7 +1147,11 @@ async def auto_escalate_stuck(
             auto=True,
             evts=evts,
         )
-    except (store.CheckoutBusy, inplace.CheckoutRefused):
+    except store.CheckoutBusy as exc:
+        # Nothing started and no turn spent: it waits for the checkout.
+        await db.write(lambda c, h=exc.holder: store.queue_follow_up(c, work_item_id, h))
+        return status_of(db, work_item_id)
+    except inplace.CheckoutRefused:
         await db.write(
             lambda c: events.append(
                 c,

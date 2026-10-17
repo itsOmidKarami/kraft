@@ -1060,6 +1060,31 @@ async def self_retry_held(wid: str, body: dict, request: Request) -> None:
     )
 
 
+async def follow_up_held(wid: str, body: dict, request: Request) -> None:
+    """Kraft's own agents at a stop, queued for the checkout as `follow_up`
+    (`executor.follow_up`): the gate's reply and review, the stop's
+    auto-escalation, as the walk that stopped would have run them."""
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    deps.spawn(
+        request.app,
+        wid,
+        deps.guard(
+            st.db,
+            wid,
+            executor.follow_up(
+                st.db,
+                st.run_dirs,
+                work_item_id=wid,
+                policy=st.policy,
+                launch=deps.launch(st, row["repo"]),
+                bd_cwd=deps.bd_cwd(),
+                on_approve=deps._on_approve(st),
+            ),
+        ),
+    )
+
+
 def blocked_refusal(row) -> str:
     """The 409 every door but pause, cancel, abandon and unblock gives a
     blocked item."""
