@@ -10,9 +10,15 @@ import sys
 import psutil
 import pytest
 from support import worktree as wtree
+from support.harness import git, write
 
+from kraft import inplace
 from kraft.config import git_read
+from kraft.executor import dispatch
+from kraft.templates.environment import WorkItemTarget
 from kraft.worker import reattach
+
+_IN_PLACE = WorkItemTarget.for_repository("sample", in_place=True)
 
 _CHAIN = """
 - id: implementation
@@ -55,3 +61,25 @@ async def test_an_agent_task_that_ended_across_a_restart_is_swept(
         "wip: uncommitted work from implementation"
     )
     assert git_read(worktree, "ls-files", "work.txt") == "work.txt"
+
+
+async def test_a_reattached_in_place_task_is_checked_not_swept(item_on, database, run_dirs, repo):
+    """In place, a restart reads the task's mark back and checks it, as
+    dispatch would have: nothing committed, the move named, no switch back."""
+    it = await item_on(_CHAIN, "implementation", target=_IN_PLACE)
+    await inplace.prepare(database, run_dirs, it.row(), base="main")
+    await inplace.take(database, run_dirs, it.row(), attachments=[])
+    path = "implementation.main.implement"
+    await dispatch.mark_in_place(database, it.row(), repo, "implementation", path)
+    write(repo, "work.txt", "the agent's, never committed\n")
+    git(repo, "checkout", "-q", "main")
+    (run_dirs.results / "s1.json").write_text('{"status": "done"}')
+    await it.session("s1", path, running=(2_000_000_000, 123.0))
+
+    await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
+
+    assert git(repo, "symbolic-ref", "HEAD") == "refs/heads/main"
+    assert git(repo, "status", "--porcelain") == "?? work.txt"
+    assert it.row()["stop_kind"] == "checkout"
+    assert "moved to main" in it.events("work_item_needs_human")[-1]["payload"]["reason"]
+    assert list(it.events("left_uncommitted")[-1]["payload"]["paths"]) == ["work.txt"]

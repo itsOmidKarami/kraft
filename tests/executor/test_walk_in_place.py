@@ -89,6 +89,13 @@ async def test_an_agent_task_runs_on_the_items_branch(item_on, fake_agent, repo,
         {"from": "main", "to": branch}
     ]
     assert it.sessions("implementation")[0]["head_sha"] == tip
+    started = it.database.read(
+        lambda c: c.execute(
+            "SELECT start_sha FROM node_runs WHERE work_item_id = ? AND node_id = ?",
+            (it.id, "implementation"),
+        ).fetchone()
+    )
+    assert started["start_sha"] == tip, "the node's run started from the person's HEAD"
 
 
 async def test_no_sweep_after_an_in_place_task_moves_or_commits_anything(item_on, run_dirs, repo):

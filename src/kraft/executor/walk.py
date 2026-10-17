@@ -2065,7 +2065,13 @@ async def run_once(
         failing_node = nodes[start_index].id
         reason = str(exc)
         kind = StopKind.CONFIG if isinstance(exc, _config.ConfigError) else StopKind.INFRA
-        await node_runs.entered(db, inplace.item_folder(run_dirs, row), work_item_id, failing_node)
+        await node_runs.entered(
+            db,
+            inplace.item_folder(run_dirs, row),
+            work_item_id,
+            failing_node,
+            branch=store.branch_for(row) if inplace.is_in_place(row) else None,
+        )
         await db.write(
             lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason, kind=kind)
         )

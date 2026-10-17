@@ -105,8 +105,12 @@ def _commit_paths(worktree: Path, paths: list[str], message: str, base: str) -> 
     with base_ignore_args(worktree, base) as ignore_args:
 
         def git(*args: str) -> subprocess.CompletedProcess:
+            # Literal: an attachment named `spec[1].md` must not match `spec1.md`.
             return subprocess.run(
-                ["git", *ignore_args, *args], cwd=str(worktree), capture_output=True, text=True
+                ["git", "--literal-pathspecs", *ignore_args, *args],
+                cwd=str(worktree),
+                capture_output=True,
+                text=True,
             )
 
         added = git("add", "--", *paths)
@@ -152,8 +156,12 @@ def restore_branch(worktree: Path, branch: str, base: str) -> None:
     with base_ignore_args(worktree, base) as ignore_args:
 
         def run(*args: str) -> subprocess.CompletedProcess:
+            # Literal: an attachment named `spec[1].md` must not match `spec1.md`.
             return subprocess.run(
-                ["git", *ignore_args, *args], cwd=str(worktree), capture_output=True, text=True
+                ["git", "--literal-pathspecs", *ignore_args, *args],
+                cwd=str(worktree),
+                capture_output=True,
+                text=True,
             )
 
         current = run("rev-parse", "--abbrev-ref", "HEAD")

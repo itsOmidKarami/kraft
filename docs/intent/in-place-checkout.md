@@ -96,3 +96,47 @@ origin: src/kraft/inplace.py §prepare
 The system SHALL NOT write the checkout's git config for an in-place item.
 enforced-by: tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config
 origin: src/kraft/inplace.py §prepare
+
+## REQ in-place-never-sweeps-stragglers
+
+WHEN an in-place item's task ends, the system SHALL NOT commit files the task
+left uncommitted.
+enforced-by: tests/executor/test_dispatch_in_place.py::test_an_edited_file_the_agent_never_touched_stays_uncommitted_and_unstopped, tests/executor/test_walk_in_place.py::test_no_sweep_after_an_in_place_task_moves_or_commits_anything, tests/worker/test_reattach_sweep.py::test_a_reattached_in_place_task_is_checked_not_swept
+origin: src/kraft/executor/dispatch.py §sweep_stragglers
+
+## REQ in-place-records-leftovers
+
+WHEN an in-place item's task ends with uncommitted paths that were not dirty
+when it started, the system SHALL record those paths on the item's history.
+enforced-by: tests/executor/test_dispatch_in_place.py::test_an_edited_file_the_agent_never_touched_stays_uncommitted_and_unstopped, tests/test_inplace.py::test_check_leftovers_are_only_what_the_task_left
+origin: src/kraft/executor/dispatch.py §_check_in_place
+
+## REQ in-place-moved-branch-stops
+
+IF an in-place checkout is not on the item's branch when a task ends, THEN the
+system SHALL stop the item as `checkout`, list the task's commits not on the
+item's branch, and SHALL NOT switch the branch back.
+enforced-by: tests/executor/test_dispatch_in_place.py::test_a_branch_switch_mid_task_stops_and_never_switches_back, tests/test_inplace.py::test_check_names_a_moved_checkout_and_the_commits_made_off_the_branch, tests/worker/test_reattach_sweep.py::test_a_reattached_in_place_task_is_checked_not_swept
+origin: src/kraft/executor/dispatch.py §_check_in_place
+
+## REQ in-place-overlap-stops
+
+IF an in-place task's commits touch a path that had uncommitted changes when
+the task started, THEN the system SHALL stop the item as `checkout` and name
+the paths.
+enforced-by: tests/executor/test_dispatch_in_place.py::test_the_agent_committing_a_persons_edited_file_stops_as_checkout, tests/test_inplace.py::test_check_overlap_is_the_tasks_own_commits_not_a_merged_main[commit], tests/test_inplace.py::test_check_overlap_is_the_tasks_own_commits_not_a_merged_main[merge]
+origin: src/kraft/inplace.py §check
+
+## REQ in-place-leftovers-stay-the-items
+
+WHEN a later task of an in-place item commits a path an earlier task left
+uncommitted and its content is unchanged since, the system SHALL NOT stop the
+item for overlap.
+enforced-by: tests/executor/test_dispatch_in_place.py::test_a_later_task_committing_an_earlier_tasks_leftover_does_not_stop, tests/test_inplace.py::test_mark_counts_the_persons_edits_and_not_the_items_own_leftovers
+origin: src/kraft/inplace.py §mark
+
+## REQ in-place-checkout-stop-never-auto-escalates
+
+The system SHALL NOT auto-escalate a `checkout` stop.
+enforced-by: tests/executor/test_dispatch_in_place.py::test_a_checkout_stop_is_never_auto_escalated
+origin: src/kraft/executor/walk.py §_sentinel_stop

@@ -7,10 +7,14 @@ Whether an item runs in place is frozen on its chain snapshot at intake
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 import subprocess
 import threading
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from kraft import events, store
@@ -163,7 +167,7 @@ def _git_lines(folder: Path, command: str, *args: str) -> list[str]:
     if done.returncode != 0:
         raise CheckoutRefused(
             f"Kraft could not read {folder} (`git {command}` said: {done.stderr.strip()}), "
-            "so it did not switch it: fix that, then retry the item"
+            "and does not go on without it: fix that, then retry the item"
         )
     return [p for p in done.stdout.split("\0") if p]
 
@@ -340,3 +344,117 @@ def _attachments_of(row) -> list[dict]:
     from kraft.executor import entry
 
     return entry.attachments_of(row)
+
+
+@dataclass(frozen=True)
+class TaskMark:
+    """The checkout as an agent task found it: the branch's tip and the paths
+    already dirty that are the person's, not the item's."""
+
+    tip: str
+    dirty: frozenset[str]
+    started_at: str  # ISO, whole seconds: the reflog's resolution
+
+
+@dataclass(frozen=True)
+class TaskCheck:
+    moved_to: str | None
+    stray_commits: list[str]
+    overlap: list[str]
+    leftovers: dict[str, str]
+
+
+def leftovers(db, work_item_id: str) -> dict[str, str]:
+    """Path to blob sha of what the item's tasks last left uncommitted."""
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE work_item_id = ? AND type = ? "
+            "ORDER BY seq DESC LIMIT 1",
+            (work_item_id, ChainEvent.LEFT_UNCOMMITTED),
+        ).fetchone()
+    )
+    return json.loads(row["payload"])["paths"] if row else {}
+
+
+def mark(checkout: Path, branch: str, leftovers: Mapping[str, str]) -> TaskMark:
+    """Before an agent task: the tip and the person's dirty paths. A leftover
+    of the item's own whose content is unchanged is the item's, so a later
+    task committing it is no overlap."""
+    tip = _ref(checkout, branch)
+    if tip is None:
+        raise CheckoutRefused(f"the branch {branch} is gone from {checkout}")
+    dirty = _dirty(checkout)
+    mine = [p for p in dirty if p in leftovers]
+    hashes = _hashes(checkout, mine)
+    return TaskMark(
+        tip=tip,
+        dirty=frozenset(p for p in dirty if p not in mine or hashes[p] != leftovers[p]),
+        started_at=datetime.now(UTC).isoformat(timespec="seconds"),
+    )
+
+
+def check(checkout: Path, branch: str, mark: TaskMark) -> TaskCheck:
+    """After an agent task: never a repair, only what a stop needs to say."""
+    head = git_read(checkout, "symbolic-ref", "--quiet", "HEAD", expected_failure=True)
+    moved_to = None
+    if head != f"refs/heads/{branch}":
+        moved_to = (head or "").removeprefix("refs/heads/") or (
+            f"detached at {git_read(checkout, 'rev-parse', 'HEAD')}"
+        )
+    since = datetime.fromisoformat(mark.started_at).timestamp()
+    made = []
+    for entry in _git_lines(checkout, "log", "-g", "--date=unix", "--format=%H %gd %gs", "HEAD"):
+        sha, selector, subject = entry.split(" ", 2)
+        when = int(selector.rsplit("{", 1)[1].rstrip("}"))
+        if when >= since and not subject.startswith("checkout:") and sha not in made:
+            made.append(sha)
+    off = (
+        set(_git_lines(checkout, "rev-list", *made, "--not", f"refs/heads/{branch}"))
+        if made
+        else set()
+    )
+    # Each of the task's own commits against its first parent; a merge counts
+    # only what it resolved, never the files the merged branch brought.
+    touched = _git_lines(
+        checkout,
+        "log",
+        "--first-parent",
+        "--diff-merges=dense-combined",
+        "--no-renames",
+        "--name-only",
+        "--format=",
+        f"{mark.tip}..refs/heads/{branch}",
+    )
+    new = [p for p in _dirty(checkout) if p not in mark.dirty]
+    return TaskCheck(
+        moved_to=moved_to,
+        stray_commits=[s for s in made if s in off],
+        overlap=sorted(mark.dirty.intersection(touched)),
+        leftovers=_hashes(checkout, new),
+    )
+
+
+def _dirty(checkout: Path) -> list[str]:
+    """Modified, staged or untracked, never ignored: one path an entry."""
+    entries = _git_lines(
+        checkout, "status", "--porcelain=v1", "--untracked-files=all", "--no-renames"
+    )
+    return [e[3:] for e in entries]
+
+
+def _hashes(checkout: Path, paths: list[str]) -> dict[str, str]:
+    """Each path's blob sha; "" for one that is gone or is not a file."""
+    out = dict.fromkeys(paths, "")
+    files = [p for p in paths if (checkout / p).is_file()]
+    for i in range(0, len(files), 500):
+        chunk = files[i : i + 500]
+        shas = subprocess.run(
+            ["git", "hash-object", "--", *chunk],
+            cwd=checkout,
+            capture_output=True,
+            text=True,
+            errors="surrogateescape",
+        ).stdout.split()
+        if len(shas) == len(chunk):
+            out.update(zip(chunk, shas, strict=True))
+    return out

@@ -229,19 +229,26 @@ async def test_prepare_never_runs_setup_or_writes_git_config(item_on, database, 
 
 @pytest.mark.parametrize(
     "already",
-    [None, "# Spec\n", "# Someone else's\n", "no identity"],
-    ids=["absent", "same", "different", "no-identity"],
+    [None, "# Spec\n", "# Someone else's\n", "no identity", "glob-like"],
+    ids=["absent", "same", "different", "no-identity", "glob-like-name"],
 )
 async def test_the_first_take_commits_the_attachment_by_path(
     item_on, database, run_dirs, repo, tmp_path, monkeypatch, already
 ):
+    # `docs/spec[1].md` read as a pathspec glob would commit the person's `docs/spec1.md`.
+    name = "docs/spec[1].md" if already == "glob-like" else "docs/spec.md"
+    if already == "glob-like":
+        write(repo, "docs/spec1.md", "on main\n")
+        commit_all(repo, "spec1")
     it, branch = await _prepared(item_on, database, run_dirs, repo)
     stored = write(tmp_path / "filed", "spec.md", "# Spec\n")
-    attachment = {"kind": "spec", "path": "docs/spec.md", "source": str(stored)}
+    attachment = {"kind": "spec", "path": name, "source": str(stored)}
     if already == "no identity":
         monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
         monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
         git(repo, "config", "--unset", "user.email")
+    elif already == "glob-like":
+        write(repo, "docs/spec1.md", "the person's edit\n")
     elif already is not None:
         write(repo, "docs/spec.md", already)
     write(repo, "calc.py", "# the person's edit\n")
@@ -263,9 +270,12 @@ async def test_the_first_take_commits_the_attachment_by_path(
     await inplace.take(database, run_dirs, it.row(), attachments=[attachment])
     await inplace.take(database, run_dirs, it.row(), attachments=[attachment])
 
-    assert git(repo, "show", f"{branch}:docs/spec.md") == "# Spec"
+    assert git(repo, "--literal-pathspecs", "show", f"{branch}:{name}") == "# Spec"
     assert git(repo, "rev-list", "--count", f"{it.row()['base_ref']}..{branch}") == "1"
-    assert git(repo, "status", "--porcelain") == "M calc.py", "only the attachment was committed"
+    assert git(repo, "status", "--porcelain", "--untracked-files=no").splitlines() == [
+        "M calc.py",
+        *([" M docs/spec1.md"] if already == "glob-like" else []),
+    ], "only the attachment was committed"
 
 
 async def test_a_glob_like_path_on_the_branch_leaves_the_persons_file_alone(
@@ -299,3 +309,108 @@ async def test_a_cancel_mid_switch_waits_for_git_and_records_the_switch(
 
     assert _head(repo) == f"refs/heads/{branch}"
     assert [e["payload"]["to"] for e in it.events("checkout_switched")] == [branch]
+
+
+# -- before and after each agent task ------------------------------------------
+
+
+def _git_now(repo, *args: str) -> str:
+    """`git` at the real time: the reflog `check` reads is timed, and
+    `support.harness.git` commits at a fixed date in the past."""
+    return subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _on_item_branch(repo) -> str:
+    git(repo, "checkout", "-q", "-b", "item")
+    return "item"
+
+
+def test_mark_counts_the_persons_edits_and_not_the_items_own_leftovers(repo):
+    branch = _on_item_branch(repo)
+    write(repo, "kept.txt", "the item left this\n")
+    write(repo, "edited.txt", "the item left this\n")
+    left = inplace._hashes(repo, ["kept.txt", "edited.txt"])
+    write(repo, "edited.txt", "then the person changed it\n")
+    write(repo, "calc.py", "# the person's edit\n")
+
+    m = inplace.mark(repo, branch, left)
+
+    assert m.dirty == {"edited.txt", "calc.py"}
+    assert m.tip == git(repo, "rev-parse", branch)
+
+
+def test_check_names_a_moved_checkout_and_the_commits_made_off_the_branch(repo):
+    branch = _on_item_branch(repo)
+    m = inplace.mark(repo, branch, {})
+    _git_now(repo, "checkout", "-q", "main")
+    write(repo, "calc.py", "# onto the person's branch\n")
+    _git_now(repo, "commit", "-q", "-am", "stray")
+    stray = git(repo, "rev-parse", "HEAD")
+
+    found = inplace.check(repo, branch, m)
+
+    assert found.moved_to == "main"
+    assert found.stray_commits == [stray]
+    _git_now(repo, "checkout", "-q", "--detach")
+    assert inplace.check(repo, branch, m).moved_to == f"detached at {stray}"
+
+
+@pytest.mark.parametrize("how", ["merge", "commit"])
+def test_check_overlap_is_the_tasks_own_commits_not_a_merged_main(repo, how):
+    branch = _on_item_branch(repo)
+    git(repo, "checkout", "-q", "main")
+    write(repo, "calc.py", "# main moved on\n")
+    commit_all(repo, "main")
+    git(repo, "checkout", "-q", branch)
+    write(repo, "calc.py", "# the person's edit\n")
+    m = inplace.mark(repo, branch, {})
+    git(repo, "checkout", "-q", "--", "calc.py")  # for git to allow the task's work below
+
+    if how == "merge":
+        git(repo, "merge", "-q", "--no-ff", "-m", "merge main", "main")
+    else:
+        write(repo, "calc.py", "# the agent's\n")
+        commit_all(repo, "agent")
+
+    assert m.dirty == {"calc.py"}
+    assert inplace.check(repo, branch, m).overlap == ([] if how == "merge" else ["calc.py"])
+
+
+def test_check_leftovers_are_only_what_the_task_left(repo):
+    branch = _on_item_branch(repo)
+    write(repo, "calc.py", "# the person's edit\n")
+    m = inplace.mark(repo, branch, {})
+    write(repo, "calc.py", "# the person's edit, and the agent's\n")
+    write(repo, "new.txt", "the agent forgot this\n")
+
+    found = inplace.check(repo, branch, m)
+
+    assert found.leftovers == inplace._hashes(repo, ["new.txt"])
+    assert found.leftovers["new.txt"] == git(repo, "hash-object", "new.txt")
+    assert (found.moved_to, found.stray_commits, found.overlap) == (None, [], [])
+
+
+@pytest.mark.parametrize("name", ["with space.txt", "ünïcode.txt", "-leading.txt"])
+def test_mark_and_check_read_odd_paths_exactly(repo, name):
+    branch = _on_item_branch(repo)
+    write(repo, name, "on the branch\n")
+    commit_all(repo, "odd")
+    write(repo, name, "the person's edit\n")
+    m = inplace.mark(repo, branch, {})
+    git(repo, "checkout", "-q", "--", name)
+    write(repo, name, "the agent's\n")
+    git(repo, "commit", "-q", "-m", "agent", "--", name)
+    write(repo, f"new {name}", "left\n")
+
+    found = inplace.check(repo, branch, m)
+
+    assert m.dirty == {name}
+    assert found.overlap == [name]
+    assert list(found.leftovers) == [f"new {name}"]
+    assert found.leftovers[f"new {name}"] != ""

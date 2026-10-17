@@ -1407,6 +1407,12 @@ async def _dispatch_task(
         # revision, and the steer note below must name the `docs/` copy this
         # seeds from an older worktree's.
         item_paths.keep_version(run_dirs, work_item_row["id"], t.produces, worktree=worktree)
+    if inplace.is_in_place(work_item_row):
+        try:
+            await mark_in_place(db, work_item_row, Path(worktree), node.id, task.path)
+        except inplace.CheckoutRefused as exc:
+            await config_error_session(db, run_dirs, common, f"{exc}\n")
+            return CHECKOUT_REFUSED
     cands = _fallback.candidates(t, table)
     listed = len(cands) > 1
     tried = _fallback.Attempts(
@@ -1527,7 +1533,7 @@ async def _dispatch_task(
                 f"{task.path}: no launch candidate is available:\n"
                 + "".join(f"  - {why}\n" for why in tried.unavailable),
             )
-    await sweep_stragglers(
+    refused = await sweep_stragglers(
         db,
         work_item_row,
         worktree,
@@ -1537,6 +1543,18 @@ async def _dispatch_task(
         sandboxed=bool(sandbox),
         repository=repository,
     )
+    if refused and status != "paused":
+        # Its own session, as a refused take's: the stop reads its log.
+        await config_error_session(
+            db,
+            run_dirs,
+            {
+                **common,
+                "session_id": db.read(lambda c: store.new_session_id(c, common["work_item_id"])),
+            },
+            f"{refused}\n",
+        )
+        return CHECKOUT_REFUSED
     return status
 
 
@@ -1550,12 +1568,15 @@ async def sweep_stragglers(
     launch: LaunchContext | None,
     sandboxed: bool,
     repository: str | None = None,
-) -> None:
+) -> str | None:
     """Commit what an agent task left uncommitted in `worktree`, and name
     what the commit left out. Run after every agent task `_dispatch_task`
     launches, and after one a restart re-adopted
     (`worker.reattach`): its work is no less the item's for the server
-    having restarted under it (R11E-03)."""
+    having restarted under it (R11E-03).
+
+    In place it commits nothing (`_check_in_place`) and answers the reason
+    for a `checkout` stop, or None."""
     # The agent is told to commit everything it changes before it exits.
     # When it does not, the work is still on disk -- so verification passes,
     # and only `_assert_clean` two nodes later notices, by which point the
@@ -1566,7 +1587,7 @@ async def sweep_stragglers(
     # Never in place: the person's own edits sit in the checkout beside the
     # agent's, and `restore_branch` forces a checkout.
     if store.is_in_place(work_item_row):
-        return
+        return await _check_in_place(db, work_item_row, Path(worktree), node_id, task_path)
     #
     # Never at the cost of the run itself: an index lock a co-task holds, a
     # submodule that `add -A` finds nothing to stage in -- either of those
@@ -1607,7 +1628,7 @@ async def sweep_stragglers(
                 {"node_id": node_id, "task": task_path, "error": f"deferred: {exc}"},
             )
         )
-        return
+        return None
     try:
         if sandboxed:
             stops.refuse_planted_repos(
@@ -1630,7 +1651,7 @@ async def sweep_stragglers(
                 },
             )
         )
-        return
+        return None
     try:
         _builtins.restore_branch(Path(worktree), store.branch_for(work_item_row), base)
         await _forge.commit_stragglers(
@@ -1671,6 +1692,69 @@ async def sweep_stragglers(
                 {"node_id": node_id, "task": task_path, "error": str(exc)},
             )
         )
+
+
+async def mark_in_place(db, row, folder: Path, node_id: str, task_path: str) -> None:
+    """Before an in-place agent task: what `_check_in_place` compares against,
+    recorded so a restart's reattach reads the same mark back."""
+    m = await asyncio.to_thread(
+        inplace.mark, folder, store.branch_for(row), inplace.leftovers(db, row["id"])
+    )
+    payload = {"node_id": node_id, "task": task_path, "tip": m.tip}
+    payload |= {"dirty": sorted(m.dirty), "started_at": m.started_at}
+    await db.write(lambda c: events.append(c, row["id"], ChainEvent.TASK_MARKED, payload))
+
+
+async def _check_in_place(db, row, folder: Path, node_id: str, task_path: str) -> str | None:
+    """After an in-place agent task, in place of the sweep: record what it
+    left uncommitted, and answer why the item stops as `checkout`, if it
+    does. Never a repair: no switch back, no commit, no undo."""
+    marked = db.read(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE work_item_id = ? AND type = ? "
+            "AND json_extract(payload, '$.node_id') = ? AND json_extract(payload, '$.task') = ? "
+            "ORDER BY seq DESC LIMIT 1",
+            (row["id"], ChainEvent.TASK_MARKED, node_id, task_path),
+        ).fetchone()
+    )
+    if marked is None:  # launched before marks were recorded
+        return None
+    p = json.loads(marked["payload"])
+    m = inplace.TaskMark(tip=p["tip"], dirty=frozenset(p["dirty"]), started_at=p["started_at"])
+    branch = store.branch_for(row)
+    try:
+        found = await asyncio.to_thread(inplace.check, folder, branch, m)
+    except inplace.CheckoutRefused as exc:
+        return str(exc)
+    # Once, not after every task: only when it differs from the last record.
+    if found.leftovers and found.leftovers != inplace.leftovers(db, row["id"]):
+        await db.write(
+            lambda c: events.append(
+                c,
+                row["id"],
+                ChainEvent.LEFT_UNCOMMITTED,
+                {"node_id": node_id, "task": task_path, "paths": found.leftovers},
+            )
+        )
+    reasons = []
+    if found.moved_to:
+        made = (
+            f"; commits made during it that are not on {branch}: {', '.join(found.stray_commits)}"
+            if found.stray_commits
+            else ""
+        )
+        reasons.append(
+            f"the checkout {folder} moved to {found.moved_to} during the run of "
+            f"{task_path}{made}. Kraft did not switch it back, nor move those commits: "
+            f"resume once {folder} may go back to {branch}"
+        )
+    if found.overlap:
+        reasons.append(
+            f"the agent committed {', '.join(found.overlap)}, which already had uncommitted "
+            "changes before it started; check that the commit holds only the item's work, "
+            "then resume"
+        )
+    return "; ".join(reasons) or None
 
 
 def _last_left_out(db, work_item_id: str) -> list[str] | None:
@@ -1860,7 +1944,13 @@ async def measure_node(
     # the resume cursor a later measuring pass reads back.
     own = steps is None
     if own:
-        await node_runs.entered(db, Path(worktree) if worktree else None, work_item_id, node.id)
+        await node_runs.entered(
+            db,
+            Path(worktree) if worktree else None,
+            work_item_id,
+            node.id,
+            branch=store.branch_for(row) if store.is_in_place(row) else None,
+        )
 
     # Kraft-37myi: read per dispatch, not once per node. The old single read
     # above this loop carried the comment "the worktree's HEAD does not move
