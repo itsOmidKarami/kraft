@@ -443,8 +443,8 @@ def checkout_reason(conn: sqlite3.Connection, holder: str) -> dict:
 
 def is_in_place(row) -> bool:
     """Whether the item runs in its repository's checkout. False for a row
-    with no snapshot, or one that did not select it."""
-    chain = materialized_chain_of(row)
+    with no row, no snapshot, or one that did not select it."""
+    chain = materialized_chain_of(row) if row is not None else None
     return chain is not None and chain.target.in_place
 
 
