@@ -429,7 +429,10 @@ def progress_note(
     if db is not None and _progress.rework_run(db, work_item_row):
         # Kraft-hj2q9: a run a rejection bounced back follows the note, not the plan.
         return ""
-    tasks = _progress.tasks_for(work_item_row, Path(worktree), run_dirs)
+    # In place, the plan on the item's branch: an escalation's or a reply's
+    # prompt is built before the take, while the checkout may be the person's.
+    in_place = _store.is_in_place(work_item_row)
+    tasks = _progress.tasks_for(work_item_row, Path(worktree), run_dirs, in_place=in_place)
     note = _PROGRESS_NOTE if _callback.reachable(sandbox) else _PROGRESS_NOTE_NO_CHANNEL
     return note.format(total=len(tasks)) if tasks else ""
 

@@ -2,8 +2,10 @@
 
 That `dispatch_node` puts them in the prompt, in order, is test_dispatch's."""
 
+import json
+
 import pytest
-from support.harness import commit_all, entry_of, git, v1_named_chain, v1_task, write
+from support.harness import IN_PLACE, commit_all, entry_of, git, v1_named_chain, v1_task, write
 from support.store_fixtures import mk_item
 
 from kraft import item_paths, store
@@ -242,10 +244,26 @@ def test_a_worker_reports_progress_by_kraft_only_where_it_can_run_it(
 ):
     """A sandbox without `network:` has no route to Kraft: the commit tag,
     which Kraft reads when no report was made, is all it is asked for."""
-    monkeypatch.setattr(prompts._progress, "tasks_for", lambda row, worktree, run_dirs: ["a", "b"])
+    monkeypatch.setattr(prompts._progress, "tasks_for", lambda *a, **k: ["a", "b"])
     note = prompts.progress_note(WORKER, {"id": "w1"}, "/wt", sandbox=sandbox, run_dirs=None)
     assert "This plan has 2 tasks." in note and "`(task K)`" in note
     assert ("kraft item progress" in note) is reachable
+
+
+async def test_an_in_place_progress_note_counts_the_plan_on_its_branch(item_on, run_dirs, repo):
+    """An escalation's or a reply's prompt is built before the take, while
+    the checkout may be on the person's branch with their copy of the plan."""
+    it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation", target=IN_PLACE)
+    git(repo, "checkout", "-q", "-b", store.branch_for(it.row()))
+    write(repo, "docs/p.md", "## Task 1 — the item's\n")
+    commit_all(repo, "the plan")
+    git(repo, "checkout", "-q", "main")
+    write(repo, "docs/p.md", "## Task 1 — theirs\n## Task 2 — theirs\n## Task 3 — theirs\n")
+    row = {**dict(it.row()), "attachments": json.dumps([{"kind": "plan", "path": "docs/p.md"}])}
+
+    note = prompts.progress_note(WORKER, row, repo, run_dirs=run_dirs)
+
+    assert "This plan has 1 tasks." in note
 
 
 # -- review_threads_note (review threads anywhere §1) -----------------------------
