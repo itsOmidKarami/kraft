@@ -12,6 +12,7 @@ import stat
 import subprocess
 import threading
 import time
+import weakref
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -658,6 +659,18 @@ def _declared_members(db, work_item_id: str) -> list[str]:
     return item_mounts(row) if row is not None else []
 
 
+#: Event loops whose server is shutting down (`server_stopping`).
+_STOPPING: weakref.WeakSet = weakref.WeakSet()
+
+
+def server_stopping() -> None:
+    """The server on this loop is cancelling its walks: a session cut off
+    before its launch now stays `pending`, for restart's reattach to stop
+    its item as `infra` ("spawn unconfirmed"). While the server is down the
+    lease holds nothing back."""
+    _STOPPING.add(asyncio.get_running_loop())
+
+
 async def run_task(db, run_dirs, *, session_id: str, work_item_id: str, **kwargs) -> str:
     """`_run_task`, closing the session it wrote when whatever ends it -- a
     cancel, most often a co-task's failure or a stop -- comes before the
@@ -668,13 +681,15 @@ async def run_task(db, run_dirs, *, session_id: str, work_item_id: str, **kwargs
             db, run_dirs, session_id=session_id, work_item_id=work_item_id, **kwargs
         )
     except BaseException as exc:
+        if asyncio.get_running_loop() in _STOPPING:
+            raise
         try:
             if await db.write(lambda c: _close_unlaunched(c, session_id, work_item_id)):
                 files = kwargs.get("files") or item_paths.session_files(
                     run_dirs, work_item_id, session_id
                 )
                 with open(files.log, "a", opener=private) as log:
-                    log.write(f"kraft: {str(exc) or 'cancelled before launch'}\n")
+                    log.write(f"kraft: {str(exc) or 'ended before its launch was recorded'}\n")
         except Exception:  # noqa: BLE001 -- never in place of what ended the task
             logger.exception("could not close session %s, ended before its launch", session_id)
         raise

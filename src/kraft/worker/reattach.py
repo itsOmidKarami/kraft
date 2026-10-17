@@ -165,7 +165,8 @@ async def reap_stopped(db, grace: float = 2.0) -> list[int]:
         {
             r["session_pid"]
             for r in rows
-            if store.is_in_place(r) and launched_group(r["session_pid"], r["session_started"])
+            # The pid first: almost all are dead, and is_in_place parses a chain.
+            if launched_group(r["session_pid"], r["session_started"]) and store.is_in_place(r)
         }
     )
     await asyncio.gather(*(_kill_group(pid, grace) for pid in pids))

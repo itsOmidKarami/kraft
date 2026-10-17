@@ -32,6 +32,7 @@ from kraft import policy as policy_mod
 from kraft import triggers as triggers_mod
 from kraft import update as update_mod
 from kraft.adapters import hook_install
+from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git as forge_git
 from kraft.addons import load as addons_load
 from kraft.api import deps
@@ -407,6 +408,7 @@ async def lifespan(app: FastAPI):
         # Before the walks are cancelled: a setup command runs in a thread
         # no cancel reaches, and would outlive this server.
         _builtins.end_running_setups()
+        _subprocess.server_stopping()
         tasks = list(app.state.tasks.values())
         for task in tasks:
             task.cancel()
