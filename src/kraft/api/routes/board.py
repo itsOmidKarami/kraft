@@ -1337,9 +1337,12 @@ async def get_work_item(wid: str, request: Request):
         "worktree_exists": folder.is_dir(),
         # What the *diff on screen* is, so the gate can tell a measurement taken
         # on this commit from one taken three commits ago (Kraft-lu2).
-        # `git_read` returns None for a worktree that does not exist yet.
-        # In place, the branch's tip: the checkout's HEAD may be the person's.
-        "head_sha": config_mod.git_read(folder, "rev-parse", inplace.head_ref(row)),
+        # `git_read` returns None for a worktree, or an in-place branch, that
+        # does not exist yet. In place, the branch's tip: the checkout's HEAD
+        # may be the person's.
+        "head_sha": config_mod.git_read(
+            folder, "rev-parse", "--verify", "-q", inplace.head_ref(row), expected_failure=True
+        ),
         "in_place": inplace.is_in_place(row),
         # The gate actually waiting on a person. Inferring it client-side from
         # "the node has a gate_after and its sessions are done" cannot see a
