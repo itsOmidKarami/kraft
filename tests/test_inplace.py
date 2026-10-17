@@ -382,18 +382,30 @@ def test_check_overlap_is_the_tasks_own_commits_not_a_merged_main(repo, how):
     assert inplace.check(repo, branch, m).overlap == ([] if how == "merge" else ["calc.py"])
 
 
-def test_check_leftovers_are_only_what_the_task_left(repo):
+@pytest.mark.parametrize("unreadable", [False, True], ids=["plain", "one-unreadable"])
+def test_check_leftovers_are_only_what_the_task_left(repo, unreadable):
     branch = _on_item_branch(repo)
     write(repo, "calc.py", "# the person's edit\n")
     m = inplace.mark(repo, branch, {})
     write(repo, "calc.py", "# the person's edit, and the agent's\n")
     write(repo, "new.txt", "the agent forgot this\n")
+    if unreadable:  # fails `hash-object` for the whole call it is in
+        write(repo, "locked.txt", "x\n").chmod(0)
 
     found = inplace.check(repo, branch, m)
 
-    assert found.leftovers == inplace._hashes(repo, ["new.txt"])
-    assert found.leftovers["new.txt"] == git(repo, "hash-object", "new.txt")
+    expected = {"new.txt": git(repo, "hash-object", "new.txt")}
+    assert found.leftovers == expected | ({"locked.txt": ""} if unreadable else {})
     assert (found.moved_to, found.stray_commits, found.overlap) == (None, [], [])
+
+
+def test_check_refuses_on_a_git_without_dense_combined_merges(repo, monkeypatch):
+    branch = _on_item_branch(repo)
+    m = inplace.mark(repo, branch, {})
+    monkeypatch.setattr(inplace, "_DIFF_MERGES", "--diff-merges=what-older-git-lacks")
+
+    with pytest.raises(inplace.CheckoutRefused, match="needs git 2.31 or newer"):
+        inplace.check(repo, branch, m)
 
 
 @pytest.mark.parametrize("name", ["with space.txt", "ünïcode.txt", "-leading.txt"])

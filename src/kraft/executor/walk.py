@@ -513,6 +513,15 @@ async def _sentinel_stop(
     if verdict == CONFIG_ERROR:
         return await _stop_for_config_error(db, work_item_id, node, failed)
     if verdict == CHECKOUT_REFUSED:
+        # The after-task check (`dispatch._check_in_place`) stops the item
+        # itself; a refused take leaves its reason in a session's log.
+        status = db.read(
+            lambda c: c.execute(
+                "SELECT status FROM work_items WHERE id = ?", (work_item_id,)
+            ).fetchone()["status"]
+        )
+        if status == "needs_human":
+            return "needs_human"
         # Never `stuck`: an escalation would take the checkout straight back.
         reason = "; ".join(_task_log(db, work_item_id, node, t).strip() for t in failed)
         await db.write(

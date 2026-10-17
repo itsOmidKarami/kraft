@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from kraft import events, store
+from kraft import events, item_paths, store
 from kraft.adapters.forge import git
 from kraft.config import ConfigError, git_read
 from kraft.vocab import ChainEvent
@@ -364,16 +364,44 @@ class TaskCheck:
     leftovers: dict[str, str]
 
 
-def leftovers(db, work_item_id: str) -> dict[str, str]:
+#: How many paths a `task_marked` or `left_uncommitted` event names; the
+#: whole set is in the item's folder (`item_paths.checkout_record`), since every event goes to
+#: every client.
+SAMPLE = 50
+
+
+def _write(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(path)
+
+
+def save_mark(run_dirs, wid: str, task_path: str, m: TaskMark) -> None:
+    data = {"tip": m.tip, "started_at": m.started_at, "dirty": sorted(m.dirty)}
+    _write(item_paths.checkout_record(run_dirs, wid, f"{task_path}.mark.json"), data)
+
+
+def load_mark(run_dirs, wid: str, task_path: str) -> TaskMark | None:
+    try:
+        d = json.loads(
+            item_paths.checkout_record(run_dirs, wid, f"{task_path}.mark.json").read_text()
+        )
+    except FileNotFoundError:
+        return None
+    return TaskMark(tip=d["tip"], dirty=frozenset(d["dirty"]), started_at=d["started_at"])
+
+
+def save_leftovers(run_dirs, wid: str, paths: Mapping[str, str]) -> None:
+    _write(item_paths.checkout_record(run_dirs, wid, "leftovers.json"), dict(paths))
+
+
+def leftovers(run_dirs, wid: str) -> dict[str, str]:
     """Path to blob sha of what the item's tasks last left uncommitted."""
-    row = db.read(
-        lambda c: c.execute(
-            "SELECT payload FROM events WHERE work_item_id = ? AND type = ? "
-            "ORDER BY seq DESC LIMIT 1",
-            (work_item_id, ChainEvent.LEFT_UNCOMMITTED),
-        ).fetchone()
-    )
-    return json.loads(row["payload"])["paths"] if row else {}
+    try:
+        return json.loads(item_paths.checkout_record(run_dirs, wid, "leftovers.json").read_text())
+    except FileNotFoundError:
+        return {}
 
 
 def mark(checkout: Path, branch: str, leftovers: Mapping[str, str]) -> TaskMark:
@@ -393,6 +421,10 @@ def mark(checkout: Path, branch: str, leftovers: Mapping[str, str]) -> TaskMark:
     )
 
 
+#: git 2.31 and later; older git refuses it, and `check` says so.
+_DIFF_MERGES = "--diff-merges=dense-combined"
+
+
 def check(checkout: Path, branch: str, mark: TaskMark) -> TaskCheck:
     """After an agent task: never a repair, only what a stop needs to say."""
     head = git_read(checkout, "symbolic-ref", "--quiet", "HEAD", expected_failure=True)
@@ -409,22 +441,30 @@ def check(checkout: Path, branch: str, mark: TaskMark) -> TaskCheck:
         if when >= since and not subject.startswith("checkout:") and sha not in made:
             made.append(sha)
     off = (
-        set(_git_lines(checkout, "rev-list", *made, "--not", f"refs/heads/{branch}"))
+        set(_git_lines(checkout, "log", "--format=%H", *made, "--not", f"refs/heads/{branch}"))
         if made
         else set()
     )
     # Each of the task's own commits against its first parent; a merge counts
     # only what it resolved, never the files the merged branch brought.
-    touched = _git_lines(
-        checkout,
-        "log",
-        "--first-parent",
-        "--diff-merges=dense-combined",
-        "--no-renames",
-        "--name-only",
-        "--format=",
-        f"{mark.tip}..refs/heads/{branch}",
-    )
+    try:
+        touched = _git_lines(
+            checkout,
+            "log",
+            "--first-parent",
+            _DIFF_MERGES,
+            "--no-renames",
+            "--name-only",
+            "--format=",
+            f"{mark.tip}..refs/heads/{branch}",
+        )
+    except CheckoutRefused as exc:
+        if "diff-merges" not in str(exc):
+            raise
+        raise CheckoutRefused(
+            f"Kraft needs git 2.31 or newer to check what an in-place task committed "
+            f"in {checkout} ({exc}): update git, then retry the item"
+        ) from None
     new = [p for p in _dirty(checkout) if p not in mark.dirty]
     return TaskCheck(
         moved_to=moved_to,
@@ -457,4 +497,8 @@ def _hashes(checkout: Path, paths: list[str]) -> dict[str, str]:
         ).stdout.split()
         if len(shas) == len(chunk):
             out.update(zip(chunk, shas, strict=True))
+        elif len(chunk) > 1:
+            # One unreadable file fails the whole call: the rest one by one.
+            for p in chunk:
+                out.update(_hashes(checkout, [p]))
     return out

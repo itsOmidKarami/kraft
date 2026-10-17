@@ -114,6 +114,7 @@ async def test_no_sweep_after_an_in_place_task_moves_or_commits_anything(item_on
         task_path="implementation.main.implement",
         launch=None,
         sandboxed=False,
+        run_dirs=run_dirs,
     )
 
     assert git(repo, "symbolic-ref", "HEAD") == "refs/heads/main", "the checkout was forced back"

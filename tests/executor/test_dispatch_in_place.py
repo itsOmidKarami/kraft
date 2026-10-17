@@ -8,9 +8,9 @@ from __future__ import annotations
 import pytest
 from support.harness import git, write
 
-from kraft import events, executor, store
+from kraft import events, executor, inplace, store
 from kraft import policy as _policy
-from kraft.executor import gates
+from kraft.executor import dispatch, gates
 from kraft.templates.environment import WorkItemTarget
 
 from .test_walk import _agent, _exec, _stop_reason, _walk
@@ -47,17 +47,47 @@ async def test_an_edited_file_the_agent_never_touched_stays_uncommitted_and_unst
     assert "test_calc.py" not in git(repo, "log", "--name-only", "--format=", f"main..{branch}")
     assert it.events("sweep_failed") == []
     [left] = it.events("left_uncommitted")
-    assert left["payload"]["paths"] == {"left.txt": git(repo, "hash-object", "left.txt")}
+    assert (left["payload"]["paths"], left["payload"]["count"]) == (["left.txt"], 1)
+    assert inplace.leftovers(it.run_dirs, it.id) == {
+        "left.txt": git(repo, "hash-object", "left.txt")
+    }
     [marked] = it.events("task_marked")
     assert marked["payload"]["dirty"] == ["test_calc.py"]
 
 
-async def test_the_agent_committing_a_persons_edited_file_stops_as_checkout(
+async def test_a_large_dirty_set_is_sampled_on_the_event_and_kept_whole_in_a_file(
     item_on, fake_agent, agent_runs, repo
+):
+    it = await item_on(fake_agent.quick_task, target=_IN_PLACE)
+    for i in range(60):
+        write(repo, f"mine/{i:02}.txt", "the person's\n")
+    agent_runs("echo agent > mine/59.txt && " + _COMMIT.format(f="mine/59.txt"))
+
+    assert await _walk(it) == "needs_human"
+
+    [marked] = it.events("task_marked")
+    assert marked["payload"]["dirty_count"] == 60
+    assert len(marked["payload"]["dirty"]) == inplace.SAMPLE
+    mark = inplace.load_mark(it.run_dirs, it.id, "implementation.main.implement")
+    assert len(mark.dirty) == 60
+    assert "the agent committed mine/59.txt" in _stop_reason(it), "overlap read from the file"
+
+
+@pytest.mark.parametrize("paused", [False, True], ids=["done", "paused-as-it-ended"])
+async def test_the_agent_committing_a_persons_edited_file_stops_as_checkout(
+    item_on, fake_agent, agent_runs, repo, monkeypatch, paused
 ):
     it = await item_on(fake_agent.quick_task, target=_IN_PLACE)
     write(repo, "test_calc.py", "# the person's edit\n")
     agent_runs("echo agent >> test_calc.py && " + _COMMIT.format(f="test_calc.py"))
+    if paused:
+        real = dispatch._agent.run_agent_task
+
+        async def pause_racing(*args, **kwargs):
+            await real(*args, **kwargs)
+            return "paused"
+
+        monkeypatch.setattr(dispatch._agent, "run_agent_task", pause_racing)
 
     assert await _walk(it) == "needs_human"
 
@@ -65,6 +95,38 @@ async def test_the_agent_committing_a_persons_edited_file_stops_as_checkout(
     assert "the agent committed test_calc.py" in _stop_reason(it)
     branch = store.branch_for(it.row())
     assert git(repo, "log", "-1", "--format=%s", branch) == "agent", "Kraft undid the commit"
+    [session] = it.sessions("implementation")
+    assert session["status"] == "done", "the stop rides on the task's own session"
+
+
+async def _resume(it):
+    await it.database.write(lambda c: store.claim_for_run(c, it.id, from_statuses=["needs_human"]))
+    await it.database.write(lambda c: store.resume_work_item(c, it.id, None))
+    await _walk(it)
+
+
+@pytest.mark.parametrize(
+    ("script", "runs"),
+    [
+        ("echo agent >> test_calc.py && " + _COMMIT.format(f="test_calc.py"), 1),
+        ("git checkout -q main && echo stray >> calc.py && git commit -q -am stray", 2),
+    ],
+    ids=["overlap-goes-on", "stray-commit-reruns"],
+)
+async def test_resume_after_a_checkout_stop_reruns_the_task_only_for_stray_commits(
+    item_on, fake_agent, agent_runs, repo, monkeypatch, script, runs
+):
+    it = await item_on(fake_agent.quick_task, target=_IN_PLACE)
+    write(repo, "test_calc.py", "# the person's edit\n")
+    agent_runs(script)
+    assert await _walk(it) == "needs_human"
+    git(repo, "checkout", "-q", "--", "test_calc.py")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_SHELL", "true")
+
+    await _resume(it)
+
+    implement = [s for s in it.sessions("implementation") if s["hook_point"].endswith("implement")]
+    assert len(implement) == runs
 
 
 async def test_a_later_task_committing_an_earlier_tasks_leftover_does_not_stop(

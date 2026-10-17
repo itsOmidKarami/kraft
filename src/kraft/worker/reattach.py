@@ -451,7 +451,8 @@ async def _sweep_after(db, run_dirs, row, launch_factory) -> None:
     if not worktree.is_dir():
         return
     try:
-        refused = await sweep_stragglers(
+        # In place, a checkout stop it finds is written there, as dispatch's is.
+        await sweep_stragglers(
             db,
             item,
             worktree,
@@ -459,14 +460,8 @@ async def _sweep_after(db, run_dirs, row, launch_factory) -> None:
             task_path=row["hook_point"],
             launch=launch_factory(item["repo"]) if launch_factory is not None else None,
             sandboxed=row["sandbox"] is not None,
+            run_dirs=run_dirs,
         )
-        if refused:
-            # Never `stuck`: an escalation would take the checkout straight back.
-            await db.write(
-                lambda c: store.mark_needs_human(
-                    c, item["id"], row["node_id"], refused, kind=StopKind.CHECKOUT
-                )
-            )
     except Exception:  # noqa: BLE001 -- never at the cost of the adoption itself
         logger.exception(
             "straggler sweep after re-adopted session %s failed",

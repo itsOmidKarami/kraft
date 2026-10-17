@@ -85,6 +85,12 @@ def history_dir(run_dirs, wid: str) -> Path:
     return item_dir(run_dirs, wid) / "history"
 
 
+def checkout_record(run_dirs, wid: str, name: str) -> Path:
+    """An in-place item's record of its checkout (`inplace`): a task's mark,
+    or what its tasks left uncommitted. Never mounted."""
+    return item_dir(run_dirs, wid) / "checkout" / _component(name, "checkout record")
+
+
 def filed_dir(run_dirs, wid: str) -> Path:
     """Where intake copies an attachment. Never mounted."""
     return item_dir(run_dirs, wid) / "filed"
