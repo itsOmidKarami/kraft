@@ -2,7 +2,7 @@
  *  tokens and changed-word ranges, in the unified or the split layout. Pure. */
 import { pairRows } from "./pair";
 import type { LineKind, PatchFile, PatchLine } from "./patch";
-import { tokenizeSide, type Lang, type Token } from "./tokenize";
+import type { FileTokens, Token } from "./highlight";
 import { changedRanges, type Range } from "./words";
 
 export type Side = "old" | "new";
@@ -28,16 +28,16 @@ export type Row =
   | { t: "u"; cell: Cell; at: Anchor }
   | { t: "s"; left: Cell | null; right: Cell | null; at: Anchor };
 
-export function buildRows(file: PatchFile, layout: "unified" | "split", lang: Lang, words: boolean): Row[] {
+export function buildRows(file: PatchFile, layout: "unified" | "split", tokens: FileTokens | null, words: boolean): Row[] {
   const rows: Row[] = [];
-  for (const h of file.hunks) {
+  file.hunks.forEach((h, hi) => {
     rows.push({ t: "hunk", text: h.header });
     const oldSide = h.lines.filter((l) => l.kind !== "+");
     const newSide = h.lines.filter((l) => l.kind !== "-");
     const tok = new Map<PatchLine, Token[]>();
-    tokenizeSide(oldSide.map((l) => l.text), lang).forEach((t, i) => tok.set(oldSide[i], t));
+    tokens?.old[hi]?.forEach((t, i) => tok.set(oldSide[i], t));
     // A context line takes its new-side tokens; both sides read the same there.
-    tokenizeSide(newSide.map((l) => l.text), lang).forEach((t, i) => tok.set(newSide[i], t));
+    tokens?.new[hi]?.forEach((t, i) => tok.set(newSide[i], t));
     const pairs = pairRows(h);
     const ranges = new Map<PatchLine, Range[]>();
     if (words)
@@ -51,7 +51,7 @@ export function buildRows(file: PatchFile, layout: "unified" | "split", lang: La
     const at = (l: PatchLine): Anchor => (l.kind === "-" ? { side: "old", line: l.old! } : { side: "new", line: l.new! });
     if (layout === "unified") for (const l of h.lines) rows.push({ t: "u", cell: cell(l), at: at(l) });
     else for (const { left, right } of pairs) rows.push({ t: "s", left: left && cell(left), right: right && cell(right), at: at(right ?? left!) });
-  }
+  });
   return rows;
 }
 

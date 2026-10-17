@@ -9,7 +9,8 @@ import type { PatchFile } from "./patch";
 import type { DiffPrefs } from "./prefs";
 import { inRange, lineIndex, rangeBetween, rangeLabel, startSideOf, toward, type LineIndex, type LineRange } from "./range";
 import { anchorsOf, buildRows, spans, type Anchor, type Cell, type Row, type Side } from "./rows";
-import { languageOf } from "./tokenize";
+import { languageOf } from "./languages";
+import { useFileTokens } from "./useHighlight";
 import { tip } from "../ui/Tooltip";
 import { Empty } from "../ui/Empty";
 
@@ -113,8 +114,8 @@ const copy = (text: string, what: string) =>
   );
 
 function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: PatchFile }) {
-  const lang = languageOf(file.path);
-  const rows = useMemo(() => buildRows(pf, p.prefs.layout, lang, p.prefs.word_highlight), [pf, p.prefs.layout, lang, p.prefs.word_highlight]);
+  const tokens = useFileTokens(pf, languageOf(file.path));
+  const rows = useMemo(() => buildRows(pf, p.prefs.layout, tokens, p.prefs.word_highlight), [pf, p.prefs.layout, tokens, p.prefs.word_highlight]);
   const collapsed = p.collapsed.has(file.path);
   const viewed = p.isViewed(file.path);
   const threads = p.threadCount(file.path);

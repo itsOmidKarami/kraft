@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CompareFile } from "../../types";
 import { DiffView, pickRange, rangeOfPick, type DiffViewProps, type Pick } from "./DiffView";
+import { HIGHLIGHT_MAX_LINES } from "./highlight";
 import { parsePatch } from "./patch";
 import { DEFAULT_PREFS, type DiffPrefs } from "./prefs";
 import { lineIndex } from "./range";
@@ -427,10 +428,53 @@ describe("DiffView", () => {
   });
 });
 
+describe("syntax colours", () => {
+  const one = (path: string, body: string) => {
+    const pf = parsePatch(`diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n${body}`)[0];
+    const f: CompareFile = { path, insertions: 1, deletions: 1, touched_by: [], viewed: false };
+    return { files: [f], patch: new Map([[path, pf]]) };
+  };
+  const RUBY = one("app/models/user.rb", '@@ -1,1 +1,1 @@\n-def name = "a"\n+def name = "b"\n');
+  const kw = () => [...document.querySelectorAll(".tok-kw")].map((e) => e.textContent);
+
+  it("draws plain, then colours each side from the grammar, keeping the word marks", async () => {
+    render(<View {...RUBY} />);
+    expect(document.querySelector("[class*=tok-]")).toBeNull();
+    await screen.findAllByText("def");
+    await vi.waitFor(() => expect(kw()).toEqual(["def", "def"]));
+    expect([...document.querySelectorAll(".rv-word-change")].map((e) => e.textContent)).toEqual(["a", "b"]);
+  });
+
+  it("leaves a language outside the 60 plain", async () => {
+    render(<View {...one("x.lock", "@@ -1,1 +1,1 @@\n-def a\n+def b\n")} />);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(document.querySelector("[class*=tok-]")).toBeNull();
+  });
+
+  it("leaves a file past the cap plain, still marking its changed words", async () => {
+    const n = HIGHLIGHT_MAX_LINES + 1;
+    const body = `@@ -1,1 +1,${n} @@\n-def a\n+def b\n` + "+x = 1\n".repeat(n - 1);
+    render(<View {...one("big.rb", body)} />);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(document.querySelector("[class*=tok-]")).toBeNull();
+    expect([...document.querySelectorAll(".rv-word-change")].map((e) => e.textContent)).toEqual(["a", "b"]);
+  });
+
+  it("does not carry one diff's colours onto the same file's next diff, even for a frame", async () => {
+    const { rerender } = render(<View {...RUBY} />);
+    await vi.waitFor(() => expect(kw()).toEqual(["def", "def"]));
+    // A reload hands the page a new PatchFile for the same path.
+    rerender(<View {...one("app/models/user.rb", '@@ -1,1 +1,1 @@\n-puts "a"\n+puts "b"\n')} />);
+    expect(document.querySelector("[class*=tok-]")).toBeNull();
+    await vi.waitFor(() => expect(document.querySelector(".tok-str")).not.toBeNull());
+    expect(kw()).toEqual([]);
+  });
+});
+
 describe("rows", () => {
   const pf = parsePatch(PATCH)[0];
   it("puts a context line on both sides, and spans cut a token at a changed range", () => {
-    const rows = buildRows(pf, "unified", "python", true);
+    const rows = buildRows(pf, "unified", null, true);
     expect(anchorsOf(rows[1])).toEqual([{ side: "old", line: 4 }, { side: "new", line: 4 }]);
     expect(anchorsOf(rows[2])).toEqual([{ side: "old", line: 5 }]);
     expect(spans({ text: "abcdef", tokens: [{ text: "abc", cls: "kw" }, { text: "def" }], ranges: [[2, 4]] })).toEqual([

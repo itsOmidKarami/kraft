@@ -12,8 +12,9 @@ export interface Token {
   cls?: TokenClass;
 }
 
-/** Per file (both sides together), more lines than this stay plain. */
-export const HIGHLIGHT_MAX_LINES = 5000;
+/** Per file (both sides together), more lines than this stay plain. Tokenizing runs on the main thread:
+ *  TSX, the slowest grammar measured, takes about 0.09 ms a line, so this keeps one file near 100 ms. */
+export const HIGHLIGHT_MAX_LINES = 1000;
 
 /** Kraft's theme paints no colours, only markers: each stands for one class. */
 const MARKER: Record<string, TokenClass> = { "#000001": "kw", "#000002": "str", "#000003": "num", "#000004": "com", "#000005": "name" };
@@ -38,7 +39,11 @@ const KRAFT_THEME: ThemeRegistration = {
   type: "dark",
   fg: "#000000",
   bg: "#ffffff",
-  settings: Object.entries(SCOPES).map(([foreground, scope]) => ({ scope, settings: { foreground } })),
+  settings: [
+    ...Object.entries(SCOPES).map(([foreground, scope]) => ({ scope, settings: { foreground } })),
+    // Operators sit under `keyword` in most grammars; they read as text, not as words.
+    { scope: ["keyword.operator"], settings: { foreground: "#000000" } },
+  ],
 };
 
 let highlighter: Promise<HighlighterCore> | undefined;

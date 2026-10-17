@@ -29,6 +29,11 @@ describe("highlightLines", () => {
     expect(classed(t)).toEqual(expect.arrayContaining(want as unknown as unknown[][]));
   });
 
+  it("leaves an operator as text, though the grammar files it under keyword", async () => {
+    const [t] = (await highlightLines(["x = 1 + 2"], "ruby"))!;
+    expect(classed(t)).toEqual([["1", "num"], ["2", "num"]]);
+  });
+
   it("carries a block comment across lines", async () => {
     const [, b] = (await highlightLines(["/* a", "b */ x"], "typescript"))!;
     expect(b[0]).toEqual({ text: "b */", cls: "com" });

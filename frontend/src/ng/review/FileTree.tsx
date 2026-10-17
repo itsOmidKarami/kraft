@@ -4,10 +4,10 @@ import { plural } from "../../format";
 import type { CompareFile, ReviewThread } from "../../types";
 import { File, FileCode, FileCog, FileTerminal, FileText } from "../icons";
 import { folders, threadSummary, unresolved } from "./model";
-import { languageOf, type Lang } from "./tokenize";
+import { familyOf, languageOf, type Family } from "./languages";
 
 /** A file's icon, by the language the diff reads it as. */
-const ICON: Record<Lang, typeof File> = { clike: FileCode, python: FileCode, shell: FileTerminal, yaml: FileCog, markdown: FileText, plain: File };
+const ICON: Record<Family, typeof File> = { clike: FileCode, python: FileCode, shell: FileTerminal, yaml: FileCog, markdown: FileText, plain: File };
 
 /** The file list beside the diff (prototype 412–417): counts and threads per
  *  file, each with its kind's icon and dimmed once viewed (the mark itself is
@@ -59,7 +59,7 @@ export function FileTree(p: {
               files.map((f) => {
                 const v = p.isViewed(f.path);
                 const n = open(f.path);
-                const lang = languageOf(f.path);
+                const lang = familyOf(languageOf(f.path));
                 const Icon = ICON[lang];
                 return (
                   <div key={f.path} className={`rv-file-row${dir ? " is-nested" : ""}${p.selected === f.path ? " is-on" : ""}${v ? " is-viewed" : ""}`}>
