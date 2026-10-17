@@ -228,7 +228,7 @@ def _of(client, wid, type_):
     ids=["approve", "reject"],
 )
 def test_a_gate_decision_behind_a_working_in_place_item_is_kept_and_goes_on_later(
-    client, repo, decision, body, recorded
+    client, repo, monkeypatch, decision, body, recorded
 ):
     """Recorded at once, queued for the checkout, and replayed as Kraft's own
     walk from where the decision sends it: past an approved gate, or at a
@@ -264,9 +264,16 @@ def test_a_gate_decision_behind_a_working_in_place_item_is_kept_and_goes_on_late
         else decided["payload"]["node"]
     )
 
+    from kraft import executor
+
+    steers, real_run = [], executor.run
+    monkeypatch.setattr(
+        executor, "run", lambda *a, **kw: steers.append(kw["steer"]) or real_run(*a, **kw)
+    )
     _set_status(working, "paused")
 
     assert _queue_tick(client) == [wid]
+    assert steers == [body.get("note")]
     _poll_events(client, wid, "node_started")
     assert _of(client, wid, "node_started")[0]["payload"]["node_id"] == goes_on_at
     assert not _of(client, wid, "work_item_resumed"), "replayed as a person's resume"
