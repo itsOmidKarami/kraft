@@ -145,6 +145,45 @@ async def test_a_later_task_committing_an_earlier_tasks_leftover_does_not_stop(
     assert [e["payload"]["task"] for e in it.events("left_uncommitted")] == ["first.main.implement"]
 
 
+async def test_resume_reruns_a_task_stopped_in_a_later_round_from_round_0(
+    item_on, agent_runs, repo, tmp_path
+):
+    """Stopped at round 1, after `on_failure` re-measured the node: a resume
+    measures from round 0 again, where that round-1 session stands for nothing."""
+    node = {
+        "id": "checks",
+        "kind": "exec",
+        "steps": [
+            {"id": "work", "tasks": [_agent()]},
+            {"id": "suite", "tasks": [_sub("suite", ["false"])]},
+        ],
+        "on_failure": {"tasks": [_sub("repair", ["true"])]},
+    }
+    it = await item_on([node], target=_IN_PLACE)
+    write(repo, "test_calc.py", "# the person's edit\n")
+    # The second run, round 1's, commits the person's file.
+    agent_runs(
+        "n=$(( $(cat .git/runs 2>/dev/null || echo 0) + 1 )); echo $n > .git/runs; "
+        "if [ $n = 2 ]; then echo agent >> test_calc.py && "
+        + _COMMIT.format(f="test_calc.py")
+        + "; fi"
+    )
+    policy = _loop_policy(tmp_path, attempts=3)
+    assert await _walk(it, policy=policy) == "needs_human"
+    assert it.row()["stop_kind"] == "checkout"
+    assert [s["round"] for s in _implements(it)] == [0, 1]
+
+    await it.database.write(lambda c: store.claim_for_run(c, it.id, from_statuses=["needs_human"]))
+    await it.database.write(lambda c: store.resume_work_item(c, it.id, None))
+    await _walk(it, policy=policy)
+
+    assert [s["round"] for s in _implements(it)][:3] == [0, 1, 0], "round 0 reused round 1's"
+
+
+def _implements(it):
+    return [s for s in it.sessions("checks") if s["hook_point"].endswith("implement")]
+
+
 @pytest.mark.parametrize("back", [False, True], ids=["stays-away", "switched-back"])
 async def test_a_branch_switch_mid_task_stops_and_never_switches_back(
     item_on, fake_agent, agent_runs, repo, back

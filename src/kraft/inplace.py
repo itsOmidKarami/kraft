@@ -437,12 +437,23 @@ def check(checkout: Path, branch: str, mark: TaskMark) -> TaskCheck:
             f"detached at {git_read(checkout, 'rev-parse', 'HEAD')}"
         )
     since = datetime.fromisoformat(mark.started_at).timestamp()
-    made = []
+    entries = []
     for entry in _git_lines(checkout, "log", "-g", "--date=unix", "--format=%H %gd %gs", "HEAD"):
         sha, selector, subject = entry.split(" ", 2)
-        when = int(selector.rsplit("{", 1)[1].rstrip("}"))
-        if when >= since and not subject.startswith("checkout:") and sha not in made:
+        if int(selector.rsplit("{", 1)[1].rstrip("}")) >= since:
+            entries.append((sha, subject))
+    # Oldest first, following which branch HEAD was on (the take left it on
+    # the item's): only what HEAD reached while it was elsewhere is stray, so
+    # an amend, reset or rebase on the item's branch never is.
+    on, made = branch, []
+    for sha, subject in reversed(entries):
+        if subject.startswith("checkout: moving from "):
+            on = subject.rsplit(" to ", 1)[1]
+        elif subject.startswith("rebase (finish): returning to refs/heads/"):
+            on = subject.removeprefix("rebase (finish): returning to refs/heads/")
+        elif on != branch and sha not in made:
             made.append(sha)
+    made.reverse()  # newest first, as named
     off = (
         set(_git_lines(checkout, "log", "--format=%H", *made, "--not", f"refs/heads/{branch}"))
         if made

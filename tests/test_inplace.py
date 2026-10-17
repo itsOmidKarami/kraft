@@ -362,6 +362,42 @@ def test_check_names_a_moved_checkout_and_the_commits_made_off_the_branch(repo):
     assert inplace.check(repo, branch, m).moved_to == f"detached at {stray}"
 
 
+_REWRITES = {
+    "amend": [
+        ("commit", "--allow-empty", "-m", "a"),
+        ("commit", "--amend", "--allow-empty", "-m", "b"),
+    ],
+    "reset": [("commit", "--allow-empty", "-m", "a"), ("reset", "-q", "--hard", "HEAD~1")],
+    "rebase": [
+        ("commit", "--allow-empty", "-m", "on the branch"),
+        ("checkout", "-q", "main"),
+        ("commit", "--allow-empty", "-m", "main moved"),
+        ("checkout", "-q", "item"),
+        ("rebase", "-q", "main"),
+    ],
+    "merged-back": [
+        ("checkout", "-q", "main"),
+        ("commit", "--allow-empty", "-m", "made off the branch"),
+        ("checkout", "-q", "item"),
+        ("merge", "-q", "--no-edit", "main"),
+    ],
+}
+
+
+@pytest.mark.parametrize("how", list(_REWRITES))
+def test_check_names_no_stray_commit_for_history_the_branch_holds_or_rewrote(repo, how):
+    """Only what HEAD reached while off the item's branch, and that the branch
+    still lacks, is stray: an amend's or a reset's old commit is neither."""
+    branch = _on_item_branch(repo)
+    m = inplace.mark(repo, branch, {})
+    for args in _REWRITES[how]:
+        _git_now(repo, *args)
+
+    found = inplace.check(repo, branch, m)
+
+    assert (found.moved_to, found.stray_commits) == (None, [])
+
+
 @pytest.mark.parametrize("how", ["merge", "commit"])
 def test_check_overlap_is_the_tasks_own_commits_not_a_merged_main(repo, how):
     branch = _on_item_branch(repo)
