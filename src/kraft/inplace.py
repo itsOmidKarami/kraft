@@ -298,6 +298,8 @@ def drop_stale_scratch(run_dirs) -> None:
     server left under `run_dirs.scratch`, which would pin its item's branch
     until that item's next rebase. Never anything of the person's."""
     for scratch in list(run_dirs.scratch.iterdir()) if run_dirs.scratch.is_dir() else []:
+        if scratch.is_symlink():  # never Kraft's: nothing is followed or removed
+            continue
         common = None
         if (scratch / ".git").is_file():  # never a repository the scratch only sits in
             common = git_read(

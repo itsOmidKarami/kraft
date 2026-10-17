@@ -302,11 +302,13 @@ def test_a_second_comment_while_the_reply_waits_queues_nothing_more(client, repo
     assert len(launched) == 1
 
 
-def test_a_comment_on_an_item_queued_for_anything_but_a_reply_starts_the_reply(
-    client, repo, monkeypatch
+@pytest.mark.parametrize("in_place", [False, True], ids=["worktree", "in-place"])
+def test_a_comment_on_an_item_queued_for_a_retry_starts_the_reply_only_in_its_worktree(
+    client, repo, monkeypatch, in_place
 ):
-    """Only a waiting reply stands in for the reply agent: a worktree item
-    queued for a retry still gets its threads answered now."""
+    """A worktree item queued for a retry still gets its threads answered now.
+    In place, nothing starts in the checkout ahead of the item's queued start:
+    its reply waits for it."""
     launched = []
 
     async def spy(*a, **kw):
@@ -314,16 +316,18 @@ def test_a_comment_on_an_item_queued_for_anything_but_a_reply_starts_the_reply(
         return "done"
 
     monkeypatch.setattr("kraft.review_reply.run", spy)
-    wid = _in_state(client, repo, DOORS["states"]["queued_at_gate"])
-    worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
-    git(repo, "worktree", "add", "-q", "-b", f"kraft/{wid}", str(worktree))
+    wid = _in_state(client, repo, DOORS["states"]["queued_at_gate"], in_place=in_place)
+    if not in_place:
+        worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
+        git(repo, "worktree", "add", "-q", "-b", f"kraft/{wid}", str(worktree))
 
     r = client.post(
         f"/api/work-items/{wid}/gates/spec_approval/review", json={"outcome": "comment"}
     )
 
     assert r.status_code == 200, r.text
-    assert r.json()["reply_agent"] is True
+    assert r.json()["reply_agent"] is not in_place
+    assert (r.json().get("status") == "queued") is in_place
 
 
 @pytest.mark.parametrize(

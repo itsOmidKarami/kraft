@@ -461,8 +461,11 @@ async def _start_reply(st, request: Request, row, gate: str, nodes) -> dict:
     launch = deps.launch(st, row["repo"])
     if await review_reply.refused_without_channel(st.db, row, launch, gate):
         return {"reply_agent": False}
-    if (store.queued_request_of(row) or {}).get("verb") == "reply":
-        # Its reply already waits, and answers every unanswered thread then.
+    if row["status"] == WorkItemStatus.QUEUED and (
+        inplace.is_in_place(row) or (store.queued_request_of(row) or {}).get("verb") == "reply"
+    ):
+        # Its reply already waits, and answers every unanswered thread then;
+        # in place, nothing may start in the checkout ahead of its queued start.
         return {"reply_agent": False, "id": wid, "status": WorkItemStatus.QUEUED}
     if holder := st.db.read(lambda c: store.checkout_holder(c, wid)):
         held = await lifecycle.queued_answer(
