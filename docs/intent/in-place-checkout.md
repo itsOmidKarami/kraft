@@ -46,7 +46,7 @@ origin: src/kraft/store/work_items.py §checkout_holder
 
 WHILE an in-place item waits at a gate, is paused, waits, or is stopped, the
 system SHALL NOT hold the checkout against another in-place item.
-enforced-by: tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[needs-human], tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[paused], tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[waiting], tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[at-a-gate]
+enforced-by: tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[needs-human], tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[paused], tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[waiting], tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[at-a-gate], tests/adapters/test_subprocess_in_place.py::test_a_task_cancelled_before_its_launch_holds_no_checkout[in-place]
 origin: src/kraft/store/work_items.py §checkout_holder
 
 ## REQ worktree-items-ignore-the-checkout-lease
@@ -146,7 +146,7 @@ origin: src/kraft/executor/walk.py §_sentinel_stop
 WHEN an in-place item's branch is rebased with uncommitted changes in the
 checkout, the system SHALL stash them for the rebase and apply them back
 afterwards.
-enforced-by: tests/test_inplace_rebase.py::test_rebase_in_the_checkout_keeps_the_persons_edits[plain], tests/test_inplace_rebase.py::test_rebase_in_the_checkout_keeps_the_persons_edits[another-stash-meanwhile], tests/test_inplace_rebase.py::test_a_conflicting_rebase_in_the_checkout_aborts_and_puts_the_edits_back, tests/test_inplace_rebase.py::test_a_cancel_mid_rebase_in_the_checkout_waits_for_git[clean]
+enforced-by: tests/test_inplace_rebase.py::test_rebase_in_the_checkout_keeps_the_persons_edits[plain], tests/test_inplace_rebase.py::test_rebase_in_the_checkout_keeps_the_persons_edits[another-stash-meanwhile], tests/test_inplace_rebase.py::test_rebase_in_the_checkout_keeps_the_persons_edits[an-older-autostash-uncovered-meanwhile], tests/test_inplace_rebase.py::test_a_conflicting_rebase_in_the_checkout_aborts_and_puts_the_edits_back, tests/test_inplace_rebase.py::test_a_cancel_mid_rebase_in_the_checkout_waits_for_git[clean]
 origin: src/kraft/inplace.py §rebase_in_checkout
 
 ## REQ in-place-autostash-clash-stops
