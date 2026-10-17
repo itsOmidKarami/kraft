@@ -443,6 +443,10 @@ async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
     }
 
 
+#: Where a reply agent's item can be: at its gate, or paused there.
+_REPLY_FROM = (WorkItemStatus.PAUSED, WorkItemStatus.NEEDS_HUMAN)
+
+
 class HeldReply(BaseModel):
     """A reply agent queued for the checkout: the gate whose threads it answers."""
 
@@ -456,24 +460,38 @@ async def _start_reply(st, request: Request, row, gate: str, nodes) -> dict:
     launch = deps.launch(st, row["repo"])
     if await review_reply.refused_without_channel(st.db, row, launch, gate):
         return {"reply_agent": False}
+    if row["status"] == WorkItemStatus.QUEUED:
+        # Its reply already waits, and answers every unanswered thread then.
+        return {"reply_agent": False, "id": wid, "status": WorkItemStatus.QUEUED}
     if holder := st.db.read(lambda c: store.checkout_holder(c, wid)):
         held = await lifecycle.queued_answer(
-            request, wid, "reply", HeldReply(gate=gate), [row["status"]], held_by=holder
+            request, wid, "reply", HeldReply(gate=gate), _REPLY_FROM, held_by=holder
         )
         return {"reply_agent": False, **held}
+    headers = deps.caller_headers(request)
+
+    async def reply() -> None:
+        try:
+            await review_reply.run(
+                st.db, st.run_dirs, work_item_id=wid, gate=gate, nodes=nodes, launch=launch
+            )
+        except store.CheckoutBusy as exc:
+            # Taken since the check above: waits for it as if found then.
+            holder = exc.holder
+            await st.db.write(
+                lambda c: store.queue_work_item(
+                    c,
+                    wid,
+                    verb="reply",
+                    body={"gate": gate},
+                    headers=headers,
+                    from_statuses=_REPLY_FROM,
+                    held_by=holder,
+                )
+            )
+
     try:
-        deps.spawn(
-            request.app,
-            wid,
-            review_reply.run(
-                st.db,
-                st.run_dirs,
-                work_item_id=wid,
-                gate=gate,
-                nodes=nodes,
-                launch=launch,
-            ),
-        )
+        deps.spawn(request.app, wid, reply())
         spawned = True
     except deps.AlreadyRunning:
         spawned = False  # an auto-review is still running; the threads wait for the next comment

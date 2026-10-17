@@ -394,6 +394,15 @@ def queue_work_item(
     return True
 
 
+class CheckoutBusy(Exception):
+    """An agent session outside the walk found its checkout in use by another
+    in-place item (`create_session(takes_checkout=True)`); nothing started."""
+
+    def __init__(self, holder: str, title: str):
+        super().__init__(f"the checkout is in use by {title}")
+        self.holder = holder
+
+
 def checkout_holder(conn: sqlite3.Connection, work_item_id: str) -> str | None:
     """The other in-place item working in this item's checkout folder
     (`folder_holder`). None for a worktree item, and for an item already

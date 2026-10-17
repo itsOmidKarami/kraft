@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from support.harness import (
     entry_of,
+    fake_harness_home,
     v1_chain,
     v1_item,
     v1_node,
@@ -286,12 +287,12 @@ async def test_a_reviewer_on_an_unavailable_profile_launches_nothing_and_claims_
     assert "gate_approved" not in types and "gate_rejected" not in types, types
 
 
-def _chain2(rd, *, auto_review=True, target=None):
+def _chain2(rd, *, auto_review=True, target=None, harness="claude"):
     """implementation (exec) -> human_review_approval (gate, reject_to
     implementation, reviewed unless `auto_review=False`)."""
     gate = v1_node("human_review_approval", "gate", reject_to="implementation")
     if auto_review:
-        gate["auto_review"] = _reviewer()
+        gate["auto_review"] = _reviewer(harness=harness)
     return v1_chain(
         [v1_node("implementation", tasks=[v1_task("build")]), gate], repo=rd.base, target=target
     )
@@ -401,6 +402,31 @@ async def test_an_agent_verdict_behind_a_working_in_place_item_is_queued(
 
     assert await _review_from_gate(database, run_dirs, chain, auto_gate=True) == "queued"
     assert calls == [], "walked on past the gate"
+
+
+async def test_a_review_behind_a_working_in_place_item_leaves_the_gate_to_a_person(
+    database, run_dirs, tmp_path
+):
+    """No reviewer starts in a checkout another in-place item is using; the
+    attempt closes with why, and the gate waits for a person."""
+    fake_harness_home(tmp_path, ["true"])
+    in_place = WorkItemTarget.for_repository("sample", in_place=True)
+    chain = _chain2(run_dirs, target=in_place, harness="fake")
+    await v1_item(database, chain, repo=run_dirs.base, wid="a", title="A")
+
+    assert await _review_from_gate(database, run_dirs, chain, auto_gate=True) == "awaiting_gate"
+
+    evts = database.read(lambda c: events.read_after(c, 0, "w1"))
+    assert [e["payload"] for e in evts if e["type"] == "gate_auto_review_skipped"] == [
+        {
+            "gate": "human_review_approval",
+            "reason": "checkout",
+            "note": "the checkout is in use by A",
+        }
+    ]
+    assert not database.read(
+        lambda c: c.execute("SELECT 1 FROM worker_sessions WHERE work_item_id = 'w1'").fetchall()
+    )
 
 
 async def test_undecided_leaves_the_gate_pending(monkeypatch, database, run_dirs):

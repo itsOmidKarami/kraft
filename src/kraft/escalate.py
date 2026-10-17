@@ -661,6 +661,7 @@ async def dispatch(
             thread=thread,
             files=files,
             time_cap=time_cap,
+            takes_checkout=True,
         )
     except _agent.LaunchRefused as exc:
         return await _refused(db, run_dirs, session_id=session_id, row=row, log=f"{exc}\n")

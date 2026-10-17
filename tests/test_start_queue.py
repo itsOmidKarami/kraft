@@ -275,6 +275,43 @@ def test_a_blocked_item_starts_once_what_it_comes_after_completes(client, repo, 
     assert types.index("work_item_unblocked") < types.index("work_item_resumed")
 
 
+def test_an_escalation_waiting_behind_a_walk_starts_on_a_full_board(
+    client, repo, stopped, board, monkeypatch
+):
+    """It runs beside the walk and takes no slot; the walk ahead of it still waits."""
+    import sqlite3
+
+    from kraft import store
+
+    asked = []
+
+    async def dispatch(*a, **kw):
+        asked.append(kw["message"])
+        return "done"
+
+    monkeypatch.setattr("kraft.escalate.dispatch", dispatch)
+    new = _paused(client, repo, chain_template="default")
+    assert client.post(f"/api/work-items/{new}/resume", json={}).json()["status"] == "queued"
+    with _db() as c, c:
+        c.row_factory = sqlite3.Row
+        assert store.queue_work_item(
+            c,
+            stopped,
+            verb="escalate",
+            body={"message": "look"},
+            headers={},
+            from_statuses=["needs_human"],
+        )
+
+    assert _tick(client) == [stopped]
+    assert _status_of(client, new) == "queued"
+    for _ in range(200):
+        if asked:
+            break
+        client.portal.call(asyncio.sleep, 0.05)
+    assert asked == ["look"]
+
+
 def test_a_released_item_waits_in_the_queue_when_the_board_is_full(client, repo, board):
     dep, wid = _blocked_after(client, repo)
     _set_status(dep, "completed")

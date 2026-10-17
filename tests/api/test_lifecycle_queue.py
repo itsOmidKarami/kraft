@@ -20,6 +20,7 @@ from support.api import (
     _post_default,
     _queue_tick,
     _set_status,
+    _status_of,
 )
 
 DOORS = json.loads((Path(__file__).parent / "lifecycle_doors.json").read_text())
@@ -265,6 +266,97 @@ def test_a_session_outside_the_walk_waits_for_the_checkout(
         time.sleep(0.05)
     [kw] = launched
     assert kw[asked[0]] == asked[1]
+
+
+def test_a_second_comment_while_the_reply_waits_queues_nothing_more(client, repo, monkeypatch):
+    """The waiting reply answers every thread unanswered when it runs."""
+    client.portal.call(client.app.state.queue_task.cancel)
+    launched = []
+
+    async def spy(*a, **kw):
+        launched.append(kw)
+        return "done"
+
+    monkeypatch.setattr("kraft.review_reply.run", spy)
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"]["gate"], in_place=True)
+    review = f"/api/work-items/{wid}/gates/spec_approval/review"
+    client.post(review, json={"outcome": "comment"})
+
+    r = client.post(review, json={"outcome": "comment"})
+
+    assert r.status_code == 200, r.text
+    assert (r.json()["status"], r.json()["reply_agent"]) == ("queued", False)
+    assert len(_of(client, wid, "work_item_queued")) == 1
+    _set_status(working, "paused")
+    assert _queue_tick(client) == [wid]
+    deadline = time.monotonic() + 10
+    while not launched and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert len(launched) == 1
+
+
+@pytest.mark.parametrize(
+    ("state", "door", "body", "verb"),
+    [
+        ("failed", "escalate", {"message": "look again"}, "escalate"),
+        ("gate", "gates/spec_approval/review", {"outcome": "comment"}, "reply"),
+    ],
+    ids=["escalate", "reply"],
+)
+def test_a_checkout_taken_after_the_doors_look_still_gets_no_second_session(
+    client, repo, monkeypatch, state, door, body, verb
+):
+    """The door found the checkout free; another item took it before the agent's
+    session was written. The session is refused, and the request waits."""
+    from kraft import executor
+
+    client.portal.call(client.app.state.queue_task.cancel)
+    working = _in_state(client, repo, DOORS["states"]["paused"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"][state], in_place=True)
+    if verb == "reply":
+        client.post(
+            f"/api/work-items/{wid}/threads",
+            json={
+                "body": "why?",
+                "file_path": "a.py",
+                "side": "new",
+                "start_line": 1,
+                "end_line": 1,
+                "label": "question",
+            },
+        )
+    restore = executor.restore_pins
+
+    async def taken_meanwhile(row):
+        _set_status(working, "active")
+        return await restore(row)
+
+    monkeypatch.setattr(executor, "restore_pins", taken_meanwhile)
+
+    r = client.post(f"/api/work-items/{wid}/{door}", json=body)
+
+    assert r.status_code == 200, r.text
+    assert r.json().get("status") != "queued", "the door saw the checkout taken"
+    deadline = time.monotonic() + 10
+    while _status_of(client, wid) != "queued" and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert [e["payload"] for e in _of(client, wid, "work_item_queued")] == [
+        {
+            "verb": verb,
+            "from": "needs_human",
+            "why": "checkout",
+            "held_by": working,
+            "held_by_title": "A",
+        }
+    ]
+    with _orchestrator_db() as c:
+        assert (
+            c.execute(
+                "SELECT COUNT(*) FROM worker_sessions WHERE work_item_id = ?", (wid,)
+            ).fetchone()[0]
+            == 0
+        )
 
 
 @pytest.mark.parametrize(

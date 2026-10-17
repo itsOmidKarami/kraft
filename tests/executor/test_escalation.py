@@ -508,3 +508,21 @@ async def test_a_self_retry_applies_the_override_it_carried(item_on, run_dirs, n
     assert fork.override["task_config"] == {"command": "make again"}
     task = fork.chain.chain.nodes[0].steps[0].tasks[0].task
     assert task.command == "make again"
+
+
+async def test_an_auto_escalation_refused_its_checkout_is_skipped(item_on, monkeypatch):
+    """`escalate.dispatch` started nothing: another in-place item took the
+    checkout (`store.create_session`). The stop stays the person's."""
+
+    async def busy(*a, **kw):
+        raise store.CheckoutBusy("a", "A")
+
+    monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", busy)
+    it = await _stuck(item_on)
+
+    assert await _escalate(it) == "needs_human"
+
+    assert [e["payload"] for e in it.events("work_item_auto_escalate_skipped")] == [
+        {"reason": "checkout"}
+    ]
+    assert not it.events("work_item_retried")

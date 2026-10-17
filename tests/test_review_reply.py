@@ -328,3 +328,31 @@ async def test_the_comment_reviews_summary_reaches_the_reply_agent(
     )
 
     assert "Mostly fine; one question." in prompts.read_text()
+
+
+async def test_no_reply_agent_starts_behind_a_working_in_place_item(
+    item_on, run_dirs, tmp_path, monkeypatch
+):
+    """Refused where its session would be written; the caller queues or skips it."""
+    import pytest
+
+    from kraft.templates.environment import WorkItemTarget
+
+    _seed(tmp_path, monkeypatch)
+    in_place = WorkItemTarget.for_repository("sample", in_place=True)
+    await item_on(NODES, GATE, wid="a", target=in_place, title="A")
+    it = await item_on(NODES, GATE, wid="b", target=in_place, status="needs_human")
+    await _published_unanswered_thread(it)
+
+    with pytest.raises(store.CheckoutBusy, match="in use by A"):
+        await review_reply.run(
+            it.database,
+            it.run_dirs,
+            work_item_id=it.id,
+            gate=GATE,
+            nodes=it.chain.chain.nodes,
+            launch=LAUNCH,
+        )
+
+    assert it.sessions() == []
+    assert not it.events("reply_agent_failed")

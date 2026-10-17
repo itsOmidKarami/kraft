@@ -956,6 +956,9 @@ async def run_agent_task(
     #: an escalation turn's result and summary are its thread's (Kraft-s7c04.54).
     files: item_paths.SessionFiles | None = None,
     harness_id: str | None = None,  # the harnesses.yaml id; keys `rate_limit_hit`
+    #: An agent outside the walk: `store.CheckoutBusy` while another in-place
+    #: item uses the checkout (`store.create_session`).
+    takes_checkout: bool = False,
 ) -> str:
     # A snapshot frozen before Kraft-9i6xy may still carry a rule: it reads
     # (`policy.FROZEN`), but it never reaches an agent (Kraft-9ct4q).
@@ -1258,6 +1261,7 @@ async def run_agent_task(
         files=files,
         rate_limit_key={"harness": harness_id, "model": model} if harness_id else None,
         harness=harness,
+        takes_checkout=takes_checkout,
         model=model,
         ro_paths=rules_files,
     )

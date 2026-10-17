@@ -76,8 +76,8 @@ async def tick(app) -> list[str]:
     await st.db.write(store.release_blocked)
     started: list[str] = []
     for wid in st.db.read(store.queued_ids):
-        if st.db.read(store.active_count) >= limit:
-            break
+        if st.db.read(store.active_count) >= limit and not _slotless(st, wid):
+            continue
         if storage.holds(st, wid):
             # Keeps its place, and is not asked again each tick (its door would
             # write another `work_item_storage_held`). A start behind it that
@@ -88,6 +88,17 @@ async def tick(app) -> list[str]:
         if await _start_one(app, wid):
             started.append(wid)
     return started
+
+
+#: Verbs that start an agent beside the walk, never a walk: they take no slot.
+_SLOTLESS = ("escalate", "reply")
+
+
+def _slotless(st, wid: str) -> bool:
+    row = st.db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+    return (store.queued_request_of(row) or {}).get("verb") in _SLOTLESS
 
 
 async def _start_one(app, wid: str) -> bool:

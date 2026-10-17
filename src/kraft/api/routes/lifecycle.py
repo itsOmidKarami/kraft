@@ -882,6 +882,14 @@ async def slots_answer(st, wid: str) -> dict:
     return slots
 
 
+#: What `queued_answer` says when the item left the statuses its door queues from.
+_NOT_QUEUEABLE = {
+    "retry": "work item is not stopped",
+    "escalate": "work item is not needs_human or paused",
+    "reply": "work item is no longer at its gate",
+}
+
+
 async def queued_answer(
     request: Request, wid: str, verb: str, body, from_statuses, *, held_by: str | None = None
 ) -> dict:
@@ -902,9 +910,7 @@ async def queued_answer(
         )
     )
     if not queued:
-        raise HTTPException(
-            409, "work item is not stopped" if verb == "retry" else "work item is not paused"
-        )
+        raise HTTPException(409, _NOT_QUEUEABLE.get(verb, "work item is not paused"))
     held = st.db.read(lambda c: store.checkout_reason(c, held_by)) if held_by else {}
     return {
         "id": wid,
@@ -2434,17 +2440,35 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
             request, wid, "escalate", body, admitting(Verb.ESCALATE), held_by=holder
         )
 
+    headers = deps.caller_headers(request)
+
     async def _run_escalation() -> None:
         cursor_evts = st.db.read(lambda c: events.read_after(c, 0, wid))
         cursor = cursor_evts[-1]["seq"] if cursor_evts else 0
-        await escalate.dispatch(
-            st.db,
-            st.run_dirs,
-            work_item_id=wid,
-            message=message,
-            launch=deps.launch(st, row["repo"]),
-            new_thread=body.new_thread,
-        )
+        try:
+            await escalate.dispatch(
+                st.db,
+                st.run_dirs,
+                work_item_id=wid,
+                message=message,
+                launch=deps.launch(st, row["repo"]),
+                new_thread=body.new_thread,
+            )
+        except store.CheckoutBusy as exc:
+            # Taken since the check above: waits for it as if found then.
+            holder = exc.holder
+            await st.db.write(
+                lambda c: store.queue_work_item(
+                    c,
+                    wid,
+                    verb="escalate",
+                    body=body.model_dump(mode="json", exclude_defaults=True),
+                    headers=headers,
+                    from_statuses=admitting(Verb.ESCALATE),
+                    held_by=holder,
+                )
+            )
+            return
         # The agent may have called `kraft item retry` on itself mid-turn
         # (lifecycle.py's `work_item_self_retry_requested` deferral above) --
         # consume it the same way `gates.auto_escalate_stuck` does, or a

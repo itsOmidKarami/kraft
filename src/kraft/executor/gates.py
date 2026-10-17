@@ -448,14 +448,27 @@ async def review_gates(
         # artifact edited, or shown to a person, between this line and the
         # approval below is exactly the race `seen` exists to catch.
         seen = _chain_revision_seen(run_dirs, row, gate, node, launch)
-        verdict, note = await gate_review.review(
-            db,
-            run_dirs,
-            work_item_id=work_item_id,
-            gate=gate,
-            node=node,
-            launch=launch,
-        )
+        try:
+            verdict, note = await gate_review.review(
+                db,
+                run_dirs,
+                work_item_id=work_item_id,
+                gate=gate,
+                node=node,
+                launch=launch,
+            )
+        except store.CheckoutBusy as exc:
+            # Closes the attempt its `_started` opened: the gate is the person's.
+            await db.write(
+                lambda c, gate=gate, note=str(exc): events.append(
+                    c,
+                    work_item_id,
+                    GateEvent.AUTO_REVIEW_SKIPPED,
+                    {"gate": gate, "reason": "checkout", "note": note},
+                    node_id=gate,
+                )
+            )
+            return status
 
         # The agent may have worked for minutes. A decision a person made in the
         # meantime outranks a verdict computed against the state before it.
@@ -1052,15 +1065,27 @@ async def auto_escalate_stuck(
         )
         return status
     cursor = evts[-1]["seq"] if evts else 0
-    await escalate.dispatch(
-        db,
-        run_dirs,
-        work_item_id=work_item_id,
-        message=_AUTO_ESCALATE_MESSAGE,
-        launch=launch,
-        auto=True,
-        evts=evts,
-    )
+    try:
+        await escalate.dispatch(
+            db,
+            run_dirs,
+            work_item_id=work_item_id,
+            message=_AUTO_ESCALATE_MESSAGE,
+            launch=launch,
+            auto=True,
+            evts=evts,
+        )
+    except store.CheckoutBusy:
+        await db.write(
+            lambda c: events.append(
+                c,
+                work_item_id,
+                EscalationEvent.WORK_ITEM_AUTO_ESCALATE_SKIPPED,
+                {"reason": "checkout"},
+                node_id=row["current_node_id"],
+            )
+        )
+        return status
     return await resume_after_escalation(
         db,
         run_dirs,

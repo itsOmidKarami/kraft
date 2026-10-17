@@ -137,6 +137,8 @@ async def review(
 
     Never raises for an agent that misbehaved: every degraded outcome is
     `("undecided", note)`, which the caller turns into "leave the gate pending".
+    Raises `store.CheckoutBusy`, having started nothing, while another
+    in-place item uses the checkout.
     """
     auto_review = node.auto_review
     if auto_review is None or not isinstance(auto_review.task, AgentTask):
@@ -350,6 +352,7 @@ async def review(
             repo_entry=launch.repo_entry,
             time_cap=time_cap,
             harness_id=auto_review.task.harness,
+            takes_checkout=True,
         )
     except _agent.LaunchRefused as exc:
         # Refused before anything started: recorded as the reviewer's own

@@ -173,6 +173,38 @@ async def test_a_gate_with_only_unanswered_questions_opens_with_the_reply_agent(
     )
 
 
+async def test_a_reply_agent_refused_its_checkout_leaves_the_gate_open_and_says_why(
+    item_on, tmp_path, monkeypatch
+):
+    it = await item_on(
+        [
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [
+                    {"id": "build", "kind": "agent", "harness": "fake", "prompt": "implement"}
+                ],
+            },
+            {"id": "review", "kind": "gate", "reject_to": "implementation"},
+        ]
+    )
+    fake_harness_home(tmp_path, ["true"])
+
+    async def _busy_reply(_db, _rd, **kw):
+        if kw["hook_point"] == "review.reply":
+            raise store.CheckoutBusy("a", "A")
+        return "done"
+
+    monkeypatch.setattr(agent_mod, "run_agent_task", _busy_reply)
+    await _published_thread(it, gate="review", label="question")
+
+    assert await _walk(it) == "awaiting_gate"
+
+    assert [e["payload"] for e in it.events("reply_agent_skipped")] == [
+        {"gate": "review", "reason": "the checkout is in use by A"}
+    ]
+
+
 async def test_an_earlier_gates_must_fix_still_blocks_a_later_gate(item_on, script):
     """Review Focus 1: a must-fix filed against `spec_approval`, still open
     when the final `review` gate is reached, must never let `review` open
