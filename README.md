@@ -43,7 +43,9 @@ the web UI on sample data, in your browser, with nothing to install.
   are all bounded. Hit a cap and the item stops and hands you the full trace
   instead of quietly burning tokens.
 - **Isolated git worktrees.** Each work item runs on its own branch in its own
-  worktree, so your checkout stays as you left it and items run in parallel.
+  worktree by default, so your checkout stays as you left it and items run in
+  parallel. A repo whose setup is heavy can run its items in its own checkout
+  instead, one at a time.
 - **Local.** One process on your machine, bound to loopback by default — not a
   hosted service.
 - **A board you can check from your phone.** Reach it from another device

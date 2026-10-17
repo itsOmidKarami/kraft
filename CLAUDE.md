@@ -56,7 +56,7 @@ ignores it).
 kraft console                               # the terminal UI; needs a terminal, refused in a worker
 kraft view list [--all] [--status=paused]   # the board, scoped to the cwd's repo
 kraft view show [ID]                        # ID defaults to the worktree you are in
-kraft item create "title" [--description "..."] [--spec P] [--plan P] [--no-auto-gate] [--after ID] [--autostart]  # files it paused unless --autostart; auto-gate is on unless --no-auto-gate
+kraft item create "title" [--description "..."] [--spec P] [--plan P] [--no-auto-gate] [--after ID] [--autostart] [--in-place|--worktree]  # files it paused unless --autostart; auto-gate is on unless --no-auto-gate; --in-place runs it in the repo's own checkout
 kraft item set-attachments [ID] [--spec P] [--plan P] [--drop KIND]  # revise a not-yet-started item's documents
 kraft item approve [ID] / kraft item reject [ID] --note "why"
 kraft item pause [ID] / kraft item resume [ID] --steer "..."
@@ -90,7 +90,7 @@ kraft view diff [ID] [--stat|--name-only] [-w]   # truncation and untracked alwa
 kraft view docs [ID] [--attachment spec|plan] / kraft view doc DOC_ID [--open [EDITOR]]  # --attachment: what it was filed with
 kraft view artifact [ID]                    # the doc the pending gate is about
 kraft repo list                             # `*` marks the repo you are in
-kraft repo connect [PATH] [--test-command C] [--setup-command C] [--no-tests] [-y] [--verify [--timeout MIN] [--on-host]]
+kraft repo connect [PATH] [--test-command C] [--setup-command C] [--no-tests] [--in-place] [-y] [--verify [--timeout MIN] [--on-host]]
 kraft repo disconnect [PATH]
 kraft repo library [PATH] [-y | --check]     # review the repo's .kraft/ library and take it; --check exits 0 current, 1 waiting, 2 refused, 3 could not check
 kraft repo path [ID] (alias cd) / kraft repo open [ID]
