@@ -29,7 +29,7 @@ describe("reasonTail", () => {
       [row("needs_you", { stop: stop("budget", { reason: "budget cap reached: $0.035 spent on this work item, cap $0.030. Nothing new was started; a running agent was not interrupted." }) }), "budget cap reached: $0.035 spent on this work item, cap $0.030"],
       [row("needs_you", { stop: stop("conflict") }), "waiting for you at verification"],
       // A checkout stop goes on to what to do about it; the row keeps what happened.
-      [row("needs_you", { stop: stop("checkout", { reason: "the checkout moved to main during the run of review in /r. Kraft did not switch it back, nor move those commits: retry the item once /r may go back to kraft/x" }) }), "the checkout moved to main during the run of review in /r"],
+      [row("needs_you", { stop: stop("checkout", { reason: "the checkout moved to main during the run of review in /r. Kraft did not switch it back: retry the item once /r may go back to kraft/x" }) }), "the checkout moved to main during the run of review in /r"],
       [row("failed", { stop: stop("failed", { node: "merge_request" }) }), "failed at merge request"],
       [row("needs_you", { stop: stop("gate"), pending_gate: "spec-approval" }), "approve spec"],
       [row("failed", { stop: stop("failed", { node: "post-merge-ci2" }) }), "failed at post merge ci2"],

@@ -460,6 +460,25 @@ def test_mark_counts_the_persons_edits_and_not_the_items_own_leftovers(repo):
     assert m.tip == git(repo, "rev-parse", branch)
 
 
+@pytest.mark.parametrize("live", [True, False], ids=["sibling-running", "sibling-ended"])
+async def test_mark_takes_a_running_co_tasks_edits_for_its_own(item_on, run_dirs, repo, live):
+    """Co-tasks of one step share the checkout: a path dirtied after a
+    sibling started is its work in flight, which it may commit, not the
+    person's. The person's edit from before stays theirs."""
+    it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation", target=IN_PLACE)
+    git(repo, "checkout", "-q", "-b", store.branch_for(it.row()))
+    write(repo, "calc.py", "# the person's edit\n")
+    marking = it.database, run_dirs, it.row(), repo, "implementation"
+    await inplace.mark_task(*marking, "implementation.main.a")
+    await it.session("s1", "implementation.main.a", None if live else "done")
+    write(repo, "a.txt", "the sibling's work in flight\n")
+
+    await inplace.mark_task(*marking, "implementation.main.b")
+
+    m = inplace.load_mark(run_dirs, it.id, "implementation.main.b")
+    assert m.dirty == ({"calc.py"} if live else {"calc.py", "a.txt"})
+
+
 def test_check_names_a_moved_checkout_and_the_commits_made_off_the_branch(repo):
     branch = _on_item_branch(repo)
     m = inplace.mark(repo, branch, {})
@@ -475,6 +494,19 @@ def test_check_names_a_moved_checkout_and_the_commits_made_off_the_branch(repo):
     assert found.stray_commits == [stray]
     _git_now(repo, "checkout", "-q", "--detach")
     assert inplace.check(repo, branch, m).moved_to == f"detached at {stray}"
+
+
+def test_check_names_the_persons_rebase_under_way_not_a_moved_checkout(repo):
+    """A rebase detaches HEAD: it is the person's to finish, not a switch away."""
+    branch = _on_item_branch(repo)
+    m = inplace.mark(repo, branch, {})
+    _git_now(repo, "commit", "-q", "--allow-empty", "-m", "on the item's branch")
+    with pytest.raises(subprocess.CalledProcessError):  # stops at the failing `exec`
+        _git_now(repo, "rebase", "-x", "false", "HEAD~1")
+
+    found = inplace.check(repo, branch, m)
+
+    assert (found.moved_to, found.under_way, found.stray_commits) == (None, True, [])
 
 
 _REWRITES = {
@@ -513,25 +545,42 @@ def test_check_names_no_stray_commit_for_history_the_branch_holds_or_rewrote(rep
     assert (found.moved_to, found.stray_commits) == (None, [])
 
 
-@pytest.mark.parametrize("how", ["merge", "commit"])
-def test_check_overlap_is_the_tasks_own_commits_not_a_merged_main(repo, how):
+_TASK_WORK = {
+    "commit": [("commit", "-q", "-m", "agent", "--", "calc.py")],
+    "merge-main": [("merge", "-q", "--no-ff", "-m", "merge main", "main")],
+    "side-branch": [
+        ("checkout", "-q", "-b", "side"),
+        ("commit", "-q", "-m", "side", "--", "calc.py"),
+        ("checkout", "-q", "item"),
+        ("merge", "-q", "--no-ff", "-m", "merge side", "side"),
+    ],
+    "rebase": [("rebase", "-q", "--autostash", "main")],
+}
+
+
+@pytest.mark.parametrize(
+    ("how", "overlap"),
+    [("commit", True), ("merge-main", False), ("side-branch", True), ("rebase", False)],
+    ids=list(_TASK_WORK),
+)
+def test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape(repo, how, overlap):
+    """A merged side branch's files are the task's; main's, or the item's own
+    commits a rebase replays, are not. The person's edit stays in place."""
     branch = _on_item_branch(repo)
+    write(repo, "calc.py", "# the item's, before the task\n")
+    commit_all(repo, "an earlier task")
     git(repo, "checkout", "-q", "main")
-    write(repo, "calc.py", "# main moved on\n")
+    write(repo, "main.txt", "main moved on\n")
     commit_all(repo, "main")
     git(repo, "checkout", "-q", branch)
     write(repo, "calc.py", "# the person's edit\n")
     m = inplace.mark(repo, branch, {})
-    git(repo, "checkout", "-q", "--", "calc.py")  # for git to allow the task's work below
 
-    if how == "merge":
-        git(repo, "merge", "-q", "--no-ff", "-m", "merge main", "main")
-    else:
-        write(repo, "calc.py", "# the agent's\n")
-        commit_all(repo, "agent")
+    for args in _TASK_WORK[how]:
+        git(repo, *args)
 
     assert m.dirty == {"calc.py"}
-    assert inplace.check(repo, branch, m).overlap == ([] if how == "merge" else ["calc.py"])
+    assert inplace.check(repo, branch, m).overlap == (["calc.py"] if overlap else [])
 
 
 @pytest.mark.parametrize("unreadable", [False, True], ids=["plain", "one-unreadable"])
@@ -549,15 +598,6 @@ def test_check_leftovers_are_only_what_the_task_left(repo, unreadable):
     expected = {"new.txt": git(repo, "hash-object", "new.txt")}
     assert found.leftovers == expected | ({"locked.txt": ""} if unreadable else {})
     assert (found.moved_to, found.stray_commits, found.overlap) == (None, [], [])
-
-
-def test_check_refuses_on_a_git_without_dense_combined_merges(repo, monkeypatch):
-    branch = _on_item_branch(repo)
-    m = inplace.mark(repo, branch, {})
-    monkeypatch.setattr(inplace, "_DIFF_MERGES", "--diff-merges=what-older-git-lacks")
-
-    with pytest.raises(inplace.CheckoutRefused, match="needs git 2.31 or newer"):
-        inplace.check(repo, branch, m)
 
 
 @pytest.mark.parametrize("name", ["with space.txt", "ünïcode.txt", "-leading.txt"])

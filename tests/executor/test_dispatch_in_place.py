@@ -188,12 +188,16 @@ def _implements(it):
     return [s for s in it.sessions("checks") if s["hook_point"].endswith("implement")]
 
 
-@pytest.mark.parametrize("back", [False, True], ids=["stays-away", "switched-back"])
+@pytest.mark.parametrize(
+    ("back", "commit"),
+    [(False, True), (True, True), (False, False)],
+    ids=["stays-away", "switched-back", "stays-away-with-no-commit"],
+)
 async def test_a_branch_switch_mid_task_stops_and_never_switches_back(
-    item_on, fake_agent, agent_runs, repo, back
+    item_on, fake_agent, agent_runs, repo, back, commit
 ):
     it = await item_on(fake_agent.quick_task, target=_IN_PLACE)
-    away = "git checkout -q main && echo stray >> calc.py && git commit -q -am stray"
+    away = "git checkout -q main" + (" && echo stray >> calc.py && git commit -q -am stray" * commit)
     agent_runs(away + (" && git checkout -q -" if back else ""))
 
     assert await _walk(it) == "needs_human"
@@ -201,10 +205,29 @@ async def test_a_branch_switch_mid_task_stops_and_never_switches_back(
     stray = git(repo, "rev-parse", "main")
     on = f"refs/heads/{store.branch_for(it.row())}" if back else "refs/heads/main"
     assert git(repo, "symbolic-ref", "HEAD") == on, "Kraft switched the checkout"
-    assert git(repo, "log", "-1", "--format=%s", "main") == "stray", "Kraft moved the commit"
+    assert not commit or git(repo, "log", "-1", "--format=%s", "main") == "stray", "moved it"
     assert it.row()["stop_kind"] == "checkout"
-    assert back or "the checkout moved to main during the run" in _stop_reason(it)
-    assert stray in _stop_reason(it)
+    reason = _stop_reason(it)
+    assert back or "the checkout moved to main during the run" in reason
+    assert (stray in reason) is commit
+    assert ("nor move those commits" in reason) is (commit and not back), "no commits to move"
+
+
+async def test_the_persons_rebase_under_way_after_a_task_is_named_not_a_move(
+    item_on, fake_agent, agent_runs, repo
+):
+    """A rebase detaches HEAD: the stop names it as theirs to finish."""
+    it = await item_on(fake_agent.quick_task, target=_IN_PLACE)
+    agent_runs(
+        "echo a > a.txt && " + _COMMIT.format(f="a.txt") + " && git rebase -x false HEAD~1; true"
+    )
+
+    assert await _walk(it) == "needs_human"
+
+    assert it.row()["stop_kind"] == "checkout"
+    reason = _stop_reason(it)
+    assert "has a git operation in progress" in reason and "at the end of the run of" in reason
+    assert "moved to" not in reason
 
 
 async def test_resume_after_a_fix_loop_tasks_checkout_stop_runs_its_next_round(

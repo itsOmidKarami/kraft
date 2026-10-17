@@ -17,7 +17,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,7 +25,8 @@ from pathlib import Path
 from kraft import events, item_paths, node_runs, store
 from kraft.adapters.forge import git
 from kraft.config import ConfigError, git_read
-from kraft.vocab import ChainEvent, StopKind, WorkItemStatus
+from kraft.vocab import LIVE, ChainEvent, StopKind, WorkItemStatus
+from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
 
@@ -246,9 +247,7 @@ async def rebase(
             except git.UnsafeWorktree:
                 # Never a worktree's advice (delete its operation's state):
                 # the person's checkout, as `_settled` tells it.
-                raise (
-                    _under_way(checkout) if _on(checkout, branch) else _left(checkout, branch)
-                ) from None
+                raise _off(checkout, branch) from None
         # One a killed server left would pin the branch for good.
         await _finish(_drop_scratch, checkout, run_dirs.scratch.glob(f"{row['id']}-*"))
         run_dirs.scratch.mkdir(parents=True, exist_ok=True)
@@ -569,11 +568,9 @@ def _settled(folder: Path) -> None:
     """Refuse a checkout with the person's own git operation under way, or
     paths they have left unmerged: Kraft never finishes, aborts or works
     over either."""
-    try:
-        git.assert_no_operation(folder)
-    except git.UnsafeWorktree:
-        raise _under_way(folder) from None
-    unmerged = _git_lines(folder, "diff", "--name-only", "--diff-filter=U")
+    if _operation(folder):
+        raise _under_way(folder)
+    unmerged =_git_lines(folder, "diff", "--name-only", "--diff-filter=U")
     if unmerged:
         raise CheckoutRefused(
             f"{folder} has unmerged paths: {', '.join(unmerged)}; resolve them yourself, "
@@ -582,11 +579,26 @@ def _settled(folder: Path) -> None:
         )
 
 
-def _under_way(folder: Path) -> CheckoutRefused:
+def _operation(folder: Path) -> bool:
+    try:
+        git.assert_no_operation(folder)
+    except git.UnsafeWorktree:
+        return True
+    return False
+
+
+def _under_way(folder: Path, when: str = "") -> CheckoutRefused:
     return CheckoutRefused(
         f"{folder} has a git operation in progress (a rebase, merge, cherry-pick, "
-        "revert or bisect): finish or abort it yourself, then retry the item"
+        f"revert or bisect){when}: finish or abort it yourself, then retry the item"
     )
+
+
+def _off(folder: Path, branch: str) -> CheckoutRefused:
+    """Why git would not act on `branch` in `folder`: a rebase of the
+    person's detaches HEAD, and is theirs to finish, not a switch away."""
+    gone = not _on(folder, branch) and not _operation(folder)
+    return _left(folder, branch) if gone else _under_way(folder)
 
 
 def _switch(folder: Path, branch: str) -> dict:
@@ -816,6 +828,8 @@ class TaskCheck:
     stray_commits: list[str]
     overlap: list[str]
     leftovers: dict[str, str]
+    #: Off the branch mid-operation (a rebase detaches HEAD): not `moved_to`.
+    under_way: bool = False
 
 
 #: How many paths a `task_marked` or `left_uncommitted` event names; the
@@ -860,32 +874,39 @@ def leftovers(run_dirs, wid: str) -> dict[str, str]:
         return {}
 
 
-def mark(checkout: Path, branch: str, leftovers: Mapping[str, str]) -> TaskMark:
+def mark(
+    checkout: Path,
+    branch: str,
+    leftovers: Mapping[str, str],
+    siblings: Iterable[frozenset[str]] = (),
+) -> TaskMark:
     """Before an agent task: the tip and the person's dirty paths. A leftover
     of the item's own whose content is unchanged is the item's, so a later
-    task committing it is no overlap."""
+    task committing it is no overlap. `siblings`: the person's paths as each
+    co-task still running marked them; a path dirtied since one started is
+    taken for that co-task's work in flight, not the person's."""
     tip = _ref(checkout, branch)
     if tip is None:
         raise CheckoutRefused(f"the branch {branch} is gone from {checkout}")
     dirty = _dirty(checkout)
     mine = [p for p in dirty if p in leftovers]
     hashes = _hashes(checkout, mine)
+    theirs = {p for p in dirty if p not in mine or hashes[p] != leftovers[p]}
+    for earlier in siblings:
+        theirs &= earlier
     return TaskMark(
         tip=tip,
-        dirty=frozenset(p for p in dirty if p not in mine or hashes[p] != leftovers[p]),
+        dirty=frozenset(theirs),
         started_at=datetime.now(UTC).isoformat(timespec="seconds"),
     )
-
-
-#: git 2.31 and later; older git refuses it, and `check` says so.
-_DIFF_MERGES = "--diff-merges=dense-combined"
 
 
 def check(checkout: Path, branch: str, mark: TaskMark) -> TaskCheck:
     """After an agent task: never a repair, only what a stop needs to say."""
     head = git_read(checkout, "symbolic-ref", "--quiet", "HEAD", expected_failure=True)
     moved_to = None
-    if head != f"refs/heads/{branch}":
+    under_way = head != f"refs/heads/{branch}" and _operation(checkout)
+    if head != f"refs/heads/{branch}" and not under_way:
         moved_to = (head or "").removeprefix("refs/heads/") or (
             f"detached at {git_read(checkout, 'rev-parse', 'HEAD')}"
         )
@@ -912,32 +933,21 @@ def check(checkout: Path, branch: str, mark: TaskMark) -> TaskCheck:
         if made
         else set()
     )
-    # Each of the task's own commits against its first parent; a merge counts
-    # only what it resolved, never the files the merged branch brought.
-    try:
-        touched = _git_lines(
-            checkout,
-            "log",
-            "--first-parent",
-            _DIFF_MERGES,
-            "--no-renames",
-            "--name-only",
-            "--format=",
-            f"{mark.tip}..refs/heads/{branch}",
-        )
-    except CheckoutRefused as exc:
-        if "diff-merges" not in str(exc):
-            raise
-        raise CheckoutRefused(
-            f"Kraft needs git 2.31 or newer to check what an in-place task committed "
-            f"in {checkout} ({exc}): update git, then retry the item"
-        ) from None
+    # Every path the branch's tree gained since the mark, whatever the merge
+    # shape: a merged side branch's files count, and a rebase's replayed
+    # commits do not. Git merges or rebases nothing over a dirty path, so an
+    # upstream change lands on one of the person's only if their edit was
+    # set aside (a stash) during the task, which is worth a look too.
+    touched = _git_lines(
+        checkout, "diff", "--name-only", "--no-renames", mark.tip, f"refs/heads/{branch}"
+    )
     new = [p for p in _dirty(checkout) if p not in mark.dirty]
     return TaskCheck(
         moved_to=moved_to,
         stray_commits=[s for s in made if s in off],
         overlap=sorted(mark.dirty.intersection(touched)),
         leftovers=_hashes(checkout, new),
+        under_way=under_way,
     )
 
 
@@ -975,7 +985,18 @@ async def mark_task(db, run_dirs, row, folder: Path, node_id: str, task_path: st
     """Before an in-place agent or command task: what `check_task` compares against,
     kept in the item's folder so a restart's reattach reads the same mark."""
     wid = row["id"]
-    m = await asyncio.to_thread(mark, folder, store.branch_for(row), leftovers(run_dirs, wid))
+    # The lease keeps every other item out: a live session here is a co-task.
+    running = db.read(
+        lambda c: c.execute(
+            "SELECT DISTINCT hook_point FROM worker_sessions WHERE work_item_id = ? "
+            f"AND hook_point != ? AND status IN ({in_list(LIVE)})",
+            (wid, task_path),
+        ).fetchall()
+    )
+    siblings = [s.dirty for r in running if (s := load_mark(run_dirs, wid, r[0])) is not None]
+    m = await asyncio.to_thread(
+        mark, folder, store.branch_for(row), leftovers(run_dirs, wid), siblings
+    )
     save_mark(run_dirs, wid, task_path, m)
     dirty = sorted(m.dirty)
     payload = {"node_id": node_id, "task": task_path, "tip": m.tip, "started_at": m.started_at}
@@ -1021,10 +1042,13 @@ async def check_task(
         if found.moved_to:
             reasons.append(
                 f"the checkout moved to {found.moved_to} during the run of {task_path} in "
-                f"{folder}{'; ' + made if made else ''}. Kraft did not switch it back, "
-                f"nor move those commits: retry the item once {folder} may go back to {branch}"
+                f"{folder}{'; ' + made if made else ''}. Kraft did not switch it back"
+                f"{', nor move those commits' if made else ''}: retry the item once {folder} "
+                f"may go back to {branch}"
             )
-        elif stray:
+        elif found.under_way:
+            reasons.append(str(_under_way(folder, f" at the end of the run of {task_path}")))
+        if stray and not found.moved_to:
             # Switched away, committed and switched back: the work may be elsewhere.
             reasons.append(
                 f"{task_path} left {made}. Kraft did not move them: check where that work "

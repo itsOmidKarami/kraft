@@ -246,20 +246,28 @@ async def test_a_rebase_in_the_checkout_refuses_what_it_would_force(
     assert {p: (repo / p).read_bytes() for p in files} == files
 
 
+@pytest.mark.parametrize("theirs", ["MERGE_HEAD", "rebase-merge"], ids=["merge", "rebase"])
 async def test_an_operation_begun_after_the_look_is_refused_in_the_checkouts_words(
-    item_on, database, run_dirs, repo, monkeypatch
+    item_on, database, run_dirs, repo, monkeypatch, theirs
 ):
-    """Never a worktree's advice to delete the operation's state."""
+    """Never a worktree's advice to delete the operation's state, and a rebase,
+    which detaches HEAD, is never taken for the checkout leaving the branch."""
     it, branch = await _behind_origin(item_on, database, run_dirs, repo, main_writes="secret.env")
     git(repo, "checkout", "-q", branch)
-    _the_persons_merge_under_way(repo, branch)
+    if theirs == "MERGE_HEAD":
+        _the_persons_merge_under_way(repo, branch)
+    else:
+        subprocess.run(["git", "rebase", "-x", "false", "HEAD~1"], cwd=repo, capture_output=True)
+        looks = iter([True])  # still on the branch when Kraft looked
+        on = inplace._on
+        monkeypatch.setattr(inplace, "_on", lambda *a: next(looks, False) or on(*a))
     monkeypatch.setattr(inplace, "_settled", lambda _: None)  # theirs began after the look
 
     with pytest.raises(inplace.CheckoutRefused, match="operation in progress") as refused:
         await inplace.rebase(run_dirs, it.row(), base="main")
 
     assert "delete" not in str(refused.value)
-    assert (Path(git(repo, "rev-parse", "--absolute-git-dir")) / "MERGE_HEAD").exists()
+    assert (Path(git(repo, "rev-parse", "--absolute-git-dir")) / theirs).exists()
 
 
 async def test_a_failed_rebase_never_aborts_the_persons_own(

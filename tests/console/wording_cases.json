@@ -58,7 +58,7 @@
     },
     {
       "name": "checkout",
-      "row": { "display_status": "needs_you", "current_node_id": "implement", "stop": { "kind": "checkout", "node": "implement", "reason": "the checkout moved to main during the run of review in /r. Kraft did not switch it back, nor move those commits: retry the item once /r may go back to kraft/x" } },
+      "row": { "display_status": "needs_you", "current_node_id": "implement", "stop": { "kind": "checkout", "node": "implement", "reason": "the checkout moved to main during the run of review in /r. Kraft did not switch it back: retry the item once /r may go back to kraft/x" } },
       "group": "needs",
       "tail": "the checkout moved to main during the run of review in /r"
     },
