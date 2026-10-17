@@ -217,6 +217,22 @@ async def test_a_rebase_in_the_checkout_refuses_what_it_would_force(
     assert {p: (repo / p).read_bytes() for p in files} == files
 
 
+async def test_an_operation_begun_after_the_look_is_refused_in_the_checkouts_words(
+    item_on, database, run_dirs, repo, monkeypatch
+):
+    """Never a worktree's advice to delete the operation's state."""
+    it, branch = await _behind_origin(item_on, database, run_dirs, repo, main_writes="secret.env")
+    git(repo, "checkout", "-q", branch)
+    _the_persons_merge_under_way(repo, branch)
+    monkeypatch.setattr(inplace, "_settled", lambda _: None)  # theirs began after the look
+
+    with pytest.raises(inplace.CheckoutRefused, match="operation in progress") as refused:
+        await inplace.rebase(run_dirs, it.row(), base="main")
+
+    assert "delete" not in str(refused.value)
+    assert (Path(git(repo, "rev-parse", "--absolute-git-dir")) / "MERGE_HEAD").exists()
+
+
 async def test_a_failed_rebase_never_aborts_the_persons_own(
     item_on, database, run_dirs, repo, monkeypatch
 ):

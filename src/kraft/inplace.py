@@ -229,15 +229,24 @@ async def rebase(
     async with _held(checkout):
         if _on(checkout, branch):
             await _finish(_settled, checkout)
-            return await builtins.refresh_worktree_base(
-                checkout,
-                checkout,
-                branch,
-                base=base,
-                force=force,
-                identity=identity,
-                autostash=True,
-            )
+            try:
+                return await builtins.refresh_worktree_base(
+                    checkout,
+                    checkout,
+                    branch,
+                    base=base,
+                    force=force,
+                    identity=identity,
+                    autostash=True,
+                )
+            except builtins.RebaseBlocked:
+                raise
+            except git.UnsafeWorktree:
+                # Never a worktree's advice (delete its operation's state):
+                # the person's checkout, as `_settled` tells it.
+                raise (
+                    _under_way(checkout) if _on(checkout, branch) else _left(checkout, branch)
+                ) from None
         # One a killed server left would pin the branch for good.
         await _finish(_drop_scratch, checkout, run_dirs.scratch.glob(f"{row['id']}-*"))
         run_dirs.scratch.mkdir(parents=True, exist_ok=True)
@@ -536,10 +545,7 @@ def _settled(folder: Path) -> None:
     try:
         git.assert_no_operation(folder)
     except git.UnsafeWorktree:
-        raise CheckoutRefused(
-            f"{folder} has a git operation in progress (a rebase, merge, cherry-pick, "
-            "revert or bisect): finish or abort it yourself, then retry the item"
-        ) from None
+        raise _under_way(folder) from None
     unmerged = _git_lines(folder, "diff", "--name-only", "--diff-filter=U")
     if unmerged:
         raise CheckoutRefused(
@@ -547,6 +553,13 @@ def _settled(folder: Path) -> None:
             "then retry the item",
             unmerged,
         )
+
+
+def _under_way(folder: Path) -> CheckoutRefused:
+    return CheckoutRefused(
+        f"{folder} has a git operation in progress (a rebase, merge, cherry-pick, "
+        "revert or bisect): finish or abort it yourself, then retry the item"
+    )
 
 
 def _switch(folder: Path, branch: str) -> dict:
