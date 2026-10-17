@@ -451,7 +451,8 @@ async def test_claim_for_run_limit_admits_when_a_slot_is_free(database):
 IN_PLACE = WorkItemTarget.for_repository("sample", in_place=True)
 _NOW = "2000-01-01T00:00:00+00:00"
 
-#: Each store write that moves an item to `active`: where it starts from, and the move.
+#: Each store write that moves an item to `active`: where it starts from, and the
+#: move, True when it moved the item.
 _CLAIMS = {
     "claim_for_run": (
         lambda c, wid: store.pause_work_item(c, wid, []),
@@ -463,7 +464,11 @@ _CLAIMS = {
     ),
     "approve_gate": (
         lambda c, wid: store.request_gate(c, wid, "n", "g"),
-        lambda c, wid: store.approve_gate(c, wid, "g"),
+        lambda c, wid: store.approve_gate(c, wid, "g") is True,
+    ),
+    "reject_gate": (
+        lambda c, wid: store.request_gate(c, wid, "n", "g"),
+        lambda c, wid: store.reject_gate(c, wid, "g", "no", reopen=True, node="n") is None,
     ),
 }
 
@@ -531,6 +536,19 @@ async def test_a_live_escalation_session_holds_the_checkout(item_on, run_dirs, d
 
     assert not await database.write(lambda c: store.claim_for_run(c, "b", from_statuses=["paused"]))
     assert database.read(lambda c: store.checkout_holder(c, "b")) == "a"
+
+
+async def test_an_active_item_keeps_its_own_checkout(item_on, run_dirs, database):
+    """B's live session in the checkout does not stop A, which is already
+    working there, from skipping a node or passing a gate mid-walk."""
+    chain = v1_named_chain(run_dirs.base / "t")
+    await item_on(chain, wid="a", target=IN_PLACE)
+    b = await item_on(chain, "implementation", wid="b", target=IN_PLACE)
+    await database.write(lambda c: store.mark_needs_human(c, "b", "n", "stop", kind="failed"))
+    await b.session("esc", "escalation", running=(os.getpid(), 0.0))
+
+    assert await database.write(lambda c: store.claim_for_run(c, "a", from_statuses=["active"]))
+    assert await database.write(lambda c: store.approve_gate(c, "a", "g")) is True
 
 
 async def test_pause_for_broken_base_pauses_and_records_who_and_what(database):

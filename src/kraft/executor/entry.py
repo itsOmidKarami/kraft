@@ -294,6 +294,14 @@ async def intake(
             and store.active_count(c) >= limit
         ):
             effective_status = WorkItemStatus.PAUSED
+        if (
+            WorkItemStatus(status) in HOLDS_SLOT
+            and materialized.target.in_place
+            and store.folder_holder(c, repo, work_item_id)
+        ):
+            # Another in-place item is working in this checkout: filed paused,
+            # for the caller to queue behind it, in the same write as the look.
+            effective_status = WorkItemStatus.PAUSED
         store.create_work_item(
             c,
             id=work_item_id,

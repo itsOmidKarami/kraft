@@ -4,6 +4,7 @@ queue a start are pinned beside the doors themselves."""
 import asyncio
 import dataclasses
 import json
+import sqlite3
 from functools import partial
 from pathlib import Path
 
@@ -12,9 +13,11 @@ from support.api import (
     _force_node,
     _hold_storage,
     _in_state,
+    _orchestrator_db,
     _paused,
     _poll_events,
     _post_default,
+    _queue_tick,
     _set_status,
 )
 
@@ -174,10 +177,8 @@ def test_an_item_with_a_worktree_is_not_held_by_the_storage_limit(client, repo):
 def test_resuming_behind_a_working_in_place_item_queues_and_says_who(
     client, repo, door, state, came_from
 ):
-    from kraft import start_queue
-
     client.portal.call(client.app.state.queue_task.cancel)
-    tick = partial(client.portal.call, partial(start_queue.tick, client.app))
+    tick = partial(_queue_tick, client)
     working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
     wid = _in_state(client, repo, DOORS["states"][state], in_place=True)
 
@@ -217,27 +218,110 @@ def test_skipping_behind_a_working_in_place_item_is_refused(client, repo, body):
     assert r.json()["detail"] == "the checkout is in use by A; try again when it stops"
 
 
-def test_approving_a_gate_behind_a_working_in_place_item_keeps_the_approval_and_queues(
-    client, repo
+def _of(client, wid, type_):
+    return [e for e in client.get(f"/api/work-items/{wid}/events").json() if e["type"] == type_]
+
+
+@pytest.mark.parametrize(
+    ("decision", "body", "recorded"),
+    [("approve", {}, "gate_approved"), ("reject", {"note": "redo it"}, "gate_rejected")],
+    ids=["approve", "reject"],
+)
+def test_a_gate_decision_behind_a_working_in_place_item_is_kept_and_goes_on_later(
+    client, repo, decision, body, recorded
 ):
+    """Recorded at once, queued for the checkout, and replayed as Kraft's own
+    walk from where the decision sends it: past an approved gate, or at a
+    rejection's target -- never the gate asked again."""
+    client.portal.call(client.app.state.queue_task.cancel)
     working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
     wid = _in_state(client, repo, DOORS["states"]["gate"], in_place=True)
 
-    r = client.post(f"/api/work-items/{wid}/gates/spec_approval/approve", json={})
+    r = client.post(f"/api/work-items/{wid}/gates/spec_approval/{decision}", json=body)
 
     assert r.status_code == 200, r.text
-    assert r.json()["status"] == "queued"
-    assert r.json()["held_by"] == working
-    evts = client.get(f"/api/work-items/{wid}/events").json()
-    approved = [e for e in evts if e["type"] == "gate_approved"]
-    assert [e["payload"]["gate"] for e in approved] == ["spec_approval"]
-    queued = [e["payload"] for e in evts if e["type"] == "work_item_queued"]
-    assert queued == [
+    assert (r.json()["status"], r.json()["held_by"]) == ("queued", working)
+    [decided] = _of(client, wid, recorded)
+    assert decided["payload"]["gate"] == "spec_approval"
+    assert [e["payload"] for e in _of(client, wid, "work_item_queued")] == [
         {
-            "verb": "resume",
+            "verb": "continue",
             "from": "paused",
             "why": "checkout",
             "held_by": working,
             "held_by_title": "A",
         }
     ]
+    nodes = [
+        n["id"]
+        for n in json.loads(client.get(f"/api/work-items/{wid}").json()["materialized_chain"])[
+            "chain"
+        ]["nodes"]
+    ]
+    goes_on_at = (
+        nodes[nodes.index("spec_approval") + 1]
+        if decision == "approve"
+        else decided["payload"]["node"]
+    )
+
+    _set_status(working, "paused")
+
+    assert _queue_tick(client) == [wid]
+    _poll_events(client, wid, "node_started")
+    assert _of(client, wid, "node_started")[0]["payload"]["node_id"] == goes_on_at
+    assert not _of(client, wid, "work_item_resumed"), "replayed as a person's resume"
+    if decision == "approve":
+        assert len(_of(client, wid, "gate_requested")) == 1, "the gate was asked again"
+
+
+def test_a_self_retry_queued_for_the_checkout_is_replayed_as_the_agents(client, repo):
+    """`only-a-person-resets-a-cap-counter`: the replay is the escalation's own retry."""
+    from kraft import events, store
+
+    client.portal.call(client.app.state.queue_task.cancel)
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"]["failed"], in_place=True)
+    with _orchestrator_db() as c, c:
+        c.row_factory = sqlite3.Row
+        cursor = events.read_after(c, 0, wid)[-1]["seq"]
+        events.append(
+            c,
+            wid,
+            "work_item_self_retry_requested",
+            {"node_id": "implementation", "key": None, "gate_key": None, "steer": "fixed it"},
+        )
+        assert store.queue_work_item(
+            c,
+            wid,
+            verb="self_retry",
+            body={"cursor": cursor},
+            headers={},
+            from_statuses=["needs_human"],
+            held_by=working,
+        )
+    assert _queue_tick(client) == []
+
+    _set_status(working, "paused")
+
+    assert _queue_tick(client) == [wid]
+    [retried] = [
+        e
+        for e in _poll_events(client, wid, "work_item_retried")
+        if e["type"] == "work_item_retried"
+    ]
+    assert retried["payload"]["escalated"] is True
+    assert retried["payload"]["steer"] == "fixed it"
+    assert not _of(client, wid, "cap_counters_reset")
+
+
+def test_an_autostart_behind_a_working_in_place_item_is_filed_queued(client, repo):
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+
+    r = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "in_place": True, "autostart": True},
+    )
+
+    assert r.json()["status"] == "queued", r.text
+    assert r.json()["held_by"] == working
+    assert client.get(f"/api/work-items/{r.json()['id']}").json()["status"] == "queued"

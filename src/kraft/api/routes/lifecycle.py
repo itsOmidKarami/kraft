@@ -924,6 +924,100 @@ def checkout_refusal(st, wid: str) -> HTTPException | None:
     return HTTPException(409, f"the checkout is in use by {title}; try again when it stops")
 
 
+async def continue_held(wid: str, body: dict, request: Request) -> None:
+    """Kraft's own replay of a gate decision that waited for the checkout
+    (`store.hold_for_checkout`): the walk from `body["node"]`, with the
+    decision's steer. Not a person's resume, so no run boundary. Queued again,
+    for its place, while the slot or the checkout is still taken."""
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    limit = st.policy.max_concurrent if st.policy else 1
+    paused = [WorkItemStatus.PAUSED]
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        row["current_node_id"],
+        reason="a held gate decision claimed this item but could not start a walk",
+        handed_off=lambda: deps.task_is_live(request.app, wid),
+    ):
+        if not await st.db.write(
+            lambda c: store.claim_for_run(c, wid, from_statuses=paused, limit=limit)
+        ):
+            await st.db.write(
+                lambda c: store.queue_work_item(
+                    c,
+                    wid,
+                    verb="continue",
+                    body=body,
+                    headers={},
+                    from_statuses=paused,
+                    held_by=store.checkout_holder(c, wid),
+                )
+            )
+            return
+        nodes = store.effective_nodes(executor.chain_of(row), store.node_overrides_of(row))
+        deps.spawn(
+            request.app,
+            wid,
+            deps.guard(
+                st.db,
+                wid,
+                executor.run(
+                    st.db,
+                    st.run_dirs,
+                    work_item_id=wid,
+                    bd_cwd=deps.bd_cwd(),
+                    start_index=next(i for i, n in enumerate(nodes) if n.id == body["node"]),
+                    policy=st.policy,
+                    steer=body.get("steer"),
+                    steer_source=body.get("steer_source", "human"),
+                    launch=deps.launch(st, row["repo"]),
+                    on_approve=deps._on_approve(st),
+                ),
+            ),
+        )
+
+
+async def self_retry_held(wid: str, body: dict, request: Request) -> None:
+    """Kraft's own replay of an escalation's self-retry that waited for the
+    checkout: `executor.resume_after_escalation` again, from the same cursor,
+    so the retry stays the agent's (counters kept, `escalated`) and its steer
+    is not checked as a person's."""
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    if holder := st.db.read(lambda c: store.checkout_holder(c, wid)):
+        await st.db.write(
+            lambda c: store.queue_work_item(
+                c,
+                wid,
+                verb="self_retry",
+                body=body,
+                headers={},
+                from_statuses=admitting(Verb.RETRY),
+                held_by=holder,
+            )
+        )
+        return
+    deps.spawn(
+        request.app,
+        wid,
+        deps.guard(
+            st.db,
+            wid,
+            executor.resume_after_escalation(
+                st.db,
+                st.run_dirs,
+                work_item_id=wid,
+                cursor=body["cursor"],
+                policy=st.policy,
+                launch=deps.launch(st, row["repo"]),
+                bd_cwd=deps.bd_cwd(),
+                on_approve=deps._on_approve(st),
+            ),
+        ),
+    )
+
+
 def blocked_refusal(row) -> str:
     """The 409 every door but pause, cancel, abandon and unblock gives a
     blocked item."""

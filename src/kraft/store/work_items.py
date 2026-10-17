@@ -395,25 +395,33 @@ def queue_work_item(
 
 
 def checkout_holder(conn: sqlite3.Connection, work_item_id: str) -> str | None:
-    """The other in-place item working in this item's checkout folder: one
-    that is `active`, or has a live session there. None for a worktree item,
-    and for an item already `active`, which holds the checkout itself.
+    """The other in-place item working in this item's checkout folder
+    (`folder_holder`). None for a worktree item, and for an item already
+    `active`, which holds the checkout itself."""
+    row = conn.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    if row is None or row["status"] == WorkItemStatus.ACTIVE or not is_in_place(row):
+        return None
+    return folder_holder(conn, row["repo"], work_item_id)
+
+
+def folder_holder(conn: sqlite3.Connection, folder: str, other_than: str) -> str | None:
+    """The in-place item, other than `other_than`, working in `folder`: one
+    that is `active`, or has a live session.
 
     Read from the rows, not kept in a lock of its own, so a restart neither
     loses nor doubles it. The folder is compared resolved: two spellings of
     one checkout are one lease."""
-    row = conn.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
-    if row is None or row["status"] == WorkItemStatus.ACTIVE or not _in_place(row):
-        return None
-    folder = os.path.realpath(row["repo"])
+    folder = os.path.realpath(folder)
     working = conn.execute(
         "SELECT * FROM work_items w WHERE id != ? AND (status = ? OR EXISTS ("
         "SELECT 1 FROM worker_sessions s WHERE s.work_item_id = w.id "
         f"AND s.status IN ({in_list(LIVE)}))) ORDER BY id",
-        (work_item_id, WorkItemStatus.ACTIVE),
+        (other_than, WorkItemStatus.ACTIVE),
     )
+    # shortcut: parses each working item's chain inside the writer; fine for a
+    # board of tens of items, a stored `in_place` column when it is hundreds.
     return next(
-        (o["id"] for o in working if _in_place(o) and os.path.realpath(o["repo"]) == folder),
+        (o["id"] for o in working if is_in_place(o) and os.path.realpath(o["repo"]) == folder),
         None,
     )
 
@@ -424,7 +432,9 @@ def checkout_reason(conn: sqlite3.Connection, holder: str) -> dict:
     return {"why": "checkout", "held_by": holder, "held_by_title": title["title"]}
 
 
-def _in_place(row) -> bool:
+def is_in_place(row) -> bool:
+    """Whether the item runs in its repository's checkout. False for a row
+    with no snapshot, or one that did not select it."""
     chain = materialized_chain_of(row)
     return chain is not None and chain.target.in_place
 

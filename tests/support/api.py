@@ -316,6 +316,20 @@ def _blocked_after(client, repo) -> tuple[str, str]:
     return dep, wid
 
 
+def _orchestrator_db():
+    """The running client's database, opened directly: `with _orchestrator_db() as c, c:`."""
+    return closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"))
+
+
+def _queue_tick(client) -> list[str]:
+    """One pass of the start queue (`kraft.start_queue.tick`); the ids it started."""
+    from functools import partial
+
+    from kraft import start_queue
+
+    return client.portal.call(partial(start_queue.tick, client.app))
+
+
 def _status_of(client, wid: str) -> str:
     return client.get(f"/api/work-items/{wid}").json()["status"]
 

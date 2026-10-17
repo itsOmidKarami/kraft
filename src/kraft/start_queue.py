@@ -109,6 +109,10 @@ async def _take_and_start(app, wid: str) -> bool:
     try:
         if saved["verb"] == "retry":
             await lifecycle._retry(wid, lifecycle.Retry(**saved["body"]), request)
+        elif saved["verb"] == "continue":
+            await lifecycle.continue_held(wid, saved["body"], request)
+        elif saved["verb"] == "self_retry":
+            await lifecycle.self_retry_held(wid, saved["body"], request)
         else:
             await lifecycle.resume_work_item(wid, lifecycle.Resume(**saved["body"]), request)
     except asyncio.CancelledError:
@@ -147,6 +151,7 @@ def _requeue(conn, wid: str, saved: dict) -> None:
         body=saved["body"],
         headers=saved["headers"],
         from_statuses=[saved["from"]],
+        held_by=store.checkout_holder(conn, wid),
     ):
         store.keep_place(conn, wid, saved["at"])
 

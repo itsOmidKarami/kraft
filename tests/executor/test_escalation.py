@@ -367,10 +367,7 @@ async def test_a_self_retry_behind_a_working_in_place_item_is_queued(item_on, ru
     )
 
     assert status == it.status() == "queued"
-    assert json.loads(it.row()["queued_request"])["body"] == {
-        "steer": "fixed it",
-        "path": "implementation.main.implement",
-    }
+    assert json.loads(it.row()["queued_request"])["body"] == {"cursor": cursor}
     assert it.events("work_item_queued")[-1]["payload"]["held_by"] == "a"
     assert not it.events("work_item_self_retry_dropped")
 

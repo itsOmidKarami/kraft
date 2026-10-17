@@ -22,13 +22,14 @@ def request_gate(conn: sqlite3.Connection, work_item_id, node_id, gate) -> None:
     events.append(conn, work_item_id, GateEvent.REQUESTED, {"gate": gate, "node_id": node_id})
 
 
-def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "human") -> bool:
+def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "human") -> bool | str:
     """Clear the gate and set the item running again. True when it is running.
 
-    False, with the approval still recorded, while another in-place item
-    works in this item's checkout (`checkout_holder`): the item is paused past
-    the gate and queued to resume, which `kraft.start_queue` does once the
-    checkout frees. False, and nothing written, for an ended item.
+    While another in-place item works in this item's checkout
+    (`checkout_holder`), the approval is still recorded, the item is paused
+    and queued to go on from the gate once the checkout frees
+    (`hold_for_checkout`), and the holder's id is returned. False, and
+    nothing written, for an ended item.
 
     Also closes the gate node's own `node_started`/`node_completed` pair. A V1
     gate *is* a node (`gate-is-an-ordered-node`) and `gates.maybe_gate` enters
@@ -56,16 +57,23 @@ def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "hum
     chain.complete_node(conn, work_item_id, gate)
     if holder is None:
         return True
+    hold_for_checkout(conn, work_item_id, holder, {"node": gate})
+    return holder
+
+
+def hold_for_checkout(conn: sqlite3.Connection, work_item_id, holder: str, body: dict) -> None:
+    """Queue a paused item's gate decision to go on as Kraft's own walk from
+    `body["node"]` (`continue`, `kraft.start_queue`), not as a person's resume:
+    the decision is already recorded, and its replay is not a new one."""
     queue_work_item(
         conn,
         work_item_id,
-        verb="resume",
-        body={},
+        verb="continue",
+        body=body,
         headers={},
         from_statuses=["paused"],
         held_by=holder,
     )
-    return False
 
 
 def pass_unchanged_revision(conn: sqlite3.Connection, work_item_id, gate, rationale) -> None:
@@ -128,10 +136,15 @@ def reject_gate(
     by: str = "human",
     verdict: str | None = None,
     rerun: Sequence[str] = (),
-) -> None:
+) -> str | None:
     """Record the rejection. `reopen` flips the item back to active for the
     backward-motion re-run (02 §7.2); a rejection that breached the gate's
     reject loop leaves it needs_human.
+
+    A reopen while another in-place item works in this item's checkout
+    (`checkout_holder`) pauses the item instead and queues the re-run from
+    `node`, with the note as its steer (`hold_for_checkout`); the holder's id
+    is returned. None otherwise.
 
     `rerun` is the nodes with a fix loop that the re-run measures again: a
     rejection that reopens gives them their rounds back
@@ -155,13 +168,14 @@ def reject_gate(
     session logs in order by hand (Kraft-s7c04.16). Rides the event alongside
     `note` and `node` for the reason those do.
     """
-    status = "'active'" if reopen else "status"
+    holder = checkout_holder(conn, work_item_id) if reopen else None
+    status = "status" if not reopen else "'active'" if holder is None else "'paused'"
     if not write_status(
         conn,
         f"UPDATE work_items SET status = {status}, updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     ):
-        return
+        return None
     events.append(
         conn,
         work_item_id,
@@ -170,6 +184,11 @@ def reject_gate(
     )
     if reopen:
         reset_fix_loops(conn, work_item_id, list(rerun), by)
+    if holder is not None:
+        # An agent's note is not a person's steer (`walk.run`'s `steer_source`).
+        source = {"steer_source": "gate_review"} if by == "agent" else {}
+        hold_for_checkout(conn, work_item_id, holder, {"node": node, "steer": note, **source})
+    return holder
 
 
 #: Events that mean the newest rejection has already been acted on, so its note

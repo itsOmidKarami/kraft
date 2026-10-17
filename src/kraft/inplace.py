@@ -10,12 +10,7 @@ from pathlib import Path
 
 from kraft import store
 
-
-def is_in_place(row) -> bool:
-    """Whether the item runs in its repository's checkout. False for a row
-    with no snapshot, or one that did not select it."""
-    chain = store.materialized_chain_of(row)
-    return chain is not None and chain.target.in_place
+is_in_place = store.is_in_place
 
 
 def item_folder(run_dirs, row) -> Path:
