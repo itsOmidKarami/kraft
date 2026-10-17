@@ -567,7 +567,9 @@ PUSHED_REFS = "refs/kraft/pushed"
 
 
 async def push(repo: Path, branch: str) -> None:
-    """`git push -u origin <branch>`, safe to call after a rebase.
+    """`git push origin <branch>`, safe to call after a rebase. Never `-u`:
+    the push names its branch, so an upstream buys nothing, and it would be
+    written into the repository's config, in place the person's own.
 
     A plain push can only fast-forward. Any rebase -- a human resolving a
     real conflict against a moved `main`, or `mr_rebase`'s own auto-refresh
@@ -646,7 +648,7 @@ async def push(repo: Path, branch: str) -> None:
     args = ["git", "push"]
     if remote:
         args.append(f"--force-with-lease={branch}:{remote}")
-    args += ["-u", "origin", branch]
+    args += ["origin", branch]
     await run_git(repo, args, env=env)
     await run_git(repo, ["git", "update-ref", pushed_ref, head])
 

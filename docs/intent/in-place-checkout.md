@@ -94,7 +94,7 @@ origin: src/kraft/inplace.py §prepare
 ## REQ in-place-never-writes-git-config
 
 The system SHALL NOT write the checkout's git config for an in-place item.
-enforced-by: tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config[on-main], tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config[on-another-branch]
+enforced-by: tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config[on-main], tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config[on-another-branch], tests/adapters/forge/test_glab.py::test_push_names_the_work_item_branch_and_sets_no_upstream
 origin: src/kraft/inplace.py §prepare
 
 ## REQ in-place-never-sweeps-stragglers

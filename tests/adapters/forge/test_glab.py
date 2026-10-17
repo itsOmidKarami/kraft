@@ -490,15 +490,17 @@ async def test_glab_find_mr_picks_the_branch_s_merge_request(cli, tmp_path, mr_l
 # --- push / merge / labels ---------------------------------------------------------
 
 
-async def test_push_sets_the_upstream_on_the_work_item_branch(cli, tmp_path):
+async def test_push_names_the_work_item_branch_and_sets_no_upstream(cli, tmp_path):
     """Origin has no `kraft/abc` yet and Kraft never pushed it (every probe
     in this stubbed repo answers nothing), so there is no lease to attach
-    and the push is the plain fast-forward one (Kraft-z6i8)."""
+    and the push is the plain fast-forward one (Kraft-z6i8). No `-u`: it
+    would write `branch.kraft/abc.*` into the repository's config, which in
+    place is the person's."""
     cli.stub("git", "")
 
     await forge.GlabCli().push(repo=tmp_path, branch="kraft/abc")
 
-    assert [c for c in cli.calls("git") if c.startswith("push")] == ["push -u origin kraft/abc"]
+    assert [c for c in cli.calls("git") if c.startswith("push")] == ["push origin kraft/abc"]
 
 
 async def test_glab_merge_uses_the_number_when_one_is_known(cli, tmp_path):
