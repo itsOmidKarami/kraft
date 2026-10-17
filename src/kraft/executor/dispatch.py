@@ -1031,6 +1031,15 @@ async def _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, 
         )
 
 
+def _takes_the_checkout(t) -> bool:
+    """Whether an in-place item's task runs in its checkout, so takes it
+    first: an agent, a command or the changed-test-scopes builtin; never a
+    forge task, which a CI poll re-enters."""
+    return isinstance(t, AgentTask | SubprocessTask) or (
+        isinstance(t, BuiltinTask) and t.ref is BuiltinAction.VERIFY_CHANGED_TEST_SCOPES
+    )
+
+
 async def _dispatch_task(
     db,
     run_dirs,
@@ -1149,10 +1158,7 @@ async def _dispatch_task(
         checkout = verified if sandbox else None
     # Right before a task that needs the folder, never on the walk's entry; a
     # forge task or a rebase does not run in it here.
-    if inplace.is_in_place(work_item_row) and (
-        isinstance(t, AgentTask | SubprocessTask)
-        or (isinstance(t, BuiltinTask) and t.ref is BuiltinAction.VERIFY_CHANGED_TEST_SCOPES)
-    ):
+    if inplace.is_in_place(work_item_row) and _takes_the_checkout(t):
         try:
             await inplace.take(
                 db, run_dirs, work_item_row, attachments=entry.attachments_of(work_item_row)
@@ -1939,10 +1945,10 @@ async def measure_node(
             db, row, launch, worktree, before, node_id=node.id, scope=scope
         )
 
-    async def _snapshot(flagged: bool):
+    async def _snapshot(flagged: bool, tasks):
         if not flagged:
             return None
-        if store.is_in_place(row):
+        if store.is_in_place(row) and any(_takes_the_checkout(t.task) for t in tasks):
             # The take is Kraft's own move, not the scope's write; a refusal
             # is the task's to report, from its own take.
             with contextlib.suppress(inplace.CheckoutRefused):
@@ -1952,7 +1958,7 @@ async def measure_node(
     async def _settle(tasks, step: ResolvedStep, *, retry: bool = False) -> list:
         # A read_only step is checked around every run of its tasks, a
         # recovery's retry included; the handler itself runs outside it.
-        before = await _snapshot(step.read_only)
+        before = await _snapshot(step.read_only, tasks)
         results = await asyncio.gather(
             *(_measure(t, retry=retry) for t in tasks), return_exceptions=True
         )
@@ -2027,7 +2033,9 @@ async def measure_node(
 
     # A read_only node is checked around its own steps, a step around its
     # tasks (`_settle`); recovery and fix loops run outside either check.
-    node_before = await _snapshot(own and getattr(node.node, "read_only", False))
+    node_before = await _snapshot(
+        own and getattr(node.node, "read_only", False), [t for g in groups for t in g.tasks]
+    )
     outcomes: list[tuple[ResolvedTask, object]] = []
     for index, step in enumerate(groups):
         # A resumed node skips the steps before `start_step` -- they already

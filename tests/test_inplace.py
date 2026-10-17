@@ -88,6 +88,17 @@ def _item_writes(repo, branch, name):
     _on_branch(repo, branch, name, "the item's version\n")
 
 
+def _ignored_where_the_branch_has_a_directory(repo, branch, name):
+    """`name` an ignored file on `main`; `branch` tracks `name/l.txt`."""
+    write(repo, ".gitignore", f"{name}\n")
+    commit_all(repo, "ignore it")
+    git(repo, "checkout", "-q", branch)
+    write(repo, f"{name}/l.txt", "the item's version\n")
+    git(repo, "add", "-f", f"{name}/l.txt")
+    git(repo, "commit", "-qm", "track it")
+    git(repo, "checkout", "-q", "main")
+
+
 def _checked_out_elsewhere(repo, branch, name):
     git(repo, "worktree", "add", "-q", str(repo.parent / "other"), branch)
 
@@ -98,9 +109,16 @@ def _checked_out_elsewhere(repo, branch, name):
         ("calc.py", _item_writes),
         ("notes.txt", _item_writes),
         ("gen.txt", _ignored_on_main),
+        ("logs", _ignored_where_the_branch_has_a_directory),
         ("calc.py", _checked_out_elsewhere),
     ],
-    ids=["tracked", "untracked", "ignored", "checked-out-elsewhere"],
+    ids=[
+        "tracked",
+        "untracked",
+        "ignored",
+        "ignored-file-where-a-directory-goes",
+        "checked-out-elsewhere",
+    ],
 )
 async def test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing(
     request, item_on, database, run_dirs, repo, name, setup
@@ -135,11 +153,16 @@ async def test_take_stops_when_the_branch_is_gone(item_on, database, run_dirs, r
     assert git(repo, "branch", "--list", branch) == "", "Kraft made the branch again"
 
 
-@pytest.mark.parametrize("unsettled", ["unmerged-paths", "mid-rebase"])
-async def test_take_stops_on_an_unsettled_checkout(item_on, database, run_dirs, repo, unsettled):
+@pytest.mark.parametrize("unsettled", ["unmerged-paths", "mid-rebase", "unreadable-index"])
+async def test_take_stops_on_an_unsettled_checkout(
+    item_on, database, run_dirs, repo, monkeypatch, unsettled
+):
     it, branch = await _prepared(item_on, database, run_dirs, repo)
     if unsettled == "mid-rebase":
         (repo / ".git" / "rebase-merge").mkdir()
+    elif unsettled == "unreadable-index":
+        # Every read of the index fails: no check may read that as "nothing there".
+        monkeypatch.setenv("GIT_INDEX_FILE", str(write(repo.parent, "junk-index", "junk")))
     else:
         # What an autostash clash leaves: conflicted entries, no operation.
         git(repo, "checkout", "-q", "-b", "theirs")
@@ -158,6 +181,8 @@ async def test_take_stops_on_an_unsettled_checkout(item_on, database, run_dirs, 
 
     if unsettled == "unmerged-paths":
         assert refused.value.paths == ["calc.py"]
+    if unsettled == "unreadable-index":
+        assert "could not read" in str(refused.value)
     assert _head(repo) == "refs/heads/main"
 
 
@@ -222,3 +247,59 @@ async def test_the_first_take_commits_the_attachment_by_path(
     assert git(repo, "show", f"{branch}:docs/spec.md") == "# Spec"
     assert git(repo, "rev-list", "--count", f"{it.row()['base_ref']}..{branch}") == "1"
     assert git(repo, "status", "--porcelain") == "M calc.py", "only the attachment was committed"
+
+
+async def test_a_stopped_switch_puts_back_only_what_it_wrote(
+    item_on, database, run_dirs, repo, monkeypatch
+):
+    """A hung filter: the checkout is killed part way. What it wrote goes, and
+    the person's own edits and files stay exactly as they were."""
+    write(repo, "a.txt", "a on main\n")
+    write(repo, "b.txt", "b on main\n")
+    commit_all(repo, "two more files")
+    it, branch = await _prepared(item_on, database, run_dirs, repo)
+    git(repo, "checkout", "-q", branch)
+    write(repo, "a.txt", "a on the branch\n")
+    (repo / "b.txt").unlink()
+    write(repo, "n.txt", "new on the branch\n")
+    commit_all(repo, "the item's work")
+    git(repo, "checkout", "-q", "main")
+    write(repo, "calc.py", "# the person's edit\n")
+    write(repo, "mine.txt", "the person's own file\n")
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True).stdout
+
+    def half_a_checkout(args, *, timeout, cwd, **kw):
+        write(cwd, "a.txt", "a on the branch\n")
+        (cwd / "b.txt").unlink()
+        write(cwd, "n.txt", "new on the branch\n")
+        write(cwd, ".git/index.lock", "")
+        raise builtins._GroupTimedOut(args, timeout, True)
+
+    monkeypatch.setattr(builtins, "_run_git_group", half_a_checkout)
+
+    with pytest.raises(inplace.CheckoutRefused, match="checkout is as it was"):
+        await inplace.take(database, run_dirs, it.row(), attachments=[])
+
+    assert (
+        subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True).stdout
+        == status
+    )
+    assert not (repo / ".git" / "index.lock").exists()
+    assert (repo / "calc.py").read_text() == "# the person's edit\n"
+    assert (repo / "mine.txt").read_text() == "the person's own file\n"
+    assert _head(repo) == "refs/heads/main"
+    assert it.events("checkout_switched") == []
+
+
+async def test_a_hung_hook_after_the_switch_still_records_it(
+    item_on, database, run_dirs, repo, monkeypatch
+):
+    it, branch = await _prepared(item_on, database, run_dirs, repo)
+    write(repo, ".git/hooks/post-checkout", "#!/bin/sh\nsleep 30\n").chmod(0o755)
+    monkeypatch.setattr(builtins, "WORKTREE_ADD_TIMEOUT_S", 1.0)
+
+    await inplace.take(database, run_dirs, it.row(), attachments=[])
+
+    assert _head(repo) == f"refs/heads/{branch}"
+    [switched] = [e["payload"] for e in it.events("checkout_switched")]
+    assert switched["from"] == "main" and "stopped" in switched["output"]

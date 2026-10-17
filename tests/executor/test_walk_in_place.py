@@ -16,9 +16,13 @@ from .test_walk import FORGE_REPO, _agent, _exec, _forge_task, _stop_reason, _wa
 _IN_PLACE = WorkItemTarget.for_repository("sample", in_place=True)
 
 
-async def test_a_ci_wait_reentry_does_not_move_the_checkout(item_on, repo, monkeypatch):
+@pytest.mark.parametrize("read_only", [False, True], ids=["plain", "read-only-node"])
+async def test_a_ci_wait_reentry_does_not_move_the_checkout(item_on, repo, monkeypatch, read_only):
     monkeypatch.setattr(_forge.run, "resolve", lambda name: _forge.FakeForge(ci_states=["pending"]))
-    chain = [_exec("implementation", _agent()), _exec("mr_checks", _forge_task("ci_poll", "mr.ci"))]
+    ci = _exec(
+        "mr_checks", _forge_task("ci_poll", "mr.ci"), **({"read_only": True} if read_only else {})
+    )
+    chain = [_exec("implementation", _agent()), ci]
     it = await item_on(chain, "mr_checks", target=_IN_PLACE)
 
     assert await _walk(it, repo_entry=FORGE_REPO) == "waiting"
