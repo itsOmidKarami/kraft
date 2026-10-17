@@ -387,6 +387,31 @@ async def test_a_self_retry_behind_a_working_in_place_item_is_queued(item_on, ru
     assert not it.events("work_item_self_retry_dropped")
 
 
+async def test_a_self_retry_whose_in_place_rebase_clashes_stops_as_checkout(
+    item_on, run_dirs, monkeypatch
+):
+    in_place = WorkItemTarget.for_repository("sample", in_place=True)
+    it = await item_on(_CHAIN, "implementation", target=in_place)
+    await _stop(it, "stuck")
+    cursor = it.events()[-1]["seq"]
+    await it.database.write(
+        lambda c: events.append(c, it.id, "work_item_self_retry_requested", _self_retry_event())
+    )
+
+    async def clash(*_, **__):
+        raise inplace.AutostashClash("your edits to f clash", ["f"], "5ca1ab1e")
+
+    monkeypatch.setattr(inplace, "rebase", clash)
+
+    status = await gates_module.resume_after_escalation(
+        it.database, run_dirs, work_item_id=it.id, cursor=cursor
+    )
+
+    assert status == "needs_human"
+    stop = it.events("work_item_needs_human")[-1]["payload"]
+    assert (stop["kind"], stop["facts"]) == ("checkout", {"paths": ["f"], "stash": "5ca1ab1e"})
+
+
 @pytest.mark.parametrize(
     ("extra", "seeded"),
     [({"seeded": True}, True), ({}, False)],

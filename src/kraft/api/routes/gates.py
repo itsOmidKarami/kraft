@@ -232,14 +232,16 @@ def _before_any_push(nodes, gate: str) -> bool:
     return True
 
 
-async def _refresh_base_at_gate(request, wid: str, row, gate: str) -> None:
+async def _refresh_base_at_gate(request, wid: str, row, gate: str) -> bool:
     """Bring the branch up to date with its base, as a resume does, before the
     chain goes on from `gate`: an item that sat there for days would otherwise
     implement and verify against the code it forked from. The approval has
     landed whatever this finds: a base that cannot be refreshed cleanly leaves
     the item on its old one and says so (`worktree_refresh_skipped`), and a
     stop that came meanwhile has already stopped the item, so the walk is not
-    started over it."""
+    started over it. An in-place checkout the rebase could not take, or left
+    clashing, stops the item for the person: answers True, and the walk does
+    not start."""
     st = request.app.state
     node = row["current_node_id"]
     reason = None
@@ -249,6 +251,9 @@ async def _refresh_base_at_gate(request, wid: str, row, gate: str) -> None:
         # Stopped (paused, cancelled, a walk already there): not a refusal of
         # the approval, and not ours to continue after.
         raise
+    except (inplace.AutostashClash, inplace.CheckoutRefused) as exc:
+        await inplace.stop_refused(st.db, wid, node, exc)
+        return True
     except RuntimeError as exc:
         new_base, reason = None, str(exc).splitlines()[0] if str(exc) else repr(exc)
     if reason is not None:
@@ -274,6 +279,7 @@ async def _refresh_base_at_gate(request, wid: str, row, gate: str) -> None:
             )
         )
         await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
+    return False
 
 
 @api_router.post("/work-items/{wid}/gates/{gate:path}/approve")
@@ -353,9 +359,12 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
             # Approved, and queued to go on once the checkout frees.
             return held_answer(st, wid, approval)
         start = board._gate_node_index(nodes, gate) + 1
-        # Not item_folder: an in-place item's checkout is never rebased here.
-        if _before_any_push(nodes, gate) and (st.run_dirs.worktrees / wid).is_dir():
-            await _refresh_base_at_gate(request, wid, row, gate)
+        if (
+            _before_any_push(nodes, gate)
+            and inplace.item_folder(st.run_dirs, row).is_dir()
+            and await _refresh_base_at_gate(request, wid, row, gate)
+        ):
+            return deps.work_item_answer(st, wid)
         try:
             deps.spawn(
                 request.app,

@@ -1194,16 +1194,21 @@ async def _dispatch_task(
                 # build, so a stale local environment feeds nothing into what
                 # they report (Kraft-gncrj is the pre-existing gap, not one
                 # this task opens).
-                return await _builtins.mr_rebase(
-                    db,
-                    run_dirs,
-                    repo=work_item_row["repo"],
-                    worktree=str(worktree),
-                    branch=store.branch_for(work_item_row),
-                    has_rebase_bounce=getattr(node.node, "on_base_changed", None) is not None,
-                    time_cap=time_cap,
-                    **common,
-                )
+                try:
+                    return await _builtins.mr_rebase(
+                        db,
+                        run_dirs,
+                        repo=work_item_row["repo"],
+                        worktree=str(worktree),
+                        branch=store.branch_for(work_item_row),
+                        has_rebase_bounce=getattr(node.node, "on_base_changed", None) is not None,
+                        time_cap=time_cap,
+                        **common,
+                    )
+                except (inplace.AutostashClash, inplace.CheckoutRefused) as exc:
+                    await config_error_session(db, run_dirs, common, f"{exc}\n")
+                    await inplace.stop_refused(db, work_item_row["id"], node.id, exc)
+                    return CHECKOUT_REFUSED
             case BuiltinAction.VERIFY_CHANGED_TEST_SCOPES:
                 return await _run_changed_test_scopes(
                     db,

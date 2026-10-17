@@ -112,3 +112,22 @@ async def test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin(
     # hook, a smudge/LFS filter) would hold the worker slot forever -- must
     # reach builtins.mr_rebase even when unset (None, no cap resolved here).
     assert "time_cap" in kw
+
+
+async def test_an_in_place_rebase_that_clashes_is_a_checkout_stop(item_on, monkeypatch):
+    """Never a failure a fix loop retries into: the person's checkout is theirs."""
+    from kraft import inplace
+    from kraft.executor.context import CHECKOUT_REFUSED
+    from kraft.templates.environment import WorkItemTarget
+
+    async def clash(*_, **__):
+        raise inplace.AutostashClash("your edits to f clash", ["f"], "5ca1ab1e")
+
+    monkeypatch.setattr(inplace, "rebase", clash)
+    target = WorkItemTarget.for_repository("sample", in_place=True)
+    it = await item_on(_rebase_chain(), target=target)
+
+    assert await _dispatch_one(it) == CHECKOUT_REFUSED
+    stop = it.events("work_item_needs_human")[-1]["payload"]
+    assert (stop["kind"], stop["facts"]) == ("checkout", {"paths": ["f"], "stash": "5ca1ab1e"})
+    assert [s["status"] for s in it.sessions()] == ["config_error"]

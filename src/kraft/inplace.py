@@ -7,8 +7,11 @@ Whether an item runs in place is frozen on its chain snapshot at intake
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import logging
 import os
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -22,6 +25,8 @@ from kraft import events, item_paths, store
 from kraft.adapters.forge import git
 from kraft.config import ConfigError, git_read
 from kraft.vocab import ChainEvent, StopKind
+
+logger = logging.getLogger(__name__)
 
 is_in_place = store.is_in_place
 
@@ -49,6 +54,18 @@ class CheckoutRefused(RuntimeError):
         super().__init__(message)
         self.paths = paths or []
         self.moved_from: dict | None = None
+
+
+class AutostashClash(RuntimeError):
+    """An in-place rebase that git reported done, but whose autostash, put
+    back, clashed with the newer base: `paths` are left unmerged in the
+    checkout, and the person's original edits are the stash commit `stash`,
+    which Kraft never pops or drops. A `checkout` stop, never a conflict."""
+
+    def __init__(self, message: str, paths: list[str], stash: str | None):
+        super().__init__(message)
+        self.paths = paths
+        self.stash = stash
 
 
 async def prepare(db, run_dirs, row, *, base: str) -> Path:
@@ -146,6 +163,166 @@ _LOCKS_GUARD = threading.Lock()
 def _lock(folder: Path) -> threading.Lock:
     with _LOCKS_GUARD:
         return _LOCKS.setdefault(str(folder.resolve()), threading.Lock())
+
+
+@contextlib.asynccontextmanager
+async def _held(folder: Path):
+    """`_lock(folder)` from async code. A cancel while waiting for it still
+    releases it once taken, so no cancel can leave it held."""
+    lock = _lock(folder)
+    got = asyncio.ensure_future(asyncio.to_thread(lock.acquire))
+    try:
+        await asyncio.shield(got)
+    except asyncio.CancelledError:
+        got.add_done_callback(lambda f: f.cancelled() or lock.release())
+        raise
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+async def rebase(
+    run_dirs,
+    row,
+    *,
+    base: str,
+    force: bool = False,
+    timeout: float | None = None,
+    identity=None,
+) -> str | None:
+    """`builtins.refresh_worktree_base` for an in-place item, never moving
+    the person's checkout: when it is on the item's branch, git will not
+    check that branch out anywhere else, so the rebase runs there with
+    `--autostash` (unbounded: git is never killed in the person's checkout);
+    otherwise in a throwaway worktree under `run_dirs.scratch`, with no setup
+    and no carried files, removed whatever happens. Which, is read under the
+    checkout's lock and held to the end, so a take cannot switch it between."""
+    from kraft import builtins
+
+    checkout = Path(row["repo"])
+    branch = store.branch_for(row)
+    async with _held(checkout):
+        if _on(checkout, branch):
+            return await builtins.refresh_worktree_base(
+                checkout,
+                checkout,
+                branch,
+                base=base,
+                force=force,
+                identity=identity,
+                autostash=True,
+            )
+        if _ref(checkout, branch) is None:
+            raise CheckoutRefused(
+                f"the branch {branch} is gone from {checkout}, and Kraft does not make it again: "
+                "restore it (`git reflog` may still have its commits) and retry, or abandon "
+                "the item"
+            )
+        run_dirs.scratch.mkdir(parents=True, exist_ok=True)
+        scratch = run_dirs.scratch / f"{row['id']}-{secrets.token_hex(4)}"
+        added = subprocess.run(
+            ["git", "worktree", "add", "--quiet", str(scratch), branch],
+            cwd=checkout,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+        )
+        try:
+            if added.returncode != 0:
+                raise CheckoutRefused(
+                    f"Kraft could not check {branch} out apart from {checkout} to rebase it "
+                    f"(git said: {added.stderr.strip()}): sort that out, then retry the item"
+                )
+            return await builtins.refresh_worktree_base(
+                scratch,
+                checkout,
+                branch,
+                base=base,
+                force=force,
+                timeout=timeout,
+                identity=identity,
+            )
+        finally:
+            for args in (["remove", "--force", str(scratch)], ["prune"]):
+                subprocess.run(
+                    ["git", "worktree", *args],
+                    cwd=checkout,
+                    capture_output=True,
+                    stdin=subprocess.DEVNULL,
+                )
+            shutil.rmtree(scratch, ignore_errors=True)  # Kraft's own, never the person's
+
+
+async def rebase_in_checkout(checkout: Path, head: str, base: str, env) -> None:
+    """`git rebase --autostash <head>` in the person's checkout, for
+    `refresh_worktree_base`. Never killed: a cancel waits for git to finish
+    (and a conflict's abort, which puts the autostash back), then is honoured.
+    Raises `RebaseConflict` (aborted) or `AutostashClash`."""
+    running = asyncio.ensure_future(
+        asyncio.to_thread(_rebase_in_checkout, checkout, head, base, env)
+    )
+    cancelled = False
+    while not running.done():
+        try:
+            await asyncio.shield(running)
+        except asyncio.CancelledError:
+            cancelled = True
+        except Exception:  # read off `running` below
+            pass
+    failed = running.exception()
+    if cancelled:
+        if isinstance(failed, AutostashClash):
+            logger.warning("a stopped in-place rebase left a clash: %s", failed)
+        raise asyncio.CancelledError
+    if failed is not None:
+        raise failed
+
+
+def _rebase_in_checkout(checkout: Path, head: str, base: str, env) -> None:
+    from kraft import builtins
+
+    def run(*args: str) -> subprocess.CompletedProcess:
+        # Its own session: a terminal's Ctrl-C or a service stop's group
+        # kill must not cut git off part way through the person's checkout.
+        return subprocess.run(
+            ["git", "-C", str(checkout), *args],
+            capture_output=True,
+            text=True,
+            errors="surrogateescape",
+            env=env,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+    done = run("rebase", "--autostash", head)
+    if done.returncode != 0:
+        builtins._refuse_unstarted_rebase(checkout, done)
+        detail = "\n".join(filter(None, [done.stdout.strip(), done.stderr.strip()]))
+        unmerged = _git_lines(checkout, "diff", "--name-only", "--diff-filter=U")
+        # The abort puts the person's autostash back; nothing else is cleaned up.
+        aborted = run("rebase", "--abort")
+        if aborted.returncode != 0:
+            said = (aborted.stderr.strip() or aborted.stdout.strip() or "no output").splitlines()
+            detail += (
+                f"\n`git rebase --abort` failed ({said[0]}); {checkout} was left mid-rebase "
+                "for you to finish or abort"
+            )
+        raise builtins.RebaseConflict(
+            f"git rebase failed for {checkout}: {detail}", tuple(unmerged)
+        )
+    # git exits 0 when putting the autostash back clashed: never trust it.
+    unmerged = _git_lines(checkout, "diff", "--name-only", "--diff-filter=U")
+    if unmerged:
+        stash = git_read(
+            checkout, "rev-parse", "--verify", "--quiet", "refs/stash", expected_failure=True
+        )
+        raise AutostashClash(
+            f"your edits to {', '.join(unmerged)} clash with the newer {base}; your original "
+            f"edits are safe in the stash as {stash}; resolve the file, then resume",
+            unmerged,
+            stash,
+        )
 
 
 def _ref(folder: Path, branch: str) -> str | None:
@@ -594,12 +771,17 @@ async def check_task(db, run_dirs, row, folder: Path, node_id: str, task_path: s
     return reason
 
 
-async def stop_refused(db, wid: str, node_id: str, exc: CheckoutRefused) -> None:
+async def stop_refused(db, wid: str, node_id: str, exc: CheckoutRefused | AutostashClash) -> None:
     """A person's request for an agent (an escalation, a reply) whose
-    checkout could not be taken: the item stops for them, as a walk task's
-    refused take does. Never `stuck`: an escalation would only take it again."""
+    checkout could not be taken, or a rebase that left it clashing: the item
+    stops for them, as a walk task's refused take does. Never `stuck`: an
+    escalation would only take it again. A clash records its stash's commit,
+    since the stash list is shared and its `stash@{n}` moves."""
+    facts = {"paths": exc.paths, "stash": exc.stash} if isinstance(exc, AutostashClash) else None
     await db.write(
-        lambda c: store.mark_needs_human(c, wid, node_id, str(exc), kind=StopKind.CHECKOUT)
+        lambda c: store.mark_needs_human(
+            c, wid, node_id, str(exc), kind=StopKind.CHECKOUT, facts=facts
+        )
     )
 
 

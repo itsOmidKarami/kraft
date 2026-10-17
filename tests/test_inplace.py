@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from support.addons import with_origin
+from support.api import _force_node, _paused, _poll_events
 from support.harness import commit_all, entry_of, git, v1_named_chain, write
 
 from kraft import builtins, inplace, store
@@ -463,3 +465,125 @@ def test_mark_and_check_read_odd_paths_exactly(repo, name):
     assert m.dirty == {name}
     assert found.overlap == [name]
     assert found.leftovers == {left: git(repo, "hash-object", "--", left)}
+
+
+# -- rebase ---------------------------------------------------------------------
+
+
+async def _behind_origin(item_on, database, run_dirs, repo, *, main_writes="main.txt"):
+    """An in-place item with one commit of its own, and `origin/main` one
+    commit past where the branch forked, writing `main_writes`; the person
+    on `main` (at the item's base, not origin's newer one)."""
+    write(repo, "f", "base\n")
+    commit_all(repo, "f")
+    with_origin(repo)
+    it, branch = await _prepared(item_on, database, run_dirs, repo)
+    _on_branch(repo, branch, "item.txt", "the item's\n")
+    git(repo, "checkout", "-q", "-b", "upstream")
+    write(repo, main_writes, "main's newer\n")
+    commit_all(repo, "main moves")
+    git(repo, "push", "-q", "origin", "upstream:main")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "branch", "-q", "-D", "upstream")
+    return it, branch
+
+
+def _contains_origin_main(repo, branch) -> bool:
+    done = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", "refs/remotes/origin/main", branch], cwd=repo
+    )
+    return done.returncode == 0
+
+
+async def test_rebase_in_the_checkout_keeps_the_persons_edits(item_on, database, run_dirs, repo):
+    it, branch = await _behind_origin(item_on, database, run_dirs, repo)
+    git(repo, "checkout", "-q", branch)
+    write(repo, "f", "the person's edit\n")
+
+    head = await inplace.rebase(run_dirs, it.row(), base="main")
+
+    assert head == git(repo, "rev-parse", "refs/remotes/origin/main")
+    assert _contains_origin_main(repo, branch)
+    assert _head(repo) == f"refs/heads/{branch}"
+    assert (repo / "main.txt").is_file() and (repo / "item.txt").is_file()
+    assert (repo / "f").read_text() == "the person's edit\n"
+    assert git(repo, "status", "--porcelain") == "M f"
+    assert git(repo, "stash", "list") == ""
+
+
+async def test_an_autostash_clash_raises_with_the_stash_and_leaves_it(
+    item_on, database, run_dirs, repo
+):
+    """The 2026-10-17 experiment: git exits 0, leaves `f` unmerged and keeps
+    the person's edit as a stash entry."""
+    it, branch = await _behind_origin(item_on, database, run_dirs, repo, main_writes="f")
+    git(repo, "checkout", "-q", branch)
+    write(repo, "f", "the person's edit\n")
+
+    with pytest.raises(inplace.AutostashClash) as raised:
+        await inplace.rebase(run_dirs, it.row(), base="main")
+
+    assert raised.value.paths == ["f"]
+    assert git(repo, "rev-parse", "refs/stash") == raised.value.stash
+    assert git(repo, "show", f"{raised.value.stash}:f") == "the person's edit"
+    assert git(repo, "stash", "list") == "stash@{0}: autostash"
+    assert raised.value.stash in str(raised.value) and "f" in str(raised.value)
+
+
+def _snapshot(repo) -> tuple:
+    files = {p: (repo / p).read_bytes() for p in ("f", "calc.py", "mine.txt")}
+    return _head(repo), git(repo, "rev-parse", "HEAD"), git(repo, "status", "--porcelain"), files
+
+
+@pytest.mark.parametrize("conflicts", [False, True], ids=["rebased", "conflict"])
+async def test_rebase_off_the_branch_never_moves_the_checkout(
+    item_on, database, run_dirs, repo, conflicts
+):
+    it, branch = await _behind_origin(
+        item_on, database, run_dirs, repo, main_writes="item.txt" if conflicts else "main.txt"
+    )
+    write(repo, "calc.py", "# the person's edit\n")
+    write(repo, "mine.txt", "the person's own file\n")
+    before, tip = _snapshot(repo), git(repo, "rev-parse", branch)
+
+    if conflicts:
+        with pytest.raises(builtins.RebaseConflict, match="item.txt"):
+            await inplace.rebase(run_dirs, it.row(), base="main")
+        assert git(repo, "rev-parse", branch) == tip
+    else:
+        await inplace.rebase(run_dirs, it.row(), base="main")
+        assert _contains_origin_main(repo, branch)
+
+    assert _snapshot(repo) == before
+    assert list(run_dirs.scratch.iterdir()) == []
+    assert git(repo, "worktree", "list", "--porcelain").count("worktree ") == 1
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        lambda: inplace.AutostashClash("your edits to f clash", ["f"], "5ca1ab1e"),
+        lambda: inplace.CheckoutRefused("the branch is gone", ["g"]),
+    ],
+    ids=["autostash-clash", "checkout-refused"],
+)
+@pytest.mark.parametrize("verb", ["resume", "retry"])
+def test_an_autostash_clash_stops_the_item_as_checkout(client, repo, monkeypatch, verb, error):
+    raised = error()
+    wid = _paused(client, repo, in_place=True)
+    _force_node(wid, "implementation", "paused" if verb == "resume" else "needs_human")
+
+    async def clash(*_, **__):
+        raise raised
+
+    monkeypatch.setattr(inplace, "rebase", clash)
+
+    r = client.post(f"/api/work-items/{wid}/{verb}", json={})
+
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+    events = _poll_events(client, wid, "work_item_needs_human")
+    stop = [e for e in events if e["type"] == "work_item_needs_human"][-1]["payload"]
+    assert (stop["kind"], stop["reason"]) == ("checkout", str(raised))
+    if isinstance(raised, inplace.AutostashClash):
+        assert stop["facts"] == {"paths": ["f"], "stash": "5ca1ab1e"}

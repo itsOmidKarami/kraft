@@ -1274,7 +1274,8 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             start_index = next(
                 (i for i, n in enumerate(target_nodes) if n.id == rewind["target"]), None
             )
-        # Not item_folder: an in-place item's checkout is never rebased here.
+        # Not item_folder: an in-place item is never sandboxed, and
+        # `refresh_base` rebases it through `inplace.rebase`.
         worktree = st.run_dirs.worktrees / wid
         conflict = None
         try:
@@ -1292,6 +1293,9 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             # Handed to the walk, which gives it to the node's `on_conflict`
             # handler as it would a task's, or stops for a human (Kraft-e7anb).
             new_base, conflict = None, str(exc)
+        except (inplace.AutostashClash, inplace.CheckoutRefused) as exc:
+            await inplace.stop_refused(st.db, wid, row["current_node_id"], exc)
+            return deps.work_item_answer(st, wid)
         except RuntimeError as exc:
             # The claim already flipped this item to 'active'; a failed rebase
             # must not leave it stranded there with no walk behind it.
@@ -1388,7 +1392,9 @@ async def refresh_base(
     and node carry, so a pause, a cancel or a server stop ends the rebase
     instead of waiting behind it, and a hung checkout filter cannot hold the
     request forever. Answers 409 when the item was paused or ended meanwhile -- a stop
-    that landed between the claim and here is not a reason to rebase."""
+    that landed between the claim and here is not a reason to rebase. An
+    in-place item goes through `inplace.rebase`, which waits a stop out
+    rather than kill git in the person's checkout."""
     st = request.app.state
     repo = Path(row["repo"])
     base = await builtins_mod.base_branch(st.db, wid, repo)
@@ -1406,20 +1412,15 @@ async def refresh_base(
 
     # No await between this read and the spawn: a stop from here on finds the task.
     active()
-    try:
-        moved = await deps.run_stoppable(
-            request.app,
-            wid,
-            builtins_mod.refresh_worktree_base(
-                # Not item_folder: an in-place item's checkout is never rebased here.
-                st.run_dirs.worktrees / wid,
-                repo,
-                store.branch_for(row),
-                base=base,
-                timeout=timeout,
-            ),
-            stopped=stopped,
+    rebasing = (
+        inplace.rebase(st.run_dirs, row, base=base, timeout=timeout)
+        if inplace.is_in_place(row)
+        else builtins_mod.refresh_worktree_base(
+            st.run_dirs.worktrees / wid, repo, store.branch_for(row), base=base, timeout=timeout
         )
+    )
+    try:
+        moved = await deps.run_stoppable(request.app, wid, rebasing, stopped=stopped)
     except RuntimeError:
         # A conflict or a failure of an item stopped meanwhile is not the
         # walk's to be handed.
@@ -1685,7 +1686,8 @@ async def _retry(wid: str, body: Retry, request: Request):
             if st.db.read(store.active_count) >= limit:
                 return await queued_answer(request, wid, "retry", asked, admitting(Verb.RETRY))
             raise HTTPException(409, "work item is not stopped")
-        # Not item_folder: an in-place item's checkout is never rebased here.
+        # Not item_folder: an in-place item is never sandboxed, and
+        # `refresh_base` rebases it through `inplace.rebase`.
         worktree = st.run_dirs.worktrees / wid
         conflict = None
         try:
@@ -1702,6 +1704,9 @@ async def _retry(wid: str, body: Retry, request: Request):
             # starting node's `on_conflict` handler, or stops for a human
             # (Kraft-e7anb).
             new_base, conflict = None, str(exc)
+        except (inplace.AutostashClash, inplace.CheckoutRefused) as exc:
+            await inplace.stop_refused(st.db, wid, node_id, exc)
+            return deps.work_item_answer(st, wid)
         except RuntimeError as exc:
             reason = str(exc)
             cause = forge_mod.failure_cause(reason) or "git"
