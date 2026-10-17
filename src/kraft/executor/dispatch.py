@@ -1975,7 +1975,8 @@ async def measure_node(
     # before. `worktree` is None only in a unit test that stubs `dispatch_node`
     # out entirely.
     def _head() -> str | None:
-        return _config.git_read(Path(worktree), "rev-parse", "HEAD") if worktree else None
+        tip = inplace.head_ref(row)
+        return _config.git_read(Path(worktree), "rev-parse", tip) if worktree else None
 
     def _skipped(task: ResolvedTask) -> bool:
         """Under a task or step path an operator skipped in this run."""

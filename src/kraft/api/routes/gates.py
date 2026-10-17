@@ -268,7 +268,7 @@ async def _refresh_base_at_gate(request, wid: str, row, gate: str) -> bool:
         )
     elif new_base and new_base != row["base_ref"]:
         worktree = inplace.item_folder(st.run_dirs, row)
-        head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
+        head = git_read(worktree, "rev-parse", inplace.head_ref(row), expected_failure=True)
         await st.db.write(
             lambda c: events.append(
                 c,

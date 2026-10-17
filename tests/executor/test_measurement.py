@@ -6,11 +6,13 @@ import asyncio
 import json
 
 import pytest
+from support.harness import commit_all, git, write
 
-from kraft import events
+from kraft import events, store
 from kraft.executor import context, dispatch
 from kraft.executor.context import BASE_MOVED
 from kraft.findings import Finding
+from kraft.templates.environment import WorkItemTarget
 
 
 def _agent(task_id, **fields):
@@ -172,16 +174,29 @@ async def test_measure_node_reads_head_once_per_task_not_once_per_node(
     assert len(reads) == 3, f"expected per-task reads plus one for node entry, got {len(reads)}"
 
 
-async def test_measure_node_reuses_a_done_session_at_the_current_head(item_on, fake_dispatch):
+@pytest.mark.parametrize("in_place", [False, True], ids=["worktree", "in-place-person-elsewhere"])
+async def test_measure_node_reuses_a_done_session_at_the_current_head(
+    item_on, fake_dispatch, in_place
+):
     """Kraft-gl9d: a task whose session for this (node, round) already exited
     'done' against the worktree's current HEAD is not redispatched; a task
     with no matching 'done' session is. (`test_resuming`'s
     `test_reconcile_reuses_a_done_measuring_session_after_a_crash` is the same
-    rule through `executor.resume`.)"""
+    rule through `executor.resume`.) In place the item's head is its branch's
+    tip, whatever the person has checked out."""
+    target = WorkItemTarget.for_repository("sample", in_place=True) if in_place else None
     it = await item_on(
-        [{"id": "verify", "kind": "exec", "tasks": [_builtin("suite"), _agent("review")]}]
+        [{"id": "verify", "kind": "exec", "tasks": [_builtin("suite"), _agent("review")]}],
+        target=target,
     )
-    head = dispatch._config.git_read(it.repo, "rev-parse", "HEAD")
+    if in_place:
+        branch = store.branch_for(it.row())
+        git(it.repo, "checkout", "-qb", branch)
+        write(it.repo, "item.txt", "the item's\n")
+        commit_all(it.repo, "the item's")
+        git(it.repo, "checkout", "-q", "main")
+    ref = f"refs/heads/{branch}" if in_place else "HEAD"
+    head = dispatch._config.git_read(it.repo, "rev-parse", ref)
     await it.session("s-done", "verify.main.review", "done", head_sha=head)
     fake_dispatch.answer = lambda task_id: "failed"
 
