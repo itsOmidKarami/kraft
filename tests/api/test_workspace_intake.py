@@ -55,7 +55,6 @@ def test_a_workspace_intake_freezes_its_selected_members_and_pointer_policy(
         "include_root": True,
         "root_pointer_policy": expected,
         "base_branch": None,
-        "in_place": False,
     }
     assert body["repos"] == []
 
