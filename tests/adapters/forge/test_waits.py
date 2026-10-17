@@ -13,8 +13,11 @@ import json
 import pytest
 from support.harness import git, own_files
 
-from kraft import events
+from kraft import events, inplace
 from kraft.adapters import forge
+from kraft.templates.environment import WorkItemTarget
+
+from .nodes import back_half
 
 
 async def _opened(fake, repo):
@@ -262,3 +265,47 @@ async def test_a_cancel_with_no_successor_stops_for_a_person_at_once(run_forge, 
     assert fake.merged == []
     [stop] = run_forge.events("ci_run_abandoned")
     assert "was cancelled" in stop["reason"] and "re-run" in stop["reason"]
+
+
+@pytest.mark.parametrize("handler", ["ci_poll", "merge"])
+async def test_an_in_place_conflict_rebase_that_clashes_stops_the_item_as_checkout(
+    run_forge, item_on, repo, monkeypatch, handler
+):
+    """In place, the forced rebase goes through `inplace.rebase`, and a
+    clash it leaves in the person's checkout is a `checkout` stop naming the
+    stash, never one more conflict."""
+    target = WorkItemTarget.for_repository("target", in_place=True)
+    run_forge.item = await item_on(back_half(), repo=repo, target=target)
+    asked = []
+
+    async def clash(_run_dirs, _row, **kw):
+        asked.append(kw["force"])
+        raise inplace.AutostashClash("your edits to f clash", ["f"], "5ca1ab1e")
+
+    monkeypatch.setattr(inplace, "rebase", clash)
+    fake = await _opened(
+        forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict"), repo
+    )
+
+    assert await run_forge(fake, handler, "r1", repo=repo) == ("checkout_refused", "config_error")
+    assert asked == [True]
+    [stop] = run_forge.events("work_item_needs_human")
+    assert (stop["kind"], stop["facts"]) == ("checkout", {"paths": ["f"], "stash": "5ca1ab1e"})
+
+
+@pytest.mark.parametrize("handler", ["ci_poll", "merge"])
+async def test_an_in_place_checkout_elsewhere_does_not_hide_the_branch_s_pipeline(
+    run_forge, item_on, repo, handler
+):
+    """The head a pipeline must be for is the item branch's tip: an in-place
+    item's checkout may be on another branch, whose HEAD no pipeline is for."""
+    git(repo, "checkout", "-q", "-b", "kraft/w1")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "the item's")
+    head = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "the person's")
+    target = WorkItemTarget.for_repository("target", in_place=True)
+    run_forge.item = await item_on(back_half(), repo=repo, target=target)
+    fake = await _opened(forge.FakeForge(ci_states=["success"], ci_shas=[head]), repo)
+
+    assert (await run_forge(fake, handler, "h1", repo=repo))[0] == "done"

@@ -84,8 +84,10 @@ class GhCli(mr_ops.CliWaits):
         title: str,
         body: str,
         meta: mr_ops.MRMeta | None = None,
+        check_clean: bool = True,
     ) -> MR:
-        await git.assert_clean(repo, base)
+        if check_clean:
+            await git.assert_clean(repo, base)
         await self.push(repo=repo, branch=branch)
         # `--fill` titles the PR from the commits; see GlabCli.open_mr.
         await git.run_git(
@@ -96,6 +98,8 @@ class GhCli(mr_ops.CliWaits):
                 "create",
                 # See GlabCli.open_mr.
                 "--draft",
+                "--head",
+                branch,
                 "--base",
                 base,
                 "--title",
@@ -105,27 +109,24 @@ class GhCli(mr_ops.CliWaits):
                 *mr_ops.meta_flags(meta or mr_ops.MRMeta()),
             ],
         )
-        raw = await git.run_git(repo, ["gh", "pr", "view", "--json", "number,url"])
+        raw = await git.run_git(repo, ["gh", "pr", "view", branch, "--json", "number,url"])
         data = mr_ops.parse_json(raw, "gh pr view")
         return MR(number=int(data["number"]), url=str(data["url"]))
 
     async def mark_ready(self, *, repo: Path, branch: str, mr: MR) -> None:
         """`gh pr ready` is a no-op on an already-ready PR (gh's own docs),
         same reasoning as `GlabCli.mark_ready`."""
-        target = [str(mr.number)] if mr.number > 0 else []
-        await git.run_git(repo, ["gh", "pr", "ready", *target])
+        await git.run_git(repo, ["gh", "pr", "ready", *mr_ops.target(mr.number, branch)])
 
     async def push(self, *, repo: Path, branch: str) -> None:
         await git.push(repo, branch)
 
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
-        await git.run_git(repo, ["gh", "pr", "edit", "--body", body])
+        await git.run_git(repo, ["gh", "pr", "edit", branch, "--body", body])
 
     async def ci_status(
         self, *, repo: Path, mr: MR, branch: str = "", pipeline_id: str = ""
     ) -> CIStatus:
-        # `gh pr view` with no argument already resolves from the current
-        # branch, so `branch` is accepted for one Forge shape and unused here.
         # `pipeline_id` is a GitLab-only concept (Kraft-ivh1): GitHub's checks
         # are per-PR-head, not per-pipeline, so there is nothing to pin to and
         # this is accepted only for signature symmetry.
@@ -138,6 +139,7 @@ class GhCli(mr_ops.CliWaits):
                 "gh",
                 "pr",
                 "view",
+                *mr_ops.target(mr.number, branch),
                 "--json",
                 "number,url,statusCheckRollup,mergeable,mergeStateStatus,reviewDecision,headRefOid",
             ],
@@ -212,11 +214,13 @@ class GhCli(mr_ops.CliWaits):
     async def _json(self, repo: Path, args: list[str], what: str):
         return mr_ops.parse_json(await git.run_git(repo, ["gh", *args]), what)
 
-    async def _bot_review(self, repo: Path, bot: str) -> ReviewResult:
+    async def _bot_review(self, repo: Path, branch: str, bot: str) -> ReviewResult:
         """`bot`'s latest review of the PR's current head, dismissed ones
         skipped: pending until there is one. Changes requested, or any inline comment, is actionable
         -- one finding per comment; anything else is clean."""
-        pr = await self._json(repo, ["pr", "view", "--json", "number,headRefOid"], "gh pr view")
+        pr = await self._json(
+            repo, ["pr", "view", branch, "--json", "number,headRefOid"], "gh pr view"
+        )
         number, head = pr["number"], pr["headRefOid"]
         # ponytail: one page of 100 reviews -- paginate if a PR ever has more.
         reviews = await self._json(
@@ -255,11 +259,13 @@ class GhCli(mr_ops.CliWaits):
             return ReviewResult("actionable", findings=findings, detail=f"{bot}: {last['state']}")
         return ReviewResult("clean", detail=f"{bot}: {last.get('state')}")
 
-    async def _check_review(self, repo: Path, check: str) -> ReviewResult:
+    async def _check_review(self, repo: Path, branch: str, check: str) -> ReviewResult:
         """The check run `check` on the PR's head, or else the commit status
         of that name: pending until it completes, clean on success, and
         actionable on anything else, its output the finding."""
-        pr = await self._json(repo, ["pr", "view", "--json", "number,headRefOid"], "gh pr view")
+        pr = await self._json(
+            repo, ["pr", "view", branch, "--json", "number,headRefOid"], "gh pr view"
+        )
         head = pr["headRefOid"]
         runs = (
             await self._json(
@@ -408,7 +414,7 @@ class GhCli(mr_ops.CliWaits):
         for run_id in run_ids:
             await git.run_git(repo, ["gh", "run", "rerun", run_id, "--failed"])
 
-    async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None:
+    async def set_labels(self, *, repo: Path, branch: str, mr: MR, labels: tuple[str, ...]) -> None:
         """Label the pull request.
 
         No pipeline to re-create, unlike GitLab: a workflow that cares about
@@ -420,7 +426,7 @@ class GhCli(mr_ops.CliWaits):
         """
         if not labels:
             return
-        target = [str(mr.number)] if mr.number > 0 else []
+        target = mr_ops.target(mr.number, branch)
         data = await self._json(repo, ["pr", "view", *target, "--json", "labels"], "gh pr view")
         current = [str(label.get("name", "")) for label in data.get("labels") or []]
         args = ["gh", "pr", "edit", *target, "--add-label", ",".join(labels)]
@@ -430,7 +436,7 @@ class GhCli(mr_ops.CliWaits):
 
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
         await git._assert_pushed(repo, branch)
-        target = [str(mr.number)] if mr.number > 0 else []
+        target = mr_ops.target(mr.number, branch)
         await git.run_git(repo, ["gh", "pr", "merge", *target, "--squash"])
 
     async def close_mr(self, *, repo: Path, mr: MRRef) -> None:

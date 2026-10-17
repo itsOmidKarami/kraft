@@ -212,6 +212,13 @@ def mr_body(
 MR_TITLE_MAX = 72
 
 
+def target(number: int, branch: str) -> list[str]:
+    """The CLI argument naming the merge request: its number when known, else
+    the item's branch. Never the checkout's current branch, which in a
+    person's own checkout may be anything (in-place-mr-names-its-branch)."""
+    return [str(number)] if number > 0 else [branch] if branch else []
+
+
 def mr_title(title: str) -> str:
     """The work item title, cut down to something a merge request can wear."""
     head = title.strip().splitlines()[0].strip() if title.strip() else ""
@@ -347,8 +354,8 @@ class CliWaits:
                 "clean", detail="no automated reviewer configured", configured=False
             )
         if reviewer.bot is not None:
-            return await self._bot_review(repo, reviewer.bot)
-        return await self._check_review(repo, reviewer.check)
+            return await self._bot_review(repo, branch, reviewer.bot)
+        return await self._check_review(repo, branch, reviewer.check)
 
 
 def same_login(a: str, b: str) -> bool:

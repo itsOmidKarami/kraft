@@ -1107,8 +1107,9 @@ def promptless_git_env(repo: Path) -> dict[str, str]:
 
 async def upstream_head(repo: Path, branch: str) -> str | None:
     """The tip of origin's `branch` -- the item's `base_branch` -- fetched now;
-    the last fetched tip when the fetch fails; `repo`'s own HEAD only for the
-    default branch when there is no `origin` or it was never fetched. A named
+    the last fetched tip when the fetch fails; `repo`'s own copy of the
+    default branch (its HEAD only when it has none) when there is no `origin`
+    or it was never fetched. A named
     branch origin cannot give -- gone from it, or never fetched and no origin
     to fetch from -- raises `BaseBranchMissing` instead (Kraft-wz6vz).
 
@@ -1151,15 +1152,19 @@ async def upstream_head(repo: Path, branch: str) -> str | None:
         tip = git_read(repo, "rev-parse", "--verify", "--quiet", ref, expected_failure=True)
         if tip and not gone:
             return tip
-    # The checkout's HEAD stands in only for the default branch, as it always
-    # has. A named base branch has no stand-in: the checkout may be on any
-    # branch at all.
+    # The checkout stands in only for the default branch, as it always has. A
+    # named base branch has no stand-in: the checkout may be on any branch at
+    # all. Its local default branch, not its HEAD, which an in-place item may
+    # have left on its own branch (base-prefers-the-default-branch-ref-over-head).
     if branch != await git.default_branch(repo):
         raise BaseBranchMissing(
             f"base branch {branch!r} cannot be read from origin of {repo} ({detail}); "
             "push it back, or retry the work item on a branch origin has"
         )
-    return git_read(repo, "rev-parse", "HEAD")
+    local = f"refs/heads/{branch}"
+    return git_read(
+        repo, "rev-parse", "--verify", "--quiet", local, expected_failure=True
+    ) or git_read(repo, "rev-parse", "HEAD")
 
 
 def item_identity(db, work_item_id: str) -> dict[str, str]:
@@ -1191,6 +1196,7 @@ async def refresh_worktree_base(
     force: bool = False,
     timeout: float | None = None,
     identity: Mapping[str, str] | None = None,
+    autostash: bool = False,
 ) -> str | None:
     """Rebase `worktree`'s branch onto origin's `base` (`upstream_head`) -- the
     item's `base_branch` -- so a paused or retried item's next commit lands on
@@ -1239,6 +1245,12 @@ async def refresh_worktree_base(
     forever (Kraft-3llig). `upstream_head`'s own fetch has its own fixed 60s
     and is not covered by this -- it is a separate subprocess, bounded before
     this one ever starts.
+
+    `autostash=True` is an in-place item's own checkout (`inplace.rebase`):
+    uncommitted changes do not skip it but ride through `git rebase
+    --autostash`, never killed and so with no `timeout`, and no setup
+    lockfiles are set aside (none ran). An autostash that clashes when put
+    back raises `inplace.AutostashClash` (`inplace.rebase_in_checkout`).
     """
     if not worktree.is_dir():
         return None
@@ -1283,13 +1295,16 @@ async def refresh_worktree_base(
     # merge request opened on a stale base and `on_base_changed` never fired
     # (R10E-01). An untracked file the incoming commits would overwrite
     # makes `git rebase` refuse to start, which is `RebaseBlocked` below.
-    if git_read(
+    if not autostash and git_read(
         worktree, "status", _sandbox.SUBMODULES_UNENTERED, "--porcelain", "--untracked-files=no"
     ):
         logger.warning("refresh_worktree_base: %s has uncommitted changes, skipping", worktree)
         return None
     # Kraft never rebases over, or aborts, an operation it did not start.
     git.assert_on_branch(worktree, branch)
+    if autostash:
+        await inplace.rebase_in_checkout(worktree, head, base, _committer_env(identity))
+        return head
     lock_before = os.path.lexists(_index_lock(worktree))
     aside = await _set_aside_setup_lockfiles(worktree)
     leftovers = (_untracked(worktree), head)
@@ -1925,11 +1940,10 @@ async def mr_rebase(
     from kraft.executor.context import BASE_MOVED  # executor imports this module
 
     base = await base_branch(db, work_item_id, Path(repo))
-    prior_base_ref = db.read(
-        lambda c: c.execute(
-            "SELECT base_ref FROM work_items WHERE id = ?", (work_item_id,)
-        ).fetchone()
-    )["base_ref"]
+    row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    prior_base_ref = row["base_ref"]
 
     def remaining() -> float | None:
         return max(0.0, time_cap.at - _caps.monotonic()) if time_cap is not None else None
@@ -1937,8 +1951,12 @@ async def mr_rebase(
     try:
         moved = await _rebase_members(db, work_item_id, Path(worktree), branch, base, remaining)
         try:
-            new_head = await refresh_worktree_base(
-                Path(worktree), Path(repo), branch, base=base, timeout=remaining()
+            new_head = await (
+                inplace.rebase(run_dirs, row, base=base, timeout=remaining())
+                if inplace.is_in_place(row)
+                else refresh_worktree_base(
+                    Path(worktree), Path(repo), branch, base=base, timeout=remaining()
+                )
             )
             # `refresh_worktree_base` now reports the upstream head even when
             # the branch already contained it (Kraft-jypzx), so `base_ref` can
@@ -2100,11 +2118,17 @@ async def mr_rebase_forced(
     branch: str,
     base: str,
     identity: Mapping[str, str] | None = None,
+    *,
+    run_dirs=None,
+    row=None,
 ) -> str | None:
     """`refresh_worktree_base` with the pushed-branch guard off, for
     `ci_poll`'s conflict path (Kraft-9h7v) -- the one caller that has already
     confirmed, from the forge's own re-fetched read, that this branch cannot
-    land as it stands."""
+    land as it stands. An in-place item's `row` sends it through
+    `inplace.rebase`, which never moves the person's checkout."""
+    if row is not None and inplace.is_in_place(row):
+        return await inplace.rebase(run_dirs, row, base=base, force=True, identity=identity)
     return await refresh_worktree_base(
         worktree, repo, branch, base=base, force=True, identity=identity
     )

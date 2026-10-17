@@ -1280,7 +1280,8 @@ def _cmd_stop(ns: argparse.Namespace, *, warn: bool = True) -> None:
     # whole graceful drain. A supervised daemon (launchd KeepAlive / systemd
     # Restart=always, task 5) rewrites the pidfile with a fresh pid well
     # inside this poll, which is the other way out.
-    worktrees = RunDirs(pid_path.parent).worktrees
+    run_dirs = RunDirs(pid_path.parent)
+    worktrees = (run_dirs.worktrees, run_dirs.scratch)
     deadline = time.monotonic() + _STOP_WAIT_S
     told = False
     while True:
@@ -1292,7 +1293,7 @@ def _cmd_stop(ns: argparse.Namespace, *, warn: bool = True) -> None:
             # A server cut off mid-rebase undoes it on the way out, which
             # takes up to `REBASE_UNDO_MAX_S` more: waiting it out is what
             # leaves the worktree clean. Only then; nothing else is worth it.
-            if not told and not _rebase_under_way(worktrees):
+            if not told and not _rebase_under_way(*worktrees):
                 print(f"kraft: pid {pid} did not stop within {_STOP_WAIT_S}s", file=sys.stderr)
                 raise SystemExit(1)
             from kraft import builtins
@@ -1313,15 +1314,18 @@ def _cmd_stop(ns: argparse.Namespace, *, warn: bool = True) -> None:
         time.sleep(0.1)
 
 
-def _rebase_under_way(worktrees: Path) -> bool:
-    """Whether any item's worktree is mid-rebase (a `rebase-merge` or
+def _rebase_under_way(*roots: Path) -> bool:
+    """Whether any worktree under `roots` (the items' and the in-place
+    rebases' throwaway ones) is mid-rebase (a `rebase-merge` or
     `rebase-apply` in its git dir), which a stopping server is undoing. Read
     from the worktrees' own `.git` files: no git runs against a repository the
     server is still writing."""
-    try:
-        entries = list(worktrees.iterdir())
-    except OSError:
-        return False
+    entries = []
+    for root in roots:
+        try:
+            entries += list(root.iterdir())
+        except OSError:
+            continue
     for entry in entries:
         try:
             pointer = (entry / ".git").read_text().strip()

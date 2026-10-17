@@ -4,12 +4,14 @@ Behaviour only one CLI has stays in test_glab.py / test_gh.py."""
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from kraft.adapters import forge
 from kraft.adapters.forge.mr import MRMeta
+from kraft.automated_review import AutomatedReview
 
 from . import outputs
 
@@ -22,7 +24,7 @@ GLAB = SimpleNamespace(
     body_flag="--description",
     base_flag="--target-branch",
     ready_argv=["mr", "update", "54", "--ready"],
-    update_argv=["mr", "update", "--description", "fresh"],
+    update_argv=["mr", "update", "kraft/abc", "--description", "fresh"],
     merge_verb="mr merge",
     merged_list=outputs.GLAB_MR_LIST_MERGED,
     queued_list=outputs.GLAB_MR_LIST_AUTO_MERGE,
@@ -39,7 +41,7 @@ GH = SimpleNamespace(
     body_flag="--body",
     base_flag="--base",
     ready_argv=["pr", "ready", "7"],
-    update_argv=["pr", "edit", "--body", "fresh"],
+    update_argv=["pr", "edit", "kraft/abc", "--body", "fresh"],
     merge_verb="pr merge",
     merged_list=outputs.GH_PR_LIST_MERGED,
     queued_list=outputs.GH_PR_LIST_AUTO_MERGE,
@@ -128,6 +130,47 @@ async def test_open_mr_refuses_a_dirty_worktree(cli, tmp_path, backend, porcelai
     assert cli.argv(backend.name) == [], "the CLI ran over an uncommitted worktree"
 
 
+#: Each call that reaches the merge request with no number known.
+_BY_BRANCH = {
+    "open_mr": lambda f, r: f.open_mr(repo=r, branch="kraft/abc", base="main", title="t", body="b"),
+    "update_mr": lambda f, r: f.update_mr(repo=r, branch="kraft/abc", body="b"),
+    "mark_ready": lambda f, r: f.mark_ready(repo=r, branch="kraft/abc", mr=forge.MR(0, "")),
+    "ci_status": lambda f, r: f.ci_status(repo=r, mr=forge.MR(0, ""), branch="kraft/abc"),
+    "merge": lambda f, r: f.merge(repo=r, branch="kraft/abc", mr=forge.MR(0, "")),
+    "set_labels": lambda f, r: f.set_labels(
+        repo=r, branch="kraft/abc", mr=forge.MR(0, ""), labels=("x",)
+    ),
+    "bot_review": lambda f, r: f.automated_review(
+        repo=r, branch="kraft/abc", reviewer=AutomatedReview(bot="b")
+    ),
+    "check_review": lambda f, r: f.automated_review(
+        repo=r, branch="kraft/abc", reviewer=AutomatedReview(check="c")
+    ),
+}
+
+
+@pytest.mark.parametrize("op", list(_BY_BRANCH))
+async def test_every_merge_request_call_names_the_branch(be, cli, tmp_path, op):
+    """`in-place-mr-names-its-branch`: an in-place item's checkout may be on
+    any branch, so no call resolves the merge request from the current one."""
+    pr = {"number": 7, "url": "u", "headRefOid": "abc", "iid": 7, "web_url": "u", "sha": "abc"}
+    cli.stub(
+        be.name,
+        routes={
+            "pr view": json.dumps(pr),
+            "mr view": json.dumps(pr),
+            "ci list": outputs.GLAB_CI_SUCCESS,
+        },
+    )
+
+    await _BY_BRANCH[op](be.cls(), tmp_path)
+
+    calls = [c.split() for c in cli.calls(be.name) if c.split()[0] in ("pr", "mr")]
+    assert calls
+    for call in calls:
+        assert "kraft/abc" in call, call
+
+
 async def test_mark_ready_unsets_draft(be, cli, tmp_path):
     await be.cls().mark_ready(repo=tmp_path, branch="kraft/abc", mr=forge.MR(be.number, "u"))
 
@@ -160,8 +203,8 @@ async def test_update_mr_rewrites_the_description(be, cli, tmp_path):
 
 async def test_merge_resolves_from_the_branch_when_no_number_is_known(be, cli, tmp_path):
     """`run_task` never threads the MR number between nodes -- it passes 0 and
-    lets the CLI resolve from the checked-out branch. `mr merge 0` would target
-    a merge request that does not exist."""
+    the CLI resolves the item's branch. `mr merge 0` would target a merge
+    request that does not exist."""
     cli.stub(be.name, "")
     cli.stub("git", "0")  # zero commits ahead of origin
 

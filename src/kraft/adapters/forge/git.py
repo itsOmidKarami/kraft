@@ -658,7 +658,9 @@ async def _assert_pushed(repo: Path, branch: str) -> None:
     and the node fails loudly — the right answer for a merge with no pushed
     branch.
     """
-    raw = await run_git(repo, ["git", "rev-list", "--count", f"origin/{branch}..HEAD"])
+    raw = await run_git(
+        repo, ["git", "rev-list", "--count", f"origin/{branch}..refs/heads/{branch}"]
+    )
     ahead = int(raw.strip() or 0)
     if ahead:
         raise ForgeError(
@@ -667,14 +669,16 @@ async def _assert_pushed(repo: Path, branch: str) -> None:
         )
 
 
-async def _head_sha(repo: Path) -> str:
-    """The worktree's HEAD, or empty when git will not say.
+async def _head_sha(repo: Path, branch: str = "") -> str:
+    """`branch`'s tip (HEAD when none is named), or empty when git will not say.
 
     Empty means "do not compare": a repo git cannot read is no reason to
-    report a pipeline that was read perfectly well as missing.
+    report a pipeline that was read perfectly well as missing. The branch, not
+    HEAD: an in-place item's checkout may be on any branch.
     """
+    rev = f"refs/heads/{branch}" if branch else "HEAD"
     try:
-        return (await run_git(repo, ["git", "rev-parse", "HEAD"])).strip()
+        return (await run_git(repo, ["git", "rev-parse", rev])).strip()
     except ForgeError:
         return ""
 

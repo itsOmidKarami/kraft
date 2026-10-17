@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from support import worktree as wtree
 from support.harness import commit_all, git, make_repo, write
+from test_inplace_rebase import _behind_origin, _snapshot
 
 from kraft import builtins as kraft_builtins
 from kraft import caps, events
@@ -344,6 +345,34 @@ async def test_mr_rebase_raises_on_conflict(database, run_dirs, repo):
             branch=branch,
         )
     assert wtree.base_ref(database) != git_read(repo, "rev-parse", "HEAD")
+
+
+async def test_mr_rebase_of_an_in_place_item_never_moves_the_checkout(
+    item_on, database, run_dirs, repo
+):
+    it, branch = await _behind_origin(item_on, database, run_dirs, repo)
+    write(repo, "calc.py", "# the person's edit\n")
+    write(repo, "mine.txt", "the person's own file\n")
+    before = _snapshot(repo)
+
+    status = await kraft_builtins.mr_rebase(
+        database,
+        run_dirs,
+        session_id="s1",
+        work_item_id=it.id,
+        node_id="pre_mr_rebase",
+        hook_point="on.mr.rebase",
+        round=0,
+        repo=str(repo),
+        worktree=str(repo),
+        branch=branch,
+    )
+
+    assert status == "done"
+    upstream = git(repo, "rev-parse", "refs/remotes/origin/main")
+    assert it.row()["base_ref"] == upstream
+    assert git(repo, "merge-base", branch, upstream) == upstream
+    assert _snapshot(repo) == before
 
 
 @pytest.mark.parametrize("shape", ["base-moved", "up-to-date", "tracked-change"])

@@ -23,6 +23,7 @@ from kraft.adapters import forge
 from kraft.adapters.forge import git as forge_git
 from kraft.worker import sandbox
 
+from . import outputs
 from .outputs import GLAB_MR_VIEW
 
 BRANCH = "kraft/abc"
@@ -74,6 +75,26 @@ def test_open_mr_refuses_a_dirty_worktree_against_real_git(tmp_path, glab):
         )
 
     assert glab.argv("glab") == [], "glab ran over an uncommitted worktree"
+
+
+@pytest.mark.parametrize(
+    "name, cls, view",
+    [("glab", forge.GlabCli, outputs.GLAB_MR_VIEW), ("gh", forge.GhCli, outputs.GH_PR_VIEW)],
+    ids=["glab", "gh"],
+)
+def test_open_mr_in_place_ignores_a_dirty_checkout(tmp_path, cli, name, cls, view):
+    """The in-place counterpart: the person's own uncommitted edits in their
+    checkout are no reason to refuse; only the branch and its commits reach
+    the merge request."""
+    cli.stub(name, view)
+    repo = _repo_with_origin(tmp_path)
+    (repo / "their_edit.py").write_text("half-finished\n")
+
+    asyncio.run(
+        cls().open_mr(repo=repo, branch=BRANCH, base="main", title="t", body="b", check_clean=False)
+    )
+
+    assert cli.argv(name)[1] == "create"
 
 
 def test_open_mr_ignores_gitignored_paths_against_real_git(tmp_path, glab):
@@ -128,9 +149,15 @@ def test_merge_refuses_an_unpushed_head_against_real_git(tmp_path, glab):
     assert glab.argv("glab") == [], "glab merged a head the forge has never seen"
 
 
-def test_merge_accepts_a_pushed_head_against_real_git(tmp_path, glab):
-    """The ordinary path: really pushed, so the guard lets the CLI run."""
+@pytest.mark.parametrize("elsewhere", [False, True], ids=["on-the-branch", "checkout-elsewhere"])
+def test_merge_accepts_a_pushed_head_against_real_git(tmp_path, glab, elsewhere):
+    """The ordinary path: really pushed, so the guard lets the CLI run. It
+    reads the branch, not HEAD: an in-place item's checkout may be on another
+    branch with commits of its own."""
     repo = _repo_with_origin(tmp_path)
+    if elsewhere:
+        git(repo, "checkout", "-q", "main")
+        git(repo, "commit", "-q", "--allow-empty", "-m", "the person's own")
 
     asyncio.run(forge.GlabCli().merge(repo=repo, branch=BRANCH, mr=forge.MR(0, "")))
 

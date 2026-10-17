@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 from kraft import builtins as _builtins
-from kraft import events, store, waits
+from kraft import events, inplace, store, waits
 from kraft.adapters import beads
 from kraft.adapters.forge import ci, git
 from kraft.adapters.forge import mr as mr_ops
@@ -147,6 +147,7 @@ async def _rebase_conflict_away(
     base: str,
     work_item_id: str,
     moved: list[Path] | None = None,
+    run_dirs=None,
 ) -> tuple[str, str]:
     """Force-rebase onto `base`'s current tip -- the item's base branch, the one
     thing that can turn a real conflict into nothing left to fix, since a
@@ -166,12 +167,27 @@ async def _rebase_conflict_away(
     `moved` is given for a workspace member: `base_ref` is the root's, so a
     member's move is appended there for `run_task` to report, never persisted
     (Kraft-puqxq).
+
+    An in-place item (`run_dirs` given, not a member) is rebased through
+    `inplace.rebase`; a checkout it could not take, or left clashing, is
+    not a conflict either.
     """
+    row = None
+    if run_dirs is not None and moved is None:
+        row = db.read(
+            lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+        )
     try:
         new_head = await _builtins.mr_rebase_forced(
-            repo, orig_repo, branch, base, identity=_builtins.item_identity(db, work_item_id)
+            repo,
+            orig_repo,
+            branch,
+            base,
+            identity=_builtins.item_identity(db, work_item_id),
+            run_dirs=run_dirs,
+            row=row,
         )
-    except git.UnsafeWorktree:
+    except (git.UnsafeWorktree, inplace.AutostashClash, inplace.CheckoutRefused):
         raise  # not a conflict: `run_task` stops the item for a person
     except RuntimeError as exc:
         return f"rebase onto {base} failed: {exc}\n", "conflict"
@@ -226,6 +242,10 @@ async def _run_one(
     repo_row_id: int | None = None,
     #: A workspace member's list for `_rebase_conflict_away`; None otherwise.
     moved: list[Path] | None = None,
+    #: For `_rebase_conflict_away`'s in-place rebase.
+    run_dirs=None,
+    #: `run_task`'s, for `open_mr`.
+    check_clean: bool = True,
 ) -> tuple[str, str, list[dict] | None]:
     """One forge handler against one repo. Extracted from `run_task` so the
     multi-repo loop there can call it once per `work_item_repos` row; a
@@ -295,6 +315,7 @@ async def _run_one(
                     title=mr_ops.mr_title_for(title, meta),
                     body=body,
                     meta=meta,
+                    check_clean=check_clean,
                 )
                 number, url = mr.number, mr.url
                 log, status = f"opened {url}\n", "done"
@@ -343,7 +364,7 @@ async def _run_one(
             # wait back to the scheduler (Kraft-ru98, `kraft.waits`); a
             # coroutine that sat here held an intake slot and could not be
             # cancelled.
-            head_sha = await git._head_sha(repo)
+            head_sha = await git._head_sha(repo, branch)
             # Pin to the pipeline the last poll of this same head already
             # saw, instead of re-resolving "latest on branch" every re-entry
             # (Kraft-ivh1). A rebase or a repair's push moves head_sha, which
@@ -435,6 +456,7 @@ async def _run_one(
                     base=base,
                     work_item_id=work_item_id,
                     moved=moved,
+                    run_dirs=run_dirs,
                 )
                 log += rebase_log
                 if status == "done" and not has_rebase_bounce:
@@ -632,7 +654,7 @@ async def _run_one(
                 # human committed while reviewing -- re-arms a required
                 # pipeline for a head nothing has seen finish (Kraft-266b,
                 # Kraft-x10m). Read it before handing forge.merge() that head.
-                head_sha = await git._head_sha(repo)
+                head_sha = await git._head_sha(repo, branch)
                 ci_status = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
                 log, gate_status = await ci.render_ci(
                     ci_status, forge=forge, repo=repo, branch=branch, head_sha=head_sha
@@ -650,6 +672,7 @@ async def _run_one(
                         base=base,
                         work_item_id=work_item_id,
                         moved=moved,
+                        run_dirs=run_dirs,
                     )
                     log += rebase_log
                     rebased = gate_status == "done"
@@ -657,7 +680,7 @@ async def _run_one(
                         # Nothing will re-verify the rebased head, so this
                         # node reads its pipeline again itself and merges only
                         # if it is green (code-review).
-                        head_sha = await git._head_sha(repo)
+                        head_sha = await git._head_sha(repo, branch)
                         ci_status = await forge.ci_status(
                             repo=repo, mr=MR(number=0, url=""), branch=branch
                         )
@@ -1001,6 +1024,9 @@ async def run_task(
     #: the safe assumption for any caller (a test, a future handler) that
     #: does not know any better.
     has_rebase_bounce: bool = False,
+    #: False for an in-place item: `open_mr` does not refuse the person's
+    #: own uncommitted edits in their checkout.
+    check_clean: bool = True,
 ) -> str:
     """One forge node -- against every repo `work_item_repos` names for this
     item, deepest submodule first, root last (design 3a), or just `repo` when
@@ -1170,6 +1196,7 @@ async def run_task(
     moved: list[Path] = []
     #: Why the observation could not be made at all, when it could not.
     unobserved: str | None = None
+    checkout_stopped = False
     # Findings only ever reach `finish_session` for a single-target run: a
     # submodule's own CI is not this item's `mr_checks` node, and findings
     # from it would double-count against the wrong job (Kraft-cbr §3).
@@ -1241,8 +1268,10 @@ async def run_task(
                     automated_review=automated_review,
                     ci_checks=ci_checks,
                     merge_requested=requested,
+                    check_clean=check_clean,
                     repo_row_id=row_id,
                     moved=moved if member else None,
+                    run_dirs=run_dirs,
                 )
             else:
                 one_log, one_status, one_findings = "", settled, None
@@ -1292,6 +1321,12 @@ async def run_task(
             # Nothing a fix loop may touch: a person looks first (Kraft-xngty).
             status = "config_error"
         unobserved = str(exc)
+    except (inplace.AutostashClash, inplace.CheckoutRefused) as exc:
+        # The person's checkout: stopped for them, as a refused take is.
+        log, status, findings = f"{hook_point} failed: {exc}\n", "config_error", None
+        unobserved = str(exc)
+        await inplace.stop_refused(db, work_item_id, node_id, exc)
+        checkout_stopped = True
 
     if handler in _WAITS:
         status, log = await _observed(
@@ -1319,8 +1354,13 @@ async def run_task(
     )
     # A member's move is a base change `base_ref` cannot show: report it, as
     # `builtins.mr_rebase` does, so the node's declared span re-verifies it.
-    from kraft.executor.context import BASE_MOVED  # the executor imports this module
+    from kraft.executor.context import (  # the executor imports this module
+        BASE_MOVED,
+        CHECKOUT_REFUSED,
+    )
 
+    if checkout_stopped:
+        return CHECKOUT_REFUSED
     return BASE_MOVED if (moved and has_rebase_bounce and recorded == "done") else recorded
 
 

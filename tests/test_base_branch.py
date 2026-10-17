@@ -446,11 +446,17 @@ async def test_the_pre_mr_rebase_onto_a_vanished_base_is_a_config_stop(database,
     assert "base branch 'release'" in own_files(run_dirs, "s1").log.read_text()
 
 
-def test_an_unnamed_base_still_falls_back_to_the_checkout_with_no_origin(repo):
-    """Unchanged for an item that named nothing: no origin, the checkout's
-    HEAD is the base, as it always was."""
+@pytest.mark.parametrize("on_item_branch", [False, True], ids=["on-main", "on-an-items-branch"])
+def test_the_base_fallback_reads_the_default_branch_ref_not_head(repo, on_item_branch):
+    """An item that named nothing, with no origin, starts from the checkout's
+    `main` -- not from its HEAD, which an in-place item may have left on its
+    own branch with unmerged work (base-prefers-the-default-branch-ref-over-head)."""
     import asyncio
 
-    assert asyncio.run(kraft_builtins.upstream_head(repo, "main")) == git_read(
-        repo, "rev-parse", "HEAD"
-    )
+    main = git_read(repo, "rev-parse", "main")
+    if on_item_branch:
+        git(repo, "checkout", "-q", "-b", "kraft/x")
+        write(repo, "x.txt", "unmerged\n")
+        commit_all(repo, "the item's work")
+
+    assert asyncio.run(kraft_builtins.upstream_head(repo, "main")) == main

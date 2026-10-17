@@ -15,6 +15,7 @@ from kraft import policy as _policy
 from kraft.executor import dispatch, gates
 from kraft.templates.environment import WorkItemTarget
 
+from .test_dispatch import _dispatch_one, _one_task
 from .test_walk import _agent, _exec, _loop_policy, _stop_reason, _sub, _walk
 
 _IN_PLACE = WorkItemTarget.for_repository("sample", in_place=True)
@@ -282,3 +283,26 @@ async def test_a_checkout_stop_from_a_session_outside_the_walk_keeps_no_node_tas
     )
 
     assert kept is None
+
+
+@pytest.mark.parametrize(
+    "target, check_clean", [(_IN_PLACE, False), (None, True)], ids=["in-place", "worktree"]
+)
+async def test_open_mr_refuses_a_dirty_folder_only_for_a_worktree_item(
+    item_on, monkeypatch, target, check_clean
+):
+    """The person's own edits in their checkout never stop `open_mr`; a
+    worktree item's uncommitted work still does."""
+    seen: dict = {}
+
+    async def run_task(_db, _rd, **kw):
+        seen.update(kw)
+        return "done"
+
+    monkeypatch.setattr(dispatch._forge, "run_task", run_task)
+    it = await item_on(
+        _one_task({"id": "t", "kind": "forge", "target": "mr.open_draft"}), target=target
+    )
+
+    assert await _dispatch_one(it) == "done"
+    assert seen["check_clean"] is check_clean

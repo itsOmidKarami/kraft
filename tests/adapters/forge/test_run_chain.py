@@ -66,10 +66,16 @@ class _RecordingForge(forge.FakeForge):
         super().__init__(**kw)
         self.cwds: list[Path] = []
 
-    async def open_mr(self, *, repo, branch, base, title, body, meta=None):
+    async def open_mr(self, *, repo, branch, base, title, body, meta=None, check_clean=True):
         self.cwds.append(Path(repo))
         return await super().open_mr(
-            repo=repo, branch=branch, base=base, title=title, body=body, meta=meta
+            repo=repo,
+            branch=branch,
+            base=base,
+            title=title,
+            body=body,
+            meta=meta,
+            check_clean=check_clean,
         )
 
 
@@ -470,6 +476,17 @@ async def test_run_task_is_unchanged_for_a_single_repo_item(
     assert await _run_task(database, run_dirs, it, repo, "kraft/w1", fake, monkeypatch) == "done"
 
     assert len(fake.opened) == 1
+
+
+@pytest.mark.parametrize("check_clean", [True, False], ids=["worktree", "in-place"])
+async def test_open_mr_hands_the_forge_its_clean_check(run_forge, check_clean):
+    """Dispatch decides it (an in-place checkout is the person's); the node
+    carries it to the forge unchanged."""
+    fake = forge.FakeForge()
+
+    assert await run_forge(fake, "open_mr", "x7", check_clean=check_clean) == ("done", "done")
+
+    assert fake.opened_check_clean == {1: check_clean}
 
 
 @pytest.mark.parametrize(

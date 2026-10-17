@@ -201,9 +201,12 @@ class Forge(Protocol):
         title: str,
         body: str,
         meta: MRMeta | None = None,
+        check_clean: bool = True,
     ) -> MR:
         """A draft merge request from `branch` into `base`, the item's base
-        branch in `repo` (`builtins.base_branch`)."""
+        branch in `repo` (`builtins.base_branch`). `check_clean` refuses a
+        dirty `repo` first; an in-place item's checkout is the person's, so
+        it passes False."""
         ...
 
     async def mark_ready(self, *, repo: Path, branch: str, mr: MR) -> None: ...
@@ -218,7 +221,9 @@ class Forge(Protocol):
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None: ...
     async def close_mr(self, *, repo: Path, mr: MRRef) -> None: ...
     async def reopen_mr(self, *, repo: Path, mr: MRRef) -> None: ...
-    async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None: ...
+    async def set_labels(
+        self, *, repo: Path, branch: str, mr: MR, labels: tuple[str, ...]
+    ) -> None: ...
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None: ...
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None: ...
     async def approval_state(self, *, repo: Path, branch: str) -> ApprovalState: ...
@@ -317,6 +322,8 @@ class FakeForge:
     #: Body each `open_mr` call was given, alongside `bodies` (which only
     #: `update_mr`/`sync_mr` write to).
     opened_bodies: dict[int, str] = field(default_factory=dict)
+    #: Whether each `open_mr` was asked to refuse a dirty checkout.
+    opened_check_clean: dict[int, bool] = field(default_factory=dict)
     #: The branch each opened merge request targets, by number.
     opened_base: dict[int, str] = field(default_factory=dict)
     #: `automated_review`'s answers, consumed like `ci_states`. A bare state
@@ -362,6 +369,7 @@ class FakeForge:
         title: str,
         body: str,
         meta: MRMeta | None = None,
+        check_clean: bool = True,
     ) -> MR:
         from kraft.adapters.forge.mr import MRMeta
 
@@ -373,6 +381,7 @@ class FakeForge:
         self.opened_draft[number] = True
         self.opened_meta[number] = meta or MRMeta()
         self.opened_bodies[number] = body
+        self.opened_check_clean[number] = check_clean
         return MR(number=number, url=f"http://fake.forge/{number}")
 
     async def mark_ready(self, *, repo: Path, branch: str, mr: MR) -> None:
@@ -458,12 +467,12 @@ class FakeForge:
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
         self.retried.append(ci.url)
 
-    async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None:
+    async def set_labels(self, *, repo: Path, branch: str, mr: MR, labels: tuple[str, ...]) -> None:
         self.labels.extend(labels)
 
     async def merge(self, *, repo: Path, branch: str = "", mr: MR) -> None:
-        # number 0 means "resolve from the checked-out branch", which is what
-        # `run_task` passes and what both real CLIs do. A fake that rejected it
+        # number 0 means "resolve from the branch", which is what `run_task`
+        # passes and what both real CLIs do. A fake that rejected it
         # would fail on the one path production always takes.
         if mr.number > 0:
             number = mr.number

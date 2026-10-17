@@ -67,7 +67,7 @@ origin: src/kraft/store/sessions.py §create_session
 ## REQ in-place-never-forces-a-checkout
 
 The system SHALL NOT run `git checkout -f` in an in-place item's checkout.
-enforced-by: tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/test_inplace.py::test_take_switches_with_plain_checkout_and_keeps_edits[plain], tests/executor/test_walk_in_place.py::test_no_sweep_after_an_in_place_task_moves_or_commits_anything
+enforced-by: tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/test_inplace.py::test_take_switches_with_plain_checkout_and_keeps_edits[plain], tests/executor/test_walk_in_place.py::test_no_sweep_after_an_in_place_task_moves_or_commits_anything, tests/test_inplace_rebase.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[ignored-file-the-base-tracks], tests/test_inplace_rebase.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[ignored-file-the-branch-untracked], tests/test_inplace_rebase.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[ignored-file-a-branch-commit-wrote], tests/test_inplace_rebase.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[the-persons-merge], tests/test_inplace_rebase.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[unmerged-path], tests/test_inplace_rebase.py::test_a_failed_rebase_never_aborts_the_persons_own
 origin: src/kraft/inplace.py §_take
 
 ## REQ in-place-switch-refusal-stops
@@ -140,3 +140,42 @@ origin: src/kraft/inplace.py §mark
 The system SHALL NOT auto-escalate a `checkout` stop.
 enforced-by: tests/executor/test_dispatch_in_place.py::test_a_checkout_stop_is_never_auto_escalated, tests/executor/test_escalation.py::test_resume_after_escalation_drops_a_self_retry_on_a_moved_item[checkout-stop]
 origin: src/kraft/executor/walk.py §_sentinel_stop
+
+## REQ in-place-rebase-keeps-edits
+
+WHEN an in-place item's branch is rebased with uncommitted changes in the
+checkout, the system SHALL stash them for the rebase and apply them back
+afterwards.
+enforced-by: tests/test_inplace_rebase.py::test_rebase_in_the_checkout_keeps_the_persons_edits, tests/test_inplace_rebase.py::test_a_conflicting_rebase_in_the_checkout_aborts_and_puts_the_edits_back, tests/test_inplace_rebase.py::test_a_cancel_mid_rebase_in_the_checkout_waits_for_git[clean]
+origin: src/kraft/inplace.py §rebase_in_checkout
+
+## REQ in-place-autostash-clash-stops
+
+IF applying the stashed changes back after an in-place rebase leaves unmerged
+paths, THEN the system SHALL stop the item as `checkout`, name the paths, and
+record the stash's commit, and SHALL NOT drop the stash.
+enforced-by: tests/test_inplace_rebase.py::test_an_autostash_clash_raises_with_the_stash_and_leaves_it, tests/test_inplace_rebase.py::test_an_autostash_clash_stops_the_item_as_checkout[resume-autostash-clash], tests/test_inplace_rebase.py::test_an_autostash_clash_stops_the_item_as_checkout[retry-autostash-clash], tests/test_inplace_rebase.py::test_an_autostash_clash_stops_the_item_as_checkout[resume-clash-as-a-pause-lands], tests/test_inplace_rebase.py::test_a_cancel_mid_rebase_in_the_checkout_waits_for_git[clash-named-over-the-cancel], tests/api/test_gates_refresh.py::test_an_in_place_refresh_that_clashes_stops_the_approved_item_as_checkout, tests/executor/test_escalation.py::test_a_self_retry_whose_in_place_rebase_clashes_stops_as_checkout, tests/executor/test_mr_rebase_dispatch.py::test_an_in_place_rebase_that_clashes_is_a_checkout_stop, tests/adapters/forge/test_waits.py::test_an_in_place_conflict_rebase_that_clashes_stops_the_item_as_checkout[ci_poll]
+origin: src/kraft/inplace.py §rebase_in_checkout
+
+## REQ in-place-git-only-rebase-leaves-the-checkout
+
+WHEN an in-place item's branch is rebased with no agent task following and the
+checkout is not on that branch, the system SHALL rebase it outside the checkout
+and SHALL NOT change the checkout's HEAD or files.
+enforced-by: tests/test_inplace_rebase.py::test_rebase_off_the_branch_never_moves_the_checkout[rebased], tests/test_inplace_rebase.py::test_rebase_off_the_branch_never_moves_the_checkout[conflict], tests/test_inplace_rebase.py::test_rebase_off_the_branch_never_moves_the_checkout[after-a-killed-server], tests/test_inplace_rebase.py::test_a_slow_throwaway_checkout_does_not_hold_up_the_server, tests/test_builtins_rebase.py::test_mr_rebase_of_an_in_place_item_never_moves_the_checkout
+origin: src/kraft/inplace.py §rebase
+
+## REQ in-place-mr-names-its-branch
+
+WHEN an in-place item opens or updates its merge request, the system SHALL name
+the item's branch to the forge rather than read the checkout's current branch.
+enforced-by: tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[glab-open_mr], tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[gh-open_mr], tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[glab-update_mr], tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[gh-update_mr], tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[glab-mark_ready], tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[gh-mark_ready], tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[glab-ci_status], tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[gh-ci_status], tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[glab-merge], tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[gh-merge], tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[glab-set_labels], tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[gh-set_labels], tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[glab-bot_review], tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[gh-bot_review], tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[glab-check_review], tests/adapters/forge/test_forge_cli_contract.py::test_every_merge_request_call_names_the_branch[gh-check_review], tests/adapters/forge/test_glab.py::test_glab_ci_status_only_trusts_a_pipeline_for_the_current_head[not-the-checkouts-head], tests/adapters/forge/test_git.py::test_open_mr_in_place_ignores_a_dirty_checkout[glab], tests/adapters/forge/test_git.py::test_open_mr_in_place_ignores_a_dirty_checkout[gh], tests/adapters/forge/test_waits.py::test_an_in_place_checkout_elsewhere_does_not_hide_the_branch_s_pipeline[ci_poll], tests/adapters/forge/test_waits.py::test_an_in_place_checkout_elsewhere_does_not_hide_the_branch_s_pipeline[merge], tests/adapters/forge/test_git.py::test_merge_accepts_a_pushed_head_against_real_git[checkout-elsewhere], tests/executor/test_dispatch_in_place.py::test_open_mr_refuses_a_dirty_folder_only_for_a_worktree_item[in-place], tests/adapters/forge/test_run_chain.py::test_open_mr_hands_the_forge_its_clean_check[in-place]
+origin: src/kraft/adapters/forge/mr.py §target
+
+## REQ base-prefers-the-default-branch-ref-over-head
+
+WHEN an item starts with no fetched `origin`, the system SHALL base it on the
+default branch's ref, and SHALL read the checkout's HEAD only where that ref
+does not exist.
+enforced-by: tests/test_base_branch.py::test_the_base_fallback_reads_the_default_branch_ref_not_head[on-an-items-branch]
+origin: src/kraft/builtins.py §upstream_head

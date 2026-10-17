@@ -203,6 +203,13 @@ class RunDirs:
         return self.base / "worktrees"
 
     @property
+    def scratch(self) -> Path:
+        """Throwaway worktrees an in-place item's branch is rebased in while
+        the person's checkout is elsewhere (`inplace.rebase`): never under
+        `worktrees/`, which everything that walks item worktrees reads."""
+        return self.base / "scratch"
+
+    @property
     def attachments(self) -> Path:
         """Intake attachments, copied here at intake rather than referenced in
         place (Kraft-eqgn).

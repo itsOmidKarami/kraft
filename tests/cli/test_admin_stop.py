@@ -12,8 +12,14 @@ from kraft import cli
 from kraft.paths import RunDirs
 
 
-@pytest.mark.parametrize("rebase", [True, False], ids=["undoing-a-rebase", "nothing-to-undo"])
-def test_stop_waits_out_a_rebase_abort_past_the_usual_wait(tmp_path, monkeypatch, capsys, rebase):
+@pytest.mark.parametrize(
+    ("rebase", "under"),
+    [(True, "worktrees"), (False, "worktrees"), (True, "scratch")],
+    ids=["undoing-a-rebase", "nothing-to-undo", "undoing-an-in-place-rebase"],
+)
+def test_stop_waits_out_a_rebase_abort_past_the_usual_wait(
+    tmp_path, monkeypatch, capsys, rebase, under
+):
     """A server stopped mid-rebase undoes it on its way out, which outlasts the
     usual wait: `stop` says it is still stopping because of that and waits,
     where a server that is merely slow is still reported as not stopped."""
@@ -23,8 +29,8 @@ def test_stop_waits_out_a_rebase_abort_past_the_usual_wait(tmp_path, monkeypatch
     monkeypatch.setattr("kraft.builtins.REBASE_UNDO_MAX_S", 5.0)
     gitdir = tmp_path / "gitdir"
     (gitdir / ("rebase-merge" if rebase else "info")).mkdir(parents=True)
-    (run / "worktrees" / "w1").mkdir(parents=True)
-    (run / "worktrees" / "w1" / ".git").write_text(f"gitdir: {gitdir}\n")
+    (run / under / "w1").mkdir(parents=True)
+    (run / under / "w1" / ".git").write_text(f"gitdir: {gitdir}\n")
     pid_path = RunDirs(run).pid
     proc = subprocess.Popen(
         [
