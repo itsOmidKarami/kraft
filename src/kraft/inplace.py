@@ -130,14 +130,7 @@ async def take(db, run_dirs, row, *, attachments) -> None:
     # A cancel (a pause) cannot stop git in its thread, and a checkout left to
     # finish never loses the person's work: wait it out, however many cancels
     # arrive, so a switch it made is recorded; then honour the cancel.
-    cancelled = False
-    while not running.done():
-        try:
-            await asyncio.shield(running)
-        except asyncio.CancelledError:
-            cancelled = True
-        except Exception:  # read off `running` below
-            pass
+    cancelled = await _wait_out(running)
     failed = running.exception()
     moved = failed.moved_from if isinstance(failed, CheckoutRefused) else None
     if failed is None:
@@ -217,24 +210,12 @@ async def rebase(
                 identity=identity,
                 autostash=True,
             )
-        if _ref(checkout, branch) is None:
-            raise CheckoutRefused(
-                f"the branch {branch} is gone from {checkout}, and Kraft does not make it again: "
-                "restore it (`git reflog` may still have its commits) and retry, or abandon "
-                "the item"
-            )
         # One a killed server left would pin the branch for good.
         await _finish(_drop_scratch, checkout, run_dirs.scratch.glob(f"{row['id']}-*"))
         run_dirs.scratch.mkdir(parents=True, exist_ok=True)
         scratch = run_dirs.scratch / f"{row['id']}-{secrets.token_hex(4)}"
         try:
-            try:
-                await _finish(builtins._add_worktree, checkout, scratch, branch, None)
-            except RuntimeError as exc:
-                raise CheckoutRefused(
-                    f"Kraft could not check {branch} out apart from {checkout} to rebase it "
-                    f"(git said: {exc}): sort that out, then retry the item"
-                ) from None
+            await _finish(_add_scratch, checkout, scratch, branch)
             return await builtins.refresh_worktree_base(
                 scratch,
                 checkout,
@@ -246,6 +227,35 @@ async def rebase(
             )
         finally:
             await _finish(_drop_scratch, checkout, [scratch])
+
+
+def _add_scratch(checkout: Path, scratch: Path, branch: str) -> None:
+    """`git worktree add` of the existing `branch`: never `-b`, so a branch
+    the person deleted is never made again. (git itself would still make one
+    from a remote's copy if it went in the instant between the read and the
+    add.)"""
+    from kraft import builtins
+
+    if _ref(checkout, branch) is None:
+        raise _gone(checkout, branch)
+    try:
+        done = builtins._run_git_group(
+            ["git", "worktree", "add", "--quiet", str(scratch), branch],
+            timeout=builtins.WORKTREE_ADD_TIMEOUT_S,
+            cwd=checkout,
+        )
+    except subprocess.TimeoutExpired:
+        said = f"timed out after {builtins.WORKTREE_ADD_TIMEOUT_S:.0f}s"
+    else:
+        if done.returncode == 0:
+            return
+        said = done.stderr.strip() or done.stdout.strip()
+    if _ref(checkout, branch) is None:
+        raise _gone(checkout, branch)
+    raise CheckoutRefused(
+        f"Kraft could not check {branch} out apart from {checkout} to rebase it "
+        f"(git said: {said}): sort that out, then retry the item"
+    )
 
 
 def _drop_scratch(checkout: Path, scratches) -> None:
@@ -268,11 +278,9 @@ def _drop_scratch(checkout: Path, scratches) -> None:
     )
 
 
-async def _finish(fn, *args):
-    """`fn(*args)` in a thread, waited out to its end however many cancels
-    arrive (a thread cannot be stopped, and what it leaves must be known);
-    then the cancel is honoured."""
-    running = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+async def _wait_out(running: asyncio.Future) -> bool:
+    """Wait for `running` (a thread, which a cancel cannot stop) to its end,
+    however many cancels arrive; whether one did."""
     cancelled = False
     while not running.done():
         try:
@@ -281,8 +289,18 @@ async def _finish(fn, *args):
             await asyncio.wait({running})
         except asyncio.CancelledError:
             cancelled = True
-    if cancelled:
-        running.exception()  # retrieved: the cancel is what the caller hears
+    return cancelled
+
+
+async def _finish(fn, *args, over_cancel: tuple[type[BaseException], ...] = ()):
+    """`fn(*args)` in a thread, waited out to its end (what it leaves must be
+    known); then a cancel is honoured, unless `fn` raised one of
+    `over_cancel`, which is raised instead."""
+    running = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+    if await _wait_out(running):
+        failed = running.exception()
+        if isinstance(failed, over_cancel):
+            raise failed
         raise asyncio.CancelledError
     return running.result()
 
@@ -293,13 +311,7 @@ async def rebase_in_checkout(checkout: Path, head: str, base: str, env) -> None:
     (and a conflict's abort, which puts the autostash back). Raises
     `RebaseConflict` (aborted) or `AutostashClash`; a clash is raised even
     over a cancel, so its stash is recorded rather than lost."""
-    try:
-        await _finish(_rebase_in_checkout, checkout, head, base, env)
-    except asyncio.CancelledError:
-        clash = _clash(checkout, base)
-        if clash is not None:
-            raise clash from None
-        raise
+    await _finish(_rebase_in_checkout, checkout, head, base, env, over_cancel=(AutostashClash,))
 
 
 def _rebase_in_checkout(checkout: Path, head: str, base: str, env) -> None:
@@ -318,9 +330,13 @@ def _rebase_in_checkout(checkout: Path, head: str, base: str, env) -> None:
             start_new_session=True,
         )
 
-    # git replaces an ignored file the incoming commits track without a word.
-    incoming = _git_lines(checkout, "diff", "--name-only", "--no-renames", f"HEAD...{head}")
-    ignored = _ignored_in_the_way(checkout, incoming)
+    # git replaces an ignored file without a word: whatever checking `head`
+    # out writes, and whatever replaying the branch's commits on it does.
+    incoming = _git_lines(checkout, "diff", "--name-only", "--no-renames", "HEAD", head)
+    incoming += _git_lines(
+        checkout, "log", "--name-only", "--no-renames", "--format=", f"{head}..HEAD"
+    )
+    ignored = _ignored_in_the_way(checkout, sorted(set(incoming)))
     if ignored:
         raise CheckoutRefused(
             f"rebasing {checkout} onto the newer {base} would overwrite {', '.join(ignored)}, "
@@ -411,11 +427,7 @@ def _take(folder, branch, base_ref, attachments, wid, base) -> dict | None:
     with _lock(folder):
         _settled(folder)
         if _ref(folder, branch) is None:
-            raise CheckoutRefused(
-                f"the branch {branch} is gone from {folder}, and Kraft does not make it again: "
-                "restore it (`git reflog` may still have its commits) and retry, or abandon "
-                "the item"
-            )
+            raise _gone(folder, branch)
         moved = None
         if git_read(folder, "symbolic-ref", "--quiet", "HEAD", expected_failure=True) != (
             f"refs/heads/{branch}"
@@ -428,6 +440,13 @@ def _take(folder, branch, base_ref, attachments, wid, base) -> dict | None:
                 exc.moved_from = moved
                 raise
         return moved
+
+
+def _gone(folder: Path, branch: str) -> CheckoutRefused:
+    return CheckoutRefused(
+        f"the branch {branch} is gone from {folder}, and Kraft does not make it again: "
+        "restore it (`git reflog` may still have its commits) and retry, or abandon the item"
+    )
 
 
 def _settled(folder: Path) -> None:

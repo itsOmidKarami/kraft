@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from support import worktree as wtree
 from support.harness import commit_all, git, make_repo, write
-from test_inplace import _behind_origin, _snapshot
+from test_inplace_rebase import _behind_origin, _snapshot
 
 from kraft import builtins as kraft_builtins
 from kraft import caps, events

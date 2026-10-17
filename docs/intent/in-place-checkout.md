@@ -67,7 +67,7 @@ origin: src/kraft/store/sessions.py §create_session
 ## REQ in-place-never-forces-a-checkout
 
 The system SHALL NOT run `git checkout -f` in an in-place item's checkout.
-enforced-by: tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/test_inplace.py::test_take_switches_with_plain_checkout_and_keeps_edits[plain], tests/executor/test_walk_in_place.py::test_no_sweep_after_an_in_place_task_moves_or_commits_anything, tests/test_inplace.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[ignored-file-the-base-tracks], tests/test_inplace.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[the-persons-merge], tests/test_inplace.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[unmerged-path], tests/test_inplace.py::test_a_failed_rebase_never_aborts_the_persons_own
+enforced-by: tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/test_inplace.py::test_take_switches_with_plain_checkout_and_keeps_edits[plain], tests/executor/test_walk_in_place.py::test_no_sweep_after_an_in_place_task_moves_or_commits_anything, tests/test_inplace_rebase.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[ignored-file-the-base-tracks], tests/test_inplace_rebase.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[ignored-file-the-branch-untracked], tests/test_inplace_rebase.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[ignored-file-a-branch-commit-wrote], tests/test_inplace_rebase.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[the-persons-merge], tests/test_inplace_rebase.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[unmerged-path], tests/test_inplace_rebase.py::test_a_failed_rebase_never_aborts_the_persons_own
 origin: src/kraft/inplace.py §_take
 
 ## REQ in-place-switch-refusal-stops
@@ -146,7 +146,7 @@ origin: src/kraft/executor/walk.py §_sentinel_stop
 WHEN an in-place item's branch is rebased with uncommitted changes in the
 checkout, the system SHALL stash them for the rebase and apply them back
 afterwards.
-enforced-by: tests/test_inplace.py::test_rebase_in_the_checkout_keeps_the_persons_edits, tests/test_inplace.py::test_a_conflicting_rebase_in_the_checkout_aborts_and_puts_the_edits_back, tests/test_inplace.py::test_a_cancel_mid_rebase_in_the_checkout_waits_for_git[clean]
+enforced-by: tests/test_inplace_rebase.py::test_rebase_in_the_checkout_keeps_the_persons_edits, tests/test_inplace_rebase.py::test_a_conflicting_rebase_in_the_checkout_aborts_and_puts_the_edits_back, tests/test_inplace_rebase.py::test_a_cancel_mid_rebase_in_the_checkout_waits_for_git[clean]
 origin: src/kraft/inplace.py §rebase_in_checkout
 
 ## REQ in-place-autostash-clash-stops
@@ -154,7 +154,7 @@ origin: src/kraft/inplace.py §rebase_in_checkout
 IF applying the stashed changes back after an in-place rebase leaves unmerged
 paths, THEN the system SHALL stop the item as `checkout`, name the paths, and
 record the stash's commit, and SHALL NOT drop the stash.
-enforced-by: tests/test_inplace.py::test_an_autostash_clash_raises_with_the_stash_and_leaves_it, tests/test_inplace.py::test_an_autostash_clash_stops_the_item_as_checkout[resume-autostash-clash], tests/test_inplace.py::test_an_autostash_clash_stops_the_item_as_checkout[retry-autostash-clash], tests/test_inplace.py::test_an_autostash_clash_stops_the_item_as_checkout[resume-clash-as-a-pause-lands], tests/test_inplace.py::test_a_cancel_mid_rebase_in_the_checkout_waits_for_git[clash-named-over-the-cancel], tests/api/test_gates_refresh.py::test_an_in_place_refresh_that_clashes_stops_the_approved_item_as_checkout, tests/executor/test_escalation.py::test_a_self_retry_whose_in_place_rebase_clashes_stops_as_checkout, tests/executor/test_mr_rebase_dispatch.py::test_an_in_place_rebase_that_clashes_is_a_checkout_stop, tests/adapters/forge/test_waits.py::test_an_in_place_conflict_rebase_that_clashes_stops_the_item_as_checkout[ci_poll]
+enforced-by: tests/test_inplace_rebase.py::test_an_autostash_clash_raises_with_the_stash_and_leaves_it, tests/test_inplace_rebase.py::test_an_autostash_clash_stops_the_item_as_checkout[resume-autostash-clash], tests/test_inplace_rebase.py::test_an_autostash_clash_stops_the_item_as_checkout[retry-autostash-clash], tests/test_inplace_rebase.py::test_an_autostash_clash_stops_the_item_as_checkout[resume-clash-as-a-pause-lands], tests/test_inplace_rebase.py::test_a_cancel_mid_rebase_in_the_checkout_waits_for_git[clash-named-over-the-cancel], tests/api/test_gates_refresh.py::test_an_in_place_refresh_that_clashes_stops_the_approved_item_as_checkout, tests/executor/test_escalation.py::test_a_self_retry_whose_in_place_rebase_clashes_stops_as_checkout, tests/executor/test_mr_rebase_dispatch.py::test_an_in_place_rebase_that_clashes_is_a_checkout_stop, tests/adapters/forge/test_waits.py::test_an_in_place_conflict_rebase_that_clashes_stops_the_item_as_checkout[ci_poll]
 origin: src/kraft/inplace.py §rebase_in_checkout
 
 ## REQ in-place-git-only-rebase-leaves-the-checkout
@@ -162,5 +162,5 @@ origin: src/kraft/inplace.py §rebase_in_checkout
 WHEN an in-place item's branch is rebased with no agent task following and the
 checkout is not on that branch, the system SHALL rebase it outside the checkout
 and SHALL NOT change the checkout's HEAD or files.
-enforced-by: tests/test_inplace.py::test_rebase_off_the_branch_never_moves_the_checkout[rebased], tests/test_inplace.py::test_rebase_off_the_branch_never_moves_the_checkout[conflict], tests/test_inplace.py::test_rebase_off_the_branch_never_moves_the_checkout[after-a-killed-server], tests/test_inplace.py::test_a_slow_throwaway_checkout_does_not_hold_up_the_server, tests/test_builtins_rebase.py::test_mr_rebase_of_an_in_place_item_never_moves_the_checkout
+enforced-by: tests/test_inplace_rebase.py::test_rebase_off_the_branch_never_moves_the_checkout[rebased], tests/test_inplace_rebase.py::test_rebase_off_the_branch_never_moves_the_checkout[conflict], tests/test_inplace_rebase.py::test_rebase_off_the_branch_never_moves_the_checkout[after-a-killed-server], tests/test_inplace_rebase.py::test_a_slow_throwaway_checkout_does_not_hold_up_the_server, tests/test_builtins_rebase.py::test_mr_rebase_of_an_in_place_item_never_moves_the_checkout
 origin: src/kraft/inplace.py §rebase
