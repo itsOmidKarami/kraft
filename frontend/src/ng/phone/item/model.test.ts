@@ -139,6 +139,10 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     expect(cardOf(mk("blocked", null, { dependencies: [{ id: "a1", title: "Schema first", status: "needs_human", met: false }, { id: "b2", title: "Old cleanup", status: "completed", met: true }] })))
       .toMatchObject({ tone: "info", title: "Blocked", where: "waiting on 1 item", facts: [["needs human", "Schema first", "a1"], ["completed", "Old cleanup", "b2"]] });
     expect(cardOf(mk("blocked"))).toMatchObject({ where: "nothing left to wait for", text: "Kraft queues it within seconds.", facts: [] });
+    // A checkout-queued item says what it waits for, as desktop's Queued card does; a slot wait has no card.
+    expect(cardOf(mk("queued", null, { queued: { verb: "resume", since: "2026-09-13T09:00:00Z", why: "checkout", held_by: "w2", held_by_title: "Cache the index" } })))
+      .toMatchObject({ tone: "info", title: "Queued", text: "Waiting for the checkout: Cache the index is using it. It starts when the checkout frees." });
+    expect(cardOf(mk("queued", null, { queued: { verb: "resume", since: "2026-09-13T09:00:00Z" } }))).toBeNull();
     expect(cardOf(mk("paused"))).toMatchObject({ tone: "muted", title: "Paused", where: "at verification" });
     expect(cardOf(mk("paused", null, { current_node_id: null }))).toBeNull();
     expect(cardOf(mk("done", null, { mr_ref: { number: 7, url: "u" } }))).toMatchObject({ tone: "ok", where: "MR !7 merged", text: undefined });

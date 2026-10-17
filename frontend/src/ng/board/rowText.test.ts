@@ -77,6 +77,7 @@ describe("rowAction", () => {
     expect(a(row("needs_you", { stop: stop("budget") }))).toEqual({ label: "Raise budget", kind: "peek", tab: "config", budget: true });
     expect(a(row("needs_you", { stop: stop("mr_closed") }))).toMatchObject({ label: "Open", kind: "peek" });
     expect(a(row("needs_you", { stop: stop("stuck") }))).toEqual({ label: "Retry…", kind: "peek", tab: "overview" });
+    expect(a(row("needs_you", { stop: stop("checkout") }))).toEqual({ label: "Retry…", kind: "peek", tab: "overview" });
     expect(a(row("failed", { stop: stop("failed") }))).toMatchObject({ label: "Retry…", kind: "peek" });
     expect(a(row("paused"))).toEqual({ label: "Resume", kind: "resume" });
     for (const s of ["running", "waiting", "escalated", "done", "cancelled"] as DisplayStatus[]) expect(a(row(s)), s).toBeNull();
@@ -92,6 +93,7 @@ describe("admittedRowAction: rowAction, only through a door the server's actions
     ["paused, the server refusing resume", row("paused", { actions: ["steer", "cancel"] }), null],
     ["failed, the server refusing retry", row("failed", { stop: stop("failed"), actions: ["escalate", "cancel"] }), null],
     ["stuck, the server refusing retry", row("needs_you", { stop: stop("stuck"), actions: ["escalate"] }), null],
+    ["a checkout stop, the server refusing retry", row("needs_you", { stop: stop("checkout"), actions: ["cancel"] }), null],
     ["a question, the server refusing resume", row("needs_you", { stop: stop("question"), actions: ["steer"] }), null],
     ["a cap, the server refusing retry", row("needs_you", { stop: stop("cap"), actions: ["cancel"] }), null],
     // The peek offers Retry when it can't raise: the row still goes there.

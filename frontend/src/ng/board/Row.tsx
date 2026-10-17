@@ -37,6 +37,8 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
   const roved = stop !== undefined;
   const off = roved ? -1 : undefined;
   const act = own ? null : admittedRowAction(item);
+  // The tail clips on a narrow row (a queue line loses "is using it"): its title keeps the whole of it.
+  const tail = own?.tail ?? reasonTail(item, now);
   const id = item.bead_id || shortId(item.id);
   const hot = groupOf(item) === "needs";
   const cue = hot ? stopCueOf(item) : null;
@@ -63,7 +65,7 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
         <span className="board-meta">
           <span className={`board-meta-tail${hot && cue !== "paused" ? " is-hot" : ""}${cue ? ` is-${cue}` : ""}`}>
             {Cue && <Cue size={12} aria-hidden className="board-cue" />}
-            <span className="board-tail-text">{own?.tail ?? reasonTail(item, now)}</span>
+            <span className="board-tail-text" title={tail}>{tail}</span>
           </span>
           {!hideRepo && <><span className="board-sep" aria-hidden>·</span><span className="board-meta-repo" title={item.repo}>{repoName(item.repo)}</span></>}
           {item.in_place && <><span className="board-sep" aria-hidden>·</span><span className="board-meta-inplace" title={item.repo}>{IN_YOUR_CHECKOUT}</span></>}

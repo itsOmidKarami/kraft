@@ -122,7 +122,7 @@ function Row({ draft, repo, f, chains, problem, changed }: { draft: ConfigDraft;
           <Segmented label="forge" value={(typeof v === "string" ? v : "none")} options={forgeOptions(v).map((x) => ({ value: x, label: x }))} onChange={(x) => void send(x === "none" ? null : x)} />
         ) : f.choice === "bool" ? (
           <label className="rp-none">
-            <Switch checked={v !== false} label={f.label} onChange={(on) => void send(on ? null : false)} /> {f.show(v)}
+            <Switch checked={v !== false} label={f.label} onChange={(on) => void send(on ? null : false)} /> {f.show(true)}
           </label>
         ) : f.choice === "chain" ? (
           <ValueMenu label={f.label} value={String(v ?? f.fallback ?? "default")} options={[...new Set([String(v ?? "default"), ...chains])].map((c) => ({ value: c, label: c }))} onPick={(c) => void send(c)} />

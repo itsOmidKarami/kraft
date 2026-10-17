@@ -162,14 +162,15 @@ export function rowAction(i: Row): RowAction | null {
     // A row carries neither the stop's limit nor its scope: the peek it opens picks the editor that raises this
     // cap (`budgetRaise`), or stays on the banner that says why the item can't, with Retry.
     case "budget": return { label: "Raise budget", kind: "peek", tab: "config", budget: true };
-    // A stuck loop's way on is Retry, on the peek's card (R11a-01): the row said Open.
-    case "stuck": return { label: "Retry…", kind: "peek", tab: "overview" };
+    // A stuck loop's and a checkout stop's way on is Retry, on the peek's card (R11a-01): the row said Open.
+    case "stuck":
+    case "checkout": return { label: "Retry…", kind: "peek", tab: "overview" };
     default: return { label: "Open", kind: "peek", tab: "overview" };
   }
 }
 
 /** `rowAction`, or null when the server's `actions` refuse its door: Resume and
- *  Answer go through `resume`; Retry… (failed, stuck) and a cap's Raise (its
+ *  Answer go through `resume`; Retry… (failed, stuck, checkout) and a cap's Raise (its
  *  limit editor patches, then retries) through `retry`; a budget's Raise
  *  through `raise_budget` or `retry`, since the peek offers Retry when it
  *  can't raise; a gate's review through `approve` or `reject`. Open goes to
@@ -182,7 +183,7 @@ export function admittedRowAction(i: Row & Pick<WorkItem, "actions">): RowAction
   const any = (...verbs: ItemAction[]) => verbs.some((v) => admits(i, v, true));
   if (a.kind === "resume") return any("resume") ? a : null;
   if (a.kind === "gate") return any("approve", "reject") ? a : null;
-  if (i.display_status === "failed" || i.stop?.kind === "stuck" || i.stop?.kind === "cap") return any("retry") ? a : null;
+  if (i.display_status === "failed" || i.stop?.kind === "stuck" || i.stop?.kind === "checkout" || i.stop?.kind === "cap") return any("retry") ? a : null;
   if (i.stop?.kind === "question") return any("resume") ? a : null;
   if (i.stop?.kind === "budget") return any("raise_budget", "retry") ? a : null;
   return a;

@@ -381,8 +381,11 @@ describe("Repos page: the Config rows", () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ resolved: { repos, detected: DETECTED } as never })));
     mount();
     await openConfig();
-    expect(screen.getByText("Items run in this repo's checkout")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("switch", { name: "worktrees" }));
+    // Off is the switch's state; its words say what on means, as "No tests" does beside it.
+    const off = screen.getByRole("switch", { name: "worktrees" });
+    expect(off).not.toBeChecked();
+    expect(screen.getByText("Each item in its own worktree")).toBeInTheDocument();
+    await userEvent.click(off);
     await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(2));
     expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { worktrees: null } }]);
   });
