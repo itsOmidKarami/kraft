@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 from support.harness import IN_PLACE, isolated_bd, v1_named_chain
 
 from kraft import events, policy, rate_limit_retry, store
@@ -141,17 +142,15 @@ async def test_tick_does_not_reclaim_an_item_abandoned_before_relaunch(
 
     app = stub_app(**_state(tmp_path))
     await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
-    original_bump_counter = store.bump_counter
+    original_claim = store.claim_for_run
 
-    def bump_then_abandon(c, *a, **kw):
-        result = original_bump_counter(c, *a, **kw)
-        # the row is still 'rate_limited' here -- simulate a human's
-        # abandon landing in the window between bump_counter and the
-        # poller's own claim
+    def abandon_then_claim(c, *a, **kw):
+        # the row was 'rate_limited' at the poller's look -- simulate a human's
+        # abandon landing in the window between it and the poller's own claim
         store.abandon_work_item(c, "w1", "test")
-        return result
+        return original_claim(c, *a, **kw)
 
-    monkeypatch.setattr(store, "bump_counter", bump_then_abandon)
+    monkeypatch.setattr(store, "claim_for_run", abandon_then_claim)
     got = await rate_limit_retry.tick(app)
     assert got == []
     row = app.state.db.read(
@@ -159,6 +158,7 @@ async def test_tick_does_not_reclaim_an_item_abandoned_before_relaunch(
     )
     assert row["status"] == "abandoned"
     assert app.state.tasks == {}
+    assert app.state.db.read(lambda c: store.cap_counts(c, "w1")) == {}, "no attempt was made"
 
 
 async def test_a_v1_item_is_relaunched_rather_than_stranded_rate_limited(
@@ -265,18 +265,32 @@ async def test_a_rate_limit_relaunch_leaves_the_position_to_the_walk(
     assert seen["work_item_id"] == "w1"
 
 
+@pytest.mark.parametrize("taken", ["before-the-look", "between-the-look-and-the-claim"])
 async def test_a_due_item_whose_checkout_is_busy_waits_and_counts_nothing(
-    tmp_path, item_on, run_dirs, stub_app
+    tmp_path, item_on, run_dirs, stub_app, monkeypatch, caplog, taken
 ):
     chain = v1_named_chain(run_dirs.base / "t")
-    await item_on(chain, wid="a", target=IN_PLACE)  # active in the checkout
+    a = await item_on(chain, wid="a", target=IN_PLACE)  # active in the checkout
     it = await item_on(chain, "implementation", wid="b", target=IN_PLACE)
     await it.database.write(
         lambda c: store.mark_rate_limited(c, "b", "implementation", "2000-01-01T00:00:00+00:00")
     )
+    if taken == "between-the-look-and-the-claim":
+        await it.database.write(lambda c: store.pause_work_item(c, "a", []))
+        claim = store.claim_for_run
+
+        def a_first(c, wid, **kw):
+            claim(c, "a", from_statuses=["paused"])
+            return claim(c, wid, **kw)
+
+        monkeypatch.setattr(store, "claim_for_run", a_first)
     before = len(it.events())
 
-    assert await rate_limit_retry.tick(stub_app(**_state(tmp_path))) == []
+    with caplog.at_level("INFO", logger="kraft.rate_limit_retry"):
+        assert await rate_limit_retry.tick(stub_app(**_state(tmp_path))) == []
     assert it.status() == "rate_limited"
     assert it.database.read(lambda c: store.cap_counts(c, "b")) == {}
     assert len(it.events()) == before
+    title = a.row()["title"]
+    assert f"b is waiting for the checkout: {title} is using it" in caplog.text
+    assert "no longer rate_limited" not in caplog.text

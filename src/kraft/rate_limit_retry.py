@@ -75,24 +75,8 @@ async def _retry_one(app, row) -> bool:
     st = app.state
     wid = row["id"]
     node_id = row["current_node_id"]
-    if st.db.read(lambda c: store.checkout_holder(c, wid)):
-        return False  # its checkout is busy: tried again next tick, nothing counted
-    retries = st.policy.rate_limit_retries if st.policy is not None else _DEFAULT_RETRIES
-    cap = policy_mod.Cap(attempts=retries, wall_clock_s=_NO_WALL_CAP)
-    count, _started_at, cap = await st.db.write(
-        lambda c: store.bump_counter(c, wid, _key(node_id), cap)
-    )
-    if count > cap.attempts:
-        await st.db.write(
-            lambda c: store.mark_needs_human(
-                c,
-                wid,
-                node_id,
-                f"rate_limit retries exhausted after {count - 1} attempt(s)",
-                kind=StopKind.CAP,
-            )
-        )
-        return False
+    if _waits_for_checkout(st, wid):
+        return False  # tried again next tick, nothing counted
 
     # Bracketed from *before* the claim to the hand-off. A claim makes this item
     # read `active`, and this poller's own `tick` SELECT filters
@@ -115,12 +99,31 @@ async def _retry_one(app, row) -> bool:
             lambda c: store.claim_for_run(c, wid, from_statuses=[WorkItemStatus.RATE_LIMITED])
         )
         if not claimed:
-            # Something else (a human abandoning it, most plausibly) already moved
+            # Another in-place item took the checkout since the look above, or
+            # something else (a human abandoning it, most plausibly) already moved
             # this item off `rate_limited` between the `due` SELECT and here.
             # `retry_after_cap` no longer flips status itself -- without this
             # check the poller would blindly claw an abandoned item back to
             # 'active' and spawn a walk into a worktree that may already be gone.
-            logger.info("rate-limit retry: %s is no longer rate_limited, skipping", wid)
+            if not _waits_for_checkout(st, wid):
+                logger.info("rate-limit retry: %s is no longer rate_limited, skipping", wid)
+            return False
+        # Counted only now: an attempt the claim refused was never made.
+        retries = st.policy.rate_limit_retries if st.policy is not None else _DEFAULT_RETRIES
+        cap = policy_mod.Cap(attempts=retries, wall_clock_s=_NO_WALL_CAP)
+        count, _started_at, cap = await st.db.write(
+            lambda c: store.bump_counter(c, wid, _key(node_id), cap)
+        )
+        if count > cap.attempts:
+            await st.db.write(
+                lambda c: store.mark_needs_human(
+                    c,
+                    wid,
+                    node_id,
+                    f"rate_limit retries exhausted after {count - 1} attempt(s)",
+                    kind=StopKind.CAP,
+                )
+            )
             return False
 
         # Kraft's own relaunch, so no cap counter resets (Kraft-s7c04.22).
@@ -163,6 +166,17 @@ async def _retry_one(app, row) -> bool:
             logger.warning("rate-limit retry: %s already has a live walk, skipping", wid)
             return False
         return True
+
+
+def _waits_for_checkout(st, wid: str) -> bool:
+    """Whether another in-place item is using `wid`'s checkout, logged in the
+    words the board uses for an item queued behind it."""
+    holder = st.db.read(lambda c: store.checkout_holder(c, wid))
+    if holder is None:
+        return False
+    title = st.db.read(lambda c: store.checkout_reason(c, holder))["held_by_title"]
+    logger.info("rate-limit retry: %s is waiting for the checkout: %s is using it", wid, title)
+    return True
 
 
 async def poller(app) -> None:
