@@ -882,10 +882,21 @@ async def slots_answer(st, wid: str) -> dict:
     return slots
 
 
-async def queued_answer(request: Request, wid: str, verb: str, body, from_statuses) -> dict:
-    """Hold a start request that passed every check but capacity, and answer
-    for it. `kraft.start_queue` makes the same request again when a slot
-    frees, so `body` is saved as the caller sent it."""
+#: What `queued_answer` says when the item left the statuses its door queues from.
+_NOT_QUEUEABLE = {
+    "retry": "work item is not stopped",
+    "escalate": "work item is not needs_human or paused",
+    "reply": "work item is no longer at its gate",
+}
+
+
+async def queued_answer(
+    request: Request, wid: str, verb: str, body, from_statuses, *, held_by: str | None = None
+) -> dict:
+    """Hold a start request that passed every check but capacity, or whose
+    checkout the in-place item `held_by` is using, and answer for it.
+    `kraft.start_queue` makes the same request again when a slot or the
+    checkout frees, so `body` is saved as the caller sent it."""
     st = request.app.state
     queued = await st.db.write(
         lambda c: store.queue_work_item(
@@ -895,13 +906,115 @@ async def queued_answer(request: Request, wid: str, verb: str, body, from_status
             body=body.model_dump(mode="json", exclude_defaults=True),
             headers=deps.caller_headers(request),
             from_statuses=from_statuses,
+            held_by=held_by,
         )
     )
     if not queued:
-        raise HTTPException(
-            409, "work item is not stopped" if verb == "retry" else "work item is not paused"
-        )
-    return {"id": wid, "status": WorkItemStatus.QUEUED, "slots": await slots_answer(st, wid)}
+        raise HTTPException(409, _NOT_QUEUEABLE.get(verb, "work item is not paused"))
+    held = st.db.read(lambda c: store.checkout_reason(c, held_by)) if held_by else {}
+    return {
+        "id": wid,
+        "status": WorkItemStatus.QUEUED,
+        "slots": await slots_answer(st, wid),
+        **held,
+    }
+
+
+def checkout_refusal(st, wid: str) -> HTTPException | None:
+    """The 409 for a door that cannot queue, when another in-place item is
+    using this item's checkout."""
+    holder = st.db.read(lambda c: store.checkout_holder(c, wid))
+    if holder is None:
+        return None
+    title = st.db.read(lambda c: store.checkout_reason(c, holder))["held_by_title"]
+    return HTTPException(409, f"the checkout is in use by {title}; try again when it stops")
+
+
+async def continue_held(wid: str, body: dict, request: Request) -> None:
+    """Kraft's own replay of a gate decision that waited for the checkout
+    (`store.hold_for_checkout`): the walk from `body["node"]`, with the
+    decision's steer (the item's pending one). Not a person's resume, so no
+    run boundary. Queued again, for its place, while the slot or the checkout
+    is still taken."""
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    limit = st.policy.max_concurrent if st.policy else 1
+    paused = [WorkItemStatus.PAUSED]
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        row["current_node_id"],
+        reason="a held gate decision claimed this item but could not start a walk",
+        handed_off=lambda: deps.task_is_live(request.app, wid),
+    ):
+        if not await st.db.write(
+            lambda c: store.claim_for_run(c, wid, from_statuses=paused, limit=limit)
+        ):
+            await st.db.write(
+                lambda c: store.queue_work_item(
+                    c,
+                    wid,
+                    verb="continue",
+                    body=body,
+                    headers={},
+                    from_statuses=paused,
+                    held_by=store.checkout_holder(c, wid),
+                )
+            )
+            return
+        nodes = store.effective_nodes(executor.chain_of(row), store.node_overrides_of(row))
+        steer = await st.db.write(lambda c: store.take_steer(c, wid))
+        try:
+            deps.spawn(
+                request.app,
+                wid,
+                deps.guard(
+                    st.db,
+                    wid,
+                    executor.run(
+                        st.db,
+                        st.run_dirs,
+                        work_item_id=wid,
+                        bd_cwd=deps.bd_cwd(),
+                        start_index=next(i for i, n in enumerate(nodes) if n.id == body["node"]),
+                        policy=st.policy,
+                        steer=steer,
+                        steer_source=body.get("steer_source", "human"),
+                        launch=deps.launch(st, row["repo"]),
+                        on_approve=deps._on_approve(st),
+                    ),
+                ),
+            )
+        except deps.AlreadyRunning:
+            raise HTTPException(409, "a walk is already running for this work item") from None
+
+
+async def self_retry_held(wid: str, body: dict, request: Request) -> None:
+    """Kraft's own replay of an escalation's self-retry that waited for the
+    checkout: `executor.resume_after_escalation` again, from the same cursor,
+    so the retry stays the agent's (counters kept, `escalated`) and its steer
+    is not checked as a person's. It queues itself again if the checkout is
+    taken by the time it claims."""
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    deps.spawn(
+        request.app,
+        wid,
+        deps.guard(
+            st.db,
+            wid,
+            executor.resume_after_escalation(
+                st.db,
+                st.run_dirs,
+                work_item_id=wid,
+                cursor=body["cursor"],
+                policy=st.policy,
+                launch=deps.launch(st, row["repo"]),
+                bd_cwd=deps.bd_cwd(),
+                on_approve=deps._on_approve(st),
+            ),
+        ),
+    )
 
 
 def blocked_refusal(row) -> str:
@@ -1139,6 +1252,10 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             lambda c: store.claim_for_run(c, wid, from_statuses=from_statuses, limit=limit)
         )
         if not claimed:
+            if holder := st.db.read(lambda c: store.checkout_holder(c, wid)):
+                return await queued_answer(
+                    request, wid, "resume", body, from_statuses, held_by=holder
+                )
             if st.db.read(store.active_count) >= limit:
                 return await queued_answer(request, wid, "resume", body, from_statuses)
             raise HTTPException(409, "work item is not paused")
@@ -1561,6 +1678,10 @@ async def _retry(wid: str, body: Retry, request: Request):
             lambda c: store.claim_for_run(c, wid, from_statuses=admitting(Verb.RETRY), limit=limit)
         )
         if not claimed:
+            if holder := st.db.read(lambda c: store.checkout_holder(c, wid)):
+                return await queued_answer(
+                    request, wid, "retry", asked, admitting(Verb.RETRY), held_by=holder
+                )
             if st.db.read(store.active_count) >= limit:
                 return await queued_answer(request, wid, "retry", asked, admitting(Verb.RETRY))
             raise HTTPException(409, "work item is not stopped")
@@ -2000,7 +2121,9 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
                 lambda c: store.claim_for_run(c, wid, from_statuses=admitting(Verb.SKIP))
             )
             if not claimed:
-                raise HTTPException(409, "work item status changed; try again")
+                raise checkout_refusal(st, wid) or HTTPException(
+                    409, "work item status changed; try again"
+                )
             note = (body.note or "").strip() or None
             session_ids = [s["id"] for s in sessions]
             # mark first, then signal: same race pause_work_item guards against —
@@ -2094,7 +2217,9 @@ async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPa
             )
         )
         if not claimed:
-            raise HTTPException(409, "work item status changed; try again")
+            raise checkout_refusal(st, wid) or HTTPException(
+                409, "work item status changed; try again"
+            )
         await st.db.write(lambda c: store.skip_scope(c, wid, target.path, note))
         try:
             deps.spawn(
@@ -2310,18 +2435,40 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     # got two agents committing to one worktree.
     if deps.task_is_live(request.app, wid):
         raise HTTPException(409, "a walk is already running for this work item")
+    if holder := st.db.read(lambda c: store.checkout_holder(c, wid)):
+        return await queued_answer(
+            request, wid, "escalate", body, admitting(Verb.ESCALATE), held_by=holder
+        )
+
+    headers = deps.caller_headers(request)
 
     async def _run_escalation() -> None:
         cursor_evts = st.db.read(lambda c: events.read_after(c, 0, wid))
         cursor = cursor_evts[-1]["seq"] if cursor_evts else 0
-        await escalate.dispatch(
-            st.db,
-            st.run_dirs,
-            work_item_id=wid,
-            message=message,
-            launch=deps.launch(st, row["repo"]),
-            new_thread=body.new_thread,
-        )
+        try:
+            await escalate.dispatch(
+                st.db,
+                st.run_dirs,
+                work_item_id=wid,
+                message=message,
+                launch=deps.launch(st, row["repo"]),
+                new_thread=body.new_thread,
+            )
+        except store.CheckoutBusy as exc:
+            # Taken since the check above: waits for it as if found then.
+            holder = exc.holder
+            await st.db.write(
+                lambda c: store.queue_work_item(
+                    c,
+                    wid,
+                    verb="escalate",
+                    body=body.model_dump(mode="json", exclude_defaults=True),
+                    headers=headers,
+                    from_statuses=admitting(Verb.ESCALATE),
+                    held_by=holder,
+                )
+            )
+            return
         # The agent may have called `kraft item retry` on itself mid-turn
         # (lifecycle.py's `work_item_self_retry_requested` deferral above) --
         # consume it the same way `gates.auto_escalate_stuck` does, or a

@@ -21,6 +21,7 @@ from kraft import policy as policy_mod
 from kraft.adapters import beads
 from kraft.addons.load import scope_problem
 from kraft.templates.models import GateNode
+from kraft.vocab import WorkItemStatus
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +200,26 @@ async def _start(app, repo: config_mod.RepoEntry, row: dict) -> str | None:
     except Exception:  # noqa: BLE001 -- one bad bead must not stop the poller
         logger.exception("auto-intake: could not file %s", row["id"])
         return None
+    filed = st.db.read(
+        lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+    if filed["status"] != WorkItemStatus.ACTIVE:
+        # Filed paused behind the in-place item using its checkout; the start
+        # queue starts it when that stops.
+        holder = st.db.read(lambda c: store.checkout_holder(c, wid))
+        await st.db.write(
+            lambda c: store.queue_work_item(
+                c,
+                wid,
+                verb="resume",
+                body={},
+                headers={},
+                from_statuses=[WorkItemStatus.PAUSED],
+                held_by=holder,
+            )
+        )
+        logger.info("auto-intake: queued %s from %s behind %s", wid, row["id"], holder)
+        return wid
     logger.info("auto-intake: started %s from %s", wid, row["id"])
     try:
         deps.spawn(

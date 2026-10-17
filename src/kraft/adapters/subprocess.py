@@ -736,6 +736,8 @@ async def run_task(
     #: a workspace member's, for a task fanned out into one. None mounts
     #: `cwd` alone, with no member (Kraft-ju36l).
     checkout: _sandbox.Checkout | None = None,
+    #: `store.create_session(takes_checkout=...)`: an agent outside the walk.
+    takes_checkout: bool = False,
 ) -> str:
     files = files or item_paths.session_files(run_dirs, work_item_id, session_id)
     # Kraft's own folder: the log, and the two sidecars below, are written
@@ -770,6 +772,7 @@ async def run_task(
             sandbox=backend.kind if backend is not None else None,
             model=model,
             repository=repository,
+            takes_checkout=takes_checkout,
         )
     )
 

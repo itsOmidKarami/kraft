@@ -330,7 +330,7 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
         )
 
     # Bracketed from *before* the claim to the hand-off. `store.approve_gate` is
-    # an unconditional `UPDATE work_items SET status = 'active'` -- a claim like
+    # an `UPDATE work_items SET status = 'active'` -- a claim like
     # any other, which `api/deps.py`'s `task_is_live` docstring already names:
     # "calling `store.approve_gate`/`apply_rejection` and only then discovering
     # `spawn` refuses would leave the gate cleared and the item `active` with no
@@ -346,7 +346,12 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
         reason="gate approval cleared the gate but could not start a walk",
         handed_off=lambda: deps.task_is_live(request.app, wid),
     ):
-        await st.db.write(lambda c: store.approve_gate(c, wid, gate, by=_decided_by(request)))
+        approval = await st.db.write(
+            lambda c: store.approve_gate(c, wid, gate, by=_decided_by(request))
+        )
+        if isinstance(approval, str):
+            # Approved, and queued to go on once the checkout frees.
+            return held_answer(st, wid, approval)
         start = board._gate_node_index(nodes, gate) + 1
         # Not item_folder: an in-place item's checkout is never rebased here.
         if _before_any_push(nodes, gate) and (st.run_dirs.worktrees / wid).is_dir():
@@ -373,6 +378,11 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
         except deps.AlreadyRunning:
             raise HTTPException(409, "a walk is already running for this work item") from None
         return deps.work_item_answer(st, wid)
+
+
+def held_answer(st, wid: str, holder: str) -> dict:
+    """The item, as a gate decision queued for its checkout leaves it."""
+    return deps.work_item_answer(st, wid) | st.db.read(lambda c: store.checkout_reason(c, holder))
 
 
 # Backward motion: 02 §7.2. Every gate on this path: Kraft-ko7j.
@@ -454,6 +464,8 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
         if target is None:
             # A spent reject loop goes to a human, not an agent (Ruling 176).
             return deps.work_item_answer(st, wid)
+        if isinstance(target, str):
+            return held_answer(st, wid, target)  # rejected, queued for the checkout
 
         try:
             deps.spawn(

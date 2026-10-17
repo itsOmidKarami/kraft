@@ -316,6 +316,20 @@ def _blocked_after(client, repo) -> tuple[str, str]:
     return dep, wid
 
 
+def _orchestrator_db():
+    """The running client's database, opened directly: `with _orchestrator_db() as c, c:`."""
+    return closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"))
+
+
+def _queue_tick(client) -> list[str]:
+    """One pass of the start queue (`kraft.start_queue.tick`); the ids it started."""
+    from functools import partial
+
+    from kraft import start_queue
+
+    return client.portal.call(partial(start_queue.tick, client.app))
+
+
 def _status_of(client, wid: str) -> str:
     return client.get(f"/api/work-items/{wid}").json()["status"]
 
@@ -419,13 +433,14 @@ def _create_escalation_session(
         conn.close()
 
 
-def _in_state(client, repo, state: dict) -> str:
-    """A default-chain item put in `state` (a `lifecycle_doors.json` row) directly."""
+def _in_state(client, repo, state: dict, **body) -> str:
+    """A default-chain item put in `state` (a `lifecycle_doors.json` row)
+    directly. `body` adds to the create body (`in_place`, `title`, ...)."""
     from kraft import events, store
     from kraft.templates.models import AgentTask
     from kraft.vocab import ThreadLabel
 
-    wid = _paused(client, repo, chain_template="default")
+    wid = _paused(client, repo, chain_template="default", **body)
     dep = _paused(client, repo, chain_template="default") if state.get("depends_on") else None
     with closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")) as c, c:
         c.execute(

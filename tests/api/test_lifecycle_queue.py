@@ -4,6 +4,9 @@ queue a start are pinned beside the doors themselves."""
 import asyncio
 import dataclasses
 import json
+import sqlite3
+import time
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -11,9 +14,13 @@ from support.api import (
     _force_node,
     _hold_storage,
     _in_state,
+    _orchestrator_db,
     _paused,
     _poll_events,
     _post_default,
+    _queue_tick,
+    _set_status,
+    _status_of,
 )
 
 DOORS = json.loads((Path(__file__).parent / "lifecycle_doors.json").read_text())
@@ -162,3 +169,342 @@ def test_an_item_with_a_worktree_is_not_held_by_the_storage_limit(client, repo):
     assert r.status_code == 200, r.text
     assert r.json().get("status") != "queued"
     assert client.get(f"/api/work-items/{wid}").json()["queued"] is None
+
+
+@pytest.mark.parametrize(
+    ("door", "state", "came_from"),
+    [("resume", "paused", "paused"), ("retry", "failed", "needs_human")],
+    ids=["resume", "retry"],
+)
+def test_resuming_behind_a_working_in_place_item_queues_and_says_who(
+    client, repo, door, state, came_from
+):
+    client.portal.call(client.app.state.queue_task.cancel)
+    tick = partial(_queue_tick, client)
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"][state], in_place=True)
+
+    r = client.post(f"/api/work-items/{wid}/{door}", json={})
+
+    held = {"why": "checkout", "held_by": working, "held_by_title": "A"}
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "queued"
+    assert r.json().items() >= held.items()
+
+    def queued():
+        return [
+            e
+            for e in _poll_events(client, wid, "work_item_queued")
+            if e["type"] == "work_item_queued"
+        ]
+
+    assert queued()[-1]["payload"] == {"verb": door, "from": came_from, **held}
+    assert tick() == []
+    assert len(queued()) == 1, "kept its place, not asked again"
+
+    _set_status(working, "paused")
+
+    assert tick() == [wid]
+
+
+@pytest.mark.parametrize(
+    ("state", "door", "body", "verb", "launch", "asked"),
+    [
+        (
+            "failed",
+            "escalate",
+            {"message": "look again"},
+            "escalate",
+            "kraft.escalate.dispatch",
+            ("message", "look again"),
+        ),
+        (
+            "gate",
+            "gates/spec_approval/review",
+            {"outcome": "comment"},
+            "reply",
+            "kraft.review_reply.run",
+            ("gate", "spec_approval"),
+        ),
+    ],
+    ids=["escalate", "reply"],
+)
+def test_a_session_outside_the_walk_waits_for_the_checkout(
+    client, repo, monkeypatch, state, door, body, verb, launch, asked
+):
+    """`in-place-sessions-take-the-lease`: no agent starts in a checkout another
+    in-place item is using; the request waits, queued, and runs as asked once
+    the checkout frees."""
+    client.portal.call(client.app.state.queue_task.cancel)
+    launched = []
+
+    async def spy(*a, **kw):
+        launched.append(kw)
+        return "done"
+
+    monkeypatch.setattr(launch, spy)
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"][state], in_place=True)
+
+    r = client.post(f"/api/work-items/{wid}/{door}", json=body)
+
+    held = {"why": "checkout", "held_by": working, "held_by_title": "A"}
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "queued"
+    assert r.json().items() >= held.items()
+    assert [e["payload"] for e in _of(client, wid, "work_item_queued")] == [
+        {"verb": verb, "from": "needs_human", **held}
+    ]
+    assert _queue_tick(client) == []
+    assert launched == []
+
+    _set_status(working, "paused")
+
+    assert _queue_tick(client) == [wid]
+    deadline = time.monotonic() + 10
+    while not launched and time.monotonic() < deadline:
+        time.sleep(0.05)
+    [kw] = launched
+    assert kw[asked[0]] == asked[1]
+
+
+def test_a_second_comment_while_the_reply_waits_queues_nothing_more(client, repo, monkeypatch):
+    """The waiting reply answers every thread unanswered when it runs."""
+    client.portal.call(client.app.state.queue_task.cancel)
+    launched = []
+
+    async def spy(*a, **kw):
+        launched.append(kw)
+        return "done"
+
+    monkeypatch.setattr("kraft.review_reply.run", spy)
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"]["gate"], in_place=True)
+    review = f"/api/work-items/{wid}/gates/spec_approval/review"
+    client.post(review, json={"outcome": "comment"})
+
+    r = client.post(review, json={"outcome": "comment"})
+
+    assert r.status_code == 200, r.text
+    assert (r.json()["status"], r.json()["reply_agent"]) == ("queued", False)
+    assert len(_of(client, wid, "work_item_queued")) == 1
+    _set_status(working, "paused")
+    assert _queue_tick(client) == [wid]
+    deadline = time.monotonic() + 10
+    while not launched and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert len(launched) == 1
+
+
+@pytest.mark.parametrize(
+    ("state", "door", "body", "verb"),
+    [
+        ("failed", "escalate", {"message": "look again"}, "escalate"),
+        ("gate", "gates/spec_approval/review", {"outcome": "comment"}, "reply"),
+    ],
+    ids=["escalate", "reply"],
+)
+def test_a_checkout_taken_after_the_doors_look_still_gets_no_second_session(
+    client, repo, monkeypatch, state, door, body, verb
+):
+    """The door found the checkout free; another item took it before the agent's
+    session was written. The session is refused, and the request waits."""
+    from kraft import executor
+
+    client.portal.call(client.app.state.queue_task.cancel)
+    working = _in_state(client, repo, DOORS["states"]["paused"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"][state], in_place=True)
+    if verb == "reply":
+        client.post(
+            f"/api/work-items/{wid}/threads",
+            json={
+                "body": "why?",
+                "file_path": "a.py",
+                "side": "new",
+                "start_line": 1,
+                "end_line": 1,
+                "label": "question",
+            },
+        )
+    restore = executor.restore_pins
+
+    async def taken_meanwhile(row):
+        _set_status(working, "active")
+        return await restore(row)
+
+    monkeypatch.setattr(executor, "restore_pins", taken_meanwhile)
+
+    r = client.post(f"/api/work-items/{wid}/{door}", json=body)
+
+    assert r.status_code == 200, r.text
+    assert r.json().get("status") != "queued", "the door saw the checkout taken"
+    deadline = time.monotonic() + 10
+    while _status_of(client, wid) != "queued" and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert [e["payload"] for e in _of(client, wid, "work_item_queued")] == [
+        {
+            "verb": verb,
+            "from": "needs_human",
+            "why": "checkout",
+            "held_by": working,
+            "held_by_title": "A",
+        }
+    ]
+    with _orchestrator_db() as c:
+        assert (
+            c.execute(
+                "SELECT COUNT(*) FROM worker_sessions WHERE work_item_id = ?", (wid,)
+            ).fetchone()[0]
+            == 0
+        )
+
+
+@pytest.mark.parametrize(
+    "body", [{}, {"path": "implementation.main.implement"}], ids=["node", "task"]
+)
+def test_skipping_behind_a_working_in_place_item_is_refused(client, repo, body):
+    _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"]["failed"], in_place=True)
+
+    r = client.post(f"/api/work-items/{wid}/skip", json=body)
+
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "the checkout is in use by A; try again when it stops"
+
+
+def _of(client, wid, type_):
+    return [e for e in client.get(f"/api/work-items/{wid}/events").json() if e["type"] == type_]
+
+
+@pytest.mark.parametrize(
+    ("decision", "body", "recorded"),
+    [("approve", {}, "gate_approved"), ("reject", {"note": "redo it"}, "gate_rejected")],
+    ids=["approve", "reject"],
+)
+def test_a_gate_decision_behind_a_working_in_place_item_is_kept_and_goes_on_later(
+    client, repo, monkeypatch, decision, body, recorded
+):
+    """Recorded at once, queued for the checkout, and replayed as Kraft's own
+    walk from where the decision sends it: past an approved gate, or at a
+    rejection's target -- never the gate asked again."""
+    client.portal.call(client.app.state.queue_task.cancel)
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"]["gate"], in_place=True)
+
+    r = client.post(f"/api/work-items/{wid}/gates/spec_approval/{decision}", json=body)
+
+    assert r.status_code == 200, r.text
+    assert (r.json()["status"], r.json()["held_by"]) == ("queued", working)
+    [decided] = _of(client, wid, recorded)
+    assert decided["payload"]["gate"] == "spec_approval"
+    assert [e["payload"] for e in _of(client, wid, "work_item_queued")] == [
+        {
+            "verb": "continue",
+            "from": "paused",
+            "why": "checkout",
+            "held_by": working,
+            "held_by_title": "A",
+        }
+    ]
+    nodes = [
+        n["id"]
+        for n in json.loads(client.get(f"/api/work-items/{wid}").json()["materialized_chain"])[
+            "chain"
+        ]["nodes"]
+    ]
+    goes_on_at = (
+        nodes[nodes.index("spec_approval") + 1]
+        if decision == "approve"
+        else decided["payload"]["node"]
+    )
+
+    from kraft import executor
+
+    steers, real_run = [], executor.run
+    monkeypatch.setattr(
+        executor, "run", lambda *a, **kw: steers.append(kw["steer"]) or real_run(*a, **kw)
+    )
+    _set_status(working, "paused")
+
+    assert _queue_tick(client) == [wid]
+    assert steers == [body.get("note")]
+    _poll_events(client, wid, "node_started")
+    assert _of(client, wid, "node_started")[0]["payload"]["node_id"] == goes_on_at
+    assert not _of(client, wid, "work_item_resumed"), "replayed as a person's resume"
+    if decision == "approve":
+        assert len(_of(client, wid, "gate_requested")) == 1, "the gate was asked again"
+
+
+def test_a_held_rejection_paused_and_resumed_by_hand_keeps_its_re_run(client, repo):
+    """The queued request goes with the pause; the re-run does not."""
+    client.portal.call(client.app.state.queue_task.cancel)
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"]["gate"], in_place=True)
+    client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "redo it"})
+    [rejected] = _of(client, wid, "gate_rejected")
+    _set_status(working, "paused")
+    assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
+
+    r = client.post(f"/api/work-items/{wid}/resume", json={})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["steer"] == "redo it"
+    evts = _poll_events(client, wid, "node_started")
+    after = [e for e in evts if e["seq"] > rejected["seq"]]
+    first = next(e for e in after if e["type"] in ("node_started", "gate_requested"))
+    assert first["type"] == "node_started", "the gate was asked again"
+    assert first["payload"]["node_id"] == rejected["payload"]["node"]
+
+
+def test_a_self_retry_queued_for_the_checkout_is_replayed_as_the_agents(client, repo):
+    """`only-a-person-resets-a-cap-counter`: the replay is the escalation's own retry."""
+    from kraft import events, store
+
+    client.portal.call(client.app.state.queue_task.cancel)
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+    wid = _in_state(client, repo, DOORS["states"]["failed"], in_place=True)
+    with _orchestrator_db() as c, c:
+        c.row_factory = sqlite3.Row
+        cursor = events.read_after(c, 0, wid)[-1]["seq"]
+        events.append(
+            c,
+            wid,
+            "work_item_self_retry_requested",
+            {"node_id": "implementation", "key": None, "gate_key": None, "steer": "fixed it"},
+        )
+        assert store.queue_work_item(
+            c,
+            wid,
+            verb="self_retry",
+            body={"cursor": cursor},
+            headers={},
+            from_statuses=["needs_human"],
+            held_by=working,
+        )
+    assert _queue_tick(client) == []
+
+    _set_status(working, "paused")
+
+    assert _queue_tick(client) == [wid]
+    [retried] = [
+        e
+        for e in _poll_events(client, wid, "work_item_retried")
+        if e["type"] == "work_item_retried"
+    ]
+    assert retried["payload"]["escalated"] is True
+    assert retried["payload"]["steer"] == "fixed it"
+    assert not _of(client, wid, "cap_counters_reset")
+
+
+def test_an_autostart_behind_a_working_in_place_item_is_filed_queued(client, repo):
+    working = _in_state(client, repo, DOORS["states"]["running"], in_place=True, title="A")
+
+    r = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "in_place": True, "autostart": True},
+    )
+
+    assert r.json()["status"] == "queued", r.text
+    assert r.json()["held_by"] == working
+    [queued] = _of(client, r.json()["id"], "work_item_queued")
+    assert queued["payload"]["held_by"] == working

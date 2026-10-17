@@ -76,16 +76,29 @@ async def tick(app) -> list[str]:
     await st.db.write(store.release_blocked)
     started: list[str] = []
     for wid in st.db.read(store.queued_ids):
-        if st.db.read(store.active_count) >= limit:
-            break
+        if st.db.read(store.active_count) >= limit and not _slotless(st, wid):
+            continue
         if storage.holds(st, wid):
             # Keeps its place, and is not asked again each tick (its door would
             # write another `work_item_storage_held`). A start behind it that
             # has a worktree still goes.
             continue
+        if st.db.read(lambda c, wid=wid: store.checkout_holder(c, wid)):
+            continue  # keeps its place until the in-place item using its checkout stops
         if await _start_one(app, wid):
             started.append(wid)
     return started
+
+
+#: Verbs that start an agent beside the walk, never a walk: they take no slot.
+_SLOTLESS = ("escalate", "reply")
+
+
+def _slotless(st, wid: str) -> bool:
+    row = st.db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+    return (store.queued_request_of(row) or {}).get("verb") in _SLOTLESS
 
 
 async def _start_one(app, wid: str) -> bool:
@@ -97,7 +110,8 @@ async def _start_one(app, wid: str) -> bool:
 
 
 async def _take_and_start(app, wid: str) -> bool:
-    from kraft.api.routes import lifecycle  # deferred: kraft.api starts this module's poller
+    # deferred: kraft.api starts this module's poller
+    from kraft.api.routes import lifecycle, review
 
     st = app.state
     saved = await st.db.write(lambda c: store.take_queued(c, wid))
@@ -107,6 +121,14 @@ async def _take_and_start(app, wid: str) -> bool:
     try:
         if saved["verb"] == "retry":
             await lifecycle._retry(wid, lifecycle.Retry(**saved["body"]), request)
+        elif saved["verb"] == "continue":
+            await lifecycle.continue_held(wid, saved["body"], request)
+        elif saved["verb"] == "self_retry":
+            await lifecycle.self_retry_held(wid, saved["body"], request)
+        elif saved["verb"] == "escalate":
+            await lifecycle.escalate_work_item(wid, lifecycle.Escalate(**saved["body"]), request)
+        elif saved["verb"] == "reply":
+            await review.reply_held(wid, saved["body"], request)
         else:
             await lifecycle.resume_work_item(wid, lifecycle.Resume(**saved["body"]), request)
     except asyncio.CancelledError:
@@ -145,6 +167,7 @@ def _requeue(conn, wid: str, saved: dict) -> None:
         body=saved["body"],
         headers=saved["headers"],
         from_statuses=[saved["from"]],
+        held_by=store.checkout_holder(conn, wid),
     ):
         store.keep_place(conn, wid, saved["at"])
 

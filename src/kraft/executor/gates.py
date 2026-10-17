@@ -157,9 +157,11 @@ async def apply_rejection(
     node: str | None = None,
     by: str = "human",
     verdict: str | None = None,
-) -> int | None:
+) -> int | str | None:
     """Record a gate rejection and return the node index the chain re-enters at,
-    or None when the reject loop's cap breached and the item is now parked.
+    or None when the reject loop's cap breached and the item is now parked, or
+    the id of the in-place item using its checkout, when the re-run is queued
+    behind it (`store.reject_gate`).
 
     One function, two callers: the `POST .../reject` endpoint (a human) and
     `review_gates` (an agent's verdict). They must not drift -- an agent
@@ -184,7 +186,7 @@ async def apply_rejection(
     span = [
         n.id for n in nodes[target:gate_index] if isinstance(n.node, ExecNode) and n.node.fix_loop
     ]
-    await db.write(
+    holder = await db.write(
         lambda c: store.reject_gate(
             c,
             work_item_id,
@@ -198,7 +200,7 @@ async def apply_rejection(
         )
     )
     if replan:
-        return target
+        return holder or target
     await db.write(
         lambda c: store.mark_needs_human(
             c,
@@ -446,14 +448,27 @@ async def review_gates(
         # artifact edited, or shown to a person, between this line and the
         # approval below is exactly the race `seen` exists to catch.
         seen = _chain_revision_seen(run_dirs, row, gate, node, launch)
-        verdict, note = await gate_review.review(
-            db,
-            run_dirs,
-            work_item_id=work_item_id,
-            gate=gate,
-            node=node,
-            launch=launch,
-        )
+        try:
+            verdict, note = await gate_review.review(
+                db,
+                run_dirs,
+                work_item_id=work_item_id,
+                gate=gate,
+                node=node,
+                launch=launch,
+            )
+        except store.CheckoutBusy as exc:
+            # Closes the attempt its `_started` opened: the gate is the person's.
+            await db.write(
+                lambda c, gate=gate, note=str(exc): events.append(
+                    c,
+                    work_item_id,
+                    GateEvent.AUTO_REVIEW_SKIPPED,
+                    {"gate": gate, "reason": "checkout", "note": note},
+                    node_id=gate,
+                )
+            )
+            return status
 
         # The agent may have worked for minutes. A decision a person made in the
         # meantime outranks a verdict computed against the state before it.
@@ -534,9 +549,11 @@ async def review_gates(
                         )
                     )
                     return "needs_human"
-                await db.write(
+                approval = await db.write(
                     lambda c, gate=gate: store.approve_gate(c, work_item_id, gate, by="agent")
                 )
+                if isinstance(approval, str):
+                    return status_of(db, work_item_id)  # approved, queued for the checkout
                 start, steer = gate_node_index(approved, gate) + 1, None
             else:
                 # `fixed` is a rejection that repaired something on its way out, so
@@ -564,6 +581,8 @@ async def review_gates(
                 )
                 if target is None:
                     return "needs_human"
+                if isinstance(target, str):
+                    return status_of(db, work_item_id)  # rejected, queued for the checkout
                 start, steer = target, note
 
             status = await walk.run_once(
@@ -1046,15 +1065,27 @@ async def auto_escalate_stuck(
         )
         return status
     cursor = evts[-1]["seq"] if evts else 0
-    await escalate.dispatch(
-        db,
-        run_dirs,
-        work_item_id=work_item_id,
-        message=_AUTO_ESCALATE_MESSAGE,
-        launch=launch,
-        auto=True,
-        evts=evts,
-    )
+    try:
+        await escalate.dispatch(
+            db,
+            run_dirs,
+            work_item_id=work_item_id,
+            message=_AUTO_ESCALATE_MESSAGE,
+            launch=launch,
+            auto=True,
+            evts=evts,
+        )
+    except store.CheckoutBusy:
+        await db.write(
+            lambda c: events.append(
+                c,
+                work_item_id,
+                EscalationEvent.WORK_ITEM_AUTO_ESCALATE_SKIPPED,
+                {"reason": "checkout"},
+                node_id=row["current_node_id"],
+            )
+        )
+        return status
     return await resume_after_escalation(
         db,
         run_dirs,
@@ -1164,6 +1195,21 @@ async def resume_after_escalation(
             lambda c: store.claim_for_run(c, work_item_id, from_statuses=admitting(Verb.RETRY))
         )
         if not claimed:
+            if holder := db.read(lambda c: store.checkout_holder(c, work_item_id)):
+                # The retry stands, queued until the checkout frees.
+                # Replayed by this function, as Kraft's own retry (`self_retry`).
+                await db.write(
+                    lambda c: store.queue_work_item(
+                        c,
+                        work_item_id,
+                        verb="self_retry",
+                        body={"cursor": cursor},
+                        headers={},
+                        from_statuses=admitting(Verb.RETRY),
+                        held_by=holder,
+                    )
+                )
+                return status_of(db, work_item_id)
             status = status_of(db, work_item_id)
             await db.write(
                 lambda c: events.append(

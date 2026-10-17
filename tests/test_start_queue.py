@@ -3,11 +3,7 @@
 import asyncio
 import dataclasses
 import json
-import os
-import sqlite3
-from contextlib import closing
 from functools import partial
-from pathlib import Path
 
 import pytest
 from support.api import (
@@ -20,12 +16,15 @@ from support.api import (
     _set_status,
     _status_of,
 )
+from support.api import (
+    _orchestrator_db as _db,
+)
+from support.api import (
+    _queue_tick as _tick,
+)
+from support.harness import v1_named_chain
 
 from kraft import start_queue
-
-
-def _db():
-    return closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"))
 
 
 @pytest.fixture
@@ -48,10 +47,6 @@ def board(client, repo):
     _set_status(busy, "active")
     client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
     return busy
-
-
-def _tick(client):
-    return client.portal.call(partial(start_queue.tick, client.app))
 
 
 def test_the_queue_starts_the_earliest_item_when_a_slot_frees(client, repo, board):
@@ -236,6 +231,24 @@ def test_a_start_cancelled_by_a_shutdown_goes_back_in_the_queue_in_its_place(
     assert held == ([] if claimed else [(first, "go left")]) + [(second, "go left")]
 
 
+async def test_a_start_put_back_by_a_shutdown_still_says_who_has_the_checkout(
+    item_on, run_dirs, database
+):
+    from kraft import store
+    from kraft.templates.environment import WorkItemTarget
+
+    in_place = WorkItemTarget.for_repository("sample", in_place=True)
+    chain = v1_named_chain(run_dirs.base / "t")
+    await item_on(chain, wid="a", target=in_place)
+    b = await item_on(chain, wid="b", target=in_place)
+    await database.write(lambda c: store.pause_work_item(c, "b", []))
+    saved = {"verb": "resume", "body": {}, "headers": {}, "from": "paused", "at": "2026-01-01"}
+
+    await database.write(lambda c: start_queue._requeue(c, "b", saved))
+
+    assert b.events("work_item_queued")[-1]["payload"]["held_by"] == "a"
+
+
 def test_the_rebuilt_request_names_the_app_and_the_caller(client):
     request = start_queue._request(client.app, {"x-kraft-session-id": "s1"})
     assert request.app is client.app
@@ -260,6 +273,43 @@ def test_a_blocked_item_starts_once_what_it_comes_after_completes(client, repo, 
     _poll_events(client, wid, "work_item_resumed")
     types = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
     assert types.index("work_item_unblocked") < types.index("work_item_resumed")
+
+
+def test_an_escalation_waiting_behind_a_walk_starts_on_a_full_board(
+    client, repo, stopped, board, monkeypatch
+):
+    """It runs beside the walk and takes no slot; the walk ahead of it still waits."""
+    import sqlite3
+
+    from kraft import store
+
+    asked = []
+
+    async def dispatch(*a, **kw):
+        asked.append(kw["message"])
+        return "done"
+
+    monkeypatch.setattr("kraft.escalate.dispatch", dispatch)
+    new = _paused(client, repo, chain_template="default")
+    assert client.post(f"/api/work-items/{new}/resume", json={}).json()["status"] == "queued"
+    with _db() as c, c:
+        c.row_factory = sqlite3.Row
+        assert store.queue_work_item(
+            c,
+            stopped,
+            verb="escalate",
+            body={"message": "look"},
+            headers={},
+            from_statuses=["needs_human"],
+        )
+
+    assert _tick(client) == [stopped]
+    assert _status_of(client, new) == "queued"
+    for _ in range(200):
+        if asked:
+            break
+        client.portal.call(asyncio.sleep, 0.05)
+    assert asked == ["look"]
 
 
 def test_a_released_item_waits_in_the_queue_when_the_board_is_full(client, repo, board):

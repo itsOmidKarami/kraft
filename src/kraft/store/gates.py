@@ -8,6 +8,7 @@ from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store import chain
 from kraft.store._common import write_status
 from kraft.store.counters import reset_fix_loops
+from kraft.store.work_items import checkout_holder, queue_work_item, set_steer
 from kraft.vocab import ChainEvent, GateEvent, WorkItemEvent
 
 
@@ -21,8 +22,14 @@ def request_gate(conn: sqlite3.Connection, work_item_id, node_id, gate) -> None:
     events.append(conn, work_item_id, GateEvent.REQUESTED, {"gate": gate, "node_id": node_id})
 
 
-def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "human") -> None:
-    """Clear the gate and set the item running again.
+def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "human") -> bool | str:
+    """Clear the gate and set the item running again. True when it is running.
+
+    While another in-place item works in this item's checkout
+    (`checkout_holder`), the approval is still recorded, the item is paused
+    and queued to go on from the gate once the checkout frees
+    (`hold_for_checkout`), and the holder's id is returned. False, and
+    nothing written, for an ended item.
 
     Also closes the gate node's own `node_started`/`node_completed` pair. A V1
     gate *is* a node (`gate-is-an-ordered-node`) and `gates.maybe_gate` enters
@@ -37,14 +44,37 @@ def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "hum
     completion: the gate reopens, and `gate_rejected` already says so.
     `complete_node` is idempotent, so re-approving writes one event.
     """
+    holder = checkout_holder(conn, work_item_id)
     if not write_status(
         conn,
-        "UPDATE work_items SET status = 'active', updated_at = ? WHERE id = ?",
+        "UPDATE work_items SET status = 'active', updated_at = ? WHERE id = ?"
+        if holder is None
+        else "UPDATE work_items SET status = 'paused', updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     ):
-        return
+        return False
     events.append(conn, work_item_id, GateEvent.APPROVED, {"gate": gate, "by": by}, node_id=gate)
     chain.complete_node(conn, work_item_id, gate)
+    if holder is None:
+        return True
+    hold_for_checkout(conn, work_item_id, holder, {"node": gate})
+    return holder
+
+
+def hold_for_checkout(conn: sqlite3.Connection, work_item_id, holder: str, body: dict) -> None:
+    """Queue a paused item's gate decision to go on as Kraft's own walk from
+    `body["node"]`, with the item's pending steer (`continue`,
+    `kraft.start_queue`), not as a person's resume: the decision is already
+    recorded, and its replay is not a new one."""
+    queue_work_item(
+        conn,
+        work_item_id,
+        verb="continue",
+        body=body,
+        headers={},
+        from_statuses=["paused"],
+        held_by=holder,
+    )
 
 
 def pass_unchanged_revision(conn: sqlite3.Connection, work_item_id, gate, rationale) -> None:
@@ -107,10 +137,15 @@ def reject_gate(
     by: str = "human",
     verdict: str | None = None,
     rerun: Sequence[str] = (),
-) -> None:
+) -> str | None:
     """Record the rejection. `reopen` flips the item back to active for the
     backward-motion re-run (02 §7.2); a rejection that breached the gate's
     reject loop leaves it needs_human.
+
+    A reopen while another in-place item works in this item's checkout
+    (`checkout_holder`) pauses the item instead and queues the re-run from
+    `node`, with the note as its steer (`hold_for_checkout`); the holder's id
+    is returned. None otherwise.
 
     `rerun` is the nodes with a fix loop that the re-run measures again: a
     rejection that reopens gives them their rounds back
@@ -134,13 +169,14 @@ def reject_gate(
     session logs in order by hand (Kraft-s7c04.16). Rides the event alongside
     `note` and `node` for the reason those do.
     """
-    status = "'active'" if reopen else "status"
+    holder = checkout_holder(conn, work_item_id) if reopen else None
+    status = "status" if not reopen else "'active'" if holder is None else "'paused'"
     if not write_status(
         conn,
         f"UPDATE work_items SET status = {status}, updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     ):
-        return
+        return None
     events.append(
         conn,
         work_item_id,
@@ -149,6 +185,21 @@ def reject_gate(
     )
     if reopen:
         reset_fix_loops(conn, work_item_id, list(rerun), by)
+    if holder is not None:
+        # The re-run is kept on the row, not only in the queued request, so a
+        # person who pauses the held item and resumes it by hand gets it too:
+        # the cursor at its target, the note as the next steer.
+        if node is not None:
+            conn.execute(
+                "UPDATE work_items SET current_node_id = ?, current_step = 0 WHERE id = ?",
+                (node, work_item_id),
+            )
+        if note:
+            set_steer(conn, work_item_id, note)
+        # An agent's note is not a person's steer (`walk.run`'s `steer_source`).
+        source = {"steer_source": "gate_review"} if by == "agent" else {}
+        hold_for_checkout(conn, work_item_id, holder, {"node": node, **source})
+    return holder
 
 
 #: Events that mean the newest rejection has already been acted on, so its note

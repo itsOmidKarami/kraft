@@ -70,10 +70,8 @@ async def run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> s
         return await _run(
             db, run_dirs, work_item_id=work_item_id, gate=gate, nodes=nodes, launch=launch
         )
-    except asyncio.CancelledError:
-        raise
-    except AssertionError:
-        raise
+    except (asyncio.CancelledError, AssertionError, store.CheckoutBusy):
+        raise  # CheckoutBusy: nothing started; the caller queues or skips it
     except Exception as exc:  # noqa: BLE001
         logger.exception("reply agent failed for %s at gate %s", work_item_id, gate)
         error = repr(exc)
@@ -186,6 +184,7 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
         repo_entry=launch.repo_entry,
         time_cap=time_cap,
         harness_id=task.task.harness,
+        takes_checkout=True,
     )
     files = read_only.changed(db, row, launch, worktree, before)
     if files:

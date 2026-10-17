@@ -75,6 +75,8 @@ async def _retry_one(app, row) -> bool:
     st = app.state
     wid = row["id"]
     node_id = row["current_node_id"]
+    if st.db.read(lambda c: store.checkout_holder(c, wid)):
+        return False  # its checkout is busy: tried again next tick, nothing counted
     retries = st.policy.rate_limit_retries if st.policy is not None else _DEFAULT_RETRIES
     cap = policy_mod.Cap(attempts=retries, wall_clock_s=_NO_WALL_CAP)
     count, _started_at, cap = await st.db.write(

@@ -33,3 +33,33 @@ IF a workspace item would run in place, THEN the system SHALL refuse to file
 it.
 enforced-by: tests/api/test_workspace_intake.py::test_a_workspace_selection_that_cannot_assemble_is_a_422[in-place], tests/api/test_workspace_intake.py::test_a_workspace_selection_that_cannot_assemble_is_a_422[in-an-in-place-root], tests/templates/test_environment.py::test_a_workspace_target_cannot_run_in_place
 origin: src/kraft/templates/environment.py §WorkItemTarget._kind_owns_its_fields
+
+## REQ one-in-place-item-works-per-repo
+
+WHILE an in-place item of a repository is active, the system SHALL queue any
+other in-place item of that repository that would become active, with a reason
+naming the item holding the checkout.
+enforced-by: tests/api/test_lifecycle_queue.py::test_resuming_behind_a_working_in_place_item_queues_and_says_who[resume], tests/api/test_lifecycle_queue.py::test_resuming_behind_a_working_in_place_item_queues_and_says_who[retry], tests/api/test_lifecycle_queue.py::test_a_gate_decision_behind_a_working_in_place_item_is_kept_and_goes_on_later[approve], tests/api/test_lifecycle_queue.py::test_a_gate_decision_behind_a_working_in_place_item_is_kept_and_goes_on_later[reject], tests/api/test_lifecycle_queue.py::test_a_held_rejection_paused_and_resumed_by_hand_keeps_its_re_run, tests/api/test_lifecycle_queue.py::test_a_self_retry_queued_for_the_checkout_is_replayed_as_the_agents, tests/api/test_lifecycle_queue.py::test_an_autostart_behind_a_working_in_place_item_is_filed_queued, tests/test_intake.py::test_a_pickup_behind_a_working_in_place_item_is_queued_not_started, tests/executor/test_escalation.py::test_a_self_retry_behind_a_working_in_place_item_is_queued, tests/skills/test_gate_review.py::test_an_agent_verdict_behind_a_working_in_place_item_is_queued[approve], tests/skills/test_gate_review.py::test_an_agent_verdict_behind_a_working_in_place_item_is_queued[reject], tests/store/test_work_items.py::test_the_lease_is_the_folder_not_its_spelling, tests/store/test_work_items.py::test_a_live_escalation_session_holds_the_checkout
+origin: src/kraft/store/work_items.py §checkout_holder
+
+## REQ in-place-gate-holds-no-checkout
+
+WHILE an in-place item waits at a gate, is paused, waits, or is stopped, the
+system SHALL NOT hold the checkout against another in-place item.
+enforced-by: tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[needs-human], tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[paused], tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[waiting], tests/store/test_work_items.py::test_a_parked_in_place_item_holds_no_checkout[at-a-gate]
+origin: src/kraft/store/work_items.py §checkout_holder
+
+## REQ worktree-items-ignore-the-checkout-lease
+
+The system SHALL NOT queue a worktree item behind an in-place item's checkout
+lease.
+enforced-by: tests/store/test_work_items.py::test_a_second_in_place_item_in_one_checkout_is_not_claimed[claim_for_run], tests/store/test_work_items.py::test_a_second_in_place_item_in_one_checkout_is_not_claimed[mark_reentered], tests/store/test_work_items.py::test_a_second_in_place_item_in_one_checkout_is_not_claimed[approve_gate], tests/store/test_work_items.py::test_a_second_in_place_item_in_one_checkout_is_not_claimed[reject_gate]
+origin: src/kraft/store/work_items.py §checkout_holder
+
+## REQ in-place-sessions-take-the-lease
+
+WHEN an escalation, review-reply or gate-review agent starts for an in-place
+item, the system SHALL take the checkout lease and run the same checks as a
+walk task.
+enforced-by: tests/api/test_lifecycle_queue.py::test_a_session_outside_the_walk_waits_for_the_checkout[escalate], tests/api/test_lifecycle_queue.py::test_a_session_outside_the_walk_waits_for_the_checkout[reply], tests/api/test_lifecycle_queue.py::test_a_checkout_taken_after_the_doors_look_still_gets_no_second_session[escalate], tests/api/test_lifecycle_queue.py::test_a_checkout_taken_after_the_doors_look_still_gets_no_second_session[reply], tests/store/test_session_checkout.py::test_an_agent_outside_the_walk_gets_no_session_beside_a_working_in_place_item[outside-the-walk], tests/store/test_session_checkout.py::test_an_agent_outside_the_walk_gets_no_session_beside_a_working_in_place_item[any-other-session], tests/skills/test_gate_review.py::test_a_review_behind_a_working_in_place_item_leaves_the_gate_to_a_person, tests/test_review_reply.py::test_no_reply_agent_starts_behind_a_working_in_place_item, tests/executor/test_gates_feedback.py::test_a_reply_agent_refused_its_checkout_leaves_the_gate_open_and_says_why, tests/executor/test_escalation.py::test_an_auto_escalation_refused_its_checkout_is_skipped
+origin: src/kraft/store/sessions.py §create_session

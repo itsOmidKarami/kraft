@@ -2169,14 +2169,25 @@ async def run_once(
                 # local: avoids an import cycle through kraft.executor
                 from kraft import review_reply
 
-                await review_reply.run(
-                    db,
-                    run_dirs,
-                    work_item_id=work_item_id,
-                    gate=node.id,
-                    nodes=nodes,
-                    launch=launch,
-                )
+                try:
+                    await review_reply.run(
+                        db,
+                        run_dirs,
+                        work_item_id=work_item_id,
+                        gate=node.id,
+                        nodes=nodes,
+                        launch=launch,
+                    )
+                except store.CheckoutBusy as exc:
+                    await db.write(
+                        lambda c, why=str(exc), gate=node.id: events.append(
+                            c,
+                            work_item_id,
+                            GateEvent.REPLY_AGENT_SKIPPED,
+                            {"gate": gate, "reason": why},
+                            node_id=gate,
+                        )
+                    )
             return "awaiting_gate"
         if isinstance(node.node, GateNode):
             # Cleared: its approval already completed it (`store.approve_gate`),

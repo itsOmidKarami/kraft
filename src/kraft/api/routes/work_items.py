@@ -519,8 +519,9 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     )
     if row["status"] not in HOLDS_SLOT:
         # Lost the capacity race inside `intake`'s own INSERT (Kraft-m43g,
-        # Kraft-nxht): filed, and queued for the slot it asked for. `slots`
-        # says why it is not running yet.
+        # Kraft-nxht), or its checkout is in use: filed, and queued for the
+        # slot or the checkout. `slots` and the reason say why it waits.
+        holder = st.db.read(lambda c: store.checkout_holder(c, wid))
         await st.db.write(
             lambda c: store.queue_work_item(
                 c,
@@ -529,10 +530,12 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
                 body={},
                 headers=deps.caller_headers(request),
                 from_statuses=[WorkItemStatus.PAUSED],
+                held_by=holder,
             )
         )
         slots = await lifecycle.slots_answer(st, wid)
-        return {"id": wid, "status": WorkItemStatus.QUEUED, "slots": slots, **extra}
+        held = st.db.read(lambda c: store.checkout_reason(c, holder)) if holder else {}
+        return {"id": wid, "status": WorkItemStatus.QUEUED, "slots": slots, **held, **extra}
 
     deps.spawn(
         request.app,

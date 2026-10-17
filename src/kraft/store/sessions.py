@@ -10,6 +10,7 @@ from kraft import events, ids, item_paths
 from kraft import usage as _usage
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import _span_ms
+from kraft.store.work_items import CheckoutBusy, checkout_holder, checkout_reason
 from kraft.usage import Usage
 from kraft.vocab import (
     LIVE,
@@ -60,6 +61,10 @@ def create_session(
     #: The repository a fanned-out run (`scope: each_repository`) is for; None
     #: for a task that does not fan out.
     repository: str | None = None,
+    #: An agent session outside the walk (escalation, review reply, gate
+    #: review): refused with `CheckoutBusy` while another in-place item uses
+    #: the item's checkout. Checked in this write, so none starts beside it.
+    takes_checkout: bool = False,
 ) -> tuple[str, str, str]:
     """`round` is the fix-cycle index this session was dispatched in (0 = first pass).
 
@@ -75,6 +80,8 @@ def create_session(
     inserted. `on.ci.poll` is the only caller that sets this; every other
     hook keeps minting a fresh row every dispatch, unchanged.
     """
+    if takes_checkout and (holder := checkout_holder(conn, work_item_id)):
+        raise CheckoutBusy(holder, checkout_reason(conn, holder)["held_by_title"])
     if reuse_if_waiting:
         existing = conn.execute(
             "SELECT id, log_path, result_path FROM worker_sessions WHERE work_item_id = ? "
