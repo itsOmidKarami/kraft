@@ -132,15 +132,16 @@ async def take(db, run_dirs, row, *, attachments, walk: bool = False) -> None:
     def look(c):
         found = c.execute("SELECT * FROM work_items WHERE id = ?", (row["id"],)).fetchone()
         holder = store.folder_holder(c, found["repo"], found["id"])
-        return found, holder and store.checkout_reason(c, holder)["held_by_title"]
+        title = holder and store.checkout_reason(c, holder)["held_by_title"]
+        return found, holder, title or holder
 
-    row, holder = await db.write(look)
+    row, holder, named = await db.write(look)
     folder = item_folder(run_dirs, row)
     if walk and row["status"] != WorkItemStatus.ACTIVE:
         raise NotRunning(f"{row['id']} is {row['status']}, no longer running: nothing to take")
-    if holder:
+    if holder is not None:
         raise CheckoutRefused(
-            f"another item, {holder}, is using the checkout {folder}: Kraft does not take it "
+            f"another item, {named}, is using the checkout {folder}: Kraft does not take it "
             "from under that item. Retry this one once that item stops"
         )
     branch = store.branch_for(row)
@@ -596,7 +597,11 @@ def _switch(folder: Path, branch: str) -> dict:
     moved_from = (head or "").removeprefix("refs/heads/") or git_read(folder, "rev-parse", "HEAD")
     # Detached: what only HEAD holds would be left to the reflog.
     held = "--branches", "--remotes", "--tags"
-    only = [] if head else _git_lines(folder, "log", "--format=%H", "HEAD", "--not", *held)
+    only = (
+        []
+        if head
+        else _git_lines(folder, "log", "--max-count=6", "--format=%H", "HEAD", "--not", *held)
+    )
     if only:
         raise CheckoutRefused(
             f"{folder} is on a detached HEAD with commits no branch holds "
@@ -1015,8 +1020,8 @@ async def check_task(
         )
         if found.moved_to:
             reasons.append(
-                f"the checkout {folder} moved to {found.moved_to} during the run of "
-                f"{task_path}{'; ' + made if made else ''}. Kraft did not switch it back, "
+                f"the checkout moved to {found.moved_to} during the run of {task_path} in "
+                f"{folder}{'; ' + made if made else ''}. Kraft did not switch it back, "
                 f"nor move those commits: retry the item once {folder} may go back to {branch}"
             )
         elif stray:

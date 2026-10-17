@@ -5,7 +5,7 @@ import os
 import re
 import sqlite3
 from collections.abc import Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
@@ -419,14 +419,35 @@ def checkout_holder(conn: sqlite3.Connection, work_item_id: str) -> str | None:
 REAP_WINDOW_S = 120
 
 
-def _group_alive(pgid: int) -> bool:
+def _group_alive(pgid: int, started: float | None) -> bool:
     """Whether the process group a session leads (`start_new_session`) has a
-    member left: `PermissionError` is macOS's answer for a zombie-only group."""
+    member left. A live leader counts only as the process Kraft launched,
+    by its start time: a reused pid is anyone's. Past a gone leader, its
+    group's other members: no pid is reused while its group has one.
+    `PermissionError` is macOS's answer for a zombie-only group."""
+    from kraft.worker import reattach
+
+    if reattach._pid_alive(pgid):
+        return reattach._identity_ok(pgid, started)
     try:
         os.killpg(pgid, 0)
     except (ProcessLookupError, PermissionError):
         return False
     return True
+
+
+def recently_stopped(conn: sqlite3.Connection, other_than: str = "") -> list[sqlite3.Row]:
+    """Sessions written stopped within `REAP_WINDOW_S` that recorded a pid,
+    each as its item's row with `session_pid` and `session_started`: ones
+    whose processes a stop may not have reached yet."""
+    since = (datetime.fromisoformat(_now()) - timedelta(seconds=REAP_WINDOW_S)).isoformat()
+    return conn.execute(
+        "SELECT w.*, s.pid AS session_pid, s.pid_start_time AS session_started "
+        "FROM work_items w JOIN worker_sessions s ON s.work_item_id = w.id "
+        "WHERE w.id != ? AND s.pid IS NOT NULL AND s.exited_at >= ? "
+        f"AND s.status NOT IN ({in_list(LIVE)}) ORDER BY w.id",
+        (other_than, since),
+    ).fetchall()
 
 
 def folder_holder(conn: sqlite3.Connection, folder: str, other_than: str) -> str | None:
@@ -438,19 +459,13 @@ def folder_holder(conn: sqlite3.Connection, folder: str, other_than: str) -> str
     so a restart neither loses nor doubles it. The folder is compared
     resolved: two spellings of one checkout are one lease."""
     folder = os.path.realpath(folder)
-    since = (datetime.now(UTC) - timedelta(seconds=REAP_WINDOW_S)).isoformat()
     working = conn.execute(
         "SELECT * FROM work_items w WHERE id != ? AND (status = ? OR EXISTS ("
         "SELECT 1 FROM worker_sessions s WHERE s.work_item_id = w.id "
         f"AND s.status IN ({in_list(LIVE)}))) ORDER BY id",
         (other_than, WorkItemStatus.ACTIVE),
     )
-    stopping = conn.execute(
-        "SELECT w.*, s.pid AS session_pid FROM work_items w JOIN worker_sessions s "
-        "ON s.work_item_id = w.id WHERE w.id != ? AND s.pid IS NOT NULL "
-        "AND s.exited_at >= ? ORDER BY w.id",
-        (other_than, since),
-    )
+    stopping = recently_stopped(conn, other_than)
 
     def here(o) -> bool:
         return is_in_place(o) and os.path.realpath(o["repo"]) == folder
@@ -458,7 +473,12 @@ def folder_holder(conn: sqlite3.Connection, folder: str, other_than: str) -> str
     # shortcut: parses each working item's chain inside the writer; fine for a
     # board of tens of items, a stored `in_place` column when it is hundreds.
     return next((o["id"] for o in working if here(o)), None) or next(
-        (o["id"] for o in stopping if here(o) and _group_alive(o["session_pid"])), None
+        (
+            o["id"]
+            for o in stopping
+            if here(o) and _group_alive(o["session_pid"], o["session_started"])
+        ),
+        None,
     )
 
 

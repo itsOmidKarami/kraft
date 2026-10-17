@@ -52,7 +52,7 @@ function checkoutMoved(i: any, b: ItemBundle) {
   b.events.splice(started, 0, { ...b.events[started], type: "checkout_switched", payload: { from: "main", to: branch }, node_id: null });
   b.events.forEach((e, n) => { e.seq = n + 1; });
   const task = s.hook_point;
-  const reason = `the checkout ${i.repo} moved to main during the run of ${task}. Kraft did not switch it back, nor move those commits: resume once ${i.repo} may go back to ${branch}`;
+  const reason = `the checkout moved to main during the run of ${task} in ${i.repo}. Kraft did not switch it back, nor move those commits: retry the item once ${i.repo} may go back to ${branch}`;
   const facts = { task, rerun: false, session: s.id, round: s.round };
   const last = [...b.events].reverse().find((e) => e.type === "work_item_needs_human")!;
   last.payload = { node_id: last.payload.node_id, reason, kind: "checkout", facts, session_id: s.id };

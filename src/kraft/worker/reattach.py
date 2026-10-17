@@ -132,6 +132,34 @@ def _identity_ok(pid: int, pid_start_time) -> bool:
         return False
 
 
+def launched_group(pid: int, pid_start_time) -> bool:
+    """Whether `pid` is still the process Kraft launched, leading its own
+    group: a row left after it died may name a pid reused by anyone, a
+    person included. Never signal a group this denies."""
+    try:
+        return _identity_ok(pid, pid_start_time) and os.getpgid(pid) == pid
+    except OSError:
+        return False
+
+
+async def reap_stopped(db, grace: float = 2.0) -> list[int]:
+    """At startup, before anything starts: the process groups of in-place
+    sessions written stopped within `store.REAP_WINDOW_S` that are still
+    running, a stopped server having never finished their kill. Each holds
+    its checkout (`store.folder_holder`) until gone, and nothing else would
+    end it. Only groups `launched_group` confirms. Returns their pids."""
+    rows = db.read(store.recently_stopped)
+    pids = sorted(
+        {
+            r["session_pid"]
+            for r in rows
+            if store.is_in_place(r) and launched_group(r["session_pid"], r["session_started"])
+        }
+    )
+    await asyncio.gather(*(_kill_group(pid, grace) for pid in pids))
+    return pids
+
+
 def _is_young(started_at) -> bool:
     """Within `_REATTACH_GRACE_AGE_MS` of now -- young enough that
     `_identity_ok`'s answer may not have settled (Kraft-s7c04.51). A row with

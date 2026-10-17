@@ -38,7 +38,7 @@ def test_an_in_place_agent_is_told_whose_checkout_it_is(run, in_place):
             "echo agent >> calc.py && git add -- calc.py && git commit -qm agent -- calc.py",
             "the agent committed calc.py, which already had uncommitted changes",
         ),
-        ("git checkout -q main", "moved to main during the run of escalation"),
+        ("git checkout -q main", "the checkout moved to main during the run of escalation in "),
         ("echo x > left.txt", None),
     ],
     ids=["overlap", "moved", "leftover"],

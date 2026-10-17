@@ -1730,7 +1730,7 @@ async def sweep_stragglers(
 
 
 def kept_past_checkout_stop(c, wid: str, node_id: str, task_path: str, round: int) -> str | None:
-    """The status a resume keeps for an in-place task its after-task check
+    """The status a retry keeps for an in-place task its after-task check
     stopped (`inplace.check_task`) without asking it to run again: once, for the
     same round's measurement, while that stop is the item's last and the walk
     has not moved on since -- a fix cycle started after it is moving on."""

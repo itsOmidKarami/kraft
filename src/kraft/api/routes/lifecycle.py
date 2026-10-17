@@ -167,13 +167,7 @@ def _terminate(pid: int | None, *, started: float | None) -> None:
     """
     if pid is None:
         return
-    # Only the process Kraft launched, leading its own group: a row left
-    # live after it died may name a pid reused by anyone, a person included.
-    try:
-        ours = reattach._identity_ok(pid, started) and os.getpgid(pid) == pid
-    except OSError:
-        ours = False
-    if not ours:
+    if not reattach.launched_group(pid, started):
         logger.warning("session pid %s is no longer the process Kraft launched; not signalled", pid)
         return
     try:

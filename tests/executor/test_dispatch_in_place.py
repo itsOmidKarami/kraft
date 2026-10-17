@@ -203,7 +203,7 @@ async def test_a_branch_switch_mid_task_stops_and_never_switches_back(
     assert git(repo, "symbolic-ref", "HEAD") == on, "Kraft switched the checkout"
     assert git(repo, "log", "-1", "--format=%s", "main") == "stray", "Kraft moved the commit"
     assert it.row()["stop_kind"] == "checkout"
-    assert back or "moved to main during the run" in _stop_reason(it)
+    assert back or "the checkout moved to main during the run" in _stop_reason(it)
     assert stray in _stop_reason(it)
 
 
@@ -334,7 +334,7 @@ async def test_a_branch_switch_during_a_command_task_stops_and_its_pass_never_co
 
     assert git(repo, "symbolic-ref", "HEAD") == "refs/heads/main", "Kraft switched it back"
     assert it.row()["stop_kind"] == "checkout"
-    assert "moved to main during the run of checks.main.suite" in _stop_reason(it)
+    assert "the checkout moved to main during the run of checks.main.suite in " in _stop_reason(it)
     assert it.events("node_completed") == []
 
     await _resume(it)

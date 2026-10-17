@@ -158,21 +158,23 @@ async def test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing(
 
 
 @pytest.mark.parametrize(
-    ("other", "walk", "refused"),
+    ("title", "walk", "refused"),
     [
-        ("active", False, "another item, .*, is using the checkout"),
+        ("Other", False, "another item, Other, is using the checkout"),
+        ("", False, "another item, other, is using the checkout"),
         (None, True, "no longer running"),
     ],
-    ids=["another-item-holds-it", "the-walks-item-paused-meanwhile"],
+    ids=["another-item-holds-it", "an-untitled-item-holds-it", "the-walks-item-paused-meanwhile"],
 )
 async def test_take_looks_at_the_lease_again_before_it_switches(
-    item_on, database, run_dirs, repo, other, walk, refused
+    item_on, database, run_dirs, repo, title, walk, refused
 ):
     """A broken base's soft pause stops no walk mid-node: its next take must
     not switch a checkout another item has taken since."""
     it, branch = await _prepared(item_on, database, run_dirs, repo)
-    if other:
-        await item_on(v1_named_chain(run_dirs.base / "t"), wid="other", target=IN_PLACE)
+    if title is not None:
+        chain = v1_named_chain(run_dirs.base / "t")
+        await item_on(chain, wid="other", target=IN_PLACE, title=title)
     await database.write(lambda c: store.pause_work_item(c, "w1", []))
 
     with pytest.raises(inplace.NotRunning if walk else inplace.CheckoutRefused, match=refused):
