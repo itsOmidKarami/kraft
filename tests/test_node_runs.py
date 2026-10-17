@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import subprocess
 
-from support.harness import commit_all, git, make_repo, write
+import pytest
+from support.harness import IN_PLACE, commit_all, git, make_repo, v1_named_chain, write
 from support.store_fixtures import mk_item
 
 from kraft import node_runs, store
@@ -19,6 +20,25 @@ async def test_completed_pins_a_ref_that_survives_a_reset(database, tmp_path):
     assert [(r["node_id"], r["attempt"], r["end_sha"]) for r in rows] == [("impl", 1, sha)]
     git(repo, "reset", "-q", "--hard", "HEAD~1")  # what a rebase does to the old tip
     assert git(repo, "rev-parse", "refs/kraft/w1/impl/1") == sha
+
+
+@pytest.mark.parametrize("end", ["completed", "gate_requested"])
+async def test_in_place_the_items_branch_is_pinned_not_the_persons_head(
+    item_on, run_dirs, repo, end
+):
+    it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation", target=IN_PLACE)
+    branch = store.branch_for(it.row())
+    git(repo, "checkout", "-q", "-b", branch)
+    await node_runs.entered(it.database, repo, it.id, "implementation", branch=branch)
+    tip = commit_all(repo, "the item's")
+    git(repo, "checkout", "-q", "main")
+    write(repo, "theirs.txt", "the person's\n")
+    commit_all(repo, "the person's")
+
+    await getattr(node_runs, end)(it.database, repo, it.id, "implementation")
+
+    pinned = git(repo, "for-each-ref", "--format=%(objectname)", f"refs/kraft/{it.id}/")
+    assert pinned == tip
 
 
 async def test_drop_refs_removes_only_this_items_refs(database, tmp_path):
