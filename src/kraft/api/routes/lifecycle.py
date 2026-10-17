@@ -490,16 +490,19 @@ async def abandon_work_item(wid: str, request: Request, body: AbandonWorkItem | 
     # and keeps everything) or a second call: either way it is reclaimed
     # again, without a second `work_item_abandoned`. A second call finds
     # nothing left and answers `worktree_removed: false`.
-    if row["status"] != WorkItemStatus.ABANDONED:
-        await st.db.write(lambda c: store.abandon_work_item(c, wid, reason))
-        await executor.settle_beads_on_abandon(row, deps.bd_cwd(), reason)
-    if inplace.is_in_place(row):
-        # The person's checkout: nothing in it is killed or removed.
+    in_place = inplace.is_in_place(row)
+    if in_place:
+        # The person's checkout: nothing in it is killed or removed. Before the
+        # write, so the event says whether the branch stayed.
         removed = {"worktree_removed": False, "in_place": True}
         removed |= await asyncio.to_thread(
             inplace.drop_branch, Path(row["repo"]), store.branch_for(row), wid, keep=False
         )
-    else:
+    if row["status"] != WorkItemStatus.ABANDONED:
+        kept = removed["branch_kept"] if in_place else None
+        await st.db.write(lambda c: store.abandon_work_item(c, wid, reason, branch_kept=kept))
+        await executor.settle_beads_on_abandon(row, deps.bd_cwd(), reason)
+    if not in_place:
         worktree = st.run_dirs.worktrees / wid
         killed = await asyncio.to_thread(_kill_orphans_under, worktree)
         if killed:
@@ -570,13 +573,16 @@ async def _archive_one(app, row, by: str, *, reason: str | None = None) -> dict:
         worktree = st.run_dirs.worktrees / wid
         kept = await asyncio.to_thread(_branches_to_keep, repo, branch, members)
         extra = {"kept_branch": branch, "unpushed_commits": sum(kept.values())} if kept else {}
-        if not in_place:  # the checkout's HEAD is the person's, not the item's
-            extra |= await asyncio.to_thread(_rescue_detached_head, repo, worktree, wid)
-        await st.db.write(lambda c: store.archive_work_item(c, wid, by, reason=reason, **extra))
-        if in_place:
+        if in_place:  # before the write, so the event says whether the branch stayed
             dropped = await asyncio.to_thread(
                 inplace.drop_branch, repo, branch, wid, keep=bool(kept)
             )
+            if dropped["branch_kept"] is not None:
+                extra["branch_kept"] = dropped["branch_kept"]
+        else:  # an in-place checkout's HEAD is the person's, not the item's
+            extra |= await asyncio.to_thread(_rescue_detached_head, repo, worktree, wid)
+        await st.db.write(lambda c: store.archive_work_item(c, wid, by, reason=reason, **extra))
+        if in_place:
             return {"worktree_removed": False, "in_place": True, **dropped, **extra}
         for where, count in kept.items():
             logger.info(

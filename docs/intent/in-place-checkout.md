@@ -191,5 +191,5 @@ origin: src/kraft/api/routes/lifecycle.py §abandon_work_item
 
 IF an in-place item is abandoned or archived while the checkout is on its
 branch, THEN the system SHALL keep the branch and say so.
-enforced-by: tests/api/test_abandon_item_folder.py::test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it[checked-out-kept], tests/api/test_abandon_item_folder.py::test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it[in-use-kept], tests/api/test_archive.py::test_archive_in_place_follows_the_same_rule[checked-out-kept]
+enforced-by: tests/api/test_abandon_item_folder.py::test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it[checked-out-kept], tests/api/test_abandon_item_folder.py::test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it[in-use-kept], tests/api/test_abandon_item_folder.py::test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it[git-refused-kept], tests/api/test_archive.py::test_archive_in_place_follows_the_same_rule[checked-out-kept]
 origin: src/kraft/inplace.py §drop_branch

@@ -430,6 +430,33 @@ def _measures(monkeypatch, governed, each=40):
     )
 
 
+async def test_an_in_place_item_is_never_measured_or_auto_archived(
+    tmp_path, repo, stub_app, item_on, run_dirs
+):
+    """Its folder is the person's checkout, outside the run folder: the walk
+    never reaches it, and the clean-up never picks the item."""
+    app = stub_app(**_state(tmp_path, limit=1, quota=0, min_age_s=0))
+    old = await seed_completed_item(app, repo, updated_at=days_ago(2), wid="old")
+    _fill(old / "big")
+    here = await item_on(
+        v1_named_chain(run_dirs.base / "t"),
+        wid="here",
+        target=WorkItemTarget.for_repository("sample", in_place=True),
+        status="completed",
+    )
+    _fill(repo / "the-person-s-own.bin")
+    await app.state.db.write(
+        lambda c: c.execute(
+            "UPDATE work_items SET updated_at = ? WHERE id = 'here'", (days_ago(3),)
+        )
+    )
+
+    assert await storage.tick(app) == ["old"]
+
+    assert here.row()["archived_at"] is None
+    assert "here" not in storage.usage(app.state).items
+
+
 async def test_tick_over_limit_archives_oldest_first_down_to_quota(
     tmp_path, repo, stub_app, monkeypatch
 ):
@@ -616,7 +643,13 @@ async def test_two_kicks_while_one_runs_start_one_tick_and_the_task_is_kept(monk
 
 
 def _row(status="completed", archived_at=None, title="t", updated_at="2026-01-01T00:00:00+00:00"):
-    return {"title": title, "status": status, "archived_at": archived_at, "updated_at": updated_at}
+    return {
+        "title": title,
+        "status": status,
+        "archived_at": archived_at,
+        "updated_at": updated_at,
+        "in_place": None,
+    }
 
 
 @pytest.mark.parametrize(

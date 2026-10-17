@@ -151,12 +151,17 @@ def test_abandon_without_a_reason_still_abandons_and_records_none(client, repo, 
 
 
 @pytest.mark.parametrize(
-    "where", ["on-it", "elsewhere", "rebasing"], ids=["checked-out-kept", "deleted", "in-use-kept"]
+    "where",
+    ["on-it", "elsewhere", "rebasing", "other-worktree"],
+    ids=["checked-out-kept", "deleted", "in-use-kept", "git-refused-kept"],
 )
-def test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it(client, repo, where):
+def test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it(
+    client, repo, tmp_path, where
+):
     """The person's checkout on the item's branch keeps it, and so does a
-    rebase holding the checkout's lock; either way the answer says so. The
-    item's refs under `refs/kraft/<id>/` go regardless."""
+    rebase holding the checkout's lock or git refusing the delete (another
+    worktree has it out); the answer and the event say so. The item's refs
+    under `refs/kraft/<id>/` go regardless."""
     from kraft import inplace
     from kraft.adapters.forge.git import PUSHED_REFS
     from kraft.config import git_read
@@ -169,6 +174,8 @@ def test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it(client, re
     git(repo, "update-ref", f"refs/kraft/{wid}/attempt-1", "HEAD")
     if where == "on-it":
         git(repo, "checkout", "-q", branch)
+    if where == "other-worktree":
+        git(repo, "worktree", "add", "-q", str(tmp_path / "elsewhere"), branch)
     lock = inplace._lock(repo)
     if where == "rebasing":
         lock.acquire()
@@ -179,7 +186,12 @@ def test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it(client, re
             lock.release()
 
     assert r.status_code == 200, r.text
-    kept = {"on-it": "checked out", "elsewhere": None, "rebasing": "in use"}[where]
+    kept = {
+        "on-it": "checked out",
+        "elsewhere": None,
+        "rebasing": "in use",
+        "other-worktree": "in use",
+    }[where]
     assert r.json() | {"id": None} == {
         "id": None,
         "status": "abandoned",
@@ -192,3 +204,6 @@ def test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it(client, re
     assert (f"{PUSHED_REFS}/{branch}" in refs) is (kept is not None)
     assert f"refs/kraft/{wid}/attempt-1" not in refs
     assert repo.is_dir()
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    payload = next(e["payload"] for e in events if e["type"] == "work_item_abandoned")
+    assert payload == {"reason": "test"} | ({"branch_kept": kept} if kept else {})

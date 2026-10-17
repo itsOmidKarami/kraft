@@ -19,10 +19,13 @@ _AT = "2026-01-01T00:00:00+00:00"
 
 
 def test_storage_joins_the_cached_measurement_to_the_items(client, repo):
+    """An in-place item, whose documents are measured, is not listed: its
+    folder is the person's checkout."""
     done, live = _paused(client, repo), _paused(client, repo)
+    here = _paused(client, repo, in_place=True)
     _set_status(done, "completed")
     client.app.state.storage_usage = storage.Usage(
-        _AT, 50, {done: 30, live: 50, "ghost": 70}, {"worktrees": 50}
+        _AT, 50, {done: 30, live: 50, "ghost": 70}, {"worktrees": 50}, {here: 9}
     )
 
     got = client.get("/api/storage").json()
@@ -119,8 +122,10 @@ def test_preview_counts_what_archive_would_lose_and_keep(client, repo):
 
 def test_preview_refuses_what_archive_would_and_counts_the_rest_once(client, repo):
     done, live, archived = (_paused(client, repo) for _ in range(3))
-    for wid in (done, archived):
+    here = _paused(client, repo, in_place=True)
+    for wid in (done, archived, here):
         _set_status(wid, "completed")
+    (repo / "the-person-s-own.txt").write_text("x")
     assert client.post(f"/api/work-items/{archived}/archive").status_code == 200
     _hold_storage(client, used=140, limit=100)
     st = client.app.state
@@ -128,7 +133,9 @@ def test_preview_refuses_what_archive_would_and_counts_the_rest_once(client, rep
         st.storage_usage, items={done: 40, live: 30, archived: 20}
     )
 
-    r = client.post("/api/storage/preview", json={"ids": [done, live, archived, "nope", done]})
+    r = client.post(
+        "/api/storage/preview", json={"ids": [done, live, archived, "nope", here, done]}
+    )
 
     assert r.status_code == 200, r.text
     got = r.json()
@@ -137,7 +144,10 @@ def test_preview_refuses_what_archive_would_and_counts_the_rest_once(client, rep
         (live, False, "only a completed or abandoned item can be archived", 30),
         (archived, False, "already archived", 20),
         ("nope", False, "unknown work item", 0),
+        (here, False, "it runs in its repository's checkout: no worktree to reclaim", 0),
     ]
+    # The person's checkout is never read for what archiving would lose.
+    assert got["items"][4]["uncommitted_files"] is None
     # A never-started item has no worktree to look in.
     assert got["items"][0]["uncommitted_files"] is None
     assert (got["freed_bytes"], got["used_after_bytes"], got["state_after"]) == (

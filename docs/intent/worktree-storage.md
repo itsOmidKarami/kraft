@@ -126,5 +126,5 @@ origin: frontend/src/ng/settings/StoragePage.tsx
 
 The system SHALL NOT hold, measure, or auto-archive an in-place item for
 `storage.worktrees.limit`.
-enforced-by: tests/test_storage.py::test_only_a_start_that_would_make_a_worktree_is_held
+enforced-by: tests/test_storage.py::test_only_a_start_that_would_make_a_worktree_is_held, tests/test_storage.py::test_an_in_place_item_is_never_measured_or_auto_archived, tests/api/test_storage.py::test_storage_joins_the_cached_measurement_to_the_items, tests/api/test_storage.py::test_preview_refuses_what_archive_would_and_counts_the_rest_once
 origin: src/kraft/storage.py §holds

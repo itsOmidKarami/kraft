@@ -463,3 +463,20 @@ def test_mark_and_check_read_odd_paths_exactly(repo, name):
     assert m.dirty == {name}
     assert found.overlap == [name]
     assert found.leftovers == {left: git(repo, "hash-object", "--", left)}
+
+
+async def test_drop_branch_reports_git_it_could_not_run(
+    item_on, database, run_dirs, repo, monkeypatch
+):
+    """Archive has already flipped the row: a git that cannot start must not
+    turn its answer into a 500."""
+    it, branch = await _prepared(item_on, database, run_dirs, repo)
+
+    def no_git(*a, **k):
+        raise OSError("no git")
+
+    monkeypatch.setattr(inplace.subprocess, "run", no_git)
+
+    assert inplace.drop_branch(Path(repo), branch, "w1", keep=False) == {
+        "branch_kept": "git failed"
+    }

@@ -503,7 +503,8 @@ def report(policy, used: Usage, rows: dict) -> dict:
             "reclaimable": reclaimable(row) and wid in used.items,
         }
         for wid in measured
-        if (row := rows.get(wid)) is not None
+        # An in-place item's folder is the person's checkout: not listed.
+        if (row := rows.get(wid)) is not None and not row["in_place"]
     ]
     items.sort(key=lambda item: -(item["bytes"] + item["documents_bytes"]))
     return {

@@ -127,6 +127,9 @@ def test_archive_in_place_follows_the_same_rule(client, repo, where):
     )
     assert bool(git_read(repo, "branch", "--list", branch)) is (kept is not None)
     assert repo.is_dir()
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    payload = next(e["payload"] for e in events if e["type"] == "work_item_archived")
+    assert payload.get("branch_kept") == kept
 
 
 def test_archive_rescues_commits_on_a_detached_head(client, repo):

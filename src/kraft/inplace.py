@@ -523,28 +523,47 @@ def drop_branch(repo: Path, branch: str, wid: str, *, keep: bool) -> dict:
     """Abandon's and archive's end of an in-place item's branch, which leaves
     the checkout and whatever runs in it alone. The branch, and Kraft's record
     of pushing it, stay when the checkout is on it (`checked out`), when a take
-    or rebase holds the checkout right now (`in use`), or when `keep` (archive
-    found commits only it holds: `unpushed`). The item's per-attempt refs go
-    regardless. Returns `branch_kept`: the reason, or None when it went."""
+    or rebase holds the checkout right now or git refuses the delete, as for a
+    branch another worktree has out (`in use`), or when `keep` (archive found
+    commits only it holds: `unpushed`). The item's per-attempt refs go
+    regardless. Returns `branch_kept`: the reason, or None when it went. Never
+    raises on git: the caller may already have flipped the row."""
     if not repo.is_dir():
         return {"branch_kept": None, "repo_missing": str(repo)}
+    try:
+        kept = _drop_branch(repo, branch, wid, keep)
+        node_runs.drop_refs(repo, wid)
+    except OSError as exc:
+        logger.warning("drop %s: git failed: %s", wid, exc)
+        return {"branch_kept": "git failed"}
+    return {"branch_kept": kept}
+
+
+def _drop_branch(repo: Path, branch: str, wid: str, keep: bool) -> str | None:
     lock = _lock(repo)
     if not lock.acquire(blocking=False):
-        kept = "in use"
-    else:
-        try:
-            kept = "checked out" if _on(repo, branch) else "unpushed" if keep else None
-            if kept is None:
-                # A never-started item has no branch; its push record is absent too, which is fine.
-                steps = [["branch", "-D", "--", branch]] if _ref(repo, branch) else []
-                for args in [*steps, ["update-ref", "-d", f"{git.PUSHED_REFS}/{branch}"]]:
-                    done = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True)
-                    if done.returncode != 0:
-                        logger.warning("drop %s: %s failed: %s", wid, args[0], done.stderr.strip())
-        finally:
-            lock.release()
-    node_runs.drop_refs(repo, wid)
-    return {"branch_kept": kept}
+        return "in use"
+    try:
+        if _on(repo, branch):
+            return "checked out"
+        if keep:
+            return "unpushed"
+        if _ref(repo, branch):
+            done = subprocess.run(
+                ["git", "branch", "-D", "--", branch], cwd=repo, capture_output=True, text=True
+            )
+            if done.returncode != 0:
+                logger.warning("drop %s: branch kept: %s", wid, done.stderr.strip())
+                return "in use"
+        # Absent (a never-started item never pushed) is fine.
+        subprocess.run(
+            ["git", "update-ref", "-d", f"{git.PUSHED_REFS}/{branch}"],
+            cwd=repo,
+            capture_output=True,
+        )
+        return None
+    finally:
+        lock.release()
 
 
 def _ignored_in_the_way(folder: Path, changed: list[str]) -> list[str]:
