@@ -241,9 +241,7 @@ def test_read_tasks_prefers_the_plan_attachment(tmp_path, run_dirs, attached, wr
 
 
 @pytest.mark.parametrize("committed", [True, False], ids=["on-its-branch", "filed-copy"])
-def test_an_in_place_item_reads_its_plan_and_commits_from_its_branch(
-    tmp_path, run_dirs, committed
-):
+def test_an_in_place_item_reads_its_plan_and_commits_from_its_branch(tmp_path, run_dirs, committed):
     """The checkout is on main and holds the person's own copy of the plan: an
     in-place item's tasks are the plan on its branch, else the copy filed at
     intake, and its commits are its branch's, not the checkout's HEAD's."""
