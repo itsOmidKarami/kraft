@@ -162,6 +162,31 @@ async def test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing(
     assert it.events("checkout_switched") == []
 
 
+@pytest.mark.parametrize(
+    ("other", "walk", "refused"),
+    [
+        ("active", False, "another item, .*, is using the checkout"),
+        (None, True, "no longer running"),
+    ],
+    ids=["another-item-holds-it", "the-walks-item-paused-meanwhile"],
+)
+async def test_take_looks_at_the_lease_again_before_it_switches(
+    item_on, database, run_dirs, repo, other, walk, refused
+):
+    """A broken base's soft pause stops no walk mid-node: its next take must
+    not switch a checkout another item has taken since."""
+    it, branch = await _prepared(item_on, database, run_dirs, repo)
+    if other:
+        await item_on(v1_named_chain(run_dirs.base / "t"), wid="other", target=_IN_PLACE)
+    await database.write(lambda c: store.pause_work_item(c, "w1", []))
+
+    with pytest.raises(inplace.NotRunning if walk else inplace.CheckoutRefused, match=refused):
+        await inplace.take(database, run_dirs, it.row(), attachments=[], walk=walk)
+
+    assert _head(repo) == "refs/heads/main"
+    assert it.events("checkout_switched") == []
+
+
 async def test_take_stops_when_the_branch_is_gone(item_on, database, run_dirs, repo):
     it, branch = await _prepared(item_on, database, run_dirs, repo)
     git(repo, "branch", "-D", branch)

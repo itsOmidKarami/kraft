@@ -1164,8 +1164,14 @@ async def _dispatch_task(
     if inplace.is_in_place(work_item_row) and _takes_the_checkout(t):
         try:
             await inplace.take(
-                db, run_dirs, work_item_row, attachments=entry.attachments_of(work_item_row)
+                db,
+                run_dirs,
+                work_item_row,
+                attachments=entry.attachments_of(work_item_row),
+                walk=True,
             )
+        except inplace.NotRunning:
+            return "paused"
         except inplace.CheckoutRefused as exc:
             await config_error_session(db, run_dirs, common, f"{exc}\n")
             return CHECKOUT_REFUSED
@@ -2064,7 +2070,9 @@ async def measure_node(
             # The take is Kraft's own move, not the scope's write; a refusal
             # is the task's to report, from its own take.
             with contextlib.suppress(inplace.CheckoutRefused):
-                await inplace.take(db, run_dirs, row, attachments=entry.attachments_of(row))
+                await inplace.take(
+                    db, run_dirs, row, attachments=entry.attachments_of(row), walk=True
+                )
         return _read_only.snapshot(db, row, launch, worktree)
 
     async def _settle(tasks, step: ResolvedStep, *, retry: bool = False) -> list:

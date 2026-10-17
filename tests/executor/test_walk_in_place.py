@@ -135,3 +135,26 @@ async def test_a_branch_deleted_while_the_item_waits_is_a_checkout_stop(
     assert it.row()["stop_kind"] == "checkout"
     assert f"{branch} is gone" in _stop_reason(it)
     assert git(repo, "branch", "--list", branch) == "", "Kraft made the branch again"
+
+
+async def test_a_soft_pause_between_steps_ends_the_walk_before_its_take(
+    item_on, fake_agent, repo, monkeypatch
+):
+    """A broken base's pause stops no walk mid-node: the next take sees it,
+    and the walk ends paused, never as a stop, with the checkout untouched."""
+    it = await item_on(fake_agent.quick_task, target=_IN_PLACE)
+    take = inplace.take
+
+    async def paused_first(db, *args, **kwargs):
+        await db.write(
+            lambda c: store.pause_for_broken_base(c, it.id, broken_by="x", follow_up_bead=None)
+        )
+        return await take(db, *args, **kwargs)
+
+    monkeypatch.setattr(inplace, "take", paused_first)
+
+    assert await _walk(it, repo_entry=entry_of({"setup_command": ""})) == "paused"
+
+    assert it.status() == "paused"
+    assert git(repo, "symbolic-ref", "HEAD") == "refs/heads/main"
+    assert fake_agent.prompts() == []

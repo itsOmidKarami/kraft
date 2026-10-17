@@ -24,7 +24,7 @@ from pathlib import Path
 from kraft import events, item_paths, node_runs, store
 from kraft.adapters.forge import git
 from kraft.config import ConfigError, git_read
-from kraft.vocab import ChainEvent, StopKind
+from kraft.vocab import ChainEvent, StopKind, WorkItemStatus
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,12 @@ class CheckoutRefused(RuntimeError):
         super().__init__(message)
         self.paths = paths or []
         self.moved_from: dict | None = None
+
+
+class NotRunning(CheckoutRefused):
+    """The walk's take for an item no longer `active`: a pause (a broken
+    base's soft one) landed between its steps. Nothing switched; the step
+    ends paused, never as a stop."""
 
 
 class AutostashClash(RuntimeError):
@@ -111,20 +117,31 @@ async def prepare(db, run_dirs, row, *, base: str) -> Path:
     return folder
 
 
-async def take(db, run_dirs, row, *, attachments) -> None:
+async def take(db, run_dirs, row, *, attachments, walk: bool = False) -> None:
     """Put the checkout on the item's branch, right before a task that needs
     the folder: never on the walk's entry, which re-runs on every CI poll.
     Never forced: anything git would refuse, or that would clobber a file,
     raises `CheckoutRefused`. The person's uncommitted edits ride along. On
     the first take (the branch still at `base_ref`) the attachments are
     committed on the branch, by path. A switch is always recorded, even one a
-    later step refused."""
+    later step refused. The lease is looked at again in the writer: `walk`'s
+    item must still be `active`, and no other item may hold the checkout."""
     from kraft import builtins
 
-    row = db.read(
-        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (row["id"],)).fetchone()
-    )
+    def look(c):
+        found = c.execute("SELECT * FROM work_items WHERE id = ?", (row["id"],)).fetchone()
+        holder = store.folder_holder(c, found["repo"], found["id"])
+        return found, holder and store.checkout_reason(c, holder)["held_by_title"]
+
+    row, holder = await db.write(look)
     folder = item_folder(run_dirs, row)
+    if walk and row["status"] != WorkItemStatus.ACTIVE:
+        raise NotRunning(f"{row['id']} is {row['status']}, no longer running: nothing to take")
+    if holder:
+        raise CheckoutRefused(
+            f"another item, {holder}, is using the checkout {folder}: Kraft does not take it "
+            "from under that item. Retry this one once that item stops"
+        )
     branch = store.branch_for(row)
     first = (
         bool(attachments)
