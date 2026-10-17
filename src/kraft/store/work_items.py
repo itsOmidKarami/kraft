@@ -438,11 +438,17 @@ def _group_alive(pgid: int, started: float | None) -> bool:
     return True
 
 
-def recently_stopped(conn: sqlite3.Connection, other_than: str = "") -> list[sqlite3.Row]:
-    """Sessions written stopped within `REAP_WINDOW_S` that recorded a pid,
-    each as its item's row with `session_pid` and `session_started`: ones
-    whose processes a stop may not have reached yet."""
-    since = (datetime.fromisoformat(_now()) - timedelta(seconds=REAP_WINDOW_S)).isoformat()
+def recently_stopped(
+    conn: sqlite3.Connection, other_than: str = "", within: int | None = REAP_WINDOW_S
+) -> list[sqlite3.Row]:
+    """Sessions written stopped within `within` seconds (any time, for None)
+    that recorded a pid, each as its item's row with `session_pid` and
+    `session_started`: ones whose processes a stop may not have reached yet."""
+    since = (
+        (datetime.fromisoformat(_now()) - timedelta(seconds=within)).isoformat()
+        if within is not None
+        else ""
+    )
     return conn.execute(
         "SELECT w.*, s.pid AS session_pid, s.pid_start_time AS session_started "
         "FROM work_items w JOIN worker_sessions s ON s.work_item_id = w.id "
@@ -458,9 +464,9 @@ def folder_holder(conn: sqlite3.Connection, folder: str, other_than: str) -> str
     but whose processes are not yet gone, still writing in the checkout.
 
     Read from the rows and the process table, not kept in a lock of its own,
-    so a restart neither loses nor doubles it. The folder is compared
-    resolved: two spellings of one checkout are one lease."""
-    folder = os.path.realpath(folder)
+    so a restart neither loses nor doubles it. The folder is compared as
+    itself (`_folder`): two spellings of one checkout are one lease."""
+    folder = _folder(folder)
     working = conn.execute(
         "SELECT * FROM work_items w WHERE id != ? AND (status = ? OR EXISTS ("
         "SELECT 1 FROM worker_sessions s WHERE s.work_item_id = w.id "
@@ -470,7 +476,7 @@ def folder_holder(conn: sqlite3.Connection, folder: str, other_than: str) -> str
     stopping = recently_stopped(conn, other_than)
 
     def here(o) -> bool:
-        return is_in_place(o) and os.path.realpath(o["repo"]) == folder
+        return is_in_place(o) and _folder(o["repo"]) == folder
 
     # shortcut: parses each working item's chain inside the writer; fine for a
     # board of tens of items, a stored `in_place` column when it is hundreds.
@@ -482,6 +488,17 @@ def folder_holder(conn: sqlite3.Connection, folder: str, other_than: str) -> str
         ),
         None,
     )
+
+
+def _folder(path: str):
+    """A folder by its device and inode, so a link or, on a case-insensitive
+    volume, another case of its name is the same folder; resolved, for one
+    that cannot be read."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return os.path.realpath(path)
+    return st.st_dev, st.st_ino
 
 
 def checkout_reason(conn: sqlite3.Connection, holder: str) -> dict:

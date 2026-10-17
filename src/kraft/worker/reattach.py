@@ -127,9 +127,20 @@ def _identity_ok(pid: int, pid_start_time) -> bool:
     if pid_start_time is None or not _pid_alive(pid):
         return False
     try:
-        return abs(psutil.Process(pid).create_time() - pid_start_time) < 1e-6
+        return _same_start(psutil.Process(pid).create_time(), pid_start_time)
     except psutil.Error:
         return False
+
+
+def _same_start(observed: float, recorded: float) -> bool:
+    """Whether a process's start time is the one recorded at its launch:
+    exactly, or one whole second off. Linux adds a process's ticks since boot
+    to the boot time in whole seconds (`btime`), which moves by one when the
+    wall clock is stepped across a second, a leap second included. A reused
+    pid would have to start a second apart to the tick (10 ms) as well. A
+    larger step reads as another process, which is never signalled."""
+    shift = observed - recorded
+    return abs(shift - round(shift)) < 1e-6 and abs(round(shift)) <= 1
 
 
 def launched_group(pid: int, pid_start_time) -> bool:
@@ -144,11 +155,12 @@ def launched_group(pid: int, pid_start_time) -> bool:
 
 async def reap_stopped(db, grace: float = 2.0) -> list[int]:
     """At startup, before anything starts: the process groups of in-place
-    sessions written stopped within `store.REAP_WINDOW_S` that are still
-    running, a stopped server having never finished their kill. Each holds
-    its checkout (`store.folder_holder`) until gone, and nothing else would
-    end it. Only groups `launched_group` confirms. Returns their pids."""
-    rows = db.read(store.recently_stopped)
+    sessions written stopped that are still running, a stopped server having
+    never finished their kill. Of any age, not only `store.REAP_WINDOW_S`'s:
+    the server may have been down longer, and one past the window holds no
+    checkout while it still writes there. Only groups `launched_group`
+    confirms. Returns their pids."""
+    rows = db.read(lambda c: store.recently_stopped(c, within=None))
     pids = sorted(
         {
             r["session_pid"]

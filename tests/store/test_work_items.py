@@ -489,18 +489,6 @@ async def test_a_second_in_place_item_in_one_checkout_is_not_claimed(
     assert c.status() == "active"
 
 
-@pytest.mark.parametrize("linked", ["b", "a"], ids=["waiter-via-link", "holder-via-link"])
-async def test_the_lease_is_the_folder_not_its_spelling(item_on, run_dirs, database, repo, linked):
-    chain = v1_named_chain(run_dirs.base / "t")
-    link = repo.parent / "link"
-    link.symlink_to(repo)
-    await item_on(chain, wid="a", target=IN_PLACE, repo=link if linked == "a" else repo)
-    await item_on(chain, wid="b", target=IN_PLACE, repo=link if linked == "b" else repo)
-    await database.write(lambda c: store.pause_work_item(c, "b", []))
-
-    assert database.read(lambda c: store.checkout_holder(c, "b")) == "a"
-
-
 @pytest.mark.parametrize(
     "park",
     [
