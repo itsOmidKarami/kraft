@@ -418,8 +418,19 @@ QUIET = frozenset(
         "findings_measured",
         "run_forked",
         "cap_counters_reset",
+        "session_reattached",
     }
 )
+
+
+def cancels_own(event: dict, before: dict | None) -> bool:
+    """`cancelsOwn`: a cancel's own status write. `store.end_work_item`
+    follows `work_item_cancelled` with `work_item_abandoned`; the cancel tells
+    it, and "abandoned" alone is the other door, the abandon that deletes the
+    worktree and branch."""
+    return event.get("type") == "work_item_abandoned" and (before or {}).get("type") == (
+        "work_item_cancelled"
+    )
 
 
 def _s(value: object) -> str:
@@ -464,12 +475,15 @@ def task_name(path: str) -> str:
     return path.split(".")[-1]
 
 
-def event_line(event: dict, nodes: list[dict] | None = None) -> str | None:
+def event_line(
+    event: dict, nodes: list[dict] | None = None, before: dict | None = None
+) -> str | None:
     """`eventLine`: one event as one line, or None for bookkeeping, each node
     named as `name_of` names it from the item's chain `nodes`. A type not
-    listed reads as its own name."""
+    listed reads as its own name. `before` is the event just before it in the
+    item's history, for the one line that depends on it (`cancels_own`)."""
     kind = event.get("type") or ""
-    if kind in QUIET:
+    if kind in QUIET or cancels_own(event, before):
         return None
     p = event.get("payload") or {}
     node_id = _s(_or(event.get("node_id"), p.get("node_id")))
@@ -490,6 +504,19 @@ def event_line(event: dict, nodes: list[dict] | None = None) -> str | None:
             hook = p.get("hook_point")
             task = task_name(_s(hook)) if hook else "a session"
             return f"{task} started on {node}"
+        case "worker_session_paused":
+            return "a session stopped"
+        case "session_unknown":
+            return "a session was lost in a restart"
+        case "agent_session_resumed":
+            return f"{task_name(_s(p.get('task')))} resumed its session on {node}"
+        case "scope_skipped":
+            # A task or a step of a node (`node.step`, `node.step.task`).
+            path = _s(p.get("path"))
+            head = path.split(".")[0]
+            if "." in path:
+                return f"{task_name(path)} skipped on {name_of(nodes, head)}"
+            return f"{name_of(nodes, head)} skipped"
         case "gate_requested":
             return f"{gate} is waiting for you"
         case "gate_approved":
@@ -535,6 +562,11 @@ def event_line(event: dict, nodes: list[dict] | None = None) -> str | None:
             return "cancelled"
         case "work_item_completed":
             return "finished"
+        case "work_item_manually_completed":
+            reason = f": {_cut(_s(p.get('reason')), 240)}" if p.get("reason") else ""
+            return f"marked complete{reason}"
+        case "work_item_abandoned":
+            return "abandoned"
         case "work_item_archived":
             if not p.get("kept_branch"):
                 return "archived"

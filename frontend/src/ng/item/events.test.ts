@@ -90,6 +90,10 @@ describe("recent", () => {
     ["an item completed with no node just finished keeps its own line",
       [stamped("2026-10-03T10:00:00Z", at("node_started", {}, "plan")), stamped("2026-10-03T10:01:00Z", at("node_completed", {}, "plan")), at("pause_requested"), at("work_item_completed")],
       ["finished", "paused", "plan finished · 1m"]],
+    // `store.end_work_item`: Mark complete's own event, with the reason, then the ordinary `work_item_completed`.
+    ["an item a person marked complete reads once, with the reason",
+      [started("s1", "verification.checks.lint"), paused("s1"), at("work_item_manually_completed", { reason: "landed by hand", node_id: "verification" }), at("work_item_completed")],
+      ["marked complete: landed by hand"]],
     ["an escalation's turn that ends reads answered",
       [at("escalation_message", { message: "why?" }, "verification"), started("s3", "escalation"), exited("s3", "done")],
       ["escalation answered", "escalation on verification: why?"]],
@@ -106,10 +110,14 @@ describe("recent", () => {
       [started("s1", "verification.review.code_review"), at("pause_requested", { sessions: ["s1"] }), paused("s1"),
         at("work_item_resumed"), at("agent_session_resumed", { task: "verification.review.code_review", session_id: "s1" }, "verification"), started("s2", "verification.review.code_review"), exited("s2", "done")],
       ["resumed", "paused"]],
-    // `store.end_work_item`: the sessions stopped first, then the end.
+    // `store.end_work_item`: the sessions stopped first, then the cancel, then its own status write.
     ["a session a cancel stopped drops out, the cancel tells it",
-      [started("s1", "verification.review.code_review"), paused("s1"), at("work_item_cancelled", { reason: "superseded", node_id: "verification" }, "verification")],
+      [started("s1", "verification.review.code_review"), paused("s1"), at("work_item_cancelled", { reason: "superseded", node_id: "verification" }, "verification"), at("work_item_abandoned")],
       ["cancelled"]],
+    // `kraft item abandon` on an item no cancel ended: its only event.
+    ["an abandon reads abandoned",
+      [at("pause_requested"), at("work_item_abandoned", { reason: "refiled as w9" })],
+      ["abandoned", "paused"]],
     // `store.skip_node`: the skip, then the sessions it stopped.
     ["a session a skip stopped drops out, the skip tells it",
       [at("node_started", {}, "verification"), started("s1", "verification.checks.lint"), at("node_skipped", { node_id: "verification", gate: null }, "verification"), paused("s1")],
@@ -124,7 +132,7 @@ describe("recent", () => {
     // `store.skip_scope`: the sessions it stopped, then the skip.
     ["a session a scope skip stopped drops out",
       [started("s1", "verification.checks.lint"), paused("s1"), at("scope_skipped", { path: "verification.checks.lint" })],
-      ["scope skipped"]],
+      ["lint skipped on verification"]],
     // A session ends once: a stop racing a turn that just finished, or a late exit after a stop, adds no second end.
     ["a stop after the turn's exit adds nothing",
       [started("s3", "escalation"), exited("s3", "done"), paused("s3")],

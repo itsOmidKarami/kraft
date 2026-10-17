@@ -94,16 +94,25 @@ def test_the_activity_reads_newest_first_and_end_reads_earlier(board, monkeypatc
 
 
 @pytest.mark.parametrize(
-    ("event", "reads", "top"),
+    ("events", "reads", "top"),
     [
-        (_event(6, "node_completed", 0, node="spec"), 2, "    now  spec finished"),
+        ([_event(6, "node_completed", 0, node="spec")], 2, "    now  spec finished"),
         # Named from the item's chain, where spec_approval is a gate.
-        (_event(6, "node_skipped", 0, node="spec_approval"), 2, "    now  approve spec skipped"),
-        (_event(6, "node_started", 0, node="x") | {"work_item_id": "elsewhere"}, 1, None),
+        ([_event(6, "node_skipped", 0, node="spec_approval")], 2, "    now  approve spec skipped"),
+        ([_event(6, "node_started", 0, node="x") | {"work_item_id": "elsewhere"}], 1, None),
+        # `store.end_work_item`: the cancel, then its own status write, which the cancel tells.
+        (
+            [
+                _event(6, "work_item_cancelled", 0, reason="superseded"),
+                _event(7, "work_item_abandoned", 0),
+            ],
+            2,
+            "    now  cancelled",
+        ),
     ],
-    ids=["its-own", "named-from-its-chain", "another-items"],
+    ids=["its-own", "named-from-its-chain", "another-items", "a-cancel-reads-once"],
 )
-def test_a_live_event_adds_its_line_to_the_activity(board, monkeypatch, event, reads, top):
+def test_a_live_event_adds_its_line_to_the_activity(board, monkeypatch, events, reads, top):
     """A live event about this item reads only what came after the newest
     line; another item's reads nothing."""
     _serve(monkeypatch, _detail(GATE), calls=[])
@@ -115,8 +124,8 @@ def test_a_live_event_adds_its_line_to_the_activity(board, monkeypatch, event, r
         await _opened(console, app, pilot, GATE["id"])
         app.view.show_tab("activity")
         await console.until(pilot, lambda: _activity(app))
-        history.append(event)
-        app.view.rows_changed([GATE], [event])
+        history.extend(events)
+        app.view.rows_changed([GATE], events)
         await console.until(pilot, lambda: len(got) == reads)
         await pilot.pause()
         return [r["after_seq"] for r in got], _activity(app)[0]

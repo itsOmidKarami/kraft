@@ -213,10 +213,10 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
         item.pending_steer_context = long ? "Look at the invalidation path first: the race only shows when reindex and search overlap." : null;
       }
       if (sc === "cancelled") {
-        // `store.end_work_item`: the running sessions stopped first, then the end. The store follows the cancel with
-        // `work_item_abandoned`, which this sample leaves out: Recent has no words for it yet and would show it raw.
+        // `store.end_work_item`: the running sessions stopped first, then the cancel, then its own status write.
         stopped(1);
         ev("work_item_cancelled", { reason: long ? "Superseded by kraft-cb61, which moves the cache into the index service; this item's branch stays for reference." : "", node_id: currentNode }, 0);
+        ev("work_item_abandoned", {}, 0);
         item.status = "abandoned"; item.display_status = "cancelled";
       }
       if (sc === "waiting-ci") {

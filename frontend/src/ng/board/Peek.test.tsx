@@ -226,6 +226,14 @@ describe("Peek", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1?sel=verification");
   });
 
+  it("reads a cancel once in Activity: its own status write is the cancel's line", async () => {
+    // `store.end_work_item` follows `work_item_cancelled` with `work_item_abandoned`.
+    mount({}, { start: "activity", events: [ev(1, "work_item_cancelled"), ev(2, "work_item_abandoned")] });
+    const rows = await within(await screen.findByRole("list")).findAllByRole("listitem");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent("cancelled");
+  });
+
   it("adds a new event to Activity live, though the item's updated_at stays put", async () => {
     useStore.setState({ eventsByItem: {} });
     mount({}, { start: "activity", events: [ev(1, "node_started", "plan")] });

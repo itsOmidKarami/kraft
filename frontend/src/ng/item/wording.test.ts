@@ -11,7 +11,8 @@ type Cases = {
   now: string;
   chain: { nodes: { id: string; kind: string; artifact?: string }[] };
   banners: { name: string; item: Partial<WorkItem>; banner: BannerWords | null }[];
-  events: { name: string; event: Omit<KraftEvent, "seq" | "work_item_id" | "created_at">; line: string | null }[];
+  /** `before`: the event just before it in the item's history, for a line that depends on it. */
+  events: { name: string; event: Omit<KraftEvent, "seq" | "work_item_id" | "created_at">; before?: Omit<KraftEvent, "seq" | "work_item_id" | "created_at">; line: string | null }[];
   event_ages: [string | null, string][];
 };
 const CASES: Cases = JSON.parse(readFileSync(new URL("../../../../tests/console/wording_cases.json", import.meta.url), "utf-8"));
@@ -24,7 +25,8 @@ describe("the stop banner's words, as the console ports them", () => {
 
 describe("the Activity's event lines, as the console ports them", () => {
   it.each(CASES.events.map((c) => [c.name, c] as const))("%s", (_name, c) => {
-    expect(eventLine({ seq: 1, work_item_id: "w", created_at: CASES.now, ...c.event } as KraftEvent, CASES.chain.nodes)).toBe(c.line);
+    const at = (e: Omit<KraftEvent, "seq" | "work_item_id" | "created_at">) => ({ seq: 1, work_item_id: "w", created_at: CASES.now, ...e }) as KraftEvent;
+    expect(eventLine(at(c.event), CASES.chain.nodes, c.before && at(c.before))).toBe(c.line);
   });
 
   it("dates an event as the console does", () => {

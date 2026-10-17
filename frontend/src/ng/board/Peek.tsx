@@ -8,7 +8,7 @@ import type { useResizable } from "../graph/useResizable";
 import { request } from "../http";
 import { act, askStartUrl, draftWaits, type Done } from "../item/actions";
 import { Banner, QuestionCard } from "../item/Banner";
-import { age, eventLine } from "../item/events";
+import { age, cancelsOwn, eventLine } from "../item/events";
 import { CancelCard } from "../item/header/CancelCard";
 import { EscalateCard, PauseConfirm } from "../item/header/Dialogs";
 import { useDuplicate } from "../item/header/ItemHeader";
@@ -143,7 +143,7 @@ function GateNote({ item, version }: { item: ItemDetail; version: string }) {
 
 const PAGE = 50;
 
-/** Every event of the item, newest first, paged backwards (B13). */
+/** Every event of the item, newest first, paged backwards (B13); a cancel's own status write is left to the cancel's line. */
 function Activity({ id, nodes, version }: { id: string; nodes: ItemDetail["chain_definition"]["nodes"]; version: string }) {
   const navigate = useNavigate();
   const [events, setEvents] = useState<KraftEvent[]>([]);
@@ -159,8 +159,10 @@ function Activity({ id, nodes, version }: { id: string; nodes: ItemDetail["chain
   return (
     <div className="peek-activity">
       <ol className="peek-events">
-        {events.map((e) => {
-          const text = eventLine(e, nodes) ?? e.type.replaceAll("_", " ");
+        {events.map((e, i) => {
+          // Newest first: the event before it in time is the next one down. A cancel's own status write is the cancel's line.
+          if (cancelsOwn(e, events[i + 1])) return null;
+          const text = eventLine(e, nodes, events[i + 1]) ?? e.type.replaceAll("_", " ");
           return (
             <li key={e.seq}>
               <span className="peek-ev-t">{age(e.created_at, now)}</span>

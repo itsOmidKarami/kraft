@@ -10,12 +10,17 @@ const s = (v: unknown) => (v == null ? "" : String(v));
 const cut = (t: string, n = 70) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 
 /** Bookkeeping that would drown the run's story in the chain pane's Recent. */
-const QUIET = new Set<EventType>(["worker_session_created", "worker_session_exited", "chain_loaded", "plan_progress", "worktree_prepared", "steer_context_set", "permission_decision", "external_wait_observed", "findings_measured", "run_forked", "cap_counters_reset"]);
+const QUIET = new Set<EventType>(["worker_session_created", "worker_session_exited", "chain_loaded", "plan_progress", "worktree_prepared", "steer_context_set", "permission_decision", "external_wait_observed", "findings_measured", "run_forked", "cap_counters_reset", "session_reattached"]);
+
+/** A cancel's own status write: `store.end_work_item` follows `work_item_cancelled` with `work_item_abandoned`.
+ *  The cancel tells it; "abandoned" alone is the other door, the abandon that deletes the worktree and branch. */
+export const cancelsOwn = (e: KraftEvent, before?: KraftEvent) => e.type === "work_item_abandoned" && before?.type === "work_item_cancelled";
 
 /** One line of the chain pane's Recent (Decisions §5 Chain pane), or null for
- *  bookkeeping. An event type not listed here shows its own name. */
-export function eventLine(e: KraftEvent, nodes?: Nodes): string | null {
-  if (QUIET.has(e.type)) return null;
+ *  bookkeeping. An event type not listed here shows its own name. `before` is the
+ *  event just before it in the item's history, for the one line that depends on it (`cancelsOwn`). */
+export function eventLine(e: KraftEvent, nodes?: Nodes, before?: KraftEvent): string | null {
+  if (QUIET.has(e.type) || cancelsOwn(e, before)) return null;
   const p = e.payload ?? {};
   const node = s(e.node_id ?? p.node_id);
   const at = node && nameOf(nodes, node);
@@ -28,6 +33,15 @@ export function eventLine(e: KraftEvent, nodes?: Nodes): string | null {
     case "node_skipped": return `${at} skipped`;
     // A start, in the past tense: the list keeps it after the session ended, and "is running" read as live (R12b-12).
     case "worker_session_started": return p.hook_point ? `${taskName(s(p.hook_point))} started on ${at}` : `a session started on ${at}`;
+    // Activity's words for a session's end with no exit, and a paused task's resume; recent() tells these by the session.
+    case "worker_session_paused": return "a session stopped";
+    case "session_unknown": return "a session was lost in a restart";
+    case "agent_session_resumed": return `${taskName(s(p.task))} resumed its session on ${at}`;
+    // A task or a step of a node (`node.step`, `node.step.task`), named as a session's task is.
+    case "scope_skipped": {
+      const path = s(p.path), head = path.split(".")[0];
+      return path.includes(".") ? `${taskName(path)} skipped on ${nameOf(nodes, head)}` : `${nameOf(nodes, head)} skipped`;
+    }
     case "gate_requested": return `${gate} is waiting for you`;
     case "gate_approved": return `${gate} · ${p.by === "agent" || p.by === "kraft" ? "passed on its own" : "approved by you"}`;
     case "gate_rejected": return `${gate} · rejected${p.note ? `: ${cut(s(p.note), 50)}` : ""}`;
@@ -47,6 +61,9 @@ export function eventLine(e: KraftEvent, nodes?: Nodes): string | null {
     case "work_item_waiting": return `${at} is waiting`;
     case "work_item_cancelled": return "cancelled";
     case "work_item_completed": return "finished";
+    // Mark complete: the reason is said nowhere else. The `work_item_completed` after it still reads "finished".
+    case "work_item_manually_completed": return `marked complete${p.reason ? `: ${cut(s(p.reason), 240)}` : ""}`;
+    case "work_item_abandoned": return "abandoned";
     case "work_item_archived": return p.kept_branch ? `archived · kept ${s(p.kept_branch)}: ${s(p.unpushed_commits)} unpushed commit${p.unpushed_commits === 1 ? "" : "s"}` : "archived";
     case "work_item_restored": return "restored";
     case "mr_opened": return `MR !${s(p.number)} opened`;
@@ -68,7 +85,8 @@ export type RecentLine = { e: KraftEvent; line: string };
  *  one that ended well drops out, the node's next line tells it; one that failed says so at
  *  its end; a gate's decision takes the place of its request; a fix round's outcome joins its start line; an escalation's turn that ends reads "escalation answered". A node's start drops
  *  once a session on it starts, and its finish takes the place of everything that ran in it, with how long it ran.
- *  A gate reads once, by its decision (CG-4), and an item's end reads once, in its last node's line.
+ *  A gate reads once, by its decision (CG-4), and an item's end reads once: in its last node's line, in a person's
+ *  "marked complete", or in "cancelled" (`cancelsOwn`).
  *  A session a person stopped ends with `worker_session_paused`, never an exit (`store.session_exited` writes
  *  none for a paused row): it drops out, and the pause, cancel, completion or skip that stopped it tells the story,
  *  except an escalation's turn, which reads "escalation stopped" (Stop agent, or a decision that outranked it).
@@ -93,7 +111,7 @@ export function recent(events: KraftEvent[], nodes?: Nodes): RecentLine[] {
     return at;
   };
   const nodeStart = new Map<string, number>();
-  for (const e of events) {
+  for (const [i, e] of events.entries()) {
     const p = e.payload ?? {};
     const node = s(e.node_id ?? p.node_id);
     if (e.type === "worker_session_started") {
@@ -119,7 +137,7 @@ export function recent(events: KraftEvent[], nodes?: Nodes): RecentLine[] {
     } else if (e.type === "agent_session_resumed") {
       // The resumed task runs as a new session with a start line of its own; the item's "resumed" tells the resume.
     } else {
-      let line = eventLine(e, nodes);
+      let line = eventLine(e, nodes, events[i - 1]);
       if (!line) continue;
       if (e.type === "node_started") nodeStart.set(node, Date.parse(e.created_at));
       // A round's outcome joins its start line; with no start left to join, it stands alone.
@@ -133,8 +151,8 @@ export function recent(events: KraftEvent[], nodes?: Nodes): RecentLine[] {
         const ms = Date.parse(e.created_at) - (nodeStart.get(node) ?? NaN);
         if (ms >= 1000) line += ` · ${elapsed(ms)}`;
       }
-      // The item's end, when its last node just finished, is that node's line.
-      if (e.type === "work_item_completed" && out.at(-1)?.e.type === "node_completed") continue;
+      // The item's end, when its last node just finished, is that node's line; when a person marked it complete, theirs.
+      if (e.type === "work_item_completed" && (out.at(-1)?.e.type === "node_completed" || out.at(-1)?.e.type === "work_item_manually_completed")) continue;
       // A decision answers the request: the wait is over and the line that said so goes (CG-3).
       // A skip answers it too (R14b-05): the gate was passed without a decision.
       if (e.type === "gate_approved" || e.type === "gate_rejected" || e.type === "node_skipped") drop((x) => !(x.e.type === "gate_requested" && (s(x.e.payload?.gate) || x.node) === (s(p.gate) || node)));

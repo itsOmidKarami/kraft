@@ -8,6 +8,7 @@ import asyncio
 import os
 import time
 from functools import partial
+from itertools import zip_longest
 from typing import ClassVar
 
 from rich.text import Text
@@ -485,8 +486,9 @@ class Item(ChainTab, MenuActions, View):
         now = time.time()
         nodes = ((self.item or {}).get("chain_definition") or {}).get("nodes")
         log.clear()
-        for event in self.events:
-            if (line := words.event_line(event, nodes)) is not None:
+        # Newest first: the event before one in time is the next one down.
+        for event, before in zip_longest(self.events, self.events[1:]):
+            if (line := words.event_line(event, nodes, before)) is not None:
                 age = words.event_age(event.get("created_at"), now).rjust(7)
                 log.write(Text.assemble((age, muted), "  ", line), scroll_end=False)
         if self.more:
