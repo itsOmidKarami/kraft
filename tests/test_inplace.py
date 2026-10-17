@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -49,8 +50,16 @@ def _on_branch(repo, branch, name, body) -> None:
     git(repo, "checkout", "-q", "main")
 
 
-async def test_take_switches_with_plain_checkout_and_keeps_edits(item_on, database, run_dirs, repo):
+@pytest.mark.parametrize(
+    "hook", [None, "echo hook broke >&2; exit 1"], ids=["plain", "failing-hook"]
+)
+async def test_take_switches_with_plain_checkout_and_keeps_edits(
+    item_on, database, run_dirs, repo, hook
+):
     it, branch = await _prepared(item_on, database, run_dirs, repo)
+    if hook is not None:
+        # git has switched by the time post-checkout runs, and exits with its status.
+        write(repo, ".git/hooks/post-checkout", f"#!/bin/sh\n{hook}\n").chmod(0o755)
     edited = (repo / "calc.py").read_text() + "# the person's edit\n"
     write(repo, "calc.py", edited)
 
@@ -59,29 +68,57 @@ async def test_take_switches_with_plain_checkout_and_keeps_edits(item_on, databa
     assert _head(repo) == f"refs/heads/{branch}"
     assert (repo / "calc.py").read_text() == edited
     assert git(repo, "status", "--porcelain") == "M calc.py"
-    assert [e["payload"] for e in it.events("checkout_switched")] == [
-        {"from": "main", "to": branch}
-    ]
+    [switched] = [e["payload"] for e in it.events("checkout_switched")]
+    assert (switched["from"], switched["to"]) == ("main", branch)
+    assert ("hook broke" in switched.get("output", "")) == (hook is not None)
+
+
+def _ignored_on_main(repo, branch, name):
+    """`name` ignored on `main` but tracked on `branch`, the person's copy on disk."""
+    write(repo, ".gitignore", f"{name}\n")
+    commit_all(repo, "ignore it")
+    git(repo, "checkout", "-q", branch)
+    write(repo, name, "the item's version\n")
+    git(repo, "add", "-f", name)
+    git(repo, "commit", "-qm", "track it")
+    git(repo, "checkout", "-q", "main")
+
+
+def _item_writes(repo, branch, name):
+    _on_branch(repo, branch, name, "the item's version\n")
+
+
+def _checked_out_elsewhere(repo, branch, name):
+    git(repo, "worktree", "add", "-q", str(repo.parent / "other"), branch)
 
 
 @pytest.mark.parametrize(
-    ("name", "person_tracks_it"),
-    [("calc.py", True), ("notes.txt", False)],
-    ids=["tracked", "untracked"],
+    ("name", "setup"),
+    [
+        ("calc.py", _item_writes),
+        ("notes.txt", _item_writes),
+        ("gen.txt", _ignored_on_main),
+        ("calc.py", _checked_out_elsewhere),
+    ],
+    ids=["tracked", "untracked", "ignored", "checked-out-elsewhere"],
 )
 async def test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing(
-    item_on, database, run_dirs, repo, name, person_tracks_it
+    request, item_on, database, run_dirs, repo, name, setup
 ):
     it, branch = await _prepared(item_on, database, run_dirs, repo)
-    _on_branch(repo, branch, name, "the item's version\n")
+    setup(repo, branch, name)
     write(repo, name, "the person's version\n")
-    assert bool(git(repo, "ls-files", name)) == person_tracks_it
 
     with pytest.raises(inplace.CheckoutRefused) as refused:
         await inplace.take(database, run_dirs, it.row(), attachments=[])
 
-    assert refused.value.paths == [name]
-    assert name in str(refused.value)
+    if request.node.callspec.id == "checked-out-elsewhere":
+        assert refused.value.paths == []
+        assert "would overwrite" not in str(refused.value)
+        assert "already used by worktree" in str(refused.value), "git's own words are lost"
+    else:
+        assert refused.value.paths == [name]
+        assert name in str(refused.value)
     assert (repo / name).read_text() == "the person's version\n"
     assert _head(repo) == "refs/heads/main"
     assert it.events("checkout_switched") == []
@@ -147,24 +184,37 @@ async def test_prepare_never_runs_setup_or_writes_git_config(item_on, database, 
 
 
 @pytest.mark.parametrize(
-    "already", [None, "# Spec\n", "# Someone else's\n"], ids=["absent", "same", "different"]
+    "already",
+    [None, "# Spec\n", "# Someone else's\n", "no identity"],
+    ids=["absent", "same", "different", "no-identity"],
 )
 async def test_the_first_take_commits_the_attachment_by_path(
-    item_on, database, run_dirs, repo, tmp_path, already
+    item_on, database, run_dirs, repo, tmp_path, monkeypatch, already
 ):
     it, branch = await _prepared(item_on, database, run_dirs, repo)
     stored = write(tmp_path / "filed", "spec.md", "# Spec\n")
     attachment = {"kind": "spec", "path": "docs/spec.md", "source": str(stored)}
-    if already is not None:
+    if already == "no identity":
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+        monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+        git(repo, "config", "--unset", "user.email")
+    elif already is not None:
         write(repo, "docs/spec.md", already)
     write(repo, "calc.py", "# the person's edit\n")
 
-    if already == "# Someone else's\n":
+    if already in ("# Someone else's\n", "no identity"):
         with pytest.raises(inplace.CheckoutRefused) as refused:
             await inplace.take(database, run_dirs, it.row(), attachments=[attachment])
-        assert refused.value.paths == ["docs/spec.md"]
-        assert (repo / "docs/spec.md").read_text() == already
+        if already == "no identity":
+            assert "user.email" in str(refused.value)
+            assert not (repo / "docs/spec.md").exists()
+        else:
+            assert refused.value.paths == ["docs/spec.md"]
+            assert (repo / "docs/spec.md").read_text() == already
         assert git(repo, "rev-parse", branch) == it.row()["base_ref"]
+        assert [e["payload"] for e in it.events("checkout_switched")] == [
+            {"from": "main", "to": branch}
+        ], "the checkout moved before the refusal, and nothing says so"
         return
     await inplace.take(database, run_dirs, it.row(), attachments=[attachment])
     await inplace.take(database, run_dirs, it.row(), attachments=[attachment])

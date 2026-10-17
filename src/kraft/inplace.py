@@ -37,17 +37,21 @@ class CheckoutRefused(RuntimeError):
     """The checkout cannot be taken without forcing it: a `checkout` stop
     (`StopKind.CHECKOUT`), never a failure and never auto-escalated. The
     message names the files or branch and what the person does next; `paths`
-    are the files."""
+    are the files. `moved_from` is set when the checkout was switched before
+    the refusal, so the switch is still recorded."""
 
     def __init__(self, message: str, paths: list[str] | None = None):
         super().__init__(message)
         self.paths = paths or []
+        self.moved_from: dict | None = None
 
 
 async def prepare(db, run_dirs, row, *, base: str) -> Path:
-    """`ensure_worktree` for an in-place item: pin `base_ref`, and make the
-    item's branch ref at it if missing. The checkout itself is untouched: no
-    switch, no setup command, no carried files and no git config written."""
+    """`ensure_worktree` for an in-place item: on its first call, pin
+    `base_ref` and make the item's branch ref there. The checkout itself is
+    untouched: no switch, no setup command, no carried files and no git
+    config written. A branch deleted later is never made again: the take
+    stops on it."""
     from kraft import builtins
 
     folder = item_folder(run_dirs, row)
@@ -55,21 +59,22 @@ async def prepare(db, run_dirs, row, *, base: str) -> Path:
         raise ConfigError(
             f"{folder}, the checkout this item runs in, is gone: put it back, or abandon the item"
         )
-    base_ref = row["base_ref"]
-    if base_ref is None:
-        base_ref = await builtins.upstream_head(folder, base)
-        if base_ref:
-            await db.write(lambda c: store.set_base_ref(c, row["id"], base_ref))
+    if row["base_ref"] is not None:
+        return folder
+    base_ref = await builtins.upstream_head(folder, base)
+    if not base_ref:
+        return folder
+    # Before the first take commits them: a missing stored copy fails the
+    # item here, as `ensure_worktree` does, not as a failed task.
+    builtins.stored_attachments(run_dirs, row["id"], _attachments_of(row), row["repo"])
     branch = store.branch_for(row)
-    if base_ref and _ref(folder, branch) is None:
+    if _ref(folder, branch) is None:
         done = subprocess.run(
             ["git", "branch", branch, base_ref], cwd=folder, capture_output=True, text=True
         )
         if done.returncode != 0:
             raise RuntimeError(f"could not make {branch} in {folder}: {done.stderr.strip()}")
-        # Before the first take commits them: a missing stored copy fails the
-        # item here, as `ensure_worktree` does, not as a failed task.
-        builtins.stored_attachments(run_dirs, row["id"], _attachments_of(row), row["repo"])
+    await db.write(lambda c: store.set_base_ref(c, row["id"], base_ref))
     return folder
 
 
@@ -77,34 +82,52 @@ async def take(db, run_dirs, row, *, attachments) -> None:
     """Put the checkout on the item's branch, right before a task that needs
     the folder: never on the walk's entry, which re-runs on every CI poll.
     Never forced: anything git would refuse, or that would clobber a file,
-    raises `CheckoutRefused` with the checkout as it was. The person's
-    uncommitted edits ride along. On the first take (the branch still at
-    `base_ref`) the attachments are committed on the branch, by path."""
+    raises `CheckoutRefused`. The person's uncommitted edits ride along. On
+    the first take (the branch still at `base_ref`) the attachments are
+    committed on the branch, by path. A switch is always recorded, even one a
+    later step refused."""
     from kraft import builtins
 
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (row["id"],)).fetchone()
     )
     folder = item_folder(run_dirs, row)
-    attachments = builtins.stored_attachments(run_dirs, row["id"], attachments, row["repo"])
-    base = await builtins.base_branch(db, row["id"], folder) if attachments else ""
-    moved_from = await asyncio.to_thread(
-        _take, folder, store.branch_for(row), row["base_ref"], attachments, row["id"], base
+    branch = store.branch_for(row)
+    first = (
+        bool(attachments)
+        and row["base_ref"] is not None
+        and _ref(folder, branch) == row["base_ref"]
     )
-    if moved_from is not None:
-        await db.write(
-            lambda c: events.append(
-                c,
-                row["id"],
-                ChainEvent.CHECKOUT_SWITCHED,
-                {"from": moved_from, "to": store.branch_for(row)},
-            )
+    attachments = (
+        builtins.stored_attachments(run_dirs, row["id"], attachments, row["repo"]) if first else []
+    )
+    base = await builtins.base_branch(db, row["id"], folder) if attachments else ""
+    moved = None
+    try:
+        moved = await asyncio.to_thread(
+            _take, folder, branch, row["base_ref"], attachments, row["id"], base
         )
+    except CheckoutRefused as exc:
+        moved = exc.moved_from
+        raise
+    finally:
+        if moved is not None:
+            await db.write(
+                lambda c: events.append(
+                    c, row["id"], ChainEvent.CHECKOUT_SWITCHED, {**moved, "to": branch}
+                )
+            )
 
 
-#: Co-tasks of one step take the same checkout at once; git's index lock
-#: would refuse the second.
-_TAKING = threading.Lock()
+#: One lock per checkout: co-tasks of one step take it at once, and git's
+#: index lock would refuse the second.
+_LOCKS: dict[str, threading.Lock] = {}
+_LOCKS_GUARD = threading.Lock()
+
+
+def _lock(folder: Path) -> threading.Lock:
+    with _LOCKS_GUARD:
+        return _LOCKS.setdefault(str(folder.resolve()), threading.Lock())
 
 
 def _ref(folder: Path, branch: str) -> str | None:
@@ -113,9 +136,18 @@ def _ref(folder: Path, branch: str) -> str | None:
     )
 
 
-def _take(folder, branch, base_ref, attachments, wid, base) -> str | None:
-    """`take`'s git, under `_TAKING`. Returns what HEAD was when it switched."""
-    with _TAKING:
+def _git_lines(folder: Path, command: str, *args: str) -> list[str]:
+    """`git <command> -z *args`, one path a line, unquoted; [] when git says no."""
+    out = git_read(
+        folder, "--literal-pathspecs", command, "-z", *args, strip=False, expected_failure=True
+    )
+    return [p for p in (out or "").split("\0") if p]
+
+
+def _take(folder, branch, base_ref, attachments, wid, base) -> dict | None:
+    """`take`'s git, under the checkout's lock. Returns `{"from": ...}` (and
+    git's `output` when a hook failed after switching) when it switched."""
+    with _lock(folder):
         try:
             git.assert_no_operation(folder)
         except git.UnsafeWorktree:
@@ -123,7 +155,7 @@ def _take(folder, branch, base_ref, attachments, wid, base) -> str | None:
                 f"{folder} has a git operation in progress (a rebase, merge, cherry-pick, "
                 "revert or bisect): finish or abort it yourself, then retry the item"
             ) from None
-        unmerged = (git_read(folder, "diff", "--name-only", "--diff-filter=U") or "").splitlines()
+        unmerged = _git_lines(folder, "diff", "--name-only", "--diff-filter=U")
         if unmerged:
             raise CheckoutRefused(
                 f"{folder} has unmerged paths: {', '.join(unmerged)}; resolve them yourself, "
@@ -136,40 +168,87 @@ def _take(folder, branch, base_ref, attachments, wid, base) -> str | None:
                 "restore it (`git reflog` may still have its commits) and retry, or abandon "
                 "the item"
             )
-        head = git_read(folder, "symbolic-ref", "--quiet", "HEAD", expected_failure=True)
-        moved_from = None
-        if head != f"refs/heads/{branch}":
-            moved_from = (head or "").removeprefix("refs/heads/") or git_read(
-                folder, "rev-parse", "HEAD"
-            )
-            # Never `-f`: git refuses a switch that would overwrite an edit.
-            done = subprocess.run(
-                ["git", "checkout", branch, "--"],
-                cwd=folder,
-                capture_output=True,
-                text=True,
-                env={**os.environ, "LC_ALL": "C"},
-            )
-            if done.returncode != 0:
-                # git lists each file it would overwrite on a tab-indented line.
-                paths = [ln.strip() for ln in done.stderr.splitlines() if ln.startswith("\t")]
-                said = ", ".join(paths) or done.stderr.strip()
-                raise CheckoutRefused(
-                    f"git would not switch {folder} from {moved_from} to {branch}: it would "
-                    f"overwrite {said}. Commit, stash or move those changes yourself, then "
-                    "retry the item",
-                    paths,
-                )
+        moved = None
+        if git_read(folder, "symbolic-ref", "--quiet", "HEAD", expected_failure=True) != (
+            f"refs/heads/{branch}"
+        ):
+            moved = _switch(folder, branch)
         if attachments and base_ref and _ref(folder, branch) == base_ref:
-            _attach(folder, attachments, wid, base)
-        return moved_from
+            try:
+                _attach(folder, attachments, wid, base)
+            except CheckoutRefused as exc:
+                exc.moved_from = moved
+                raise
+        return moved
+
+
+def _switch(folder: Path, branch: str) -> dict:
+    """A plain `git checkout <branch>`: never `-f`, and refused before it
+    would overwrite an ignored file the branch tracks, which git itself
+    would replace without a word."""
+    from kraft import builtins
+
+    head = git_read(folder, "symbolic-ref", "--quiet", "HEAD", expected_failure=True)
+    moved_from = (head or "").removeprefix("refs/heads/") or git_read(folder, "rev-parse", "HEAD")
+    changed = _git_lines(folder, "diff", "--name-only", "HEAD", branch)
+    ignored = (
+        _git_lines(
+            folder, "ls-files", "--others", "--ignored", "--exclude-standard", "--", *changed
+        )
+        if changed
+        else []
+    )
+    if ignored:
+        raise CheckoutRefused(
+            f"switching {folder} from {moved_from} to {branch} would overwrite "
+            f"{', '.join(ignored)}, ignored here but tracked on {branch}. Move them aside "
+            "yourself, then retry the item",
+            ignored,
+        )
+    try:
+        done = builtins._run_git_group(
+            ["git", "-c", "core.quotePath=false", "checkout", branch, "--"],
+            timeout=builtins.WORKTREE_ADD_TIMEOUT_S,
+            env={**os.environ, "LC_ALL": "C"},
+            cwd=folder,
+        )
+    except builtins._GroupTimedOut:
+        raise CheckoutRefused(
+            f"git checkout {branch} in {folder} did not finish in "
+            f"{builtins.WORKTREE_ADD_TIMEOUT_S:.0f}s (a hook or a filter such as an LFS smudge "
+            "hung) and was stopped: check `git status` there, then retry the item"
+        ) from None
+    said = done.stderr.strip() or done.stdout.strip()
+    if done.returncode == 0:
+        return {"from": moved_from}
+    if git_read(folder, "symbolic-ref", "--quiet", "HEAD", expected_failure=True) == (
+        f"refs/heads/{branch}"
+    ):
+        # A post-checkout hook failed after git had switched.
+        return {"from": moved_from, "output": said}
+    # git lists each file it would overwrite on a tab-indented line.
+    paths = [ln.strip() for ln in done.stderr.splitlines() if ln.startswith("\t")]
+    what = f"it would overwrite {', '.join(paths)}" if paths else f"git said: {said}"
+    advice = "Commit, stash or move those changes" if paths else "Sort that out"
+    raise CheckoutRefused(
+        f"git would not switch {folder} from {moved_from} to {branch}: {what}. "
+        f"{advice} yourself, then retry the item",
+        paths,
+    )
 
 
 def _attach(folder: Path, attachments: list[dict], wid: str, base: str) -> None:
     """Copy the attachments in and commit them on the branch, by path. A file
-    already there with other content is the person's, and refuses."""
+    already there with other content is the person's, and refuses; so does a
+    checkout with no identity to commit as."""
     from kraft import builtins
 
+    for key in ("user.name", "user.email"):
+        if not git_read(folder, "config", "--get", key, expected_failure=True):
+            raise CheckoutRefused(
+                f"no {key} configured in {folder}, so Kraft cannot commit the item's "
+                "attachments there: set it, then retry the item"
+            )
     root = folder.resolve()
     for a in attachments:
         dest = folder / a["path"]
@@ -184,9 +263,11 @@ def _attach(folder: Path, attachments: list[dict], wid: str, base: str) -> None:
                 "and Kraft will not overwrite it: move it aside, then retry the item",
                 [a["path"]],
             )
+    for a in attachments:
+        dest = folder / a["path"]
         if not dest.exists():
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src, dest)
+            shutil.copyfile(a["source"], dest)
     builtins._commit_paths(
         folder,
         [a["path"] for a in attachments],

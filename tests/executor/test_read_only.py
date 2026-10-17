@@ -21,6 +21,7 @@ from kraft import store
 from kraft.executor import dispatch, walk
 from kraft.executor.context import READ_ONLY_VIOLATED, LaunchContext
 from kraft.templates import models as tm
+from kraft.templates.environment import WorkItemTarget
 
 NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}))
 
@@ -238,3 +239,24 @@ def test_git_failing_the_same_way_twice_still_counts_as_a_change(tmp_path):
 
     failed = (None, None, None)
     assert read_only._changed_in(tmp_path, failed, failed) == ["(git could not read it)"]
+
+
+async def test_an_in_place_take_is_not_the_read_only_steps_write(item_on, monkeypatch):
+    """The take switches the person's checkout to the item's branch right
+    before the task: Kraft's move, read before the step's snapshot."""
+    in_place = WorkItemTarget.for_repository("sample", in_place=True)
+    it = await item_on(
+        [v1_node(steps=[{"id": "check", "read_only": True, "tasks": [_sub("t")]}])], target=in_place
+    )
+    branch = store.branch_for(it.row())
+    git(it.repo, "checkout", "-qb", branch)
+    write(it.repo, "ITEM", "on the item's branch\n")
+    git(it.repo, "add", "ITEM")
+    git(it.repo, "commit", "-qm", "item")
+    git(it.repo, "checkout", "-q", "main")
+    _launches(monkeypatch)
+
+    assert await _walk(it) != "needs_human"
+
+    assert git(it.repo, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"
+    assert it.events("read_only_violated") == []

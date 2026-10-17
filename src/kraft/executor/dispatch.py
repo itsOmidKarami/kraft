@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import fnmatch
 import json
 import logging
@@ -1556,6 +1557,11 @@ async def sweep_stragglers(
     # `git commit` in someone else's worktree (Kraft-7fip). Kraft owns the
     # worktree, so it takes the work rather than reporting it missing.
     #
+    # Never in place: the person's own edits sit in the checkout beside the
+    # agent's, and `restore_branch` forces a checkout.
+    if store.is_in_place(work_item_row):
+        return
+    #
     # Never at the cost of the run itself: an index lock a co-task holds, a
     # submodule that `add -A` finds nothing to stage in -- either of those
     # would turn a *successful* agent task into a failed node, and on the
@@ -1933,13 +1939,20 @@ async def measure_node(
             db, row, launch, worktree, before, node_id=node.id, scope=scope
         )
 
-    def _snapshot(flagged: bool):
-        return _read_only.snapshot(db, row, launch, worktree) if flagged else None
+    async def _snapshot(flagged: bool):
+        if not flagged:
+            return None
+        if store.is_in_place(row):
+            # The take is Kraft's own move, not the scope's write; a refusal
+            # is the task's to report, from its own take.
+            with contextlib.suppress(inplace.CheckoutRefused):
+                await inplace.take(db, run_dirs, row, attachments=entry.attachments_of(row))
+        return _read_only.snapshot(db, row, launch, worktree)
 
     async def _settle(tasks, step: ResolvedStep, *, retry: bool = False) -> list:
         # A read_only step is checked around every run of its tasks, a
         # recovery's retry included; the handler itself runs outside it.
-        before = _snapshot(step.read_only)
+        before = await _snapshot(step.read_only)
         results = await asyncio.gather(
             *(_measure(t, retry=retry) for t in tasks), return_exceptions=True
         )
@@ -2014,7 +2027,7 @@ async def measure_node(
 
     # A read_only node is checked around its own steps, a step around its
     # tasks (`_settle`); recovery and fix loops run outside either check.
-    node_before = _snapshot(own and getattr(node.node, "read_only", False))
+    node_before = await _snapshot(own and getattr(node.node, "read_only", False))
     outcomes: list[tuple[ResolvedTask, object]] = []
     for index, step in enumerate(groups):
         # A resumed node skips the steps before `start_step` -- they already

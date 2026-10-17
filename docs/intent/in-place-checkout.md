@@ -67,7 +67,7 @@ origin: src/kraft/store/sessions.py §create_session
 ## REQ in-place-never-forces-a-checkout
 
 The system SHALL NOT run `git checkout -f` in an in-place item's checkout.
-enforced-by: tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/test_inplace.py::test_take_switches_with_plain_checkout_and_keeps_edits
+enforced-by: tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/test_inplace.py::test_take_switches_with_plain_checkout_and_keeps_edits[plain], tests/executor/test_walk_in_place.py::test_no_sweep_after_an_in_place_task_moves_or_commits_anything
 origin: src/kraft/inplace.py §_take
 
 ## REQ in-place-switch-refusal-stops
@@ -75,14 +75,14 @@ origin: src/kraft/inplace.py §_take
 IF switching the checkout to the item's branch would overwrite uncommitted
 changes, THEN the system SHALL stop the item as `checkout` naming the files,
 and SHALL leave the changes untouched.
-enforced-by: tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/executor/test_walk_in_place.py::test_a_refused_take_stops_the_item_as_checkout
+enforced-by: tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[ignored], tests/executor/test_walk_in_place.py::test_a_refused_take_stops_the_item_as_checkout
 origin: src/kraft/inplace.py §_take
 
 ## REQ in-place-uncommitted-edits-do-not-stop
 
 WHILE an in-place checkout has uncommitted changes that the switch does not
 overwrite, the system SHALL start the item's task without stopping.
-enforced-by: tests/test_inplace.py::test_take_switches_with_plain_checkout_and_keeps_edits, tests/test_inplace.py::test_the_first_take_commits_the_attachment_by_path[absent]
+enforced-by: tests/test_inplace.py::test_take_switches_with_plain_checkout_and_keeps_edits[plain], tests/test_inplace.py::test_the_first_take_commits_the_attachment_by_path[absent], tests/executor/test_walk_in_place.py::test_an_agent_task_runs_on_the_items_branch[the-persons-edit]
 origin: src/kraft/inplace.py §take
 
 ## REQ in-place-never-runs-setup
