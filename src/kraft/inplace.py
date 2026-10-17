@@ -941,8 +941,9 @@ async def check_task(
         facts |= {"session": last[0]["id"], "round": last[0]["round"]}
 
     def stop(c) -> None:
-        if command and last:
-            # What it measured was not the item's tip: never reused for it.
+        if facts["rerun"] and last:
+            # Its work or its verdict may be about another branch: a resume
+            # runs it again, never reuses it at the branch's unmoved tip.
             c.execute(
                 "UPDATE worker_sessions SET head_sha = NULL WHERE work_item_id = ? "
                 "AND node_id = ? AND hook_point = ? AND round = ?",
