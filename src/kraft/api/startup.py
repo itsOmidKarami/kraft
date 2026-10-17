@@ -16,6 +16,7 @@ from kraft import (
     auto_escalate_delay,
     caps,
     executor,
+    inplace,
     mr_poller,
     rate_limit_retry,
     start_queue,
@@ -184,6 +185,11 @@ async def lifespan(app: FastAPI):
         refreshed = []
     for path in refreshed:
         logger.info("%s: Kraft's permission hook now runs with -I", path)
+
+    try:
+        await asyncio.to_thread(inplace.drop_stale_scratch, run_dirs)
+    except Exception:  # noqa: BLE001 -- a leftover never refuses the boot
+        logger.exception("could not remove the throwaway rebase worktrees in %s", run_dirs.scratch)
 
     summary, adopted = await reattach.reattach(
         database,

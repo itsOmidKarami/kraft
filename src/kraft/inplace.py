@@ -293,6 +293,26 @@ def _drop_scratch(checkout: Path, scratches) -> None:
     )
 
 
+def drop_stale_scratch(run_dirs) -> None:
+    """At startup, before anything rebases: every throwaway worktree a killed
+    server left under `run_dirs.scratch`, which would pin its item's branch
+    until that item's next rebase. Never anything of the person's."""
+    for scratch in list(run_dirs.scratch.iterdir()) if run_dirs.scratch.is_dir() else []:
+        common = None
+        if (scratch / ".git").is_file():  # never a repository the scratch only sits in
+            common = git_read(
+                scratch,
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+                expected_failure=True,
+            )
+        if common:
+            _drop_scratch(Path(common).parent, [scratch])
+        else:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+
 async def _wait_out(running: asyncio.Future) -> bool:
     """Wait for `running` (a thread, which a cancel cannot stop) to its end,
     however many cancels arrive; whether one did."""

@@ -4,6 +4,7 @@ import json
 import sys
 
 import pytest
+from support.harness import git, make_repo
 
 from kraft.adapters import hook_install
 
@@ -40,3 +41,22 @@ def test_a_failed_hook_refresh_never_stops_the_server_starting(refresh_raises, c
     """Every file the refresh reads is one a worker wrote: one that broke it
     must not stop every later start until someone deletes it."""
     assert client.get("/api/health").status_code == 200
+
+
+@pytest.fixture
+def stale_scratch(tmp_path):
+    """What a server killed mid-rebase left under `run/scratch`: a throwaway
+    worktree holding an in-place item's branch, and one git no longer knows."""
+    repo = make_repo(tmp_path)
+    git(repo, "branch", "kraft/w1")
+    scratch = tmp_path / "run/scratch"
+    git(repo, "worktree", "add", "-q", str(scratch / "w1-0dead0ff"), "kraft/w1")
+    (scratch / "w2-0dead0ff").mkdir()
+    return repo
+
+
+def test_start_up_removes_the_rebase_worktrees_a_killed_server_left(stale_scratch, client):
+    """One would pin its item's branch until that item's next rebase."""
+    assert client.get("/api/health").status_code == 200
+    assert git(stale_scratch, "worktree", "list", "--porcelain").count("worktree ") == 1
+    assert list((stale_scratch.parent / "run/scratch").iterdir()) == []
