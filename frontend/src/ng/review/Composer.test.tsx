@@ -146,6 +146,13 @@ describe("Composer", () => {
     expect(onSubmit).toHaveBeenLastCalledWith({ body: "Cap it lower", label: null, suggest: LINES.join("\n") });
   });
 
+  it("colours a fenced block in the preview", async () => {
+    compose(NEW);
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "```ruby\ndef x = 1\n```" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(await screen.findByText("def", {}, { timeout: 3000 })).toHaveClass("tok-kw");
+  });
+
   it("goes back to Write when Add to review finds no text in Preview, with the reason on the field", async () => {
     const { onSubmit } = compose(NEW);
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));

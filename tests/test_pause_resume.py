@@ -638,43 +638,34 @@ def test_two_concurrent_resumes_produce_one_two_hundred_and_one_409(monkeypatch,
 
 
 @pytest.mark.parametrize(
-    ("identity", "group", "signalled"),
-    [(True, 4242, True), (False, 4242, False), (True, 1, False)],
-    ids=["its-own-process", "pid-reused", "not-a-group-leader"],
+    ("identity", "group", "gone", "signalled"),
+    [(True, 4242, False, True), (False, 4242, False, False), (True, 1, False, False)]
+    + [(True, 4242, True, True)],
+    ids=["its-own-process", "pid-reused", "not-a-group-leader", "already-gone"],
 )
 def test_pause_interrupts_the_agent_rather_than_terminating_it(
-    monkeypatch, identity, group, signalled
+    monkeypatch, identity, group, gone, signalled
 ):
-    """Kraft-s7c04.18: SIGTERM kills a claude process mid-turn without a word.
-    SIGINT makes it flush the result envelope carrying total_cost_usd, which is
-    the only cost figure Kraft will ever have for a session a human stopped.
-    Measured against claude 2.1.273. Only the process Kraft launched, leading
-    its own group, is signalled: a reused pid may be anyone's."""
+    """Kraft-s7c04.18: SIGINT, not SIGTERM, so claude flushes the result
+    envelope with total_cost_usd. Only the process Kraft launched, leading its
+    own group, is signalled (a reused pid may be anyone's); one gone is no error."""
     from kraft.api.routes import lifecycle
 
     sent = []
+
+    def killpg(pgid, sig):
+        sent.append((pgid, sig))
+        if gone:
+            raise ProcessLookupError
+
     monkeypatch.setattr(lifecycle.reattach, "_identity_ok", lambda pid, started: identity)
     monkeypatch.setattr(lifecycle.os, "getpgid", lambda pid: group)
-    monkeypatch.setattr(lifecycle.os, "killpg", lambda pgid, sig: sent.append((pgid, sig)))
+    monkeypatch.setattr(lifecycle.os, "killpg", killpg)
 
     lifecycle._terminate(4242, started=1.0)
+    lifecycle._terminate(None, started=None)
 
     assert sent == ([(4242, signal.SIGINT)] if signalled else [])
-
-
-def test_terminate_still_swallows_a_process_that_is_already_gone(monkeypatch):
-    """Unchanged posture: the row moves to paused either way."""
-    from kraft.api.routes import lifecycle
-
-    def boom(pgid, sig):
-        raise ProcessLookupError
-
-    monkeypatch.setattr(lifecycle.reattach, "_identity_ok", lambda pid, started: True)
-    monkeypatch.setattr(lifecycle.os, "getpgid", lambda pid: pid)
-    monkeypatch.setattr(lifecycle.os, "killpg", boom)
-
-    lifecycle._terminate(4242, started=1.0)  # must not raise
-    lifecycle._terminate(None, started=None)  # must not raise
 
 
 def test_resume_leaves_the_position_to_the_walk(monkeypatch, repo, client):

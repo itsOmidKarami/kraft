@@ -20,6 +20,10 @@ const ROWS: Row[] = [
     name: "review: Approve stays locked while must-fix threads are open [decided]",
     run: async (p) => { await app(p, item("needs-gate", "/review"), { ready: (pg) => pg.locator(".review-page").waitFor() }); await expect(p.getByText(/must[- ]fix/i).first()).toBeVisible(); await expect(p.getByRole("button", { name: /^Approve/ }).first()).toBeDisabled(); },
   },
+  {
+    name: "review: a diff is coloured from its grammar, loaded as a chunk",
+    run: async (p) => { await app(p, item("needs-gate", "/review"), { ready: (pg) => pg.locator(".review-page").waitFor() }); await expect(p.locator(".rv-code .tok-kw", { hasText: "def" }).first()).toBeVisible({ timeout: 5000 }); },
+  },
 
   // Document viewer
   {

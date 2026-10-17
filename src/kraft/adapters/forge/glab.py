@@ -95,7 +95,7 @@ class GlabCli(mr_ops.CliWaits):
                 "create",
                 # Every MR Kraft opens starts as a draft: `human_review` is
                 # the gate that decides it's ready, not this call (draft-MR
-                # workflow spec). `mr_sync` un-drafts it after the gate.
+                # workflow spec). `mark_ready` un-drafts it after the gate.
                 "--draft",
                 "--source-branch",
                 branch,
@@ -126,6 +126,10 @@ class GlabCli(mr_ops.CliWaits):
 
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
         await git.run_git(repo, ["glab", "mr", "update", branch, "--description", body])
+
+    async def mr_body(self, *, repo: Path, branch: str) -> str:
+        data = await self._json(repo, ["mr", "view", branch, "-F", "json"], "glab mr view")
+        return str(data.get("description") or "")
 
     async def _merge_state(self, repo: Path, branch: str = "") -> str:
         """The merge request's own view of whether it can merge.
@@ -479,12 +483,25 @@ class GlabCli(mr_ops.CliWaits):
         for label in drop:
             args += ["--unlabel", label]
         await git.run_git(repo, args)
+        await self._new_mr_pipeline(repo, number)
+
+    async def _new_mr_pipeline(self, repo: Path, number: int) -> None:
         # `projects/:id` is glab's own placeholder for the repo the command is
         # run in, so this stays as repo-agnostic as every other call here.
         await git.run_git(
             repo,
             ["glab", "api", "-X", "POST", f"projects/:id/merge_requests/{number}/pipelines"],
         )
+
+    async def rerun_after_description_change(
+        self, *, repo: Path, branch: str, ci: CIStatus
+    ) -> bool:
+        """`CI_MERGE_REQUEST_DESCRIPTION` is fixed when a pipeline is created,
+        so retrying jobs would re-read the old body: start a new pipeline, as
+        `set_labels` does for labels."""
+        raw = await git.run_git(repo, ["glab", "mr", "view", branch, "-F", "json"])
+        await self._new_mr_pipeline(repo, int(mr_ops.parse_json(raw, "glab mr view")["iid"]))
+        return True
 
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
         await git._assert_pushed(repo, branch)

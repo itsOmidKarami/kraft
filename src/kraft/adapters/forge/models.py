@@ -212,6 +212,7 @@ class Forge(Protocol):
     async def mark_ready(self, *, repo: Path, branch: str, mr: MR) -> None: ...
     async def push(self, *, repo: Path, branch: str) -> None: ...
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None: ...
+    async def mr_body(self, *, repo: Path, branch: str) -> str: ...
     async def ci_status(
         self, *, repo: Path, mr: MR, branch: str, pipeline_id: str = ""
     ) -> CIStatus: ...
@@ -226,6 +227,14 @@ class Forge(Protocol):
     ) -> None: ...
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None: ...
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None: ...
+    async def rerun_after_description_change(
+        self, *, repo: Path, branch: str, ci: CIStatus
+    ) -> bool:
+        """Start the failed checks again after the description was edited, so
+        they read the new one. True when that made a NEW pipeline, which the
+        caller's stored pipeline ref must stop pinning past."""
+        ...
+
     async def approval_state(self, *, repo: Path, branch: str) -> ApprovalState: ...
     async def automated_review(
         self, *, repo: Path, branch: str, reviewer: AutomatedReview | None
@@ -399,6 +408,11 @@ class FakeForge:
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
         self.bodies[branch] = body
 
+    async def mr_body(self, *, repo: Path, branch: str) -> str:
+        if branch in self.bodies:
+            return self.bodies[branch]
+        return next((b for n, b in self.opened_bodies.items() if self.opened[n] == branch), "")
+
     async def ci_status(
         self, *, repo: Path, mr: MR, branch: str = "", pipeline_id: str = ""
     ) -> CIStatus:
@@ -466,6 +480,15 @@ class FakeForge:
 
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
         self.retried.append(ci.url)
+
+    #: Whether `rerun_after_description_change` makes a new pipeline, as GitLab does.
+    edit_makes_new_pipeline: bool = False
+
+    async def rerun_after_description_change(
+        self, *, repo: Path, branch: str, ci: CIStatus
+    ) -> bool:
+        self.retried.append(ci.url)
+        return self.edit_makes_new_pipeline
 
     async def set_labels(self, *, repo: Path, branch: str, mr: MR, labels: tuple[str, ...]) -> None:
         self.labels.extend(labels)

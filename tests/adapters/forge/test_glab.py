@@ -594,3 +594,25 @@ async def test_glab_set_labels_re_creates_the_pipeline_for_the_sentinel_number(c
     assert "POST" in argv, "the pipeline was never re-created"
     assert any("/pipelines" in a for a in argv)
     assert not any("merge_requests/0/" in a for a in argv), "the sentinel 0 was used as an id"
+
+
+async def test_glab_rerun_after_description_change_creates_a_new_pipeline(cli, tmp_path):
+    """`CI_MERGE_REQUEST_DESCRIPTION` is fixed at pipeline creation: retrying
+    the old pipeline's jobs would re-read the old body."""
+    cli.stub("glab", routes={"mr view": GLAB_MR_VIEW, "api": ""})
+
+    made_new = await forge.GlabCli().rerun_after_description_change(
+        repo=tmp_path, branch="b", ci=forge.CIStatus(state="failed", url="u", pipeline_ref="9")
+    )
+
+    assert made_new is True
+    argv = cli.argv("glab")
+    assert "POST" in argv and any("/merge_requests/54/pipelines" in a for a in argv)
+    assert not any("/retry" in a for a in argv)
+
+
+async def test_glab_mr_body_reads_the_live_description(cli, tmp_path):
+    cli.stub("glab", routes={"mr view": '{"description":"the live body"}'})
+
+    assert await forge.GlabCli().mr_body(repo=tmp_path, branch="b") == "the live body"
+    assert cli.argv("glab") == ["mr", "view", "b", "-F", "json"]

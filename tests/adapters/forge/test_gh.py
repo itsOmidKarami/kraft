@@ -351,3 +351,24 @@ async def test_gh_retry_jobs_reruns_the_actions_run_behind_the_failed_check(cli,
     )
 
     assert cli.argv("gh") == ["run", "rerun", "123456", "--failed"]
+
+
+async def test_gh_rerun_after_description_change_reruns_without_a_new_pipeline(cli, tmp_path):
+    cli.stub("gh", "")
+    job = forge.FailedJob("build", "failed", None, "https://github.com/o/r/actions/runs/77/job/9")
+
+    made_new = await forge.GhCli().rerun_after_description_change(
+        repo=tmp_path,
+        branch="b",
+        ci=forge.CIStatus(state="failed", url="u", failed_jobs=(job,)),
+    )
+
+    assert made_new is False
+    assert cli.argv("gh") == ["run", "rerun", "77", "--failed"]
+
+
+async def test_gh_mr_body_reads_the_live_description(cli, tmp_path):
+    cli.stub("gh", routes={"pr view": '{"body":"the live body"}'})
+
+    assert await forge.GhCli().mr_body(repo=tmp_path, branch="b") == "the live body"
+    assert cli.argv("gh") == ["pr", "view", "b", "--json", "body"]

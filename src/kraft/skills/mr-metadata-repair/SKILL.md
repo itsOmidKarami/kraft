@@ -1,6 +1,6 @@
 ---
 name: mr-metadata-repair
-description: "Repairs a merge request's metadata, such as a missing or wrong label, so its checks can pass. Kraft runs it as the on_failure repair of the merge request's CI wait, on every failure; it acts only when the failed job's trace names a label."
+description: "Repairs a merge request's metadata, such as a missing or wrong label or a missing description section, so its checks can pass. Kraft runs it as the on_failure repair of the merge request's CI wait, on every failure; it acts only when the failed job's trace names a label or a description section."
 ---
 
 # Repairing a merge request's metadata
@@ -29,6 +29,22 @@ Apply your choice with the `set_mr_labels` tool of the `kraft` MCP server
 `glab`/`gh` directly. It re-creates the pipeline too: `CI_MERGE_REQUEST_LABELS`
 is fixed when a pipeline starts, so a label applied after the fact needs a new
 pipeline to be seen at all, and this is what makes that happen.
+
+## When the trace names a missing or wrong description section
+
+A job that reads the merge request's description (for example `missing
+section: ## Removed tests`) is fixed in the item's `mr_meta` document, whose
+path is in the documents list above. Edit that file, not the live description:
+Kraft rebuilds the description from it on every sync, so an edit anywhere else
+is reverted. Keep its front matter, change only the body, and take the
+section's format from CONTRIBUTING, the PR template or the job's own checker
+(run it on the new body if the repo ships one). Fill it from the diff, never
+from guesswork; if you cannot tell what it should say, leave it. The `sync`
+step after you writes the description to the forge and starts the failed
+checks again (on GitLab as a new pipeline). A check that reads the description
+when it runs sees the fix; one that reads it from its triggering event does
+only if it re-runs on edits. If neither works the item stops for a person, as
+before: do not push a commit or touch CI config to force a run.
 
 ## When the trace names something else
 

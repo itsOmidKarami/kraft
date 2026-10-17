@@ -557,17 +557,9 @@ async def _run_one(
                 return f"already merged (!{existing.number}); nothing to sync\n", "done", findings
             if await git.commits_ahead(repo, branch, base) == 0:
                 return empty, "config_error", findings
-            # Undraft before anything else: every MR opens as a draft now
-            # (open_mr always does), and mr_sync is the one node every
-            # chain shape runs before merge, gated or not -- see the
-            # draft-MR workflow spec's "Undraft" decision. A no-op on an
-            # MR that is already ready (both CLIs' own docs), so calling
-            # it unconditionally costs nothing on a re-entry.
-            await forge.mark_ready(
-                repo=repo,
-                branch=branch,
-                mr=MR(number=existing.number if existing else 0, url=""),
-            )
+            # Stays a draft: publication is `mark_ready`'s, after the chain's final
+            # gate. sync also runs in on_failure and fix_loop, i.e. before that
+            # gate, so undrafting here published the MR mid-repair.
             # Push first: every commit after `open_mr` -- verify's fixes,
             # mr_checks' findings -- is local only until this runs, and
             # `merge` refuses a branch ahead of its remote (Kraft-nh5m).
@@ -575,8 +567,35 @@ async def _run_one(
             # The description `open_mr` wrote predates every commit verify
             # and mr_checks added, so it is rewritten from the branch head
             # before a human is asked to read it (Kraft-c09h).
+            try:
+                live_body: str | None = await forge.mr_body(repo=repo, branch=branch)
+            except ForgeError:
+                live_body = None  # shortcut: best-effort read, the sync itself goes on
             await forge.update_mr(repo=repo, branch=branch, body=body)
             log, status = "pushed and synced the merge request description\n", "done"
+            # Editing a description triggers no workflow, so a check that read
+            # the old one (a required section, say) stays red until its jobs
+            # run again. Only when the body changed AND the current head's
+            # checks are red: a sync after new commits sees a pending pipeline.
+            # shortcut: re-runs whenever the live description differs, including
+            # edits by a bot or a person, not only a repair; key it on the body
+            # Kraft last wrote if that costs CI.
+            if live_body is not None and live_body.strip() != body.strip():
+                try:
+                    head_ci = await forge.ci_status(
+                        repo=repo, mr=MR(number=0, url=""), branch=branch
+                    )
+                    head_sha = await git._head_sha(repo, branch)
+                    if head_ci.state == "failed" and head_ci.sha in ("", head_sha):
+                        if await forge.rerun_after_description_change(
+                            repo=repo, branch=branch, ci=head_ci
+                        ):
+                            # A new pipeline: the CI wait pins `head:pipeline`,
+                            # and would keep reading the old one.
+                            await db.write(lambda c: store.set_ci_pipeline_ref(c, work_item_id, ""))
+                        log += "description changed: re-ran the failed jobs\n"
+                except ForgeError:
+                    pass  # shortcut: best-effort re-run, the CI wait still reports the truth
         case "mark_ready":
             # `mr.mark_ready` in V1: publication, split out of `sync_mr`'s
             # push-and-describe so a chain can put its final human gate between

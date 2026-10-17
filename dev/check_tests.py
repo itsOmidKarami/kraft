@@ -173,10 +173,6 @@ REAL_CLI_ALLOWLIST: dict[str, str] = {
 #: `check_expectation_allowlist_is_current` fails the build if an entry's
 #: test id no longer exists.
 EXPECTATION_ALLOWLIST: set[str] = {
-    # lifecycle._terminate(pid) swallows ProcessLookupError/PermissionError
-    # and returns None either way -- no return value, no state it touches
-    # that the test could inspect instead.
-    "tests/test_pause_resume.py::test_terminate_still_swallows_a_process_that_is_already_gone",
     # ast.parse(kl.py, feature_version=(3, 10)) raising SyntaxError is the
     # failure; a tree that parsed has nothing further to say about the floor.
     "plugins/kraft-lite/tests/test_skills.py::test_kl_parses_on_the_oldest_supported_python",
