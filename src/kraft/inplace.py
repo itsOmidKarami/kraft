@@ -196,10 +196,13 @@ async def rebase(
     check that branch out anywhere else, so the rebase runs there with
     `--autostash` (unbounded: git is never killed in the person's checkout);
     otherwise in a throwaway worktree under `run_dirs.scratch`, with no setup
-    and no carried files, removed whatever happens. Which, is read under the
-    checkout's lock and held to the end, so a take cannot switch it between."""
+    and no carried files, removed whatever happens. Which one is decided
+    under the checkout's lock, held to the end, so a take cannot switch the
+    checkout in between."""
     from kraft import builtins
 
+    if row["base_ref"] is None:  # never started: `prepare` forks from the newest base
+        return None
     checkout = Path(row["repo"])
     branch = store.branch_for(row)
     async with _held(checkout):

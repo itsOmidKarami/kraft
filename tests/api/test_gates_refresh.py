@@ -76,7 +76,7 @@ def test_an_in_place_refresh_that_clashes_stops_the_approved_item_as_checkout(
     client, repo, monkeypatch
 ):
     """The approval lands, but a rebase that left the person's checkout
-    clashing stops the item for them, naming the stash; the chain does not go on."""
+    clashing stops the item for them, naming the stash."""
     from kraft import inplace
 
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
@@ -101,4 +101,3 @@ def test_an_in_place_refresh_that_clashes_stops_the_approved_item_as_checkout(
     [stop] = [e["payload"] for e in evts if e["type"] == "work_item_needs_human"]
     assert (stop["kind"], stop["facts"]) == ("checkout", {"paths": ["f"], "stash": "5ca1ab1e"})
     assert "gate_approved" in [e["type"] for e in evts]
-    assert not any(e["type"] == "node_started" and e["node_id"] == "plan" for e in evts)

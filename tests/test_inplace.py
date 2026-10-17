@@ -530,6 +530,66 @@ async def test_an_autostash_clash_raises_with_the_stash_and_leaves_it(
     assert raised.value.stash in str(raised.value) and "f" in str(raised.value)
 
 
+async def test_a_conflicting_rebase_in_the_checkout_aborts_and_puts_the_edits_back(
+    item_on, database, run_dirs, repo
+):
+    it, branch = await _behind_origin(item_on, database, run_dirs, repo, main_writes="item.txt")
+    git(repo, "checkout", "-q", branch)
+    write(repo, "f", "the person's edit\n")
+    tip = git(repo, "rev-parse", branch)
+
+    with pytest.raises(builtins.RebaseConflict, match="item.txt"):
+        await inplace.rebase(run_dirs, it.row(), base="main")
+
+    assert (_head(repo), git(repo, "rev-parse", branch)) == (f"refs/heads/{branch}", tip)
+    assert git(repo, "status", "--porcelain") == "M f"
+    assert (repo / "f").read_text() == "the person's edit\n"
+    assert git(repo, "stash", "list") == ""
+
+
+async def test_a_cancel_mid_rebase_in_the_checkout_waits_for_git(item_on, database, run_dirs, repo):
+    it, branch = await _behind_origin(item_on, database, run_dirs, repo)
+    git(repo, "checkout", "-q", branch)
+    write(repo, "f", "the person's edit\n")
+    write(repo, ".git/hooks/pre-rebase", "#!/bin/sh\nsleep 1\n").chmod(0o755)
+    rebasing = asyncio.ensure_future(inplace.rebase(run_dirs, it.row(), base="main"))
+    await asyncio.sleep(0.5)
+    rebasing.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await rebasing
+
+    assert _contains_origin_main(repo, branch), "git was cut off, or left running"
+    assert git(repo, "status", "--porcelain") == "M f"
+    assert not inplace._lock(repo).locked()
+
+
+async def test_a_rebase_waits_for_the_checkouts_lock(item_on, database, run_dirs, repo):
+    """A take holds it while it switches: which way to rebase is read after."""
+    it, branch = await _behind_origin(item_on, database, run_dirs, repo)
+    lock = inplace._lock(repo)
+    lock.acquire()
+    try:
+        rebasing = asyncio.ensure_future(inplace.rebase(run_dirs, it.row(), base="main"))
+        await asyncio.sleep(0.3)
+        assert not rebasing.done()
+        git(repo, "checkout", "-q", branch)  # what the take did meanwhile
+    finally:
+        lock.release()
+
+    await rebasing
+
+    assert _contains_origin_main(repo, branch)
+    assert not run_dirs.scratch.exists(), "rebased in the checkout, as it now is"
+
+
+async def test_rebase_of_an_item_not_yet_started_does_nothing(item_on, run_dirs, repo):
+    it = await item_on(v1_named_chain(run_dirs.base / "t"), wid="w1", target=_IN_PLACE)
+
+    assert await inplace.rebase(run_dirs, it.row(), base="main") is None
+    assert git(repo, "branch", "--list", store.branch_for(it.row())) == ""
+
+
 def _snapshot(repo) -> tuple:
     files = {p: (repo / p).read_bytes() for p in ("f", "calc.py", "mine.txt")}
     return _head(repo), git(repo, "rev-parse", "HEAD"), git(repo, "status", "--porcelain"), files
