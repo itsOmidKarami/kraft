@@ -389,11 +389,12 @@ async def test_verdict_reenters_the_walk_at_the_right_node(
         assert calls[0][1] == "because the migration is missing"
 
 
-async def test_an_agent_approval_behind_a_working_in_place_item_is_queued(
-    monkeypatch, database, run_dirs
+@pytest.mark.parametrize("verdict", ["approve", "reject"])
+async def test_an_agent_verdict_behind_a_working_in_place_item_is_queued(
+    monkeypatch, database, run_dirs, verdict
 ):
     calls = []
-    _stub_review(monkeypatch, "approve")
+    _stub_review(monkeypatch, verdict)
     _stub_walk(monkeypatch, calls)
     chain = _chain2(run_dirs, target=WorkItemTarget.for_repository("sample", in_place=True))
     await v1_item(database, chain, repo=run_dirs.base, wid="a")  # active in the checkout

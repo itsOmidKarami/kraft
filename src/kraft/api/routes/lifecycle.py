@@ -982,22 +982,10 @@ async def self_retry_held(wid: str, body: dict, request: Request) -> None:
     """Kraft's own replay of an escalation's self-retry that waited for the
     checkout: `executor.resume_after_escalation` again, from the same cursor,
     so the retry stays the agent's (counters kept, `escalated`) and its steer
-    is not checked as a person's."""
+    is not checked as a person's. It queues itself again if the checkout is
+    taken by the time it claims."""
     st = request.app.state
     row = deps._live_work_item_row(st, wid)
-    if holder := st.db.read(lambda c: store.checkout_holder(c, wid)):
-        await st.db.write(
-            lambda c: store.queue_work_item(
-                c,
-                wid,
-                verb="self_retry",
-                body=body,
-                headers={},
-                from_statuses=admitting(Verb.RETRY),
-                held_by=holder,
-            )
-        )
-        return
     deps.spawn(
         request.app,
         wid,

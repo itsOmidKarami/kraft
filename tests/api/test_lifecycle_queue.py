@@ -324,4 +324,5 @@ def test_an_autostart_behind_a_working_in_place_item_is_filed_queued(client, rep
 
     assert r.json()["status"] == "queued", r.text
     assert r.json()["held_by"] == working
-    assert client.get(f"/api/work-items/{r.json()['id']}").json()["status"] == "queued"
+    [queued] = _of(client, r.json()["id"], "work_item_queued")
+    assert queued["payload"]["held_by"] == working
