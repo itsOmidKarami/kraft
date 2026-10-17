@@ -406,11 +406,11 @@ def test_mark_and_check_read_odd_paths_exactly(repo, name):
     git(repo, "checkout", "-q", "--", name)
     write(repo, name, "the agent's\n")
     git(repo, "commit", "-q", "-m", "agent", "--", name)
-    write(repo, f"new {name}", "left\n")
+    left = name.replace(".txt", ".left")
+    write(repo, left, "left\n")
 
     found = inplace.check(repo, branch, m)
 
     assert m.dirty == {name}
     assert found.overlap == [name]
-    assert list(found.leftovers) == [f"new {name}"]
-    assert found.leftovers[f"new {name}"] != ""
+    assert found.leftovers == {left: git(repo, "hash-object", "--", left)}

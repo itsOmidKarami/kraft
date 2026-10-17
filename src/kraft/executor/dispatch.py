@@ -1726,8 +1726,7 @@ async def _check_in_place(db, row, folder: Path, node_id: str, task_path: str) -
         found = await asyncio.to_thread(inplace.check, folder, branch, m)
     except inplace.CheckoutRefused as exc:
         return str(exc)
-    # Once, not after every task: only when it differs from the last record.
-    if found.leftovers and found.leftovers != inplace.leftovers(db, row["id"]):
+    if found.leftovers:
         await db.write(
             lambda c: events.append(
                 c,
