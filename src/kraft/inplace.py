@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from kraft import events, item_paths, store
+from kraft import events, item_paths, node_runs, store
 from kraft.adapters.forge import git
 from kraft.config import ConfigError, git_read
 from kraft.vocab import ChainEvent, StopKind
@@ -517,6 +517,34 @@ def _switch(folder: Path, branch: str) -> dict:
 def _on(folder: Path, branch: str) -> bool:
     head = git_read(folder, "symbolic-ref", "--quiet", "HEAD", expected_failure=True)
     return head == f"refs/heads/{branch}"
+
+
+def drop_branch(repo: Path, branch: str, wid: str, *, keep: bool) -> dict:
+    """Abandon's and archive's end of an in-place item's branch, which leaves
+    the checkout and whatever runs in it alone. The branch, and Kraft's record
+    of pushing it, stay when the checkout is on it (`checked out`), when a take
+    or rebase holds the checkout right now (`in use`), or when `keep` (archive
+    found commits only it holds: `unpushed`). The item's per-attempt refs go
+    regardless. Returns `branch_kept`: the reason, or None when it went."""
+    if not repo.is_dir():
+        return {"branch_kept": None, "repo_missing": str(repo)}
+    lock = _lock(repo)
+    if not lock.acquire(blocking=False):
+        kept = "in use"
+    else:
+        try:
+            kept = "checked out" if _on(repo, branch) else "unpushed" if keep else None
+            if kept is None:
+                # A never-started item has no branch; its push record is absent too, which is fine.
+                steps = [["branch", "-D", "--", branch]] if _ref(repo, branch) else []
+                for args in [*steps, ["update-ref", "-d", f"{git.PUSHED_REFS}/{branch}"]]:
+                    done = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True)
+                    if done.returncode != 0:
+                        logger.warning("drop %s: %s failed: %s", wid, args[0], done.stderr.strip())
+        finally:
+            lock.release()
+    node_runs.drop_refs(repo, wid)
+    return {"branch_kept": kept}
 
 
 def _ignored_in_the_way(folder: Path, changed: list[str]) -> list[str]:

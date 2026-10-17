@@ -121,3 +121,10 @@ The Storage page SHALL offer a clean-up only for the items the server marks
 reclaimable.
 enforced-by: frontend/src/ng/settings/StoragePage.test.tsx::Settings › Storage worktrees
 origin: frontend/src/ng/settings/StoragePage.tsx
+
+## REQ in-place-items-are-never-held-for-storage
+
+The system SHALL NOT hold, measure, or auto-archive an in-place item for
+`storage.worktrees.limit`.
+enforced-by: tests/test_storage.py::test_only_a_start_that_would_make_a_worktree_is_held
+origin: src/kraft/storage.py §holds

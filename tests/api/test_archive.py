@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 import pytest
-from support.api import _poll_events, _post_default, _set_status
+from support.api import _paused, _poll_events, _post_default, _set_status
 from support.harness import git, write
 
 from kraft.adapters.forge.git import PUSHED_REFS
@@ -91,6 +91,42 @@ def test_archive_keeps_a_branch_only_it_holds_commits_on(client, repo, pushed_to
         kept = {"kept_branch": branch, "unpushed_commits": 1}
         assert r.json().items() >= kept.items()
         assert payload == {"by": "you", **kept}
+
+
+@pytest.mark.parametrize(
+    "where",
+    ["on-it", "elsewhere", "unpushed"],
+    ids=["checked-out-kept", "deleted", "unpushed-kept"],
+)
+def test_archive_in_place_follows_the_same_rule(client, repo, where):
+    """As abandon: the checkout stays, and so does its branch while the person
+    is on it; archive's own guard keeps one with commits nothing else holds."""
+    wid = _paused(client, repo, in_place=True)
+    branch = client.get(f"/api/work-items/{wid}").json()["branch"]
+    assert branch
+    git(repo, "branch", branch)
+    if where == "unpushed":
+        git(repo, "commit", "-q", "--allow-empty", "-m", "nobody pushed this")
+        git(repo, "branch", "-f", branch)
+        git(repo, "reset", "-q", "--hard", "HEAD~1")
+    if where == "on-it":
+        git(repo, "checkout", "-q", branch)
+    _set_status(wid, "completed")
+
+    r = client.post(f"/api/work-items/{wid}/archive")
+
+    assert r.status_code == 200, r.text
+    kept = {"on-it": "checked out", "elsewhere": None, "unpushed": "unpushed"}[where]
+    assert (
+        r.json().items()
+        >= {
+            "worktree_removed": False,
+            "in_place": True,
+            "branch_kept": kept,
+        }.items()
+    )
+    assert bool(git_read(repo, "branch", "--list", branch)) is (kept is not None)
+    assert repo.is_dir()
 
 
 def test_archive_rescues_commits_on_a_detached_head(client, repo):

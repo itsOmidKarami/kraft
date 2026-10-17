@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from kraft import item_paths, render
+from kraft import item_paths, render, store
 from kraft.item_paths import ITEMS
 from kraft.store import _now
 from kraft.vocab import Verb, admitting
@@ -262,7 +262,13 @@ def holds(st, wid: str) -> bool:
     """Whether starting `wid` must wait for space. Only a start that would
     create a worktree: an item that has one adds little by continuing, and
     finishing it is what makes it archivable."""
-    return state_of(st.policy, usage(st)) == "held" and not (st.run_dirs.worktrees / wid).exists()
+    if state_of(st.policy, usage(st)) != "held" or (st.run_dirs.worktrees / wid).exists():
+        return False
+    # An in-place item never makes one: it works in its repository's checkout.
+    row = st.db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+    return not store.is_in_place(row)
 
 
 def figures(st) -> dict:
@@ -393,6 +399,7 @@ async def _clean_up(app, min_age: int, quota: int) -> list[str]:
             "AND archived_at IS NULL ORDER BY updated_at, id"
         ).fetchall()
     )
+    # An in-place item has no `worktrees/<id>`, so it is never picked here.
     finished = [r for r in finished if (st.run_dirs.worktrees / r["id"]).is_dir()]
     archived: list[str] = []
     stuck = 0

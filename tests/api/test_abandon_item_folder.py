@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 from support.api import _paused
-from support.harness import write
+from support.harness import git, write
 
 
 def test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at(
@@ -19,7 +19,12 @@ def test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at
 ):
     wid = _paused(client, repo)
     folder = Path(os.environ["KRAFT_RUN_DIR"]) / "items" / wid
-    for part in ("docs/spec.md", "history/spec.1.md", "sessions/s1/session.log"):
+    for part in (
+        "docs/spec.md",
+        "history/spec.1.md",
+        "sessions/s1/session.log",
+        "checkout/leftovers.json",
+    ):
         write(folder, part, "x")
     victim = write(tmp_path, "victim/keep.md", "untouched")
     (folder / "docs" / "elsewhere").symlink_to(victim.parent)
@@ -143,3 +148,47 @@ def test_abandon_without_a_reason_still_abandons_and_records_none(client, repo, 
     events = client.get(f"/api/work-items/{wid}/events").json()
     assert [e["payload"] for e in events if e["type"] == "work_item_abandoned"] == [{}]
     assert fake_beads.all()[own]["close_reason"] == "abandoned"
+
+
+@pytest.mark.parametrize(
+    "where", ["on-it", "elsewhere", "rebasing"], ids=["checked-out-kept", "deleted", "in-use-kept"]
+)
+def test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it(client, repo, where):
+    """The person's checkout on the item's branch keeps it, and so does a
+    rebase holding the checkout's lock; either way the answer says so. The
+    item's refs under `refs/kraft/<id>/` go regardless."""
+    from kraft import inplace
+    from kraft.adapters.forge.git import PUSHED_REFS
+    from kraft.config import git_read
+
+    wid = _paused(client, repo, in_place=True)
+    branch = client.get(f"/api/work-items/{wid}").json()["branch"]
+    assert branch
+    git(repo, "branch", branch)
+    git(repo, "update-ref", f"{PUSHED_REFS}/{branch}", "HEAD")
+    git(repo, "update-ref", f"refs/kraft/{wid}/attempt-1", "HEAD")
+    if where == "on-it":
+        git(repo, "checkout", "-q", branch)
+    lock = inplace._lock(repo)
+    if where == "rebasing":
+        lock.acquire()
+    try:
+        r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
+    finally:
+        if where == "rebasing":
+            lock.release()
+
+    assert r.status_code == 200, r.text
+    kept = {"on-it": "checked out", "elsewhere": None, "rebasing": "in use"}[where]
+    assert r.json() | {"id": None} == {
+        "id": None,
+        "status": "abandoned",
+        "worktree_removed": False,
+        "in_place": True,
+        "branch_kept": kept,
+    }
+    refs = git_read(repo, "for-each-ref", "--format=%(refname)").splitlines()
+    assert (f"refs/heads/{branch}" in refs) is (kept is not None)
+    assert (f"{PUSHED_REFS}/{branch}" in refs) is (kept is not None)
+    assert f"refs/kraft/{wid}/attempt-1" not in refs
+    assert repo.is_dir()

@@ -11,8 +11,10 @@ from types import SimpleNamespace
 import pytest
 from support.archive import days_ago, seed_completed_item
 from support.deep_tree import deep_chain, opens_during
+from support.harness import v1_named_chain
 
 from kraft import item_paths, policy, storage
+from kraft.templates.environment import WorkItemTarget
 
 MB = 1024**2
 
@@ -265,15 +267,18 @@ def test_state_is_none_without_a_limit():
     assert storage.state_of(_policy(), _usage(10**12)) is None
 
 
-def test_only_a_start_that_would_make_a_worktree_is_held(tmp_path):
-    (tmp_path / "worktrees" / "has").mkdir(parents=True)
+async def test_only_a_start_that_would_make_a_worktree_is_held(item_on, database, run_dirs):
+    """An in-place item never makes one: its folder is the person's checkout."""
+    chain = v1_named_chain(run_dirs.base / "t")
+    await item_on(chain, wid="new")
+    await item_on(chain, wid="here", target=WorkItemTarget.for_repository("sample", in_place=True))
+    (run_dirs.worktrees / "has").mkdir(parents=True)
     st = SimpleNamespace(
-        policy=_policy(100, 80),
-        storage_usage=_usage(101),
-        run_dirs=SimpleNamespace(worktrees=tmp_path / "worktrees"),
+        policy=_policy(100, 80), storage_usage=_usage(101), run_dirs=run_dirs, db=database
     )
     assert storage.holds(st, "new") is True
     assert storage.holds(st, "has") is False
+    assert storage.holds(st, "here") is False
     st.storage_usage = _usage(100)
     assert storage.holds(st, "new") is False
 
