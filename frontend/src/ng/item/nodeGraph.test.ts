@@ -29,7 +29,16 @@ describe("nodeGraph", () => {
     ]);
     expect(g.steps[1].tasks[0]).toMatchObject({ running: true, taskKind: "agent" });
     expect(g.loop).toEqual({ tone: "active", label: "round 2", tasks: [] });
-    expect(g.onFailure).toBe("repair_pass");
+    // Nothing failed in this pass: its on-failure handler never ran, so no footer names it.
+    expect(g.onFailure).toBeUndefined();
+  });
+
+  it("names the on-failure handler in the footer once it ran in the pass shown, and not in a pass it did not", () => {
+    const ran = s("verification.repair.repair_pass", { round: -1 });
+    const first = [s("verification.checks.lint", { status: "failed", pass: 1 }), { ...ran, pass: 1 }];
+    const item = detail({ node_passes: { verification: [{ pass: 1 }, { pass: 2, reason: "retry" as const }] }, worker_sessions: [...first, s("verification.checks.lint", { pass: 2 })] });
+    expect(nodeGraph(asOfPass(item, "verification", 1), node, NOW).onFailure).toBe("repair_pass");
+    expect(nodeGraph(item, node, NOW).onFailure).toBeUndefined();
   });
 
   it("draws a skipped task as skipped, whether the skip cut its session short or it never ran", () => {
