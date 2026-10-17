@@ -1290,10 +1290,11 @@ def _cmd_stop(ns: argparse.Namespace, *, warn: bool = True) -> None:
             print(f"kraft: stopped (pid {pid})")
             return
         if time.monotonic() >= deadline:
-            # A server cut off mid-rebase undoes it on the way out, which
-            # takes up to `REBASE_UNDO_MAX_S` more: waiting it out is what
-            # leaves the worktree clean. Only then; nothing else is worth it.
-            if not told and not _rebase_under_way(*worktrees):
+            # A server cut off mid-rebase undoes it on the way out (in a
+            # person's checkout, waits git out), which takes up to about
+            # `REBASE_UNDO_MAX_S` more: waiting it out is what leaves the
+            # folder clean. Only then; nothing else is worth it.
+            if not told and not _rebase_under_way(*worktrees, checkouts=_connected_checkouts()):
                 print(f"kraft: pid {pid} did not stop within {_STOP_WAIT_S}s", file=sys.stderr)
                 raise SystemExit(1)
             from kraft import builtins
@@ -1301,8 +1302,8 @@ def _cmd_stop(ns: argparse.Namespace, *, warn: bool = True) -> None:
             limit = _STOP_WAIT_S + builtins.REBASE_UNDO_MAX_S
             if not told:
                 print(
-                    f"kraft: pid {pid} is still stopping: a git rebase is being undone "
-                    f"(waiting up to {limit:g}s)",
+                    f"kraft: pid {pid} is still stopping: a git rebase is being finished or "
+                    f"undone (waiting up to {limit:g}s)",
                     file=sys.stderr,
                     flush=True,
                 )
@@ -1314,29 +1315,50 @@ def _cmd_stop(ns: argparse.Namespace, *, warn: bool = True) -> None:
         time.sleep(0.1)
 
 
-def _rebase_under_way(*roots: Path) -> bool:
+def _rebase_under_way(*roots: Path, checkouts: list[Path] = ()) -> bool:
     """Whether any worktree under `roots` (the items' and the in-place
-    rebases' throwaway ones) is mid-rebase (a `rebase-merge` or
-    `rebase-apply` in its git dir), which a stopping server is undoing. Read
-    from the worktrees' own `.git` files: no git runs against a repository the
-    server is still writing."""
-    entries = []
+    rebases' throwaway ones), or any of `checkouts`, is mid-rebase (a
+    `rebase-merge` or `rebase-apply` in its git dir), which a stopping server
+    is undoing, or finishing in a person's checkout (`inplace.rebase_in_checkout`
+    waits git out). Read from the folders' own `.git`: no git runs against a
+    repository the server is still writing."""
+    entries = list(checkouts)
     for root in roots:
         try:
             entries += list(root.iterdir())
         except OSError:
             continue
     for entry in entries:
-        try:
-            pointer = (entry / ".git").read_text().strip()
-        except OSError:
+        gitdir = _git_dir(entry)
+        if gitdir is None:
             continue
-        if not pointer.startswith("gitdir:"):
-            continue
-        gitdir = Path(pointer.removeprefix("gitdir:").strip())
         if any(os.path.lexists(gitdir / d) for d in ("rebase-merge", "rebase-apply")):
             return True
     return False
+
+
+def _git_dir(folder: Path) -> Path | None:
+    """`folder`'s git dir: its `.git` directory, or where its `.git` file points."""
+    dot = folder / ".git"
+    if dot.is_dir():
+        return dot
+    try:
+        pointer = dot.read_text().strip()
+    except OSError:
+        return None
+    if not pointer.startswith("gitdir:"):
+        return None
+    return folder / pointer.removeprefix("gitdir:").strip()
+
+
+def _connected_checkouts() -> list[Path]:
+    """Every connected repository's own checkout, where an in-place item
+    rebases: not only `worktrees: false` ones, since one item may be filed in
+    place in any repository. None when `repos.yaml` cannot be read."""
+    try:
+        return [Path(r.path) for r in config.load_repos(config_dir() / "repos.yaml")]
+    except (config.ConfigError, OSError):
+        return []
 
 
 def _service_installed() -> bool:

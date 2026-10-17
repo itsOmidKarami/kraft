@@ -14,23 +14,38 @@ from kraft.paths import RunDirs
 
 @pytest.mark.parametrize(
     ("rebase", "under"),
-    [(True, "worktrees"), (False, "worktrees"), (True, "scratch")],
-    ids=["undoing-a-rebase", "nothing-to-undo", "undoing-an-in-place-rebase"],
+    [(True, "worktrees"), (False, "worktrees"), (True, "scratch"), (True, "checkout")],
+    ids=[
+        "undoing-a-rebase",
+        "nothing-to-undo",
+        "undoing-an-in-place-rebase",
+        "finishing-a-rebase-in-the-checkout",
+    ],
 )
 def test_stop_waits_out_a_rebase_abort_past_the_usual_wait(
     tmp_path, monkeypatch, capsys, rebase, under
 ):
     """A server stopped mid-rebase undoes it on its way out, which outlasts the
     usual wait: `stop` says it is still stopping because of that and waits,
-    where a server that is merely slow is still reported as not stopped."""
+    where a server that is merely slow is still reported as not stopped. An
+    in-place item's rebase runs in a connected repository's own checkout."""
     run = tmp_path / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run))
     monkeypatch.setattr(cli.admin, "_STOP_WAIT_S", 0.3)
     monkeypatch.setattr("kraft.builtins.REBASE_UNDO_MAX_S", 5.0)
-    gitdir = tmp_path / "gitdir"
+    if under == "checkout":
+        checkout = tmp_path / "repo"
+        gitdir = checkout / ".git"
+        config = tmp_path / "config"
+        config.mkdir()
+        (config / "repos.yaml").write_text(f"repos:\n  - path: {checkout}\n    worktrees: false\n")
+        monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config))
+    else:
+        gitdir = tmp_path / "gitdir"
+        (run / under / "w1").mkdir(parents=True)
+        (run / under / "w1" / ".git").write_text(f"gitdir: {gitdir}\n")
     (gitdir / ("rebase-merge" if rebase else "info")).mkdir(parents=True)
-    (run / under / "w1").mkdir(parents=True)
-    (run / under / "w1" / ".git").write_text(f"gitdir: {gitdir}\n")
+    run.mkdir(exist_ok=True)
     pid_path = RunDirs(run).pid
     proc = subprocess.Popen(
         [
@@ -56,7 +71,7 @@ def test_stop_waits_out_a_rebase_abort_past_the_usual_wait(
         out, err = capsys.readouterr()
         if rebase:
             assert f"stopped (pid {proc.pid})" in out
-            assert "still stopping: a git rebase is being undone" in err
+            assert "still stopping: a git rebase is being finished or undone" in err
         else:
             assert "did not stop within 0.3s" in err
     finally:
