@@ -11,8 +11,7 @@ from datetime import datetime, timedelta
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
-from kraft.store._common import joined
-from kraft.store._common import write_status
+from kraft.store._common import joined, write_status
 from kraft.store.chain import materialized_chain_of
 from kraft.vocab import (
     ENDED,
