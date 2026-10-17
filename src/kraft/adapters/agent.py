@@ -101,8 +101,10 @@ _WORKTREE = (
 _IN_PLACE = (
     "You are working in a person's own checkout, on this work item's branch "
     "`{branch}`. They may have uncommitted changes here that are not yours. "
-    "Commit only the files you changed, with a pathspec: `git add -- <paths>`, "
-    'then `git commit -m "..." -- <paths>`. Never `git add -A`, `git add .`, '
+    "Commit only the files you changed, by literal path: `git --literal-pathspecs "
+    'add -- <paths>`, then `git --literal-pathspecs commit -m "..." -- <paths>` '
+    "(a name like `[slug].tsx` is otherwise a pattern that can match theirs). "
+    "Never `git add -A`, `git add .`, "
     "`git commit -a`, `git stash`, `git checkout`, `git switch` or `git reset`, "
     "and never touch a file you did not change. Commit everything you change "
     "before you exit: work left uncommitted never reaches the merge request. Do "

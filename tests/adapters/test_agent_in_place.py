@@ -18,7 +18,8 @@ def test_an_in_place_agent_is_told_whose_checkout_it_is(run, in_place):
     prompt = _system_prompt(run(**in_place)["cmd"])
     for phrase in (
         "You are working in a person's own checkout, on this work item's branch `kraft/w1`.",
-        '`git add -- <paths>`, then `git commit -m "..." -- <paths>`',
+        "`git --literal-pathspecs add -- <paths>`, then "
+        '`git --literal-pathspecs commit -m "..." -- <paths>`',
         "Never `git add -A`, `git add .`, `git commit -a`, `git stash`, `git checkout`, "
         "`git switch` or `git reset`",
         "Do not push and do not merge",
