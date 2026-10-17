@@ -295,15 +295,17 @@ def _add_scratch(checkout: Path, scratch: Path, branch: str) -> None:
     )
 
 
-def _drop_scratch(checkout: Path, scratches) -> None:
+def _drop_scratch(checkout: Path, scratches, git_dir: Path | None = None) -> None:
     """Remove throwaway worktrees (Kraft's own, never the person's) and
-    prune what git still records of them."""
+    prune what git still records of them. `git_dir`, the repository's own,
+    when `checkout` is no checkout of it."""
     from kraft import builtins
 
+    gitd = ["git", *(["--git-dir", str(git_dir)] if git_dir else [])]
     for scratch in list(scratches):
         try:
             builtins._run_git_group(
-                ["git", "worktree", "remove", "--force", str(scratch)],
+                [*gitd, "worktree", "remove", "--force", str(scratch)],
                 timeout=builtins.WORKTREE_ADD_TIMEOUT_S,
                 cwd=checkout,
             )
@@ -311,7 +313,7 @@ def _drop_scratch(checkout: Path, scratches) -> None:
             logger.warning("git worktree remove timed out for %s", scratch)
         shutil.rmtree(scratch, ignore_errors=True)
     subprocess.run(
-        ["git", "worktree", "prune"],
+        [*gitd, "worktree", "prune"],
         cwd=checkout,
         capture_output=True,
         stdin=subprocess.DEVNULL,
@@ -335,8 +337,8 @@ def drop_stale_scratch(run_dirs) -> None:
                 "--git-common-dir",
                 expected_failure=True,
             )
-        if common:
-            _drop_scratch(Path(common).parent, [scratch])
+        if common:  # a submodule's, or one apart from its checkout, is no `.git` in one
+            _drop_scratch(run_dirs.scratch, [scratch], git_dir=Path(common))
         else:
             shutil.rmtree(scratch, ignore_errors=True)
 

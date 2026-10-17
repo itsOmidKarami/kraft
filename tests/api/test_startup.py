@@ -44,11 +44,14 @@ def test_a_failed_hook_refresh_never_stops_the_server_starting(refresh_raises, c
 
 
 @pytest.fixture
-def stale_scratch(tmp_path):
+def stale_scratch(tmp_path, request):
     """What a server killed mid-rebase left under `run/scratch`: a throwaway
     worktree holding an in-place item's branch, one git no longer knows, and a
-    link someone put there."""
+    link someone put there. `request.param`: the repository's git dir is
+    apart from its checkout, as a submodule's is."""
     repo = make_repo(tmp_path)
+    if getattr(request, "param", False):
+        git(repo, "init", "-q", f"--separate-git-dir={tmp_path / 'apart.git'}")
     git(repo, "branch", "kraft/w1")
     scratch = tmp_path / "run/scratch"
     git(repo, "worktree", "add", "-q", str(scratch / "w1-0dead0ff"), "kraft/w1")
@@ -60,6 +63,9 @@ def stale_scratch(tmp_path):
     return repo
 
 
+@pytest.mark.parametrize(
+    "stale_scratch", [False, True], ids=["plain", "git-dir-apart"], indirect=True
+)
 def test_start_up_removes_the_rebase_worktrees_a_killed_server_left(stale_scratch, client):
     """One would pin its item's branch until that item's next rebase."""
     assert client.get("/api/health").status_code == 200
