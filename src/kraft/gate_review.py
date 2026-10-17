@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from kraft import caps, events, executor, item_paths, store
+from kraft import caps, events, executor, inplace, item_paths, store
 from kraft import harness as _harness
 from kraft import overrides as _overrides
 from kraft.adapters import agent as _agent
@@ -340,13 +340,13 @@ async def review(
             method_text=inv.method_text,
             steering_texts=inv.steering_texts,
             sandbox=sandbox,
-            checkout=executor.sandbox_checkout(row, launch, run_dirs.worktrees / work_item_id)
+            checkout=executor.sandbox_checkout(row, launch, inplace.item_folder(run_dirs, row))
             if sandbox
             else None,
             task_instruction=task_instruction,
             title=row["title"],
             repo_path=row["repo"],
-            cwd=run_dirs.worktrees / work_item_id,
+            cwd=inplace.item_folder(run_dirs, row),
             repo_entry=launch.repo_entry,
             time_cap=time_cap,
             harness_id=auto_review.task.harness,

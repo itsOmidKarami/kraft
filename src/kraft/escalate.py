@@ -16,7 +16,7 @@ import dataclasses
 import os
 from pathlib import Path
 
-from kraft import caps, events, executor, item_paths, store
+from kraft import caps, events, executor, inplace, item_paths, store
 from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import usage as _usage
@@ -428,7 +428,7 @@ async def dispatch(
     turn = db.read(lambda c: store.escalation_thread_turn_count(c, work_item_id, thread)) + 1
 
     session_id = db.read(lambda c: store.new_session_id(c, work_item_id))
-    worktree = run_dirs.worktrees / work_item_id
+    worktree = inplace.item_folder(run_dirs, row)
 
     # Node-scoped (Kraft-l8ype, `stuck-escalation-is-an-exec-node-control`):
     # the turn runs under the policy of the node the item stopped at, resolved

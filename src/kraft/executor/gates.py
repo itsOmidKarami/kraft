@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from kraft import builtins as _builtins
-from kraft import escalate, events, gate_review, item_paths, node_runs, store
+from kraft import escalate, events, gate_review, inplace, item_paths, node_runs, store
 from kraft import policy as _policy
 from kraft.executor import stops
 from kraft.executor.context import LaunchContext, OnApprove
@@ -330,9 +330,13 @@ async def maybe_gate(db, work_item_id: str, node: ResolvedNode, run_dirs=None) -
         if why is not None:
             await db.write(lambda c: store.pass_unchanged_revision(c, work_item_id, node.id, why))
             return False
-    await node_runs.gate_requested(
-        db, run_dirs.worktrees / work_item_id if run_dirs else None, work_item_id, node.id
-    )
+    folder = None
+    if run_dirs is not None:
+        row = db.read(
+            lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+        )
+        folder = inplace.item_folder(run_dirs, row)
+    await node_runs.gate_requested(db, folder, work_item_id, node.id)
     return True
 
 
@@ -1170,7 +1174,7 @@ async def resume_after_escalation(
                 )
             )
             return status
-        worktree = run_dirs.worktrees / work_item_id
+        worktree = inplace.item_folder(run_dirs, row)
         try:
             # The refresh runs host git in the worktree and its members (Kraft-ju36l).
             stops.refuse_planted_repos(row, launch, worktree)

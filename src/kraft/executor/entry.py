@@ -9,7 +9,7 @@ import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
-from kraft import events, ids, item_paths, store
+from kraft import events, ids, inplace, item_paths, store
 from kraft.adapters import beads
 from kraft.config import RepoEntry, git_read
 from kraft.policy import InstancePolicy, InstancePolicyInput
@@ -450,7 +450,7 @@ def named_beads(row, run_dirs, bead_id: str | None = None) -> list[str]:
     implements, then those a `Fixes`/`Closes` trailer on its own commits names.
     The cancel preview reads it too, so Mark complete names every bead its box
     would close."""
-    worktree = run_dirs.worktrees / row["id"]
+    worktree = inplace.item_folder(run_dirs, row)
     base = row["base_ref"]
     log = git_read(worktree, "log", "--format=%B%x00", f"{base}..HEAD") if base else None
     own = bead_id or row["bead_id"]
@@ -495,7 +495,7 @@ async def close_beads(db, row, bd_cwd: str | None, run_dirs, *, by_hand: bool = 
     # `git_read` never raises, so a worktree already cleaned up, or a row with no
     # `base_ref`, reads as no change at all.
     base = row["base_ref"]
-    worktree = run_dirs.worktrees / row["id"]
+    worktree = inplace.item_folder(run_dirs, row)
     changed = git_read(worktree, "diff", "--name-only", base, "HEAD") if base else None
     ids = named_beads(row, run_dirs, bead_id)
     if not by_hand and not _carries_a_change(db, row, changed):

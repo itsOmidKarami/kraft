@@ -6,7 +6,7 @@ import logging
 from fastapi import HTTPException, Query, Request
 
 from kraft import config as config_mod
-from kraft import events, item_paths, review, store
+from kraft import events, inplace, item_paths, review, store
 from kraft.api import api_router, deps, perimeter
 from kraft.api.routes import board
 from kraft.api.routes.search import OpenDocument, _launch_editor
@@ -83,9 +83,9 @@ async def get_work_item_diff(wid: str, request: Request, ignore_whitespace: bool
             "ignore_whitespace": ignore_whitespace,
             "landed": {"commits": [], "files": [], "diff": "", "truncated": False},
             "diff_max_bytes": DIFF_MAX_BYTES,
-            "worktree_path": str(st.run_dirs.worktrees / wid),
+            "worktree_path": str(inplace.item_folder(st.run_dirs, row)),
         }
-    worktree = st.run_dirs.worktrees / wid
+    worktree = inplace.item_folder(st.run_dirs, row)
     if not worktree.is_dir():
         raise deps.worktree_missing(row)
 
@@ -159,7 +159,7 @@ def _resolve_target(st, row, gate: str | None, target: str) -> tuple[str | None,
 
 
 def _readable_worktree(st, row):
-    worktree = st.run_dirs.worktrees / row["id"]
+    worktree = inplace.item_folder(st.run_dirs, row)
     if not worktree.is_dir():
         raise deps.worktree_missing(row)
     try:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kraft import ids, node_runs, store
+from kraft import ids, inplace, node_runs, store
 from kraft import policy as _policy
 from kraft.executor import gates, walk
 from kraft.executor.context import _ADVANCING, LaunchContext, OnApprove
@@ -188,7 +188,7 @@ async def resume_once(
     start_index = None
     if current is not None:
         settled = await reconcile_current_node(
-            db, work_item_id, nodes[current], adopted, worktree=run_dirs.worktrees / work_item_id
+            db, work_item_id, nodes[current], adopted, worktree=inplace.item_folder(run_dirs, row)
         )
         if settled == "needs_human":
             return "needs_human"

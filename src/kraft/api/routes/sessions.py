@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
 
 from kraft import auth as auth_mod
-from kraft import escalate, events, permission_hooks, store
+from kraft import escalate, events, inplace, permission_hooks, store
 from kraft import harness as harness_mod
 from kraft import logs as logs_mod
 from kraft.adapters import agent as _agent
@@ -271,11 +271,11 @@ async def _permission(st, row, body: PermissionAsk) -> dict:
         names = (body.tool_name, *body.also)
         item = st.db.read(
             lambda c: c.execute(
-                "SELECT id, branch FROM work_items WHERE id = ?", (row["work_item_id"],)
+                "SELECT * FROM work_items WHERE id = ?", (row["work_item_id"],)
             ).fetchone()
         )
         grant = matching(grants, body.tool_name, body.input, store.branch_for(item))
-        worktree = st.run_dirs.worktrees / row["work_item_id"]
+        worktree = inplace.item_folder(st.run_dirs, item)
         if body.harness == "cursor" and hook_install.touches_hook_file(names, body.input, worktree):
             decision, reason = "deny", hook_install.HOOK_FILE_REASON
         elif hit := next((n for n in names if n in denied), None):

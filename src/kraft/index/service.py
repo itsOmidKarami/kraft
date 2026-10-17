@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from kraft import config as config_mod
-from kraft import events, item_paths
+from kraft import events, inplace, item_paths
 from kraft.events import _now
 from kraft.index import ingest
 from kraft.index.embed import Embedder
@@ -151,17 +151,30 @@ class Indexer:
         self._errors = []
         return await self.rescan_all()
 
-    def _worktree_file(self, ref: str, work_item_id: str, *, markdown: bool = False) -> Path | None:
+    def _folder(self, work_item_id: str) -> Path | None:
+        """The item's folder (`inplace.item_folder`); its worktree's place for
+        an id with no row. Read on the loop: the state database is not to be
+        read from a worker thread."""
+        if self._run_dirs is None:
+            return None
+        row = self._state.read(
+            lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+        )
+        if row is None:
+            return self._run_dirs.worktrees / work_item_id
+        return inplace.item_folder(self._run_dirs, row)
+
+    def _worktree_file(self, ref: str, base: Path | None, *, markdown: bool = False) -> Path | None:
         """Resolve a ref into the item's own worktree. Untrusted input: a
         worker reports a summary ref, and absolute paths and anything escaping
         the worktree are refused (4B design §7). The main checkout is not
         searched: it holds files no worker wrote, ignored ones such as `.env`
         among them, and what is read here lands in an index every repo's
         agents can search. `markdown`: a summary is a `.md` file, wherever a
-        symlink to it points."""
-        if not ref or Path(ref).is_absolute() or self._run_dirs is None:
+        symlink to it points. `base`: the item's folder (`_folder`)."""
+        if not ref or Path(ref).is_absolute() or base is None:
             return None
-        base = (self._run_dirs.worktrees / work_item_id).resolve()
+        base = base.resolve()
         candidate = (base / ref).resolve()
         if not candidate.is_relative_to(base) or candidate == base:
             return None
@@ -170,18 +183,23 @@ class Indexer:
         return candidate
 
     def _read_worktree_file(
-        self, ref: str, work_item_id: str, *, markdown: bool = False
+        self, ref: str, base: Path | None, *, markdown: bool = False
     ) -> str | None:
         """The text `_worktree_file` names, read only if it is a regular file:
         never blocking on a FIFO a worker swapped in (`ingest.read_inside`)."""
-        path = self._worktree_file(ref, work_item_id, markdown=markdown)
+        path = self._worktree_file(ref, base, markdown=markdown)
         if path is None:
             return None
-        base = (self._run_dirs.worktrees / work_item_id).resolve()
+        base = base.resolve()
         return ingest.read_inside(base, str(path.relative_to(base)))
 
     def _read_summary(
-        self, ref: str, work_item_id: str, session_id: str, thread: int | None = None
+        self,
+        ref: str,
+        work_item_id: str,
+        base: Path | None,
+        session_id: str,
+        thread: int | None = None,
     ) -> str | None:
         """The text of a session's summary ref, or None. Untrusted input: a
         worker may still report its own. A ref under `items/` is read only
@@ -204,7 +222,7 @@ class Indexer:
             return ingest.read_inside(root.resolve(), rel)
         if Path(ref).parts[:1] == ("items",):
             return None
-        return self._read_worktree_file(ref, work_item_id, markdown=True)
+        return self._read_worktree_file(ref, base, markdown=True)
 
     async def ingest_session_summary(self, work_item_id: str, session_id: str) -> bool:
         """Ingest the summary a finished worker session of `work_item_id`
@@ -224,8 +242,9 @@ class Indexer:
         ref = row["session_summary_ref"]
         # Every session has a thread number; only an escalation turn's names a folder.
         thread = row["thread"] if row["hook_point"] == "escalation" else None
+        wid = row["work_item_id"]
         text = await asyncio.to_thread(
-            self._read_summary, ref, row["work_item_id"], session_id, thread
+            self._read_summary, ref, wid, self._folder(wid), session_id, thread
         )
         if text is None:
             logger.warning("session %s summary ref %r not readable; skipping", session_id, ref)
@@ -570,8 +589,9 @@ class Indexer:
         so a worker's edit, or its deletion, is what shows."""
         if self._run_dirs is None:
             return None
-        if (self._run_dirs.worktrees / work_item_id).exists():
-            return self._read_worktree_file(attachment["path"], work_item_id)
+        folder = self._folder(work_item_id)
+        if folder.exists():
+            return self._read_worktree_file(attachment["path"], folder)
         stored = item_paths.filed_copy(self._run_dirs, work_item_id, attachment.get("source"))
         return ingest.read_inside(*stored) if stored else None
 
@@ -812,7 +832,7 @@ class Indexer:
         # then takes for the worktree (R11F-02 review). The stored copy is
         # never offered either: editing it would change what the item is
         # filed with behind `kraft item set-attachments`' back.
-        path = self._worktree_file(attachment["path"], work_item_id)
+        path = self._worktree_file(attachment["path"], self._folder(work_item_id))
         return path if path is not None and path.is_file() else None
 
     def _get_synthetic_attachment_document(self, doc_id: str) -> dict | None:

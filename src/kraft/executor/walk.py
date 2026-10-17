@@ -6,7 +6,7 @@ from pathlib import Path
 
 from kraft import builtins as _builtins
 from kraft import config as _config
-from kraft import events, node_runs, store
+from kraft import events, inplace, node_runs, store
 from kraft import findings as _findings
 from kraft import policy as _policy
 from kraft.adapters import beads
@@ -2009,7 +2009,7 @@ async def run_once(
         # Before the worktree is touched at all: host git in a member or a
         # nested repository runs what a sandboxed worker planted in its
         # config (Kraft-nx4id, Kraft-ju36l).
-        stops.refuse_planted_repos(row, launch, run_dirs.worktrees / work_item_id)
+        stops.refuse_planted_repos(row, launch, inplace.item_folder(run_dirs, row))
         # A sandboxed item's setup_command runs in its sandbox, never on the
         # host (Kraft-p8nem).
         sandbox = dispatch.item_sandbox(row, launch)
@@ -2054,7 +2054,7 @@ async def run_once(
         failing_node = nodes[start_index].id
         reason = str(exc)
         kind = StopKind.CONFIG if isinstance(exc, _config.ConfigError) else StopKind.INFRA
-        await node_runs.entered(db, run_dirs.worktrees / work_item_id, work_item_id, failing_node)
+        await node_runs.entered(db, inplace.item_folder(run_dirs, row), work_item_id, failing_node)
         await db.write(
             lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason, kind=kind)
         )
