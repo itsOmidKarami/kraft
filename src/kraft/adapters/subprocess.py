@@ -658,7 +658,41 @@ def _declared_members(db, work_item_id: str) -> list[str]:
     return item_mounts(row) if row is not None else []
 
 
-async def run_task(
+async def run_task(db, run_dirs, *, session_id: str, work_item_id: str, **kwargs) -> str:
+    """`_run_task`, closing the session it wrote when whatever ends it -- a
+    cancel, most often a co-task's failure or a stop -- comes before the
+    launch: an in-place item's row left `pending` would hold its checkout's
+    lease (`store.folder_holder`) until a restart."""
+    try:
+        return await _run_task(
+            db, run_dirs, session_id=session_id, work_item_id=work_item_id, **kwargs
+        )
+    except BaseException as exc:
+        try:
+            if await db.write(lambda c: _close_unlaunched(c, session_id, work_item_id)):
+                files = kwargs.get("files") or item_paths.session_files(
+                    run_dirs, work_item_id, session_id
+                )
+                with open(files.log, "a", opener=private) as log:
+                    log.write(f"kraft: {str(exc) or 'cancelled before launch'}\n")
+        except Exception:  # noqa: BLE001 -- never in place of what ended the task
+            logger.exception("could not close session %s, ended before its launch", session_id)
+        raise
+
+
+def _close_unlaunched(conn, session_id: str, work_item_id: str) -> bool:
+    """End an in-place item's session that never launched (`config_error`,
+    as a refused take ends it). Whether it did."""
+    if store.session_status(conn, session_id, work_item_id=work_item_id) != SessionStatus.PENDING:
+        return False
+    row = conn.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    if not store.is_in_place(row):
+        return False  # restart's reattach stops it, as it always has
+    store.session_exited(conn, session_id, "config_error", work_item_id=work_item_id)
+    return True
+
+
+async def _run_task(
     db,
     run_dirs,
     *,
