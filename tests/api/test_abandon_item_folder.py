@@ -207,3 +207,45 @@ def test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it(
     events = client.get(f"/api/work-items/{wid}/events").json()
     payload = next(e["payload"] for e in events if e["type"] == "work_item_abandoned")
     assert payload == {"reason": "test"} | ({"branch_kept": kept} if kept else {})
+
+
+def test_abandon_in_place_stops_krafts_own_session_and_nothing_of_the_persons(client, repo):
+    """An escalation or a reply still running on a stopped item would go on
+    committing in the person's checkout: its recorded pid is stopped. A
+    process of the person's in the same checkout is not Kraft's to touch."""
+    import sqlite3
+    import subprocess
+    import sys
+
+    from kraft import store
+
+    wid = _paused(client, repo, in_place=True)
+    sleep = [sys.executable, "-c", "import time; time.sleep(60)"]
+    agent = subprocess.Popen(sleep, cwd=repo, start_new_session=True)
+    theirs = subprocess.Popen(sleep, cwd=repo, start_new_session=True)
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    conn.row_factory = sqlite3.Row
+    try:
+        store.create_session(
+            conn,
+            id="s1",
+            work_item_id=wid,
+            node_id="n",
+            hook_point="escalation",
+            log_path="l",
+            result_path="r",
+        )
+        store.session_running(conn, "s1", agent.pid, None, work_item_id=wid)
+        conn.commit()
+    finally:
+        conn.close()
+    try:
+        r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
+
+        assert r.status_code == 200, r.text
+        assert agent.wait(timeout=10) != 0
+        assert theirs.poll() is None, "Kraft killed a process of the person's"
+    finally:
+        for p in (agent, theirs):
+            p.kill()
+            p.wait()

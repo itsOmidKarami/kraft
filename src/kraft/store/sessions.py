@@ -976,17 +976,19 @@ def running_sessions_for_node(conn: sqlite3.Connection, work_item_id: str) -> li
     ).fetchall()
 
 
+def live_sessions(conn: sqlite3.Connection, work_item_id: str) -> list[sqlite3.Row]:
+    """`(id, pid)` of every session of this item still running or just
+    started, whatever its node or task."""
+    return conn.execute(
+        "SELECT id, pid FROM worker_sessions WHERE work_item_id = ? "
+        f"AND status IN ({in_list(LIVE)}) ORDER BY rowid",
+        (work_item_id,),
+    ).fetchall()
+
+
 def live_session_ids(conn: sqlite3.Connection, work_item_id: str) -> list[str]:
-    """Every session of this item still running or just started, whatever
-    its node or task: what `stops.refuse_live_sandboxed_session` waits on."""
-    return [
-        r["id"]
-        for r in conn.execute(
-            "SELECT id FROM worker_sessions WHERE work_item_id = ? "
-            f"AND status IN ({in_list(LIVE)}) ORDER BY rowid",
-            (work_item_id,),
-        ).fetchall()
-    ]
+    """`live_sessions`' ids: what `stops.refuse_live_sandboxed_session` waits on."""
+    return [r["id"] for r in live_sessions(conn, work_item_id)]
 
 
 def result_files(conn: sqlite3.Connection, run_dirs, work_item_id: str) -> list[Path]:

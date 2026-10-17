@@ -492,8 +492,13 @@ async def abandon_work_item(wid: str, request: Request, body: AbandonWorkItem | 
     # nothing left and answers `worktree_removed: false`.
     in_place = inplace.is_in_place(row)
     if in_place:
-        # The person's checkout: nothing in it is killed or removed. Before the
+        # The person's checkout: nothing of theirs in it is killed or removed.
+        # Kraft's own sessions (an escalation, a reply) stop, found by their
+        # recorded pids, never by a cwd that may be the person's. Before the
         # write, so the event says whether the branch stayed.
+        for s in st.db.read(lambda c: store.live_sessions(c, wid)):
+            await st.db.write(lambda c, sid=s["id"]: store.stop_escalation_session(c, wid, sid))
+            _terminate(s["pid"])
         removed = {"worktree_removed": False, "in_place": True}
         removed |= await asyncio.to_thread(
             inplace.drop_branch, Path(row["repo"]), store.branch_for(row), wid, keep=False
