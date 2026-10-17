@@ -385,36 +385,45 @@ async def test_rebase_off_the_branch_never_moves_the_checkout(
     assert git(repo, "worktree", "list", "--porcelain").count("worktree ") == 1
 
 
-@pytest.mark.parametrize(
-    ("error", "paused_meanwhile"),
-    [
-        (lambda: inplace.AutostashClash("your edits to f clash", ["f"], "5ca1ab1e"), False),
-        (lambda: inplace.CheckoutRefused("the branch is gone", ["g"]), False),
-        (lambda: inplace.AutostashClash("your edits to f clash", ["f"], "5ca1ab1e"), True),
-    ],
-    ids=["autostash-clash", "checkout-refused", "clash-as-a-pause-lands"],
-)
-@pytest.mark.parametrize("verb", ["resume", "retry"])
-def test_an_autostash_clash_stops_the_item_as_checkout(
-    client, repo, monkeypatch, verb, error, paused_meanwhile
-):
-    raised = error()
+def _stop_after_rebase_raises(client, repo, monkeypatch, verb, raised, paused_meanwhile=False):
+    """The stop `verb` writes when the in-place rebase raises `raised`."""
     wid = _paused(client, repo, in_place=True)
     _force_node(wid, "implementation", "paused" if verb == "resume" else "needs_human")
 
-    async def clash(*_, **__):
+    async def rebase(*_, **__):
         if paused_meanwhile:  # the stash is named all the same
             _set_status(wid, "paused")
         raise raised
 
-    monkeypatch.setattr(inplace, "rebase", clash)
+    monkeypatch.setattr(inplace, "rebase", rebase)
 
     r = client.post(f"/api/work-items/{wid}/{verb}", json={})
 
     assert r.status_code == 200, r.text
     assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
     events = _poll_events(client, wid, "work_item_needs_human")
-    stop = [e for e in events if e["type"] == "work_item_needs_human"][-1]["payload"]
+    return [e for e in events if e["type"] == "work_item_needs_human"][-1]["payload"]
+
+
+@pytest.mark.parametrize(
+    "paused_meanwhile", [False, True], ids=["autostash-clash", "clash-as-a-pause-lands"]
+)
+@pytest.mark.parametrize("verb", ["resume", "retry"])
+def test_an_autostash_clash_stops_the_item_as_checkout(
+    client, repo, monkeypatch, verb, paused_meanwhile
+):
+    raised = inplace.AutostashClash("your edits to f clash", ["f"], "5ca1ab1e")
+
+    stop = _stop_after_rebase_raises(client, repo, monkeypatch, verb, raised, paused_meanwhile)
+
     assert (stop["kind"], stop["reason"]) == ("checkout", str(raised))
-    if isinstance(raised, inplace.AutostashClash):
-        assert stop["facts"] == {"paths": ["f"], "stash": "5ca1ab1e"}
+    assert stop["facts"] == {"paths": ["f"], "stash": "5ca1ab1e"}
+
+
+@pytest.mark.parametrize("verb", ["resume", "retry"])
+def test_a_refused_in_place_rebase_stops_the_item_as_checkout(client, repo, monkeypatch, verb):
+    raised = inplace.CheckoutRefused("the branch is gone", ["g"])
+
+    stop = _stop_after_rebase_raises(client, repo, monkeypatch, verb, raised)
+
+    assert (stop["kind"], stop["reason"]) == ("checkout", str(raised))
