@@ -83,6 +83,7 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 | `deny_tools` | list of strings | `[]` | Tool names withheld from every agent task on this repo. Part of the repository policy layer, frozen into each work item when it is filed. See [`policy`](#policy). |
 | `steering` | list of strings | `[]` | Names of `library.yaml` steering profiles given to every agent launch on this repo, before the task's own steering. Frozen into each work item when it is filed. See [Repository steering](#repository-steering). |
 | `sandbox` | mapping, or `false` | `null` | Runs this repo's task processes in a container. See [`sandbox`](#sandbox). |
+| `worktrees` | boolean | `true` | `false` runs this repo's items in place, in its own checkout, rather than in a worktree each. Refused beside a `sandbox`. See [`worktrees`](#worktrees). _Added in next_ |
 
 ### Review and CI
 
@@ -171,6 +172,15 @@ This is not a place for target-repo files: Kraft never reads `CLAUDE.md`, `AGENT
 ### `sandbox`
 
 `sandbox` is part of the repository policy layer. [Sandboxed workers](/reference/configuration/sandbox#the-sandbox-key) lists its keys, which go with `kind: docker` and which with `kind: kit`, and says why no chain, node or task can change it. A sandbox needs a `network:` policy or `unrestricted_network: true`: a launch into one with neither is refused. See [Network policy](/reference/configuration/sandbox/network-policy#without-a-network-policy).
+
+### `worktrees`
+_Added in next_
+
+`worktrees: false` makes the repo's items run [in place](/guides/run/run-items-in-place): in the folder `path` names, on their own branches, one at a time, with no `setup_command` and no `local_files`. `kraft repo connect --in-place` writes it.
+
+- An item may say otherwise when it is filed (`kraft item create --in-place` or `--worktree`), and its choice is frozen then. A later change here moves no item already filed.
+- An entry with `worktrees: false` and a `sandbox` does not load: in-place items cannot be sandboxed. The message names both settings.
+- A workspace item never runs in place: one filed on a `worktrees: false` root is refused until you file it with `--worktree`.
 
 ### Automated review
 

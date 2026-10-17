@@ -36,6 +36,15 @@ The keys depend on `kind`. A key a `kind` refuses stops `repos.yaml` from loadin
 
 Set the key in `repos.yaml` or in `policy.sandbox`, not both. It is part of the repository policy layer: once it is set, no chain, node or task can turn it off or change it, limits and network policy included, and `sandbox: false` on a repo cannot turn off one a layer set.
 
+## In-place items are never sandboxed
+_Added in next_
+
+An [in-place item](/guides/run/run-items-in-place) runs in the repo's own checkout, so its agents' files land in the folder you work in, unsandboxed, as you. Kraft refuses the combination rather than dropping either side:
+
+- A `repos.yaml` entry with `worktrees: false` and a `sandbox` does not load.
+- An item filed to run in place while a sandbox applies to it, from its repo, a policy, its chain or its own policy, is refused, naming both settings.
+- A task of an in-place item whose repo gained a sandbox since it was filed stops as `config`.
+
 ## What reaches the container
 
 A sandboxed task runs `docker run --init` (or `podman run`) with every capability dropped, within its [resource limits](/reference/configuration/sandbox/resource-limits). It runs as a user that leaves what it writes yours, on rootless Docker and Podman too.
