@@ -2,7 +2,7 @@ import type { KeyboardEvent, MouseEvent } from "react";
 import { ago, repoName, shortId } from "../../format";
 import type { WorkItem } from "../../types";
 import { NodeGlyph } from "../graph/NodeGlyph";
-import { breakable } from "../phone/ui/breakable";
+import { breakPaths } from "../phone/ui/breakable";
 import { CUE_ICON } from "./cue";
 import { chainOf, groupOf } from "./model";
 import { actionVariant, admittedRowAction, glyphOf, reasonTail, stopCueOf, ticksOf, type RowAction } from "./rowText";
@@ -69,7 +69,7 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
         <span className="board-meta">
           <span className={`board-meta-tail${hot && cue !== "paused" ? " is-hot" : ""}${cue ? ` is-${cue}` : ""}`}>
             {Cue && <Cue size={12} aria-hidden className="board-cue" />}
-            <span className="board-tail-text" title={tail}>{breakable(tail)}</span>
+            <span className="board-tail-text" title={tail}>{breakPaths(tail)}</span>
           </span>
           {!hideRepo && <><span className="board-sep" aria-hidden>·</span><span className="board-meta-repo" title={item.repo}>{repoName(item.repo)}</span></>}
           {item.in_place && <><span className={`board-sep${saysCheckout ? " is-said" : ""}`} aria-hidden>·</span><span className={`board-meta-inplace${saysCheckout ? " is-said" : ""}`} title={item.repo}>{IN_YOUR_CHECKOUT}</span></>}

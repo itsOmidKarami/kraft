@@ -116,12 +116,13 @@ describe("the phone board (B)", () => {
   });
 
   it("wraps a card's long tail after its path's slashes, never mid-folder, the words whole", async () => {
-    const reason = "the checkout moved to main in /Volumes/Work/clients/acme-corporation/monorepo";
+    const reason = "would overwrite local.cfg and $5.00 in /Volumes/Work/clients/acme-corporation/monorepo";
     put(item("c1", "needs_you", { stop: { kind: "checkout", node: "verification", resume_at: null, reason } }));
     mount();
     await act(async () => {});
     const tail = document.querySelector('[data-row="c1"] .ph-card-tail')!;
     expect(tail.innerHTML).toContain("/<wbr>Work/<wbr>clients/<wbr>acme-corporation/<wbr>");
+    expect(tail.innerHTML).toContain("would overwrite local.cfg and $5.00 in /");
     expect(tail).toHaveTextContent(reason);
   });
 

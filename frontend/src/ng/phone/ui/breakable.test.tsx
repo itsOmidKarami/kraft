@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { breakable } from "./breakable";
+import { breakable, breakPaths } from "./breakable";
 
 describe("breakable", () => {
   it.each([
@@ -12,6 +12,18 @@ describe("breakable", () => {
     const { container } = render(<span>{breakable(text)}</span>);
     expect(container.textContent).toBe(text);
     expect(container.querySelectorAll("wbr")).toHaveLength(parts.length - 1);
+    const seen = [...container.firstElementChild!.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent);
+    expect(seen).toEqual(parts);
+  });
+
+  it.each([
+    ["moved to main in /Volumes/Work/x", ["moved to main in /", "Volumes/", "Work/", "x"]],
+    ["Spend cap reached · $5.00 of $5.00", ["Spend cap reached · $5.00 of $5.00"]],
+    ["would overwrite local.cfg", ["would overwrite local.cfg"]],
+    ["review › code_review", ["review › code_review"]],
+  ])("breakPaths offers a break only after a slash in %s", (text, parts) => {
+    const { container } = render(<span>{breakPaths(text)}</span>);
+    expect(container.textContent).toBe(text);
     const seen = [...container.firstElementChild!.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent);
     expect(seen).toEqual(parts);
   });

@@ -8,3 +8,11 @@ export function breakable(text: string): ReactNode {
   if (parts.length < 2) return text;
   return parts.map((p, i) => <Fragment key={i}>{i > 0 && <wbr />}{p}</Fragment>);
 }
+
+/** Prose that may hold a path, such as a stop's reason: a break after each slash and nowhere else, so `$5.00`,
+ *  `local.cfg` and `code_review` stay whole. The text is unchanged for a screen reader and for copy. */
+export function breakPaths(text: string): ReactNode {
+  const parts = text.split(/(?<=\/)/);
+  if (parts.length < 2) return text;
+  return parts.map((p, i) => <Fragment key={i}>{i > 0 && <wbr />}{p}</Fragment>);
+}
