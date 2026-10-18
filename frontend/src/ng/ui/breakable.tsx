@@ -10,10 +10,11 @@ export function breakable(text: string): ReactNode {
 }
 
 /** Prose that may hold a path, such as a stop's reason: a break after each slash and nowhere else, so `$5.00`,
- *  `local.cfg` and `code_review` stay whole. Not after a path's leading slash, which would end a line on a lone
- *  "/": the space before it is the break. The text is unchanged for a screen reader and for copy. */
+ *  `local.cfg` and `code_review` stay whole. Not after a path's leading slash, even behind a bracket or a quote
+ *  ("(/", "`/"), which would end a line on it: the space before is the break. The text is unchanged for a screen
+ *  reader and for copy. */
 export function breakPaths(text: string): ReactNode {
-  const parts = text.split(/(?<=\S\/)/);
+  const parts = text.split(/(?<=[^\s([{"'`]\/)/);
   if (parts.length < 2) return text;
   return parts.map((p, i) => <Fragment key={i}>{i > 0 && <wbr />}{p}</Fragment>);
 }
