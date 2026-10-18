@@ -211,8 +211,8 @@ _RERUN = {
 @pytest.mark.parametrize("where", list(_RERUN))
 async def test_a_conflict_handler_that_rebases_restarts_the_declared_span(item_on, script, where):
     """`resolved-conflict-restarts-from-base-change-target`. In place the
-    scripted walk never takes the checkout, so the handler rebases `main`
-    there: only its note differs."""
+    walk takes the checkout before the handler, which rebases the item's
+    branch there: only its note differs."""
     in_place = where == "in-place"
     it = await item_on(_chain(**_with_handler()), target=IN_PLACE if in_place else None)
     folder = it.repo if in_place else it.worktree
@@ -242,20 +242,33 @@ async def test_a_conflict_handler_that_rebases_restarts_the_declared_span(item_o
     assert [p for p in other if p in note] == []
 
 
-async def test_an_in_place_resolver_is_not_sent_to_overwrite_an_ignored_file(item_on, script):
+@pytest.mark.parametrize(
+    "on_the_branch", [False, True], ids=["ignored-here", "ignored-only-on-the-items-branch"]
+)
+async def test_an_in_place_resolver_is_not_sent_to_overwrite_an_ignored_file(
+    item_on, script, on_the_branch
+):
     """The resolver's own rebase in the person's checkout would replace a file
     ignored there but tracked on the newer base, as Kraft's rebase never does:
-    the item stops as `checkout` before the handler runs, the file untouched."""
+    the item stops as `checkout` before the handler runs, the file untouched.
+    Ignored by the item's branch's own rules, read after the take, though the
+    person's branch does not ignore it."""
     it = await item_on(_chain(**_with_handler()), target=IN_PLACE)
     await inplace.prepare(it.database, it.run_dirs, it.row(), base="main")
     git(it.repo, "checkout", "-q", store.branch_for(it.row()))  # where the take leaves it
+    if on_the_branch:
+        write(it.repo, ".gitignore", "local.cfg\n")
+        commit_all(it.repo, "the item ignores local.cfg")
     upstream = it.run_dirs.base / "upstream"
     git(it.repo, "worktree", "add", "-q", str(upstream), "main")
     write(upstream, "local.cfg", "upstream's\n")
     git(upstream, "add", "-f", "local.cfg")
     git(upstream, "commit", "-q", "-m", "main tracks local.cfg")
     git(it.repo, "worktree", "remove", str(upstream))
-    (it.repo / ".git/info/exclude").write_text("local.cfg\n")
+    if on_the_branch:  # the person on a branch of theirs, which does not ignore it
+        git(it.repo, "checkout", "-q", "-b", "theirs", it.row()["base_ref"])
+    else:
+        (it.repo / ".git/info/exclude").write_text("local.cfg\n")
     write(it.repo, "local.cfg", "the person's\n")
     script.plan = {"sync": ["conflict"]}
 

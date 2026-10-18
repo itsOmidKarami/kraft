@@ -507,6 +507,7 @@ _EDITED = "which you had edited"
         ("main.txt", None, "elsewhere-after-a-pull-by-url", None),
         ("item.txt", None, "merge-committed", ["f"]),
         ("f", None, "older-git", ["f"]),
+        ("main.txt", None, "stash-pop-conflicts", None),
     ],
     ids=[
         "resolved",
@@ -524,6 +525,7 @@ _EDITED = "which you had edited"
         "pulled-by-url-then-another-at-the-new-base",
         "merge-conflict-committed-then-clash",
         "clash-in-an-older-gits-reflog",
+        "unmerged-from-a-stash-pop-after-the-rebase",
     ],
 )
 async def test_an_agents_autostash_rebase_is_checked_after_its_task(
@@ -596,6 +598,13 @@ async def test_an_agents_autostash_rebase_is_checked_after_its_task(
         old = log.read_text().replace("rebase (start): checkout", "rebase: checkout")
         old = old.replace("rebase (pick): ", "rebase: ")
         log.write_text(old.replace("rebase (finish): returning", "rebase finished: returning"))
+    if then == "stash-pop-conflicts":  # unmerged paths, but no autostash of the rebase's
+        write(repo, "g", "the agent's, stashed\n")
+        git(repo, "stash", "push", "-q", "--", "g")
+        write(repo, "g", "the agent's, committed\n")
+        git(repo, "commit", "-q", "-m", "agent", "--", "g")
+        assert subprocess.run(["git", "stash", "pop"], cwd=repo).returncode != 0
+        assert git(repo, "diff", "--name-only", "--diff-filter=U") == "g"
     if then == "commit-f":  # the clashed file, resolved and committed against the prompt
         write(repo, "f", "main's and the person's\n")
         git(repo, "add", "--", "f")
@@ -623,7 +632,8 @@ async def test_an_agents_autostash_rebase_is_checked_after_its_task(
         assert (reason, it.row()["stop_kind"]) == (None, None)
         assert not rebases or git(repo, "merge-base", branch, onto) == onto, "rebased onto it"
         assert (repo / "f").read_text() == "the person's edit\n"
-        assert (git(repo, "stash", "list") == "") != (then or "").startswith("elsewhere")
+        kept = (then or "").startswith("elsewhere") or then == "stash-pop-conflicts"
+        assert (git(repo, "stash", "list") == "") != kept
         return
     assert it.row()["stop_kind"] == "checkout"
     facts = it.events("work_item_needs_human")[-1]["payload"]["facts"]

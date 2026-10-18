@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import math
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -779,7 +780,11 @@ async def _resolve_conflict(
         return "needs_human"
     if store.is_in_place(row) and new_base is not None:
         # The resolver's own `git rebase` in the person's checkout skips the
-        # guard Kraft's rebase has: refused before it is dispatched.
+        # guard Kraft's rebase has: refused before it is dispatched, after
+        # the take, so the item's branch's ignore rules are the ones read. A
+        # refused take is the handler's to report, from its own.
+        with contextlib.suppress(inplace.CheckoutRefused):
+            await inplace.take(db, run_dirs, row, attachments=entry.attachments_of(row), walk=True)
         try:
             await asyncio.to_thread(
                 inplace.refuse_ignored,
