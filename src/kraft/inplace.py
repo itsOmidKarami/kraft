@@ -536,17 +536,20 @@ def _raise_clash(
 def _put_back(checkout: Path, m: TaskMark, task: str) -> AutostashClash | None:
     """What a task's own `git rebase --autostash` (the conflict resolver's,
     `prompts._RESOLVE_IN`) could not put back since its mark: git exits 0 on
-    it. Its autostash is on a commit this checkout's HEAD held during the task
-    (HEAD's reflog is this worktree's own), never another worktree's.
+    it. Its autostash is on the tip the task found or on a commit made here
+    during it (HEAD's reflog is this worktree's own), never on a commit HEAD
+    only checked out, such as the new base, which another worktree may sit on.
     None mid-operation: its unmerged paths are its own, and its autostash is
-    still in git's operation state, put back when the person finishes it."""
+    still in git's operation state, put back when the person finishes it.
+    shortcut: with no HEAD reflog only `m.tip` counts, so a clash after a
+    commit is left to the next take's refusal of its unmerged paths."""
     if _operation(checkout):
         return None
     since = int(datetime.fromisoformat(m.started_at).timestamp())
     held = {m.tip}
-    for line in _git_lines(checkout, "log", "-g", "--date=unix", "--format=%H %gd", "HEAD"):
-        sha, selector = line.split(" ", 1)
-        if int(selector.rsplit("{", 1)[1].rstrip("}")) >= since:
+    for line in _git_lines(checkout, "log", "-g", "--date=unix", "--format=%H %gd %gs", "HEAD"):
+        sha, selector, subject = line.split(" ", 2)
+        if int(selector.rsplit("{", 1)[1].rstrip("}")) >= since and subject.startswith(_MADE_HERE):
             held.add(sha)
     try:
         _raise_clash(checkout, "", None, since, task=task, held=held)

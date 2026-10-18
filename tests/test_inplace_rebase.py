@@ -496,18 +496,22 @@ _EDITED = "which you had edited"
         ("item.txt", None, "continue", None),
         ("f", None, None, ["f"]),
         ("f", None, "commit-f", []),
+        ("f", None, "commit-first", ["f"]),
         ("main.txt", ("post-rewrite", "echo the hook >> f"), None, []),
         ("item.txt", None, "leave", _UNDER_WAY),
         ("g", None, "elsewhere", None),
+        ("main.txt", None, "elsewhere-at-the-new-base", None),
     ],
     ids=[
         "resolved",
         "conflict-resolved",
         "clash",
         "clash-then-committed",
+        "committed-then-clash",
         "put-back-refused",
         "left-mid-rebase",
         "another-worktrees-autostash",
+        "another-worktrees-autostash-at-the-new-base",
     ],
 )
 async def test_an_agents_autostash_rebase_is_checked_after_its_task(
@@ -529,7 +533,14 @@ async def test_an_agents_autostash_rebase_is_checked_after_its_task(
     await inplace.mark_task(database, run_dirs, it.row(), repo, "implementation", _RESOLVER)
 
     # At the real time, as the agent's: the check reads timed reflogs.
-    done = subprocess.run(["git", "rebase", "--autostash", "origin/main"], cwd=repo)
+    if then == "commit-first":  # its autostash is then on that commit, not the tip it found
+        write(repo, "agent.txt", "the agent's\n")
+        git(repo, "add", "--", "agent.txt")
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "agent", "--", "agent.txt"], cwd=repo, check=True
+        )
+    onto = git(repo, "rev-parse", "refs/remotes/origin/main")
+    done = subprocess.run(["git", "rebase", "--autostash", onto], cwd=repo)
     if main_writes == "item.txt":  # the conflict
         assert done.returncode != 0
     if then == "continue":  # resolved as the agent is told
@@ -540,9 +551,16 @@ async def test_an_agents_autostash_rebase_is_checked_after_its_task(
         write(repo, "f", "main's and the person's\n")
         git(repo, "add", "--", "f")
         git(repo, "commit", "-q", "-m", "agent", "--", "f")
-    if then == "elsewhere":  # the person's own pull in a second worktree clashes meanwhile
+    if (then or "").startswith("elsewhere"):  # a pull in a second worktree clashes meanwhile
         theirs = tmp_path / "theirs"
-        git(repo, "worktree", "add", "-q", "-b", "theirs", str(theirs), "main")
+        # Behind, at the local main; or at the new base this checkout's rebase checked out.
+        at = "main" if then == "elsewhere" else "origin/main"
+        git(repo, "worktree", "add", "-q", "-b", "theirs", str(theirs), at)
+        if then == "elsewhere-at-the-new-base":  # upstream moves on again, over g
+            write(theirs, "g", "upstream again\n")
+            commit_all(theirs, "upstream again")
+            git(theirs, "push", "-q", "origin", "theirs:main")
+            git(theirs, "reset", "-q", "--hard", "HEAD~1")
         write(theirs, "g", "their edit in the other worktree\n")
         subprocess.run(["git", "rebase", "--autostash", "origin/main"], cwd=theirs)
         assert git(repo, "stash", "list") == "stash@{0}: autostash"
@@ -553,9 +571,9 @@ async def test_an_agents_autostash_rebase_is_checked_after_its_task(
 
     if stop is None:
         assert (reason, it.row()["stop_kind"]) == (None, None)
-        assert _contains_origin_main(repo, branch)
+        assert git(repo, "merge-base", branch, onto) == onto, "rebased onto it"
         assert (repo / "f").read_text() == "the person's edit\n"
-        assert (git(repo, "stash", "list") == "") == (then != "elsewhere")
+        assert (git(repo, "stash", "list") == "") != (then or "").startswith("elsewhere")
         return
     assert it.row()["stop_kind"] == "checkout"
     facts = it.events("work_item_needs_human")[-1]["payload"]["facts"]

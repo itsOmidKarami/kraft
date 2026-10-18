@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import math
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -780,8 +781,12 @@ async def _resolve_conflict(
         # The resolver's own `git rebase` in the person's checkout skips the
         # guard Kraft's rebase has: refused before it is dispatched.
         try:
-            inplace.refuse_ignored(
-                Path(worktree), f"refs/heads/{store.branch_for(row)}", new_base, base
+            await asyncio.to_thread(
+                inplace.refuse_ignored,
+                Path(worktree),
+                f"refs/heads/{store.branch_for(row)}",
+                new_base,
+                base,
             )
         except inplace.CheckoutRefused as exc:
             await inplace.stop_refused(db, work_item_id, node.id, exc)

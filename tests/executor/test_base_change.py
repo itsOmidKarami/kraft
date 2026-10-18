@@ -199,6 +199,8 @@ _RERUN = {
     "in-place": (
         "This is a person's own checkout",
         "`git -c rebase.updateRefs=false rebase --autostash {sha}`",
+        # After a finished rebase or an abort alike: never "the rebase is done".
+        "When the rebase ends and git says applying the autostash resulted in conflicts, "
         "the conflict markers in those files are the person's to resolve: "
         "leave those files and the stash alone",
         "an untracked file of theirs would be overwritten, do not move or remove it",
