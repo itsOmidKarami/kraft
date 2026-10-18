@@ -130,7 +130,14 @@ def test_the_since_line_names_the_day_only_when_it_is_not_today(seen, now, said)
 def test_approving_leads_with_the_mark_and_lights_where_the_item_went(board, monkeypatch):
     """D2: the CLI's own sentence after `✓`; the next read that shows the
     item past the gate draws its new node lit, for a moment only."""
-    monkeypatch.setattr(item_view, "LIT_S", 0.2)
+    # Held, not slept: a poll waits for the screen's redraw, which on a loaded
+    # runner outlasted a short real timer and missed the lit frame entirely.
+    timers: list[tuple[float, object]] = []
+    monkeypatch.setattr(
+        item_view.Item,
+        "set_timer",
+        lambda self, delay, callback=None, **kw: timers.append((delay, callback)),
+    )
     detail = _detail(GATE)
     _serve(monkeypatch, detail, calls=[])
     console = board([GATE])
@@ -147,12 +154,15 @@ def test_approving_leads_with_the_mark_and_lights_where_the_item_went(board, mon
         app._live_event([GATE | {"updated_at": _iso(0)}], [])
         await console.until(pilot, lambda: chain.has_class("-lit"))
         lit = {str(span.style) for span in chain.render().spans}
+        ((delay, unlight),) = timers
+        unlight()
         await console.until(pilot, lambda: not chain.has_class("-lit"))
         after = {str(span.style) for span in chain.render().spans}
-        return _toasts(app), before, lit, after
+        return _toasts(app), before, lit, delay, after
 
-    toasts, before, lit, after = console.run(scenario, notifications=True)
+    toasts, before, lit, delay, after = console.run(scenario, notifications=True)
     assert toasts == ["✓ approved spec_approval on a91c03fe"]
+    assert delay == item_view.LIT_S
     assert before is False
     assert "bold $background on $kraft-accent" in lit
     assert "bold $background on $kraft-accent" not in after and "bold $kraft-accent" in after
