@@ -17,7 +17,8 @@ describe("breakable", () => {
   });
 
   it.each([
-    ["moved to main in /Volumes/Work/x", ["moved to main in /", "Volumes/", "Work/", "x"]],
+    // Never after a path's leading slash: a line would end on a lone "/".
+    ["moved to main in /Volumes/Work/x", ["moved to main in /Volumes/", "Work/", "x"]],
     ["Spend cap reached · $5.00 of $5.00", ["Spend cap reached · $5.00 of $5.00"]],
     ["would overwrite local.cfg", ["would overwrite local.cfg"]],
     ["review › code_review", ["review › code_review"]],
