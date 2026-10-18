@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from kraft import analytics as analytics_mod
 from kraft import config as config_mod
-from kraft import inplace
+from kraft import inplace, item_paths
 from kraft.adapters import beads as beads_mod
 from kraft.api import api_router, deps, perimeter
 
@@ -250,6 +250,11 @@ async def open_document(doc_id: str, body: OpenDocument, request: Request):
         if path is None:
             raise HTTPException(404, "attachment file not found")
         return {"document_id": doc_id, **_launch_editor(request, body.editor, path)}
+    if doc_id.startswith("gate:"):
+        # A pending gate's document, not indexed yet: the file in the item's
+        # own folder, where the same containment walk as its read found it.
+        root, rel = item_paths.locate(st.run_dirs, doc_id.split(":", 2)[1], doc["path"])
+        return {"document_id": doc_id, **_launch_editor(request, body.editor, root / rel)}
     if doc.get("origin") == "event_ingest":
         # A session summary or gate artifact: `path` is a synthetic identifier
         # Kraft made up for the index, never a file the connected repo

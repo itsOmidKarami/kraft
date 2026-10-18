@@ -13,7 +13,7 @@ from kraft import events, inplace, item_paths, store
 from kraft.events import _now
 from kraft.index import ingest
 from kraft.index.embed import Embedder
-from kraft.vocab import ChainEvent, GateEvent, SessionEvent, WorkItemEvent
+from kraft.vocab import ChainEvent, SessionEvent, WorkItemEvent
 
 logger = logging.getLogger(__name__)
 
@@ -350,30 +350,6 @@ class Indexer:
                 self._conn.rollback()
                 raise
 
-    async def ingest_pending_gate_artifact(self, work_item_id: str, gate: str) -> None:
-        """Index the document a gate that has just opened is about, so the
-        documents list shows what the reviewer is deciding on, not only what
-        an earlier approval left (`ingest_gate_artifact` runs again at
-        approval and refreshes it). A gate with no document on disk is
-        skipped: it is still answerable."""
-        from kraft.executor.gates import gate_artifact
-
-        if self._run_dirs is None:
-            return
-        row = self._state.read(
-            lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
-        )
-        rel = row and gate_artifact(self._run_dirs, row, gate)
-        if rel is None:
-            return
-        text = await asyncio.to_thread(
-            lambda: ingest.read_inside(*item_paths.locate(self._run_dirs, work_item_id, rel))
-        )
-        if text is not None:
-            await self.ingest_gate_artifact(
-                repo=row["repo"], work_item_id=work_item_id, path=rel, content=text
-            )
-
     # ---- live event drain ----
 
     def notify(self) -> None:
@@ -402,7 +378,6 @@ class Indexer:
                 new = self._state.read(lambda c: events.read_after(c, self._cursor))
                 repos: list[str] = []
                 summaries: list[tuple[str, str]] = []
-                opened: list[tuple[str, str]] = []
                 for ev in new:
                     self._cursor = ev["seq"]
                     payload = ev["payload"]
@@ -423,18 +398,11 @@ class Indexer:
                             repos.append(row["repo"])
                     elif ev["type"] == SessionEvent.WORKER_SESSION_EXITED:
                         summaries.append((ev["work_item_id"], payload["session_id"]))
-                    elif ev["type"] == GateEvent.REQUESTED:
-                        opened.append((ev["work_item_id"], payload["gate"]))
                 for wid, sid in summaries:
                     try:
                         await self.ingest_session_summary(wid, sid)
                     except Exception:  # noqa: BLE001
                         logger.exception("session summary ingest failed for %s/%s", wid, sid)
-                for wid, gate in opened:
-                    try:
-                        await self.ingest_pending_gate_artifact(wid, gate)
-                    except Exception:  # noqa: BLE001
-                        logger.exception("gate artifact ingest failed for %s/%s", wid, gate)
                 for repo in repos:
                     try:
                         await self.rescan_repo(repo)
@@ -492,6 +460,9 @@ class Indexer:
         docs = [{**{k: r[k] for k in r.keys()}, "attachment_kind": None} for r in rows]
         seen = {d["document_id"] for d in docs}
         docs += [d for d in self._attachment_docs(work_item_id) if d["document_id"] not in seen]
+        pending = self._pending_gate_doc(work_item_id)
+        if pending and pending["path"] not in {d["path"] for d in docs}:
+            docs.append(pending)
         # W13 A: the run a session summary came from. worker_sessions lives in
         # the state db, not the index, so the join is a keyed lookup rather
         # than SQL. Artifacts and attachments have no session: all three null.
@@ -614,6 +585,47 @@ class Indexer:
                 }
             )
         return out
+
+    def _pending_gate(self, work_item_id: str) -> tuple[dict, str, str] | None:
+        """The item's row, its pending gate and that gate's document, when it has
+        one on disk. Approval is what indexes a gate's document (it is a draft
+        until then and must not answer a search), so this is read live."""
+        from kraft.executor.gates import gate_artifact, pending_gate
+
+        if self._run_dirs is None:
+            return None
+        row = self._state.read(
+            lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+        )
+        gate = row and pending_gate(self._state, work_item_id)
+        rel = gate and gate_artifact(self._run_dirs, row, gate)
+        return (row, gate, rel) if rel else None
+
+    def _pending_gate_doc(self, work_item_id: str) -> dict | None:
+        """The document a pending gate is about, shaped like a `documents` row
+        under the synthetic id `gate:{work_item_id}:{gate}`, until approval
+        indexes it and the real row takes over (as `_attachment_docs` does for an
+        attachment the index does not hold yet)."""
+        found = self._pending_gate(work_item_id)
+        where = found and item_paths.locate(self._run_dirs, work_item_id, found[2])
+        text = where and ingest.read_inside(*where)
+        if text is None:
+            return None
+        row, gate, rel = found
+        fm, body = ingest.split_front_matter(text)
+        return {
+            "document_id": f"gate:{work_item_id}:{gate}",
+            "repo": row["repo"],
+            "title": ingest.derive_title(rel, fm, body),
+            "kind": ingest.derive_kind(rel, fm),
+            "source_kind": "artifact",
+            "path": rel,
+            "indexed_at": _now(),
+            "node_id": None,
+            "hook_point": None,
+            "worker_session_id": None,
+            "attachment_kind": None,
+        }
 
     def _read_attachment(self, work_item_id: str, attachment: dict) -> str | None:
         """An unindexed attachment's text: from the item's own worktree while
@@ -938,9 +950,31 @@ class Indexer:
             "links": [],
         }
 
+    def _get_pending_gate_document(self, doc_id: str) -> dict | None:
+        """Content fetch for a `gate:{work_item_id}:{gate}` id: the file again,
+        and only while that gate is the pending one."""
+        parts = doc_id.split(":", 2)
+        doc = self._pending_gate_doc(parts[1]) if len(parts) == 3 else None
+        if doc is None or doc["document_id"] != doc_id:
+            return None
+        text = ingest.read_inside(*item_paths.locate(self._run_dirs, parts[1], doc["path"]))
+        if text is None:
+            return None
+        return {
+            "id": doc_id,
+            **{k: doc[k] for k in ("repo", "source_kind", "kind", "title", "path", "indexed_at")},
+            "content": ingest.split_front_matter(text)[1],
+            "metadata": {},
+            "source_created_at": None,
+            "source_updated_at": None,
+            "links": [],
+        }
+
     def get_document(self, doc_id: str) -> dict | None:
         if doc_id.startswith("attachment:"):
             return self._get_synthetic_attachment_document(doc_id)
+        if doc_id.startswith("gate:"):
+            return self._get_pending_gate_document(doc_id)
         r = self._conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
         if r is None:
             return None
