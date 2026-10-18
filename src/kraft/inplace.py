@@ -418,7 +418,7 @@ def _rebase_in_checkout(checkout: Path, branch: str, head: str, base: str, env) 
     stash, since = _stash(checkout), int(time.time())
     done = run("-c", "rebase.updateRefs=false", "rebase", "--autostash", head)
     if done.returncode != 0:
-        onto = _rebase_onto(checkout)
+        onto = _rebase_file(checkout, "onto")
         if onto is not None and onto != head:
             raise CheckoutRefused(
                 f"a rebase Kraft did not start is under way in {checkout}: finish or abort it "
@@ -446,12 +446,13 @@ def _rebase_in_checkout(checkout: Path, branch: str, head: str, base: str, env) 
     _raise_clash(checkout, base, stash, since)
 
 
-def _rebase_onto(checkout: Path) -> str | None:
-    """The commit a rebase under way in `checkout` is onto, or None."""
+def _rebase_file(checkout: Path, name: str) -> str | None:
+    """A rebase under way in `checkout`'s record `name` (`onto`, the commit
+    it is onto; `head-name`, the branch it rebases), or None."""
     gitdir = git_read(checkout, "rev-parse", "--absolute-git-dir")
     for state in ("rebase-merge", "rebase-apply") if gitdir else ():
         with contextlib.suppress(OSError):
-            return Path(gitdir, state, "onto").read_text().strip()
+            return Path(gitdir, state, name).read_text().strip()
     return None
 
 
@@ -910,19 +911,28 @@ def mark(
     )
 
 
+#: Reflog subjects of a commit made in the checkout, not merged or replayed
+#: into it (a merge's result is the tree diff's, a rebase's replays were made
+#: before the task).
+_MADE_HERE = ("commit:", "commit (amend):", "revert:", "cherry-pick:")
+
+
 def check(checkout: Path, branch: str, mark: TaskMark) -> TaskCheck:
     """After an agent task: never a repair, only what a stop needs to say."""
     head = git_read(checkout, "symbolic-ref", "--quiet", "HEAD", expected_failure=True)
     since = datetime.fromisoformat(mark.started_at).timestamp()
-    entries = []
+    entries, before = [], None
     for entry in _git_lines(checkout, "log", "-g", "--date=unix", "--format=%H %gd %gs", "HEAD"):
         sha, selector, subject = entry.split(" ", 2)
         if int(selector.rsplit("{", 1)[1].rstrip("}")) >= since:
             entries.append((sha, subject))
+            before = None
+        elif before is None:
+            before = sha  # where HEAD stood before the oldest entry so far
     # Oldest first, following which branch HEAD was on (the take left it on
     # the item's): only what HEAD reached while it was elsewhere is stray, so
     # an amend, reset or rebase on the item's branch never is.
-    on, made = branch, []
+    on, made, ours, prev = branch, [], [], before
     for sha, subject in reversed(entries):
         if subject.startswith("checkout: moving from "):
             on = subject.rsplit(" to ", 1)[1]
@@ -930,10 +940,17 @@ def check(checkout: Path, branch: str, mark: TaskMark) -> TaskCheck:
             on = subject.removeprefix("rebase (finish): returning to refs/heads/")
         elif on != branch and sha not in made:
             made.append(sha)
+        elif on == branch and subject.startswith(_MADE_HERE):
+            ours.append((prev, sha))
+        prev = sha
     made.reverse()  # newest first, as named
+    operation = _operation(checkout)
     # An operation begun on the item's branch (a rebase detaches HEAD, a merge
-    # does not) is the person's to finish; one begun elsewhere is a move.
-    under_way = on == branch and _operation(checkout)
+    # does not) is the person's to finish; one begun elsewhere is a move. A
+    # rebase says which branch it is rebasing, whichever one it began from.
+    rebasing = _rebase_file(checkout, "head-name")
+    mine = rebasing == f"refs/heads/{branch}" if rebasing is not None else on == branch
+    under_way = operation and mine
     moved_to = None
     if head != f"refs/heads/{branch}" and not under_way:
         moved_to = (head or "").removeprefix("refs/heads/") or (
@@ -945,20 +962,21 @@ def check(checkout: Path, branch: str, mark: TaskMark) -> TaskCheck:
         else set()
     )
     # Every path the branch's tree gained since the mark, whatever the merge
-    # shape (a merged side branch's files count), plus every path of a commit
-    # the branch gained that is not a rebase's replay, so one a later commit
-    # undid still counts. Git merges or rebases nothing over a dirty path, so
-    # an upstream change lands on one of the person's only if their edit was
-    # set aside (a stash) during the task, which is worth a look too.
+    # shape (a merged side branch's files count), plus every path a commit
+    # made here on the branch changed, so one a later commit or a reset undid
+    # still counts. Never main's commits or a rebase's replays: those are not
+    # made here. Git merges or rebases nothing over a dirty path, so an
+    # upstream change lands on one of the person's only if their edit was set
+    # aside (a stash) during the task, which is worth a look too.
     tip = f"refs/heads/{branch}"
     touched = _git_lines(checkout, "diff", "--name-only", "--no-renames", mark.tip, tip)
-    touched += _git_lines(
-        checkout,
-        *("log", "--right-only", "--cherry-pick", "--no-merges", "--no-renames"),
-        *("--name-only", "--format=", f"{mark.tip}...{tip}"),
-    )
+    for was, sha in ours:
+        # Against where HEAD stood before it, so an amend counts only its change.
+        since_was = ("diff", "--name-only", "--no-renames", was, sha) if was else None
+        whole = ("diff-tree", "-r", "--root", "--name-only", "--no-renames", "--no-commit-id", sha)
+        touched += _git_lines(checkout, *(since_was or whole))
     # Mid-operation, the dirty paths are the operation's, not the task's.
-    new = [] if under_way else [p for p in _dirty(checkout) if p not in mark.dirty]
+    new = [] if operation else [p for p in _dirty(checkout) if p not in mark.dirty]
     return TaskCheck(
         moved_to=moved_to,
         stray_commits=[s for s in made if s in off],

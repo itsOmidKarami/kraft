@@ -518,14 +518,16 @@ _THEIR_OPERATION = {
         ("commit", "-q", "--allow-empty", "-m", "theirs"),
         ("merge", "item"),
     ],
+    # Begun from the item's branch, but rebasing `feature`.
+    "rebase-of-another-branch": [("rebase", "-x", "false", "item", "feature")],
 }
 
 
 @pytest.mark.parametrize("how", list(_THEIR_OPERATION))
 def test_check_tells_the_persons_operation_on_the_branch_from_a_move(repo, how):
-    """Begun on the item's branch, an operation is the person's to finish, and
-    its conflicted files are not the task's leftovers. Begun on another
-    branch, it is a move, and their commit there is not the task's."""
+    """On the item's branch, an operation is the person's to finish. On
+    another branch, it is a move, and their commit there is not the task's.
+    Either way, its conflicted files are not the task's leftovers."""
     branch = _on_item_branch(repo)
     write(repo, "f.txt", "the item's\n")
     commit_all(repo, "item")
@@ -542,6 +544,7 @@ def test_check_tells_the_persons_operation_on_the_branch_from_a_move(repo, how):
 
     found = inplace.check(repo, branch, m)
 
+    assert found.leftovers == {}
     if how == "merge-on-another-branch":
         theirs = git(repo, "rev-parse", "feature")
         assert (found.moved_to, found.under_way, found.stray_commits) == (
@@ -549,8 +552,10 @@ def test_check_tells_the_persons_operation_on_the_branch_from_a_move(repo, how):
             False,
             [theirs],
         )
+    elif how == "rebase-of-another-branch":
+        assert (found.moved_to[:12], found.under_way) == ("detached at ", False)
     else:
-        assert (found.moved_to, found.under_way, found.leftovers) == (None, True, {})
+        assert (found.moved_to, found.under_way) == (None, True)
 
 
 _REWRITES = {
@@ -589,48 +594,74 @@ def test_check_names_no_stray_commit_for_history_the_branch_holds_or_rewrote(rep
     assert (found.moved_to, found.stray_commits) == (None, [])
 
 
+_ITEMS_CALC = "# the item's, before the task\n"
+_Q = "".join(f"{i}\n" for i in range(1, 8))
+_COMMIT_CALC = ("commit", "-q", "-m", "agent", "--", "calc.py")
+_MERGE_MAIN = ("merge", "-q", "--no-ff", "-m", "merge main", "main")
+_REBASE_MAIN = ("rebase", "-q", "--autostash", "main")
+
+
+def _main_has_the_items_calc(repo) -> None:
+    """A hotfix main also took: its commit touches calc.py, the merge does not."""
+    write(repo, "calc.py", _ITEMS_CALC)
+    commit_all(repo, "the same fix on main")
+
+
+def _main_drifts_the_items_context(repo) -> None:
+    """Near the item's q.txt hunk: no conflict, but its replay is a new patch."""
+    write(repo, "q.txt", _Q.replace("2\n", "2 main\n"))
+    commit_all(repo, "main edits near the item's hunk")
+
+
+#: What main does before the mark, what the task does after it, and whether
+#: the task committed the person's calc.py.
 _TASK_WORK = {
-    "commit": [("commit", "-q", "-m", "agent", "--", "calc.py")],
-    "merge-main": [("merge", "-q", "--no-ff", "-m", "merge main", "main")],
-    "side-branch": [
-        ("checkout", "-q", "-b", "side"),
-        ("commit", "-q", "-m", "side", "--", "calc.py"),
-        ("checkout", "-q", "item"),
-        ("merge", "-q", "--no-ff", "-m", "merge side", "side"),
-    ],
-    "rebase": [("rebase", "-q", "--autostash", "main")],
-    "revert": [("commit", "-q", "-m", "agent", "--", "calc.py"), ("revert", "--no-edit", "HEAD")],
-    "amend": [("commit", "-q", "--amend", "--no-edit", "--", "calc.py")],
+    "commit": (None, [_COMMIT_CALC], True),
+    "merge-main": (None, [_MERGE_MAIN], False),
+    "merge-main-unchanged": (_main_has_the_items_calc, [_MERGE_MAIN], False),
+    "side-branch": (
+        None,
+        [
+            ("checkout", "-q", "-b", "side"),
+            ("commit", "-q", "-m", "side", "--", "calc.py"),
+            ("checkout", "-q", "item"),
+            ("merge", "-q", "--no-ff", "-m", "merge side", "side"),
+        ],
+        True,
+    ),
+    "rebase": (None, [_REBASE_MAIN], False),
+    "rebase-autostash-replayed": (_main_drifts_the_items_context, [_REBASE_MAIN], False),
+    "revert": (None, [_COMMIT_CALC, ("revert", "--no-edit", "HEAD")], True),
+    "amend": (None, [("commit", "-q", "--amend", "--no-edit", "--", "calc.py")], True),
+    # The amended commit touched calc.py before the task; the amend did not.
+    "amend-the-message": (None, [("commit", "-q", "--amend", "-m", "reworded")], False),
+    "commit-then-reset-hard": (None, [_COMMIT_CALC, ("reset", "-q", "--hard", "HEAD~1")], True),
 }
 
 
-@pytest.mark.parametrize(
-    ("how", "overlap"),
-    [
-        ("commit", True),
-        ("merge-main", False),
-        ("side-branch", True),
-        ("rebase", False),
-        ("revert", True),
-        ("amend", True),
-    ],
-    ids=list(_TASK_WORK),
-)
-def test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape(repo, how, overlap):
+@pytest.mark.parametrize("how", list(_TASK_WORK))
+def test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape(repo, how):
     """A merged side branch's files are the task's, and so is a commit a later
-    one undid; main's, or the item's own commits a rebase replays, are not."""
+    one or a reset undid; main's commits, or the item's own a rebase replays,
+    are not, even where they touch the person's file."""
+    main_does, task_does, overlap = _TASK_WORK[how]
+    write(repo, "q.txt", _Q)
+    commit_all(repo, "q")
     branch = _on_item_branch(repo)
-    write(repo, "calc.py", "# the item's, before the task\n")
+    write(repo, "calc.py", _ITEMS_CALC)
+    write(repo, "q.txt", _Q.replace("5\n", "5 item\n"))
     commit_all(repo, "an earlier task")
     git(repo, "checkout", "-q", "main")
     write(repo, "main.txt", "main moved on\n")
     commit_all(repo, "main")
+    if main_does:
+        main_does(repo)
     git(repo, "checkout", "-q", branch)
     write(repo, "calc.py", "# the person's edit\n")
     m = inplace.mark(repo, branch, {})
 
-    for args in _TASK_WORK[how]:
-        git(repo, *args)
+    for args in task_does:  # at the real time: `check` reads the reflog
+        _git_now(repo, *args)
 
     assert m.dirty == {"calc.py"}
     assert inplace.check(repo, branch, m).overlap == (["calc.py"] if overlap else [])
