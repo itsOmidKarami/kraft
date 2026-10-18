@@ -26,7 +26,7 @@ from support.api import (
 )
 from support.harness import IN_PLACE, v1_named_chain
 
-from kraft import start_queue
+from kraft import start_queue, storage
 
 DOORS = json.loads((Path(__file__).parent / "api" / "lifecycle_doors.json").read_text())
 
@@ -368,6 +368,27 @@ def test_a_start_held_for_storage_keeps_its_place_and_lets_a_worktree_holder_pas
 
     assert _tick(client) == [stopped]
     assert _status_of(client, new) == "queued"
+
+
+def test_starts_released_together_are_counted_as_each_one_starts(client, repo, board):
+    """Space freed, three held starts released in one pass: each new worktree is
+    counted before the next is asked, so only as many start as fit."""
+    held = [_paused(client, repo, chain_template="default") for _ in range(3)]
+    _hold_storage(client)
+    for wid in held:
+        assert client.post(f"/api/work-items/{wid}/resume", json={}).json()["status"] == "queued"
+    st = client.app.state
+    st.policy = dataclasses.replace(
+        st.policy, max_concurrent=10, storage_limit_bytes=250, storage_quota_bytes=200
+    )
+    # Archiving freed it: 100 bytes left, one item of that size to go by.
+    st.storage_usage = storage.Usage(
+        "2026-01-01T00:00:00+00:00", 100, {"old": 100}, {"worktrees": 100}
+    )
+    _set_status(board, "paused")
+
+    assert _tick(client) == held[:2]
+    assert _status_of(client, held[2]) == "queued"
 
 
 def test_removing_the_limit_releases_a_held_start(client, repo, board):

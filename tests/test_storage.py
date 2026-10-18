@@ -289,6 +289,52 @@ def test_a_held_start_is_told_the_figure_compared_with_the_limit():
     assert storage.figures(st) == {"used_bytes": 110, "limit_bytes": 100}
 
 
+@pytest.mark.parametrize(
+    ("limit", "items", "wid", "charged"),
+    [
+        (100, {"a": 30, "b": 50}, "new", 40),
+        (100, {"a": 30, "b": 50}, "has", 0),
+        (100, {"a": 30, "b": 50}, "here", 0),
+        (100, {"a": 30, "b": 50}, "a", 0),
+        (None, {"a": 30, "b": 50}, "new", 0),
+    ],
+    ids=["new-worktree", "worktree-exists", "in-place", "already-counted", "no-limit"],
+)
+async def test_charge_counts_a_new_worktree_at_once(
+    item_on, database, run_dirs, limit, items, wid, charged
+):
+    """The mean of the items on the cache stands in until the next walk."""
+    chain = v1_named_chain(run_dirs.base / "t")
+    for name, target in (("new", None), ("has", None), ("here", IN_PLACE)):
+        await item_on(chain, wid=name, **({"target": target} if target else {}))
+    (run_dirs.worktrees / "has").mkdir(parents=True)
+    st = SimpleNamespace(
+        policy=_policy(limit, limit and limit * 8 // 10),
+        storage_usage=_usage(80, items, {"worktrees": 80}),
+        run_dirs=run_dirs,
+        db=database,
+    )
+    storage.charge(SimpleNamespace(state=st), wid)
+    got = st.storage_usage
+    assert (got.governed, got.categories["worktrees"]) == (80 + charged, 80 + charged)
+    assert got.items.get(wid, 0) == (charged or items.get(wid, 0))
+
+
+async def test_charge_with_nothing_to_average_kicks_a_walk(
+    item_on, database, run_dirs, monkeypatch
+):
+    chain = v1_named_chain(run_dirs.base / "t")
+    await item_on(chain, wid="new")
+    kicked = []
+    monkeypatch.setattr(storage, "kick", kicked.append)
+    st = SimpleNamespace(
+        policy=_policy(100, 80), storage_usage=_usage(0), run_dirs=run_dirs, db=database
+    )
+    app = SimpleNamespace(state=st)
+    storage.charge(app, "new")
+    assert (kicked, st.storage_usage.items) == ([app], {})
+
+
 def test_forget_takes_an_items_bytes_off_the_cache():
     st = SimpleNamespace(
         storage_usage=_usage(

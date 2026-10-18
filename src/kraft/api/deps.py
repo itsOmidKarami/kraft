@@ -24,7 +24,7 @@ from fastapi import FastAPI, HTTPException
 
 from kraft import builtins as builtins_mod
 from kraft import config as config_mod
-from kraft import executor, ids, store
+from kraft import executor, ids, storage, store
 from kraft.adapters.forge import git as forge_git
 from kraft.addons import load as addons_load
 from kraft.config import RepoEntry
@@ -135,6 +135,9 @@ def discard(coro) -> None:
 def _start(app: FastAPI, wid: str, coro) -> asyncio.Task:
     """Run `coro` as `wid`'s task, in `app.state.tasks`. The caller has
     checked nothing else holds the key."""
+    # Every walk starts here, and a walk is what makes the worktree (later, in
+    # its own task): count it now, so the start after this one sees it.
+    storage.charge(app, wid)
     task = asyncio.ensure_future(coro)
     app.state.tasks[wid] = task
 

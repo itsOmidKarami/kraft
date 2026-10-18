@@ -262,7 +262,11 @@ def holds(st, wid: str) -> bool:
     """Whether starting `wid` must wait for space. Only a start that would
     create a worktree: an item that has one adds little by continuing, and
     finishing it is what makes it archivable."""
-    if state_of(st.policy, usage(st)) != "held" or (st.run_dirs.worktrees / wid).exists():
+    return state_of(st.policy, usage(st)) == "held" and _would_create_worktree(st, wid)
+
+
+def _would_create_worktree(st, wid: str) -> bool:
+    if (st.run_dirs.worktrees / wid).exists():
         return False
     # An in-place item never makes one: it works in its repository's checkout.
     row = st.db.read(
@@ -298,6 +302,32 @@ def forget(st, wid: str) -> None:
         governed=max(0, used.governed - used.items[wid]),
         items={k: v for k, v in used.items.items() if k != wid},
         categories=categories,
+    )
+
+
+def charge(app, wid: str) -> None:
+    """Count the worktree a start is about to create, at once, so the next
+    `holds` sees it: the cache is walked every ten minutes, and a burst of
+    starts released together would otherwise all read the same stale "ok".
+    Only with a limit set, and never for an in-place item or one already
+    counted. The size is the mean of the items on the cache, since a walk
+    cannot run here (the repository's own size is not known); the next walk
+    reconciles it. With no item to average, nothing is charged but the walk is
+    kicked, so the figure is real soon."""
+    st = app.state
+    used = usage(st)
+    if st.policy is None or st.policy.storage_limit_bytes is None or used is None:
+        return
+    if wid in used.items or not _would_create_worktree(st, wid):
+        return
+    if not used.items:
+        kick(app)
+        return
+    size = sum(used.items.values()) // len(used.items)
+    categories = dict(used.categories)
+    categories["worktrees"] = categories.get("worktrees", 0) + size
+    st.storage_usage = dataclasses.replace(
+        used, governed=used.governed + size, items={**used.items, wid: size}, categories=categories
     )
 
 
