@@ -211,8 +211,9 @@ body:has(.rv-bar) { --toast-bottom: 88px; }
   .rv-gate-head { flex-wrap: wrap; row-gap: 6px; }
   .rv-gate-head > .rv-spacer { flex-basis: 100%; }
   .rv-gate-head > .rv-spacer + button { margin-left: auto; }
-  /* Approve's "Unavailable while…" note takes the room left on that line and wraps, never pushing Close off it. */
-  .rv-gate-head > [role="status"] { flex: 1 1 0; min-width: 12ch; }
+  /* Approve's "Unavailable while…" note takes the room left on that line and wraps, never pushing Close off it,
+     and sits against Approve, the button it explains. */
+  .rv-gate-head > [role="status"] { flex: 1 1 0; min-width: 12ch; text-align: right; }
   .rv-gate-body { flex-direction: column; }
   .rv-gate-doc { flex: 1 1 0; padding: 16px; }
   .rv-gate-side { width: auto; flex: 0 1 45%; border-left: 0; border-top: 1px solid var(--line); }
