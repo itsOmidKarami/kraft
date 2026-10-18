@@ -1,4 +1,4 @@
-import { breakable } from "../ui/breakable";
+import { breakable } from "../../ui/breakable";
 import { ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";

@@ -2,7 +2,7 @@ import type { KeyboardEvent, MouseEvent } from "react";
 import { ago, repoName, shortId } from "../../format";
 import type { WorkItem } from "../../types";
 import { NodeGlyph } from "../graph/NodeGlyph";
-import { breakPaths } from "../phone/ui/breakable";
+import { breakPaths } from "../ui/breakable";
 import { CUE_ICON } from "./cue";
 import { chainOf, groupOf } from "./model";
 import { actionVariant, admittedRowAction, glyphOf, reasonTail, stopCueOf, ticksOf, type RowAction } from "./rowText";

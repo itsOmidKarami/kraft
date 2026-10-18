@@ -18,7 +18,7 @@ import { notStarted } from "../chainValues";
 import { ItemAgentRows } from "./ItemOverrides";
 import { limitPolicy } from "../limitPolicy";
 import { tip } from "../../ui/Tooltip";
-import { breakable } from "../../phone/ui/breakable";
+import { breakable } from "../../ui/breakable";
 import { BUDGET_IN_DOLLARS } from "../sharedWords";
 import { LinkButton } from "../../ui/LinkButton";
 

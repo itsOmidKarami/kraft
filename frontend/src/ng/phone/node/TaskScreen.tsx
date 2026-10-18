@@ -1,4 +1,4 @@
-import { breakable } from "../ui/breakable";
+import { breakable } from "../../ui/breakable";
 import { nameOf } from "../../board/rowText";
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";

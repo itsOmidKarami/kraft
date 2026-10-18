@@ -2,7 +2,7 @@ import { ChevronRight, Pencil, Plus, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { showToast } from "../../ui/Toast";
-import { breakable } from "../ui/breakable";
+import { breakable } from "../../ui/breakable";
 import { notListed, unlisted } from "../../ui/Combobox";
 import { ChoiceSheet, EditSheet, useSheet, type Listed, type Option } from "../nav/Sheet";
 import "./areas.css";

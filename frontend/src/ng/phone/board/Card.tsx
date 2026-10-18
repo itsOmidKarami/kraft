@@ -6,7 +6,7 @@ import { reasonTail, stopCueOf, ticksOf } from "../../board/rowText";
 import { IN_YOUR_CHECKOUT } from "../../board/sharedWords";
 import { NodeGlyph } from "../../graph/NodeGlyph";
 import { Button } from "../../ui/Button";
-import { breakPaths } from "../ui/breakable";
+import { breakPaths } from "../../ui/breakable";
 import { cardButtons, type CardButton } from "./actions";
 import { stateGlyph } from "./glyph";
 

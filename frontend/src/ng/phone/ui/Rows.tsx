@@ -1,4 +1,4 @@
-import { breakable } from "./breakable";
+import { breakable } from "../../ui/breakable";
 import type { ReactNode } from "react";
 import "./ui.css";
 
