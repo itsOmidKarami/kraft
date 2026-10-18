@@ -29,9 +29,9 @@ their agent steps on Claude Code, and any step can
 [switch to another agent](https://kraft-sdlc.dev/guides/switch-harness).
 
 **New in 2.1:** [add-ons](https://kraft-sdlc.dev/guides/customize/share-chains-with-addons)
-that share chains, skills and agent profiles from a git repository,
-`kraft console`, a terminal UI for the board, and in-place items that run in
-the repo's own checkout instead of a worktree. The
+that share chains, skills and agent profiles from a git repository;
+`kraft console`, a terminal UI for Kraft; and in-place items that run in the
+repo's own checkout instead of a worktree. The
 [2.1.0 release notes](https://github.com/itsOmidKarami/kraft/releases/tag/v2.1.0)
 have the rest. Coming from 1.4? [What's new in 2.0](https://kraft-sdlc.dev/project/whats-new)
 says what to check before you upgrade.
