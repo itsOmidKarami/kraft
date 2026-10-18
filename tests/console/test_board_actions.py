@@ -191,6 +191,31 @@ def test_an_action_goes_to_the_item_its_dialog_opened_for(
     assert board([GATE, FAILED, RUNNING]).run(scenario) == [(name, args)]
 
 
+def test_a_paused_item_offers_resume_once_the_pause_is_answered(board, monkeypatch):
+    """The pause event reads the board while the walk is still stopping, and the
+    server hides resume until it has: the walk ending is no event, so the answer
+    to the pause is what reads the board again."""
+    paused = RUNNING | {"display_status": "paused", "actions": ["resume", "steer"]}
+
+    async def pause(work_item_id=None):
+        async def board_rows(**kwargs):  # what the server reads once the walk is gone
+            return [paused], 0
+
+        monkeypatch.setattr(client, "board_rows", board_rows)
+        return {"id": RUNNING["id"], "paused_sessions": []}
+
+    monkeypatch.setattr(client, "pause", pause)
+    console = board([RUNNING])
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        await pilot.press("p")
+        await console.until(pilot, lambda: "resume" in app.view.selected["actions"])
+        return app.view.selected["display_status"]
+
+    assert console.run(scenario) == "paused"
+
+
 @pytest.mark.parametrize(
     ("height", "reads"), [(40, True), (24, False)], ids=["peek-open", "peek-closed"]
 )

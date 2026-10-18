@@ -111,10 +111,12 @@ async def reject(app: App, row: dict, note_dialog: Dialog | None = None) -> None
 async def pause_or_resume(app: App, row: dict) -> None:
     if "resume" in (row.get("actions") or []):
         await resume(app, row)
-    else:
-        await act(
-            app, client.pause(row["id"]), answers.item_action("paused {id}", small=answers.paused)
-        )
+    elif await act(
+        app, client.pause(row["id"]), answers.item_action("paused {id}", small=answers.paused)
+    ):
+        # The pause event reads the board while the walk is still stopping, which hides
+        # resume; the walk ending is no event, but the answer comes after it.
+        app.live.reread()
 
 
 async def resume(app: App, row: dict) -> None:
