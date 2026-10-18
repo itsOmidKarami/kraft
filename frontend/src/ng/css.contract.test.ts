@@ -60,6 +60,10 @@ describe("ng CSS", () => {
     expect(css).toMatch(/:root\[data-sidebar="rail"\] \.ng-sidebar\s*{[^}]*transition:[^;}]*(?:\.18s|180ms)/);
   });
 
+  it("holds the sidebar to the viewport, so a tall page does not push its footer's version below the fold", () => {
+    expect(readFileSync(join(here, "shell/shell.css"), "utf-8")).toMatch(/\.ng-side\s*{[^}]*position:\s*sticky;\s*top:\s*0;\s*height:\s*100vh/);
+  });
+
   it("shades a revealed sidebar with a ring and a soft drop, fading in with the slide, and none when pinned", () => {
     const css = readFileSync(join(here, "shell/shell.css"), "utf-8");
     expect(css).toMatch(/\.ng-side:is\([^{]*\) \.ng-sidebar\s*{[^}]*box-shadow:\s*0 0 0 1px var\(--border\), 16px 0 40px var\(--side-shade\)/);

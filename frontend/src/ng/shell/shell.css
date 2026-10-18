@@ -38,7 +38,8 @@
    stay in the tab order. */
 :root { --ng-side-w: 210px; }
 :root[data-sidebar="rail"] { --ng-side-w: 0px; }
-.ng-side { position: relative; z-index: 20; flex: none; width: var(--ng-side-w); }
+/* Held to the viewport: stretched to a tall page's height, it put the footer's version below the fold. */
+.ng-side { position: sticky; top: 0; height: 100vh; z-index: 20; flex: none; width: var(--ng-side-w); }
 .ng-side-edge { display: none; position: absolute; inset: 0 auto 0 0; width: 8px; }
 :root[data-sidebar="rail"] .ng-side-edge { display: block; }
 .ng-sidebar { position: absolute; inset: 0 auto 0 0; box-sizing: border-box; width: 210px; display: flex; flex-direction: column; overflow: hidden; background: var(--side); border-right: 1px solid var(--line); font-size: var(--fs-meta); }
