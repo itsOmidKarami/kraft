@@ -67,35 +67,35 @@ origin: src/kraft/store/sessions.py §create_session
 ## REQ in-place-never-forces-a-checkout
 
 The system SHALL NOT run `git checkout -f` in an in-place item's checkout.
-enforced-by: tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/test_inplace.py::test_take_switches_with_plain_checkout_and_keeps_edits[plain], tests/executor/test_walk_in_place.py::test_no_sweep_after_an_in_place_task_moves_or_commits_anything, tests/test_inplace_rebase.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[ignored-file-the-base-tracks], tests/test_inplace_rebase.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[ignored-file-the-branch-untracked], tests/test_inplace_rebase.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[ignored-file-a-branch-commit-wrote], tests/test_inplace_rebase.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[the-persons-merge], tests/test_inplace_rebase.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[unmerged-path], tests/test_inplace_rebase.py::test_a_failed_rebase_never_aborts_the_persons_own, tests/executor/test_base_change.py::test_an_in_place_resolver_is_not_sent_to_overwrite_an_ignored_file[ignored-here], tests/executor/test_base_change.py::test_an_in_place_resolver_is_not_sent_to_overwrite_an_ignored_file[ignored-only-on-the-items-branch]
-origin: src/kraft/inplace.py §_take
+enforced-by: tests/inplace/test_taking.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/inplace/test_taking.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/inplace/test_taking.py::test_take_switches_with_plain_checkout_and_keeps_edits[plain], tests/executor/test_walk_in_place.py::test_no_sweep_after_an_in_place_task_moves_or_commits_anything, tests/inplace/test_rebasing.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[ignored-file-the-base-tracks], tests/inplace/test_rebasing.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[ignored-file-the-branch-untracked], tests/inplace/test_rebasing.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[ignored-file-a-branch-commit-wrote], tests/inplace/test_rebasing.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[the-persons-merge], tests/inplace/test_rebasing.py::test_a_rebase_in_the_checkout_refuses_what_it_would_force[unmerged-path], tests/inplace/test_rebasing.py::test_a_failed_rebase_never_aborts_the_persons_own, tests/executor/test_base_change.py::test_an_in_place_resolver_is_not_sent_to_overwrite_an_ignored_file[ignored-here], tests/executor/test_base_change.py::test_an_in_place_resolver_is_not_sent_to_overwrite_an_ignored_file[ignored-only-on-the-items-branch]
+origin: src/kraft/inplace/taking.py §_take
 
 ## REQ in-place-switch-refusal-stops
 
 IF switching the checkout to the item's branch would overwrite uncommitted
 changes, THEN the system SHALL stop the item as `checkout` naming the files,
 and SHALL leave the changes untouched.
-enforced-by: tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/test_inplace.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[ignored], tests/executor/test_walk_in_place.py::test_a_refused_take_stops_the_item_as_checkout
-origin: src/kraft/inplace.py §_take
+enforced-by: tests/inplace/test_taking.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[tracked], tests/inplace/test_taking.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[untracked], tests/inplace/test_taking.py::test_take_refuses_a_switch_that_would_overwrite_and_touches_nothing[ignored], tests/executor/test_walk_in_place.py::test_a_refused_take_stops_the_item_as_checkout
+origin: src/kraft/inplace/taking.py §_take
 
 ## REQ in-place-uncommitted-edits-do-not-stop
 
 WHILE an in-place checkout has uncommitted changes that the switch does not
 overwrite, the system SHALL start the item's task without stopping.
-enforced-by: tests/test_inplace.py::test_take_switches_with_plain_checkout_and_keeps_edits[plain], tests/test_inplace.py::test_the_first_take_commits_the_attachment_by_path[absent], tests/executor/test_walk_in_place.py::test_an_agent_task_runs_on_the_items_branch[the-persons-edit]
-origin: src/kraft/inplace.py §take
+enforced-by: tests/inplace/test_taking.py::test_take_switches_with_plain_checkout_and_keeps_edits[plain], tests/inplace/test_taking.py::test_the_first_take_commits_the_attachment_by_path[absent], tests/executor/test_walk_in_place.py::test_an_agent_task_runs_on_the_items_branch[the-persons-edit]
+origin: src/kraft/inplace/taking.py §take
 
 ## REQ in-place-never-runs-setup
 
 The system SHALL NOT run the repository's setup command for an in-place item.
-enforced-by: tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config[on-main], tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config[on-another-branch], tests/executor/test_walk_in_place.py::test_a_refused_take_stops_the_item_as_checkout
-origin: src/kraft/inplace.py §prepare
+enforced-by: tests/inplace/test_taking.py::test_prepare_never_runs_setup_or_writes_git_config[on-main], tests/inplace/test_taking.py::test_prepare_never_runs_setup_or_writes_git_config[on-another-branch], tests/executor/test_walk_in_place.py::test_a_refused_take_stops_the_item_as_checkout
+origin: src/kraft/inplace/taking.py §prepare
 
 ## REQ in-place-never-writes-git-config
 
 The system SHALL NOT write the checkout's git config for an in-place item.
-enforced-by: tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config[on-main], tests/test_inplace.py::test_prepare_never_runs_setup_or_writes_git_config[on-another-branch], tests/adapters/forge/test_glab.py::test_push_names_the_work_item_branch_and_sets_no_upstream
-origin: src/kraft/inplace.py §prepare
+enforced-by: tests/inplace/test_taking.py::test_prepare_never_runs_setup_or_writes_git_config[on-main], tests/inplace/test_taking.py::test_prepare_never_runs_setup_or_writes_git_config[on-another-branch], tests/adapters/forge/test_glab.py::test_push_names_the_work_item_branch_and_sets_no_upstream
+origin: src/kraft/inplace/taking.py §prepare
 
 ## REQ in-place-never-sweeps-stragglers
 
@@ -108,48 +108,48 @@ origin: src/kraft/executor/dispatch.py §sweep_stragglers
 
 WHEN an in-place item's task ends with uncommitted paths that were not dirty
 when it started, the system SHALL record those paths on the item's history.
-enforced-by: tests/executor/test_dispatch_in_place.py::test_an_edited_file_the_agent_never_touched_stays_uncommitted_and_unstopped, tests/test_inplace.py::test_check_leftovers_are_only_what_the_task_left[plain]
-origin: src/kraft/inplace.py §check_task
+enforced-by: tests/executor/test_dispatch_in_place.py::test_an_edited_file_the_agent_never_touched_stays_uncommitted_and_unstopped, tests/inplace/test_task_check.py::test_check_leftovers_are_only_what_the_task_left[plain]
+origin: src/kraft/inplace/task_check.py §check_task
 
 ## REQ in-place-moved-branch-stops
 
 IF an in-place checkout is not on the item's branch when a task ends, THEN the
 system SHALL stop the item as `checkout`, list the task's commits not on the
 item's branch, and SHALL NOT switch the branch back.
-enforced-by: tests/executor/test_dispatch_in_place.py::test_a_branch_switch_mid_task_stops_and_never_switches_back[stays-away], tests/executor/test_dispatch_in_place.py::test_a_branch_switch_mid_task_stops_and_never_switches_back[switched-back], tests/test_inplace.py::test_check_names_a_moved_checkout_and_the_commits_made_off_the_branch, tests/worker/test_reattach_sweep.py::test_a_reattached_in_place_task_is_checked_not_swept[moved-with-a-stray-commit], tests/executor/test_dispatch_in_place.py::test_resume_after_a_checkout_stop_reruns_the_task_only_for_stray_commits[stray-commit-reruns], tests/executor/test_dispatch_in_place.py::test_a_branch_switch_mid_task_stops_and_never_switches_back[stays-away-with-no-commit]
-origin: src/kraft/inplace.py §check_task
+enforced-by: tests/executor/test_dispatch_in_place.py::test_a_branch_switch_mid_task_stops_and_never_switches_back[stays-away], tests/executor/test_dispatch_in_place.py::test_a_branch_switch_mid_task_stops_and_never_switches_back[switched-back], tests/inplace/test_task_check.py::test_check_names_a_moved_checkout_and_the_commits_made_off_the_branch, tests/worker/test_reattach_sweep.py::test_a_reattached_in_place_task_is_checked_not_swept[moved-with-a-stray-commit], tests/executor/test_dispatch_in_place.py::test_resume_after_a_checkout_stop_reruns_the_task_only_for_stray_commits[stray-commit-reruns], tests/executor/test_dispatch_in_place.py::test_a_branch_switch_mid_task_stops_and_never_switches_back[stays-away-with-no-commit]
+origin: src/kraft/inplace/task_check.py §check_task
 
 ## REQ in-place-operation-under-way-is-named
 
 IF a git operation begun on an in-place item's branch is still in progress when
 a task ends, THEN the system SHALL name the operation, rather than a branch the
 checkout moved to, and SHALL NOT record the operation's files as the task's.
-enforced-by: tests/test_inplace.py::test_check_tells_the_persons_operation_on_the_branch_from_a_move[rebase], tests/test_inplace.py::test_check_tells_the_persons_operation_on_the_branch_from_a_move[merge], tests/test_inplace.py::test_check_tells_the_persons_operation_on_the_branch_from_a_move[merge-on-another-branch], tests/test_inplace.py::test_check_tells_the_persons_operation_on_the_branch_from_a_move[rebase-of-another-branch], tests/executor/test_dispatch_in_place.py::test_the_persons_rebase_under_way_after_a_task_is_named_not_a_move, tests/test_inplace_rebase.py::test_an_operation_begun_after_the_look_is_refused_in_the_checkouts_words[rebase], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[left-mid-rebase]
-origin: src/kraft/inplace.py §check
+enforced-by: tests/inplace/test_task_check.py::test_check_tells_the_persons_operation_on_the_branch_from_a_move[rebase], tests/inplace/test_task_check.py::test_check_tells_the_persons_operation_on_the_branch_from_a_move[merge], tests/inplace/test_task_check.py::test_check_tells_the_persons_operation_on_the_branch_from_a_move[merge-on-another-branch], tests/inplace/test_task_check.py::test_check_tells_the_persons_operation_on_the_branch_from_a_move[rebase-of-another-branch], tests/executor/test_dispatch_in_place.py::test_the_persons_rebase_under_way_after_a_task_is_named_not_a_move, tests/inplace/test_rebasing.py::test_an_operation_begun_after_the_look_is_refused_in_the_checkouts_words[rebase], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[left-mid-rebase]
+origin: src/kraft/inplace/task_check.py §check
 
 ## REQ in-place-overlap-stops
 
 IF an in-place task's commits touch a path that had uncommitted changes when
 the task started, THEN the system SHALL stop the item as `checkout` and name
 the paths.
-enforced-by: tests/executor/test_dispatch_in_place.py::test_the_agent_committing_a_persons_edited_file_stops_as_checkout[done], tests/executor/test_dispatch_in_place.py::test_the_agent_committing_a_persons_edited_file_stops_as_checkout[paused-as-it-ended], tests/executor/test_dispatch_in_place.py::test_a_large_dirty_set_is_sampled_on_the_event_and_kept_whole_in_a_file, tests/worker/test_reattach_sweep.py::test_a_reattached_in_place_task_is_checked_not_swept[overlap], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[commit], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[side-branch], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[merge-main], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[rebase], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[revert], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[amend], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[merge-main-unchanged], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[rebase-autostash-replayed], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[commit-then-reset-hard], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[amend-the-message], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[rebase-conflict-committed], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[squash-whole-branch], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[cherry-pick-committed-then-reset-hard]
-origin: src/kraft/inplace.py §check
+enforced-by: tests/executor/test_dispatch_in_place.py::test_the_agent_committing_a_persons_edited_file_stops_as_checkout[done], tests/executor/test_dispatch_in_place.py::test_the_agent_committing_a_persons_edited_file_stops_as_checkout[paused-as-it-ended], tests/executor/test_dispatch_in_place.py::test_a_large_dirty_set_is_sampled_on_the_event_and_kept_whole_in_a_file, tests/worker/test_reattach_sweep.py::test_a_reattached_in_place_task_is_checked_not_swept[overlap], tests/inplace/test_task_check.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[commit], tests/inplace/test_task_check.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[side-branch], tests/inplace/test_task_check.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[merge-main], tests/inplace/test_task_check.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[rebase], tests/inplace/test_task_check.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[revert], tests/inplace/test_task_check.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[amend], tests/inplace/test_task_check.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[merge-main-unchanged], tests/inplace/test_task_check.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[rebase-autostash-replayed], tests/inplace/test_task_check.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[commit-then-reset-hard], tests/inplace/test_task_check.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[amend-the-message], tests/inplace/test_task_check.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[rebase-conflict-committed], tests/inplace/test_task_check.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[squash-whole-branch], tests/inplace/test_task_check.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[cherry-pick-committed-then-reset-hard]
+origin: src/kraft/inplace/task_check.py §check
 
 ## REQ in-place-co-task-edits-are-not-the-persons
 
 WHILE another task of the same node of an in-place item runs, the system SHALL
 NOT count a path that became dirty after that task started as the person's
 edit.
-enforced-by: tests/test_inplace.py::test_mark_takes_a_running_co_tasks_edits_for_its_own[sibling-running], tests/test_inplace.py::test_mark_takes_a_running_co_tasks_edits_for_its_own[sibling-ended], tests/test_inplace.py::test_mark_takes_a_running_co_tasks_edits_for_its_own[another-nodes-task]
-origin: src/kraft/inplace.py §mark
+enforced-by: tests/inplace/test_task_check.py::test_mark_takes_a_running_co_tasks_edits_for_its_own[sibling-running], tests/inplace/test_task_check.py::test_mark_takes_a_running_co_tasks_edits_for_its_own[sibling-ended], tests/inplace/test_task_check.py::test_mark_takes_a_running_co_tasks_edits_for_its_own[another-nodes-task]
+origin: src/kraft/inplace/task_check.py §mark
 
 ## REQ in-place-leftovers-stay-the-items
 
 WHEN a later task of an in-place item commits a path an earlier task left
 uncommitted and its content is unchanged since, the system SHALL NOT stop the
 item for overlap.
-enforced-by: tests/executor/test_dispatch_in_place.py::test_a_later_task_committing_an_earlier_tasks_leftover_does_not_stop, tests/test_inplace.py::test_mark_counts_the_persons_edits_and_not_the_items_own_leftovers
-origin: src/kraft/inplace.py §mark
+enforced-by: tests/executor/test_dispatch_in_place.py::test_a_later_task_committing_an_earlier_tasks_leftover_does_not_stop, tests/inplace/test_task_check.py::test_mark_counts_the_persons_edits_and_not_the_items_own_leftovers
+origin: src/kraft/inplace/task_check.py §mark
 
 ## REQ in-place-checkout-stop-never-auto-escalates
 
@@ -162,24 +162,24 @@ origin: src/kraft/executor/walk.py §_sentinel_stop
 WHEN an in-place item's branch is rebased with uncommitted changes in the
 checkout, the system SHALL stash them for the rebase and apply them back
 afterwards.
-enforced-by: tests/test_inplace_rebase.py::test_rebase_in_the_checkout_keeps_the_persons_edits[plain], tests/test_inplace_rebase.py::test_rebase_in_the_checkout_keeps_the_persons_edits[another-stash-meanwhile], tests/test_inplace_rebase.py::test_rebase_in_the_checkout_keeps_the_persons_edits[an-older-autostash-uncovered-meanwhile], tests/test_inplace_rebase.py::test_a_conflicting_rebase_in_the_checkout_aborts_and_puts_the_edits_back, tests/test_inplace_rebase.py::test_a_cancel_mid_rebase_in_the_checkout_waits_for_git[clean], tests/executor/test_base_change.py::test_a_conflict_handler_that_rebases_restarts_the_declared_span[in-place], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[resolved], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[conflict-resolved]
-origin: src/kraft/inplace.py §rebase_in_checkout
+enforced-by: tests/inplace/test_rebasing.py::test_rebase_in_the_checkout_keeps_the_persons_edits[plain], tests/inplace/test_rebasing.py::test_rebase_in_the_checkout_keeps_the_persons_edits[another-stash-meanwhile], tests/inplace/test_rebasing.py::test_rebase_in_the_checkout_keeps_the_persons_edits[an-older-autostash-uncovered-meanwhile], tests/inplace/test_rebasing.py::test_a_conflicting_rebase_in_the_checkout_aborts_and_puts_the_edits_back, tests/inplace/test_rebasing.py::test_a_cancel_mid_rebase_in_the_checkout_waits_for_git[clean], tests/executor/test_base_change.py::test_a_conflict_handler_that_rebases_restarts_the_declared_span[in-place], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[resolved], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[conflict-resolved]
+origin: src/kraft/inplace/rebasing.py §rebase_in_checkout
 
 ## REQ in-place-autostash-clash-stops
 
 IF applying the stashed changes back after an in-place rebase leaves unmerged
 paths, THEN the system SHALL stop the item as `checkout`, name the paths, and
 record the stash's commit, and SHALL NOT drop the stash.
-enforced-by: tests/test_inplace_rebase.py::test_an_autostash_clash_raises_with_the_stash_and_leaves_it[clash], tests/test_inplace_rebase.py::test_an_autostash_clash_raises_with_the_stash_and_leaves_it[put-back-refused], tests/test_inplace_rebase.py::test_an_autostash_clash_stops_the_item_as_checkout[resume-autostash-clash], tests/test_inplace_rebase.py::test_an_autostash_clash_stops_the_item_as_checkout[retry-autostash-clash], tests/test_inplace_rebase.py::test_an_autostash_clash_stops_the_item_as_checkout[resume-clash-as-a-pause-lands], tests/test_inplace_rebase.py::test_a_cancel_mid_rebase_in_the_checkout_waits_for_git[clash-named-over-the-cancel], tests/api/test_gates_refresh.py::test_an_in_place_refresh_that_clashes_stops_the_approved_item_as_checkout, tests/executor/test_escalation.py::test_a_self_retry_whose_in_place_rebase_clashes_stops_as_checkout, tests/executor/test_mr_rebase_dispatch.py::test_an_in_place_rebase_that_clashes_is_a_checkout_stop, tests/adapters/forge/test_waits.py::test_an_in_place_conflict_rebase_that_clashes_stops_the_item_as_checkout[ci_poll], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[clash], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[put-back-refused], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[clash-then-committed], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[another-worktrees-autostash], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[another-worktrees-autostash-at-the-new-base], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[committed-then-clash], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[another-worktree-at-the-tip], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[rebased-twice], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[pulled-then-another-at-the-new-base], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[pulled-by-url-then-another-at-the-new-base], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[merge-conflict-committed-then-clash], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[clash-in-an-older-gits-reflog], tests/test_inplace_rebase.py::test_an_agents_autostash_rebase_is_checked_after_its_task[unmerged-from-a-stash-pop-after-the-rebase]
-origin: src/kraft/inplace.py §rebase_in_checkout
+enforced-by: tests/inplace/test_rebasing.py::test_an_autostash_clash_raises_with_the_stash_and_leaves_it[clash], tests/inplace/test_rebasing.py::test_an_autostash_clash_raises_with_the_stash_and_leaves_it[put-back-refused], tests/inplace/test_rebasing.py::test_an_autostash_clash_stops_the_item_as_checkout[resume-autostash-clash], tests/inplace/test_rebasing.py::test_an_autostash_clash_stops_the_item_as_checkout[retry-autostash-clash], tests/inplace/test_rebasing.py::test_an_autostash_clash_stops_the_item_as_checkout[resume-clash-as-a-pause-lands], tests/inplace/test_rebasing.py::test_a_cancel_mid_rebase_in_the_checkout_waits_for_git[clash-named-over-the-cancel], tests/api/test_gates_refresh.py::test_an_in_place_refresh_that_clashes_stops_the_approved_item_as_checkout, tests/executor/test_escalation.py::test_a_self_retry_whose_in_place_rebase_clashes_stops_as_checkout, tests/executor/test_mr_rebase_dispatch.py::test_an_in_place_rebase_that_clashes_is_a_checkout_stop, tests/adapters/forge/test_waits.py::test_an_in_place_conflict_rebase_that_clashes_stops_the_item_as_checkout[ci_poll], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[clash], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[put-back-refused], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[clash-then-committed], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[another-worktrees-autostash], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[another-worktrees-autostash-at-the-new-base], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[committed-then-clash], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[another-worktree-at-the-tip], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[rebased-twice], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[pulled-then-another-at-the-new-base], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[pulled-by-url-then-another-at-the-new-base], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[merge-conflict-committed-then-clash], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[clash-in-an-older-gits-reflog], tests/inplace/test_rebasing.py::test_an_agents_autostash_rebase_is_checked_after_its_task[unmerged-from-a-stash-pop-after-the-rebase]
+origin: src/kraft/inplace/rebasing.py §rebase_in_checkout
 
 ## REQ in-place-git-only-rebase-leaves-the-checkout
 
 WHEN an in-place item's branch is rebased with no agent task following and the
 checkout is not on that branch, the system SHALL rebase it outside the checkout
 and SHALL NOT change the checkout's HEAD or files.
-enforced-by: tests/test_inplace_rebase.py::test_rebase_off_the_branch_never_moves_the_checkout[rebased], tests/test_inplace_rebase.py::test_rebase_off_the_branch_never_moves_the_checkout[conflict], tests/test_inplace_rebase.py::test_rebase_off_the_branch_never_moves_the_checkout[after-a-killed-server], tests/test_inplace_rebase.py::test_a_slow_throwaway_checkout_does_not_hold_up_the_server, tests/test_builtins_rebase.py::test_mr_rebase_of_an_in_place_item_never_moves_the_checkout
-origin: src/kraft/inplace.py §rebase
+enforced-by: tests/inplace/test_rebasing.py::test_rebase_off_the_branch_never_moves_the_checkout[rebased], tests/inplace/test_rebasing.py::test_rebase_off_the_branch_never_moves_the_checkout[conflict], tests/inplace/test_rebasing.py::test_rebase_off_the_branch_never_moves_the_checkout[after-a-killed-server], tests/inplace/test_rebasing.py::test_a_slow_throwaway_checkout_does_not_hold_up_the_server, tests/test_builtins_rebase.py::test_mr_rebase_of_an_in_place_item_never_moves_the_checkout
+origin: src/kraft/inplace/rebasing.py §rebase
 
 ## REQ in-place-mr-names-its-branch
 
@@ -193,7 +193,7 @@ origin: src/kraft/adapters/forge/mr.py §target
 The system SHALL show an in-place item's diff as its branch's commits since its
 base, without uncommitted or untracked files.
 enforced-by: tests/api/test_diff.py::test_diff_in_place_shows_only_the_branchs_commits, tests/api/test_board.py::test_an_item_says_whether_it_runs_in_the_checkout[in-place]
-origin: src/kraft/inplace.py §head_ref
+origin: src/kraft/inplace/base.py §head_ref
 
 ## REQ base-prefers-the-default-branch-ref-over-head
 
@@ -215,4 +215,4 @@ origin: src/kraft/api/routes/lifecycle.py §abandon_work_item
 IF an in-place item is abandoned or archived while the checkout is on its
 branch, THEN the system SHALL keep the branch and say so.
 enforced-by: tests/api/test_abandon_item_folder.py::test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it[checked-out-kept], tests/api/test_abandon_item_folder.py::test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it[in-use-kept], tests/api/test_abandon_item_folder.py::test_abandon_in_place_deletes_the_branch_only_when_nothing_has_it[git-refused-kept], tests/api/test_archive.py::test_archive_in_place_follows_the_same_rule[checked-out-kept]
-origin: src/kraft/inplace.py §drop_branch
+origin: src/kraft/inplace/taking.py §drop_branch

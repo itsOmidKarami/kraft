@@ -1,6 +1,6 @@
-"""`inplace.rebase`: an in-place item's branch brought onto a newer base
-without moving the person's checkout, or forcing anything in it. A sibling
-of test_inplace.py, which is at its line budget."""
+"""`inplace.rebase` (`kraft.inplace.rebasing`): an in-place item's branch
+brought onto a newer base without moving the person's checkout, or forcing
+anything in it."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ import pytest
 from support.addons import with_origin
 from support.api import _force_node, _paused, _poll_events, _set_status
 from support.harness import IN_PLACE, commit_all, git, v1_named_chain, write
-from test_inplace import _head, _on_branch, _prepared
 
+from inplace.test_taking import _head, _on_branch, _prepared
 from kraft import builtins, inplace, store
 
 
@@ -260,8 +260,8 @@ async def test_an_operation_begun_after_the_look_is_refused_in_the_checkouts_wor
         subprocess.run(["git", "rebase", "-x", "false", "HEAD~1"], cwd=repo, capture_output=True)
         looks = iter([True])  # still on the branch when Kraft looked
         on = inplace._on
-        monkeypatch.setattr(inplace, "_on", lambda *a: next(looks, False) or on(*a))
-    monkeypatch.setattr(inplace, "_settled", lambda _: None)  # theirs began after the look
+        monkeypatch.setattr(inplace.rebasing, "_on", lambda *a: next(looks, False) or on(*a))
+    monkeypatch.setattr(inplace.rebasing, "_settled", lambda _: None)  # theirs began after the look
 
     with pytest.raises(inplace.CheckoutRefused, match="operation in progress") as refused:
         await inplace.rebase(run_dirs, it.row(), base="main")
@@ -275,7 +275,7 @@ async def test_a_failed_rebase_never_aborts_the_persons_own(
 ):
     """Theirs, started between Kraft's check and its rebase: left alone."""
     it, branch = await _behind_origin(item_on, database, run_dirs, repo)
-    monkeypatch.setattr(inplace, "_on", lambda *_: True)  # theirs began after the look
+    monkeypatch.setattr(inplace.rebasing, "_on", lambda *_: True)  # theirs began after the look
     git(repo, "checkout", "-q", branch)
     _side_branch(repo, branch, "item.txt", "side's\n")
     subprocess.run(["git", "rebase", "side"], cwd=repo, capture_output=True)
@@ -346,10 +346,10 @@ async def test_a_cancel_reports_nothing_but_the_cancel(
     unhandled = []
     asyncio.get_running_loop().set_exception_handler(lambda _, ctx: unhandled.append(ctx))
     if which == "take":
-        monkeypatch.setattr(inplace, "_take", _slow_take)
+        monkeypatch.setattr(inplace.taking, "_take", _slow_take)
         running = inplace.take(database, run_dirs, it.row(), attachments=[])
     else:
-        monkeypatch.setattr(inplace, "_rebase_in_checkout", _slow_conflict)
+        monkeypatch.setattr(inplace.rebasing, "_rebase_in_checkout", _slow_conflict)
         running = inplace.rebase_in_checkout(repo, branch, "HEAD", "main", None)
     task = asyncio.ensure_future(running)
     await asyncio.sleep(0.1)
