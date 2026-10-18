@@ -21,8 +21,6 @@
 .ng-crumb-repo { flex-shrink: 4; }
 .ng-crumb.ng-crumb-ext { flex: none; }
 .ng-crumb.is-whole { flex: none; }
-/* Beside a whole id the repo keeps enough to be told apart; its title holds the rest. */
-.ng-crumb-repo { min-width: 10ch; }
 .ng-crumb + .ng-crumb-ext::before { content: "·" / ""; margin: 0 6px; }
 .ng-main { flex: 1 1 auto; min-width: 0; }
 .ng-main:focus { outline: none; }
