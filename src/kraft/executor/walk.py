@@ -784,6 +784,7 @@ async def _resolve_conflict(
         new_base or "(unknown)",
         detail,
         entry.attachments_of(row),
+        in_place=store.is_in_place(row),
     )
     verdict, failed, _excs = await dispatch.run_recovery(
         db,

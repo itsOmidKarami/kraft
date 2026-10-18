@@ -481,28 +481,56 @@ def _autostash(checkout: Path, before: str | None, since: int) -> str | None:
 
 
 def _raise_clash(
-    checkout: Path, base: str, before: str | None, since: int, *, conflict: str | None = None
+    checkout: Path,
+    base: str,
+    before: str | None,
+    since: int,
+    *,
+    conflict: str | None = None,
+    task: str | None = None,
 ) -> None:
     """The autostash git could not put back: a clash leaves unmerged paths,
     but a put-back git refused outright (a hook or an editor wrote one of
     those files meanwhile) leaves none, and only the autostash's own stash
     entry says the person's edits are not in the checkout. `conflict`: the
-    rebase was undone after one, which the person still needs to hear of."""
+    rebase was undone after one, which the person still needs to hear of.
+    `task`: the rebase was that agent task's (the conflict resolver's), not
+    Kraft's own onto `base`."""
     unmerged = _git_lines(checkout, "diff", "--name-only", "--diff-filter=U")
     stash = _autostash(checkout, before, since)
     if not unmerged and stash is None:
         return
     kept = f"as {stash}" if stash else "(`git stash list`)"
     undone = f" hit a conflict and was undone (git said: {conflict}), and" if conflict else ""
+    onto = f"what {task} rebased onto" if task else f"the newer {base}"
+    rebase = (
+        f"the rebase {task} ran in {checkout}"
+        if task
+        else f"Kraft's rebase of {checkout} onto the newer {base}"
+    )
     message = (
-        f"your edits to {', '.join(unmerged)} clash with the newer {base}; your original "
+        f"your edits to {', '.join(unmerged)} clash with {onto}; your original "
         f"edits are safe in the stash {kept}; resolve the file, then retry the item"
         if unmerged
-        else f"Kraft's rebase of {checkout} onto the newer {base}{undone} could not put your "
+        else f"{rebase}{undone} could not put your "
         f"edits back (something wrote those files meanwhile); they are safe in the stash "
         f"{kept}: apply it yourself (`git stash apply {stash}`), then retry the item"
     )
     raise AutostashClash(message, unmerged, stash)
+
+
+def _put_back(checkout: Path, since: int, task: str) -> AutostashClash | None:
+    """What a task's own `git rebase --autostash` (the conflict resolver's,
+    `prompts._RESOLVE_IN`) could not put back since `since`: git exits 0 on it.
+    None mid-operation: its unmerged paths are its own, and its autostash is
+    still in git's operation state, put back when the person finishes it."""
+    if _operation(checkout):
+        return None
+    try:
+        _raise_clash(checkout, "", None, since, task=task)
+    except AutostashClash as exc:
+        return exc
+    return None
 
 
 def _left(checkout: Path, branch: str) -> CheckoutRefused:
@@ -1043,7 +1071,8 @@ async def check_task(
 ):
     """After an in-place agent task, in place of the sweep: record what it
     left uncommitted, and stop the item as `checkout` when the checkout moved
-    or the task committed a path the person had changed. Never a repair: no
+    or the task committed a path the person had changed, or its rebase could not
+    put their autostashed edits back (named with the stash). Never a repair: no
     switch back, no commit, no undo. Answers the stop's reason, or None.
     After a `command` the stop reruns it on a retry, since its verdict was
     measured on whatever the checkout held, and only paths no earlier task
@@ -1054,8 +1083,11 @@ async def check_task(
         return None
     branch = store.branch_for(row)
     stray: list[str] = []
+    clash: AutostashClash | None = None
+    since = int(datetime.fromisoformat(m.started_at).timestamp())
     try:
         found = await asyncio.to_thread(check, folder, branch, m)
+        clash = await asyncio.to_thread(_put_back, folder, since, task_path)
     except CheckoutRefused as exc:
         reason = str(exc)
     else:
@@ -1088,7 +1120,10 @@ async def check_task(
                 f"{task_path} left {made}. Kraft did not move them: check where that work "
                 "belongs, then retry the item"
             )
-        if found.overlap:
+        if clash is not None:
+            # Its paths overlap because the put-back merged upstream into them, not a commit.
+            reasons.append(str(clash))
+        elif found.overlap:
             reasons.append(
                 f"the agent committed {', '.join(found.overlap)}, which already had uncommitted "
                 "changes before it started; check that the commit holds only the item's work, "
@@ -1100,6 +1135,8 @@ async def check_task(
     last = db.read(lambda c: store.latest_session_per_task(c, wid, node_id, [task_path]))
     # A retry goes on past the task, unless its work may be on another branch.
     facts = {"task": task_path, "rerun": command or bool(stray)}
+    if clash is not None:  # as `stop_refused` records Kraft's own
+        facts |= {"paths": clash.paths, "stash": clash.stash}
     if last:
         facts |= {"session": last[0]["id"], "round": last[0]["round"]}
 

@@ -205,13 +205,12 @@ def rebase_drift_note(worktree, base: str, old_base: str, new_base: str) -> str:
 _REBASE_RESOLVE_PROMPT = (
     "A rebase conflict stopped this work item. Branch {branch} could not be "
     "replayed onto {new_base} (it was based on {old_base}); the rebase has "
-    "already been aborted and the worktree is clean. git reported:\n\n"
+    "already been aborted{folder} git reported:\n\n"
     "{conflict}\n\n"
     "What landed upstream, {old_base}..{new_base}:\n\n{diff}\n\n"
     "{attachments}"
     "You have two jobs:\n"
-    "1. Re-run the rebase (`git rebase {new_base}`) and resolve the conflict "
-    "yourself, then finish it (`git rebase --continue`).\n"
+    "1. {rerun}\n"
     "2. Judge whether the commits that landed upstream change what this work "
     "item is supposed to do -- not just whether the text merges cleanly. A "
     "clean rebase can still invalidate the plan; a conflict can be "
@@ -226,6 +225,31 @@ _REBASE_RESOLVE_PROMPT = (
     "- status: failed -- could not resolve the conflict.\n"
 )
 
+#: Where the resolver works and how it re-runs the rebase there: a clean
+#: worktree; or in place a person's checkout, whose uncommitted edits git
+#: refuses a plain rebase over and the agent may not stash (`agent._IN_PLACE`),
+#: so `--autostash` sets them aside, as Kraft's own rebase does
+#: (`inplace.rebase_in_checkout`). A put-back that fails stops the item after
+#: the task (`inplace.check_task`).
+_RESOLVE_IN = {
+    False: (
+        " and the worktree is clean.",
+        "Re-run the rebase (`git rebase {new_base}`) and resolve the conflict "
+        "yourself, then finish it (`git rebase --continue`).",
+    ),
+    True: (
+        ". This is a person's own checkout: it may hold their uncommitted "
+        "edits, which you must neither commit nor discard.",
+        "Re-run the rebase with `git rebase --autostash {new_base}`: git sets "
+        "their edits aside for the rebase and puts them back when it ends. That "
+        "is the one exception to the rule against `git stash`; never stash, pop "
+        "or drop anything yourself. Resolve the conflict by editing the "
+        "conflicted files and `git add`-ing them by literal path, then finish it "
+        "(`git rebase --continue`). If you cannot resolve it, `git rebase "
+        "--abort` puts their edits back too.",
+    ),
+}
+
 #: Same posture as `_REBASE_NOTE_MAX`, but larger: the resolver's whole job
 #: is judging this diff's relevance, unlike the drift note's reviewer, who
 #: only needs a pointer at what to go re-look at.
@@ -239,13 +263,18 @@ def rebase_resolve_note(
     new_base: str,
     conflict: str,
     attachments: list[dict],
+    *,
+    in_place: bool = False,
 ) -> str:
     log = git_read(worktree, "log", "--oneline", f"{old_base}..{new_base}") or "(no log)"
     diff = git_read(worktree, "diff", f"{old_base}..{new_base}") or "(no changes)"
     body = f"Commits:\n{log}\n\nDiff:\n{diff}"
     if len(body) > _REBASE_RESOLVE_DIFF_MAX:
         body = body[:_REBASE_RESOLVE_DIFF_MAX] + "\n... (truncated)"
+    folder, rerun = _RESOLVE_IN[in_place]
     return _REBASE_RESOLVE_PROMPT.format(
+        folder=folder,
+        rerun=rerun.format(new_base=new_base),
         branch=branch,
         old_base=old_base,
         new_base=new_base,

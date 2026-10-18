@@ -1119,13 +1119,13 @@ enforced-by: tests/templates/test_failure_controls.py::test_a_restart_target_mus
 The system SHALL attempt automatic rebase-conflict resolution only when the
 relevant execution node's `on_base_changed` configuration declares an explicit
 `on_conflict` handler.
-enforced-by: tests/executor/test_base_change.py::test_a_conflict_without_an_explicit_handler_is_an_ordinary_failure, tests/executor/test_base_change.py::test_a_conflict_handler_that_rebases_restarts_the_declared_span, tests/executor/test_base_change.py::test_a_conflict_at_the_door_with_no_handler_stops_for_a_human, tests/api/test_retry_paths.py::test_a_refresh_conflict_at_the_door_is_handed_to_the_walk[retry], tests/api/test_retry_paths.py::test_a_refresh_conflict_at_the_door_is_handed_to_the_walk[resume]
+enforced-by: tests/executor/test_base_change.py::test_a_conflict_without_an_explicit_handler_is_an_ordinary_failure, tests/executor/test_base_change.py::test_a_conflict_handler_that_rebases_restarts_the_declared_span[worktree], tests/executor/test_base_change.py::test_a_conflict_handler_that_rebases_restarts_the_declared_span[in-place], tests/executor/test_base_change.py::test_a_conflict_at_the_door_with_no_handler_stops_for_a_human, tests/api/test_retry_paths.py::test_a_refresh_conflict_at_the_door_is_handed_to_the_walk[retry], tests/api/test_retry_paths.py::test_a_refresh_conflict_at_the_door_is_handed_to_the_walk[resume]
 
 ## REQ resolved-conflict-restarts-from-base-change-target
 
 When an explicit conflict handler resolves a conflict and changes the worktree
 base, the system SHALL apply that node's `on_base_changed` restart behaviour.
-enforced-by: tests/executor/test_base_change.py::test_a_conflict_handler_that_rebases_restarts_the_declared_span, tests/executor/test_base_change.py::test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human[did-not-rebase], tests/executor/test_base_change.py::test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human[failed], tests/executor/test_base_change.py::test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human[asked]
+enforced-by: tests/executor/test_base_change.py::test_a_conflict_handler_that_rebases_restarts_the_declared_span[worktree], tests/executor/test_base_change.py::test_a_conflict_handler_that_rebases_restarts_the_declared_span[in-place], tests/executor/test_base_change.py::test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human[did-not-rebase], tests/executor/test_base_change.py::test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human[failed], tests/executor/test_base_change.py::test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human[asked]
 
 ## REQ policy-is-layered-by-execution-scope
 

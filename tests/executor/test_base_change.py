@@ -7,7 +7,7 @@ import shlex
 import subprocess
 
 import pytest
-from support.harness import commit_all, entry_of, git, v1_node
+from support.harness import IN_PLACE, commit_all, entry_of, git, v1_node
 
 from kraft import executor, store
 from kraft import policy as _policy
@@ -191,9 +191,22 @@ async def _upstream_moves(it) -> str:
     return commit_all(it.repo, "landed upstream")
 
 
-async def test_a_conflict_handler_that_rebases_restarts_the_declared_span(item_on, script):
-    """`resolved-conflict-restarts-from-base-change-target`."""
-    it = await item_on(_chain(**_with_handler()))
+#: How the resolver is told to re-run the rebase: in a person's checkout,
+#: with `--autostash` over their edits (Kraft-xn3zb.27).
+_RERUN = {
+    "worktree": ("the worktree is clean", "Re-run the rebase (`git rebase {sha}`)"),
+    "in-place": ("This is a person's own checkout", "`git rebase --autostash {sha}`"),
+}
+
+
+@pytest.mark.parametrize("where", list(_RERUN))
+async def test_a_conflict_handler_that_rebases_restarts_the_declared_span(item_on, script, where):
+    """`resolved-conflict-restarts-from-base-change-target`. In place the
+    scripted walk never takes the checkout, so the handler rebases `main`
+    there: only its note differs."""
+    in_place = where == "in-place"
+    it = await item_on(_chain(**_with_handler()), target=IN_PLACE if in_place else None)
+    folder = it.repo if in_place else it.worktree
     script.plan = {"sync": ["conflict", "done"]}
     upstream = {}
 
@@ -202,7 +215,7 @@ async def test_a_conflict_handler_that_rebases_restarts_the_declared_span(item_o
             upstream["sha"] = await _upstream_moves(it)
 
     async def rebase(_row):
-        git(it.worktree, "rebase", upstream["sha"])
+        git(folder, "rebase", upstream["sha"])
 
     script.effects = {"check": land_upstream, "resolve": rebase}
 
@@ -212,7 +225,12 @@ async def test_a_conflict_handler_that_rebases_restarts_the_declared_span(item_o
     [conflict] = it.events("node_recovery_started")
     assert conflict["payload"]["scope"] == "conflict"
     assert conflict["payload"]["tasks"] == ["rebase.on_base_changed.on_conflict.main.resolve"]
-    assert "A rebase conflict stopped this work item" in script.steers["resolve"][0].take()
+    note = script.steers["resolve"][0].take()
+    assert "A rebase conflict stopped this work item" in note
+    said, rerun = _RERUN[where]
+    other_said, other_rerun = _RERUN["worktree" if in_place else "in-place"]
+    assert said in note and rerun.format(sha=upstream["sha"]) in note
+    assert other_said not in note and other_rerun.format(sha=upstream["sha"]) not in note
 
 
 async def test_a_conflict_handler_s_concerns_do_not_stop_its_resolved_rebase(item_on, script):
