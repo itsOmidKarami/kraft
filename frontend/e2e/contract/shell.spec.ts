@@ -185,6 +185,15 @@ const ROWS: Row[] = [
     },
   },
   {
+    name: "phone item: an in-place item's meta line never splits \"in your checkout\" across lines",
+    run: async (p) => {
+      await p.setViewportSize({ width: 320, height: 700 });
+      await app(p, (S) => `/work-items/${Object.values(S.bundles).find((b) => b.item.title.startsWith("Tidy the extension's settings page"))!.item.id}`, { noShell: true });
+      const lines = await p.locator(".ph-item-meta").getByText("in your checkout").evaluate((el) => el.getClientRects().length);
+      expect(lines).toBe(1);
+    },
+  },
+  {
     name: "sidebar: a revealed (unpinned) sidebar floats over the page with an overlay shadow [decided]",
     run: async (p) => { await appRevealed(p); expect(await shadowAround(p)).not.toBe("none"); },
   },

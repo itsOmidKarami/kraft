@@ -39,8 +39,9 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
   const act = own ? null : admittedRowAction(item);
   // The tail clips on a narrow row (a queue line loses "is using it"): its title keeps the whole of it.
   const tail = own?.tail ?? reasonTail(item, now);
-  // A checkout stop's and a checkout wait's tail already says the checkout: a narrow row gives the marker's room to it.
-  const saysCheckout = !own && (item.stop?.kind === "checkout" || (item.display_status === "queued" && item.queued?.why === "checkout"));
+  // A tail that says "the checkout" (a checkout wait, most checkout stops) already says in place: a narrow row gives
+  // the marker's room to it. Read from the words, not the stop kind: many checkout reasons name only the folder.
+  const saysCheckout = !own && /\bthe checkout\b/i.test(tail);
   const id = item.bead_id || shortId(item.id);
   const hot = groupOf(item) === "needs";
   const cue = hot ? stopCueOf(item) : null;

@@ -56,7 +56,10 @@ describe("the item screen (C)", () => {
 
   it("says an in-place item runs in your checkout", async () => {
     mount({ ...item("running"), in_place: true });
-    expect(await screen.findByText(/in your checkout/)).toHaveClass("ph-item-meta");
+    // Its own span, which item.css keeps on one line, inside the meta line.
+    const marker = await screen.findByText("in your checkout");
+    expect(marker).toHaveClass("ph-item-inplace");
+    expect(marker.closest(".ph-item-meta")).not.toBeNull();
   });
 
   it("shows the brief, the chain with done nodes collapsed, a log preview and the pair", async () => {

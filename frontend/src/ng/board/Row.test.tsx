@@ -57,6 +57,10 @@ describe("Row", () => {
     ["checkout stop", "needs_you", { stop: { kind: "checkout", node: "build", reason: "The checkout moved to main.", resume_at: null } as WorkItem["stop"] }, true],
     ["checkout wait", "queued", { queued: { verb: "resume", since: "2026-09-13T09:00:00Z", why: "checkout", held_by: "w2", held_by_title: "Cache the index" } }, true],
     ["slot wait", "queued", { queued: { verb: "resume", since: "2026-09-13T09:00:00Z" } }, false],
+    // A checkout stop whose first sentence never says "the checkout" keeps the marker: nothing else on the row says in place.
+    ["checkout stop naming only the folder", "needs_you", { stop: { kind: "checkout", node: "build", reason: "/src/kraft-checkout has unmerged paths: a.py; resolve them yourself, then retry the item", resume_at: null } as WorkItem["stop"] }, false],
+    ["checkout stop with a raw log reason", "needs_you", { stop: { kind: "checkout", node: "build", reason: "fatal: not a git repository (or any of the parent directories): .git", resume_at: null } as WorkItem["stop"] }, false],
+    ["checkout stop with no reason", "needs_you", { stop: { kind: "checkout", node: "build", reason: null, resume_at: null } as WorkItem["stop"] }, false],
   ])("lets a narrow %s row drop its in-place marker only when the tail says the checkout", (_n, status, over, said) => {
     const meta = mount(status, { in_place: true, ...over }).main.querySelector(".board-meta")!;
     expect(meta.querySelector(".board-meta-inplace")!.classList.contains("is-said")).toBe(said);

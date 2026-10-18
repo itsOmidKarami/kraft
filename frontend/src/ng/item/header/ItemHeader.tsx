@@ -185,7 +185,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
         <Clock size={12} aria-hidden /> {elapsedBetween(item.created_at, endedAt, now)}
       </span>
       {/* Focusable, so the checkout's path in its tip reaches a keyboard as well as a pointer. */}
-      {item.in_place && <Badge className="item-inplace" tabIndex={0} {...hint(item.worktree_path ?? item.repo)}>{IN_YOUR_CHECKOUT}</Badge>}
+      {item.in_place && <Badge className="item-inplace" role="note" tabIndex={0} {...hint(item.worktree_path ?? item.repo)}>{IN_YOUR_CHECKOUT}</Badge>}
       <Badge tone={hs.tone} mono>{hs.badge}</Badge>
       {/* Without a main button the group anchors the cards (pause, cancel, escalate) itself. */}
       <div className="item-main-group" ref={hs.main ? undefined : group}>

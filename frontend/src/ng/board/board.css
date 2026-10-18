@@ -102,6 +102,8 @@
   .board-tail-text { overflow: visible; text-overflow: clip; }
   /* "in your checkout" gives its room to a tail that already says the checkout (Row.tsx `saysCheckout`). */
   .board-meta .is-said { display: none; }
+  /* The repo gives way before the tail does: its title holds the whole name. */
+  .board-meta-repo { flex: 0 1 auto; min-width: 8ch; }
 }
 
 @media (max-width: 1023px) {

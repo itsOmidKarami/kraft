@@ -2,6 +2,7 @@
 .ph-item-top { display: flex; flex-direction: column; gap: 10px; }
 .ph-item-tagline { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .ph-item-meta { font-size: var(--fs-label); color: var(--text-muted); overflow-wrap: anywhere; min-width: 0; }
+.ph-item-inplace { white-space: nowrap; } /* never "in your / checkout" across lines */
 .ph-item-title { margin: 0; font-size: var(--fs-ph-h1); font-weight: 600; line-height: 1.25; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .ph-brief { margin: 0; font-size: var(--fs-meta); line-height: 1.55; color: var(--text-sub); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ph-brief.ph-is-open { -webkit-line-clamp: 20; }
