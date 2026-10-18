@@ -913,12 +913,6 @@ def mark(
 def check(checkout: Path, branch: str, mark: TaskMark) -> TaskCheck:
     """After an agent task: never a repair, only what a stop needs to say."""
     head = git_read(checkout, "symbolic-ref", "--quiet", "HEAD", expected_failure=True)
-    moved_to = None
-    under_way = head != f"refs/heads/{branch}" and _operation(checkout)
-    if head != f"refs/heads/{branch}" and not under_way:
-        moved_to = (head or "").removeprefix("refs/heads/") or (
-            f"detached at {git_read(checkout, 'rev-parse', 'HEAD')}"
-        )
     since = datetime.fromisoformat(mark.started_at).timestamp()
     entries = []
     for entry in _git_lines(checkout, "log", "-g", "--date=unix", "--format=%H %gd %gs", "HEAD"):
@@ -937,20 +931,34 @@ def check(checkout: Path, branch: str, mark: TaskMark) -> TaskCheck:
         elif on != branch and sha not in made:
             made.append(sha)
     made.reverse()  # newest first, as named
+    # An operation begun on the item's branch (a rebase detaches HEAD, a merge
+    # does not) is the person's to finish; one begun elsewhere is a move.
+    under_way = on == branch and _operation(checkout)
+    moved_to = None
+    if head != f"refs/heads/{branch}" and not under_way:
+        moved_to = (head or "").removeprefix("refs/heads/") or (
+            f"detached at {git_read(checkout, 'rev-parse', 'HEAD')}"
+        )
     off = (
         set(_git_lines(checkout, "log", "--format=%H", *made, "--not", f"refs/heads/{branch}"))
         if made
         else set()
     )
     # Every path the branch's tree gained since the mark, whatever the merge
-    # shape: a merged side branch's files count, and a rebase's replayed
-    # commits do not. Git merges or rebases nothing over a dirty path, so an
-    # upstream change lands on one of the person's only if their edit was
+    # shape (a merged side branch's files count), plus every path of a commit
+    # the branch gained that is not a rebase's replay, so one a later commit
+    # undid still counts. Git merges or rebases nothing over a dirty path, so
+    # an upstream change lands on one of the person's only if their edit was
     # set aside (a stash) during the task, which is worth a look too.
-    touched = _git_lines(
-        checkout, "diff", "--name-only", "--no-renames", mark.tip, f"refs/heads/{branch}"
+    tip = f"refs/heads/{branch}"
+    touched = _git_lines(checkout, "diff", "--name-only", "--no-renames", mark.tip, tip)
+    touched += _git_lines(
+        checkout,
+        *("log", "--right-only", "--cherry-pick", "--no-merges", "--no-renames"),
+        *("--name-only", "--format=", f"{mark.tip}...{tip}"),
     )
-    new = [p for p in _dirty(checkout) if p not in mark.dirty]
+    # Mid-operation, the dirty paths are the operation's, not the task's.
+    new = [] if under_way else [p for p in _dirty(checkout) if p not in mark.dirty]
     return TaskCheck(
         moved_to=moved_to,
         stray_commits=[s for s in made if s in off],
@@ -994,12 +1002,13 @@ async def mark_task(db, run_dirs, row, folder: Path, node_id: str, task_path: st
     """Before an in-place agent or command task: what `check_task` compares against,
     kept in the item's folder so a restart's reattach reads the same mark."""
     wid = row["id"]
-    # The lease keeps every other item out: a live session here is a co-task.
+    # The lease keeps every other item out: a live session of this node here
+    # is a co-task.
     running = db.read(
         lambda c: c.execute(
             "SELECT DISTINCT hook_point FROM worker_sessions WHERE work_item_id = ? "
-            f"AND hook_point != ? AND status IN ({in_list(LIVE)})",
-            (wid, task_path),
+            f"AND node_id = ? AND hook_point != ? AND status IN ({in_list(LIVE)})",
+            (wid, node_id, task_path),
         ).fetchall()
     )
     siblings = [s.dirty for r in running if (s := load_mark(run_dirs, wid, r[0])) is not None]

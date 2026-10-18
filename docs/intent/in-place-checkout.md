@@ -121,10 +121,10 @@ origin: src/kraft/inplace.py §check_task
 
 ## REQ in-place-operation-under-way-is-named
 
-IF an in-place checkout is off the item's branch because of a git operation in
-progress, THEN the system SHALL name the operation rather than a branch the
-checkout moved to.
-enforced-by: tests/test_inplace.py::test_check_names_the_persons_rebase_under_way_not_a_moved_checkout, tests/executor/test_dispatch_in_place.py::test_the_persons_rebase_under_way_after_a_task_is_named_not_a_move, tests/test_inplace_rebase.py::test_an_operation_begun_after_the_look_is_refused_in_the_checkouts_words[rebase]
+IF a git operation begun on an in-place item's branch is still in progress when
+a task ends, THEN the system SHALL name the operation, rather than a branch the
+checkout moved to, and SHALL NOT record the operation's files as the task's.
+enforced-by: tests/test_inplace.py::test_check_tells_the_persons_operation_on_the_branch_from_a_move[rebase], tests/test_inplace.py::test_check_tells_the_persons_operation_on_the_branch_from_a_move[merge], tests/test_inplace.py::test_check_tells_the_persons_operation_on_the_branch_from_a_move[merge-on-another-branch], tests/executor/test_dispatch_in_place.py::test_the_persons_rebase_under_way_after_a_task_is_named_not_a_move, tests/test_inplace_rebase.py::test_an_operation_begun_after_the_look_is_refused_in_the_checkouts_words[rebase]
 origin: src/kraft/inplace.py §check
 
 ## REQ in-place-overlap-stops
@@ -132,14 +132,15 @@ origin: src/kraft/inplace.py §check
 IF an in-place task's commits touch a path that had uncommitted changes when
 the task started, THEN the system SHALL stop the item as `checkout` and name
 the paths.
-enforced-by: tests/executor/test_dispatch_in_place.py::test_the_agent_committing_a_persons_edited_file_stops_as_checkout[done], tests/executor/test_dispatch_in_place.py::test_the_agent_committing_a_persons_edited_file_stops_as_checkout[paused-as-it-ended], tests/executor/test_dispatch_in_place.py::test_a_large_dirty_set_is_sampled_on_the_event_and_kept_whole_in_a_file, tests/worker/test_reattach_sweep.py::test_a_reattached_in_place_task_is_checked_not_swept[overlap], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[commit], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[side-branch], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[merge-main], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[rebase]
+enforced-by: tests/executor/test_dispatch_in_place.py::test_the_agent_committing_a_persons_edited_file_stops_as_checkout[done], tests/executor/test_dispatch_in_place.py::test_the_agent_committing_a_persons_edited_file_stops_as_checkout[paused-as-it-ended], tests/executor/test_dispatch_in_place.py::test_a_large_dirty_set_is_sampled_on_the_event_and_kept_whole_in_a_file, tests/worker/test_reattach_sweep.py::test_a_reattached_in_place_task_is_checked_not_swept[overlap], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[commit], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[side-branch], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[merge-main], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[rebase], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[revert], tests/test_inplace.py::test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape[amend]
 origin: src/kraft/inplace.py §check
 
 ## REQ in-place-co-task-edits-are-not-the-persons
 
-WHILE another task of the same in-place item runs, the system SHALL NOT count a
-path that became dirty after that task started as the person's edit.
-enforced-by: tests/test_inplace.py::test_mark_takes_a_running_co_tasks_edits_for_its_own[sibling-running], tests/test_inplace.py::test_mark_takes_a_running_co_tasks_edits_for_its_own[sibling-ended]
+WHILE another task of the same node of an in-place item runs, the system SHALL
+NOT count a path that became dirty after that task started as the person's
+edit.
+enforced-by: tests/test_inplace.py::test_mark_takes_a_running_co_tasks_edits_for_its_own[sibling-running], tests/test_inplace.py::test_mark_takes_a_running_co_tasks_edits_for_its_own[sibling-ended], tests/test_inplace.py::test_mark_takes_a_running_co_tasks_edits_for_its_own[another-nodes-task]
 origin: src/kraft/inplace.py §mark
 
 ## REQ in-place-leftovers-stay-the-items
