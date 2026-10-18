@@ -27,6 +27,27 @@ def test_create_work_item_never_starts_it(wired, tmp_path):
     assert item["current_node_id"] is None
 
 
+@pytest.mark.parametrize(
+    "held",
+    [
+        {"slots": {"busy": 1, "limit": 3}},
+        {"why": "checkout", "held_by": "w2", "held_by_title": "A"},
+    ],
+    ids=["slots", "checkout"],
+)
+def test_create_work_item_keeps_what_holds_a_queued_start(tmp_path, monkeypatch, held):
+    """`kraft item create --autostart` words the hold from these: dropped, an
+    in-place item waiting on the checkout read `1 of 3 slots are busy`
+    (Kraft-whnhx)."""
+
+    async def post(path, payload=None, **kw):
+        return 201, {"id": "w1", "status": "queued", **held}
+
+    monkeypatch.setattr(client.transport, "_post", post)
+    created = asyncio.run(client.create_work_item("t", repo=str(tmp_path)))
+    assert created == {"id": "w1", "status": "queued", "title": "t", **held}
+
+
 def test_create_work_item_sends_the_description(wired, tmp_path):
     repo = connected_repo(tmp_path)
 

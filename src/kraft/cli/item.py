@@ -89,7 +89,7 @@ def _cmd_create(ns: argparse.Namespace) -> None:
 def _render_created(result: dict) -> str:
     """The created item, and, when an --autostart found every slot busy, why:
     what the board's composer says too."""
-    shown = common._render_action({k: v for k, v in result.items() if k != "slots"})
+    shown = common._render_action({k: v for k, v in result.items() if k not in answers.QUEUED_KEYS})
     said = answers.filed(result)
     return f"{shown}\n{said}" if said else shown
 

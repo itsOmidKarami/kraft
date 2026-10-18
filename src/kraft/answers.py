@@ -81,6 +81,10 @@ def item_action(
     return say
 
 
+#: What a queued start's answer carries to say what holds it.
+QUEUED_KEYS = ("slots", "why", "held_by", "held_by_title")
+
+
 def hold_reason(held: dict, storage: dict | None) -> str | None:
     """Why a queued start waits when it is not a busy slot, in the web UI's
     words: another in-place item is using its checkout (`held`'s `why`,

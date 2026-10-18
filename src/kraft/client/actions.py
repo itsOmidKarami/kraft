@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from types import EllipsisType
 
-from kraft import config
+from kraft import answers, config
 from kraft.client import context, reads, transport
 from kraft.vocab import DiffSide
 
@@ -95,8 +95,14 @@ async def create_work_item(
     if status >= 400:
         raise transport.status_error(status, transport.detail_of(body))
     result = {"id": body["id"], "status": body.get("status", "paused"), "title": title}
-    # `slots`: an --autostart filed paused because every slot was busy says so.
-    for told in ("slots", "waiting_on", "repo_warning", "bead_warning", "duplicate_warning"):
+    # `slots`, `why` and its `held_by`: an --autostart queued says what holds it.
+    for told in (
+        *answers.QUEUED_KEYS,
+        "waiting_on",
+        "repo_warning",
+        "bead_warning",
+        "duplicate_warning",
+    ):
         if body.get(told):
             result[told] = body[told]
     return result

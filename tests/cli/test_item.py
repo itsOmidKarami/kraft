@@ -130,11 +130,12 @@ def test_create_autostart_at_the_slot_limit_says_it_is_queued(tmp_path, monkeypa
 
     async def post(path, payload=None, **kw):
         assert payload["autostart"] is True
-        return 201, _QUEUED_ANSWER
+        return 201, _QUEUED_ANSWER | {"held_by": "w2"}
 
     monkeypatch.setattr(transport, "_post", post)
     cli.main(["item", "create", "t", "--repo", str(tmp_path), "--autostart"])
-    assert _QUEUED_LINE in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert _QUEUED_LINE in out and "held_by" not in out  # not a kv row (Kraft-whnhx)
     cli.main(["item", "create", "t", "--repo", str(tmp_path), "--autostart", "--json"])
     assert json.loads(capsys.readouterr().out)["slots"] == {"busy": 3, "limit": 3}
 
