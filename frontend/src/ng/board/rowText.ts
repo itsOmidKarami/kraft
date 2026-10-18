@@ -16,11 +16,11 @@ export const nodeWords = (id: string) => id.replace(/[_-]+/g, " ");
 
 type Named = { id: string; kind?: string; artifact?: string | null };
 
-/** What a gate decides, in words: its document's kind ("spec"), else its id without a trailing "approval". The
- *  VS Code extension knows only a gate's id, so an id is accepted too. */
+/** What a gate decides, in words: its id without a trailing "approval" ("spec_approval" reads "spec", "local_review"
+ *  "local review"), never its document, so a surface that knows only the id (VS Code) names it the same. */
 export const gateWords = (g: Named | string) => {
   const n = typeof g === "string" ? { id: g } : g;
-  return nodeWords(n.artifact || n.id.replace(/[_-]approval$/, ""));
+  return nodeWords(n.id.replace(/[_-]approval$/, ""));
 };
 
 /** What a reader calls a node: a gate by what it decides ("approve spec"), any other node in words. The id stays

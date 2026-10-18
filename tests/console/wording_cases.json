@@ -20,10 +20,10 @@
       "marks": ["done", "hot", "todo", "todo", "todo"]
     },
     {
-      "name": "gate-named-by-its-document",
+      "name": "gate-named-by-its-id-not-its-document",
       "row": { "display_status": "needs_you", "current_node_id": "sign_off", "pending_gate": "sign_off", "stop": { "kind": "gate", "node": "sign_off", "reason": null } },
       "group": "needs",
-      "tail": "approve plan",
+      "tail": "approve sign off",
       "marks": ["done", "done", "done", "done", "hot"]
     },
     {
@@ -371,9 +371,9 @@
       "banner": { "kind": "gate", "node": "spec_approval", "name": "approve spec", "text": "", "way": "" }
     },
     {
-      "name": "gate-named-by-its-document",
+      "name": "gate-named-by-its-id-not-its-document",
       "item": { "display_status": "needs_you", "pending_gate": "sign_off", "stop": { "kind": "gate", "node": "sign_off", "reason": null }, "chain_definition": { "nodes": [{ "id": "sign_off", "kind": "gate", "artifact": "plan" }] } },
-      "banner": { "kind": "gate", "node": "sign_off", "name": "approve plan", "text": "", "way": "" }
+      "banner": { "kind": "gate", "node": "sign_off", "name": "approve sign off", "text": "", "way": "" }
     },
     {
       "name": "failed-at-a-gate-the-chain-lists",
@@ -503,7 +503,7 @@
     {
       "name": "question-at-a-gate",
       "item": {"display_status": "needs_you", "needs_context_question": "Is the plan's scope right?", "stop": {"kind": "question", "node": "sign_off", "reason": "needs_context: is the plan's scope right?"}, "chain_definition": {"nodes": [{"id": "sign_off", "kind": "gate", "artifact": "plan"}]}},
-      "banner": {"kind": "question", "node": "sign_off", "text": "Is the plan's scope right?", "way": "", "name": "approve plan"}
+      "banner": {"kind": "question", "node": "sign_off", "text": "Is the plan's scope right?", "way": "", "name": "approve sign off"}
     }
   ],
   "events": [
@@ -535,11 +535,11 @@
     { "name": "approved-by-you", "event": { "type": "gate_approved", "node_id": "plan_approval", "payload": { "gate": "plan_approval", "by": "human" } }, "line": "approve plan · approved by you" },
     { "name": "passed-on-its-own", "event": { "type": "gate_approved", "node_id": null, "payload": { "gate": "chain_revision_approval", "by": "agent" } }, "line": "approve chain revision · passed on its own" },
     { "name": "rejected-with-a-long-note", "event": { "type": "gate_rejected", "node_id": "spec_approval", "payload": { "gate": "spec_approval", "note": "the goal says [/] eleven findings but lists only ten of them" } }, "line": "approve spec · rejected: the goal says [/] eleven findings but lists only …" },
-    { "name": "gate-named-by-its-document", "event": { "type": "gate_approved", "node_id": "sign_off", "payload": { "gate": "sign_off", "by": "human" } }, "line": "approve plan · approved by you" },
+    { "name": "gate-named-by-its-id-not-its-document", "event": { "type": "gate_approved", "node_id": "sign_off", "payload": { "gate": "sign_off", "by": "human" } }, "line": "approve sign off · approved by you" },
     { "name": "a-gate-node-named-from-the-chain", "event": { "type": "node_skipped", "node_id": "spec_approval", "payload": {} }, "line": "approve spec skipped" },
     { "name": "rejected-without-a-note", "event": { "type": "gate_rejected", "node_id": "spec_approval", "payload": {} }, "line": "approve spec · rejected" },
     { "name": "reopened-by-the-retry", "event": { "type": "gate_reopened", "node_id": "spec_approval", "payload": { "gate": "spec_approval", "reason": "retry" } }, "line": "approve spec · reopened by the retry" },
-    { "name": "reopened-after-a-conflict", "event": { "type": "gate_reopened", "node_id": "sign_off", "payload": { "gate": "sign_off", "reason": "conflict_resolved" } }, "line": "approve plan · reopened after a conflict was resolved" },
+    { "name": "reopened-after-a-conflict", "event": { "type": "gate_reopened", "node_id": "sign_off", "payload": { "gate": "sign_off", "reason": "conflict_resolved" } }, "line": "approve sign off · reopened after a conflict was resolved" },
     { "name": "reopened-without-a-reason", "event": { "type": "gate_reopened", "node_id": "spec_approval", "payload": { "gate": "spec_approval" } }, "line": "approve spec · reopened" },
     { "name": "reopened-with-an-odd-reason", "event": { "type": "gate_reopened", "node_id": "spec_approval", "payload": { "gate": "spec_approval", "reason": ["retry"] } }, "line": "approve spec · reopened" },
     { "name": "fix-round", "event": { "type": "fix_cycle_started", "node_id": "verification", "payload": { "cycle": 1 } }, "line": "verification · fix loop round 2" },
@@ -595,12 +595,12 @@
     { "name": "title-edited", "event": { "type": "work_item_title_edited", "node_id": null, "payload": {} }, "line": "title edited" },
     { "name": "brief-edited", "event": { "type": "work_item_description_edited", "node_id": null, "payload": {} }, "line": "brief edited" },
     { "name": "node-started-named", "event": {"type": "node_started", "node_id": "spec_approval", "payload": {}}, "line": "approve spec started" },
-    { "name": "node-completed-named", "event": {"type": "node_completed", "node_id": "sign_off", "payload": {}}, "line": "approve plan finished" },
+    { "name": "node-completed-named", "event": {"type": "node_completed", "node_id": "sign_off", "payload": {}}, "line": "approve sign off finished" },
     { "name": "session-started-named", "event": {"type": "worker_session_started", "node_id": "merge_request", "payload": {}}, "line": "a session started on merge request" },
     { "name": "fix-round-named", "event": {"type": "fix_cycle_started", "node_id": "merge_request_feedback", "payload": {"cycle": 0}}, "line": "merge request feedback · fix loop round 1" },
     { "name": "fix-round-finished-named", "event": {"type": "fix_cycle_finished", "node_id": "merge_request_feedback", "payload": {"cycle": 1, "committed": false}}, "line": "merge request feedback · fix loop round 2 · the fix changed nothing" },
     { "name": "needs-you-named", "event": {"type": "work_item_needs_human", "node_id": "spec_approval", "payload": {"reason": "the gate's check failed"}}, "line": "stopped at approve spec: the gate's check failed" },
-    { "name": "escalation-named", "event": {"type": "escalation_message", "node_id": "sign_off", "payload": {"message": "why was this approved?"}}, "line": "escalation on approve plan: why was this approved?" },
+    { "name": "escalation-named", "event": {"type": "escalation_message", "node_id": "sign_off", "payload": {"message": "why was this approved?"}}, "line": "escalation on approve sign off: why was this approved?" },
     { "name": "retried-named", "event": {"type": "work_item_retried", "node_id": "merge_request", "payload": {}}, "line": "retried merge request" },
     { "name": "rate-limited-named", "event": {"type": "work_item_rate_limited", "node_id": "merge_request_feedback", "payload": {}}, "line": "merge request feedback hit a rate limit" },
     { "name": "gate-with-a-hyphenated-approval-id", "event": {"type": "gate_requested", "node_id": "code-approval", "payload": {"gate": "code-approval"}}, "line": "approve code is waiting for you" }

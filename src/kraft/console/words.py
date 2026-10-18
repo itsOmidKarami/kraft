@@ -71,10 +71,10 @@ def node_words(node: str) -> str:
 
 
 def gate_words(gate: dict | str) -> str:
-    """`gateWords`: what a gate decides, its document's kind ("spec"), else
-    its id without a trailing "approval"."""
+    """`gateWords`: what a gate decides, its id without a trailing "approval"
+    ("spec_approval" reads "spec"), never its document."""
     n = {"id": gate} if isinstance(gate, str) else gate
-    return node_words(n.get("artifact") or re.sub(r"[_-]approval$", "", n["id"]))
+    return node_words(re.sub(r"[_-]approval$", "", n["id"]))
 
 
 def display_name(node: dict) -> str:

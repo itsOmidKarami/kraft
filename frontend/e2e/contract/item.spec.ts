@@ -273,8 +273,8 @@ const ROWS: Row[] = [
     name: "item page: a finished item's Recent reads its gate and its end once each (CG-4)",
     run: async (p) => {
       await app(p, item("done"));
-      await expect(p.getByText("approve review brief · approved by you")).toBeVisible();
-      await expect(p.getByText(/^approve review brief finished/)).toHaveCount(0);
+      await expect(p.getByText("approve final review · approved by you")).toBeVisible();
+      await expect(p.getByText(/^approve final review finished/)).toHaveCount(0);
       await expect(p.getByText(/^release finished/)).toHaveCount(1);
     },
   },

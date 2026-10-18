@@ -171,7 +171,7 @@ describe("FinishDialog", () => {
     const it = item({ chain_definition: chain, fix_target: fix });
     const first = routed(<><Toaster /><Finish it={it} threads={[]} /></>);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit review" })));
-    expect(await screen.findByText(/^Approved · approve spec passed/)).toBeInTheDocument();
+    expect(await screen.findByText(/^Approved · approve final review passed/)).toBeInTheDocument();
     first.unmount();
     routed(<><Toaster /><Finish it={it} threads={[th()]} initial="request_changes" /></>);
     await act(async () => fireEvent.click(screen.getAllByRole("button", { name: "Request changes" }).at(-1)!));

@@ -137,8 +137,9 @@ describe("glyphOf and ticksOf", () => {
 
 describe("displayName", () => {
   it.each([
-    ["a gate, by the document it decides", { id: "spec_approval", kind: "gate", artifact: "spec" }, "approve spec"],
-    ["a gate whose artifact is not its id's prefix", { id: "final_review", kind: "gate", artifact: "review_brief" }, "approve review brief"],
+    ["a gate, by its id without approval", { id: "spec_approval", kind: "gate", artifact: "spec" }, "approve spec"],
+    ["a gate whose artifact differs from its id, by the id", { id: "final_review", kind: "gate", artifact: "review_brief" }, "approve final review"],
+    ["another gate whose artifact differs from its id", { id: "local_review", kind: "gate", artifact: "work_brief" }, "approve local review"],
     ["a gate with a longer id", { id: "chain_revision_approval", kind: "gate", artifact: "chain_revision" }, "approve chain revision"],
     ["a gate deciding no document, by its id", { id: "final_review", kind: "gate" }, "approve final review"],
     ["an exec node whose id ends in approval, in words", { id: "external_approval", kind: "exec" }, "external approval"],
@@ -159,9 +160,9 @@ describe("displayName", () => {
 });
 
 describe("a gate row", () => {
-  it("is named by its artifact on the board too", () => {
+  it("is named by its id on the board too", () => {
     const nodes = [{ id: "final_review", kind: "gate", artifact: "review_brief" }] as WorkItem["chain_definition"]["nodes"];
     const r = row("needs_you", { stop: stop("gate", { node: "final_review" }), pending_gate: "final_review", chain_definition: { nodes } as WorkItem["chain_definition"] });
-    expect(reasonTail(r, NOW)).toBe("approve review brief");
+    expect(reasonTail(r, NOW)).toBe("approve final review");
   });
 });

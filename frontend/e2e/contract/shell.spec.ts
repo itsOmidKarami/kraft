@@ -108,7 +108,7 @@ const ROWS: Row[] = [
   },
   {
     name: "search: a needs-you row for a gate is an action row, Review <gate>, and Enter opens that review (Q1)",
-    run: async (p) => { await app(p, "/"); await p.keyboard.press("ControlOrMeta+k"); await pause(p, 400); const r = p.getByRole("option", { name: /Review · approve review brief/ }).first(); await expect(r).toBeVisible({ timeout: 3000 }); await r.click(); await pause(p, 800); expect(p.url()).toMatch(/\/review/); },
+    run: async (p) => { await app(p, "/"); await p.keyboard.press("ControlOrMeta+k"); await pause(p, 400); const r = p.getByRole("option", { name: /Review · approve final review/ }).first(); await expect(r).toBeVisible({ timeout: 3000 }); await r.click(); await pause(p, 800); expect(p.url()).toMatch(/\/review/); },
   },
   {
     name: "search: the query is highlighted in titles (Q3)",
