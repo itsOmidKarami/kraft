@@ -71,8 +71,9 @@ _ALSO_SHOWN = 4
 
 def _print(line: str) -> None:
     """`print`, with every character a terminal would act on written out
-    (`render.printable`): what a repository holds is shown, never obeyed."""
-    print(render.printable(line))
+    (`render.printable`): what a repository holds is shown, never obeyed. A
+    line break is kept: `line` may be a multi-line review."""
+    print("\n".join(map(render.printable, line.split("\n"))))
 
 
 def _pick(

@@ -132,3 +132,25 @@ def test_a_worker_may_not_take_a_repo_library(app, tmp_path, monkeypatch):
 
     monkeypatch.delenv("KRAFT_WORK_ITEM_ID")
     assert library_outcome(repo) == "waiting"
+
+
+@pytest.mark.parametrize(
+    "review, lines",
+    [
+        pytest.param(
+            "Content:\n  one\n  two", ["Content:", "  one", "  two"], id="line-breaks-kept"
+        ),
+        pytest.param(
+            "a\x1b[31mred\rb\nnext", ["a\\x1b[31mred\\rb", "next"], id="escapes-still-escaped"
+        ),
+    ],
+)
+def test_a_multi_line_review_prints_on_separate_lines(app, capsys, monkeypatch, review, lines):
+    async def waiting(_path):
+        return {"path": "/app", "outcome": "waiting", "review": {"text": review}}
+
+    monkeypatch.setattr(client, "repo_library", waiting)
+
+    assert _main(["repo", "library", "--check"]) == 1
+
+    assert capsys.readouterr().out.splitlines() == lines
