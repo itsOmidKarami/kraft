@@ -316,7 +316,9 @@ def charge(app, wid: str) -> None:
     kicked, so the figure is real soon."""
     st = app.state
     used = usage(st)
-    if st.policy is None or st.policy.storage_limit_bytes is None or used is None:
+    # Startup's reattach starts walks before the policy is loaded or anything is measured.
+    policy = getattr(st, "policy", None)
+    if used is None or policy is None or policy.storage_limit_bytes is None:
         return
     if wid in used.items or not _would_create_worktree(st, wid):
         return
