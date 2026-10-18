@@ -117,11 +117,24 @@ jobs:
           RANGE=${PREVIOUS:+$PREVIOUS..}$SHA
           # The pull request behind each commit since the previous tag. A
           # commit with none -- a direct push, the revert button -- carries no
-          # declaration and adds nothing to the bump or the notes.
+          # declaration and adds nothing to the bump or the notes. A call that
+          # still fails after its retries stops the step: a list missing PRs
+          # would ship wrong notes, or the wrong version. The loop writes to a
+          # file, not into a pipe, so errexit cannot be swallowed by `jq -s`.
+          : > "$RUNNER_TEMP/pr-lines.json"
           for c in $(git rev-list --first-parent "$RANGE"); do
-            gh api "repos/$GITHUB_REPOSITORY/commits/$c/pulls" \
-              --jq '.[0] // empty | {number, title, body, labels: [.labels[].name]}'
-          done | jq -s 'unique_by(.number)' > "$RUNNER_TEMP/prs.json"
+            for TRY in 1 2 3 4 5; do
+              P=$(gh api "repos/$GITHUB_REPOSITORY/commits/$c/pulls" \
+                --jq '.[0] // empty | {number, title, body, labels: [.labels[].name]}') && break
+              if [ "$TRY" = 5 ]; then
+                echo "::error::could not list the pull request behind $c after $TRY tries"
+                exit 1
+              fi
+              sleep $((2 ** TRY))
+            done
+            printf '%s\n' "$P" >> "$RUNNER_TEMP/pr-lines.json"
+          done
+          jq -s 'unique_by(.number)' "$RUNNER_TEMP/pr-lines.json" > "$RUNNER_TEMP/prs.json"
           # No `|| true`: plan_release exits non-zero on an unlabelled PR or a
           # tag it cannot read, and swallowing that would turn it into a
           # silently skipped release.
