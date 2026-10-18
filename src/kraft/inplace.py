@@ -533,12 +533,18 @@ def _raise_clash(
     raise AutostashClash(message, unmerged, stash)
 
 
+#: HEAD reflog subjects of an operation that may `--autostash`: a rebase's
+#: start (or a pull's, `pull --rebase … (start):`), a pull, a merge.
+_STARTS_AN_AUTOSTASH = ("rebase (start):", "rebase -i (start):", "pull", "merge")
+
+
 def _put_back(checkout: Path, m: TaskMark, task: str) -> AutostashClash | None:
     """What a task's own `git rebase --autostash` (the conflict resolver's,
     `prompts._RESOLVE_IN`) could not put back since its mark: git exits 0 on
-    it. Its autostash is on the tip the task found or on a commit made here
-    during it (HEAD's reflog is this worktree's own), never on a commit HEAD
-    only checked out, such as the new base, which another worktree may sit on.
+    it. Its autostash is on the HEAD one of this checkout's own rebases, pulls
+    or merges since the mark started from (HEAD's reflog is this worktree's
+    own): never just a commit another worktree may sit on too, such as the tip
+    a fresh item starts at or the new base a rebase checks out.
     None mid-operation: its unmerged paths are its own, and its autostash is
     still in git's operation state, put back when the person finishes it.
     shortcut: with no HEAD reflog only `m.tip` counts, so a clash after a
@@ -546,11 +552,16 @@ def _put_back(checkout: Path, m: TaskMark, task: str) -> AutostashClash | None:
     if _operation(checkout):
         return None
     since = int(datetime.fromisoformat(m.started_at).timestamp())
-    held = {m.tip}
-    for line in _git_lines(checkout, "log", "-g", "--date=unix", "--format=%H %gd %gs", "HEAD"):
-        sha, selector, subject = line.split(" ", 2)
-        if int(selector.rsplit("{", 1)[1].rstrip("}")) >= since and subject.startswith(_MADE_HERE):
-            held.add(sha)
+    entries = _git_lines(checkout, "log", "-g", "--date=unix", "--format=%H %gd %gs", "HEAD")
+    held = set() if entries else {m.tip}
+    for i, line in enumerate(entries):  # newest first
+        _sha, selector, subject = line.split(" ", 2)
+        # Not a `break`: an entry's time is its committer date's when one is set
+        # (GIT_COMMITTER_DATE), so an older-looking entry may be newer.
+        if int(selector.rsplit("{", 1)[1].rstrip("}")) < since:
+            continue
+        if subject.startswith(_STARTS_AN_AUTOSTASH):  # the HEAD it started from, the older entry
+            held.add(entries[i + 1].split(" ", 1)[0] if i + 1 < len(entries) else m.tip)
     try:
         _raise_clash(checkout, "", None, since, task=task, held=held)
     except AutostashClash as exc:
