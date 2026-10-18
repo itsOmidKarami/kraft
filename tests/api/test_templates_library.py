@@ -211,14 +211,14 @@ def test_a_chain_already_broken_does_not_block_an_unrelated_save(client, templat
 # ── GET /templates/steering/preview (B23) ──
 
 
-def _demo_repo(templates_dir):
+def _demo_repo(templates_dir, **extra):
     """A repository `demo` that selects a steering profile of its own."""
     entry = {
         "path": "/srv/demo",
         "name": "demo",
         "steering": ["never-signal-processes-you-didnt-start"],
         "intent_dir": "docs/intent",
-    }
+    } | extra
     (templates_dir / "repos.yaml").write_text(yaml.safe_dump({"repos": [entry]}))
 
 
@@ -228,7 +228,15 @@ def _preview(client, **query):
 
 
 @pytest.mark.api_client(edit_templates=_demo_repo)
-def test_the_steering_preview_shows_a_task_launch_section_by_section(client):
+@pytest.mark.parametrize(
+    "worktrees, checkout",
+    [(True, "git worktree cut for this work item"), (False, "a person's own checkout")],
+    ids=["worktree", "in-place"],
+)
+def test_the_steering_preview_shows_a_task_launch_section_by_section(
+    client, templates_dir, worktrees, checkout
+):
+    _demo_repo(templates_dir, worktrees=worktrees)
     response = _preview(client)
     assert response.status_code == 200, response.text
     sections = response.json()["sections"]
@@ -243,6 +251,7 @@ def test_the_steering_preview_shows_a_task_launch_section_by_section(client):
     ]
     contract, *_, task_steering = (s["text"] for s in sections)
     assert "Work item: <work item id>" in contract and "Worker session: <session id>" in contract
+    assert checkout in contract
     assert "Keep changes focused." in task_steering
 
 

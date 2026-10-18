@@ -267,6 +267,7 @@ async def steering_preview(chain: str, task: str, repo: str, request: Request):
         skill=rt.task.skill,
         intent_dir=entry.intent_dir,
         steering=list(zip(names, inv.steering_texts, strict=True)),
+        in_place=not entry.worktrees,
     )
     return {"sections": [{"kind": k, "source": s, "text": t} for k, s, t in sections]}
 
