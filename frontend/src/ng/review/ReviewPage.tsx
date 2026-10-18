@@ -217,7 +217,8 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
           {compare.state === "ready" && comments.elsewhere}
         </section>
       </div>
-      {place.doc && place.gate && item.pending_gate === place.gate && item.gate_artifact && (
+      {/* Not under a finish dialog: the router commits the URL's doc=0 a render after the dialog opens, and two modals never stand at once. */}
+      {!finish && place.doc && place.gate && item.pending_gate === place.gate && item.gate_artifact && (
         <GateReview
           item={item}
           gate={place.gate}

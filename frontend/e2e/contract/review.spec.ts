@@ -100,10 +100,13 @@ const ROWS: Row[] = [
     run: async (p) => {
       await app(p, item("needs-gate", "/review?gate=final_review&doc=1"), { ready: (pg) => pg.locator(".review-page").waitFor({ timeout: 8000 }) });
       await expect(p.getByRole("button", { name: /^Reject/ }), "no Reject button in the review header").toHaveCount(0);
+      // Every commit counted, not one moment: the gate overlay and the finish dialog once stood together for a render.
+      await p.evaluate(() => { const w = window as unknown as { maxDialogs: number }; w.maxDialogs = 0; new MutationObserver(() => { w.maxDialogs = Math.max(w.maxDialogs, document.querySelectorAll("[role=dialog]").length); }).observe(document.body, { childList: true, subtree: true }); });
       await p.getByRole("button", { name: "Request changes" }).first().click();
       const d = p.getByRole("dialog");
       await expect(d.locator(".rv-finish-sends, .rv-outcome-sub").first()).toContainText(/back to\s+implementation/, { timeout: 2000 });
       await expect(d.getByRole("button", { name: "Request changes" })).toBeVisible();
+      expect(await p.evaluate(() => (window as unknown as { maxDialogs: number }).maxDialogs), "one modal at a time").toBe(1);
     },
   },
   {
