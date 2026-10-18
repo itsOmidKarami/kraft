@@ -461,8 +461,9 @@ class Indexer:
         seen = {d["document_id"] for d in docs}
         docs += [d for d in self._attachment_docs(work_item_id) if d["document_id"] not in seen]
         pending = self._pending_gate_doc(work_item_id)
-        if pending and pending["path"] not in {d["path"] for d in docs}:
-            docs.append(pending)
+        if pending:
+            # What the reviewer is deciding on wins over an earlier approval's copy.
+            docs = [d for d in docs if d["path"] != pending["path"]] + [pending]
         # W13 A: the run a session summary came from. worker_sessions lives in
         # the state db, not the index, so the join is a keyed lookup rather
         # than SQL. Artifacts and attachments have no session: all three null.
