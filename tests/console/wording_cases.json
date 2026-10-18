@@ -183,7 +183,7 @@
       "name": "queued-for-the-checkout",
       "row": { "display_status": "queued", "current_node_id": "implement", "queued": { "verb": "resume", "since": "2026-10-15T11:00:00Z", "why": "checkout", "held_by": "w2", "held_by_title": "Cache the index" } },
       "group": "running",
-      "tail": "waiting for the checkout: Cache the index is using it"
+      "tail": "waiting for the checkout: “Cache the index” is using it"
     },
     {
       "name": "escalated",
@@ -562,7 +562,7 @@
     { "name": "cancelled", "event": { "type": "work_item_cancelled", "node_id": null, "payload": {} }, "line": "cancelled" },
     { "name": "queued-to-resume", "event": { "type": "work_item_queued", "node_id": null, "payload": { "verb": "resume", "from": "paused" } }, "line": "queued to resume" },
     { "name": "queued-to-retry", "event": { "type": "work_item_queued", "node_id": null, "payload": { "verb": "retry", "from": "needs_human" } }, "line": "queued to retry" },
-    { "name": "queued-to-continue-for-the-checkout", "event": { "type": "work_item_queued", "node_id": null, "payload": { "verb": "continue", "from": "needs_human", "why": "checkout", "held_by": "w2", "held_by_title": "Cache the index" } }, "line": "queued to continue past its gate · waiting for the checkout: Cache the index is using it" },
+    { "name": "queued-to-continue-for-the-checkout", "event": { "type": "work_item_queued", "node_id": null, "payload": { "verb": "continue", "from": "needs_human", "why": "checkout", "held_by": "w2", "held_by_title": "Cache the index" } }, "line": "queued to continue past its gate · waiting for the checkout: “Cache the index” is using it" },
     { "name": "queued-to-self-retry", "event": { "type": "work_item_queued", "node_id": null, "payload": { "verb": "self_retry", "from": "needs_human" } }, "line": "queued to retry, as its escalation asked" },
     { "name": "queued-to-escalate", "event": { "type": "work_item_queued", "node_id": null, "payload": { "verb": "escalate", "from": "needs_human" } }, "line": "queued to escalate" },
     { "name": "queued-to-reply", "event": { "type": "work_item_queued", "node_id": null, "payload": { "verb": "reply", "from": "needs_human" } }, "line": "queued to answer its review" },

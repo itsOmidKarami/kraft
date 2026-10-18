@@ -38,8 +38,14 @@ export const capitalise = (s: string) => s.replace(/^./, (c) => c.toUpperCase())
 /** Every sub-task of the plan done: a list with nothing left on it, not an empty or a board-only one. */
 export const allDone = (p: Pick<TaskProgress, "tasks">) => !!p.tasks?.length && p.tasks.every((t) => t.state === "done");
 
-/** Why a queued item waits, when it is another in-place item's use of its checkout rather than a slot. */
-export const waitingForCheckout = (q?: { why?: unknown; held_by_title?: unknown } | null) => (q?.why === "checkout" ? `waiting for the checkout: ${String(q.held_by_title ?? "another item")} is using it` : null);
+export const WAITING_FOR_CHECKOUT = "waiting for the checkout";
+/** The Queued card's words for a checkout wait, desktop and phone: the holder is its `USING_IT` fact. */
+export const CHECKOUT_FREES = "It starts when the checkout frees.";
+export const USING_IT = "using it";
+/** Why a queued item waits, when it is another in-place item's use of its checkout rather than a slot.
+ *  The holder's title is quoted: in a line, where a long one ends is otherwise unclear. */
+export const waitingForCheckout = (q?: { why?: unknown; held_by_title?: unknown } | null) =>
+  q?.why === "checkout" ? `${WAITING_FOR_CHECKOUT}: ${q.held_by_title != null ? `“${String(q.held_by_title)}”` : "another item"} is using it` : null;
 
 /** The start a queued request makes, in words: `self_retry` is an escalation agent's own retry. */
 const QUEUED_VERB: Record<string, string> = { resume: "resume", start: "start", retry: "retry", continue: "continue past its gate", self_retry: "retry, as its escalation asked", escalate: "escalate", reply: "answer its review", follow_up: "run its agents at the stop" };

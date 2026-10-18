@@ -141,7 +141,7 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     expect(cardOf(mk("blocked"))).toMatchObject({ where: "nothing left to wait for", text: "Kraft queues it within seconds.", facts: [] });
     // A checkout-queued item says what it waits for, as desktop's Queued card does; a slot wait has no card.
     expect(cardOf(mk("queued", null, { queued: { verb: "resume", since: "2026-09-13T09:00:00Z", why: "checkout", held_by: "w2", held_by_title: "Cache the index" } })))
-      .toMatchObject({ tone: "info", title: "Queued", text: "Waiting for the checkout: Cache the index is using it. It starts when the checkout frees." });
+      .toEqual({ tone: "info", title: "Queued", where: "waiting for the checkout", text: "It starts when the checkout frees.", facts: [["using it", "Cache the index", "w2"]] });
     expect(cardOf(mk("queued", null, { queued: { verb: "resume", since: "2026-09-13T09:00:00Z" } }))).toBeNull();
     expect(cardOf(mk("paused"))).toMatchObject({ tone: "muted", title: "Paused", where: "at verification" });
     expect(cardOf(mk("paused", null, { current_node_id: null }))).toBeNull();

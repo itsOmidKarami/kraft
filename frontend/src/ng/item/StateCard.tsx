@@ -9,7 +9,7 @@ import type { ChainNode, DiffFile, KraftEvent, WorkerSession } from "../../types
 import { Ban, ChevronDown, ChevronRight, CircleCheck, CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
-import { capitalise, nameOf, waitingForCheckout } from "../board/rowText";
+import { CHECKOUT_FREES, nameOf, USING_IT, WAITING_FOR_CHECKOUT } from "../board/rowText";
 import { admits, neverStarted, RELEASED, spentLine } from "./status";
 import { actionPath, taskName } from "./paths";
 import { pathSel, placeUrl } from "./url";
@@ -233,12 +233,14 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
       ],
     };
   }
-  const checkoutWait = status === "queued" && waitingForCheckout(item.queued);
-  if (checkoutWait) {
+  const held = status === "queued" && item.queued?.why === "checkout" ? item.queued : null;
+  if (held) {
+    // The holder is a fact linking to it, as the Blocked card's items are: not run into the sentence.
     return {
-      tone: "info", glyph: <Clock size={14} aria-hidden />, title: "Queued",
-      text: `${capitalise(checkoutWait)}. It starts when the checkout frees.`,
-      facts: [], actions: [],
+      tone: "info", glyph: <Clock size={14} aria-hidden />, title: "Queued", where: WAITING_FOR_CHECKOUT,
+      text: CHECKOUT_FREES,
+      facts: held.held_by ? [[USING_IT, <Link className={linkButtonClass()} to={`/work-items/${encodeURIComponent(held.held_by)}`}>{held.held_by_title ?? held.held_by}</Link>]] : [],
+      actions: [],
     };
   }
   if (status === "queued" && item.queued?.storage) {

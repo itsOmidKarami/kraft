@@ -15,7 +15,7 @@ describe("reasonTail", () => {
   it("says a queued item is waiting for a slot, or for the checkout and who is using it", () => {
     expect(reasonTail(row("queued"), NOW)).toBe("waiting to start");
     const queued = { verb: "resume", since: "2026-09-13T09:00:00Z", why: "checkout" as const, held_by: "w2", held_by_title: "Cache the index" };
-    expect(reasonTail(row("queued", { queued }), NOW)).toBe("waiting for the checkout: Cache the index is using it");
+    expect(reasonTail(row("queued", { queued }), NOW)).toBe("waiting for the checkout: “Cache the index” is using it");
   });
 
   it("says one short thing per status and stop kind", () => {

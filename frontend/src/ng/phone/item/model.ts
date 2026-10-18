@@ -10,7 +10,7 @@ import { limitPolicy } from "../../item/limitPolicy";
 import type { ItemDetail } from "../../item/useItem";
 import type { ChainNode } from "../../graph/layout";
 import { steerDoor } from "./steer";
-import { capitalise, gateName, nameOf, waitingForCheckout } from "../../board/rowText";
+import { CHECKOUT_FREES, gateName, nameOf, USING_IT, WAITING_FOR_CHECKOUT } from "../../board/rowText";
 import { LIMIT_REACHED, CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, MARK_COMPLETE, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, BUDGET_RAN_OUT, WAITING_ON_THE_PROVIDER, REMOVE_FROM_QUEUE, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "../../item/sharedWords";
 
 /** The item screen's decisions, pure (W17 brief C): what the state card says,
@@ -138,9 +138,10 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
       };
     }
     case "queued": {
-      // As desktop's Queued card: only the checkout wait has words of its own here.
-      const wait = waitingForCheckout(item.queued);
-      return wait ? { tone: "info", title: "Queued", text: `${capitalise(wait)}. It starts when the checkout frees.`, facts: [] } : null;
+      // As desktop's Queued card: only the checkout wait has words of its own here, its holder a fact that opens it.
+      const q = item.queued;
+      if (q?.why !== "checkout") return null;
+      return { tone: "info", title: "Queued", where: WAITING_FOR_CHECKOUT, text: CHECKOUT_FREES, facts: q.held_by ? [[USING_IT, q.held_by_title ?? q.held_by, q.held_by]] : [] };
     }
     case "escalated": return { tone: "warn", title: "Escalation running", where: item.current_node_id ? `at ${nameOf(item.chain_definition.nodes, item.current_node_id)}` : undefined, text: "An agent is looking at this. It resumes the run, or comes back with a question for you.", facts: [] };
     case "paused": return item.current_node_id ? { tone: "muted", title: "Paused", where: `at ${nameOf(item.chain_definition.nodes, item.current_node_id)}`, text: "Nothing runs until you resume. Steering resumes the item with your note.", facts: [] } : null;

@@ -150,9 +150,9 @@ def waiting_for_checkout(queued: dict | None) -> str | None:
     item is using its checkout rather than a slot being busy."""
     if not queued or queued.get("why") != "checkout":
         return None
-    return (
-        f"waiting for the checkout: {_or(queued.get('held_by_title'), 'another item')} is using it"
-    )
+    title = queued.get("held_by_title")
+    holder = "another item" if title is None else f"“{title}”"
+    return f"waiting for the checkout: {holder} is using it"
 
 
 #: `rowText.ts`'s `QUEUED_VERB`: the start a queued request makes, in words.

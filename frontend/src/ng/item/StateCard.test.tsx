@@ -32,7 +32,12 @@ const show = (over: Parameters<typeof detail>[0], h = handlers()) => ({ h, ...ro
 describe("StateCard: queued", () => {
   it("says whose use of the checkout it waits on, and that it starts when the checkout frees", () => {
     show({ display_status: "queued", status: "queued", queued: { verb: "resume", since: "2026-10-10T09:00:00+00:00", storage: null, why: "checkout", held_by: "w2", held_by_title: "Cache the index" } });
-    expect(screen.getByRole("region", { name: "Queued" })).toHaveTextContent("Waiting for the checkout: Cache the index is using it. It starts when the checkout frees.");
+    const card = screen.getByRole("region", { name: "Queued" });
+    expect(card).toHaveTextContent("waiting for the checkout");
+    expect(card).toHaveTextContent("It starts when the checkout frees.");
+    // The holder is a fact linking to it, as the Blocked card's items are, not run into the sentence.
+    expect(within(card).getByRole("link", { name: "Cache the index" })).toHaveAttribute("href", "/work-items/w2");
+    expect(within(card).getByText("using it").tagName).toBe("DT");
   });
 
   it("says the worktrees are over the limit and that it starts when space frees", () => {
