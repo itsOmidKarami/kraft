@@ -11,6 +11,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -536,9 +537,19 @@ def _raise_clash(
 #: HEAD reflog subjects of an operation that may `--autostash`: a rebase's
 #: start (or a pull's, `pull --rebase … (start):`), a pull, a merge.
 _STARTS_AN_AUTOSTASH = ("rebase (start):", "rebase -i (start):", "pull", "merge")
+#: A phased entry's phase: a `pull --rebase` names every entry `pull … (pick):`
+#: and the like, and only its `(start)` started from the HEAD before it.
+_PHASE = re.compile(r"[^:]* \(([\w -]+)\):")
 
 
-def _put_back(checkout: Path, m: TaskMark, task: str) -> AutostashClash | None:
+def _head_reflog(checkout: Path) -> list[str]:
+    """HEAD's reflog in `checkout`, newest first: `<sha> HEAD@{<unix>} <subject>`."""
+    return _git_lines(checkout, "log", "-g", "--date=unix", "--format=%H %gd %gs", "HEAD")
+
+
+def _put_back(
+    checkout: Path, m: TaskMark, task: str, reflog: list[str] | None = None
+) -> AutostashClash | None:
     """What a task's own `git rebase --autostash` (the conflict resolver's,
     `prompts._RESOLVE_IN`) could not put back since its mark: git exits 0 on
     it. Its autostash is on the HEAD one of this checkout's own rebases, pulls
@@ -547,12 +558,16 @@ def _put_back(checkout: Path, m: TaskMark, task: str) -> AutostashClash | None:
     a fresh item starts at or the new base a rebase checks out.
     None mid-operation: its unmerged paths are its own, and its autostash is
     still in git's operation state, put back when the person finishes it.
-    shortcut: with no HEAD reflog only `m.tip` counts, so a clash after a
-    commit is left to the next take's refusal of its unmerged paths."""
+    shortcut: another worktree whose own rebase started from the same commit
+    as one of this checkout's during the task, and whose put-back clashed,
+    still stops this item, even when this checkout's put-back was clean: `^1`
+    cannot tell the two apart. With no HEAD reflog only `m.tip` counts, so a
+    clash after a commit is left to the next take's refusal of its unmerged
+    paths. Upgrade if either is seen in practice."""
     if _operation(checkout):
         return None
     since = int(datetime.fromisoformat(m.started_at).timestamp())
-    entries = _git_lines(checkout, "log", "-g", "--date=unix", "--format=%H %gd %gs", "HEAD")
+    entries = _head_reflog(checkout) if reflog is None else reflog
     held = set() if entries else {m.tip}
     for i, line in enumerate(entries):  # newest first
         _sha, selector, subject = line.split(" ", 2)
@@ -560,7 +575,9 @@ def _put_back(checkout: Path, m: TaskMark, task: str) -> AutostashClash | None:
         # (GIT_COMMITTER_DATE), so an older-looking entry may be newer.
         if int(selector.rsplit("{", 1)[1].rstrip("}")) < since:
             continue
-        if subject.startswith(_STARTS_AN_AUTOSTASH):  # the HEAD it started from, the older entry
+        phase = _PHASE.match(subject)
+        # The HEAD it started from: the older entry.
+        if subject.startswith(_STARTS_AN_AUTOSTASH) and (phase is None or phase[1] == "start"):
             held.add(entries[i + 1].split(" ", 1)[0] if i + 1 < len(entries) else m.tip)
     try:
         _raise_clash(checkout, "", None, since, task=task, held=held)
@@ -990,12 +1007,15 @@ _MADE_HERE = (
 )
 
 
-def check(checkout: Path, branch: str, mark: TaskMark) -> TaskCheck:
-    """After an agent task: never a repair, only what a stop needs to say."""
+def check(
+    checkout: Path, branch: str, mark: TaskMark, reflog: list[str] | None = None
+) -> TaskCheck:
+    """After an agent task: never a repair, only what a stop needs to say.
+    `reflog`: `_head_reflog`, when the caller already read it."""
     head = git_read(checkout, "symbolic-ref", "--quiet", "HEAD", expected_failure=True)
     since = datetime.fromisoformat(mark.started_at).timestamp()
     entries = []
-    for entry in _git_lines(checkout, "log", "-g", "--date=unix", "--format=%H %gd %gs", "HEAD"):
+    for entry in _head_reflog(checkout) if reflog is None else reflog:
         sha, selector, subject = entry.split(" ", 2)
         if int(selector.rsplit("{", 1)[1].rstrip("}")) >= since:
             entries.append((sha, subject))
@@ -1127,8 +1147,9 @@ async def check_task(
     stray: list[str] = []
     clash: AutostashClash | None = None
     try:
-        found = await asyncio.to_thread(check, folder, branch, m)
-        clash = await asyncio.to_thread(_put_back, folder, m, task_path)
+        reflog = await asyncio.to_thread(_head_reflog, folder)
+        found = await asyncio.to_thread(check, folder, branch, m, reflog)
+        clash = await asyncio.to_thread(_put_back, folder, m, task_path, reflog)
     except CheckoutRefused as exc:
         reason = str(exc)
     else:

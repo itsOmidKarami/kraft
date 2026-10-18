@@ -503,6 +503,7 @@ _EDITED = "which you had edited"
         ("main.txt", None, "elsewhere-at-the-new-base", None),
         ("main.txt", None, "elsewhere-at-the-tip", None),
         ("main.txt", None, "rebase-twice", ["f"]),
+        ("main.txt", None, "elsewhere-after-a-pull", None),
     ],
     ids=[
         "resolved",
@@ -516,6 +517,7 @@ _EDITED = "which you had edited"
         "another-worktrees-autostash-at-the-new-base",
         "another-worktree-at-the-tip",
         "rebased-twice",
+        "pulled-then-another-at-the-new-base",
     ],
 )
 async def test_an_agents_autostash_rebase_is_checked_after_its_task(
@@ -558,7 +560,10 @@ async def test_an_agents_autostash_rebase_is_checked_after_its_task(
     onto = git(repo, "rev-parse", "refs/remotes/origin/main")
     rebases = then != "elsewhere-at-the-tip"
     if rebases:
-        done = subprocess.run(["git", "rebase", "--autostash", onto], cwd=repo)
+        # A pull's every reflog entry is named `pull …`: only its `(start)` started it.
+        pull = ["pull", "-q", "--rebase", "--autostash", "origin", "main"]
+        how = pull if then == "elsewhere-after-a-pull" else ["rebase", "--autostash", onto]
+        done = subprocess.run(["git", *how], cwd=repo)
         if main_writes == "item.txt":  # the conflict
             assert done.returncode != 0
     else:  # an ordinary task: no rebase here at all
@@ -578,7 +583,7 @@ async def test_an_agents_autostash_rebase_is_checked_after_its_task(
         theirs = tmp_path / "theirs"
         # Behind, at the local main; at the new base this checkout's rebase checked
         # out; or at the very tip this task found.
-        at = {"elsewhere": "main", "elsewhere-at-the-new-base": onto}.get(then, tip)
+        at = {"elsewhere": "main", "elsewhere-at-the-tip": tip}.get(then, onto)
         git(repo, "worktree", "add", "-q", "-b", "theirs", str(theirs), at)
         if then != "elsewhere":
             upstream_again("g")
