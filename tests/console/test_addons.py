@@ -30,8 +30,11 @@ GOOD = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}
 
 
 def _asking(app) -> bool:
-    """A Confirm on top and mounted: pushed is not mounted, and these tests read its widgets."""
-    return isinstance(app.screen, Confirm) and bool(app.screen.query("#question"))
+    """A Confirm done mounting: `#listing`, in a nested scroll, can mount after
+    `#question`, and Back focused (the keys pressed start there) ends `on_mount`."""
+    d = app.screen
+    ready = all(d.query(w) for w in ("#question", "#listing", "#yes"))
+    return isinstance(d, Confirm) and ready and getattr(d.focused, "id", None) == "no"
 
 
 def _never(what: str):
