@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { DisplayStatus, WorkItem } from "../../types";
@@ -41,6 +42,16 @@ describe("Row", () => {
   // board.css clamps a narrow row's tail to 3 lines: the words themselves stay whole, in the DOM and in its title.
   const LONG_PATH = "/Volumes/Work/clients/acme-corporation/monorepo/services/kraft-plugins-with-a-long-checkout-path";
   const LONG_STOP = `the checkout moved to main during the run of verification.review.code_review in ${LONG_PATH}`;
+  it.each([
+    ["the narrow desktop row's", "src/ng/board/board.css", ".board-tail-text"],
+    ["the phone card's", "src/ng/phone/board/board.css", ".ph-card-tail"],
+  ])("clamps %s tail to 3 lines in CSS, wrapping a long folder rather than cutting it", (_, file, selector) => {
+    const css = readFileSync(file, "utf-8");
+    const rules = [...css.matchAll(new RegExp(`^\\s*${selector.replace(".", "\\.")} \\{([^}]*)\\}`, "gm"))].map((m) => m[1]);
+    const clamp = rules.find((r) => r.includes("-webkit-line-clamp: 3"));
+    expect(clamp).toContain("overflow-wrap: anywhere");
+  });
+
   it.each<[string, DisplayStatus, Partial<WorkItem>, string]>([
     ["queue line", "queued", { queued: { verb: "resume", since: "2026-09-13T09:00:00Z", why: "checkout", held_by: "w2", held_by_title: "Cache the index" } }, "waiting for the checkout: “Cache the index” is using it"],
     ["long checkout stop", "needs_you", { stop: { kind: "checkout", node: "verification", resume_at: null, reason: `${LONG_STOP}. Kraft did not switch it back` } as WorkItem["stop"] }, LONG_STOP],
@@ -64,6 +75,8 @@ describe("Row", () => {
     ["slot wait", "queued", { queued: { verb: "resume", since: "2026-09-13T09:00:00Z" } }, false],
     // A checkout stop whose first sentence never says "the checkout" keeps the marker: nothing else on the row says in place.
     ["checkout stop naming only the folder", "needs_you", { stop: { kind: "checkout", node: "build", reason: "/src/kraft-checkout has unmerged paths: a.py; resolve them yourself, then retry the item", resume_at: null } as WorkItem["stop"] }, false],
+    // Says "the checkout" only after its folder, which a 3-line clamp may hide whole: the marker stays.
+    ["checkout stop leading with the folder", "needs_you", { stop: { kind: "checkout", node: "build", reason: "/Volumes/Work/kraft-plugins, the checkout this item runs in, is gone: put it back, or abandon the item", resume_at: null } as WorkItem["stop"] }, false],
     ["checkout stop with a raw log reason", "needs_you", { stop: { kind: "checkout", node: "build", reason: "fatal: not a git repository (or any of the parent directories): .git", resume_at: null } as WorkItem["stop"] }, false],
     ["checkout stop with no reason", "needs_you", { stop: { kind: "checkout", node: "build", reason: null, resume_at: null } as WorkItem["stop"] }, false],
   ])("lets a narrow %s row drop its in-place marker only when the tail says the checkout", (_n, status, over, said) => {

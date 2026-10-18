@@ -240,13 +240,19 @@ _RESOLVE_IN = {
     True: (
         ". This is a person's own checkout: it may hold their uncommitted "
         "edits, which you must neither commit nor discard.",
-        "Re-run the rebase with `git rebase --autostash {new_base}`: git sets "
-        "their edits aside for the rebase and puts them back when it ends. That "
-        "is the one exception to the rule against `git stash`; never stash, pop "
-        "or drop anything yourself. Resolve the conflict by editing the "
-        "conflicted files and `git add`-ing them by literal path, then finish it "
-        "(`git rebase --continue`). If you cannot resolve it, `git rebase "
-        "--abort` puts their edits back too.",
+        "Re-run the rebase with `git -c rebase.updateRefs=false rebase "
+        "--autostash {new_base}`: git sets their edits aside for the rebase and "
+        "puts them back when it ends. That is the one exception to the rule "
+        "against `git stash`; never stash, pop or drop anything yourself. "
+        "Resolve the conflict by editing the conflicted files and `git add`-ing "
+        "them by literal path, then finish it (`git rebase --continue`). If you "
+        "cannot resolve it, `git rebase --abort` puts their edits back too. If "
+        "git then says applying the autostash resulted in conflicts, the rebase "
+        "is done and the conflict markers in those files are the person's to "
+        "resolve: leave those files and the stash alone, and report "
+        "`done_with_concerns` naming them. If git refuses to start because an "
+        "untracked file of theirs would be overwritten, do not move or remove "
+        "it: report `failed`.",
     ),
 }
 

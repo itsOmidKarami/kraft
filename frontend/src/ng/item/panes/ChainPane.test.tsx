@@ -56,7 +56,9 @@ describe("ChainOverview", () => {
 
   it("names an in-place item's checkout in words a tap can read, and a worktree item's not at all", () => {
     const { unmount } = render(<ChainOverview item={detail({ in_place: true, worktree_path: "/src/app" })} events={[]} now={NOW} onSelect={() => {}} />);
-    expect(screen.getByText("checkout").nextElementSibling).toHaveTextContent(/^\/src\/app$/);
+    const path = screen.getByText("checkout").nextElementSibling!;
+    expect(path).toHaveTextContent(/^\/src\/app$/);
+    expect(path.querySelectorAll("wbr"), "it breaks after a slash, not mid-folder").toHaveLength(2);
     unmount();
     render(<ChainOverview item={detail({ in_place: false })} events={[]} now={NOW} onSelect={() => {}} />);
     expect(screen.queryByText("checkout")).toBeNull();

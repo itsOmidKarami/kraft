@@ -39,9 +39,9 @@ export const capitalise = (s: string) => s.replace(/^./, (c) => c.toUpperCase())
 export const allDone = (p: Pick<TaskProgress, "tasks">) => !!p.tasks?.length && p.tasks.every((t) => t.state === "done");
 
 export const WAITING_FOR_CHECKOUT = "waiting for the checkout";
-/** The Queued card's words for a checkout wait, desktop and phone: the holder is its `USING_IT` fact. */
+/** The Queued card's words for a checkout wait, desktop and phone: the holder is its `IN_USE_BY` fact. */
 export const CHECKOUT_FREES = "It starts when the checkout frees.";
-export const USING_IT = "in use by";
+export const IN_USE_BY = "in use by";
 /** Why a queued item waits, when it is another in-place item's use of its checkout rather than a slot.
  *  The holder's title is quoted: in a line, where a long one ends is otherwise unclear. */
 export const waitingForCheckout = (q?: { why?: unknown; held_by_title?: unknown } | null) =>

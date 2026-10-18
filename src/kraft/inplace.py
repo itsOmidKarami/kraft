@@ -382,6 +382,24 @@ async def rebase_in_checkout(checkout: Path, branch: str, head: str, base: str, 
     )
 
 
+def refuse_ignored(checkout: Path, tip: str, onto: str, base: str) -> None:
+    """Refuse a rebase of `tip` onto `onto` in `checkout` that would replace
+    an ignored file, which git does without a word: whatever checking `onto`
+    out writes, and whatever replaying `tip`'s commits on it does. Kraft's own
+    rebase, and the conflict resolver's before it is dispatched."""
+    incoming = _git_lines(checkout, "diff", "--name-only", "--no-renames", tip, onto)
+    incoming += _git_lines(
+        checkout, "log", "--name-only", "--no-renames", "--format=", f"{onto}..{tip}"
+    )
+    ignored = _ignored_in_the_way(checkout, sorted(set(incoming)))
+    if ignored:
+        raise CheckoutRefused(
+            f"rebasing {checkout} onto the newer {base} would overwrite {', '.join(ignored)}, "
+            f"ignored here but tracked on {base}. Move them aside yourself, then retry the item",
+            ignored,
+        )
+
+
 def _rebase_in_checkout(checkout: Path, branch: str, head: str, base: str, env) -> None:
     from kraft import builtins
 
@@ -398,19 +416,7 @@ def _rebase_in_checkout(checkout: Path, branch: str, head: str, base: str, env) 
             start_new_session=True,
         )
 
-    # git replaces an ignored file without a word: whatever checking `head`
-    # out writes, and whatever replaying the branch's commits on it does.
-    incoming = _git_lines(checkout, "diff", "--name-only", "--no-renames", "HEAD", head)
-    incoming += _git_lines(
-        checkout, "log", "--name-only", "--no-renames", "--format=", f"{head}..HEAD"
-    )
-    ignored = _ignored_in_the_way(checkout, sorted(set(incoming)))
-    if ignored:
-        raise CheckoutRefused(
-            f"rebasing {checkout} onto the newer {base} would overwrite {', '.join(ignored)}, "
-            f"ignored here but tracked on {base}. Move them aside yourself, then retry the item",
-            ignored,
-        )
+    refuse_ignored(checkout, "HEAD", head, base)
     # The person may have switched since the lock was taken: never rebase
     # their branch. `updateRefs` off: no other branch of theirs moves along.
     if not _on(checkout, branch):
@@ -462,11 +468,15 @@ def _stash(checkout: Path) -> str | None:
     )
 
 
-def _autostash(checkout: Path, before: str | None, since: int) -> str | None:
+def _autostash(
+    checkout: Path, before: str | None, since: int, held: set[str] | None = None
+) -> str | None:
     """The autostash this rebase left in the stash: the newest entry since
     `before` (and since `since`, the rebase's start) whose reflog subject is
     git's own `autostash`. The stash is shared by every worktree of the
-    repository: another's entry, pushed meanwhile, is never it."""
+    repository: another's entry, pushed meanwhile, is never it. `held`, when
+    no `before` is known: the commits this checkout's HEAD held, one of which
+    an autostash made here is on."""
     if _stash(checkout) is None:
         return None
     for line in _git_lines(
@@ -475,7 +485,9 @@ def _autostash(checkout: Path, before: str | None, since: int) -> str | None:
         sha, selector, subject = line.split(" ", 2)
         if sha == before or int(selector.rsplit("{", 1)[1].rstrip("}")) < since:
             return None
-        if subject == "autostash":
+        if subject == "autostash" and (
+            held is None or git_read(checkout, "rev-parse", f"{sha}^1") in held
+        ):
             return sha
     return None
 
@@ -488,6 +500,7 @@ def _raise_clash(
     *,
     conflict: str | None = None,
     task: str | None = None,
+    held: set[str] | None = None,
 ) -> None:
     """The autostash git could not put back: a clash leaves unmerged paths,
     but a put-back git refused outright (a hook or an editor wrote one of
@@ -495,10 +508,11 @@ def _raise_clash(
     entry says the person's edits are not in the checkout. `conflict`: the
     rebase was undone after one, which the person still needs to hear of.
     `task`: the rebase was that agent task's (the conflict resolver's), not
-    Kraft's own onto `base`."""
+    Kraft's own onto `base`, and only its own autostash (`held`) says so:
+    unmerged paths alone may be anyone's, and the next take refuses them."""
     unmerged = _git_lines(checkout, "diff", "--name-only", "--diff-filter=U")
-    stash = _autostash(checkout, before, since)
-    if not unmerged and stash is None:
+    stash = _autostash(checkout, before, since, held)
+    if stash is None and (task or not unmerged):
         return
     kept = f"as {stash}" if stash else "(`git stash list`)"
     undone = f" hit a conflict and was undone (git said: {conflict}), and" if conflict else ""
@@ -519,15 +533,23 @@ def _raise_clash(
     raise AutostashClash(message, unmerged, stash)
 
 
-def _put_back(checkout: Path, since: int, task: str) -> AutostashClash | None:
+def _put_back(checkout: Path, m: TaskMark, task: str) -> AutostashClash | None:
     """What a task's own `git rebase --autostash` (the conflict resolver's,
-    `prompts._RESOLVE_IN`) could not put back since `since`: git exits 0 on it.
+    `prompts._RESOLVE_IN`) could not put back since its mark: git exits 0 on
+    it. Its autostash is on a commit this checkout's HEAD held during the task
+    (HEAD's reflog is this worktree's own), never another worktree's.
     None mid-operation: its unmerged paths are its own, and its autostash is
     still in git's operation state, put back when the person finishes it."""
     if _operation(checkout):
         return None
+    since = int(datetime.fromisoformat(m.started_at).timestamp())
+    held = {m.tip}
+    for line in _git_lines(checkout, "log", "-g", "--date=unix", "--format=%H %gd", "HEAD"):
+        sha, selector = line.split(" ", 1)
+        if int(selector.rsplit("{", 1)[1].rstrip("}")) >= since:
+            held.add(sha)
     try:
-        _raise_clash(checkout, "", None, since, task=task)
+        _raise_clash(checkout, "", None, since, task=task, held=held)
     except AutostashClash as exc:
         return exc
     return None
@@ -617,9 +639,15 @@ def _operation(folder: Path) -> bool:
 
 
 def _under_way(folder: Path, when: str = "") -> CheckoutRefused:
+    held = (
+        "; your uncommitted edits are held by its autostash and come back when it "
+        "finishes or is aborted"
+        if _rebase_file(folder, "autostash") is not None
+        else ""
+    )
     return CheckoutRefused(
         f"{folder} has a git operation in progress (a rebase, merge, cherry-pick, "
-        f"revert or bisect){when}: finish or abort it yourself, then retry the item"
+        f"revert or bisect){when}: finish or abort it yourself, then retry the item{held}"
     )
 
 
@@ -1084,10 +1112,9 @@ async def check_task(
     branch = store.branch_for(row)
     stray: list[str] = []
     clash: AutostashClash | None = None
-    since = int(datetime.fromisoformat(m.started_at).timestamp())
     try:
         found = await asyncio.to_thread(check, folder, branch, m)
-        clash = await asyncio.to_thread(_put_back, folder, since, task_path)
+        clash = await asyncio.to_thread(_put_back, folder, m, task_path)
     except CheckoutRefused as exc:
         reason = str(exc)
     else:
@@ -1121,8 +1148,15 @@ async def check_task(
                 "belongs, then retry the item"
             )
         if clash is not None:
-            # Its paths overlap because the put-back merged upstream into them, not a commit.
             reasons.append(str(clash))
+        if clash is not None and found.overlap:
+            # The put-back merged upstream into them, or a commit took them: either may hold
+            # the person's edits, so the overlap is said, in words that blame no commit.
+            reasons.append(
+                f"the branch now changes {', '.join(found.overlap)}, which you had edited "
+                "before the task started; check that no commit holds your edits, "
+                "then retry the item"
+            )
         elif found.overlap:
             reasons.append(
                 f"the agent committed {', '.join(found.overlap)}, which already had uncommitted "

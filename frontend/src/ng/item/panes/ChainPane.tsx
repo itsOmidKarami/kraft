@@ -18,6 +18,7 @@ import { notStarted } from "../chainValues";
 import { ItemAgentRows } from "./ItemOverrides";
 import { limitPolicy } from "../limitPolicy";
 import { tip } from "../../ui/Tooltip";
+import { breakable } from "../../phone/ui/breakable";
 import { BUDGET_IN_DOLLARS } from "../sharedWords";
 import { LinkButton } from "../../ui/LinkButton";
 
@@ -75,7 +76,7 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore
         )}
         {cap && <div><dt>spent</dt><dd>{spentLine(item)}</dd></div>}
         {/* The header chip's path is a hover tip, which a tap closes: here touch reads it too. */}
-        {item.in_place && <div><dt>checkout</dt><dd className="is-mono">{item.worktree_path ?? item.repo}</dd></div>}
+        {item.in_place && <div><dt>checkout</dt><dd className="is-mono">{breakable(item.worktree_path ?? item.repo)}</dd></div>}
         {/* Off the item page (the board's peek), which chain and repo: the page's crumb says them there. */}
         {where && <div><dt>chain</dt><dd>{chainName(item)} · frozen at intake</dd></div>}
         {where && <div><dt>repo</dt><dd>{repoName(item.repo)}</dd></div>}

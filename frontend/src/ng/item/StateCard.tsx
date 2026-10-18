@@ -9,7 +9,7 @@ import type { ChainNode, DiffFile, KraftEvent, WorkerSession } from "../../types
 import { Ban, ChevronDown, ChevronRight, CircleCheck, CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
-import { CHECKOUT_FREES, nameOf, USING_IT, WAITING_FOR_CHECKOUT } from "../board/rowText";
+import { CHECKOUT_FREES, IN_USE_BY, nameOf, WAITING_FOR_CHECKOUT } from "../board/rowText";
 import { admits, neverStarted, RELEASED, spentLine } from "./status";
 import { actionPath, taskName } from "./paths";
 import { pathSel, placeUrl } from "./url";
@@ -239,7 +239,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
     return {
       tone: "info", glyph: <Clock size={14} aria-hidden />, title: "Queued", where: WAITING_FOR_CHECKOUT,
       text: CHECKOUT_FREES,
-      facts: held.held_by ? [[USING_IT, <Link className={linkButtonClass()} to={`/work-items/${encodeURIComponent(held.held_by)}`}>{held.held_by_title ?? held.held_by}</Link>]] : [],
+      facts: held.held_by ? [[IN_USE_BY, <Link className={linkButtonClass()} to={`/work-items/${encodeURIComponent(held.held_by)}`}>{held.held_by_title ?? held.held_by}</Link>]] : [],
       actions: [],
     };
   }

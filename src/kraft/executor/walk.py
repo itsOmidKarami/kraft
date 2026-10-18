@@ -767,9 +767,8 @@ async def _resolve_conflict(
     before_conflicted = _conflicted_paths(worktree)
     old_base = dispatch._current_base_ref(db, work_item_id)
     try:
-        new_base = await _builtins.upstream_head(
-            Path(row["repo"]), await _builtins.base_branch(db, work_item_id, Path(row["repo"]))
-        )
+        base = await _builtins.base_branch(db, work_item_id, Path(row["repo"]))
+        new_base = await _builtins.upstream_head(Path(row["repo"]), base)
     except _builtins.BaseBranchMissing as exc:
         # No base to resolve onto: a person has to say where this item goes.
         reason = f"the conflict in node {node.id} cannot be resolved: {exc}"
@@ -777,6 +776,16 @@ async def _resolve_conflict(
             lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=StopKind.CONFIG)
         )
         return "needs_human"
+    if store.is_in_place(row) and new_base is not None:
+        # The resolver's own `git rebase` in the person's checkout skips the
+        # guard Kraft's rebase has: refused before it is dispatched.
+        try:
+            inplace.refuse_ignored(
+                Path(worktree), f"refs/heads/{store.branch_for(row)}", new_base, base
+            )
+        except inplace.CheckoutRefused as exc:
+            await inplace.stop_refused(db, work_item_id, node.id, exc)
+            return "needs_human"
     note = prompts.rebase_resolve_note(
         worktree,
         store.branch_for(row),
