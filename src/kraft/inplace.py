@@ -914,25 +914,25 @@ def mark(
 #: Reflog subjects of a commit made in the checkout, not merged or replayed
 #: into it (a merge's result is the tree diff's, a rebase's replays were made
 #: before the task).
-_MADE_HERE = ("commit:", "commit (amend):", "revert:", "cherry-pick:")
+_MADE_HERE = (
+    *("commit:", "commit (amend):", "commit (cherry-pick):"),
+    *("revert:", "cherry-pick:", "am:"),
+)
 
 
 def check(checkout: Path, branch: str, mark: TaskMark) -> TaskCheck:
     """After an agent task: never a repair, only what a stop needs to say."""
     head = git_read(checkout, "symbolic-ref", "--quiet", "HEAD", expected_failure=True)
     since = datetime.fromisoformat(mark.started_at).timestamp()
-    entries, before = [], None
+    entries = []
     for entry in _git_lines(checkout, "log", "-g", "--date=unix", "--format=%H %gd %gs", "HEAD"):
         sha, selector, subject = entry.split(" ", 2)
         if int(selector.rsplit("{", 1)[1].rstrip("}")) >= since:
             entries.append((sha, subject))
-            before = None
-        elif before is None:
-            before = sha  # where HEAD stood before the oldest entry so far
     # Oldest first, following which branch HEAD was on (the take left it on
     # the item's): only what HEAD reached while it was elsewhere is stray, so
     # an amend, reset or rebase on the item's branch never is.
-    on, made, ours, prev = branch, [], [], before
+    on, made, ours = branch, [], []
     for sha, subject in reversed(entries):
         if subject.startswith("checkout: moving from "):
             on = subject.rsplit(" to ", 1)[1]
@@ -941,8 +941,7 @@ def check(checkout: Path, branch: str, mark: TaskMark) -> TaskCheck:
         elif on != branch and sha not in made:
             made.append(sha)
         elif on == branch and subject.startswith(_MADE_HERE):
-            ours.append((prev, sha))
-        prev = sha
+            ours.append(sha)
     made.reverse()  # newest first, as named
     operation = _operation(checkout)
     # An operation begun on the item's branch (a rebase detaches HEAD, a merge
@@ -962,19 +961,18 @@ def check(checkout: Path, branch: str, mark: TaskMark) -> TaskCheck:
         else set()
     )
     # Every path the branch's tree gained since the mark, whatever the merge
-    # shape (a merged side branch's files count), plus every path a commit
-    # made here on the branch changed, so one a later commit or a reset undid
-    # still counts. Never main's commits or a rebase's replays: those are not
-    # made here. Git merges or rebases nothing over a dirty path, so an
-    # upstream change lands on one of the person's only if their edit was set
-    # aside (a stash) during the task, which is worth a look too.
-    tip = f"refs/heads/{branch}"
-    touched = _git_lines(checkout, "diff", "--name-only", "--no-renames", mark.tip, tip)
-    for was, sha in ours:
-        # Against where HEAD stood before it, so an amend counts only its change.
-        since_was = ("diff", "--name-only", "--no-renames", was, sha) if was else None
-        whole = ("diff-tree", "-r", "--root", "--name-only", "--no-renames", "--no-commit-id", sha)
-        touched += _git_lines(checkout, *(since_was or whole))
+    # shape (a merged side branch's files count), and every path a commit made
+    # here on the branch records unlike the mark, so one a later commit or a
+    # reset undid still counts. Each against the mark, never its parent: a
+    # reworded amend, a squash or a replay committed by hand only carries the
+    # item's earlier work, and a commit from before the mark (the reflog has
+    # whole seconds) is already in it. Never main's commits or a rebase's
+    # replays: those are not made here. Git merges or rebases nothing over a
+    # dirty path, so an upstream change lands on one of the person's only if
+    # their edit was set aside (a stash) during the task, worth a look too.
+    touched: list[str] = []
+    for sha in [f"refs/heads/{branch}", *ours]:
+        touched += _git_lines(checkout, "diff", "--name-only", "--no-renames", mark.tip, sha)
     # Mid-operation, the dirty paths are the operation's, not the task's.
     new = [] if operation else [p for p in _dirty(checkout) if p not in mark.dirty]
     return TaskCheck(

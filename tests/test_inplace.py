@@ -613,6 +613,16 @@ def _main_drifts_the_items_context(repo) -> None:
     commit_all(repo, "main edits near the item's hunk")
 
 
+def _main_clashes_with_the_items_hunk(repo) -> None:
+    write(repo, "q.txt", _Q.replace("5\n", "5 main\n"))
+    commit_all(repo, "main edits the item's line")
+
+
+#: A step git stops part way, for the next steps to finish.
+_STOPS = "stops"
+_TAKE_THEIRS = ("checkout", "--theirs", "--", "q.txt")
+
+
 #: What main does before the mark, what the task does after it, and whether
 #: the task committed the person's calc.py.
 _TASK_WORK = {
@@ -636,6 +646,34 @@ _TASK_WORK = {
     # The amended commit touched calc.py before the task; the amend did not.
     "amend-the-message": (None, [("commit", "-q", "--amend", "-m", "reworded")], False),
     "commit-then-reset-hard": (None, [_COMMIT_CALC, ("reset", "-q", "--hard", "HEAD~1")], True),
+    # The replay of the item's earlier commit, committed by hand: it carries
+    # calc.py from before the mark, and the autostash puts the edit back.
+    "rebase-conflict-committed": (
+        _main_clashes_with_the_items_hunk,
+        [
+            (_STOPS, *_REBASE_MAIN),
+            _TAKE_THEIRS,
+            ("add", "q.txt"),
+            ("commit", "-q", "-m", "an earlier task"),
+            ("-c", "core.editor=true", "rebase", "--continue"),
+        ],
+        False,
+    ),
+    "squash-whole-branch": (
+        None,
+        [("reset", "--soft", "main~1"), ("commit", "-q", "-m", "all")],
+        False,
+    ),
+    "cherry-pick-committed-then-reset-hard": (
+        _main_clashes_with_the_items_hunk,
+        [
+            (_STOPS, "cherry-pick", "main"),
+            _TAKE_THEIRS,
+            ("commit", "-q", "-a", "-m", "picked"),
+            ("reset", "-q", "--hard", "HEAD~1"),
+        ],
+        True,
+    ),
 }
 
 
@@ -661,7 +699,11 @@ def test_check_overlap_is_every_path_the_branch_gained_whatever_its_shape(repo, 
     m = inplace.mark(repo, branch, {})
 
     for args in task_does:  # at the real time: `check` reads the reflog
-        _git_now(repo, *args)
+        if args[0] == _STOPS:
+            with pytest.raises(subprocess.CalledProcessError):
+                _git_now(repo, *args[1:])
+        else:
+            _git_now(repo, *args)
 
     assert m.dirty == {"calc.py"}
     assert inplace.check(repo, branch, m).overlap == (["calc.py"] if overlap else [])
