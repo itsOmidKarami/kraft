@@ -5,9 +5,13 @@
 [![Latest release](https://img.shields.io/github/v/release/itsOmidKarami/kraft)](https://github.com/itsOmidKarami/kraft/releases)
 [![License](https://img.shields.io/github/license/itsOmidKarami/kraft)](https://github.com/itsOmidKarami/kraft/blob/main/LICENSE)
 [![Docs](https://img.shields.io/badge/docs-kraft--sdlc.dev-blue)](https://kraft-sdlc.dev/)
+[![Live demo](https://img.shields.io/badge/demo-try_it_in_your_browser-brightgreen)](https://kraft-sdlc.dev/demo/)
 
 **A local orchestrator that takes your coding agent from spec to pull request,
 stopping only when a decision is yours.**
+
+**[Try the live demo](https://kraft-sdlc.dev/demo/)**: the web UI on sample
+data, in your browser, with nothing to install.
 
 Kraft isn't another coding agent. It runs the one you already use, and adds
 what a single session can't: a process the agent can't skip, checks it doesn't
@@ -24,17 +28,15 @@ Cursor, Antigravity, OpenCode, Amp or Gemini CLI too. The shipped chains run
 their agent steps on Claude Code, and any step can
 [switch to another agent](https://kraft-sdlc.dev/guides/switch-harness).
 
-**New in 2.0:** a redesigned web interface built around what needs you, a
-review page that works like a code host's, and a `kraft repo connect` that
-reads a repo's task runner, toolchain and CI, explains each command it
-proposes, and rehearses them with `--verify`.
-[What's new in 2.0](https://kraft-sdlc.dev/next/get-started/whats-new)
-has the rest, and what to check before you upgrade from 1.4.
+**New in 2.1:** [add-ons](https://kraft-sdlc.dev/guides/customize/share-chains-with-addons)
+that share chains, skills and agent profiles from a git repository,
+`kraft console`, a terminal UI for the board, and in-place items that run in
+the repo's own checkout instead of a worktree. The
+[2.1.0 release notes](https://github.com/itsOmidKarami/kraft/releases/tag/v2.1.0)
+have the rest. Coming from 1.4? [What's new in 2.0](https://kraft-sdlc.dev/project/whats-new)
+says what to check before you upgrade.
 
-Want to look around first? [Try the dashboard demo](https://kraft-sdlc.dev/next/demo/):
-the web UI on sample data, in your browser, with nothing to install.
-
-![The Kraft board in the dark graphite look: filters for chain, gate and stop reason above work items grouped by Needs you (a paused item with Resume, a failed one with Retry, and two waiting at a gate, each with its one button), Running and Not started, the unstarted items marked created paused, with a Select all link on every group and a ? shortcuts button in the toolbar](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)
+[![The Kraft board in the dark graphite look: filters for chain, gate and stop reason above work items grouped by Needs you (a paused item with Resume, a failed one with Retry, and two waiting at a gate, each with its one button), Running and Not started, the unstarted items marked created paused, with a Select all link on every group and a ? shortcuts button in the toolbar](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)](https://kraft-sdlc.dev/demo/)
 
 - **Gates where a human decides.** Kraft pauses at a spec, a plan, or a merge
   request for your approval; request changes with a note and the node that wrote it
