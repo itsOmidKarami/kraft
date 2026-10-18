@@ -5,7 +5,7 @@ navigation:
 description: Do the daily work of filing, reviewing and unsticking work items.
 ---
 
-_Added in next_
+_Added in 2.1_
 
 Each guide takes one task from start to finish.
 

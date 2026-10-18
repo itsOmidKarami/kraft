@@ -37,7 +37,7 @@ The keys depend on `kind`. A key a `kind` refuses stops `repos.yaml` from loadin
 Set the key in `repos.yaml` or in `policy.sandbox`, not both. It is part of the repository policy layer: once it is set, no chain, node or task can turn it off or change it, limits and network policy included, and `sandbox: false` on a repo cannot turn off one a layer set.
 
 ## In-place items are never sandboxed
-_Added in next_
+_Added in 2.1_
 
 An [in-place item](/guides/run/run-items-in-place) runs in the repo's own checkout, so its agents' files land in the folder you work in, unsandboxed, as you. Kraft refuses the combination rather than dropping either side:
 

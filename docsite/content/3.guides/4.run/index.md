@@ -5,7 +5,7 @@ navigation:
 description: Reach, back up, upgrade and run the Kraft server.
 ---
 
-_Added in next_
+_Added in 2.1_
 
 Each guide takes one task from start to finish.
 

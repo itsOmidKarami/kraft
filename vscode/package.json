@@ -2,7 +2,7 @@
   "name": "kraft",
   "displayName": "Kraft",
   "description": "Approve gates, review diffs and edit config for Kraft, the local orchestrator for your coding agent, without leaving VS Code.",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "publisher": "kraft-sdlc",
   "license": "Apache-2.0",
   "icon": "media/kraft.png",
@@ -192,7 +192,7 @@
       },
       {
         "command": "kraft.search",
-        "title": "Search…",
+        "title": "Search\u2026",
         "category": "Kraft"
       },
       {
@@ -402,7 +402,7 @@
     "viewsWelcome": [
       {
         "view": "kraft.board",
-        "contents": "No Kraft work in this repo.\n[File Work Item…](command:kraft.fileWork)\n[Show all repos](command:kraft.toggleAllRepos)",
+        "contents": "No Kraft work in this repo.\n[File Work Item\u2026](command:kraft.fileWork)\n[Show all repos](command:kraft.toggleAllRepos)",
         "when": "kraft.welcome == here && !kraft.readOnly"
       },
       {
@@ -412,7 +412,7 @@
       },
       {
         "view": "kraft.board",
-        "contents": "No Kraft work yet, in any repo.\n[File Work Item…](command:kraft.fileWork)",
+        "contents": "No Kraft work yet, in any repo.\n[File Work Item\u2026](command:kraft.fileWork)",
         "when": "kraft.welcome == all && !kraft.readOnly"
       },
       {

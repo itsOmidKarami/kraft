@@ -5,7 +5,7 @@ navigation:
 description: Choose which agent CLI runs a task, and give it what it needs to run headless.
 ---
 
-_Added in next_
+_Added in 2.1_
 
 Each guide takes one task from start to finish.
 

@@ -5,6 +5,209 @@ section from the `## Changelog` part of the pull requests it ships; do not
 edit this file by hand. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## 2.1.0
+
+### Highlights
+
+- Add-ons and collections: share chains, library components, skills and agent profiles as an add-on in a git collection. `kraft admin addon` adds collections and installs, updates and removes add-ons; each is pinned to a commit, reviewed before every update, read-only in the Templates screens, and can update itself when the change cannot widen what a run reaches. See the new guide, Share chains with add-ons. A connected repo can share its own the same way, from `.kraft/` on its default branch: `kraft repo library` reviews and takes it. (#700)
+
+- `kraft console`: a terminal UI for Kraft. The board, an item's document, history, log and diff, the server, repos and add-ons, in the web UI's words; every `kraft` verb also runs from its prompt. (#904)
+
+- **In-place items.** A repo, or a single work item, can now run in the repo's own checkout instead of a per-item git worktree: `worktrees: false` in `repos.yaml`, `kraft repo connect --in-place`, or `kraft item create --in-place` / `--worktree`. Kraft runs one in-place item per checkout at a time, never forces, sweeps or deletes anything in it, and stops the item with a new `checkout` stop when something in the checkout needs you. (#953)
+
+### New
+
+- Feature: a start request (resume, retry, raise-budget, or create with autostart) made while every `max_concurrent` slot is busy now queues the work item with the new `queued` status and starts it, oldest first, when a slot frees, instead of answering 409. (#651)
+
+- New: `kraft item create --after ID` makes a work item wait for other items. Started before they complete, it is `blocked`, and Kraft starts it once they have all completed; `kraft item unblock` drops the wait. (#653)
+
+- A fix-loop step that runs several tasks in parallel can be selected on the node canvas: it has its own panel listing its tasks, and a link to it opens it. (#659)
+
+- A blocked item now lists the items it is waiting on, on its page, in the board's side panel and on the phone, with **Unblock** to stop it waiting. The full new-item page can choose what a new item comes after. (#669)
+
+- On the review page, ticking **Viewed** folds the file, arrows on each block of changes show the unchanged lines around it so you can comment on them, and the file tree shows each file's kind. (#671)
+
+- On a phone, a node with a fix loop shows each of its rounds, the loop's repair and judge open like any task, a task's attempts are counted inside the round, and a test task lists the scopes it ran. (#682)
+
+- On a phone, a test scope opens on its own screen, with its command, the paths that select it, how the other rounds treated it, and its log. (#683)
+
+- A gate rejection gives the nodes it re-runs their fix-loop rounds back. Each time the chain runs a node again (after a rejection, a retry or a base change) is a pass: the desktop and the phone let you pick an earlier pass and read its rounds, tasks, logs and test scopes. (#688)
+
+- Policy: `storage.worktrees.limit` and `quota` bound the disk worktrees use. Over the quota Kraft warns; over the limit it holds starts that would create a new worktree until space is freed, and says why in the queued answer, `/health`, doctor and a `work_item_storage_held` notification. (#701)
+
+- Add `kraft view storage`, `kraft item archive` and `kraft item restore`, and `GET /api/storage` and `POST /api/storage/preview`, to see what the worktrees use and free it from a shell; a storage limit added by a reload or a Policy save now takes effect at once. (#704)
+
+- Add: `storage.worktrees.auto_cleanup` in `policy.yaml` lets Kraft archive completed and abandoned items itself, oldest first and never one that ended within `min_age`, when worktree usage is over `storage.worktrees.limit`. Off unless set. (#708)
+
+- Add a Storage page under Settings: worktree use against the quota and limit, the totals by category, and a clean-up of finished items that shows what it would free and what it would lose before it archives anything. (#710)
+
+- Add: a connected repo can share chains, skills and agent profiles from `.kraft/` on its default branch. `kraft repo library` reviews and takes them, and new items in that repo run its `default` chain. (#726)
+
+- Add: a repository's entry can set `library_auto_update: true` so its repo library takes text-only changes (prompts, messages, descriptions, and skills no gate reads) on the daily check without `kraft repo library`; anything else still waits. (#727)
+
+- VS Code extension catches up with Kraft 2.0: the board shows the server's stops, actions and repo scope; review comments are the server's review threads; file work, watch worker logs, search, and act on many items at once without leaving the editor. The web UI also offers only the actions the server admits, and pre-2.0 work items no longer cause server errors. (#741)
+
+- A repo library is now visible only to its own repository's work items, and every file Kraft reads from an add-on's or repo library's store is checked against its digest when it is read. A chain revision or an item draft can add a node that extends an add-on's component. A repository connected with submodules, or with a repo library, never gets an add-on's namespace as its id. (#756)
+
+- A work item's files now live in one folder of its own, `run/items/<id>/`, outside its worktree, so nothing Kraft keeps for itself can reach a merge request. New work items get 8-character ids, and sessions get 6-character ids unique within their item. Outside its item, a session is written `<item>/<session>`. A work item can be named by the start of its id, 4 characters or more that no other item's id shares, wherever a command, MCP tool or API route takes one. Every existing id and file keeps working where it is. `kraft admin doctor` counts worktrees that still hold old `.engineering/` documents. (#767)
+
+- The board, work item page and analytics were reworked from a design review: one primary action per item state, a failed card that says why and a finished card that shows the outcome, a chain graph that fits beside its pane, a "Waiting at each gate" view in analytics with the same filters on desktop and phone, stop kinds told apart without colour, a larger type scale (13px meta, 12px labels, 14px board titles), a gate review page that names the decision and says what Approve starts next, long chains folded into stages on the item graph, a keyboard-shortcuts dialog, and a phone gate card that opens its review before you approve. (#806)
+
+- Every dashboard area outside the board, item page and analytics was reworked from a design review. These are the main changes: (#829)
+- **Correctness:** five places where the UI said something false are fixed. (#829)
+- **Type:** text sizes come from shared tokens. (#829)
+- **Amber:** it now means only that a person is needed. (#829)
+- **Disabled controls:** each says why. (#829)
+- **Phone and desktop:** they use the same words, and new items start paused everywhere. (#829)
+- **Config panes:** each is grouped and folds what is at its default. (#829)
+- **Review:** you can approve with no comments. (#829)
+- **Library:** it has an overview. (#829)
+- **Repos:** the list says whether a repo can run work. (#829)
+- **Harnesses:** each shows whether its CLI is installed. (#829)
+- **Notifications:** browser permission comes first. (#829)
+- **Policy:** sections show as tabs. (#829)
+- **Auto-intake:** it validates repos and schedules. (#829)
+- **Settings:** the pages share one frame. (#829)
+
+- VS Code: gates arrive with the item's title, a coloured icon and a bell in the status bar; approving a gate that merges asks first on both routes; default keys for Next Gate, Approve, Reject and Submit Review; an Open submenu; titles instead of ids in every prompt and toast; screen-reader labels; and the gate opens as a rendered preview in a fresh window. (#865)
+
+- Long chains are drawn as one chain: an overview of the whole chain sits over the full-size chain on the item page, the new-item page and the Chains editor. (#872)
+- The web UI names nodes by what they are ("approve spec"), shows an offline banner on every page, titles each page, and has `?` shortcut help everywhere. (#872)
+- The board filters by gate and stop reason, offers bulk Retry and Resume, and Analytics rows open the board filtered to them. (#872)
+- Phone Chains edits drafts, like phone Library; code and board preferences move to their own Settings › Board & code page. (#872)
+- Change review has one "Request changes" action that opens on writing the note. (#872)
+- The docs site: exact error text and config keys lead in search, a generated Unreleased page on `/next/`, concepts that open with their model, guides with one golden path, and a shorter first-time path. (#872)
+
+- New: a demo of the web UI on the docs site, on sample data in your browser, with no install, server or agents. Each release's docs link to the demo of that release. (#909)
+
+- The item page's status cards fold to one line from their title, and start folded in a node's view. (#937)
+
+- Diffs and code in review comments and gate documents are now coloured by Shiki in 60 languages, including Java, PHP, Python, Perl, Ruby and Jinja. (#944)
+
+### Fixes
+
+- Fix: the board's bulk Pause now includes items waiting on an agent rate limit. (#646)
+
+- Fix: a worker session that ended in a merge conflict or an infrastructure stop is drawn as failed on the item's graph, not as done. (#647)
+
+- Fix: a gate review verdict is now ignored unless the review session finished (`done` or `done_with_concerns`), so a session that was capped out, paused or errored can no longer approve or reject a gate. (#650)
+
+- Fix: a fix loop with more than one repair task, such as the merge-request feedback loop's `repair` and `sync`, drew its first task off the loop on the node canvas. A loop step with several tasks now draws as one box that opens into its parallel tasks. (#656)
+
+- Fix: an item's badge no longer goes stale after an abandon, a gate decision, an archive or an escalation turn, and a slow refresh can no longer erase an event that arrived while it was loading. (#657)
+
+- Fix: the work brief names the checks that did not run and how many repair attempts were allowed, and no longer adds sections that only say there is nothing to report. (#658)
+
+- Fix: `notify.yaml` refuses an event type it does not know instead of accepting a typo that never notifies. A file that already has one stops loading until the name is fixed. (#660)
+
+- Fix: what a task flagged about its own work is shown again where a gate is decided: in the gate's panel, in `kraft view show`, and in the `get_work_item` tool. (#662)
+
+- Fix: a malformed webhook URL such as `http://[x` is refused by Settings instead of answering 500. `kraft admin doctor` reports a `notify.yaml` that does not load or is enabled with no webhook URL. (#664)
+
+- Fix: a node measured again no longer reads the findings, or the pending question, of a step that did not run this time. (#665)
+
+- Fix: a queued start that fails now says so in the item's timeline instead of dropping out of the queue silently, and raise-budget, skip and escalate tell a queued or blocked item how to take it out. (#666)
+
+- Fix: a queued or blocked item that is stopped or moved by something other than the queue now says so in its timeline, and pausing an item the queue is starting says it is starting instead of that it is paused. (#667)
+
+- Fix: a shutdown that lands while Kraft is starting a queued item is no longer lost: the server stops, and the item goes back in the queue in its place for the next start. (#668)
+
+- On the review page, a comment on an unchanged line stays under its line after a reload. (#673)
+
+- On an item's page, a test-scopes frame for an item in one repository shows only its scopes, without the repository's number, name and status, and every such frame is now only as wide as its contents. (#680)
+
+- Fix: on an item's page, a task's token count left out cached tokens, so a running Claude task could read "28". It now counts them and shows new and cached tokens apart, with every kind on hover. (#685)
+
+- Fix: a task, step or node skipped while it waits on CI or a review no longer stays "waiting" on the item page; a skipped task now reads "skipped". (#686)
+
+- Fix: a node's or item's token total now says when its output count is missing a session's, as `at least N out` or `out not known`, instead of presenting the sum as complete. (#689)
+
+- Fix: a waiting item's row on the board now names its node ("verification · next check in 1m") instead of showing only the time. (#690)
+
+- A test task reads failed when one of its scopes failed, even if a later one passed. On the desktop, a scope that a round ran more than once offers its earlier runs, and a one-repository item's test task no longer counts or names its repository. A scope link that matches nothing says why. (#697)
+
+- On the desktop, the fix-loop round and the pass a node shows are in the page's address, so a link opens on them, as it does on a phone. (#699)
+
+- A pass that a gate's reviewer started by fixing the work itself says "after a fix at …", not "after a reject at …". (#702)
+
+- Fix: on the phone, a blocked item's card links each item it waits on, and its text says that Unblock starts the item without them. (#705)
+
+- Fix: a work item waiting on another item before its first node is listed under Not started, not Running, on the board and in the VS Code extension. (#706)
+
+- Fix: the MCP gate and lifecycle tools (`approve_gate`, `reject_gate`, `resume_work_item`, `retry_work_item`, `raise_budget`, `skip_work_item`, `complete_work_item`, `cancel_work_item`) no longer return the item's frozen chain, saving about 25k tokens of agent context per call. (#712)
+
+- Fix: a finished item's card on the board shows its whole chain instead of a shortened one. (#713)
+
+- Fix: a work item whose GitHub pull request conflicts with its base branch is rebased at once, instead of waiting for CI that GitHub never starts until the wait times out. (#717)
+
+- Fix: a pause, skip or cancel no longer waits out the kill grace when a process was forked at the moment of the stop. (#719)
+
+- The docs now live at https://kraft-sdlc.dev. (#730)
+
+- Fix: when a restart from VS Code doesn't happen because Kraft is still running (you answered no to the running-agents question), the notification says Kraft is still running instead of offering Start Kraft. (#747)
+
+- Build(deps-dev): Bump vite from 8.3.2 to 8.3.4 in /frontend (#775)
+
+- Build(deps-dev): Bump @playwright/test from 1.63.0 to 1.64.0 in /frontend (#778)
+
+- Build(deps-dev): Bump @vitejs/plugin-react from 6.1.1 to 6.1.2 in /frontend (#781)
+
+- Build(deps): Bump fastembed from 0.8.1 to 0.9.0 (#782)
+
+- Build(deps-dev): Bump ruff from 0.16.10 to 0.17.0 (#785)
+
+- Build(deps): Bump pydantic from 2.13.5 to 2.14.1 (#786)
+
+- Build(deps): Bump idna from 3.19 to 3.20 (#787)
+
+- Build(deps): Bump lucide-react from 1.51.0 to 1.55.0 in /frontend (#788)
+
+- Build(deps-dev): Bump @types/node from 26.6.4 to 26.6.5 in /frontend (#789)
+
+- Build(deps): Bump fastapi from 0.142.2 to 0.143.0 (#790)
+
+- Dashboard polish: menus and bars lift off the page in the light theme, backdrops dim, keyboard focus rings are no longer cut off and focus returns after in-place edits, long names and paths fit on the review page and phone, phone Chains show node names, and every write refuses while Kraft is offline. (#891)
+
+- Dashboard consistency: buttons, link buttons, selects, empty states and section heads look and behave the same everywhere; phone and desktop word the same things identically; icon sizes and corner radii follow one scale; the sidebar and switches respect reduced motion. (#902)
+
+- Chips and badges look the same across the dashboard, desktop and phone: read-only labels are square-cornered badges in one set of tones, and things you press are round chips that fill when on. (#907)
+
+- Fix: `server.log` holds each log record on one line, so `grep` finds whole records; the terminal keeps its rendering. (#914)
+
+- Gates read Review everywhere and a queued item offers Remove from queue; the board list is one Tab stop with j/k, g and a keys and rows lead with their reason; Appearance › Density works; a bad payload shows a reload message instead of a blank page; approving a gate no longer stalls when the semantic-search model cannot be downloaded; accessibility fixes in the Library, task panel, phone sign-in, review ranges and light-mode chips; the docs site keeps readers on its own origin and its LLM text renders diagrams. (#916)
+
+- Fix: the chain canvas keeps the chain in view (a mouse wheel scrolls along a chain instead of off it) and a long chain's canvas fills the pane; Settings › Harnesses fills a wide screen instead of floating in the middle. (#919)
+
+- Resume, retry, gate approval and `kraft admin stop` handle a slow or hung git checkout and rebase without leaving files, processes or a stuck item behind. `kraft item abandon` asks why and records it on the item and its bead, cancel closes the item's bead too, and saving repos, policy and intake settings keeps your comments and layout. (#928)
+
+- Fix: after a retry, an item's history no longer shows "run forked" and "cap counters reset", and a gate the retry reopened, or a steer that never reached an agent, now reads in words (web item page and console). (#930)
+
+- Fix: the node canvas no longer shows an "on failure" line on a pass where the on-failure handler never ran. (#935)
+
+- Fix: an item page's Recent no longer says a session "is running" after a pause, cancel, skip or Stop escalation ended it; a stopped escalation turn reads "escalation stopped". (#938)
+
+- Fix: an item's history no longer shows a raw event name for a cancel, an abandon, a Mark complete, a skipped task or step, or a session stopped, lost or resumed. (#941)
+
+- Fix: pausing, cancelling, skipping or stopping an escalation in the instant an agent was starting no longer leaves that agent running or writes a "session started" event after the pause. (#942)
+
+- Fix: a merge request whose description lacks a section CI requires is now repaired in the item's description document and its failed checks re-run, instead of stopping the item. (#946)
+
+- Fix: a merge request stays a draft through CI repairs until the chain's `mark_ready` step, so the final gate comes before publication. A custom chain that merges without a `mr.mark_ready` step must now add one. (#948)
+
+- Fix: `kraft repo library` prints its review on separate lines instead of one line with literal `\n`. (#960)
+
+- Fix: a start held by the storage limit says so, with usage and how to free space, instead of "N of M slots are busy"; `kraft view show` names an in-place item, the item holding its checkout, and a `checkout` stop. (#962)
+
+- Fix: in `kraft console`, an item paused from the Board offers `p` to resume it, instead of no action until it is reopened. (#963)
+
+- Fix: `kraft item create --autostart` for an in-place item that waits for the checkout says which item is using it, instead of "N of M slots are busy". (#965)
+
+- Fix: the worktree storage limit counts a worktree a start just created at once, so a burst of starts released together can no longer pass the limit several times over. (#966)
+
+- Fix: `kraft view docs` lists the spec or plan a pending gate is about, not only after the next node runs. (#967)
+
+- Fix: a gate is named by what it decides everywhere: the default chain's last two gates read "approve local review" and "approve final review" on the web UI, phone and console, as in VS Code, instead of naming the brief. (#968)
+
 ## 2.0.0
 
 ### Highlights

@@ -102,7 +102,7 @@ load `/openapi.json` into your own OpenAPI viewer.
 
 ## Work item IDs in a path
 
-_Added in next_
+_Added in 2.1_
 
 The `{id}` segment of a route under `/api/work-items/` may be the start of a
 work item ID instead of all of it. A start is 4 characters or more, from `0-9`
@@ -122,8 +122,6 @@ reaches Kraft through its own channel, which still takes only its own item's
 whole ID.
 
 ## Session IDs in a path
-
-<!-- not new: session routes changed shape with per-item session ids; nothing was added -->
 
 A session ID is unique only within its work item, so a session's routes are
 under its item:
@@ -260,7 +258,7 @@ The pages can change in any release. A script that must keep working calls the [
 
 ### Storage
 
-_Added in next_
+_Added in 2.1_
 
 | Route | What it does |
 |---|---|
