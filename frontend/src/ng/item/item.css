@@ -15,7 +15,7 @@
 .item-input { box-sizing: border-box; width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); font: inherit; font-size: var(--fs-meta); resize: vertical; }
 .item-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .item-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.item-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: var(--fs-meta); }
+.item-facts { display: grid; grid-template-columns: max-content 1fr; align-items: baseline; gap: 4px 16px; margin: 0; font-size: var(--fs-meta); }
 .item-facts > div { display: contents; }
 .item-facts dt { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); }
 .item-facts dd { margin: 0; color: var(--text-sub); overflow-wrap: anywhere; }

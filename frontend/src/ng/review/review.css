@@ -188,6 +188,8 @@ body:has(.rv-bar) { --toast-bottom: 88px; }
 /* Gate review overlay (prototype 292–321): a layer over the review page. */
 .rv-gate { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; background: var(--bg); }
 .rv-gate-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: var(--fs-meta); }
+/* Its buttons keep their label on one line; the title and the "Unavailable while…" note wrap instead. */
+.rv-gate-head button { white-space: nowrap; }
 .rv-chips { display: inline-flex; gap: 4px; }
 .rv-gate-title { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 600; }
 .rv-gate-next { flex: none; margin: 0; padding: 6px 16px; border-bottom: 1px solid var(--line); font-size: var(--fs-meta); color: var(--text-sub); }

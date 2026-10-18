@@ -342,7 +342,7 @@ export function ComesAfterCard({ item, reload }: { item: ItemDetail; reload: () 
       <p className="item-card-text">{!waits ? RELEASED.text : blocked ? "Kraft starts it when they complete." : "Started before they complete, it is blocked until they do."}</p>
       <dl className="item-facts item-card-facts">
         {deps.map((d) => (
-          <div key={d.id}><dt>{d.status.replace("_", " ")}</dt><dd><Link className={linkButtonClass()} to={`/work-items/${encodeURIComponent(d.id)}`}>{d.title}</Link></dd></div>
+          <div key={d.id}><dt>{d.status.replace("_", " ")}</dt><dd><Link className={linkButtonClass({ inline: true })} to={`/work-items/${encodeURIComponent(d.id)}`}>{d.title}</Link></dd></div>
         ))}
       </dl>
       {error && <p className="item-error" role="alert">{error}</p>}

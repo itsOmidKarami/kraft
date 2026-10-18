@@ -74,6 +74,7 @@ describe("ComesAfterCard", () => {
     const card = screen.getByRole("region", { name: title });
     expect(card).toHaveTextContent("waiting on 1 item");
     expect(within(card).getByRole("link", { name: "Schema first" })).toHaveAttribute("href", "/work-items/a1");
+    expect(within(card).getByRole("link", { name: "Schema first" })).toHaveClass("is-inline"); // as the Queued card's holder
     expect(card).toHaveTextContent("needs humanSchema first");
     expect(card).toHaveTextContent("completedOld cleanup");
     expect(!!within(card).queryByRole("button", { name: "Unblock" })).toBe(offered);
