@@ -110,6 +110,23 @@ const ROWS: Row[] = [
     },
   },
   {
+    name: "review: the gate overlay's header keeps every button whole, on one line and in view, from 1024px down to 768px",
+    run: async (p) => {
+      await p.setViewportSize({ width: 1024, height: 700 });
+      await app(p, item("needs-gate", "/review?gate=final_review&doc=1"), { ready: (pg) => pg.locator(".rv-gate-head").waitFor({ timeout: 8000 }) });
+      for (const width of [1024, 900, 800, 768]) {
+        await p.setViewportSize({ width, height: 700 });
+        await pause(p, 200);
+        // Approve's "Unavailable while…" note and a pending comment make it the widest header there is.
+        const boxes = await p.locator(".rv-gate-head button").evaluateAll((bs) => bs.map((b) => { const r = b.getBoundingClientRect(); return { name: b.textContent || b.getAttribute("aria-label"), right: r.right, height: r.height }; }));
+        for (const b of boxes) {
+          expect(b.right, `${b.name} is cut off at ${width}px`).toBeLessThanOrEqual(width);
+          expect(b.height, `${b.name}'s label wraps at ${width}px`).toBeLessThan(34);
+        }
+      }
+    },
+  },
+  {
     name: "doc viewer: a gate's document says who wrote it [decided]",
     run: async (p) => {
       await app(p, item("needs-gate", "?sel=final_review"), { routes: editorsRoute, tweak: withProducer });
