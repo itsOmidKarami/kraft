@@ -163,6 +163,52 @@ def test_a_start_on_a_full_board_says_it_is_queued(monkeypatch, capsys, argv):
     assert "started" not in out and "retried at" not in out
 
 
+@pytest.mark.parametrize(
+    ("answer", "says"),
+    [
+        (
+            {
+                "slots": {
+                    "busy": 0,
+                    "limit": 3,
+                    "storage": {"used_bytes": 12 * 1024**3, "limit_bytes": 10 * 1024**3},
+                }
+            },
+            [
+                "held by the worktree storage limit: 12G counted against the 10G limit",
+                "kraft item archive --reclaimable",
+            ],
+        ),
+        (
+            {
+                "slots": {"busy": 0, "limit": 3},
+                "why": "checkout",
+                "held_by": "w2",
+                "held_by_title": "Cache the index",
+            },
+            [
+                "waiting for the checkout: “Cache the index” is using it",
+                "It starts when the checkout frees",
+            ],
+        ),
+    ],
+    ids=["storage-limit", "checkout"],
+)
+def test_a_start_not_held_by_a_slot_says_what_holds_it(monkeypatch, capsys, answer, says):
+    """`0 of 3 slots are busy` was false: the answer carried why in `slots.storage`
+    and `why`, which only `--json` showed (Kraft-6upco, Kraft-tw4ws)."""
+    from kraft.client import transport
+
+    async def post(path, payload=None, **kw):
+        return 200, {"id": "w1", "status": "queued", **answer}
+
+    monkeypatch.setattr(transport, "_post", post)
+    cli.main(["item", "resume", "w1"])
+    out = capsys.readouterr().out
+    assert all(part in out for part in says)
+    assert "slots are busy" not in out
+
+
 def test_create_after_sends_what_the_item_comes_after(tmp_path, monkeypatch):
     from kraft.client import transport
 

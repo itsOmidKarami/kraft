@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 
+from kraft import render
 from kraft.vocab import WorkItemStatus
 from kraft.vocab.total import total
 
@@ -80,14 +81,40 @@ def item_action(
     return say
 
 
+def hold_reason(held: dict, storage: dict | None) -> str | None:
+    """Why a queued start waits when it is not a busy slot, in the web UI's
+    words: another in-place item is using its checkout (`held`'s `why`,
+    `held_by_title`), or the worktree storage limit holds it (`storage`, the
+    figures `slots.storage` and `queued.storage` carry). None for a slot."""
+    if held.get("why") == "checkout":
+        title = held.get("held_by_title")
+        who = f"“{render.plain_text(str(title))}”" if title is not None else "another item"
+        return f"waiting for the checkout: {who} is using it"
+    if storage:
+        used = render.human_size(storage["used_bytes"])
+        limit = render.human_size(storage["limit_bytes"])
+        return f"held by the worktree storage limit: {used} counted against the {limit} limit"
+    return None
+
+
 def queued(result: dict) -> str | None:
     """A start the board had no slot for, or None for any other answer."""
     if result.get("status") != WorkItemStatus.QUEUED:
         return None
     slots = result.get("slots") or {}
+    storage = slots.get("storage")
+    why = hold_reason(result, storage)
+    pause = f"kraft item pause {result['id']} takes it out of the queue"
+    if result.get("why") == "checkout":
+        return f"queued {result['id']}: {why}. It starts when the checkout frees; {pause}"
+    if why:
+        return (
+            f"queued {result['id']}: {why}. It starts when space frees; "
+            f"kraft item archive --reclaimable archives finished items to make room, {pause}"
+        )
     return (
         f"queued {result['id']}: {slots.get('busy')} of {slots.get('limit')} slots are busy. "
-        f"It starts when one frees; kraft item pause {result['id']} takes it out of the queue"
+        f"It starts when one frees; {pause}"
     )
 
 

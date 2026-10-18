@@ -121,20 +121,67 @@ def test_show_prints_a_title_1_4_stored_as_plain_text(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["title"] == title
 
 
-def test_show_says_a_queued_item_is_queued_since_when_and_for_which_verb(monkeypatch, capsys):
+@pytest.mark.parametrize(
+    ("extra", "line"),
+    [
+        ({}, "for retry, since 2026-10-09T09:00:00+00:00"),
+        (
+            {"storage": {"used_bytes": 12 * 1024**3, "limit_bytes": 10 * 1024**3}},
+            "since 2026-10-09T09:00:00+00:00; held by the worktree storage limit: "
+            "12G counted against the 10G limit",
+        ),
+        (
+            {"why": "checkout", "held_by": "w2", "held_by_title": "Cache the index"},
+            "since 2026-10-09T09:00:00+00:00; "
+            "waiting for the checkout: “Cache the index” is using it",
+        ),
+    ],
+    ids=["slot", "storage-limit", "checkout"],
+)
+def test_show_says_a_queued_item_is_queued_since_when_for_which_verb_and_why(
+    monkeypatch, capsys, extra, line
+):
     from kraft.client import transport
 
     async def get(path, **_):
         return {
             "id": "w1",
             "status": "queued",
-            "queued": {"verb": "retry", "since": "2026-10-09T09:00:00+00:00"},
+            "queued": {"verb": "retry", "since": "2026-10-09T09:00:00+00:00", **extra},
             "chain_definition": {"nodes": []},
         }
 
     monkeypatch.setattr(transport, "_get", get)
     cli.main(["view", "show", "w1"])
-    assert "for retry, since 2026-10-09T09:00:00+00:00" in capsys.readouterr().out
+    assert line in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("detail", "printed"),
+    [
+        ({"in_place": True}, ["in_place yes"]),
+        ({"in_place": False}, []),
+        (
+            {"status": "needs_human", "stop": {"kind": "checkout"}, "stop_reason": "in use"},
+            ["stop_reason in use", "stop_kind checkout"],
+        ),
+    ],
+    ids=["in-place", "worktree", "checkout-stop"],
+)
+def test_show_marks_an_in_place_item_and_names_the_kind_of_its_stop(
+    monkeypatch, capsys, detail, printed
+):
+    from kraft.client import transport
+
+    async def get(path, **_):
+        return {"id": "w1", "status": "paused", "chain_definition": {"nodes": []}, **detail}
+
+    monkeypatch.setattr(transport, "_get", get)
+    cli.main(["view", "show", "w1"])
+    out = capsys.readouterr().out
+    rows = [" ".join(r.split()) for r in out.splitlines()]
+    assert all(line in rows for line in printed)
+    assert ("in_place" in out) is bool(detail.get("in_place"))
 
 
 def test_show_lists_what_a_blocked_item_comes_after(monkeypatch, capsys):

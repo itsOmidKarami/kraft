@@ -7,7 +7,7 @@ import asyncio
 import json
 import sys
 
-from kraft import client, logs, render, usage
+from kraft import answers, client, logs, render, usage
 from kraft.cli import common
 from kraft.vocab import StopKind, WorkItemEvent, WorkItemStatus
 
@@ -100,7 +100,9 @@ def _show_value(item: dict, key: str, value) -> str:
     if key == "dependencies":
         return ", ".join(f"{d['id']} ({d['status']})" for d in value or []) or "none"
     if key == "queued" and value:
-        return f"for {value['verb']}, since {value['since']}"
+        line = f"for {value['verb']}, since {value['since']}"
+        why = answers.hold_reason(value, value.get("storage"))
+        return f"{line}; {why}" if why else line
     if key == "concerns" and value:
         # An agent wrote these, so like a title they are printed as plain text.
         return "\n".join(
@@ -111,9 +113,17 @@ def _show_value(item: dict, key: str, value) -> str:
 
 def _render_show(item: dict, full: dict | None = None) -> str:
     pairs = [(key, _show_value(item, key, value)) for key, value in item.items()]
-    if full is not None and (hint := _raise_hint(full)) and not item.get("suggested_action"):
+    if full is not None:
+        # What the trimmed item drops: the in-place mark, and the kind of stop.
+        if full.get("in_place"):
+            at = next((i + 1 for i, (key, _) in enumerate(pairs) if key == "repo"), len(pairs))
+            pairs.insert(at, ("in_place", "yes"))
         at = next((i + 1 for i, (key, _) in enumerate(pairs) if key == "stop_reason"), len(pairs))
-        pairs.insert(at, ("next", hint))
+        if kind := (full.get("stop") or {}).get("kind"):
+            pairs.insert(at, ("stop_kind", kind))
+            at += 1
+        if (hint := _raise_hint(full)) and not item.get("suggested_action"):
+            pairs.insert(at, ("next", hint))
     return render.kv(pairs)
 
 
