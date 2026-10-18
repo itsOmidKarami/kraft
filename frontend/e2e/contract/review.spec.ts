@@ -118,11 +118,12 @@ const ROWS: Row[] = [
         await p.setViewportSize({ width, height: 700 });
         await pause(p, 200);
         // Approve's "Unavailable while…" note and a pending comment make it the widest header there is.
-        const boxes = await p.locator(".rv-gate-head button").evaluateAll((bs) => bs.map((b) => { const r = b.getBoundingClientRect(); return { name: b.textContent || b.getAttribute("aria-label"), right: r.right, height: r.height }; }));
+        const boxes = await p.locator(".rv-gate-head button").evaluateAll((bs) => bs.map((b) => { const r = b.getBoundingClientRect(); return { name: b.textContent || b.getAttribute("aria-label"), right: r.right, height: r.height, top: r.top }; }));
         for (const b of boxes) {
           expect(b.right, `${b.name} is cut off at ${width}px`).toBeLessThanOrEqual(width);
           expect(b.height, `${b.name}'s label wraps at ${width}px`).toBeLessThan(34);
         }
+        expect(new Set(boxes.map((b) => Math.round(b.top))).size, `the decision splits across lines at ${width}px`).toBe(1);
       }
     },
   },
