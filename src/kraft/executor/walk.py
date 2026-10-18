@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import math
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -782,9 +781,14 @@ async def _resolve_conflict(
         # The resolver's own `git rebase` in the person's checkout skips the
         # guard Kraft's rebase has: refused before it is dispatched, after
         # the take, so the item's branch's ignore rules are the ones read. A
-        # refused take is the handler's to report, from its own.
-        with contextlib.suppress(inplace.CheckoutRefused):
+        # refused take is the handler's to report, from its own; a pause that
+        # landed meanwhile ends the walk paused, as a task's take does.
+        try:
             await inplace.take(db, run_dirs, row, attachments=entry.attachments_of(row), walk=True)
+        except inplace.NotRunning:
+            return "paused"
+        except inplace.CheckoutRefused:
+            pass
         try:
             await asyncio.to_thread(
                 inplace.refuse_ignored,

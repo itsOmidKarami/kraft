@@ -243,16 +243,19 @@ async def test_a_conflict_handler_that_rebases_restarts_the_declared_span(item_o
 
 
 @pytest.mark.parametrize(
-    "on_the_branch", [False, True], ids=["ignored-here", "ignored-only-on-the-items-branch"]
+    ("on_the_branch", "paused"),
+    [(False, False), (True, False), (False, True)],
+    ids=["ignored-here", "ignored-only-on-the-items-branch", "paused-before-the-take"],
 )
 async def test_an_in_place_resolver_is_not_sent_to_overwrite_an_ignored_file(
-    item_on, script, on_the_branch
+    item_on, script, monkeypatch, on_the_branch, paused
 ):
     """The resolver's own rebase in the person's checkout would replace a file
     ignored there but tracked on the newer base, as Kraft's rebase never does:
     the item stops as `checkout` before the handler runs, the file untouched.
     Ignored by the item's branch's own rules, read after the take, though the
-    person's branch does not ignore it."""
+    person's branch does not ignore it. A pause that lands before the take
+    ends the walk paused: no stop over a paused item."""
     it = await item_on(_chain(**_with_handler()), target=IN_PLACE)
     await inplace.prepare(it.database, it.run_dirs, it.row(), base="main")
     git(it.repo, "checkout", "-q", store.branch_for(it.row()))  # where the take leaves it
@@ -271,6 +274,21 @@ async def test_an_in_place_resolver_is_not_sent_to_overwrite_an_ignored_file(
         (it.repo / ".git/info/exclude").write_text("local.cfg\n")
     write(it.repo, "local.cfg", "the person's\n")
     script.plan = {"sync": ["conflict"]}
+    if paused:
+        take = inplace.take
+
+        async def paused_first(db, *args, **kwargs):
+            await db.write(
+                lambda c: store.pause_for_broken_base(c, it.id, broken_by="x", follow_up_bead=None)
+            )
+            return await take(db, *args, **kwargs)
+
+        monkeypatch.setattr(inplace, "take", paused_first)
+        assert await _walk(it) == "paused"
+        assert (it.row()["status"], it.row()["stop_kind"]) == ("paused", None)
+        assert not it.events("work_item_needs_human")
+        assert (it.repo / "local.cfg").read_text() == "the person's\n"
+        return
 
     assert await _walk(it) == "needs_human"
 
