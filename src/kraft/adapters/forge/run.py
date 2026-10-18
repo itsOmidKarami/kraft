@@ -355,7 +355,7 @@ async def _run_one(
             # pushed — sync_mr *after* human review. Without this, a commit
             # made after open_mr is local, so the pipeline polled below is
             # the previous head's: the same id on every retry, green or
-            # red, forever (Kraft-bxj8). `git push -u` is a no-op when the
+            # red, forever (Kraft-bxj8). `git push` is a no-op when the
             # branch is up to date, so this costs one git call.
             await forge.push(repo=repo, branch=branch)
             if not ci_checks:
