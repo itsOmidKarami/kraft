@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.mark.parametrize(
     "path, needle",
     [
-        pytest.param("README.md", "kraft-sdlc.dev/next/demo/", id="readme"),
+        pytest.param("README.md", "kraft-sdlc.dev/demo/", id="readme"),
         pytest.param("docsite/content/index.md", "to: /demo/", id="docs-home"),
         pytest.param("docsite/content/1.get-started/index.md", "](/demo/)", id="get-started"),
         pytest.param(
