@@ -535,11 +535,24 @@ def _raise_clash(
 
 
 #: HEAD reflog subjects of an operation that may `--autostash`: a rebase's
-#: start (or a pull's, `pull --rebase … (start):`), a pull, a merge.
-_STARTS_AN_AUTOSTASH = ("rebase (start):", "rebase -i (start):", "pull", "merge")
+#: start (or a pull's, `pull --rebase … (start):`; `rebase: checkout …` from
+#: git 2.25 and older, and from `--apply` before 2.39), a pull, a merge.
+_STARTS_AN_AUTOSTASH = (
+    "rebase (start):",
+    "rebase -i (start):",
+    "rebase: checkout ",
+    "pull",
+    "merge",
+)
+#: A merge that conflicted writes no entry of its own: its autostash is put
+#: back when its commit is made, and that commit's entry follows the HEAD it
+#: started from.
+_ENDS_A_MERGE = "commit (merge):"
 #: A phased entry's phase: a `pull --rebase` names every entry `pull … (pick):`
-#: and the like, and only its `(start)` started from the HEAD before it.
-_PHASE = re.compile(r"[^:]* \(([\w -]+)\):")
+#: and the like, and only its `(start)` started from the HEAD before it. A
+#: search, not a match: a pull by URL or with a `src:dst` refspec puts a colon
+#: before the phase.
+_PHASE = re.compile(r" \(([\w -]+)\):")
 
 
 def _head_reflog(checkout: Path) -> list[str]:
@@ -575,9 +588,11 @@ def _put_back(
         # (GIT_COMMITTER_DATE), so an older-looking entry may be newer.
         if int(selector.rsplit("{", 1)[1].rstrip("}")) < since:
             continue
-        phase = _PHASE.match(subject)
+        phase = _PHASE.search(subject)
         # The HEAD it started from: the older entry.
-        if subject.startswith(_STARTS_AN_AUTOSTASH) and (phase is None or phase[1] == "start"):
+        if subject.startswith(_ENDS_A_MERGE) or (
+            subject.startswith(_STARTS_AN_AUTOSTASH) and (phase is None or phase[1] == "start")
+        ):
             held.add(entries[i + 1].split(" ", 1)[0] if i + 1 < len(entries) else m.tip)
     try:
         _raise_clash(checkout, "", None, since, task=task, held=held)

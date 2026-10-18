@@ -504,6 +504,9 @@ _EDITED = "which you had edited"
         ("main.txt", None, "elsewhere-at-the-tip", None),
         ("main.txt", None, "rebase-twice", ["f"]),
         ("main.txt", None, "elsewhere-after-a-pull", None),
+        ("main.txt", None, "elsewhere-after-a-pull-by-url", None),
+        ("item.txt", None, "merge-committed", ["f"]),
+        ("f", None, "older-git", ["f"]),
     ],
     ids=[
         "resolved",
@@ -518,6 +521,9 @@ _EDITED = "which you had edited"
         "another-worktree-at-the-tip",
         "rebased-twice",
         "pulled-then-another-at-the-new-base",
+        "pulled-by-url-then-another-at-the-new-base",
+        "merge-conflict-committed-then-clash",
+        "clash-in-an-older-gits-reflog",
     ],
 )
 async def test_an_agents_autostash_rebase_is_checked_after_its_task(
@@ -561,8 +567,17 @@ async def test_an_agents_autostash_rebase_is_checked_after_its_task(
     rebases = then != "elsewhere-at-the-tip"
     if rebases:
         # A pull's every reflog entry is named `pull …`: only its `(start)` started it.
-        pull = ["pull", "-q", "--rebase", "--autostash", "origin", "main"]
-        how = pull if then == "elsewhere-after-a-pull" else ["rebase", "--autostash", onto]
+        # By URL, a colon comes before that phase.
+        pull = ["pull", "-q", "--rebase", "--autostash"]
+        if then == "merge-committed":  # f too: the put-back at the merge's commit clashes
+            upstream_again("f")
+            onto = git(repo, "rev-parse", "refs/remotes/origin/main")
+        by_url = git(repo, "remote", "get-url", "origin")
+        how = {
+            "elsewhere-after-a-pull": [*pull, "origin", "main"],
+            "elsewhere-after-a-pull-by-url": [*pull, by_url, "main"],
+            "merge-committed": ["merge", "--no-edit", "--autostash", onto],
+        }.get(then, ["rebase", "--autostash", onto])
         done = subprocess.run(["git", *how], cwd=repo)
         if main_writes == "item.txt":  # the conflict
             assert done.returncode != 0
@@ -572,6 +587,15 @@ async def test_an_agents_autostash_rebase_is_checked_after_its_task(
         write(repo, "item.txt", "the item's, on main's newer\n")
         git(repo, "add", "--", "item.txt")
         git(repo, "-c", "core.editor=true", "rebase", "--continue")
+    if then == "merge-committed":  # resolved; git writes only `commit (merge):`
+        write(repo, "item.txt", "the item's, on main's newer\n")
+        git(repo, "add", "--", "item.txt")
+        subprocess.run(["git", "commit", "-q", "--no-edit"], cwd=repo)
+    if then == "older-git":  # git 2.25 and older name a rebase's entries `rebase: …`
+        log = repo / ".git" / "logs" / "HEAD"
+        old = log.read_text().replace("rebase (start): checkout", "rebase: checkout")
+        old = old.replace("rebase (pick): ", "rebase: ")
+        log.write_text(old.replace("rebase (finish): returning", "rebase finished: returning"))
     if then == "commit-f":  # the clashed file, resolved and committed against the prompt
         write(repo, "f", "main's and the person's\n")
         git(repo, "add", "--", "f")
@@ -613,5 +637,5 @@ async def test_an_agents_autostash_rebase_is_checked_after_its_task(
     assert git(repo, "show", f"{stash}:f") == "the person's edit"
     assert stash in reason and _RESOLVER in reason
     assert "the agent committed" not in reason, "a put-back may have merged it, not a commit"
-    upstream_wrote_f = main_writes == "f" or then == "rebase-twice"
+    upstream_wrote_f = main_writes == "f" or then in ("rebase-twice", "merge-committed")
     assert (_EDITED in reason) == upstream_wrote_f, "the overlap is still said"
