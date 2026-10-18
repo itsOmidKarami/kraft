@@ -14,6 +14,7 @@
 .ph-card-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .ph-card-title { font-size: var(--fs-body); font-weight: 500; line-height: 1.3; overflow-wrap: anywhere; }
 .ph-card-meta { font-size: var(--fs-label); color: var(--text-muted); overflow-wrap: anywhere; }
+.ph-card-inplace { white-space: nowrap; } /* never "in your / checkout" across lines */
 .ph-ticks { display: flex; align-items: center; gap: 2px; padding-left: 40px; }
 .ph-tick { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
 .ph-tick-done { background: var(--text-muted); }

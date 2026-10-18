@@ -308,6 +308,17 @@ const ROWS: Row[] = [
     },
   },
   {
+    name: "header: on a 1024px window a long repo and \"in your checkout\" never push the item's id out of the breadcrumb",
+    run: async (p) => {
+      await p.setViewportSize({ width: 1024, height: 768 });
+      await app(p, (S) => `/work-items/${Object.values(S.bundles).find((b) => b.item.title.startsWith("Cache the search index in place"))!.item.id}`, { data: "long" });
+      await expect(p.getByText("in your checkout")).toBeVisible();
+      const id = p.getByRole("navigation", { name: "Breadcrumb" }).locator('[aria-current="page"]');
+      await expect(id).toHaveText("kraft-e3c1");
+      expect(await id.evaluate((el) => el.scrollWidth <= el.clientWidth), "the id is whole, not cut").toBe(true);
+    },
+  },
+  {
     name: "stop: a time-capped item names its limit and offers Raise cap [decided]",
     run: async (p) => {
       await app(p, item("capped"), { tweak: withCapLimit });

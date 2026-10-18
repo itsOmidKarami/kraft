@@ -10,6 +10,8 @@ export interface Crumb {
   /** A page on the shipped UI, reached by a full load. */
   href?: string;
   title?: string;
+  /** Never shrinks: an item's id stays whole however long its repo's name. */
+  whole?: boolean;
   /** `ext`: a link out of Kraft after the crumbs (the item's merge request), opened in a new tab. */
   kind: "repo" | "mid" | "current" | "ext";
 }
@@ -42,7 +44,8 @@ export function crumbsFor(pathname: string, item: ItemLookup): Crumb[] {
     const out: Crumb[] = [mid("Board", { to: "/" })];
     // The repo, like the draft page's, is the board filtered to it.
     if (it) out.push({ text: repoName(it.repo), kind: "repo", title: it.repo, to: `/?repo=${encodeURIComponent(it.repo)}` });
-    out.push(node ? mid(name, { to: `/work-items/${encodeURIComponent(id)}`, title: id }) : { text: name, kind: "current", title: id });
+    // The id never gives way: the header's chips ("in your checkout") shrink the repo instead.
+    out.push(node ? mid(name, { to: `/work-items/${encodeURIComponent(id)}`, title: id, whole: true }) : { text: name, kind: "current", title: id, whole: true });
     if (node) out.push(current(node));
     if (it?.mr_ref) out.push({ text: `!${it.mr_ref.number}${it.display_status === "done" || it.display_status === "archived" ? " merged" : ""} ↗`, kind: "ext", href: it.mr_ref.url, title: it.mr_ref.url });
     return out;

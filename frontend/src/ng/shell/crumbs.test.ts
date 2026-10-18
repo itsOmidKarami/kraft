@@ -32,7 +32,8 @@ describe("crumbsFor", () => {
     expect(board).toMatchObject({ text: "Board", to: "/" });
     expect(board.href).toBeUndefined();
     expect(repo).toMatchObject({ text: "kraft-api", kind: "repo", title: "/home/me/code/kraft-api", to: "/?repo=%2Fhome%2Fme%2Fcode%2Fkraft-api" });
-    expect(cur).toMatchObject({ text: "kraft-cb59", kind: "current", title: "abc" });
+    // Whole: the header's chips never push the id out (shell.css `.is-whole`).
+    expect(cur).toMatchObject({ text: "kraft-cb59", kind: "current", title: "abc", whole: true });
     expect(rest).toEqual([]);
   });
 
@@ -44,7 +45,7 @@ describe("crumbsFor", () => {
 
   it("in a node view and on the review page, links the item back to its chain and ends in the node or Review changes", () => {
     const [, , onItem, review] = crumbsFor("/work-items/abc/review", () => ({ repo: "/r/x", title: "t", bead_id: "kraft-cb59" }));
-    expect(onItem).toMatchObject({ text: "kraft-cb59", kind: "mid", to: "/work-items/abc" });
+    expect(onItem).toMatchObject({ text: "kraft-cb59", kind: "mid", to: "/work-items/abc", whole: true });
     expect(review).toMatchObject({ text: "Review changes", kind: "current" });
     expect(crumbsFor("/work-items/abc/review", () => ({ repo: "/r/x", title: "t", pending_gate: "spec_approval" }))[3]).toMatchObject({ text: "Approve spec", kind: "current" });
     const [, , itemCrumb, node] = crumbsFor("/work-items/abc/nodes/verification", () => ({ repo: "/r/x", title: "t", bead_id: "kraft-cb59" }));

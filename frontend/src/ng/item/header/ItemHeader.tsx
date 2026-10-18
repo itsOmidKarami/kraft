@@ -20,6 +20,7 @@ import { IN_YOUR_CHECKOUT, PAUSE_THIS_ITEM } from "../../board/sharedWords";
 import { REMOVE_FROM_QUEUE_TITLE } from "../sharedWords";
 import { withBase } from "../../base";
 import { Badge } from "../../ui/Badge";
+import { hint } from "../../ui/Tooltip";
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
 
@@ -183,7 +184,8 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
       <span className="item-elapsed" title={`Created ${new Date(item.created_at).toLocaleString()}`}>
         <Clock size={12} aria-hidden /> {elapsedBetween(item.created_at, endedAt, now)}
       </span>
-      {item.in_place && <Badge title={item.worktree_path}>{IN_YOUR_CHECKOUT}</Badge>}
+      {/* Focusable, so the checkout's path in its tip reaches a keyboard as well as a pointer. */}
+      {item.in_place && <Badge className="item-inplace" tabIndex={0} {...hint(item.worktree_path ?? item.repo)}>{IN_YOUR_CHECKOUT}</Badge>}
       <Badge tone={hs.tone} mono>{hs.badge}</Badge>
       {/* Without a main button the group anchors the cards (pause, cancel, escalate) itself. */}
       <div className="item-main-group" ref={hs.main ? undefined : group}>

@@ -18,7 +18,7 @@ export function Crumbs({ crumbs }: { crumbs: Crumb[] }) {
             );
           const last = i === crumbs.length - 1 || crumbs[i + 1].kind === "ext";
           const cut = c.kind !== "mid";
-          const cls = `ng-crumb ng-crumb-${c.kind}`;
+          const cls = `ng-crumb ng-crumb-${c.kind}${c.whole ? " is-whole" : ""}`;
           const cutProps = cut ? { "data-allow-ellipsis": "", title: c.title ?? c.text } : {};
           return (
             <Fragment key={i}>

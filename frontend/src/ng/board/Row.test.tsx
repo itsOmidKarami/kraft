@@ -38,10 +38,29 @@ describe("Row", () => {
     expect(meta).toHaveTextContent(/\d+ of \d+ nodes done/);
   });
 
+  it("keeps the whole tail in its title, for a narrow row that clips it", () => {
+    const queued = { verb: "resume", since: "2026-09-13T09:00:00Z", why: "checkout" as const, held_by: "w2", held_by_title: "Cache the index" };
+    const tail = mount("queued", { queued }).main.querySelector(".board-tail-text")!;
+    expect(tail).toHaveAttribute("title", "waiting for the checkout: “Cache the index” is using it");
+    expect(tail).toHaveTextContent("waiting for the checkout: “Cache the index” is using it");
+  });
+
   it("says an in-place item runs in your checkout, and a worktree item nothing of the kind", () => {
     expect(mount("running", { in_place: true }).main.querySelector(".board-meta")).toHaveTextContent("in your checkout");
     cleanup();
     expect(mount("running", { in_place: false }).main.querySelector(".board-meta")).not.toHaveTextContent("in your checkout");
+  });
+
+  // board.css hides an `is-said` marker on a narrow row: its tail says the checkout already.
+  it.each<[string, DisplayStatus, Partial<WorkItem>, boolean]>([
+    ["running", "running", {}, false],
+    ["checkout stop", "needs_you", { stop: { kind: "checkout", node: "build", reason: "The checkout moved to main.", resume_at: null } as WorkItem["stop"] }, true],
+    ["checkout wait", "queued", { queued: { verb: "resume", since: "2026-09-13T09:00:00Z", why: "checkout", held_by: "w2", held_by_title: "Cache the index" } }, true],
+    ["slot wait", "queued", { queued: { verb: "resume", since: "2026-09-13T09:00:00Z" } }, false],
+  ])("lets a narrow %s row drop its in-place marker only when the tail says the checkout", (_n, status, over, said) => {
+    const meta = mount(status, { in_place: true, ...over }).main.querySelector(".board-meta")!;
+    expect(meta.querySelector(".board-meta-inplace")!.classList.contains("is-said")).toBe(said);
+    expect(meta.querySelectorAll(".is-said")).toHaveLength(said ? 2 : 0);
   });
 
   it("offers the row's one action and hands it over, none for a running or done row", () => {

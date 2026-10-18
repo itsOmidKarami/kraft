@@ -165,6 +165,26 @@ const ROWS: Row[] = [
     run: async (p) => { await p.setViewportSize({ width: 390, height: 844 }); await app(p, "/", { noShell: true }); await expect(p.getByRole("button", { name: /Raise (cap|budget)/ }).first()).toBeVisible({ timeout: 3000 }); },
   },
   {
+    name: "board: on a 1024px window \"in your checkout\" gives its room to a tail that already says the checkout, and stays on a running row",
+    run: async (p) => {
+      await p.setViewportSize({ width: 1024, height: 768 });
+      await app(p, "/", { data: "long" });
+      const inPlace = (title: string) => p.locator(".board-row").filter({ has: p.locator(".board-title", { hasText: title }) }).locator(".board-meta-inplace");
+      await expect(inPlace("Cache the search index in place")).toBeHidden();
+      await expect(inPlace("Tidy the extension's settings page")).toBeHidden();
+      await expect(inPlace("Bump the VS Code extension to schema v4")).toBeVisible();
+    },
+  },
+  {
+    name: "phone board: an in-place card never splits \"in your checkout\" across lines",
+    run: async (p) => {
+      await p.setViewportSize({ width: 390, height: 844 });
+      await app(p, "/", { noShell: true, data: "long" });
+      const lines = await p.locator(".ph-card").filter({ hasText: "Cache the search index in place" }).getByText("in your checkout").evaluate((el) => el.getClientRects().length);
+      expect(lines).toBe(1);
+    },
+  },
+  {
     name: "sidebar: a revealed (unpinned) sidebar floats over the page with an overlay shadow [decided]",
     run: async (p) => { await appRevealed(p); expect(await shadowAround(p)).not.toBe("none"); },
   },
