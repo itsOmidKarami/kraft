@@ -101,9 +101,9 @@
 @media (max-width: 1279px) {
   .board-meta { overflow: visible; }
   .board-meta-tail { white-space: normal; align-items: flex-start; overflow: visible; }
-  /* The repo crumb shrinks with the tail, each by its own length, so a long repo name never squeezes the reason to a
-     sliver; a short one keeps its own width (no min-width, which left a gap after it). */
-  .board-meta-repo { flex: 0 1 auto; }
+  /* A long repo name is capped, so it never squeezes the reason to a sliver; a short one stays whole, never shrunk
+     (a shrinking crumb cut "kraft-api" to "kr…") and never padded (a min-width left a gap after it). */
+  .board-meta-repo { flex: none; max-width: 12ch; }
   /* At most 3 lines: the whole tail stays in the DOM and in the row's title (Row.tsx). */
   .board-tail-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
   .board-tail-text wbr { display: inline; }
