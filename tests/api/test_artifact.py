@@ -133,6 +133,7 @@ def _write_artifact(client, wid: str, text: str, *, older: bool = False) -> Path
 @pytest.mark.parametrize("older", [False, True], ids=["new-place", "older-worktree"])
 def test_gate_artifact_names_the_file_the_hook_wrote(client, item_at_spec_gate, older):
     wid = item_at_spec_gate
+    _forget_gate_copy(client, wid)
     path = _write_artifact(client, wid, "---\ntitle: A spec\n---\n\nthe body\n", older=older)
     name = (item_paths.legacy_document_name if older else item_paths.document_name)(wid, "spec")
 
@@ -260,6 +261,7 @@ def test_a_produced_document_is_only_a_kind_the_chain_produces(
 
 
 def test_a_produced_document_nobody_wrote_or_indexed_is_a_404(client, item_at_spec_gate):
+    _forget_gate_copy(client, item_at_spec_gate)
     _spec(client, item_at_spec_gate).unlink()
     r = client.get(f"/api/work-items/{item_at_spec_gate}/artifacts/spec")
     assert r.status_code == 404, r.text
@@ -451,6 +453,13 @@ def test_artifact_over_the_cap_truncates_without_500ing_on_a_split_codepoint(
     assert len(body["content"]) <= DIFF_MAX_BYTES
 
 
+def _forget_gate_copy(client, wid: str) -> None:
+    """Drop the copy the index took when the gate opened, for a test about what
+    approval alone indexes."""
+    repo = client.get(f"/api/work-items/{wid}").json()["repo"]
+    client.portal.call(client.app.state.indexer.purge_repo, repo)
+
+
 def _await_artifact_docs(client, wid: str) -> list:
     """The ingest runs after the approve response; wait for its document."""
     deadline = time.monotonic() + 10
@@ -460,6 +469,14 @@ def _await_artifact_docs(client, wid: str) -> list:
         if found or time.monotonic() > deadline:
             return found
         time.sleep(0.05)
+
+
+def test_a_pending_gate_lists_the_document_it_is_about(client, item_at_spec_gate):
+    """`kraft view docs` is filed under "Reviewing before you approve": the spec
+    a gate is waiting on must be in the list before anyone approves it, not
+    only once the next node has run."""
+    artifacts = _await_artifact_docs(client, item_at_spec_gate)
+    assert [d["path"] for d in artifacts] == [item_paths.document_name(item_at_spec_gate, "spec")]
 
 
 def test_approving_a_gate_ingests_its_artifact_into_the_index(client, item_at_spec_gate):
@@ -497,6 +514,7 @@ def test_approving_a_gate_survives_a_broken_index(client, item_at_spec_gate, mon
     instead, since approval is a synchronous request a reviewer is waiting on.
     The approve response must still succeed and the gate must still clear even
     though nothing got indexed."""
+    _forget_gate_copy(client, item_at_spec_gate)
     _write_artifact(client, item_at_spec_gate, "---\ntitle: A spec\n---\n\nthe body\n")
 
     async def _boom(*args, **kwargs):
@@ -515,6 +533,7 @@ def test_approving_a_gate_does_not_wait_for_a_slow_ingest(client, item_at_spec_g
     """With the vector extra installed and the model host unreachable, the
     embed stalls for minutes. The approval answers without it, and the ingest
     still finishes afterwards."""
+    _forget_gate_copy(client, item_at_spec_gate)
     _write_artifact(client, item_at_spec_gate, "---\ntitle: A spec\n---\n\nthe body\n")
     real = api.app.state.indexer.ingest_gate_artifact
     release = threading.Event()
@@ -542,6 +561,7 @@ def test_approving_a_gate_with_no_artifact_ingests_nothing(client, item_at_spec_
     for this gate's artifact -- there is nothing to remember. (The fake
     agent's own session summary still ingests separately; this only pins the
     artifact side.)"""
+    _forget_gate_copy(client, item_at_spec_gate)
     _spec(client, item_at_spec_gate).unlink()
 
     resp = client.post(f"/api/work-items/{item_at_spec_gate}/gates/spec_approval/approve")

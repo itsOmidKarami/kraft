@@ -154,7 +154,8 @@ def collect(client, wid: str, filed: str) -> dict[str, dict]:
     item = client.get(f"/api/work-items/{wid}").json()
     docs = []
     for _ in range(100):  # the index links the spec node's documents a moment after its gate
-        if docs := client.get(f"/api/work-items/{wid}/documents").json()["documents"]:
+        found = client.get(f"/api/work-items/{wid}/documents").json()["documents"]
+        if docs := [d for d in found if d["source_kind"] == "session_summary"]:
             break
         time.sleep(0.05)
     ids = {

@@ -13,7 +13,7 @@ from kraft import events, inplace, item_paths, store
 from kraft.events import _now
 from kraft.index import ingest
 from kraft.index.embed import Embedder
-from kraft.vocab import ChainEvent, SessionEvent, WorkItemEvent
+from kraft.vocab import ChainEvent, GateEvent, SessionEvent, WorkItemEvent
 
 logger = logging.getLogger(__name__)
 
@@ -350,6 +350,30 @@ class Indexer:
                 self._conn.rollback()
                 raise
 
+    async def ingest_pending_gate_artifact(self, work_item_id: str, gate: str) -> None:
+        """Index the document a gate that has just opened is about, so the
+        documents list shows what the reviewer is deciding on, not only what
+        an earlier approval left (`ingest_gate_artifact` runs again at
+        approval and refreshes it). A gate with no document on disk is
+        skipped: it is still answerable."""
+        from kraft.executor.gates import gate_artifact
+
+        if self._run_dirs is None:
+            return
+        row = self._state.read(
+            lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+        )
+        rel = row and gate_artifact(self._run_dirs, row, gate)
+        if rel is None:
+            return
+        text = await asyncio.to_thread(
+            lambda: ingest.read_inside(*item_paths.locate(self._run_dirs, work_item_id, rel))
+        )
+        if text is not None:
+            await self.ingest_gate_artifact(
+                repo=row["repo"], work_item_id=work_item_id, path=rel, content=text
+            )
+
     # ---- live event drain ----
 
     def notify(self) -> None:
@@ -378,6 +402,7 @@ class Indexer:
                 new = self._state.read(lambda c: events.read_after(c, self._cursor))
                 repos: list[str] = []
                 summaries: list[tuple[str, str]] = []
+                opened: list[tuple[str, str]] = []
                 for ev in new:
                     self._cursor = ev["seq"]
                     payload = ev["payload"]
@@ -398,11 +423,18 @@ class Indexer:
                             repos.append(row["repo"])
                     elif ev["type"] == SessionEvent.WORKER_SESSION_EXITED:
                         summaries.append((ev["work_item_id"], payload["session_id"]))
+                    elif ev["type"] == GateEvent.REQUESTED:
+                        opened.append((ev["work_item_id"], payload["gate"]))
                 for wid, sid in summaries:
                     try:
                         await self.ingest_session_summary(wid, sid)
                     except Exception:  # noqa: BLE001
                         logger.exception("session summary ingest failed for %s/%s", wid, sid)
+                for wid, gate in opened:
+                    try:
+                        await self.ingest_pending_gate_artifact(wid, gate)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("gate artifact ingest failed for %s/%s", wid, gate)
                 for repo in repos:
                     try:
                         await self.rescan_repo(repo)
