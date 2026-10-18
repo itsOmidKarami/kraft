@@ -239,7 +239,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
     return {
       tone: "info", glyph: <Clock size={14} aria-hidden />, title: "Queued", where: WAITING_FOR_CHECKOUT,
       text: CHECKOUT_FREES,
-      facts: held.held_by ? [[IN_USE_BY, <Link className={linkButtonClass()} to={`/work-items/${encodeURIComponent(held.held_by)}`}>{held.held_by_title ?? held.held_by}</Link>]] : [],
+      facts: held.held_by ? [[IN_USE_BY, <Link className={linkButtonClass({ inline: true })} to={`/work-items/${encodeURIComponent(held.held_by)}`}>{held.held_by_title ?? held.held_by}</Link>]] : [],
       actions: [],
     };
   }

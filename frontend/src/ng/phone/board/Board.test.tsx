@@ -115,6 +115,16 @@ describe("the phone board (B)", () => {
     expect(document.querySelector('[data-row="w2"] .ph-card-meta')).not.toHaveTextContent("in your checkout");
   });
 
+  it("wraps a card's long tail after its path's slashes, never mid-folder, the words whole", async () => {
+    const reason = "the checkout moved to main in /Volumes/Work/clients/acme-corporation/monorepo";
+    put(item("c1", "needs_you", { stop: { kind: "checkout", node: "verification", resume_at: null, reason } }));
+    mount();
+    await act(async () => {});
+    const tail = document.querySelector('[data-row="c1"] .ph-card-tail')!;
+    expect(tail.innerHTML).toContain("/<wbr>Work/<wbr>clients/<wbr>acme-corporation/<wbr>");
+    expect(tail).toHaveTextContent(reason);
+  });
+
   it("a paused card's tail is neutral: ph-is-hot (amber) is only for a stop that needs a human", async () => {
     put(item("p1", "paused"), gate("g2"));
     mount();

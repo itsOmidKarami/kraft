@@ -36,7 +36,10 @@ describe("StateCard: queued", () => {
     expect(card).toHaveTextContent("waiting for the checkout");
     expect(card).toHaveTextContent("It starts when the checkout frees.");
     // The holder is a fact linking to it, as the Blocked card's items are, not run into the sentence.
-    expect(within(card).getByRole("link", { name: "Cache the index" })).toHaveAttribute("href", "/work-items/w2");
+    const holder = within(card).getByRole("link", { name: "Cache the index" });
+    expect(holder).toHaveAttribute("href", "/work-items/w2");
+    // Underlined at rest and the facts' own size, as a link inside a line (link-btn is-inline).
+    expect(holder).toHaveClass("is-inline");
     expect(within(card).getByText("in use by").tagName).toBe("DT");
   });
 

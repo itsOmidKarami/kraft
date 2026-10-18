@@ -72,6 +72,8 @@
 .board-meta-id { flex: none; } /* never shrinks: the id is whole at any width (R10) */
 .board-meta-tail { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-sub); display: flex; align-items: center; gap: 4px; }
 .board-tail-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A path's break points (`breakable`) only where the tail wraps: Chrome breaks at a <wbr> even under nowrap. */
+.board-tail-text wbr { display: none; }
 .board-cue { flex: none; }
 /* Amber stays "needs you"; the stop's kind is told by icon and weight, and a failure by --bad as everywhere else. */
 .board-meta-tail.is-hot { color: var(--warn); }
@@ -99,8 +101,12 @@
 @media (max-width: 1279px) {
   .board-meta { overflow: visible; }
   .board-meta-tail { white-space: normal; align-items: flex-start; overflow: visible; }
+  /* The repo crumb shrinks with the tail, each by its own length, so a long repo name never squeezes the reason to a
+     sliver; a short one keeps its own width (no min-width, which left a gap after it). */
+  .board-meta-repo { flex: 0 1 auto; }
   /* At most 3 lines: the whole tail stays in the DOM and in the row's title (Row.tsx). */
   .board-tail-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
+  .board-tail-text wbr { display: inline; }
   /* "in your checkout" gives its room to a tail that already says the checkout (Row.tsx `saysCheckout`). */
   .board-meta .is-said { display: none; }
 }

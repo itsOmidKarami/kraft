@@ -6,6 +6,7 @@ import { reasonTail, stopCueOf, ticksOf } from "../../board/rowText";
 import { IN_YOUR_CHECKOUT } from "../../board/sharedWords";
 import { NodeGlyph } from "../../graph/NodeGlyph";
 import { Button } from "../../ui/Button";
+import { breakable } from "../ui/breakable";
 import { cardButtons, type CardButton } from "./actions";
 import { stateGlyph } from "./glyph";
 
@@ -42,7 +43,7 @@ export function Card({ item, now, offline, busy, error, onOpen, onButton }: Card
         </span>
         <span className={`ph-card-tail${hot && cue !== "paused" ? " ph-is-hot" : ""}${cue ? ` ph-is-${cue}` : ""}`}>
           {Cue && <Cue size={12} aria-hidden className="ph-card-cue" />}
-          {reasonTail(item, now)}
+          {breakable(reasonTail(item, now))}
         </span>
       </button>
       {buttons.length > 0 && (

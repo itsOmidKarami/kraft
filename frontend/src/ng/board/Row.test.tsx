@@ -61,6 +61,11 @@ describe("Row", () => {
     expect(tail.textContent).toBe(words);
   });
 
+  it("wraps a long tail's path after its slashes, never mid-folder", () => {
+    const stop = { kind: "checkout", node: "verification", resume_at: null, reason: LONG_STOP } as WorkItem["stop"];
+    expect(mount("needs_you", { stop }).main.querySelector(".board-tail-text")!.innerHTML).toContain("/<wbr>Work/<wbr>clients/<wbr>acme-corporation/<wbr>");
+  });
+
   it("says an in-place item runs in your checkout, and a worktree item nothing of the kind", () => {
     expect(mount("running", { in_place: true }).main.querySelector(".board-meta")).toHaveTextContent("in your checkout");
     cleanup();
