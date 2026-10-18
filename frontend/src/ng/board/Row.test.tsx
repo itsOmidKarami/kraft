@@ -38,11 +38,16 @@ describe("Row", () => {
     expect(meta).toHaveTextContent(/\d+ of \d+ nodes done/);
   });
 
-  it("keeps the whole tail in its title, for a narrow row that clips it", () => {
-    const queued = { verb: "resume", since: "2026-09-13T09:00:00Z", why: "checkout" as const, held_by: "w2", held_by_title: "Cache the index" };
-    const tail = mount("queued", { queued }).main.querySelector(".board-tail-text")!;
-    expect(tail).toHaveAttribute("title", "waiting for the checkout: “Cache the index” is using it");
-    expect(tail).toHaveTextContent("waiting for the checkout: “Cache the index” is using it");
+  // board.css clamps a narrow row's tail to 3 lines: the words themselves stay whole, in the DOM and in its title.
+  const LONG_PATH = "/Volumes/Work/clients/acme-corporation/monorepo/services/kraft-plugins-with-a-long-checkout-path";
+  const LONG_STOP = `the checkout moved to main during the run of verification.review.code_review in ${LONG_PATH}`;
+  it.each<[string, DisplayStatus, Partial<WorkItem>, string]>([
+    ["queue line", "queued", { queued: { verb: "resume", since: "2026-09-13T09:00:00Z", why: "checkout", held_by: "w2", held_by_title: "Cache the index" } }, "waiting for the checkout: “Cache the index” is using it"],
+    ["long checkout stop", "needs_you", { stop: { kind: "checkout", node: "verification", resume_at: null, reason: `${LONG_STOP}. Kraft did not switch it back` } as WorkItem["stop"] }, LONG_STOP],
+  ])("keeps the whole tail in the DOM and its title, for a narrow row that clamps it: %s", (_, status, over, words) => {
+    const tail = mount(status, over).main.querySelector(".board-tail-text")!;
+    expect(tail).toHaveAttribute("title", words);
+    expect(tail.textContent).toBe(words);
   });
 
   it("says an in-place item runs in your checkout, and a worktree item nothing of the kind", () => {

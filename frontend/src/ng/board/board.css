@@ -99,7 +99,8 @@
 @media (max-width: 1279px) {
   .board-meta { overflow: visible; }
   .board-meta-tail { white-space: normal; align-items: flex-start; overflow: visible; }
-  .board-tail-text { overflow: visible; text-overflow: clip; }
+  /* At most 3 lines: the whole tail stays in the DOM and in the row's title (Row.tsx). */
+  .board-tail-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; text-overflow: clip; }
   /* "in your checkout" gives its room to a tail that already says the checkout (Row.tsx `saysCheckout`). */
   .board-meta .is-said { display: none; }
 }

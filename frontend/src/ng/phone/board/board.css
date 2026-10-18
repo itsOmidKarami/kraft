@@ -22,7 +22,8 @@
 .ph-tick-hot { background: var(--warn); }
 .ph-tick-paused { background: var(--text-sub); }
 .ph-tick-gate { flex: none; width: 6px; height: 6px; border-radius: 1px; transform: rotate(45deg); }
-.ph-card-tail { padding-left: 40px; font-size: var(--fs-meta); color: var(--text-sub); overflow-wrap: anywhere; }
+/* At most 3 lines, as the desktop row's tail: the whole reason stays in the DOM, and the item page shows it. */
+.ph-card-tail { padding-left: 40px; font-size: var(--fs-meta); color: var(--text-sub); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .ph-card-tail.ph-is-hot { color: var(--warn); }
 .ph-card-tail.ph-is-failed { color: var(--bad); font-weight: 600; }
 .ph-card-cue { vertical-align: -2px; margin-right: 4px; }
