@@ -350,6 +350,26 @@ overrides:
 """
 
 
+#: team3 replaces lists: verification's steps, implementation's main tasks
+#: (the shorthand), and fills one slot, verification's judge.
+TEXTS = {
+    "team2": "id: team2\nextends: team\n",
+    "team3": """id: team3
+extends: default
+overrides:
+  verification:
+    steps:
+      - id: tests
+        tasks:
+          - {id: again, kind: subprocess, command: make test}
+    fix_loop: {judge: {prompt: Judge strictly.}}
+  implementation:
+    tasks:
+      - {id: implement, extends: spec_author, prompt: Build it.}
+""",
+}
+
+
 def team(st, text=TEAM, *, published=TEAM, key="team"):
     name = f"chains/{key}.yaml"
     return resolve.resolve(st, "chains", key, {name: text}, {name: published})
@@ -363,15 +383,29 @@ def team(st, text=TEAM, *, published=TEAM, key="team"):
         ("team", "security_scan.main.scan", "command", "chain"),
         ("team", "build.main.implement", "prompt", "library:tasks.implementer"),
         ("team2", "implementation.main.implement", "prompt", "chain:team"),
+        ("team3", "verification.tests.again", "command", "chain"),
+        ("team3", "implementation.main.implement", "prompt", "chain"),
+        ("team3", "verification.fix_loop.judge", "prompt", "chain"),
+        ("team3", "implementation.main.implement", "harness", "library:tasks.spec_author"),
     ],
-    ids=["inherited", "overridden", "added", "added-from-the-library", "two-levels"],
+    ids=[
+        "inherited",
+        "overridden",
+        "added",
+        "added-from-the-library",
+        "two-levels",
+        "in-a-replaced-list",
+        "in-a-replaced-main-step",
+        "in-an-overridden-slot",
+        "the-replacing-items-own-parent",
+    ],
 )
 async def test_an_extending_chains_sources_name_the_parent(
     templates_dir, database, key, path, field, source
 ):
     (templates_dir / "chains" / "team.yaml").write_text(TEAM)
     st = draft_state(templates_dir, database)
-    text = TEAM if key == "team" else "id: team2\nextends: team\n"
+    text = TEAM if key == "team" else TEXTS[key]
     result = team(st, text, published=text, key=key)
     assert result["sources"][path][field]["source"] == source
 

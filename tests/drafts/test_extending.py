@@ -69,6 +69,11 @@ async def test_the_editor_keeps_the_final_gate(st):
     assert no(st, ("remove", {"path": "final_review"})).startswith("final_review is the final gate")
 
 
+async def test_removing_an_added_node_deletes_its_entry(st):
+    r = team(st, ("remove", {"path": "security_scan"}))
+    assert "add" not in r.model and "security_scan" not in r.resolved_order
+
+
 async def test_restoring_a_removed_node_deletes_its_entry(st):
     r = team(st, ("restore", {"node": "external_approval"}))
     assert "remove" not in r.model
@@ -210,6 +215,7 @@ FINAL_MESSAGE = "Review the complete work item and merge-request summary."
             "final_review",
             None,
         ),
+        ([("set_field", {"path": IMPLEMENT, "field": "prompt", "value": ""})], IMPLEMENT, None),
     ],
     ids=[
         "node-field",
@@ -217,6 +223,7 @@ FINAL_MESSAGE = "Review the complete work item and merge-request summary."
         "task-route-back-to-inherited",
         "dotted-policy-field",
         "back-to-the-inherited-value",
+        "an-empty-value-resets",
     ],
 )
 async def test_an_inherited_field_edit_is_an_override(st, batch, path, expected):
@@ -273,6 +280,18 @@ async def test_an_editor_override_keeps_identity(st, field, value):
         (("reset_field", {"path": ""}), "YAML view"),
         (("set_fragment", {"path": "", "yaml": "id: team\n"}), "change the chain itself"),
         (("remove", {"path": "implementation"}), "implementation has overrides; reset them first"),
+        (("set_field", {"path": "nope", "field": "message", "value": "x"}), "nothing at 'nope'"),
+        (("set_field", {"path": "spec.nope", "field": "prompt", "value": "x"}), "nothing at"),
+        (("add_node", {"at": 3, "id": "lint", "kind": "loop"}), "exec or gate, not 'loop'"),
+        (("remove", {"path": "external_approval"}), "already removed; put it back with restore"),
+        (("restore", {"node": "spec"}), "spec is not removed from default"),
+        (("add_step", {"container": "external_approval", "at": 0}), "removed; restore it first"),
+        (
+            ("set_field", {"path": "external_approval", "field": "icon", "value": "x"}),
+            "external_approval is removed; restore it first",
+        ),
+        (("reset_field", {"path": "spec"}), "spec has no override to reset"),
+        (("rename", {"path": IMPLEMENT, "id": "build"}), "inherited from default"),
     ],
     ids=[
         "move-node",
@@ -288,6 +307,15 @@ async def test_an_editor_override_keeps_identity(st, field, value):
         "reset-the-chain",
         "set_fragment-the-chain",
         "remove-an-overridden-node",
+        "unknown-node",
+        "unknown-component",
+        "add_node-of-no-kind",
+        "remove-a-removed-node",
+        "restore-a-kept-node",
+        "inside-a-removed-node",
+        "override-a-removed-node",
+        "reset-with-no-override",
+        "rename-task",
     ],
 )
 async def test_an_inherited_component_refuses_what_has_no_edit(st, batch, error):
@@ -325,11 +353,63 @@ LINT = (
             [("move_to_library", {"path": "security_scan", "name": "security_scan"})],
             lambda node: node == {"id": "security_scan", "extends": "security_scan"},
         ),
+        (
+            [("rename", {"path": "security_scan.main.scan", "id": "sast"})],
+            lambda node: _tasks(node) == ["sast"],
+        ),
+        (
+            [LINT, ("move", {"path": "security_scan.main.lint", "to": 0})],
+            lambda node: _tasks(node) == ["lint", "scan"],
+        ),
+        (
+            [
+                (
+                    "set_field",
+                    {"path": "security_scan.main.scan", "field": "command", "value": "make scan"},
+                ),
+                ("reset_field", {"path": "security_scan.main.scan", "field": "command"}),
+            ],
+            lambda node: "command" not in node["steps"][0]["tasks"][0],
+        ),
+        (
+            [("move_to_library", {"path": "security_scan.main.scan", "name": "scan"})],
+            lambda node: node["steps"][0]["tasks"][0] == {"id": "scan", "extends": "scan"},
+        ),
     ],
-    ids=["add_task", "set_field", "remove-task", "move_to_library"],
+    ids=[
+        "add_task",
+        "set_field",
+        "remove-task",
+        "move_to_library",
+        "rename-task",
+        "move-task",
+        "reset_field",
+        "move_to_library-task",
+    ],
 )
 async def test_an_op_inside_an_added_node_edits_its_entry(st, batch, check):
     assert check(team(st, *batch).model["add"][0]["node"])
+
+
+SCAN_OK = [
+    ("add_node", {"at": 10, "id": "scan_ok", "kind": "gate"}),
+    ("set_field", {"path": "scan_ok", "field": "reject_to", "value": "security_scan"}),
+]
+
+
+@pytest.mark.parametrize(
+    ("batch", "error"),
+    [
+        ([*SCAN_OK, ("move", {"path": "scan_ok", "to": 8})], "can't move scan_ok"),
+        (
+            [*SCAN_OK, ("move_to_library", {"path": "scan_ok", "name": "ok"})],
+            "only an exec node or a task",
+        ),
+    ],
+    ids=["move-before-its-reject_to", "move_to_library-a-gate"],
+)
+async def test_an_added_node_refuses_what_its_own_node_would(st, batch, error):
+    assert error in no(st, *batch)
 
 
 @pytest.mark.parametrize(
@@ -375,6 +455,33 @@ async def test_renaming_an_added_node_renames_its_pointers(st, pointer, read):
 )
 async def test_no_op_leaves_the_edits_not_applying(st, batch):
     assert "would leave team not resolving" in no(st, *batch)
+
+
+#: Keeps no final gate: its edits don't apply, so the canvas has no nodes.
+BROKEN = TEAM.replace("remove: [external_approval]", "remove: [external_approval, final_review]")
+#: Replaces verification's steps: a component in that list is the override's.
+REPLACED = TEAM + (
+    "  verification:\n    steps:\n      - id: tests\n        tasks:\n"
+    "          - {id: again, kind: subprocess, command: make test}\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("text", "batch", "error"),
+    [
+        (BROKEN, ("add_node", {"at": 3, "id": "lint", "kind": "gate"}), "fix it in the YAML view"),
+        (BROKEN, ("detach", {}), "team does not resolve, so it can't be detached"),
+        (
+            REPLACED,
+            ("set_field", {"path": "verification.tests.again", "field": "command", "value": "x"}),
+            "sits in the list overrides.verification replaces",
+        ),
+    ],
+    ids=["edits-not-applying", "detach-edits-not-applying", "inside-a-replaced-list"],
+)
+async def test_what_only_the_yaml_view_can_edit(st, text, batch, error):
+    (st.templates_dir / "chains" / "team.yaml").write_text(text)
+    assert error in no(draft_state(st.templates_dir, st.db), batch)
 
 
 async def test_a_new_chain_can_extend_a_chain(st):
@@ -480,11 +587,14 @@ async def test_changing_a_chains_base_drops_the_edits_it_cant_take(st, first):
         ("team", "can't extend itself"),
         ("team2", "would be a cycle"),
         ("nope", "there is no chain 'nope' to extend"),
+        ("broken", "broken does not resolve, so nothing can extend it"),
     ],
-    ids=["itself", "cycle", "unknown"],
+    ids=["itself", "cycle", "unknown", "one-that-does-not-resolve"],
 )
 async def test_a_chains_base_is_one_it_may_extend(st, base, error):
     (st.templates_dir / "chains" / "team2.yaml").write_text(TEAM2)
+    broken = BROKEN.replace("id: team", "id: broken")
+    (st.templates_dir / "chains" / "broken.yaml").write_text(broken)
     st = draft_state(st.templates_dir, st.db)
     for op in ("chain_base_check", "change_chain_base"):
         assert error in no(st, (op, {"base": base}))

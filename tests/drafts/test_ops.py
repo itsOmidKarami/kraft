@@ -305,6 +305,21 @@ async def test_set_field_refuses_the_id(st):
     assert "rename it with rename" in refused(st, *fields("spec", ("id", "x")))
 
 
+@pytest.mark.parametrize(
+    ("op", "fields", "why"),
+    [
+        ("restore", {"node": "spec"}, "extends nothing, so no node is removed"),
+        ("detach", {}, "extends nothing, so there is nothing to detach"),
+        ("chain_base_check", {"base": "quick-task"}, "extends nothing, so it has no base"),
+        ("change_chain_base", {"base": "quick-task"}, "extends nothing, so it has no base"),
+        ("nope", {}, "no op 'nope'"),
+    ],
+    ids=["restore", "detach", "chain_base_check", "change_chain_base", "unknown"],
+)
+async def test_a_chain_extending_nothing_has_no_extending_ops(st, op, fields, why):
+    assert why in refused(st, (op, fields))
+
+
 async def test_reset_field_removes_one_override_or_every_one(st):
     path = "implementation.main.implement"
     overrides = fields(path, ("icon", "hammer"), ("model", "opus"), ("policy.budget_usd", 2))
@@ -484,6 +499,8 @@ overrides:
         tasks:
           - {id: again, extends: implementer}
   implementation.main.implement: {steering: [project-standards]}
+  verification.fix_loop.judge: {steering: [project-standards]}
+  post_draft_feedback.on_failure.repair.repair_feedback: {steering: [project-standards]}
 """
 
 
@@ -509,8 +526,29 @@ overrides:
             "implementation.main.implement",
             lambda m: m["overrides"]["implementation.main.implement"]["steering"][0],
         ),
+        (
+            "steering.project-standards",
+            "standards",
+            "verification.fix_loop.judge",
+            lambda m: m["overrides"]["verification.fix_loop.judge"]["steering"][0],
+        ),
+        (
+            "steering.project-standards",
+            "standards",
+            "post_draft_feedback.on_failure.repair.repair_feedback",
+            lambda m: m["overrides"]["post_draft_feedback.on_failure.repair.repair_feedback"][
+                "steering"
+            ][0],
+        ),
     ],
-    ids=["added-node", "added-task", "override-list", "override-steering"],
+    ids=[
+        "added-node",
+        "added-task",
+        "override-list",
+        "override-steering",
+        "override-a-judge",
+        "override-a-handler-task",
+    ],
 )
 async def test_renaming_a_library_component_rewrites_an_extending_chains_uses(
     st, old, new, path, read
