@@ -261,3 +261,56 @@ def test_a_removed_pointer_target_is_named(tmp_path, child, why):
         assert "ship" not in ids(resolve(tmp_path, {"extends": "parent", **child}))
     else:
         assert why in refused(tmp_path, {"extends": "parent", **child})
+
+
+@pytest.mark.parametrize("case", ["inline-parent-node", "library-node"])
+def test_an_inherited_error_names_the_file_that_defined_it(tmp_path, case):
+    """An override that breaks a component the parent's file (or the library)
+    defined names both: the child's override, and where the definition lives."""
+    inline = {"id": "solo", "kind": "exec", "tasks": [{"id": "t", **agent_task()}]}
+    parent = {**PARENT, "nodes": [*PARENT["nodes"], inline]}
+    path = "solo.main.t" if case == "inline-parent-node" else "build.main.t"
+    child = {"extends": "parent", "overrides": {path: {"prompt": 5}}}
+    lib = library(tmp_path, child, parent=parent)
+    with pytest.raises(TemplateLibraryError) as exc:
+        lib.resolve_chain("child")
+    defined = (
+        "chains/parent.yaml: chain parent"
+        if case == "inline-parent-node"
+        else "library.yaml: tasks.base"
+    )
+    assert f"child.yaml: {path}.prompt <- " in str(exc.value)
+    assert defined in str(exc.value)
+    assert exc.value.loc == ("overrides", path)
+    # The key path in the file that defined it: the parent chain's own nodes
+    # list (index 5 is `solo`), or the library section.
+    where = (
+        ("nodes", 5, "tasks", 0, "prompt")
+        if case == "inline-parent-node"
+        else ("tasks", "base", "prompt")
+    )
+    assert exc.value.related[1] == where
+
+
+@pytest.mark.parametrize("case", ["bad-edit", "parent-broken"])
+def test_an_extending_chain_fails_alone(tmp_path, case):
+    broken = {**PARENT, "nodes": [node("build", extends="ghost")]}
+    chains = {
+        "parent": PARENT if case == "bad-edit" else broken,
+        "child": {
+            "id": "child",
+            "extends": "parent",
+            "remove": ["nope" if case == "bad-edit" else "build"],
+        },
+        "sibling": {"id": "sibling", "nodes": [node("n")]},
+    }
+    write_chains(tmp_path, LIBRARY, chains)
+    report = TemplateLibrary.lint_dir(tmp_path)
+    child = [i for i in report.issues if i.chain == "child"]
+    assert len(child) == 1
+    assert "sibling" in report.chains
+    if case == "parent-broken":
+        assert "extends 'parent', which does not resolve" in child[0].message
+        assert "ghost" not in child[0].message
+    else:
+        assert "parent" in report.chains
