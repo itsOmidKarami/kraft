@@ -470,6 +470,20 @@ def _new_parent(d: Draft, base: object) -> tuple[list[dict], set[str]]:
     return nodes, {located.path for located in resolution._located.values()}
 
 
+def _pointers(node: Mapping, override: object) -> list[tuple[str, object]]:
+    """`node`'s `reject_to` and `restart_from`, as this chain's override of
+    it leaves them."""
+    over = override if isinstance(override, Mapping) else {}
+    changed = over.get("on_base_changed")
+    restart = ops._restart_from(node)
+    if isinstance(changed, Mapping) and "restart_from" in changed:
+        restart = changed["restart_from"]
+    return [
+        ("reject_to", over.get("reject_to", node.get("reject_to"))),
+        ("on_base_changed.restart_from", restart),
+    ]
+
+
 def chain_base_check(d: Draft, base: str) -> dict:
     """Which of this chain's edits `base` can take, as `ops.base_check` says
     which of a node's overrides a new library base can: each `remove`, `add`
@@ -486,15 +500,33 @@ def chain_base_check(d: Draft, base: str) -> dict:
         else:
             dropped.append({"key": key, "why": why})
 
-    for id in _removed(d):
-        judge(
-            f"remove {id}",
-            f"{base} has no node {id}"
-            if id not in ids
-            else f"{id} is {base}'s final gate"
-            if id in final
-            else None,
-        )
+    why = {
+        id: f"{base} has no node {id}"
+        if id not in ids
+        else f"{id} is {base}'s final gate"
+        if id in final
+        else None
+        for id in _removed(d)
+    }
+    # A node the new parent keeps can't point at one this chain removes: that
+    # removal goes too, and then so does any the node it puts back points at.
+    overrides = d._chain.get("overrides")
+    overrides = overrides if isinstance(overrides, Mapping) else {}
+    while True:
+        gone = {id for id, no in why.items() if no is None}
+        names = [
+            (n.get("id"), field, target)
+            for n in nodes
+            if n.get("id") not in gone
+            for field, target in _pointers(n, overrides.get(n.get("id")))
+            if target in gone
+        ]
+        if not names:
+            break
+        for node, field, target in names:
+            why[target] = why[target] or f"{base}'s {node} {field} names it"
+    for id, no in why.items():
+        judge(f"remove {id}", no)
     for entry in d._chain.get("add") or ():
         node = entry.get("node") if isinstance(entry, Mapping) else None
         id = node.get("id") if isinstance(node, Mapping) else None

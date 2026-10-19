@@ -181,8 +181,8 @@ origin: src/kraft/drafts/extending.py §remove
 
 ## REQ changing-an-extending-chains-base-keeps-what-fits
 
-WHEN the editor changes the chain an extending chain extends, the system SHALL keep each `remove`, `add` and `overrides` entry the new parent can take and SHALL drop each one it cannot, saying which and why.
-enforced-by: tests/drafts/test_extending.py::test_a_chain_base_check_says_which_edits_the_new_parent_takes, tests/drafts/test_extending.py::test_changing_a_chains_base_drops_the_edits_it_cant_take[as-filed], tests/drafts/test_extending.py::test_changing_a_chains_base_drops_the_edits_it_cant_take[with-an-override-it-cant-take]
+WHEN the editor changes the chain an extending chain extends, the system SHALL keep each `remove`, `add` and `overrides` entry the new parent can take and SHALL drop each one it cannot, saying which and why. A removal the new parent cannot take includes one of a node that a node it keeps still names in `reject_to` or `restart_from`, after this chain's overrides.
+enforced-by: tests/drafts/test_extending.py::test_a_chain_base_check_says_which_edits_the_new_parent_takes, tests/drafts/test_extending.py::test_changing_a_chains_base_drops_the_edits_it_cant_take[as-filed], tests/drafts/test_extending.py::test_changing_a_chains_base_drops_the_edits_it_cant_take[with-an-override-it-cant-take], tests/drafts/test_extending.py::test_a_new_parents_pointer_keeps_the_node_it_names[reject_to], tests/drafts/test_extending.py::test_a_new_parents_pointer_keeps_the_node_it_names[restart_from], tests/drafts/test_extending.py::test_a_new_parents_pointer_keeps_the_node_it_names[reject_to-elsewhere], tests/drafts/test_extending.py::test_a_new_parents_pointer_keeps_the_node_it_names[restart_from-elsewhere]
 origin: src/kraft/drafts/extending.py §change_chain_base
 
 ## REQ a-chains-new-base-is-one-it-may-extend

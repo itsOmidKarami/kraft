@@ -433,13 +433,28 @@ async def test_an_added_node_refuses_what_its_own_node_would(st, batch, error):
             ],
             lambda m: m["overrides"]["local_review"]["reject_to"],
         ),
+        (
+            [
+                (
+                    "set_field",
+                    {
+                        "path": "security_scan",
+                        "field": "on_base_changed.restart_from",
+                        "value": "security_scan",
+                    },
+                )
+            ],
+            lambda m: m["add"][0]["node"]["on_base_changed"]["restart_from"],
+        ),
     ],
-    ids=["added-gate", "inherited-gate-override"],
+    ids=["added-gate", "inherited-gate-override", "its-own-restart_from"],
 )
 async def test_renaming_an_added_node_renames_its_pointers(st, pointer, read):
     r = team(st, *pointer, ("rename", {"path": "security_scan", "id": "sast"}))
     assert read(r.model) == "sast"
-    assert r.answers[-1]["updated"]
+    # As `ops.rename` answers: the node's own restart_from is no other node's.
+    own = pointer[-1][1]["path"] == "security_scan"
+    assert bool(r.answers[-1]["updated"]) is not own
 
 
 @pytest.mark.parametrize(
@@ -579,6 +594,46 @@ async def test_changing_a_chains_base_drops_the_edits_it_cant_take(st, first):
         "overrides": {IMPLEMENT: {"prompt": "Implement it carefully."}},
     }
     assert r.resolved_order == apply_ops(st, key="quick-task").resolved_order
+
+
+LEAN = "id: lean\nextends: default\nremove: [describe_merge_request]\n"
+#: Each a new parent that points at the node `lean` removes.
+POINTS = {
+    "reject_to": "final_review: {reject_to: describe_merge_request}",
+    "restart_from": (
+        "merge_request_feedback: {on_base_changed: {restart_from: describe_merge_request}}"
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("points", "mine", "why"),
+    [
+        ("reject_to", "", "alt's final_review reject_to names it"),
+        ("restart_from", "", "alt's merge_request_feedback on_base_changed.restart_from names it"),
+        ("reject_to", "final_review: {reject_to: implementation}", None),
+        (
+            "restart_from",
+            "merge_request_feedback: {on_base_changed: {restart_from: verification}}",
+            None,
+        ),
+    ],
+    ids=["reject_to", "restart_from", "reject_to-elsewhere", "restart_from-elsewhere"],
+)
+async def test_a_new_parents_pointer_keeps_the_node_it_names(st, points, mine, why):
+    chains = st.templates_dir / "chains"
+    (chains / "alt.yaml").write_text(f"id: alt\nextends: default\noverrides:\n  {POINTS[points]}\n")
+    (chains / "lean.yaml").write_text(LEAN + (f"overrides:\n  {mine}\n" if mine else ""))
+    st = draft_state(st.templates_dir, st.db)
+    check = apply_ops(st, ("chain_base_check", {"base": "alt"}), key="lean").answers[0]
+    key = "remove describe_merge_request"
+    if why is None:
+        assert check == {"kept": [key, f"overrides {mine.split(':')[0]}"], "dropped": []}
+    else:
+        assert check == {"kept": [], "dropped": [{"key": key, "why": why}]}
+    # What the check keeps, the change can apply.
+    r = apply_ops(st, ("change_chain_base", {"base": "alt"}), key="lean")
+    assert r.model.get("remove") == (None if why else ["describe_merge_request"])
 
 
 @pytest.mark.parametrize(
