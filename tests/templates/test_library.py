@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from support.templates import agent_task
 
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentInput, AgentTask, BuiltinAction, ForgeAction, GateNode
@@ -29,10 +30,6 @@ def write_library(
     (root / "library.yaml").write_text(yaml.safe_dump(library))
     (root / "chains" / f"{chain_id}.yaml").write_text(yaml.safe_dump(chain))
     return TemplateLibrary.from_yaml_dir(root)
-
-
-def agent_task(**kw) -> dict:
-    return {"kind": "agent", "harness": "codex", "prompt": "do it", **kw}
 
 
 # ── the library is components plus one chain per file
