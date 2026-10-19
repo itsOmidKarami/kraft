@@ -56,6 +56,16 @@ describe("Chains (L.1)", () => {
     expect(posts(calls)).toEqual([]);
   });
 
+  it("an extending chain names its parent, and marks the nodes it adds or overrides as the canvas does", async () => {
+    const team = { id: "team", nodes: NODES, gates: 1, extends: "default" };
+    const extending = { parent: "default", nodes: [], origins: { spec: "inherited", spec_approval: "overridden", verification: "added" }, removed: [] };
+    mountAt(<ChainView />, "/templates/chains/team", "/templates/chains/:chain", answers({ "GET /templates/chains": [200, [...CHAINS, team]], "GET /templates/chains/team": [200, { id: "team", text: "id: team\n" }], "GET /drafts/chains/team": [200, view("chains", "team", {}, { extending: extending as never })] }));
+    expect(await screen.findByText("extends default · 3 nodes · 1 gate")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("link", { name: /^verification/ })).toHaveTextContent("added here"));
+    expect(screen.getByRole("link", { name: /^approve spec/ })).toHaveTextContent("overridden here");
+    expect(screen.getByRole("link", { name: /^spec.*exec · 1 step/ })).not.toHaveTextContent(/here/);
+  });
+
   it("a chain-wide cap is parsed as the desktop parses it, then sent as set_field", async () => {
     const { calls } = open();
     await userEvent.click(await screen.findByRole("button", { name: /^running cap/ }));

@@ -74,21 +74,45 @@ describe("chain switcher", () => {
     await waitFor(() => expect(where).toBe("/templates/chains/quick-task"));
   });
 
-  it("New chain and Duplicate send new_chain on the new key, refuse a taken id, and go there", async () => {
+  it.each([
+    // A chain of your own duplicates as a copy unless Extend is chosen.
+    { how: "a copy, the default", choice: undefined, initial: "default_copy", source: { from: "default" } },
+    { how: "Extend, chosen", choice: "Extend", initial: "default_ext", source: { extends: "default" } },
+  ])("Duplicate as $how sends new_chain on the new key, refuses a taken id, and goes there", async ({ choice, initial, source }) => {
     const post = vi.spyOn(d, "postOps").mockImplementation(() => ok({ ...view(true), ops: [] }));
     mount();
     await userEvent.click(await crumb());
     await screen.findByRole("option", { name: /quick-task/ });
     await userEvent.click(within(screen.getByRole("dialog", { name: "Switch chain" })).getByRole("button", { name: "Duplicate" }));
+    expect(screen.queryByRole("button", { name: "Extend" })).toBeNull();
+    expect(screen.getByRole("radio", { name: "Copy" })).toBeChecked();
+    if (choice) await userEvent.click(screen.getByRole("radio", { name: choice }));
     const id = await screen.findByRole("textbox", { name: "Duplicate id" });
-    expect(id).toHaveValue("default_copy");
+    expect(id).toHaveValue(initial);
     await userEvent.clear(id);
     await userEvent.type(id, "quick-task");
     expect(screen.getByRole("alert")).toHaveTextContent("quick-task is taken.");
     await userEvent.clear(id);
     await userEvent.type(id, "mine{Enter}");
-    await waitFor(() => expect(post).toHaveBeenCalledWith("chains", "mine", [{ op: "new_chain", from: "default" }]));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("chains", "mine", [{ op: "new_chain", ...source }]));
     await waitFor(() => expect(where).toBe("/templates/chains/mine"));
+  });
+
+  it("says a refused new chain as an error, and stays", async () => {
+    vi.spyOn(d, "postOps").mockResolvedValue({ status: 409, body: { detail: "a chain mine already exists" } } as never);
+    const heard: { message: string; tone?: string }[] = [];
+    const hear = (e: Event) => heard.push((e as CustomEvent<{ message: string; tone?: string }>).detail);
+    window.addEventListener("kraft:toast", hear);
+    mount();
+    await userEvent.click(await crumb());
+    await screen.findByRole("option", { name: /quick-task/ });
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Switch chain" })).getByRole("button", { name: "Duplicate" }));
+    const id = await screen.findByRole("textbox", { name: "Duplicate id" });
+    await userEvent.clear(id);
+    await userEvent.type(id, "mine{Enter}");
+    await waitFor(() => expect(heard).toEqual([{ message: "a chain mine already exists", tone: "error" }]));
+    window.removeEventListener("kraft:toast", hear);
+    expect(where).toBe("/templates/chains/default");
   });
 });
 

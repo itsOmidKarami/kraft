@@ -127,6 +127,18 @@ def test_fragment_is_the_components_yaml_from_the_draft_else_the_published_file(
     )
 
 
+def test_an_extending_chains_inherited_fragment_is_its_component_with_the_edits(client):
+    team = (
+        "id: team\nextends: default\n"
+        "overrides:\n  implementation.main.implement: {prompt: Implement it carefully.}\n"
+    )
+    assert client.put("/api/templates/chains/team", json={"text": team}).status_code == 200
+    path = {"path": "implementation.main.implement"}
+    answer = client.get("/api/drafts/chains/team/fragment", params=path)
+    assert answer.status_code == 200, answer.text
+    assert yaml.safe_load(answer.json()["text"])["prompt"] == "Implement it carefully."
+
+
 def test_fragment_of_an_unknown_path_is_404_and_a_missing_path_is_400(client):
     assert client.get(f"{DEFAULT}/fragment", params={"path": "nope"}).status_code == 404
     assert client.get(f"{DEFAULT}/fragment").status_code == 400

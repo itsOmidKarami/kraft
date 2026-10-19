@@ -290,14 +290,42 @@ def _read_by_deciding(value: object, deciding: bool = False) -> set[str]:
     return out
 
 
-def _steering_texts(extracted: fetch.Extracted) -> dict:
+def _library_data(extracted: fetch.Extracted) -> dict:
+    """The candidate's `library.yaml` as a mapping; empty when it has none or
+    it does not parse (`update.problems` says why)."""
     entry = extracted.files.get("library.yaml")
     try:
         data = bounded_yaml(entry[1].decode(), [20_000]) if entry else {}
     except (ValueError, yaml.YAMLError):
         return {}
-    section = data.get("steering") if isinstance(data, dict) else None
+    return data if isinstance(data, dict) else {}
+
+
+def _steering_texts(extracted: fetch.Extracted) -> dict:
+    section = _library_data(extracted).get("steering")
     return section if isinstance(section, dict) else {}
+
+
+def _through_addons(library: TemplateLibrary | None, repo_id: str) -> set[str]:
+    """`repo_id`'s chains whose `extends` ancestry leaves the library, through
+    an add-on's chain. `review.review` loads the library alone, where such a
+    chain does not resolve, so only `local_changes` can show what it runs."""
+    if library is None:
+        return set()
+    own = f"{repo_id}:"
+    out: set[str] = set()
+    for chain_id in library.chain_ids:
+        at, seen = chain_id, set()
+        while chain_id.startswith(own) and at in library.chain_ids and at not in seen:
+            seen.add(at)
+            parent = library.chain_data(at).get("extends")
+            if not isinstance(parent, str):
+                break
+            if not parent.startswith(own):
+                out.add(chain_id)
+                break
+            at = parent
+    return out
 
 
 def _holds(
@@ -406,6 +434,7 @@ def check(
         extracted.files,
         other_namespaces=others,
         repositories=set(load.connected_ids(config_dir, repos)) - {repo_id},
+        repo_library=repo_id,
     )
     if why := load.instance_problem(
         repo_id, declared.requires, config_dir, repos=repos, repo_library=True
@@ -413,6 +442,15 @@ def check(
         problems.append(why)
     if problems:
         return refused(*problems)
+    by_id = {p.id: p for p in loaded if p.repo_id is None}
+    unloaded = [
+        f"library.yaml: addons: lists {listed}, which this instance does not load "
+        f"({'not installed' if by_id.get(listed) is None else by_id[listed].left_out})"
+        for listed in load.builds_on(_library_data(extracted))
+        if by_id.get(listed) is None or by_id[listed].left_out is not None
+    ]
+    if unloaded:
+        return refused(*unloaded)
 
     old = None
     store = addons_root / "store" / was.removeprefix("sha256:") if was else None
@@ -435,6 +473,17 @@ def check(
         f"read from {found.url} at {found.commit[:12]} ({found.branch})",
         *reviewed.content,
     ]
+    # What it builds on (`a-change-to-the-addons-list-is-reach`): a new entry
+    # makes uninstalling or disabling that add-on refuse.
+    had = set(load.builds_on(_library_data(old))) if old is not None else set()
+    lists = load.builds_on(_library_data(extracted))
+    reach += [
+        f"now builds on {listed}: uninstalling or disabling it will be refused while this "
+        "library lists it"
+        for listed in lists
+        if listed not in had
+    ]
+    content += [f"no longer builds on {listed}" for listed in sorted(had - set(lists))]
     with tempfile.TemporaryDirectory() as scratch:
         root = fetch.write_scratch(Path(scratch), extracted)
         candidate = load.InstalledAddon(addon_id, NAME, repo_id, _short(digest), root)
@@ -445,6 +494,14 @@ def check(
                 refused(*(why.replace(str(root), addon_id) for why in broken)),
                 review=reviewed,
             )
+        own = f"{repo_id}:"
+        content += [
+            f"its chain {chain} still does not resolve (since the add-on update)"
+            for chain in sorted(
+                {c for c, _ in state.issues if c and c.startswith(own)}
+                & {c for c, _ in after.issues if c}
+            )
+        ]
         holds = (
             _holds(state.library, after.library, repo_id, old, extracted, steering)
             if old is not None
@@ -474,7 +531,11 @@ def check(
                 reach.append("new items in this repo go back to the instance's default chain")
         if after.library is not None:
             more_reach, more_content = review_mod.local_changes(
-                state.library, after.library, repo_id
+                state.library,
+                after.library,
+                repo_id,
+                extra=_through_addons(state.library, repo_id)
+                | _through_addons(after.library, repo_id),
             )
             reach += more_reach
             content += more_content

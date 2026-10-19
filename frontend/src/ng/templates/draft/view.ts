@@ -1,5 +1,5 @@
 import { stepsGlyph } from "../../item/chainValues";
-import type { Authored, Change, Problem, Result, Scope } from "./types";
+import type { Authored, Change, Origin, Problem, Result, Scope } from "./types";
 
 /** What the pages read off a resolve result. Pure; nothing here edits a draft (R18). */
 
@@ -35,12 +35,24 @@ export const extendsOf = (r: Result, scope: Scope): string | undefined => {
 };
 
 /** A chain's node list; the library has none (its nodes are a mapping by name). An
- *  extending chain writes no `nodes`, so the canvas draws its resolved ones. */
+ *  extending chain writes no `nodes`, so the canvas draws them with its edits applied:
+ *  the draft's expansion, there while it does not validate, else the resolved chain. */
 export const authoredNodes = (r: Result, scope: Scope): NodeA[] => {
   if (scope.area === "library") return [];
-  if (extendsOf(r, scope)) return ((r.resolved?.chain?.nodes as NodeA[] | undefined) ?? []).map((n) => ({ id: n.id, kind: n.kind }));
+  if (extendsOf(r, scope)) return ((r.extending?.nodes ?? r.resolved?.chain?.nodes ?? []) as NodeA[]).map((n) => normalise(n) as NodeA);
   return (authoredChain(r, scope).nodes as NodeA[] | undefined) ?? [];
 };
+
+/** Where a node of an extending chain comes from: inherited, added or overridden here. */
+export const originOf = (r: Result, id: string): Origin | undefined => r.extending?.origins[id];
+
+/** Whether node `id` is one an extending chain adds: read off its file's `add` entries, which
+ *  hold while the edits don't apply and `origins` is empty. */
+export const isAdded = (r: Result, scope: Scope, id: string): boolean => addedNodes(r, scope).some((n) => n.id === id);
+
+/** An extending chain's own nodes: each `add` entry's `node`, as its file writes it. */
+export const addedNodes = (r: Result, scope: Scope): NodeA[] =>
+  ((authoredChain(r, scope).add as { node?: NodeA }[] | undefined) ?? []).map((e) => e?.node).filter((n): n is NodeA => !!n && typeof n === "object");
 
 /** `tasks:` is one step `main` (the model's own rule); every container gets `steps`. */
 export function normalise<T extends Authored>(c: T | null | undefined): (T & { steps: Step[] }) | null {
@@ -96,6 +108,26 @@ export function settingRows(r: Result, path: string) {
   return rows;
 }
 
+/** The Config rows of an extending chain's component while the draft does not resolve (so it has no
+ *  `sources`): each value with the edits applied, `chain` where this chain's file sets it, else
+ *  `inherited`, since where an inherited one comes from shows once the draft resolves. */
+export function expandedRows(r: Result, scope: Scope, path: string): { field: string; value: unknown; source: string }[] {
+  if (!extendsOf(r, scope) || !path) return [];
+  const at = walk(authoredNodes(r, scope), path);
+  if (!at) return [];
+  const own = authoredAt(r, scope, path) ?? {};
+  const added = isAdded(r, scope, path.split(".")[0]);
+  const rows: { field: string; value: unknown; source: string }[] = [];
+  for (const [k, v] of Object.entries(at)) {
+    if (NOT_ROWS.has(k) || NESTED.has(k)) continue;
+    const pairs = k === "policy" && v && typeof v === "object" ? Object.entries(v).map(([c, x]) => [`policy.${c}`, x] as const) : [[k, v] as const];
+    for (const [field, value] of pairs) rows.push({ field, value, source: added || dig(own, field) !== undefined ? "chain" : "inherited" });
+  }
+  return rows;
+}
+/** Keys holding nested components, which have panes of their own. */
+const NESTED = new Set(["tasks", "steps", "judge", "on_failure", "fix_loop", "escalation", "auto_review", "extends"]);
+
 /** The chain's own caps, in two groups: `sources` has no row for the chain, so these read the file and say "policy" when unset. */
 export function chainCapGroups(r: Result, scope: Scope): { head: string; rows: { field: string; value: unknown; source: string }[] }[] {
   const policy = (authoredAt(r, scope, "")?.policy ?? {}) as Record<string, unknown>;
@@ -114,7 +146,8 @@ export const rowChanged = (r: Result, path: string, field: string, source?: stri
 export const counts = (r: Result) => ({ changes: r.changes.length, problems: r.problems.length + (r.yaml_error ? 1 : 0) });
 
 /** "library:tasks.implementer" → "library"; the chip's word (Decisions §9 Config tab). */
-export const sourceWord = (source: string) => (source === "chain" ? "this chain" : source.startsWith("library:") ? "library" : source);
+export const sourceWord = (source: string) =>
+  source === "chain" ? "this chain" : source.startsWith("chain:") ? source.slice("chain:".length) : source.startsWith("library:") ? "library" : source;
 
 /** Named containers inside a node (W9's canonical segments). */
 const SLOTS = new Set(["on_failure", "fix_loop", "escalation", "on_base_changed", "on_conflict", "auto_review", "judge"]);
@@ -150,9 +183,16 @@ function libraryAt(root: Authored, path: string): Authored | null {
   return rest.length ? walk([{ ...entry, id: name }], [name, ...rest].join(".")) : entry;
 }
 
-/** The authored component at a path: what this draft's file itself writes there. */
-export const authoredAt = (r: Result, scope: Scope, path: string): Authored | null =>
-  !path ? authoredChain(r, scope) : scope.area === "library" ? libraryAt(authoredChain(r, scope), path) : walk(authoredNodes(r, scope), path);
+/** The authored component at a path: what this draft's file itself writes there. On an
+ *  extending chain, an added node's component, or an inherited one's override. */
+export function authoredAt(r: Result, scope: Scope, path: string): Authored | null {
+  if (!path) return authoredChain(r, scope);
+  if (scope.area === "library") return libraryAt(authoredChain(r, scope), path);
+  if (!extendsOf(r, scope)) return walk(authoredNodes(r, scope), path);
+  const added = addedNodes(r, scope).map((n) => normalise(n) as NodeA);
+  if (added.some((n) => n.id === path.split(".")[0])) return walk(added, path);
+  return (authoredChain(r, scope).overrides as Record<string, Authored> | undefined)?.[path] ?? null;
+}
 /** The resolved component at a path (extends expanded), when the draft resolves. */
 export const resolvedAt = (r: Result, path: string): Authored | null => (r.resolved ? (path ? walk(r.resolved.chain.nodes as NodeA[], path) : r.resolved.chain) : null);
 
@@ -177,5 +217,7 @@ export function valueAt(r: Result, scope: Scope, path: string, field: string): u
   const s = r.sources[path]?.[field];
   if (s) return s.value;
   if (scope.area === "library") return libraryValue(r, scope, path, field);
-  return dig(resolvedAt(r, path) ?? authoredAt(r, scope, path), field);
+  // An extending chain's file holds only its overrides: its nodes with the edits applied hold the rest.
+  const expanded = extendsOf(r, scope) ? walk(authoredNodes(r, scope), path) : null;
+  return dig(resolvedAt(r, path) ?? expanded ?? authoredAt(r, scope, path), field);
 }

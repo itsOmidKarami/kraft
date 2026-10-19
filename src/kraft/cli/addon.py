@@ -75,10 +75,13 @@ def _lint_in(
     root: Path,
     collection: str | None,
     home: tuple[Path, Path],
-) -> list[dict]:
-    """What installing the add-on into the instance at `home` would be refused
-    for: an unmet `requires`, a namespace another add-on holds, and anything
-    of the instance's own that would stop resolving. The same add-on already
+) -> tuple[list[dict], list[str]]:
+    """`(problems, warnings)` for installing the add-on into the instance at
+    `home`. Problems are what it would be refused for: an unmet `requires`, a
+    namespace another add-on holds, and anything of the instance's own that
+    would stop resolving. A repo library's chain that would stop resolving is
+    a warning, as an update holds rather than refuses for it
+    (`a-broken-repo-library-chain-holds-an-update`). The same add-on already
     installed is replaced, not a clash."""
     config_dir, addons_dir = home
 
@@ -90,24 +93,27 @@ def _lint_in(
     loaded = [p for p in now if not same(p.id)]
     held = next((p.id for p in loaded if p.namespace == found.name), None)
     if held is not None:
-        return [{"file": str(root), "message": f"namespace {found.name!r} is taken by {held}"}]
+        return [{"file": str(root), "message": f"namespace {found.name!r} is taken by {held}"}], []
     if why := load.instance_problem(found.name, found.requires, config_dir):
-        return [{"file": str(root), "message": why}]
+        return [{"file": str(root), "message": why}], []
     with tempfile.TemporaryDirectory() as tmp:
         store = fetch.write_scratch(Path(tmp), extracted)
         candidate = InstalledAddon(
             f"{found.name}@{collection or 'validate'}", found.name, found.name, found.version, store
         )
+        libraries = {p.namespace for p in loaded if p.repo_id is not None}
+        held_lines: list[str] = []
         try:
-            broken = addon_update.breaks(
-                addon_update.state_of(config_dir, now),
-                addon_update.state_of(config_dir, [*loaded, candidate]),
-                config_dir,
-                found.name,
-            )
+            before = addon_update.state_of(config_dir, now)
+            after = addon_update.state_of(config_dir, [*loaded, candidate])
+            broken = addon_update.breaks(before, after, config_dir, found.name, exempt=libraries)
+            held_lines = addon_update.held_breaks(before, after, libraries)
         except PolicyError as exc:
             broken = [str(exc)]
-        return [{"file": str(root), "message": m.replace(str(store), str(root))} for m in broken]
+        return (
+            [{"file": str(root), "message": m.replace(str(store), str(root))} for m in broken],
+            [f"{root}: {m.replace(str(store), str(root))}" for m in held_lines],
+        )
 
 
 def validate(path: Path, home: tuple[Path, Path] | None = None) -> dict:
@@ -190,12 +196,13 @@ def validate(path: Path, home: tuple[Path, Path] | None = None) -> dict:
         if why is not None:
             problem(addon_file, f"{found.name} {found.version} {why}; this is Kraft {running}")
             continue
-        problems = (
+        problems, held = (
             _lint_in(found, extracted, root, collection_name, home)
             if home
-            else _lint(found, extracted, root)
+            else (_lint(found, extracted, root), [])
         )
         report["problems"] += problems
+        report["warnings"] += held
         report["addons"].append(
             {"name": found.name, "version": found.version, "digest": fetch.digest(extracted.files)}
         )
@@ -554,10 +561,13 @@ def _cmd_auto_update(ns: argparse.Namespace) -> None:
     )
 
 
-def _still_referenced(config: AddonsConfig, config_dir: Path, addon_id: str, verb: str) -> None:
+def _still_referenced(
+    config: AddonsConfig, config_dir: Path, addons_dir: Path, addon_id: str, verb: str
+) -> None:
     """Refuse while the instance's own files name the add-on's namespace: with
     the add-on gone each would stop resolving, or be handed to the agent as
-    another tool's plugin skill."""
+    another tool's plugin skill. Refuse too while a connected repository's
+    library lists the add-on under `addons:`: its chains build on it."""
     try:
         locked = AddonsLock.load(config_dir / AddonsLock.FILE).addons.get(addon_id)
     except ConfigError as exc:
@@ -568,22 +578,29 @@ def _still_referenced(config: AddonsConfig, config_dir: Path, addon_id: str, ver
         for where, key, _kind, value in addon_update.references(config_dir)
         if value.split(":", 1)[0] == namespace
     ]
+    said = []
     if uses:
-        raise _refuse(
+        said.append(
             f"cannot {verb} {addon_id}: its namespace {namespace!r} is still referenced by\n  "
             + "\n  ".join(uses)
         )
+    if built_on := addon_update.built_on_refusal(
+        addon_id, verb, load.installed(config_dir, addons_dir)
+    ):
+        said.append(built_on)
+    if said:
+        raise _refuse("\n".join(said))
 
 
 def _cmd_enable(ns: argparse.Namespace) -> None:
     _not_a_worker()
     on = ns.addon_verb == "enable"
-    config_dir, _addons_dir = flow.home()
+    config_dir, addons_dir = flow.home()
 
     def change(raw: dict, config: AddonsConfig) -> None:
         _installed_id(config, ns.addon)
         if not on:
-            _still_referenced(config, config_dir, ns.addon, "disable")
+            _still_referenced(config, config_dir, addons_dir, ns.addon, "disable")
         _long_entry(raw, ns.addon)["enabled"] = on
         _short_entry(raw, ns.addon)
 
@@ -594,7 +611,7 @@ def _cmd_enable(ns: argparse.Namespace) -> None:
 
 def _cmd_uninstall(ns: argparse.Namespace) -> None:
     _not_a_worker()
-    config_dir, _addons_dir = flow.home()
+    config_dir, addons_dir = flow.home()
     lock_file = config_dir / AddonsLock.FILE
     try:
         lock = read_yaml(lock_file, {})
@@ -606,7 +623,7 @@ def _cmd_uninstall(ns: argparse.Namespace) -> None:
         if ns.addon not in config.addons and not locked:
             raise _refuse(f"{ns.addon} is not installed")
         if ns.addon in config.addons:
-            _still_referenced(config, config_dir, ns.addon, "uninstall")
+            _still_referenced(config, config_dir, addons_dir, ns.addon, "uninstall")
         raw["addons"].pop(ns.addon, None)
 
     def drop_lock_entry() -> None:
@@ -618,7 +635,7 @@ def _cmd_uninstall(ns: argparse.Namespace) -> None:
             write_yaml(lock_file, current)
 
     _edit(change, drop_lock_entry)
-    addon_update.clear_status(_addons_dir, {ns.addon})
+    addon_update.clear_status(addons_dir, {ns.addon})
     _reload()
     common.emit({"uninstalled": ns.addon}, lambda v: f"uninstalled {ns.addon}", ns.json)
 

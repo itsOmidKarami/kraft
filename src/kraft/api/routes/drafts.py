@@ -8,6 +8,7 @@ Item drafts (W9 G): a person's unapplied edits to one work item's chain
 
 from __future__ import annotations
 
+import copy
 import difflib
 
 import yaml
@@ -393,6 +394,11 @@ async def get_draft_fragment(area: str, key: str, request: Request, path: str | 
         if isinstance(mapping, dict)
         else None
     )
+    if found is None and (result.get("extending") or {}).get("nodes") is not None:
+        # A component an extending chain inherits is in no file: the chain's
+        # nodes with its edits applied, to read (`set_fragment` refuses it).
+        nodes = authored.normalise({"nodes": copy.deepcopy(result["extending"]["nodes"])})
+        found = authored.at(nodes, path, file=kind)
     if found is None:
         raise HTTPException(404, f"nothing at {path!r} in {area} {key!r}")
     return {"path": path, "text": authored.dump(found)}

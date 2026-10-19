@@ -8,6 +8,7 @@ import re
 from types import SimpleNamespace
 
 import pytest
+from support.drafts import draft_state
 
 from kraft.drafts import authored, resolve
 from kraft.policy import InstancePolicy, InstancePolicyInput
@@ -26,13 +27,7 @@ nodes:
 
 @pytest.fixture
 def st(templates_dir, database):
-    return SimpleNamespace(
-        templates_dir=templates_dir,
-        library=TemplateLibrary.from_yaml_dir(templates_dir),
-        instance_policy=None,
-        skills_dir=None,
-        db=database,
-    )
+    return draft_state(templates_dir, database)
 
 
 def scratch(st, text, *, published=None, **kw):
@@ -335,3 +330,148 @@ async def test_a_chain_others_extend_reports_them(st, templates_dir, case):
     messages = [p["message"] for p in result["problems"]]
     assert any("chain team extends it" in m for m in messages), messages
     assert result["impact"]["extended_by"] == ["team"]
+
+
+IMPLEMENT = "implementation.main.implement"
+TEAM = """id: team
+extends: default
+remove: [external_approval]
+add:
+  - after: verification
+    node:
+      id: security_scan
+      kind: exec
+      tasks:
+        - {id: scan, kind: subprocess, command: "true"}
+  - after: verification
+    node: {id: build, extends: implementation}
+overrides:
+  implementation.main.implement: {prompt: Implement it carefully.}
+"""
+
+
+#: team3 replaces lists: verification's steps, implementation's main tasks
+#: (the shorthand), and fills one slot, verification's judge.
+TEXTS = {
+    "team2": "id: team2\nextends: team\n",
+    "team3": """id: team3
+extends: default
+overrides:
+  verification:
+    steps:
+      - id: tests
+        tasks:
+          - {id: again, kind: subprocess, command: make test}
+    fix_loop: {judge: {prompt: Judge strictly.}}
+  implementation:
+    tasks:
+      - {id: implement, extends: spec_author, prompt: Build it.}
+""",
+}
+
+
+def team(st, text=TEAM, *, published=TEAM, key="team"):
+    name = f"chains/{key}.yaml"
+    return resolve.resolve(st, "chains", key, {name: text}, {name: published})
+
+
+@pytest.mark.parametrize(
+    ("key", "path", "field", "source"),
+    [
+        ("team", "final_review", "message", "chain:default"),
+        ("team", "implementation.main.implement", "prompt", "chain"),
+        ("team", "security_scan.main.scan", "command", "chain"),
+        ("team", "build.main.implement", "prompt", "library:tasks.implementer"),
+        ("team2", "implementation.main.implement", "prompt", "chain:team"),
+        ("team3", "verification.tests.again", "command", "chain"),
+        ("team3", "implementation.main.implement", "prompt", "chain"),
+        ("team3", "verification.fix_loop.judge", "prompt", "chain"),
+        ("team3", "implementation.main.implement", "harness", "library:tasks.spec_author"),
+    ],
+    ids=[
+        "inherited",
+        "overridden",
+        "added",
+        "added-from-the-library",
+        "two-levels",
+        "in-a-replaced-list",
+        "in-a-replaced-main-step",
+        "in-an-overridden-slot",
+        "the-replacing-items-own-parent",
+    ],
+)
+async def test_an_extending_chains_sources_name_the_parent(
+    templates_dir, database, key, path, field, source
+):
+    (templates_dir / "chains" / "team.yaml").write_text(TEAM)
+    st = draft_state(templates_dir, database)
+    text = TEAM if key == "team" else TEXTS[key]
+    result = team(st, text, published=text, key=key)
+    assert result["sources"][path][field]["source"] == source
+
+
+async def test_the_draft_places_removed_parent_nodes(st):
+    # Two in a row: both follow the last node the chain still runs.
+    text = TEAM.replace("remove: [external_approval]", "remove: [merge, external_approval]")
+    extending = team(st, text)["extending"]
+    assert extending["parent"] == "default"
+    assert extending["removed"] == [
+        {"id": "external_approval", "kind": "exec", "after": "mark_ready"},
+        {"id": "merge", "kind": "exec", "after": "mark_ready"},
+    ]
+
+
+async def test_an_unfinished_extending_draft_still_lists_its_nodes(st):
+    # An exec node with no step yet, as `add_node` writes it: a problem, so no `resolved`.
+    added = "add:\n  - after: spec\n    node: {id: lint, kind: exec, steps: []}\n"
+    result = team(st, TEAM.replace("add:\n", added))
+    assert result["resolved"] is None
+    assert [n["id"] for n in result["extending"]["nodes"]][:2] == ["spec", "lint"]
+    assert result["extending"]["origins"]["lint"] == "added"
+
+
+@pytest.mark.parametrize(
+    ("edit", "path"),
+    [
+        ("overrides:\n  final_review: {kind: exec}\n", "final_review"),
+        ("add:\n  - after: nope\n    node: {id: scan, kind: gate}\n", "scan"),
+        ("remove: [nope]\n", "nope"),
+        ("overrides:\n  final_review: {message: 3}\n", "final_review"),
+        (
+            "add:\n  - after: verification\n    node: {id: scan, kind: exec, tasks: "
+            "[{id: t, kind: subprocess, command: 'true', bogus: 1}]}\n",
+            "scan.main.t",
+        ),
+        ("overrides:\n  implementation.main.implement: {icon: no-such-icon}\n", IMPLEMENT),
+        (
+            "add:\n  - after: verification\n    node: {id: scan, kind: exec, tasks: "
+            "[{id: t, kind: subprocess, command: 'true', icon: no-such-icon}]}\n",
+            "scan.main.t",
+        ),
+    ],
+    ids=[
+        "override",
+        "added-node",
+        "remove",
+        "override-schema",
+        "added-node-schema",
+        "override-icon",
+        "added-node-icon",
+    ],
+)
+async def test_a_problem_in_an_edit_lands_on_its_component(st, edit, path):
+    problems = team(st, f"id: team\nextends: default\n{edit}")["problems"]
+    assert path in [p["path"] for p in problems]
+
+
+@pytest.mark.parametrize(
+    ("text", "summary"),
+    [
+        ("id: team\nnodes:\n  - {id: n, kind: gate}\n", "detached from default"),
+        ("id: team\nextends: quick-task\n", "extends default → quick-task"),
+    ],
+    ids=["detached", "changed"],
+)
+async def test_a_parent_change_is_a_draft_change(st, text, summary):
+    rows = team(st, text)["changes"]
+    assert {"path": "", "kind": "change", "summary": summary, "fields": ["extends"]} in rows

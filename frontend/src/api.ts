@@ -188,6 +188,9 @@ export const addRepo = (body: Partial<Repo> & { path: string }) =>
   req<Repo>("/repos", json("POST", body));
 
 export const getTemplate = (id: string) => req<ChainFile>(`/templates/chains/${encodeURIComponent(id)}`);
+/** A saved chain resolved, `extends` expanded: an extending chain's nodes, which its file does not list. */
+export const getResolvedTemplate = (id: string) =>
+  req<{ nodes: { id: string; kind: "exec" | "gate" }[] }>(`/templates/chains/${encodeURIComponent(id)}/resolved`);
 export const getLibrary = () => req<Library>("/templates/library");
 export const getHarnesses = () => req<Harnesses>("/harnesses/profiles");
 export const getHarnessProviders = () => req<HarnessProviders>("/harnesses/providers");

@@ -326,6 +326,26 @@ def _refuse_removed_targets(
                 )
 
 
+def edit_location(data: Mapping[str, object], loc: tuple[object, ...]) -> tuple[str, tuple] | None:
+    """For `loc` in an extending chain's own edits (`ExtensionError.loc`, or a
+    location `_Resolution` rewrote into the file): the canonical path of the
+    node or component the edit addresses, and the rest of `loc`. None for any
+    other location."""
+    if len(loc) >= 2 and loc[0] == "overrides" and isinstance(loc[1], str):
+        return loc[1], loc[2:]
+    if len(loc) >= 2 and loc[0] == "remove" and isinstance(loc[1], int):
+        removed = data.get("remove")
+        if isinstance(removed, list) and loc[1] < len(removed):
+            return str(removed[loc[1]]), loc[2:]
+    if len(loc) >= 2 and loc[0] == "add" and isinstance(loc[1], int):
+        adds = data.get("add")
+        entry = adds[loc[1]] if isinstance(adds, list) and loc[1] < len(adds) else None
+        node = entry.get("node") if isinstance(entry, Mapping) else None
+        if isinstance(node, Mapping) and isinstance(node.get("id"), str):
+            return node["id"], loc[3:] if loc[2:3] == ("node",) else loc[2:]
+    return None
+
+
 def _at(root: Mapping, loc: tuple[object, ...]) -> dict:
     found: object = root
     for part in loc:

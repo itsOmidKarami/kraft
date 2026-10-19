@@ -75,6 +75,17 @@ export interface Provenance {
   removed: string[];
 }
 
+/** Where a node of an extending chain comes from. */
+export type Origin = Provenance["nodes"][string];
+
+/** `Result.extending`: an extending chain's draft, read off its expansion. */
+export interface Extending {
+  parent: string;
+  nodes: Authored[] | null;
+  origins: Record<string, Origin>;
+  removed: { id: string; kind: "exec" | "gate"; after: string | null }[];
+}
+
 /** A builtin task's `ref`, a forge task's `target` (`waits`: it runs as an
  *  external wait), an agent task's `inputs`, a policy layer's `grants`. */
 export type Choices = Record<"ref" | "inputs" | "grants", Choice[]> & { target: (Choice & { waits: boolean })[] };
@@ -90,6 +101,10 @@ export interface Result {
   impact: { running?: number; repos?: string[]; chains?: string[]; extended_by?: string[] };
   warnings: { file: string; message: string }[];
   policy_values: { auto_escalate_delay_s: number; auto_review_attempts: number };
+  /** A chain draft that extends another (null otherwise): its parent; its nodes with the edits
+   *  applied, before validation (null when they don't apply); where each came from; and the
+   *  parent's nodes it removes, each after the nearest node it still runs. */
+  extending?: Extending | null;
   /** The closed sets a field takes its values from, by field (`catalogue.choices`). */
   choices?: Choices;
   yaml_error?: { file: string; line: number; col: number; message: string };

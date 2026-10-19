@@ -108,7 +108,7 @@ export function harnessesServer() {
       files: { "harnesses.yaml": harnessesYaml(state), "policy.yaml": policyYaml(state) },
       published: { "harnesses.yaml": harnessesYaml(original), "policy.yaml": policyYaml(original) },
       base: { "harnesses.yaml": "a".repeat(64), "policy.yaml": "b".repeat(64) }, updated_at: "2026-10-01T09:12:00Z",
-      result: { model: {}, resolved: resolved(), problems: problems(), sources: {}, changes: c, impact: { tasks: 3, chains: ["default"] }, warnings: [], policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 } },
+      result: { model: {}, resolved: resolved(), problems: problems(), sources: {}, changes: c, impact: { tasks: 3, chains: ["default"] }, warnings: [], extending: null, policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 } },
     };
   };
 

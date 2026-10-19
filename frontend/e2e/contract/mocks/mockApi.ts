@@ -116,7 +116,7 @@ function libraryState() {
         updated_at: drafted ? "2026-10-01T09:12:00Z" : null,
         result: {
           model: { "library.yaml": clone(model) }, resolved: null, sources: {}, warnings: [], yaml_error: undefined,
-          policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
+          extending: null, policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
           impact: { chains: drafted ? ["default", "quick-task"] : [], repos: drafted ? ["/Users/me/code/kraft"] : [] },
           problems: clone(problems), changes: clone(changes),
         },
@@ -723,7 +723,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       const text = file ? req.json()?.text : "tasks: {}\n";
       const result = {
         model: { [name]: { tasks: {} } }, resolved: null, warnings: [], sources: {},
-        policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
+        extending: null, policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
         impact: { chains: ["default", "quick-task"], repos: ["/Users/me/code/kraft"] },
         problems: [],
         changes: [

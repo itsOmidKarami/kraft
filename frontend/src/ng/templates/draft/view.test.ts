@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_VIEW } from "./fixture.default";
 import type { Result, Scope } from "./types";
-import { authoredAt, authoredNodes, changeAt, counts, extendsOf, kindOf, normalise, problemsAt, resolvedAt, resolvedNode, sourceRows, sourceWord, valueAt } from "./view";
+import { EXT, EXTENDING_VIEW } from "./fixture.extending";
+import { addedNodes, authoredAt, authoredNodes, changeAt, counts, extendsOf, kindOf, normalise, problemsAt, resolvedAt, resolvedNode, originOf, sourceRows, sourceWord, valueAt } from "./view";
 
 const R = DEFAULT_VIEW.result;
 const CHAIN: Scope = { area: "chains", key: "default" };
@@ -77,7 +78,24 @@ describe("draft view", () => {
   });
 
   it("words a source the way the chip shows it", () => {
-    expect(["chain", "library:tasks.implementer", "policy", "default"].map(sourceWord)).toEqual(["this chain", "library", "policy", "default"]);
+    expect(["chain", "chain:default", "library:tasks.implementer", "policy", "default"].map(sourceWord)).toEqual(["this chain", "default", "library", "policy", "default"]);
+  });
+});
+
+describe("an extending chain", () => {
+  const TEAM: Scope = { area: "chains", key: "team" };
+  const r = EXTENDING_VIEW.result;
+
+  it("reads what its file writes: an added node's component, an inherited one's override", () => {
+    expect(authoredAt(r, TEAM, "security_scan.main.scan")).toEqual({ id: "scan", kind: "subprocess", command: "true" });
+    expect(authoredAt(r, TEAM, EXT.overridden)).toEqual({ icon: "flag" });
+    expect(authoredAt(r, TEAM, EXT.first)).toBeNull();
+  });
+
+  it("draws whole nodes from its edits, and says where each came from", () => {
+    expect(authoredNodes(r, TEAM).find((n) => n.id === "security_scan")?.steps).toEqual([{ id: "main", tasks: [{ id: "scan", kind: "subprocess", command: "true" }] }]);
+    expect([EXT.first, "security_scan", EXT.overridden].map((id) => originOf(r, id))).toEqual(["inherited", "added", "overridden"]);
+    expect(addedNodes(r, TEAM).map((n) => n.id)).toEqual(["security_scan"]);
   });
 });
 

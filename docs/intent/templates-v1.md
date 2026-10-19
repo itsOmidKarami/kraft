@@ -631,7 +631,7 @@ origin: src/kraft/templates/library.py §_extend
 ## REQ an-extending-chain-pins-its-ancestors
 
 WHEN an extending chain is resolved, the system SHALL pin every add-on whose chain it extends, directly or through a chain between.
-enforced-by: tests/templates/test_extension.py::test_an_extending_chain_pins_its_ancestors
+enforced-by: tests/templates/test_extension.py::test_an_extending_chain_pins_its_ancestors, tests/addons/test_repo_library_extends.py::test_a_repo_library_chain_extends_an_addon_chain_it_lists[alias]
 origin: src/kraft/templates/library.py §_pins
 
 ## REQ a-resolved-node-says-where-it-came-from
@@ -639,12 +639,6 @@ origin: src/kraft/templates/library.py §_pins
 The system SHALL report, for each node of a resolved extending chain, whether it is inherited, added or overridden, and SHALL list the parent nodes it removed.
 enforced-by: tests/templates/test_extension.py::test_a_resolved_node_says_where_it_came_from, tests/cli/test_templates.py::test_show_resolved_marks_where_each_node_came_from, tests/api/test_templates_inspection.py::test_the_resolved_chain_marks_where_each_node_came_from
 origin: src/kraft/templates/library.py §provenance
-
-## REQ the-editor-leaves-an-extending-chain-to-yaml
-
-IF a Templates editor op other than renaming, deleting or creating a chain addresses an extending chain, THEN the system SHALL refuse it with 422 and SHALL NOT write the chain.
-enforced-by: tests/drafts/test_ops.py::test_an_op_on_an_extending_chain_is_refused[move], tests/drafts/test_ops.py::test_an_op_on_an_extending_chain_is_refused[remove], tests/drafts/test_ops.py::test_an_op_on_an_extending_chain_is_refused[add_node], tests/drafts/test_ops.py::test_an_op_on_an_extending_chain_is_refused[set_field], tests/drafts/test_ops.py::test_an_op_on_an_extending_chain_is_refused[set_fragment]
-origin: src/kraft/drafts/ops.py §apply
 
 ## REQ a-chain-others-extend-is-not-deleted-or-renamed-silently
 

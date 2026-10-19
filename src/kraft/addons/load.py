@@ -166,6 +166,33 @@ def qualify(data: object, addon: InstalledAddon) -> object:
     return out
 
 
+def builds_on(library: object) -> tuple[str, ...]:
+    """The add-on ids a repo library's `library.yaml` lists under `addons:`,
+    as written. An entry that is not a string is left out here;
+    `update.problems` says why it is refused."""
+    listed = library.get("addons") if isinstance(library, Mapping) else None
+    return tuple(v for v in listed if isinstance(v, str)) if isinstance(listed, list) else ()
+
+
+def alias_extends(written: object, qualified: object, aliases: Mapping[str, str]) -> object:
+    """`qualified` (`qualify(written, addon)`), a repo library's chain file,
+    with the top-level `extends` that `written` names a listed add-on by
+    (`base:default`) set to the namespace this instance loads that add-on
+    under (`o:default`). The same committed file then means the same add-on
+    on every instance. The written value is read, not the qualified one:
+    `qualify` has made a bare `default` into `<repo id>:default`, and a repo
+    id may be a listed add-on's name on an instance that aliased it."""
+    if not isinstance(written, Mapping) or not isinstance(qualified, Mapping):
+        return qualified
+    parent = written.get("extends")
+    if not isinstance(parent, str):
+        return qualified
+    qualifier, colon, name = parent.partition(":")
+    if not colon or qualifier not in aliases:
+        return qualified
+    return {**qualified, "extends": f"{aliases[qualifier]}:{name}"}
+
+
 def addons_dir() -> Path:
     """This process's `run/addons`: `KRAFT_RUN_DIR`, else the default run directory."""
     from kraft.paths import RunDirs, default_run_dir

@@ -173,7 +173,7 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
   };
   const pickBase = async (base: string) => {
     const a = await draft.ops([{ op: "change_base", node: path, base }], { preview: true });
-    if (a.status !== 200) return showToast(detailOf(a.body));
+    if (a.status !== 200) return showToast(detailOf(a.body), { tone: "error" });
     const res = (a.body.ops?.[0]?.result ?? {}) as Partial<BaseCheck>;
     setCard({ t: "base", base, check: { kept: res.kept ?? [], dropped: res.dropped ?? [] } });
   };

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ConfigDraft } from "../draft/useConfigDraft";
 import type { Result, Scope } from "../draft/types";
-import { authoredAt, authoredNodes, kindOf, normalise, resolvedAt, valueAt, type NodeA, type Step, type Task } from "../draft/view";
+import { authoredAt, authoredNodes, extendsOf, kindOf, normalise, resolvedAt, valueAt, type NodeA, type Step, type Task } from "../draft/view";
 import { Head, Kv, Note, PauseText, SelectRow, type Option } from "./controls";
 import { FallbackRows } from "./Fallback";
 import type { PaneKind } from "./describe";
@@ -57,6 +57,8 @@ function ChainOverview({ ctx }: { ctx: PaneCtx }) {
   const gates = nodes.filter((n) => kindOf(r, n) === "gate").length;
   const repos = r.impact.repos ?? [];
   const running = r.impact.running ?? 0;
+  // An extending chain's nodes come expanded, so what they use from the library is its parent's to say.
+  const parent = extendsOf(r, scope);
   const libs = used(nodes);
   return (
     <>
@@ -64,7 +66,7 @@ function ChainOverview({ ctx }: { ctx: PaneCtx }) {
       <Kv k="size" v={`${plural(nodes.length - gates, "exec node")} · ${plural(gates, "gate")}`} />
       <Kv k="default for" v={repos.length ? repos.join(", ") : "no repos"} mono muted={!repos.length} />
       <Kv k="open" v={`${plural(running, "item")} · keep their version`} muted={!running} />
-      <Kv k="library" v={libs.length ? libs.join(", ") : "none"} mono muted={!libs.length} />
+      {!parent && <Kv k="library" v={libs.length ? libs.join(", ") : "none"} mono muted={!libs.length} />}
     </>
   );
 }
@@ -80,7 +82,8 @@ function GateOverview({ ctx }: { ctx: PaneCtx }) {
   const docOptions: Option[] = [{ value: "", label: "none" }, ...docs.map((d) => ({ value: d, label: d }))];
   if (artifact && !docs.includes(artifact)) docOptions.push({ value: artifact, label: `${artifact} (not produced)` });
   const earlier = nodes.slice(0, Math.max(0, i));
-  const rejectTo = str(authoredAt(r, scope, path)?.reject_to);
+  // An inherited gate's file is its override: its parent's `reject_to` is in the chain's nodes.
+  const rejectTo = str(extendsOf(r, scope) ? valueAt(r, scope, path, "reject_to") : authoredAt(r, scope, path)?.reject_to);
   const rejectOptions: Option[] = [{ value: "", label: "not set" }, ...earlier.map((n) => ({ value: n.id, label: kindOf(r, n) === "gate" ? `${n.id} (gate)` : n.id, disabled: kindOf(r, n) === "gate" }))];
   if (rejectTo && !earlier.some((n) => n.id === rejectTo)) rejectOptions.push({ value: rejectTo, label: `${rejectTo} (not earlier)` });
   const reviewer = resolvedAt(r, `${path}.auto_review`) ?? authoredAt(r, scope, `${path}.auto_review`);

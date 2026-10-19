@@ -303,11 +303,29 @@ describe("change base", () => {
     await userEvent.click(screen.getByRole("button", { name: "Change base…" }));
     await userEvent.click(await screen.findByRole("option", { name: /implementation/ }));
     const card = await screen.findByRole("dialog", { name: "Change base of verification" });
-    expect(card).toHaveTextContent("skippable");
-    expect(card).toHaveTextContent("steps · implementation has no step tests");
+    expect(within(card).getByRole("list", { name: "Keeps" })).toHaveTextContent("skippable");
+    const drops = within(card).getByRole("list", { name: "Drops" });
+    expect(drops).toHaveTextContent("steps");
+    expect(within(drops).getByText("implementation has no step tests")).toHaveClass("cb-why");
     expect(post).toHaveBeenCalledTimes(1);
     await userEvent.click(within(card).getByRole("button", { name: "Change base" }));
     expect(post).toHaveBeenLastCalledWith("chains", "default", [{ op: "change_base", node: "verification", base: "implementation" }], undefined);
     await toasted("Base is now implementation");
+  });
+
+  it("says a refused check as an error, as the chain's own Change base does", async () => {
+    vi.spyOn(d, "postOps").mockResolvedValue({ status: 409, body: { detail: "the library has no node implementation" } } as never);
+    const tones: unknown[] = [];
+    const hear = (e: Event) => tones.push((e as CustomEvent<{ tone?: string }>).detail.tone);
+    window.addEventListener("kraft:toast", hear);
+    mount();
+    const g = await canvas();
+    await userEvent.click(within(g).getByRole("button", { name: "verification, node" }));
+    await userEvent.click(screen.getByRole("button", { name: "Change base…" }));
+    await userEvent.click(await screen.findByRole("option", { name: /implementation/ }));
+    await toasted("the library has no node implementation");
+    window.removeEventListener("kraft:toast", hear);
+    expect(tones).toEqual(["error"]);
+    expect(screen.queryByRole("dialog", { name: "Change base of verification" })).toBeNull();
   });
 });

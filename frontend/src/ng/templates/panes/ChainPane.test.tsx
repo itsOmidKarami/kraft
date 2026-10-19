@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../../api";
 import type { ConfigDraft } from "../draft/useConfigDraft";
 import { DEFAULT_VIEW } from "../draft/fixture.default";
+import { EXT, EXTENDING_VIEW } from "../draft/fixture.extending";
+import { INHERITED, INHERITED_NOTE } from "../../ui/reasons";
 import type { DraftView, Result } from "../draft/types";
 import { resolvedNode } from "../draft/view";
 import { ChainPane } from "./ChainPane";
@@ -11,8 +13,8 @@ import { resetHarnessOptions } from "./useHarnessOptions";
 
 const SIZE = { width: 380, overlay: false, handle: undefined };
 
-function mount(path: string, result: Partial<Result> = {}) {
-  const view: DraftView = { ...DEFAULT_VIEW, result: { ...DEFAULT_VIEW.result, ...result } };
+function mount(path: string, result: Partial<Result> = {}, base: DraftView = DEFAULT_VIEW) {
+  const view: DraftView = { ...base, result: { ...base.result, ...result } };
   const draft = {
     view,
     field: vi.fn(),
@@ -21,7 +23,7 @@ function mount(path: string, result: Partial<Result> = {}) {
     resolvedNode: (id: string) => resolvedNode(view.result, id),
   } as unknown as ConfigDraft;
   const goTo = vi.fn();
-  render(<ChainPane draft={draft} scope={{ area: "chains", key: "default" }} path={path} open size={SIZE} onCollapse={() => {}} onExpand={() => {}} goTo={goTo} />);
+  render(<ChainPane draft={draft} scope={{ area: "chains", key: view.key }} path={path} open size={SIZE} onCollapse={() => {}} onExpand={() => {}} goTo={goTo} />);
   return { draft, goTo };
 }
 
@@ -399,5 +401,119 @@ describe("an agent task's fallback list", () => {
     expect(rowOf("fallback")).toHaveTextContent("codex · strong, claude · model opus · effort high");
     expect(within(rowOf("fallback")).queryByRole("button", { name: "Edit fallback" })).toBeNull();
     expect(within(rowOf("fallback")).getByText("on Overview")).toBeInTheDocument();
+  });
+});
+
+describe("an extending chain", () => {
+  it("locks an inherited node's structure, and keeps its Remove", () => {
+    mount(EXT.first, {}, EXTENDING_VIEW);
+    expect(screen.getByRole("button", { name: "Remove node" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Move to library…" })).toBeNull();
+    expect(screen.getByRole("button", { name: `Rename ${EXT.first}` })).toHaveAttribute("aria-disabled", "true");
+    // Its fields stay editable, so the note says where a change goes, not only that it is locked.
+    expect(screen.getByText(INHERITED_NOTE("default"))).toBeInTheDocument();
+  });
+
+  it("refuses removing what is inside an inherited node, saying why", () => {
+    mount(`${EXT.first}.main.author`, {}, EXTENDING_VIEW);
+    const remove = screen.getByRole("button", { name: "Remove task" });
+    expect(remove).toBeDisabled();
+    expect(remove).toHaveAccessibleDescription(INHERITED("default"));
+  });
+
+  it.each([
+    { id: "resolving", extra: {} },
+    // The edits don't apply: no origins, so added-ness is read off the file's `add` entries.
+    { id: "with its edits not applying", extra: { extending: { ...EXTENDING_VIEW.result.extending!, nodes: null, origins: {} } } },
+  ])("leaves an added node fully editable, $id", ({ extra }) => {
+    mount("security_scan", extra, EXTENDING_VIEW);
+    expect(screen.getByRole("button", { name: "Move to library…" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Rename security_scan" })).toBeNull();
+    expect(screen.queryByText(INHERITED_NOTE("default"))).toBeNull();
+  });
+
+  it("resets every override of an inherited component", async () => {
+    const { draft } = mount(EXT.overridden, {}, EXTENDING_VIEW);
+    // Its override is all its file holds: nothing to move to the library.
+    expect(screen.queryByRole("button", { name: "Move to library…" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Reset all overrides" }));
+    expect(draft.ops).toHaveBeenCalledWith([{ op: "reset_field", path: EXT.overridden }]);
+  });
+
+  it("reads an inherited gate's reject_to from its parent", () => {
+    mount("local_review", {}, EXTENDING_VIEW);
+    expect(screen.getByRole("button", { name: /^reject to, implementation\. Edit$/ })).toBeInTheDocument();
+  });
+
+  it("names the chain it extends in place of the library it uses", () => {
+    mount("", {}, EXTENDING_VIEW);
+    expect(screen.getByText(/^Extends/)).toHaveTextContent("Extends default");
+    expect(screen.queryByText("library")).toBeNull();
+  });
+
+  it("changes the chain's base: picks a chain it may extend, shows what fits, then changes it", async () => {
+    const summary = (id: string, more = {}) => ({ id, nodes: [], gates: 0, ...more });
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      summary("team", { extends: "default", extended_by: ["team2"] }),
+      summary("default", { extended_by: ["team", "team2"] }),
+      summary("team2", { extends: "team" }),
+      summary("quick-task"),
+      summary("app:ship", { addon: { id: "app", version: "1", repo: "app" } }),
+    ] as never);
+    const check = { kept: ["overrides implementation"], dropped: [{ key: "remove spec_approval", why: "quick-task has no node spec_approval" }] };
+    const { draft } = mount("", {}, EXTENDING_VIEW);
+    vi.mocked(draft.ops).mockResolvedValue({ status: 200, body: { ops: [{ op: "chain_base_check", result: check }] } } as never);
+    await userEvent.click(screen.getByRole("button", { name: "Change base…" }));
+    const menu = await screen.findByRole("dialog", { name: "Change base" });
+    // Not itself, its parent, a chain that extends it, or a repo library's.
+    await waitFor(() => expect(within(menu).getAllByRole("option").map((o) => o.textContent)).toEqual([expect.stringMatching(/^quick-task/)]));
+    await userEvent.click(within(menu).getByRole("option", { name: /quick-task/ }));
+    expect(draft.ops).toHaveBeenCalledWith([{ op: "chain_base_check", base: "quick-task" }], { preview: true });
+    const card = await screen.findByRole("dialog", { name: "Change base of team" });
+    expect(within(card).getByRole("list", { name: "Keeps" })).toHaveTextContent("overrides implementation");
+    const drops = within(card).getByRole("list", { name: "Drops" });
+    expect(drops).toHaveTextContent("remove spec_approval");
+    // Why it goes is a line of its own, under the edit.
+    expect(within(drops).getByText("quick-task has no node spec_approval")).toHaveClass("cb-why");
+    // It drops an edit: the button is the danger one.
+    expect(within(card).getByRole("button", { name: "Change base" })).toHaveClass("btn-danger");
+    await userEvent.click(within(card).getByRole("button", { name: "Change base" }));
+    expect(draft.ops).toHaveBeenLastCalledWith([{ op: "change_chain_base", base: "quick-task" }]);
+  });
+
+  it("detaches the chain from its pane", async () => {
+    const { draft } = mount("", {}, EXTENDING_VIEW);
+    await userEvent.click(screen.getByRole("button", { name: "Detach…" }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Detach team" })).getByRole("button", { name: "Detach" }));
+    expect(draft.ops).toHaveBeenCalledWith([{ op: "detach" }]);
+  });
+
+  it("restores a removed node", async () => {
+    const { draft } = mount(EXT.removed, {}, EXTENDING_VIEW);
+    expect(screen.getByText(/Removed from default/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Restore" }));
+    expect(draft.ops).toHaveBeenCalledWith([{ op: "restore", node: EXT.removed }]);
+  });
+
+  it("shows an inherited component's values under its overrides while the draft does not resolve", async () => {
+    const path = `${EXT.overridden}.main.implement`;
+    const model = structuredClone(EXTENDING_VIEW.result.model);
+    model["chains/team.yaml"].overrides = { [path]: { prompt: "Mine." } };
+    mount(path, { resolved: null, sources: {}, model }, EXTENDING_VIEW);
+    await configTab();
+    expect(screen.getByText("Config with this chain's overrides")).toBeInTheDocument();
+    await showDefaults();
+    expect(rowOf("harness")).toHaveTextContent("inherited");
+    expect(rowOf("harness")).not.toHaveClass("is-own");
+    expect(rowOf("prompt")).toHaveClass("is-own");
+  });
+
+  it.each([
+    { chain: "team", view: EXTENDING_VIEW, points: false },
+    { chain: "default", view: DEFAULT_VIEW, points: true },
+  ])("points at the bottom pane to edit a task's on failure only where it edits ($chain: $points)", async ({ view, points }) => {
+    mount(`${EXT.overridden}.main.implement`, {}, view);
+    await configTab();
+    expect(screen.getByText(/^on failure ·/).textContent?.includes("edit it in the pane below")).toBe(points);
   });
 });

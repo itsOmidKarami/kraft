@@ -6,49 +6,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from support.drafts import apply_ops as apply
+from support.drafts import draft_state, refused
 
 from kraft.drafts import authored, ops, resolve
-from kraft.templates.library import TemplateLibrary
 
 
 @pytest.fixture
 def st(templates_dir, database):
-    return SimpleNamespace(
-        templates_dir=templates_dir,
-        library=TemplateLibrary.from_yaml_dir(templates_dir),
-        instance_policy=None,
-        skills_dir=None,
-        db=database,
-    )
-
-
-def apply(st, *batch, key="default"):
-    """The batch applied to the published chain, and the resolve result after it."""
-    name = f"chains/{key}.yaml"
-    published = resolve.published(st.templates_dir, [name])
-    draft = ops.Draft(
-        st, key, {n: t for n, t in published.items() if t is not None}, exists=bool(published[name])
-    )
-    answers = ops.apply(draft, [{"op": op, **fields} for op, fields in batch])
-    files = draft.finish()
-    result = resolve.resolve(st, "chains", key, files, published)
-    model = result["model"][resolve.chain_file(key, files)]
-    return SimpleNamespace(
-        answers=[a.get("result") for a in answers],
-        files=files,
-        model=model,
-        text=files[name],
-        nodes={n["id"]: n for n in model["nodes"]} if model else None,
-        order=[n["id"] for n in model["nodes"]] if model else None,
-        paths=(result["resolved"] or {}).get("task_paths"),
-        problems=[(p["path"], p["field"], p["message"]) for p in result["problems"]],
-    )
-
-
-def refused(st, *batch) -> str:
-    with pytest.raises(ops.OpError) as exc:
-        apply(st, *batch)
-    return str(exc.value)
+    return draft_state(templates_dir, database)
 
 
 async def test_add_node_inserts_an_exec_node_with_no_step_yet_or_a_gate(st):
@@ -339,6 +305,21 @@ async def test_set_field_refuses_the_id(st):
     assert "rename it with rename" in refused(st, *fields("spec", ("id", "x")))
 
 
+@pytest.mark.parametrize(
+    ("op", "fields", "why"),
+    [
+        ("restore", {"node": "spec"}, "extends nothing, so no node is removed"),
+        ("detach", {}, "extends nothing, so there is nothing to detach"),
+        ("chain_base_check", {"base": "quick-task"}, "extends nothing, so it has no base"),
+        ("change_chain_base", {"base": "quick-task"}, "extends nothing, so it has no base"),
+        ("nope", {}, "no op 'nope'"),
+    ],
+    ids=["restore", "detach", "chain_base_check", "change_chain_base", "unknown"],
+)
+async def test_a_chain_extending_nothing_has_no_extending_ops(st, op, fields, why):
+    assert why in refused(st, (op, fields))
+
+
 async def test_reset_field_removes_one_override_or_every_one(st):
     path = "implementation.main.implement"
     overrides = fields(path, ("icon", "hammer"), ("model", "opus"), ("policy.budget_usd", 2))
@@ -500,6 +481,86 @@ async def test_renaming_a_library_task_rewrites_every_use_and_pulls_its_chains_i
     assert r.problems == []
 
 
+TEAM_USES = """id: team
+extends: default
+add:
+  - after: verification
+    node: {id: build, extends: implementation}
+  - after: verification
+    node:
+      id: rebuild
+      kind: exec
+      tasks:
+        - {id: impl, extends: implementer}
+overrides:
+  verification:
+    steps:
+      - id: tests
+        tasks:
+          - {id: again, extends: implementer}
+  implementation.main.implement: {steering: [project-standards]}
+  verification.fix_loop.judge: {steering: [project-standards]}
+  post_draft_feedback.on_failure.repair.repair_feedback: {steering: [project-standards]}
+"""
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "path", "read"),
+    [
+        ("nodes.implementation", "build_node", "build", lambda m: m["add"][0]["node"]["extends"]),
+        (
+            "tasks.implementer",
+            "builder",
+            "rebuild.main.impl",
+            lambda m: m["add"][1]["node"]["steps"][0]["tasks"][0]["extends"],
+        ),
+        (
+            "tasks.implementer",
+            "builder",
+            "verification.tests.again",
+            lambda m: m["overrides"]["verification"]["steps"][0]["tasks"][0]["extends"],
+        ),
+        (
+            "steering.project-standards",
+            "standards",
+            "implementation.main.implement",
+            lambda m: m["overrides"]["implementation.main.implement"]["steering"][0],
+        ),
+        (
+            "steering.project-standards",
+            "standards",
+            "verification.fix_loop.judge",
+            lambda m: m["overrides"]["verification.fix_loop.judge"]["steering"][0],
+        ),
+        (
+            "steering.project-standards",
+            "standards",
+            "post_draft_feedback.on_failure.repair.repair_feedback",
+            lambda m: m["overrides"]["post_draft_feedback.on_failure.repair.repair_feedback"][
+                "steering"
+            ][0],
+        ),
+    ],
+    ids=[
+        "added-node",
+        "added-task",
+        "override-list",
+        "override-steering",
+        "override-a-judge",
+        "override-a-handler-task",
+    ],
+)
+async def test_renaming_a_library_component_rewrites_an_extending_chains_uses(
+    st, old, new, path, read
+):
+    (st.templates_dir / "chains" / "team.yaml").write_text(TEAM_USES)
+    r = library(st, ("rename", {"path": old, "id": new}))
+    assert {"file": "chains/team.yaml", "path": path} in [
+        {k: u[k] for k in ("file", "path")} for u in r.answers[0]["updated"]
+    ]
+    assert read(r.model["chains/team.yaml"]) == new
+
+
 async def test_renaming_a_steering_profile_rewrites_the_tasks_selecting_it(st):
     r = library(st, ("rename", {"path": "steering.project-standards", "id": "standards"}))
     assert r.model["library.yaml"]["tasks"]["spec_author"]["steering"] == ["standards"]
@@ -554,24 +615,6 @@ EXTENDING = "id: team\nextends: default\nremove: [external_approval]\n"
 
 def extending(st) -> ops.Draft:
     return ops.Draft(st, "team", {"chains/team.yaml": EXTENDING}, exists=True)
-
-
-@pytest.mark.parametrize(
-    ("op", "fields"),
-    [
-        ("move", {"path": "spec", "to": 1}),
-        ("remove", {"path": "spec"}),
-        ("add_node", {"at": 0, "id": "lint", "kind": "exec"}),
-        ("set_field", {"path": "spec", "field": "icon", "value": "flag"}),
-        ("set_fragment", {"path": "spec", "yaml": "id: spec\n"}),
-    ],
-    ids=["move", "remove", "add_node", "set_field", "set_fragment"],
-)
-async def test_an_op_on_an_extending_chain_is_refused(st, op, fields):
-    draft = extending(st)
-    with pytest.raises(ops.OpError, match="team extends default; edit it in the YAML view"):
-        ops.apply(draft, [{"op": op, **fields}])
-    assert draft.finish()["chains/team.yaml"] == EXTENDING
 
 
 async def test_an_extending_chain_can_still_be_renamed_or_deleted(st):

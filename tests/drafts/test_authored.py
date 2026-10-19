@@ -228,3 +228,31 @@ def test_set_then_reset_of_a_field_on_every_task_resolves_the_same(library, file
         ops.apply(draft, [{"op": "set_field", **field, "value": 7}, {"op": "reset_field", **field}])
     candidate, id = library.with_chain(file, yaml.safe_load(draft.finish()[f"chains/{file.name}"]))
     assert resolved(candidate, id) == resolved(library, id)
+
+
+ADDING = """id: team
+extends: default
+add:
+  - after: verification
+    node:
+      id: scan
+      kind: exec
+      tasks:
+        - {id: run, kind: subprocess, command: "true"}
+"""
+RUN = {"id": "run", "kind": "subprocess", "command": "true"}
+
+
+@pytest.mark.parametrize("case", ["at", "put", "normalised", "key-order"])
+def test_an_added_node_is_addressable(case):
+    data = authored.load(ADDING)
+    if case == "at":
+        assert authored.at(data, "scan.main.run") == RUN
+    elif case == "put":
+        authored.put(data, "scan.main.run", "command", "make scan")
+        assert data["add"][0]["node"]["steps"][0]["tasks"][0]["command"] == "make scan"
+    elif case == "normalised":
+        assert data["add"][0]["node"]["steps"] == [{"id": "main", "tasks": [RUN]}]
+    else:
+        authored.put(data, "", "description", "x")
+        assert list(data) == ["id", "extends", "description", "add"]

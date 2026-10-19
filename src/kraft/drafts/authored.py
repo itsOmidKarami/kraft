@@ -23,7 +23,8 @@ from kraft.templates.models import AUTO_REVIEW_SEGMENT, JUDGE_SEGMENT, MAIN_STEP
 CHAIN = "chain"
 LIBRARY = "library"
 
-CHAIN_KEYS = ("id", "description", "policy", "nodes")
+#: An extending chain (`extends`) writes `remove`, `add` and `overrides` in place of `nodes`.
+CHAIN_KEYS = ("id", "extends", "description", "policy", "remove", "add", "overrides", "nodes")
 LIBRARY_KEYS = ("steering", "tasks", "steps", "nodes")
 NODE_KEYS = (
     "id", "kind", "extends", "icon", "message", "artifact", "artifact_required", "reject_to",
@@ -204,6 +205,11 @@ def _dicts(value: object) -> list[dict]:
     return [v for v in values if isinstance(v, dict)]
 
 
+def added_nodes(data: Mapping) -> list[dict]:
+    """The `node` of each `add` entry of an extending chain: the nodes its own file writes."""
+    return [e["node"] for e in _dicts(data.get("add")) if isinstance(e.get("node"), dict)]
+
+
 def _walk(data: dict, fn: Callable[[dict], None]) -> None:
     """Apply `fn` to every container that may take the shorthand: each node
     (a chain's list, a library's section), and each handler and fix loop."""
@@ -239,7 +245,7 @@ def _walk(data: dict, fn: Callable[[dict], None]) -> None:
         if isinstance(base_change, dict) and isinstance(base_change.get("on_conflict"), dict):
             shape(base_change["on_conflict"])
 
-    for n in _dicts(data.get("nodes")):
+    for n in [*_dicts(data.get("nodes")), *added_nodes(data)]:
         node(n)
     # A library's sections; a chain has none.
     if isinstance(data.get("steps"), dict):
@@ -295,7 +301,8 @@ class _Walk:
         if not segs:
             return mapping, CHAIN_KEYS if file == CHAIN else LIBRARY_KEYS
         if file == CHAIN:
-            return self.node(_by_id(mapping.get("nodes"), segs[0]), segs[1:])
+            node = _by_id(mapping.get("nodes"), segs[0]) or _by_id(added_nodes(mapping), segs[0])
+            return self.node(node, segs[1:])
         section, name, rest = segs[0], segs[1] if len(segs) > 1 else None, segs[2:]
         entries = mapping.get(section)
         body = entries.get(name) if isinstance(entries, dict) and name else None

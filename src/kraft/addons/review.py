@@ -16,7 +16,7 @@ import json
 import re
 import tempfile
 import unicodedata
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -297,16 +297,26 @@ def _chain_diff(was: _Facts, now: _Facts, name: str, reach: list[str], content: 
 
 
 def local_changes(
-    before: TemplateLibrary | None, after: TemplateLibrary, namespace: str
+    before: TemplateLibrary | None,
+    after: TemplateLibrary,
+    namespace: str,
+    *,
+    extra: Collection[str] = (),
 ) -> tuple[list[str], list[str]]:
     """`(reach, content)` for the instance's own chains: what each one that
     resolves through the add-on under `namespace` would run differently once
-    `after` replaces `before`. A chain the add-on does not reach has no line."""
+    `after` replaces `before`. A chain the add-on does not reach has no line.
+    `extra`: other chains to diff the same way, a repo library's
+    (`the-review-covers-repo-library-chains`)."""
     sides = []
     for loaded in (before, after):
         facts = _Facts("", {}, {}, {}, {}, {}, {}, {}, {})
         if loaded is not None:
-            local = [chain_id for chain_id in loaded.chain_ids if ":" not in chain_id]
+            local = [
+                chain_id
+                for chain_id in loaded.chain_ids
+                if ":" not in chain_id or chain_id in extra
+            ]
             _chain_facts(loaded, local, facts.chains, facts.lists, facts.order)
         sides.append(facts)
     reach: list[str] = []

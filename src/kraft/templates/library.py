@@ -26,7 +26,7 @@ import yaml
 from pydantic import ValidationError
 
 from kraft import skill as _skill
-from kraft.addons.load import InstalledAddon, qualify
+from kraft.addons.load import InstalledAddon, alias_extends, builds_on, qualify
 from kraft.config import bounded_yaml
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
 from kraft.templates import extension, positions
@@ -416,6 +416,7 @@ class TemplateLibrary:
         library_path = addon.root / LIBRARY_FILE
         library = qualify(_read_stored(store, LIBRARY_FILE, library_path, optional=True), addon)
         assert isinstance(library, Mapping)
+        aliases = self._listed_namespaces(addon, library)
         for namespace in _EXTENDABLE:
             for name, body in _section(library_path, library, namespace).items():
                 self._components[namespace][f"{addon.namespace}:{name}"] = RawComponent(
@@ -429,9 +430,28 @@ class TemplateLibrary:
             if not rel.endswith(".yaml") or "/" in rel.removeprefix(f"{CHAINS_DIR}/"):
                 continue
             chain_path = addon.root / rel
-            body = qualify(_read_stored(store, rel, chain_path), addon)
+            written = _read_stored(store, rel, chain_path)
+            body = alias_extends(written, qualify(written, addon), aliases)
             assert isinstance(body, Mapping)
             self._add_chain(chain_path, body, addon=addon)
+
+    def _listed_namespaces(
+        self, addon: InstalledAddon, library: Mapping[str, object]
+    ) -> dict[str, str]:
+        """For a repo library: each add-on its `addons:` lists, by name, to
+        what its chains' `extends` read it as here
+        (`a-listed-addons-name-means-that-addon-alone`). One this instance
+        knows maps to its namespace: when it is left out, nothing loads
+        there, and the chain fails with its `left_out` reason. One it does not
+        know maps to its id, which names no namespace. Neither ever falls
+        through to another add-on or repo library that holds the name."""
+        if addon.repo_id is None:
+            return {}
+        known = {p.id: p for p in self.addons if p.repo_id is None}
+        return {
+            addon_id.split("@", 1)[0]: known[addon_id].namespace if addon_id in known else addon_id
+            for addon_id in builds_on(library)
+        }
 
     def with_library(self, library: Mapping[str, object], library_path: Path) -> TemplateLibrary:
         """This library's chains against a replacement `library.yaml` content:
@@ -879,12 +899,19 @@ class _Resolution:
         self.provenance: dict[str, object] | None = None
         #: Every chain this one extends, nearest first.
         self.ancestors: tuple[str, ...] = ()
+        #: The chain as written and its expanded node ids, for `split` to place
+        #: a location in an extending chain's edits.
+        self._written: Mapping[str, object] = {}
+        self._order: list[object] = []
 
     # ── expansion ──
 
     def expand_chain(self, data: Mapping[str, object]) -> Mapping[str, object]:
+        self._written = data
         if "extends" in data:
-            return self._extend(data)
+            out = self._extend(data)
+            self._order = [n.get("id") for n in out["nodes"] if isinstance(n, Mapping)]
+            return out
         if written := [key for key in extension.EDIT_KEYS if key in data]:
             # Said here, rather than letting the author read pydantic's "Extra
             # inputs are not permitted" (`edits-need-a-parent`).
@@ -1050,8 +1077,11 @@ class _Resolution:
         name: object = parent
         while isinstance(name, str):
             if name in seen:
+                # Only a chain that names itself: `default.yaml` saying
+                # `extends: default` meant the instance's `default`.
+                hint = self._instance_chain_hint(name) if parent == self._chain.name else ""
                 raise TemplateLibraryError(
-                    f"{self._chain.file}: 'extends' cycle: {' -> '.join((*seen, name))}",
+                    f"{self._chain.file}: 'extends' cycle: {' -> '.join((*seen, name))}{hint}",
                     loc=("extends",),
                 )
             if name not in chains:
@@ -1069,9 +1099,25 @@ class _Resolution:
                 loc=("extends",),
             )
         return TemplateLibraryError(
-            f"{file}: extends no chain named {name!r}{self._left_out(name)}",
+            f"{file}: extends no chain named {name!r}{self._left_out(name)}"
+            f"{self._instance_chain_hint(name)}",
             loc=("extends",),
             addon_ref=":" in name,
+        )
+
+    def _instance_chain_hint(self, name: str) -> str:
+        """For a repo library's chain whose parent `name` (`app:default`) came
+        from a bare name: when the instance has a local chain of that bare
+        name, what the author most likely meant, and why it is refused
+        (`a-bare-repo-library-parent-is-its-own`). Empty otherwise. Local ids
+        have no `:`, so `bare in chain_ids` holds only for a local chain."""
+        owner = self._library.addon_of(name)
+        bare = name.partition(":")[2]
+        if owner is None or owner.repo_id is None or bare not in self._library.chain_ids:
+            return ""
+        return (
+            "; a bare name in a repo library is its own chain, and an instance chain "
+            "cannot be extended"
         )
 
     def _left_out(self, name: str) -> str:
@@ -1392,7 +1438,15 @@ class _Resolution:
 
     def split(self, loc: tuple[object, ...]) -> tuple[str | None, tuple[object, ...]]:
         """The canonical path of the deepest expanded component `loc` walks to,
-        and the rest of `loc` below it; `None` and all of `loc` for none."""
+        and the rest of `loc` below it; `None` and all of `loc` for none. A
+        location in an extending chain's edits lands on the component the edit
+        addresses (`a-problem-in-an-edit-lands-on-its-component`)."""
+        found = extension.edit_location(self._written, loc) if "extends" in self._written else None
+        if found is not None:
+            if loc[2:3] != ("node",) or found[0] not in self._order:
+                return found
+            # Inside an added node: its expanded location knows the deeper path.
+            loc = ("nodes", self._order.index(found[0]), *found[1])
         key = next((k for k in _prefixes(loc) if k in self._located), None)
         return (None, loc) if key is None else (self._located[key].path, loc[len(key) :])
 

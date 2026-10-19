@@ -140,7 +140,7 @@ export function makeAreas() {
     return {
       model: { "repos.yaml": { repos: s } }, resolved: { repos: views.filter((v) => v.managed), detected: views.filter((v) => !v.managed) },
       problems, sources: {}, changes, impact: { running: Object.fromEntries([...s, ...gone].map((e) => [e.path, RUNNING[e.path] ?? 0])) },
-      warnings: [], policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
+      warnings: [], extending: null, policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
     };
   }
 
@@ -176,7 +176,7 @@ export function makeAreas() {
     const items = [p.budget?.work_item_usd, p.maxima?.work_item?.budget_usd, p.defaults?.work_item?.budget_usd].map((v, i) => [["budget.work_item_usd", "maxima.work_item.budget_usd", "defaults.work_item.budget_usd"][i], v] as const).filter(([, v]) => v != null);
     const bind = items.sort((a, b) => (a[1] as number) - (b[1] as number))[0];
     return {
-      model: { "policy.yaml": p }, problems, sources: {}, impact: null, warnings: [], policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
+      model: { "policy.yaml": p }, problems, sources: {}, impact: null, warnings: [], extending: null, policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
       resolved: {
         limits: {
           caps, work_item_usd: bind ? { value: bind[1], source: "policy", binding: { key: bind[0], value: bind[1] } } : { value: null, source: "default", binding: null },
@@ -198,7 +198,7 @@ export function makeAreas() {
   function intakeResult(i: Obj, p: Obj) {
     const problems: Obj[] = [];
     return {
-      model: { "intake.yaml": i, "policy.yaml": p }, problems, sources: {}, impact: null, warnings: [], policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
+      model: { "intake.yaml": i, "policy.yaml": p }, problems, sources: {}, impact: null, warnings: [], extending: null, policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
       resolved: { enabled: i.enabled, interval_s: i.interval_s, max_concurrent: p.max_concurrent ?? 3, priority_ceiling: i.priority_ceiling, repos: i.repos ?? [], schedules: (p.triggers ?? []).map((t: Obj, n: number) => ({ index: n, cron: t.cron, repo: t.repo, chain: t.chain, title: t.title, description: t.description ?? "" })) },
       changes: [...keyChanges("intake.yaml", pub.intake, i), ...keyChanges("policy.yaml", pickIntakePolicy(pub.policy), pickIntakePolicy(p))],
     };

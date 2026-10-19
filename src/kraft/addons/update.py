@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import re
 import tempfile
 import threading
 import time
@@ -31,6 +32,7 @@ from pydantic import ValidationError
 
 from kraft.addons import fetch, load, manifest
 from kraft.addons.config import (
+    ADDON_ID_PATTERN,
     AddonEntry,
     AddonsConfig,
     AddonsLock,
@@ -129,19 +131,74 @@ def _qualifier(value: object) -> str | None:
     return None
 
 
+#: `AddonId`'s pattern: `<addon>@<collection>`.
+_ADDON_ID = re.compile(ADDON_ID_PATTERN)
+
+
+def _listed_addons(
+    found: AddonManifest,
+    files: Mapping[str, tuple[str, bytes]],
+    repo_library: str | None,
+    out: list[str],
+) -> dict[str, str]:
+    """A repo library's `addons:` list as add-on name to id, with every reason
+    it is refused appended to `out` (`a-repo-librarys-addons-list-is-well-
+    formed`). An add-on may not have the key at all (`an-addon-lists-no-addons`):
+    there are no add-on dependencies."""
+    entry = files.get("library.yaml")
+    try:
+        data = bounded_yaml(entry[1].decode(), [20_000]) if entry else None
+    except (ValueError, yaml.YAMLError):
+        return {}  # `problems` says the file cannot be parsed
+    if not isinstance(data, Mapping) or "addons" not in data:
+        return {}
+    if not repo_library:
+        out.append(
+            "library.yaml: addons: an add-on may not list add-ons; there are no add-on dependencies"
+        )
+        return {}
+    raw = data["addons"]
+    if not isinstance(raw, list):
+        out.append("library.yaml: addons: must be a list of add-on ids (<addon>@<collection>)")
+        return {}
+    listed: dict[str, str] = {}
+    for index, value in enumerate(raw):
+        if not isinstance(value, str) or not _ADDON_ID.fullmatch(value):
+            out.append(
+                f"library.yaml: addons[{index}]: {value!r} is not an add-on id "
+                "(<addon>@<collection>)"
+            )
+            continue
+        name = value.split("@", 1)[0]
+        if name == found.name:
+            out.append(f"library.yaml: addons[{index}]: {name!r} is this library's own qualifier")
+        elif name in listed:
+            out.append(
+                f"library.yaml: addons: lists two add-ons named {name}: {listed[name]} and {value}"
+            )
+        else:
+            listed[name] = value
+    return listed
+
+
 def problems(
     found: AddonManifest,
     files: Mapping[str, tuple[str, bytes]],
     *,
     other_namespaces: Collection[str] = (),
     repositories: Collection[str] = (),
+    repo_library: str | None = None,
 ) -> list[str]:
     """Every reason this add-on's content is refused; empty when it is taken.
     `other_namespaces` are the installed add-ons' namespaces, this one's own
     left out: a skill reference into one of them is an add-on dependency.
     `repositories` are the connected repository ids: each is reserved for
-    that repository's library, whether or not one is accepted."""
+    that repository's library, whether or not one is accepted.
+    `repo_library`: the repository id, when the content is a repo library's,
+    whose `addons:` list lets a chain's top-level `extends` name a listed
+    add-on (`a-repo-library-chain-may-extend-a-listed-addon-chain`)."""
     out: list[str] = []
+    listed = _listed_addons(found, files, repo_library, out)
     allowed_harnesses = set(found.requires.harnesses)
     for rel in sorted(files):
         if not (rel in ("library.yaml", "profiles.yaml") or rel.startswith("chains/")):
@@ -180,11 +237,30 @@ def problems(
             ]
             for key, value in references:
                 qualifier = _qualifier(value)
-                if qualifier is not None and qualifier != found.name:
-                    out.append(
-                        f"{where}: {key} {value!r} reaches outside the add-on; an add-on is "
-                        "self-contained"
+                if qualifier is None or qualifier == found.name:
+                    continue
+                # `at` is empty only at a chain file's top level: a library or
+                # profiles entry always sits under its section.
+                top = key == "extends" and at == ""
+                if top and qualifier in listed:
+                    continue
+                if repo_library and qualifier == repo_library:
+                    # Its own id: a bare name already means its own declaration.
+                    hint = (
+                        f"; a bare name in a repo library is its own, so write "
+                        f"{value.split(':', 1)[1]!r}"
                     )
+                elif repo_library and top:
+                    hint = (
+                        "; a repo library builds on an add-on's chain by listing "
+                        "<addon>@<collection> under addons: in .kraft/library.yaml"
+                    )
+                else:
+                    hint = ""
+                out.append(
+                    f"{where}: {key} {value!r} reaches outside the add-on; an add-on is "
+                    f"self-contained{hint}"
+                )
             skill = component.get("skill")
             if (qualifier := _qualifier(skill)) in set(repositories) - {found.name}:
                 out.append(
@@ -226,6 +302,41 @@ def referrers(namespace: str, addons: Sequence[load.InstalledAddon]) -> list[str
                         f"add-on's namespace {namespace!r}; there are no add-on dependencies"
                     )
     return out
+
+
+def repo_library_dependents(addon_id: str, addons: Sequence[load.InstalledAddon]) -> list[str]:
+    """One line for each loaded repo library whose `library.yaml` lists
+    `addon_id` under `addons:` (`removing-a-referenced-addon-is-refused`),
+    naming the repository. A store that does not read says nothing: loading
+    says why."""
+    out: list[str] = []
+    for addon in addons:
+        if addon.repo_id is None or addon.left_out is not None:
+            continue
+        try:
+            entry = fetch.extract_dir(addon.root).files.get("library.yaml")
+            data = bounded_yaml(entry[1].decode(), [20_000]) if entry else {}
+        except Exception:  # noqa: BLE001 -- an edited store can break in any way
+            continue
+        if addon_id in load.builds_on(data):
+            out.append(
+                f"repository {addon.repo_id}: .kraft/library.yaml lists {addon_id} under "
+                "addons:; disconnect that repository, or have it drop the line"
+            )
+    return out
+
+
+def built_on_refusal(addon_id: str, verb: str, addons: Sequence[load.InstalledAddon]) -> str | None:
+    """Why `verb` (`uninstall`, `disable`) is refused for `addon_id` while a
+    repo library among `addons` lists it under `addons:`; None when none does.
+    The CLI and the `addons.yaml` editor both say it this way."""
+    lines = repo_library_dependents(addon_id, addons)
+    if not lines:
+        return None
+    return (
+        f"cannot {verb} {addon_id}: a connected repository's repo library builds on it\n  "
+        + "\n  ".join(lines)
+    )
 
 
 def check(
@@ -472,27 +583,67 @@ def scope_problems(
 
 
 def breaks(
-    before: State, after: State, config_dir: Path, namespace: str | None = None
+    before: State,
+    after: State,
+    config_dir: Path,
+    namespace: str | None = None,
+    *,
+    exempt: Collection[str] = (),
 ) -> list[str]:
     """Why what resolves in `before` would not in `after`. `namespace` is the
     candidate add-on's, whose own chains must resolve too; None when no
-    add-on's content changes (an `addons.yaml` edit)."""
+    add-on's content changes (an `addons.yaml` edit). `exempt`: repo-library
+    namespaces whose chains `held_breaks` reports instead, as Reach
+    (`a-broken-repo-library-chain-holds-an-update`)."""
     out = (
         [f"harnesses.yaml: {after.table_error}"]
         if after.table_error and not before.table_error
         else []
     )
+    # A chain is judged by its id: a lint message names the store it was read
+    # from, so a chain that failed before fails "anew" from a candidate's
+    # scratch copy. One that already failed is not this change's break.
+    failed = {chain for chain, _ in before.issues if chain is not None}
     for chain, message in sorted(after.issues - before.issues, key=str):
         if chain is None:
             out.append(message)
+        elif chain in failed:
+            continue
         elif namespace is not None and chain.startswith(f"{namespace}:"):
             out.append(f"its chain {chain} does not resolve: {message}")
+        elif _qualifier(chain) in exempt:
+            continue
         elif chain in before.chains:
             out.append(f"chain {chain} would stop resolving: {message}")
     for where, key, kind, value in references(config_dir):
+        if _qualifier(value) in exempt:
+            continue  # a reference into a repo library breaks only through its chain
         if kind and before.resolves(kind, value) and not after.resolves(kind, value):
             out.append(f"{where}: {key} {value!r} would stop resolving")
     return out
+
+
+def held_breaks(before: State, after: State, namespaces: Collection[str]) -> list[str]:
+    """A Reach line for each chain of a repo library under `namespaces` that
+    resolves in `before` and would not in `after`. Its repository's
+    maintainers, not this instance's, can fix it, so it holds an update for a
+    person and never refuses it (`a-broken-repo-library-chain-holds-an-update`)."""
+    out = []
+    for chain, message in sorted(after.issues - before.issues, key=str):
+        qualifier = _qualifier(chain)
+        if qualifier in namespaces and chain in before.chains:
+            out.append(
+                f"chain {chain} would stop resolving: {message}; {qualifier}'s items "
+                "refuse it until its repo library is fixed"
+            )
+    return out
+
+
+def _chains_of(namespaces: Collection[str], state: State) -> set[str]:
+    """Every chain of a repo library under `namespaces` that resolves in
+    `state`. One that stops resolving is a `held_breaks` line, not a
+    "removed" line for every fact it had."""
+    return {chain for chain in state.chains if _qualifier(chain) in namespaces}
 
 
 def _catalogue(
@@ -716,7 +867,8 @@ def update(
             candidate = load.InstalledAddon(addon_id, name, namespace, found.version, root)
             would_load = [p for p in loaded if p.id != addon_id] + [candidate]
             after = state_of(config_dir, would_load)
-            if broken := breaks(state, after, config_dir, namespace):
+            libraries = {p.namespace for p in would_load if p.repo_id is not None}
+            if broken := breaks(state, after, config_dir, namespace, exempt=libraries):
                 results[addon_id] = Result(
                     addon_id,
                     "refused",
@@ -724,6 +876,7 @@ def update(
                     problems=tuple(why.replace(str(root), addon_id) for why in broken),
                 )
                 continue
+            held = held_breaks(state, after, libraries)
             captured = (
                 [
                     f"{where}: {key} {value!r} is now read from this add-on"
@@ -734,13 +887,18 @@ def update(
                 else []
             )
             reach, content = (
-                review_mod.local_changes(state.library, after.library, namespace)
+                review_mod.local_changes(
+                    state.library,
+                    after.library,
+                    namespace,
+                    extra=_chains_of(libraries, after),
+                )
                 if after.library is not None
                 else ([], [])
             )
             reviewed = replace(
                 reviewed,
-                reach=(*reviewed.reach, *captured, *reach),
+                reach=(*held, *reviewed.reach, *captured, *reach),
                 content=(*reviewed.content, *content),
             )
             if not accept(reviewed):

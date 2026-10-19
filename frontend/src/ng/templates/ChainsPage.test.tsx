@@ -8,6 +8,7 @@ import { Shell } from "../shell/Shell";
 import { ChainsPage } from "./ChainsPage";
 import * as d from "./draft/draftApi";
 import { DEFAULT_VIEW } from "./draft/fixture.default";
+import { EXT, EXTENDING_VIEW } from "./draft/fixture.extending";
 import type { DraftView, Result } from "./draft/types";
 
 const view = (extra: Partial<Result> = {}, draft = true): DraftView => ({ ...DEFAULT_VIEW, draft, result: { ...DEFAULT_VIEW.result, ...extra } });
@@ -221,17 +222,63 @@ describe("Chains page: the chain canvas", () => {
     expect(screen.queryByRole("complementary", { name: "Draft · 2 changes pane" })).toBeNull();
   });
 
-  it("shows an extending chain read-only on the canvas, editable in YAML", async () => {
-    vi.spyOn(api, "getTemplate").mockResolvedValue({ id: "default", file: "chains/default.yaml", text: "id: default\nextends: base\n", chain: {} });
-    vi.mocked(d.getDraft).mockImplementation(() => ok(view({ model: { "chains/default.yaml": { id: "default", extends: "base" } } })));
-    mount();
-    const g = await canvas();
-    expect(screen.getByRole("note")).toHaveTextContent("default extends base. Edit it in YAML");
-    expect(within(g).getByRole("button", { name: "verification, node" })).toBeInTheDocument();
-    expect(within(g).queryAllByRole("button", { name: "Add a node or gate here" })).toHaveLength(0);
-    await userEvent.click(screen.getByRole("button", { name: "YAML" }));
-    const yaml = screen.getByRole("region", { name: "chains/default.yaml, YAML" });
-    expect(within(yaml).getByRole("textbox")).not.toHaveAttribute("readonly");
+  it("draws an extending chain editable, and points at YAML when its edits don't apply", async () => {
+    vi.mocked(d.getDraft).mockImplementation(() => ok(EXTENDING_VIEW));
+    const { unmount } = mount("/templates/chains/team");
+    const g = await screen.findByRole("group", { name: "team" });
+    expect(within(g).getAllByRole("button", { name: "Add a node or gate here" })).toHaveLength(7);
+    expect(screen.queryByRole("note")).toBeNull();
+    unmount();
+    const unapplied = { ...EXTENDING_VIEW.result, extending: { ...EXTENDING_VIEW.result.extending!, nodes: null } };
+    vi.mocked(d.getDraft).mockImplementation(() => ok({ ...EXTENDING_VIEW, result: unapplied }));
+    mount("/templates/chains/team");
+    expect(await screen.findByRole("note")).toHaveTextContent("team's edits don't apply to default. Fix them in YAML.");
+  });
+
+  it("names an extending chain's parent in the header, and the chain pane's Detach confirms before sending detach", async () => {
+    const post = vi.spyOn(d, "postOps").mockImplementation(() => ok({ ...EXTENDING_VIEW, ops: [] }));
+    vi.mocked(d.getDraft).mockImplementation(() => ok(EXTENDING_VIEW));
+    mount("/templates/chains/team");
+    await screen.findByRole("group", { name: "team" });
+    expect(screen.getByText("extends default")).not.toHaveClass("is-mono");
+    const pane = screen.getByRole("complementary", { name: "team pane" });
+    await userEvent.click(within(pane).getByRole("button", { name: "Detach…" }));
+    const card = screen.getByRole("dialog", { name: "Detach team" });
+    expect(card).toHaveTextContent("team stops following default.");
+    await userEvent.click(within(card).getByRole("button", { name: "Keep" }));
+    expect(post).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Detach…" }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Detach team" })).getByRole("button", { name: "Detach" }));
+    await waitFor(() => expect(post.mock.calls[0]?.slice(0, 3)).toEqual(["chains", "team", [{ op: "detach" }]]));
+  });
+
+  it.each([
+    { node: EXT.overridden, locked: true, applies: true },
+    { node: "security_scan", locked: false, applies: true },
+    // With the edits not applying there are no origins: the file's `add` entries still say it is added.
+    { node: "security_scan", locked: false, applies: false },
+  ])("opens $node's node view with its structure locked: $locked (edits apply: $applies)", async ({ node, locked, applies }) => {
+    const extending = { ...EXTENDING_VIEW.result.extending!, ...(applies ? {} : { origins: {} }) };
+    vi.mocked(d.getDraft).mockImplementation(() => ok({ ...EXTENDING_VIEW, result: { ...EXTENDING_VIEW.result, extending } }));
+    mount(`/templates/chains/team/nodes/${node}`);
+    await screen.findByRole("complementary", { name: `${node} pane` });
+    expect(screen.queryAllByText("Inherited from default: change it in YAML, or detach the chain.", { selector: ".tpl-banner" })).toHaveLength(locked ? 1 : 0);
+    expect(screen.queryAllByRole("button", { name: /add a task|Add a step/i }).length > 0).toBe(!locked);
+  });
+
+  it("reviews an extending chain's removed parent node as a ghost where it stood", async () => {
+    // Published, `team` still ran the node its draft now removes.
+    const changes = [{ path: EXT.removed, kind: "remove" as const, summary: "removed" }];
+    vi.mocked(d.getDraft).mockImplementation(() => ok({ ...EXTENDING_VIEW, draft: true, result: { ...EXTENDING_VIEW.result, changes } }));
+    vi.spyOn(api, "getTemplate").mockResolvedValue({ id: "team", file: "chains/team.yaml", text: "id: team\nextends: default\n", chain: { id: "team", extends: "default" } });
+    const nodes = [EXT.first, EXT.removed, EXT.overridden, ...EXT.rest].map((id) => ({ id, kind: "exec" as const }));
+    vi.spyOn(api, "getResolvedTemplate").mockResolvedValue({ nodes });
+    mount("/templates/chains/team");
+    await screen.findByRole("group", { name: "team" });
+    await userEvent.click(screen.getByRole("button", { name: "Review & publish" }));
+    await waitFor(() => expect(api.getResolvedTemplate).toHaveBeenCalledWith("team"));
+    const g = screen.getByRole("group", { name: "team" });
+    await waitFor(() => expect(within(g).getByRole("button", { name: `${EXT.removed}, node, removed` })).toBeInTheDocument());
   });
 
   it("switches to the YAML view and back, and keeps you there while the YAML does not parse", async () => {

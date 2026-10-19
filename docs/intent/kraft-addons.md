@@ -224,9 +224,33 @@ origin: src/kraft/addons/update.py §update
 
 ## REQ update-refuses-a-change-that-breaks-a-chain
 
-IF an update's candidate add-ons would leave a currently resolving chain, chain reference or profile fallback unresolved, THEN the system SHALL refuse that add-on and name each such reference.
+IF an update's candidate add-ons would leave a currently resolving chain of the instance's own or of an add-on, a chain reference to one of those, or a profile fallback unresolved, THEN the system SHALL refuse that add-on and name each such reference.
 enforced-by: tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[local-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[repos-default-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[intake-schedule], tests/addons/test_update.py::test_a_captured_reference_the_addon_does_not_provide_is_refused, tests/addons/test_update.py::test_a_broken_profile_pairing_is_refused, tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[removed-node-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[anchor-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[override-path-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[added-id-taken]
 origin: src/kraft/addons/update.py §breaks
+
+## REQ an-addon-lists-no-addons
+
+IF an add-on's `library.yaml` has an `addons:` key, THEN the system SHALL refuse the add-on.
+enforced-by: tests/addons/test_repo_library_extends.py::test_an_addon_lists_no_addons
+origin: src/kraft/addons/update.py §_listed_addons
+
+## REQ a-broken-repo-library-chain-holds-an-update
+
+IF an update would leave a currently resolving repo-library chain unresolved, THEN the system SHALL put it in that update's review as a Reach line and SHALL NOT refuse the update for it or for a reference to it.
+enforced-by: tests/addons/test_repo_library_extends.py::test_an_update_that_breaks_a_repo_library_chain_holds_and_never_refuses[by-hand-applies], tests/addons/test_repo_library_extends.py::test_an_update_that_breaks_a_repo_library_chain_holds_and_never_refuses[auto-update-holds], tests/addons/test_repo_library_extends.py::test_an_update_that_breaks_a_repo_library_chain_holds_and_never_refuses[named-by-repos-yaml], tests/addons/test_repo_library_extends.py::test_an_update_that_breaks_a_repo_library_chain_holds_and_never_refuses[then-the-library-changes], tests/cli/test_addon.py::test_validate_against_a_kraft_home[breaks-a-repo-library-chain]
+origin: src/kraft/addons/update.py §held_breaks
+
+## REQ the-review-covers-repo-library-chains
+
+WHEN an add-on update, or a change of a repo library, alters what a repo-library chain that extends an add-on chain runs, the system SHALL list each change in the review, as Reach or content by the rules for the instance's own chains.
+enforced-by: tests/addons/test_repo_library_extends.py::test_the_review_shows_what_a_repo_library_chain_will_run[limit-raised-is-reach], tests/addons/test_repo_library_extends.py::test_the_review_shows_what_a_repo_library_chain_will_run[text-is-content], tests/addons/test_repo_library_extends.py::test_a_change_of_the_library_shows_what_it_builds_on[its-extending-chain]
+origin: src/kraft/addons/review.py §local_changes
+
+## REQ addon-rules-govern-a-change-through-the-addon
+
+WHEN an add-on auto-update changes a repo-library chain only in what the add-on's review counts as content, a change of shape included, the system SHALL apply it without a person.
+enforced-by: tests/addons/test_repo_library_extends.py::test_an_addon_change_reaches_a_repo_library_chain_by_the_addons_rules[text], tests/addons/test_repo_library_extends.py::test_an_addon_change_reaches_a_repo_library_chain_by_the_addons_rules[a-change-of-shape]
+origin: src/kraft/addons/update.py §auto_update
 
 ## REQ one-addon-change-at-a-time
 
@@ -242,8 +266,8 @@ origin: src/kraft/cli/addon.py §_cmd_update
 
 ## REQ removing-a-referenced-addon-is-refused
 
-IF local configuration (`library.yaml`, `chains/`, `repos.yaml`, `intake.yaml`, `policy.yaml` triggers or `harnesses.yaml` fallbacks) references the namespace of an add-on being uninstalled or disabled, THEN the system SHALL refuse and list each reference.
-enforced-by: tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[uninstall], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[disable], tests/cli/test_addon.py::test_removing_an_addon_a_chain_extends_is_refused
+IF local configuration (`library.yaml`, `chains/`, `repos.yaml`, `intake.yaml`, `policy.yaml` triggers or `harnesses.yaml` fallbacks) references the namespace of an add-on being uninstalled or disabled, or an accepted repo library lists it under `addons:`, THEN the system SHALL refuse and list each reference.
+enforced-by: tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[uninstall], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[disable], tests/cli/test_addon.py::test_removing_an_addon_a_chain_extends_is_refused, tests/cli/test_addon.py::test_removing_an_addon_a_repo_library_builds_on_is_refused[uninstall], tests/cli/test_addon.py::test_removing_an_addon_a_repo_library_builds_on_is_refused[disable], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[a-repo-library-builds-on-it]
 origin: src/kraft/cli/addon.py §_still_referenced
 
 ## REQ a-worker-does-not-change-addons

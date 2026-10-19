@@ -80,6 +80,12 @@ def test_a_misspelled_library_section_is_refused():
     assert list(validator("library.schema.json").iter_errors({"taks": {}}))
 
 
+def test_the_library_schema_takes_a_repo_librarys_addons_list():
+    schema = validator("library.schema.json")
+    assert schema.is_valid({"addons": ["base@org"]})
+    assert not schema.is_valid({"addons": ["base"]})
+
+
 def test_the_addons_schema_catches_shape_and_typos():
     """What an editor can catch in `addons.yaml`; the rules that compare
     entries are the loader's."""

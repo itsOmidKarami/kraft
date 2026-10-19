@@ -91,6 +91,7 @@ def resolve(
         "sources": {},
         "changes": [],
         "impact": None,
+        "extending": None,
         "policy_values": {
             k: getattr(policy, k) for k in ("auto_escalate_delay_s", "auto_review_attempts")
         },
@@ -184,6 +185,8 @@ def _chains(st, key: str, raw: dict, files: dict, published: dict) -> dict:
         before = authored.parse(published.get(old))
     except yaml.YAMLError:
         before = None
+    # As written: the expansion drops `extends`.
+    before_raw = before
     before, _ = _expand(getattr(st, "library", None), st.templates_dir / old, key, before)
     # A `move_to_library` draft holds the library its chain now extends.
     library = (
@@ -244,25 +247,70 @@ def _chains(st, key: str, raw: dict, files: dict, published: dict) -> dict:
                                 f"resolving: {exc}",
                             }
                         )
-                # `_sources` walks authored `nodes`, which an extending chain has none of.
-                if "extends" not in data:
-                    sources = _sources(
-                        authored.normalise(copy.deepcopy(data)),
-                        _library_model(st, files),
-                        chain,
-                        deps.instance_policy(st),
-                    )
+                sources = _sources(
+                    authored.normalise(copy.deepcopy(data)),
+                    _library_model(st, files),
+                    chain,
+                    deps.instance_policy(st),
+                    parent=lambda name: authored.normalise(
+                        copy.deepcopy(dict(candidate.chain_data(name)))
+                    ),
+                )
     return {
         "resolved": resolved,
         "problems": problems,
         "sources": sources,
         "changes": [
             *_renamed(key, id, files, published),
+            *_extends_change(before_raw, data),
             *_chain_changes(before, after),
             *changes(_flat(before), _flat(after)),
         ],
         "impact": impact,
+        "extending": _extending(library, resolution, after, data),
     }
+
+
+def _extending(library, resolution, after: Mapping, data: object) -> dict | None:
+    """An extending chain's draft: its parent; its nodes with the edits applied
+    (None when they don't apply) and where each came from; and each parent node
+    it removes, with the nearest earlier node it still runs. Read off the
+    draft's own expansion, so it is there while the draft does not validate."""
+    name = data.get("extends") if isinstance(data, Mapping) else None
+    if not isinstance(name, str):
+        return None
+    provenance = resolution.provenance if resolution is not None else None
+    out: dict = {
+        "parent": name,
+        "nodes": to_jsonable_python(list(after["nodes"])) if provenance is not None else None,
+        "origins": dict(provenance["nodes"]) if provenance is not None else {},
+        "removed": [],
+    }
+    try:
+        parent = library.resolve_chain(name) if library is not None else None
+    except TemplateLibraryError:
+        parent = None
+    removed = data.get("remove")
+    removed, last = set(removed) if isinstance(removed, list) else set(), None
+    for node in parent.nodes if parent is not None else ():
+        if node.id in removed:
+            kind = "gate" if isinstance(node.node, GateNode) else "exec"
+            out["removed"].append({"id": node.id, "kind": kind, "after": last})
+        else:
+            last = node.id
+    return out
+
+
+def _extends_change(before: object, after: object) -> list[dict]:
+    """A row at the chain's own path when the draft adds, changes or drops
+    `extends`: the expansion drops it, so a Detach whose nodes resolve the same
+    would otherwise review as no change (`a-parent-change-is-a-draft-change`)."""
+    old = before.get("extends") if isinstance(before, Mapping) else None
+    new = after.get("extends") if isinstance(after, Mapping) else None
+    if old == new:
+        return []
+    summary = f"detached from {old}" if new is None else f"extends {old or 'nothing'} → {new}"
+    return [{"path": "", "kind": "change", "summary": summary, "fields": ["extends"]}]
 
 
 def _renamed(
@@ -299,7 +347,9 @@ def _chain_changes(before: Mapping, after: Mapping) -> list[dict]:
     fields = [
         k
         for k in dict.fromkeys([*before, *after])
-        if k not in ("id", "nodes") and (before.get(k) or None) != (after.get(k) or None)
+        # An extending chain's edits show in the node rows, its parent in `_extends_change`.
+        if k not in ("id", "nodes", "extends", "remove", "add", "overrides")
+        and (before.get(k) or None) != (after.get(k) or None)
     ]
     if not fields:
         return []
@@ -355,26 +405,35 @@ def _library_model(st, files: Mapping[str, str | None]) -> Mapping:
     return library if isinstance(library, dict) else {}
 
 
-def _layers(chain: Mapping, library: Mapping, path: str) -> list[tuple[str, Mapping]]:
+def _parents(own: list, namespace: Namespace, library: Mapping) -> list:
+    """`own` and, after it, each library component its `extends` names, up the chain."""
+    out = list(own)
+    section = library.get(namespace.value)
+    name = next((m["extends"] for _, m in own if m.get("extends")), None)
+    seen = set()
+    while isinstance(name, str) and name not in seen and isinstance(section, Mapping):
+        seen.add(name)
+        body = section.get(name)
+        if not isinstance(body, Mapping):
+            break
+        out.append((f"library:{namespace.value}.{name}", body))
+        name = body.get("extends")
+    return out
+
+
+def _layers(chain: Mapping, library: Mapping, path: str, parent=None) -> list[tuple[str, Mapping]]:
     """The authored mappings the component at canonical `path` takes its fields
     from, nearest first, each labelled `chain` or `library:<section>.<name>`:
     the chain file's own, then each library component it inherits them through.
     A list (`steps`, `tasks`) comes whole from the nearest layer holding it, as
-    `extends` replaces arrays; a mapping merges across the layers."""
+    `extends` replaces arrays; a mapping merges across the layers. For a chain
+    that extends another, `parent` reads a chain as authored by id."""
+    name = chain.get("extends") if isinstance(chain, Mapping) else None
+    if isinstance(name, str) and parent is not None:
+        return _extending_layers(chain, library, path, name, parent)
 
     def parents(own: list, namespace: Namespace) -> list:
-        out = list(own)
-        section = library.get(namespace.value)
-        name = next((m["extends"] for _, m in own if m.get("extends")), None)
-        seen = set()
-        while isinstance(name, str) and name not in seen and isinstance(section, Mapping):
-            seen.add(name)
-            body = section.get(name)
-            if not isinstance(body, Mapping):
-                break
-            out.append((f"library:{namespace.value}.{name}", body))
-            name = body.get("extends")
-        return out
+        return _parents(own, namespace, library)
 
     def merged(layers: list, key: str) -> list:
         out = []
@@ -411,6 +470,63 @@ def _layers(chain: Mapping, library: Mapping, path: str) -> list[tuple[str, Mapp
     return layers
 
 
+def _extending_layers(chain, library, path: str, name: str, parent) -> list:
+    """An extending chain's layers for `path`: an added node's own, as any
+    chain's; else its overrides reaching `path` (`chain`), then the parent
+    chain's layers with `chain` relabelled `chain:<parent>`."""
+    root = path.split(PATH_SEPARATOR)[0]
+    added = next((n for n in authored.added_nodes(chain) if n.get("id") == root), None)
+    if added is not None:
+        return _layers({"nodes": [added]}, library, path)
+    own, whole = _override_layers(chain.get("overrides"), library, path)
+    if whole:
+        return own
+    base = parent(name)
+    inherited = _layers(base, library, path, parent) if isinstance(base, Mapping) else []
+    return [*own, *((f"chain:{name}" if label == "chain" else label, m) for label, m in inherited)]
+
+
+def _override_layers(overrides: object, library: Mapping, path: str) -> tuple[list, bool]:
+    """`(layers, whole)`: each override mapping that reaches `path`, from the
+    key nearest it; `whole` when an ancestor override's list holds the
+    component, which is then its whole definition, it and its library parents."""
+    if not isinstance(overrides, Mapping):
+        return [], False
+    segs = path.split(PATH_SEPARATOR)
+    out: list = []
+    for k in range(len(segs), 0, -1):
+        sub = overrides.get(PATH_SEPARATOR.join(segs[:k]))
+        for seg in segs[k:]:
+            if not isinstance(sub, Mapping):
+                break
+            if isinstance(sub.get(seg), Mapping):
+                sub = sub[seg]  # a slot: on_failure, fix_loop, judge, escalation, auto_review
+                continue
+            if seg == MAIN_STEP and isinstance(sub.get("tasks"), list) and "steps" not in sub:
+                sub = {"id": MAIN_STEP, "tasks": sub["tasks"]}  # the shorthand, as written
+                continue
+            for key, namespace in (("steps", Namespace.STEPS), ("tasks", Namespace.TASKS)):
+                items = sub.get(key)
+                item = next(
+                    (
+                        x
+                        for x in (items if isinstance(items, list) else ())
+                        if isinstance(x, Mapping) and x.get("id") == seg
+                    ),
+                    None,
+                )
+                if item is not None:
+                    if seg == segs[-1]:
+                        return _parents([("chain", item)], namespace, library), True
+                    sub = item
+                    break
+            else:
+                sub = None
+        if isinstance(sub, Mapping):
+            out.append(("chain", sub))
+    return out, False
+
+
 def _setter(layers: list[tuple[str, Mapping]], field: str) -> str:
     """The label of the nearest layer that sets dotted `field`."""
     for label, m in layers:
@@ -422,7 +538,9 @@ def _setter(layers: list[tuple[str, Mapping]], field: str) -> str:
     return "chain"
 
 
-def _sources(chain: Mapping, library: Mapping, resolved: ResolvedChain, policy) -> dict:
+def _sources(
+    chain: Mapping, library: Mapping, resolved: ResolvedChain, policy, parent=None
+) -> dict:
     """`{path: {field: {value, source}}}` for every component of `resolved`:
     its model's own fields, and its scope's `policy.*` caps. A field the
     expanded chain does not set is `default`; a cap it does not set is
@@ -435,7 +553,7 @@ def _sources(chain: Mapping, library: Mapping, resolved: ResolvedChain, policy) 
     out: dict[str, dict] = {}
 
     def put(model, path: str) -> None:
-        layers = _layers(chain, library, path)
+        layers = _layers(chain, library, path, parent)
         dumped = model.model_dump(mode="json")
         # What a task accepts but nothing reads is left out unless set; a cap
         # only its recovery runs under says so (`TaskBase.unread`).

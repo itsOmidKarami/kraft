@@ -3,7 +3,7 @@ import type { ChainArc, ChainNode, Seam } from "../graph/layout";
 import { EDITOR_FIT } from "../graph/camera";
 import { StageGraph } from "../graph/StageGraph";
 import type { Op, Result, Scope } from "./draft/types";
-import { authoredNodes, changeAt, kindOf, nodeGlyph, problemsAt, type NodeA } from "./draft/view";
+import { authoredNodes, changeAt, extendsOf, kindOf, nodeGlyph, originOf, problemsAt, type NodeA } from "./draft/view";
 import { SeamMenu } from "./menus/SeamMenu";
 import { ReadOnly } from "./addon";
 import { problemWord } from "./problems";
@@ -46,6 +46,8 @@ function rejectTarget(r: Result, nodes: NodeA[], i: number): string | undefined 
 /** Level 1 of the editor: the chain drawn from the draft's model (brief B.2). */
 export function ChainCanvas({ scope, result: r, selected, pending, reserve, refused, onSelect, onOpen, onFocusNode, onEscape, onBackground, onAdd, review, marked = [], onDrag, strip }: Props) {
   const authored = authoredNodes(r, scope);
+  // An extending chain: each node marked by where it comes from, its parent's removed ones ghosts.
+  const parent = extendsOf(r, scope);
   const busy = useMemo(() => new Set((pending ?? []).map(opNode)), [pending]);
   const nodes: ChainNode[] = authored.map((n) => {
     const kind = kindOf(r, n);
@@ -55,6 +57,8 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
     const probs = problemsAt(r, n.id, true);
     const gate = kind === "gate";
     const glyph = gate ? {} : nodeGlyph(r, n.id);
+    const origin = parent ? originOf(r, n.id) : undefined;
+    const originMeta = origin === "added" ? "added here" : origin === "overridden" ? "overridden here" : undefined;
     return {
       id: n.id,
       kind,
@@ -64,11 +68,19 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
       mark: change?.kind === "add" ? "add" : change?.kind === "change" || inside ? "change" : undefined,
       prob: probs.length > 0 || marked.includes(n.id),
       // Gates on the chain show only the diamond and name (Decisions §9).
-      meta: probs.length && !gate ? problemWord(probs[0]) : undefined,
-      metaTone: probs.length ? "red" : undefined,
+      meta: probs.length && !gate ? problemWord(probs[0]) : originMeta,
+      metaTone: probs.length ? "red" : origin === "added" ? "green" : origin === "overridden" ? "amber" : undefined,
       pending: busy.has(n.id),
     };
   });
+  if (parent && !review) {
+    // Each removed parent node right after the node it followed (the server knows the parent's order).
+    for (const g of r.extending?.removed ?? []) {
+      let at = g.after ? nodes.findIndex((n) => n.id === g.after) + 1 : 0;
+      while (nodes[at]?.state === "ghost") at++; // a run of removals keeps the parent's order
+      nodes.splice(at, 0, { id: g.id, kind: g.kind, state: "ghost", meta: "removed" });
+    }
+  }
   if (review) {
     // Unchanged nodes fade; changed ones carry their one-line summary; removed ones are ghosts where they were.
     nodes.forEach((n) => {
@@ -86,7 +98,12 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
   const anchor = useRef<HTMLElement | null>(null);
   // No seams while reviewing: the review is read-only (the prototype's `!s.review`).
   const readOnly = useContext(ReadOnly);
-  const seams: Seam[] = review || readOnly ? [] : Array.from({ length: nodes.length + 1 }, (_, at) => ({ at, open: menu === at, always: nodes.length === 0 }));
+  /** The live nodes before display index `k` (without `skip`): what `add_node` and `move` index; a ghost is no node. */
+  const live = (k: number, skip?: string) => nodes.filter((n) => n.id !== skip).slice(0, k).filter((n) => n.state !== "ghost").length;
+  // An extending chain adds after one of its parent's nodes: no seam before the first.
+  const seams: Seam[] = review || readOnly ? [] : Array.from({ length: nodes.length + 1 }, (_, at) => ({ at, open: menu === at, always: nodes.length === 0 })).filter((x) => !parent || live(x.at) > 0);
+  const drag = parent && onDrag ? { ...onDrag, over: (id: string, to: number) => onDrag.over(id, live(to, id)), drop: (id: string, to: number) => onDrag.drop(id, live(to, id)) } : onDrag;
+  const unapplied = !!parent && r.extending?.nodes === null;
   const sel = authored.findIndex((n) => n.id === selected);
   const target = sel >= 0 && kindOf(r, authored[sel]) === "gate" ? rejectTarget(r, authored, sel) : undefined;
   const arcs: ChainArc[] = target && selected ? [{ kind: "reject", from: selected, to: target }] : [];
@@ -106,7 +123,7 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
         fit={EDITOR_FIT}
         // A long chain draws under its overview; its nodes keep their ids, which are what an author edits.
         overview
-        onDrag={review || readOnly ? undefined : onDrag}
+        onDrag={review || readOnly ? undefined : drag}
         reserve={reserve}
         onSelect={onSelect}
         onOpen={onOpen}
@@ -118,16 +135,16 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
           setMenu(at);
         }}
       />
-      {!nodes.length && !readOnly && <Empty className="tpl-empty-chain">Add the first node with +</Empty>}
+      {!nodes.length && !readOnly && !unapplied && <Empty className="tpl-empty-chain">Add the first node with +</Empty>}
       {strip && <p className={`tpl-strip${strip.ok ? "" : " is-bad"}`} role="status">{strip.text}</p>}
       {menu !== null && (
         <SeamMenu
           anchor={anchor}
-          taken={authored.map((n) => n.id)}
+          taken={[...authored.map((n) => n.id), ...(r.extending?.removed.map((g) => g.id) ?? [])]}
           refused={refused}
           onClose={close}
           onCreate={async (kind, id) => {
-            if (await onAdd(menu, kind, id)) setMenu(null);
+            if (await onAdd(parent ? live(menu) : menu, kind, id)) setMenu(null);
           }}
         />
       )}

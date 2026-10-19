@@ -38,6 +38,8 @@ type Props = {
   onIcon?: (el: HTMLElement) => void;
   /** A click on the title (the editor's rename, Decisions §9 Rename); the title is then a button. */
   onTitle?: () => void;
+  /** Why the title can't be renamed here: it shows as a disabled rename carrying the reason. */
+  titleLocked?: string;
   /** The title's in-place editor while it is open, in the title's place. */
   titleEdit?: ReactNode;
   footer?: ReactNode;
@@ -46,7 +48,7 @@ type Props = {
 
 /** The side pane over a canvas (Inspector.dc.html): crumb, icon and title,
  *  tabs, a body that alone scrolls, a footer; collapses to a 40px rail. */
-export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title, prose, sub, prob, tabs, tab, onTab, onCollapse, onExpand, rail, onFocus, focusAs, onTitle, titleEdit, onIcon, footer, children }: Props) {
+export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title, prose, sub, prob, tabs, tab, onTab, onCollapse, onExpand, rail, onFocus, focusAs, onTitle, titleLocked, titleEdit, onIcon, footer, children }: Props) {
   const railBtn = useRef<HTMLButtonElement>(null);
   const fromKeys = useRef(false);
   // Escape, or the collapse button, lands focus on the rail that replaces the pane.
@@ -109,7 +111,7 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
               {glyph}<ChevronDown size={10} aria-hidden />
             </button>
           ) : <span className="pane-glyph">{glyph}</span>}
-          {titleEdit ?? <h2 className={`pane-title${prose ? " is-prose" : ""}`}>{onTitle ? <button ref={titleBtn} type="button" className="pane-title-btn" {...hint("Rename")} onClick={onTitle}>{title}</button> : title}</h2>}
+          {titleEdit ?? <h2 className={`pane-title${prose ? " is-prose" : ""}`}>{onTitle ? <button ref={titleBtn} type="button" className="pane-title-btn" {...hint("Rename")} onClick={onTitle}>{title}</button> : titleLocked ? <button type="button" className="pane-title-btn is-locked" aria-disabled="true" aria-label={`Rename ${title}`} {...hint(titleLocked)}>{title}</button> : title}</h2>}
           {onFocus && <button type="button" className="pane-focus" {...hint(focusAs?.tip ?? "Open the node view (double-click)")} onClick={onFocus}>{focusAs?.label ?? "Focus"} <Maximize2 size={12} /></button>}
         </div>
         {sub && <p className="pane-sub">{sub}</p>}
