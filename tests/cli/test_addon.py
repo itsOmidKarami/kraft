@@ -390,6 +390,16 @@ def test_removing_a_referenced_addon_is_refused(installed, capsys, verb):
         assert _run(capsys, "enable", ID)[0] == 0 and installed.yaml()["addons"] == {ID: True}
 
 
+def test_removing_an_addon_a_chain_extends_is_refused(installed, capsys):
+    write_yaml(installed.config / "chains" / "wraps.yaml", {"extends": "release:ship"})
+    before = installed.written()
+
+    code, out = _run(capsys, "uninstall", ID)
+
+    assert code != 0 and "chains/wraps.yaml: extends 'release:ship'" in out
+    assert installed.written() == before
+
+
 def _a_new_version(home):
     publish(home.repo, "release", version="1.1.0")
 

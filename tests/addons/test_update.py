@@ -82,6 +82,7 @@ JUDGE = {
         ({"tasks": {"base": AGENT}, **JUDGE}, {}, r"nodes.fix.fix_loop.judge: policy.grants"),
         (_task(harness="claude"), {}, "harness 'claude' is not listed"),
         (_task(extends="other:base"), {}, "reaches outside the add-on"),
+        (_task(), {"ship": {"extends": "other:default"}}, "reaches outside the add-on"),
     ],
     ids=[
         "subprocess",
@@ -96,6 +97,7 @@ JUDGE = {
         "judge-task",
         "unlisted-harness",
         "reference-to-another-addon",
+        "chain-extends-another-addon",
     ],
 )
 def test_an_addon_cannot_carry(library, chains, why):

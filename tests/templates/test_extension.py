@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import pytest
 import yaml
-from support.addons import AGENT, home, installed
+from support.addons import AGENT, home, installed, instance
 from support.templates import agent_task, write_chains
 
+from kraft.addons import update
+from kraft.config import write_yaml
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
 LIBRARY = {
@@ -374,3 +376,11 @@ def test_a_resolved_node_says_where_it_came_from(tmp_path):
     assert lib.provenance("parent") is None
     assert lib.extended_by("parent") == ("child", "grandchild")
     assert lib.extended_by("child") == ("grandchild",)
+
+
+def test_a_local_chain_cannot_extend_a_repo_library_chain(tmp_path):
+    config_dir, _ = instance(tmp_path, chains={"team": {"extends": "app:default"}})
+    write_yaml(config_dir / "repos.yaml", {"repos": [{"path": "/r", "id": "app"}]})
+    [(file, why)] = update.scope_problems(config_dir)
+    assert file == "chains/team.yaml"
+    assert "extends app:default is in app's repo library" in why
