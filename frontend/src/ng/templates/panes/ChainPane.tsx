@@ -222,12 +222,6 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
     ) : (
       <>
         <Button onClick={onDuplicate}>Duplicate</Button>
-        {parentChain && (
-          <>
-            <Button onClick={(e) => { at(e.currentTarget); setCard({ t: "chainBase" }); }}>Change base…</Button>
-            <Button onClick={(e) => { at(e.currentTarget); setCard({ t: "detach" }); }}>Detach…</Button>
-          </>
-        )}
         <span className="bp-gap" />
         {/* Refused while a repo defaults to it (Decisions §9 Chain settings). */}
         {inUse.note}
@@ -303,7 +297,18 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
         : shownTab === "yaml" ? <ItemYaml key={path} draft={draft} scope={scope} path={path} extendsName={typeof own?.extends === "string" ? own.extends : undefined} locked={locked} />
           : <>
             {locked && <p className="pane-note">{locked}</p>}
-            {d.kind === "chain" && parentChain && <ParentHint parent={parentChain} />}
+            {d.kind === "chain" && parentChain && (
+              // The chain's relation to its parent, and the two ways to change it, as a node's "In the library" line.
+              <div className="tpl-parent">
+                <ParentHint parent={parentChain} />
+                {!readOnly && (
+                  <span className="tpl-parent-acts">
+                    <Button onClick={(e) => { at(e.currentTarget); setCard({ t: "chainBase" }); }}>Change base…</Button>
+                    <Button onClick={(e) => { at(e.currentTarget); setCard({ t: "detach" }); }}>Detach…</Button>
+                  </span>
+                )}
+              </div>
+            )}
             {typeof own?.extends === "string" && (d.kind === "node" || d.kind === "task") && <LibraryHint section={d.kind === "node" ? "nodes" : "tasks"} name={own.extends} />}
             <Overview kind={d.kind} ctx={ctx} />
           </>}

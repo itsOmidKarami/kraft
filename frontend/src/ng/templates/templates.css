@@ -130,6 +130,10 @@
 /* Duplicate's choice: follow this chain, or copy it. */
 .sw-how { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-bottom: 8px; }
 .sw-how .tpl-menu-note { margin: 0; }
+/* An extending chain's pane: "Extends <parent>" and its two actions on one line, wrapping on a narrow pane. */
+.tpl-parent { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; margin: 0 0 10px; }
+.tpl-parent .lib-hint { margin: 0; }
+.tpl-parent-acts { display: flex; gap: 6px; }
 .sw-acts { display: flex; flex-direction: column; margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
 .unsaved p { margin: 0 0 8px; font-size: var(--fs-meta); color: var(--text-sub); line-height: 1.5; }
 .tpl-first { max-width: 420px; }
