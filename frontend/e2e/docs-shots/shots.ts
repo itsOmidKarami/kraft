@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { errors, expect, test, type Page } from "@playwright/test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,8 +55,12 @@ const settle = (page: Page) =>
       undefined,
       { timeout: 5_000 },
     )
-    // Still moving after 5s (a long or restarting animation): take the picture anyway, and say so.
-    .catch(() => console.warn(`docs-shots: ${page.url()} still animating after 5s; captured as it is`));
+    // Still moving after 5s (a long or restarting animation): take the picture anyway, and say so. Anything
+    // else (the page navigated, or closed) fails the shot, so a half-loaded frame never replaces a picture.
+    .catch((e: unknown) => {
+      if (!(e instanceof errors.TimeoutError)) throw e;
+      console.warn(`docs-shots: ${page.url()} still animating after 5s; captured as it is`);
+    });
 
 const board = async (page: Page) => {
   await page.goto("./");

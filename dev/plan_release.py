@@ -98,34 +98,40 @@ _TOP_ITEM = re.compile(r"^(?:[-*+]|\d+[.)]) ")
 #: A line that ends the text of the bullet above it: a nested item, a fence, or a
 #: Markdown image (`![…]`, or linked `[![…](…)](…)`).
 _NOT_PROSE = re.compile(r"^\s*(?:[-*+] |\d+[.)] |```|~~~|!\[|\[!\[)")
-#: The name of the tag a line opens on. An autolink (`<https://…>`) matches too,
-#: as `https`: no block tag, and not a whole tag for `_TAG`, so it stays words.
-_LEADING_TAG = re.compile(r"\s*</?([A-Za-z][A-Za-z0-9-]*)")
-#: Tags that make a line a picture's or its frame's whatever else is on it, so
-#: an `<img>` whose attributes wrap, or `<details><summary>Shot</summary>`, is.
-_BLOCK_TAGS = frozenset(
-    "img picture source video figure figcaption p div center details summary br hr table".split()
+#: An HTML tag's start: `<` or `</`, its name, then a space, `/`, `>` or the
+#: line's end. An autolink (`<https://…>`, `<a@b.c>`) is not one.
+_TAG_START = r"</?([A-Za-z][A-Za-z0-9-]*)(?=[\s/>]|$)"
+_LEADING_TAG = re.compile(r"\s*" + _TAG_START)
+#: A whole tag: its start, then quoted values or any other character but a
+#: quote or `>`, then `>`. One loop over disjoint choices, so it runs in linear
+#: time on any line, and `alt="a > b"` does not end it early.
+_TAG = re.compile(_TAG_START + r"""(?:"[^"]*"|'[^']*'|[^'">])*>""")
+#: Tags that make a line a picture's whatever else is on it, so an `<img>` whose
+#: attributes wrap, or `<details><summary>Shot</summary>`, is one.
+_PICTURE_TAGS = frozenset("img picture source video figure details table hr".split())
+#: A file GitHub embeds when its URL stands alone on a line: an uploaded GIF or
+#: video, under `user-attachments/` or, from before, a repository's `assets/`.
+_ATTACHMENT = re.compile(
+    r"\s*https://github\.com/(?:user-attachments|[\w.-]+/[\w.-]+)/assets/\S+\s*$"
 )
-#: Every complete tag on a line, quoted attributes and all, so `alt="a > b"`
-#: does not end it early.
-_TAG = re.compile(r"""</?[A-Za-z][A-Za-z0-9-]*(?:\s+(?:"[^"]*"|'[^']*'|[^'">\s])*)*\s*/?>""")
-#: A file GitHub embeds when its URL stands alone on a line: an uploaded GIF or video.
-_ATTACHMENT = re.compile(r"\s*https://github\.com/user-attachments/\S+\s*$")
 
 
 def _picture_line(line: str) -> bool:
     """A line that holds a picture, not words, so it ends the bullet's text: one
-    that opens with a block or picture tag (`<img>`, `<p align=center>`,
-    `<details>`), one of HTML tags and nothing else (`<a href=…><img …></a>`, a
-    closing tag), or a GitHub attachment URL alone. A wrapped line that opens on
-    an inline tag and goes on in words (`<kbd>K</kbd> opens it.`), or on an
-    autolink, is still words."""
+    that opens on a picture tag (`<img>`, `<details>`), on a tag left open at
+    the line's end (`<a href=…` whose attributes wrap), or that is HTML tags
+    and nothing else (`<p align="center"><img …></p>`, a closing tag); or a
+    GitHub attachment URL alone. A wrapped line that opens on a tag and goes on
+    in words (`<kbd>K</kbd> opens it.`, `<br>Next line`), or on an autolink, is
+    still words."""
     if _ATTACHMENT.match(line):
         return True
-    tag = _LEADING_TAG.match(line)
-    if not tag:
+    start = _LEADING_TAG.match(line)
+    if not start:
         return False
-    return tag.group(1).lower() in _BLOCK_TAGS or not _TAG.sub("", line).strip()
+    if start.group(1).lower() in _PICTURE_TAGS or not _TAG.match(line.lstrip()):
+        return True
+    return not _TAG.sub("", line).strip()
 
 
 _FENCE = re.compile(r"^\s*(```|~~~)")

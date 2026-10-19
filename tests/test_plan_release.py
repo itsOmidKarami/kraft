@@ -133,6 +133,11 @@ _IMG = "https://raw.githubusercontent.com/o/r/main/.github/assets/console.png"
             id="html-details",
         ),
         pytest.param("https://github.com/user-attachments/assets/0f3c-4b2a", id="attachment"),
+        pytest.param("https://github.com/o/r/assets/1/0f3c-4b2a", id="attachment-repo"),
+        pytest.param(
+            f'<a href="https://kraft-sdlc.dev/demo/"\n     title="Demo"><img src="{_IMG}"></a>',
+            id="html-wrapped-link",
+        ),
     ],
 )
 def test_an_image_under_a_bullet_leaves_the_number_on_its_words(picture):
@@ -158,6 +163,7 @@ def test_an_image_under_a_bullet_leaves_the_number_on_its_words(picture):
         pytest.param("<b>everywhere</b> it applies.", id="emphasis"),
         pytest.param("<https://kraft-sdlc.dev/>", id="autolink-alone"),
         pytest.param('<a href="https://kraft-sdlc.dev/">the docs</a> say how.', id="text-link"),
+        pytest.param("<br>the second line of the same entry.", id="line-break"),
     ],
 )
 def test_inline_html_on_a_wrapped_line_is_still_the_bullets_words(wrapped):
