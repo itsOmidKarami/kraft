@@ -165,4 +165,18 @@ describe("Library: change base", () => {
     await waitFor(() => expect(post).toHaveBeenLastCalledWith("library", "library", [{ op: "change_base", node: "nodes.fast", base: "approval" }], undefined));
     expect(post.mock.calls[0][3]).toBe(true);
   });
+
+  it("says a refused check as an error", async () => {
+    const u = userEvent.setup();
+    draftWith({ model: { "library.yaml": { ...LIB_MODEL, nodes: { ...LIB_MODEL.nodes, fast: { extends: "verification", read_only: true } } } } });
+    vi.spyOn(d, "postOps").mockResolvedValue({ status: 409, body: { detail: "the library has no node approval" } } as never);
+    const tones: unknown[] = [];
+    const hear = (e: Event) => tones.push((e as CustomEvent<{ tone?: string }>).detail.tone);
+    window.addEventListener("kraft:toast", hear);
+    await select("nodes.fast");
+    await u.click(await screen.findByRole("button", { name: "Change base…" }));
+    await u.click(within(await screen.findByRole("dialog", { name: "Change base" })).getByText("approval"));
+    await waitFor(() => expect(tones).toEqual(["error"]));
+    window.removeEventListener("kraft:toast", hear);
+  });
 });

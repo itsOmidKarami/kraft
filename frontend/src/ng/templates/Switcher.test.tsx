@@ -97,6 +97,23 @@ describe("chain switcher", () => {
     await waitFor(() => expect(post).toHaveBeenCalledWith("chains", "mine", [{ op: "new_chain", ...source }]));
     await waitFor(() => expect(where).toBe("/templates/chains/mine"));
   });
+
+  it("says a refused new chain as an error, and stays", async () => {
+    vi.spyOn(d, "postOps").mockResolvedValue({ status: 409, body: { detail: "a chain mine already exists" } } as never);
+    const heard: { message: string; tone?: string }[] = [];
+    const hear = (e: Event) => heard.push((e as CustomEvent<{ message: string; tone?: string }>).detail);
+    window.addEventListener("kraft:toast", hear);
+    mount();
+    await userEvent.click(await crumb());
+    await screen.findByRole("option", { name: /quick-task/ });
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Switch chain" })).getByRole("button", { name: "Duplicate" }));
+    const id = await screen.findByRole("textbox", { name: "Duplicate id" });
+    await userEvent.clear(id);
+    await userEvent.type(id, "mine{Enter}");
+    await waitFor(() => expect(heard).toEqual([{ message: "a chain mine already exists", tone: "error" }]));
+    window.removeEventListener("kraft:toast", hear);
+    expect(where).toBe("/templates/chains/default");
+  });
 });
 
 describe("unpublished changes dialog", () => {

@@ -312,4 +312,20 @@ describe("change base", () => {
     expect(post).toHaveBeenLastCalledWith("chains", "default", [{ op: "change_base", node: "verification", base: "implementation" }], undefined);
     await toasted("Base is now implementation");
   });
+
+  it("says a refused check as an error, as the chain's own Change base does", async () => {
+    vi.spyOn(d, "postOps").mockResolvedValue({ status: 409, body: { detail: "the library has no node implementation" } } as never);
+    const tones: unknown[] = [];
+    const hear = (e: Event) => tones.push((e as CustomEvent<{ tone?: string }>).detail.tone);
+    window.addEventListener("kraft:toast", hear);
+    mount();
+    const g = await canvas();
+    await userEvent.click(within(g).getByRole("button", { name: "verification, node" }));
+    await userEvent.click(screen.getByRole("button", { name: "Change base…" }));
+    await userEvent.click(await screen.findByRole("option", { name: /implementation/ }));
+    await toasted("the library has no node implementation");
+    window.removeEventListener("kraft:toast", hear);
+    expect(tones).toEqual(["error"]);
+    expect(screen.queryByRole("dialog", { name: "Change base of verification" })).toBeNull();
+  });
 });

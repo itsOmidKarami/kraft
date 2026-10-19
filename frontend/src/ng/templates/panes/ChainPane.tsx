@@ -178,7 +178,7 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
   };
   const pickBase = async (base: string) => {
     const a = await draft.ops([{ op: "change_base", node: path, base }], { preview: true });
-    if (a.status !== 200) return showToast(detailOf(a.body));
+    if (a.status !== 200) return showToast(detailOf(a.body), { tone: "error" });
     const res2 = (a.body.ops?.[0]?.result ?? {}) as Partial<BaseCheck>;
     setCard({ t: "base", base, check: { kept: res2.kept ?? [], dropped: res2.dropped ?? [] } });
   };
