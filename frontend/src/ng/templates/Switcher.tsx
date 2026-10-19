@@ -83,7 +83,8 @@ export function Switcher({ chain, renamedTo, onGo, startDup, copy, extend = true
       title: copy ? `Add ${chain} to my library as` : `Duplicate ${chain} as`,
       label: "Duplicate id",
       initial: how === "extend" ? `${bare}_ext` : copy ? bare : `${chain}_copy`,
-      go: how === "extend" ? "Extend →" : copy ? "Copy →" : "Duplicate →",
+      // The button names the choice made above it.
+      go: how === "extend" ? "Extend →" : "Copy →",
     },
   };
   const choices = [
