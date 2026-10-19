@@ -312,6 +312,11 @@ things-to-try list and pauses its live motion. The sidebar's footer names the
 release the demo was built from, the newest tag behind the commit; a clone
 without tags says `vdev`, so build with `KRAFT_DEMO_VERSION=X.Y.Z` there.
 `setup` answers the repo and item lists empty, which is what a new home shows.
+A retake writes a picture only when it looks different from the one there, so
+an unchanged screen leaves its file alone. `chain-extends` is of `team-default`,
+a chain that extends `default`, which the demo lists on the Chains screen only:
+its list entry and draft view are a real server's answers, recorded into
+`e2e/contract/mocks/draftViews.json`.
 
 `just console-screenshot` needs the dev instance filled first: `just api` in
 one terminal, then `just dev-seed --rich`. It runs the console headless,
@@ -340,6 +345,13 @@ at its size on screen, so text reads at its real size.
 | `stop-peek.png` | 1230×700 | a capped item's side panel beside the board | why did my item stop |
 | `composer.png` | 1230×309 | the board's composer, filled in | file a work item |
 | `storage.png` | 1230×685 | Settings › Storage down to the first worktree row | logs and disk space |
+| `chain-extends.png` | 1230×700 | Templates › Chains on `team-default`, which extends `default`: `verification` overridden and selected, `security_scan` added | web UI › Templates and Settings |
+| `fixloop.png` | 1230×700 | a running item's `verification` node in its own view, on its second fix-loop round | web UI › Fix loops and test scopes |
+| `new-item-page.png` | 1230×602 | the full new-item page, a title typed | file a work item |
+| `harnesses.png` | 1230×700 | Settings › Harnesses | web UI › Templates and Settings |
+| `notifications.png` | 1230×700 | Settings › Notifications | web UI › Templates and Settings, notifications |
+| `access.png` | 1230×700 | Settings › Access | web UI › Templates and Settings, remote access |
+| `appearance.png` | 1230×700 | Settings › Appearance on the default look | web UI › Templates and Settings |
 | `console.png` | 1482×880 | `kraft console` on the board, its peek on a gate | console reference |
 | `vscode-*.png` | various | copies of `vscode/media/screenshot-*.png` | Kraft for VS Code |
 

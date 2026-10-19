@@ -744,7 +744,9 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if (p === "/harnesses/providers") return json(DRAFTS.providers);
     if (p === "/drafts") return json([...areas.list(), ...["default", "broken", "yaml-error", "stale"].map((key) => ({ area: "chains", key, files: [`chains/${key}.yaml`], changes: 1, problems: key === "broken" ? 1 : 0, updated_at: "2026-10-01T09:12:00Z" }))]);
     // `_chain_summary`'s other keys: no add-on, no description, it resolves, no node linked to a library component.
-    if (p === "/templates/chains") return json(opts.ngBoard ? NG_CHAINS.map((c) => ({ addon: null, description: null, error: null, uses: {}, extends: null, extended_by: [], ...c })) : st.templates);
+    // The Chains screen also lists `team-default`, a chain that extends `default` (its list entry and draft view are a
+    // real server's answers, draftViews.json); the composer's chain menu keeps to NG_CHAINS.
+    if (p === "/templates/chains") return json(opts.ngBoard ? [...NG_CHAINS.map((c) => ({ addon: null, description: null, error: null, uses: {}, extends: null, extended_by: c.id === "default" ? [DRAFTS.extending.id] : [], ...c })), clone(DRAFTS.extending)] : st.templates);
     if (p === "/templates/parse") return json({ nodes: st.templates[0]?.nodes ?? [], error: null });
     if ((m = p.match(/^\/templates\/([^/]+)\/validate$/))) return json({ id: m[1], valid: true, error: null, unresolved: [] });
     /* the steering preview (B23): one agent task's launch context, section by section */
