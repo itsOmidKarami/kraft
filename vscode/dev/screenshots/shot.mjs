@@ -219,7 +219,8 @@ async function drive(app) {
     const width = fit(clip.x, clip.width, size.width);
     const height = fit(clip.y, clip.height, size.height);
     let img = sharp(await sharp(full).extract({ left, top, width, height }).toBuffer());
-    const css = Math.round(clip.width);
+    // The clip's width in CSS pixels, rounded as `fit` rounds it, so a 1x capture is never resampled.
+    const css = Math.round(clip.x + clip.width) - Math.round(clip.x);
     if (width > css) img = sharp(await img.resize({ width: css }).toBuffer());
     await img.png({ palette: true, colours: 256, dither: 0 }).toFile(join(OUT, `${name}.png`));
     console.log(`wrote ${join(OUT, `${name}.png`)}`);

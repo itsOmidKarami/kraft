@@ -45,10 +45,15 @@ const still = (page: Page) =>
 test.beforeEach(async ({ page }) => still(page));
 
 /** Lets every animation that ends (a selection ring, a panel sliding in) end first, so two retakes of an
- *  unchanged screen match; endless ones (a running item's pulse) are left running. */
+ *  unchanged screen match; endless ones (a running item's pulse) and paused ones are left as they are. */
 const settle = (page: Page) =>
   page.evaluate(() =>
-    Promise.all(document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))),
+    Promise.all(
+      document.getAnimations()
+        // Running and finite only: a paused one would never finish, an endless one never ends.
+        .filter((a) => a.playState === "running" && a.effect?.getTiming().iterations !== Infinity)
+        .map((a) => a.finished.catch(() => undefined)),
+    ),
   );
 
 const board = async (page: Page) => {

@@ -34,7 +34,7 @@ from kraft.console import live, moments
 from kraft.console.app import KraftConsole
 from kraft.console.screens.board import Board
 from kraft.item_paths import docs_dir
-from kraft.paths import RunDirs, default_run_dir
+from kraft.paths import RunDirs, default_run_dir, kraft_home
 
 ROOT = Path(__file__).resolve().parents[1]
 #: The item the peek opens on: a gate with a spec to show, in `dev-seed --rich`.
@@ -100,6 +100,13 @@ def main() -> None:
     if not (os.environ.get("KRAFT_HOME") and os.environ.get("KRAFT_PORT")):
         raise SystemExit(
             "KRAFT_HOME and KRAFT_PORT must name the dev instance: run `just console-screenshot`"
+        )
+    # KRAFT_RUN_DIR wins over KRAFT_HOME for the run folder (the spec, the console's token):
+    # one left over from the person's own install points at their run folder.
+    run_dir = os.environ.get("KRAFT_RUN_DIR")
+    if run_dir and not Path(run_dir).expanduser().resolve().is_relative_to(kraft_home().resolve()):
+        raise SystemExit(
+            f"KRAFT_RUN_DIR={run_dir} is outside KRAFT_HOME: unset it for the dev instance"
         )
     version = args.version or newest_release()
     size = tuple(int(n) for n in args.size.split("x"))
