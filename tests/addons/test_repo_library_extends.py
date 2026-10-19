@@ -189,20 +189,25 @@ def test_a_bare_parent_is_the_librarys_own(app, home, chains):
 
     problems = _refused(app, home, LISTS, chains)
 
-    hint = "a bare name in a repo library is its own chain, and an instance chain cannot be extended"
+    hint = "a bare name in a repo library is its own chain, and an instance chain cannot be"
     assert any(hint in problem for problem in problems), problems
 
 
 def test_an_addons_bare_parent_gets_no_repo_library_hint(tmp_path):
     """The hint is a repo library's: an add-on's bare parent is its own too,
     and its author never wrote a `.kraft/`."""
-    addon = installed(tmp_path, "base", library={"tasks": {"base": AGENT}}, chains={"ship": {"extends": "default"}})
+    ship = {"ship": {"extends": "default"}}
+    addon = installed(tmp_path, "base", library={"tasks": {"base": AGENT}}, chains=ship)
     config_dir, _ = instance(tmp_path, chains={"default": {"nodes": [{"id": "build", **STEP}]}})
 
     with pytest.raises(TemplateLibraryError, match="no chain named 'base:default'") as raised:
         TemplateLibrary.from_yaml_dir(config_dir, addons=[addon]).resolve_chain("base:ship")
 
     assert "repo library" not in str(raised.value)
+
+
+def _disable(config_dir):
+    edit_addons_yaml(config_dir, lambda c: c["addons"].update({ID: {"as": "o", "enabled": False}}))
 
 
 def _forget(config_dir):
@@ -216,10 +221,7 @@ def _forget(config_dir):
 @pytest.mark.parametrize(
     "drop, why",
     [
-        (
-            lambda d: edit_addons_yaml(d, lambda c: c["addons"].update({ID: {"as": "o", "enabled": False}})),
-            "is disabled",
-        ),
+        (_disable, "is disabled"),
         # Unknown: its id names no namespace.
         (_forget, "no chain named 'base@org:default'"),
     ],

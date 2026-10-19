@@ -174,7 +174,6 @@ def builds_on(library: object) -> tuple[str, ...]:
     return tuple(v for v in listed if isinstance(v, str)) if isinstance(listed, list) else ()
 
 
-
 def alias_extends(written: object, qualified: object, aliases: Mapping[str, str]) -> object:
     """`qualified` (`qualify(written, addon)`), a repo library's chain file,
     with the top-level `extends` that `written` names a listed add-on by
@@ -192,6 +191,7 @@ def alias_extends(written: object, qualified: object, aliases: Mapping[str, str]
     if not colon or qualifier not in aliases:
         return qualified
     return {**qualified, "extends": f"{aliases[qualifier]}:{name}"}
+
 
 def addons_dir() -> Path:
     """This process's `run/addons`: `KRAFT_RUN_DIR`, else the default run directory."""
