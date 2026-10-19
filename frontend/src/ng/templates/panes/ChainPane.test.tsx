@@ -471,6 +471,8 @@ describe("an extending chain", () => {
     const card = await screen.findByRole("dialog", { name: "Change base of team" });
     expect(card).toHaveTextContent("overrides implementation");
     expect(card).toHaveTextContent("remove spec_approval · quick-task has no node spec_approval");
+    // It drops an edit: the button is the danger one.
+    expect(within(card).getByRole("button", { name: "Change base" })).toHaveClass("btn-danger");
     await userEvent.click(within(card).getByRole("button", { name: "Change base" }));
     expect(draft.ops).toHaveBeenLastCalledWith([{ op: "change_chain_base", base: "quick-task" }]);
   });
