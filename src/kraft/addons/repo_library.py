@@ -306,6 +306,28 @@ def _steering_texts(extracted: fetch.Extracted) -> dict:
     return section if isinstance(section, dict) else {}
 
 
+def _through_addons(library: TemplateLibrary | None, repo_id: str) -> set[str]:
+    """`repo_id`'s chains whose `extends` ancestry leaves the library, through
+    an add-on's chain. `review.review` loads the library alone, where such a
+    chain does not resolve, so only `local_changes` can show what it runs."""
+    if library is None:
+        return set()
+    own = f"{repo_id}:"
+    out: set[str] = set()
+    for chain_id in library.chain_ids:
+        at, seen = chain_id, set()
+        while chain_id.startswith(own) and at in library.chain_ids and at not in seen:
+            seen.add(at)
+            parent = library.chain_data(at).get("extends")
+            if not isinstance(parent, str):
+                break
+            if not parent.startswith(own):
+                out.add(chain_id)
+                break
+            at = parent
+    return out
+
+
 def _holds(
     before: TemplateLibrary | None,
     after: TemplateLibrary | None,
@@ -490,7 +512,11 @@ def check(
                 reach.append("new items in this repo go back to the instance's default chain")
         if after.library is not None:
             more_reach, more_content = review_mod.local_changes(
-                state.library, after.library, repo_id
+                state.library,
+                after.library,
+                repo_id,
+                extra=_through_addons(state.library, repo_id)
+                | _through_addons(after.library, repo_id),
             )
             reach += more_reach
             content += more_content

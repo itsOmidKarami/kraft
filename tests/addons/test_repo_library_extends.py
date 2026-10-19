@@ -11,6 +11,7 @@ from support.addons import (
     installed,
     instance,
     make_collection,
+    publish,
     repo_library_files,
     repo_with_library,
 )
@@ -237,3 +238,113 @@ def test_a_listed_addon_that_stops_loading_is_never_another(tmp_path, app, drop,
 
     with pytest.raises(TemplateLibraryError, match=why):
         _library(home).resolve_chain("app:ship")
+
+
+def _update(home):
+    (result,) = update.update([ID], accept=lambda review: True, config_dir=home[0], addons_root=home[1])
+    return result
+
+
+ONE_NODE = {"default": {"nodes": [{"id": "build", **STEP}]}}
+
+
+@pytest.mark.parametrize(
+    "auto, named",
+    [(False, False), (True, False), (False, True)],
+    ids=["by-hand-applies", "auto-update-holds", "named-by-repos-yaml"],
+)
+def test_an_update_that_breaks_a_repo_library_chain_holds_and_never_refuses(
+    app, home, org, auto, named
+):
+    _accepted(app, home)
+    if named:  # the instance's own file names the chain: still no veto
+        entry = {"path": str(app), "id": "app", "default_chain": "app:ship"}
+        write_yaml(home[0] / "repos.yaml", {"repos": [entry]})
+    publish(org, "base", version="1.1.0", chains=ONE_NODE)  # `check`, which ship removes, is gone
+    said = "chain app:ship would stop resolving"
+
+    if auto:
+        edit_addons_yaml(home[0], lambda c: c["addons"].update({ID: {"auto_update": True}}))
+        outcome = update.auto_update(*home)[ID]
+        assert outcome["outcome"] == "held" and said in outcome["message"], outcome
+        return
+    result = _update(home)
+
+    assert result.outcome == "applied", result.problems
+    assert result.review.reach[0].startswith(said), result.review.reach
+    with pytest.raises(TemplateLibraryError, match="check"):
+        _library(home).resolve_chain("app:ship")
+
+
+@pytest.mark.parametrize(
+    "task, section, line",
+    [
+        pytest.param(
+            {**TASK, "policy": {"budget_usd": 9}},
+            "reach",
+            "app:ship.nodes[build].tasks[t].policy: limit budget_usd raised, 5 -> 9",
+            id="limit-raised-is-reach",
+        ),
+        pytest.param(
+            {**TASK, "prompt": "new words"},
+            "content",
+            "app:ship.nodes[build].tasks[t]: prompt changed",
+            id="text-is-content",
+        ),
+    ],
+)
+def test_the_review_shows_what_a_repo_library_chain_will_run(app, home, org, task, section, line):
+    _accepted(app, home)
+    publish(org, "base", version="1.1.0", library={"tasks": {"base": task}})
+
+    result = _update(home)
+
+    assert result.outcome == "applied", result.problems
+    assert any(entry.startswith(line) for entry in getattr(result.review, section)), result.review
+
+
+HOUSE = {"steering": {"house": {"instructions": "be kind"}}}
+
+
+@pytest.mark.parametrize(
+    "library, runs",
+    [
+        pytest.param({"tasks": {"base": {**TASK, "prompt": "new words"}}}, ("new words", []), id="text"),
+        # A change of shape, which `_holds` would hold; content by the add-on's rules.
+        pytest.param(
+            {**HOUSE, "tasks": {"base": {**TASK, "steering": ["house"]}}},
+            (AGENT["prompt"], ["base:house"]),
+            id="a-change-of-shape",
+        ),
+    ],
+)
+def test_an_addon_change_reaches_a_repo_library_chain_by_the_addons_rules(app, home, org, library, runs):
+    _accepted(app, home)
+    edit_addons_yaml(home[0], lambda c: c["addons"].update({ID: {"auto_update": True}}))
+    publish(org, "base", version="1.1.0", library=library)
+
+    assert update.auto_update(*home)[ID] == {"outcome": "applied"}
+    (task,) = _library(home).resolve_chain("app:ship").nodes[0].tasks()
+    assert (task.task.prompt, list(task.task.steering)) == runs
+
+
+def test_a_change_of_the_librarys_extending_chain_holds(app, home):
+    _accepted(app, home)
+    repo_library_files(app, library=LISTS, chains={"ship": {"extends": "base:default"}})  # keeps `check`
+
+    found = repo_library.check(app, "app", *home)
+
+    assert "chain app:ship changes more than text" in found.holds, found
+
+
+def test_a_change_of_the_library_shows_its_extending_chain(app, home):
+    _accepted(app, home)
+    # An override may only tighten a parent's limit (`extension.tighten`).
+    lowered = {"overrides": {"build.main.t": {"policy": {"budget_usd": 3}}}}
+    repo_library_files(app, library=LISTS, chains={"ship": {**SHIP, **lowered}})
+
+    found = repo_library.check(app, "app", *home)
+
+    assert found.outcome == "waiting", found.problems
+    line = "app:ship.nodes[build].tasks[t].policy: budget_usd lowered, 5 -> 3"
+    assert line in found.review.content, found.review

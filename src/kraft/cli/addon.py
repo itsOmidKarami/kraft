@@ -75,10 +75,13 @@ def _lint_in(
     root: Path,
     collection: str | None,
     home: tuple[Path, Path],
-) -> list[dict]:
-    """What installing the add-on into the instance at `home` would be refused
-    for: an unmet `requires`, a namespace another add-on holds, and anything
-    of the instance's own that would stop resolving. The same add-on already
+) -> tuple[list[dict], list[str]]:
+    """`(problems, warnings)` for installing the add-on into the instance at
+    `home`. Problems are what it would be refused for: an unmet `requires`, a
+    namespace another add-on holds, and anything of the instance's own that
+    would stop resolving. A repo library's chain that would stop resolving is
+    a warning, as an update holds rather than refuses for it
+    (`a-broken-repo-library-chain-holds-an-update`). The same add-on already
     installed is replaced, not a clash."""
     config_dir, addons_dir = home
 
@@ -90,24 +93,31 @@ def _lint_in(
     loaded = [p for p in now if not same(p.id)]
     held = next((p.id for p in loaded if p.namespace == found.name), None)
     if held is not None:
-        return [{"file": str(root), "message": f"namespace {found.name!r} is taken by {held}"}]
+        return [
+            {"file": str(root), "message": f"namespace {found.name!r} is taken by {held}"}
+        ], []
     if why := load.instance_problem(found.name, found.requires, config_dir):
-        return [{"file": str(root), "message": why}]
+        return [{"file": str(root), "message": why}], []
     with tempfile.TemporaryDirectory() as tmp:
         store = fetch.write_scratch(Path(tmp), extracted)
         candidate = InstalledAddon(
             f"{found.name}@{collection or 'validate'}", found.name, found.name, found.version, store
         )
+        libraries = {p.namespace for p in loaded if p.repo_id is not None}
+        held_lines: list[str] = []
         try:
+            before = addon_update.state_of(config_dir, now)
+            after = addon_update.state_of(config_dir, [*loaded, candidate])
             broken = addon_update.breaks(
-                addon_update.state_of(config_dir, now),
-                addon_update.state_of(config_dir, [*loaded, candidate]),
-                config_dir,
-                found.name,
+                before, after, config_dir, found.name, exempt=libraries
             )
+            held_lines = addon_update.held_breaks(before, after, libraries)
         except PolicyError as exc:
             broken = [str(exc)]
-        return [{"file": str(root), "message": m.replace(str(store), str(root))} for m in broken]
+        return (
+            [{"file": str(root), "message": m.replace(str(store), str(root))} for m in broken],
+            [f"{root}: {m.replace(str(store), str(root))}" for m in held_lines],
+        )
 
 
 def validate(path: Path, home: tuple[Path, Path] | None = None) -> dict:
@@ -190,12 +200,13 @@ def validate(path: Path, home: tuple[Path, Path] | None = None) -> dict:
         if why is not None:
             problem(addon_file, f"{found.name} {found.version} {why}; this is Kraft {running}")
             continue
-        problems = (
+        problems, held = (
             _lint_in(found, extracted, root, collection_name, home)
             if home
-            else _lint(found, extracted, root)
+            else (_lint(found, extracted, root), [])
         )
         report["problems"] += problems
+        report["warnings"] += held
         report["addons"].append(
             {"name": found.name, "version": found.version, "digest": fetch.digest(extracted.files)}
         )

@@ -541,11 +541,18 @@ def scope_problems(
 
 
 def breaks(
-    before: State, after: State, config_dir: Path, namespace: str | None = None
+    before: State,
+    after: State,
+    config_dir: Path,
+    namespace: str | None = None,
+    *,
+    exempt: Collection[str] = (),
 ) -> list[str]:
     """Why what resolves in `before` would not in `after`. `namespace` is the
     candidate add-on's, whose own chains must resolve too; None when no
-    add-on's content changes (an `addons.yaml` edit)."""
+    add-on's content changes (an `addons.yaml` edit). `exempt`: repo-library
+    namespaces whose chains `held_breaks` reports instead, as Reach
+    (`a-broken-repo-library-chain-holds-an-update`)."""
     out = (
         [f"harnesses.yaml: {after.table_error}"]
         if after.table_error and not before.table_error
@@ -556,12 +563,39 @@ def breaks(
             out.append(message)
         elif namespace is not None and chain.startswith(f"{namespace}:"):
             out.append(f"its chain {chain} does not resolve: {message}")
+        elif _qualifier(chain) in exempt:
+            continue
         elif chain in before.chains:
             out.append(f"chain {chain} would stop resolving: {message}")
     for where, key, kind, value in references(config_dir):
+        if _qualifier(value) in exempt:
+            continue  # a reference into a repo library breaks only through its chain
         if kind and before.resolves(kind, value) and not after.resolves(kind, value):
             out.append(f"{where}: {key} {value!r} would stop resolving")
     return out
+
+
+def held_breaks(before: State, after: State, namespaces: Collection[str]) -> list[str]:
+    """A Reach line for each chain of a repo library under `namespaces` that
+    resolves in `before` and would not in `after`. Its repository's
+    maintainers, not this instance's, can fix it, so it holds an update for a
+    person and never refuses it (`a-broken-repo-library-chain-holds-an-update`)."""
+    out = []
+    for chain, message in sorted(after.issues - before.issues, key=str):
+        qualifier = _qualifier(chain)
+        if qualifier in namespaces and chain in before.chains:
+            out.append(
+                f"chain {chain} would stop resolving: {message}; {qualifier}'s items "
+                "refuse it until its repo library is fixed"
+            )
+    return out
+
+
+def _chains_of(namespaces: Collection[str], state: State) -> set[str]:
+    """Every chain of a repo library under `namespaces` that resolves in
+    `state`. One that stops resolving is a `held_breaks` line, not a
+    "removed" line for every fact it had."""
+    return {chain for chain in state.chains if _qualifier(chain) in namespaces}
 
 
 def _catalogue(
@@ -785,7 +819,8 @@ def update(
             candidate = load.InstalledAddon(addon_id, name, namespace, found.version, root)
             would_load = [p for p in loaded if p.id != addon_id] + [candidate]
             after = state_of(config_dir, would_load)
-            if broken := breaks(state, after, config_dir, namespace):
+            libraries = {p.namespace for p in would_load if p.repo_id is not None}
+            if broken := breaks(state, after, config_dir, namespace, exempt=libraries):
                 results[addon_id] = Result(
                     addon_id,
                     "refused",
@@ -793,6 +828,7 @@ def update(
                     problems=tuple(why.replace(str(root), addon_id) for why in broken),
                 )
                 continue
+            held = held_breaks(state, after, libraries)
             captured = (
                 [
                     f"{where}: {key} {value!r} is now read from this add-on"
@@ -803,13 +839,18 @@ def update(
                 else []
             )
             reach, content = (
-                review_mod.local_changes(state.library, after.library, namespace)
+                review_mod.local_changes(
+                    state.library,
+                    after.library,
+                    namespace,
+                    extra=_chains_of(libraries, after),
+                )
                 if after.library is not None
                 else ([], [])
             )
             reviewed = replace(
                 reviewed,
-                reach=(*reviewed.reach, *captured, *reach),
+                reach=(*held, *reviewed.reach, *captured, *reach),
                 content=(*reviewed.content, *content),
             )
             if not accept(reviewed):
