@@ -138,7 +138,7 @@ _ADDON_ID = re.compile(ADDON_ID_PATTERN)
 def _listed_addons(
     found: AddonManifest,
     files: Mapping[str, tuple[str, bytes]],
-    repo_library: bool,
+    repo_library: str | None,
     out: list[str],
 ) -> dict[str, str]:
     """A repo library's `addons:` list as add-on name to id, with every reason
@@ -187,16 +187,16 @@ def problems(
     *,
     other_namespaces: Collection[str] = (),
     repositories: Collection[str] = (),
-    repo_library: bool = False,
+    repo_library: str | None = None,
 ) -> list[str]:
     """Every reason this add-on's content is refused; empty when it is taken.
     `other_namespaces` are the installed add-ons' namespaces, this one's own
     left out: a skill reference into one of them is an add-on dependency.
     `repositories` are the connected repository ids: each is reserved for
     that repository's library, whether or not one is accepted.
-    `repo_library`: the content is a repo library's, whose `addons:` list lets
-    a chain's top-level `extends` name a listed add-on
-    (`a-repo-library-chain-may-extend-a-listed-addon-chain`)."""
+    `repo_library`: the repository id, when the content is a repo library's,
+    whose `addons:` list lets a chain's top-level `extends` name a listed
+    add-on (`a-repo-library-chain-may-extend-a-listed-addon-chain`)."""
     out: list[str] = []
     listed = _listed_addons(found, files, repo_library, out)
     allowed_harnesses = set(found.requires.harnesses)
@@ -244,12 +244,19 @@ def problems(
                 top = key == "extends" and at == ""
                 if top and qualifier in listed:
                     continue
-                hint = (
-                    "; a repo library builds on an add-on's chain by listing "
-                    "<addon>@<collection> under addons: in .kraft/library.yaml"
-                    if repo_library and top
-                    else ""
-                )
+                if repo_library and qualifier == repo_library:
+                    # Its own id: a bare name already means its own declaration.
+                    hint = (
+                        f"; a bare name in a repo library is its own, so write "
+                        f"{value.split(':', 1)[1]!r}"
+                    )
+                elif repo_library and top:
+                    hint = (
+                        "; a repo library builds on an add-on's chain by listing "
+                        "<addon>@<collection> under addons: in .kraft/library.yaml"
+                    )
+                else:
+                    hint = ""
                 out.append(
                     f"{where}: {key} {value!r} reaches outside the add-on; an add-on is "
                     f"self-contained{hint}"
@@ -317,6 +324,19 @@ def repo_library_dependents(addon_id: str, addons: Sequence[load.InstalledAddon]
                 "addons:; disconnect that repository, or have it drop the line"
             )
     return out
+
+
+def built_on_refusal(addon_id: str, verb: str, addons: Sequence[load.InstalledAddon]) -> str | None:
+    """Why `verb` (`uninstall`, `disable`) is refused for `addon_id` while a
+    repo library among `addons` lists it under `addons:`; None when none does.
+    The CLI and the `addons.yaml` editor both say it this way."""
+    lines = repo_library_dependents(addon_id, addons)
+    if not lines:
+        return None
+    return (
+        f"cannot {verb} {addon_id}: a connected repository's repo library builds on it\n  "
+        + "\n  ".join(lines)
+    )
 
 
 def check(
@@ -580,9 +600,15 @@ def breaks(
         if after.table_error and not before.table_error
         else []
     )
+    # A chain is judged by its id: a lint message names the store it was read
+    # from, so a chain that failed before fails "anew" from a candidate's
+    # scratch copy. One that already failed is not this change's break.
+    failed = {chain for chain, _ in before.issues if chain is not None}
     for chain, message in sorted(after.issues - before.issues, key=str):
         if chain is None:
             out.append(message)
+        elif chain in failed:
+            continue
         elif namespace is not None and chain.startswith(f"{namespace}:"):
             out.append(f"its chain {chain} does not resolve: {message}")
         elif _qualifier(chain) in exempt:

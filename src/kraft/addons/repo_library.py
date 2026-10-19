@@ -434,7 +434,7 @@ def check(
         extracted.files,
         other_namespaces=others,
         repositories=set(load.connected_ids(config_dir, repos)) - {repo_id},
-        repo_library=True,
+        repo_library=repo_id,
     )
     if why := load.instance_problem(
         repo_id, declared.requires, config_dir, repos=repos, repo_library=True
@@ -473,6 +473,17 @@ def check(
         f"read from {found.url} at {found.commit[:12]} ({found.branch})",
         *reviewed.content,
     ]
+    # What it builds on (`a-change-to-the-addons-list-is-reach`): a new entry
+    # makes uninstalling or disabling that add-on refuse.
+    had = set(load.builds_on(_library_data(old))) if old is not None else set()
+    lists = load.builds_on(_library_data(extracted))
+    reach += [
+        f"now builds on {listed}: uninstalling or disabling it will be refused while this "
+        "library lists it"
+        for listed in lists
+        if listed not in had
+    ]
+    content += [f"no longer builds on {listed}" for listed in sorted(had - set(lists))]
     with tempfile.TemporaryDirectory() as scratch:
         root = fetch.write_scratch(Path(scratch), extracted)
         candidate = load.InstalledAddon(addon_id, NAME, repo_id, _short(digest), root)
@@ -483,6 +494,14 @@ def check(
                 refused(*(why.replace(str(root), addon_id) for why in broken)),
                 review=reviewed,
             )
+        own = f"{repo_id}:"
+        content += [
+            f"its chain {chain} still does not resolve (since the add-on update)"
+            for chain in sorted(
+                {c for c, _ in state.issues if c and c.startswith(own)}
+                & {c for c, _ in after.issues if c}
+            )
+        ]
         holds = (
             _holds(state.library, after.library, repo_id, old, extracted, steering)
             if old is not None

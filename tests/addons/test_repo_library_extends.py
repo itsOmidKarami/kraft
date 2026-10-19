@@ -6,6 +6,7 @@ import yaml
 from support.addons import (
     AGENT,
     addon_json,
+    chain,
     edit_addons_yaml,
     install,
     installed,
@@ -111,6 +112,12 @@ def _refused(app, home, library, chains):
             {"ship": NESTED},
             "chains/ship.yaml: add[0].node.tasks[t]: extends 'base:base' reaches outside",
             id="a-nested-node-extends-it",
+        ),
+        pytest.param(
+            LISTS,
+            {"ship": {"extends": "app:default"}, "default": chain("base")},
+            "a bare name in a repo library is its own, so write 'default'",
+            id="its-own-id",
         ),
         pytest.param(
             {**LISTS, "addons": ID},
@@ -251,12 +258,12 @@ ONE_NODE = {"default": {"nodes": [{"id": "build", **STEP}]}}
 
 
 @pytest.mark.parametrize(
-    "auto, named",
-    [(False, False), (True, False), (False, True)],
-    ids=["by-hand-applies", "auto-update-holds", "named-by-repos-yaml"],
+    "auto, named, then",
+    [(False, False, False), (True, False, False), (False, True, False), (False, False, True)],
+    ids=["by-hand-applies", "auto-update-holds", "named-by-repos-yaml", "then-the-library-changes"],
 )
 def test_an_update_that_breaks_a_repo_library_chain_holds_and_never_refuses(
-    app, home, org, auto, named
+    app, home, org, auto, named, then
 ):
     _accepted(app, home)
     if named:  # the instance's own file names the chain: still no veto
@@ -276,6 +283,13 @@ def test_an_update_that_breaks_a_repo_library_chain_holds_and_never_refuses(
     assert result.review.reach[0].startswith(said), result.review.reach
     with pytest.raises(TemplateLibraryError, match="check"):
         _library(home).resolve_chain("app:ship")
+    if then:  # a change of the library that leaves `ship` alone is not refused for it
+        text = {**LISTS, "tasks": {"base": {**AGENT, "prompt": "new words"}}}
+        repo_library_files(app, library=text, chains={"ship": SHIP})
+        found = repo_library.check(app, "app", *home)
+        assert found.outcome == "waiting", found.problems
+        still = "its chain app:ship still does not resolve (since the add-on update)"
+        assert still in found.review.content, found.review
 
 
 @pytest.mark.parametrize(
@@ -344,14 +358,38 @@ def test_a_change_of_the_librarys_extending_chain_holds(app, home):
     assert "chain app:ship changes more than text" in found.holds, found
 
 
-def test_a_change_of_the_library_shows_its_extending_chain(app, home):
-    _accepted(app, home)
-    # An override may only tighten a parent's limit (`extension.tighten`).
-    lowered = {"overrides": {"build.main.t": {"policy": {"budget_usd": 3}}}}
-    repo_library_files(app, library=LISTS, chains={"ship": {**SHIP, **lowered}})
+LOWERED = {"policy": {"budget_usd": 3}}
+#: An accepted library that builds on nothing: one local chain.
+ALONE = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
+
+
+@pytest.mark.parametrize(
+    "was, now, section, line",
+    [
+        pytest.param(
+            {},
+            # An override may only tighten a parent's limit (`extension.tighten`).
+            {"chains": {"ship": {**SHIP, "overrides": {"build.main.t": LOWERED}}}},
+            "content",
+            "app:ship.nodes[build].tasks[t].policy: budget_usd lowered, 5 -> 3",
+            id="its-extending-chain",
+        ),
+        pytest.param(
+            ALONE,
+            {},
+            "reach",
+            "now builds on base@org: uninstalling or disabling it will be refused while this "
+            "library lists it",
+            id="an-addon-listed",
+        ),
+        pytest.param({}, ALONE, "content", "no longer builds on base@org", id="an-addon-dropped"),
+    ],
+)
+def test_a_change_of_the_library_shows_what_it_builds_on(app, home, was, now, section, line):
+    _accepted(app, home, **was)
+    repo_library_files(app, **{"library": LISTS, "chains": {"ship": SHIP}, **now})
 
     found = repo_library.check(app, "app", *home)
 
     assert found.outcome == "waiting", found.problems
-    line = "app:ship.nodes[build].tasks[t].policy: budget_usd lowered, 5 -> 3"
-    assert line in found.review.content, found.review
+    assert line in getattr(found.review, section), found.review

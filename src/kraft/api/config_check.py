@@ -788,15 +788,31 @@ def _check_addons(path, data, ctx):
 
     issues: list[TemplateIssue] = []
     if loads(now) != loads(then):
+        # As `kraft admin addon disable` and `uninstall` refuse: while a repo
+        # library lists an add-on this edit unloads. Its chains then need no
+        # judging of their own (`removing-a-referenced-addon-is-refused`).
+        still = {p.id for p in then if p.left_out is None}
+        built_on = [
+            why
+            for p in now
+            if p.repo_id is None and p.left_out is None and p.id not in still
+            if (
+                why := addon_update.built_on_refusal(
+                    p.id, "disable" if p.id in config.addons else "uninstall", now
+                )
+            )
+        ]
+        libraries = {p.namespace for p in then if p.repo_id is not None}
         try:
             broken = addon_update.breaks(
                 addon_update.state_of(ctx.templates_dir, now),
                 addon_update.state_of(ctx.templates_dir, then),
                 ctx.templates_dir,
+                exempt=libraries,
             )
         except policy_mod.PolicyError:
             return []  # policy.yaml's own check says why; not kept
-        issues = [TemplateIssue(path, None, why, loc=("addons",)) for why in broken]
+        issues = [TemplateIssue(path, None, why, loc=("addons",)) for why in [*built_on, *broken]]
     _addons_lint = {**_addons_lint, str(ctx.templates_dir): (key, issues)}
     return list(issues)
 

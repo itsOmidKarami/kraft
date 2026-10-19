@@ -578,20 +578,16 @@ def _still_referenced(
         for where, key, _kind, value in addon_update.references(config_dir)
         if value.split(":", 1)[0] == namespace
     ]
-    builds_on = addon_update.repo_library_dependents(
-        addon_id, load.installed(config_dir, addons_dir)
-    )
     said = []
     if uses:
         said.append(
             f"cannot {verb} {addon_id}: its namespace {namespace!r} is still referenced by\n  "
             + "\n  ".join(uses)
         )
-    if builds_on:
-        said.append(
-            f"cannot {verb} {addon_id}: a connected repository's repo library builds on it\n  "
-            + "\n  ".join(builds_on)
-        )
+    if built_on := addon_update.built_on_refusal(
+        addon_id, verb, load.installed(config_dir, addons_dir)
+    ):
+        said.append(built_on)
     if said:
         raise _refuse("\n".join(said))
 

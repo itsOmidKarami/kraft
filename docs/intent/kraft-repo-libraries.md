@@ -27,7 +27,7 @@ origin: src/kraft/addons/repo_library.py §check
 ## REQ a-repo-library-holds-what-an-addon-may
 
 IF a repo library breaks a rule an add-on is refused for, or qualifies a name with anything but its own `library:` outside a chain's top-level `extends`, THEN the system SHALL refuse it and name the file and key.
-enforced-by: tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[subprocess], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[permission], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[harness-the-instance-lacks], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[its-own-repo-id-as-a-qualifier], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[broken-chain], tests/addons/test_repo_library_extends.py::test_a_repo_library_names_only_the_addons_it_lists[undeclared], tests/addons/test_repo_library_extends.py::test_a_repo_library_names_only_the_addons_it_lists[a-task-extends-it], tests/addons/test_repo_library_extends.py::test_a_repo_library_names_only_the_addons_it_lists[a-nested-node-extends-it]
+enforced-by: tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[subprocess], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[permission], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[harness-the-instance-lacks], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[its-own-repo-id-as-a-qualifier], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[broken-chain], tests/addons/test_repo_library_extends.py::test_a_repo_library_names_only_the_addons_it_lists[undeclared], tests/addons/test_repo_library_extends.py::test_a_repo_library_names_only_the_addons_it_lists[a-task-extends-it], tests/addons/test_repo_library_extends.py::test_a_repo_library_names_only_the_addons_it_lists[a-nested-node-extends-it], tests/addons/test_repo_library_extends.py::test_a_repo_library_names_only_the_addons_it_lists[its-own-id]
 origin: src/kraft/addons/repo_library.py §check
 
 ## REQ a-repo-library-chain-may-extend-a-listed-addon-chain
@@ -52,6 +52,12 @@ origin: src/kraft/addons/update.py §_listed_addons
 
 IF a repo library lists under `addons:` an add-on this instance does not load, THEN the system SHALL refuse to accept it, naming the add-on and why it does not load.
 enforced-by: tests/addons/test_repo_library_extends.py::test_a_repo_library_lists_only_addons_the_instance_loads[not-installed], tests/addons/test_repo_library_extends.py::test_a_repo_library_lists_only_addons_the_instance_loads[disabled]
+origin: src/kraft/addons/repo_library.py §check
+
+## REQ a-change-to-the-addons-list-is-reach
+
+WHEN a change of a repo library adds an add-on to its `addons:` list, the system SHALL show it as a Reach line, and a removed one as content.
+enforced-by: tests/addons/test_repo_library_extends.py::test_a_change_of_the_library_shows_what_it_builds_on[an-addon-listed], tests/addons/test_repo_library_extends.py::test_a_change_of_the_library_shows_what_it_builds_on[an-addon-dropped]
 origin: src/kraft/addons/repo_library.py §check
 
 ## REQ a-bare-repo-library-parent-is-its-own

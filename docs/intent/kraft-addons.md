@@ -237,13 +237,13 @@ origin: src/kraft/addons/update.py §_listed_addons
 ## REQ a-broken-repo-library-chain-holds-an-update
 
 IF an update would leave a currently resolving repo-library chain unresolved, THEN the system SHALL put it in that update's review as a Reach line and SHALL NOT refuse the update for it or for a reference to it.
-enforced-by: tests/addons/test_repo_library_extends.py::test_an_update_that_breaks_a_repo_library_chain_holds_and_never_refuses[by-hand-applies], tests/addons/test_repo_library_extends.py::test_an_update_that_breaks_a_repo_library_chain_holds_and_never_refuses[auto-update-holds], tests/addons/test_repo_library_extends.py::test_an_update_that_breaks_a_repo_library_chain_holds_and_never_refuses[named-by-repos-yaml], tests/cli/test_addon.py::test_validate_against_a_kraft_home[breaks-a-repo-library-chain]
+enforced-by: tests/addons/test_repo_library_extends.py::test_an_update_that_breaks_a_repo_library_chain_holds_and_never_refuses[by-hand-applies], tests/addons/test_repo_library_extends.py::test_an_update_that_breaks_a_repo_library_chain_holds_and_never_refuses[auto-update-holds], tests/addons/test_repo_library_extends.py::test_an_update_that_breaks_a_repo_library_chain_holds_and_never_refuses[named-by-repos-yaml], tests/addons/test_repo_library_extends.py::test_an_update_that_breaks_a_repo_library_chain_holds_and_never_refuses[then-the-library-changes], tests/cli/test_addon.py::test_validate_against_a_kraft_home[breaks-a-repo-library-chain]
 origin: src/kraft/addons/update.py §held_breaks
 
 ## REQ the-review-covers-repo-library-chains
 
 WHEN an add-on update, or a change of a repo library, alters what a repo-library chain that extends an add-on chain runs, the system SHALL list each change in the review, as Reach or content by the rules for the instance's own chains.
-enforced-by: tests/addons/test_repo_library_extends.py::test_the_review_shows_what_a_repo_library_chain_will_run[limit-raised-is-reach], tests/addons/test_repo_library_extends.py::test_the_review_shows_what_a_repo_library_chain_will_run[text-is-content], tests/addons/test_repo_library_extends.py::test_a_change_of_the_library_shows_its_extending_chain
+enforced-by: tests/addons/test_repo_library_extends.py::test_the_review_shows_what_a_repo_library_chain_will_run[limit-raised-is-reach], tests/addons/test_repo_library_extends.py::test_the_review_shows_what_a_repo_library_chain_will_run[text-is-content], tests/addons/test_repo_library_extends.py::test_a_change_of_the_library_shows_what_it_builds_on[its-extending-chain]
 origin: src/kraft/addons/review.py §local_changes
 
 ## REQ addon-rules-govern-a-change-through-the-addon
@@ -267,7 +267,7 @@ origin: src/kraft/cli/addon.py §_cmd_update
 ## REQ removing-a-referenced-addon-is-refused
 
 IF local configuration (`library.yaml`, `chains/`, `repos.yaml`, `intake.yaml`, `policy.yaml` triggers or `harnesses.yaml` fallbacks) references the namespace of an add-on being uninstalled or disabled, or an accepted repo library lists it under `addons:`, THEN the system SHALL refuse and list each reference.
-enforced-by: tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[uninstall], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[disable], tests/cli/test_addon.py::test_removing_an_addon_a_chain_extends_is_refused, tests/cli/test_addon.py::test_removing_an_addon_a_repo_library_builds_on_is_refused[uninstall], tests/cli/test_addon.py::test_removing_an_addon_a_repo_library_builds_on_is_refused[disable]
+enforced-by: tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[uninstall], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[disable], tests/cli/test_addon.py::test_removing_an_addon_a_chain_extends_is_refused, tests/cli/test_addon.py::test_removing_an_addon_a_repo_library_builds_on_is_refused[uninstall], tests/cli/test_addon.py::test_removing_an_addon_a_repo_library_builds_on_is_refused[disable], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[a-repo-library-builds-on-it]
 origin: src/kraft/cli/addon.py §_still_referenced
 
 ## REQ a-worker-does-not-change-addons
