@@ -386,14 +386,12 @@ test-vscode: schemas
 
 # Retake the Marketplace screenshots in vscode/media/: packages the extension,
 # runs it in a real VS Code against a seeded Kraft with fake agents (on Linux,
-# under xvfb-run). The docs' copies in .github/assets/vscode-*.png follow.
+# under xvfb-run). Written to vscode/media/, the docs' copies in .github/assets/vscode-*.png follow.
 [doc("VS Code extension: retake the Marketplace screenshots (args: --out DIR, --vsix FILE, --keep)")]
 vscode-screenshots *args:
     cd vscode && [ -d node_modules ] || npm ci
     cd vscode/dev/screenshots && [ -d node_modules ] || npm ci
     node vscode/dev/screenshots/shot.mjs {{args}}
-    # With --out the pictures went elsewhere: vscode/media/ still holds the old ones, so leave the docs' copies alone.
-    case " {{args}} " in *" --out"*) ;; *) for f in board gate review; do cp vscode/media/screenshot-$f.png .github/assets/vscode-$f.png; done ;; esac
 
 # Lint + format check
 lint:

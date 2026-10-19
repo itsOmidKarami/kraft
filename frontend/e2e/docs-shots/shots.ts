@@ -44,6 +44,13 @@ const still = (page: Page) =>
 
 test.beforeEach(async ({ page }) => still(page));
 
+/** Lets every animation that ends (a selection ring, a panel sliding in) end first, so two retakes of an
+ *  unchanged screen match; endless ones (a running item's pulse) are left running. */
+const settle = (page: Page) =>
+  page.evaluate(() =>
+    Promise.all(document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))),
+  );
+
 const board = async (page: Page) => {
   await page.goto("./");
   await expect(page.getByRole("heading", { name: "Board", level: 1 })).toBeVisible();
@@ -54,6 +61,7 @@ const board = async (page: Page) => {
 const shootMain = async (page: Page, name: string, bottom?: number) => {
   await page.mouse.move(0, 0);
   await page.waitForLoadState("networkidle");
+  await settle(page);
   const main = (await page.locator("#ng-main").boundingBox())!;
   const view = page.viewportSize()!;
   const height = Math.min(bottom ?? view.height, view.height);
@@ -65,6 +73,7 @@ test("stops: the board's Needs you group, one row per kind of stop", async ({ pa
   const group = page.getByRole("region", { name: "Needs you" });
   await expect(group.getByText("Running time hit its 8h cap")).toBeVisible();
   await page.mouse.move(0, 0);
+  await settle(page);
   save("stops", await group.screenshot());
 });
 
@@ -106,6 +115,7 @@ const gateItem = async (page: Page) => {
 const shoot = async (page: Page, name: string) => {
   await page.mouse.move(0, 0);
   await page.waitForLoadState("networkidle");
+  await settle(page);
   save(name, await page.screenshot()); // the viewport, not the full page
 };
 
@@ -191,16 +201,15 @@ test("setup: the setup wizard, on a home with no repo and no item", async ({ pag
   await shoot(page, "setup");
 });
 
-test("mobile: the board in the phone layout", async ({ browser }) => {
-  // Its own context, for the phone's touch and viewport; the rest as the project sets it.
-  const { baseURL, colorScheme, deviceScaleFactor, locale, timezoneId } = test.info().project.use;
-  const phone = await browser.newContext({ baseURL, colorScheme, deviceScaleFactor, locale, timezoneId, viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-  const page = await phone.newPage();
-  await still(page);
-  await page.goto("./");
-  await page.waitForTimeout(1500);
-  await shoot(page, "mobile");
-  await phone.close();
+test.describe("phone", () => {
+  // The phone's viewport and touch over the project's own options (locale, time zone, timeouts).
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("mobile: the board in the phone layout", async ({ page }) => {
+    await page.goto("./");
+    await page.waitForTimeout(1500);
+    await shoot(page, "mobile");
+  });
 });
 
 test("chain-extends: a chain that extends default, an inherited node it overrides selected", async ({ page }) => {

@@ -121,6 +121,10 @@ try {
   await stage();
   app = await launch();
   await drive(app);
+  // The docs show three of these too: copy them there when they were written to the Marketplace's folder.
+  if (OUT === join(EXT, "media")) {
+    for (const f of ["board", "gate", "review"]) cpSync(join(OUT, `screenshot-${f}.png`), join(ROOT, ".github", "assets", `vscode-${f}.png`));
+  }
 } finally {
   await app?.close().catch(() => {});
   const exited = new Promise((r) => daemon.once("exit", r));
@@ -205,9 +209,15 @@ async function drive(app) {
     const size = await sharp(full).metadata();
     const k = size.width / (await page.evaluate(() => window.innerWidth));
     const [left, top] = [clip.x, clip.y].map((n) => Math.round(n * k));
-    // Rounded apart, a clip that reaches the window's edge can end a pixel past it, which extract refuses.
-    const width = Math.min(Math.round(clip.width * k), size.width - left);
-    const height = Math.min(Math.round(clip.height * k), size.height - top);
+    // Rounded apart, a clip that reaches the window's edge can end a pixel past it, which extract refuses:
+    // that pixel is trimmed. A clip further off the window is a broken shot, so it fails here, by name.
+    const fit = (start, span, whole) => {
+      const end = Math.round((start + span) * k);
+      if (start < 0 || end > whole + 1) throw new Error(`${name}: clip ${JSON.stringify(clip)} is outside the window`);
+      return Math.min(end, whole) - Math.round(start * k);
+    };
+    const width = fit(clip.x, clip.width, size.width);
+    const height = fit(clip.y, clip.height, size.height);
     let img = sharp(await sharp(full).extract({ left, top, width, height }).toBuffer());
     const css = Math.round(clip.width);
     if (width > css) img = sharp(await img.resize({ width: css }).toBuffer());

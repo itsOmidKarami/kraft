@@ -151,7 +151,12 @@ export const NG_CHAINS = [
 ].map((c) => ({ ...c, gates: c.nodes.filter((n) => n.kind === "gate").length }));
 /** `team-default`, a chain that extends `default`: GET /templates/chains's entry for it, a real server's answer
  *  (draftViews.json). Every chain list lists it, so the composer can pick it and its dry run reads its own nodes. */
-export const NG_EXTENDING_CHAIN = draftViews.extending as unknown as (typeof NG_CHAINS)[number] & Record<string, unknown>;
+const EXT = draftViews.extending;
+export const NG_EXTENDING_CHAIN = {
+  ...EXT,
+  // Only what ngDryRun reads, each field read from the recorded node, so a re-recording that drops one fails tsc.
+  nodes: EXT.nodes.map((n) => ({ ...n, id: n.id, kind: n.kind, covered_by: n.covered_by ?? null, fix_loop: "fix_loop" in n ? n.fix_loop : undefined })),
+};
 export const NG_REPOS = ["kraft-plugins", "kraft-core", "kraft-api", "kraft-vscode", "kraft-docs", "kraft-lite", "vendor-schemas"].map((name, i) => ({
   ...repo(R(name), i), id: name, enabled: true, default_chain: name === "kraft-docs" ? "docs_only" : "default",
 }));

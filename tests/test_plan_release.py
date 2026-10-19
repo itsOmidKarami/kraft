@@ -108,6 +108,14 @@ _IMG = "https://raw.githubusercontent.com/o/r/main/.github/assets/console.png"
             f"[![The console's board]({_IMG})](https://kraft-sdlc.dev/demo/)", id="linked"
         ),
         pytest.param(f'<img src="{_IMG}" alt="The console\'s board" width="600">', id="html"),
+        pytest.param(
+            f'<a href="https://kraft-sdlc.dev/demo/"><img src="{_IMG}" alt="b"></a>',
+            id="html-linked",
+        ),
+        pytest.param(
+            f'<p align="center"><img src="{_IMG}" alt="b" width="600"></p>', id="html-centred"
+        ),
+        pytest.param(f'<picture><img src="{_IMG}" alt="b"></picture>', id="picture"),
     ],
 )
 def test_an_image_under_a_bullet_leaves_the_number_on_its_words(picture):

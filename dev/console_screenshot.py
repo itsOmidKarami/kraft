@@ -33,6 +33,8 @@ from kraft import client, update
 from kraft.console import live, moments
 from kraft.console.app import KraftConsole
 from kraft.console.screens.board import Board
+from kraft.item_paths import docs_dir
+from kraft.paths import RunDirs, default_run_dir
 
 ROOT = Path(__file__).resolve().parents[1]
 #: The item the peek opens on: a gate with a spec to show, in `dev-seed --rich`.
@@ -46,8 +48,8 @@ and evict the oldest entry once the cache is full.
 
 def give_it_a_spec(work_item_id: str) -> None:
     """SPEC in place of the fake agent's body, keeping its front matter."""
-    run = Path(os.environ.get("KRAFT_RUN_DIR") or Path(os.environ["KRAFT_HOME"]) / "run")
-    spec = run / "items" / work_item_id / "docs" / "spec.md"
+    run = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
+    spec = docs_dir(RunDirs(run), work_item_id) / "spec.md"
     text = spec.read_text()
     if "fake spec body" in text:
         body = text.split("\n---\n", 1)[0] + "\n---\n\n" + SPEC.strip() + "\n"
@@ -92,11 +94,12 @@ def main() -> None:
     ap.add_argument("--version")
     ap.add_argument("--size", default="120x34")
     args = ap.parse_args()
-    # The console reads whichever instance KRAFT_HOME names; unset, that is the
-    # person's own ~/.kraft, whose board this must never picture or write to.
-    if not os.environ.get("KRAFT_HOME"):
+    # The console reads the home KRAFT_HOME names and the server on KRAFT_PORT; either
+    # unset falls back to the person's own ~/.kraft or :8765, whose board this must
+    # never picture or write to.
+    if not (os.environ.get("KRAFT_HOME") and os.environ.get("KRAFT_PORT")):
         raise SystemExit(
-            "KRAFT_HOME is not set: run `just console-screenshot`, which points it at .dev"
+            "KRAFT_HOME and KRAFT_PORT must name the dev instance: run `just console-screenshot`"
         )
     version = args.version or newest_release()
     size = tuple(int(n) for n in args.size.split("x"))

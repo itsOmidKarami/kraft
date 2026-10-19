@@ -96,9 +96,13 @@ def release_impact(prs: list[dict]) -> str:
 #: A list item at the left margin: one of an entry's own bullets, not a nested one.
 _TOP_ITEM = re.compile(r"^(?:[-*+]|\d+[.)]) ")
 #: A line that ends the text of the bullet above it: a nested item, a fence, or
-#: an image on its own line (`![…]`, a linked `[![…](…)](…)`, or `<img>`), so the
-#: number stays on the words, not after a picture.
-_NOT_PROSE = re.compile(r"^\s*(?:[-*+] |\d+[.)] |```|~~~|!\[|\[!\[|<img\b)", re.IGNORECASE)
+#: an image on its own line (`![…]`, a linked `[![…](…)](…)`, `<img>`, `<picture>`,
+#: or an `<a>` or `<p>` that opens on an `<img>`), so the number stays on the
+#: words, not after a picture.
+_NOT_PROSE = re.compile(
+    r"^\s*(?:[-*+] |\d+[.)] |```|~~~|!\[|\[!\[|<img\b|<picture\b|<(?:a|p)\b[^>]*>\s*<img\b)",
+    re.IGNORECASE,
+)
 _FENCE = re.compile(r"^\s*(```|~~~)")
 
 
