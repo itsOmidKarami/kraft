@@ -503,4 +503,13 @@ describe("an extending chain", () => {
     expect(rowOf("harness")).not.toHaveClass("is-own");
     expect(rowOf("prompt")).toHaveClass("is-own");
   });
+
+  it.each([
+    { chain: "team", view: EXTENDING_VIEW, points: false },
+    { chain: "default", view: DEFAULT_VIEW, points: true },
+  ])("points at the bottom pane to edit a task's on failure only where it edits ($chain: $points)", async ({ view, points }) => {
+    mount(`${EXT.overridden}.main.implement`, {}, view);
+    await configTab();
+    expect(screen.getByText(/^on failure ·/).textContent?.includes("edit it in the pane below")).toBe(points);
+  });
 });

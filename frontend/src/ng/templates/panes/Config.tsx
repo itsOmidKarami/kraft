@@ -2,7 +2,7 @@ import { Fragment, useContext, useState } from "react";
 import { Pencil, RotateCcw } from "lucide-react";
 import { IconButton } from "../../ui/IconButton";
 import { Switch } from "../../ui/Switch";
-import { authoredAt, chainCapGroups, expandedRows, rowChanged, settingRows, sourceWord } from "../draft/view";
+import { authoredAt, chainCapGroups, expandedRows, extendsOf, isAdded, rowChanged, settingRows, sourceWord } from "../draft/view";
 import { fieldMeta, parse, RECOVERY_NOTE, show, type FieldMeta } from "../fields";
 import { Fold, Head, Note } from "./controls";
 import type { PaneKind } from "./describe";
@@ -42,6 +42,8 @@ export function Config({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
   const readOnly = useContext(ReadOnly);
   if (kind === "chain") return <ChainConfig ctx={ctx} />;
   const rows: Row[] = settingRows(r, path);
+  // A task an extending chain inherits: its node's bottom pane only reads, so it is no place to edit.
+  const inheritedTask = !!extendsOf(r, scope) && !isAdded(r, scope, path.split(".")[0]);
   // An add-on's chain answers no `sources`: what each part sets is in its YAML.
   if (!rows.length && readOnly) return <Note>An add-on's settings are in the YAML tab.</Note>;
   // An extending chain that does not validate yet: its values with the edits applied, its own ones marked.
@@ -60,7 +62,7 @@ export function Config({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
     <>
       <Head>Resolved config</Head>
       <Rows rows={rows} ctx={ctx} />
-      {kind === "task" && <Note>on failure · {authoredAt(r, scope, path)?.on_failure ? "set" : "none"} · edit it in the pane below</Note>}
+      {kind === "task" && <Note>on failure · {authoredAt(r, scope, path)?.on_failure ? "set" : "none"}{inheritedTask ? "" : " · edit it in the pane below"}</Note>}
     </>
   );
 }
