@@ -96,44 +96,10 @@ def release_impact(prs: list[dict]) -> str:
 #: A list item at the left margin: one of an entry's own bullets, not a nested one.
 _TOP_ITEM = re.compile(r"^(?:[-*+]|\d+[.)]) ")
 #: A line that ends the text of the bullet above it: a nested item, a fence, or a
-#: Markdown image (`![…]`, or linked `[![…](…)](…)`).
+#: Markdown image (`![…]`, or linked `[![…](…)](…)`), so the number stays on the
+#: words. Any other picture (HTML, an uploaded video's URL) goes after a blank
+#: line, which ends the words already.
 _NOT_PROSE = re.compile(r"^\s*(?:[-*+] |\d+[.)] |```|~~~|!\[|\[!\[)")
-#: An HTML tag's start: `<` or `</`, its name, then a space, `/`, `>` or the
-#: line's end. An autolink (`<https://…>`, `<a@b.c>`) is not one.
-_TAG_START = r"</?([A-Za-z][A-Za-z0-9-]*)(?=[\s/>]|$)"
-_LEADING_TAG = re.compile(r"\s*" + _TAG_START)
-#: A whole tag: its start, then quoted values or any other character but a
-#: quote or `>`, then `>`. One loop over disjoint choices, so it runs in linear
-#: time on any line, and `alt="a > b"` does not end it early.
-_TAG = re.compile(_TAG_START + r"""(?:"[^"]*"|'[^']*'|[^'">])*>""")
-#: Tags that make a line a picture's whatever else is on it, so an `<img>` whose
-#: attributes wrap, or `<details><summary>Shot</summary>`, is one.
-_PICTURE_TAGS = frozenset("img picture source video figure details table hr".split())
-#: A file GitHub embeds when its URL stands alone on a line: an uploaded GIF or
-#: video, under `user-attachments/` or, from before, a repository's `assets/`.
-_ATTACHMENT = re.compile(
-    r"\s*https://github\.com/(?:user-attachments|[\w.-]+/[\w.-]+)/assets/\S+\s*$"
-)
-
-
-def _picture_line(line: str) -> bool:
-    """A line that holds a picture, not words, so it ends the bullet's text: one
-    that opens on a picture tag (`<img>`, `<details>`), on a tag left open at
-    the line's end (`<a href=…` whose attributes wrap), or that is HTML tags
-    and nothing else (`<p align="center"><img …></p>`, a closing tag); or a
-    GitHub attachment URL alone. A wrapped line that opens on a tag and goes on
-    in words (`<kbd>K</kbd> opens it.`, `<br>Next line`), or on an autolink, is
-    still words."""
-    if _ATTACHMENT.match(line):
-        return True
-    start = _LEADING_TAG.match(line)
-    if not start:
-        return False
-    if start.group(1).lower() in _PICTURE_TAGS or not _TAG.match(line.lstrip()):
-        return True
-    return not _TAG.sub("", line).strip()
-
-
 _FENCE = re.compile(r"^\s*(```|~~~)")
 
 
@@ -180,7 +146,6 @@ def changelog_entry(pr: dict) -> str:
             and lines[end + 1].strip()
             and not _TOP_ITEM.match(lines[end + 1])
             and not _NOT_PROSE.match(lines[end + 1])
-            and not _picture_line(lines[end + 1])
         ):
             end += 1
         lines[end] += f" (#{pr['number']})"

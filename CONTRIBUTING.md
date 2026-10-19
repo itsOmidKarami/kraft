@@ -272,8 +272,10 @@ instead of sitting among the others (a `release::major` one is also kept under
 Breaking changes), and its impact still counts toward the bump. Keep it for the change the release is about: rarely more than one or two
 per release. Write its `## Changelog` section as a headline, and give it a
 picture when the change is something to see: one screenshot or GIF on its own
-line under the bullet, linked from `main` by its full URL, since the notes are
-read on GitHub, in `CHANGELOG.md` and on the Marketplace:
+line, after a blank line under the bullet, linked from `main` by its full URL,
+since the notes are read on GitHub, in `CHANGELOG.md` and on the Marketplace.
+The blank line keeps the pull request's number on the bullet's words, whatever
+form the picture takes (Markdown, HTML, an uploaded video's URL):
 
 ```markdown
 - `kraft console`: a terminal UI for Kraft.

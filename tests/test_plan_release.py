@@ -107,42 +107,11 @@ _IMG = "https://raw.githubusercontent.com/o/r/main/.github/assets/console.png"
         pytest.param(
             f"[![The console's board]({_IMG})](https://kraft-sdlc.dev/demo/)", id="linked"
         ),
-        pytest.param(f'<img src="{_IMG}" alt="The console\'s board" width="600">', id="html"),
-        pytest.param(
-            f'<a href="https://kraft-sdlc.dev/demo/"><img src="{_IMG}" alt="b"></a>',
-            id="html-linked",
-        ),
-        pytest.param(
-            f'<p align="center"><img src="{_IMG}" alt="b" width="600"></p>', id="html-centred"
-        ),
-        pytest.param(f'<picture><img src="{_IMG}" alt="b"></picture>', id="picture"),
-        pytest.param(f'<div align="center"><img src="{_IMG}" alt="b"></div>', id="html-div"),
-        pytest.param(
-            f'<p align="center"><a href="https://kraft-sdlc.dev/demo/"><img src="{_IMG}"></a></p>',
-            id="html-nested",
-        ),
-        pytest.param(f'<p align="center">\n  <img src="{_IMG}" alt="b">\n  </p>', id="html-lines"),
-        pytest.param(f'<img src="{_IMG}"\n       alt="b" width="600">', id="html-wrapped-tag"),
-        pytest.param(f'<img alt="Settings > Storage" src="{_IMG}">', id="html-gt-in-alt"),
-        pytest.param(
-            f'<a href="https://kraft-sdlc.dev/" title="Settings > Storage"><img src="{_IMG}"></a>',
-            id="html-gt-in-link",
-        ),
-        pytest.param(
-            f'<details><summary>Screenshot</summary>\n\n  <img src="{_IMG}">\n  </details>',
-            id="html-details",
-        ),
-        pytest.param("https://github.com/user-attachments/assets/0f3c-4b2a", id="attachment"),
-        pytest.param("https://github.com/o/r/assets/1/0f3c-4b2a", id="attachment-repo"),
-        pytest.param(
-            f'<a href="https://kraft-sdlc.dev/demo/"\n     title="Demo"><img src="{_IMG}"></a>',
-            id="html-wrapped-link",
-        ),
     ],
 )
-def test_an_image_under_a_bullet_leaves_the_number_on_its_words(picture):
-    """A highlight's picture sits under its line, with or without a blank line
-    between: the number goes on the words, never after the image."""
+def test_a_markdown_image_under_a_bullet_leaves_the_number_on_its_words(picture):
+    """A Markdown image ends the bullet's words, right under its line or after
+    a blank one: the number goes on the words, never after the image."""
     body = (
         "## Changelog\n\n"
         "- The console: a terminal UI.\n"
@@ -156,19 +125,45 @@ def test_an_image_under_a_bullet_leaves_the_number_on_its_words(picture):
 
 
 @pytest.mark.parametrize(
+    "picture",
+    [
+        pytest.param(f'<img src="{_IMG}" alt="The console\'s board" width="600">', id="html"),
+        pytest.param(
+            f'<p align="center"><a href="https://kraft-sdlc.dev/demo/"><img src="{_IMG}"></a></p>',
+            id="html-centred-link",
+        ),
+        pytest.param(
+            f'<p align="center">\n  <img src="{_IMG}"\n       width="600">\n  </p>',
+            id="html-wrapped",
+        ),
+        pytest.param(
+            f'<details><summary>Screenshot</summary>\n  <img src="{_IMG}">\n  </details>',
+            id="html-details",
+        ),
+        pytest.param("https://github.com/user-attachments/assets/0f3c-4b2a", id="uploaded-video"),
+    ],
+)
+def test_any_picture_after_a_blank_line_leaves_the_number_on_the_words(picture):
+    """HTML or an uploaded video's URL goes after a blank line (CONTRIBUTING.md),
+    which ends the bullet's words whatever follows."""
+    body = f"## Changelog\n\n- The console: a terminal UI.\n\n  {picture}\n"
+    assert plan_release.changelog_entry(pr(904, "minor", body)) == (
+        f"- The console: a terminal UI. (#904)\n\n  {picture}"
+    )
+
+
+@pytest.mark.parametrize(
     "wrapped",
     [
         pytest.param("<kbd>Ctrl</kbd>+<kbd>K</kbd> from any screen.", id="inline-tag"),
         pytest.param("<https://kraft-sdlc.dev/> for the new home.", id="autolink"),
-        pytest.param("<b>everywhere</b> it applies.", id="emphasis"),
-        pytest.param("<https://kraft-sdlc.dev/>", id="autolink-alone"),
         pytest.param('<a href="https://kraft-sdlc.dev/">the docs</a> say how.', id="text-link"),
         pytest.param("<br>the second line of the same entry.", id="line-break"),
     ],
 )
-def test_inline_html_on_a_wrapped_line_is_still_the_bullets_words(wrapped):
-    """Only a line of tags alone is a picture's; one that starts with a tag
-    and goes on in words is part of the bullet, so the number ends it."""
+def test_html_on_a_wrapped_line_is_still_the_bullets_words(wrapped):
+    """Only a Markdown image ends the words without a blank line: a wrapped
+    line that opens on HTML is part of the bullet, so the number ends it."""
     body = f"## Changelog\n\n- Search opens with\n  {wrapped}\n"
     assert plan_release.changelog_entry(pr(9, "minor", body)) == (
         f"- Search opens with\n  {wrapped} (#9)"
