@@ -245,6 +245,14 @@ async def test_glab_ci_status_only_trusts_a_pipeline_for_the_current_head(
     assert asked is reads_a_commit
 
 
+def _payload_lags(head: str, status: str) -> dict:
+    """Routes where the merge request's `head_pipeline` for `head` is still an
+    older one in `status`, and the list's top row is a newer, running one."""
+    lagging, read_lagging, lagging_commit = glab_merged_results(head, status=status)
+    newer = _merged(head, id=2962437759, sha="3" * 40, payload=False)
+    return {**newer, "mr view": _mr_view(lagging), read_lagging: lagging_commit}
+
+
 @pytest.mark.parametrize(
     "routes, expected",
     [
@@ -252,19 +260,13 @@ async def test_glab_ci_status_only_trusts_a_pipeline_for_the_current_head(
         # `set_labels` starts a new pipeline, the payload still names the red
         # one for the same head, and the list already has the new one.
         (
-            lambda head: {
-                **_merged(head, status="failed"),
-                **_merged(head, id=2962437759, sha="3" * 40, payload=False),
-            },
+            lambda head: _payload_lags(head, "failed"),
             ("pending", "2962437759"),
         ),
         # A cancelled head pipeline whose successor the payload has not caught
         # up with reads the successor, not "cancelled".
         (
-            lambda head: {
-                **_merged(head, status="canceled"),
-                **_merged(head, id=2962437759, sha="3" * 40, payload=False),
-            },
+            lambda head: _payload_lags(head, "canceled"),
             ("pending", "2962437759"),
         ),
         # An older GitLab running both kinds lists only the branch pipeline;

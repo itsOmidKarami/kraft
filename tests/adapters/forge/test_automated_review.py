@@ -32,7 +32,9 @@ GLAB_STATUSES = f"api projects/:id/repository/commits/{HEAD}/statuses?per_page=1
 #: A merged results head pipeline built from HEAD: its jobs report on its merge
 #: commit, not on HEAD.
 MERGED, READ_MERGE_COMMIT, MERGE_COMMIT = glab_merged_results(HEAD)
-GLAB_MERGED_STATUSES = f"api projects/:id/repository/commits/{MERGED['sha']}/statuses?per_page=100"
+GLAB_MERGED_STATUSES = (
+    f"api projects/{MERGED['project_id']}/repository/commits/{MERGED['sha']}/statuses?per_page=100"
+)
 
 
 def _gh_review(

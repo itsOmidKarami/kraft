@@ -297,8 +297,12 @@ class GlabCli(mr_ops.CliWaits):
         # `head_pipeline` in a background worker after a pipeline is created,
         # so right after `set_labels` or a description re-run starts one it can
         # still name the old red pipeline for this same head, which the list
-        # already has a newer one than; and an older GitLab's `?ref=` filter
-        # leaves merge request pipelines out of the list altogether.
+        # (gitlab.com's `?ref=` includes merge request pipelines) already has
+        # a newer one than; and a GitLab whose `?ref=` leaves merge request
+        # pipelines out of the list has only the payload to offer.
+        # shortcut: on such a GitLab, that lag can still hand back the old
+        # pipeline for a few seconds after a re-create; `set_labels` could
+        # return the id it created for the caller to pin instead.
         candidates: dict[str, dict] = {}
         head_pipeline = view.get("head_pipeline")
         if isinstance(head_pipeline, dict) and head_pipeline.get("id"):
@@ -529,19 +533,22 @@ class GlabCli(mr_ops.CliWaits):
         built from this head (`_answered_for`)."""
         mr = await self._json(repo, ["mr", "view", branch, "-F", "json"], "glab mr view")
         head = mr["sha"]
-        shas = [head]
+        # (project, commit) pairs: a merge commit lives in its pipeline's own
+        # project, which `:id` (the checkout's remote) may not be.
+        commits = [(":id", head)]
         head_pipeline = mr.get("head_pipeline")
         if isinstance(head_pipeline, dict) and head_pipeline.get("sha") not in (None, "", head):
             answered, _ = await self._answered_for(
                 repo, head_pipeline, head, str(mr.get("iid") or "")
             )
             if answered == head:
-                shas.append(str(head_pipeline["sha"]))
+                project = str(head_pipeline.get("project_id") or ":id")
+                commits.append((project, str(head_pipeline["sha"])))
         statuses: list = []
-        for sha in shas:
+        for project, sha in commits:
             got = await self._json(
                 repo,
-                ["api", f"projects/:id/repository/commits/{sha}/statuses?per_page=100"],
+                ["api", f"projects/{project}/repository/commits/{sha}/statuses?per_page=100"],
                 "glab api statuses",
             )
             statuses += got if isinstance(got, list) else []
