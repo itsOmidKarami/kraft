@@ -97,6 +97,25 @@ def test_a_fenced_example_is_never_numbered_and_every_list_style_is():
     )
 
 
+def test_an_image_under_a_bullet_leaves_the_number_on_its_words():
+    """A highlight's picture sits under its line, with or without a blank line
+    between: the number goes on the words, never after the image."""
+    url = "https://raw.githubusercontent.com/o/r/main/.github/assets/console.png"
+    body = (
+        "## Changelog\n\n"
+        "- The console: a terminal UI.\n"
+        f"  ![The console's board]({url})\n"
+        "- Doctor warns.\n\n"
+        f"  ![Doctor's line]({url})\n"
+    )
+    assert plan_release.changelog_entry(pr(904, "minor", body)) == (
+        "- The console: a terminal UI. (#904)\n"
+        f"  ![The console's board]({url})\n"
+        "- Doctor warns. (#904)\n\n"
+        f"  ![Doctor's line]({url})"
+    )
+
+
 def test_a_changelog_last_in_the_body_leaves_its_footer_out():
     """A body ending in `## Changelog` carries the attribution, the session's
     link and a `---` footer after it: none of them is a change."""

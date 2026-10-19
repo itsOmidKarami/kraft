@@ -96,6 +96,13 @@ dev-seed *args: _dev-home
 dev-console: _dev-home
     {{dev_env}} uv run python -m kraft console
 
+# Retake .github/assets/console.png: the console headless against the dev instance, which
+# `just api` and `just dev-seed --rich` must have filled (args: --version X.Y.Z, --size 120x34)
+[doc("Docs: retake the console screenshot from the seeded dev instance")]
+console-screenshot *args: _dev-home
+    cd frontend && [ -d node_modules ] || npm ci
+    {{dev_env}} uv run python dev/console_screenshot.py {{args}}
+
 # Throw the dev instance away (DB, logs, worktrees, seed repo, config)
 dev-reset:
     rm -rf .dev
@@ -304,6 +311,15 @@ demo-smoke *args:
     cd frontend && npx playwright install chromium
     cd frontend && npx playwright test -c e2e/demo/playwright.config.ts {{args}}
 
+# Retake the docs screenshots that come from the dashboard demo (frontend/e2e/docs-shots/):
+# builds the demo, serves it on :4329 (DEMO_PORT moves it) and writes each picture into
+# .github/assets/. Pass Playwright flags after it: -g storage takes one.
+[doc("Docs: retake the screenshots taken from the dashboard demo (args: Playwright flags, -g NAME)")]
+docs-screenshots *args:
+    cd frontend && [ -d node_modules ] || npm ci
+    cd frontend && npx playwright install chromium
+    cd frontend && npx playwright test -c e2e/docs-shots/playwright.config.ts {{args}}
+
 # Playwright e2e against a fixture server you started (frontend/e2e/README.md)
 e2e:
     cd frontend && npm run e2e
@@ -368,12 +384,14 @@ test-vscode: schemas
     cd vscode && npm test
 
 # Retake the Marketplace screenshots in vscode/media/: packages the extension,
-# runs it in a real VS Code against a seeded Kraft with fake agents.
+# runs it in a real VS Code against a seeded Kraft with fake agents (on Linux,
+# under xvfb-run). The docs' copies in .github/assets/vscode-*.png follow.
 [doc("VS Code extension: retake the Marketplace screenshots (args: --out DIR, --vsix FILE, --keep)")]
 vscode-screenshots *args:
     cd vscode && [ -d node_modules ] || npm ci
     cd vscode/dev/screenshots && [ -d node_modules ] || npm ci
     node vscode/dev/screenshots/shot.mjs {{args}}
+    for f in board gate review; do cp vscode/media/screenshot-$f.png .github/assets/vscode-$f.png; done
 
 # Lint + format check
 lint:

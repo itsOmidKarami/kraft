@@ -9,6 +9,10 @@ What a release writes into what it ships, which a tag alone does not:
       (`kraft-sdlc.dev/next/`) go to the release's (`kraft-sdlc.dev/`) too.
       Only this repository's links move for the asset pins: $GITHUB_REPOSITORY,
       or itsOmidKarami/kraft when that is unset.
+  python3 dev/release_artifacts.py pin-notes <notes> <tag>
+      Points the release notes' images hot-linked to `main` at <tag>, in place,
+      so a release's notes, changelogs and GitHub Release keep the pictures it
+      shipped with after main's are retaken. Same rule as the wheel's pins.
   python3 dev/release_artifacts.py vsix-version <tag>
       Prints <tag> as the version `vsce package` stamps on the .vsix, in
       semver: v1.5.0 -> 1.5.0, v1.5.0rc2 -> 1.5.0-rc.2.
@@ -159,6 +163,10 @@ def vsix_version(tag: str) -> str:
 def main(argv: list[str]) -> None:
     if len(argv) == 3 and argv[0] == "pin-wheel":
         pin_wheel(Path(argv[1]), argv[2], os.environ.get("GITHUB_REPOSITORY") or REPOSITORY)
+    elif len(argv) == 3 and argv[0] == "pin-notes":
+        notes = Path(argv[1])
+        repository = os.environ.get("GITHUB_REPOSITORY") or REPOSITORY
+        notes.write_bytes(pin_refs(notes.read_bytes().decode(), argv[2], repository).encode())
     elif len(argv) == 2 and argv[0] == "vsix-version":
         print(vsix_version(argv[1]))
     elif len(argv) == 2 and argv[0] == "vsix-links":

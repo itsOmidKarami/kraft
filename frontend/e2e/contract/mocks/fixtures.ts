@@ -729,8 +729,9 @@ function settingsFor(variant: Variant, theme: { mode?: string; density?: string;
       // As config/policy.yaml ships them.
       forge_cli_timeout_s: 120, archive: { after_days: 30 },
     },
-    // The UX V2 keys as GET /theme answers them (B30): an explicit look, not derived from `palette`.
-    theme: { palette: "nocturne", mode: theme.mode ?? "dark", density: theme.density ?? "compact", board: { group_by: theme.group_by ?? "status", show_done: 5, open_in: "peek" }, surface: "graphite", accent: "none", colour_amount: "subtle", derived: false,
+    // The UX V2 keys as GET /theme answers them (B30): Kraft's default look, as a home with no
+    // theme.yaml answers it, so the demo and the docs screenshots show what a new install shows.
+    theme: { palette: "nocturne", mode: theme.mode ?? "dark", density: theme.density ?? "compact", board: { group_by: theme.group_by ?? "status", show_done: 5, open_in: "peek" }, surface: "ink", accent: "violet", colour_amount: "full", derived: true,
       // The rest at config.Theme's defaults, which are the UI's own.
       code_scheme: { light: "auto", dark: "auto" }, diff: { layout: "unified", colours: "theme", show_whitespace: true, word_highlight: true, wrap_lines: false, one_file_at_a_time: true }, editor: null } as Record<string, unknown>,
     steering: { files: empty ? [] : [

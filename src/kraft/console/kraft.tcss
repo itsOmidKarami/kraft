@@ -224,7 +224,8 @@ Screen.-compact #rows {
 #rows > .option-list--option-highlighted,
 #repo-rows > .option-list--option-highlighted,
 #addon-rows > .option-list--option-highlighted {
-    background: $primary 12%;
+    /* The text colour, not the accent: a row under the cursor stays neutral. */
+    background: $foreground 12%;
     text-style: bold;
 }
 

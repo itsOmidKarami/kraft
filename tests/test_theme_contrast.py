@@ -152,7 +152,8 @@ def test_the_cursor_ground_is_the_one_the_console_draws():
 
     tcss = (Path(gen.__file__).parents[1] / "src/kraft/console/kraft.tcss").read_text()
     shown = re.search(
-        r"#rows > \.option-list--option-highlighted,[^{]*\{[^}]*background: \$primary (\d+)%", tcss
+        r"#rows > \.option-list--option-highlighted,[^{]*\{[^}]*background: \$foreground (\d+)%",
+        tcss,
     )
     assert int(shown[1]) / 100 == gen.CURSOR_ALPHA
     for mode in gen.MODES:

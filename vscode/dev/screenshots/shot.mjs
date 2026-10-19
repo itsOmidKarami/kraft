@@ -166,10 +166,9 @@ async function launch() {
   sh(cli, [`--user-data-dir=${ud}`, `--extensions-dir=${join(ud, "ext")}`, "--install-extension", vsix], EXT);
   return _electron.launch({
     executablePath: exe,
-    // Linux (xvfb) renders at 1x; the committed images are 2x, as a Retina display takes them.
+    // No forced scale factor: on xvfb it halved the window's CSS size, so text came out twice its size.
     args: [
       join(home, "repo"), `--user-data-dir=${ud}`, `--extensions-dir=${join(ud, "ext")}`, "--skip-welcome", "--skip-release-notes", "--disable-workspace-trust",
-      ...(process.platform === "linux" ? ["--force-device-scale-factor=2"] : []),
     ],
     env,
   });
@@ -179,7 +178,8 @@ async function drive(app) {
   const page = await app.firstWindow();
   await app.evaluate(({ BrowserWindow }) => {
     const w = BrowserWindow.getAllWindows()[0];
-    w.setContentSize(1600, 1000);
+    // A laptop's window, so text sits at the size a person sees it.
+    w.setContentSize(1440, 900);
     w.center();
   });
   await page.waitForSelector(".statusbar", { timeout: 60_000 });
@@ -193,15 +193,20 @@ async function drive(app) {
     await page.keyboard.press("Enter");
     await pause(800);
   };
-  // Clips are in CSS pixels; the PNG keeps the display's density unless that makes it over 1600 wide.
+  // Clips are in CSS pixels, and so is the PNG: a Retina display's 2x render is scaled down to the
+  // clip's own size, so a picture shows VS Code at the size it is on screen, not zoomed in.
   const shot = async (name, clip) => {
     // VS Code as root (a container) ends the window title in " [Superuser]", whatever `window.title` says.
     await page.evaluate(() => {
       for (const n of document.querySelectorAll(".window-title")) n.textContent = n.textContent.replace(/ \[Superuser\]$/, "");
     });
-    let img = sharp(await page.screenshot({ clip }));
-    const { width } = await img.metadata();
-    if (width > 1600) img = sharp(await img.resize({ width: Math.round(width / 2) }).toBuffer());
+    // The whole window, then the clip cut from it: a clipped capture closes an open hover first.
+    const full = await page.screenshot();
+    const k = (await sharp(full).metadata()).width / (await page.evaluate(() => window.innerWidth));
+    const [left, top, width, height] = [clip.x, clip.y, clip.width, clip.height].map((n) => Math.round(n * k));
+    let img = sharp(await sharp(full).extract({ left, top, width, height }).toBuffer());
+    const css = Math.round(clip.width);
+    if (width > css) img = sharp(await img.resize({ width: css }).toBuffer());
     await img.png({ palette: true, colours: 256, dither: 0 }).toFile(join(OUT, `${name}.png`));
     console.log(`wrote ${join(OUT, `${name}.png`)}`);
   };
@@ -221,24 +226,18 @@ async function drive(app) {
   await shot("screenshot-gate-notification", await toast.boundingBox());
   await toast.getByRole("button", { name: "Open" }).click();
   await pause(2500);
-  await shot("screenshot-gate", { x: 0, y: 0, width: 1600, height: 576 });
-
-  // Wide enough to read a row's reason after its title.
+  // Wide enough to read a row's reason after its title, in this shot and the rest: a 1440 window has the room.
   const side = await page.locator(".part.sidebar").boundingBox();
   await page.mouse.move(side.x + side.width, side.y + 300);
   await page.mouse.down();
-  await page.mouse.move(side.x + side.width + 220, side.y + 300, { steps: 8 });
+  await page.mouse.move(side.x + side.width + 120, side.y + 300, { steps: 8 });
   await page.mouse.up();
   await page.mouse.move(0, 0);
   await pause(1000);
-  await shot("screenshot-board", { x: 48, y: 32, width: 456, height: 192 });
-  // Back to its width: the gate and the review shots want the room.
-  await page.mouse.move(side.x + side.width + 220, side.y + 300);
-  await page.mouse.down();
-  await page.mouse.move(side.x + side.width, side.y + 300, { steps: 8 });
-  await page.mouse.up();
-  await page.mouse.move(0, 0);
-  await pause(1000);
+  await shot("screenshot-gate", { x: 0, y: 0, width: 1440, height: 640 });
+  // The sidebar in its window: the activity bar and title bar keep it the size it is.
+  const wide = await page.locator(".part.sidebar").boundingBox();
+  await shot("screenshot-board", { x: 0, y: 0, width: Math.round(wide.x + wide.width + 8), height: 300 });
 
   await page.locator('.editor-actions [aria-label="Review Changes"]').click();
   await pause(4000);
@@ -249,7 +248,7 @@ async function drive(app) {
   await page.locator(".view-line", { hasText: "hit = self._entries.get(key)" }).last().click();
   await palette("View: Focus Problems");
   await pause(1500);
-  await shot("screenshot-review", { x: 0, y: 0, width: 1600, height: 712 });
+  await shot("screenshot-review", { x: 0, y: 0, width: 1440, height: 760 });
 
   await palette("View: Close Panel");
   await palette("View: Close All Editors");
@@ -263,9 +262,19 @@ async function drive(app) {
   await page.keyboard.press("Escape");
   await page.keyboard.type("urgent]");
   await pause(3000);
-  await palette("Show or Focus Hover");
-  await pause(1500);
-  await shot("screenshot-config", { x: 352, y: 608, width: 1248, height: 180 });
+  // The mouse on the flagged word opens its hover; the palette's Show or Focus Hover did not on xvfb.
+  // By position: the squiggle sits under the text layer, which takes the pointer events.
+  const squiggle = await page.locator(".part.editor .squiggly-error").last().boundingBox();
+  await page.mouse.move(squiggle.x + squiggle.width / 2, squiggle.y + squiggle.height / 2, { steps: 4 });
+  await page.locator(".monaco-hover", { hasText: "unknown severity" }).first().waitFor({ state: "visible", timeout: 10_000 });
+  await pause(800);
+  // The hover and the line it is about, across the editor: wherever the hover opened, above or below.
+  const editor = await page.locator(".part.editor").boundingBox();
+  const hover = await page.locator(".monaco-hover", { hasText: "unknown severity" }).first().boundingBox();
+  const cursor = await page.locator(".part.editor .cursor").first().boundingBox();
+  const top = Math.min(hover.y, cursor.y) - 12;
+  const bottom = Math.max(hover.y + hover.height, cursor.y + cursor.height) + 12;
+  await shot("screenshot-config", { x: editor.x, y: Math.round(top), width: Math.round(editor.width), height: Math.round(bottom - top) });
 }
 
 function SETTINGS(port) {
@@ -291,6 +300,8 @@ function SETTINGS(port) {
     "git.enabled": false,
     "editor.fontSize": 13,
     "diffEditor.hideUnchangedRegions.enabled": false,
+    // Inline, as a narrow window shows it: a new file side by side is half empty.
+    "diffEditor.renderSideBySide": false,
     "files.simpleDialog.enable": true,
     "files.hotExit": "off",
   };

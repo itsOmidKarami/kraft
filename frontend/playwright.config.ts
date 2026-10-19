@@ -16,7 +16,7 @@ if (!baseURL) {
 export default defineConfig({
   testDir: "./e2e",
   // e2e/contract/ is the UI contract and e2e/demo/ the dashboard demo's smoke suite: each its own config, no fixture server.
-  testIgnore: ["**/e2e/contract/**", "**/e2e/demo/**"],
+  testIgnore: ["**/e2e/contract/**", "**/e2e/demo/**", "**/e2e/docs-shots/**"],
   timeout: scaledTimeout(120_000),
   // Playwright's fixed 5s default for bare `expect(...)` assertions (no
   // explicit timeout) doesn't scale with KRAFT_E2E_TIMEOUT_SCALE otherwise --

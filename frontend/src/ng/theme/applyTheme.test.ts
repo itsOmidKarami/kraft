@@ -86,6 +86,6 @@ describe("ng applyTheme", () => {
     });
     expect(cachedLook()).toBeNull();
     applyTheme(cachedLook() ?? DEFAULT_LOOK);
-    expect({ ...html() }).toEqual({ surface: "graphite", accent: "none", amount: "subtle", mode: "dark", density: "compact" });
+    expect({ ...html() }).toEqual({ surface: "ink", accent: "violet", amount: "full", mode: "dark", density: "compact" });
   });
 });

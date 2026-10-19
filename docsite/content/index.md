@@ -61,7 +61,7 @@ ui:
 :::landing-shot
 ---
 src: /assets/board.png
-alt: 'The Kraft board in the dark graphite look: filters for chain, gate and stop reason above work items grouped by Needs you (a paused item with Resume, a failed one with Retry, and two waiting at a gate, each with its one button), Running and Not started, the unstarted items marked created paused, with a Select all link on every group and a ? shortcuts button in the toolbar'
+alt: 'The Kraft board in the dark Ink look with a violet accent: filters for chain, gate and stop reason above work items grouped by status, Needs you first with each item''s one button (Review at a gate, Retry, Raise cap, Answer, Resume and Raise budget on the stopped ones), and Running below it, with a Select all link on every group and a ? shortcuts button in the toolbar'
 crop: 210 0 1230 688
 width: 1440
 ---
@@ -79,8 +79,8 @@ ui:
 :::::landing-shot
 ---
 src: /assets/item.png
-alt: "The spec_approval gate on an item's page: waiting for you, the files it decides on, an open thread, reject to spec, and Read spec.md, Review gate, Approve and Request changes buttons"
-crop: 1034 214 384 474
+alt: "The final_review gate on an item's page: waiting for you, the files it decides on, an open thread, and Read kraft-cb59-review.md, Review gate, Approve and Request changes buttons"
+crop: 1036 262 380 422
 width: 1440
 ---
 **The gate.** What it decides on, where a rejection goes, and the buttons. [The review page](/reference/web-ui/review-page)
@@ -90,7 +90,7 @@ width: 1440
 ---
 src: /assets/review.png
 alt: 'A line comment on a one-line change, labelled Must fix, being added to a review'
-crop: 500 296 860 320
+crop: 500 196 924 244
 width: 1440
 ---
 **The note.** Comment on the lines it is about, and label it must-fix, question, or nit. [Review a change](/guides/day-to-day/review-a-change)
@@ -99,8 +99,8 @@ width: 1440
 :::::landing-shot
 ---
 src: /assets/mobile.png
-alt: 'The board at a 390px phone viewport: a failed item with a Retry button, and an item waiting at approve spec with a Review button on the card'
-crop: 0 206 390 366
+alt: 'The board at a 390px phone viewport: an item waiting at approve final review with a Review button on the card, and a stopped item with a Retry button'
+crop: 0 212 390 430
 width: 390
 ---
 **On your phone.** The same board at the same address, laid out for a phone. Open a gate's review from the card's one button, and answer a question or retry a stopped item from its page. [The phone layout](/guides/day-to-day/kraft-on-a-phone) · [Reach it from your phone](/guides/run/remote-access)

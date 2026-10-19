@@ -17,8 +17,8 @@ export function AppearanceScreen() {
   const { edit, node } = useEditor();
   if (!theme) return <AreaScreen title="Appearance" status={{ label: SAVED.change }} yaml={false}>{error ? <p className="ph-error" role="alert">{error}</p> : <p className="ph-empty">Loading…</p>}</AreaScreen>;
 
-  const surface = theme.surface ?? "graphite";
-  const amount = theme.colour_amount ?? "subtle";
+  const surface = theme.surface ?? "ink";
+  const amount = theme.colour_amount ?? "full";
   const accent = amount === "mono" ? "none" : accentOf(theme.accent);
   const mode = resolveMode(theme.mode);
 

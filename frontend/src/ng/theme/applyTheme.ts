@@ -13,7 +13,7 @@ export interface Look {
 }
 
 /** What the page paints when nothing is cached and the server has not answered. */
-export const DEFAULT_LOOK: Look = { surface: "graphite", accent: "none", colour_amount: "subtle", mode: "dark", density: "compact" };
+export const DEFAULT_LOOK: Look = { surface: "ink", accent: "violet", colour_amount: "full", mode: "dark", density: "compact" };
 
 // Not the shipped UI's `kraft.theme`: the two UIs keep their own copy.
 const KEY = "kraft.theme.v2";

@@ -9,10 +9,10 @@ import { DEFAULT_PREFS } from "../review/prefs";
 export function themeYaml(theme: Theme): string {
   const scheme = theme.code_scheme ?? { light: "auto", dark: "auto" };
   const diff = theme.diff ?? DEFAULT_PREFS;
-  const amount = theme.colour_amount ?? "subtle";
+  const amount = theme.colour_amount ?? "full";
   return [
     `mode: ${theme.mode}`,
-    `surface: ${theme.surface ?? "graphite"}`,
+    `surface: ${theme.surface ?? "ink"}`,
     `accent: ${amount === "mono" ? "none" : accentOf(theme.accent)}`,
     `colour_amount: ${amount}`,
     "code_scheme:",
@@ -50,8 +50,8 @@ export function useTheme() {
     if (!theme) return null;
     // A derived look is written out whole on its first change, so the other
     // two keys stop following the default at the same moment (brief E.3).
-    const amount = theme.colour_amount ?? "subtle";
-    const body = theme.derived ? { surface: theme.surface ?? "graphite", accent: amount === "mono" ? "none" : accentOf(theme.accent), colour_amount: amount, ...patch } : patch;
+    const amount = theme.colour_amount ?? "full";
+    const body = theme.derived ? { surface: theme.surface ?? "ink", accent: amount === "mono" ? "none" : accentOf(theme.accent), colour_amount: amount, ...patch } : patch;
     const before = theme;
     setTheme({ ...theme, ...body, derived: false });
     setError(null);

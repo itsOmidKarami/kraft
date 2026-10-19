@@ -23,8 +23,8 @@ export function AppearancePage() {
 
   if (!theme) return <div className="ng-settings">{error && <p role="alert">{error}</p>}</div>;
 
-  const surface = theme.surface ?? "graphite";
-  const amount = theme.colour_amount ?? "subtle";
+  const surface = theme.surface ?? "ink";
+  const amount = theme.colour_amount ?? "full";
   const accent = amount === "mono" ? "none" : accentOf(theme.accent);
   const mode = resolveMode(theme.mode);
 

@@ -270,7 +270,22 @@ The release's headline change can also carry `notes::highlight`, next to its
 `release::` label. Its entry then opens the release notes under **Highlights**
 instead of sitting among the others (a `release::major` one is also kept under
 Breaking changes), and its impact still counts toward the bump. Keep it for the change the release is about: rarely more than one or two
-per release. Write its `## Changelog` section as a headline. A `release::none`
+per release. Write its `## Changelog` section as a headline, and give it a
+picture when the change is something to see: one screenshot or GIF on its own
+line under the bullet, linked from `main` by its full URL, since the notes are
+read on GitHub, in `CHANGELOG.md` and on the Marketplace:
+
+```markdown
+- `kraft console`: a terminal UI for Kraft.
+
+  ![The console's board, its peek on an item at a gate](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/console.png)
+```
+
+Use a picture the docs already show (`.github/assets/`, taken by `just
+docs-screenshots`), or add one there in the same pull request. The release
+points the link at its own tag, so the notes keep this release's picture after
+`main`'s is retaken. Keep pictures to highlights: an entry under New or Fixes is
+one line. A `release::none`
 pull request with the label stops the release, since there is no entry to
 highlight. See [RELEASING.md](RELEASING.md#cut-a-release).
 
@@ -417,7 +432,7 @@ Page rules:
 | A new event type (`events.append`), or the notification webhook (`src/kraft/notify.py`) | `docsite/content/5.reference/10.events.md` |
 | A stop reason (`store.mark_needs_human`) or a `kraft admin doctor` check | `docsite/content/4.troubleshooting/1.why-did-my-item-stop.md` (a stop reason; a sandbox, Kit or workspace-member one goes on `docsite/content/4.troubleshooting/5.sandbox-and-kit-stops.md`, with a row in the first page's table; one that needs numbered steps gets an entry on `docsite/content/4.troubleshooting/2.stop-reasons-in-detail.md`), `docsite/content/4.troubleshooting/4.doctor-failures.md` (a doctor check) |
 | `access.yaml` / remote-access behaviour | `docsite/content/3.guides/4.run/01.remote-access.md` (and `02.put-a-proxy-in-front-of-kraft.md` for the `Host` check behind a proxy), and `SECURITY.md` if it's security-relevant |
-| A screen or its behaviour (`frontend/src/ng/`) | the pages that show or name it: `docsite/content/1.get-started/2.first-work-item.md` (the board), `docsite/content/5.reference/00.web-ui/` (each screen: the board, an item's page, the review page, Templates and Settings, Analytics), `docsite/content/3.guides/1.day-to-day/2.first-run.md` (the setup wizard), `docsite/content/3.guides/1.day-to-day/3.file-a-work-item.md` (the composer), `docsite/content/3.guides/1.day-to-day/5.review-a-change.md` (the review page), `docsite/content/3.guides/1.day-to-day/8.kraft-on-a-phone.md` (the phone), `docsite/content/3.guides/4.run/01.remote-access.md` (Access), and any other page that names the screen or a button on it (`git grep` its label under `docsite/content/`). If the screen is in a README or docs screenshot (`.github/assets/*.png`), retake it: [`frontend/README.md`](frontend/README.md#retaking-the-screenshots-in-githubassets) has the recipe |
+| A screen or its behaviour (`frontend/src/ng/`) | the pages that show or name it: `docsite/content/1.get-started/2.first-work-item.md` (the board), `docsite/content/5.reference/00.web-ui/` (each screen: the board, an item's page, the review page, Templates and Settings, Analytics), `docsite/content/3.guides/1.day-to-day/2.first-run.md` (the setup wizard), `docsite/content/3.guides/1.day-to-day/3.file-a-work-item.md` (the composer), `docsite/content/3.guides/1.day-to-day/5.review-a-change.md` (the review page), `docsite/content/3.guides/1.day-to-day/8.kraft-on-a-phone.md` (the phone), `docsite/content/3.guides/4.run/01.remote-access.md` (Access), and any other page that names the screen or a button on it (`git grep` its label under `docsite/content/`). If the screen is in a README or docs screenshot (`.github/assets/*.png`), retake it with `just docs-screenshots` (the web UI), `just console-screenshot` or `just vscode-screenshots`: [`frontend/README.md`](frontend/README.md#retaking-the-screenshots-in-githubassets) has the details |
 
 Run `npm ci && npx nuxt generate` in `docsite/` before you push. It fails on
 a page that doesn't parse, but a link to a page or heading that no longer

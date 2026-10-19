@@ -36,7 +36,7 @@ repo's own checkout instead of a worktree. The
 have the rest. Coming from 1.4? [What's new in 2.0](https://kraft-sdlc.dev/project/whats-new)
 says what to check before you upgrade.
 
-[![The Kraft board in the dark graphite look: filters for chain, gate and stop reason above work items grouped by Needs you (a paused item with Resume, a failed one with Retry, and two waiting at a gate, each with its one button), Running and Not started, the unstarted items marked created paused, with a Select all link on every group and a ? shortcuts button in the toolbar](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)](https://kraft-sdlc.dev/demo/)
+[![The Kraft board in the dark Ink look with a violet accent: filters for chain, gate and stop reason above work items grouped by status, Needs you first with each item's one button (Review at a gate, Retry, Raise cap, Answer, Resume and Raise budget on the stopped ones), and Running below it, with a Select all link on every group and a ? shortcuts button in the toolbar](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)](https://kraft-sdlc.dev/demo/)
 
 - **Gates where a human decides.** Kraft pauses at a spec, a plan, or a merge
   request for your approval; request changes with a note and the node that wrote it
@@ -60,7 +60,7 @@ New here? [Why Kraft](https://kraft-sdlc.dev/get-started/why-kraft) covers what 
 **A gate stops the chain where a human decides.** Read what the agent wrote,
 then approve, or request changes with a note that re-runs the node that wrote it.
 
-![The gate's review page headed Approve spec: Request changes and Approve buttons in the header, a Waiting for you mark, a line saying Approving starts plan with the gates left and the spend, the spec an agent wrote rendered below, and the files on the branch with one pending comment](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/gate.png)
+![The gate's review page headed Approve final review: Request changes and Approve buttons in the header, a Waiting for you mark, a line saying Approving starts release with no gate after it and the spend, the review brief an agent wrote rendered below, and the files on the branch beside it](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/gate.png)
 
 **Read by name, not by id.** Nodes show as "approve spec" and "chain revision",
 and a chain too long to read whole gets an overview of all of it, one small
@@ -80,7 +80,7 @@ keyboard shortcuts.
 </td>
 <td width="40%">
 
-![The board at a 390px phone viewport, with bottom tab navigation, filter chips and Chain, Gate and Stop reason menus, and cards for a paused item with Resume, a failed one with Retry, and gate-waiting items whose Review button opens the review](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/mobile.png)
+![The board at a 390px phone viewport, with bottom tab navigation, status chips and Chain, Gate and Stop reason menus, and cards for an item at a gate whose Review button opens the review, and stopped items with Retry and Raise cap](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/mobile.png)
 
 </td>
 </tr>

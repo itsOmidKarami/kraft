@@ -28,8 +28,8 @@ export function BoardCodePage() {
 
   const scheme: Scheme = theme.code_scheme ?? { light: "auto", dark: "auto" };
   const diff: DiffPrefs = theme.diff ?? DEFAULT_PREFS;
-  const surface = theme.surface ?? "graphite";
-  const amount = theme.colour_amount ?? "subtle";
+  const surface = theme.surface ?? "ink";
+  const amount = theme.colour_amount ?? "full";
   const setDiff = (patch: Partial<DiffPrefs>) => save({ diff: { ...diff, ...patch } });
   const unified = diff.layout === "unified";
 

@@ -273,6 +273,28 @@ def test_each_artifact_is_built_with_the_tagged_commits_time(name, builds):
     assert [step.index(b) for b in builds] == sorted(step.index(b) for b in builds)
 
 
+def test_pin_notes_points_main_images_at_the_tag_in_place(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    raw = "https://raw.githubusercontent.com/itsOmidKarami/kraft/{}/.github/assets/console.png"
+    other = "https://raw.githubusercontent.com/someone/else/main/x.png"
+    notes = tmp_path / "notes.md"
+    before = f"- The console. (#904)\r\n  ![c]({raw.format('main')})\r\n  ![o]({other})\r\n"
+    notes.write_bytes(before.encode())
+    release_artifacts.main(["pin-notes", str(notes), "v2.2.0"])
+    assert notes.read_bytes().decode() == (
+        f"- The console. (#904)\r\n  ![c]({raw.format('v2.2.0')})\r\n  ![o]({other})\r\n"
+    )
+
+
+def test_the_notes_are_pinned_before_the_release_text_and_changelogs_read_them():
+    text = RELEASE_YML.read_text()
+    pin = text.index('release_artifacts.py" pin-notes "$RUNNER_TEMP/notes.md" "$TAG"')
+    assert text.index('plan_release.py" plan ') < pin
+    assert text.index('plan_release.py" pre ') < pin
+    assert pin < text.index('plan_release.py" body ')
+    assert pin < text.index('plan_release.py" changelog ')
+
+
 def test_the_wheel_is_pinned_after_it_is_built_and_before_it_is_smoke_tested():
     names = [n for n in _steps() if n]
     pin, build, smoke = (

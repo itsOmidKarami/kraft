@@ -25,12 +25,13 @@ OUT = Path(__file__).resolve().parents[1] / "frontend" / "src" / "ng" / "theme" 
 #: The console's colours: the web's default look (`DEFAULT_LOOK` in
 #: `ng/theme/applyTheme.ts`), surface, amount and accent, in both modes.
 CONSOLE_OUT = Path(__file__).resolve().parents[1] / "src" / "kraft" / "console" / "theme.py"
-CONSOLE_LOOK = ("graphite", "subtle", "none")
+CONSOLE_LOOK = ("ink", "full", "violet")
 #: The console's own accent, `brand` and `brand-muted` in `theme.py`: the
 #: brand mark, panel titles, the focused frame, the prompt's mark and the
-#: active tab. The default look's accent is the text colour, which names
-#: nothing, and blue is the info colour, so it is violet at the full amount:
-#: a hue no state colour uses. `brand-muted` is quieter, for secondary chips.
+#: active tab. Violet at the full amount, the default look's own accent: blue
+#: is the info colour, and violet is a hue no state colour uses. It stays
+#: violet when the look changes, since the console follows the default look,
+#: not theme.yaml. `brand-muted` is quieter, for secondary chips.
 CONSOLE_ACCENT = ("violet", "full")
 
 MODES = ("dark", "light")
@@ -304,7 +305,7 @@ def render(blocks: dict, accents: dict, code: dict) -> str:
 
 
 #: The console's cursor row: the text colour at this much over the page
-#: (`kraft.tcss`, a highlighted option's `$primary 12%`).
+#: (`kraft.tcss`, a highlighted option's `$foreground 12%`).
 CURSOR_ALPHA = 0.12
 
 
