@@ -459,7 +459,9 @@ async def test_a_chain_base_check_says_which_edits_the_new_parent_takes(st):
 NO_PATH = ("set_field", {"path": "verification", "field": "policy.time_cap_minutes", "value": 30})
 
 
-@pytest.mark.parametrize("first", [[], [NO_PATH]], ids=["as-filed", "with-an-override-it-cant-take"])
+@pytest.mark.parametrize(
+    "first", [[], [NO_PATH]], ids=["as-filed", "with-an-override-it-cant-take"]
+)
 async def test_changing_a_chains_base_drops_the_edits_it_cant_take(st, first):
     r = team(st, *first, ("change_chain_base", {"base": "quick-task"}))
     dropped = [{"key": "overrides verification", "why": "quick-task has no verification"}]
