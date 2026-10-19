@@ -241,7 +241,9 @@ def test_a_listed_addon_that_stops_loading_is_never_another(tmp_path, app, drop,
 
 
 def _update(home):
-    (result,) = update.update([ID], accept=lambda review: True, config_dir=home[0], addons_root=home[1])
+    (result,) = update.update(
+        [ID], accept=lambda review: True, config_dir=home[0], addons_root=home[1]
+    )
     return result
 
 
@@ -309,7 +311,9 @@ HOUSE = {"steering": {"house": {"instructions": "be kind"}}}
 @pytest.mark.parametrize(
     "library, runs",
     [
-        pytest.param({"tasks": {"base": {**TASK, "prompt": "new words"}}}, ("new words", []), id="text"),
+        pytest.param(
+            {"tasks": {"base": {**TASK, "prompt": "new words"}}}, ("new words", []), id="text"
+        ),
         # A change of shape, which `_holds` would hold; content by the add-on's rules.
         pytest.param(
             {**HOUSE, "tasks": {"base": {**TASK, "steering": ["house"]}}},
@@ -318,7 +322,9 @@ HOUSE = {"steering": {"house": {"instructions": "be kind"}}}
         ),
     ],
 )
-def test_an_addon_change_reaches_a_repo_library_chain_by_the_addons_rules(app, home, org, library, runs):
+def test_an_addon_change_reaches_a_repo_library_chain_by_the_addons_rules(
+    app, home, org, library, runs
+):
     _accepted(app, home)
     edit_addons_yaml(home[0], lambda c: c["addons"].update({ID: {"auto_update": True}}))
     publish(org, "base", version="1.1.0", library=library)
@@ -330,7 +336,8 @@ def test_an_addon_change_reaches_a_repo_library_chain_by_the_addons_rules(app, h
 
 def test_a_change_of_the_librarys_extending_chain_holds(app, home):
     _accepted(app, home)
-    repo_library_files(app, library=LISTS, chains={"ship": {"extends": "base:default"}})  # keeps `check`
+    # Keeps `check`: a change of shape.
+    repo_library_files(app, library=LISTS, chains={"ship": {"extends": "base:default"}})
 
     found = repo_library.check(app, "app", *home)
 

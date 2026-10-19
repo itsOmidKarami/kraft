@@ -93,9 +93,7 @@ def _lint_in(
     loaded = [p for p in now if not same(p.id)]
     held = next((p.id for p in loaded if p.namespace == found.name), None)
     if held is not None:
-        return [
-            {"file": str(root), "message": f"namespace {found.name!r} is taken by {held}"}
-        ], []
+        return [{"file": str(root), "message": f"namespace {found.name!r} is taken by {held}"}], []
     if why := load.instance_problem(found.name, found.requires, config_dir):
         return [{"file": str(root), "message": why}], []
     with tempfile.TemporaryDirectory() as tmp:
@@ -108,9 +106,7 @@ def _lint_in(
         try:
             before = addon_update.state_of(config_dir, now)
             after = addon_update.state_of(config_dir, [*loaded, candidate])
-            broken = addon_update.breaks(
-                before, after, config_dir, found.name, exempt=libraries
-            )
+            broken = addon_update.breaks(before, after, config_dir, found.name, exempt=libraries)
             held_lines = addon_update.held_breaks(before, after, libraries)
         except PolicyError as exc:
             broken = [str(exc)]
