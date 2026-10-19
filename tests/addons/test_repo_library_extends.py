@@ -6,7 +6,9 @@ import yaml
 from support.addons import (
     AGENT,
     addon_json,
+    edit_addons_yaml,
     install,
+    installed,
     instance,
     make_collection,
     repo_library_files,
@@ -14,8 +16,8 @@ from support.addons import (
 )
 
 from kraft.addons import load, manifest, repo_library, update
-from kraft.config import write_yaml
-from kraft.templates.library import TemplateLibrary
+from kraft.config import read_yaml, write_yaml
+from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
 ID = "base@org"
 TASK = {**AGENT, "policy": {"budget_usd": 5}}
@@ -150,7 +152,7 @@ def test_an_addon_lists_no_addons():
     ]
 
 
-@pytest.mark.parametrize("alias", [None], ids=["name"])
+@pytest.mark.parametrize("alias", [None, "o"], ids=["name", "alias"])
 def test_a_repo_library_chain_extends_an_addon_chain_it_lists(tmp_path, org, app, alias):
     home = _home(tmp_path, org, app, alias=alias)
     _accepted(app, home)
@@ -159,3 +161,77 @@ def test_a_repo_library_chain_extends_an_addon_chain_it_lists(tmp_path, org, app
 
     assert [node.id for node in resolved.nodes] == ["build"]
     assert set(resolved.addons) == {"app", alias or "base"}
+
+
+@pytest.mark.parametrize(
+    "state, why",
+    [("not-installed", "not installed"), ("disabled", "is disabled")],
+    ids=["not-installed", "disabled"],
+)
+def test_a_repo_library_lists_only_addons_the_instance_loads(tmp_path, org, app, state, why):
+    home = _home(tmp_path, org, app, installed=state != "not-installed")
+    if state == "disabled":
+        edit_addons_yaml(home[0], lambda c: c["addons"].update({ID: False}))
+
+    problems = _refused(app, home, LISTS, {"ship": SHIP})
+
+    said = f"library.yaml: addons: lists {ID}, which this instance does not load ({why})"
+    assert said in problems, problems
+
+
+@pytest.mark.parametrize(
+    "chains",
+    [{"ship": {"extends": "default"}}, {"default": {"extends": "default"}}],
+    ids=["the-library-lacks-it", "the-chain-extends-itself"],
+)
+def test_a_bare_parent_is_the_librarys_own(app, home, chains):
+    write_yaml(home[0] / "chains" / "default.yaml", {"nodes": [{"id": "build", **STEP}]})
+
+    problems = _refused(app, home, LISTS, chains)
+
+    hint = "a bare name in a repo library is its own chain, and an instance chain cannot be extended"
+    assert any(hint in problem for problem in problems), problems
+
+
+def test_an_addons_bare_parent_gets_no_repo_library_hint(tmp_path):
+    """The hint is a repo library's: an add-on's bare parent is its own too,
+    and its author never wrote a `.kraft/`."""
+    addon = installed(tmp_path, "base", library={"tasks": {"base": AGENT}}, chains={"ship": {"extends": "default"}})
+    config_dir, _ = instance(tmp_path, chains={"default": {"nodes": [{"id": "build", **STEP}]}})
+
+    with pytest.raises(TemplateLibraryError, match="no chain named 'base:default'") as raised:
+        TemplateLibrary.from_yaml_dir(config_dir, addons=[addon]).resolve_chain("base:ship")
+
+    assert "repo library" not in str(raised.value)
+
+
+def _forget(config_dir):
+    """`base@org` dropped from `addons.yaml` and its lock by hand: unknown here."""
+    edit_addons_yaml(config_dir, lambda c: c["addons"].pop(ID))
+    lock = read_yaml(config_dir / "addons.lock")
+    lock["addons"].pop(ID)
+    write_yaml(config_dir / "addons.lock", lock)
+
+
+@pytest.mark.parametrize(
+    "drop, why",
+    [
+        (
+            lambda d: edit_addons_yaml(d, lambda c: c["addons"].update({ID: {"as": "o", "enabled": False}})),
+            "is disabled",
+        ),
+        # Unknown: its id names no namespace.
+        (_forget, "no chain named 'base@org:default'"),
+    ],
+    ids=["disabled", "unknown"],
+)
+def test_a_listed_addon_that_stops_loading_is_never_another(tmp_path, app, drop, why):
+    both = make_collection(tmp_path, {"base": BASE, "other": BASE}, name="org")
+    home = _home(tmp_path, both, app, alias="o")
+    _accepted(app, home)
+    # `other@org` now holds the namespace `base`, and `base@org` stops loading.
+    install(*home, both, "other", alias="base")
+    drop(home[0])
+
+    with pytest.raises(TemplateLibraryError, match=why):
+        _library(home).resolve_chain("app:ship")

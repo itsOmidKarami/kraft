@@ -290,13 +290,19 @@ def _read_by_deciding(value: object, deciding: bool = False) -> set[str]:
     return out
 
 
-def _steering_texts(extracted: fetch.Extracted) -> dict:
+def _library_data(extracted: fetch.Extracted) -> dict:
+    """The candidate's `library.yaml` as a mapping; empty when it has none or
+    it does not parse (`update.problems` says why)."""
     entry = extracted.files.get("library.yaml")
     try:
         data = bounded_yaml(entry[1].decode(), [20_000]) if entry else {}
     except (ValueError, yaml.YAMLError):
         return {}
-    section = data.get("steering") if isinstance(data, dict) else None
+    return data if isinstance(data, dict) else {}
+
+
+def _steering_texts(extracted: fetch.Extracted) -> dict:
+    section = _library_data(extracted).get("steering")
     return section if isinstance(section, dict) else {}
 
 
@@ -414,6 +420,15 @@ def check(
         problems.append(why)
     if problems:
         return refused(*problems)
+    by_id = {p.id: p for p in loaded if p.repo_id is None}
+    unloaded = [
+        f"library.yaml: addons: lists {listed}, which this instance does not load "
+        f"({'not installed' if by_id.get(listed) is None else by_id[listed].left_out})"
+        for listed in load.builds_on(_library_data(extracted))
+        if by_id.get(listed) is None or by_id[listed].left_out is not None
+    ]
+    if unloaded:
+        return refused(*unloaded)
 
     old = None
     store = addons_root / "store" / was.removeprefix("sha256:") if was else None
