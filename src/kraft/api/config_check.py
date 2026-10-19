@@ -183,7 +183,7 @@ def chain_icon_issues(
 ) -> list[TemplateIssue]:
     """`icon_issues` for one chain file, each named by its canonical path.
     Only the icons the file itself writes: an inherited one is the library's."""
-    resolution = _Resolution(library, ComponentSource(path, Namespace.NODES, tid))
+    resolution = _Resolution(library, ComponentSource(path, Namespace.NODES, tid, chain=True))
     try:
         resolution.expand_chain({**data, "id": tid})
     except TemplateLibraryError:

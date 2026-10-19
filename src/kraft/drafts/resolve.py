@@ -158,7 +158,7 @@ def _expand(library: TemplateLibrary | None, path: Path, key: str, data: object)
     fails part-way: such a chain diffs as written."""
     if library is None or not isinstance(data, Mapping):
         return (data if isinstance(data, Mapping) else {}), None
-    resolution = _Resolution(library, ComponentSource(path, Namespace.NODES, key))
+    resolution = _Resolution(library, ComponentSource(path, Namespace.NODES, key, chain=True))
     try:
         return resolution.expand_chain({**data, "id": key}), resolution
     except TemplateLibraryError:

@@ -29,7 +29,7 @@ from kraft import skill as _skill
 from kraft.addons.load import InstalledAddon, qualify
 from kraft.config import bounded_yaml
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
-from kraft.templates import positions
+from kraft.templates import extension, positions
 from kraft.templates.models import (
     AUTO_REVIEW_SEGMENT,
     JUDGE_SEGMENT,
@@ -180,8 +180,13 @@ class ComponentSource:
     file: Path
     namespace: Namespace
     name: str
+    #: The component is a whole chain file, named `chain <id>`, not a
+    #: `library.yaml` section entry.
+    chain: bool = False
 
     def __str__(self) -> str:
+        if self.chain:
+            return f"{self.file}: chain {self.name}"
         return f"{self.file}: {self.namespace.value}.{self.name}"
 
 
@@ -515,7 +520,7 @@ class TemplateLibrary:
                 f"{chain_path}: chain id {id!r} is already declared by {claimed}"
             )
         self._chains[id] = RawComponent(
-            {**body, "id": id}, ComponentSource(chain_path, Namespace.NODES, id)
+            {**body, "id": id}, ComponentSource(chain_path, Namespace.NODES, id, chain=True)
         )
         return id
 
@@ -794,6 +799,10 @@ class _Located:
 
     path: str
     source: ComponentSource
+    #: The component's key path in `source.file` when that file is another
+    #: chain's; None for a library component, which `_at` names by section and
+    #: name.
+    key: tuple[object, ...] | None = None
 
 
 class _Resolution:
@@ -830,18 +839,31 @@ class _Resolution:
         #: The chain node being expanded, as authored, and the library node it extends.
         self._node_raw: object = None
         self._via: object = None
+        #: For an extending chain, where each final node came from
+        #: (`extension.Applied.origins`); None for a chain that extends none.
+        self._origins: list[tuple[str, int]] | None = None
+        #: Per node id, the override paths at or under it.
+        self._overridden: dict[str, list[str]] = {}
+        #: The parent's locations by path, for a parent node an override
+        #: re-expands: its components keep the source that defined them.
+        self._seed: dict[str, _Located] = {}
+        #: `TemplateLibrary.provenance`'s answer; None for a chain that extends none.
+        self.provenance: dict[str, object] | None = None
+        #: Every chain this one extends, nearest first.
+        self.ancestors: tuple[str, ...] = ()
 
     # ── expansion ──
 
     def expand_chain(self, data: Mapping[str, object]) -> Mapping[str, object]:
         if "extends" in data:
-            # `component-extends-has-one-parent` allows a chain to extend one
-            # chain, but V1 has no consumer for it and no chain namespace to
-            # resolve it against. Say so, rather than letting the author read
-            # pydantic's "Extra inputs are not permitted".
+            return self._extend(data)
+        if written := [key for key in extension.EDIT_KEYS if key in data]:
+            # Said here, rather than letting the author read pydantic's "Extra
+            # inputs are not permitted" (`edits-need-a-parent`).
             raise TemplateLibraryError(
-                f"{self._chain.file}: chain-level 'extends' is not supported; "
-                "share structure through a reusable node instead"
+                f"{self._chain.file}: {written[0]!r} edits a parent chain; add "
+                "'extends: <chain id>' or drop it",
+                loc=(written[0],),
             )
         nodes = data.get("nodes")
         if not isinstance(nodes, list):
@@ -903,6 +925,198 @@ class _Resolution:
                 handler, f"{path}{PATH_SEPARATOR}on_failure", (*loc, "on_failure")
             ),
         }
+
+    # ── a chain that extends a chain ──
+
+    def _extend(self, data: Mapping[str, object]) -> Mapping[str, object]:
+        """`an-extending-chain-is-its-parent-with-edits`: the parent chain,
+        resolved, with this chain's edits applied, as the expanded mapping
+        `Chain` validates."""
+        file = self._chain.file
+        name = data["extends"]
+        if not isinstance(name, str):
+            raise TemplateLibraryError(
+                f"{file}: 'extends' names exactly one parent chain, not {name!r}",
+                loc=("extends",),
+            )
+        if "nodes" in data:
+            raise TemplateLibraryError(
+                f"{file}: an extending chain holds no 'nodes'; change {name}'s with remove, "
+                "add and overrides, or copy it to own its structure",
+                loc=("nodes",),
+            )
+        self.ancestors = self._ancestry(name)
+        try:
+            # Any failure of the parent, a schema one included, is the parent's
+            # to report: the child says once that it does not resolve.
+            self._library.resolve_chain(name)
+        except TemplateLibraryError as exc:
+            raise TemplateLibraryError(
+                f"{file}: extends {name!r}, which does not resolve",
+                loc=("extends",),
+                addon_ref=exc.addon_ref,
+            ) from exc
+        try:
+            edits = extension.Edits.read(data)
+        except extension.ExtensionError as exc:
+            # `first_error` already starts the message with its location.
+            raise TemplateLibraryError(f"{file}: {exc}", loc=exc.loc) from exc
+        raw = self._library._chains[name]
+        parent = _Resolution(self._library, raw.source)
+        expanded = parent.expand_chain(raw.data)
+        paths = {located.path: loc for loc, located in parent._located.items()}
+        try:
+            applied = extension.apply(name, expanded["nodes"], paths, edits)
+            policy = extension.tighten(expanded.get("policy"), data.get("policy"))
+        except extension.ExtensionError as exc:
+            raise TemplateLibraryError(f"{file}: {exc}", loc=exc.loc) from exc
+        self._origins, self._overridden = applied.origins, applied.overridden
+        nodes = []
+        for index, (node, (origin, at)) in enumerate(
+            zip(applied.nodes, applied.origins, strict=True)
+        ):
+            if origin == "parent" and node["id"] not in applied.overridden:
+                nodes.append(self._inherit(parent, at, index, node))
+                continue
+            if origin == "parent":
+                self._seed.update({v.path: v for v in parent.exported(("nodes", at)).values()})
+            nodes.append(self._node(node, index))
+            if origin == "parent":
+                self.references.setdefault(node["id"], set()).update(
+                    parent.references.get(node["id"], ())
+                )
+                self._adopt_usages(parent, node["id"])
+        self.provenance = {
+            "parent": name,
+            "nodes": {
+                node["id"]: "added"
+                if origin == "add"
+                else "overridden"
+                if node["id"] in applied.overridden
+                else "inherited"
+                for node, (origin, _) in zip(applied.nodes, applied.origins, strict=True)
+            },
+            "overrides": {id: list(paths) for id, paths in applied.overridden.items()},
+            "removed": list(applied.removed),
+        }
+        out = {k: v for k, v in expanded.items() if k not in ("id", "nodes", "policy")}
+        out.update(
+            {
+                k: v
+                for k, v in data.items()
+                if k not in ("extends", "nodes", "policy", *extension.EDIT_KEYS)
+            }
+        )
+        out["nodes"] = nodes
+        if policy is not None:
+            out["policy"] = policy
+        return out
+
+    def _ancestry(self, parent: str) -> tuple[str, ...]:
+        """The chains this one extends, nearest first. Refuses a parent that is
+        not a chain and a cycle (`component-extends-has-one-parent`). A chain
+        missing further up is the parent's own failure, reported as its not
+        resolving."""
+        chains = self._library._chains
+        if parent not in chains:
+            raise self._no_chain(parent)
+        seen = [self._chain.name]
+        name: object = parent
+        while isinstance(name, str):
+            if name in seen:
+                raise TemplateLibraryError(
+                    f"{self._chain.file}: 'extends' cycle: {' -> '.join((*seen, name))}",
+                    loc=("extends",),
+                )
+            if name not in chains:
+                break
+            seen.append(name)
+            name = chains[name].data.get("extends")
+        return tuple(seen[1:])
+
+    def _no_chain(self, name: str) -> TemplateLibraryError:
+        file = self._chain.file
+        other = self._library.namespace_of(name)
+        if other is not None:
+            return TemplateLibraryError(
+                f"{file}: extends {name!r}, which is a library {other.singular}, not a chain",
+                loc=("extends",),
+            )
+        return TemplateLibraryError(
+            f"{file}: extends no chain named {name!r}{self._left_out(name)}",
+            loc=("extends",),
+            addon_ref=":" in name,
+        )
+
+    def _left_out(self, name: str) -> str:
+        """Why the add-on `name` is qualified by is not loaded, as a suffix;
+        empty for a local name or a loaded add-on."""
+        qualifier = name.partition(":")[0] if ":" in name else None
+        return next(
+            (
+                f"; {addon.left_out}"
+                for addon in self._library.addons
+                if addon.namespace == qualifier and addon.left_out is not None
+            ),
+            "",
+        )
+
+    def _inherit(
+        self, parent: _Resolution, at: int, index: int, node: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        """Parent node `at`, unchanged, as this chain's node `index`: its
+        locations, sources, references and usages carried over, not expanded
+        again (its `extends` are already gone)."""
+        for loc, located in parent.exported(("nodes", at)).items():
+            self._located[("nodes", index, *loc[2:])] = located
+            self._sources.setdefault(located.path, located.source)
+        self.references.setdefault(str(node["id"]), set()).update(
+            parent.references.get(str(node["id"]), ())
+        )
+        self._adopt_usages(parent, str(node["id"]))
+        return node
+
+    def _adopt_usages(self, parent: _Resolution, node: str) -> None:
+        """The parent's usages under `node`, for the components this chain
+        still has there (`_sources`, filled by now): one an override's
+        replacement list dropped is not carried over."""
+        for ref, entries in parent.usages.items():
+            mine = self.usages.setdefault(ref, [])
+            for usage in entries:
+                path = str(usage["path"])
+                under = path == node or path.startswith(f"{node}{PATH_SEPARATOR}")
+                if under and path in self._sources and not any(u["path"] == path for u in mine):
+                    mine.append(dict(usage))
+            if not mine:
+                del self.usages[ref]
+
+    def exported(self, prefix: tuple[object, ...]) -> dict[tuple[object, ...], _Located]:
+        """Every location under `prefix`, as a chain extending this one sees
+        it: a component this chain's own file holds names that file and its
+        key path there."""
+        return {
+            loc: _Located(located.path, located.source, self._authored(loc))
+            if located.source == self._chain
+            else located
+            for loc, located in self._located.items()
+            if loc[: len(prefix)] == prefix
+        }
+
+    def _authored(self, key: tuple[object, ...]) -> tuple[object, ...]:
+        """`key`, a location in the expanded chain, as a key path into this
+        chain's own file. The same tuple for a chain that extends none."""
+        if self._origins is None or len(key) < 2 or key[0] != "nodes":
+            return key
+        origin, at = self._origins[int(key[1])]  # type: ignore[call-overload]
+        if origin == "add":
+            return ("add", at, "node", *key[2:])
+        located = self._located.get(key)
+        if located is not None:
+            node = located.path.split(PATH_SEPARATOR, 1)[0]
+            for path in sorted(self._overridden.get(node, ()), key=len, reverse=True):
+                if located.path == path or located.path.startswith(f"{path}{PATH_SEPARATOR}"):
+                    return ("overrides", path)
+        return ("extends",)
 
     def _container(
         self, raw: Mapping[str, object], path: str, loc: tuple[object, ...], *, step: bool = False
@@ -1012,9 +1226,13 @@ class _Resolution:
         for usage in self._pending.pop(loc, ()):
             ref = usage.pop("component")
             self.usages.setdefault(ref, []).append({"path": path, **usage})
-        source = self._inherited.pop(loc, self._chain)
-        self._located[loc] = _Located(path, source)
-        self._sources.setdefault(path, source)
+        inherited = self._inherited.pop(loc, None)
+        # A parent node an override re-expands keeps the source that defined
+        # each of its components, which its own expansion recorded.
+        seeded = self._seed.get(path) if inherited is None else None
+        located = seeded or _Located(path, inherited or self._chain)
+        self._located[loc] = located
+        self._sources.setdefault(path, located.source)
 
     # ── extends ──
 
@@ -1081,17 +1299,9 @@ class _Resolution:
                 f"{other.singular}, not a {namespace.singular}",
                 loc=(*loc, "extends"),
             )
-        qualifier = name.partition(":")[0] if ":" in name else None
-        why = next(
-            (
-                f"; {addon.left_out}"
-                for addon in self._library.addons
-                if addon.namespace == qualifier and addon.left_out is not None
-            ),
-            "",
-        )
         raise TemplateLibraryError(
-            f"{self._chain.file}: {where}: extends no {namespace.singular} named {name!r}{why}",
+            f"{self._chain.file}: {where}: extends no {namespace.singular} named "
+            f"{name!r}{self._left_out(name)}",
             loc=(*loc, "extends"),
             addon_ref=":" in name,
         )
@@ -1144,11 +1354,15 @@ class _Resolution:
         return {} if key is None else self._at(key, ())
 
     def _at(self, key: tuple[object, ...], rest: tuple[object, ...]) -> dict[str, object]:
-        source = self._located[key].source
+        located = self._located[key]
+        # For a chain that extends none, `_authored(key) == key`.
+        source, where = located.source, self._authored(key)
         if source == self._chain:
-            return {"loc": (*key, *rest)}
+            return {"loc": (*where, *rest)}
+        if located.key is not None:
+            return {"loc": where, "related": (source.file, (*located.key, *rest))}
         return {
-            "loc": key,
+            "loc": where,
             "related": (source.file, (source.namespace.value, source.name, *rest)),
         }
 

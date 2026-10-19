@@ -548,7 +548,7 @@ enforced-by: tests/templates/test_models.py::test_steps_keep_their_authored_iden
 
 A reusable task, step, node, or chain MAY extend one same-namespace parent and
 the system SHALL reject multiple parents, cross-namespace parents, and cycles.
-enforced-by: tests/templates/test_library.py::test_extends_rejects_more_than_one_parent, tests/templates/test_library.py::test_extends_rejects_a_cycle, tests/templates/test_library.py::test_extends_rejects_a_cross_namespace_parent, tests/templates/test_library.py::test_extends_rejects_an_unknown_parent
+enforced-by: tests/templates/test_library.py::test_extends_rejects_more_than_one_parent, tests/templates/test_library.py::test_extends_rejects_a_cycle[component], tests/templates/test_library.py::test_extends_rejects_a_cross_namespace_parent[component], tests/templates/test_library.py::test_extends_rejects_an_unknown_parent[component]
 origin: docs/templates-v1-design.md "Library components" -- implemented for the task, step and node namespaces. Chain-level `extends` is deliberately not implemented in V1 -- no shipped chain uses it -- and a chain file carrying `extends` is rejected with an explicit resolver error (tests/templates/test_library.py::test_chain_level_extends_is_rejected_explicitly).
 
 ## REQ extends-merges-objects-and-replaces-arrays
@@ -567,7 +567,7 @@ enforced-by: tests/templates/test_library.py::test_extends_cannot_change_the_par
 
 The system SHALL reject a chain with missing references, invalid overrides,
 duplicate identifiers, or invalid cross-node references before it is used.
-enforced-by: tests/templates/test_models.py::test_a_gate_reject_target_must_name_a_node_in_the_chain, tests/templates/test_models.py::test_a_gate_reject_target_cannot_name_a_later_node, tests/templates/test_models.py::test_a_gate_reject_target_cannot_name_a_gate, tests/templates/test_library.py::test_extends_rejects_an_unknown_parent, tests/templates/test_library.py::test_an_unknown_steering_reference_is_rejected, tests/templates/test_materialization.py::test_lint_reports_a_scope_its_chain_refuses_without_any_instance_ceiling
+enforced-by: tests/templates/test_models.py::test_a_gate_reject_target_must_name_a_node_in_the_chain, tests/templates/test_models.py::test_a_gate_reject_target_cannot_name_a_later_node, tests/templates/test_models.py::test_a_gate_reject_target_cannot_name_a_gate, tests/templates/test_library.py::test_extends_rejects_an_unknown_parent[component], tests/templates/test_library.py::test_an_unknown_steering_reference_is_rejected, tests/templates/test_materialization.py::test_lint_reports_a_scope_its_chain_refuses_without_any_instance_ceiling
 origin: docs/templates-v1-design.md "Resolution and execution" -- this covers missing references and cross-node reject targets here, including the `base-change-restart-target-is-backward` backward-reference rule applied to `reject_to`; duplicate identifiers are pinned under `resolved-chain-identifiers-are-unique`. Invalid per-scope policy overrides are refused by `ResolvedChain.check_scopes`, which lint and materialization share.
 
 ## REQ template-resolution-preserves-source-context

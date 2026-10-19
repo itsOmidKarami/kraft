@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from support.templates import agent_task
+from support.templates import agent_task, write_chains
 
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentInput, AgentTask, BuiltinAction, ForgeAction, GateNode
@@ -69,17 +69,6 @@ def test_two_chain_files_claiming_one_id_is_an_error_naming_both(tmp_path):
         TemplateLibrary.from_yaml_dir(tmp_path)
     assert "also-default.yaml" in str(exc.value)
     assert "chains/default.yaml" in str(exc.value)
-
-
-def test_chain_level_extends_is_rejected_explicitly(tmp_path):
-    library = {"tasks": {"base": agent_task()}}
-    chain = {
-        "id": "variant",
-        "extends": "default",
-        "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
-    }
-    with pytest.raises(TemplateLibraryError, match="chain-level 'extends' is not supported"):
-        write_library(tmp_path, library, chain, chain_id="variant").resolve_chain("variant")
 
 
 def test_an_unknown_chain_is_rejected(design):
@@ -329,36 +318,89 @@ def test_extends_rejects_more_than_one_parent(tmp_path):
         write_library(tmp_path, library, chain).resolve_chain("default")
 
 
-def test_extends_rejects_a_cycle(tmp_path):
-    library = {
-        "tasks": {
-            "a": {"kind": "agent", "harness": "h", "prompt": "p", "extends": "b"},
-            "b": {"extends": "a"},
-        }
-    }
-    chain = {
-        "id": "default",
-        "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "a"}]}],
-    }
-    with pytest.raises(TemplateLibraryError, match="cycle"):
-        write_library(tmp_path, library, chain).resolve_chain("default")
+_EXEC = {"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "a"}]}
 
 
-def test_extends_rejects_a_cross_namespace_parent(tmp_path):
-    library = {"tasks": {"implementer": agent_task()}}
-    chain = {"id": "default", "nodes": [{"id": "n", "extends": "implementer"}]}
-    with pytest.raises(TemplateLibraryError, match="which is a task, not a node"):
-        write_library(tmp_path, library, chain).resolve_chain("default")
+@pytest.mark.parametrize(
+    ("library", "chains", "chain_id", "why"),
+    [
+        (
+            {
+                "tasks": {
+                    "a": {"kind": "agent", "harness": "h", "prompt": "p", "extends": "b"},
+                    "b": {"extends": "a"},
+                }
+            },
+            {"default": {"id": "default", "nodes": [_EXEC]}},
+            "default",
+            "cycle",
+        ),
+        (
+            {"tasks": {"a": agent_task()}},
+            {"one": {"id": "one", "extends": "two"}, "two": {"id": "two", "extends": "one"}},
+            "one",
+            "'extends' cycle: one -> two -> one",
+        ),
+    ],
+    ids=["component", "chain"],
+)
+def test_extends_rejects_a_cycle(tmp_path, library, chains, chain_id, why):
+    with pytest.raises(TemplateLibraryError, match=why):
+        write_chains(tmp_path, library, chains).resolve_chain(chain_id)
 
 
-def test_extends_rejects_an_unknown_parent(tmp_path):
-    library = {"tasks": {}}
-    chain = {
-        "id": "default",
-        "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "ghost"}]}],
-    }
-    with pytest.raises(TemplateLibraryError, match="no task named 'ghost'"):
-        write_library(tmp_path, library, chain).resolve_chain("default")
+@pytest.mark.parametrize(
+    ("library", "chains", "chain_id", "why"),
+    [
+        (
+            {"tasks": {"implementer": agent_task()}},
+            {"default": {"id": "default", "nodes": [{"id": "n", "extends": "implementer"}]}},
+            "default",
+            "which is a task, not a node",
+        ),
+        (
+            {
+                "tasks": {"a": agent_task()},
+                "nodes": {"stage": {"kind": "exec", "tasks": [{"id": "t", "extends": "a"}]}},
+            },
+            {"child": {"id": "child", "extends": "stage"}},
+            "child",
+            "which is a library node, not a chain",
+        ),
+    ],
+    ids=["component", "chain-names-a-node"],
+)
+def test_extends_rejects_a_cross_namespace_parent(tmp_path, library, chains, chain_id, why):
+    with pytest.raises(TemplateLibraryError, match=why):
+        write_chains(tmp_path, library, chains).resolve_chain(chain_id)
+
+
+@pytest.mark.parametrize(
+    ("library", "chains", "chain_id", "why"),
+    [
+        (
+            {"tasks": {}},
+            {
+                "default": {
+                    "id": "default",
+                    "nodes": [{**_EXEC, "tasks": [{"id": "t", "extends": "ghost"}]}],
+                }
+            },
+            "default",
+            "no task named 'ghost'",
+        ),
+        (
+            {"tasks": {}},
+            {"child": {"id": "child", "extends": "ghost"}},
+            "child",
+            "extends no chain named 'ghost'",
+        ),
+    ],
+    ids=["component", "chain"],
+)
+def test_extends_rejects_an_unknown_parent(tmp_path, library, chains, chain_id, why):
+    with pytest.raises(TemplateLibraryError, match=why):
+        write_chains(tmp_path, library, chains).resolve_chain(chain_id)
 
 
 # ── errors name the input to correct
