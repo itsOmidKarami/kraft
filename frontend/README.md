@@ -345,7 +345,7 @@ at its size on screen, so text reads at its real size.
 | `stop-peek.png` | 1230×700 | a capped item's side panel beside the board | why did my item stop |
 | `composer.png` | 1230×309 | the board's composer, filled in | file a work item |
 | `storage.png` | 1230×685 | Settings › Storage down to the first worktree row | logs and disk space |
-| `chain-extends.png` | 1230×700 | Templates › Chains on `team-default`, which extends `default`: `verification` overridden and selected, `security_scan` added | web UI › Templates and Settings |
+| `chain-extends.png` | 1230×700 | Templates › Chains on `team-default`, which extends `default`: `verification` overridden and selected, `security_scan` added | web UI › Templates and Settings, write your own chain |
 | `fixloop.png` | 1230×700 | a running item's `verification` node in its own view, on its second fix-loop round | web UI › Fix loops and test scopes |
 | `new-item-page.png` | 1230×602 | the full new-item page, a title typed | file a work item |
 | `harnesses.png` | 1230×700 | Settings › Harnesses | web UI › Templates and Settings |
