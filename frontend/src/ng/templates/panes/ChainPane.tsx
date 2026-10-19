@@ -18,6 +18,9 @@ import { ChangeBaseCard, type BaseCheck } from "../cards/ChangeBaseCard";
 import { RemoveCard } from "../cards/RemoveCard";
 import { refsTo } from "../cards/refs";
 import { ExtendMenu } from "../menus/ExtendMenu";
+import { ChainBaseMenu } from "../menus/ChainBaseMenu";
+import { DetachCard } from "../cards/DetachCard";
+import { Link, useInRouterContext } from "react-router-dom";
 import { IconPicker } from "../IconPicker";
 import { showToast } from "../../ui/Toast";
 import { LibraryHint } from "../../library/LibraryHint";
@@ -63,7 +66,7 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
   renaming?: string | null;
   onRenaming?: (path: string | null) => void;
 }) {
-  const [card, setCard] = useState<{ t: "move" } | { t: "remove" } | { t: "extend" } | { t: "icon" } | { t: "base"; base: string; check: BaseCheck } | null>(null);
+  const [card, setCard] = useState<{ t: "move" } | { t: "remove" } | { t: "extend" } | { t: "icon" } | { t: "base"; base: string; check: BaseCheck } | { t: "chainBase" } | { t: "chainCheck"; base: string; check: BaseCheck } | { t: "detach" } | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   // The path whose title is being renamed in place: the page's, else this pane's own.
   const [ownRenaming, setOwnRenaming] = useState<string | null>(null);
@@ -179,6 +182,23 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
     const res2 = (a.body.ops?.[0]?.result ?? {}) as Partial<BaseCheck>;
     setCard({ t: "base", base, check: { kept: res2.kept ?? [], dropped: res2.dropped ?? [] } });
   };
+  // An extending chain's own Change base and Detach (the node's, one level up).
+  const pickChainBase = async (base: string) => {
+    const a = await draft.ops([{ op: "chain_base_check", base }], { preview: true });
+    if (a.status !== 200) return showToast(detailOf(a.body), { tone: "error" });
+    const res2 = (a.body.ops?.[0]?.result ?? {}) as Partial<BaseCheck>;
+    setCard({ t: "chainCheck", base, check: { kept: res2.kept ?? [], dropped: res2.dropped ?? [] } });
+  };
+  const applyChainBase = async (base: string) => {
+    const a = await draft.ops([{ op: "change_chain_base", base }]);
+    closeCard();
+    if (a.status === 200) showToast(`${chain} now extends ${base}`);
+  };
+  const detach = async () => {
+    const a = await draft.ops([{ op: "detach" }]);
+    closeCard();
+    if (a.status === 200) showToast(`${chain} no longer follows ${parentChain}`);
+  };
   const applyBase = async (base: string) => {
     const a = await draft.ops([{ op: "change_base", node: path, base }]);
     closeCard();
@@ -202,6 +222,12 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
     ) : (
       <>
         <Button onClick={onDuplicate}>Duplicate</Button>
+        {parentChain && (
+          <>
+            <Button onClick={(e) => { at(e.currentTarget); setCard({ t: "chainBase" }); }}>Change base…</Button>
+            <Button onClick={(e) => { at(e.currentTarget); setCard({ t: "detach" }); }}>Detach…</Button>
+          </>
+        )}
         <span className="bp-gap" />
         {/* Refused while a repo defaults to it (Decisions §9 Chain settings). */}
         {inUse.note}
@@ -277,6 +303,7 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
         : shownTab === "yaml" ? <ItemYaml key={path} draft={draft} scope={scope} path={path} extendsName={typeof own?.extends === "string" ? own.extends : undefined} locked={locked} />
           : <>
             {locked && <p className="pane-note">{locked}</p>}
+            {d.kind === "chain" && parentChain && <ParentHint parent={parentChain} />}
             {typeof own?.extends === "string" && (d.kind === "node" || d.kind === "task") && <LibraryHint section={d.kind === "node" ? "nodes" : "tasks"} name={own.extends} />}
             <Overview kind={d.kind} ctx={ctx} />
           </>}
@@ -290,7 +317,21 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
         draft.field(path, "icon", name);
       }} />
     )}
+    {card?.t === "chainBase" && parentChain && <ChainBaseMenu anchor={anchor} chain={chain} parent={parentChain} onPick={(b) => void pickChainBase(b)} onClose={closeCard} />}
+    {card?.t === "chainCheck" && <ChangeBaseCard anchor={anchor} node={chain} base={card.base} check={card.check} empty="This chain has no edits to carry over." onApply={() => void applyChainBase(card.base)} onClose={closeCard} />}
+    {card?.t === "detach" && parentChain && <DetachCard anchor={anchor} chain={chain} parent={parentChain} onDetach={() => void detach()} onClose={closeCard} />}
     {card?.t === "base" && <ChangeBaseCard anchor={anchor} node={path} base={card.base} check={card.check} onApply={() => void applyBase(card.base)} onClose={closeCard} />}
     </>
+  );
+}
+
+/** "Extends default" on an extending chain's pane: a link to the chain it follows (as `LibraryHint` is for a node). */
+function ParentHint({ parent }: { parent: string }) {
+  const inRouter = useInRouterContext();
+  return (
+    <p className="lib-hint">
+      Extends{" "}
+      {inRouter ? <Link className="lib-hint-link" to={`/templates/chains/${encodeURIComponent(parent)}`}>{parent}</Link> : <span className="lib-hint-link">{parent}</span>}
+    </p>
   );
 }

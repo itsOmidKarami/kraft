@@ -11,20 +11,26 @@ import type { Addon } from "../../types";
 import { AddonBadge } from "./addon";
 import { NoMatch } from "../ui/NoMatch";
 import { Empty } from "../ui/Empty";
+import { Segmented } from "../ui/Segmented";
 
 type Row = { id: string; nodes: number; open: number; draft: boolean; addon?: Addon | null };
 export type SwitchTo = { kind: "switch"; id: string } | { kind: "new"; id: string } | { kind: "dup"; id: string } | { kind: "extend"; id: string };
-type Stage = "list" | "new" | "dup" | "extend";
+type Stage = "list" | "new" | "dup";
+/** How the id step makes the new chain: one that follows this one, or a standalone copy. */
+type How = "extend" | "copy";
 
 /** The chain crumb, and the switcher it opens (Decisions §9 Chain switcher):
  *  search, every chain with its size and open items, ✓ on the current one,
  *  an amber dot on one with a draft; then New chain and Duplicate, which turn
  *  the menu into the id step. No Delete here. An add-on's chain (`copy`) is
- *  duplicated as "Copy to my library", from the page's own button. Extend starts
- *  a chain that follows this one (`extend`: not a repo library's). */
-export function Switcher({ chain, renamedTo, onGo, startDup, startExtend, copy, extend = true }: { chain: string; renamedTo?: string; onGo: (to: SwitchTo) => void; startDup?: number; startExtend?: number; copy?: boolean; extend?: boolean }) {
+ *  added with "Add to my library", from the page's own button. Duplicate's id
+ *  step chooses Extend (a chain that follows this one) or Copy (a standalone
+ *  one): Copy by default for your own chain, Extend for an add-on's. */
+export function Switcher({ chain, renamedTo, onGo, startDup, copy, extend = true }: { chain: string; renamedTo?: string; onGo: (to: SwitchTo) => void; startDup?: number; copy?: boolean; /** Whether a chain may extend this one (not a repo library's). */ extend?: boolean }) {
   const [open, setOpen] = useState(false);
   const [stage, setStage] = useState<Stage>("list");
+  const fresh: How = copy && extend ? "extend" : "copy";
+  const [how, setHow] = useState<How>(fresh);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [q, setQ] = useState("");
   const items = useStore((s) => s.workItems);
@@ -34,13 +40,12 @@ export function Switcher({ chain, renamedTo, onGo, startDup, startExtend, copy, 
 
   const show = (st: Stage) => {
     setStage(st);
+    setHow(fresh);
     setQ("");
     setOpen(true);
   };
   // The chain pane's Duplicate opens this at its id step.
   useEffect(() => { if (startDup) show("dup"); }, [startDup]);
-  // The add-on chain's Extend opens this at its id step.
-  useEffect(() => { if (startExtend) show("extend"); }, [startExtend]);
   useEffect(() => {
     if (!open) return;
     Promise.all([api.getTemplates(), listDrafts()]).then(([chains, drafts]) => {
@@ -68,16 +73,23 @@ export function Switcher({ chain, renamedTo, onGo, startDup, startExtend, copy, 
     e.preventDefault();
     const to = from + (e.key === "ArrowDown" ? 1 : -1);
     if (to < 0) search.current?.focus();
-    else refs.current[Math.min(to, shown.length + 2)]?.focus();
+    else refs.current[Math.min(to, shown.length + 1)]?.focus();
   };
-  const dupTitle = copy ? `Copy ${chain} to my library as` : `Duplicate ${chain} as`;
+  // An add-on's chain id is `<namespace>:<name>`; the new chain is the operator's own, so it starts from the bare name.
   const bare = chain.split(":").pop()!;
   const step = {
     new: { title: "New chain id", label: "New chain id", initial: "", go: "Create →" },
-    // An add-on's chain id is `<namespace>:<name>`; the copy is the operator's own, so it starts from the bare name.
-    dup: { title: dupTitle, label: "Duplicate id", initial: copy ? bare : `${chain}_copy`, go: copy ? "Copy →" : "Duplicate →" },
-    extend: { title: `Extend ${chain} as`, label: "Extending chain id", initial: `${bare}_ext`, go: "Extend →" },
+    dup: {
+      title: copy ? `Add ${chain} to my library as` : `Duplicate ${chain} as`,
+      label: "Duplicate id",
+      initial: how === "extend" ? `${bare}_ext` : copy ? bare : `${chain}_copy`,
+      go: how === "extend" ? "Extend →" : copy ? "Copy →" : "Duplicate →",
+    },
   };
+  const choices = [
+    { value: "extend" as const, label: "Extend", note: `Keeps following ${chain}; its later changes reach this chain.` },
+    { value: "copy" as const, label: "Copy", note: `A standalone copy you own; ${chain}'s later changes don't reach it.` },
+  ].filter((c) => c.value === "copy" || extend);
   const go = (to: SwitchTo) => {
     setOpen(false);
     onGo(to);
@@ -109,18 +121,23 @@ export function Switcher({ chain, renamedTo, onGo, startDup, startExtend, copy, 
             <div className="sw-acts">
               <button ref={(el) => void (refs.current[shown.length] = el)} type="button" className="menu-item" onKeyDown={(e) => move(e, shown.length)} onClick={() => show("new")}>New chain</button>
               {!copy && <button ref={(el) => void (refs.current[shown.length + 1] = el)} type="button" className="menu-item" onKeyDown={(e) => move(e, shown.length + 1)} onClick={() => show("dup")}>Duplicate</button>}
-              {extend && <button ref={(el) => void (refs.current[shown.length + 2] = el)} type="button" className="menu-item" onKeyDown={(e) => move(e, shown.length + 2)} onClick={() => show("extend")}>Extend</button>}
             </div>
           </div>
         ) : (
           <div className="seam-id">
             <p className="menu-title">{step[stage].title}</p>
+            {stage === "dup" && choices.length > 1 && (
+              <div className="sw-how">
+                <Segmented label="Make it" options={choices} value={how} onChange={setHow} />
+                <p className="tpl-menu-note">{choices.find((c) => c.value === how)?.note}</p>
+              </div>
+            )}
             <IdRow
               label={step[stage].label}
               initial={step[stage].initial}
               taken={(rows ?? []).map((r) => r.id)}
               go={step[stage].go}
-              onGo={(id) => go({ kind: stage, id })}
+              onGo={(id) => go({ kind: stage === "dup" && how === "extend" ? "extend" : stage, id })}
             />
           </div>
         )}

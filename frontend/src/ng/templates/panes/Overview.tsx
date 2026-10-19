@@ -66,7 +66,7 @@ function ChainOverview({ ctx }: { ctx: PaneCtx }) {
       <Kv k="size" v={`${plural(nodes.length - gates, "exec node")} · ${plural(gates, "gate")}`} />
       <Kv k="default for" v={repos.length ? repos.join(", ") : "no repos"} mono muted={!repos.length} />
       <Kv k="open" v={`${plural(running, "item")} · keep their version`} muted={!running} />
-      {parent ? <Kv k="extends" v={parent} mono /> : <Kv k="library" v={libs.length ? libs.join(", ") : "none"} mono muted={!libs.length} />}
+      {!parent && <Kv k="library" v={libs.length ? libs.join(", ") : "none"} mono muted={!libs.length} />}
     </>
   );
 }

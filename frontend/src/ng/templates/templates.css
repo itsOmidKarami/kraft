@@ -127,6 +127,9 @@
 .sw-check { flex: none; width: 12px; color: var(--text); }
 .sw-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .sw-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; background: transparent; border: 1.5px solid var(--mark-change-line); }
+/* Duplicate's choice: follow this chain, or copy it. */
+.sw-how { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-bottom: 8px; }
+.sw-how .tpl-menu-note { margin: 0; }
 .sw-acts { display: flex; flex-direction: column; margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
 .unsaved p { margin: 0 0 8px; font-size: var(--fs-meta); color: var(--text-sub); line-height: 1.5; }
 .tpl-first { max-width: 420px; }

@@ -18,6 +18,11 @@ export function IdRow({ label, taken, placeholder, initial = "", go, refused, on
 }) {
   const [text, setText] = useState(initial);
   const [sent, setSent] = useState<string | null>(null);
+  // A new suggestion (another choice beside the field) replaces the text until it is typed in.
+  const typed = useRef(false);
+  useEffect(() => {
+    if (!typed.current) setText(initial);
+  }, [initial]);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     // After the popover is placed (focusSoon), then the text selected.
@@ -46,6 +51,7 @@ export function IdRow({ label, taken, placeholder, initial = "", go, refused, on
           placeholder={placeholder}
           spellCheck={false}
           onChange={(e) => {
+            typed.current = true;
             setText(e.target.value.trim());
             onChange?.(e.target.value.trim());
           }}

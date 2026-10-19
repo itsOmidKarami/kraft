@@ -235,13 +235,14 @@ describe("Chains page: the chain canvas", () => {
     expect(await screen.findByRole("note")).toHaveTextContent("team's edits don't apply to default. Fix them in YAML.");
   });
 
-  it("names an extending chain's parent, and Detach confirms before sending detach", async () => {
+  it("names an extending chain's parent in the header, and the chain pane's Detach confirms before sending detach", async () => {
     const post = vi.spyOn(d, "postOps").mockImplementation(() => ok({ ...EXTENDING_VIEW, ops: [] }));
     vi.mocked(d.getDraft).mockImplementation(() => ok(EXTENDING_VIEW));
     mount("/templates/chains/team");
     await screen.findByRole("group", { name: "team" });
     expect(screen.getByText("extends default")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Detach…" }));
+    const pane = screen.getByRole("complementary", { name: "team pane" });
+    await userEvent.click(within(pane).getByRole("button", { name: "Detach…" }));
     const card = screen.getByRole("dialog", { name: "Detach team" });
     expect(card).toHaveTextContent("team stops following default.");
     await userEvent.click(within(card).getByRole("button", { name: "Keep" }));

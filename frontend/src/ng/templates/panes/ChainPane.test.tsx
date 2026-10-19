@@ -446,8 +446,40 @@ describe("an extending chain", () => {
 
   it("names the chain it extends in place of the library it uses", () => {
     mount("", {}, EXTENDING_VIEW);
-    expect(screen.getByText("extends").nextSibling).toHaveTextContent("default");
+    expect(screen.getByText(/^Extends/)).toHaveTextContent("Extends default");
     expect(screen.queryByText("library")).toBeNull();
+  });
+
+  it("changes the chain's base: picks a chain it may extend, shows what fits, then changes it", async () => {
+    const summary = (id: string, more = {}) => ({ id, nodes: [], gates: 0, ...more });
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      summary("team", { extends: "default", extended_by: ["team2"] }),
+      summary("default", { extended_by: ["team", "team2"] }),
+      summary("team2", { extends: "team" }),
+      summary("quick-task"),
+      summary("app:ship", { addon: { id: "app", version: "1", repo: "app" } }),
+    ] as never);
+    const check = { kept: ["overrides implementation"], dropped: [{ key: "remove spec_approval", why: "quick-task has no node spec_approval" }] };
+    const { draft } = mount("", {}, EXTENDING_VIEW);
+    vi.mocked(draft.ops).mockResolvedValue({ status: 200, body: { ops: [{ op: "chain_base_check", result: check }] } } as never);
+    await userEvent.click(screen.getByRole("button", { name: "Change base…" }));
+    const menu = await screen.findByRole("dialog", { name: "Change base" });
+    // Not itself, its parent, a chain that extends it, or a repo library's.
+    await waitFor(() => expect(within(menu).getAllByRole("option").map((o) => o.textContent)).toEqual([expect.stringMatching(/^quick-task/)]));
+    await userEvent.click(within(menu).getByRole("option", { name: /quick-task/ }));
+    expect(draft.ops).toHaveBeenCalledWith([{ op: "chain_base_check", base: "quick-task" }], { preview: true });
+    const card = await screen.findByRole("dialog", { name: "Change base of team" });
+    expect(card).toHaveTextContent("overrides implementation");
+    expect(card).toHaveTextContent("remove spec_approval · quick-task has no node spec_approval");
+    await userEvent.click(within(card).getByRole("button", { name: "Change base" }));
+    expect(draft.ops).toHaveBeenLastCalledWith([{ op: "change_chain_base", base: "quick-task" }]);
+  });
+
+  it("detaches the chain from its pane", async () => {
+    const { draft } = mount("", {}, EXTENDING_VIEW);
+    await userEvent.click(screen.getByRole("button", { name: "Detach…" }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Detach team" })).getByRole("button", { name: "Detach" }));
+    expect(draft.ops).toHaveBeenCalledWith([{ op: "detach" }]);
   });
 
   it("restores a removed node", async () => {

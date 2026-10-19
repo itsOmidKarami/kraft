@@ -22,7 +22,6 @@ import { Button } from "../ui/Button";
 import { INHERITED, NOTHING_TO_PUBLISH } from "../ui/reasons";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
 import { authoredNodes, chainFile, counts, extendsOf, isAdded, kindOf, liveChainId } from "./draft/view";
-import { DetachCard } from "./cards/DetachCard";
 import { Badge } from "../ui/Badge";
 import { addonRepo } from "../library/types";
 import { AddonBadge, ReadOnly } from "./addon";
@@ -96,10 +95,6 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   // Leaving a chain with a draft asks first (Decisions §9 Unpublished changes, brief Decided 5).
   const [pendingGo, setPendingGo] = useState<SwitchTo | null>(null);
   const [dupTick, setDupTick] = useState(0);
-  const [extendTick, setExtendTick] = useState(0);
-  // Detach's card, at the header button that opened it.
-  const detachAt = useRef<HTMLElement | null>(null);
-  const [detaching, setDetaching] = useState(false);
   // The nodes an open remove card lists, marked red on the canvas (Decisions §9 Remove).
   const [marked, setMarked] = useState<string[]>([]);
   const [strip, setStrip] = useState<{ ok: boolean; text: string } | null>(null);
@@ -312,7 +307,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
       <h1 className="tpl-sr">Chain {liveId}</h1>
       <HeaderTail>
         <span className="tpl-crumb-sep" aria-hidden>›</span>
-        <Switcher chain={chain} renamedTo={liveId !== chain ? liveId : undefined} onGo={requestGo} startDup={dupTick} startExtend={extendTick} copy={readOnly} extend={!addonRepo(addon)} />
+        <Switcher chain={chain} renamedTo={liveId !== chain ? liveId : undefined} onGo={requestGo} startDup={dupTick} copy={readOnly} extend={!addonRepo(addon)} />
         {addon && <AddonBadge addon={addon} />}
         {parent && <Badge mono>extends {parent}</Badge>}
         {s.level === "node" && s.node && (
@@ -348,9 +343,8 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         )}
         {/* With no draft there is nothing to publish: the server would answer 404 (R8b-04), as Repos, Policy and Harnesses already know. */}
         {/* A repo library's chain is edited in its repository's `.kraft/`: the server refuses a copy. */}
-        {parent && !readOnly && !review && <Button onClick={(e) => { detachAt.current = e.currentTarget; setDetaching(true); }}>Detach…</Button>}
         {readOnly
-          ? (addonRepo(addon) ? null : <><Button onClick={() => setExtendTick((k) => k + 1)}>Extend</Button><Button variant="primary" onClick={() => setDupTick((k) => k + 1)}>Copy to my library</Button></>)
+          ? (addonRepo(addon) ? null : <Button variant="primary" onClick={() => setDupTick((k) => k + 1)}>Add to my library</Button>)
           : <Button variant={review ? undefined : "primary"} disabled={!review && !view.draft} aria-describedby={view.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={review ? endReview : startReview}>{review ? "Back to editing" : REVIEW_AND_PUBLISH}</Button>}
       </HeaderActions>
       <div className={`tpl-area${s.level === "node" ? " has-strip" : ""}${s.level === "node" && selNode && kindOf(r, selNode) === "exec" ? " has-bottom" : ""}`}>
@@ -505,19 +499,6 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
           />
         )}
       </div>
-      {detaching && parent && (
-        <DetachCard
-          anchor={detachAt}
-          chain={liveId}
-          parent={parent}
-          onDetach={async () => {
-            setDetaching(false);
-            const a = await draft.ops([{ op: "detach" }]);
-            if (a.status === 200) showToast(`${liveId} no longer follows ${parent}`);
-          }}
-          onClose={() => setDetaching(false)}
-        />
-      )}
       {pendingGo && (
         <Dialog
           title="You have unpublished changes"

@@ -84,7 +84,7 @@ describe("An add-on's chain on the Chains page", () => {
     const there = (el: unknown) => (shipped ? expect(el).toBeNull() : expect(el).not.toBeNull());
 
     expect(screen.queryAllByText("release@acme 1.0.0")).toHaveLength(shipped ? 1 : 0);
-    expect(screen.queryAllByRole("button", { name: "Copy to my library" })).toHaveLength(shipped ? 1 : 0);
+    expect(screen.queryAllByRole("button", { name: "Add to my library" })).toHaveLength(shipped ? 1 : 0);
     there(screen.queryByRole("button", { name: /Review & publish/ }));
     expect(within(canvas).queryAllByRole("button", { name: "Add a node or gate here" })).toHaveLength(shipped ? 0 : 7);
     // The chain's pane: no rename on its title, no description field, no Duplicate or Delete.
@@ -112,8 +112,7 @@ describe("An add-on's chain on the Chains page", () => {
     mount("app:ship");
     await screen.findByRole("group", { name: "app:ship" });
     expect(screen.getAllByText("repo library app").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "Copy to my library" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Extend" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add to my library" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Review & publish/ })).toBeNull();
   });
 
@@ -125,16 +124,20 @@ describe("An add-on's chain on the Chains page", () => {
   });
 
   it.each([
-    { action: "Copy to my library", field: "Duplicate id", initial: "ship", source: { from: "release:ship" } },
-    { action: "Extend", field: "Extending chain id", initial: "ship_ext", source: { extends: "release:ship" } },
-  ])("$action asks for an id, sends new_chain on the add-on's chain, and opens the new draft", async ({ action, field, initial, source }) => {
+    // An add-on's chain is added as one that extends it unless Copy is chosen.
+    { how: "Extend, the default", choice: undefined, initial: "ship_ext", source: { extends: "release:ship" } },
+    { how: "a copy, chosen", choice: "Copy", initial: "ship", source: { from: "release:ship" } },
+  ])("Add to my library as $how asks for an id, sends new_chain on the add-on's chain, and opens the new draft", async ({ choice, initial, source }) => {
     const posts = serve(200, { ...LOCAL, draft: true, ops: [] });
     mount("release:ship");
-    await userEvent.click(await screen.findByRole("button", { name: action }));
-    const id = await screen.findByRole("textbox", { name: field });
+    await userEvent.click(await screen.findByRole("button", { name: "Add to my library" }));
+    expect(screen.getByRole("radio", { name: "Extend" })).toBeChecked();
+    if (choice) await userEvent.click(screen.getByRole("radio", { name: choice }));
+    const id = await screen.findByRole("textbox", { name: "Duplicate id" });
     // From the bare name: `release:ship_copy` would not be an id.
     expect(id).toHaveValue(initial);
-    await waitFor(() => expect(id).toHaveFocus());
+    // The id field takes focus as the step opens; choosing moves it to the choice.
+    if (!choice) await waitFor(() => expect(id).toHaveFocus());
     await userEvent.clear(id);
     await userEvent.type(id, "default");
     expect(screen.getByText("default is taken.")).toBeInTheDocument();
@@ -147,9 +150,10 @@ describe("An add-on's chain on the Chains page", () => {
   it("says why when the server refuses the copy, and stays on the add-on's chain", async () => {
     serve(409, { detail: "my_ship comes from add-on release@acme; extend it or copy it to your library" });
     mount("release:ship");
-    await userEvent.click(await screen.findByRole("button", { name: "Copy to my library" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Add to my library" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Copy" }));
     const id = await screen.findByRole("textbox", { name: "Duplicate id" });
-    await waitFor(() => expect(id).toHaveFocus());
+    await userEvent.click(id);
     await userEvent.keyboard("{Enter}");
     expect(await screen.findByText("my_ship comes from add-on release@acme; extend it or copy it to your library")).toBeInTheDocument();
     expect(where).toBe("/templates/chains/release%3Aship");
