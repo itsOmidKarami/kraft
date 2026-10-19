@@ -46,6 +46,10 @@ export const authoredNodes = (r: Result, scope: Scope): NodeA[] => {
 /** Where a node of an extending chain comes from: inherited, added or overridden here. */
 export const originOf = (r: Result, id: string): Origin | undefined => r.extending?.origins[id];
 
+/** Whether node `id` is one an extending chain adds: read off its file's `add` entries, which
+ *  hold while the edits don't apply and `origins` is empty. */
+export const isAdded = (r: Result, scope: Scope, id: string): boolean => addedNodes(r, scope).some((n) => n.id === id);
+
 /** An extending chain's own nodes: each `add` entry's `node`, as its file writes it. */
 export const addedNodes = (r: Result, scope: Scope): NodeA[] =>
   ((authoredChain(r, scope).add as { node?: NodeA }[] | undefined) ?? []).map((e) => e?.node).filter((n): n is NodeA => !!n && typeof n === "object");
@@ -112,7 +116,7 @@ export function expandedRows(r: Result, scope: Scope, path: string): { field: st
   const at = walk(authoredNodes(r, scope), path);
   if (!at) return [];
   const own = authoredAt(r, scope, path) ?? {};
-  const added = originOf(r, path.split(".")[0]) === "added";
+  const added = isAdded(r, scope, path.split(".")[0]);
   const rows: { field: string; value: unknown; source: string }[] = [];
   for (const [k, v] of Object.entries(at)) {
     if (NOT_ROWS.has(k) || NESTED.has(k)) continue;

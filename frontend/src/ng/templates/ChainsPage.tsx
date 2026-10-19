@@ -21,7 +21,7 @@ import * as api from "../../api";
 import { Button } from "../ui/Button";
 import { INHERITED, NOTHING_TO_PUBLISH } from "../ui/reasons";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
-import { authoredNodes, chainFile, counts, extendsOf, kindOf, liveChainId, originOf } from "./draft/view";
+import { authoredNodes, chainFile, counts, extendsOf, isAdded, kindOf, liveChainId } from "./draft/view";
 import { DetachCard } from "./cards/DetachCard";
 import { Badge } from "../ui/Badge";
 import { addonRepo } from "../library/types";
@@ -303,7 +303,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const parent = extendsOf(r, scope);
   const selNode = sel.kind === "chain" ? null : nodes.find((x) => x.id === sel.node);
   // A node it inherits keeps its parent's structure: its node view and bottom pane only read.
-  const inheritedNode = !!parent && s.level === "node" && !!s.node && originOf(r, s.node) !== "added";
+  const inheritedNode = !!parent && s.level === "node" && !!s.node && !isAdded(r, scope, s.node);
   const isGate = !!selNode && sel.kind === "node" && kindOf(r, selNode) === "gate";
 
   return (

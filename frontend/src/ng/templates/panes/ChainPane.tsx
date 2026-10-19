@@ -7,7 +7,7 @@ import { useReason } from "../../ui/Reason";
 import { CHAIN_IN_USE, INHERITED } from "../../ui/reasons";
 import type { Scope } from "../draft/types";
 import type { ConfigDraft } from "../draft/useConfigDraft";
-import { authoredAt, authoredNodes, extendsOf, liveChainId, nodeGlyph, normalise, originOf, problemsAt, resolvedAt, valueAt, type NodeA } from "../draft/view";
+import { authoredAt, authoredNodes, extendsOf, isAdded, liveChainId, nodeGlyph, normalise, problemsAt, resolvedAt, valueAt, type NodeA } from "../draft/view";
 import { problemText } from "../problems";
 import { Config } from "./Config";
 import { ItemYaml } from "./ItemYaml";
@@ -85,7 +85,7 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
   const parentChain = extendsOf(r, scope);
   const root = path.split(".")[0];
   const removed = parentChain && path ? r.extending?.removed.find((g) => g.id === path) : undefined;
-  const inherited = parentChain && path && !removed && originOf(r, root) !== "added" ? parentChain : null;
+  const inherited = parentChain && path && !removed && !isAdded(r, scope, root) ? parentChain : null;
   const locked = inherited ? INHERITED(inherited) : undefined;
   const lockedWhy = useReason(locked ?? null);
   const ctx: PaneCtx = { r, scope, path, draft, goTo };

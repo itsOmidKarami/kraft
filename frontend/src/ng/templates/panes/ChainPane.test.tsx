@@ -420,8 +420,12 @@ describe("an extending chain", () => {
     expect(remove).toHaveAccessibleDescription(INHERITED("default"));
   });
 
-  it("leaves an added node fully editable", () => {
-    mount("security_scan", {}, EXTENDING_VIEW);
+  it.each([
+    { id: "resolving", extra: {} },
+    // The edits don't apply: no origins, so added-ness is read off the file's `add` entries.
+    { id: "with its edits not applying", extra: { extending: { ...EXTENDING_VIEW.result.extending!, nodes: null, origins: {} } } },
+  ])("leaves an added node fully editable, $id", ({ extra }) => {
+    mount("security_scan", extra, EXTENDING_VIEW);
     expect(screen.getByRole("button", { name: "Move to library…" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Rename security_scan" })).toBeNull();
     expect(screen.queryByText(INHERITED("default"))).toBeNull();

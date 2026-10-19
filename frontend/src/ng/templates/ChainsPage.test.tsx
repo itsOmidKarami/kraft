@@ -252,10 +252,13 @@ describe("Chains page: the chain canvas", () => {
   });
 
   it.each([
-    { node: EXT.overridden, locked: true },
-    { node: "security_scan", locked: false },
-  ])("opens $node's node view with its structure locked: $locked", async ({ node, locked }) => {
-    vi.mocked(d.getDraft).mockImplementation(() => ok(EXTENDING_VIEW));
+    { node: EXT.overridden, locked: true, applies: true },
+    { node: "security_scan", locked: false, applies: true },
+    // With the edits not applying there are no origins: the file's `add` entries still say it is added.
+    { node: "security_scan", locked: false, applies: false },
+  ])("opens $node's node view with its structure locked: $locked (edits apply: $applies)", async ({ node, locked, applies }) => {
+    const extending = { ...EXTENDING_VIEW.result.extending!, ...(applies ? {} : { origins: {} }) };
+    vi.mocked(d.getDraft).mockImplementation(() => ok({ ...EXTENDING_VIEW, result: { ...EXTENDING_VIEW.result, extending } }));
     mount(`/templates/chains/team/nodes/${node}`);
     await screen.findByRole("complementary", { name: `${node} pane` });
     expect(screen.queryAllByText("Inherited from default: change it in YAML, or detach the chain.", { selector: ".tpl-banner" })).toHaveLength(locked ? 1 : 0);
