@@ -398,6 +398,25 @@ def test_removing_a_referenced_addon_is_refused(installed, capsys, verb):
         assert _run(capsys, "enable", ID)[0] == 0 and installed.yaml()["addons"] == {ID: True}
 
 
+@pytest.mark.parametrize("verb", ["uninstall", "disable"])
+def test_removing_an_addon_a_repo_library_builds_on_is_refused(installed, capsys, tmp_path, verb):
+    app = repo_with_library(
+        tmp_path,
+        library={"addons": [ID], "tasks": {"base": AGENT}},
+        chains={"ship": {"extends": "release:ship"}},
+    )
+    accept_repo_library(installed.config, installed.addons, app, "app")
+    before = installed.written()
+
+    code, out = _run(capsys, verb, ID)
+
+    assert code != 0, out
+    assert f"cannot {verb} release@acme: a connected repository's repo library builds on it" in out
+    said = "repository app: .kraft/library.yaml lists release@acme under addons:; disconnect"
+    assert said in out and "is still referenced by" not in out, out
+    assert installed.written() == before and installed.reloads == []
+
+
 def test_removing_an_addon_a_chain_extends_is_refused(installed, capsys):
     write_yaml(installed.config / "chains" / "wraps.yaml", {"extends": "release:ship"})
     before = installed.written()

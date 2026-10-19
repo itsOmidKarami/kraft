@@ -297,6 +297,28 @@ def referrers(namespace: str, addons: Sequence[load.InstalledAddon]) -> list[str
     return out
 
 
+def repo_library_dependents(addon_id: str, addons: Sequence[load.InstalledAddon]) -> list[str]:
+    """One line for each loaded repo library whose `library.yaml` lists
+    `addon_id` under `addons:` (`removing-a-referenced-addon-is-refused`),
+    naming the repository. A store that does not read says nothing: loading
+    says why."""
+    out: list[str] = []
+    for addon in addons:
+        if addon.repo_id is None or addon.left_out is not None:
+            continue
+        try:
+            entry = fetch.extract_dir(addon.root).files.get("library.yaml")
+            data = bounded_yaml(entry[1].decode(), [20_000]) if entry else {}
+        except Exception:  # noqa: BLE001 -- an edited store can break in any way
+            continue
+        if addon_id in load.builds_on(data):
+            out.append(
+                f"repository {addon.repo_id}: .kraft/library.yaml lists {addon_id} under "
+                "addons:; disconnect that repository, or have it drop the line"
+            )
+    return out
+
+
 def check(
     found: AddonManifest,
     files: Mapping[str, tuple[str, bytes]],

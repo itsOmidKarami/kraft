@@ -561,10 +561,13 @@ def _cmd_auto_update(ns: argparse.Namespace) -> None:
     )
 
 
-def _still_referenced(config: AddonsConfig, config_dir: Path, addon_id: str, verb: str) -> None:
+def _still_referenced(
+    config: AddonsConfig, config_dir: Path, addons_dir: Path, addon_id: str, verb: str
+) -> None:
     """Refuse while the instance's own files name the add-on's namespace: with
     the add-on gone each would stop resolving, or be handed to the agent as
-    another tool's plugin skill."""
+    another tool's plugin skill. Refuse too while a connected repository's
+    library lists the add-on under `addons:`: its chains build on it."""
     try:
         locked = AddonsLock.load(config_dir / AddonsLock.FILE).addons.get(addon_id)
     except ConfigError as exc:
@@ -575,22 +578,33 @@ def _still_referenced(config: AddonsConfig, config_dir: Path, addon_id: str, ver
         for where, key, _kind, value in addon_update.references(config_dir)
         if value.split(":", 1)[0] == namespace
     ]
+    builds_on = addon_update.repo_library_dependents(
+        addon_id, load.installed(config_dir, addons_dir)
+    )
+    said = []
     if uses:
-        raise _refuse(
+        said.append(
             f"cannot {verb} {addon_id}: its namespace {namespace!r} is still referenced by\n  "
             + "\n  ".join(uses)
         )
+    if builds_on:
+        said.append(
+            f"cannot {verb} {addon_id}: a connected repository's repo library builds on it\n  "
+            + "\n  ".join(builds_on)
+        )
+    if said:
+        raise _refuse("\n".join(said))
 
 
 def _cmd_enable(ns: argparse.Namespace) -> None:
     _not_a_worker()
     on = ns.addon_verb == "enable"
-    config_dir, _addons_dir = flow.home()
+    config_dir, addons_dir = flow.home()
 
     def change(raw: dict, config: AddonsConfig) -> None:
         _installed_id(config, ns.addon)
         if not on:
-            _still_referenced(config, config_dir, ns.addon, "disable")
+            _still_referenced(config, config_dir, addons_dir, ns.addon, "disable")
         _long_entry(raw, ns.addon)["enabled"] = on
         _short_entry(raw, ns.addon)
 
@@ -601,7 +615,7 @@ def _cmd_enable(ns: argparse.Namespace) -> None:
 
 def _cmd_uninstall(ns: argparse.Namespace) -> None:
     _not_a_worker()
-    config_dir, _addons_dir = flow.home()
+    config_dir, addons_dir = flow.home()
     lock_file = config_dir / AddonsLock.FILE
     try:
         lock = read_yaml(lock_file, {})
@@ -613,7 +627,7 @@ def _cmd_uninstall(ns: argparse.Namespace) -> None:
         if ns.addon not in config.addons and not locked:
             raise _refuse(f"{ns.addon} is not installed")
         if ns.addon in config.addons:
-            _still_referenced(config, config_dir, ns.addon, "uninstall")
+            _still_referenced(config, config_dir, addons_dir, ns.addon, "uninstall")
         raw["addons"].pop(ns.addon, None)
 
     def drop_lock_entry() -> None:
@@ -625,7 +639,7 @@ def _cmd_uninstall(ns: argparse.Namespace) -> None:
             write_yaml(lock_file, current)
 
     _edit(change, drop_lock_entry)
-    addon_update.clear_status(_addons_dir, {ns.addon})
+    addon_update.clear_status(addons_dir, {ns.addon})
     _reload()
     common.emit({"uninstalled": ns.addon}, lambda v: f"uninstalled {ns.addon}", ns.json)
 
