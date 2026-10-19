@@ -1,5 +1,6 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { Inspector } from "../../graph/Inspector";
+import { hint } from "../../ui/Tooltip";
 import type { useResizable } from "../../graph/useResizable";
 import { Button } from "../../ui/Button";
 import { repoName } from "../../../format";
@@ -90,7 +91,6 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
   const removed = parentChain && path ? r.extending?.removed.find((g) => g.id === path) : undefined;
   const inherited = parentChain && path && !removed && !isAdded(r, scope, root) ? parentChain : null;
   const locked = inherited ? INHERITED(inherited) : undefined;
-  const lockedWhy = useReason(locked ?? null);
   const ctx: PaneCtx = { r, scope, path, draft, goTo };
   const own = authoredAt(r, scope, path);
   const res = resolvedAt(r, path) ?? own;
@@ -235,7 +235,8 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
       {moveWhat && <Button onClick={(e) => { at(e.currentTarget); setCard({ t: "move" }); }}>Move to library…</Button>}
       <span className="bp-gap" />
       {/* An inherited node is removed whole (`remove`); what is inside it is its parent's. */}
-      {removeLabel && inherited && path !== root && <>{lockedWhy.note}<Button variant="danger" disabled {...lockedWhy.attrs}>{removeLabel}</Button></>}
+      {/* The reason is the pane's own note above; on the button it is its description and hint. */}
+      {removeLabel && inherited && path !== root && <Button variant="danger" disabled {...hint(locked!)}>{removeLabel}</Button>}
       {removeLabel && !(inherited && path !== root) && <Button variant="danger" onClick={(e) => { at(e.currentTarget); setCard({ t: "remove" }); onMarking?.(refs.map((x) => x.node)); }}>{removeLabel}</Button>}
     </>
   );
