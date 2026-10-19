@@ -314,3 +314,25 @@ def test_an_extending_chain_fails_alone(tmp_path, case):
         assert "ghost" not in child[0].message
     else:
         assert "parent" in report.chains
+
+
+@pytest.mark.parametrize(
+    ("policy", "outcome"),
+    [
+        ({"deny_tools": ["Write"]}, {"deny_tools": {"Bash", "Write"}}),
+        ({"token_budget": 5000}, "token_budget: 5000 cannot exceed the parent's 1000"),
+        ({"allowed_tools": ["Read"]}, {"allowed_tools": {"Read"}}),
+        ({"allowed_tools": ["Read", "Bash"]}, "cannot widen the inherited safety ceiling"),
+    ],
+    ids=["drops-a-deny", "raises-a-cap", "narrows", "widens-allowed-tools"],
+)
+def test_an_extending_chains_policy_only_tightens(tmp_path, policy, outcome):
+    own = {"deny_tools": ["Bash"], "token_budget": 1000, "allowed_tools": ["Read", "Edit"]}
+    parent = {**PARENT, "policy": own}
+    child = {"extends": "parent", "policy": policy}
+    if isinstance(outcome, str):
+        assert outcome in refused(tmp_path, child, parent=parent)
+        return
+    resolved = resolve(tmp_path, child, parent=parent).chain.policy
+    for field, expected in outcome.items():
+        assert set(getattr(resolved, field)) == expected
