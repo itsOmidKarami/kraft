@@ -5,7 +5,15 @@ import json
 import socket
 
 import pytest
-from support.addons import AGENT, chain, instance, make_collection, publish
+from support.addons import (
+    AGENT,
+    accept_repo_library,
+    chain,
+    instance,
+    make_collection,
+    publish,
+    repo_with_library,
+)
 
 from kraft import cli, update
 from kraft.addons import fetch
@@ -390,6 +398,25 @@ def test_removing_a_referenced_addon_is_refused(installed, capsys, verb):
         assert _run(capsys, "enable", ID)[0] == 0 and installed.yaml()["addons"] == {ID: True}
 
 
+@pytest.mark.parametrize("verb", ["uninstall", "disable"])
+def test_removing_an_addon_a_repo_library_builds_on_is_refused(installed, capsys, tmp_path, verb):
+    app = repo_with_library(
+        tmp_path,
+        library={"addons": [ID], "tasks": {"base": AGENT}},
+        chains={"ship": {"extends": "release:ship"}},
+    )
+    accept_repo_library(installed.config, installed.addons, app, "app")
+    before = installed.written()
+
+    code, out = _run(capsys, verb, ID)
+
+    assert code != 0, out
+    assert f"cannot {verb} release@acme: a connected repository's repo library builds on it" in out
+    said = "repository app: .kraft/library.yaml lists release@acme under addons:; disconnect"
+    assert said in out and "is still referenced by" not in out, out
+    assert installed.written() == before and installed.reloads == []
+
+
 def test_removing_an_addon_a_chain_extends_is_refused(installed, capsys):
     write_yaml(installed.config / "chains" / "wraps.yaml", {"extends": "release:ship"})
     before = installed.written()
@@ -633,6 +660,20 @@ def _a_version_that_breaks_a_local_chain(home, tmp_path):
     return home.repo
 
 
+def _a_version_that_breaks_a_repo_library_chain(home, tmp_path):
+    """A connected repository's chain extends `release:ship`, which the new
+    version drops: a warning, not a problem, as the update holds for it."""
+    app = repo_with_library(
+        tmp_path,
+        library={"addons": [ID], "tasks": {"base": AGENT}},
+        chains={"ship": {"extends": "release:ship"}},
+    )
+    accept_repo_library(home.config, home.addons, app, "app")
+    publish(home.repo, "release", version="1.1.0", chains={})
+    (home.repo / "addons" / "release" / "chains" / "ship.yaml").unlink()
+    return home.repo
+
+
 def _a_skill_into_an_installed_addon(home, tmp_path):
     reaches = {**AGENT, "skill": "release:notes"}
     addon = {"deploy": {"library": {"tasks": {"base": reaches}}, "chains": {"go": chain("base")}}}
@@ -646,6 +687,11 @@ def _a_skill_into_an_installed_addon(home, tmp_path):
         (_another_collection_with_the_name, 1, "namespace 'release' is taken by release@acme"),
         (_an_addon_this_instance_cannot_meet, 1, "requires agent profile 'deep'"),
         (_a_version_that_breaks_a_local_chain, 1, "chain mine would stop resolving"),
+        (
+            _a_version_that_breaks_a_repo_library_chain,
+            0,
+            "warning: {repo}/addons/release: chain app:ship would stop resolving",
+        ),
         (_a_skill_into_an_installed_addon, 1, "names another installed Kraft add-on"),
     ],
     ids=[
@@ -653,6 +699,7 @@ def _a_skill_into_an_installed_addon(home, tmp_path):
         "namespace-taken",
         "requires-unmet",
         "breaks-a-chain",
+        "breaks-a-repo-library-chain",
         "dependency",
     ],
 )
@@ -664,7 +711,7 @@ def test_validate_against_a_kraft_home(installed, capsys, tmp_path, collection, 
 
     got, out = _run(capsys, "validate", str(path))
 
-    assert got == code and says in out, out
+    assert got == code and says.format(repo=path) in out, out
     assert "no Kraft home was used" not in out
     assert installed.written() == before and installed.reloads == []
 

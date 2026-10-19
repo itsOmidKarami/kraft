@@ -28,8 +28,10 @@ from kraft.templates.environment import Identifier, branch_name_problem
 #: A collection name, add-on name or alias: an `Identifier` short enough to be
 #: a directory name under `run/addons/`.
 Name = Annotated[Identifier, Field(max_length=64)]
-#: `<addon>@<collection>`.
-AddonId = Annotated[StrictStr, Field(pattern=r"^[a-z][a-z0-9_-]{0,63}@[a-z][a-z0-9_-]{0,63}$")]
+#: `<addon>@<collection>`. A repo library's `addons:` list (`update.problems`)
+#: and the library schema read the same pattern.
+ADDON_ID_PATTERN = r"^[a-z][a-z0-9_-]{0,63}@[a-z][a-z0-9_-]{0,63}$"
+AddonId = Annotated[StrictStr, Field(pattern=ADDON_ID_PATTERN)]
 #: A URL git clones: https without credentials, ssh, file, or scp-like
 #: `user@host:path`. Never the GitHub shorthand: `collection add owner/repo`
 #: writes https://github.com/owner/repo.git. No form may start with `-`.

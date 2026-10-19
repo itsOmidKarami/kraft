@@ -1719,6 +1719,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "addons": {
+      "description": "A repo library's .kraft/library.yaml only: the add-ons whose chains its chains extend, as <addon>@<collection>. Ignored in the instance's own library.yaml.",
+      "items": {
+        "pattern": "^[a-z][a-z0-9_-]{0,63}@[a-z][a-z0-9_-]{0,63}$",
+        "type": "string"
+      },
+      "type": "array"
+    },
     "nodes": {
       "additionalProperties": {
         "anyOf": [

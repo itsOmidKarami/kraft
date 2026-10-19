@@ -263,19 +263,55 @@ USES_ANOTHER_TOOLS_SKILL = (
 )
 
 
+#: A chain that reads nothing of an add-on's.
+LOCAL = (
+    "nodes:\n  - id: n\n    kind: exec\n    tasks:\n"
+    "      - {id: t, kind: agent, harness: codex, prompt: p}\n"
+)
+
+
+def _builds_on_release(st, tmp_path):
+    """A connected repository whose accepted library lists `release@acme`."""
+    from support.addons import AGENT, accept_repo_library, repo_with_library
+
+    app = repo_with_library(
+        tmp_path,
+        library={"addons": ["release@acme"], "tasks": {"base": AGENT}},
+        chains={"ship": {"extends": "release:ship"}},
+    )
+    accept_repo_library(st.templates_dir, st.run_dirs.addons, app, "app")
+    deps._reload_templates(st)
+
+
 @pytest.mark.parametrize(
     "chain_text, edit, says",
     [
         (USES_RELEASE, {"release@acme": False}, "chain mine would stop resolving"),
+        (
+            LOCAL,
+            {"release@acme": False},
+            "cannot disable release@acme: a connected repository's repo library builds on it\n"
+            "  repository app: .kraft/library.yaml lists release@acme under addons:",
+        ),
         (USES_ANOTHER_TOOLS_SKILL, {"tools@acme": True}, "chain mine would stop resolving"),
         (USES_RELEASE, {"release@acme": {"auto_update": True}}, None),
         (USES_RELEASE, {"release@acme": {"enabeld": False}}, "enabeld"),
     ],
-    ids=["breaks-a-chain", "captures-a-reference", "an-edit-that-unloads-nothing", "typo"],
+    ids=[
+        "breaks-a-chain",
+        "a-repo-library-builds-on-it",
+        "captures-a-reference",
+        "an-edit-that-unloads-nothing",
+        "typo",
+    ],
 )
-def test_an_addons_yaml_edit_is_checked(with_release, chain_text, edit, says):
-    """A hand edit is refused for what it would stop resolving, with the reason."""
+def test_an_addons_yaml_edit_is_checked(with_release, tmp_path, chain_text, edit, says):
+    """A hand edit is refused for what it would stop resolving, with the reason,
+    and, as `kraft admin addon disable` is, while a repo library builds on the
+    add-on it unloads."""
     st = with_release
+    if chain_text is LOCAL:
+        _builds_on_release(st, tmp_path)
     (st.templates_dir / "chains" / "mine.yaml").write_text(chain_text)
     deps._reload_templates(st)
     assert "mine" not in st.invalid_chains
