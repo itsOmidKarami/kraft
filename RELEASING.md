@@ -65,8 +65,9 @@ headline, since it now opens the release notes. You can add the label after
 merge, then dry-run again to check.
 
 A highlight can carry a picture under its bullet, indented after a blank line
-(CONTRIBUTING.md has the form). Only an image dropped into the description on
-GitHub may sit right under the bullet; a dropped video needs the blank line. The release points an image linked from `main`
+(CONTRIBUTING.md has the form). A Markdown image, or an image dropped into the
+description on GitHub, may also sit right under the bullet; a dropped video
+needs the blank line. The release points an image linked from `main`
 at the tag (`dev/release_artifacts.py pin-notes`), in the GitHub Release and
 both changelogs, so its notes keep the picture it shipped with.
 
