@@ -95,11 +95,21 @@ def release_impact(prs: list[dict]) -> str:
 
 #: A list item at the left margin: one of an entry's own bullets, not a nested one.
 _TOP_ITEM = re.compile(r"^(?:[-*+]|\d+[.)]) ")
-#: A line that ends the text of the bullet above it: a nested item, a fence, a
-#: Markdown image (`![…]`, or linked `[![…](…)](…)`), or a line that starts with
-#: an HTML tag (`<img>`, a centring `<p>` or `<div>`, `<picture>`, its closing
-#: tag), so the number stays on the words, never in or after a picture.
-_NOT_PROSE = re.compile(r"^\s*(?:[-*+] |\d+[.)] |```|~~~|!\[|\[!\[|</?[A-Za-z])")
+#: A line that ends the text of the bullet above it: a nested item, a fence, or a
+#: Markdown image (`![…]`, or linked `[![…](…)](…)`).
+_NOT_PROSE = re.compile(r"^\s*(?:[-*+] |\d+[.)] |```|~~~|!\[|\[!\[)")
+#: An HTML tag, for `_markup_only`.
+_TAG = re.compile(r"</?[A-Za-z][^>]*>")
+
+
+def _markup_only(line: str) -> bool:
+    """A line of HTML tags and nothing else, such as a picture's `<img>`, its
+    centring `<p>` or `<div>`, or a closing tag: it ends the bullet's words too.
+    A wrapped line that only starts with a tag (`<kbd>K</kbd> opens it.`) is
+    still words, and so is an autolink (`<https://…>`)."""
+    return line.lstrip().startswith("<") and not _TAG.sub("", line).strip()
+
+
 _FENCE = re.compile(r"^\s*(```|~~~)")
 
 
@@ -146,6 +156,7 @@ def changelog_entry(pr: dict) -> str:
             and lines[end + 1].strip()
             and not _TOP_ITEM.match(lines[end + 1])
             and not _NOT_PROSE.match(lines[end + 1])
+            and not _markup_only(lines[end + 1])
         ):
             end += 1
         lines[end] += f" (#{pr['number']})"

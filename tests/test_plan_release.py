@@ -139,6 +139,23 @@ def test_an_image_under_a_bullet_leaves_the_number_on_its_words(picture):
     )
 
 
+@pytest.mark.parametrize(
+    "wrapped",
+    [
+        pytest.param("<kbd>Ctrl</kbd>+<kbd>K</kbd> from any screen.", id="inline-tag"),
+        pytest.param("<https://kraft-sdlc.dev/> for the new home.", id="autolink"),
+        pytest.param("<b>everywhere</b> it applies.", id="emphasis"),
+    ],
+)
+def test_inline_html_on_a_wrapped_line_is_still_the_bullets_words(wrapped):
+    """Only a line of tags alone is a picture's; one that starts with a tag
+    and goes on in words is part of the bullet, so the number ends it."""
+    body = f"## Changelog\n\n- Search opens with\n  {wrapped}\n"
+    assert plan_release.changelog_entry(pr(9, "minor", body)) == (
+        f"- Search opens with\n  {wrapped} (#9)"
+    )
+
+
 def test_a_changelog_last_in_the_body_leaves_its_footer_out():
     """A body ending in `## Changelog` carries the attribution, the session's
     link and a `---` footer after it: none of them is a change."""

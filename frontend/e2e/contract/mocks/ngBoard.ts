@@ -149,11 +149,11 @@ export const NG_CHAINS = [
   { id: "default", nodes: v1(NG_NODES.map((n) => n.id)), gates: 4 },
   { id: "docs_only", nodes: v1(["spec", "spec_approval", "implementation", "work_brief", "merge_request"]), gates: 1 },
 ].map((c) => ({ ...c, gates: c.nodes.filter((n) => n.kind === "gate").length }));
+/** What ngDryRun reads of a node. Every recorded node has all four (`fix_loop` is null without a loop), so a
+ *  re-recording that drops one fails tsc. */
+type DryRunNode = { id: string; kind: string; covered_by: string | null; fix_loop: unknown };
 /** `team-default`, a chain that extends `default`: GET /templates/chains's entry for it, a real server's answer
  *  (draftViews.json). Every chain list lists it, so the composer can pick it and its dry run reads its own nodes. */
-/** What ngDryRun reads of a node. `id`, `kind` and `covered_by` are on every recorded node, so a re-recording
- *  that drops one fails tsc; `fix_loop` is on the nodes that have a loop only. */
-type DryRunNode = { id: string; kind: string; covered_by: string | null; fix_loop?: unknown };
 export const NG_EXTENDING_CHAIN = { ...draftViews.extending, nodes: draftViews.extending.nodes satisfies DryRunNode[] as DryRunNode[] };
 export const NG_REPOS = ["kraft-plugins", "kraft-core", "kraft-api", "kraft-vscode", "kraft-docs", "kraft-lite", "vendor-schemas"].map((name, i) => ({
   ...repo(R(name), i), id: name, enabled: true, default_chain: name === "kraft-docs" ? "docs_only" : "default",
