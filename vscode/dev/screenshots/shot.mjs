@@ -202,8 +202,12 @@ async function drive(app) {
     });
     // The whole window, then the clip cut from it: a clipped capture closes an open hover first.
     const full = await page.screenshot();
-    const k = (await sharp(full).metadata()).width / (await page.evaluate(() => window.innerWidth));
-    const [left, top, width, height] = [clip.x, clip.y, clip.width, clip.height].map((n) => Math.round(n * k));
+    const size = await sharp(full).metadata();
+    const k = size.width / (await page.evaluate(() => window.innerWidth));
+    const [left, top] = [clip.x, clip.y].map((n) => Math.round(n * k));
+    // Rounded apart, a clip that reaches the window's edge can end a pixel past it, which extract refuses.
+    const width = Math.min(Math.round(clip.width * k), size.width - left);
+    const height = Math.min(Math.round(clip.height * k), size.height - top);
     let img = sharp(await sharp(full).extract({ left, top, width, height }).toBuffer());
     const css = Math.round(clip.width);
     if (width > css) img = sharp(await img.resize({ width: css }).toBuffer());
