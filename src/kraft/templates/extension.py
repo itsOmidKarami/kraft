@@ -161,13 +161,13 @@ def _override(
                 "list it was in",
                 where,
             )
-        if fixed := _identity(value):
+        target = _at(root, paths[path])
+        if fixed := _identity(value, target):
             raise ExtensionError(
                 f"overrides.{path}: an override cannot set {', '.join(fixed)}; remove the "
                 "node and add one instead",
                 where,
             )
-        target = _at(root, paths[path])
         try:
             value = _tightened(target, value)
         except ExtensionError as exc:
@@ -181,14 +181,19 @@ def _override(
     return overridden
 
 
-def _identity(value: Mapping[str, object], prefix: str = "") -> list[str]:
-    """The `IDENTITY` keys `value` sets, at any depth of its mappings
-    (`fix_loop.judge.extends`). A list replaces whole and holds new
-    components, whose ids and parents are their own."""
+def _identity(
+    value: Mapping[str, object], target: Mapping[str, object], prefix: str = ""
+) -> list[str]:
+    """The `IDENTITY` keys `value` sets on `target`, the parent's component, or
+    on any component nested in it that `value` reaches through its mappings
+    (`fix_loop.judge.extends`). A slot the parent leaves empty (a gate with no
+    `auto_review`) takes a new component, whose id and parent are its own, as
+    a list that replaces whole does."""
     found = [f"{prefix}{key}" for key in IDENTITY if key in value]
     for key, item in value.items():
-        if isinstance(item, Mapping):
-            found += _identity(item, f"{prefix}{key}.")
+        held = target.get(key)
+        if isinstance(item, Mapping) and isinstance(held, Mapping):
+            found += _identity(item, held, f"{prefix}{key}.")
     return found
 
 

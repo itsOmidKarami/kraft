@@ -199,6 +199,7 @@ def test_an_extending_chain_holds_one_final_gate(tmp_path, case):
         "list-replaces",
         "tasks-replaces-steps",
         "replacement-list-is-expanded",
+        "fills-an-empty-slot",
     ],
 )
 def test_an_override_merges_like_extends(tmp_path, case):
@@ -224,6 +225,8 @@ def test_an_override_merges_like_extends(tmp_path, case):
         "list-replaces": {"build": replacement},
         "tasks-replaces-steps": {"staged": replacement},
         "replacement-list-is-expanded": {"build": replacement},
+        # `review` has no reviewer, so one is a new component, ids and parent its own.
+        "fills-an-empty-slot": {"review": {"auto_review": {"id": "reviewer", "extends": "other"}}},
     }[case]
     lib = library(tmp_path, {"extends": "parent", "overrides": overrides}, parent=parent)
     resolved = lib.resolve_chain("child")
@@ -238,6 +241,12 @@ def test_an_override_merges_like_extends(tmp_path, case):
         assert paths["build"] == ["build.main.u"]
     elif case == "tasks-replaces-steps":
         assert paths["staged"] == ["staged.main.u"]
+    elif case == "fills-an-empty-slot":
+        review = next(n for n in resolved.nodes if n.id == "review")
+        assert (review.auto_review.path, review.auto_review.task.prompt) == (
+            "review.auto_review",
+            "other",
+        )
     else:
         assert _task(resolved, "build.main.u").prompt == "other"
         assert "tasks.other" in lib.references("child")["build"]
@@ -252,7 +261,7 @@ def test_an_override_merges_like_extends(tmp_path, case):
         ({"build.main.t": {"extends": "other"}}, "cannot set extends"),
         ({"review": {"chain_finalized": True}}, "cannot set chain_finalized"),
         (
-            {"build": {"fix_loop": {"judge": {"extends": "other"}}}},
+            {"check": {"fix_loop": {"judge": {"extends": "other"}}}},
             "cannot set fix_loop.judge.extends",
         ),
         (
@@ -266,7 +275,16 @@ def test_an_override_merges_like_extends(tmp_path, case):
     ids=["id", "kind", "extends", "chain_finalized", "nested-extends", "under-a-replaced-list"],
 )
 def test_an_override_cannot_change_identity(tmp_path, overrides, why):
-    assert why in refused(tmp_path, {"extends": "parent", "overrides": overrides})
+    # `check` has a judge to swap; a slot the parent leaves empty is a new component's.
+    judged = node(
+        "check",
+        fix_loop={
+            "tasks": [{"id": "repair", "extends": "base"}],
+            "judge": {"id": "judge", "extends": "base"},
+        },
+    )
+    parent = {**PARENT, "nodes": [*PARENT["nodes"], judged]}
+    assert why in refused(tmp_path, {"extends": "parent", "overrides": overrides}, parent=parent)
 
 
 @pytest.mark.parametrize(

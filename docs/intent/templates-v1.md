@@ -601,12 +601,12 @@ origin: src/kraft/templates/extension.py §apply
 ## REQ an-extending-chains-override-merges-like-extends
 
 WHEN an extending chain overrides a path, the system SHALL merge the override onto that component by the `extends` merge rule, ancestor paths before descendant paths.
-enforced-by: tests/templates/test_extension.py::test_an_override_merges_like_extends[task-profile-displaces-model], tests/templates/test_extension.py::test_an_override_merges_like_extends[fix-loop-limit], tests/templates/test_extension.py::test_an_override_merges_like_extends[list-replaces], tests/templates/test_extension.py::test_an_override_merges_like_extends[tasks-replaces-steps], tests/templates/test_extension.py::test_an_override_merges_like_extends[replacement-list-is-expanded]
+enforced-by: tests/templates/test_extension.py::test_an_override_merges_like_extends[task-profile-displaces-model], tests/templates/test_extension.py::test_an_override_merges_like_extends[fix-loop-limit], tests/templates/test_extension.py::test_an_override_merges_like_extends[list-replaces], tests/templates/test_extension.py::test_an_override_merges_like_extends[tasks-replaces-steps], tests/templates/test_extension.py::test_an_override_merges_like_extends[replacement-list-is-expanded], tests/templates/test_extension.py::test_an_override_merges_like_extends[fills-an-empty-slot]
 origin: src/kraft/templates/extension.py §apply
 
 ## REQ an-extending-chains-override-keeps-identity
 
-IF an extending chain's override sets `id`, `kind`, `extends` or `chain_finalized` at any depth of its mappings, or sits under an ancestor override that replaces its list, THEN the system SHALL refuse it.
+IF an extending chain's override sets `id`, `kind`, `extends` or `chain_finalized` on the component it names, or on a component the parent already has at any depth of its mappings, or sits under an ancestor override that replaces its list, THEN the system SHALL refuse it.
 enforced-by: tests/templates/test_extension.py::test_an_override_cannot_change_identity[id], tests/templates/test_extension.py::test_an_override_cannot_change_identity[kind], tests/templates/test_extension.py::test_an_override_cannot_change_identity[extends], tests/templates/test_extension.py::test_an_override_cannot_change_identity[chain_finalized], tests/templates/test_extension.py::test_an_override_cannot_change_identity[nested-extends], tests/templates/test_extension.py::test_an_override_cannot_change_identity[under-a-replaced-list]
 origin: src/kraft/templates/extension.py §apply
 
