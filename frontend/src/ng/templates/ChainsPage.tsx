@@ -21,7 +21,7 @@ import * as api from "../../api";
 import { Button } from "../ui/Button";
 import { NOTHING_TO_PUBLISH } from "../ui/reasons";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
-import { authoredNodes, chainFile, counts, kindOf, liveChainId } from "./draft/view";
+import { authoredNodes, chainFile, counts, extendsOf, kindOf, liveChainId } from "./draft/view";
 import { addonRepo } from "../library/types";
 import { AddonBadge, ReadOnly } from "./addon";
 import { pathOf, selOf, type TSel } from "./sel";
@@ -290,6 +290,9 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const latest = useRef({ selPath, level: s.level, node: s.node });
   latest.current = { selPath, level: s.level, node: s.node };
   const nodes = authoredNodes(r, scope);
+  // An extending chain's canvas shows its resolved nodes and edits none: its
+  // edits are written in YAML until the editor knows them.
+  const parent = extendsOf(r, scope);
   const selNode = sel.kind === "chain" ? null : nodes.find((x) => x.id === sel.node);
   const isGate = !!selNode && sel.kind === "node" && kindOf(r, selNode) === "gate";
 
@@ -338,7 +341,13 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
           ? (addonRepo(addon) ? null : <Button variant="primary" onClick={() => setDupTick((k) => k + 1)}>Copy to my library</Button>)
           : <Button variant={review ? undefined : "primary"} disabled={!review && !view.draft} aria-describedby={view.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={review ? endReview : startReview}>{review ? "Back to editing" : REVIEW_AND_PUBLISH}</Button>}
       </HeaderActions>
+      {parent && s.level === "chain" && (
+        <div className="tpl-note" role="note">
+          {liveId} extends {parent}. Edit it in YAML; the canvas shows the resolved chain.
+        </div>
+      )}
       <div className={`tpl-area${s.level === "node" ? " has-strip" : ""}${s.level === "node" && selNode && kindOf(r, selNode) === "exec" ? " has-bottom" : ""}`}>
+        <ReadOnly.Provider value={readOnly || !!parent}>
         {s.level === "chain" ? (
           <ChainCanvas
             scope={scope}
@@ -423,6 +432,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             onLeave={() => dispatch({ type: "background" })}
           />
         )}
+        </ReadOnly.Provider>
         {surface === "yaml" && s.level === "chain" && !review && <YamlView draft={draft} scope={scope} published={published === undefined ? undefined : published?.text ?? null} />}
         {review ? (
           <ReviewPane

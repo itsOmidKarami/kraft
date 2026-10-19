@@ -27,8 +27,20 @@ export const scopeFile = (files: Record<string, unknown>, scope: Scope): string 
 /** The draft's authored mapping: a chain's file, or `library.yaml`; the last that parsed. */
 export const authoredChain = (r: Result, scope: Scope): Authored =>
   scope.area === "library" ? r.model[LIBRARY_FILE] ?? {} : r.model[liveChainFile(r.model, scope.key)] ?? r.model[chainFile(scope.key)] ?? {};
-/** A chain's node list; the library has none (its nodes are a mapping by name). */
-export const authoredNodes = (r: Result, scope: Scope): NodeA[] => (scope.area === "library" ? [] : (authoredChain(r, scope).nodes as NodeA[] | undefined) ?? []);
+/** The chain a chain draft extends, as written; undefined for one with its own `nodes`. */
+export const extendsOf = (r: Result, scope: Scope): string | undefined => {
+  if (scope.area === "library") return undefined;
+  const parent = authoredChain(r, scope).extends;
+  return typeof parent === "string" ? parent : undefined;
+};
+
+/** A chain's node list; the library has none (its nodes are a mapping by name). An
+ *  extending chain writes no `nodes`, so the canvas draws its resolved ones. */
+export const authoredNodes = (r: Result, scope: Scope): NodeA[] => {
+  if (scope.area === "library") return [];
+  if (extendsOf(r, scope)) return ((r.resolved?.chain?.nodes as NodeA[] | undefined) ?? []).map((n) => ({ id: n.id, kind: n.kind }));
+  return (authoredChain(r, scope).nodes as NodeA[] | undefined) ?? [];
+};
 
 /** `tasks:` is one step `main` (the model's own rule); every container gets `steps`. */
 export function normalise<T extends Authored>(c: T | null | undefined): (T & { steps: Step[] }) | null {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_VIEW } from "./fixture.default";
 import type { Result, Scope } from "./types";
-import { authoredAt, authoredNodes, changeAt, counts, kindOf, normalise, problemsAt, resolvedAt, resolvedNode, sourceRows, sourceWord, valueAt } from "./view";
+import { authoredAt, authoredNodes, changeAt, counts, extendsOf, kindOf, normalise, problemsAt, resolvedAt, resolvedNode, sourceRows, sourceWord, valueAt } from "./view";
 
 const R = DEFAULT_VIEW.result;
 const CHAIN: Scope = { area: "chains", key: "default" };
@@ -9,6 +9,16 @@ const LIB: Scope = { area: "library", key: "library" };
 const withR = (extra: Partial<Result>): Result => ({ ...R, ...extra });
 
 describe("draft view", () => {
+  it("draws an extending chain from its resolved nodes", () => {
+    const TEAM: Scope = { area: "chains", key: "team" };
+    const r = withR({ model: { "chains/team.yaml": { id: "team", extends: "default" } } });
+    expect(extendsOf(r, TEAM)).toBe("default");
+    const resolved = (R.resolved!.chain.nodes as { id: string }[]).map((n) => n.id);
+    expect(resolved.length).toBeGreaterThan(0);
+    expect(authoredNodes(r, TEAM).map((n) => n.id)).toEqual(resolved);
+    expect(extendsOf(R, CHAIN)).toBeUndefined();
+  });
+
   it("reads the nodes from the authored model, kinds from the resolved chain for an extends", () => {
     const nodes = authoredNodes(R, CHAIN);
     expect(nodes.map((n) => n.id)).toEqual(["spec", "spec_approval", "implementation", "verification", "local_review", "merge_request_feedback"]);

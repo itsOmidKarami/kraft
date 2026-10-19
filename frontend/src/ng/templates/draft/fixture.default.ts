@@ -2480,6 +2480,7 @@ export const DEFAULT_VIEW = {
   "changes": [],
   "impact": {
    "running": 0,
+   "extended_by": [],
    "repos": []
   },
   "policy_values": {

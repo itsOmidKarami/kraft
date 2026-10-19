@@ -547,3 +547,37 @@ async def test_move_to_library_moves_a_task_and_refuses_a_taken_name(st):
     assert r.problems == []
     why = refused(st, ("move_to_library", {"path": "spec", "name": "verification"}))
     assert "already taken" in why
+
+
+EXTENDING = "id: team\nextends: default\nremove: [external_approval]\n"
+
+
+def extending(st) -> ops.Draft:
+    return ops.Draft(st, "team", {"chains/team.yaml": EXTENDING}, exists=True)
+
+
+@pytest.mark.parametrize(
+    ("op", "fields"),
+    [
+        ("move", {"path": "spec", "to": 1}),
+        ("remove", {"path": "spec"}),
+        ("add_node", {"at": 0, "id": "lint", "kind": "exec"}),
+        ("set_field", {"path": "spec", "field": "icon", "value": "flag"}),
+        ("set_fragment", {"path": "spec", "yaml": "id: spec\n"}),
+    ],
+    ids=["move", "remove", "add_node", "set_field", "set_fragment"],
+)
+async def test_an_op_on_an_extending_chain_is_refused(st, op, fields):
+    draft = extending(st)
+    with pytest.raises(ops.OpError, match="team extends default; edit it in the YAML view"):
+        ops.apply(draft, [{"op": op, **fields}])
+    assert draft.finish()["chains/team.yaml"] == EXTENDING
+
+
+async def test_an_extending_chain_can_still_be_renamed_or_deleted(st):
+    renamed = extending(st)
+    ops.apply(renamed, [{"op": "rename", "path": "", "id": "crew"}])
+    assert "extends: default" in renamed.finish()["chains/crew.yaml"]
+    deleted = extending(st)
+    ops.apply(deleted, [{"op": "delete_chain"}])
+    assert deleted.finish()["chains/team.yaml"] is None

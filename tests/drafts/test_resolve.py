@@ -112,8 +112,8 @@ async def test_impact_counts_running_items_and_the_repos_that_default_to_the_cha
     (st.templates_dir / "repos.yaml").write_text(
         "repos:\n  - {path: /a, default_chain_template: quick-task}\n  - {path: /b}\n"
     )
-    assert resolve._impact(st, "quick-task") == {"running": 1, "repos": ["/a"]}
-    assert resolve._impact(st, "default") == {"running": 1, "repos": ["/b"]}
+    assert resolve._impact(st, "quick-task") == {"running": 1, "repos": ["/a"], "extended_by": []}
+    assert resolve._impact(st, "default") == {"running": 1, "repos": ["/b"], "extended_by": []}
 
 
 @pytest.mark.parametrize(
@@ -311,3 +311,27 @@ async def test_library_changes_carry_the_chains_each_reaches(st):
         ("tasks.describe_mr", ["default"]),
     ]
     assert result["impact"] == {"chains": ["default", "quick-task"], "repos": ["/a"]}
+
+
+@pytest.mark.parametrize("case", ["delete", "rename", "edit-breaks-a-child"])
+async def test_a_chain_others_extend_reports_them(st, templates_dir, case):
+    team = "id: team\nextends: default\nremove: [external_approval]\n"
+    (templates_dir / "chains" / "team.yaml").write_text(team)
+    st.library = TemplateLibrary.from_yaml_dir(templates_dir)
+    name = "chains/default.yaml"
+    published = resolve.published(templates_dir, [name])
+    text = published[name]
+    renamed = text.replace("id: default", "id: standard", 1)
+    files = {
+        "delete": {name: None},
+        "rename": {name: None, "chains/standard.yaml": renamed},
+        "edit-breaks-a-child": {
+            name: text.replace("- id: external_approval", "- id: outside_approval")
+        },
+    }[case]
+
+    result = resolve.resolve(st, "chains", "default", files, published)
+
+    messages = [p["message"] for p in result["problems"]]
+    assert any("chain team extends it" in m for m in messages), messages
+    assert result["impact"]["extended_by"] == ["team"]

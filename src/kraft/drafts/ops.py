@@ -200,6 +200,10 @@ class Draft:
 
     def nodes(self) -> list:
         self.chains_only("a node")
+        if (parent := _extending(self)) is not None:
+            # An extending chain holds no `nodes:`; writing one would make it
+            # a chain the resolver refuses.
+            raise OpError(f"{self.key} extends {parent}; edit it in the YAML view")
         if not isinstance(self.chain.get("nodes"), list):
             authored.put(self.chain, "", "nodes", [])
         return self.chain["nodes"]
@@ -1008,6 +1012,24 @@ def copy_component(d: Draft, ref: str, name: str) -> dict:
 
 
 #: Every op by name.
+#: The ops an extending chain still takes: they act on the chain as a whole,
+#: never on a node it inherits (`the-editor-leaves-an-extending-chain-to-yaml`).
+#: Renaming the chain itself (`rename` at `path: ""`) is one too.
+_WHOLE_CHAIN = frozenset({"new_chain", "delete_chain"})
+
+
+def _extending(d: Draft) -> str | None:
+    """The chain `d`'s chain extends, or None. A config area's draft
+    (`config_drafts`) runs through `apply` too, and holds no chain."""
+    if not isinstance(d, Draft) or d.file != authored.CHAIN:
+        return None
+    chain = d._chain
+    if not isinstance(chain, Mapping):
+        return None
+    parent = chain.get("extends")
+    return parent if isinstance(parent, str) else None
+
+
 OPS: dict[str, Callable[..., dict | None]] = {
     "add_node": add_node,
     "add_step": add_step,
@@ -1053,6 +1075,11 @@ def apply(d: Draft, ops: list, table: Mapping[str, Callable] = OPS) -> list[dict
                 raise OpError(f"no op {name!r}")
             fn = table[op["op"]]
             fields = {k: v for k, v in op.items() if k != "op"}
+            # The canvas edits `nodes:`, which an extending chain has none of:
+            # until the editor knows its edits, the YAML view is where it changes.
+            whole = op["op"] in _WHOLE_CHAIN or (op["op"] == "rename" and fields.get("path") == "")
+            if (parent := _extending(d)) is not None and not whole:
+                raise OpError(f"{d.key} extends {parent}; edit it in the YAML view")
             # Every way an op names where it acts.
             for address in ("path", "container", "node"):
                 _refuse_addon_address(d, fields.get(address))

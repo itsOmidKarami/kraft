@@ -221,6 +221,19 @@ describe("Chains page: the chain canvas", () => {
     expect(screen.queryByRole("complementary", { name: "Draft · 2 changes pane" })).toBeNull();
   });
 
+  it("shows an extending chain read-only on the canvas, editable in YAML", async () => {
+    vi.spyOn(api, "getTemplate").mockResolvedValue({ id: "default", file: "chains/default.yaml", text: "id: default\nextends: base\n", chain: {} });
+    vi.mocked(d.getDraft).mockImplementation(() => ok(view({ model: { "chains/default.yaml": { id: "default", extends: "base" } } })));
+    mount();
+    const g = await canvas();
+    expect(screen.getByRole("note")).toHaveTextContent("default extends base. Edit it in YAML");
+    expect(within(g).getByRole("button", { name: "verification, node" })).toBeInTheDocument();
+    expect(within(g).queryAllByRole("button", { name: "Add a node or gate here" })).toHaveLength(0);
+    await userEvent.click(screen.getByRole("button", { name: "YAML" }));
+    const yaml = screen.getByRole("region", { name: "chains/default.yaml, YAML" });
+    expect(within(yaml).getByRole("textbox")).not.toHaveAttribute("readonly");
+  });
+
   it("switches to the YAML view and back, and keeps you there while the YAML does not parse", async () => {
     vi.spyOn(api, "getTemplate").mockResolvedValue({ id: "default", file: "chains/default.yaml", text: "id: default\n", chain: {} });
     mount();

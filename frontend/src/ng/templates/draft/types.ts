@@ -87,7 +87,7 @@ export interface Result {
   problems: Problem[];
   sources: Record<string, Record<string, Source>>;
   changes: Change[];
-  impact: { running?: number; repos?: string[]; chains?: string[] };
+  impact: { running?: number; repos?: string[]; chains?: string[]; extended_by?: string[] };
   warnings: { file: string; message: string }[];
   policy_values: { auto_escalate_delay_s: number; auto_review_attempts: number };
   /** The closed sets a field takes its values from, by field (`catalogue.choices`). */
