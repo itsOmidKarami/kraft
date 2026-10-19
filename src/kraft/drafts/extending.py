@@ -15,6 +15,7 @@ from typing import Literal
 from kraft.drafts import authored, ops
 from kraft.drafts.ops import Draft, OpError, _check_id, _position
 from kraft.drafts.ops import _extending as parent_of
+from kraft.templates import catalogue
 from kraft.templates.extension import IDENTITY
 from kraft.templates.library import ComponentSource, Namespace, TemplateLibraryError, _Resolution
 from kraft.templates.models import PATH_SEPARATOR
@@ -439,6 +440,100 @@ def detach(d: Draft) -> dict:
     return {"detached_from": parent}
 
 
+# ── change base: the chain an extending chain follows ──
+
+
+def _new_parent(d: Draft, base: object) -> tuple[list[dict], set[str]]:
+    """Chain `base`'s expanded nodes and every canonical path in it, refusing a
+    base this chain may not extend: none, itself, one that extends it (a
+    cycle), or a repo library's."""
+    library = d.resolving_library()
+    if library is None or not isinstance(base, str) or base not in library.chain_ids:
+        raise OpError(f"there is no chain {base!r} to extend")
+    if base == d.key:
+        raise OpError(f"{d.key} can't extend itself")
+    name, seen = base, set()
+    while isinstance(name, str) and name in library.chain_ids and name not in seen:
+        if name == d.key:
+            raise OpError(f"{base} extends {d.key}, so {d.key} extending it would be a cycle")
+        seen.add(name)
+        name = library.chain_data(name).get("extends")
+    if why := catalogue.repo_library_copy(library, base):  # as new_chain refuses it
+        raise OpError(why)
+    raw = library._chains[base]
+    resolution = _Resolution(library, raw.source)
+    try:
+        expanded = resolution.expand_chain(raw.data)
+    except TemplateLibraryError as exc:
+        raise OpError(f"{base} does not resolve, so nothing can extend it: {exc}") from None
+    nodes = [n for n in expanded["nodes"] if isinstance(n, Mapping)]
+    return nodes, {located.path for located in resolution._located.values()}
+
+
+def chain_base_check(d: Draft, base: str) -> dict:
+    """Which of this chain's edits `base` can take, as `ops.base_check` says
+    which of a node's overrides a new library base can: each `remove`, `add`
+    and `overrides` entry, kept or dropped with why."""
+    nodes, paths = _new_parent(d, base)
+    ids = [n.get("id") for n in nodes]
+    final = {n.get("id") for n in nodes if n.get("kind") == "gate" and n.get("chain_finalized")}
+    kept: list[str] = []
+    dropped: list[dict] = []
+
+    def judge(key: str, why: str | None) -> None:
+        if why is None:
+            kept.append(key)
+        else:
+            dropped.append({"key": key, "why": why})
+
+    for id in _removed(d):
+        judge(
+            f"remove {id}",
+            f"{base} has no node {id}"
+            if id not in ids
+            else f"{id} is {base}'s final gate"
+            if id in final
+            else None,
+        )
+    for entry in d._chain.get("add") or ():
+        node = entry.get("node") if isinstance(entry, Mapping) else None
+        id = node.get("id") if isinstance(node, Mapping) else None
+        after = entry.get("after") if isinstance(entry, Mapping) else None
+        judge(
+            f"add {id}",
+            f"{base} already has a node {id}"
+            if id in ids
+            else f"{base} has no node {after} to add it after"
+            if after not in ids
+            else None,
+        )
+    for path in d._chain.get("overrides") or ():
+        judge(f"overrides {path}", None if path in paths else f"{base} has no {path}")
+    return {"kept": kept, "dropped": dropped}
+
+
+def change_chain_base(d: Draft, base: str) -> dict:
+    """Follow chain `base` in place of the parent: `extends` rewritten, and the
+    edits it can't take dropped, as `ops.change_base` drops the overrides a new
+    node base can't take. What is left must still resolve (`ops.apply`)."""
+    check = chain_base_check(d, base)
+    gone = {x["key"] for x in check["dropped"]}
+    if isinstance(d.chain.get("remove"), list):
+        d.chain["remove"] = [id for id in d.chain["remove"] if f"remove {id}" not in gone]
+        _prune(d, "remove")
+    if isinstance(d.chain.get("add"), list):
+        d.chain["add"] = [
+            e for e in d.chain["add"] if f"add {(e.get('node') or {}).get('id')}" not in gone
+        ]
+        _prune(d, "add")
+    if isinstance(d.chain.get("overrides"), dict):
+        for path in [p for p in d.chain["overrides"] if f"overrides {p}" in gone]:
+            del d.chain["overrides"][path]
+        _prune(d, "overrides")
+    authored.put(d.chain, "", "extends", base)
+    return check
+
+
 def expansion_error(d: Draft) -> str | None:
     """Why `d`'s chain does not expand (its edits don't apply to its parent),
     or None when it does."""
@@ -472,4 +567,6 @@ OPS = {
     "change_base": _in_added(ops.change_base, "node"),
     "set_fragment": _in_added(ops.set_fragment, "path"),
     "detach": detach,
+    "chain_base_check": chain_base_check,
+    "change_chain_base": change_chain_base,
 }

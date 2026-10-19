@@ -154,6 +154,16 @@ _IN_ITS_REPO = "edit it in that repository's .kraft/"
             id="repo-library-extend",
         ),
         pytest.param(
+            [
+                {"op": "new_chain", "extends": "default"},
+                {"op": "change_chain_base", "base": "app:ship"},
+            ],
+            "chains",
+            "mine",
+            f"app:ship is in app's repo library, visible only to items in app; {_IN_ITS_REPO}",
+            id="repo-library-base",
+        ),
+        pytest.param(
             {"op": "copy_component", "ref": "tasks.app:base", "name": "mine"},
             "library",
             "library",
@@ -172,7 +182,8 @@ _IN_ITS_REPO = "edit it in that repository's .kraft/"
 def test_a_repo_librarys_content_is_edited_in_its_repository(repo_library, op, kind, key, says):
     """Not copied into the instance's own library: that would make an
     instance-wide chain out of one repository's."""
-    answer = repo_library.post(f"/api/drafts/{kind}/{key}/ops", json={"ops": [op]})
+    ops = op if isinstance(op, list) else [op]
+    answer = repo_library.post(f"/api/drafts/{kind}/{key}/ops", json={"ops": ops})
 
     assert answer.status_code in (409, 422), answer.text
     assert answer.json()["detail"] == says

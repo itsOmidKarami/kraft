@@ -1070,6 +1070,16 @@ def detach(d: Draft) -> dict:
     raise OpError(f"{d.key} extends nothing, so there is nothing to detach")
 
 
+def chain_base_check(d: Draft, base: str) -> dict:
+    """Which edits a new parent keeps (`drafts.extending.chain_base_check`)."""
+    raise OpError(f"{d.key} extends nothing, so it has no base to change")
+
+
+def change_chain_base(d: Draft, base: str) -> dict:
+    """Follow another parent (`drafts.extending.change_chain_base`)."""
+    raise OpError(f"{d.key} extends nothing, so it has no base to change")
+
+
 def _extending(d: Draft) -> str | None:
     """The chain `d`'s chain extends, or None. A config area's draft
     (`config_drafts`) runs through `apply` too, and holds no chain."""
@@ -1104,6 +1114,8 @@ OPS: dict[str, Callable[..., dict | None]] = {
     "copy_component": copy_component,
     "restore": restore,
     "detach": detach,
+    "chain_base_check": chain_base_check,
+    "change_chain_base": change_chain_base,
 }
 
 

@@ -97,7 +97,7 @@ origin: src/kraft/drafts/extending.py §rename
 
 ## REQ a-new-chain-can-extend-a-chain
 
-WHEN `new_chain` names `extends`, the system SHALL write a chain holding only its id and that `extends`.
+WHEN `new_chain` names `extends` (the Extend choice of the editor's Duplicate or Add to my library), the system SHALL write a chain holding only its id and that `extends`.
 enforced-by: tests/drafts/test_extending.py::test_a_new_chain_can_extend_a_chain, tests/api/test_addon_content.py::test_a_new_chain_can_extend_an_addon_chain
 origin: src/kraft/drafts/ops.py §new_chain
 
@@ -178,3 +178,15 @@ origin: src/kraft/drafts/extending.py §_chain_field
 IF the editor removes a node an extending chain inherits while the chain overrides it, THEN the system SHALL refuse the op rather than drop the overrides.
 enforced-by: tests/drafts/test_extending.py::test_an_inherited_component_refuses_what_has_no_edit[remove-an-overridden-node]
 origin: src/kraft/drafts/extending.py §remove
+
+## REQ changing-an-extending-chains-base-keeps-what-fits
+
+WHEN the editor changes the chain an extending chain extends, the system SHALL keep each `remove`, `add` and `overrides` entry the new parent can take and SHALL drop each one it cannot, saying which and why.
+enforced-by: tests/drafts/test_extending.py::test_a_chain_base_check_says_which_edits_the_new_parent_takes, tests/drafts/test_extending.py::test_changing_a_chains_base_drops_the_edits_it_cant_take[as-filed], tests/drafts/test_extending.py::test_changing_a_chains_base_drops_the_edits_it_cant_take[with-an-override-it-cant-take]
+origin: src/kraft/drafts/extending.py §change_chain_base
+
+## REQ a-chains-new-base-is-one-it-may-extend
+
+IF the editor changes an extending chain's base to itself, to a chain that extends it, to no chain the library holds, or to a repo library's chain, THEN the system SHALL refuse the op.
+enforced-by: tests/drafts/test_extending.py::test_a_chains_base_is_one_it_may_extend[itself], tests/drafts/test_extending.py::test_a_chains_base_is_one_it_may_extend[cycle], tests/drafts/test_extending.py::test_a_chains_base_is_one_it_may_extend[unknown], tests/api/test_addon_content.py::test_a_repo_librarys_content_is_edited_in_its_repository[repo-library-base]
+origin: src/kraft/drafts/extending.py §_new_parent

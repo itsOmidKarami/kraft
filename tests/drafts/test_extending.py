@@ -440,3 +440,49 @@ async def test_detach_keeps_untouched_nodes_as_authored(st, key, node, expected)
         # Touched by `team`, the chain between: resolved too.
         implement = r.nodes["implementation"]["steps"][0]["tasks"][0]
         assert implement["prompt"] == "Implement it carefully."
+
+
+FIT = {
+    "kept": ["overrides implementation.main.implement"],
+    "dropped": [
+        {"key": "remove external_approval", "why": "quick-task has no node external_approval"},
+        {"key": "add security_scan", "why": "quick-task has no node verification to add it after"},
+    ],
+}
+
+
+async def test_a_chain_base_check_says_which_edits_the_new_parent_takes(st):
+    assert team(st, ("chain_base_check", {"base": "quick-task"})).answers == [FIT]
+
+
+#: An override quick-task has no path for: dropped with the rest.
+NO_PATH = ("set_field", {"path": "verification", "field": "policy.time_cap_minutes", "value": 30})
+
+
+@pytest.mark.parametrize("first", [[], [NO_PATH]], ids=["as-filed", "with-an-override-it-cant-take"])
+async def test_changing_a_chains_base_drops_the_edits_it_cant_take(st, first):
+    r = team(st, *first, ("change_chain_base", {"base": "quick-task"}))
+    dropped = [{"key": "overrides verification", "why": "quick-task has no verification"}]
+    assert r.answers[-1] == {**FIT, "dropped": FIT["dropped"] + (dropped if first else [])}
+    assert r.model == {
+        "id": "team",
+        "extends": "quick-task",
+        "overrides": {IMPLEMENT: {"prompt": "Implement it carefully."}},
+    }
+    assert r.resolved_order == apply_ops(st, key="quick-task").resolved_order
+
+
+@pytest.mark.parametrize(
+    ("base", "error"),
+    [
+        ("team", "can't extend itself"),
+        ("team2", "would be a cycle"),
+        ("nope", "there is no chain 'nope' to extend"),
+    ],
+    ids=["itself", "cycle", "unknown"],
+)
+async def test_a_chains_base_is_one_it_may_extend(st, base, error):
+    (st.templates_dir / "chains" / "team2.yaml").write_text(TEAM2)
+    st = draft_state(st.templates_dir, st.db)
+    for op in ("chain_base_check", "change_chain_base"):
+        assert error in no(st, (op, {"base": base}))
