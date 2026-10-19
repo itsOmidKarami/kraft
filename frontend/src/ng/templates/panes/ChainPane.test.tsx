@@ -5,7 +5,7 @@ import * as api from "../../../api";
 import type { ConfigDraft } from "../draft/useConfigDraft";
 import { DEFAULT_VIEW } from "../draft/fixture.default";
 import { EXT, EXTENDING_VIEW } from "../draft/fixture.extending";
-import { INHERITED } from "../../ui/reasons";
+import { INHERITED, INHERITED_NOTE } from "../../ui/reasons";
 import type { DraftView, Result } from "../draft/types";
 import { resolvedNode } from "../draft/view";
 import { ChainPane } from "./ChainPane";
@@ -410,7 +410,8 @@ describe("an extending chain", () => {
     expect(screen.getByRole("button", { name: "Remove node" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Move to library…" })).toBeNull();
     expect(screen.getByRole("button", { name: `Rename ${EXT.first}` })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText(INHERITED("default"))).toBeInTheDocument();
+    // Its fields stay editable, so the note says where a change goes, not only that it is locked.
+    expect(screen.getByText(INHERITED_NOTE("default"))).toBeInTheDocument();
   });
 
   it("refuses removing what is inside an inherited node, saying why", () => {
@@ -428,7 +429,7 @@ describe("an extending chain", () => {
     mount("security_scan", extra, EXTENDING_VIEW);
     expect(screen.getByRole("button", { name: "Move to library…" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Rename security_scan" })).toBeNull();
-    expect(screen.queryByText(INHERITED("default"))).toBeNull();
+    expect(screen.queryByText(INHERITED_NOTE("default"))).toBeNull();
   });
 
   it("resets every override of an inherited component", async () => {

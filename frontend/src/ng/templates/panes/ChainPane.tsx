@@ -5,7 +5,7 @@ import type { useResizable } from "../../graph/useResizable";
 import { Button } from "../../ui/Button";
 import { repoName } from "../../../format";
 import { useReason } from "../../ui/Reason";
-import { CHAIN_IN_USE, INHERITED } from "../../ui/reasons";
+import { CHAIN_IN_USE, INHERITED, INHERITED_NOTE } from "../../ui/reasons";
 import type { Scope } from "../draft/types";
 import type { ConfigDraft } from "../draft/useConfigDraft";
 import { authoredAt, authoredNodes, extendsOf, isAdded, liveChainId, nodeGlyph, normalise, problemsAt, resolvedAt, valueAt, type NodeA } from "../draft/view";
@@ -297,7 +297,8 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
       ) : shownTab === "config" ? <Config kind={d.kind} ctx={ctx} />
         : shownTab === "yaml" ? <ItemYaml key={path} draft={draft} scope={scope} path={path} extendsName={typeof own?.extends === "string" ? own.extends : undefined} locked={locked} />
           : <>
-            {locked && <p className="pane-note">{locked}</p>}
+            {/* Its fields are editable (each change an override); the controls it locks say why on themselves. */}
+            {inherited && <p className="pane-note">{INHERITED_NOTE(inherited)}</p>}
             {d.kind === "chain" && parentChain && (
               // The chain's relation to its parent, and the two ways to change it, as a node's "In the library" line.
               <div className="tpl-parent">
