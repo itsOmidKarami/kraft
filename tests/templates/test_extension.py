@@ -336,3 +336,41 @@ def test_an_extending_chains_policy_only_tightens(tmp_path, policy, outcome):
     resolved = resolve(tmp_path, child, parent=parent).chain.policy
     for field, expected in outcome.items():
         assert set(getattr(resolved, field)) == expected
+
+
+def test_an_extending_chain_pins_its_ancestors(tmp_path):
+    """Nothing in the add-on's chain names `acme`: only the chain it is does."""
+    inline = {"nodes": [{"id": "n", "kind": "exec", "tasks": [{**AGENT, "id": "t"}]}]}
+    addon = installed(tmp_path, "acme", library={"tasks": {}}, chains={"inline": inline})
+    chains = {"middle": {"extends": "acme:inline"}, "child": {"extends": "middle"}}
+    root = home(tmp_path, chains=chains)
+    resolved = TemplateLibrary.from_yaml_dir(root, addons=[addon]).resolve_chain("child")
+    assert list(resolved.addons) == ["acme"]
+
+
+def test_a_resolved_node_says_where_it_came_from(tmp_path):
+    lib = library(
+        tmp_path,
+        {
+            "extends": "parent",
+            "remove": ["after"],
+            "add": [{"after": "build", "node": node("lint")}],
+            "overrides": {"build.main.t": {"prompt": "built"}},
+        },
+        extra={"grandchild": {"id": "grandchild", "extends": "child"}},
+    )
+    assert lib.provenance("child") == {
+        "parent": "parent",
+        "nodes": {
+            "build": "overridden",
+            "lint": "added",
+            "review": "inherited",
+            "ship": "inherited",
+            "final": "inherited",
+        },
+        "overrides": {"build": ["build.main.t"]},
+        "removed": ["after"],
+    }
+    assert lib.provenance("parent") is None
+    assert lib.extended_by("parent") == ("child", "grandchild")
+    assert lib.extended_by("child") == ("grandchild",)

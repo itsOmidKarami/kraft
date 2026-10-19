@@ -553,6 +553,30 @@ class TemplateLibrary:
         `{path, overrides, via?}` (`_Resolution.usages`)."""
         return self._expansion(id).usages
 
+    def provenance(self, id: str) -> dict[str, object] | None:
+        """For an extending chain: its parent, each resolved node's origin
+        (`inherited`, `added`, `overridden`), the override paths per node, and
+        the parent nodes it removed (`a-resolved-node-says-where-it-came-from`).
+        None for a chain that extends none. Computed, never stored."""
+        return self._expansion(id).provenance
+
+    def extended_by(self, id: str) -> tuple[str, ...]:
+        """Every chain whose `extends` reaches `id`, directly or through a chain
+        between, by id. Read from the files as written, so a child that does not
+        resolve is still listed."""
+        out = []
+        for other, raw in self._chains.items():
+            seen: set[str] = set()
+            name = raw.data.get("extends")
+            while isinstance(name, str) and name not in seen:
+                if name == id:
+                    out.append(other)
+                    break
+                seen.add(name)
+                parent = self._chains.get(name)
+                name = parent.data.get("extends") if parent is not None else None
+        return tuple(sorted(out))
+
     def _expansion(self, id: str) -> _Resolution:
         resolution = _Resolution(self, self._chains[id].source)
         try:
@@ -718,7 +742,7 @@ class TemplateLibrary:
                 for task in node.tasks()
                 for name in task.task.steering
             },
-            addons=self._pins(id, resolved),
+            addons=self._pins(id, resolved, resolution.ancestors),
         )
 
     def _fallback_profiles(self, chain: object) -> list[str]:
@@ -747,13 +771,17 @@ class TemplateLibrary:
                     pending.append(name)
         return reached
 
-    def _pins(self, id: str, resolved: ResolvedChain) -> dict[str, dict[str, str | None]]:
+    def _pins(
+        self, id: str, resolved: ResolvedChain, ancestors: Sequence[str] = ()
+    ) -> dict[str, dict[str, str | None]]:
         """The loaded add-ons chain `id` reads anything from: the chain itself,
-        a component it extends or selects, or a skill or agent profile one of
+        every chain it extends (`an-extending-chain-pins-its-ancestors`), a
+        component it extends or selects, or a skill or agent profile one of
         its tasks names."""
         data = resolved.chain.model_dump(mode="json")
         named = {
             id,
+            *ancestors,
             *(name.partition(".")[2] for names in self.references(id).values() for name in names),
             *_qualified_names(data),
             *self._fallback_profiles(data),
