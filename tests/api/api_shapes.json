@@ -493,6 +493,8 @@
      "addon": "_",
      "description": "_",
      "error": "_",
+     "extended_by": [],
+     "extends": "_",
      "gates": "_",
      "id": "_",
      "nodes": [

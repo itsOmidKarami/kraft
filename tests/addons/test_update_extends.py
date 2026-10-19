@@ -50,9 +50,7 @@ def test_an_update_that_breaks_an_extending_chain_is_refused(tmp_path, mine, shi
     result = _update(home)
 
     assert result.outcome == "refused"
-    assert any("chain mine would stop resolving" in why for why in result.problems), (
-        result.problems
-    )
+    assert any("chain mine would stop resolving" in why for why in result.problems), result.problems
 
 
 def test_the_review_shows_what_an_extending_chain_will_run(tmp_path):

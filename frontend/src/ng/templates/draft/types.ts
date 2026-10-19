@@ -61,6 +61,18 @@ export interface ResolvedView {
   nodes: { id: string; kind: "exec" | "gate"; icon: string | null }[];
   /** Per gate, the document kinds the exec nodes before it produce. */
   documents: Record<string, string[]>;
+  /** For a chain that extends another, where each node came from; null otherwise. */
+  provenance?: Provenance | null;
+}
+
+/** `TemplateLibrary.provenance`: an extending chain's nodes against its parent's. */
+export interface Provenance {
+  parent: string;
+  nodes: Record<string, "inherited" | "added" | "overridden">;
+  /** Per node id, the override paths at or under it. */
+  overrides: Record<string, string[]>;
+  /** The parent's nodes this chain removes. */
+  removed: string[];
 }
 
 /** A builtin task's `ref`, a forge task's `target` (`waits`: it runs as an

@@ -744,7 +744,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if (p === "/harnesses/providers") return json(DRAFTS.providers);
     if (p === "/drafts") return json([...areas.list(), ...["default", "broken", "yaml-error", "stale"].map((key) => ({ area: "chains", key, files: [`chains/${key}.yaml`], changes: 1, problems: key === "broken" ? 1 : 0, updated_at: "2026-10-01T09:12:00Z" }))]);
     // `_chain_summary`'s other keys: no add-on, no description, it resolves, no node linked to a library component.
-    if (p === "/templates/chains") return json(opts.ngBoard ? NG_CHAINS.map((c) => ({ addon: null, description: null, error: null, uses: {}, ...c })) : st.templates);
+    if (p === "/templates/chains") return json(opts.ngBoard ? NG_CHAINS.map((c) => ({ addon: null, description: null, error: null, uses: {}, extends: null, extended_by: [], ...c })) : st.templates);
     if (p === "/templates/parse") return json({ nodes: st.templates[0]?.nodes ?? [], error: null });
     if ((m = p.match(/^\/templates\/([^/]+)\/validate$/))) return json({ id: m[1], valid: true, error: null, unresolved: [] });
     /* the steering preview (B23): one agent task's launch context, section by section */
@@ -758,7 +758,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if ((m = p.match(/^\/templates\/chains\/([^/]+)\/resolved$/))) {
       const tpl = st.templates.find((x) => x.id === decodeURIComponent(m![1]));
       if (!tpl) return json({ detail: `unknown chain template ${JSON.stringify(m[1])}` }, 404);
-      return json({ id: tpl.id, chain: { nodes: tpl.nodes }, task_paths: [], steering: {}, nodes: tpl.nodes });
+      return json({ id: tpl.id, chain: { nodes: tpl.nodes }, task_paths: [], steering: {}, nodes: tpl.nodes, provenance: null });
     }
     if ((m = p.match(/^\/templates\/chains\/([^/]+)$/))) {
       // For the Chains editor, `default` is the real shipped file, the draft views' published side.

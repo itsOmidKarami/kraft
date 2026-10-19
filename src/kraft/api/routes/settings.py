@@ -48,13 +48,18 @@ def _chain_summary(library: TemplateLibrary, id: str) -> dict:
     listed with its error rather than dropped, so the Chains screen can still
     open it to fix it. `uses` names, per node id, the library components that
     node is built from, which is what the screen links each node to.
-    `description` is read as authored, so a broken chain still shows it."""
+    `description` is read as authored, so a broken chain still shows it, and
+    so are `extends`, the chain this one builds on, and `extended_by`, every
+    chain whose `extends` reaches this one."""
     uses = {node: sorted(refs) for node, refs in library.references(id).items() if refs}
-    description = library.chain_data(id).get("description")
+    data = library.chain_data(id)
+    description, parent = data.get("description"), data.get("extends")
     listed = {
         "id": id,
         "description": description if isinstance(description, str) else None,
         "addon": catalogue.addon_view(library, id),
+        "extends": parent if isinstance(parent, str) else None,
+        "extended_by": list(library.extended_by(id)),
     }
     try:
         nodes = [store.node_view(n) for n in library.resolve_chain(id).nodes]
@@ -151,7 +156,7 @@ async def put_library(body: LibraryText, request: Request):
 # library the daemon is running (`st.library`).
 
 
-def _resolved_view(chain: ResolvedChain) -> dict:
+def _resolved_view(chain: ResolvedChain, provenance: dict | None = None) -> dict:
     """A resolved chain as the API shows it: the chain with `extends` expanded
     -- what the author wrote plus what it inherited, no defaults filled in --
     its canonical task paths, the steering text it selects, and the nodes in
@@ -159,7 +164,9 @@ def _resolved_view(chain: ResolvedChain) -> dict:
     no attachment trim (`resolved-template-is-deterministic`).
 
     `documents` lists, per gate, the kinds the execution nodes before it
-    produce, in chain order: what that gate's `artifact` can name."""
+    produce, in chain order: what that gate's `artifact` can name.
+    `provenance` is `TemplateLibrary.provenance`: for a chain that extends
+    another, where each node came from; None for one that extends none."""
     documents: dict[str, list[str]] = {}
     produced: list[str] = []
     for node in chain.nodes:
@@ -174,6 +181,7 @@ def _resolved_view(chain: ResolvedChain) -> dict:
         "steering": chain.steering or {},
         "nodes": [store.node_view(n) for n in chain.nodes],
         "documents": documents,
+        "provenance": provenance,
     }
 
 
@@ -200,7 +208,7 @@ async def get_resolved_template(tid: str, request: Request):
     if tid not in library.chain_ids:
         raise HTTPException(404, f"unknown chain {tid!r}")
     try:
-        return _resolved_view(library.resolve_chain(tid))
+        return _resolved_view(library.resolve_chain(tid), library.provenance(tid))
     except TemplateLibraryError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -331,7 +339,7 @@ async def resolve_templates(body: ResolveBody, request: Request):
     chains = []
     for id in ids:
         try:
-            chains.append(_resolved_view(library.resolve_chain(id)))
+            chains.append(_resolved_view(library.resolve_chain(id), library.provenance(id)))
         except TemplateLibraryError as exc:
             issues.append(TemplateIssue.from_error(_UNSAVED, id, exc))
     return {"chains": chains, "issues": [positions.issue_view(i) for i in issues]}

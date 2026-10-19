@@ -47,10 +47,26 @@ def _cmd_lint(ns: argparse.Namespace) -> None:
 def _cmd_show(ns: argparse.Namespace) -> None:
     if ns.resolved:
         payload = asyncio.run(client.resolved_template(ns.template_id))
-        common.emit(payload, lambda p: yaml.safe_dump(p["chain"], sort_keys=False), ns.json)
+        common.emit(payload, _render_resolved, ns.json)
     else:
         payload = asyncio.run(client.template(ns.template_id))
         common.emit(payload, _render_chain_text, ns.json)
+
+
+def _render_resolved(payload: dict) -> str:
+    """The resolved chain as YAML; an extending chain's headed by where each
+    node came from, as comments, so the YAML still loads."""
+    text = yaml.safe_dump(payload["chain"], sort_keys=False).rstrip("\n")
+    provenance = payload.get("provenance")
+    if not provenance:
+        return text
+    lines = [f"# extends {provenance['parent']}"]
+    for node in payload["chain"]["nodes"]:
+        paths = provenance["overrides"].get(node["id"], [])
+        how = provenance["nodes"][node["id"]] + (f" ({', '.join(paths)})" if paths else "")
+        lines.append(f"#   {node['id']}: {how}")
+    lines += [f"#   {id}: removed" for id in provenance["removed"]]
+    return "\n".join([*lines, text])
 
 
 def _render_chain_text(payload: dict) -> str:

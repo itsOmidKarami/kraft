@@ -139,7 +139,16 @@ def test_resolved_shows_a_saved_chain_expanded_and_not_materialized(client):
     assert body["task_paths"][:2] == ["spec.main.author", "plan.main.author"]
     # Not materialized: no target, no policy, and the gates an attachment
     # would satisfy are still in the chain.
-    assert set(body) == {"id", "chain", "task_paths", "steering", "nodes", "documents"}
+    assert set(body) == {
+        "id",
+        "chain",
+        "task_paths",
+        "steering",
+        "nodes",
+        "documents",
+        "provenance",
+    }
+    assert body["provenance"] is None
     assert {"spec_approval", "plan_approval"} <= {n["id"] for n in body["chain"]["nodes"]}
 
 
@@ -346,3 +355,12 @@ def test_with_no_library_loaded_the_library_reads_are_503(tmp_path, monkeypatch)
     assert "library.yaml" in saved.json()["detail"]
     assert alone.status_code == 200
     assert [c["id"] for c in alone.json()["chains"]] == ["solo"]
+
+
+def test_the_resolved_chain_marks_where_each_node_came_from(client):
+    candidate = {"id": "team", "extends": "default", "remove": ["external_approval"]}
+    body = client.post("/api/templates/resolve", json={"chain": candidate}).json()
+    [resolved] = body["chains"]
+    assert resolved["provenance"]["parent"] == "default"
+    assert resolved["provenance"]["removed"] == ["external_approval"]
+    assert set(resolved["provenance"]["nodes"].values()) == {"inherited"}

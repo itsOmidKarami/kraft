@@ -210,7 +210,7 @@ def _chains(st, key: str, raw: dict, files: dict, published: dict) -> dict:
         # An add-on's chain is read-only and already in the library: resolved
         # as loaded, never re-added as a local chain (its id has a `:`).
         try:
-            resolved = settings._resolved_view(library.resolve_chain(key))
+            resolved = settings._resolved_view(library.resolve_chain(key), library.provenance(key))
         except TemplateLibraryError as exc:
             problems = [{**_not_a_mapping(name), "message": str(exc)}]
     elif data is not None:
@@ -226,7 +226,7 @@ def _chains(st, key: str, raw: dict, files: dict, published: dict) -> dict:
             except TemplateLibraryError:
                 pass
             else:
-                resolved = settings._resolved_view(chain)
+                resolved = settings._resolved_view(chain, candidate.provenance(id))
                 sources = _sources(
                     authored.normalise(copy.deepcopy(data)),
                     _library_model(st, files),

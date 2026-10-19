@@ -117,6 +117,10 @@ export interface TemplateSummary {
   /** Per node id, the library components that node is built from
    *  (`tasks.implementer`). A node that uses none is absent. */
   uses?: Record<string, string[]>;
+  /** The chain this one extends, as written; null for a chain with its own `nodes`. */
+  extends?: string | null;
+  /** Every chain whose `extends` reaches this one, directly or through a chain between. */
+  extended_by?: string[];
 }
 
 /** The add-on a chain or library component is loaded from. */

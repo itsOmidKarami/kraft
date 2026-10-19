@@ -107,3 +107,25 @@ def test_a_field_named_required_survives_the_authored_transform():
     out = config_schemas.authored(schema)
     assert out["properties"]["required"] == {"type": "boolean"}
     assert "required" not in out
+
+
+@pytest.mark.parametrize(
+    ("chain", "valid"),
+    [
+        (
+            {
+                "id": "team",
+                "extends": "default",
+                "remove": ["x"],
+                "overrides": {"a.main.t": {"model": "m"}},
+            },
+            True,
+        ),
+        ({"id": "team", "extends": "default", "nodes": [{"id": "n", "kind": "gate"}]}, False),
+        ({"id": "team", "remove": ["x"], "nodes": [{"id": "n", "kind": "gate"}]}, False),
+    ],
+    ids=["extending", "extends-and-nodes", "edits-without-extends"],
+)
+def test_the_chain_schema_takes_an_extending_chain(chain, valid):
+    errors = list(validator("chain.schema.json").iter_errors(chain))
+    assert (not errors) is valid, errors

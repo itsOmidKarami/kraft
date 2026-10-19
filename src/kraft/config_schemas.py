@@ -26,6 +26,7 @@ from kraft import config as config_mod
 from kraft import detect as detect_mod
 from kraft import policy as policy_mod
 from kraft.addons.config import AddonsConfig
+from kraft.templates import extension
 from kraft.templates import models as models_mod
 from kraft.templates.environment import AgentProfileInput, HarnessProfileInput
 
@@ -96,7 +97,25 @@ def _file(title: str, properties: dict, models: list[type[BaseModel]], *, closed
 
 
 def chain_schema() -> dict:
-    return authored(_model(models_mod.Chain, "Kraft chain"))
+    """A chain file: its own `nodes`, or `extends` and the edits
+    (`templates.extension`), never both."""
+    schema = authored(_model(models_mod.Chain, "Kraft chain"))
+    edits = authored(extension.Edits.model_json_schema())
+    schema["$defs"].update(edits.pop("$defs", {}))
+    schema["properties"]["extends"] = {
+        "type": "string",
+        "description": "The chain this one builds on: a local chain's id or an add-on's `ns:id`.",
+    }
+    schema["properties"].update(edits["properties"])
+    # `authored()` already dropped every `required`, `nodes` included.
+    schema["oneOf"] = [
+        {
+            "required": ["nodes"],
+            "not": {"anyOf": [{"required": [k]} for k in ("extends", *extension.EDIT_KEYS)]},
+        },
+        {"required": ["extends"], "not": {"required": ["nodes"]}},
+    ]
+    return schema
 
 
 def library_schema() -> dict:

@@ -1,5 +1,22 @@
 {
   "$defs": {
+    "Added": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "After",
+          "type": "string"
+        },
+        "node": {
+          "additionalProperties": true,
+          "title": "Node",
+          "type": "object"
+        }
+      },
+      "title": "Added",
+      "type": "object"
+    },
     "AgentInput": {
       "description": "What Kraft hands an agent task beyond its prompt, when the task asks for\nit by name. Declared on the task rather than keyed on a task's name or\nrole, which is the indirection V1 deletes (Ruling 47).\n\n* `review_package` -- the change under review written out to a file, its\n  path in `$KRAFT_REVIEW_PACKAGE`: the whole branch since `base_ref`, then\n  from a task's second session on only what changed since its previous\n  one (`review-package-is-delivered-to-a-task-that-declares-it`).\n* `carried_findings` -- the findings the node's last measurement reported,\n  each with its stable tag, so a reworded repeat can be reported as the\n  same finding (`carried-findings-are-delivered-to-a-reviewing-task`).\n* `previous_review` -- the task's own previous completed session's result\n  file and summary, by path\n  (`continuity-note-is-delivered-to-a-resumed-reviewer`).",
       "enum": [
@@ -1686,7 +1703,55 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One authored chain file, after `extends` expansion. `id` is optional\nbecause `POST /templates/resolve` accepts an unsaved candidate; a chain\nloaded from disk always has one.",
+  "oneOf": [
+    {
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "extends"
+            ]
+          },
+          {
+            "required": [
+              "remove"
+            ]
+          },
+          {
+            "required": [
+              "add"
+            ]
+          },
+          {
+            "required": [
+              "overrides"
+            ]
+          }
+        ]
+      },
+      "required": [
+        "nodes"
+      ]
+    },
+    {
+      "not": {
+        "required": [
+          "nodes"
+        ]
+      },
+      "required": [
+        "extends"
+      ]
+    }
+  ],
   "properties": {
+    "add": {
+      "items": {
+        "$ref": "#/$defs/Added"
+      },
+      "title": "Add",
+      "type": "array"
+    },
     "description": {
       "anyOf": [
         {
@@ -1698,6 +1763,10 @@
       ],
       "default": null,
       "title": "Description"
+    },
+    "extends": {
+      "description": "The chain this one builds on: a local chain's id or an add-on's `ns:id`.",
+      "type": "string"
     },
     "id": {
       "anyOf": [
@@ -1727,6 +1796,14 @@
       "title": "Nodes",
       "type": "array"
     },
+    "overrides": {
+      "additionalProperties": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Overrides",
+      "type": "object"
+    },
     "policy": {
       "anyOf": [
         {
@@ -1737,6 +1814,14 @@
         }
       ],
       "default": null
+    },
+    "remove": {
+      "items": {
+        "pattern": "^[a-z][a-z0-9_-]*$",
+        "type": "string"
+      },
+      "title": "Remove",
+      "type": "array"
     }
   },
   "title": "Kraft chain",
