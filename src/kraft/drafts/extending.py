@@ -20,6 +20,19 @@ from kraft.templates.library import ComponentSource, Namespace, TemplateLibraryE
 from kraft.templates.models import PATH_SEPARATOR
 
 Owner = Literal["chain", "added", "inherited", "removed"]
+#: What an extending chain sets on itself; its parent and edits are the YAML view's.
+CHAIN_FIELDS = ("description", "policy")
+
+
+def _chain_field(d: Draft, field: str | None) -> None:
+    """Refuse a write to the chain itself other than `CHAIN_FIELDS`: `extends`,
+    `remove`, `add` and `overrides` are what the other ops write, and changing
+    one by hand could leave the edits without a parent."""
+    if field is None or field.split(PATH_SEPARATOR)[0] not in CHAIN_FIELDS:
+        raise OpError(
+            f"{d.key} extends {parent_of(d)}: on the chain itself only "
+            f"{' and '.join(CHAIN_FIELDS)} change here; edit the rest in the YAML view"
+        )
 
 
 def _inherited_message(d: Draft, path: str) -> str:
@@ -119,6 +132,8 @@ def add_node(d: Draft, at: int, id: str, kind: str) -> None:
 
 
 def move(d: Draft, path: str, to: int, to_step: str | None = None) -> None:
+    if not path:
+        raise OpError("no node ''")
     if PATH_SEPARATOR in path or to_step is not None:
         return _inside(d, path, ops.move, path=path, to=to, to_step=to_step)
     if owner(d, path) != "added":
@@ -140,6 +155,8 @@ def move(d: Draft, path: str, to: int, to_step: str | None = None) -> None:
 
 
 def remove(d: Draft, path: str) -> dict:
+    if not path:
+        raise OpError("no node ''")
     if PATH_SEPARATOR in path:
         return _inside(d, path, ops.remove, path=path)
     who = owner(d, path)
@@ -158,6 +175,10 @@ def remove(d: Draft, path: str) -> dict:
     adds = [e for e in d._chain.get("add") or () if isinstance(e, dict)]
     if follows := [(e.get("node") or {}).get("id") for e in adds if e.get("after") == path]:
         raise OpError(f"can't remove {path}: {follows[0]} goes after it; move {follows[0]} first")
+    # Its overrides would name a removed node; dropping them silently loses work.
+    overrides = d._chain.get("overrides")
+    if any(k == path or str(k).startswith(f"{path}{PATH_SEPARATOR}") for k in overrides or ()):
+        raise OpError(f"{path} has overrides; reset them first")
     if broken:
         ref = broken[0]
         raise OpError(
@@ -185,7 +206,9 @@ def _inside(d: Draft, address: str, fn, /, **fields):
     """`fn` on a component the file holds (the chain, or a node it adds); a
     refusal naming the way out otherwise."""
     who = owner(d, address)
-    if who in ("chain", "added"):
+    if who == "chain":
+        raise OpError(f"{d.key} extends {parent_of(d)}; change the chain itself in the YAML view")
+    if who == "added":
         return fn(d, **fields)
     if who == "removed":
         raise OpError(f"{address.split(PATH_SEPARATOR)[0]} is removed; restore it first")
@@ -267,7 +290,10 @@ def set_field(d: Draft, path: str, field: str, value: object) -> None:
         raise OpError(
             f"{path}'s {field} would name {value}, which this chain removes; restore it first"
         )
-    if owner(d, path) in ("chain", "added"):
+    who = owner(d, path)
+    if who == "chain":
+        _chain_field(d, field)
+    if who in ("chain", "added"):
         return ops.set_field(d, path, field, value)
     _writable(d, path)
     # Item 1 refuses an identity key at any depth of an override.
@@ -296,7 +322,10 @@ def set_field(d: Draft, path: str, field: str, value: object) -> None:
 
 
 def reset_field(d: Draft, path: str, field: str | None = None) -> None:
-    if owner(d, path) in ("chain", "added"):
+    who = owner(d, path)
+    if who == "chain":
+        _chain_field(d, field)
+    if who in ("chain", "added"):
         return ops.reset_field(d, path, field)
     _writable(d, path)
     if field is None and path not in (d._chain.get("overrides") or {}):
@@ -334,6 +363,8 @@ def rename(d: Draft, path: str, id: str) -> dict:
 
 
 def move_to_library(d: Draft, path: str, name: str) -> dict:
+    if not path:
+        raise OpError("no node ''")
     if PATH_SEPARATOR in path:
         return _inside(d, path, ops.move_to_library, path=path, name=name)
     if owner(d, path) != "added":

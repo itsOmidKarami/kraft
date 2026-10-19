@@ -268,6 +268,11 @@ async def test_an_editor_override_keeps_identity(st, field, value):
         ),
         (("extend", {"node": "spec", "base": "implementation"}), "inherited from default"),
         (("move_to_library", {"path": "spec", "name": "speccy"}), "inherited from default"),
+        (("set_field", {"path": "", "field": "extends", "value": None}), "YAML view"),
+        (("set_field", {"path": "", "field": "add", "value": []}), "YAML view"),
+        (("reset_field", {"path": ""}), "YAML view"),
+        (("set_fragment", {"path": "", "yaml": "id: team\n"}), "change the chain itself"),
+        (("remove", {"path": "implementation"}), "implementation has overrides; reset them first"),
     ],
     ids=[
         "move-node",
@@ -278,6 +283,11 @@ async def test_an_editor_override_keeps_identity(st, field, value):
         "set_fragment",
         "extend",
         "move_to_library",
+        "unset-extends",
+        "write-add",
+        "reset-the-chain",
+        "set_fragment-the-chain",
+        "remove-an-overridden-node",
     ],
 )
 async def test_an_inherited_component_refuses_what_has_no_edit(st, batch, error):

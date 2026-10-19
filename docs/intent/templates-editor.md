@@ -166,3 +166,15 @@ origin: src/kraft/drafts/ops.py §apply
 WHEN the editor renames a library component, the system SHALL rename each use of it inside an extending chain's added nodes and override values.
 enforced-by: tests/drafts/test_ops.py::test_renaming_a_library_component_rewrites_an_extending_chains_uses[added-node], tests/drafts/test_ops.py::test_renaming_a_library_component_rewrites_an_extending_chains_uses[added-task], tests/drafts/test_ops.py::test_renaming_a_library_component_rewrites_an_extending_chains_uses[override-list], tests/drafts/test_ops.py::test_renaming_a_library_component_rewrites_an_extending_chains_uses[override-steering]
 origin: src/kraft/drafts/ops.py §_components
+
+## REQ an-extending-chain-sets-only-its-description-and-policy
+
+IF an editor op on an extending chain writes the chain itself other than its `description` or `policy`, THEN the system SHALL refuse the op.
+enforced-by: tests/drafts/test_extending.py::test_an_inherited_component_refuses_what_has_no_edit[unset-extends], tests/drafts/test_extending.py::test_an_inherited_component_refuses_what_has_no_edit[write-add], tests/drafts/test_extending.py::test_an_inherited_component_refuses_what_has_no_edit[reset-the-chain], tests/drafts/test_extending.py::test_an_inherited_component_refuses_what_has_no_edit[set_fragment-the-chain]
+origin: src/kraft/drafts/extending.py §_chain_field
+
+## REQ removing-an-overridden-node-keeps-its-overrides
+
+IF the editor removes a node an extending chain inherits while the chain overrides it, THEN the system SHALL refuse the op rather than drop the overrides.
+enforced-by: tests/drafts/test_extending.py::test_an_inherited_component_refuses_what_has_no_edit[remove-an-overridden-node]
+origin: src/kraft/drafts/extending.py §remove
