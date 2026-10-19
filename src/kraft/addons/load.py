@@ -166,6 +166,14 @@ def qualify(data: object, addon: InstalledAddon) -> object:
     return out
 
 
+def builds_on(library: object) -> tuple[str, ...]:
+    """The add-on ids a repo library's `library.yaml` lists under `addons:`,
+    as written. An entry that is not a string is left out here;
+    `update.problems` says why it is refused."""
+    listed = library.get("addons") if isinstance(library, Mapping) else None
+    return tuple(v for v in listed if isinstance(v, str)) if isinstance(listed, list) else ()
+
+
 def addons_dir() -> Path:
     """This process's `run/addons`: `KRAFT_RUN_DIR`, else the default run directory."""
     from kraft.paths import RunDirs, default_run_dir

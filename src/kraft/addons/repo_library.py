@@ -406,6 +406,7 @@ def check(
         extracted.files,
         other_namespaces=others,
         repositories=set(load.connected_ids(config_dir, repos)) - {repo_id},
+        repo_library=True,
     )
     if why := load.instance_problem(
         repo_id, declared.requires, config_dir, repos=repos, repo_library=True

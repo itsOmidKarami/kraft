@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from kraft import config as config_mod
 from kraft import detect as detect_mod
 from kraft import policy as policy_mod
-from kraft.addons.config import AddonsConfig
+from kraft.addons.config import ADDON_ID_PATTERN, AddonsConfig
 from kraft.templates import extension
 from kraft.templates import models as models_mod
 from kraft.templates.environment import AgentProfileInput, HarnessProfileInput
@@ -135,6 +135,13 @@ def library_schema() -> dict:
             "tasks": section({"anyOf": [_ref(n) for n in _TASKS]}),
             "steps": section(_ref("Step")),
             "nodes": section({"anyOf": [_ref(n) for n in _NODES]}),
+            "addons": {
+                "type": "array",
+                "items": {"type": "string", "pattern": ADDON_ID_PATTERN},
+                "description": "A repo library's .kraft/library.yaml only: the add-ons whose "
+                "chains its chains extend, as <addon>@<collection>. Ignored in the instance's "
+                "own library.yaml.",
+            },
         },
         "$defs": defs,
     }
