@@ -12,3 +12,10 @@ export const ADD_TO_SUBMIT = "Add a comment or a note first.";
 export const ADD_NOTE = "Write what needs to change first.";
 export const WRITE_FIRST = "Write something first.";
 export const ARCHIVE_ONLY_ENDED = "Only done or cancelled items can be archived.";
+/** A refused move, naming the node once: the server's own "can't move X:" lead
+ * goes, and a reason that opens with the node reads "it …". */
+export function cantMove(name: string, why: string, path = name): string {
+  const rest = why.replace(/^can't move [^:]*: /i, "");
+  const own = [path, name].find((p) => rest.startsWith(`${p} `));
+  return `Can't move ${name}: ${own ? `it${rest.slice(own.length)}` : rest}`;
+}

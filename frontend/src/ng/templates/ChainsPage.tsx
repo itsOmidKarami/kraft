@@ -19,7 +19,7 @@ import { Dialog } from "../ui/Dialog";
 import { draftsChanged, postOps } from "./draft/draftApi";
 import * as api from "../../api";
 import { Button } from "../ui/Button";
-import { INHERITED, NOTHING_TO_PUBLISH } from "../ui/reasons";
+import { INHERITED, NOTHING_TO_PUBLISH, cantMove } from "../ui/reasons";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
 import { authoredNodes, chainFile, counts, extendsOf, isAdded, kindOf, liveChainId } from "./draft/view";
 import { Badge } from "../ui/Badge";
@@ -265,7 +265,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const move = async (path: string, to: number) => {
     const op = { op: "move", path, to };
     const check = await draft.ops([op], { preview: true });
-    if (check.status !== 200) return showToast(`Can't move ${path.split(".").pop()}: ${detailOf(check.body)}`, { tone: "error" });
+    if (check.status !== 200) return showToast(cantMove(path.split(".").pop() ?? path, detailOf(check.body), path), { tone: "error" });
     await draft.ops([op]);
   };
   moveSel.current = (dir) => {
@@ -391,7 +391,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
               over: async (id, to) => {
                 setStrip({ ok: true, text: `Move ${id} here` });
                 const a = await draft.ops([{ op: "move", path: id, to }], { preview: true });
-                setStrip(a.status === 200 ? { ok: true, text: `Move ${id} here` } : { ok: false, text: `Can't move ${id}: ${detailOf(a.body)}` });
+                setStrip(a.status === 200 ? { ok: true, text: `Move ${id} here` } : { ok: false, text: cantMove(id, detailOf(a.body)) });
               },
               drop: (id, to) => {
                 const i = authoredNodes(r, scope).findIndex((x) => x.id === id);

@@ -15,6 +15,7 @@ import type { Use } from "./types";
 import { libSel } from "./sel";
 import { useUrl } from "./UsedBy";
 import { ReadOnly } from "../templates/addon";
+import { cantMove } from "../ui/reasons";
 
 /** The Library's canvas (Decisions §10): a node as its steps and tasks, with its failure handlers in the bottom
  *  pane; a step as one step; a task as its one glyph and the chains that use it. Drawn from the draft as written (R18). The page keys it by
@@ -60,7 +61,7 @@ export function LibraryCanvas({ draft, row, uses, path, reserve, height, onPick,
     if (at < 0 || to < 0 || to >= ids.length) return;
     const op = { op: "move", path, to };
     const check = await draft.ops([op], { preview: true });
-    if (check.status !== 200) return showToast(`Can't move ${sel.step}: ${detailOf(check.body)}`, { tone: "error" });
+    if (check.status !== 200) return showToast(cantMove(sel.step, detailOf(check.body), path), { tone: "error" });
     await draft.ops([op]);
   };
   useEffect(() => {
