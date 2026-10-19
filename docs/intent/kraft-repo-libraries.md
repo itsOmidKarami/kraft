@@ -26,9 +26,39 @@ origin: src/kraft/addons/repo_library.py §check
 
 ## REQ a-repo-library-holds-what-an-addon-may
 
-IF a repo library breaks a rule an add-on is refused for, or qualifies a name with anything but its own `library:`, THEN the system SHALL refuse it and name the file and key.
-enforced-by: tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[subprocess], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[permission], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[harness-the-instance-lacks], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[its-own-repo-id-as-a-qualifier], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[broken-chain]
+IF a repo library breaks a rule an add-on is refused for, or qualifies a name with anything but its own `library:` outside a chain's top-level `extends`, THEN the system SHALL refuse it and name the file and key.
+enforced-by: tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[subprocess], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[permission], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[harness-the-instance-lacks], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[its-own-repo-id-as-a-qualifier], tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[broken-chain], tests/addons/test_repo_library_extends.py::test_a_repo_library_names_only_the_addons_it_lists[undeclared], tests/addons/test_repo_library_extends.py::test_a_repo_library_names_only_the_addons_it_lists[a-task-extends-it], tests/addons/test_repo_library_extends.py::test_a_repo_library_names_only_the_addons_it_lists[a-nested-node-extends-it]
 origin: src/kraft/addons/repo_library.py §check
+
+## REQ a-repo-library-chain-may-extend-a-listed-addon-chain
+
+WHERE a repo library lists an add-on id under `addons:` in its `library.yaml`, the system SHALL accept a chain whose top-level `extends` names `<addon-name>:<chain>`.
+enforced-by: tests/addons/test_repo_library_extends.py::test_a_repo_library_chain_extends_an_addon_chain_it_lists[name]
+origin: src/kraft/addons/update.py §problems
+
+## REQ a-listed-addons-name-means-that-addon-alone
+
+WHEN a repo library's chain extends `<addon-name>:<chain>` for an add-on its `addons:` lists, the system SHALL resolve it against that add-on under the namespace this instance loads it as, and against no other add-on or repo library.
+enforced-by: tests/addons/test_repo_library_extends.py::test_a_repo_library_chain_extends_an_addon_chain_it_lists[alias], tests/addons/test_repo_library_extends.py::test_a_listed_addon_that_stops_loading_is_never_another[disabled], tests/addons/test_repo_library_extends.py::test_a_listed_addon_that_stops_loading_is_never_another[unknown]
+origin: src/kraft/templates/library.py §_listed_namespaces
+
+## REQ a-repo-librarys-addons-list-is-well-formed
+
+IF a repo library's `addons:` is not a list of add-on ids, lists an add-on named `library`, or lists two add-ons of one name, THEN the system SHALL refuse it, naming the entry.
+enforced-by: tests/addons/test_repo_library_extends.py::test_a_repo_library_names_only_the_addons_it_lists[not-a-list], tests/addons/test_repo_library_extends.py::test_a_repo_library_names_only_the_addons_it_lists[not-an-id], tests/addons/test_repo_library_extends.py::test_a_repo_library_names_only_the_addons_it_lists[named-library], tests/addons/test_repo_library_extends.py::test_a_repo_library_names_only_the_addons_it_lists[two-of-one-name]
+origin: src/kraft/addons/update.py §_listed_addons
+
+## REQ a-repo-library-lists-only-loaded-addons
+
+IF a repo library lists under `addons:` an add-on this instance does not load, THEN the system SHALL refuse to accept it, naming the add-on and why it does not load.
+enforced-by: tests/addons/test_repo_library_extends.py::test_a_repo_library_lists_only_addons_the_instance_loads[not-installed], tests/addons/test_repo_library_extends.py::test_a_repo_library_lists_only_addons_the_instance_loads[disabled]
+origin: src/kraft/addons/repo_library.py §check
+
+## REQ a-bare-repo-library-parent-is-its-own
+
+IF a repo library's chain extends a bare name that the library lacks or that is the chain itself, and the instance has a local chain of that name, THEN the system SHALL say that a bare name is the library's own chain and an instance chain cannot be extended.
+enforced-by: tests/addons/test_repo_library_extends.py::test_a_bare_parent_is_the_librarys_own[the-library-lacks-it], tests/addons/test_repo_library_extends.py::test_a_bare_parent_is_the_librarys_own[the-chain-extends-itself], tests/addons/test_repo_library_extends.py::test_an_addons_bare_parent_gets_no_repo_library_hint
+origin: src/kraft/templates/library.py §_instance_chain_hint
 
 ## REQ a-repo-id-must-be-free-to-be-a-namespace
 
@@ -86,8 +116,8 @@ origin: src/kraft/addons/repo_library.py §_unattended
 
 ## REQ a-change-of-shape-waits-for-a-person
 
-IF a change alters any chain other than in its text, or adds or removes a chain, THEN the system SHALL NOT apply it without a person.
-enforced-by: tests/addons/test_repo_library.py::test_what_holds_a_change_with_no_reach_line[a-node-added], tests/addons/test_repo_library.py::test_what_holds_a_change_with_no_reach_line[a-chain-added], tests/addons/test_repo_library.py::test_what_holds_a_change_with_no_reach_line[a-judges-prompt], tests/addons/test_repo_library.py::test_a_local_chain_that_changes_shape_through_the_library_holds, tests/addons/test_repo_library.py::test_the_daily_check_applies_text_and_holds_the_rest[a-chain-added]
+IF a change of the repo library itself alters any chain other than in its text, or adds or removes a chain, THEN the system SHALL NOT apply it without a person.
+enforced-by: tests/addons/test_repo_library.py::test_what_holds_a_change_with_no_reach_line[a-node-added], tests/addons/test_repo_library.py::test_what_holds_a_change_with_no_reach_line[a-chain-added], tests/addons/test_repo_library.py::test_what_holds_a_change_with_no_reach_line[a-judges-prompt], tests/addons/test_repo_library.py::test_a_local_chain_that_changes_shape_through_the_library_holds, tests/addons/test_repo_library.py::test_the_daily_check_applies_text_and_holds_the_rest[a-chain-added], tests/addons/test_repo_library_extends.py::test_a_change_of_the_librarys_extending_chain_holds
 origin: src/kraft/addons/repo_library.py §_holds
 
 ## REQ a-deciding-tasks-text-waits-for-a-person

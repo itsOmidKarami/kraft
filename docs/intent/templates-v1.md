@@ -631,7 +631,7 @@ origin: src/kraft/templates/library.py §_extend
 ## REQ an-extending-chain-pins-its-ancestors
 
 WHEN an extending chain is resolved, the system SHALL pin every add-on whose chain it extends, directly or through a chain between.
-enforced-by: tests/templates/test_extension.py::test_an_extending_chain_pins_its_ancestors
+enforced-by: tests/templates/test_extension.py::test_an_extending_chain_pins_its_ancestors, tests/addons/test_repo_library_extends.py::test_a_repo_library_chain_extends_an_addon_chain_it_lists[alias]
 origin: src/kraft/templates/library.py §_pins
 
 ## REQ a-resolved-node-says-where-it-came-from
