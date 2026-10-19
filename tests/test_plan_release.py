@@ -122,6 +122,17 @@ _IMG = "https://raw.githubusercontent.com/o/r/main/.github/assets/console.png"
             id="html-nested",
         ),
         pytest.param(f'<p align="center">\n  <img src="{_IMG}" alt="b">\n  </p>', id="html-lines"),
+        pytest.param(f'<img src="{_IMG}"\n       alt="b" width="600">', id="html-wrapped-tag"),
+        pytest.param(f'<img alt="Settings > Storage" src="{_IMG}">', id="html-gt-in-alt"),
+        pytest.param(
+            f'<a href="https://kraft-sdlc.dev/" title="Settings > Storage"><img src="{_IMG}"></a>',
+            id="html-gt-in-link",
+        ),
+        pytest.param(
+            f'<details><summary>Screenshot</summary>\n\n  <img src="{_IMG}">\n  </details>',
+            id="html-details",
+        ),
+        pytest.param("https://github.com/user-attachments/assets/0f3c-4b2a", id="attachment"),
     ],
 )
 def test_an_image_under_a_bullet_leaves_the_number_on_its_words(picture):
@@ -145,6 +156,8 @@ def test_an_image_under_a_bullet_leaves_the_number_on_its_words(picture):
         pytest.param("<kbd>Ctrl</kbd>+<kbd>K</kbd> from any screen.", id="inline-tag"),
         pytest.param("<https://kraft-sdlc.dev/> for the new home.", id="autolink"),
         pytest.param("<b>everywhere</b> it applies.", id="emphasis"),
+        pytest.param("<https://kraft-sdlc.dev/>", id="autolink-alone"),
+        pytest.param('<a href="https://kraft-sdlc.dev/">the docs</a> say how.', id="text-link"),
     ],
 )
 def test_inline_html_on_a_wrapped_line_is_still_the_bullets_words(wrapped):

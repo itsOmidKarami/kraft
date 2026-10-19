@@ -98,16 +98,34 @@ _TOP_ITEM = re.compile(r"^(?:[-*+]|\d+[.)]) ")
 #: A line that ends the text of the bullet above it: a nested item, a fence, or a
 #: Markdown image (`![…]`, or linked `[![…](…)](…)`).
 _NOT_PROSE = re.compile(r"^\s*(?:[-*+] |\d+[.)] |```|~~~|!\[|\[!\[)")
-#: An HTML tag, for `_markup_only`.
-_TAG = re.compile(r"</?[A-Za-z][^>]*>")
+#: The name of the tag a line opens on. An autolink (`<https://…>`) matches too,
+#: as `https`: no block tag, and not a whole tag for `_TAG`, so it stays words.
+_LEADING_TAG = re.compile(r"\s*</?([A-Za-z][A-Za-z0-9-]*)")
+#: Tags that make a line a picture's or its frame's whatever else is on it, so
+#: an `<img>` whose attributes wrap, or `<details><summary>Shot</summary>`, is.
+_BLOCK_TAGS = frozenset(
+    "img picture source video figure figcaption p div center details summary br hr table".split()
+)
+#: Every complete tag on a line, quoted attributes and all, so `alt="a > b"`
+#: does not end it early.
+_TAG = re.compile(r"""</?[A-Za-z][A-Za-z0-9-]*(?:\s+(?:"[^"]*"|'[^']*'|[^'">\s])*)*\s*/?>""")
+#: A file GitHub embeds when its URL stands alone on a line: an uploaded GIF or video.
+_ATTACHMENT = re.compile(r"\s*https://github\.com/user-attachments/\S+\s*$")
 
 
-def _markup_only(line: str) -> bool:
-    """A line of HTML tags and nothing else, such as a picture's `<img>`, its
-    centring `<p>` or `<div>`, or a closing tag: it ends the bullet's words too.
-    A wrapped line that only starts with a tag (`<kbd>K</kbd> opens it.`) is
-    still words, and so is an autolink (`<https://…>`)."""
-    return line.lstrip().startswith("<") and not _TAG.sub("", line).strip()
+def _picture_line(line: str) -> bool:
+    """A line that holds a picture, not words, so it ends the bullet's text: one
+    that opens with a block or picture tag (`<img>`, `<p align=center>`,
+    `<details>`), one of HTML tags and nothing else (`<a href=…><img …></a>`, a
+    closing tag), or a GitHub attachment URL alone. A wrapped line that opens on
+    an inline tag and goes on in words (`<kbd>K</kbd> opens it.`), or on an
+    autolink, is still words."""
+    if _ATTACHMENT.match(line):
+        return True
+    tag = _LEADING_TAG.match(line)
+    if not tag:
+        return False
+    return tag.group(1).lower() in _BLOCK_TAGS or not _TAG.sub("", line).strip()
 
 
 _FENCE = re.compile(r"^\s*(```|~~~)")
@@ -156,7 +174,7 @@ def changelog_entry(pr: dict) -> str:
             and lines[end + 1].strip()
             and not _TOP_ITEM.match(lines[end + 1])
             and not _NOT_PROSE.match(lines[end + 1])
-            and not _markup_only(lines[end + 1])
+            and not _picture_line(lines[end + 1])
         ):
             end += 1
         lines[end] += f" (#{pr['number']})"

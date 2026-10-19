@@ -47,13 +47,16 @@ test.beforeEach(async ({ page }) => still(page));
 /** Lets every animation that ends (a selection ring, a panel sliding in) end first, so two retakes of an
  *  unchanged screen match; endless ones (a running item's pulse) and paused ones are left as they are. */
 const settle = (page: Page) =>
-  page.waitForFunction(
-    // None running that ends: a paused one is left as it is, an endless one never ends. Polled, so one that
-    // starts as another ends is waited on too, and one paused partway stops counting.
-    () => !document.getAnimations().some((a) => a.playState === "running" && a.effect?.getTiming().iterations !== Infinity),
-    undefined,
-    { timeout: 5_000 },
-  );
+  page
+    .waitForFunction(
+      // None running that ends: a paused one is left as it is, an endless one never ends. Polled, so one that
+      // starts as another ends is waited on too, and one paused partway stops counting.
+      () => !document.getAnimations().some((a) => a.playState === "running" && a.effect?.getTiming().iterations !== Infinity),
+      undefined,
+      { timeout: 5_000 },
+    )
+    // Still moving after 5s (a long or restarting animation): take the picture anyway, and say so.
+    .catch(() => console.warn(`docs-shots: ${page.url()} still animating after 5s; captured as it is`));
 
 const board = async (page: Page) => {
   await page.goto("./");
