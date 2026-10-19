@@ -546,10 +546,111 @@ enforced-by: tests/templates/test_models.py::test_steps_keep_their_authored_iden
 
 ## REQ component-extends-has-one-parent
 
-A reusable task, step, node, or chain MAY extend one same-namespace parent and
-the system SHALL reject multiple parents, cross-namespace parents, and cycles.
-enforced-by: tests/templates/test_library.py::test_extends_rejects_more_than_one_parent, tests/templates/test_library.py::test_extends_rejects_a_cycle[component], tests/templates/test_library.py::test_extends_rejects_a_cross_namespace_parent[component], tests/templates/test_library.py::test_extends_rejects_an_unknown_parent[component]
-origin: docs/templates-v1-design.md "Library components" -- implemented for the task, step and node namespaces. Chain-level `extends` is deliberately not implemented in V1 -- no shipped chain uses it -- and a chain file carrying `extends` is rejected with an explicit resolver error (tests/templates/test_library.py::test_chain_level_extends_is_rejected_explicitly).
+WHEN a task, step, node or chain declares `extends`, the system SHALL resolve it against exactly one parent of its own kind and SHALL reject multiple parents, cross-namespace parents and cycles.
+enforced-by: tests/templates/test_library.py::test_extends_rejects_more_than_one_parent, tests/templates/test_library.py::test_extends_rejects_a_cycle[component], tests/templates/test_library.py::test_extends_rejects_a_cycle[chain], tests/templates/test_library.py::test_extends_rejects_a_cross_namespace_parent[component], tests/templates/test_library.py::test_extends_rejects_a_cross_namespace_parent[chain-names-a-node], tests/templates/test_library.py::test_extends_rejects_an_unknown_parent[component], tests/templates/test_library.py::test_extends_rejects_an_unknown_parent[chain]
+origin: docs/templates-v1-design.md "Library components" -- the task, step and node namespaces in `templates/library.py` §_merge_chain; a chain's parent is a chain, in `templates/extension.py` §apply.
+
+## REQ an-extending-chain-is-its-parent-with-edits
+
+WHEN a chain declares `extends`, the system SHALL resolve it as its parent chain's resolved nodes, in the parent's order, with the chain's `remove`, then `overrides`, then `add` applied.
+enforced-by: tests/templates/test_extension.py::test_an_extending_chain_is_its_parent_with_edits[local], tests/templates/test_extension.py::test_an_extending_chain_is_its_parent_with_edits[addon-chain], tests/templates/test_extension.py::test_an_extending_chain_is_its_parent_with_edits[two-levels]
+origin: src/kraft/templates/extension.py §apply
+
+## REQ an-extending-chain-holds-no-nodes
+
+IF a chain declares both `extends` and `nodes`, THEN the system SHALL refuse it.
+enforced-by: tests/templates/test_extension.py::test_an_extending_chain_holds_no_nodes
+origin: src/kraft/templates/library.py §_extend
+
+## REQ edits-need-a-parent
+
+IF a chain without `extends` declares `remove`, `add` or `overrides`, THEN the system SHALL refuse it, naming the key.
+enforced-by: tests/templates/test_extension.py::test_edits_need_a_parent
+origin: src/kraft/templates/library.py §expand_chain
+
+## REQ an-extending-chain-follows-its-parent
+
+WHEN a parent chain changes, the system SHALL resolve each chain that extends it against the changed parent, including nodes the parent added.
+enforced-by: tests/templates/test_extension.py::test_a_node_the_parent_adds_reaches_the_extending_chain
+origin: src/kraft/templates/library.py §_extend
+
+## REQ an-extending-chains-edit-must-match
+
+IF an extending chain removes a node its parent lacks, adds after a node that is not its parent's, adds a node whose id its parent has, or overrides a path its parent lacks, THEN the system SHALL refuse the chain and name the edit.
+enforced-by: tests/templates/test_extension.py::test_an_edit_that_does_not_match_is_refused[remove], tests/templates/test_extension.py::test_an_edit_that_does_not_match_is_refused[add-after], tests/templates/test_extension.py::test_an_edit_that_does_not_match_is_refused[add-after-an-added-node], tests/templates/test_extension.py::test_an_edit_that_does_not_match_is_refused[add-id-taken], tests/templates/test_extension.py::test_an_edit_that_does_not_match_is_refused[override-path], tests/templates/test_extension.py::test_an_edit_that_does_not_match_is_refused[override-in-a-removed-node]
+origin: src/kraft/templates/extension.py §apply
+
+## REQ an-extending-chains-adds-follow-their-anchor-in-order
+
+WHEN an extending chain adds several nodes after one node, the system SHALL place them directly after it in the order written.
+enforced-by: tests/templates/test_extension.py::test_added_nodes_follow_their_anchor_in_written_order
+origin: src/kraft/templates/extension.py §apply
+
+## REQ an-extending-chain-keeps-the-final-gate
+
+IF an extending chain removes its parent's `chain_finalized` gate, THEN the system SHALL refuse it.
+enforced-by: tests/templates/test_extension.py::test_an_extending_chain_keeps_the_final_gate
+origin: src/kraft/templates/extension.py §apply
+
+## REQ an-extending-chain-holds-one-final-gate
+
+IF an extending chain adds a `chain_finalized` gate to a parent that has one, THEN the system SHALL refuse it.
+enforced-by: tests/templates/test_extension.py::test_an_extending_chain_holds_one_final_gate[parent-has-one], tests/templates/test_extension.py::test_an_extending_chain_holds_one_final_gate[parent-has-none]
+origin: src/kraft/templates/extension.py §apply
+
+## REQ an-extending-chains-override-merges-like-extends
+
+WHEN an extending chain overrides a path, the system SHALL merge the override onto that component by the `extends` merge rule, ancestor paths before descendant paths.
+enforced-by: tests/templates/test_extension.py::test_an_override_merges_like_extends[task-profile-displaces-model], tests/templates/test_extension.py::test_an_override_merges_like_extends[fix-loop-limit], tests/templates/test_extension.py::test_an_override_merges_like_extends[list-replaces], tests/templates/test_extension.py::test_an_override_merges_like_extends[tasks-replaces-steps], tests/templates/test_extension.py::test_an_override_merges_like_extends[replacement-list-is-expanded]
+origin: src/kraft/templates/extension.py §apply
+
+## REQ an-extending-chains-override-keeps-identity
+
+IF an extending chain's override sets `id`, `kind`, `extends` or `chain_finalized`, or sits under an ancestor override that replaces its list, THEN the system SHALL refuse it.
+enforced-by: tests/templates/test_extension.py::test_an_override_cannot_change_identity[id], tests/templates/test_extension.py::test_an_override_cannot_change_identity[kind], tests/templates/test_extension.py::test_an_override_cannot_change_identity[extends], tests/templates/test_extension.py::test_an_override_cannot_change_identity[chain_finalized], tests/templates/test_extension.py::test_an_override_cannot_change_identity[under-a-replaced-list]
+origin: src/kraft/templates/extension.py §apply
+
+## REQ an-extending-chains-policy-only-tightens
+
+IF an extending chain's `policy` relaxes what its parent's chain policy sets, THEN the system SHALL refuse it.
+enforced-by: tests/templates/test_extension.py::test_an_extending_chains_policy_only_tightens[drops-a-deny], tests/templates/test_extension.py::test_an_extending_chains_policy_only_tightens[raises-a-cap], tests/templates/test_extension.py::test_an_extending_chains_policy_only_tightens[narrows], tests/templates/test_extension.py::test_an_extending_chains_policy_only_tightens[widens-allowed-tools]
+origin: src/kraft/templates/extension.py §tighten
+
+## REQ a-removed-pointer-target-is-named
+
+IF an extending chain's result has a `reject_to` or `restart_from` naming a node the chain removed, THEN the system SHALL refuse it, naming the pointing node and the removal.
+enforced-by: tests/templates/test_extension.py::test_a_removed_pointer_target_is_named[reject_to], tests/templates/test_extension.py::test_a_removed_pointer_target_is_named[restart_from], tests/templates/test_extension.py::test_a_removed_pointer_target_is_named[re-pointed-by-override]
+origin: src/kraft/templates/extension.py §_refuse_removed_targets
+
+## REQ an-extending-chain-fails-alone
+
+IF an extending chain or its parent does not resolve, THEN the system SHALL report that chain alone, once, and SHALL resolve every other chain.
+enforced-by: tests/templates/test_extension.py::test_an_extending_chain_fails_alone[bad-edit], tests/templates/test_extension.py::test_an_extending_chain_fails_alone[parent-broken]
+origin: src/kraft/templates/library.py §_extend
+
+## REQ an-extending-chain-pins-its-ancestors
+
+WHEN an extending chain is resolved, the system SHALL pin every add-on whose chain it extends, directly or through a chain between.
+enforced-by: tests/templates/test_extension.py::test_an_extending_chain_pins_its_ancestors
+origin: src/kraft/templates/library.py §_pins
+
+## REQ a-resolved-node-says-where-it-came-from
+
+The system SHALL report, for each node of a resolved extending chain, whether it is inherited, added or overridden, and SHALL list the parent nodes it removed.
+enforced-by: tests/templates/test_extension.py::test_a_resolved_node_says_where_it_came_from, tests/cli/test_templates.py::test_show_resolved_marks_where_each_node_came_from, tests/api/test_templates_inspection.py::test_the_resolved_chain_marks_where_each_node_came_from
+origin: src/kraft/templates/library.py §provenance
+
+## REQ the-editor-leaves-an-extending-chain-to-yaml
+
+IF a Templates editor op other than renaming, deleting or creating a chain addresses an extending chain, THEN the system SHALL refuse it with 422 and SHALL NOT write the chain.
+enforced-by: tests/drafts/test_ops.py::test_an_op_on_an_extending_chain_is_refused[move], tests/drafts/test_ops.py::test_an_op_on_an_extending_chain_is_refused[remove], tests/drafts/test_ops.py::test_an_op_on_an_extending_chain_is_refused[add_node], tests/drafts/test_ops.py::test_an_op_on_an_extending_chain_is_refused[set_field], tests/drafts/test_ops.py::test_an_op_on_an_extending_chain_is_refused[set_fragment]
+origin: src/kraft/drafts/ops.py §apply
+
+## REQ a-chain-others-extend-is-not-deleted-or-renamed-silently
+
+WHEN a draft deletes or renames a chain another chain extends, or edits it so a child no longer resolves, the system SHALL report each such child as a problem.
+enforced-by: tests/drafts/test_resolve.py::test_a_chain_others_extend_reports_them[delete], tests/drafts/test_resolve.py::test_a_chain_others_extend_reports_them[rename], tests/drafts/test_resolve.py::test_a_chain_others_extend_reports_them[edit-breaks-a-child]
+origin: src/kraft/drafts/resolve.py §_impact
 
 ## REQ extends-merges-objects-and-replaces-arrays
 
@@ -574,7 +675,7 @@ origin: docs/templates-v1-design.md "Resolution and execution" -- this covers mi
 
 The template resolver SHALL retain source paths for inheritance and validation
 errors so an author can identify the input that needs correction.
-enforced-by: tests/templates/test_library.py::test_an_inheritance_error_names_the_file_and_the_component, tests/templates/test_library.py::test_a_schema_error_names_the_library_file_the_component_came_from, tests/templates/test_library.py::test_a_duplicate_identifier_error_names_the_container_and_the_id
+enforced-by: tests/templates/test_library.py::test_an_inheritance_error_names_the_file_and_the_component, tests/templates/test_library.py::test_a_schema_error_names_the_library_file_the_component_came_from, tests/templates/test_library.py::test_a_duplicate_identifier_error_names_the_container_and_the_id, tests/templates/test_extension.py::test_an_inherited_error_names_the_file_that_defined_it[inline-parent-node], tests/templates/test_extension.py::test_an_inherited_error_names_the_file_that_defined_it[library-node]
 
 ## REQ authored-resolved-and-materialized-chains-are-distinct
 

@@ -165,7 +165,7 @@ origin: src/kraft/skill.py §validate
 ## REQ an-addon-is-self-contained
 
 IF an add-on's qualified `extends`, `steering`, `profile` or `skill` reference names another installed Kraft add-on's namespace, THEN the system SHALL refuse the add-on.
-enforced-by: tests/addons/test_update.py::test_an_addon_cannot_carry[reference-to-another-addon], tests/addons/test_update.py::test_a_skill_may_not_reach_into_another_kraft_addon[another-kraft-addon], tests/cli/test_addon.py::test_validate_against_a_kraft_home[dependency]
+enforced-by: tests/addons/test_update.py::test_an_addon_cannot_carry[reference-to-another-addon], tests/addons/test_update.py::test_a_skill_may_not_reach_into_another_kraft_addon[another-kraft-addon], tests/cli/test_addon.py::test_validate_against_a_kraft_home[dependency], tests/addons/test_update.py::test_an_addon_cannot_carry[chain-extends-another-addon]
 origin: src/kraft/addons/update.py §check
 
 ## REQ an-addon-cannot-run-commands-or-grant-permissions
@@ -177,7 +177,7 @@ origin: src/kraft/addons/update.py §check
 ## REQ update-shows-what-will-run-before-applying
 
 WHEN an install or update would change an installed add-on, the system SHALL list, before it writes anything, its changes to gates, merge steps, the order of a chain's nodes, forge targets, task harnesses and models, policy limits, `requires`, prompts, steering, skills, profiles and add-on skill references, the references its namespace captures, and whether it is a downgrade.
-enforced-by: tests/addons/test_review.py::test_review_calls_out[gate-removed], tests/addons/test_review.py::test_review_calls_out[gate-replaced], tests/addons/test_review.py::test_review_calls_out[auto-review], tests/addons/test_review.py::test_review_calls_out[merge-step], tests/addons/test_review.py::test_review_calls_out[forge-target], tests/addons/test_review.py::test_review_calls_out[target-used-by-a-sibling-chain], tests/addons/test_review.py::test_review_calls_out[harness], tests/addons/test_review.py::test_review_calls_out[limit-raised], tests/addons/test_review.py::test_review_calls_out[requires], tests/addons/test_review.py::test_review_calls_out[prompt], tests/addons/test_review.py::test_review_calls_out[steering], tests/addons/test_review.py::test_review_calls_out[skill], tests/addons/test_review.py::test_review_calls_out[profile], tests/addons/test_review.py::test_review_calls_out[plugin-ref], tests/addons/test_review.py::test_review_calls_out[downgrade], tests/addons/test_review.py::test_a_reordered_chain_is_reviewed[gate-after-merge], tests/addons/test_review.py::test_a_reordered_chain_is_reviewed[work-moved-past-a-gate], tests/addons/test_update.py::test_the_review_covers_the_instances_own_chains[captured-ref], tests/addons/test_update.py::test_the_review_covers_the_instances_own_chains[local-chain-through-the-addon]
+enforced-by: tests/addons/test_review.py::test_review_calls_out[gate-removed], tests/addons/test_review.py::test_review_calls_out[gate-replaced], tests/addons/test_review.py::test_review_calls_out[auto-review], tests/addons/test_review.py::test_review_calls_out[merge-step], tests/addons/test_review.py::test_review_calls_out[forge-target], tests/addons/test_review.py::test_review_calls_out[target-used-by-a-sibling-chain], tests/addons/test_review.py::test_review_calls_out[harness], tests/addons/test_review.py::test_review_calls_out[limit-raised], tests/addons/test_review.py::test_review_calls_out[requires], tests/addons/test_review.py::test_review_calls_out[prompt], tests/addons/test_review.py::test_review_calls_out[steering], tests/addons/test_review.py::test_review_calls_out[skill], tests/addons/test_review.py::test_review_calls_out[profile], tests/addons/test_review.py::test_review_calls_out[plugin-ref], tests/addons/test_review.py::test_review_calls_out[downgrade], tests/addons/test_review.py::test_a_reordered_chain_is_reviewed[gate-after-merge], tests/addons/test_review.py::test_a_reordered_chain_is_reviewed[work-moved-past-a-gate], tests/addons/test_update.py::test_the_review_covers_the_instances_own_chains[captured-ref], tests/addons/test_update.py::test_the_review_covers_the_instances_own_chains[local-chain-through-the-addon], tests/addons/test_update_extends.py::test_the_review_shows_what_an_extending_chain_will_run
 origin: src/kraft/addons/review.py §review
 
 ## REQ the-review-cannot-hide-text
@@ -225,7 +225,7 @@ origin: src/kraft/addons/update.py §update
 ## REQ update-refuses-a-change-that-breaks-a-chain
 
 IF an update's candidate add-ons would leave a currently resolving chain, chain reference or profile fallback unresolved, THEN the system SHALL refuse that add-on and name each such reference.
-enforced-by: tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[local-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[repos-default-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[intake-schedule], tests/addons/test_update.py::test_a_captured_reference_the_addon_does_not_provide_is_refused, tests/addons/test_update.py::test_a_broken_profile_pairing_is_refused
+enforced-by: tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[local-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[repos-default-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[intake-schedule], tests/addons/test_update.py::test_a_captured_reference_the_addon_does_not_provide_is_refused, tests/addons/test_update.py::test_a_broken_profile_pairing_is_refused, tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[removed-node-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[anchor-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[override-path-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[added-id-taken]
 origin: src/kraft/addons/update.py §breaks
 
 ## REQ one-addon-change-at-a-time
@@ -243,7 +243,7 @@ origin: src/kraft/cli/addon.py §_cmd_update
 ## REQ removing-a-referenced-addon-is-refused
 
 IF local configuration (`library.yaml`, `chains/`, `repos.yaml`, `intake.yaml`, `policy.yaml` triggers or `harnesses.yaml` fallbacks) references the namespace of an add-on being uninstalled or disabled, THEN the system SHALL refuse and list each reference.
-enforced-by: tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[uninstall], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[disable]
+enforced-by: tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[uninstall], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[disable], tests/cli/test_addon.py::test_removing_an_addon_a_chain_extends_is_refused
 origin: src/kraft/cli/addon.py §_still_referenced
 
 ## REQ a-worker-does-not-change-addons
