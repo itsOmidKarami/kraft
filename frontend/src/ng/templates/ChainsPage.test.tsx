@@ -240,7 +240,7 @@ describe("Chains page: the chain canvas", () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(EXTENDING_VIEW));
     mount("/templates/chains/team");
     await screen.findByRole("group", { name: "team" });
-    expect(screen.getByText("extends default")).toBeInTheDocument();
+    expect(screen.getByText("extends default")).not.toHaveClass("is-mono");
     const pane = screen.getByRole("complementary", { name: "team pane" });
     await userEvent.click(within(pane).getByRole("button", { name: "Detach…" }));
     const card = screen.getByRole("dialog", { name: "Detach team" });

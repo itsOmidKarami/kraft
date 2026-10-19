@@ -309,7 +309,8 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         <span className="tpl-crumb-sep" aria-hidden>›</span>
         <Switcher chain={chain} renamedTo={liveId !== chain ? liveId : undefined} onGo={requestGo} startDup={dupTick} copy={readOnly} extend={!addonRepo(addon)} />
         {addon && <AddonBadge addon={addon} />}
-        {parent && <Badge mono>extends {parent}</Badge>}
+        {/* Set as the add-on badge beside it and a node's own "extends" badge are: mono is for ids and caps words. */}
+        {parent && <Badge>extends {parent}</Badge>}
         {s.level === "node" && s.node && (
           <>
             <span className="tpl-crumb-sep" aria-hidden>›</span>
