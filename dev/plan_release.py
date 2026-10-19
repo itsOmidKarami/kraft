@@ -100,9 +100,7 @@ _TOP_ITEM = re.compile(r"^(?:[-*+]|\d+[.)]) ")
 #: linked `[![…](…)](…)`, with a title, or two side by side), or an `<img …>`
 #: tag alone, which is what GitHub's editor writes for a dropped image. Any other
 #: picture, a dropped video too, goes after a blank line (CONTRIBUTING.md).
-_NOT_PROSE = re.compile(
-    r"^\s*(?:[-*+] |\d+[.)] |```|~~~|!\[|\[!\[|<img\b[^<>]*>\s*$)", re.IGNORECASE
-)
+_NOT_PROSE = re.compile(r"^\s*(?:[-*+] |\d+[.)] |```|~~~|!\[|\[!\[|<img\b[^<>]*>\s*$)")
 _FENCE = re.compile(r"^\s*(```|~~~)")
 
 
