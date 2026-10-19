@@ -14,6 +14,8 @@ from kraft import config
 from kraft.adapters import forge
 from kraft.automated_review import AutomatedReview
 
+from .outputs import glab_merged_results
+
 HEAD = "abc123"
 
 GH_PR = json.dumps({"number": 7, "headRefOid": HEAD})
@@ -26,6 +28,11 @@ GLAB_MR = json.dumps({"iid": 9, "sha": HEAD})
 GLAB_APPROVALS = "api projects/:id/merge_requests/9/approvals"
 GLAB_DISCUSSIONS = "api projects/:id/merge_requests/9/discussions?per_page=100"
 GLAB_STATUSES = f"api projects/:id/repository/commits/{HEAD}/statuses?per_page=100"
+
+#: A merged results head pipeline built from HEAD: its jobs report on its merge
+#: commit, not on HEAD.
+MERGED, READ_MERGE_COMMIT, MERGE_COMMIT = glab_merged_results(HEAD)
+GLAB_MERGED_STATUSES = f"api projects/:id/repository/commits/{MERGED['sha']}/statuses?per_page=100"
 
 
 def _gh_review(
@@ -217,8 +224,27 @@ async def test_a_withdrawn_bot_review_does_not_count(cli, tmp_path, backend, rou
             },
             "calc.py:3 unused x",
         ),
+        (
+            GLAB,
+            {
+                "mr view": json.dumps({"iid": 262611, "sha": HEAD, "head_pipeline": MERGED}),
+                READ_MERGE_COMMIT: MERGE_COMMIT,
+                GLAB_STATUSES: "[]",
+                GLAB_MERGED_STATUSES: json.dumps(
+                    [
+                        {
+                            "id": 4,
+                            "name": "review-bot",
+                            "status": "failed",
+                            "description": "calc.py:3 unused x",
+                        }
+                    ]
+                ),
+            },
+            "calc.py:3 unused x",
+        ),
     ],
-    ids=["gh", "glab"],
+    ids=["gh", "glab", "glab-on-the-merge-commit"],
 )
 async def test_a_failed_review_check_is_actionable_with_its_output(
     cli, tmp_path, backend, routes, output

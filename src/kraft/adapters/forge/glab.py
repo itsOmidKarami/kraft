@@ -63,6 +63,13 @@ _GLAB_MR_STATES: dict[str, str] = {
 _UNREADABLE_JOBS = (FailedJob("(unreadable)", "failed", None),)
 
 
+#: Where a merged results pipeline runs: a merge commit of the merge request's
+#: head into its target, built afresh on every push. Its `sha` is that merge
+#: commit, never the head, so the head it tested is the commit's second parent
+#: (`_answered_for`).
+_MERGE_REF = "refs/merge-requests/{iid}/merge"
+
+
 class GlabCli(mr_ops.CliWaits):
     """GitLab through `glab`. Credentials stay in glab's own keyring."""
 
@@ -132,7 +139,15 @@ class GlabCli(mr_ops.CliWaits):
         return str(data.get("description") or "")
 
     async def _merge_state(self, repo: Path, branch: str = "") -> str:
-        """The merge request's own view of whether it can merge.
+        """The merge request's own view of whether it can merge (`_merge_view`)."""
+        return (await self._merge_view(repo, branch))[0]
+
+    async def _merge_view(self, repo: Path, branch: str = "") -> tuple[str, dict]:
+        """The merge request's own view of whether it can merge, and the
+        `glab mr view` object it came from (`{}` when there is none to give:
+        a payload that is not an object, or the `find_mr` fallback below).
+        `ci_status` reads the object's `head_pipeline` and `iid` too, so the
+        merge request is asked once per read.
 
         `glab mr view <branch> -F json` is the call `open_mr` already makes.
         `detailed_merge_status` says *why*; `merge_status` is the older,
@@ -159,13 +174,13 @@ class GlabCli(mr_ops.CliWaits):
         except ForgeError:
             ref = await self.find_mr(repo=repo, branch=branch) if branch else None
             if ref is not None and ref.state == "merged":
-                return "merged"
+                return "merged", {}
             raise
         if not isinstance(data, dict):
-            return ""
+            return "", {}
         if data.get("state") == "merged":
-            return "merged"
-        return str(data.get("detailed_merge_status") or data.get("merge_status") or "")
+            return "merged", data
+        return str(data.get("detailed_merge_status") or data.get("merge_status") or ""), data
 
     async def ci_status(
         self, *, repo: Path, mr: MR, branch: str = "", pipeline_id: str = ""
@@ -175,7 +190,7 @@ class GlabCli(mr_ops.CliWaits):
         # pipeline to learn it (Kraft-ejj9). Only meaningful pre-merge, on the
         # checked-out feature branch that actually has an open MR -- see
         # `branch_ci_status` for the post-merge, no-MR read.
-        detail = await self._merge_state(repo, branch)
+        detail, view = await self._merge_view(repo, branch)
         # Merged out-of-band is a result, not a conflict and not a pipeline to
         # read: a deleted source branch's pipeline list is not a fact this
         # node needs once the MR has already landed (Kraft-v6ci). `_run_one`'s
@@ -192,7 +207,7 @@ class GlabCli(mr_ops.CliWaits):
         mergeable = mr_ops.mergeable(detail)
         block_reason = mr_ops.classify_block_reason(detail)
         expected_sha = await git._head_sha(repo, branch)
-        pipeline = await self._pipeline_on_ref(repo, branch, pipeline_id, expected_sha)
+        pipeline = await self._pipeline_on_ref(repo, branch, pipeline_id, expected_sha, view)
         return replace(
             pipeline, mergeable=mergeable, merge_detail=detail, block_reason=block_reason
         )
@@ -215,16 +230,26 @@ class GlabCli(mr_ops.CliWaits):
         return await self._pipeline_on_ref(repo, branch, pipeline_id, head_sha)
 
     async def _pipeline_on_ref(
-        self, repo: Path, branch: str, pipeline_id: str, expected_sha: str
+        self,
+        repo: Path,
+        branch: str,
+        pipeline_id: str,
+        expected_sha: str,
+        view: dict | None = None,
     ) -> CIStatus:
-        """Read the branch's pipeline, pinned or latest, with no merge-request
-        involvement at all -- shared by `ci_status` and `branch_ci_status`,
-        which differ only in whether `mergeable`/`merge_detail` get filled in
-        on top of what this returns.
+        """Read the newest pipeline for `expected_sha`, pinned or not --
+        shared by `ci_status` and `branch_ci_status`, which differ only in
+        whether `mergeable`/`merge_detail` get filled in on top of what this
+        returns. `view` is `ci_status`'s merge request (`_merge_view`): its
+        `head_pipeline` is a candidate, and its `iid` lets a merged results
+        pipeline count (`_answered_for`). `branch_ci_status` has none, so no
+        merge request's pipeline ever answers for a target branch.
         """
+        view = view or {}
+        iid = str(view.get("iid") or "")
         if pipeline_id:
             # Pinned to a pipeline the caller already resolved against the
-            # current head (Kraft-ivh1): no sha guard needed here, unlike
+            # current head (Kraft-ivh1): no re-resolving here, unlike
             # `glab ci list` below, which can answer with the previous
             # commit's pipeline for a few seconds after a push.
             try:
@@ -235,11 +260,15 @@ class GlabCli(mr_ops.CliWaits):
             except ForgeError:
                 top = None
             # A cancelled pin has a successor to find, so it falls through too.
+            # So does one this head no longer answers for: returning it would
+            # have `ci_poll` pin it again on every poll.
+            answered = None
             if isinstance(top, dict) and top and top.get("status") != "canceled":
+                answered, _ = await self._answered_for(repo, top, expected_sha, iid)
+            if isinstance(top, dict) and answered is not None:
                 raw_state = str(top.get("status", ""))
                 state: CIState = _GLAB_STATES.get(raw_state, "failed")
                 url = str(top.get("web_url", ""))
-                sha = str(top.get("sha", ""))
                 pipeline_ref = str(top.get("id", pipeline_id))
                 jobs: tuple[str, ...] = (f"pipeline {pipeline_ref}: {raw_state}",)
                 failed_jobs: tuple[FailedJob, ...] = ()
@@ -250,58 +279,131 @@ class GlabCli(mr_ops.CliWaits):
                     state=state,
                     url=url,
                     jobs=jobs,
-                    sha=sha,
+                    sha=answered,
                     failed_jobs=failed_jobs,
                     pipeline_ref=pipeline_ref,
                 )
             # Pinned id unreadable (deleted, transient CLI error) -- fall
-            # through to the ordinary "resolve latest on branch" path below
+            # through to the ordinary "newest for this head" path below
             # rather than erroring the whole poll.
         # --ref, or this returns the newest pipeline in the whole project: a
         # green run on main would pass the gate for a red branch.
         ref = ["--ref", branch] if branch else []
         raw = await git.run_git(repo, ["glab", "ci", "list", "-F", "json", "-P", "1", *ref])
         rows = mr_ops.parse_json(raw, "glab ci list")
-        # No pipeline yet is not a green one.
-        state = "pending"
-        url, jobs, sha, pipeline_ref, cancelled_at = "", ("no pipeline yet",), "", "", ""
-        failed_jobs = ()
-        if rows:
-            top = rows[0]
-            # For a few seconds after a push, this list still answers with the
-            # *previous* commit's pipeline — green, for code the branch no
-            # longer has. ci_poll pushes now (Kraft-bxj8), so that window is on
-            # the hot path, and a pipeline that is not for this head is not a
-            # result. Same answer as no pipeline at all: pending. Guarded
-            # against `expected_sha`, the caller's own reference commit --
-            # `ci_status` passes the item branch's local tip (correct: it is
-            # the branch being checked), `branch_ci_status` passes the
-            # upstream head it fetched, never this checkout's possibly-stale
-            # local HEAD (plan-review finding, second half).
-            sha = str(top.get("sha", ""))
-            if sha and expected_sha and sha != expected_sha:
-                jobs = (f"no pipeline for {expected_sha[:7]} yet",)
-            else:
-                raw_state = str(top.get("status", ""))
-                state = _GLAB_STATES.get(raw_state, "failed")
-                url = str(top.get("web_url", ""))
-                # Never pin a cancelled pipeline: its successor is the one to read.
-                pipeline_ref = "" if raw_state == "canceled" else str(top.get("id", ""))
-                jobs = (f"pipeline {top.get('id')}: {raw_state}",)
-                if raw_state == "canceled":  # when, for `render_ci` (Kraft-kbqmk)
-                    cancelled_at = str(top.get("updated_at") or "")
-                if state == "failed":
-                    detail_lines, failed_jobs = await self._failure_detail(repo, pipeline_ref)
-                    jobs += detail_lines
+        row = rows[0] if rows and isinstance(rows[0], dict) else None
+        # Two candidates, the merge request's head pipeline first so the list
+        # row wins a tie. Both, because neither is enough alone: GitLab moves
+        # `head_pipeline` in a background worker after a pipeline is created,
+        # so right after `set_labels` or a description re-run starts one it can
+        # still name the old red pipeline for this same head, which the list
+        # already has a newer one than; and an older GitLab's `?ref=` filter
+        # leaves merge request pipelines out of the list altogether.
+        candidates: dict[str, dict] = {}
+        head_pipeline = view.get("head_pipeline")
+        if isinstance(head_pipeline, dict) and head_pipeline.get("id"):
+            candidates[str(head_pipeline["id"])] = head_pipeline
+        if row is not None:
+            candidates[str(row.get("id", ""))] = row
+        accepted: list[tuple[dict, str]] = []
+        refused: list[str] = []
+        for top in candidates.values():
+            answered, why = await self._answered_for(repo, top, expected_sha, iid)
+            if answered is not None:
+                accepted.append((top, answered))
+            elif why:
+                refused.append(why)
+        if accepted:
+            # The newest pipeline for the head, which is GitLab's own rule for
+            # a merge request's head pipeline.
+            top, answered = max(accepted, key=lambda pair: _pipeline_number(pair[0]))
+            return await self._read_pipeline(repo, top, answered)
+        # No pipeline yet is not a green one. For a few seconds after a push
+        # the list still answers with the *previous* commit's pipeline -- green,
+        # for code the branch no longer has. ci_poll pushes now (Kraft-bxj8), so
+        # that window is on the hot path, and a pipeline that is not for this
+        # head is not a result: the same answer as no pipeline at all.
+        # `expected_sha` is the caller's own reference commit -- `ci_status`
+        # passes the item branch's local tip, `branch_ci_status` the upstream
+        # head it fetched, never this checkout's possibly-stale local HEAD.
+        jobs = ("no pipeline yet",)
+        if candidates:
+            jobs = (f"no pipeline for {expected_sha[:7]} yet", *refused)
+        return CIStatus(
+            state="pending",
+            url="",
+            jobs=jobs,
+            sha=str(row.get("sha", "")) if row is not None else "",
+        )
+
+    async def _read_pipeline(self, repo: Path, top: dict, sha: str) -> CIStatus:
+        """One pipeline that answers for `sha` (`_answered_for`), as a
+        `CIStatus`: `sha` is the head it tested, never a merge commit's own."""
+        raw_state = str(top.get("status", ""))
+        state: CIState = _GLAB_STATES.get(raw_state, "failed")
+        # Never pin a cancelled pipeline: its successor is the one to read.
+        pipeline_ref = "" if raw_state == "canceled" else str(top.get("id", ""))
+        jobs: tuple[str, ...] = (f"pipeline {top.get('id')}: {raw_state}",)
+        cancelled_at = ""
+        if raw_state == "canceled":  # when, for `render_ci` (Kraft-kbqmk)
+            cancelled_at = str(top.get("updated_at") or "")
+        failed_jobs: tuple[FailedJob, ...] = ()
+        if state == "failed":
+            detail_lines, failed_jobs = await self._failure_detail(repo, pipeline_ref)
+            jobs += detail_lines
         return CIStatus(
             state=state,
-            url=url,
+            url=str(top.get("web_url", "")),
             jobs=jobs,
             sha=sha,
             failed_jobs=failed_jobs,
             pipeline_ref=pipeline_ref,
             cancelled_at=cancelled_at,
         )
+
+    async def _answered_for(
+        self, repo: Path, top: dict, expected: str, iid: str
+    ) -> tuple[str | None, str]:
+        """The head pipeline `top` tested, when that is `expected`, and why
+        not otherwise.
+
+        A pipeline on the head itself (a branch pipeline, a detached merge
+        request pipeline) answers for its own `sha`; with no `sha` or no
+        `expected` there is nothing to compare, and it answers for its own as
+        it always has. A merged results pipeline's `sha` is a merge commit,
+        built on `_MERGE_REF` for this merge request's `iid` only: it answers
+        for `expected` when `expected` is that commit's second parent, the
+        head merged in. Every merged results pipeline of one merge request
+        shares that ref, and `head_pipeline` can still name the previous
+        head's for a moment after a push, so the ref alone never proves it.
+        `(None, why)` is "not for this head", a wait; `why` is "" when it is
+        plainly another commit's, and names the pipeline when a merge commit
+        was asked about, so a wait that times out says what it saw.
+        """
+        sha = str(top.get("sha") or "")
+        if not sha or not expected or sha == expected:
+            return sha, ""
+        ref = str(top.get("ref") or "")
+        if not iid or ref != _MERGE_REF.format(iid=iid):
+            return None, ""
+        # The merge ref lives in the pipeline's own project, which `:id` (the
+        # checkout's remote) may not be.
+        project = str(top.get("project_id") or ":id")
+        name = f"pipeline {top.get('id')} on {ref}"
+        try:
+            raw = await git.run_git(
+                repo, ["glab", "api", f"projects/{project}/repository/commits/{sha}"]
+            )
+            commit = mr_ops.parse_json(raw, "glab api commit")
+        except ForgeError as exc:
+            return None, f"{name}: could not read merge commit {sha[:7]}: {exc}"
+        parents = commit.get("parent_ids") if isinstance(commit, dict) else None
+        # The second parent; a slice, so a commit with one parent (or none)
+        # reads as having tested nothing rather than raising.
+        tested = (parents[1:2] or [""])[0] if isinstance(parents, list) else ""
+        if tested != expected:
+            return None, f"{name} tested {str(tested)[:7] or 'nothing'}, not {expected[:7]}"
+        return expected, ""
 
     async def _failure_detail(
         self, repo: Path, pipeline_id: str
@@ -421,14 +523,28 @@ class GlabCli(mr_ops.CliWaits):
 
     async def _check_review(self, repo: Path, branch: str, check: str) -> ReviewResult:
         """The commit status (a CI job or an external status) named `check`
-        on the MR's head, its latest if it ran more than once."""
+        on the MR's head, its latest if it ran more than once. A merged
+        results pipeline's jobs report on its merge commit, not the head, so
+        that commit is read too when the merge request's head pipeline is one
+        built from this head (`_answered_for`)."""
         mr = await self._json(repo, ["mr", "view", branch, "-F", "json"], "glab mr view")
         head = mr["sha"]
-        statuses = await self._json(
-            repo,
-            ["api", f"projects/:id/repository/commits/{head}/statuses?per_page=100"],
-            "glab api statuses",
-        )
+        shas = [head]
+        head_pipeline = mr.get("head_pipeline")
+        if isinstance(head_pipeline, dict) and head_pipeline.get("sha") not in (None, "", head):
+            answered, _ = await self._answered_for(
+                repo, head_pipeline, head, str(mr.get("iid") or "")
+            )
+            if answered == head:
+                shas.append(str(head_pipeline["sha"]))
+        statuses: list = []
+        for sha in shas:
+            got = await self._json(
+                repo,
+                ["api", f"projects/:id/repository/commits/{sha}/statuses?per_page=100"],
+                "glab api statuses",
+            )
+            statuses += got if isinstance(got, list) else []
         mine = sorted((s for s in statuses if s.get("name") == check), key=lambda s: s["id"])
         if not mine:
             return ReviewResult("pending", detail=f"waiting for {check} on {head[:7]}")
@@ -536,6 +652,14 @@ class GlabCli(mr_ops.CliWaits):
                 for r in rows
             ]
         )
+
+
+def _pipeline_number(top: dict) -> int:
+    """A pipeline's id as a number, for "newest"; 0 when it is not one."""
+    try:
+        return int(top.get("id") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _landed(r: dict) -> str:

@@ -4,6 +4,7 @@ promises too is in test_forge_cli_contract.py."""
 
 from __future__ import annotations
 
+import json
 import subprocess
 
 import pytest
@@ -16,6 +17,7 @@ from .outputs import (
     GLAB_MR_LIST_MERGED,
     GLAB_MR_VIEW,
     GLAB_MR_VIEW_CONFLICT,
+    glab_merged_results,
 )
 
 GLAB_CI_FAILED = (
@@ -140,32 +142,147 @@ async def test_glab_ci_status_asks_for_this_branch_only(cli, tmp_path):
     assert "--ref kraft/abc" in ci_list
 
 
+OLDER = "1" * 40
+
+
+def _mr_view(head_pipeline: dict | None = None) -> str:
+    """`glab mr view -F json` for !262611, the merge request the captured
+    merged results pipeline belongs to, with `head_pipeline`."""
+    view = {"iid": 262611, "state": "opened", "source_branch": "kraft/abc"}
+    return json.dumps({**view, "head_pipeline": head_pipeline})
+
+
+def _merged(tested: str, *, payload=True, listed="[]", unreadable=False, **fields) -> dict:
+    """Routes for a merged results pipeline built from `tested`: as the merge
+    request's `head_pipeline` with `listed` the list (`payload`), or as the
+    list's top row with no `head_pipeline`. `unreadable` fails the merge
+    commit read."""
+    pipeline, read_commit, merge_commit = glab_merged_results(tested, **fields)
+    return {
+        "mr view": _mr_view(pipeline if payload else None),
+        "ci list": listed if payload else json.dumps([pipeline]),
+        read_commit: FAIL if unreadable else merge_commit,
+    }
+
+
 @pytest.mark.parametrize(
-    "pipeline_on, expected",
+    "routes, expected, says, reads_a_commit",
     [
         # For a few seconds after a push `glab ci list -P 1` still returns the
         # *previous* commit's pipeline, which may be green (Kraft-bxj8).
-        ("older", "pending"),
-        ("branch", "success"),
+        (lambda head, checkout: {"ci list": _pipeline(OLDER)}, "pending", "", False),
+        (lambda head, checkout: {"ci list": _pipeline(head)}, "success", "", False),
         # An in-place item's checkout may be on another branch: its HEAD is
         # not the head being checked.
-        ("checkout", "pending"),
+        (lambda head, checkout: {"ci list": _pipeline(checkout)}, "pending", "", False),
+        # A merged results pipeline runs on a merge commit of the head into the
+        # target: that commit's second parent is the head it tested. The list
+        # holds only an older branch pipeline, as on an older GitLab whose
+        # `?ref=` leaves merge request pipelines out.
+        (
+            lambda head, checkout: _merged(head, status="success", listed=_pipeline(OLDER)),
+            "success",
+            "",
+            True,
+        ),
+        # The payload's head pipeline lags a push: the previous head's merge
+        # commit, on the very same ref.
+        (
+            lambda head, checkout: _merged(OLDER, status="success"),
+            "pending",
+            f"tested {OLDER[:7]}",
+            True,
+        ),
+        (
+            lambda head, checkout: _merged(
+                head, status="success", ref="refs/merge-requests/999/merge"
+            ),
+            "pending",
+            "",
+            False,
+        ),
+        (
+            lambda head, checkout: _merged(head, status="success", unreadable=True),
+            "pending",
+            "could not read merge commit",
+            True,
+        ),
+        # gitlab.com's `?ref=<branch>` lists the merge request's pipelines too.
+        (
+            lambda head, checkout: _merged(head, status="success", payload=False),
+            "success",
+            "",
+            True,
+        ),
     ],
-    ids=["older-commit-is-not-a-result", "current-head-accepted", "not-the-checkouts-head"],
+    ids=[
+        "older-commit-is-not-a-result",
+        "current-head-accepted",
+        "not-the-checkouts-head",
+        "merged-results-built-from-the-head",
+        "merged-results-built-from-an-older-head",
+        "another-merge-request-s-merge-ref",
+        "merge-commit-unreadable",
+        "merged-results-row-in-the-list",
+    ],
 )
 async def test_glab_ci_status_only_trusts_a_pipeline_for_the_current_head(
-    cli, repo, pipeline_on, expected
+    cli, repo, routes, expected, says, reads_a_commit
 ):
     subprocess.run(["git", "branch", "kraft/abc"], cwd=repo, check=True)
     branch_head = _head(repo)
     subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "theirs"], cwd=repo, check=True)
-    sha = {"older": "1" * 40, "branch": branch_head, "checkout": _head(repo)}[pipeline_on]
-    cli.stub("glab", _pipeline(sha))
+    cli.stub("glab", routes={"mr view": _mr_view(), **routes(branch_head, _head(repo))})
 
     status = await forge.GlabCli().ci_status(repo=repo, mr=NO_MR, branch="kraft/abc")
 
     assert status.state == expected
     assert ("no pipeline for" in status.jobs[0]) is (expected == "pending"), status.jobs
+    assert says in "\n".join(status.jobs)
+    if expected == "success":
+        assert status.sha == branch_head, "reported the merge commit, not the head it tested"
+    asked = any("/repository/commits/" in call for call in cli.calls("glab"))
+    assert asked is reads_a_commit
+
+
+@pytest.mark.parametrize(
+    "routes, expected",
+    [
+        # GitLab moves `head_pipeline` in a background worker: just after
+        # `set_labels` starts a new pipeline, the payload still names the red
+        # one for the same head, and the list already has the new one.
+        (
+            lambda head: {
+                **_merged(head, status="failed"),
+                **_merged(head, id=2962437759, sha="3" * 40, payload=False),
+            },
+            ("pending", "2962437759"),
+        ),
+        # A cancelled head pipeline whose successor the payload has not caught
+        # up with reads the successor, not "cancelled".
+        (
+            lambda head: {
+                **_merged(head, status="canceled"),
+                **_merged(head, id=2962437759, sha="3" * 40, payload=False),
+            },
+            ("pending", "2962437759"),
+        ),
+        # An older GitLab running both kinds lists only the branch pipeline;
+        # the merge request's newer, red one is the one its merge rule reads.
+        (
+            lambda head: _merged(head, status="failed", listed=_pipeline(head)),
+            ("failed", "2962437758"),
+        ),
+    ],
+    ids=["a-new-pipeline-the-payload-lags", "a-cancelled-one-s-successor", "newer-than-the-list"],
+)
+async def test_glab_ci_status_reads_the_newest_pipeline_for_the_head(cli, repo, routes, expected):
+    subprocess.run(["git", "branch", "kraft/abc"], cwd=repo, check=True)
+    cli.stub("glab", routes=routes(_head(repo)))
+
+    status = await forge.GlabCli().ci_status(repo=repo, mr=NO_MR, branch="kraft/abc")
+
+    assert (status.state, status.pipeline_ref) == expected
 
 
 async def test_glab_branch_ci_status_never_resolves_a_merge_request(cli, repo):
@@ -181,45 +298,85 @@ async def test_glab_branch_ci_status_never_resolves_a_merge_request(cli, repo):
     assert all("mr view" not in call for call in cli.calls("glab"))
 
 
-async def test_glab_branch_ci_status_guards_against_the_caller_s_head_not_the_checkout_s(cli, repo):
+@pytest.mark.parametrize(
+    "listed",
+    [
+        lambda repo: _pipeline(_head(repo), ref="main"),
+        # A target branch has no merge request: no merge ref ever answers for
+        # it, whoever's head its merge commit merged in.
+        lambda repo: json.dumps([glab_merged_results("not-pulled-yet", status="success")[0]]),
+    ],
+    ids=["not-the-local-head", "never-a-merge-request-s-merge-ref"],
+)
+async def test_glab_branch_ci_status_guards_against_the_caller_s_head_not_the_checkout_s(
+    cli, repo, listed
+):
     """The sha guard compares against `head_sha` -- the caller's freshly-fetched
     upstream head -- not the local checkout's own HEAD, which post-merge may not
     be pulled at all."""
-    cli.stub("glab", _pipeline(_head(repo), ref="main"))
+    cli.stub("glab", listed(repo))
 
     status = await forge.GlabCli().branch_ci_status(
         repo=repo, branch="main", head_sha="not-pulled-yet"
     )
 
-    assert status.state == "pending", "matched the stale local HEAD instead of the caller's"
+    assert status.state == "pending", "matched a head that is not the caller's"
+    assert not any("/repository/commits/" in call for call in cli.calls("glab"))
 
 
-async def test_glab_ci_status_reads_the_pinned_pipeline_directly(cli, tmp_path):
+def _pinned_merged_results(tested: str) -> dict:
+    """Routes for a pinned merged results pipeline built from `tested`."""
+    pipeline, read_commit, merge_commit = glab_merged_results(tested, status="success")
+    return {"ci get": json.dumps(pipeline), read_commit: merge_commit}
+
+
+@pytest.mark.parametrize(
+    "routes, pinned",
+    [
+        ({"ci get": GLAB_CI_GET_PINNED_SUCCESS}, "2826926705"),
+        # Its `sha` is a merge commit; the head it tested is what it answers for.
+        (_pinned_merged_results("deadbeef"), "2962437758"),
+    ],
+    ids=["on-the-head", "merged-results"],
+)
+async def test_glab_ci_status_reads_the_pinned_pipeline_directly(cli, tmp_path, routes, pinned):
     """A `pipeline_id` skips `glab ci list` entirely -- the caller already knows
     which pipeline this head has."""
-    cli.stub("glab", routes={"mr view": GLAB_MR_VIEW, "ci get": GLAB_CI_GET_PINNED_SUCCESS})
-    cli.stub("git", "")
+    cli.stub("glab", routes={"mr view": _mr_view(), **routes})
+    cli.stub("git", "deadbeef")
 
     status = await forge.GlabCli().ci_status(
-        repo=tmp_path, mr=forge.MR(1, "u"), branch="kraft/abc", pipeline_id="2826926705"
+        repo=tmp_path, mr=forge.MR(1, "u"), branch="kraft/abc", pipeline_id=pinned
     )
 
-    assert (status.state, status.pipeline_ref, status.sha) == ("success", "2826926705", "deadbeef")
+    assert (status.state, status.pipeline_ref, status.sha) == ("success", pinned, "deadbeef")
     assert not any(call.startswith("ci list") for call in cli.calls("glab"))
 
 
-async def test_glab_ci_status_falls_back_when_the_pinned_pipeline_is_unreadable(cli, tmp_path):
+@pytest.mark.parametrize(
+    "pinned",
+    [
+        {"ci get": FAIL},
+        # One this head no longer answers for: returned, `ci_poll` would pin it
+        # again on every poll.
+        _pinned_merged_results(OLDER),
+    ],
+    ids=["unreadable", "built-from-another-head"],
+)
+async def test_glab_ci_status_falls_back_when_the_pinned_pipeline_is_unreadable(
+    cli, tmp_path, pinned
+):
     """A deleted/unreadable pinned pipeline must not fail the whole poll: fall
     back to resolving "latest on branch" the way an unpinned poll does."""
     cli.stub(
         "glab",
-        routes={"mr view": GLAB_MR_VIEW, "ci get": FAIL, "ci list": GLAB_CI_SUCCESS},
+        routes={"mr view": _mr_view(), "ci list": GLAB_CI_SUCCESS, **pinned},
         default=FAIL,
     )
-    cli.stub("git", "")
+    cli.stub("git", "deadbeef")
 
     status = await forge.GlabCli().ci_status(
-        repo=tmp_path, mr=forge.MR(1, "u"), branch="kraft/abc", pipeline_id="999999"
+        repo=tmp_path, mr=forge.MR(1, "u"), branch="kraft/abc", pipeline_id="2962437758"
     )
 
     assert (status.state, status.pipeline_ref) == ("success", "2826926699")
