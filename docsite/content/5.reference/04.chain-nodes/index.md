@@ -62,8 +62,12 @@ has no default: the chain must set it, itself or through `extends`.
 |---|---|---|---|
 | `id` | string | The file name | The chain's name. |
 | `description` | string | none | One line saying what the chain is for, shown in the chain list. Listed even for a chain that does not resolve. |
-| `nodes` | list | required | The ordered list of nodes. At least one. |
-| `policy` | mapping | none | The chain's layer of the [policy](/reference/configuration/policy). |
+| `nodes` | list | required, unless `extends` is given | The ordered list of nodes. At least one. A chain with `extends` holds none. |
+| `policy` | mapping | none | The chain's layer of the [policy](/reference/configuration/policy). In a chain with `extends`, it may only tighten the parent's. |
+| `extends` | string | none | The chain this one builds on: one of yours, or an add-on's `ns:id`. See [Extending a chain](/reference/configuration/library-and-chains#extending-a-chain). _Added in next_ |
+| `remove` | list of strings | none | With `extends`: the parent's nodes to drop, by id. The final gate cannot be one. _Added in next_ |
+| `add` | list | none | With `extends`: each entry an `after`, a parent node's id, and a `node`, a complete node to put directly after it. _Added in next_ |
+| `overrides` | mapping | none | With `extends`: canonical path to the keys to merge onto that component, such as `implementation.main.implement: { profile: deep }`. _Added in next_ |
 
 ## Node keys
 
