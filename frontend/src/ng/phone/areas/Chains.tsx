@@ -28,12 +28,17 @@ function useChains() {
   return { chains, error };
 }
 
+/** A chain's size, after what it extends: "extends default · 19 nodes · 5 gates". */
+const sizeOf = (c: TemplateSummary) => `${c.extends ? `extends ${c.extends} · ` : ""}${c.nodes.length} nodes · ${c.gates} ${c.gates === 1 ? "gate" : "gates"}`;
+/** On an extending chain, where a node comes from, in the canvas's words; an inherited one unchanged has no mark. */
+const ORIGIN = { added: "added here", overridden: "overridden here" } as const;
+
 const nodeSub = (n: ChainNode) => (n.kind === "gate" ? `gate · reject to ${n.reject_to ?? "the nearest node before it"}` : `exec · ${(n.steps ?? n.tasks.map((t) => [t])).length} ${((n.steps ?? n.tasks.map((t) => [t])).length === 1) ? "step" : "steps"}${n.fix_loop ? " · fix loop" : ""}`);
 
 /** `/templates/chains`: the chains (W17 brief L.1). */
 export function ChainsList() {
   const { chains, error } = useChains();
-  const rows: RowSpec[] = (chains ?? []).map((c) => ({ key: c.id, label: c.id, mono: true, sub: c.error ? c.error : `${c.nodes.length} nodes · ${c.gates} ${c.gates === 1 ? "gate" : "gates"}`, to: `/templates/chains/${encodeURIComponent(c.id)}`, chips: c.addon ? [{ label: addonLabel(c.addon) }] : undefined }));
+  const rows: RowSpec[] = (chains ?? []).map((c) => ({ key: c.id, label: c.id, mono: true, sub: c.error ? c.error : sizeOf(c), to: `/templates/chains/${encodeURIComponent(c.id)}`, chips: c.addon ? [{ label: addonLabel(c.addon) }] : undefined }));
   return (
     <AreaScreen title="Chains" sub="The chains an item runs: how it moves from spec to merge." status={{ label: "published" }} yaml={false}>
       {error && <p className="ph-error" role="alert">{error}</p>}
@@ -69,11 +74,13 @@ export function ChainView() {
   const nodes = c?.nodes ?? [];
   // An add-on's chain is not edited here: every write to it is refused.
   const settings = useSettingRows(draft, edit, !draft.view || !!c?.addon || !!draft.view.addon);
+  const origins = draft.view?.result.extending?.origins ?? {};
+  const origin = (id: string) => (origins[id] === "added" || origins[id] === "overridden" ? [{ label: ORIGIN[origins[id] as keyof typeof ORIGIN] }] : undefined);
   return (
-    <AreaScreen title={chain} sub={c ? `${c.addon ? `${addonLabel(c.addon)} · ` : ""}${nodes.length} nodes · ${c.gates} ${c.gates === 1 ? "gate" : "gates"}` : undefined} draft={draft} yaml={draft.view ? true : text ?? ""}>
+    <AreaScreen title={chain} sub={c ? `${c.addon ? `${addonLabel(c.addon)} · ` : ""}${sizeOf(c)}` : undefined} draft={draft} yaml={draft.view ? true : text ?? ""}>
       {error && <p className="ph-error" role="alert">{error}</p>}
       {chains && !c && <p className="ph-empty">There is no chain {chain}.</p>}
-      <Group title={`Nodes · ${nodes.length}`} note={c && !c.addon ? STRUCTURE : undefined} rows={nodes.map((n) => ({ key: n.id, label: displayName(n), sub: `${n.id} · ${nodeSub(n)}`, subMono: true, to: `/templates/chains/${encodeURIComponent(chain)}/nodes/${encodeURIComponent(n.id)}` }))} />
+      <Group title={`Nodes · ${nodes.length}`} note={c && !c.addon ? STRUCTURE : undefined} rows={nodes.map((n) => ({ key: n.id, label: displayName(n), sub: `${n.id} · ${nodeSub(n)}`, subMono: true, chips: origin(n.id), to: `/templates/chains/${encodeURIComponent(chain)}/nodes/${encodeURIComponent(n.id)}` }))} />
       {draft.view && c && chainCapGroups(draft.view.result, draft.scope).map((g) => {
         const rows = settings("", g.rows);
         return <Group key={g.head} title={g.head} rows={[...rows.set, ...rows.unset]} />;
