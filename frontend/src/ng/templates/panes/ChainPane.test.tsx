@@ -469,8 +469,11 @@ describe("an extending chain", () => {
     await userEvent.click(within(menu).getByRole("option", { name: /quick-task/ }));
     expect(draft.ops).toHaveBeenCalledWith([{ op: "chain_base_check", base: "quick-task" }], { preview: true });
     const card = await screen.findByRole("dialog", { name: "Change base of team" });
-    expect(card).toHaveTextContent("overrides implementation");
-    expect(card).toHaveTextContent("remove spec_approval · quick-task has no node spec_approval");
+    expect(within(card).getByRole("list", { name: "Keeps" })).toHaveTextContent("overrides implementation");
+    const drops = within(card).getByRole("list", { name: "Drops" });
+    expect(drops).toHaveTextContent("remove spec_approval");
+    // Why it goes is a line of its own, under the edit.
+    expect(within(drops).getByText("quick-task has no node spec_approval")).toHaveClass("cb-why");
     // It drops an edit: the button is the danger one.
     expect(within(card).getByRole("button", { name: "Change base" })).toHaveClass("btn-danger");
     await userEvent.click(within(card).getByRole("button", { name: "Change base" }));

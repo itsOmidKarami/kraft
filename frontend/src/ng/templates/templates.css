@@ -142,6 +142,16 @@
 .card { display: flex; flex-direction: column; gap: 4px; }
 .card-refs { margin: 0 6px 6px; padding: 0 0 0 14px; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-sub); }
 .card-refs.is-bad { color: var(--bad); }
+/* Change base's Keeps and Drops: the edit in words, what it names in mono, why it goes under it. */
+.cb-head { margin: 2px 6px 0; font-size: var(--fs-label); font-weight: 600; color: var(--text-sub); }
+.cb-list { display: flex; flex-direction: column; gap: 6px; margin: 2px 6px 8px; padding: 0; list-style: none; }
+.cb-entry { display: flex; align-items: flex-start; gap: 6px; font-size: var(--fs-meta); line-height: 1.45; color: var(--text); }
+.cb-entry code { font: var(--fs-label) ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
+.cb-mark { flex: none; margin-top: 3px; }
+.cb-mark.is-ok { color: var(--ok); }
+.cb-mark.is-bad { color: var(--bad); }
+.cb-text { display: flex; flex-direction: column; min-width: 0; }
+.cb-why { color: var(--text-muted); }
 .card-acts { display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px; }
 .tpl-strip { position: absolute; left: 50%; top: 12px; z-index: 5; transform: translateX(-50%); margin: 0; padding: 6px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-size: var(--fs-label); color: var(--text); width: max-content; max-width: min(560px, calc(100% - 32px)); text-align: center; pointer-events: none; box-shadow: 0 8px 20px var(--side-shade); }
 .tpl-strip.is-bad { border-color: var(--bad); color: var(--bad); }

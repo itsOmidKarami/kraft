@@ -157,8 +157,10 @@ describe("Library: change base", () => {
     expect(within(menu).queryByText("fast")).toBeNull();
     await u.click(within(menu).getByText("approval"));
     const card = await screen.findByRole("dialog", { name: "Change base of nodes.fast" });
-    expect(card).toHaveTextContent("read_only");
-    expect(card).toHaveTextContent("fix_loop · approval has none");
+    expect(within(card).getByRole("list", { name: "Keeps" })).toHaveTextContent("read_only");
+    const drops = within(card).getByRole("list", { name: "Drops" });
+    expect(drops).toHaveTextContent("fix_loop");
+    expect(within(drops).getByText("approval has none")).toHaveClass("cb-why");
     await u.click(within(card).getByRole("button", { name: "Change base" }));
     await waitFor(() => expect(post).toHaveBeenLastCalledWith("library", "library", [{ op: "change_base", node: "nodes.fast", base: "approval" }], undefined));
     expect(post.mock.calls[0][3]).toBe(true);

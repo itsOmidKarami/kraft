@@ -303,8 +303,10 @@ describe("change base", () => {
     await userEvent.click(screen.getByRole("button", { name: "Change base…" }));
     await userEvent.click(await screen.findByRole("option", { name: /implementation/ }));
     const card = await screen.findByRole("dialog", { name: "Change base of verification" });
-    expect(card).toHaveTextContent("skippable");
-    expect(card).toHaveTextContent("steps · implementation has no step tests");
+    expect(within(card).getByRole("list", { name: "Keeps" })).toHaveTextContent("skippable");
+    const drops = within(card).getByRole("list", { name: "Drops" });
+    expect(drops).toHaveTextContent("steps");
+    expect(within(drops).getByText("implementation has no step tests")).toHaveClass("cb-why");
     expect(post).toHaveBeenCalledTimes(1);
     await userEvent.click(within(card).getByRole("button", { name: "Change base" }));
     expect(post).toHaveBeenLastCalledWith("chains", "default", [{ op: "change_base", node: "verification", base: "implementation" }], undefined);
