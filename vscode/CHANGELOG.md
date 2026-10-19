@@ -6,6 +6,28 @@ Kraft's release notes for that version. The release workflow writes them; do not
 edit this file by hand. Earlier releases are in Kraft's
 [CHANGELOG](https://github.com/itsOmidKarami/kraft/blob/main/CHANGELOG.md).
 
+## 2.2.0
+
+### Highlights
+
+- Chains can extend a chain: `extends` plus `remove`, `add` and `overrides`, so a shared chain can be customised without forking it. (#974)
+
+### New
+
+- A repository's `.kraft/` can build on an add-on's chain: list the add-on under `addons:` in `.kraft/library.yaml` and extend its chain by the add-on's own name. An add-on update that would break such a chain waits for a person instead of being refused. (#975)
+
+- Edit a chain that extends another on the Templates screen: every change is an edit to its parent. Duplicate and Add to my library can extend a chain instead of copying it, and an extending chain's pane changes its base or detaches it. (#976)
+
+### Fixes
+
+- Fix: the sidebar's version and update badge stay on screen on a page taller than the window, such as Settings › Storage with many worktrees. (#970)
+
+- Fix: on GitLab, the CI wait and the merge node now read merged results pipelines instead of waiting for one until they time out. (#973)
+
+- Fix: Change base lists what it keeps and drops one row per entry, and refusals from Change base and from a new chain are shown as error toasts. (#977)
+
+- The web UI and the console draw Kraft's default look, Ink with a violet accent at the full colour amount, from the start: the web UI no longer shows Graphite until the server answers, and the console's colours follow it. (#979)
+
 ## 2.1.0
 
 ### Highlights
