@@ -254,7 +254,7 @@ async def test_an_editor_override_keeps_identity(st, field, value):
 @pytest.mark.parametrize(
     ("batch", "error"),
     [
-        (("move", {"path": "spec", "to": 3}), "keeps its parent's order"),
+        (("move", {"path": "spec", "to": 3}), "spec comes from default, so it keeps its place"),
         (("rename", {"path": "spec", "id": "specify"}), "would replace"),
         (("add_step", {"container": "verification", "at": 0}), "inherited from default"),
         (

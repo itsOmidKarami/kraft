@@ -139,8 +139,7 @@ def move(d: Draft, path: str, to: int, to_step: str | None = None) -> None:
         return _inside(d, path, ops.move, path=path, to=to, to_step=to_step)
     if owner(d, path) != "added":
         raise OpError(
-            f"{path} is {parent_of(d)}'s node; an extending chain keeps its parent's "
-            "order. Detach the chain to reorder it"
+            f"{path} comes from {parent_of(d)}, so it keeps its place. Detach the chain to reorder it"
         )
     before = _order(d)
     rest = [n for n in before if n.get("id") != path]
