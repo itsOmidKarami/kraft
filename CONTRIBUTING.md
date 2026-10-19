@@ -272,10 +272,9 @@ instead of sitting among the others (a `release::major` one is also kept under
 Breaking changes), and its impact still counts toward the bump. Keep it for the change the release is about: rarely more than one or two
 per release. Write its `## Changelog` section as a headline, and give it a
 picture when the change is something to see: one screenshot or GIF on its own
-line, after a blank line under the bullet, linked from `main` by its full URL,
-since the notes are read on GitHub, in `CHANGELOG.md` and on the Marketplace.
-The blank line keeps the pull request's number on the bullet's words, whatever
-form the picture takes (Markdown, HTML, an uploaded video's URL):
+line, indented under the bullet after a blank line, so the number stays on the
+bullet's words and the picture stays in its entry. Link it by its full URL,
+since the notes are read on GitHub, in `CHANGELOG.md` and on the Marketplace:
 
 ```markdown
 - `kraft console`: a terminal UI for Kraft.
@@ -284,12 +283,14 @@ form the picture takes (Markdown, HTML, an uploaded video's URL):
 ```
 
 Use a picture the docs already show (`.github/assets/`, taken by `just
-docs-screenshots`), or add one there in the same pull request. The release
-points the link at its own tag, so the notes keep this release's picture after
-`main`'s is retaken. Keep pictures to highlights: an entry under New or Fixes is
-one line. A `release::none`
-pull request with the label stops the release, since there is no entry to
-highlight. See [RELEASING.md](RELEASING.md#cut-a-release).
+docs-screenshots`), or add one there in the same pull request, and link it on
+`main`: the release points the link at its own tag, so the notes keep this
+release's picture after `main`'s is retaken. A file dropped into the
+description on GitHub works too (its `user-attachments` URL never changes, so
+nothing is pinned), including right under the bullet as the editor writes it.
+Keep pictures to highlights: an entry under New or Fixes is one line. A
+`release::none` pull request with the label stops the release, since there is
+no entry to highlight. See [RELEASING.md](RELEASING.md#cut-a-release).
 
 **Pull requests from forks are not asked for a label** — only people with write
 access can apply one. A maintainer labels the pull request before merging. One
