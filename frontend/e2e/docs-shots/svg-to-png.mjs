@@ -6,8 +6,10 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const [svg, png] = process.argv.slice(2);
+const usage = "usage: svg-to-png.mjs IN.svg OUT.png (an SVG with a viewBox)";
+if (!svg || !png) throw new Error(usage);
 const box = readFileSync(svg, "utf8").match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
-if (!svg || !png || !box) throw new Error("usage: svg-to-png.mjs IN.svg OUT.png (an SVG with a viewBox)");
+if (!box) throw new Error(usage);
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: Math.ceil(+box[1]), height: Math.ceil(+box[2]) } });
 await page.goto(pathToFileURL(svg).href);

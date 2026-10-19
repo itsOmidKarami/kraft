@@ -70,7 +70,9 @@ def _theme(name: str, tokens: dict[str, str], *, dark: bool) -> Theme:
     or `$surface`."""
     return Theme(
         name=name,
-        primary=tokens["accent"],
+        # Selection, focus and primary controls stay neutral, as on the web (gen_theme.py's
+        # Decisions §13): the accent's colour is `$kraft-accent`, for the console's own marks.
+        primary=tokens["selection"],
         warning=tokens["warn"],
         error=tokens["bad"],
         success=tokens["ok"],
@@ -91,10 +93,10 @@ def _theme(name: str, tokens: dict[str, str], *, dark: bool) -> Theme:
             "kraft-frame": tokens["border"],
             # The live dot for the beat after an event lands.
             "kraft-live-lit": Color.parse(tokens["ok"]).blend(Color.parse(tokens["text"]), 0.6).hex,
-            # A field's frame: the accent at half strength when focused, so the
+            # A field's frame: the focus colour at half strength when focused, so the
             # field is not the loudest thing in a dialog; the web's border else,
             # so a field not focused still reads as one to type in.
-            "border": Color.parse(tokens["surface"]).blend(Color.parse(tokens["accent"]), 0.5).hex,
+            "border": Color.parse(tokens["surface"]).blend(Color.parse(tokens["focus"]), 0.5).hex,
             "border-blurred": tokens["border"],
             # Scrollbars stay quieter than what they scroll.
             "scrollbar": tokens["text-faint"],

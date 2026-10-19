@@ -1,4 +1,5 @@
 import { hex, repo, t, type ItemBundle, type Variant } from "./fixtures";
+import draftViews from "./draftViews.json" with { type: "json" };
 import { buildNeverStarted, buildNgItem, NG_NODES, type NgScenario } from "./ngItems";
 
 /**
@@ -148,6 +149,9 @@ export const NG_CHAINS = [
   { id: "default", nodes: v1(NG_NODES.map((n) => n.id)), gates: 4 },
   { id: "docs_only", nodes: v1(["spec", "spec_approval", "implementation", "work_brief", "merge_request"]), gates: 1 },
 ].map((c) => ({ ...c, gates: c.nodes.filter((n) => n.kind === "gate").length }));
+/** `team-default`, a chain that extends `default`: GET /templates/chains's entry for it, a real server's answer
+ *  (draftViews.json). Every chain list lists it, so the composer can pick it and its dry run reads its own nodes. */
+export const NG_EXTENDING_CHAIN = draftViews.extending as unknown as (typeof NG_CHAINS)[number] & Record<string, unknown>;
 export const NG_REPOS = ["kraft-plugins", "kraft-core", "kraft-api", "kraft-vscode", "kraft-docs", "kraft-lite", "vendor-schemas"].map((name, i) => ({
   ...repo(R(name), i), id: name, enabled: true, default_chain: name === "kraft-docs" ? "docs_only" : "default",
 }));
@@ -163,7 +167,7 @@ export const NG_WORKSPACES = {
 export function ngDryRun(body: { chain_template?: string; attachments?: { kind: string; path: string }[]; skip_nodes?: string[] }) {
   const missing = (body.attachments ?? []).find((a) => a.path.includes("missing"));
   if (missing) return { status: 422, body: { detail: `attachment not found: ${missing.path}` } };
-  const tpl = NG_CHAINS.find((c) => c.id === body.chain_template) ?? NG_CHAINS[0];
+  const tpl = [...NG_CHAINS, NG_EXTENDING_CHAIN].find((c) => c.id === body.chain_template) ?? NG_CHAINS[0];
   const kinds = new Set((body.attachments ?? []).map((a) => a.kind));
   const skipped = tpl.nodes.flatMap((n) =>
     n.covered_by && kinds.has(n.covered_by) ? [{ node: n.id, why: "covered_by", kind: n.covered_by }] : (body.skip_nodes ?? []).includes(n.id) ? [{ node: n.id, why: "skip" }] : []);

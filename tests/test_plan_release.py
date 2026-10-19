@@ -97,22 +97,31 @@ def test_a_fenced_example_is_never_numbered_and_every_list_style_is():
     )
 
 
-def test_an_image_under_a_bullet_leaves_the_number_on_its_words():
+_IMG = "https://raw.githubusercontent.com/o/r/main/.github/assets/console.png"
+
+
+@pytest.mark.parametrize(
+    "picture",
+    [
+        pytest.param(f"![The console's board]({_IMG})", id="image"),
+        pytest.param(
+            f"[![The console's board]({_IMG})](https://kraft-sdlc.dev/demo/)", id="linked"
+        ),
+        pytest.param(f'<img src="{_IMG}" alt="The console\'s board" width="600">', id="html"),
+    ],
+)
+def test_an_image_under_a_bullet_leaves_the_number_on_its_words(picture):
     """A highlight's picture sits under its line, with or without a blank line
     between: the number goes on the words, never after the image."""
-    url = "https://raw.githubusercontent.com/o/r/main/.github/assets/console.png"
     body = (
         "## Changelog\n\n"
         "- The console: a terminal UI.\n"
-        f"  ![The console's board]({url})\n"
+        f"  {picture}\n"
         "- Doctor warns.\n\n"
-        f"  ![Doctor's line]({url})\n"
+        f"  {picture}\n"
     )
     assert plan_release.changelog_entry(pr(904, "minor", body)) == (
-        "- The console: a terminal UI. (#904)\n"
-        f"  ![The console's board]({url})\n"
-        "- Doctor warns. (#904)\n\n"
-        f"  ![Doctor's line]({url})"
+        f"- The console: a terminal UI. (#904)\n  {picture}\n- Doctor warns. (#904)\n\n  {picture}"
     )
 
 

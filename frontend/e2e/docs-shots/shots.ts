@@ -192,8 +192,9 @@ test("setup: the setup wizard, on a home with no repo and no item", async ({ pag
 });
 
 test("mobile: the board in the phone layout", async ({ browser }) => {
-  const { baseURL } = test.info().project.use;
-  const phone = await browser.newContext({ baseURL, viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, colorScheme: "dark" });
+  // Its own context, for the phone's touch and viewport; the rest as the project sets it.
+  const { baseURL, colorScheme, deviceScaleFactor, locale, timezoneId } = test.info().project.use;
+  const phone = await browser.newContext({ baseURL, colorScheme, deviceScaleFactor, locale, timezoneId, viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   const page = await phone.newPage();
   await still(page);
   await page.goto("./");

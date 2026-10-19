@@ -8,7 +8,8 @@ Playwright (frontend/e2e/docs-shots/svg-to-png.mjs). The fake agent's spec says
 `fake spec body`; the first run writes SPEC over it, in the dev instance's
 `run/items/<id>/docs/spec.md`, as the web UI's retake recipe does by hand.
 
-  python dev/console_screenshot.py [--out PATH] [--version X.Y.Z] [--size COLSxROWS]
+  KRAFT_HOME=.dev KRAFT_PORT=8766 python dev/console_screenshot.py \
+      [--out PATH] [--version X.Y.Z] [--size COLSxROWS]
 
 --out      default .github/assets/console.png
 --version  the release the top line names; default the newest stable tag, so a
@@ -45,8 +46,8 @@ and evict the oldest entry once the cache is full.
 
 def give_it_a_spec(work_item_id: str) -> None:
     """SPEC in place of the fake agent's body, keeping its front matter."""
-    home = Path(os.environ.get("KRAFT_HOME") or ROOT / ".dev")
-    spec = home / "run" / "items" / work_item_id / "docs" / "spec.md"
+    run = Path(os.environ.get("KRAFT_RUN_DIR") or Path(os.environ["KRAFT_HOME"]) / "run")
+    spec = run / "items" / work_item_id / "docs" / "spec.md"
     text = spec.read_text()
     if "fake spec body" in text:
         body = text.split("\n---\n", 1)[0] + "\n---\n\n" + SPEC.strip() + "\n"
@@ -91,6 +92,12 @@ def main() -> None:
     ap.add_argument("--version")
     ap.add_argument("--size", default="120x34")
     args = ap.parse_args()
+    # The console reads whichever instance KRAFT_HOME names; unset, that is the
+    # person's own ~/.kraft, whose board this must never picture or write to.
+    if not os.environ.get("KRAFT_HOME"):
+        raise SystemExit(
+            "KRAFT_HOME is not set: run `just console-screenshot`, which points it at .dev"
+        )
     version = args.version or newest_release()
     size = tuple(int(n) for n in args.size.split("x"))
 

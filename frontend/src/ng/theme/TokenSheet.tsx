@@ -12,6 +12,7 @@ import { Switch } from "../ui/Switch";
 import { Tabs } from "../ui/Tabs";
 import { HeaderActions } from "../shell/HeaderActions";
 import { showToast } from "../ui/Toast";
+import { DEFAULT_LOOK } from "./applyTheme";
 import { AMOUNTS, paintedMode, SURFACES } from "./looks";
 import { ThemeCard } from "./ThemeCard";
 import "./tokens.css";
@@ -32,7 +33,7 @@ export function TokenSheet() {
   const [seg, setSeg] = useState("subtle");
   const [dialog, setDialog] = useState(false);
   const html = document.documentElement.dataset;
-  const amount = (html.amount ?? "subtle") as (typeof AMOUNTS)[number]["value"];
+  const amount = (html.amount ?? DEFAULT_LOOK.colour_amount) as (typeof AMOUNTS)[number]["value"];
 
   return (
     <div className="tokens">

@@ -101,6 +101,7 @@ dev-console: _dev-home
 [doc("Docs: retake the console screenshot from the seeded dev instance")]
 console-screenshot *args: _dev-home
     cd frontend && [ -d node_modules ] || npm ci
+    cd frontend && npx playwright install chromium
     {{dev_env}} uv run python dev/console_screenshot.py {{args}}
 
 # Throw the dev instance away (DB, logs, worktrees, seed repo, config)
@@ -391,7 +392,8 @@ vscode-screenshots *args:
     cd vscode && [ -d node_modules ] || npm ci
     cd vscode/dev/screenshots && [ -d node_modules ] || npm ci
     node vscode/dev/screenshots/shot.mjs {{args}}
-    for f in board gate review; do cp vscode/media/screenshot-$f.png .github/assets/vscode-$f.png; done
+    # With --out the pictures went elsewhere: vscode/media/ still holds the old ones, so leave the docs' copies alone.
+    case " {{args}} " in *" --out"*) ;; *) for f in board gate review; do cp vscode/media/screenshot-$f.png .github/assets/vscode-$f.png; done ;; esac
 
 # Lint + format check
 lint:

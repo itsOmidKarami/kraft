@@ -162,3 +162,16 @@ def test_a_focused_button_is_underlined_not_inverted(console):
 
     style = console.run(scenario)
     assert "underline" in style and "reverse" not in style
+
+
+@pytest.mark.parametrize("tokens", [theme.DARK, theme.LIGHT], ids=["dark", "light"])
+def test_selection_and_focus_stay_neutral_when_the_look_has_an_accent(tokens):
+    """The default look's accent is violet, but a menu's cursor, a focused
+    frame and a primary button stay the text colour, as on the web; the
+    accent is `$kraft-accent`, for the console's own marks."""
+    from kraft.console.app import _theme
+
+    look = _theme("kraft-test", tokens, dark=tokens is theme.DARK)
+    assert tokens["accent"] != tokens["selection"]
+    assert look.primary.lower() == tokens["selection"]
+    assert look.variables["kraft-accent"] == tokens["brand"]
