@@ -153,18 +153,39 @@ def test_an_extending_chain_keeps_the_final_gate(tmp_path):
     assert "final gate" in refused(tmp_path, {"extends": "parent", "remove": ["final"]})
 
 
-@pytest.mark.parametrize("parent_has_one", [True, False], ids=["parent-has-one", "parent-has-none"])
-def test_an_extending_chain_holds_one_final_gate(tmp_path, parent_has_one):
+@pytest.mark.parametrize("case", ["parent-has-one", "parent-has-none", "added-through-extends"])
+def test_an_extending_chain_holds_one_final_gate(tmp_path, case):
+    """`added-through-extends`: the added node takes `chain_finalized` from a
+    library node, and a merge after the parent's review would run before the
+    parent's final gate if Kraft let it in."""
+    if case == "added-through-extends":
+        fingate = {"kind": "gate", "chain_finalized": True}
+        lib = {**LIBRARY, "nodes": {**LIBRARY["nodes"], "fingate": fingate}}
+        merge = {"id": "m", "kind": "forge", "target": "mr.merge"}
+        child = {
+            "id": "child",
+            "extends": "parent",
+            "add": [
+                {"after": "build", "node": {"id": "g2", "extends": "fingate"}},
+                {"after": "review", "node": {"id": "merge", "kind": "exec", "tasks": [merge]}},
+            ],
+        }
+        chains = {"parent": PARENT, "child": child}
+        with pytest.raises(TemplateLibraryError) as exc:
+            write_chains(tmp_path, lib, chains).resolve_chain("child")
+        assert "add g2: the chain already has a final gate" in str(exc.value)
+        assert exc.value.loc == ("add", 0, "node")
+        return
     parent = (
         PARENT
-        if parent_has_one
+        if case == "parent-has-one"
         else {**PARENT, "nodes": [n for n in PARENT["nodes"] if n["id"] != "final"]}
     )
     child = {
         "extends": "parent",
         "add": [{"after": "after", "node": gate("second", chain_finalized=True)}],
     }
-    if parent_has_one:
+    if case == "parent-has-one":
         assert "already has a final gate" in refused(tmp_path, child, parent=parent)
     else:
         assert ids(resolve(tmp_path, child, parent=parent))[-1] == "second"
@@ -220,6 +241,7 @@ def test_an_override_merges_like_extends(tmp_path, case):
     else:
         assert _task(resolved, "build.main.u").prompt == "other"
         assert "tasks.other" in lib.references("child")["build"]
+        assert "tasks.base" not in lib.references("child")["build"]
 
 
 @pytest.mark.parametrize(
@@ -230,6 +252,10 @@ def test_an_override_merges_like_extends(tmp_path, case):
         ({"build.main.t": {"extends": "other"}}, "cannot set extends"),
         ({"review": {"chain_finalized": True}}, "cannot set chain_finalized"),
         (
+            {"build": {"fix_loop": {"judge": {"extends": "other"}}}},
+            "cannot set fix_loop.judge.extends",
+        ),
+        (
             {
                 "build": {"tasks": [{"id": "u", "extends": "other"}]},
                 "build.main.t": {"prompt": "p"},
@@ -237,7 +263,7 @@ def test_an_override_merges_like_extends(tmp_path, case):
             "sits under overrides build",
         ),
     ],
-    ids=["id", "kind", "extends", "chain_finalized", "under-a-replaced-list"],
+    ids=["id", "kind", "extends", "chain_finalized", "nested-extends", "under-a-replaced-list"],
 )
 def test_an_override_cannot_change_identity(tmp_path, overrides, why):
     assert why in refused(tmp_path, {"extends": "parent", "overrides": overrides})
@@ -319,25 +345,50 @@ def test_an_extending_chain_fails_alone(tmp_path, case):
 
 
 @pytest.mark.parametrize(
-    ("policy", "outcome"),
+    ("edits", "outcome"),
     [
-        ({"deny_tools": ["Write"]}, {"deny_tools": {"Bash", "Write"}}),
-        ({"token_budget": 5000}, "token_budget: 5000 cannot exceed the parent's 1000"),
-        ({"allowed_tools": ["Read"]}, {"allowed_tools": {"Read"}}),
-        ({"allowed_tools": ["Read", "Bash"]}, "cannot widen the inherited safety ceiling"),
+        ({"policy": {"deny_tools": ["Write"]}}, (None, {"deny_tools": {"Bash", "Write"}})),
+        ({"policy": {"token_budget": 5000}}, "token_budget: 5000 cannot exceed the parent's 1000"),
+        ({"policy": {"allowed_tools": ["Read"]}}, (None, {"allowed_tools": {"Read"}})),
+        (
+            {"policy": {"allowed_tools": ["Read", "Bash"]}},
+            "cannot widen the inherited safety ceiling",
+        ),
+        (
+            {"policy": {"deny_tools": None, "token_budget": None}},
+            "policy.deny_tools: cannot clear the parent's deny_tools",
+        ),
+        (
+            {"overrides": {"build": {"policy": {"deny_tools": []}}}},
+            ("build", {"deny_tools": {"Bash"}}),
+        ),
     ],
-    ids=["drops-a-deny", "raises-a-cap", "narrows", "widens-allowed-tools"],
+    ids=[
+        "drops-a-deny",
+        "raises-a-cap",
+        "narrows",
+        "widens-allowed-tools",
+        "null-drops-a-limit",
+        "override-loosens-a-node",
+    ],
 )
-def test_an_extending_chains_policy_only_tightens(tmp_path, policy, outcome):
+def test_an_extending_chains_policy_only_tightens(tmp_path, edits, outcome):
     own = {"deny_tools": ["Bash"], "token_budget": 1000, "allowed_tools": ["Read", "Edit"]}
-    parent = {**PARENT, "policy": own}
-    child = {"extends": "parent", "policy": policy}
+    guarded = {**PARENT["nodes"][0], "policy": {"deny_tools": ["Bash"]}}
+    parent = {**PARENT, "policy": own, "nodes": [guarded, *PARENT["nodes"][1:]]}
+    child = {"extends": "parent", **edits}
     if isinstance(outcome, str):
         assert outcome in refused(tmp_path, child, parent=parent)
         return
-    resolved = resolve(tmp_path, child, parent=parent).chain.policy
-    for field, expected in outcome.items():
-        assert set(getattr(resolved, field)) == expected
+    where, expected = outcome
+    resolved = resolve(tmp_path, child, parent=parent)
+    policy = (
+        resolved.chain.policy
+        if where is None
+        else next(n for n in resolved.nodes if n.id == where).node.policy
+    )
+    for field, values in expected.items():
+        assert set(getattr(policy, field)) == values
 
 
 def test_an_extending_chain_pins_its_ancestors(tmp_path):

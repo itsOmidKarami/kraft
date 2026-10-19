@@ -48,7 +48,8 @@ def _chain_summary(library: TemplateLibrary, id: str) -> dict:
     listed with its error rather than dropped, so the Chains screen can still
     open it to fix it. `uses` names, per node id, the library components that
     node is built from, which is what the screen links each node to.
-    `description` is read as authored, so a broken chain still shows it, and
+    `description` is read as authored, so a broken chain still shows it (an
+    extending chain that writes none shows the one it inherits), and
     so are `extends`, the chain this one builds on, and `extended_by`, every
     chain whose `extends` reaches this one."""
     uses = {node: sorted(refs) for node, refs in library.references(id).items() if refs}
@@ -62,9 +63,12 @@ def _chain_summary(library: TemplateLibrary, id: str) -> dict:
         "extended_by": list(library.extended_by(id)),
     }
     try:
-        nodes = [store.node_view(n) for n in library.resolve_chain(id).nodes]
+        resolved = library.resolve_chain(id)
     except TemplateLibraryError as exc:
         return {**listed, "nodes": [], "gates": 0, "error": str(exc), "uses": uses}
+    # An extending chain that writes none inherits its parent's.
+    listed["description"] = listed["description"] or resolved.chain.description
+    nodes = [store.node_view(n) for n in resolved.nodes]
     gates = sum(1 for n in nodes if n["kind"] == "gate")
     return {**listed, "nodes": nodes, "gates": gates, "error": None, "uses": uses}
 

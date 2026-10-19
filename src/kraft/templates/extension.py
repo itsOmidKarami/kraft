@@ -161,13 +161,17 @@ def _override(
                 "list it was in",
                 where,
             )
-        if fixed := [key for key in IDENTITY if key in value]:
+        if fixed := _identity(value):
             raise ExtensionError(
                 f"overrides.{path}: an override cannot set {', '.join(fixed)}; remove the "
                 "node and add one instead",
                 where,
             )
         target = _at(root, paths[path])
+        try:
+            value = _tightened(target, value)
+        except ExtensionError as exc:
+            raise ExtensionError(f"overrides.{path}: {exc}", where) from exc
         merged = _merge(_displaced(target, value), value)
         target.clear()
         target.update(merged)
@@ -175,6 +179,34 @@ def _override(
             replaced.append(path)
         overridden.setdefault(node, []).append(path)
     return overridden
+
+
+def _identity(value: Mapping[str, object], prefix: str = "") -> list[str]:
+    """The `IDENTITY` keys `value` sets, at any depth of its mappings
+    (`fix_loop.judge.extends`). A list replaces whole and holds new
+    components, whose ids and parents are their own."""
+    found = [f"{prefix}{key}" for key in IDENTITY if key in value]
+    for key, item in value.items():
+        if isinstance(item, Mapping):
+            found += _identity(item, f"{prefix}{key}.")
+    return found
+
+
+def _tightened(target: Mapping[str, object], value: Mapping[str, object]) -> dict:
+    """`value` with each `policy` it sets on a component that already has one
+    laid over that policy by `tighten`, at any depth of its mappings: an
+    override may tighten a node's or a task's policy, never loosen it, as the
+    chain's own `policy` may not loosen its parent's."""
+    out = dict(value)
+    for key, item in value.items():
+        inherited = target.get(key)
+        if key == "policy" and inherited is not None:
+            if item is None:
+                raise ExtensionError("policy: cannot clear the parent's policy", ("policy",))
+            out[key] = tighten(inherited, item)
+        elif isinstance(item, Mapping) and isinstance(inherited, Mapping):
+            out[key] = _tightened(inherited, item)
+    return out
 
 
 def _anchored(
@@ -235,12 +267,18 @@ def tighten(parent: object, child: object) -> object:
     parent by `InstancePolicy.apply_template_override`, the rule every policy
     scope follows, so it may not widen `allowed_tools` or change a sandbox;
     a scope cap (a budget, a time cap) stays at or under the parent's, as
-    `ResolvedChain._check_caps` keeps a scope's under its parent's. A policy
-    that does not read is returned as merged, for `Chain` to refuse."""
+    `ResolvedChain._check_caps` keeps a scope's under its parent's. A key the
+    parent sets cannot be cleared with an explicit null. A policy that does
+    not read is returned as merged, for `Chain` to refuse."""
     if child is None:
         return parent
     if parent is None or not (isinstance(parent, Mapping) and isinstance(child, Mapping)):
         return child
+    # An explicit null would otherwise replace the parent's value, and every
+    # check below skips a None.
+    for key, value in child.items():
+        if value is None and parent.get(key) is not None:
+            raise ExtensionError(f"policy.{key}: cannot clear the parent's {key}", ("policy", key))
     merged = {**parent, **child}
     try:
         was = TemplatePolicyOverride.model_validate(parent)

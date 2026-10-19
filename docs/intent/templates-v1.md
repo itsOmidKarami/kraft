@@ -594,8 +594,8 @@ origin: src/kraft/templates/extension.py §apply
 
 ## REQ an-extending-chain-holds-one-final-gate
 
-IF an extending chain adds a `chain_finalized` gate to a parent that has one, THEN the system SHALL refuse it.
-enforced-by: tests/templates/test_extension.py::test_an_extending_chain_holds_one_final_gate[parent-has-one], tests/templates/test_extension.py::test_an_extending_chain_holds_one_final_gate[parent-has-none]
+IF an extending chain adds a `chain_finalized` gate to a parent that has one, written on the node or inherited through its `extends`, THEN the system SHALL refuse it.
+enforced-by: tests/templates/test_extension.py::test_an_extending_chain_holds_one_final_gate[parent-has-one], tests/templates/test_extension.py::test_an_extending_chain_holds_one_final_gate[parent-has-none], tests/templates/test_extension.py::test_an_extending_chain_holds_one_final_gate[added-through-extends]
 origin: src/kraft/templates/extension.py §apply
 
 ## REQ an-extending-chains-override-merges-like-extends
@@ -606,14 +606,14 @@ origin: src/kraft/templates/extension.py §apply
 
 ## REQ an-extending-chains-override-keeps-identity
 
-IF an extending chain's override sets `id`, `kind`, `extends` or `chain_finalized`, or sits under an ancestor override that replaces its list, THEN the system SHALL refuse it.
-enforced-by: tests/templates/test_extension.py::test_an_override_cannot_change_identity[id], tests/templates/test_extension.py::test_an_override_cannot_change_identity[kind], tests/templates/test_extension.py::test_an_override_cannot_change_identity[extends], tests/templates/test_extension.py::test_an_override_cannot_change_identity[chain_finalized], tests/templates/test_extension.py::test_an_override_cannot_change_identity[under-a-replaced-list]
+IF an extending chain's override sets `id`, `kind`, `extends` or `chain_finalized` at any depth of its mappings, or sits under an ancestor override that replaces its list, THEN the system SHALL refuse it.
+enforced-by: tests/templates/test_extension.py::test_an_override_cannot_change_identity[id], tests/templates/test_extension.py::test_an_override_cannot_change_identity[kind], tests/templates/test_extension.py::test_an_override_cannot_change_identity[extends], tests/templates/test_extension.py::test_an_override_cannot_change_identity[chain_finalized], tests/templates/test_extension.py::test_an_override_cannot_change_identity[nested-extends], tests/templates/test_extension.py::test_an_override_cannot_change_identity[under-a-replaced-list]
 origin: src/kraft/templates/extension.py §apply
 
 ## REQ an-extending-chains-policy-only-tightens
 
-IF an extending chain's `policy` relaxes what its parent's chain policy sets, THEN the system SHALL refuse it.
-enforced-by: tests/templates/test_extension.py::test_an_extending_chains_policy_only_tightens[drops-a-deny], tests/templates/test_extension.py::test_an_extending_chains_policy_only_tightens[raises-a-cap], tests/templates/test_extension.py::test_an_extending_chains_policy_only_tightens[narrows], tests/templates/test_extension.py::test_an_extending_chains_policy_only_tightens[widens-allowed-tools]
+IF an extending chain's `policy`, or a `policy` its override sets on a node, step or task, relaxes or clears what the parent sets there, THEN the system SHALL refuse it.
+enforced-by: tests/templates/test_extension.py::test_an_extending_chains_policy_only_tightens[drops-a-deny], tests/templates/test_extension.py::test_an_extending_chains_policy_only_tightens[raises-a-cap], tests/templates/test_extension.py::test_an_extending_chains_policy_only_tightens[narrows], tests/templates/test_extension.py::test_an_extending_chains_policy_only_tightens[widens-allowed-tools], tests/templates/test_extension.py::test_an_extending_chains_policy_only_tightens[null-drops-a-limit], tests/templates/test_extension.py::test_an_extending_chains_policy_only_tightens[override-loosens-a-node]
 origin: src/kraft/templates/extension.py §tighten
 
 ## REQ a-removed-pointer-target-is-named

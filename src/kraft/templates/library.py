@@ -1010,10 +1010,8 @@ class _Resolution:
                 self._seed.update({v.path: v for v in parent.exported(("nodes", at)).values()})
             nodes.append(self._node(node, index))
             if origin == "parent":
-                self.references.setdefault(node["id"], set()).update(
-                    parent.references.get(node["id"], ())
-                )
-                self._adopt_usages(parent, node["id"])
+                self._adopt(parent, node["id"])
+        self._refuse_a_second_final_gate(nodes, applied.origins)
         self.provenance = {
             "parent": name,
             "nodes": {
@@ -1098,25 +1096,47 @@ class _Resolution:
         for loc, located in parent.exported(("nodes", at)).items():
             self._located[("nodes", index, *loc[2:])] = located
             self._sources.setdefault(located.path, located.source)
-        self.references.setdefault(str(node["id"]), set()).update(
-            parent.references.get(str(node["id"]), ())
-        )
-        self._adopt_usages(parent, str(node["id"]))
+        self._adopt(parent, str(node["id"]))
         return node
 
-    def _adopt_usages(self, parent: _Resolution, node: str) -> None:
-        """The parent's usages under `node`, for the components this chain
-        still has there (`_sources`, filled by now): one an override's
-        replacement list dropped is not carried over."""
+    def _adopt(self, parent: _Resolution, node: str) -> None:
+        """The parent's references and usages under `node`, for the components
+        this chain still has there (`_sources`, filled by now): one an
+        override's replacement list dropped is not carried over, so it neither
+        pins its add-on nor shows as a use of the node."""
+        kept: set[str] = set()
         for ref, entries in parent.usages.items():
             mine = self.usages.setdefault(ref, [])
             for usage in entries:
                 path = str(usage["path"])
                 under = path == node or path.startswith(f"{node}{PATH_SEPARATOR}")
-                if under and path in self._sources and not any(u["path"] == path for u in mine):
-                    mine.append(dict(usage))
+                if under and path in self._sources:
+                    kept.add(ref)
+                    if not any(u["path"] == path for u in mine):
+                        mine.append(dict(usage))
             if not mine:
                 del self.usages[ref]
+        refs = self.references.setdefault(node, set())
+        refs.update(r for r in parent.references.get(node, ()) if r in kept)
+
+    def _refuse_a_second_final_gate(
+        self, nodes: list[Mapping[str, object]], origins: list[tuple[str, int]]
+    ) -> None:
+        """`an-extending-chain-holds-one-final-gate`, on the expanded result: an
+        added node can take `chain_finalized` from a library node it extends,
+        which `extension.apply` cannot see on the node as written."""
+        finals = [
+            (node, origin)
+            for node, origin in zip(nodes, origins, strict=True)
+            if node.get("kind") == "gate" and node.get("chain_finalized") is True
+        ]
+        if len(finals) > 1:
+            node, (_, at) = next((f for f in finals if f[1][0] == "add"), finals[-1])
+            raise TemplateLibraryError(
+                f"{self._chain.file}: add {node.get('id')}: the chain already has a final "
+                "gate (chain_finalized); it holds one",
+                loc=("add", at, "node"),
+            )
 
     def exported(self, prefix: tuple[object, ...]) -> dict[tuple[object, ...], _Located]:
         """Every location under `prefix`, as a chain extending this one sees

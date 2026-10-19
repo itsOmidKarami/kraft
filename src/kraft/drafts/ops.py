@@ -1011,7 +1011,6 @@ def copy_component(d: Draft, ref: str, name: str) -> dict:
     return {"path": _join(section, name)}
 
 
-#: Every op by name.
 #: The ops an extending chain still takes: they act on the chain as a whole,
 #: never on a node it inherits (`the-editor-leaves-an-extending-chain-to-yaml`).
 #: Renaming the chain itself (`rename` at `path: ""`) is one too.
@@ -1030,6 +1029,7 @@ def _extending(d: Draft) -> str | None:
     return parent if isinstance(parent, str) else None
 
 
+#: Every op by name.
 OPS: dict[str, Callable[..., dict | None]] = {
     "add_node": add_node,
     "add_step": add_step,
