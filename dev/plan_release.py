@@ -95,17 +95,13 @@ def release_impact(prs: list[dict]) -> str:
 
 #: A list item at the left margin: one of an entry's own bullets, not a nested one.
 _TOP_ITEM = re.compile(r"^(?:[-*+]|\d+[.)]) ")
-#: A line that ends the text of the bullet above it: a nested item or a fence.
-_NOT_PROSE = re.compile(r"^\s*(?:[-*+] |\d+[.)] |```|~~~)")
-#: A picture alone on its line, in the forms a PR description holds one: a
-#: Markdown image (`![…](…)`, or linked `[![…](…)](…)`), and what GitHub's
-#: editor writes for a dropped file: an `<img …>` tag, or a video's
-#: `user-attachments` URL. Such a line ends the bullet's words too; any other
-#: picture goes after a blank line (CONTRIBUTING.md), which ends them already.
-_PICTURE = re.compile(
-    r"^\s*(?:!\[[^\]]*\]\([^)\s]*\)|\[!\[[^\]]*\]\([^)\s]*\)\]\([^)\s]*\)"
-    r"|<img\b[^<>]*>|https://github\.com/user-attachments/assets/\S+)\s*$",
-    re.IGNORECASE,
+#: A line that ends the text of the bullet above it, so the number stays on the
+#: words: a nested item, a fence, a line that opens on a Markdown image (`![…]`,
+#: linked `[![…](…)](…)`, with a title, or two side by side), or an `<img …>`
+#: tag alone, which is what GitHub's editor writes for a dropped image. Any other
+#: picture, a dropped video too, goes after a blank line (CONTRIBUTING.md).
+_NOT_PROSE = re.compile(
+    r"^\s*(?:[-*+] |\d+[.)] |```|~~~|!\[|\[!\[|<img\b[^<>]*>\s*$)", re.IGNORECASE
 )
 _FENCE = re.compile(r"^\s*(```|~~~)")
 
@@ -153,7 +149,6 @@ def changelog_entry(pr: dict) -> str:
             and lines[end + 1].strip()
             and not _TOP_ITEM.match(lines[end + 1])
             and not _NOT_PROSE.match(lines[end + 1])
-            and not _PICTURE.match(lines[end + 1])
         ):
             end += 1
         lines[end] += f" (#{pr['number']})"

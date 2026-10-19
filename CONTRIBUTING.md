@@ -286,8 +286,10 @@ Use a picture the docs already show (`.github/assets/`, taken by `just
 docs-screenshots`), or add one there in the same pull request, and link it on
 `main`: the release points the link at its own tag, so the notes keep this
 release's picture after `main`'s is retaken. A file dropped into the
-description on GitHub works too (its `user-attachments` URL never changes, so
-nothing is pinned), including right under the bullet as the editor writes it.
+description on GitHub works too: its `user-attachments` URL never changes, so
+nothing is pinned. A dropped image may stay right under the bullet as the
+editor writes it; a dropped video needs the blank line, since GitHub plays one
+only when it stands alone in its paragraph.
 Keep pictures to highlights: an entry under New or Fixes is one line. A
 `release::none` pull request with the label stops the release, since there is
 no entry to highlight. See [RELEASING.md](RELEASING.md#cut-a-release).

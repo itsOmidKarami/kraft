@@ -107,17 +107,18 @@ _IMG = "https://raw.githubusercontent.com/o/r/main/.github/assets/console.png"
         pytest.param(
             f"[![The console's board]({_IMG})](https://kraft-sdlc.dev/demo/)", id="linked"
         ),
+        pytest.param(f'![The board]({_IMG} "The console")', id="titled"),
+        pytest.param(f"![Light]({_IMG}) ![Dark]({_IMG})", id="side-by-side"),
         pytest.param(
-            '<img width="600" alt="The board" src="https://github.com/user-attachments/assets/0f3c">',
+            '<img width="600" alt="Board" src="https://github.com/user-attachments/assets/0f" />',
             id="dropped-image",
         ),
-        pytest.param("https://github.com/user-attachments/assets/0f3c-4b2a", id="dropped-video"),
     ],
 )
-def test_a_picture_alone_under_a_bullet_leaves_the_number_on_its_words(picture):
-    """A picture alone on its line ends the bullet's words, right under it or
-    after a blank line: a Markdown image, or what GitHub's editor writes for a
-    dropped file. The number goes on the words, never after the picture."""
+def test_a_picture_under_a_bullet_leaves_the_number_on_its_words(picture):
+    """A line that opens on a Markdown image, or an `<img>` alone as GitHub's
+    editor writes a dropped one, ends the bullet's words, right under it or
+    after a blank line. The number goes on the words, never after the picture."""
     body = (
         "## Changelog\n\n"
         "- The console: a terminal UI.\n"
@@ -130,11 +131,19 @@ def test_a_picture_alone_under_a_bullet_leaves_the_number_on_its_words(picture):
     )
 
 
-def test_a_picture_of_several_lines_after_a_blank_line_leaves_the_number_on_the_words():
-    """Any other picture, such as centred HTML over several lines, goes after a
-    blank line (CONTRIBUTING.md), which ends the bullet's words whatever follows."""
-    link = f'<a href="https://kraft-sdlc.dev/demo/"><img src="{_IMG}"></a>'
-    picture = f'<p align="center">\n  {link}\n  </p>'
+@pytest.mark.parametrize(
+    "picture",
+    [
+        pytest.param(
+            f'<p align="center">\n  <a href="https://kraft.dev/"><img src="{_IMG}"></a>\n  </p>',
+            id="html-lines",
+        ),
+        pytest.param("https://github.com/user-attachments/assets/0f3c-4b2a", id="dropped-video"),
+    ],
+)
+def test_any_other_picture_goes_after_a_blank_line(picture):
+    """HTML over several lines, or a dropped video (GitHub plays one only alone
+    in its paragraph), goes after a blank line, which ends the bullet's words."""
     body = f"## Changelog\n\n- The console: a terminal UI.\n\n  {picture}\n"
     assert plan_release.changelog_entry(pr(904, "minor", body)) == (
         f"- The console: a terminal UI. (#904)\n\n  {picture}"
@@ -147,17 +156,16 @@ def test_a_picture_of_several_lines_after_a_blank_line_leaves_the_number_on_the_
         pytest.param("<kbd>Ctrl</kbd>+<kbd>K</kbd> from any screen.", id="inline-tag"),
         pytest.param("<https://kraft-sdlc.dev/> for the new home.", id="autolink"),
         pytest.param('<a href="https://kraft-sdlc.dev/">the docs</a> say how.', id="text-link"),
-        pytest.param(f"![dot]({_IMG}) badge on stuck items.", id="inline-image"),
-        pytest.param(f'<img src="{_IMG}" alt="dot"> badge on stuck items.', id="inline-img-tag"),
+        pytest.param(f'<img src="{_IMG}" alt="dot"> badge on stuck items.', id="img-then-words"),
+        pytest.param("https://github.com/user-attachments/assets/ab", id="url-ending-a-sentence"),
     ],
 )
-def test_a_wrapped_line_with_words_on_it_is_still_the_bullets_words(wrapped):
-    """Only a picture alone on its line ends the words without a blank line: a
-    wrapped line that has words on it, whatever it opens on, is part of the
-    bullet, so the number ends it."""
-    body = f"## Changelog\n\n- Search opens with\n  {wrapped}\n"
+def test_a_wrapped_line_of_words_is_still_the_bullets_words(wrapped):
+    """A wrapped line that is not a picture, whatever it opens on, is part of
+    the bullet, so the number ends it."""
+    body = f"## Changelog\n\n- See the recording at\n  {wrapped}\n"
     assert plan_release.changelog_entry(pr(9, "minor", body)) == (
-        f"- Search opens with\n  {wrapped} (#9)"
+        f"- See the recording at\n  {wrapped} (#9)"
     )
 
 
