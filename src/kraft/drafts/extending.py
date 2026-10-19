@@ -297,7 +297,8 @@ def set_field(d: Draft, path: str, field: str, value: object) -> None:
     if who in ("chain", "added"):
         return ops.set_field(d, path, field, value)
     _writable(d, path)
-    # Item 1 refuses an identity key at any depth of an override.
+    # Item 1 refuses an identity key on anything the parent already has; the
+    # editor refuses one at any depth (it fills no empty slot through a field).
     if fixed := next((seg for seg in field.split(PATH_SEPARATOR) if seg in IDENTITY), None):
         root = path.split(PATH_SEPARATOR)[0]
         raise OpError(f"an override can't change {fixed}; remove {root} and add your own")
