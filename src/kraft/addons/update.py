@@ -301,6 +301,9 @@ def _removal_problems(
     the lint after it says why."""
     from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
+    # `update` also sees these as the after-state library's `stale_removals`;
+    # they are worked out here as well because validate judges a child with
+    # `problems(ancestors=...)` and builds no state.
     if parent_id is None or not ancestors:
         return []
     entry = files.get("library.yaml")
@@ -784,7 +787,9 @@ def _ancestors(
         return inherit.ancestry(candidate, addons)[1:]
     except inherit.InheritanceError as exc:
         hint = ""
-        if parent.left_out is None and _outside(candidate.parent_range, parent.version):
+        if parent.left_out == load.DISABLED:
+            hint = f"; enable it first: kraft admin addon enable {parent_id}"
+        elif parent.left_out is None and _outside(candidate.parent_range, parent.version):
             hint = (
                 f"; point collection {parent_id.split('@', 1)[1]}'s ref at a release it "
                 f"accepts, or wait for {candidate.id} to accept {parent.version}"
@@ -803,15 +808,31 @@ def _outside(range_: str | None, version: str) -> str | None:
         return str(exc)
 
 
+def _as_installed(
+    addon_id: str, namespace: str, found: AddonManifest, root: Path
+) -> load.InstalledAddon:
+    """A candidate as the add-on it would load as, its parent from `found`."""
+    parent, range_ = found.parent or (None, None)
+    name = addon_id.split("@", 1)[0]
+    return load.InstalledAddon(
+        addon_id, name, namespace, found.version, root, parent=parent, parent_range=range_
+    )
+
+
 def _children_left_behind(
     addon_id: str, version: str, addons: Sequence[load.InstalledAddon]
-) -> list[str]:
-    """One line for each loading child among `addons` whose range `version`
-    of its parent `addon_id` falls outside: moving the parent would leave it
-    out. Slice 1 refuses the move; it does not move the set."""
+) -> list[tuple[str, str]]:
+    """`(child id, why)` for each loading child among `addons` whose range
+    `version` of its parent `addon_id` falls outside: moving the parent would
+    leave it out. Slice 1 refuses the move; it does not move the set, so the
+    way across is to take the child out first."""
     return [
-        f"{version} would leave {child.id} outside its range {child.parent_range} ({why}); "
-        "it would no longer load"
+        (
+            child.id,
+            f"{version} would leave {child.id} outside its range {child.parent_range} ({why}); "
+            f"it would no longer load. Disable {child.id} first, then update it to a "
+            f"release that accepts {version} and enable it",
+        )
         for child in addons
         if child.repo_id is None
         and child.left_out is None
@@ -941,21 +962,32 @@ def update(
                     )
                 if why := load.instance_problem(namespace, found.requires, config_dir):
                     raise Refused([why])
-                parent = found.parent or (None, None)
-                # Its root is the scratch copy, written once it is known to be pending.
-                candidate = load.InstalledAddon(
-                    addon_id,
-                    name,
-                    namespace,
-                    found.version,
-                    Path(scratch),
-                    parent=parent[0],
-                    parent_range=parent[1],
-                )
                 rest = [p for p in loaded if p.id != addon_id]
-                ancestors = _ancestors(candidate, rest, config)
-                if behind := _children_left_behind(addon_id, found.version, rest):
-                    raise Refused(behind)
+                # The candidate as the tree sees it; its root is swapped for the
+                # scratch copy once it is known to be pending. Neither the
+                # ancestry nor the cascade reads a root.
+                candidate = _as_installed(addon_id, namespace, found, Path(scratch))
+                # Why the move would not hold in this tree: said only if there
+                # is a move, so a current add-on whose parent is left out stays
+                # current rather than refused on every routine update.
+                held_by_tree: list[str] = []
+                try:
+                    ancestors = _ancestors(candidate, rest, config)
+                except Refused as exc:
+                    ancestors, held_by_tree = (), list(exc.problems)
+                would_load = list(inherit.cascade([*rest, candidate]))
+                behind = _children_left_behind(addon_id, found.version, rest)
+                held_by_tree += [why for _child, why in behind]
+                # A descendant whose ancestry no longer holds is named: its
+                # chains would be gone, not broken.
+                loading = {p.id for p in rest if p.left_out is None}
+                held_by_tree += [
+                    f"{p.id} would no longer load: {p.left_out}"
+                    for p in would_load
+                    if p.id in loading
+                    and p.left_out is not None
+                    and p.id not in {child for child, _why in behind}
+                ]
                 others = (
                     set(holders)
                     | {config.namespace(o) for o in config.addons if o != addon_id}
@@ -965,7 +997,7 @@ def update(
                     found,
                     extracted.files,
                     other_namespaces=others,
-                    named_by=referrers(namespace, [p for p in loaded if p.id != addon_id]),
+                    named_by=referrers(namespace, rest),
                     repositories=load.connected_ids(config_dir),
                     ancestors=ancestors,
                 )
@@ -990,13 +1022,16 @@ def update(
                 or (mirror is None and digest != locked.digest)
             )
             if not pending:
-                note = None
+                notes = list(held_by_tree)
                 if extracted.tree != locked.tree:
-                    note = (
+                    notes.append(
                         f"version {locked.version} unchanged, but its files changed at "
                         f"{commit[:12]}; --re-install to take it"
                     )
-                results[addon_id] = Result(addon_id, "current", note=note)
+                results[addon_id] = Result(addon_id, "current", note="; ".join(notes) or None)
+                continue
+            if held_by_tree:
+                results[addon_id] = Result(addon_id, "refused", problems=tuple(held_by_tree))
                 continue
 
             store = (
@@ -1029,21 +1064,10 @@ def update(
                 reviewed = replace(reviewed, reach=(moved, *reviewed.reach))
 
             root = fetch.write_scratch(Path(scratch), extracted)
-            # A descendant whose ancestry no longer holds drops before it is
-            # judged, and is named: its chains are gone, not broken.
-            would_load = list(inherit.cascade([*rest, replace(candidate, root=root)]))
-            loading = {p.id for p in rest if p.left_out is None}
-            dropped = [
-                f"{p.id} would no longer load: {p.left_out}"
-                for p in would_load
-                if p.id in loading and p.left_out is not None
-            ]
+            would_load = [replace(p, root=root) if p.id == addon_id else p for p in would_load]
             after = state_of(config_dir, would_load)
             libraries = {p.namespace for p in would_load if p.repo_id is not None}
-            if broken := [
-                *dropped,
-                *breaks(state, after, config_dir, namespace, exempt=libraries),
-            ]:
+            if broken := breaks(state, after, config_dir, namespace, exempt=libraries):
                 results[addon_id] = Result(
                     addon_id,
                     "refused",

@@ -27,6 +27,10 @@ def repo_library_id(repo_id: str) -> str:
     return f"library@{_REPO}{repo_id}"
 
 
+#: The `left_out` of an add-on `addons.yaml` disables.
+DISABLED = "is disabled"
+
+
 @dataclass(frozen=True)
 class InstalledAddon:
     """One add-on the instance loads: where its extracted files are and the
@@ -356,7 +360,7 @@ def _installed(config_dir: Path, store: Path, verify: bool, config) -> tuple[Ins
             source=locked.source,
         )
         if not config.entry(addon_id).enabled:
-            found.append(replace(addon, left_out="is disabled", quiet=True))
+            found.append(replace(addon, left_out=DISABLED, quiet=True))
         else:
             found.append(_with_store_problem(addon, verify, manifests))
     for addon_id, locked in lock.addons.items():

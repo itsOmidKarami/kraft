@@ -4,7 +4,15 @@ together with its ancestors, and a parent's update with its children
 
 import pytest
 import yaml
-from support.addons import AGENT, addon_json, chain, instance, make_collection, publish
+from support.addons import (
+    AGENT,
+    addon_json,
+    chain,
+    edit_addons_yaml,
+    instance,
+    make_collection,
+    publish,
+)
 
 from kraft.addons import manifest, update
 from kraft.addons.config import AddonEntry
@@ -94,6 +102,22 @@ def _both_installed(tmp_path, **spec):
     return repos, home
 
 
+def _disable_parent(home):
+    edit_addons_yaml(home[0], lambda written: written["addons"].update({PARENT: False}))
+
+
+def _current_child_of_a_disabled_parent(tmp_path):
+    _, home = _both_installed(tmp_path)
+    _disable_parent(home)
+    return home, CHILD, False
+
+
+def _child_of_a_disabled_parent(tmp_path):
+    _, home = _parent_then_child(tmp_path)
+    _disable_parent(home)
+    return home, CHILD, True
+
+
 def _parent_moves_out_of_range(tmp_path):
     repos, home = _both_installed(tmp_path)
     publish(repos["corp"], "company", version="4.0.0")
@@ -177,9 +201,24 @@ def _written(home):
             id="child-out-of-range",
         ),
         pytest.param(
+            _current_child_of_a_disabled_parent,
+            "current",
+            "its parent company@corp is not loaded: is disabled",
+            id="current-child-of-a-disabled-parent",
+        ),
+        pytest.param(
+            _child_of_a_disabled_parent,
+            "refused",
+            "is not loaded: is disabled; enable it first: kraft admin addon enable company@corp",
+            id="child-of-a-disabled-parent",
+        ),
+        pytest.param(
             _parent_moves_out_of_range,
             "refused",
-            "would leave team@payments outside its range 3.1",
+            (
+                "would leave team@payments outside its range 3.1",
+                "Disable team@payments first, then update it to a release that accepts 4.0.0",
+            ),
             id="parent-update-leaves-child-out-of-range",
         ),
         pytest.param(
@@ -224,9 +263,12 @@ def test_a_child_is_judged_with_its_ancestors(tmp_path, setup, outcome, message)
 
     assert result.outcome == outcome, result.problems
     parts = (message,) if isinstance(message, str) else message
-    said = [why for why in result.problems if all(part in why for part in parts or ())]
+    told = [*result.problems, *([result.note] if result.note else [])]
+    said = [why for why in told if all(part in why for part in parts or ())]
     assert parts is None or said, result.problems
     if outcome == "refused":
+        # Each reason once: a child left behind is not also said to drop.
+        assert len(result.problems) == 1, result.problems
         assert _written(home) == before
 
 

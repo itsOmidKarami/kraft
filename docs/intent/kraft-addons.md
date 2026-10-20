@@ -272,8 +272,8 @@ origin: src/kraft/addons/update.py §problems
 
 ## REQ install-refuses-a-missing-parent-collection
 
-IF an add-on being installed or updated names a parent that is not installed, THEN the system SHALL refuse it, naming the parent and the `kraft admin addon install` to run, or, when the parent's collection is not in `addons.yaml`, naming that collection and the `kraft admin addon collection add` to run.
-enforced-by: tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-missing-parent], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-missing-parent-collection]
+IF an add-on being installed or updated names a parent that is not installed, THEN the system SHALL refuse it, naming the parent and the `kraft admin addon install` to run, or, when the parent's collection is not in `addons.yaml`, naming that collection and the `kraft admin addon collection add` to run, or, when the parent is disabled, the `kraft admin addon enable` to run; and an installed add-on with nothing to take SHALL be reported current, with why its ancestry does not hold, never refused.
+enforced-by: tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-missing-parent], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-missing-parent-collection], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-of-a-disabled-parent], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[current-child-of-a-disabled-parent]
 origin: src/kraft/addons/update.py §_ancestors
 
 ## REQ an-addon-cannot-run-commands-or-grant-permissions
