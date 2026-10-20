@@ -1,7 +1,7 @@
 import { DEFAULT_VIEW } from "./fixture.default";
 import type { NodeInheritance, Result } from "./types";
 
-/** `chains/company:ship`-style result of a child add-on's chain: node `implementation` runs a task
+/** The resolved view of a child add-on's chain (a `company:ship`-style id): node `implementation` runs a task
  *  the child overrides, `verification` one it adds. Tests only. */
 export const INHERITED_NODES: Record<string, NodeInheritance> = {
   implementation: { origin: "overridden", entry: "tasks.platform-dept:security_scan" },

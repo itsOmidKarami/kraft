@@ -68,7 +68,7 @@ export function inheritanceText(a: Addon | null | undefined): string | null {
 }
 
 /** The mark's tooltip: who wrote the entry. */
-export const inheritanceTitle = (a: Addon | null | undefined): string | null => (a?.inheritance ? `Written by ${a.inheritance.author.id} ${a.inheritance.author.version}`.trim() : null);
+export const inheritanceTitle = (a: Addon | null | undefined): string | null => (a?.inheritance ? `Written by ${a.inheritance.author.id} ${a.inheritance.author.version}` : null);
 
 /** ` · inherited from company` in a picker: inherited and overridden only. An added chain is simply one of that add-on's. */
 export function pickerMark(a: Addon | null | undefined): string {

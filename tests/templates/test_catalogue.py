@@ -84,6 +84,30 @@ OWN_HOUSE = {
 }
 #: A repo library that names the dept as its parent, with a chain of its own.
 REPO_CHILD = {"library": {"tasks": {"own": AGENT}}, "chains": {"default": chain("own")}}
+#: A team whose added `pci_review` node runs two added tasks, `zeta` before `alpha`.
+TWO_ADDED = {
+    **TEAM,
+    "library": {
+        **TEAM["library"],
+        "tasks": {**TEAM["library"]["tasks"], "zeta": AGENT, "alpha": AGENT},
+    },
+    "chains": {
+        **TEAM["chains"],
+        "default": {
+            "extends": "platform-dept:default",
+            "add": [
+                {
+                    "after": "verification",
+                    "node": {
+                        "id": "pci_review",
+                        "kind": "exec",
+                        "tasks": [{"id": "z", "extends": "zeta"}, {"id": "a", "extends": "alpha"}],
+                    },
+                }
+            ],
+        },
+    },
+}
 HOUSE = {"origin": "overridden", "entry": "steering.team-payments:house"}
 SCAN = {"origin": "overridden", "entry": "tasks.team-payments:security_scan"}
 
@@ -125,6 +149,16 @@ SCAN = {"origin": "overridden", "entry": "tasks.team-payments:security_scan"}
             },
             None,
             id="steering",
+        ),
+        pytest.param(
+            TWO_ADDED,
+            "team-payments:default",
+            {
+                "pci_review": {"origin": "added", "entry": "tasks.team-payments:alpha"},
+                "scan": SCAN,
+            },
+            None,
+            id="tie-takes-the-first-in-sorted-order",
         ),
         pytest.param(None, "company:default", {}, None, id="root-chain"),
         pytest.param(None, "local", {}, None, id="local-chain"),

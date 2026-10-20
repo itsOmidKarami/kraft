@@ -421,6 +421,10 @@ OWN_HOUSE = {
     **TEAM,
     "library": {**TEAM["library"], "steering": {"house": {"instructions": "team rules"}}},
 }
+NEW_PROFILE = {
+    **TEAM,
+    "library": {**TEAM["library"], "steering": {"strict": {"instructions": "team only"}}},
+}
 
 #: `(origin, parent namespace, author id)` of a team entry, as most rows expect.
 BY_DEPT = ("inherited", "platform-dept", "platform-dept@acme")
@@ -480,6 +484,11 @@ REPO_CHILD = {"library": {"tasks": {"own": AGENT}}, "chains": {"default": chain(
                 "steering.platform-dept:house": ("inherited", "company", "company@acme"),
             },
             id="steering",
+        ),
+        pytest.param(
+            {"team": NEW_PROFILE},
+            {"steering.team-payments:strict": TEAM_ADDED},
+            id="steering-added",
         ),
         pytest.param(
             {"dept_alias": "plat", "team": TEAM_INHERITS_SCAN},
