@@ -450,6 +450,55 @@ _C2_OUTSIDE_T = f"{_C} 2.0.0 is outside {_T}'s range 1 (needs 1.x)"
             {_T: f"{_T}'s range 1 does not accept {_C} 2.0.0 (needs 1.x)"},
             id="re-offer-parents-first",
         ),
+        pytest.param(
+            {_T: _S("1.0.0", None, None)},
+            {_T: _S("1.1.0", _C, "1"), _C: _S("1.0.0", "root@corp", "1")},
+            {
+                _T: f"its parent {_C} cannot be installed: its parent root@corp is not installed",
+                _C: "its parent root@corp is not installed",
+            },
+            id="parent-install-dropped-after-its-child",
+        ),
+        pytest.param(
+            {_C: _S("1.0.0", None, None), "app@corp": _S("1.0.0", _C, None)},
+            {_C: _S("2.0.0", None, None), "app@corp": _S("1.1.0", _C, "1")},
+            {"app@corp": f"app@corp's range 1 does not accept {_C} 2.0.0 (needs 1.x)"},
+            id="re-offer-by-depth-not-id",
+        ),
+        pytest.param(
+            {"app@corp": _S("1.0.0", None, None), "base@corp": _S("2.0.0", None, None)},
+            {"app@corp": _S("2.0.0", "base@corp", "2"), "base@corp": _S("1.0.0", None, None)},
+            {"base@corp": "base@corp 1.0.0 is outside app@corp's range 2 (needs 2.x)"},
+            id="re-offer-depth-is-the-locked-one",
+        ),
+        pytest.param(
+            {
+                _C: _S("1.0.0", None, None),
+                "app@corp": _S("1.0.0", _C, "1"),
+                "web@corp": _S("1.0.0", _C, "1"),
+            },
+            {_C: _S("2.0.0", None, None)},
+            {_C: f"{_C} 2.0.0 is outside app@corp's range 1 (needs 1.x)"},
+            id="reason-names-the-first-child-by-id",
+        ),
+        pytest.param(
+            {},
+            {_C: _S("1.0.0", _T, "2"), _T: _S("1.0.0", _C, "2")},
+            {
+                _C: f"its parent {_T} cannot be installed: its parent {_C} is not installed",
+                _T: f"its parent {_C} is not installed",
+            },
+            id="parent-installs-in-a-cycle",
+        ),
+        pytest.param(
+            _TWO,
+            {_T: _S("1.1.0", _C, "x")},
+            {
+                _T: f"{_T}'s range x does not accept {_C} 1.0.0 "
+                "(invalid literal for int() with base 10: 'x')"
+            },
+            id="unparsable-range-breaks",
+        ),
     ],
 )
 def test_settle(locked, moves, dropped):
@@ -498,6 +547,7 @@ def test_needed(locked, kept, named, expected):
     assert inherit.needed(named, locked, kept) == expected
 
 
+_CHAIN = dict(_levels(10))
 _PARENTS = {_C: None, _D: _C, _T: _D, "tools@acme": None, "a@corp": _C, "b@corp": _C}
 
 
@@ -508,11 +558,28 @@ _PARENTS = {_C: None, _D: _C, _T: _D, "tools@acme": None, "a@corp": _C, "b@corp"
         pytest.param(
             ["tools@acme", _T, _C], _PARENTS, [("tools@acme",), (_C, _T)], id="first-appearance"
         ),
-        pytest.param([_T, _D, _C], _PARENTS, [(_C, _D, _T)], id="depth-order"),
+        pytest.param(
+            ["a@corp", "m@corp", "z@corp"],
+            {"z@corp": None, "m@corp": "z@corp", "a@corp": "m@corp"},
+            [("z@corp", "m@corp", "a@corp")],
+            id="depth-order",
+        ),
         pytest.param(
             ["b@corp", "a@corp", _C], _PARENTS, [(_C, "a@corp", "b@corp")], id="siblings-by-id"
         ),
         pytest.param([_T, _C], _PARENTS, [(_C, _T)], id="through-a-still-member"),
+        pytest.param(
+            ["w@corp", "x@corp", "y@corp", "z@corp"],
+            {"w@corp": "x@corp", "x@corp": "y@corp", "y@corp": "x@corp", "z@corp": None},
+            [("w@corp",), ("x@corp",), ("y@corp",), ("z@corp",)],
+            id="cycle-members-alone",
+        ),
+        pytest.param(
+            ["l1@acme", "l9@acme"], _CHAIN, [("l9@acme", "l1@acme")], id="deepest-allowed-chain"
+        ),
+        pytest.param(
+            ["l0@acme", "l9@acme"], _CHAIN, [("l0@acme",), ("l9@acme",)], id="chain-too-deep"
+        ),
     ],
 )
 def test_trees(ids, parents, expected):

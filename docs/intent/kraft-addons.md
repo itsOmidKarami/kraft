@@ -591,7 +591,7 @@ origin: src/kraft/drafts/extending.py §detach
 ## REQ update-applies-a-consistent-set
 
 WHEN an update judges waiting moves, the system SHALL drop every move that breaks a range, judged with the other moves applied, repeat until none breaks, then re-offer each dropped move, parents first and then by id, keeping one whose addition to the kept set breaks no range, repeat the re-offer until it keeps nothing new, and apply only what is kept.
-enforced-by: tests/addons/test_inherit.py::test_settle[cascade], tests/addons/test_inherit.py::test_settle[move-together], tests/addons/test_inherit.py::test_settle[order-independent], tests/addons/test_inherit.py::test_settle[child-keeps-old-range], tests/addons/test_inherit.py::test_settle[re-offer-second-round], tests/addons/test_inherit.py::test_settle[re-offer-parents-first]
+enforced-by: tests/addons/test_inherit.py::test_settle[cascade], tests/addons/test_inherit.py::test_settle[move-together], tests/addons/test_inherit.py::test_settle[order-independent], tests/addons/test_inherit.py::test_settle[child-keeps-old-range], tests/addons/test_inherit.py::test_settle[re-offer-second-round], tests/addons/test_inherit.py::test_settle[re-offer-parents-first], tests/addons/test_inherit.py::test_settle[re-offer-by-depth-not-id], tests/addons/test_inherit.py::test_settle[re-offer-depth-is-the-locked-one]
 origin: src/kraft/addons/inherit.py §settle
 
 ## REQ a-new-parent-name-the-child-shadows-is-reach

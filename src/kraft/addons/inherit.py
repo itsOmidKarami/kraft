@@ -133,12 +133,11 @@ class Side(NamedTuple):
     range: str | None
 
 
-def _breaks(addon_id: str, sides: Mapping[str, Side]) -> list[tuple[str | None, str]]:
+def _breaks(addon_id: str, sides: Mapping[str, Side]) -> list[tuple[str, str]]:
     """Each range `addon_id` breaks against `sides` (every add-on present, at
     its kept or locked side), as `(other id, why)`: its own range or missing
-    parent first, then each child's range, in child-id order. The other id of
-    a parent not among `sides` is that parent's; a range that does not parse
-    breaks, worded with its error."""
+    parent first, then each child's range, in child-id order. A range that
+    does not parse breaks, worded with its error."""
     from kraft.addons import manifest
 
     def outside(range_: str, version: str) -> str | None:
@@ -148,7 +147,7 @@ def _breaks(addon_id: str, sides: Mapping[str, Side]) -> list[tuple[str | None, 
             return str(exc)
 
     side = sides[addon_id]
-    out: list[tuple[str | None, str]] = []
+    out: list[tuple[str, str]] = []
     if side.parent is not None:
         parent = sides.get(side.parent)
         if parent is None:
@@ -215,19 +214,25 @@ def settle(locked: Mapping[str, Side], moves: Mapping[str, Side]) -> dict[str, s
         for addon_id in order:
             if addon_id in kept:
                 continue
-            trial = kept | {addon_id}
-            applied = sides(trial)
-            if not any(_breaks(i, applied) for i in trial):
+            if not _breaks(addon_id, sides(kept | {addon_id})):
                 kept.add(addon_id)
                 offered = True
     dropped: dict[str, str] = {}
+
+    def reason(addon_id: str, asking: tuple[str, ...] = ()) -> str:
+        # A parent install that is dropped too is worded first, whatever its
+        # depth, since a locked add-on's new parent can be one.
+        if addon_id not in dropped:
+            other, why = _breaks(addon_id, sides(kept | {addon_id}))[0]
+            if other in moves and other not in kept and other not in locked and other not in asking:
+                parent_why = reason(other, (*asking, addon_id))
+                why = f"its parent {other} cannot be installed: {parent_why}"
+            dropped[addon_id] = why
+        return dropped[addon_id]
+
     for addon_id in order:
-        if addon_id in kept:
-            continue
-        other, why = _breaks(addon_id, sides(kept | {addon_id}))[0]
-        if other in dropped and other not in locked:
-            why = f"its parent {other} cannot be installed: {dropped[other]}"
-        dropped[addon_id] = why
+        if addon_id not in kept:
+            reason(addon_id)
     return dropped
 
 
