@@ -107,7 +107,7 @@ kraft admin templates lint                   # check every chain in the library;
 kraft admin templates show ID [--resolved]   # a chain file as written, or expanded
 kraft admin templates library [ID]           # the library's components
 kraft admin harnesses [ID]                   # harness profiles and the tasks that select each
-kraft admin addon validate PATH [--with DIR] # check a collection or add-on directory; installs nothing, exit 1 on any problem
+kraft admin addon validate PATH [--with DIR ...] # check a collection or add-on directory; installs nothing, exit 1 on any problem
 kraft admin addon collection add SOURCE [--ref REF] [--auto-update] / list / update [NAME] / auto-update NAME on|off / remove NAME
 kraft admin addon install ADDON@COLLECTION [--as ALIAS] [--auto-update] [--re-install] [-y]  # shows a review; writes nothing until accepted
 kraft admin addon update [ADDON@COLLECTION ...] [-y | --check]  # --check exits 0 current, 1 waiting, 2 refused, 3 could not check
