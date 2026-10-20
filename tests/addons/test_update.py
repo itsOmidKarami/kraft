@@ -179,9 +179,9 @@ def _run(home, ids=(ID,), *, accept=True, install=(), **kw):
     config_dir, addons_dir = home
     reviews = []
 
-    def answer(review):
-        reviews.append(review)
-        return accept(review) if callable(accept) else accept
+    def answer(group):
+        reviews.append(group)
+        return accept(group) if callable(accept) else accept
 
     entry = kw.pop("entry", True)
     try:

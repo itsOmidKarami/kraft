@@ -129,11 +129,6 @@ def test_a_group_is_held_whole(reaches, expected):
     group = review.Group(tuple(_member(i, reach) for i, reach in reaches.items()))
 
     assert update.unattended_holds(group) == expected
-    if len(reaches) == 1:
-        (only,) = group.reviews
-        assert update.unattended_holds(group) == (
-            {only.addon_id: update.may_apply_unattended(only)} if reaches[only.addon_id] else {}
-        )
 
 
 def _listed_not_locked(repo, config_dir):

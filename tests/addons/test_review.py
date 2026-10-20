@@ -688,38 +688,40 @@ def _member(addon_id, content=()):
 
 
 @pytest.mark.parametrize(
-    "group, title, first_line",
+    "group, title, text",
     [
-        (review.Group((_member("release@acme"),)), "release@acme", "release@acme 1.0.0 -> 1.1.0"),
+        (
+            review.Group((_member("release@acme"),)),
+            "release@acme",
+            "release@acme 1.0.0 -> 1.1.0",
+        ),
         (
             review.Group(
                 (_member("company@acme"), _member("release@acme")), ("company@acme comes too",)
             ),
             "company@acme, release@acme",
-            "company@acme comes too",
+            "company@acme comes too\ncompany@acme 1.0.0 -> 1.1.0\nrelease@acme 1.0.0 -> 1.1.0",
         ),
         (
             review.Group((_member("release@acme", ("a\u202eb",)),), ("pulled\x1b[2K in",)),
             "release@acme",
-            "pulled\\u{001B}[2K in",
+            "pulled\\u{001B}[2K in\nrelease@acme 1.0.0 -> 1.1.0\nContent:\n  - a\\u{202E}b",
+        ),
+        (
+            review.Group((_member("evil\u202e@acme"), _member("x\x1b[2K@acme"))),
+            "evil\\u{202E}@acme, x\\u{001B}[2K@acme",
+            "evil\\u{202E}@acme 1.0.0 -> 1.1.0\nx\\u{001B}[2K@acme 1.0.0 -> 1.1.0",
         ),
     ],
-    ids=["one-review", "pulled-in-first", "escapes"],
+    ids=["one-review", "pulled-in-first", "escapes", "escapes-the-title"],
 )
-def test_render_group(group, title, first_line):
+def test_render_group(group, title, text):
     """A group reads as what it pulled in, then its members in order; a group
-    of one reads as its review; no raw control character survives anywhere."""
-    text = review.render_group(group)
-
+    of one reads as its review; no raw control character survives anywhere,
+    the title included."""
     assert group.title == title
-    assert text.splitlines()[0] == first_line
-    members = "\n".join(review.render(r) for r in group.reviews)
-    assert text.endswith(members)
-    if not group.pulled_in:
-        assert text == review.render(group.reviews[0])
-    assert not any(ch in text for ch in "\u202e\x1b")
-    if group.reviews[0].content:
-        assert "a\\u{202E}b" in text
+    assert review.render_group(group) == text
+    assert not any(ch in group.title + text for ch in "\u202e\x1b")
 
 
 def test_versions_sort_by_semver_precedence():

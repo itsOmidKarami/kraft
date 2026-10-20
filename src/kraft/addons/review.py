@@ -100,7 +100,7 @@ class Group:
 
     @property
     def title(self) -> str:
-        return ", ".join(r.addon_id for r in self.reviews)
+        return escape(", ".join(r.addon_id for r in self.reviews))
 
 
 def render_group(group: Group) -> str:
