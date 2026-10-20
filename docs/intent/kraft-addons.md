@@ -557,3 +557,15 @@ origin: src/kraft/addons/update.py §child_dependents
 IF `kraft admin addon enable` names an add-on whose parent, with the entry enabled, is not installed, not loaded, or outside its range, THEN the system SHALL refuse with why, naming the parent and, when it is not installed, the install to run, and write nothing.
 enforced-by: tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-disabled], tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-not-installed], tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-out-of-range], tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-loaded]
 origin: src/kraft/cli/addon.py §_parent_loads
+
+## REQ validate-names-a-parents-own-problems-by-its-real-path
+
+IF `kraft admin addon validate` finds a failure in an ancestor's own files, THEN the system SHALL report it once, against the directory that ancestor was read from, and SHALL NOT name a temporary copy or report the child's served copy of it as a second failure.
+enforced-by: tests/cli/test_addon_validate.py::test_validate[parent-broken-not-blamed-on-child]
+origin: src/kraft/cli/addon.py §_own_problems
+
+## REQ a-draft-names-an-inherited-entry-by-its-public-id
+
+WHERE a draft of a chain reads through a child add-on's inherited chains, the system SHALL write and show them under the ancestor's own id (detach, the per-field sources), never a hidden level's name.
+enforced-by: tests/api/test_addon_content.py::test_a_local_chain_through_a_child_addon_detaches, tests/api/test_addon_content.py::test_a_drafts_sources_name_inherited_chains_publicly
+origin: src/kraft/drafts/extending.py §detach
