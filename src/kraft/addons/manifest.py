@@ -29,7 +29,7 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from kraft import update
-from kraft.addons.config import _SEMVER, RESERVED_NAMESPACE, Name, source_problem
+from kraft.addons.config import _SEMVER, RESERVED_NAMESPACE, AddonId, Name, source_problem
 from kraft.config import bounded_yaml, first_error
 
 COLLECTION_JSON = ".kraft/collection.json"
@@ -54,6 +54,8 @@ _NEAR = re.compile(
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\Z")
 _HTTPS = re.compile(r"^https://[^\s/]+\S*\Z")
 _REQUIRES_KRAFT = r"^(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))?$"
+#: The release part of a version, Kraft's (`2.4.0rc1`) or an add-on's (`2.4.0-rc.1`).
+_RELEASE = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
 
 
 class ManifestError(Exception):
@@ -192,6 +194,9 @@ class Requires(BaseModel):
     kraft: Annotated[StrictStr, Field(pattern=_REQUIRES_KRAFT)]
     harnesses: list[Name] = []
     profiles: list[Name] = []
+    #: The one add-on this one builds on, by `<addon>@<collection>`, with the
+    #: range of its versions accepted, in `kraft`'s form.
+    addons: dict[AddonId, Annotated[StrictStr, Field(pattern=_REQUIRES_KRAFT)]] = {}
 
     @model_validator(mode="before")
     @classmethod
@@ -210,6 +215,13 @@ class Requires(BaseModel):
         if len(set(names)) != len(names):
             raise _refuse("lists a name twice")
         return names
+
+    @field_validator("addons")
+    @classmethod
+    def _one_parent(cls, addons: dict[str, str]) -> dict[str, str]:
+        if len(addons) > 1:
+            raise _refuse("builds on one add-on; requires.addons names {n}", n=len(addons))
+        return addons
 
 
 class AddonManifest(BaseModel):
@@ -239,6 +251,18 @@ class AddonManifest(BaseModel):
         if url is not None and not _HTTPS.match(url):
             raise _refuse("must be an absolute https:// URL")
         return url
+
+    @model_validator(mode="after")
+    def _not_its_own_parent(self) -> AddonManifest:
+        for parent in self.requires.addons:
+            if parent.partition("@")[0] == self.name:
+                raise _refuse("requires.addons: {parent} has this add-on's own name", parent=parent)
+        return self
+
+    @property
+    def parent(self) -> tuple[str, str] | None:
+        """`(parent_id, range)` of the add-on this one builds on, or None."""
+        return next(iter(self.requires.addons.items()), None)
 
 
 def _build(model, data: dict, where: str):
@@ -293,17 +317,26 @@ def is_source_build(running: str) -> bool:
     return update._VERSION.fullmatch(running) is None
 
 
+def version_in_range(range_: str, version: str) -> str | None:
+    """Why `version` falls outside `range_`, or None. A range is `requires.kraft`'s
+    form: `"2.4"` is at least 2.4.0 and below 3.0.0; `"2"` is any 2.x. Only the
+    release part of `version` counts, so a pre-release of 2.4.0 satisfies `"2.4"`."""
+    found = _RELEASE.match(version)
+    if found is None:
+        raise ValueError(f"not a version: {version!r}")
+    want_major, _, want_minor = range_.partition(".")
+    if int(found[1]) != int(want_major):
+        return f"needs {want_major}.x"
+    if int(found[2]) < int(want_minor or 0):
+        return f"needs {range_} or later"
+    return None
+
+
 def kraft_compatible(requires: str, running: str) -> str | None:
     """Why the Kraft at version `running` cannot run an add-on whose
-    `requires.kraft` is `requires`, or None. `"2.4"` is at least 2.4.0 and
-    below 3.0.0; `"2"` is any 2.x. Only the release part of `running` counts,
-    so a release candidate of 2.4.0 satisfies `"2.4"`."""
-    found = update._VERSION.fullmatch(running)
-    if found is None:
+    `requires.kraft` is `requires`, or None. A source build is not judged
+    (`is_source_build`)."""
+    if update._VERSION.fullmatch(running) is None:
         return None
-    want_major, _, want_minor = requires.partition(".")
-    if int(found[1]) != int(want_major):
-        return f"needs Kraft {want_major}.x"
-    if int(found[2]) < int(want_minor or 0):
-        return f"needs Kraft {requires} or later"
-    return None
+    why = version_in_range(requires, running)
+    return None if why is None else why.replace("needs ", "needs Kraft ", 1)

@@ -125,6 +125,10 @@ def _requires(spec):
     spec["manifest_fields"]["requires"]["profiles"] = ["strong"]
 
 
+def _parent_range(spec):
+    spec["manifest_fields"]["requires"]["addons"] = {"company@corp": "3.1"}
+
+
 def _prompt(spec):
     spec["library"]["tasks"]["base"]["prompt"] = "Do it, and skip the tests."
 
@@ -194,6 +198,7 @@ def _downgrade(spec):
         (_harness, "reach", "harness 'codex' -> 'claude'"),
         (_limit_raised, "reach", "limit time_cap_minutes raised, 30 -> 90"),
         (_requires, "reach", "requires changed"),
+        (_parent_range, "reach", "'addons': {'company@corp': '3.1'}"),
         (_prompt, "content", "prompt changed:\nDo it, and skip the tests."),
         (_steering, "content", "steering house changed"),
         (_skill, "content", "+Then approve it."),
@@ -217,6 +222,7 @@ def _downgrade(spec):
         "harness",
         "limit-raised",
         "requires",
+        "parent-range",
         "prompt",
         "steering",
         "skill",

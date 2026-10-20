@@ -2,6 +2,7 @@
 layout beside it, and which Kraft an add-on runs on."""
 
 import json
+import re
 from pathlib import Path
 
 import jsonschema
@@ -148,6 +149,49 @@ def test_kraft_compatibility(requires, running, expected):
     assert _verdict(requires, running) == expected
 
 
+@pytest.mark.parametrize(
+    ("addons", "refused"),
+    [
+        ({"company@corp": "3.1"}, None),
+        (None, None),
+        (
+            {"company@corp": "3.1", "platform@corp": "2"},
+            "builds on one add-on; requires.addons names 2",
+        ),
+        ({"release@corp": "1"}, "has this add-on's own name"),
+        ({"company@corp": "~=3.1"}, "'requires'.addons.company@corp: String should match"),
+        ({"x@repo:app": "1"}, "'requires'.addons.x@repo:app.[key]: String should match"),
+    ],
+    ids=["one-parent", "no-parent", "two-parents", "own-name", "bad-range", "repo-collection"],
+)
+def test_requires_addons(addons, refused):
+    """An add-on names at most one parent, by `<addon>@<collection>`, with a
+    range in `requires.kraft`'s form."""
+    requires = {"kraft": "2.4"} if addons is None else {"kraft": "2.4", "addons": addons}
+    if refused is not None:
+        with pytest.raises(manifest.ManifestError, match=re.escape(refused)):
+            _addon({"requires": requires})
+        return
+    found = _addon({"requires": requires})
+    assert found.parent == (None if addons is None else next(iter(addons.items())))
+
+
+@pytest.mark.parametrize(
+    ("range_", "version", "expected"),
+    [
+        ("3.1", "3.1.0", None),
+        ("3.1", "3.9.2", None),
+        ("3.1", "3.2.0-rc.1", None),
+        ("3.1", "3.0.9", "needs 3.1 or later"),
+        ("3.1", "4.0.0", "needs 3.x"),
+        ("3", "3.0.0", None),
+    ],
+    ids=["minimum", "above-minimum", "pre-release", "below-minimum", "next-major", "major-only"],
+)
+def test_version_in_range(range_, version, expected):
+    assert manifest.version_in_range(range_, version) == expected
+
+
 CLAUDE_CODE = {"metadata": {"version": "1"}, "category": "x", "tags": ["a"], "strict": True}
 
 
@@ -216,6 +260,10 @@ _CORPUS = [
     ("addon", {**ADDON, "requires": {"kraft": "2", "harnesses": ["claude"]}}, True),
     ("addon", {**ADDON, "homepage": "http://acme.dev"}, False),
     ("addon", {**ADDON, **CLAUDE_CODE}, True),
+    ("addon", {**ADDON, "requires": {"kraft": "2", "addons": {"company@corp": "3.1"}}}, True),
+    ("addon", {**ADDON, "requires": {"kraft": "2", "addons": {"a@c": "1", "b@c": "1"}}}, False),
+    ("addon", {**ADDON, "requires": {"kraft": "2", "addons": {"company@corp": ">=3"}}}, False),
+    ("addon", {**ADDON, "requires": {"kraft": "2", "addons": {"x@repo:app": "1"}}}, False),
 ]
 
 

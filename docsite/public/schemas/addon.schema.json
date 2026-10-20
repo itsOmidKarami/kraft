@@ -91,6 +91,23 @@
             "$ref": "#/$defs/identifier"
           },
           "description": "Instance agent profiles the add-on's tasks select by bare name."
+        },
+        "addons": {
+          "type": "object",
+          "maxProperties": 1,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,63}@[a-z][a-z0-9_-]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)(\\.(0|[1-9][0-9]*))?$"
+          },
+          "description": "The one add-on this add-on builds on, as <addon>@<collection>, mapped to the range of its versions accepted, in the form of kraft: \"3.1\" means at least 3.1.0 and below 4.0.0. The add-on may not name itself.",
+          "examples": [
+            {
+              "company@corp": "3.1"
+            }
+          ]
         }
       },
       "additionalProperties": false
