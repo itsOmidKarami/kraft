@@ -70,9 +70,14 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
       state: "plain",
       mark: change?.kind === "add" ? "add" : change?.kind === "change" || inside ? "change" : undefined,
       prob: probs.length > 0 || marked.includes(n.id),
-      // Gates on the chain show only the diamond and name (Decisions §9).
-      meta: probs.length && !gate ? problemWord(probs[0]) : originMeta ?? inhMeta,
-      metaTone: probs.length ? "red" : origin === "added" ? "green" : origin === "overridden" ? "amber" : inh ? (inh.origin === "added" ? "green" : "amber") : undefined,
+      // Gates on the chain show only the diamond and name (Decisions §9); a gate's origin or inheritance mark still shows, in the tone of that mark.
+      ...(probs.length && !gate
+        ? { meta: problemWord(probs[0]), metaTone: "red" as const }
+        : originMeta
+          ? { meta: originMeta, metaTone: origin === "added" ? "green" as const : "amber" as const }
+          : inhMeta
+            ? { meta: inhMeta, metaTone: inh!.origin === "added" ? "green" as const : "amber" as const }
+            : {}),
       pending: busy.has(n.id),
     };
   });

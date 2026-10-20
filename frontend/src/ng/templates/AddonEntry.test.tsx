@@ -138,6 +138,8 @@ describe("An add-on's chain on the Chains page", () => {
       const first = mount(chain);
       const row = await find();
       expect(within(row).getByText("inherited from company")).toHaveAttribute("title", "inherited from company\nWritten by company@corp 3.2.0");
+      // The author is read out too, not only shown on hover.
+      expect(within(row).getByText("inherited from company")).toHaveAttribute("aria-description", "Written by company@corp 3.2.0");
       first.unmount();
       cleanup();
 

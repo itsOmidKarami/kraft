@@ -142,11 +142,11 @@
 .inheritance-mark.is-added { color: var(--ok); }
 .inheritance-mark.is-overridden { color: var(--warn); }
 /* In a list row the add-on badge gives way first, then the name (down to its 8ch), then the mark. Under 360px the
-   badge would only ever show its first letters, so beside a mark it steps aside: the name carries the namespace and
-   the pane header the whole badge. */
+   badge keeps its outline but shows only the start of its namespace, so a child add-on's row still reads as
+   read-only beside "added here"; its title and the pane header hold the whole badge. */
 .lib-rows { container-type: inline-size; }
 .lib-row .inheritance-mark { flex-shrink: 1; font-size: var(--fs-label); line-height: 14px; }
 .lib-row:has(> .inheritance-mark) > .lib-name { flex-shrink: 10; }
-@container (max-width: 360px) { .lib-row > .addon-badge:has(+ .inheritance-mark) { display: none; } }
+@container (max-width: 360px) { .lib-row > .addon-badge:has(+ .inheritance-mark) { max-width: 5ch; min-width: 0; padding-inline: 4px; } }
 /* In a picker's second line it is one more " · " fact, and wraps with it. */
 .inheritance-mark.is-inline { white-space: normal; }

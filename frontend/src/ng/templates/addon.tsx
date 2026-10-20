@@ -21,5 +21,5 @@ export const AddonBadge = ({ addon }: { addon: Addon }) => {
  *  a picker's second line, it wraps with that line instead. */
 export const InheritanceMark = ({ addon, inline }: { addon: Addon; inline?: boolean }) => {
   const text = inheritanceText(addon);
-  return text ? <span className={`inheritance-mark is-${addon.inheritance!.origin}${inline ? " is-inline" : ""}`} data-allow-ellipsis title={`${text}\n${inheritanceTitle(addon)}`}>{text}</span> : null;
+  return text ? <span className={`inheritance-mark is-${addon.inheritance!.origin}${inline ? " is-inline" : ""}`} data-allow-ellipsis title={`${text}\n${inheritanceTitle(addon)}`} aria-description={inheritanceTitle(addon) ?? undefined}>{text}</span> : null;
 };

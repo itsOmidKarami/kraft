@@ -82,6 +82,8 @@ describe("a child add-on's chain", () => {
     // The chain-extends origin ranks above the inheritance mark.
     { id: "extends-origin-wins", result: marked({ security_scan: { origin: "overridden", entry: "tasks.platform-dept:security_scan" } }), node: "security_scan", meta: "added here", tone: "green" },
     { id: "problem-wins", result: { ...inheritedResult(), problems: [{ path: "implementation", field: null, message: "field required", file: "chains/default.yaml", line: null, col: null }] }, node: "implementation", meta: "missing", tone: "red" },
+    // A gate shows no problem word, so its mark shows in the mark's own tone and not the problem's red.
+    { id: "gate-problem-shows-its-mark", result: { ...inheritedResult({ spec_approval: { origin: "added", entry: "tasks.team-payments:pci_review" } }), problems: [{ path: "spec_approval", field: null, message: "field required", file: "chains/default.yaml", line: null, col: null }] }, node: "spec_approval", meta: "pci_review added here", tone: "green" },
     { id: "local-chain", result: { ...inheritedResult(), resolved: { ...inheritedResult().resolved!, inherited_nodes: undefined } }, node: "implementation", meta: undefined, tone: undefined },
     { id: "empty-marks", result: inheritedResult({}), node: "implementation", meta: undefined, tone: undefined },
   ])("$id", ({ result, node, meta, tone }) => {

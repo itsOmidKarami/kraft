@@ -223,7 +223,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams: chainSeams
             >
               <NodeGlyph {...n} size="lg" sel={n.id === selected} />
               <span className="graph-label" style={{ maxWidth: w - 8 }}>{breakable(label(n))}</span>
-              {n.meta && <span id={metaId} className={`graph-meta tone-${n.metaTone ?? "muted"}${readMeta ? " is-wrapped" : ""}`} style={readMeta ? { maxWidth: w - 8 } : undefined}>{n.meta}</span>}
+              {n.meta && <span id={metaId} className={`graph-meta tone-${n.metaTone ?? "muted"}${readMeta ? " is-clamped" : ""}`} style={readMeta ? { maxWidth: w - 8 } : undefined} title={readMeta ? n.meta : undefined}>{n.meta}</span>}
               {n.sub && <span className="graph-sub"><span className={`graph-sub-dot tone-${n.subTone ?? "amber"}`} />{n.sub}</span>}
             </button>
           );
