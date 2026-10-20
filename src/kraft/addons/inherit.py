@@ -360,24 +360,68 @@ def inherited(kind: str, addon: InstalledAddon, addons: Sequence[InstalledAddon]
     that an ancestor defines, the defining ancestor's namespace. Empty for a
     root add-on, one that is left out, and one whose ancestry or stores do not
     read. A name `addon` defines itself, or removed, is not in it."""
+    if addon.left_out is not None or addon.parent is None:
+        return {}
+    try:
+        return _inherited(kind, addon, addons)
+    except _unreadable_tree():
+        return {}
+
+
+def _unreadable_tree() -> tuple[type[Exception], ...]:
+    """What reading a child's tree raises when it does not read: its ancestry
+    does not resolve, a store was edited, or a file does not parse."""
     from kraft.addons import fetch
 
     # library imports this module at module level
     from kraft.templates.library import TemplateLibraryError
 
-    if addon.left_out is not None or addon.parent is None:
-        return {}
-    try:
-        chain = ancestry(addon, addons)
-        seen = visible(chain)
-    except (InheritanceError, fetch.StoreMismatch, TemplateLibraryError, OSError):
-        return {}
+    return (InheritanceError, fetch.StoreMismatch, TemplateLibraryError, OSError)
+
+
+def _inherited(
+    kind: str, addon: InstalledAddon, addons: Sequence[InstalledAddon]
+) -> dict[str, str]:
+    """`inherited` for a loaded child, raising what `_unreadable_tree` names."""
+    seen = visible(ancestry(addon, addons))
     out: dict[str, str] = {}
     for name in seen.names(kind):
         owner = (seen.owner(kind, name, 0) or "").partition(":")[0]
         if owner and owner != addon.namespace:
             out[name] = owner
     return out
+
+
+def skill_dirs(addons: Sequence[InstalledAddon]) -> dict[str, Path | None]:
+    """Where `kraft.skill` reads an add-on's skill: each namespace to its
+    store, or to None when its add-on is left out (a reference into it is
+    refused, never handed to the agent as another tool's skill). A loaded
+    namespace wins over a left-out one of the same name.
+
+    Each skill a loaded child inherits is also a key, `<child>:<skill>`, to
+    the store of the ancestor that defines it, so a reference from outside
+    the tree names it by the child's name. A skill the child ships itself, or
+    removed, has no key: it is looked for in the child's own store. A child
+    whose tree does not read maps to None, with no keys, so its skills are
+    refused as not loaded rather than looked for in its own store."""
+    dirs: dict[str, Path | None] = {}
+    for addon in addons:
+        if addon.left_out is None:
+            dirs[addon.namespace] = addon.root
+        else:
+            dirs.setdefault(addon.namespace, None)
+    for addon in addons:
+        if addon.left_out is not None or addon.parent is None:
+            continue
+        try:
+            owners = _inherited("skills", addon, addons)
+        except _unreadable_tree():
+            dirs[addon.namespace] = None
+            continue
+        for name, owner in owners.items():
+            # An ancestor is loaded (`ancestry` says so), so this is its store.
+            dirs[f"{addon.namespace}:{name}"] = dirs.get(owner)
+    return dirs
 
 
 def humanize(text: str, layers: Mapping[str, str]) -> str:

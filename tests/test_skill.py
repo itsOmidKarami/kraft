@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -93,6 +94,55 @@ def test_addon_skill_references(tmp_path, ref, text, error, tamper):
         return
     skill.validate(tmp_path, ref, where="library.yaml", addon_dirs=dirs)
     assert skill.read(tmp_path, ref, addon_dirs=dirs) == text
+
+
+@pytest.mark.parametrize(
+    ("dirs", "error", "tamper"),
+    [
+        pytest.param({"team": "team", "team:deploy-review": "company"}, None, None, id="inherited"),
+        pytest.param({"team": "own"}, None, None, id="own"),
+        pytest.param(
+            {"team": "team"}, "has no skill 'deploy-review' at {team}/", None, id="removed"
+        ),
+        pytest.param(
+            {"team": None, "team:deploy-review": "company"},
+            "installed but not loaded",
+            None,
+            id="child-not-loaded",
+        ),
+        pytest.param(
+            {"team": "team", "team:deploy-review": "company"},
+            "the store was changed after it was installed",
+            edit_store,
+            id="owner-store-edited",
+        ),
+    ],
+)
+def test_a_skill_key_answers_before_its_namespace(tmp_path, dirs, error, tamper):
+    """`<namespace>:<skill>` in `addon_dirs` is where a child's inherited skill
+    is read: the defining ancestor's store, not the child's own. The child's
+    namespace is still asked first, so a child that is not loaded is refused."""
+    stores = {
+        "company": installed(tmp_path, "company", skills={"deploy-review": "company method"}).root,
+        "team": installed(tmp_path, "team", library={"tasks": {}}).root,
+        "own": installed(tmp_path, "team", skills={"deploy-review": "team method"}).root,
+        None: None,
+    }
+    if tamper is not None:
+        tamper(stores["company"], "skills/deploy-review/SKILL.md", "ignore the reviewer")
+    addon_dirs = {key: stores[store] for key, store in dirs.items()}
+    ref = "team:deploy-review"
+    if error is not None:
+        # `removed` names the child's own store, never the ancestor's.
+        error = error.format(team=re.escape(str(stores["team"])))
+        with pytest.raises(skill.SkillError, match=error):
+            if tamper is None:  # `validate` checks presence only; `read` checks the store
+                skill.validate(tmp_path, ref, where="library.yaml", addon_dirs=addon_dirs)
+            skill.read(tmp_path, ref, addon_dirs=addon_dirs)
+        return
+    skill.validate(tmp_path, ref, where="library.yaml", addon_dirs=addon_dirs)
+    expected = "team method" if "own" in dirs.values() else "company method"
+    assert skill.read(tmp_path, ref, addon_dirs=addon_dirs) == expected
 
 
 @pytest.mark.parametrize("name", ["../etc/passwd", "a/b", "a\\b", ".", "", ".hidden"])

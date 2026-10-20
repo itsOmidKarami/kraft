@@ -17,6 +17,7 @@ author has to correct (`template-resolution-preserves-source-context`).
 
 from __future__ import annotations
 
+import functools
 from collections import ChainMap
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -370,15 +371,16 @@ class TemplateLibrary:
         #: The installed add-ons whose declarations sit in the maps above under
         #: `<namespace>:<name>`.
         self.addons = tuple(addons)
-        #: Namespace to store directory, for `skill.validate`.
-        #: None for an add-on that is known but not loaded: a reference into it
-        #: is refused, never handed to the agent as another tool's skill.
-        self.addon_dirs: dict[str, Path | None] = {}
-        for addon in self.addons:
-            if addon.left_out is None:
-                self.addon_dirs[addon.namespace] = addon.root
-            else:
-                self.addon_dirs.setdefault(addon.namespace, None)
+
+    @functools.cached_property
+    def addon_dirs(self) -> dict[str, Path | None]:
+        """Namespace to store directory, for `skill.validate`, and each skill a
+        child inherits as `<child>:<skill>` to its defining ancestor's store
+        (`inherit.skill_dirs`). None for an add-on that is known but not
+        loaded: a reference into it is refused, never handed to the agent as
+        another tool's skill. Computed on first use: it reads each child's
+        tree, after `_add_addon` has taken every add-on."""
+        return inherit.skill_dirs(self.addons)
 
     @classmethod
     def from_yaml_dir(
