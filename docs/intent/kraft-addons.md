@@ -587,3 +587,9 @@ origin: src/kraft/cli/addon.py §_own_problems
 WHERE a draft of a chain reads through a child add-on's inherited chains, the system SHALL write and show them under the ancestor's own id (detach, the per-field sources), never a hidden level's name.
 enforced-by: tests/api/test_addon_content.py::test_a_local_chain_through_a_child_addon_detaches, tests/api/test_addon_content.py::test_a_drafts_sources_name_inherited_chains_publicly
 origin: src/kraft/drafts/extending.py §detach
+
+## REQ update-applies-a-consistent-set
+
+WHEN an update judges waiting moves, the system SHALL drop every move that breaks a range, judged with the other moves applied, repeat until none breaks, then re-offer each dropped move, parents first and then by id, keeping one whose addition to the kept set breaks no range, repeat the re-offer until it keeps nothing new, and apply only what is kept.
+enforced-by: tests/addons/test_inherit.py::test_settle[cascade], tests/addons/test_inherit.py::test_settle[move-together], tests/addons/test_inherit.py::test_settle[order-independent], tests/addons/test_inherit.py::test_settle[child-keeps-old-range], tests/addons/test_inherit.py::test_settle[re-offer-second-round], tests/addons/test_inherit.py::test_settle[re-offer-parents-first]
+origin: src/kraft/addons/inherit.py §settle

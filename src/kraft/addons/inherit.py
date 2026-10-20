@@ -14,10 +14,10 @@ this module.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from kraft.addons.load import InstalledAddon
 
@@ -122,6 +122,142 @@ def tree_order(addons: Sequence[InstalledAddon]) -> tuple[InstalledAddon, ...]:
         return len(seen) - 1
 
     return tuple(sorted(addons, key=depth))
+
+
+class Side(NamedTuple):
+    """One add-on as the set rule sees it, locked or moved: its version, and
+    the parent and range it builds on."""
+
+    version: str
+    parent: str | None
+    range: str | None
+
+
+def _breaks(addon_id: str, sides: Mapping[str, Side]) -> list[tuple[str | None, str]]:
+    """Each range `addon_id` breaks against `sides` (every add-on present, at
+    its kept or locked side), as `(other id, why)`: its own range or missing
+    parent first, then each child's range, in child-id order. The other id of
+    a parent not among `sides` is that parent's; a range that does not parse
+    breaks, worded with its error."""
+    from kraft.addons import manifest
+
+    def outside(range_: str, version: str) -> str | None:
+        try:
+            return manifest.version_in_range(range_, version)
+        except ValueError as exc:
+            return str(exc)
+
+    side = sides[addon_id]
+    out: list[tuple[str | None, str]] = []
+    if side.parent is not None:
+        parent = sides.get(side.parent)
+        if parent is None:
+            out.append((side.parent, f"its parent {side.parent} is not installed"))
+        elif side.range is not None and (why := outside(side.range, parent.version)):
+            out.append(
+                (
+                    side.parent,
+                    f"{addon_id}'s range {side.range} does not accept "
+                    f"{side.parent} {parent.version} ({why})",
+                )
+            )
+    for child_id in sorted(sides):
+        child = sides[child_id]
+        if child_id != addon_id and child.parent == addon_id and child.range is not None:
+            if why := outside(child.range, side.version):
+                out.append(
+                    (
+                        child_id,
+                        f"{addon_id} {side.version} is outside {child_id}'s range "
+                        f"{child.range} ({why})",
+                    )
+                )
+    return out
+
+
+def _path(addon_id: str, parents: Mapping[str, str | None]) -> tuple[str, ...] | None:
+    """`(addon_id, parent, ..., root)` through `parents`, at most `MAX_DEPTH`
+    steps; None when `addon_id` meets a cycle on the way."""
+    path = [addon_id]
+    while len(path) <= MAX_DEPTH and (parent := parents.get(path[-1])) is not None:
+        if parent in path:
+            return None
+        path.append(parent)
+    return tuple(path)
+
+
+def settle(locked: Mapping[str, Side], moves: Mapping[str, Side]) -> dict[str, str]:
+    """Which of `moves` (id to its new side) the set rule drops, each mapped
+    to why; the rest are kept. `locked` holds every installed add-on, so a move
+    not in it is an install. Every move that breaks a range, judged with the
+    other kept moves applied, is dropped at once, until none breaks. Then each
+    dropped move is offered again, parents first and then by id, and kept when
+    the kept set with it breaks nothing, until a pass keeps nothing new. A move
+    still dropped is judged once more, alone with the final kept set, for its
+    reason: never one about a move that was later dropped or kept."""
+
+    def sides(kept: Collection[str]) -> dict[str, Side]:
+        return {**locked, **{i: moves[i] for i in kept}}
+
+    kept = set(moves)
+    while True:
+        applied = sides(kept)
+        failing = {i for i in kept if _breaks(i, applied)}
+        if not failing:
+            break
+        kept -= failing
+    parents = {i: s.parent for i, s in locked.items()}
+    parents |= {i: s.parent for i, s in moves.items() if i not in locked}
+    order = sorted(set(moves) - kept, key=lambda i: (len(_path(i, parents) or (i,)), i))
+    offered = True
+    while offered:
+        offered = False
+        for addon_id in order:
+            if addon_id in kept:
+                continue
+            trial = kept | {addon_id}
+            applied = sides(trial)
+            if not any(_breaks(i, applied) for i in trial):
+                kept.add(addon_id)
+                offered = True
+    dropped: dict[str, str] = {}
+    for addon_id in order:
+        if addon_id in kept:
+            continue
+        other, why = _breaks(addon_id, sides(kept | {addon_id}))[0]
+        if other in dropped and other not in locked:
+            why = f"its parent {other} cannot be installed: {dropped[other]}"
+        dropped[addon_id] = why
+    return dropped
+
+
+def needed(
+    named: Collection[str], locked: Mapping[str, Side], kept: Mapping[str, Side]
+) -> frozenset[str]:
+    """The ids of `named` among `kept` (moves the set rule kept), plus each
+    other kept move they cannot apply without, to a fixed point: one whose
+    add-on, back at its locked side or not there for an install, breaks a
+    range with a move already needed. The moves returned settle on their own."""
+    need = {i for i in named if i in kept}
+    while True:
+        sides = {**locked, **{i: kept[i] for i in need}}
+        more = {other for i in need for other, _ in _breaks(i, sides) if other in kept}
+        if more <= need:
+            return frozenset(need)
+        need |= more
+
+
+def trees(ids: Iterable[str], parents: Mapping[str, str | None]) -> list[tuple[str, ...]]:
+    """`ids` grouped by the root each reaches through `parents`, which may
+    hold add-ons not among `ids`, followed at most `MAX_DEPTH` steps. Groups
+    come in the order they first appear in `ids`; within one, by depth, then
+    id. An id that meets a cycle forms a group of its own."""
+    groups: dict[object, list[tuple[int, str]]] = {}
+    for addon_id in dict.fromkeys(ids):
+        path = _path(addon_id, parents)
+        root: object = path[-1] if path is not None else (addon_id,)
+        groups.setdefault(root, []).append((len(path or ()), addon_id))
+    return [tuple(i for _, i in sorted(members)) for members in groups.values()]
 
 
 def read_manifest(addon: InstalledAddon) -> AddonManifest:

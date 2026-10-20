@@ -372,3 +372,149 @@ def test_layer_reference(value, found):
     """A value in the layered shape is spotted, one that only resembles it is
     not, and a long run of `-` is answered at once (no backtracking)."""
     assert inherit.layer_reference({"extends": value}) == found
+
+
+_C, _D, _T = "company@corp", "dept@platform", "team@payments"
+_S = inherit.Side
+
+#: company 1.0.0 with team 1.0.0 under it at range 1; and with dept between.
+_TWO = {_C: _S("1.0.0", None, None), _T: _S("1.0.0", _C, "1")}
+_THREE = {_C: _S("1.0.0", None, None), _D: _S("1.0.0", _C, "1"), _T: _S("1.0.0", _D, "1")}
+
+_CASCADE = {_C: _S("2.0.0", None, None), _D: _S("2.0.0", _C, "2")}
+_CASCADE_DROPPED = {
+    _D: f"{_D}'s range 2 does not accept {_C} 1.0.0 (needs 2.x)",
+    _C: f"{_C} 2.0.0 is outside {_D}'s range 1 (needs 1.x)",
+}
+_C2_OUTSIDE_T = f"{_C} 2.0.0 is outside {_T}'s range 1 (needs 1.x)"
+
+
+@pytest.mark.parametrize(
+    ("locked", "moves", "dropped"),
+    [
+        pytest.param(_TWO, {}, {}, id="nothing-moves"),
+        pytest.param(_TWO, {_C: _S("1.1.0", None, None)}, {}, id="compatible-parent-move"),
+        pytest.param(
+            _TWO, {_C: _S("2.0.0", None, None)}, {_C: _C2_OUTSIDE_T}, id="parent-held-by-child"
+        ),
+        pytest.param(
+            _TWO,
+            {_T: _S("1.1.0", _C, "2")},
+            {_T: f"{_T}'s range 2 does not accept {_C} 1.0.0 (needs 2.x)"},
+            id="child-held-by-its-range",
+        ),
+        pytest.param(
+            _TWO,
+            {_C: _S("2.0.0", None, None), _T: _S("1.1.0", _C, "2")},
+            {},
+            id="move-together",
+        ),
+        pytest.param(_THREE, _CASCADE, _CASCADE_DROPPED, id="cascade"),
+        pytest.param(
+            _TWO,
+            {_C: _S("2.0.0", None, None), _T: _S("1.1.0", _C, "1")},
+            {_C: _C2_OUTSIDE_T},
+            id="child-keeps-old-range",
+        ),
+        pytest.param(
+            _THREE,
+            {
+                _C: _S("2.0.0", None, None),
+                _D: _S("1.1.0", None, None),
+                _T: _S("1.1.0", _D, "2"),
+            },
+            {_T: f"{_T}'s range 2 does not accept {_D} 1.1.0 (needs 2.x)"},
+            id="re-offer-second-round",
+        ),
+        pytest.param(
+            {_T: _S("1.0.0", _C, "1")},
+            {_C: _S("2.0.0", None, None), _D: _S("1.0.0", _C, "2")},
+            {_C: _C2_OUTSIDE_T, _D: f"its parent {_C} cannot be installed: {_C2_OUTSIDE_T}"},
+            id="parent-install-dropped",
+        ),
+        pytest.param(
+            _TWO,
+            {_T: _S("1.1.0", "other@corp", "1")},
+            {_T: "its parent other@corp is not installed"},
+            id="missing-parent",
+        ),
+        pytest.param(
+            dict(reversed(_THREE.items())),
+            dict(reversed(_CASCADE.items())),
+            _CASCADE_DROPPED,
+            id="order-independent",
+        ),
+        pytest.param(
+            {_C: _S("1.0.0", None, None), _T: _S("1.0.0", _C, None)},
+            {_T: _S("1.1.0", _C, "1"), _C: _S("2.0.0", None, None)},
+            {_T: f"{_T}'s range 1 does not accept {_C} 2.0.0 (needs 1.x)"},
+            id="re-offer-parents-first",
+        ),
+    ],
+)
+def test_settle(locked, moves, dropped):
+    """Moves that break a range, judged with the others applied, are dropped
+    until none breaks; each dropped one is offered again, parents first, and
+    kept when it breaks nothing. Each still dropped says what holds it against
+    the set that applies."""
+    assert inherit.settle(locked, moves) == dropped
+
+
+@pytest.mark.parametrize(
+    ("locked", "kept", "named", "expected"),
+    [
+        pytest.param(
+            _TWO,
+            {_C: _S("1.1.0", None, None), _T: _S("1.1.0", _C, "1")},
+            [_C],
+            {_C},
+            id="named-alone",
+        ),
+        pytest.param(
+            _TWO,
+            {_C: _S("2.0.0", None, None), _T: _S("1.1.0", _C, "2")},
+            [_C],
+            {_C, _T},
+            id="needs-its-child",
+        ),
+        pytest.param(
+            {},
+            {_C: _S("1.0.0", None, None), _T: _S("1.0.0", _C, "1")},
+            [_T],
+            {_C, _T},
+            id="needs-its-parent-install",
+        ),
+        pytest.param(
+            _THREE,
+            {**_CASCADE, _T: _S("1.1.0", _D, "2")},
+            [_T],
+            {_C, _D, _T},
+            id="transitive",
+        ),
+    ],
+)
+def test_needed(locked, kept, named, expected):
+    """The named moves and every kept move they cannot apply without."""
+    assert inherit.needed(named, locked, kept) == expected
+
+
+_PARENTS = {_C: None, _D: _C, _T: _D, "tools@acme": None, "a@corp": _C, "b@corp": _C}
+
+
+@pytest.mark.parametrize(
+    ("ids", "parents", "expected"),
+    [
+        pytest.param([_T, _C], {_C: None, _T: _C}, [(_C, _T)], id="one-tree"),
+        pytest.param(
+            ["tools@acme", _T, _C], _PARENTS, [("tools@acme",), (_C, _T)], id="first-appearance"
+        ),
+        pytest.param([_T, _D, _C], _PARENTS, [(_C, _D, _T)], id="depth-order"),
+        pytest.param(
+            ["b@corp", "a@corp", _C], _PARENTS, [(_C, "a@corp", "b@corp")], id="siblings-by-id"
+        ),
+        pytest.param([_T, _C], _PARENTS, [(_C, _T)], id="through-a-still-member"),
+    ],
+)
+def test_trees(ids, parents, expected):
+    """Ids grouped by the root they reach, through add-ons not among them too."""
+    assert inherit.trees(ids, parents) == expected
