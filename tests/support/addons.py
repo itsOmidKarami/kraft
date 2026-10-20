@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -59,6 +60,59 @@ def installed(
     return InstalledAddon(
         id=f"{name}@acme", name=name, namespace=alias or name, version="1.0.0", root=root
     )
+
+
+#: The design's example tree, root first, as `tree_collection` installs it.
+TREE = ("company@acme", "platform-dept@acme", "team-payments@acme")
+
+#: What each add-on of the example tree ships by default, as `installed` and
+#: `make_collection` both take it.
+_TREE_SPECS: dict[str, dict] = {
+    "company": {
+        "library": {"tasks": {"security_scan": {**AGENT, "skill": "deploy-review"}}},
+        "skills": {"deploy-review": "company method"},
+        "profiles": {
+            "slow": {"model": {"codex": "company-model"}, "fallback": [{"profile": "fast"}]},
+            "fast": {"model": {"codex": "fast-model"}},
+        },
+    },
+    "platform-dept": {},
+    "team-payments": {},
+}
+
+
+def example_tree(
+    tmp_path: Path,
+    *,
+    company: dict | None = None,
+    dept: dict | None = None,
+    team: dict | None = None,
+    alias: str | None = None,
+) -> tuple[InstalledAddon, InstalledAddon, InstalledAddon]:
+    """`(company, platform_dept, team_payments)`, root first: three stores that
+    each hold a `.kraft/addon.json` naming their parent with range `"1"`, and
+    the `InstalledAddon`s that say so. Each keyword is a dict of `installed`
+    keyword arguments laid over the defaults; `alias` is platform-dept's
+    namespace. Company ships a task `security_scan` that names the skill
+    `deploy-review` ("company method") and the profiles `slow` and `fast`."""
+    defaults = _TREE_SPECS
+    given = {"company": company, "platform-dept": dept, "team-payments": team}
+    out: list[InstalledAddon] = []
+    parent: InstalledAddon | None = None
+    for name, spec in defaults.items():
+        wanted = {**spec, **(given[name] or {})}
+        requires = {"addons": {parent.id: "1"}} if parent else {}
+        declared = addon_json(name, requires={**addon_json(name)["requires"], **requires})
+        wanted["files"] = {
+            **(wanted.get("files") or {}),
+            manifest.ADDON_JSON: json.dumps(declared),
+        }
+        made = installed(tmp_path, name, alias=alias if name == "platform-dept" else None, **wanted)
+        if parent:
+            made = replace(made, parent=parent.id, parent_range="1")
+        out.append(made)
+        parent = made
+    return out[0], out[1], out[2]
 
 
 def _layout(library, chains, skills, profiles, files) -> dict[str, tuple[str, bytes]]:
@@ -122,6 +176,28 @@ def make_collection(tmp_path: Path, addons: dict[str, dict], *, name: str = "acm
     )
     commit_all(repo, "collection")
     return repo
+
+
+def tree_collection(
+    tmp_path: Path,
+    *,
+    company: dict | None = None,
+    dept: dict | None = None,
+    team: dict | None = None,
+) -> Path:
+    """`example_tree`'s three add-ons as a committed collection named `acme`
+    (`make_collection`), `requires.addons` wired through `manifest`. Each
+    keyword is a `make_collection` spec laid over the same defaults."""
+    base = _TREE_SPECS
+    given = {"company": company, "platform-dept": dept, "team-payments": team}
+    addons: dict[str, dict] = {}
+    for (name, spec), parent in zip(base.items(), (None, *TREE), strict=False):
+        wanted = {**spec, **(given[name] or {})}
+        requires = {"kraft": "2", "harnesses": ["codex"]}
+        if parent:
+            requires["addons"] = {parent: "1"}
+        addons[name] = {**wanted, "manifest": {**wanted.get("manifest", {}), "requires": requires}}
+    return make_collection(tmp_path, addons)
 
 
 def publish(repo: Path, addon: str, **spec) -> str:

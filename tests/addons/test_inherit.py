@@ -5,7 +5,7 @@ import json
 from dataclasses import replace
 
 import pytest
-from support.addons import addon_json, installed
+from support.addons import addon_json, example_tree, installed
 
 from kraft.addons import inherit, manifest
 
@@ -195,3 +195,49 @@ def test_requirements(tmp_path, read):
         ["codex", "claude"],
         ["fast", "deep", "strong"],
     )
+
+
+def _ships_deploy_review(text="dept method"):
+    return {"skills": {"deploy-review": text}}
+
+
+@pytest.mark.parametrize(
+    ("edits", "kind", "expected"),
+    [
+        pytest.param({}, "skills", {"deploy-review": "company"}, id="skill-from-root"),
+        pytest.param(
+            {"dept": _ships_deploy_review()},
+            "skills",
+            {"deploy-review": "platform-dept"},
+            id="skill-overridden-by-dept",
+        ),
+        pytest.param({"team": _ships_deploy_review()}, "skills", {}, id="skill-own"),
+        pytest.param(
+            {"team": {"library": {"remove": {"skills": ["deploy-review"]}}}},
+            "skills",
+            {},
+            id="skill-removed",
+        ),
+        pytest.param(
+            {}, "profiles", {"fast": "company", "slow": "company"}, id="profile-from-root"
+        ),
+        pytest.param(
+            {"dept": {"library": {"remove": {"profiles": ["slow"]}}}},
+            "profiles",
+            {"fast": "company"},
+            id="profile-removed-by-dept",
+        ),
+        pytest.param(
+            {"dept": _ships_deploy_review(), "alias": "plat"},
+            "skills",
+            {"deploy-review": "plat"},
+            id="alias-parent",
+        ),
+        pytest.param({"asked": 0}, "skills", {}, id="root"),
+    ],
+)
+def test_inherited(tmp_path, edits, kind, expected):
+    edits = dict(edits)
+    asked = edits.pop("asked", 2)
+    tree = example_tree(tmp_path, **edits)
+    assert inherit.inherited(kind, tree[asked], tree) == expected

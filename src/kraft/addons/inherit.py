@@ -308,12 +308,74 @@ class Visible:
             levels[d] = seen
         return cls(tuple(levels))
 
+    def names(self, kind: str, from_depth: int = 0) -> tuple[str, ...]:
+        """Every `kind` name level `from_depth` sees, sorted."""
+        if from_depth >= len(self.levels):
+            return ()
+        return tuple(sorted(self.levels[from_depth].get(kind, {})))
+
     def owner(self, kind: str, name: str, from_depth: int) -> str | None:
         """The `namespace:name` of the ancestor whose `kind` (`skills`,
         `profiles`, `steering`) `name` level `from_depth` sees; None when none does."""
         if from_depth >= len(self.levels):
             return None
         return self.levels[from_depth].get(kind, {}).get(name)
+
+
+def visible(chain: Sequence[InstalledAddon]) -> Visible:
+    """`Visible` for `chain` (`ancestry`'s answer): the skills, agent profiles
+    and steering profiles each member's store ships, less what each level
+    removes. Reads each store through `fetch.open_store`, so a
+    `fetch.StoreMismatch` propagates; raises `TemplateLibraryError` for a file
+    that does not read."""
+    from kraft.addons import fetch
+    from kraft.templates import library as lib
+
+    stores = [fetch.open_store(author.root) for author in chain]
+    written = [
+        lib._read_stored(store, lib.LIBRARY_FILE, author.root / lib.LIBRARY_FILE, optional=True)
+        for author, store in zip(chain, stores, strict=True)
+    ]
+    return Visible.build(
+        chain,
+        [
+            {
+                "skills": lib._store_skills(store),
+                "profiles": lib._store_profiles(store, author),
+                "steering": lib._section(
+                    author.root / lib.LIBRARY_FILE, library, lib.Namespace.STEERING
+                ).keys(),
+            }
+            for author, store, library in zip(chain, stores, written, strict=True)
+        ],
+        [
+            removals(author.root / lib.LIBRARY_FILE, library)
+            for author, library in zip(chain, written, strict=True)
+        ],
+    )
+
+
+def inherited(kind: str, addon: InstalledAddon, addons: Sequence[InstalledAddon]) -> dict[str, str]:
+    """For each `kind` (`skills` or `profiles`) name `addon` sees at depth 0
+    that an ancestor defines, the defining ancestor's namespace. Empty for a
+    root add-on, one that is left out, and one whose ancestry or stores do not
+    read. A name `addon` defines itself, or removed, is not in it."""
+    from kraft.addons import fetch
+    from kraft.templates.library import TemplateLibraryError
+
+    if addon.left_out is not None or addon.parent is None:
+        return {}
+    try:
+        chain = ancestry(addon, addons)
+        seen = visible(chain)
+    except (InheritanceError, fetch.StoreMismatch, TemplateLibraryError, OSError):
+        return {}
+    out: dict[str, str] = {}
+    for name in seen.names(kind):
+        owner = (seen.owner(kind, name, 0) or "").partition(":")[0]
+        if owner and owner != addon.namespace:
+            out[name] = owner
+    return out
 
 
 def humanize(text: str, layers: Mapping[str, str]) -> str:

@@ -534,20 +534,7 @@ class TemplateLibrary:
             # A stray `remove:` at the root is refused by the root's own
             # `_add_addon`: every load path loads the root by itself too.
             removed.append(inherit.removals(author.root / LIBRARY_FILE, library))
-        visible = inherit.Visible.build(
-            chain,
-            [
-                {
-                    "skills": _store_skills(store),
-                    "profiles": _store_profiles(store, author),
-                    "steering": _section(
-                        author.root / LIBRARY_FILE, library, Namespace.STEERING
-                    ).keys(),
-                }
-                for author, store, library in zip(chain, stores, written, strict=True)
-            ],
-            removed,
-        )
+        visible = inherit.visible(chain)
 
         def owner(kind: str) -> Callable[[str, int], str]:
             # Defined nowhere visible: the level asked from names it, and its
