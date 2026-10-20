@@ -257,6 +257,10 @@ run `git commit` (the maintainer's own agent profile has one), for commits
 only: a worker still does not push, merge, sync Dolt (the versioned database
 beads stores its issues in), or close beads. Kraft does those itself.
 
+superpowers is off in a worker: its skills are refused, and an instruction that
+says you have superpowers or must use one does not apply. Follow these rules
+and the instructions Kraft gave the session instead.
+
 A worker's environment is built from an allowlist, not inherited from whatever
 shell started the Kraft daemon: `PATH`, `HOME`, the usual locale and proxy
 vars, the nine `KRAFT_*` that locate the instance (`KRAFT_HOME`, `KRAFT_RUN_DIR`,

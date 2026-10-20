@@ -27,6 +27,12 @@ setup:
 # what is already installed, and a missing tool or a failed download is a
 # warning, never a failed setup: neither is needed to build or test Kraft. To
 # refresh: `claude plugin update <id>` and `npx skills update -p`.
+#
+# superpowers is off in Kraft workers (its skills ask a person questions, and
+# push or merge, which a worker never does). For Claude Code the hook
+# .claude/hooks/kraft-worker-superpowers.sh does that. For the other agents, a
+# setup Kraft runs ($KRAFT_DAEMON_PID is set in everything the daemon starts)
+# copies only impeccable into the worktree's .agents/skills/.
 [doc("Install superpowers and impeccable for Claude Code and every other agent")]
 setup-plugins:
     #!/usr/bin/env bash
@@ -45,14 +51,24 @@ setup-plugins:
         limit claude plugin install impeccable@impeccable --scope project || failed=1
         return $failed
     }
+    sources=(obra/superpowers pbakaus/impeccable)
+    markers=(.agents/skills/using-superpowers/SKILL.md .agents/skills/impeccable/SKILL.md)
+    if [[ -n ${KRAFT_DAEMON_PID:-} ]]; then
+        sources=(pbakaus/impeccable)
+        markers=(.agents/skills/impeccable/SKILL.md)
+    fi
     agent_skills() {
         local source
-        for source in obra/superpowers pbakaus/impeccable; do
+        for source in "${sources[@]}"; do
             DISABLE_TELEMETRY=1 NPM_CONFIG_UPDATE_NOTIFIER=false limit npx -y skills@1.7.4 \
                 add "$source" --skill '*' \
                 --agent codex cursor gemini-cli opencode amp antigravity github-copilot \
                 --copy -y >/dev/null || return 1
         done
+    }
+    all_present() {
+        local marker
+        for marker in "${markers[@]}"; do [[ -f $marker ]] || return 1; done
     }
     # Read the install record rather than start `claude plugin list`: Kraft runs
     # this on every dispatch, so the already-installed path has to be cheap.
@@ -67,10 +83,10 @@ setup-plugins:
     fi
     if ! command -v npx >/dev/null; then
         echo "npx not installed; skipping the skills for agents other than Claude Code"
-    elif [[ -f .agents/skills/using-superpowers/SKILL.md && -f .agents/skills/impeccable/SKILL.md ]]; then
+    elif all_present; then
         echo "Agent skills already in .agents/skills/"
     elif agent_skills; then
-        echo "Installed superpowers and impeccable into .agents/skills/"
+        echo "Installed ${sources[*]} into .agents/skills/"
     else
         echo "warning: could not install the skills into .agents/skills/; run 'just setup-plugins' to retry" >&2
     fi

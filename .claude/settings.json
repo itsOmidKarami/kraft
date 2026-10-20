@@ -9,6 +9,25 @@
             "command": "jq -c '\n  (.tool_input.command // \"\") as $c\n  | ($c | test(\"(^|&&|;|\\\\||\\\\n)\\\\s*(uv run python -m pytest|uv run pytest|python -m pytest|pytest)(\\\\s|$)\")) as $isPytest\n  | if $isPytest then\n      {hookSpecificOutput:{hookEventName:\"PreToolUse\",permissionDecision:\"deny\",permissionDecisionReason:\"Blocked: raw pytest bypasses testmon change-tracking. Use `just test` instead (add -k pattern to target tests, or --no-testmon for a full run).\"}}\n    else\n      {}\n    end\n'"
           }
         ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/kraft-worker-superpowers.sh"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/kraft-worker-superpowers.sh"
+          }
+        ]
       }
     ]
   },

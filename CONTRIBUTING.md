@@ -53,6 +53,14 @@ repo's `setup_command` to `just setup` in its `repos.yaml` entry (or pass
 new worktree. Claude Code's plugins live in `~/.claude` and need no setup per
 worktree.
 
+superpowers is off in Kraft workers: its skills ask a person questions and push
+or merge a finished branch, and a worker does neither. For Claude Code,
+`.claude/hooks/kraft-worker-superpowers.sh` refuses every superpowers skill in a
+session with `$KRAFT_WORK_ITEM_ID` set and tells the session so. For the other
+agents, a setup Kraft runs copies only impeccable into the worktree. An
+in-place item runs in your own checkout, so other agents there still see the
+superpowers copies you installed.
+
 Cloud agents start from a fresh clone, so give them the same step. Copilot's
 coding agent already runs `just setup` (`.github/workflows/copilot-setup-steps.yml`).
 For Codex cloud, Cursor background agents and the like, add this to the
@@ -183,7 +191,7 @@ them unless you use the same tools:
 | `.github/` | CI workflows, issue and PR templates, CODEOWNERS | Yes: CI lives here |
 | `.claude-plugin/` | the marketplace manifest that publishes `plugins/` to Claude Code and Codex | Only to rename a plugin or add one |
 | `.cursor-plugin/` | the same marketplace for Cursor | Only to rename a plugin or add one |
-| `.claude/` | Claude Code settings: a hook that blocks raw `pytest` (needs `jq`), and the plugins it turns on (superpowers, impeccable) | Only with Claude Code |
+| `.claude/` | Claude Code settings: a hook that blocks raw `pytest` (needs `jq`), the plugins it turns on (superpowers, impeccable), and a hook that turns superpowers off in Kraft workers | Only with Claude Code |
 | `.beads/` | beads config and git hooks for the maintainer's private tracker | No |
 | `.agents/` | a beads skill for agent sessions; `just setup` adds superpowers and impeccable beside it, gitignored | Only with an agent other than Claude Code |
 | `.codex/` | Codex hooks that call `bd`; they fail without beads installed | No |
