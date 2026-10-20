@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ChevronDown, ChevronRight, ListFilter, Plus, Search } from "lucide-react";
 import { useRoving } from "../graph/useRoving";
 import { isTextField } from "../keys";
@@ -8,7 +8,7 @@ import { Popover } from "../ui/Popover";
 import { IdCard } from "../templates/menus/IdCard";
 import { loadHidden, saveHidden } from "./kinds";
 import { LOCAL, shownRows, sourceLabel, sources, type Row } from "./rows";
-import type { useListWidth } from "./listWidth";
+import type { ListSize } from "./listWidth";
 import { SECTIONS, SECTION_LABEL, type Section } from "./types";
 import { tip } from "../ui/Tooltip";
 import { NoMatch } from "../ui/NoMatch";
@@ -43,7 +43,7 @@ function RowGlyph({ row }: { row: Row }) {
 export function LibraryList({ rows, selected, only, size, onShowAll, onSelect, onAdd }: {
   rows: Row[];
   /** From useListWidth: the list's width and its handle's props. */
-  size: ReturnType<typeof useListWidth>;
+  size: ListSize;
   selected: string | undefined;
   /** A section a landing tile asked for: the list shows only it, until Show all. */
   only?: Section;
@@ -54,8 +54,9 @@ export function LibraryList({ rows, selected, only, size, onShowAll, onSelect, o
 }) {
   const [q, setQ] = useState("");
   const [hidden, setHidden] = useState(loadHidden);
-  // Sources the person turned off, for this visit: an add-on's id can change under an update, so none is remembered.
-  const [hiddenSources, setHiddenSources] = useState<ReadonlySet<string>>(new Set());
+  // Sources the person turned off, for this visit: until the published list names an add-on its source is the bare
+  // namespace, so none is remembered, and one that no longer names a source is dropped (`hiddenSources` below).
+  const [turnedOff, setHiddenSources] = useState<ReadonlySet<string>>(new Set());
   const [filterOpen, setFilterOpen] = useState(false);
   const [adding, setAdding] = useState<(typeof NEW)[number] | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
@@ -65,11 +66,14 @@ export function LibraryList({ rows, selected, only, size, onShowAll, onSelect, o
   // Groups the person folded; a search or the selection's own group opens one again.
   const [folded, setFolded] = useState<ReadonlySet<Section>>(new Set());
   // A tile asked for its section, so the kind filter does not empty it.
+  const origins = useMemo(() => sources(rows), [rows]);
+  const hiddenSources = useMemo(() => new Set([...turnedOff].filter((s) => origins.some((o) => o.source === s))), [turnedOff, origins]);
   const kindsOff = only ? new Set<Section>() : hidden;
-  const shown = shownRows(rows, q, kindsOff, hiddenSources).filter((x) => !only || x.section === only);
+  // What a section tile narrowed to is the base the filters and the search work on.
+  const base = only ? rows.filter((x) => x.section === only) : rows;
+  const shown = shownRows(base, q, kindsOff, hiddenSources);
   // What the filters alone hide, apart from the search.
-  const filtered = hidden.size + hiddenSources.size > 0 ? rows.length - shownRows(rows, "", kindsOff, hiddenSources).filter((x) => !only || x.section === only).length : 0;
-  const origins = sources(rows);
+  const filtered = base.length - shownRows(base, "", kindsOff, hiddenSources).length;
   const selectedSection = rows.find((x) => x.id === selected)?.section;
   const isFolded = (s: Section) => folded.has(s) && !q.trim();
   const reachable = shown.filter((x) => !isFolded(x.section));
@@ -97,12 +101,17 @@ export function LibraryList({ rows, selected, only, size, onShowAll, onSelect, o
   };
 
   const toggleSource = (s: string) => setHiddenSources((h) => new Set(h.has(s) ? [...h].filter((x) => x !== s) : [...h, s]));
-  const reset = () => {
-    setHidden(new Set());
-    saveHidden(new Set());
+  /** Turns the filters off: the kinds too, unless a section tile has the list ignoring them. */
+  const reset = (kinds = true) => {
+    if (kinds) {
+      setHidden(new Set());
+      saveHidden(new Set());
+    }
     setHiddenSources(new Set());
   };
-  const active = hidden.size + hiddenSources.size;
+  // The filters in force: a kind is not one while a tile's section shows whatever it says.
+  const active = kindsOff.size + hiddenSources.size;
+  const kindsBox = useRef<HTMLDivElement>(null);
 
   const move = (e: KeyboardEvent, from: number) => {
     const to = e.key === "ArrowDown" ? from + 1 : e.key === "ArrowUp" ? from - 1 : e.key === "Home" ? 0 : e.key === "End" ? reachable.length - 1 : null;
@@ -133,7 +142,7 @@ export function LibraryList({ rows, selected, only, size, onShowAll, onSelect, o
         </div>
         <button ref={filterBtn} type="button" className="icon-btn" {...tip("Filter")} aria-haspopup="dialog" aria-expanded={filterOpen} onClick={() => setFilterOpen((o) => !o)}>
           <ListFilter size={14} aria-hidden />
-          {active > 0 && <span className="lib-filter-dot" aria-label={`${active} filter${active === 1 ? "" : "s"} on`} />}
+          {active > 0 && <span className="lib-filter-dot" role="img" aria-label={`${active} filter${active === 1 ? "" : "s"} on`} />}
         </button>
         <Menu
           label="New component"
@@ -142,10 +151,10 @@ export function LibraryList({ rows, selected, only, size, onShowAll, onSelect, o
         />
       </div>
       <Popover anchor={filterBtn} open={filterOpen} onClose={() => { setFilterOpen(false); filterBtn.current?.focus(); }} role="dialog" label="Filter the library">
-        <div className="lib-filter">
+        <div className="lib-filter" ref={kindsBox}>
           <div className="lib-filter-head">
             <p className="menu-title">Filter</p>
-            {active > 0 && <LinkButton onClick={reset}>Reset</LinkButton>}
+            {hidden.size + hiddenSources.size > 0 && <LinkButton onClick={() => { reset(); kindsBox.current?.querySelector("input")?.focus(); }}>Reset</LinkButton>}
           </div>
           <fieldset className="lib-filter-set">
             <legend className="lib-filter-legend">Kind</legend>
@@ -196,13 +205,13 @@ export function LibraryList({ rows, selected, only, size, onShowAll, onSelect, o
       )}
       {filtered > 0 && (
         <p className="lib-only">
-          <span>Hiding {filtered} of {rows.length}</span>
-          <LinkButton onClick={reset}>Reset filters</LinkButton>
+          <span>Hiding {filtered} of {base.length}</span>
+          <LinkButton onClick={() => { reset(!only); filterBtn.current?.focus(); }}>Reset filters</LinkButton>
         </p>
       )}
       <div className="lib-rows" role="group" aria-label="Library components">
         {!rows.length && <Empty className="lib-empty">The library is empty. + New to add the first component.</Empty>}
-        {!!rows.length && !shown.length && <NoMatch className="lib-empty" query={q} onClear={() => { setQ(""); reset(); }} />}
+        {!!rows.length && !shown.length && <NoMatch className="lib-empty" query={q} onClear={() => { setQ(""); if (!q.trim()) reset(); }} />}
         {SECTIONS.map((s) => {
           const inGroup = shown.filter((x) => x.section === s);
           if (!inGroup.length) return null;

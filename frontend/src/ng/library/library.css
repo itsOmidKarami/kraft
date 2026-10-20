@@ -37,9 +37,9 @@
 .lib-filter-row:focus-within { outline: 2px solid var(--focus); outline-offset: -2px; }
 .lib-filter-row .lib-count { margin-left: auto; }
 /* The list's right edge: drag, ← →, Home/End, double click for the default width. */
-.lib-handle { position: absolute; top: 0; bottom: 0; right: -4px; width: 8px; z-index: 3; cursor: col-resize; touch-action: none; }
+.lib-handle { position: absolute; top: 0; bottom: 0; right: -3px; width: 6px; z-index: 3; cursor: col-resize; touch-action: none; }
 .lib-handle:focus-visible { outline-offset: -2px; }
-.lib-handle:is(:hover, :focus-visible) { background: linear-gradient(90deg, transparent 3px, var(--text-muted) 3px, var(--text-muted) 5px, transparent 5px); }
+.lib-handle:is(:hover, :focus-visible) { background: linear-gradient(90deg, transparent 2px, var(--text-muted) 2px, var(--text-muted) 4px, transparent 4px); }
 .lib-sr { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }
 .lib-rows { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 10px; }
 .lib-group { margin: 10px 0 4px; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }

@@ -1,7 +1,7 @@
 import { hint } from "../ui/Tooltip";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useResizable } from "../graph/useResizable";
+import { useResizable, useWidth } from "../graph/useResizable";
 import { detailOf, request } from "../http";
 import { isTextField } from "../keys";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
@@ -70,8 +70,8 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   const [collapsed, setCollapsed] = useState(false);
   const [frame, mainW, mainH] = useBox();
   const size = useResizable("library", mainW);
-  const page = useRef<HTMLDivElement>(null);
-  const listSize = useListWidth(page);
+  const [pageRef, pageW] = useWidth();
+  const listSize = useListWidth(pageW);
   const addons = draft.view!.addon_library;
   const rows = useMemo(() => listRows(r, published === "failed" ? [] : published?.components ?? null, addons), [r, published, addons]);
   const merged = useMemo(() => withAddons(r, addons), [r, addons]);
@@ -154,7 +154,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
 
   return (
     <DraftLibrary.Provider value={draftLibrary}>
-    <div className="lib-page" data-ref={refId} ref={page}>
+    <div className="lib-page" data-ref={refId} ref={pageRef}>
       {row && <h1 className="lib-sr">Library: {row.name}</h1>}
       <HeaderTail>
         {row && (

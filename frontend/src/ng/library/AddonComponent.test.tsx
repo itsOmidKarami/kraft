@@ -125,7 +125,7 @@ describe("An add-on's component in the Library", () => {
     expect(within(box).getAllByRole("option")).toHaveLength(1);
     expect(within(box).getByRole("option", { name: /release:base/ })).toBeInTheDocument();
     expect(screen.getByText("Hiding 9 of 10")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Filter" })).toHaveTextContent("");
+    expect(screen.getByRole("img", { name: "1 filter on" })).toBeInTheDocument();
     await u.click(within(dialog).getByRole("checkbox", { name: /Local/ }));
     await u.click(within(dialog).getByRole("checkbox", { name: /release@acme/ }));
     expect(within(box).queryByRole("option", { name: /release:base/ })).toBeNull();
@@ -133,6 +133,9 @@ describe("An add-on's component in the Library", () => {
     await u.click(within(dialog).getByRole("button", { name: "Reset" }));
     expect(within(box).getAllByRole("option")).toHaveLength(10);
     expect(screen.queryByText(/^Hiding/)).toBeNull();
+    expect(screen.queryByRole("img", { name: /filter.* on/ })).toBeNull();
+    // Reset leaves focus inside the dialog, not on the page.
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
   });
 
   it("clears a filter that hides everything from the empty list", async () => {
@@ -146,5 +149,62 @@ describe("An add-on's component in the Library", () => {
     expect(within(box).getByText(/Nothing matches this filter/)).toBeInTheDocument();
     await u.click(within(box).getByRole("button", { name: "Clear" }));
     expect(within(box).getAllByRole("option")).toHaveLength(10);
+  });
+
+  it("drops a hidden source the published list renames, instead of hiding it by a key that is gone", async () => {
+    const u = userEvent.setup();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal("fetch", vi.fn(async () => { await gate; return new Response(JSON.stringify(LISTED), { status: 200 }); }));
+    mount();
+    const box = await screen.findByRole("group", { name: "Library components" });
+    await u.click(screen.getByRole("button", { name: "Filter" }));
+    const dialog = screen.getByRole("dialog", { name: "Filter the library" });
+    // Until the published list arrives the add-on is named by its namespace.
+    await u.click(within(dialog).getByRole("checkbox", { name: /^release/ }));
+    expect(within(box).queryByRole("option", { name: /release:base/ })).toBeNull();
+    release();
+    await waitFor(() => expect(within(box).getByRole("option", { name: /release:base/ })).toBeInTheDocument());
+    expect(within(dialog).getByRole("checkbox", { name: /release@acme/ })).toBeChecked();
+    expect(screen.queryByText(/^Hiding/)).toBeNull();
+    expect(screen.queryByRole("img", { name: /filter.* on/ })).toBeNull();
+  });
+
+  it("counts what a section tile's list hides from that section, and leaves the kinds it ignores alone", async () => {
+    const u = userEvent.setup();
+    mount();
+    const box = await screen.findByRole("group", { name: "Library components" });
+    await waitFor(() => expect(within(box).getByRole("option", { name: /release:base/ })).toBeInTheDocument());
+    await u.click(screen.getByRole("button", { name: "Filter" }));
+    await u.click(within(screen.getByRole("dialog", { name: "Filter the library" })).getByRole("checkbox", { name: /Steering/ }));
+    await u.keyboard("{Escape}");
+    await u.click(within(await screen.findByRole("list", { name: "Components per section" })).getByRole("link", { name: /tasks/ }));
+    // The tile shows its tasks whatever the kind filter says: nothing is hidden, so nothing is counted.
+    expect(screen.getByText("Showing tasks only")).toBeInTheDocument();
+    expect(screen.queryByText(/^Hiding/)).toBeNull();
+    expect(screen.queryByRole("img", { name: /filter.* on/ })).toBeNull();
+    await u.click(screen.getByRole("button", { name: "Filter" }));
+    await u.click(within(screen.getByRole("dialog", { name: "Filter the library" })).getByRole("checkbox", { name: /release@acme/ }));
+    await u.keyboard("{Escape}");
+    expect(screen.getByText("Hiding 1 of 5")).toBeInTheDocument();
+    // Its reset lets go of the source and keeps the kind choice, and hands focus back to the filter.
+    await u.click(screen.getByRole("button", { name: "Reset filters" }));
+    expect(within(box).getByRole("option", { name: /release:base/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Filter" })).toHaveFocus();
+    await u.click(screen.getByRole("button", { name: "Show all" }));
+    expect(within(await screen.findByRole("group", { name: "Library components" })).queryByRole("listbox", { name: "Steering" })).toBeNull();
+  });
+
+  it("keeps the kind filter when a search finds nothing and its Clear is pressed", async () => {
+    const u = userEvent.setup();
+    mount();
+    const box = await screen.findByRole("group", { name: "Library components" });
+    await u.click(screen.getByRole("button", { name: "Filter" }));
+    await u.click(within(screen.getByRole("dialog", { name: "Filter the library" })).getByRole("checkbox", { name: /Steering/ }));
+    await u.keyboard("{Escape}");
+    await u.type(screen.getByRole("textbox", { name: "Search the library" }), "zzz");
+    await u.click(within(box).getByRole("button", { name: "Clear" }));
+    expect(within(box).queryByRole("listbox", { name: "Steering" })).toBeNull();
+    expect(screen.getByRole("img", { name: "1 filter on" })).toBeInTheDocument();
   });
 });
