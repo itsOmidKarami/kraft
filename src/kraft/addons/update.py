@@ -1384,17 +1384,23 @@ def _below(
     moving = {m.addon_id for m in members}
     out: dict[str, tuple[list[str], list[str]]] = {m.addon_id: ([], []) for m in members}
     for d in loaded:
+        if d.repo_id is not None or d.left_out is not None or d.id in moving:
+            continue
         before = _ancestry_in(d.id, loaded)
         nearest = next((a.id for a in before if a.id in moving), None)
         after = _ancestry_in(d.id, would_load)
-        if d.repo_id is not None or d.left_out is not None or d.id in moving:
-            continue
         if nearest is None or not after:
             continue
         try:
-            lines = review_mod.descendant_lines(d.id, fetch.verify_store(d.root), before, after)
-        except Exception:  # noqa: BLE001 -- an edited store can break in any way
-            continue  # loading says why
+            # As loading reads it (the manifest was checked, the files are not
+            # hashed again), so the review sees what would run.
+            lines = review_mod.descendant_lines(d.id, fetch.extract_dir(d.root), before, after)
+        except (OSError, ValueError, KeyError, fetch.AddonRefused) as exc:
+            # Failing open would let an unattended update change what it runs.
+            out[nearest][0].append(
+                f"{d.id}: its store does not read ({exc}); its changes cannot be shown"
+            )
+            continue
         for lane, found in zip(out[nearest], lines, strict=True):
             lane += [line for line in found if line.removeprefix(f"{d.id}: ") not in said]
     return out

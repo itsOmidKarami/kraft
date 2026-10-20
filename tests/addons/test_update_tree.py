@@ -7,7 +7,7 @@ import shutil
 import pytest
 from support.addons import AGENT, chain, child_manifest, install, make_tree, publish
 
-from kraft.addons import fetch, update
+from kraft.addons import fetch, load, update
 from kraft.addons.config import AddonsLock
 
 COMPANY = "company@corp"
@@ -640,3 +640,72 @@ def test_a_parent_review_shows_each_descendants_changes(tmp_path, row):
         assert results[TEAM].outcome == "applied", results
         lines = [*ours.reach, *ours.content]
         assert not [line for line in lines if line.startswith(("team@payments:", "team:"))], lines
+
+
+def _tampered(home, edit):
+    """team's installed store, changed behind the lock's back: `edit` gets its
+    check chain, whose folder is writable only while it does."""
+    team = next(a for a in load.installed(*home) if a.id == TEAM)
+    path = team.root / "chains/check.yaml"
+    path.parent.chmod(0o755)
+    path.chmod(0o644)
+    edit(path)
+    path.parent.chmod(0o555)
+
+
+def _append(path):
+    path.write_text(path.read_text() + "\n# edited\n")
+
+
+def _hard_link(path):
+    path.parent.joinpath("also.yaml").hardlink_to(path)
+
+
+#: How team's store is changed, and the line company's review then says.
+TAMPERED = {
+    # Still loads (only the manifest is checked): its edited files are read as
+    # loading reads them, so the shadow is shown.
+    "edited-file-still-shown": (_append, "its task pci_review now overrides"),
+    "unreadable-store": (_hard_link, "its store does not read"),
+}
+
+
+@pytest.mark.parametrize("row", list(TAMPERED))
+def test_a_descendant_that_cannot_be_read_holds_its_parents_update(tmp_path, row):
+    """team's store was edited and company moves: company's review either
+    shows team as loading reads it or, when it cannot, says so, and either
+    way a Reach line holds an unattended update for a person."""
+    edit, said = TAMPERED[row]
+    repos, home = make_tree(tmp_path, {**GATED_TREE, TEAM: {**TREE[TEAM], "library": SHADOWED}})
+    _task_added(repos)
+    _tampered(home, edit)
+
+    results, groups = _update(home)
+
+    assert results[COMPANY].outcome == "applied", results
+    ours = next(r for g in groups for r in g.reviews if r.addon_id == COMPANY)
+    assert sum(said in line for line in ours.reach) == 1, ours
+    assert update.may_apply_unattended(ours) is not None
+
+
+def test_a_descendants_lines_go_to_its_nearest_moving_ancestor(tmp_path):
+    """company and dept both move and team, below dept, does not: team's
+    shadow is in dept's review, not company's."""
+    tree = {**THREE_LEVELS, TEAM: {**THREE_LEVELS[TEAM], "library": SHADOWED}}
+    repos, home = make_tree(tmp_path, tree)
+    _task_added(repos)
+    publish(
+        repos["platform"],
+        "dept",
+        version="1.1.0",
+        manifest=child_manifest(COMPANY, "1"),
+        library=THREE_LEVELS[DEPT]["library"],
+    )
+
+    results, groups = _update(home)
+
+    assert results[COMPANY].outcome == results[DEPT].outcome == "applied", results
+    said = "team@payments: its task pci_review now overrides"
+    reviews = {r.addon_id: r for g in groups for r in g.reviews}
+    assert not [line for line in reviews[COMPANY].reach if said in line], reviews[COMPANY]
+    assert sum(said in line for line in reviews[DEPT].reach) == 1, reviews[DEPT]

@@ -16,7 +16,7 @@ from support.addons import (
 )
 from support.harness import git
 
-from kraft.addons import fetch, review, update
+from kraft.addons import fetch, load, review, update
 from kraft.addons.config import AddonEntry, AddonsLock
 
 ID = "release@acme"
@@ -322,3 +322,26 @@ def test_a_descendants_reach_holds_its_parents_auto_update(tmp_path, team_librar
             in result["message"]
         ), result
         assert _versions(config_dir)["company@corp"] == "1.0.0"
+
+
+def test_a_descendant_that_cannot_be_read_holds_its_parents_auto_update(tmp_path):
+    """team's store was changed behind the lock's back, so company's release
+    cannot show what it does to team: the move waits for a person."""
+    team = {**RELEASE, "library": {"tasks": {"mine": AGENT}}, "parent": ("company@corp", "1")}
+    repos, (config_dir, addons_dir) = make_tree(
+        tmp_path, {"company@corp": RELEASE, "team@corp": team}
+    )
+    on = {"company@corp": {"auto_update": True}}
+    edit_addons_yaml(config_dir, lambda w: w["addons"].update(on))
+    mine = next(a for a in load.installed(config_dir, addons_dir) if a.id == "team@corp")
+    ship = mine.root / "chains/ship.yaml"
+    ship.parent.chmod(0o755)
+    ship.parent.joinpath("also.yaml").hardlink_to(ship)
+    library = {"tasks": {**RELEASE["library"]["tasks"], "other": AGENT}}
+    publish(repos["corp"], "company", version="1.1.0", library=library)
+
+    result = update.auto_update(config_dir, addons_dir)["company@corp"]
+
+    assert result["outcome"] == "held", result
+    assert "team@corp: its store does not read" in result["message"], result
+    assert _versions(config_dir)["company@corp"] == "1.0.0"
