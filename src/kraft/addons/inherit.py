@@ -135,6 +135,40 @@ def requirements(
     return Requires(kraft=declared[0].kraft, harnesses=harnesses, profiles=profiles)
 
 
+#: The sections a child's `remove:` names entries of: what it may drop from
+#: the library it inherits.
+REMOVABLE = ("chains", "tasks", "steps", "nodes", "steering", "skills", "profiles")
+
+#: The message a `remove:` gets anywhere but in a child add-on's `library.yaml`.
+REMOVE_OUTSIDE_A_CHILD = "`remove:` is for an add-on that builds on another"
+
+
+def removals(library: Mapping[str, object]) -> dict[str, tuple[str, ...]]:
+    """`library`'s (a `library.yaml`'s content) `remove:` key, section to the
+    names it drops from the inherited layer; empty when it has none. Raises
+    `TemplateLibraryError` for a section outside `REMOVABLE` or a value that
+    is not a list of names."""
+    from kraft.templates.library import TemplateLibraryError
+
+    written = library.get("remove")
+    if written is None:
+        return {}
+    if not isinstance(written, Mapping):
+        raise TemplateLibraryError(
+            f"'remove' must be a mapping of section to names, one of {', '.join(REMOVABLE)}"
+        )
+    out: dict[str, tuple[str, ...]] = {}
+    for section, names in written.items():
+        if section not in REMOVABLE:
+            raise TemplateLibraryError(
+                f"remove.{section}: no such section; one of {', '.join(REMOVABLE)}"
+            )
+        if not isinstance(names, list) or not all(isinstance(n, str) and n for n in names):
+            raise TemplateLibraryError(f"remove.{section} must be a list of names")
+        out[section] = tuple(names)
+    return out
+
+
 #: What separates a child's namespace from an ancestor level in a layer's
 #: namespace (`team^1`). Never shown: `humanize` and `public` take it out.
 LAYER_MARK = "^"

@@ -291,6 +291,13 @@ def _refuse_layer_reference(path: Path, data: Mapping[str, object]) -> None:
         )
 
 
+def _refuse_remove(path: Path, data: Mapping[str, object]) -> None:
+    """A `remove:` drops entries from an inherited layer, which only a child
+    add-on has: anywhere else it would silently do nothing."""
+    if "remove" in data:
+        raise TemplateLibraryError(f"{path}: {inherit.REMOVE_OUTSIDE_A_CHILD}")
+
+
 def _section(path: Path, data: Mapping[str, object], namespace: Namespace) -> Mapping[str, object]:
     section = data.get(namespace.value) or {}
     if not isinstance(section, Mapping):
@@ -350,6 +357,10 @@ class TemplateLibrary:
         #: `(section, name)` to the add-on whose file a child's entry was read
         #: from (`authored_by`); a root add-on's entries are not listed.
         self._authors: dict[tuple[str, str], InstalledAddon] = {}
+        #: Each child add-on's `remove:` names its parent does not have, as
+        #: `<top>: remove.<section>: <name> is not inherited from <parent>`:
+        #: recorded at load, which they do nothing to, and never raised there.
+        self.stale_removals: tuple[str, ...] = ()
         #: The `library.yaml` this was read from, whose directory also holds
         #: `harnesses.yaml`. `None` for a library built with no file behind it.
         self.library_path = library_path
@@ -429,6 +440,7 @@ class TemplateLibrary:
         real for `from_yaml_dir`, nominal for an unsaved library, which is
         resolved without ever being written (`POST /templates/resolve`)."""
         _refuse_layer_reference(library_path, library)
+        _refuse_remove(library_path, library)
         components = {
             namespace: {
                 name: RawComponent(body, ComponentSource(library_path, namespace, name))
@@ -473,6 +485,7 @@ class TemplateLibrary:
         library_path = addon.root / LIBRARY_FILE
         written = _read_stored(store, LIBRARY_FILE, library_path, optional=True)
         _refuse_layer_reference(library_path, written)
+        _refuse_remove(library_path, written)
         library = qualify(written, addon)
         assert isinstance(library, Mapping)
         aliases = self._listed_namespaces(addon, library)
@@ -515,8 +528,18 @@ class TemplateLibrary:
             _read_stored(store, LIBRARY_FILE, author.root / LIBRARY_FILE, optional=True)
             for author, store in zip(chain, stores, strict=True)
         ]
-        for author, library in zip(chain, written, strict=True):
+        removed: list[dict[str, tuple[str, ...]]] = []
+        for depth, (author, library) in enumerate(zip(chain, written, strict=True)):
             _refuse_layer_reference(author.root / LIBRARY_FILE, library)
+            try:
+                removed.append(inherit.removals(library))
+            except TemplateLibraryError as exc:
+                raise TemplateLibraryError(f"{author.root / LIBRARY_FILE}: {exc}") from exc
+            if depth == len(chain) - 1 and removed[-1]:
+                # The root of the tree builds on nothing.
+                raise TemplateLibraryError(
+                    f"{author.root / LIBRARY_FILE}: {inherit.REMOVE_OUTSIDE_A_CHILD}"
+                )
         visible = inherit.Visible.build(
             chain,
             [
@@ -529,6 +552,7 @@ class TemplateLibrary:
                 }
                 for author, store, library in zip(chain, stores, written, strict=True)
             ],
+            removed,
         )
 
         def owner(kind: str) -> Callable[[str, int], str]:
@@ -597,13 +621,31 @@ class TemplateLibrary:
             authored.append(entries)
 
         merged: dict[str, dict[str, tuple[object, InstalledAddon]]] = {}
+        stale: list[str] = []
         for depth in reversed(range(len(chain))):
+            for section, names in removed[depth].items():
+                if section in ("skills", "profiles"):
+                    # Files in a store, not entries: what the parent's level sees.
+                    inherited = visible.levels[depth + 1].get(section, {})
+                else:
+                    inherited = merged.get(section, {})
+                for name in names:
+                    if name not in inherited and depth == 0:
+                        stale.append(
+                            f"{top}: remove.{section}: {name} is not inherited from "
+                            f"{chain[1].namespace}"
+                        )
+                if section in merged:
+                    merged[section] = {
+                        n: entry for n, entry in merged[section].items() if n not in names
+                    }
             for section, items in authored[depth].items():
                 merged[section] = {**merged.get(section, {}), **items}
             namespace = inherit.layer_namespace(top, depth)
             if depth:
                 self._layers[namespace] = chain[depth].namespace
             self._register_layer(namespace, merged, public=depth == 0)
+        self.stale_removals = (*self.stale_removals, *stale)
 
     def _register_layer(
         self,
@@ -717,6 +759,7 @@ class TemplateLibrary:
         self._layer_chains = other._layer_chains
         self._layers = other._layers
         self._authors = other._authors
+        self.stale_removals = other.stale_removals
 
     @property
     def _all_chains(self) -> Mapping[str, RawComponent]:

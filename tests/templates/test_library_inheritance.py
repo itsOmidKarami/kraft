@@ -10,11 +10,21 @@ import re
 from dataclasses import replace
 
 import pytest
-from support.addons import AGENT, chain, edit_store, home, installed
+from support.addons import (
+    AGENT,
+    chain,
+    edit_store,
+    home,
+    install,
+    installed,
+    instance,
+    make_collection,
+)
 
+from kraft.addons import load
 from kraft.api.routes.settings import _chain_summary
 from kraft.templates import catalogue
-from kraft.templates.library import Namespace, TemplateLibrary
+from kraft.templates.library import Namespace, TemplateLibrary, TemplateLibraryError
 
 COMPANY = {
     "library": {
@@ -185,6 +195,15 @@ TEAM_INHERITS_SCAN = {
 WITH_SKILL = {**TEAM, "skills": {"deploy-review": "team method"}}
 
 
+def _without(team, **removed):
+    """`team` with a `remove:` of `removed` (section to names) in its library."""
+    return {**team, "library": {**team["library"], "remove": removed}}
+
+
+#: A team that removes the `security_scan` its inherited `default` still runs.
+SCAN_REMOVED = _without(TEAM_INHERITS_SCAN, tasks=["security_scan"])
+
+
 @pytest.mark.parametrize(
     ("tree", "checks"),
     [
@@ -242,6 +261,7 @@ def _surfaces(library):
         pytest.param(TEAM, "catalogue", "platform-dept:security_scan", id="catalogue"),
         # The hidden level's own failure is said, not only that it fails.
         pytest.param(BROKEN, "lint", "cannot change kind", id="lint"),
+        pytest.param(SCAN_REMOVED, "lint", "platform-dept's default", id="lint-removed"),
         pytest.param(TEAM, "provenance", "platform-dept:default", id="provenance-parent"),
         pytest.param(TEAM, "chains-extends", "platform-dept:default", id="chains-extends"),
     ],
@@ -321,3 +341,85 @@ def test_a_hidden_level_is_not_reachable_by_name(tmp_path, local, rogue):
         "'team-payments^1:security_scan' is no name a library declares; an add-on reads "
         "its parent's entries by the parent's name"
     ]
+
+
+def _remove_chain(tmp_path):
+    library = _library(tmp_path, team=_without(TEAM, chains=["hotfix"]))
+    assert "team-payments:hotfix" not in library.chain_ids
+    assert "platform-dept:hotfix" in library.chain_ids
+    assert not library.lint()
+
+
+def _remove_task(tmp_path):
+    library = _library(tmp_path, team=_without(TEAM, tasks=["hotfix"]))
+    assert "team-payments:hotfix" not in library.component_names("tasks")
+    assert "platform-dept:hotfix" in library.component_names("tasks")
+
+
+def _remove_breaks_ref(tmp_path):
+    # Company's `default`, which the team's extends, still runs `security_scan`.
+    library = _library(tmp_path, team=SCAN_REMOVED)
+    messages = [issue.message for issue in library.lint()]
+    assert any(
+        "no task named 'team-payments:security_scan'" in m and "platform-dept's default" in m
+        for m in messages
+    ), messages
+
+
+def _remove_skill(tmp_path):
+    library = _library(tmp_path, team=_without(TEAM, skills=["deploy-review"]))
+    messages = [issue.message for issue in library.lint()]
+    assert any("deploy-review" in m and "no skill" in m for m in messages), messages
+
+
+def _stale_name(tmp_path):
+    library = _library(tmp_path, team=_without(TEAM, tasks=["legacy_lint"], skills=["gone"]))
+    assert sorted(library.stale_removals) == [
+        "team-payments: remove.skills: gone is not inherited from platform-dept",
+        "team-payments: remove.tasks: legacy_lint is not inherited from platform-dept",
+    ]
+    assert "team-payments:default" in library.chain_ids
+
+
+def _unknown_section(tmp_path):
+    with pytest.raises(TemplateLibraryError, match=r"remove\.widgets: no such section"):
+        _library(tmp_path, team=_without(TEAM, widgets=["x"]))
+
+
+def _local_library(tmp_path):
+    local = home(tmp_path, library={"tasks": {"base": AGENT}, "remove": {"tasks": ["base"]}})
+    with pytest.raises(TemplateLibraryError, match=re.escape(REMOVE_OUTSIDE)):
+        TemplateLibrary.from_yaml_dir(local)
+
+
+def _root_addon_stray_remove(tmp_path):
+    # Review focus 5: an add-on installed before `remove:` meant anything.
+    stray = {"tasks": {"base": AGENT}, "remove": {"tasks": ["base"]}}
+    collection = make_collection(tmp_path, {"release": {"library": stray}})
+    config, addons = instance(tmp_path)
+    install(config, addons, collection, "release")
+    (found,) = load.installed(config, addons)
+    assert found.left_out.endswith(REMOVE_OUTSIDE)
+
+
+REMOVE_OUTSIDE = "`remove:` is for an add-on that builds on another"
+
+
+@pytest.mark.parametrize(
+    "assert_row",
+    [
+        pytest.param(_remove_chain, id="remove-chain"),
+        pytest.param(_remove_task, id="remove-task"),
+        pytest.param(_remove_breaks_ref, id="remove-breaks-ref"),
+        pytest.param(_remove_skill, id="remove-skill"),
+        pytest.param(_stale_name, id="stale-name"),
+        pytest.param(_unknown_section, id="unknown-section"),
+        pytest.param(_local_library, id="local-library"),
+        pytest.param(_root_addon_stray_remove, id="root-addon-stray-remove"),
+    ],
+)
+def test_remove(tmp_path, assert_row):
+    """A child's `remove:` drops entries from the library it inherits, and
+    nothing else: a name it does not inherit is stale, a section it cannot
+    name is refused, and a `remove:` anywhere but in a child is refused."""
+    assert_row(tmp_path)
