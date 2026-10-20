@@ -252,3 +252,70 @@ def test_inherited(tmp_path, edits, kind, expected):
     if without is not None:
         del tree[without]
     assert inherit.inherited(kind, child, tree) == expected
+
+
+def _roots(company, dept, team):
+    return {"company": company.root, "platform-dept": dept.root, "team-payments": team.root}
+
+
+@pytest.mark.parametrize(
+    ("edits", "expected"),
+    [
+        pytest.param(
+            {},
+            lambda c, d, t: {
+                **_roots(c, d, t),
+                "platform-dept:deploy-review": c.root,
+                "team-payments:deploy-review": c.root,
+            },
+            id="inherited-maps-to-owner",
+        ),
+        pytest.param(
+            {"team": _ships_deploy_review("team method")},
+            lambda c, d, t: {**_roots(c, d, t), "platform-dept:deploy-review": c.root},
+            id="own-has-no-key",
+        ),
+        pytest.param(
+            {"team": {"library": {"remove": {"skills": ["deploy-review"]}}}},
+            lambda c, d, t: {**_roots(c, d, t), "platform-dept:deploy-review": c.root},
+            id="removed-has-no-key",
+        ),
+        pytest.param(
+            {"damage": "library.yaml"},
+            lambda c, d, t: {"company": c.root, "platform-dept": None, "team-payments": None},
+            id="unreadable-tree",
+        ),
+        pytest.param(
+            {"without": 0},
+            lambda c, d, t: {"platform-dept": None, "team-payments": None},
+            id="ancestry-raises",
+        ),
+        pytest.param(
+            {"alias": "plat", "dept": _ships_deploy_review()},
+            lambda c, d, t: {
+                "company": c.root,
+                "plat": d.root,
+                "team-payments": t.root,
+                "team-payments:deploy-review": d.root,
+            },
+            id="alias-parent",
+        ),
+        pytest.param({"only": 1}, lambda c, d, t: {"company": c.root}, id="root-unchanged"),
+    ],
+)
+def test_skill_dirs(tmp_path, edits, expected):
+    """Every namespace to its store, as the library always mapped it, and
+    each skill a child inherits under the child's name to the store of the
+    ancestor that defines it. A child whose tree does not read maps to None,
+    so its skills are refused as not loaded, never looked for in its own store."""
+    edits = dict(edits)
+    damage = edits.pop("damage", None)
+    without = edits.pop("without", None)
+    only = edits.pop("only", 3)
+    tree = example_tree(tmp_path, **edits)
+    if damage is not None:
+        edit_store(tree[0].root, damage, "tasks: {}\n")
+    given = [a for i, a in enumerate(tree[:only]) if i != without]
+    dirs = inherit.skill_dirs(given)
+    assert dirs == expected(*tree)
+    assert not any(inherit.LAYER_MARK in key for key in dirs)

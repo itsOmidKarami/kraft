@@ -28,6 +28,7 @@ from kraft.adapters.profiles import (  # noqa: F401 -- re-exported: callers use 
     resolve_profile,
     select_profile,
 )
+from kraft.addons import inherit
 from kraft.addons import load as addons_load
 from kraft.config import RepoEntry, git_read
 from kraft.policy import InstancePolicy
@@ -454,7 +455,7 @@ def resolve_agent_task(
         },
         repo_entry,
         skills_dir=skills_dir,
-        addon_dirs={p.namespace: p.root if p.left_out is None else None for p in known},
+        addon_dirs=inherit.skill_dirs(known),
         escalate=escalate,
         item_override=item_override,
         profile_defaults=profile.defaults,

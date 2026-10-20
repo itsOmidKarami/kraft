@@ -122,8 +122,8 @@ origin: src/kraft/addons/inherit.py §requirements
 
 ## REQ a-child-inherits-its-parents-library
 
-WHERE an add-on names a parent, the system SHALL serve under the add-on's namespace every chain, task, step, node, steering profile and skill of its parent's merged library that it does not override, so a grandchild inherits its grandparent's entries through its parent.
-enforced-by: tests/templates/test_library_inheritance.py::test_inherited_library[inherited-as-is], tests/templates/test_library_inheritance.py::test_inherited_library[skill-inherited], tests/templates/test_library_inheritance.py::test_inherited_library[steering-inherited]
+WHERE an add-on names a parent, the system SHALL serve under the add-on's namespace every chain, task, step, node, steering profile and skill of its parent's merged library that it does not override, so a grandchild inherits its grandparent's entries through its parent, and SHALL serve each skill it inherits under the child's namespace to a reference from outside the tree, read from the store of the ancestor that defines it; a skill the child removes is not found there.
+enforced-by: tests/templates/test_library_inheritance.py::test_inherited_library[inherited-as-is], tests/templates/test_library_inheritance.py::test_inherited_library[skill-inherited], tests/templates/test_library_inheritance.py::test_inherited_library[steering-inherited], tests/templates/test_library_inheritance.py::test_an_inherited_skill_is_named_under_the_child[inherited-skill], tests/templates/test_library_inheritance.py::test_an_inherited_skill_is_named_under_the_child[removed-skill], tests/templates/test_library_inheritance.py::test_an_inherited_skill_is_named_under_the_child[removed-then-own], tests/addons/test_pins.py::test_a_launch_reads_an_inherited_skill_under_the_childs_name
 origin: src/kraft/templates/library.py §TemplateLibrary._add_inherited
 
 ## REQ the-parents-name-means-the-inherited-layer

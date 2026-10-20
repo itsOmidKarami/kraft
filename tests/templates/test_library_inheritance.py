@@ -14,6 +14,7 @@ from support.addons import (
     AGENT,
     chain,
     edit_store,
+    example_tree,
     home,
     install,
     installed,
@@ -21,6 +22,7 @@ from support.addons import (
     make_collection,
 )
 
+from kraft import skill
 from kraft.addons import load
 from kraft.api.routes.settings import _chain_summary
 from kraft.templates import catalogue
@@ -468,3 +470,59 @@ def test_a_root_addon_with_remove_is_left_out(tmp_path):
     install(config, addons, collection, "release")
     (found,) = load.installed(config, addons)
     assert found.left_out.endswith(REMOVE_OUTSIDE)
+
+
+_REMOVES_REVIEW = {"library": {"remove": {"skills": ["deploy-review"]}}}
+
+
+@pytest.mark.parametrize(
+    ("tree", "reads"),
+    [
+        pytest.param({}, "company method", id="inherited-skill"),
+        pytest.param(
+            {"dept": {"skills": {"deploy-review": "dept method"}}},
+            "dept method",
+            id="grandparent-through-dept-override",
+        ),
+        pytest.param(
+            {"team": _REMOVES_REVIEW},
+            "selects skill 'team-payments:deploy-review', which resolves to no method: "
+            ".*has no skill 'deploy-review'",
+            id="removed-skill",
+        ),
+        pytest.param(
+            {"team": {**_REMOVES_REVIEW, "skills": {"deploy-review": "team method"}}},
+            "team method",
+            id="removed-then-own",
+        ),
+        pytest.param(
+            {"alias": "plat", "dept": {"skills": {"deploy-review": "dept method"}}},
+            "dept method",
+            id="alias-parent",
+        ),
+    ],
+)
+def test_an_inherited_skill_is_named_under_the_child(tmp_path, tree, reads):
+    """A library outside the tree names a skill the child inherits by the
+    child's name, and reads the defining ancestor's file; one the child
+    removed is not found there, even though its parent still ships it."""
+    ref = "team-payments:deploy-review"
+    local = {"tasks": {"base": {**AGENT, "skill": ref}}}
+
+    def resolve():
+        library = TemplateLibrary.from_mappings(
+            local,
+            [(tmp_path / "config" / "chains" / "local.yaml", chain("base"))],
+            library_path=tmp_path / "config" / "library.yaml",
+            addons=example_tree(tmp_path, **tree),
+        )
+        return library, library.resolve_chain("local")
+
+    if "selects skill" in reads:
+        with pytest.raises(TemplateLibraryError, match=reads) as refused:
+            resolve()
+        assert "^" not in str(refused.value)
+        return
+    library, resolved = resolve()
+    assert next(iter(resolved.nodes[0].tasks())).task.skill == ref
+    assert skill.read(None, ref, library.addon_dirs) == reads

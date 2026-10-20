@@ -9,6 +9,7 @@ import pytest
 import yaml
 from support.addons import (
     AGENT,
+    TREE,
     accept_repo_library,
     chain,
     drop_store,
@@ -19,6 +20,7 @@ from support.addons import (
     make_collection,
     publish,
     repo_with_library,
+    tree_collection,
 )
 
 from kraft.adapters import agent
@@ -97,6 +99,25 @@ def _resolved(config_dir, addons_dir, chain_id):
         config_dir, addons=load.installed(config_dir, addons_dir)
     )
     return library.resolve_chain(chain_id)
+
+
+@pytest.fixture
+def tree_home(tmp_path, monkeypatch):
+    """A Kraft home, this process's own, with the example tree (`TREE`:
+    company, platform-dept, team-payments, from one collection `acme`)
+    installed root first. The instance defines the agent profile `fast` that
+    company's `slow` falls back to, and each child ships an empty
+    `library.yaml`: install refuses an add-on that holds nothing."""
+    repo = tree_collection(tmp_path, dept={"library": {}}, team={"library": {}})
+    config_dir, addons_dir = instance(tmp_path, {"acme": {"git": repo.as_uri()}})
+    harnesses = yaml.safe_load((config_dir / "harnesses.yaml").read_text())
+    harnesses["profiles"] = {"fast": {"model": {"codex": "instance-fast"}}}
+    (config_dir / "harnesses.yaml").write_text(yaml.safe_dump(harnesses))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(addons_dir.parent))
+    for addon_id in TREE:
+        _update(config_dir, addons_dir, [addon_id], install=True)
+    return repo, config_dir, addons_dir
 
 
 def test_a_chain_that_only_extends_an_addon_pins_it_and_a_trim_keeps_the_pin(home):
@@ -630,3 +651,17 @@ def test_a_pinned_child_builds_with_its_parent(home, tmp_path, chain_id):
 
     assert "team" in pins
     assert rebuilt.resolve_chain(chain_id).nodes[0].id == "n"
+
+
+def test_a_launch_reads_an_inherited_skill_under_the_childs_name(tree_home):
+    """A local task names the skill team-payments inherits from company by
+    the team's name: the launch injects company's file."""
+    repo, config_dir, addons_dir = tree_home
+    skill = "team-payments:deploy-review"
+    body = {"nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", **AGENT, "skill": skill}]}]}
+    (config_dir / "chains" / "outside.yaml").write_text(json.dumps(body))
+    resolved = _resolved(config_dir, addons_dir, "outside")
+
+    inv = _launch(resolved.addons, skill=skill)
+
+    assert "company method" in inv.method_text
