@@ -544,3 +544,99 @@ def test_update_takes_waiting_relatives(
         assert groups == []
     if row == "current-id-takes-relatives":
         assert _version(home, COMPANY) == "1.1.0"
+
+
+DEPT = "dept@platform"
+GATED = {"nodes": [*chain("verify")["nodes"], {"id": "approve", "kind": "gate"}]}
+#: company with a gated `default` and a `hotfix` chain, which team is built on.
+GATED_TREE = {
+    COMPANY: {
+        "library": {"tasks": {"verify": AGENT}},
+        "chains": {"default": GATED, "hotfix": chain("verify")},
+    },
+    TEAM: TREE[TEAM],
+}
+#: team removes `hotfix`, which company 1.1.0 stops having.
+STALE_TREE = {**GATED_TREE, TEAM: {**TREE[TEAM], "library": {"remove": {"chains": ["hotfix"]}}}}
+#: dept between company and team; neither moves.
+THREE_LEVELS = {
+    COMPANY: GATED_TREE[COMPANY],
+    DEPT: {"library": {"tasks": {"mine": {"extends": "company:verify"}}}, "parent": (COMPANY, "1")},
+    TEAM: {**TREE[TEAM], "parent": (DEPT, "1")},
+}
+SHADOWED = {"tasks": {"scan": {"extends": "company:verify"}, "pci_review": AGENT}}
+
+
+def _gate_dropped(repos):
+    _company(repos, "1.1.0", chains={"default": chain("verify"), "hotfix": chain("verify")})
+
+
+def _task_added(repos):
+    _company(repos, "1.1.0", library={"tasks": {"verify": AGENT, "pci_review": AGENT}})
+
+
+def _chain_dropped(repos):
+    (repos["corp"] / "addons/company/chains/hotfix.yaml").unlink()
+    _company(repos, "1.1.0")
+
+
+def _both_move(repos):
+    _gate_dropped(repos)
+    _team(repos, "1.1.0", "1")
+
+
+#: Per row: the tree, the publish, and the lines a descendant adds to
+#: company's review (`reach`, `content`; each a substring of one line).
+DESCENDANTS = {
+    "inherited-gate-removed": (
+        GATED_TREE,
+        _gate_dropped,
+        ["team:default.nodes[approve]: gate removed"],
+        [],
+    ),
+    "shadow": (
+        {**GATED_TREE, TEAM: {**TREE[TEAM], "library": SHADOWED}},
+        _task_added,
+        ["team@payments: its task pci_review now overrides company@corp's new task pci_review"],
+        [],
+    ),
+    "stale-remove": (
+        STALE_TREE,
+        _chain_dropped,
+        [],
+        [
+            "team@payments: warning: team: remove.chains: hotfix is not inherited from company; "
+            "it does nothing"
+        ],
+    ),
+    "through-a-middle-level": (
+        THREE_LEVELS,
+        _gate_dropped,
+        ["dept:default.nodes[approve]: gate removed", "team:default.nodes[approve]: gate removed"],
+        [],
+    ),
+    "moving-child-not-repeated": (GATED_TREE, _both_move, [], []),
+}
+
+
+@pytest.mark.parametrize("row", list(DESCENDANTS))
+def test_a_parent_review_shows_each_descendants_changes(tmp_path, row):
+    """company moves and team (and dept) do not: company's review, which is
+    what an unattended update is judged on, says how each one's effective
+    chains change, and a child that moves itself is not said twice."""
+    tree, published, reach, content = DESCENDANTS[row]
+    repos, home = make_tree(tmp_path, tree)
+    published(repos)
+
+    results, groups = _update(home)
+
+    assert results[COMPANY].outcome == "applied", results
+    ours = next(r for g in groups for r in g.reviews if r.addon_id == COMPANY)
+    for said in reach:
+        assert sum(said in line for line in ours.reach) == 1, ours
+    for said in content:
+        assert sum(said in line for line in ours.content) == 1, ours
+    if row == "moving-child-not-repeated":
+        assert results[TEAM].outcome == "applied", results
+        lines = [*ours.reach, *ours.content]
+        assert not [line for line in lines if line.startswith(("team@payments:", "team:"))], lines

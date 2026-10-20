@@ -525,3 +525,21 @@ def review(
         reach=tuple(reach),
         content=tuple(content),
     )
+
+
+def descendant_lines(
+    addon_id: str,
+    files: Extracted,
+    before: Sequence[InstalledAddon],
+    after: Sequence[InstalledAddon],
+) -> tuple[list[str], list[str]]:
+    """`(reach, content)` for an installed descendant `addon_id` whose own
+    files `files` do not move while its ancestors do, from `before` to `after`
+    (parent first): what its effective chains, the names it now shadows and
+    its stale `remove:` entries would say in its own review, each line naming
+    the descendant. They go in the review of the ancestor that moves."""
+    said = review(addon_id, files, files, old_ancestors=before, new_ancestors=after)
+    return (
+        [f"{addon_id}: {line}" for line in said.reach],
+        [f"{addon_id}: {line}" for line in said.content],
+    )

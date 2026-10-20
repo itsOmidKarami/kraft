@@ -290,3 +290,35 @@ def test_auto_update_takes_no_relatives(tmp_path, monkeypatch):
     }
     assert (config_dir / "addons.lock").read_text() == before
     assert fetched == [repos["corp"].as_uri()]
+
+
+@pytest.mark.parametrize(
+    ("team_library", "outcome"),
+    [
+        ({"tasks": {"pci_review": AGENT}}, "held"),
+        ({"tasks": {"mine": AGENT}}, "applied"),
+    ],
+    ids=["descendant-shadows-a-new-name", "descendant-unaffected"],
+)
+def test_a_descendants_reach_holds_its_parents_auto_update(tmp_path, team_library, outcome):
+    """company's release adds a task, a plain addition for company; a child
+    that declares the name now overrides it, and that holds the move for a
+    person though the child's own auto-update is off."""
+    company, team = RELEASE, {**RELEASE, "library": team_library, "parent": ("company@corp", "1")}
+    repos, (config_dir, addons_dir) = make_tree(
+        tmp_path, {"company@corp": company, "team@corp": team}
+    )
+    on = {"company@corp": {"auto_update": True}}
+    edit_addons_yaml(config_dir, lambda w: w["addons"].update(on))
+    library = {"tasks": {**RELEASE["library"]["tasks"], "pci_review": AGENT}}
+    publish(repos["corp"], "company", version="1.1.0", library=library)
+
+    result = update.auto_update(config_dir, addons_dir)["company@corp"]
+
+    assert result["outcome"] == outcome, result
+    if outcome == "held":
+        assert (
+            "team@corp: its task pci_review now overrides company@corp's new task pci_review"
+            in result["message"]
+        ), result
+        assert _versions(config_dir)["company@corp"] == "1.0.0"

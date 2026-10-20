@@ -1366,6 +1366,40 @@ def _review(
     return replace(reviewed, reach=(*said, *reviewed.reach))
 
 
+def _below(
+    members: Sequence[_Move],
+    loaded: Sequence[load.InstalledAddon],
+    would_load: Sequence[load.InstalledAddon],
+    said: Collection[str],
+) -> dict[str, tuple[list[str], list[str]]]:
+    """For each member, the `(reach, content)` lines of the installed, loaded
+    descendants that do not move, whose nearest moving ancestor it is: how
+    their chains, shadowed names and `remove:` entries change under the
+    moves (`a-parent-review-shows-each-descendants-changes`). `said`: lines
+    the instance's own chains already gave, which a chain line of a
+    descendant (`team:ship.nodes[n]: ...`, named by its chain) does not
+    repeat."""
+    from kraft.addons import review as review_mod
+
+    moving = {m.addon_id for m in members}
+    out: dict[str, tuple[list[str], list[str]]] = {m.addon_id: ([], []) for m in members}
+    for d in loaded:
+        before = _ancestry_in(d.id, loaded)
+        nearest = next((a.id for a in before if a.id in moving), None)
+        after = _ancestry_in(d.id, would_load)
+        if d.repo_id is not None or d.left_out is not None or d.id in moving:
+            continue
+        if nearest is None or not after:
+            continue
+        try:
+            lines = review_mod.descendant_lines(d.id, fetch.verify_store(d.root), before, after)
+        except Exception:  # noqa: BLE001 -- an edited store can break in any way
+            continue  # loading says why
+        for lane, found in zip(out[nearest], lines, strict=True):
+            lane += [line for line in found if line.removeprefix(f"{d.id}: ") not in said]
+    return out
+
+
 def update(
     ids: Sequence[str] | None = None,
     *,
@@ -1647,6 +1681,7 @@ def update(
                 if after.library is not None
                 else ([], [])
             )
+            below = _below(members, loaded, would_load, {*reach, *content})
             for index, (m, reviewed) in enumerate(zip(members, reviews, strict=True)):
                 captured = (
                     [
@@ -1666,8 +1701,13 @@ def update(
                         *reviewed.reach,
                         *captured,
                         *(reach if first else ()),
+                        *below[m.addon_id][0],
                     ),
-                    content=(*reviewed.content, *(content if first else ())),
+                    content=(
+                        *reviewed.content,
+                        *(content if first else ()),
+                        *below[m.addon_id][1],
+                    ),
                 )
             # A pulled-in ancestor names the members it is taken for.
             here = {m.addon_id for m in members}
