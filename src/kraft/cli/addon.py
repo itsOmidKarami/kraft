@@ -608,7 +608,7 @@ def _parent_loads(raw: dict, config_dir: Path, addons_dir: Path, addon_id: str) 
             inherit.ancestry(addon, found)
         except inherit.InheritanceError as exc:
             why = str(exc)
-            if why == f"its parent {addon.parent} is not installed":
+            if addon.parent not in {a.id for a in found if a.repo_id is None}:
                 why += f"; install it first: kraft admin addon install {addon.parent}"
             raise _refuse(f"cannot enable {addon_id}: {why}") from exc
 

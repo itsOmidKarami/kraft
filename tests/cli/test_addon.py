@@ -378,9 +378,12 @@ TEAM = {
 }
 
 
-def _install_team(home, tmp_path):
-    """`team@payments`, which builds on `release@acme`, installed and enabled."""
-    collection = make_collection(tmp_path, {"team": TEAM}, name="payments")
+def _install_team(home, tmp_path, accepts="1"):
+    """`team@payments`, which builds on the `release@acme` versions `accepts`
+    takes, installed and enabled."""
+    requires = {**TEAM["manifest"]["requires"], "addons": {ID: accepts}}
+    team = {**TEAM, "manifest": {"requires": requires}}
+    collection = make_collection(tmp_path, {"team": team}, name="payments")
     install(home.config, home.addons, collection, "team")
 
 
@@ -435,13 +438,15 @@ def test_removing_a_referenced_addon_is_refused(installed, capsys, tmp_path, ver
     assert installed.written() == before and installed.reloads == []
 
     undo()
+    rest = {k: v for k, v in installed.yaml()["addons"].items() if k != ID}
     assert _run(capsys, verb, ID)[0] == 0
     assert installed.reloads == [1]
     if verb == "uninstall":
-        assert ID not in installed.yaml()["addons"] and installed.locked() is None
+        assert installed.yaml()["addons"] == rest and installed.locked() is None
     else:
-        assert installed.yaml()["addons"][ID] is False and installed.locked() is not None
-        assert _run(capsys, "enable", ID)[0] == 0 and installed.yaml()["addons"][ID] is True
+        assert installed.yaml()["addons"] == {**rest, ID: False} and installed.locked() is not None
+        assert _run(capsys, "enable", ID)[0] == 0
+        assert installed.yaml()["addons"] == {**rest, ID: True}
 
 
 @pytest.mark.parametrize("verb", ["uninstall", "disable"])

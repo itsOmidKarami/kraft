@@ -8,20 +8,30 @@ import pytest
 from cli.test_addon import ID, _install_team, _run, added, home, installed  # noqa: F401
 
 
-def _disable_both(home, capsys):
+def _child_disabled(home, tmp_path, capsys, accepts="1"):
+    _install_team(home, tmp_path, accepts)
     assert _run(capsys, "disable", "team@payments")[0] == 0
+
+
+def _disable_both(home, tmp_path, capsys):
+    _child_disabled(home, tmp_path, capsys)
     assert _run(capsys, "disable", ID)[0] == 0
 
 
-def _drop_the_parent(home, capsys):
-    _disable_both(home, capsys)
+def _drop_the_parent(home, tmp_path, capsys):
+    _disable_both(home, tmp_path, capsys)
     assert _run(capsys, "uninstall", ID)[0] == 0
 
 
+def _parent_out_of_range(home, tmp_path, capsys):
+    """The child takes `release@acme` 2.x; 1.0.0 is installed."""
+    _child_disabled(home, tmp_path, capsys, accepts="2")
+
+
 @pytest.mark.parametrize(
-    ("happens", "code", "says"),
+    ("setup", "code", "says"),
     [
-        pytest.param(None, 0, "team@payments: enabled", id="parent-loaded"),
+        pytest.param(_child_disabled, 0, "team@payments: enabled", id="parent-loaded"),
         pytest.param(
             _disable_both,
             1,
@@ -35,18 +45,21 @@ def _drop_the_parent(home, capsys):
             "install it first: kraft admin addon install release@acme",
             id="parent-not-installed",
         ),
+        pytest.param(
+            _parent_out_of_range,
+            1,
+            "cannot enable team@payments: its parent release@acme is 1.0.0, outside its range 2",
+            id="parent-out-of-range",
+        ),
     ],
 )
-def test_enable_a_child_without_its_parent(installed, capsys, tmp_path, happens, code, says):
+def test_enable_a_child_without_its_parent(installed, capsys, tmp_path, setup, code, says):
     """A child is enabled only while its parent loads and accepts it."""
-    _install_team(installed, tmp_path)
-    if happens:
-        happens(installed, capsys)
-    else:
-        assert _run(capsys, "disable", "team@payments")[0] == 0
+    setup(installed, tmp_path, capsys)
     before = installed.written()
 
     got, out = _run(capsys, "enable", "team@payments")
 
     assert got == code and says in out, out
+    assert ("install it first" in out) is ("install it first" in says), out
     assert (installed.written() == before) is (code != 0)
