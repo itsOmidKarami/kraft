@@ -111,4 +111,40 @@ describe("An add-on's component in the Library", () => {
     expect(await screen.findByText("'tasks.release:base' is not an add-on's component; edit it where it is")).toBeInTheDocument();
     expect(where()).toBe(REF);
   });
+
+  it("filters the list by source: local, or one add-on, with the rest kept", async () => {
+    const u = userEvent.setup();
+    mount();
+    const box = await screen.findByRole("group", { name: "Library components" });
+    await waitFor(() => expect(within(box).getByRole("option", { name: /release:base/ })).toBeInTheDocument());
+    await u.click(screen.getByRole("button", { name: "Filter" }));
+    const dialog = screen.getByRole("dialog", { name: "Filter the library" });
+    const sources = within(within(dialog).getByRole("group", { name: "Source" })).getAllByRole("checkbox").map((c) => c.closest("label")!.textContent);
+    expect(sources).toEqual(["Local9", "release@acme1"]);
+    await u.click(within(dialog).getByRole("checkbox", { name: /Local/ }));
+    expect(within(box).getAllByRole("option")).toHaveLength(1);
+    expect(within(box).getByRole("option", { name: /release:base/ })).toBeInTheDocument();
+    expect(screen.getByText("Hiding 9 of 10")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Filter" })).toHaveTextContent("");
+    await u.click(within(dialog).getByRole("checkbox", { name: /Local/ }));
+    await u.click(within(dialog).getByRole("checkbox", { name: /release@acme/ }));
+    expect(within(box).queryByRole("option", { name: /release:base/ })).toBeNull();
+    expect(within(box).getAllByRole("option")).toHaveLength(9);
+    await u.click(within(dialog).getByRole("button", { name: "Reset" }));
+    expect(within(box).getAllByRole("option")).toHaveLength(10);
+    expect(screen.queryByText(/^Hiding/)).toBeNull();
+  });
+
+  it("clears a filter that hides everything from the empty list", async () => {
+    const u = userEvent.setup();
+    mount();
+    const box = await screen.findByRole("group", { name: "Library components" });
+    await u.click(screen.getByRole("button", { name: "Filter" }));
+    const dialog = screen.getByRole("dialog", { name: "Filter the library" });
+    await u.click(within(dialog).getByRole("checkbox", { name: /Local/ }));
+    await u.click(within(dialog).getByRole("checkbox", { name: /release@acme/ }));
+    expect(within(box).getByText(/Nothing matches this filter/)).toBeInTheDocument();
+    await u.click(within(box).getByRole("button", { name: "Clear" }));
+    expect(within(box).getAllByRole("option")).toHaveLength(10);
+  });
 });
