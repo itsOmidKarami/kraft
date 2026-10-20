@@ -58,14 +58,26 @@ def _render_resolved(payload: dict) -> str:
     node came from, as comments, so the YAML still loads."""
     text = yaml.safe_dump(payload["chain"], sort_keys=False).rstrip("\n")
     provenance = payload.get("provenance")
-    if not provenance:
-        return text
-    lines = [f"# extends {provenance['parent']}"]
+    marks = payload.get("inherited_nodes") or {}
+    lines = []
+    if payload.get("addon"):
+        lines.append(f"# {_named({'id': payload['chain']['id'], 'addon': payload['addon']})}")
+    if provenance:
+        lines.append(f"# extends {provenance['parent']}")
     for node in payload["chain"]["nodes"]:
-        paths = provenance["overrides"].get(node["id"], [])
-        how = provenance["nodes"][node["id"]] + (f" ({', '.join(paths)})" if paths else "")
-        lines.append(f"#   {node['id']}: {how}")
-    lines += [f"#   {id}: removed" for id in provenance["removed"]]
+        how = None
+        if provenance:
+            paths = provenance["overrides"].get(node["id"], [])
+            how = provenance["nodes"][node["id"]] + (f" ({', '.join(paths)})" if paths else "")
+        mark = marks.get(node["id"])
+        if mark:
+            entry = mark["entry"].rpartition(":")[2]
+            note = f"{entry} {'overridden' if mark['origin'] == 'overridden' else 'added'} here"
+            how = f"{how}; {note}" if how else note
+        if how:
+            lines.append(f"#   {node['id']}: {how}")
+    if provenance:
+        lines += [f"#   {id}: removed" for id in provenance["removed"]]
     return "\n".join([*lines, text])
 
 
@@ -75,10 +87,25 @@ def _render_chain_text(payload: dict) -> str:
     return header + payload["text"].rstrip("\n")
 
 
+def mark_text(inheritance: dict | None) -> str | None:
+    """What a child add-on's entry is, in words: `inherited from company`,
+    `overridden here`, `added here`; None for an entry with no mark."""
+    if not inheritance:
+        return None
+    origin = inheritance["origin"]
+    if origin == "inherited":
+        return f"inherited from {inheritance['parent']['namespace']}"
+    return {"overridden": "overridden here", "added": "added here"}.get(origin)
+
+
 def _named(entry: dict) -> str:
-    """An id, followed by the add-on it comes from: `release:ship (release@acme 1.4.0)`."""
+    """An id, followed by the add-on it comes from: `release:ship (release@acme 1.4.0)`,
+    and how a child add-on holds it: `(... 2.1.0; inherited from company)`."""
     addon = entry.get("addon")
-    return entry["id"] + (f" ({addon['id']} {addon['version']})" if addon else "")
+    if not addon:
+        return entry["id"]
+    mark = mark_text(addon.get("inheritance"))
+    return f"{entry['id']} ({addon['id']} {addon['version']}{'; ' + mark if mark else ''})"
 
 
 def _render_components(payload: dict) -> str:

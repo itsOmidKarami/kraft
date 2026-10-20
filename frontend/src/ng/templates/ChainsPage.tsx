@@ -24,7 +24,7 @@ import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
 import { authoredNodes, chainFile, counts, extendsOf, isAdded, kindOf, liveChainId } from "./draft/view";
 import { Badge } from "../ui/Badge";
 import { addonRepo } from "../library/types";
-import { AddonBadge, ReadOnly } from "./addon";
+import { AddonBadge, InheritanceMark, ReadOnly } from "./addon";
 import { pathOf, selOf, type TSel } from "./sel";
 import "./templates.css";
 import { usePane } from "../shell/usePane";
@@ -309,6 +309,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         <span className="tpl-crumb-sep" aria-hidden>›</span>
         <Switcher chain={chain} renamedTo={liveId !== chain ? liveId : undefined} onGo={requestGo} startDup={dupTick} copy={readOnly} extend={!addonRepo(addon)} />
         {addon && <AddonBadge addon={addon} />}
+        {addon && <InheritanceMark addon={addon} />}
         {/* Set as the add-on badge beside it and a node's own "extends" badge are: mono is for ids and caps words. */}
         {parent && <Badge>extends {parent}</Badge>}
         {s.level === "node" && s.node && (

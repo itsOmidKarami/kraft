@@ -6,6 +6,8 @@
 .ph-row-static { cursor: default; }
 .ph-row.ph-is-danger { color: var(--bad); }
 .ph-chips-end { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: 150px; }
+/* A chip longer than the column ("inherited from platform-dept") wraps inside its outline rather than running past the chevron. */
+.ph-chips-end > * { max-width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: break-word; text-align: center; }
 /* A row with chips and a value leaves its label too little room: the label takes the first line, the chips and value the second. */
 .ph-row:has(> .ph-chips-end):has(> .ph-row-value) { flex-wrap: wrap; row-gap: 6px; }
 .ph-row:has(> .ph-chips-end):has(> .ph-row-value) > .ph-row-text { flex-basis: 100%; }

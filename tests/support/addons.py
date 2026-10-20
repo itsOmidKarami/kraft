@@ -15,7 +15,7 @@ import yaml
 
 from kraft import client
 from kraft.addons import fetch, manifest, repo_library
-from kraft.addons.load import InstalledAddon
+from kraft.addons.load import InstalledAddon, repo_library_id
 from kraft.config import read_yaml, write_yaml
 from support.harness import commit_all, git, make_repo, write
 
@@ -412,6 +412,117 @@ def load_release(client, tmp_path: Path, **spec) -> Path:
     return store
 
 
+#: The specs of the design's example tree, richer than `example_tree`'s defaults:
+#: `team-payments` builds on `platform-dept`, which builds on `company`.
+COMPANY = {
+    "library": {
+        "steering": {"house": {"instructions": "company rules"}},
+        "tasks": {
+            "verify": {
+                **AGENT,
+                "prompt": "company verify",
+                "skill": "deploy-review",
+                "steering": ["house"],
+            },
+            "security_scan": {**AGENT, "prompt": "company scan"},
+            "hotfix": {**AGENT, "prompt": "company hotfix"},
+        },
+    },
+    "chains": {
+        "default": {
+            "nodes": [
+                {"id": "verification", "kind": "exec", "tasks": [{"id": "v", "extends": "verify"}]},
+                {"id": "scan", "kind": "exec", "tasks": [{"id": "s", "extends": "security_scan"}]},
+            ]
+        },
+        "hotfix": chain("hotfix"),
+    },
+    "skills": {"deploy-review": "company method"},
+    "profiles": {"slow": {"model": {"codex": "slow-model"}}},
+}
+DEPT = {"library": {"tasks": {"security_scan": {**AGENT, "prompt": "dept scan"}}}}
+TEAM = {
+    "library": {
+        "tasks": {
+            "security_scan": {"extends": "platform-dept:security_scan", "model": "pci-model"},
+            "pci_review": {**AGENT, "prompt": "team pci"},
+            # Each file reference by the parent's name: the ancestor that ships it.
+            "supered": {
+                **AGENT,
+                "skill": "platform-dept:deploy-review",
+                "steering": ["platform-dept:house"],
+                "profile": "platform-dept:slow",
+            },
+        }
+    },
+    "chains": {
+        "supers": chain("supered"),
+        "default": {
+            "extends": "platform-dept:default",
+            "add": [
+                {
+                    "after": "verification",
+                    "node": {
+                        "id": "pci_review",
+                        "kind": "exec",
+                        "tasks": [{"id": "p", "extends": "pci_review"}],
+                    },
+                }
+            ],
+        },
+    },
+}
+
+
+def inherited_tree(
+    tmp_path: Path,
+    *,
+    company: dict | None = None,
+    dept: dict | None = None,
+    team: dict | None = None,
+    dept_alias: str | None = None,
+) -> tuple[InstalledAddon, InstalledAddon, InstalledAddon]:
+    """`example_tree` with `COMPANY`, `DEPT` and `TEAM` as the default specs,
+    for the checks that need their chains, steering and overrides; a keyword
+    replaces one, and `dept_alias` is the dept's namespace."""
+    return example_tree(
+        tmp_path,
+        company=company or COMPANY,
+        dept=dept or DEPT,
+        team=team or TEAM,
+        alias=dept_alias,
+    )
+
+
+def repo_library_child(
+    tmp_path: Path, repo_id: str, parent: InstalledAddon, **spec
+) -> InstalledAddon:
+    """A repo library that names `parent` as its parent, which a real one never
+    does: it is served under `repo_id`, read by that repository's items only,
+    so the inheritance mark has to refuse it."""
+    return replace(
+        installed(tmp_path, "library", **spec),
+        id=repo_library_id(repo_id),
+        namespace=repo_id,
+        parent=parent.id,
+    )
+
+
+def load_tree(client, tmp_path: Path, **specs) -> None:
+    """`tree_collection` of `COMPANY`, `DEPT` and `TEAM` (`specs` replaces one
+    by `company`, `dept` or `team`) installed into a running test server,
+    parents first, and loaded."""
+    from kraft.api import deps
+
+    st = client.app.state
+    collection = tree_collection(
+        tmp_path, **{"company": COMPANY, "dept": DEPT, "team": TEAM, **specs}
+    )
+    for addon_id in TREE:
+        install(st.templates_dir, st.run_dirs.addons, collection, addon_id.split("@")[0])
+    deps._reload_templates(st)
+
+
 def install_release(
     tmp_path: Path, version: str = "1.0.0", *, fallback: bool = True, provider: str = "fake"
 ) -> tuple[dict, Path]:
@@ -449,8 +560,6 @@ def pinned_chain(nodes, pins: dict, *, repo):
     """`nodes` (authored V1 node mappings) materialized as a snapshot that
     pins `pins`, the way an item filed while those add-on versions were the
     lock's records it."""
-    from dataclasses import replace
-
     from support.harness import v1_chain, v1_resolved
 
     return v1_chain(replace(v1_resolved(nodes), addons=pins), repo=repo)

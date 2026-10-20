@@ -55,6 +55,25 @@ describe("An add-on's component in the Library", () => {
     expect(posts()).toEqual([]);
   });
 
+  it("a child's overridden component says so in its row and in its pane header", async () => {
+    const inheritance = { origin: "overridden" as const, parent: { id: "company@corp", namespace: "company" }, author: { id: "platform-dept@corp", version: "1.0.0" } };
+    const listed = { ...LISTED, components: LISTED.components.map((c) => (c.id === "tasks.release:base" ? { ...c, addon: { ...ADDON, inheritance } } : c)) };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(listed), { status: 200 })));
+    mount(REF);
+    expect(await screen.findByRole("heading", { name: "release:base" })).toBeInTheDocument();
+    const list = screen.getByRole("group", { name: "Library components" });
+    await waitFor(() => expect(within(list).getByRole("option", { name: /release:base/ })).toHaveTextContent("overridden here"));
+    expect(within(list).getByRole("option", { name: /^implementer/ })).not.toHaveTextContent("overridden here");
+    // Where the list is narrow the badge shows a glyph only; its text and title stay for assistive tech.
+    const badge = within(list).getByText("release@acme 1.0.0").parentElement!;
+    expect(badge).toHaveAttribute("title", "From add-on release@acme 1.0.0: read-only");
+    expect(badge.querySelector("svg.addon-badge-glyph")).toHaveAttribute("aria-hidden", "true");
+    // The header beside the breadcrumb, outside the list.
+    const header = screen.getAllByText("overridden here").filter((el) => !list.contains(el));
+    expect(header).toHaveLength(1);
+    expect(header[0]).toHaveAttribute("title", "overridden here\nWritten by platform-dept@corp 1.0.0");
+  });
+
   it("a repo library's component is badged with its repository and offers no copy", async () => {
     const repo = { id: "library@repo:app", version: "", repo: "app" };
     const listed = { ...PUBLISHED, components: [...PUBLISHED.components, { id: "tasks.app:base", kind: "tasks", name: "app:base", used_by: [], used_by_paths: [], addon: repo }] };

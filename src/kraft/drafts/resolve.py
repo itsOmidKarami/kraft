@@ -218,7 +218,7 @@ def _chains(st, key: str, raw: dict, files: dict, published: dict) -> dict:
         # An add-on's chain is read-only and already in the library: resolved
         # as loaded, never re-added as a local chain (its id has a `:`).
         try:
-            resolved = settings._resolved_view(library.resolve_chain(key), library.provenance(key))
+            resolved = settings.library_resolved_view(library, key)
         except TemplateLibraryError as exc:
             problems = [{**_not_a_mapping(name), "message": str(exc)}]
     elif data is not None:
@@ -234,7 +234,7 @@ def _chains(st, key: str, raw: dict, files: dict, published: dict) -> dict:
             except TemplateLibraryError:
                 pass
             else:
-                resolved = settings._resolved_view(chain, candidate.provenance(id))
+                resolved = settings.library_resolved_view(candidate, id, chain)
                 # Each local child, against the chain as this draft leaves it.
                 for child in (c for c in candidate.extended_by(id) if ":" not in c):
                     try:

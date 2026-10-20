@@ -72,7 +72,9 @@ def _agent_profiles_view(table, library, selections, path, providers) -> list[di
         {
             "id": p.id,
             # The add-on a qualified profile comes from; None for the instance's own.
-            "addon": catalogue.addon_view(library, p.id) if library is not None else None,
+            "addon": (
+                catalogue.addon_view(library, p.id, marks=False) if library is not None else None
+            ),
             "effort": p.effort,
             "model": p.model,
             "providers": {

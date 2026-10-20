@@ -8,7 +8,7 @@ import { rejectTarget } from "../../item/graph";
 import { useConfigDraft } from "../../templates/draft/useConfigDraft";
 import { chainCapGroups, settingRows } from "../../templates/draft/view";
 import { stepsOf, taskName } from "../../item/paths";
-import { addonLabel } from "../../library/types";
+import { addonLabel, inheritanceText } from "../../library/types";
 import { coveredText } from "../../item/chainName";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, type RowSpec } from "./kit";
@@ -38,7 +38,7 @@ const nodeSub = (n: ChainNode) => (n.kind === "gate" ? `gate · reject to ${n.re
 /** `/templates/chains`: the chains (W17 brief L.1). */
 export function ChainsList() {
   const { chains, error } = useChains();
-  const rows: RowSpec[] = (chains ?? []).map((c) => ({ key: c.id, label: c.id, mono: true, sub: c.error ? c.error : sizeOf(c), to: `/templates/chains/${encodeURIComponent(c.id)}`, chips: c.addon ? [{ label: addonLabel(c.addon) }] : undefined }));
+  const rows: RowSpec[] = (chains ?? []).map((c) => ({ key: c.id, label: c.id, mono: true, sub: c.error ? c.error : sizeOf(c), to: `/templates/chains/${encodeURIComponent(c.id)}`, chips: c.addon ? [{ label: addonLabel(c.addon) }, ...(inheritanceText(c.addon) ? [{ label: inheritanceText(c.addon)! }] : [])] : undefined }));
   return (
     <AreaScreen title="Chains" sub="The chains an item runs: how it moves from spec to merge." status={{ label: "published" }} yaml={false}>
       {error && <p className="ph-error" role="alert">{error}</p>}
@@ -77,7 +77,7 @@ export function ChainView() {
   const origins = draft.view?.result.extending?.origins ?? {};
   const origin = (id: string) => (origins[id] === "added" || origins[id] === "overridden" ? [{ label: ORIGIN[origins[id] as keyof typeof ORIGIN] }] : undefined);
   return (
-    <AreaScreen title={chain} sub={c ? `${c.addon ? `${addonLabel(c.addon)} · ` : ""}${sizeOf(c)}` : undefined} draft={draft} yaml={draft.view ? true : text ?? ""}>
+    <AreaScreen title={chain} sub={c ? `${c.addon ? `${addonLabel(c.addon)} · ${inheritanceText(c.addon) ? `${inheritanceText(c.addon)} · ` : ""}` : ""}${sizeOf(c)}` : undefined} draft={draft} yaml={draft.view ? true : text ?? ""}>
       {error && <p className="ph-error" role="alert">{error}</p>}
       {chains && !c && <p className="ph-empty">There is no chain {chain}.</p>}
       <Group title={`Nodes · ${nodes.length}`} note={c && !c.addon ? STRUCTURE : undefined} rows={nodes.map((n) => ({ key: n.id, label: displayName(n), sub: `${n.id} · ${nodeSub(n)}`, subMono: true, chips: origin(n.id), to: `/templates/chains/${encodeURIComponent(chain)}/nodes/${encodeURIComponent(n.id)}` }))} />

@@ -6,7 +6,7 @@ import json
 
 import pytest
 import yaml
-from support.addons import AGENT, chain, load_release
+from support.addons import AGENT, chain, load_release, load_tree
 
 from kraft.templates.models import MaterializedChain
 
@@ -25,7 +25,7 @@ def test_addon_entries_carry_their_addon(loaded):
         c["id"]: c["addon"] for c in loaded.get("/api/templates/library").json()["components"]
     }
 
-    addon = {"id": "release@acme", "version": "1.0.0", "repo": None}
+    addon = {"id": "release@acme", "version": "1.0.0", "repo": None, "inheritance": None}
     assert (chains["release:ship"], chains["default"]) == (addon, None)
     assert components["tasks.release:base"] == addon
     assert {v for k, v in components.items() if ":" not in k} == {None}
@@ -324,7 +324,7 @@ def test_an_addon_chain_opens_read_only_through_the_draft_view(loaded):
 
     assert (view["draft"], view["addon"]) == (
         False,
-        {"id": "release@acme", "version": "1.0.0", "repo": None},
+        {"id": "release@acme", "version": "1.0.0", "repo": None, "inheritance": None},
     )
     assert [n["id"] for n in view["result"]["resolved"]["nodes"]] == ["n"]
     assert view["result"]["problems"] == [] and view["result"]["changes"] == []
@@ -416,3 +416,73 @@ def test_an_item_draft_adds_an_addons_node(client, repo, tmp_path):
     assert client.post(f"/api/work-items/{wid}/draft/apply").status_code == 200
     item = client.get(f"/api/work-items/{wid}").json()
     assert "release" in MaterializedChain.from_json(item["materialized_chain"]).chain.addons
+
+
+def _row(rows, id):
+    return next(row for row in rows if row["id"] == id)
+
+
+def _chains_list(client):
+    answer = client.get("/api/templates/chains")
+    mark = _row(answer.json(), "team-payments:default")["addon"]["inheritance"]
+    assert mark["origin"] == "overridden"
+    return answer
+
+
+def _library(client):
+    answer = client.get("/api/templates/library")
+    component = _row(answer.json()["components"], "tasks.platform-dept:security_scan")
+    assert component["addon"]["inheritance"] == {
+        "origin": "overridden",
+        "parent": {"id": "company@acme", "namespace": "company"},
+        "author": {"id": "platform-dept@acme", "version": "1.0.0"},
+    }
+    return answer
+
+
+def _resolved(client, chain_id="platform-dept:default"):
+    answer = client.get(f"/api/templates/chains/{chain_id}/resolved")
+    view = answer.json()
+    if chain_id == "platform-dept:default":
+        assert view["inherited_nodes"]["scan"]["origin"] == "overridden"
+        assert view["addon"]["inheritance"]["origin"] == "inherited"
+    else:
+        assert view["provenance"]["parent"] == "platform-dept:default"
+    return answer
+
+
+def _draft_view(client, chain_id="platform-dept:default"):
+    answer = client.get(f"/api/drafts/chains/{chain_id}")
+    view = answer.json()
+    assert view["addon"]["inheritance"] is not None
+    resolved = view["result"]["resolved"]
+    if chain_id == "platform-dept:default":
+        assert resolved["inherited_nodes"]["scan"]["entry"] == "tasks.platform-dept:security_scan"
+    else:
+        assert resolved["provenance"]["parent"] == "platform-dept:default"
+    return answer
+
+
+def _no_layer_names(client):
+    answers = [_chains_list(client), _library(client), _resolved(client), _draft_view(client)]
+    answers += [
+        _resolved(client, "team-payments:default"),
+        _draft_view(client, "team-payments:default"),
+    ]
+    for answer in answers:
+        assert "^" not in answer.text, answer.request.url
+    return answers[-1]
+
+
+@pytest.mark.parametrize(
+    "request_",
+    [_chains_list, _library, _resolved, _draft_view, _no_layer_names],
+    ids=["chains-list", "library", "resolved", "draft-view", "no-layer-names"],
+)
+def test_a_child_addons_entries_carry_their_marks(client, tmp_path, request_):
+    """Every payload that names an entry's add-on says whether a child add-on
+    inherited, overrode or added it, and a child's chain marks its nodes,
+    never through a hidden level's name."""
+    load_tree(client, tmp_path)
+    answer = request_(client)
+    assert answer.status_code == 200, answer.text

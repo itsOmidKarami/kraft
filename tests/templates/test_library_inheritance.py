@@ -7,19 +7,23 @@ which builds on `company`."""
 
 import json
 import re
-from dataclasses import replace
 
 import pytest
 from support.addons import (
     AGENT,
+    COMPANY,
+    DEPT,
+    TEAM,
     chain,
     edit_store,
     example_tree,
     home,
+    inherited_tree,
     install,
     installed,
     instance,
     make_collection,
+    repo_library_child,
 )
 
 from kraft import skill
@@ -28,79 +32,13 @@ from kraft.api.routes.settings import _chain_summary
 from kraft.templates import catalogue
 from kraft.templates.library import Namespace, TemplateLibrary, TemplateLibraryError
 
-COMPANY = {
-    "library": {
-        "steering": {"house": {"instructions": "company rules"}},
-        "tasks": {
-            "verify": {
-                **AGENT,
-                "prompt": "company verify",
-                "skill": "deploy-review",
-                "steering": ["house"],
-            },
-            "security_scan": {**AGENT, "prompt": "company scan"},
-            "hotfix": {**AGENT, "prompt": "company hotfix"},
-        },
-    },
-    "chains": {
-        "default": {
-            "nodes": [
-                {"id": "verification", "kind": "exec", "tasks": [{"id": "v", "extends": "verify"}]},
-                {"id": "scan", "kind": "exec", "tasks": [{"id": "s", "extends": "security_scan"}]},
-            ]
-        },
-        "hotfix": chain("hotfix"),
-    },
-    "skills": {"deploy-review": "company method"},
-    "profiles": {"slow": {"model": {"codex": "slow-model"}}},
-}
-DEPT = {"library": {"tasks": {"security_scan": {**AGENT, "prompt": "dept scan"}}}}
-TEAM = {
-    "library": {
-        "tasks": {
-            "security_scan": {"extends": "platform-dept:security_scan", "model": "pci-model"},
-            "pci_review": {**AGENT, "prompt": "team pci"},
-            # Each file reference by the parent's name: the ancestor that ships it.
-            "supered": {
-                **AGENT,
-                "skill": "platform-dept:deploy-review",
-                "steering": ["platform-dept:house"],
-                "profile": "platform-dept:slow",
-            },
-        }
-    },
-    "chains": {
-        "supers": chain("supered"),
-        "default": {
-            "extends": "platform-dept:default",
-            "add": [
-                {
-                    "after": "verification",
-                    "node": {
-                        "id": "pci_review",
-                        "kind": "exec",
-                        "tasks": [{"id": "p", "extends": "pci_review"}],
-                    },
-                }
-            ],
-        },
-    },
-}
 
-
-def _tree(tmp_path, *, dept_alias=None, team=None, dept=None, company=None):
-    """The three add-ons, each as installed, children naming their parents."""
-    root = installed(tmp_path, "company", **(company or COMPANY))
-    dept = replace(
-        installed(tmp_path, "platform-dept", alias=dept_alias, **(dept or DEPT)), parent=root.id
-    )
-    child = replace(installed(tmp_path, "team-payments", **(team or TEAM)), parent=dept.id)
-    return root, dept, child
-
-
-def _library(tmp_path, local=None, **tree):
+def _library(tmp_path, local=None, repo=None, **tree):
     local = home(tmp_path, library=local, chains={"local": chain("base")})
-    return TemplateLibrary.from_yaml_dir(local, addons=list(_tree(tmp_path, **tree)))
+    addons = list(inherited_tree(tmp_path, **tree))
+    if repo is not None:
+        addons.append(repo_library_child(tmp_path, "r1", addons[1], **repo))
+    return TemplateLibrary.from_yaml_dir(local, addons=addons)
 
 
 def _task(library, chain_id, node):
@@ -338,7 +276,7 @@ def test_a_hidden_level_is_not_reachable_by_name(tmp_path, local, rogue):
     a file naming a hidden level is refused, not resolved, whether the
     instance's own or another add-on's."""
     root = home(tmp_path, **local)
-    addons = list(_tree(tmp_path))
+    addons = list(inherited_tree(tmp_path))
     if rogue is not None:
         addons.append(installed(tmp_path, "rogue", library=rogue))
     report = TemplateLibrary.lint_dir(root, addons=addons)
@@ -470,6 +408,122 @@ def test_a_root_addon_with_remove_is_left_out(tmp_path):
     install(config, addons, collection, "release")
     (found,) = load.installed(config, addons)
     assert found.left_out.endswith(REMOVE_OUTSIDE)
+
+
+#: A team that inherits `security_scan` as a task and adds a step of that name.
+STEP_OF_THE_SAME_NAME = {
+    **TEAM_INHERITS_SCAN,
+    "library": {
+        **TEAM_INHERITS_SCAN["library"],
+        "steps": {"security_scan": {"tasks": [{"id": "s", "extends": "pci_review"}]}},
+    },
+}
+#: A team that replaces the steering profile it inherits from company.
+OWN_HOUSE = {
+    **TEAM,
+    "library": {**TEAM["library"], "steering": {"house": {"instructions": "team rules"}}},
+}
+NEW_PROFILE = {
+    **TEAM,
+    "library": {**TEAM["library"], "steering": {"strict": {"instructions": "team only"}}},
+}
+
+#: `(origin, parent namespace, author id)` of a team entry, as most rows expect.
+BY_DEPT = ("inherited", "platform-dept", "platform-dept@acme")
+TEAM_ADDED = ("added", "platform-dept", "team-payments@acme")
+TEAM_OVERRIDES = ("overridden", "platform-dept", "team-payments@acme")
+
+
+#: A repo library that names the dept as its parent, with a task and a chain of its own.
+REPO_CHILD = {"library": {"tasks": {"own": AGENT}}, "chains": {"default": chain("own")}}
+
+
+@pytest.mark.parametrize(
+    ("tree", "marks"),
+    [
+        pytest.param(
+            {},
+            {"platform-dept:hotfix": ("inherited", "company", "company@acme")},
+            id="inherited-chain",
+        ),
+        pytest.param(
+            {"team": TEAM_INHERITS_SCAN},
+            {"tasks.team-payments:security_scan": BY_DEPT},
+            id="inherited-through-two",
+        ),
+        pytest.param(
+            {},
+            {"tasks.platform-dept:security_scan": ("overridden", "company", "platform-dept@acme")},
+            id="overridden-component",
+        ),
+        pytest.param(
+            {},
+            {"team-payments:default": TEAM_OVERRIDES},
+            id="overridden-chain",
+        ),
+        pytest.param(
+            {},
+            {"tasks.team-payments:pci_review": TEAM_ADDED},
+            id="added-component",
+        ),
+        pytest.param(
+            {},
+            {"team-payments:supers": TEAM_ADDED},
+            id="added-chain",
+        ),
+        pytest.param(
+            {"team": STEP_OF_THE_SAME_NAME},
+            {
+                "steps.team-payments:security_scan": TEAM_ADDED,
+                "tasks.team-payments:security_scan": BY_DEPT,
+            },
+            id="same-name-other-section",
+        ),
+        pytest.param(
+            {"team": OWN_HOUSE},
+            {
+                "steering.team-payments:house": TEAM_OVERRIDES,
+                "steering.platform-dept:house": ("inherited", "company", "company@acme"),
+            },
+            id="steering",
+        ),
+        pytest.param(
+            {"team": NEW_PROFILE},
+            {"steering.team-payments:strict": TEAM_ADDED},
+            id="steering-added",
+        ),
+        pytest.param(
+            {"dept_alias": "plat", "team": TEAM_INHERITS_SCAN},
+            {
+                "tasks.team-payments:security_scan": ("inherited", "plat", "platform-dept@acme"),
+                "tasks.plat:security_scan": ("overridden", "company", "platform-dept@acme"),
+                "team-payments:hotfix": ("inherited", "plat", "company@acme"),
+            },
+            id="alias-parent",
+        ),
+        pytest.param(
+            {}, {"company:default": None, "tasks.company:security_scan": None}, id="root-addon"
+        ),
+        pytest.param({}, {"local": None, "tasks.base": None}, id="local"),
+        pytest.param(
+            {"repo": REPO_CHILD}, {"r1:default": None, "tasks.r1:own": None}, id="repo-library"
+        ),
+        pytest.param(
+            {}, {"team-payments^1:default": None, "tasks.team-payments^1:verify": None}, id="layer"
+        ),
+    ],
+)
+def test_inheritance_marks(tmp_path, tree, marks):
+    """Each entry served under a child add-on's namespace is inherited (the
+    add-on that wrote it is an ancestor), overridden (the child wrote one of
+    a name its parent has, in the same section) or added; the parent is
+    named by the namespace this instance serves it under."""
+    library = _library(tmp_path, **tree)
+    found = {}
+    for name in marks:
+        mark = library.inheritance(name)
+        found[name] = mark and (mark.origin, mark.parent.namespace, mark.author.id)
+    assert found == marks
 
 
 _REMOVES_REVIEW = {"library": {"remove": {"skills": ["deploy-review"]}}}

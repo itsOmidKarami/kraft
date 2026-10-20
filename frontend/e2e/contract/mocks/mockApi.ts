@@ -759,7 +759,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if ((m = p.match(/^\/templates\/chains\/([^/]+)\/resolved$/))) {
       const tpl = st.templates.find((x) => x.id === decodeURIComponent(m![1]));
       if (!tpl) return json({ detail: `unknown chain template ${JSON.stringify(m[1])}` }, 404);
-      return json({ id: tpl.id, chain: { nodes: tpl.nodes }, task_paths: [], steering: {}, nodes: tpl.nodes, provenance: null });
+      return json({ id: tpl.id, chain: { nodes: tpl.nodes }, task_paths: [], steering: {}, nodes: tpl.nodes, provenance: null, addon: null, inherited_nodes: {} });
     }
     if ((m = p.match(/^\/templates\/chains\/([^/]+)$/))) {
       // For the Chains editor, `default` is the real shipped file, the draft views' published side.

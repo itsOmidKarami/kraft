@@ -5,6 +5,8 @@ export const SECTION_LABEL: Record<Section, string> = { nodes: "Nodes", steps: "
 
 import type { Addon } from "../../types";
 
+export type { Inheritance } from "../../types";
+
 /** One place a chain uses a component (`GET /templates/library`'s `used_by_paths`). */
 export interface Use {
   chain: string;
@@ -57,7 +59,22 @@ export function chainsForRepo<C extends { addon?: Addon | null }>(chains: C[], r
 }
 
 /** A chain's option in a picker, desktop and phone alike: its id and size. */
-export const chainOptionText = (c: { id: string; nodes: unknown[] }) => `${c.id} · ${c.nodes.length} nodes`;
+export const chainOptionText = (c: { id: string; nodes: unknown[]; addon?: Addon | null }) => `${c.id} · ${c.nodes.length} nodes${pickerMark(c.addon)}`;
+
+/** The mark a child add-on's entry carries, in the CLI's words; null when there is none. */
+export function inheritanceText(a: Addon | null | undefined): string | null {
+  const i = a?.inheritance;
+  return !i ? null : i.origin === "inherited" ? `inherited from ${i.parent.namespace}` : i.origin === "overridden" ? "overridden here" : "added here";
+}
+
+/** The mark's tooltip: who wrote the entry. */
+export const inheritanceTitle = (a: Addon | null | undefined): string | null => (a?.inheritance ? `Written by ${a.inheritance.author.id} ${a.inheritance.author.version}` : null);
+
+/** ` · inherited from company` in a picker: inherited and overridden only. An added chain is simply one of that add-on's. */
+export function pickerMark(a: Addon | null | undefined): string {
+  const text = a?.inheritance?.origin === "added" ? null : inheritanceText(a);
+  return text ? ` · ${text}` : "";
+}
 
 /** The line under a chain picker that names the repo's default chain. */
 export const defaultChainNote = (chain: string) => `${chain} is the repo's default chain`;

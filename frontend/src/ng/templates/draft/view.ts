@@ -1,5 +1,5 @@
 import { stepsGlyph } from "../../item/chainValues";
-import type { Authored, Change, Origin, Problem, Result, Scope } from "./types";
+import type { Authored, Change, NodeInheritance, Origin, Problem, Result, Scope } from "./types";
 
 /** What the pages read off a resolve result. Pure; nothing here edits a draft (R18). */
 
@@ -45,6 +45,17 @@ export const authoredNodes = (r: Result, scope: Scope): NodeA[] => {
 
 /** Where a node of an extending chain comes from: inherited, added or overridden here. */
 export const originOf = (r: Result, id: string): Origin | undefined => r.extending?.origins[id];
+
+/** What a child add-on's chain overrides or adds at node `id`, as the server marked it. */
+export const inheritedAt = (r: Result, id: string): NodeInheritance | undefined => r.resolved?.inherited_nodes?.[id];
+
+/** The bare name of an `inherited_nodes` entry: the server files it as `<section>.<qualified name>`
+ *  (`tasks.platform-dept:security_scan`), and the mark shows what follows the last colon, or
+ *  what follows the section dot when the name is unqualified (`tasks.security_scan`). */
+export const inheritedName = (entry: string): string => {
+  const rest = entry.slice(entry.indexOf(".") + 1);
+  return rest.slice(rest.lastIndexOf(":") + 1);
+};
 
 /** Whether node `id` is one an extending chain adds: read off its file's `add` entries, which
  *  hold while the edits don't apply and `origins` is empty. */

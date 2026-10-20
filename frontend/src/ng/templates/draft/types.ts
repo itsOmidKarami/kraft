@@ -63,6 +63,16 @@ export interface ResolvedView {
   documents: Record<string, string[]>;
   /** For a chain that extends another, where each node came from; null otherwise. */
   provenance?: Provenance | null;
+  /** The add-on the chain ships in, with its inheritance mark; null or absent for a local chain. */
+  addon?: Addon | null;
+  /** Per node of a child add-on's chain, the entry it overrides or adds there; empty otherwise. */
+  inherited_nodes?: Record<string, NodeInheritance>;
+}
+
+/** `catalogue.node_inheritance`: `entry` is `<section>.<qualified name>`. */
+export interface NodeInheritance {
+  origin: "overridden" | "added";
+  entry: string;
 }
 
 /** `TemplateLibrary.provenance`: an extending chain's nodes against its parent's. */
