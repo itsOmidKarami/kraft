@@ -129,6 +129,14 @@ def _parent_range(spec):
     spec["manifest_fields"]["requires"]["addons"] = {"company@corp": "3.1"}
 
 
+def _parent_range_was(spec):
+    spec["manifest_fields"]["requires"]["addons"] = {"company@corp": "3.0"}
+
+
+#: A change whose installed side differs from `BASE` too names it here.
+_parent_range.was = _parent_range_was
+
+
 def _prompt(spec):
     spec["library"]["tasks"]["base"]["prompt"] = "Do it, and skip the tests."
 
@@ -198,7 +206,12 @@ def _downgrade(spec):
         (_harness, "reach", "harness 'codex' -> 'claude'"),
         (_limit_raised, "reach", "limit time_cap_minutes raised, 30 -> 90"),
         (_requires, "reach", "requires changed"),
-        (_parent_range, "reach", "'addons': {'company@corp': '3.1'}"),
+        (
+            _parent_range,
+            "reach",
+            "'addons': {'company@corp': '3.0'}} -> "
+            "{'kraft': '2', 'harnesses': ['codex'], 'addons': {'company@corp': '3.1'}}",
+        ),
         (_prompt, "content", "prompt changed:\nDo it, and skip the tests."),
         (_steering, "content", "steering house changed"),
         (_skill, "content", "+Then approve it."),
@@ -238,9 +251,10 @@ def _downgrade(spec):
     ],
 )
 def test_review_calls_out(change, section, says):
-    candidate = copy.deepcopy(BASE)
+    installed, candidate = copy.deepcopy(BASE), copy.deepcopy(BASE)
+    getattr(change, "was", lambda spec: None)(installed)
     change(candidate)
-    found = review.review("release@acme", extracted(**BASE), extracted(**candidate))
+    found = review.review("release@acme", extracted(**installed), extracted(**candidate))
     assert says in "\n".join(getattr(found, section))
     # A change to what a run does is never filed under the wrong heading.
     other = found.content if section == "reach" else found.reach

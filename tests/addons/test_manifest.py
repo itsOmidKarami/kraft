@@ -185,10 +185,29 @@ def test_requires_addons(addons, refused):
         ("3.1", "3.0.9", "needs 3.1 or later"),
         ("3.1", "4.0.0", "needs 3.x"),
         ("3", "3.0.0", None),
+        ("3.1", "3.1", ValueError),
+        ("3.1", "3.1.0garbage", ValueError),
+        ("3", "3.0.0+build.5", None),
+        ("0.3", "1.0.0", "needs 0.x"),
     ],
-    ids=["minimum", "above-minimum", "pre-release", "below-minimum", "next-major", "major-only"],
+    ids=[
+        "minimum",
+        "above-minimum",
+        "pre-release",
+        "below-minimum",
+        "next-major",
+        "major-only",
+        "not-a-version",
+        "trailing-garbage",
+        "build-metadata",
+        "zero-major",
+    ],
 )
 def test_version_in_range(range_, version, expected):
+    if expected is ValueError:
+        with pytest.raises(ValueError, match="not a version"):
+            manifest.version_in_range(range_, version)
+        return
     assert manifest.version_in_range(range_, version) == expected
 
 

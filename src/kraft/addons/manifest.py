@@ -54,8 +54,13 @@ _NEAR = re.compile(
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\Z")
 _HTTPS = re.compile(r"^https://[^\s/]+\S*\Z")
 _REQUIRES_KRAFT = r"^(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))?$"
-#: The release part of a version, Kraft's (`2.4.0rc1`) or an add-on's (`2.4.0-rc.1`).
-_RELEASE = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
+#: A version, Kraft's (`2.4.0rc1`) or an add-on's (`2.4.0-rc.1`, `2.4.0+build.5`),
+#: with its release part in the groups.
+_RELEASE = re.compile(
+    r"v?(\d+)\.(\d+)\.(\d+)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*|(?:a|b|rc)\d+)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?\Z"
+)
 
 
 class ManifestError(Exception):
@@ -320,7 +325,8 @@ def is_source_build(running: str) -> bool:
 def version_in_range(range_: str, version: str) -> str | None:
     """Why `version` falls outside `range_`, or None. A range is `requires.kraft`'s
     form: `"2.4"` is at least 2.4.0 and below 3.0.0; `"2"` is any 2.x. Only the
-    release part of `version` counts, so a pre-release of 2.4.0 satisfies `"2.4"`."""
+    release part of `version` counts, so a pre-release of 2.4.0 satisfies `"2.4"`.
+    Raises ValueError on a string that is not a version."""
     found = _RELEASE.match(version)
     if found is None:
         raise ValueError(f"not a version: {version!r}")
