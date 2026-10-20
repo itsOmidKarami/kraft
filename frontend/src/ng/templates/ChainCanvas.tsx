@@ -3,7 +3,7 @@ import type { ChainArc, ChainNode, Seam } from "../graph/layout";
 import { EDITOR_FIT } from "../graph/camera";
 import { StageGraph } from "../graph/StageGraph";
 import type { Op, Result, Scope } from "./draft/types";
-import { authoredNodes, changeAt, extendsOf, kindOf, nodeGlyph, originOf, problemsAt, type NodeA } from "./draft/view";
+import { authoredNodes, changeAt, extendsOf, kindOf, nodeGlyph, inheritedAt, originOf, problemsAt, type NodeA } from "./draft/view";
 import { SeamMenu } from "./menus/SeamMenu";
 import { ReadOnly } from "./addon";
 import { problemWord } from "./problems";
@@ -59,6 +59,9 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
     const glyph = gate ? {} : nodeGlyph(r, n.id);
     const origin = parent ? originOf(r, n.id) : undefined;
     const originMeta = origin === "added" ? "added here" : origin === "overridden" ? "overridden here" : undefined;
+    // A child add-on's own task at this node ranks below a problem and below the chain-extends origin.
+    const inh = inheritedAt(r, n.id);
+    const inhMeta = inh && `${inh.entry.slice(inh.entry.indexOf(".") + 1)} ${inh.origin} here`;
     return {
       id: n.id,
       kind,
@@ -68,8 +71,8 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
       mark: change?.kind === "add" ? "add" : change?.kind === "change" || inside ? "change" : undefined,
       prob: probs.length > 0 || marked.includes(n.id),
       // Gates on the chain show only the diamond and name (Decisions §9).
-      meta: probs.length && !gate ? problemWord(probs[0]) : originMeta,
-      metaTone: probs.length ? "red" : origin === "added" ? "green" : origin === "overridden" ? "amber" : undefined,
+      meta: probs.length && !gate ? problemWord(probs[0]) : originMeta ?? inhMeta,
+      metaTone: probs.length ? "red" : origin === "added" ? "green" : origin === "overridden" ? "amber" : inh ? (inh.origin === "added" ? "green" : "amber") : undefined,
       pending: busy.has(n.id),
     };
   });

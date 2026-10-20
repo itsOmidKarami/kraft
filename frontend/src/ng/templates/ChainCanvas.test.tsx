@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ChainCanvas } from "./ChainCanvas";
 import { EXT, EXTENDING_VIEW } from "./draft/fixture.extending";
+import { inheritedResult } from "./draft/fixture.inherited";
 import type { Result } from "./draft/types";
 
 const SCOPE = { area: "chains", key: "team" } as const;
@@ -69,5 +70,24 @@ describe("an extending chain", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Gate id" })).toHaveFocus());
     await userEvent.keyboard(EXT.removed);
     expect(screen.getByRole("alert")).toHaveTextContent(`${EXT.removed} is taken.`);
+  });
+});
+
+describe("a child add-on's chain", () => {
+  const ext = EXTENDING_VIEW.result;
+  const marked = (marks: Record<string, { origin: "overridden" | "added"; entry: string }> | undefined): Result => ({ ...ext, resolved: { ...ext.resolved!, inherited_nodes: marks } });
+  it.each([
+    { id: "task-overridden", result: inheritedResult(), node: "implementation", meta: "security_scan overridden here", tone: "amber" },
+    { id: "task-added", result: inheritedResult(), node: "verification", meta: "pci_review added here", tone: "green" },
+    // The chain-extends origin ranks above the inheritance mark.
+    { id: "extends-origin-wins", result: marked({ security_scan: { origin: "overridden", entry: "tasks.security_scan" } }), node: "security_scan", meta: "added here", tone: "green" },
+    { id: "problem-wins", result: { ...inheritedResult(), problems: [{ path: "implementation", field: null, message: "field required", file: "chains/default.yaml", line: null, col: null }] }, node: "implementation", meta: "missing", tone: "red" },
+    { id: "local-chain", result: inheritedResult({}), node: "implementation", meta: undefined, tone: undefined },
+  ])("$id", ({ result, node, meta, tone }) => {
+    mountCanvas(result);
+    const el = nodeEl(node);
+    if (meta) expect(el.querySelector(".graph-meta")?.textContent).toBe(meta);
+    else expect(el).not.toHaveTextContent(/here/);
+    if (tone) expect(el.querySelector(".graph-meta")).toHaveClass(`tone-${tone}`);
   });
 });
