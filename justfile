@@ -5,10 +5,91 @@ set shell := ["bash", "-uc"]
 _default:
     @just --list
 
-# Install backend + frontend deps
+# Install backend + frontend deps, then the agent skills (`setup-plugins`)
 setup:
     uv sync
     cd frontend && npm ci
+    @just setup-plugins
+
+# superpowers and impeccable, for every agent this repo is worked on with.
+#
+# Claude Code: .claude/settings.json turns both plugins on, but committing
+# `enabledPlugins` does not download a plugin from an outside source, so each
+# machine installs them once, into ~/.claude, which every checkout and worktree
+# shares.
+#
+# Every other agent Kraft runs (Codex, Cursor, Gemini CLI, OpenCode, Amp,
+# Antigravity) and GitHub Copilot reads skills from .agents/skills/. The
+# `skills` CLI copies them there; they are gitignored, and only beads is
+# committed in that folder, so each checkout and worktree installs its own.
+#
+# Kraft runs `just setup` in every worktree, more than once, so each half skips
+# what is already installed, and a missing tool or a failed download is a
+# warning, never a failed setup: neither is needed to build or test Kraft. To
+# refresh: `claude plugin update <id>` and `npx skills update -p`.
+#
+# superpowers is off in Kraft workers (its skills ask a person questions, and
+# push or merge, which a worker never does). For Claude Code the hook
+# .claude/hooks/kraft-worker-superpowers.sh does that. For the other agents, a
+# setup Kraft runs ($KRAFT_DAEMON_PID is set in everything the daemon starts)
+# copies only impeccable into the worktree's .agents/skills/.
+[doc("Install superpowers and impeccable for Claude Code and every other agent")]
+setup-plugins:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    # Each download gets a time limit, so an unreachable host costs a worktree
+    # setup minutes at most rather than hanging it. Stock macOS has no
+    # `timeout`, so there it runs unlimited.
+    limit() {
+        if command -v timeout >/dev/null; then timeout 300 "$@"; else "$@"; fi
+    }
+    claude_plugins() {
+        local failed=0
+        limit claude plugin marketplace add anthropics/claude-plugins-official >/dev/null || failed=1
+        limit claude plugin marketplace add pbakaus/impeccable >/dev/null || failed=1
+        limit claude plugin install superpowers@claude-plugins-official --scope project || failed=1
+        limit claude plugin install impeccable@impeccable --scope project || failed=1
+        return $failed
+    }
+    sources=(obra/superpowers pbakaus/impeccable)
+    markers=(.agents/skills/using-superpowers/SKILL.md .agents/skills/impeccable/SKILL.md)
+    if [[ -n ${KRAFT_DAEMON_PID:-} ]]; then
+        sources=(pbakaus/impeccable)
+        markers=(.agents/skills/impeccable/SKILL.md)
+    fi
+    agent_skills() {
+        local source
+        for source in "${sources[@]}"; do
+            DISABLE_TELEMETRY=1 NPM_CONFIG_UPDATE_NOTIFIER=false limit npx -y skills@1.7.4 \
+                add "$source" --skill '*' \
+                --agent codex cursor gemini-cli opencode amp antigravity github-copilot \
+                --copy -y >/dev/null || return 1
+        done
+    }
+    all_present() {
+        local marker
+        for marker in "${markers[@]}"; do [[ -f $marker ]] || return 1; done
+    }
+    # Read the install record rather than start `claude plugin list`: Kraft runs
+    # this on every dispatch, so the already-installed path has to be cheap.
+    installed="${CLAUDE_CODE_PLUGIN_CACHE_DIR:-$HOME/.claude/plugins}/installed_plugins.json"
+    if ! command -v claude >/dev/null; then
+        echo "claude not installed; skipping the Claude Code plugins"
+    elif grep -qs '"superpowers@claude-plugins-official"' "$installed" &&
+        grep -qs '"impeccable@impeccable"' "$installed"; then
+        echo "Claude Code plugins already installed"
+    elif ! claude_plugins; then
+        echo "warning: could not install the Claude Code plugins; run 'just setup-plugins' to retry" >&2
+    fi
+    if ! command -v npx >/dev/null; then
+        echo "npx not installed; skipping the skills for agents other than Claude Code"
+    elif all_present; then
+        echo "Agent skills already in .agents/skills/"
+    elif agent_skills; then
+        echo "Installed ${sources[*]} into .agents/skills/"
+    else
+        echo "warning: could not install the skills into .agents/skills/; run 'just setup-plugins' to retry" >&2
+    fi
 
 # Install deps including semantic search (downloads a ~130MB model on first
 # search). Without this, /search still works in fts mode.

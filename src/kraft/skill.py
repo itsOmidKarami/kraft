@@ -127,11 +127,19 @@ def _addon_path(
     """The store and the store-relative file `<namespace>:<name>` names when
     the namespace is a loaded Kraft add-on's; None when it is not, which
     leaves the reference another tool's. `present` also requires the file to
-    be there; `read` asks the store's manifest instead."""
+    be there; `read` asks the store's manifest instead.
+
+    A skill a child add-on inherits is its own key, `<namespace>:<name>`, to
+    the store of the ancestor that defines it (`inherit.skill_dirs`); the
+    namespace is still asked first, so a child that is not loaded is refused.
+    A key with `:` is never a namespace, which is a bare name."""
+    dirs = addon_dirs or {}
     qualifier, _, name = value.partition(":")
-    if qualifier not in (addon_dirs or {}):
+    if qualifier not in dirs:
         return None
-    root = (addon_dirs or {})[qualifier]
+    root = dirs[qualifier]
+    if root is not None and value in dirs:
+        root = dirs[value]
     if root is None:
         raise SkillError(
             f"{where}: add-on {qualifier!r} is installed but not loaded, so its skill "

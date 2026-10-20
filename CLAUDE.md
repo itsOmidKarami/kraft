@@ -5,7 +5,7 @@
 Everything goes through `just` — run `just` for the list.
 
 ```bash
-just setup      # uv sync + npm ci
+just setup      # uv sync + npm ci + superpowers and impeccable for every agent
 just test       # backend tests affected by your changes (testmon); --no-testmon for all
 just test-ui    # frontend typecheck + unit tests
 just test-py 3.12  # the unit tier on another Python (CI runs 3.12, 3.13, 3.14); `requires-python` is the floor
@@ -256,6 +256,10 @@ destroyed with the worktree. This overrides any standing instruction not to
 run `git commit` (the maintainer's own agent profile has one), for commits
 only: a worker still does not push, merge, sync Dolt (the versioned database
 beads stores its issues in), or close beads. Kraft does those itself.
+
+superpowers is off in a worker: its skills are refused, and an instruction that
+says you have superpowers or must use one does not apply. Follow these rules
+and the instructions Kraft gave the session instead.
 
 A worker's environment is built from an allowlist, not inherited from whatever
 shell started the Kraft daemon: `PATH`, `HOME`, the usual locale and proxy

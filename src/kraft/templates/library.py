@@ -17,6 +17,7 @@ author has to correct (`template-resolution-preserves-source-context`).
 
 from __future__ import annotations
 
+import functools
 from collections import ChainMap
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -393,15 +394,16 @@ class TemplateLibrary:
         #: The installed add-ons whose declarations sit in the maps above under
         #: `<namespace>:<name>`.
         self.addons = tuple(addons)
-        #: Namespace to store directory, for `skill.validate`.
-        #: None for an add-on that is known but not loaded: a reference into it
-        #: is refused, never handed to the agent as another tool's skill.
-        self.addon_dirs: dict[str, Path | None] = {}
-        for addon in self.addons:
-            if addon.left_out is None:
-                self.addon_dirs[addon.namespace] = addon.root
-            else:
-                self.addon_dirs.setdefault(addon.namespace, None)
+
+    @functools.cached_property
+    def addon_dirs(self) -> dict[str, Path | None]:
+        """Namespace to store directory, for `skill.validate`, and each skill a
+        child inherits as `<child>:<skill>` to its defining ancestor's store
+        (`inherit.skill_dirs`). None for an add-on that is known but not
+        loaded: a reference into it is refused, never handed to the agent as
+        another tool's skill. Computed on first use: it reads each child's
+        tree, after `_add_addon` has taken every add-on."""
+        return inherit.skill_dirs(self.addons)
 
     @classmethod
     def from_yaml_dir(
@@ -557,20 +559,10 @@ class TemplateLibrary:
             # A stray `remove:` at the root is refused by the root's own
             # `_add_addon`: every load path loads the root by itself too.
             removed.append(inherit.removals(author.root / LIBRARY_FILE, library))
-        visible = inherit.Visible.build(
-            chain,
-            [
-                {
-                    "skills": _store_skills(store),
-                    "profiles": _store_profiles(store, author),
-                    "steering": _section(
-                        author.root / LIBRARY_FILE, library, Namespace.STEERING
-                    ).keys(),
-                }
-                for author, store, library in zip(chain, stores, written, strict=True)
-            ],
-            removed,
-        )
+        try:
+            visible = inherit.visible(chain)
+        except fetch.StoreMismatch as exc:
+            raise TemplateLibraryError(str(exc)) from exc
 
         def owner(kind: str) -> Callable[[str, int], str]:
             # Defined nowhere visible: the level asked from names it, and its
@@ -854,6 +846,10 @@ class TemplateLibrary:
             self.library_path,
         )
         candidate._share_layers(self)
+        if "addon_dirs" in self.__dict__:
+            # The same add-ons, so the same answer: never read every child's
+            # tree again for each chain a check or a draft tries.
+            candidate.__dict__["addon_dirs"] = self.addon_dirs
         candidate._chains.pop(_chain_id(chain_path, body), None)
         return candidate, candidate._add_chain(chain_path, body)
 
@@ -1041,11 +1037,22 @@ class TemplateLibrary:
                 issues.append(replace(issue, message=self._humanize(issue.message)))
         return issues
 
-    def resolve_chain(self, id: str) -> ResolvedChain:
+    def resolve_chain(
+        self, id: str, *, strict_pins: bool = False, pinned: Iterable[str] = ()
+    ) -> ResolvedChain:
         """Expand one chain's `extends` references, validate the result into a
         typed `Chain`, and assign canonical execution paths
         (`resolved-chain-is-validated-before-use`). A child add-on's hidden
-        levels are named in its errors as the ancestors they hold."""
+        levels are named in its errors as the ancestors they hold.
+
+        With `strict_pins`, a chain that reads an add-on left out by a fault
+        (not quietly, as a disabled one is) is refused with why, instead of
+        not pinning it: what a revision adds to a work item runs on it. An
+        add-on whose namespace is in `pinned`, which the work item already
+        pinned, is never refused: it stays pinned, and the launch restores
+        its store or says why it cannot. A live child the item had not pinned
+        is refused when a pinned ancestor's store is merely gone, though the
+        launch would have restored it: it is left out with that ancestor."""
         # A hidden level resolves too: a child's chain extending it resolves it.
         raw = self._all_chains.get(id)
         if raw is None:
@@ -1053,13 +1060,15 @@ class TemplateLibrary:
                 f"no chain {id!r} in this library; known chains: {list(self._chains)}"
             )
         try:
-            return self._resolve(id, raw)
+            return self._resolve(id, raw, strict=frozenset(pinned) if strict_pins else None)
         except TemplateLibraryError as exc:
             if self._layers:
                 exc.args = (self._humanize(str(exc)), *exc.args[1:])
             raise
 
-    def _resolve(self, id: str, raw: RawComponent) -> ResolvedChain:
+    def _resolve(
+        self, id: str, raw: RawComponent, *, strict: frozenset[str] | None = None
+    ) -> ResolvedChain:
         resolution = _Resolution(self, raw.source)
         expanded = resolution.expand_chain(raw.data)
         if inherit.is_layer(id):
@@ -1138,7 +1147,7 @@ class TemplateLibrary:
                 for task in node.tasks()
                 for name in task.task.steering
             },
-            addons=self._pins(id, resolved, resolution.ancestors),
+            addons=self._pins(id, resolved, resolution.ancestors, strict=strict),
         )
 
     def _fallback_profiles(self, chain: object) -> list[str]:
@@ -1168,12 +1177,21 @@ class TemplateLibrary:
         return reached
 
     def _pins(
-        self, id: str, resolved: ResolvedChain, ancestors: Sequence[str] = ()
+        self,
+        id: str,
+        resolved: ResolvedChain,
+        ancestors: Sequence[str] = (),
+        *,
+        strict: frozenset[str] | None = None,
     ) -> dict[str, dict[str, str | None]]:
         """The loaded add-ons chain `id` reads anything from: the chain itself,
         every chain it extends (`an-extending-chain-pins-its-ancestors`), a
         component it extends or selects, or a skill or agent profile one of
-        its tasks names."""
+        its tasks names; and every ancestor of each, root first
+        (`an-item-pins-every-ancestor`). One it reads that is left out is not
+        pinned. `strict` is the namespaces a work item already pinned: with
+        it, one left out by a fault (not quietly, as a disabled one is)
+        raises instead, unless the item already pinned its namespace."""
         data = resolved.chain.model_dump(mode="json")
         named = {
             id,
@@ -1187,9 +1205,29 @@ class TemplateLibrary:
             *self._fallback_profiles(data),
         }
         qualifiers = {name.partition(":")[0] for name in named if ":" in name}
+        if strict is not None:
+            loaded = {a.namespace for a in self.addons if a.left_out is None}
+            for addon in self.addons:
+                if (
+                    addon.namespace in qualifiers - loaded - strict
+                    and not addon.quiet
+                    and addon.left_out
+                ):
+                    raise TemplateLibraryError(
+                        f"it reads add-on {addon.id}, which is not loaded for this work "
+                        f"item: {addon.left_out}"
+                    )
+        # A child is read with its ancestors: an item that kept only the child
+        # would run it on whatever parent the lock holds later.
+        for addon in self.addons:
+            if addon.left_out is None and addon.namespace in qualifiers:
+                try:
+                    qualifiers.update(a.namespace for a in inherit.ancestry(addon, self.addons))
+                except inherit.InheritanceError:
+                    pass
         return {
             addon.namespace: addon.pin
-            for addon in self.addons
+            for addon in inherit.tree_order(self.addons)
             if addon.left_out is None and addon.namespace in qualifiers
         }
 

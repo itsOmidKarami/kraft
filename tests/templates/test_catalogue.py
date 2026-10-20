@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-from support.addons import AGENT, TEAM, chain, example_tree, home, repo_library_child
+from support.addons import AGENT, TEAM, chain, home, inherited_tree, repo_library_child
 
 from kraft.policy import TaskPolicyOverride
 from kraft.templates import catalogue
@@ -169,7 +169,7 @@ def test_node_inheritance(tmp_path, team, chain_id, nodes, repo):
     """Each node of a child add-on's chain built from a component the child
     overrides or adds is marked with it; a node that only inherits is not."""
     local = home(tmp_path, chains={"local": chain("base")})
-    addons = list(example_tree(tmp_path, team=team))
+    addons = list(inherited_tree(tmp_path, team=team))
     if repo is not None:
         addons.append(repo_library_child(tmp_path, "r1", addons[1], **repo))
     library = TemplateLibrary.from_yaml_dir(local, addons=addons)

@@ -18,6 +18,7 @@ from support.addons import (
     edit_store,
     example_tree,
     home,
+    inherited_tree,
     install,
     installed,
     instance,
@@ -25,6 +26,7 @@ from support.addons import (
     repo_library_child,
 )
 
+from kraft import skill
 from kraft.addons import load
 from kraft.api.routes.settings import _chain_summary
 from kraft.templates import catalogue
@@ -33,7 +35,7 @@ from kraft.templates.library import Namespace, TemplateLibrary, TemplateLibraryE
 
 def _library(tmp_path, local=None, repo=None, **tree):
     local = home(tmp_path, library=local, chains={"local": chain("base")})
-    addons = list(example_tree(tmp_path, **tree))
+    addons = list(inherited_tree(tmp_path, **tree))
     if repo is not None:
         addons.append(repo_library_child(tmp_path, "r1", addons[1], **repo))
     return TemplateLibrary.from_yaml_dir(local, addons=addons)
@@ -274,7 +276,7 @@ def test_a_hidden_level_is_not_reachable_by_name(tmp_path, local, rogue):
     a file naming a hidden level is refused, not resolved, whether the
     instance's own or another add-on's."""
     root = home(tmp_path, **local)
-    addons = list(example_tree(tmp_path))
+    addons = list(inherited_tree(tmp_path))
     if rogue is not None:
         addons.append(installed(tmp_path, "rogue", library=rogue))
     report = TemplateLibrary.lint_dir(root, addons=addons)
@@ -522,3 +524,77 @@ def test_inheritance_marks(tmp_path, tree, marks):
         mark = library.inheritance(name)
         found[name] = mark and (mark.origin, mark.parent.namespace, mark.author.id)
     assert found == marks
+
+
+_REMOVES_REVIEW = {"library": {"remove": {"skills": ["deploy-review"]}}}
+
+
+@pytest.mark.parametrize(
+    ("tree", "reads"),
+    [
+        pytest.param({}, "company method", id="inherited-skill"),
+        pytest.param(
+            {"dept": {"skills": {"deploy-review": "dept method"}}},
+            "dept method",
+            id="grandparent-through-dept-override",
+        ),
+        pytest.param(
+            {"team": _REMOVES_REVIEW},
+            "selects skill 'team-payments:deploy-review', which resolves to no method: "
+            ".*has no skill 'deploy-review'",
+            id="removed-skill",
+        ),
+        pytest.param(
+            {"team": {**_REMOVES_REVIEW, "skills": {"deploy-review": "team method"}}},
+            "team method",
+            id="removed-then-own",
+        ),
+        pytest.param(
+            {"alias": "plat", "dept": {"skills": {"deploy-review": "dept method"}}},
+            "dept method",
+            id="alias-parent",
+        ),
+    ],
+)
+def test_an_inherited_skill_is_named_under_the_child(tmp_path, tree, reads):
+    """A library outside the tree names a skill the child inherits by the
+    child's name, and reads the defining ancestor's file; one the child
+    removed is not found there, even though its parent still ships it."""
+    ref = "team-payments:deploy-review"
+    local = {"tasks": {"base": {**AGENT, "skill": ref}}}
+
+    def resolve():
+        library = TemplateLibrary.from_mappings(
+            local,
+            [(tmp_path / "config" / "chains" / "local.yaml", chain("base"))],
+            library_path=tmp_path / "config" / "library.yaml",
+            addons=example_tree(tmp_path, **tree),
+        )
+        return library, library.resolve_chain("local")
+
+    if "selects skill" in reads:
+        with pytest.raises(TemplateLibraryError, match=reads) as refused:
+            resolve()
+        assert "^" not in str(refused.value)
+        return
+    library, resolved = resolve()
+    assert next(iter(resolved.nodes[0].tasks())).task.skill == ref
+    assert skill.read(None, ref, library.addon_dirs) == reads
+
+
+def test_a_chain_checked_against_the_library_reuses_its_skill_dirs(tmp_path):
+    """`with_chain` builds a candidate per chain it checks, on the same add-ons:
+    the candidate takes the library's `addon_dirs`, which reads every child's
+    tree, rather than reading them all again."""
+    library = TemplateLibrary.from_mappings(
+        {"tasks": {"base": AGENT}},
+        (),
+        library_path=tmp_path / "config" / "library.yaml",
+        addons=example_tree(tmp_path),
+    )
+    dirs = library.addon_dirs
+
+    candidate, _ = library.with_chain(tmp_path / "config" / "chains" / "c.yaml", chain("base"))
+
+    assert "team-payments:deploy-review" in dirs
+    assert candidate.addon_dirs is dirs
