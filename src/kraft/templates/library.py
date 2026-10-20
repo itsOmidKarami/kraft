@@ -342,6 +342,15 @@ class Inheritance:
     author: InstalledAddon
 
 
+def _split_section(name: str, default: str | None) -> tuple[str | None, str]:
+    """`name` as `(section, entry)`: a `<section>.<entry>` name split at its
+    section prefix, any other as `(default, name)`."""
+    head, dot, rest = name.partition(".")
+    if dot and head in (_CHAINS, *(ns.value for ns in Namespace)):
+        return head, rest
+    return default, name
+
+
 class TemplateLibrary:
     """One template directory's authored configuration: reusable components,
     named steering profiles, and the selectable chains."""
@@ -738,9 +747,7 @@ class TemplateLibrary:
         and components share the name; given as a `tasks.` prefix it is read
         from `name`. None for a local name."""
         if section is None:
-            head, dot, rest = name.partition(".")
-            if dot and head in (_CHAINS, *(ns.value for ns in Namespace)):
-                section, name = head, rest
+            section, name = _split_section(name, None)
         sections = [section] if section else [_CHAINS, *(ns.value for ns in Namespace)]
         for each in sections:
             if (author := self._authors.get((each, name))) is not None:
@@ -753,9 +760,7 @@ class TemplateLibrary:
         added it (`an-inherited-entry-is-marked`). None for a local name, a
         repo library's entry, an add-on with no parent, a hidden level's name,
         and an entry the loaded layering cannot place."""
-        head, dot, rest = name.partition(".")
-        sections = (_CHAINS, *(ns.value for ns in Namespace))
-        section, entry = (head, rest) if dot and head in sections else (_CHAINS, name)
+        section, entry = _split_section(name, _CHAINS)
         top = self.addon_of(entry)
         if top is None or top.parent is None or top.repo_id is not None:
             return None

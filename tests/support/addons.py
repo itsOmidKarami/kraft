@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -13,7 +14,7 @@ import yaml
 
 from kraft import client
 from kraft.addons import fetch, manifest, repo_library
-from kraft.addons.load import InstalledAddon
+from kraft.addons.load import InstalledAddon, repo_library_id
 from kraft.config import read_yaml, write_yaml
 from support.harness import commit_all, git, make_repo, write
 
@@ -353,14 +354,26 @@ def example_tree(
     """The three add-ons of `TREE`, each as `installed` lays it out, children
     naming their parents; `team`, `dept` and `company` replace one's spec,
     and `dept_alias` is the namespace the dept is installed under."""
-    from dataclasses import replace
-
     root = installed(tmp_path, "company", **(company or COMPANY))
     dept = replace(
         installed(tmp_path, "platform-dept", alias=dept_alias, **(dept or DEPT)), parent=root.id
     )
     child = replace(installed(tmp_path, "team-payments", **(team or TEAM)), parent=dept.id)
     return root, dept, child
+
+
+def repo_library_child(
+    tmp_path: Path, repo_id: str, parent: InstalledAddon, **spec
+) -> InstalledAddon:
+    """A repo library that names `parent` as its parent, which a real one never
+    does: it is served under `repo_id`, read by that repository's items only,
+    so the inheritance mark has to refuse it."""
+    return replace(
+        installed(tmp_path, "library", **spec),
+        id=repo_library_id(repo_id),
+        namespace=repo_id,
+        parent=parent.id,
+    )
 
 
 def tree_collection(tmp_path: Path, **specs) -> Path:
@@ -425,8 +438,6 @@ def pinned_chain(nodes, pins: dict, *, repo):
     """`nodes` (authored V1 node mappings) materialized as a snapshot that
     pins `pins`, the way an item filed while those add-on versions were the
     lock's records it."""
-    from dataclasses import replace
-
     from support.harness import v1_chain, v1_resolved
 
     return v1_chain(replace(v1_resolved(nodes), addons=pins), repo=repo)

@@ -208,7 +208,7 @@ def library_resolved_view(
     as `chain`), with its provenance, its add-on and its node marks. Raises
     `TemplateLibraryError` for a chain that does not resolve."""
     return _resolved_view(
-        chain or library.resolve_chain(id),
+        chain if chain is not None else library.resolve_chain(id),
         library.provenance(id),
         addon=catalogue.addon_view(library, id),
         inherited_nodes=catalogue.node_inheritance(library, id),

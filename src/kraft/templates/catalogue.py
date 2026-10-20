@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import re
 
-from kraft.addons import inherit
 from kraft.policy import GRANT_SUMMARIES, GRANTS
 from kraft.templates.library import Namespace, TemplateIssue, TemplateLibrary
 from kraft.templates.models import AgentInput, BuiltinAction, ForgeAction
@@ -96,19 +95,20 @@ def inheritance_view(library: TemplateLibrary, name: str) -> dict | None:
 
 
 def node_inheritance(library: TemplateLibrary, chain_id: str) -> dict[str, dict]:
-    """Per node of a chain served under a child add-on, the component of
-    that same namespace it is built from that the child overrides or adds:
+    """Per node of a chain served under a child add-on, the component (a
+    task, step or node, or a steering profile a task selects) of that same
+    namespace it is built from that the child overrides or adds:
     `{node: {origin, entry}}`, `overridden` before `added` and the first in
     sorted order between equals. A node built only from inherited components
     is absent, and a chain that is not a child add-on's gives `{}`."""
     top = library.addon_of(chain_id)
-    if top is None or top.parent is None or top.repo_id is not None:
+    if top is None or top.parent is None:
         return {}
     marked: dict[str, dict] = {}
     for node, refs in library.references(chain_id).items():
         for ref in sorted(refs):
             entry = ref.partition(".")[2]
-            if inherit.is_layer(entry) or entry.partition(":")[0] != top.namespace:
+            if entry.partition(":")[0] != top.namespace:
                 continue
             mark = library.inheritance(ref)
             if mark is None or mark.origin == "inherited":

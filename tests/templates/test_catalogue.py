@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-from support.addons import TEAM, chain, example_tree, home
+from support.addons import AGENT, TEAM, chain, example_tree, home, repo_library_child
 
 from kraft.policy import TaskPolicyOverride
 from kraft.templates import catalogue
@@ -77,16 +77,25 @@ PCI_ON_SCAN = {
         "tasks": {**TEAM["library"]["tasks"], "pci_review": {"extends": "security_scan"}},
     },
 }
+#: A team whose own `house` steering profile is the one its `verification` node selects.
+OWN_HOUSE = {
+    **TEAM,
+    "library": {**TEAM["library"], "steering": {"house": {"instructions": "team rules"}}},
+}
+#: A repo library that names the dept as its parent, with a chain of its own.
+REPO_CHILD = {"library": {"tasks": {"own": AGENT}}, "chains": {"default": chain("own")}}
+HOUSE = {"origin": "overridden", "entry": "steering.team-payments:house"}
 SCAN = {"origin": "overridden", "entry": "tasks.team-payments:security_scan"}
 
 
 @pytest.mark.parametrize(
-    ("team", "chain_id", "nodes"),
+    ("team", "chain_id", "nodes", "repo"),
     [
         pytest.param(
             None,
             "platform-dept:default",
             {"scan": {"origin": "overridden", "entry": "tasks.platform-dept:security_scan"}},
+            None,
             id="inherited-chain-overridden-task",
         ),
         pytest.param(
@@ -96,21 +105,38 @@ SCAN = {"origin": "overridden", "entry": "tasks.team-payments:security_scan"}
                 "pci_review": {"origin": "added", "entry": "tasks.team-payments:pci_review"},
                 "scan": SCAN,
             },
+            None,
             id="extending-chain",
         ),
         pytest.param(
             PCI_ON_SCAN,
             "team-payments:default",
             {"pci_review": SCAN, "scan": SCAN},
+            None,
             id="overridden-beats-added",
         ),
-        pytest.param(None, "company:default", {}, id="root-chain"),
-        pytest.param(None, "local", {}, id="local-chain"),
+        pytest.param(
+            OWN_HOUSE,
+            "team-payments:default",
+            {
+                "verification": HOUSE,
+                "pci_review": {"origin": "added", "entry": "tasks.team-payments:pci_review"},
+                "scan": SCAN,
+            },
+            None,
+            id="steering",
+        ),
+        pytest.param(None, "company:default", {}, None, id="root-chain"),
+        pytest.param(None, "local", {}, None, id="local-chain"),
+        pytest.param(None, "r1:default", {}, REPO_CHILD, id="repo-library"),
     ],
 )
-def test_node_inheritance(tmp_path, team, chain_id, nodes):
+def test_node_inheritance(tmp_path, team, chain_id, nodes, repo):
     """Each node of a child add-on's chain built from a component the child
     overrides or adds is marked with it; a node that only inherits is not."""
     local = home(tmp_path, chains={"local": chain("base")})
-    library = TemplateLibrary.from_yaml_dir(local, addons=list(example_tree(tmp_path, team=team)))
+    addons = list(example_tree(tmp_path, team=team))
+    if repo is not None:
+        addons.append(repo_library_child(tmp_path, "r1", addons[1], **repo))
+    library = TemplateLibrary.from_yaml_dir(local, addons=addons)
     assert catalogue.node_inheritance(library, chain_id) == nodes

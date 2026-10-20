@@ -22,6 +22,7 @@ from support.addons import (
     installed,
     instance,
     make_collection,
+    repo_library_child,
 )
 
 from kraft.addons import load
@@ -30,9 +31,12 @@ from kraft.templates import catalogue
 from kraft.templates.library import Namespace, TemplateLibrary, TemplateLibraryError
 
 
-def _library(tmp_path, local=None, **tree):
+def _library(tmp_path, local=None, repo=None, **tree):
     local = home(tmp_path, library=local, chains={"local": chain("base")})
-    return TemplateLibrary.from_yaml_dir(local, addons=list(example_tree(tmp_path, **tree)))
+    addons = list(example_tree(tmp_path, **tree))
+    if repo is not None:
+        addons.append(repo_library_child(tmp_path, "r1", addons[1], **repo))
+    return TemplateLibrary.from_yaml_dir(local, addons=addons)
 
 
 def _task(library, chain_id, node):
@@ -424,6 +428,10 @@ TEAM_ADDED = ("added", "platform-dept", "team-payments@acme")
 TEAM_OVERRIDES = ("overridden", "platform-dept", "team-payments@acme")
 
 
+#: A repo library that names the dept as its parent, with a task and a chain of its own.
+REPO_CHILD = {"library": {"tasks": {"own": AGENT}}, "chains": {"default": chain("own")}}
+
+
 @pytest.mark.parametrize(
     ("tree", "marks"),
     [
@@ -486,6 +494,9 @@ TEAM_OVERRIDES = ("overridden", "platform-dept", "team-payments@acme")
             {}, {"company:default": None, "tasks.company:security_scan": None}, id="root-addon"
         ),
         pytest.param({}, {"local": None, "tasks.base": None}, id="local"),
+        pytest.param(
+            {"repo": REPO_CHILD}, {"r1:default": None, "tasks.r1:own": None}, id="repo-library"
+        ),
         pytest.param(
             {}, {"team-payments^1:default": None, "tasks.team-payments^1:verify": None}, id="layer"
         ),
