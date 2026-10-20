@@ -1120,51 +1120,78 @@ def _resolve(addon_id: str, ctx: _Context) -> _Move | Result:
     )
 
 
-def _check_moves(moves: dict[str, _Move], ctx: _Context) -> dict[str, Result]:
-    """Phase 2: each move judged among the candidates of every move and the
-    loaded add-ons that are not moving. A refused move is taken out of
-    `moves`, and its `Result` returned. An update's ranges are left to the set
-    rule, which holds rather than refuses; an install's are judged here."""
-    world = [*(p for p in ctx.loaded if p.id not in moves), *(m.candidate for m in moves.values())]
-    unranged = [replace(p, parent_range=None) for p in world]
-    manifests = {i: m.found for i, m in moves.items()}
-    parents = {p.id: p.parent for p in [*ctx.loaded, *world] if p.repo_id is None}
-    # A descendant whose ancestry no longer holds is named: its chains would be
-    # gone, not broken. One a range leaves out is the set rule's.
-    loading = {p.id for p in ctx.loaded if p.left_out is None and p.id not in moves}
-    cascaded = inherit.cascade(unranged)
+def _choose(moves: dict[str, _Move], ctx: _Context) -> dict[str, Result]:
+    """Phases 2 and 3 together: which of `moves` apply. The set rule settles
+    the moves not refused yet, each is judged against the ones it keeps
+    (`_check_moves`), and a refusal settles and judges again, until none is
+    refused. A dropped move is taken out of `moves`, and its `Result`
+    returned: a refusal stands over a hold."""
     refused: dict[str, Result] = {}
+    while True:
+        kept = dict(moves)
+        held = _settle(kept, ctx)
+        failing = _check_moves(moves, kept, ctx)
+        if not failing:
+            break
+        for addon_id in failing:
+            del moves[addon_id]
+        refused |= failing
+    for addon_id in held:
+        del moves[addon_id]
+    return refused | held
+
+
+def _check_moves(
+    moves: Mapping[str, _Move], kept: Collection[str], ctx: _Context
+) -> dict[str, Result]:
+    """Phase 2: why each of `moves` is refused. A move is judged in the
+    instance as loaded, with its own candidate and those of its ancestors'
+    moves in place: the `kept` ones for a kept move, every one for a move the
+    set rule holds. Another tree's moves, and a sibling's or a descendant's,
+    never reach its judgment. A refusal whose ancestor's move is refused here
+    too is left for the next round, judged without it. An update's ranges are
+    left to the set rule, which holds rather than refuses; an install's are
+    judged here."""
+    failing: dict[str, Result] = {}
+    above: dict[str, set[str]] = {}
     for addon_id, move in moves.items():
-        on = world if move.locked is None else unranged
-        rest = [p for p in on if p.id != addon_id]
-        candidate = next(p for p in on if p.id == addon_id)
+        applied = kept if addon_id in kept else moves
+        parents = {p.id: p.parent for p in ctx.loaded if p.repo_id is None}
+        parents |= {i: moves[i].candidate.parent for i in applied}
+        parents[addon_id] = move.candidate.parent
+        # A cycle is `_judge`'s to name; no ancestor's move is taken onto it.
+        on = {i for i in inherit._path(addon_id, parents) or () if i in applied} | {addon_id}
+        above[addon_id] = on - {addon_id}
+        view = [*(p for p in ctx.loaded if p.id not in on), *(moves[i].candidate for i in on)]
+        unranged = [replace(p, parent_range=None) for p in view]
+        judged = view if move.locked is None else unranged
+        rest = [p for p in judged if p.id != addon_id]
+        candidate = next(p for p in judged if p.id == addon_id)
+        manifests = {i: moves[i].found for i in on}
         try:
             held_by_tree = _judge(move.found, move.extracted.files, candidate, rest, ctx, manifests)
         except Refused as exc:
-            refused[addon_id] = Result(addon_id, "refused", problems=tuple(exc.problems))
+            failing[addon_id] = Result(addon_id, "refused", problems=tuple(exc.problems))
             continue
         except (fetch.AddonRefused, manifest.ManifestError, OSError) as exc:
-            refused[addon_id] = Result(addon_id, "refused", problems=(str(exc),))
+            failing[addon_id] = Result(addon_id, "refused", problems=(str(exc),))
             continue
+        # A descendant whose ancestry no longer holds is named: its chains
+        # would be gone, not broken. One a range leaves out is the set rule's.
+        loading = {p.id for p in ctx.loaded if p.left_out is None and p.id not in applied}
+        tree = {p.id: p.parent for p in unranged if p.repo_id is None}
         held_by_tree += _dropped(
-            [p for p in cascaded if addon_id in _lineage(p.id, parents)], loading
+            [
+                p
+                for p in inherit.cascade(unranged)
+                if addon_id in (inherit._path(p.id, tree) or ())[1:]
+            ],
+            loading,
         )
         if held_by_tree:
-            refused[addon_id] = Result(addon_id, "refused", problems=tuple(held_by_tree))
-    for addon_id in refused:
-        del moves[addon_id]
-    return refused
-
-
-def _lineage(addon_id: str, parents: Mapping[str, str | None]) -> set[str]:
-    """The ancestors of `addon_id` through `parents`, at most `MAX_DEPTH`
-    steps, stopping at a cycle."""
-    out: set[str] = set()
-    current = parents.get(addon_id)
-    while current is not None and current not in out and len(out) < inherit.MAX_DEPTH:
-        out.add(current)
-        current = parents.get(current)
-    return out
+            failing[addon_id] = Result(addon_id, "refused", problems=tuple(held_by_tree))
+    first = {i: r for i, r in failing.items() if not above[i] & failing.keys()}
+    return first or failing
 
 
 def _settle(moves: dict[str, _Move], ctx: _Context) -> dict[str, Result]:
@@ -1289,9 +1316,8 @@ def update(
                 moves[addon_id] = resolved
             else:
                 results[addon_id] = resolved
-        # 2. Check, and 3. settle.
-        results |= _check_moves(moves, ctx)
-        results |= _settle(moves, ctx)
+        # 2. Check, and 3. settle, to a fixed point.
+        results |= _choose(moves, ctx)
         # 4. Trees: one review and one answer each.
         parents = {p.id: p.parent for p in loaded if p.repo_id is None}
         parents |= {i: m.candidate.parent for i, m in moves.items()}
@@ -1337,7 +1363,7 @@ def update(
                 review_mod.local_changes(
                     state.library,
                     after.library,
-                    namespaces[0],
+                    namespaces,
                     extra=_chains_of(libraries | descendants, after),
                 )
                 if after.library is not None

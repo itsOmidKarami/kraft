@@ -325,9 +325,10 @@ def _how(old: object, new: object) -> str:
 
 
 def _chain_change(
-    path: str, old: object, new: object, was: _Facts, now: _Facts, name: str
+    path: str, old: object, new: object, was: _Facts, now: _Facts, names: Collection[str]
 ) -> tuple[str, str]:
-    """`(section, line)` for one changed fact of a resolved chain."""
+    """`(section, line)` for one changed fact of a resolved chain. `names`:
+    the namespaces under review, whose skills are their own."""
     where, _, last = path.rpartition(".")
     if ".auto_review" in path:
         return "reach", f"{where}: a gate's own agent review changed: {last} {_how(old, new)}"
@@ -381,7 +382,7 @@ def _chain_change(
         return "content", f"{where}: prompt {'new' if old is None else 'changed'}:\n{new or ''}"
     if last == "skill":
         qualifier = new.split(":", 1)[0] if isinstance(new, str) and ":" in new else None
-        if qualifier not in (None, name, "kraft"):
+        if qualifier not in (None, "kraft", *names):
             return "content", f"{where}: new plugin skill reference {new!r}, handed to the agent"
         return "content", f"{where}: skill {_how(old, new)}"
     if last in _INPUTS or last == "steering":
@@ -398,12 +399,14 @@ def _reordered(path: str, before: list[str], after: list[str]) -> tuple[str, str
     return section, f"{path}: order changed, {before} -> {after}"
 
 
-def _chain_diff(was: _Facts, now: _Facts, name: str, reach: list[str], content: list[str]) -> None:
+def _chain_diff(
+    was: _Facts, now: _Facts, names: Collection[str], reach: list[str], content: list[str]
+) -> None:
     """Every changed fact and every reordered list of the resolved chains."""
     for path in sorted(was.chains.keys() | now.chains.keys()):
         before, after = was.chains.get(path), now.chains.get(path)
         if before != after:
-            section, line = _chain_change(path, before, after, was, now, name)
+            section, line = _chain_change(path, before, after, was, now, names)
             (reach if section == "reach" else content).append(line)
     for path in sorted(was.lists.keys() & now.lists.keys()):
         common = set(was.lists[path]) & set(now.lists[path])
@@ -417,15 +420,17 @@ def _chain_diff(was: _Facts, now: _Facts, name: str, reach: list[str], content: 
 def local_changes(
     before: TemplateLibrary | None,
     after: TemplateLibrary,
-    namespace: str,
+    namespace: str | Collection[str],
     *,
     extra: Collection[str] = (),
 ) -> tuple[list[str], list[str]]:
     """`(reach, content)` for the instance's own chains: what each one that
-    resolves through the add-on under `namespace` would run differently once
-    `after` replaces `before`. A chain the add-on does not reach has no line.
-    `extra`: other chains to diff the same way, a repo library's
+    resolves through the add-on under `namespace` (or the add-ons of a tree,
+    under each of a collection) would run differently once `after` replaces
+    `before`. A chain the add-on does not reach has no line. `extra`: other
+    chains to diff the same way, a repo library's
     (`the-review-covers-repo-library-chains`)."""
+    names = (namespace,) if isinstance(namespace, str) else tuple(namespace)
     sides = []
     for loaded in (before, after):
         facts = _Facts("", {}, {}, {}, {}, {}, {}, {}, {})
@@ -439,7 +444,7 @@ def local_changes(
         sides.append(facts)
     reach: list[str] = []
     content: list[str] = []
-    _chain_diff(sides[0], sides[1], namespace, reach, content)
+    _chain_diff(sides[0], sides[1], names, reach, content)
     return reach, content
 
 
@@ -477,7 +482,7 @@ def review(
                 for own in sorted(names)
                 if own in offered and own not in offered_before
             ]
-    _chain_diff(was, now, name, reach, content)
+    _chain_diff(was, now, (name,), reach, content)
     for label, before_map, after_map in (
         ("component", was.components, now.components),
         ("steering", was.steering, now.steering),
