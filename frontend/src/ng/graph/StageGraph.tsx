@@ -35,6 +35,9 @@ type Props = {
   overview?: boolean;
   /** Nodes read by name ("approve spec"), not id: the item's pages. An editor, where the id is the point, keeps ids. */
   names?: boolean;
+  /** The chain canvas's inheritance metas ("security_scan overridden here"): each wraps inside its node's column and
+   *  describes the node to a screen reader. Off, a meta (an elapsed time, a decider) stays one line and unannounced. */
+  readMeta?: boolean;
   onSelect?: (id: string) => void;
   onOpen?: (id: string) => void;
   onFocusNode?: (id: string) => void;
@@ -56,7 +59,7 @@ export const OVERVIEW_PAST = 800;
 export const overviewFor = (nodes: ChainNode[]) => layout(nodes).W > OVERVIEW_PAST;
 
 /** The chain canvas: a chain in one row (StageGraph.dc.html), a long one under its overview. */
-export function StageGraph({ name, nodes, selected, arcs = [], seams: chainSeams = [], opening = "fit", focus, reserve = 0, cover = 0, fit, overview = false, names = false, onDrag, onSelect, onOpen, onFocusNode, onEscape, onBackground, onSeam }: Props) {
+export function StageGraph({ name, nodes, selected, arcs = [], seams: chainSeams = [], opening = "fit", focus, reserve = 0, cover = 0, fit, overview = false, names = false, readMeta = false, onDrag, onSelect, onOpen, onFocusNode, onEscape, onBackground, onSeam }: Props) {
   const mapped = overview && overviewFor(nodes);
   const ids = useId();
   const mapId = (id: string) => `${ids}-map-${id}`;
@@ -201,7 +204,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams: chainSeams
           const bold = n.id === selected || n.state === "current";
           const nodeName = accessibleName(names ? { ...n, id: label(n) } : n, n.kind === "gate" ? "gate" : "node");
           // The meta under the name ("security_scan overridden here", a problem word) describes the node, unless its name already says it.
-          const metaId = n.meta && !nodeName.includes(n.meta) ? `${ids}-meta-${n.id}` : undefined;
+          const metaId = readMeta && n.meta && !nodeName.split(", ").includes(n.meta) ? `${ids}-meta-${n.id}` : undefined;
           return (
             <button
               key={key}
@@ -220,7 +223,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams: chainSeams
             >
               <NodeGlyph {...n} size="lg" sel={n.id === selected} />
               <span className="graph-label" style={{ maxWidth: w - 8 }}>{breakable(label(n))}</span>
-              {n.meta && <span id={metaId} className={`graph-meta tone-${n.metaTone ?? "muted"}`} style={{ maxWidth: w - 8 }}>{n.meta}</span>}
+              {n.meta && <span id={metaId} className={`graph-meta tone-${n.metaTone ?? "muted"}${readMeta ? " is-wrapped" : ""}`} style={readMeta ? { maxWidth: w - 8 } : undefined}>{n.meta}</span>}
               {n.sub && <span className="graph-sub"><span className={`graph-sub-dot tone-${n.subTone ?? "amber"}`} />{n.sub}</span>}
             </button>
           );

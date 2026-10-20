@@ -23,6 +23,18 @@ describe("StageGraph", () => {
     expect(btn(/^merge/)).toHaveAccessibleName("merge, gate, not started");
   });
 
+  it("describes a node by its meta only where the consumer opts in (the chain canvas)", () => {
+    const metas: ChainNode[] = [{ id: "spec", kind: "exec", state: "done", meta: "3m" }, { id: "spec_check", kind: "exec", state: "todo", meta: "spec" }];
+    const { rerender } = render(<StageGraph name="c" nodes={metas} />);
+    expect(btn(/^spec,/)).not.toHaveAttribute("aria-describedby");
+    expect(btn(/^spec,/).querySelector(".graph-meta")).not.toHaveClass("is-wrapped");
+    rerender(<StageGraph name="c" nodes={metas} readMeta />);
+    expect(btn(/^spec,/)).toHaveAccessibleDescription("3m");
+    // Only a meta the name already says verbatim is left out: "spec" inside "spec_check" is not that.
+    expect(btn(/^spec_check/)).toHaveAccessibleDescription("spec");
+    expect(btn(/^spec,/).querySelector(".graph-meta")).toHaveClass("is-wrapped");
+  });
+
   it("enters on the selected node and moves with ←/→, stopping at the ends, through seams", async () => {
     const user = userEvent.setup();
     render(<StageGraph name="c" nodes={nodes} selected="approve_spec" seams={[{ at: 3 }]} />);

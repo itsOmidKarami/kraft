@@ -126,6 +126,7 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
         fit={EDITOR_FIT}
         // A long chain draws under its overview; its nodes keep their ids, which are what an author edits.
         overview
+        readMeta
         onDrag={review || readOnly ? undefined : drag}
         reserve={reserve}
         onSelect={onSelect}
