@@ -122,3 +122,7 @@
 .lib-landing-none { margin: 0; font-size: var(--fs-label); color: var(--text-muted); }
 /* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
 .lib-row { padding-block: calc(5px + var(--row-pad-add)); }
+
+.inheritance-mark { flex: none; font-size: var(--fs-meta); color: var(--text-muted); white-space: nowrap; }
+.inheritance-mark.is-added { color: var(--ok); }
+.inheritance-mark.is-overridden { color: var(--warn); }

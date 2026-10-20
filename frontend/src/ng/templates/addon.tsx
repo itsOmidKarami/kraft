@@ -1,6 +1,6 @@
 import { createContext } from "react";
 import type { Addon } from "../../types";
-import { addonLabel, addonRepo } from "../library/types";
+import { addonLabel, addonRepo, inheritanceText, inheritanceTitle } from "../library/types";
 import "../library/library.css";
 import { Badge } from "../ui/Badge";
 
@@ -14,4 +14,10 @@ export const AddonBadge = ({ addon }: { addon: Addon }) => {
   const repo = addonRepo(addon);
   const title = repo ? `From ${repo}'s repo library: read-only` : `From add-on ${addonLabel(addon)}: read-only`;
   return <Badge className="addon-badge" data-allow-ellipsis title={title}>{addonLabel(addon)}</Badge>;
+};
+
+/** Beside an `AddonBadge`: "inherited from company", "overridden here" or "added here" on a child add-on's entry. */
+export const InheritanceMark = ({ addon }: { addon: Addon }) => {
+  const text = inheritanceText(addon);
+  return text ? <span className={`inheritance-mark is-${addon.inheritance!.origin}`} data-allow-ellipsis title={inheritanceTitle(addon) ?? undefined}>{text}</span> : null;
 };

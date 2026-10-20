@@ -11,7 +11,7 @@ import { shownRows, type Row } from "./rows";
 import { SECTIONS, SECTION_LABEL, type Section } from "./types";
 import { tip } from "../ui/Tooltip";
 import { NoMatch } from "../ui/NoMatch";
-import { AddonBadge } from "../templates/addon";
+import { AddonBadge, InheritanceMark } from "../templates/addon";
 import { SEARCH_LIBRARY } from "./sharedWords";
 import { Empty } from "../ui/Empty";
 import { LinkButton } from "../ui/LinkButton";
@@ -187,6 +187,7 @@ export function LibraryList({ rows, selected, only, onShowAll, onSelect, onAdd }
                   <RowGlyph row={row} />
                   <span className="lib-name" data-allow-ellipsis title={row.name}>{row.name}</span>
                   {row.addon && <AddonBadge addon={row.addon} />}
+                  {row.addon && <InheritanceMark addon={row.addon} />}
                   {row.problem && <span className="lib-prob" role="img" aria-label="has a problem" />}
                   {row.mark && <span className={`lib-mark is-${row.mark}`} role="img" aria-label={row.mark === "add" ? "added in the draft" : "changed in the draft"} />}
                   {row.used && <span className={`lib-used${row.used === "unused" ? " is-unused" : ""}`}>{row.used}</span>}

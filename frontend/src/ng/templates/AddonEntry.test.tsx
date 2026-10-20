@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -121,6 +121,31 @@ describe("An add-on's chain on the Chains page", () => {
     await userEvent.click(await screen.findByRole("button", { name: /switch chain/ }));
     expect(await screen.findByRole("option", { name: /release:ship/ })).toHaveTextContent("release@acme 1.0.0");
     expect(screen.getByRole("option", { name: /^default/ })).not.toHaveTextContent("release@acme");
+  });
+
+  describe("a child add-on's chain", () => {
+    const INHERITED = { id: "company@corp", version: "3.2.0", inheritance: { origin: "inherited" as const, parent: { id: "company@corp", namespace: "company" }, author: { id: "company@corp", version: "3.2.0" } } };
+    const withMark = (addon: typeof INHERITED | typeof SHIPPED.addon) => {
+      vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0, addon: null }, { id: "release:ship", nodes: [], gates: 0, addon }]);
+      vi.spyOn(d, "getDraft").mockImplementation((_area, key) => ok(key === "release:ship" ? { ...SHIPPED, addon } : LOCAL));
+    };
+
+    it.each([
+      { where: "switcher", find: async () => { await userEvent.click(await screen.findByRole("button", { name: /switch chain/ })); return screen.findByRole("option", { name: /release:ship/ }); }, chain: "default" },
+      { where: "page-header", find: async () => { await screen.findByRole("group", { name: "release:ship" }); return document.body; }, chain: "release:ship" },
+    ])("$where shows the inherited mark with its author and a root add-on's chain none", async ({ find, chain }) => {
+      withMark(INHERITED);
+      const first = mount(chain);
+      const row = await find();
+      expect(within(row).getByText("inherited from company")).toHaveAttribute("title", "Written by company@corp 3.2.0");
+      first.unmount();
+      cleanup();
+
+      withMark(SHIPPED.addon);
+      mount(chain);
+      const root = await find();
+      expect(within(root).queryByText(/inherited from|overridden here|added here/)).toBeNull();
+    });
   });
 
   it.each([
