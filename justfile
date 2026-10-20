@@ -31,25 +31,36 @@ setup:
 setup-plugins:
     #!/usr/bin/env bash
     set -uo pipefail
+    # Each download gets a time limit, so an unreachable host costs a worktree
+    # setup minutes at most rather than hanging it. Stock macOS has no
+    # `timeout`, so there it runs unlimited.
+    limit() {
+        if command -v timeout >/dev/null; then timeout 300 "$@"; else "$@"; fi
+    }
     claude_plugins() {
-        claude plugin marketplace add anthropics/claude-plugins-official >/dev/null &&
-        claude plugin marketplace add pbakaus/impeccable >/dev/null &&
-        claude plugin install superpowers@claude-plugins-official --scope project &&
-        claude plugin install impeccable@impeccable --scope project
+        local failed=0
+        limit claude plugin marketplace add anthropics/claude-plugins-official >/dev/null || failed=1
+        limit claude plugin marketplace add pbakaus/impeccable >/dev/null || failed=1
+        limit claude plugin install superpowers@claude-plugins-official --scope project || failed=1
+        limit claude plugin install impeccable@impeccable --scope project || failed=1
+        return $failed
     }
     agent_skills() {
         local source
         for source in obra/superpowers pbakaus/impeccable; do
-            DISABLE_TELEMETRY=1 NPM_CONFIG_UPDATE_NOTIFIER=false npx -y skills@1.7.4 add "$source" --skill '*' \
+            DISABLE_TELEMETRY=1 NPM_CONFIG_UPDATE_NOTIFIER=false limit npx -y skills@1.7.4 \
+                add "$source" --skill '*' \
                 --agent codex cursor gemini-cli opencode amp antigravity github-copilot \
                 --copy -y >/dev/null || return 1
         done
     }
+    # Read the install record rather than start `claude plugin list`: Kraft runs
+    # this on every dispatch, so the already-installed path has to be cheap.
+    installed="${CLAUDE_CODE_PLUGIN_CACHE_DIR:-$HOME/.claude/plugins}/installed_plugins.json"
     if ! command -v claude >/dev/null; then
         echo "claude not installed; skipping the Claude Code plugins"
-    elif listed=$(claude plugin list --json 2>/dev/null) &&
-        grep -q '"superpowers@claude-plugins-official"' <<<"$listed" &&
-        grep -q '"impeccable@impeccable"' <<<"$listed"; then
+    elif grep -qs '"superpowers@claude-plugins-official"' "$installed" &&
+        grep -qs '"impeccable@impeccable"' "$installed"; then
         echo "Claude Code plugins already installed"
     elif ! claude_plugins; then
         echo "warning: could not install the Claude Code plugins; run 'just setup-plugins' to retry" >&2
