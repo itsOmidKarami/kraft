@@ -529,10 +529,10 @@ class TemplateLibrary:
             for author, store in zip(chain, stores, strict=True)
         ]
         removed: list[dict[str, tuple[str, ...]]] = []
-        for depth, (author, library) in enumerate(zip(chain, written, strict=True)):
+        for author, library in zip(chain, written, strict=True):
             _refuse_layer_reference(author.root / LIBRARY_FILE, library)
-            if depth == len(chain) - 1:
-                _refuse_remove(author.root / LIBRARY_FILE, library)  # the root builds on nothing
+            # A stray `remove:` at the root is refused by the root's own
+            # `_add_addon`: every load path loads the root by itself too.
             removed.append(inherit.removals(author.root / LIBRARY_FILE, library))
         visible = inherit.Visible.build(
             chain,
