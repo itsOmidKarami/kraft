@@ -1,5 +1,6 @@
-"""`kraft admin addon`: an author validates a collection without installing
-anything; an operator adds collections and installs, updates and removes add-ons."""
+"""`kraft admin addon`: an operator adds collections and installs, updates and
+removes add-ons, and validates against this instance. An author's validate
+without one is `test_addon_validate`'s."""
 
 import json
 import socket
@@ -16,7 +17,7 @@ from support.addons import (
     repo_with_library,
 )
 
-from kraft import cli, update
+from kraft import cli
 from kraft.addons import fetch
 from kraft.addons.config import AddonsLock
 from kraft.cli import addon as addon_cli
@@ -36,116 +37,6 @@ def _run(capsys, *argv):
     if isinstance(code, str):  # `SystemExit("error: ...")`: printed, and exit 1
         return 1, out.out + out.err + code
     return code, out.out + out.err
-
-
-@pytest.mark.parametrize(
-    ("addons", "sub", "running", "code", "says"),
-    [
-        (GOOD, "", None, 0, "release 1.0.0"),
-        (GOOD, "addons/release", None, 0, "release 1.0.0"),
-        (
-            {"release": {**GOOD["release"], "chains": {"ship": chain("nope")}}},
-            "",
-            None,
-            1,
-            "extends no task named 'release:nope'",
-        ),
-        (
-            {
-                "release": {
-                    **GOOD["release"],
-                    "manifest": {"requires": {"kraft": "3.0", "harnesses": ["codex"]}},
-                }
-            },
-            "",
-            "2.4.0",
-            1,
-            "needs Kraft 3.x",
-        ),
-        (
-            {"release": {**GOOD["release"], "manifest": {"category": "delivery"}}},
-            "",
-            None,
-            0,
-            "'category' is not read by Kraft",
-        ),
-        (GOOD, "", None, 0, "no Kraft home"),
-        (
-            {"release": {**GOOD["release"], "files": {"chains/Review.yaml": "nodes: []\n"}}},
-            "",
-            None,
-            0,
-            "chains/Review.yaml is not part of the add-on layout",
-        ),
-        (GOOD, "addons", None, 1, "holds neither"),
-        (
-            {"release": {"library": {"tasks": {"run": {"kind": "subprocess", "command": "make"}}}}},
-            "",
-            None,
-            1,
-            "may not carry a subprocess task",
-        ),
-        (
-            {"release": {"files": {"library.yaml": "tasks: {'x:y': {kind: agent}}\n"}}},
-            "",
-            None,
-            1,
-            "addons/release/library.yaml",
-        ),
-    ],
-    ids=[
-        "collection",
-        "single-addon",
-        "lint-failure",
-        "wrong-kraft-major",
-        "unknown-key-warning",
-        "no-home",
-        "ignored-look-alike",
-        "not-an-addon",
-        "refused-content",
-        "library-error-names-the-authors-file",
-    ],
-)
-def test_validate(tmp_path, capsys, monkeypatch, addons, sub, running, code, says):
-    if running is not None:
-        monkeypatch.setattr(update, "installed", lambda: running)
-    collection = make_collection(tmp_path, addons)
-    got, out = _run(capsys, "validate", str(collection / sub))
-    assert got == code and says in out, out
-
-
-@pytest.mark.parametrize(
-    "manifest_path",
-    [
-        pytest.param(".kraft/collection.json", id="collection"),
-        pytest.param("addons/release/.kraft/addon.json", id="addon"),
-    ],
-)
-def test_validate_names_a_broken_manifest_once(tmp_path, capsys, manifest_path):
-    collection = make_collection(tmp_path, GOOD)
-    broken = collection / manifest_path
-    assert broken.is_file()
-    broken.write_text("{")
-
-    code, out = _run(capsys, "validate", str(collection))
-
-    assert code == 1 and f"error: {broken}: " in out and out.count(str(broken)) == 1, out
-
-
-def test_validate_writes_nothing_and_prints_json(tmp_path, capsys, monkeypatch):
-    """`validate` installs nothing: the instance's home is not touched, with a
-    home or without one. `--json` is the report itself."""
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setenv("KRAFT_HOME", str(home))
-    collection = make_collection(tmp_path, GOOD)
-    before = set(home.rglob("*"))
-    code, out = _run(capsys, "validate", str(collection), "--json")
-    report = json.loads(out)
-    assert code == 0 and set(home.rglob("*")) == before
-    assert [p["name"] for p in report["addons"]] == ["release"]
-    assert report["addons"][0]["digest"].startswith("sha256:")
-    assert report["problems"] == [] and report["skipped"]
 
 
 # ── collections, install, update ──

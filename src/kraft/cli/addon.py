@@ -6,8 +6,9 @@ new lock. A worker runs none of the ones that write.
 
 `validate` runs every check an install would: extraction under the limits,
 the manifests, the Kraft version, and a lint, against this instance when
-there is a Kraft home and of each add-on on its own when there is none. It
-installs nothing and writes nothing.
+there is a Kraft home and of each add-on on its own when there is none. A
+child add-on is judged with its ancestors, found in the path validated, each
+`--with` directory, or the instance. It installs nothing and writes nothing.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import re
 import shutil
 import sys
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -43,25 +44,27 @@ _NEEDS_AN_INSTANCE = (
 )
 
 
-def _lint(found: manifest.AddonManifest, extracted: fetch.Extracted, root: Path) -> list[dict]:
-    """Every chain of the add-on that does not resolve, with the add-on as the
-    only layer of an otherwise empty library."""
+def _lint(
+    found: manifest.AddonManifest,
+    extracted: fetch.Extracted,
+    root: Path,
+    ancestors: Sequence[InstalledAddon] = (),
+) -> list[dict]:
+    """Every chain of the add-on that does not resolve, with the add-on and its
+    `ancestors` (parent first) as the only layers of an otherwise empty library."""
     with tempfile.TemporaryDirectory() as tmp:
         store = fetch.write_scratch(Path(tmp), extracted)
-        addon = InstalledAddon(
-            id=f"{found.name}@validate",
-            name=found.name,
-            namespace=found.name,
-            version=found.version,
-            root=store,
-        )
+        addons = [
+            *ancestors,
+            addon_update._as_installed(f"{found.name}@validate", found.name, found, store),
+        ]
         try:
             library = TemplateLibrary.from_mappings(
-                {}, (), library_path=store / "local-library.yaml", addons=[addon]
+                {}, (), library_path=store / "local-library.yaml", addons=addons
             )
             messages = [issue.message for issue in library.lint()]
             HarnessProfileTable.from_mapping(
-                {}, store / "harnesses.yaml", harnesses=harness.load(None).valid, addons=[addon]
+                {}, store / "harnesses.yaml", harnesses=harness.load(None).valid, addons=addons
             )
         except (TemplateLibraryError, TemplateEnvironmentError) as exc:
             messages = [str(exc)]
@@ -75,6 +78,7 @@ def _lint_in(
     root: Path,
     collection: str | None,
     home: tuple[Path, Path],
+    ancestors: Sequence[InstalledAddon] = (),
 ) -> tuple[list[dict], list[str]]:
     """`(problems, warnings)` for installing the add-on into the instance at
     `home`. Problems are what it would be refused for: an unmet `requires`, a
@@ -82,7 +86,8 @@ def _lint_in(
     would stop resolving. A repo library's chain that would stop resolving is
     a warning, as an update holds rather than refuses for it
     (`a-broken-repo-library-chain-holds-an-update`). The same add-on already
-    installed is replaced, not a clash."""
+    installed is replaced, not a clash, and so is each of its `ancestors`
+    (parent first) found outside the instance."""
     config_dir, addons_dir = home
 
     def same(addon_id: str) -> bool:
@@ -98,14 +103,16 @@ def _lint_in(
         return [{"file": str(root), "message": why}], []
     with tempfile.TemporaryDirectory() as tmp:
         store = fetch.write_scratch(Path(tmp), extracted)
-        candidate = InstalledAddon(
-            f"{found.name}@{collection or 'validate'}", found.name, found.name, found.version, store
+        candidate = addon_update._as_installed(
+            f"{found.name}@{collection or 'validate'}", found.name, found, store
         )
+        taken = {a.id for a in ancestors}
+        tree = [*(p for p in loaded if p.id not in taken), *ancestors, candidate]
         libraries = {p.namespace for p in loaded if p.repo_id is not None}
         held_lines: list[str] = []
         try:
             before = addon_update.state_of(config_dir, now)
-            after = addon_update.state_of(config_dir, [*loaded, candidate])
+            after = addon_update.state_of(config_dir, tree)
             broken = addon_update.breaks(before, after, config_dir, found.name, exempt=libraries)
             held_lines = addon_update.held_breaks(before, after, libraries)
         except PolicyError as exc:
@@ -116,10 +123,141 @@ def _lint_in(
         )
 
 
-def validate(path: Path, home: tuple[Path, Path] | None = None) -> dict:
+def _read_addon(where: Path, entry: str | None) -> tuple[manifest.AddonManifest, fetch.Extracted]:
+    """The add-on directory at `where`, extracted, and its manifest. `entry` is
+    its name in a `collection.json`, None for a directory on its own."""
+    return _parsed(fetch.extract_dir(where), where, entry)
+
+
+def _parsed(
+    extracted: fetch.Extracted, where: Path | str, entry: str | None
+) -> tuple[manifest.AddonManifest, fetch.Extracted]:
+    """`extracted`, an add-on's files read from `where`, and its manifest."""
+    if manifest.ADDON_JSON not in extracted.files:
+        raise manifest.ManifestError(f"{where}: no {manifest.ADDON_JSON}")
+    file = f"{where}/{manifest.ADDON_JSON}"
+    found = manifest.addon(
+        manifest.parse(extracted.files[manifest.ADDON_JSON][1].decode(), file), file
+    )
+    manifest.check_addon(found, entry, extracted.files)
+    return found, extracted
+
+
+def _collection_at(path: Path) -> tuple[str, dict[str, Path]] | None:
+    """The collection directory at `path`: its name and each add-on's directory
+    by name. None when `path` holds no `collection.json`."""
+    file = path / manifest.COLLECTION_JSON
+    if not file.is_file():
+        return None
+    listed = manifest.collection(manifest.parse(file.read_text(), str(file)), str(file))
+    return listed.name, {e.name: path / e.source.removeprefix("./") for e in listed.addons}
+
+
+def _in_dirs(
+    addon_id: str, own: Mapping[str, Path], with_dirs: Sequence[Path]
+) -> tuple[manifest.AddonManifest, fetch.Extracted] | None:
+    """`addon_id` from `own` (the validated collection's add-on directories,
+    by id), else from the first of `with_dirs` that has it: a collection of
+    that name listing it, or an add-on directory of that name."""
+    name, _, collection = addon_id.partition("@")
+    if addon_id in own:
+        return _read_addon(own[addon_id], name)
+    for where in with_dirs:
+        if (listed := _collection_at(where)) is not None:
+            if listed[0] == collection and name in listed[1]:
+                return _read_addon(listed[1][name], name)
+        elif (where / manifest.ADDON_JSON).is_file():
+            if (here := _read_addon(where, None))[0].name == name:
+                return here
+    return None
+
+
+def _on_instance(
+    addon_id: str, home: tuple[Path, Path], scratch: Path
+) -> InstalledAddon | tuple[manifest.AddonManifest, fetch.Extracted] | None:
+    """`addon_id` as installed on the instance at `home`, else the current
+    version that the instance's collection of that name publishes."""
+    name, _, collection = addon_id.partition("@")
+    config_dir, addons_dir = home
+    installed = load.installed(config_dir, addons_dir)
+    if hit := next((a for a in installed if a.id == addon_id and a.repo_id is None), None):
+        return hit
+    source = AddonsConfig.load(config_dir / AddonsConfig.FILE).collections.get(collection)
+    if source is None:
+        return None
+    # Fetched into the scratch directory: validate writes nothing to the home.
+    mirror, commit, listed = addon_update._catalogue(collection, source, scratch / "mirrors")
+    entry = next((e for e in listed.addons if e.name == name), None)
+    if entry is None:
+        return None
+    if mirror is None:
+        return _read_addon(Path(source.path) / entry.source.removeprefix("./"), name)
+    return _parsed(fetch.extract_git(mirror, commit, entry.source), addon_id, name)
+
+
+def _ancestors_for(
+    found: manifest.AddonManifest,
+    own: Mapping[str, Path],
+    with_dirs: Sequence[Path],
+    home: tuple[Path, Path] | None,
+    scratch: Path,
+) -> list[InstalledAddon]:
+    """The ancestors (parent first) of the add-on `found` describes, each
+    resolved from, in order: `own` (the add-on directories of the collection
+    validated, by id), each of `with_dirs` (a collection or an add-on
+    directory), the add-on installed on the instance at `home`, then the
+    current version in the instance's collection of that name
+    (`validate-resolves-a-parent-from-path-or-with`). Each one found outside
+    the instance is written to a store under `scratch`. Raises
+    `addon_update.Refused` when one cannot be found or read. Whether the
+    ancestry holds (a version in range, no cycle, not too deep) is the
+    library's to say, as it is at load."""
+    own_id = next((i for i in own if i.split("@", 1)[0] == found.name), f"{found.name}@validate")
+    ancestors: list[InstalledAddon] = []
+    seen = {own_id}
+    parent_id = found.parent[0] if found.parent else None
+    # The walk stops at a loop or past the depth limit; the library says which.
+    while parent_id is not None and parent_id not in seen and len(ancestors) < inherit.MAX_DEPTH:
+        try:
+            parent = _in_dirs(parent_id, own, with_dirs)
+            if parent is None and home is not None:
+                parent = _on_instance(parent_id, home, scratch)
+        except (
+            OSError,
+            ValueError,
+            ConfigError,
+            fetch.FetchError,
+            fetch.AddonRefused,
+            manifest.ManifestError,
+        ) as exc:
+            raise addon_update.Refused(
+                [f"its parent {parent_id} could not be read: {exc}"]
+            ) from exc
+        if parent is None:
+            raise addon_update.Refused(
+                [
+                    f"its parent {parent_id} could not be found in PATH, --with or this "
+                    "instance; pass its collection with --with"
+                ]
+            )
+        if not isinstance(parent, InstalledAddon):
+            store = fetch.write_scratch(scratch, parent[1])
+            parent = addon_update._as_installed(parent_id, parent[0].name, parent[0], store)
+        ancestors.append(parent)
+        seen.add(parent_id)
+        parent_id = parent.parent
+    return ancestors
+
+
+def validate(
+    path: Path, home: tuple[Path, Path] | None = None, with_dirs: Sequence[Path] = ()
+) -> dict:
     """`{addons, problems, warnings, skipped}` for the collection or the one
     add-on directory at `path`. With `home`, a Kraft home's config and add-ons
-    directories, each add-on is also judged as an install into that instance."""
+    directories, each add-on is also judged as an install into that instance.
+    A child add-on is judged with its ancestors, found by `_ancestors_for` in
+    `path`, `with_dirs` and the instance; one whose parent is found nowhere
+    gets only the checks of its own files, and the problem that says so."""
     report: dict = {
         "addons": [],
         "problems": [],
@@ -159,53 +297,74 @@ def validate(path: Path, home: tuple[Path, Path] | None = None) -> dict:
     running = update.installed()
     if manifest.is_source_build(running):
         report["skipped"].append(f"requires.kraft: this Kraft ({running}) is a source build")
-    for entry, root in targets:
-        addon_file = root / manifest.ADDON_JSON
-        try:
-            extracted = fetch.extract_dir(root)
-            if manifest.ADDON_JSON not in extracted.files:
-                raise manifest.ManifestError(f"{root}: no {manifest.ADDON_JSON}")
-            raw = manifest.parse(extracted.files[manifest.ADDON_JSON][1].decode(), str(addon_file))
-            found = manifest.addon(raw, str(addon_file))
-            manifest.check_addon(found, entry, extracted.files)
-            held = load.installed(*home) if home else ()
-            addon_update.check(
-                found,
-                extracted.files,
-                other_namespaces={p.namespace for p in held} - {found.name},
-                named_by=addon_update.referrers(
-                    found.name, [p for p in held if p.name != found.name]
-                ),
+    own = {f"{entry}@{collection_name}": root for entry, root in targets if collection_name}
+    held = load.installed(*home) if home else ()
+    # Each ancestor found outside the instance is a store here until the end.
+    with tempfile.TemporaryDirectory() as scratch:
+        for entry, root in targets:
+            addon_file = root / manifest.ADDON_JSON
+            try:
+                extracted = fetch.extract_dir(root)
+                if manifest.ADDON_JSON not in extracted.files:
+                    raise manifest.ManifestError(f"{root}: no {manifest.ADDON_JSON}")
+                raw = manifest.parse(
+                    extracted.files[manifest.ADDON_JSON][1].decode(), str(addon_file)
+                )
+                found = manifest.addon(raw, str(addon_file))
+                manifest.check_addon(found, entry, extracted.files)
+                # A parent found nowhere still leaves the checks of its own files.
+                unresolved: list[str] = []
+                try:
+                    ancestors = _ancestors_for(found, own, with_dirs, home, Path(scratch))
+                except addon_update.Refused as exc:
+                    ancestors, unresolved = [], exc.problems
+                addon_update.check(
+                    found,
+                    extracted.files,
+                    other_namespaces={p.namespace for p in held} - {found.name},
+                    named_by=addon_update.referrers(
+                        found.name, [p for p in held if p.name != found.name]
+                    ),
+                    ancestors=ancestors,
+                )
+            except addon_update.Refused as exc:
+                for why in exc.problems:
+                    problem(root, why)
+                continue
+            except (fetch.AddonRefused, manifest.ManifestError) as exc:
+                problem(root, str(exc))
+                continue
+            report["warnings"] += [
+                f"{addon_file}: '{key}' is not read by Kraft"
+                for key in manifest.unknown_keys(raw, manifest.AddonManifest)
+            ]
+            report["warnings"] += [
+                f"{root}/{rel} is not part of the add-on layout and is ignored"
+                for rel in extracted.skipped
+            ]
+            why = manifest.kraft_compatible(found.requires.kraft, running)
+            if why is not None:
+                problem(addon_file, f"{found.name} {found.version} {why}; this is Kraft {running}")
+                continue
+            if unresolved:
+                # Lint needs the ancestors: without them it says nothing true.
+                problems, warnings = [{"file": str(root), "message": m} for m in unresolved], []
+            elif home:
+                problems, warnings = _lint_in(
+                    found, extracted, root, collection_name, home, ancestors
+                )
+            else:
+                problems, warnings = _lint(found, extracted, root, ancestors), []
+            report["problems"] += problems
+            report["warnings"] += warnings
+            report["addons"].append(
+                {
+                    "name": found.name,
+                    "version": found.version,
+                    "digest": fetch.digest(extracted.files),
+                    "parent": found.parent[0] if found.parent else None,
+                }
             )
-        except addon_update.Refused as exc:
-            for why in exc.problems:
-                problem(root, why)
-            continue
-        except (fetch.AddonRefused, manifest.ManifestError) as exc:
-            problem(root, str(exc))
-            continue
-        report["warnings"] += [
-            f"{addon_file}: '{key}' is not read by Kraft"
-            for key in manifest.unknown_keys(raw, manifest.AddonManifest)
-        ]
-        report["warnings"] += [
-            f"{root}/{rel} is not part of the add-on layout and is ignored"
-            for rel in extracted.skipped
-        ]
-        why = manifest.kraft_compatible(found.requires.kraft, running)
-        if why is not None:
-            problem(addon_file, f"{found.name} {found.version} {why}; this is Kraft {running}")
-            continue
-        problems, held = (
-            _lint_in(found, extracted, root, collection_name, home)
-            if home
-            else (_lint(found, extracted, root), [])
-        )
-        report["problems"] += problems
-        report["warnings"] += held
-        report["addons"].append(
-            {"name": found.name, "version": found.version, "digest": fetch.digest(extracted.files)}
-        )
     return report
 
 
@@ -221,7 +380,8 @@ def _cmd_validate(ns: argparse.Namespace) -> None:
     config_dir, addons_dir = flow.home()
     # A Kraft home is one that has a library; CI has none.
     home = (config_dir, addons_dir) if (config_dir / "library.yaml").is_file() else None
-    report = validate(Path(ns.path).resolve(), home)
+    with_dirs = [Path(d).resolve() for d in ns.with_dirs or ()]
+    report = validate(Path(ns.path).resolve(), home, with_dirs)
     common.emit(report, _render, ns.json)
     if report["problems"]:
         raise SystemExit(1)
@@ -706,6 +866,13 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
     )
     validate_p.add_argument(
         "path", metavar="PATH", help="a collection or a single add-on directory"
+    )
+    validate_p.add_argument(
+        "--with",
+        action="append",
+        dest="with_dirs",
+        metavar="DIR",
+        help="a collection or add-on directory to find a child's parent in; repeatable",
     )
 
     collection_p = verbs.add_parser("collection", help="the collections this instance knows")

@@ -189,7 +189,7 @@ origin: src/kraft/addons/manifest.py §AddonManifest
 ## REQ validate-warns-about-unknown-keys
 
 WHEN `validate` reads a manifest key Kraft does not read, the system SHALL list it as a warning.
-enforced-by: tests/cli/test_addon.py::test_validate[unknown-key-warning]
+enforced-by: tests/cli/test_addon_validate.py::test_validate[unknown-key-warning]
 origin: src/kraft/cli/addon.py §validate
 
 ## REQ addons-yaml-refuses-unknown-keys
@@ -218,9 +218,15 @@ origin: src/kraft/addons/config.py §CollectionConfig
 
 ## REQ validate-runs-the-install-checks
 
-WHEN an author validates a local collection or add-on, the system SHALL run the same extraction checks, add-on checks and whole-library lint as an install, SHALL report each problem with its file and key, and SHALL NOT change `addons.yaml`, `addons.lock` or the store.
-enforced-by: tests/cli/test_addon.py::test_validate[collection], tests/cli/test_addon.py::test_validate[single-addon], tests/cli/test_addon.py::test_validate[lint-failure], tests/cli/test_addon.py::test_validate[wrong-kraft-major], tests/cli/test_addon.py::test_validate[no-home], tests/cli/test_addon.py::test_validate[refused-content], tests/cli/test_addon.py::test_validate_writes_nothing_and_prints_json, tests/cli/test_addon.py::test_validate_against_a_kraft_home[same-id-is-not-a-clash], tests/cli/test_addon.py::test_validate_against_a_kraft_home[requires-unmet], tests/cli/test_addon.py::test_validate_against_a_kraft_home[breaks-a-chain]
+WHEN an author validates a local collection or add-on, the system SHALL run the same extraction checks, add-on checks and whole-library lint as an install, judging a child add-on together with its ancestors, SHALL report each problem with its file and key, and SHALL NOT change `addons.yaml`, `addons.lock` or the store.
+enforced-by: tests/cli/test_addon_validate.py::test_validate[collection], tests/cli/test_addon_validate.py::test_validate[single-addon], tests/cli/test_addon_validate.py::test_validate[lint-failure], tests/cli/test_addon_validate.py::test_validate[wrong-kraft-major], tests/cli/test_addon_validate.py::test_validate[no-home], tests/cli/test_addon_validate.py::test_validate[refused-content], tests/cli/test_addon_validate.py::test_validate_writes_nothing_and_prints_json, tests/cli/test_addon.py::test_validate_against_a_kraft_home[same-id-is-not-a-clash], tests/cli/test_addon.py::test_validate_against_a_kraft_home[requires-unmet], tests/cli/test_addon.py::test_validate_against_a_kraft_home[breaks-a-chain], tests/cli/test_addon_validate.py::test_validate[child-broken-against-parent], tests/cli/test_addon_validate.py::test_validate[child-removes-what-it-inherits]
 origin: src/kraft/cli/addon.py §validate
+
+## REQ validate-resolves-a-parent-from-path-or-with
+
+WHEN an author validates a child add-on, the system SHALL resolve each of its ancestors from, in order, the validated collection, each `--with` directory, the instance's installed add-on and the current version in the instance's collection, and IF an ancestor is found in none of them, THEN the system SHALL exit 1 saying so after running the checks that need only the child's own files.
+enforced-by: tests/cli/test_addon_validate.py::test_validate[child-with-parent-in-path], tests/cli/test_addon_validate.py::test_validate[child-with-grandparent-in-path], tests/cli/test_addon_validate.py::test_validate[child-with-parent-via-with], tests/cli/test_addon_validate.py::test_validate[child-parent-not-found], tests/cli/test_addon_validate.py::test_validate[child-against-instance], tests/cli/test_addon_validate.py::test_validate[child-against-instance-collection], tests/cli/test_addon_validate.py::test_validate_writes_nothing_and_prints_json
+origin: src/kraft/cli/addon.py §_ancestors_for
 
 ## REQ addons-load-only-from-the-lock
 
