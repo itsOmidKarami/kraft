@@ -318,6 +318,11 @@ _STRONG_FALLS_BACK_TO_PARENTS_FAST = {
         "strong": {**_model("m"), "fallback": [{"profile": "platform-dept:fast"}]},
     }
 }
+_STRONG_FALLS_BACK_TO_OWN_NAME = {
+    "profiles": {
+        "strong": {**_model("m"), "fallback": [{"profile": "team-payments:slow"}]},
+    }
+}
 _STRONG_INTO_SLOW = {"strong": {**_model("m"), "fallback": [{"profile": "team-payments:slow"}]}}
 _REMOVES_SLOW = {"library": {"remove": {"profiles": ["slow"]}}}
 
@@ -337,7 +342,10 @@ _REMOVES_SLOW = {"library": {"remove": {"profiles": ["slow"]}}}
         pytest.param(
             {"dept": {"profiles": {"slow": _model("dept-model")}}},
             {},
-            {"team-payments:slow": {"codex": "dept-model"}},
+            {
+                "team-payments:slow": {"codex": "dept-model"},
+                "team-payments:fast": {"codex": "fast-model"},
+            },
             {},
             [],
             None,
@@ -397,6 +405,15 @@ _REMOVES_SLOW = {"library": {"remove": {"profiles": ["slow"]}}}
             [],
             None,
             id="child-fallback-names-parent",
+        ),
+        pytest.param(
+            {"team": _STRONG_FALLS_BACK_TO_OWN_NAME},
+            {},
+            {},
+            {"team-payments:strong": "company:slow"},
+            [],
+            None,
+            id="child-fallback-names-itself",
         ),
         pytest.param(
             {"alias": "plat", "team": _STRONG_FALLS_BACK_TO_PARENTS_FAST},

@@ -583,7 +583,7 @@ def _agent_profiles(
 def _addon_profiles(
     addon: InstalledAddon,
     harnesses: Mapping[str, Harness],
-    addons: Sequence[InstalledAddon] = (),
+    addons: Sequence[InstalledAddon],
 ) -> dict[str, AgentProfile]:
     """An add-on's `profiles.yaml`, under its namespace. Only its `profiles:`
     section is read: an add-on never chooses an executable, so a `harnesses:`
@@ -619,15 +619,19 @@ def _name_the_defining_ancestor(
     parent's name (`platform-dept:fast`) set to the namespace of the ancestor
     that defines it, as `TemplateLibrary` does for a `profile:` in a chain. A
     child whose ancestry does not read is left as written: the library load
-    says why."""
+    says why (the same errors `inherit.inherited` leaves to it). A file that
+    names no profile by its own or its parent's name has nothing to re-point and
+    is returned before any ancestor's store is read."""
     # Imported here: `kraft.config` imports this module.
-    from kraft.addons import inherit
+    from kraft.addons import fetch, inherit
     from kraft.templates.library import TemplateLibraryError
 
     try:
         chain = inherit.ancestry(addon, addons)
+        if not _names_a_profile_of(written, {addon.name, chain[1].name}):
+            return written
         seen = inherit.visible(chain)
-    except (inherit.InheritanceError, TemplateLibraryError):
+    except (inherit.InheritanceError, fetch.StoreMismatch, TemplateLibraryError, OSError):
         return written
 
     def profile_owner(name: str, depth: int) -> str:
@@ -635,6 +639,7 @@ def _name_the_defining_ancestor(
             f"{chain[min(depth, len(chain) - 1)].namespace}:{name}"
         )
 
+    # profiles.yaml has no skill or steering keys, so those two never fire.
     return inherit.requalify(
         written,
         top=addon.namespace,
@@ -644,6 +649,21 @@ def _name_the_defining_ancestor(
         skill_owner=lambda name, depth: name,
         profile_owner=profile_owner,
         steering_owner=lambda name, depth: name,
+    )
+
+
+def _names_a_profile_of(node: object, qualifiers: set[str]) -> bool:
+    """Whether `node` holds a `profile:` written as `<qualifier>:<name>` for one
+    of `qualifiers`: the only references `requalify` re-points in a
+    `profiles.yaml`."""
+    if isinstance(node, list):
+        return any(_names_a_profile_of(item, qualifiers) for item in node)
+    if not isinstance(node, Mapping):
+        return False
+    return any(
+        (key == "profile" and isinstance(value, str) and value.partition(":")[0] in qualifiers)
+        or _names_a_profile_of(value, qualifiers)
+        for key, value in node.items()
     )
 
 
