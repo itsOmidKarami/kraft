@@ -72,7 +72,10 @@ _TREE_SPECS: dict[str, dict] = {
         "library": {"tasks": {"security_scan": {**AGENT, "skill": "deploy-review"}}},
         "skills": {"deploy-review": "company method"},
         "profiles": {
-            "slow": {"model": {"codex": "company-model"}, "fallback": [{"profile": "fast"}]},
+            "slow": {
+                "model": {"codex": "company-model"},
+                "fallback": [{"profile": "company:fast"}],
+            },
             "fast": {"model": {"codex": "fast-model"}},
         },
     },

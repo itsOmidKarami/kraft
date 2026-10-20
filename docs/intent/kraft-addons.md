@@ -557,3 +557,9 @@ origin: src/kraft/addons/update.py §child_dependents
 IF `kraft admin addon enable` names an add-on whose parent, with the entry enabled, is not installed, not loaded, or outside its range, THEN the system SHALL refuse with why, naming the parent and, when it is not installed, the install to run, and write nothing.
 enforced-by: tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-disabled], tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-not-installed], tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-out-of-range], tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-loaded]
 origin: src/kraft/cli/addon.py §_parent_loads
+
+## REQ a-child-inherits-its-parents-agent-profiles
+
+WHERE an add-on names a parent, the system SHALL serve under the add-on's namespace every agent profile of its ancestors' `profiles.yaml` that it neither defines nor removes, from the nearest ancestor that defines it, and SHALL read a `fallback:` of the child's own that names its parent as the profile of the ancestor that defines it, whatever namespace the instance gives the parent.
+enforced-by: tests/templates/test_environment.py::test_inherited_addon_profiles[inherited], tests/templates/test_environment.py::test_inherited_addon_profiles[nearest-owner], tests/templates/test_environment.py::test_inherited_addon_profiles[removed], tests/templates/test_environment.py::test_inherited_addon_profiles[alias-parent], tests/templates/test_environment.py::test_inherited_addon_profiles[child-fallback-names-parent], tests/templates/test_environment.py::test_inherited_addon_profiles[child-fallback-names-aliased-parent]
+origin: src/kraft/templates/environment.py §HarnessProfileTable.from_mapping
