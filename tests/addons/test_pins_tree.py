@@ -91,6 +91,13 @@ def _fast_falls_back_to(config_dir, profile):
 
 _WHOLE_TREE = ["company", "platform-dept", "team-payments"]
 
+#: The skill team-payments inherits from company, named by the team's name.
+_SKILL = "team-payments:deploy-review"
+
+_TAMPERED = (
+    ".kraft/addon.json does not match its digest; the store was changed after it was installed"
+)
+
 
 @pytest.mark.parametrize(
     ("case", "chain_id", "expected"),
@@ -149,6 +156,7 @@ def test_an_item_pins_its_whole_tree(tree_home, case, chain_id, expected):
         "pin-without-parent",
         "child-disabled-since",
         "pin-parent-wins-over-its-store",
+        "pin-without-parent-manifest-tampered",
     ],
 )
 async def test_an_item_keeps_its_tree_across_a_parent_update(tree_home, case):
@@ -185,11 +193,22 @@ async def test_an_item_keeps_its_tree_across_a_parent_update(tree_home, case):
 
         assert "company method" in launch_task(pins, skill=skill).method_text
         return
+    expected = [
+        ("company", None, None),
+        ("platform-dept", "company@acme", None),
+        ("team-payments", "platform-dept@acme", None),
+    ]
     if case == "for-item-tree-order":
         pins = dict(reversed(pins.items()))
     elif case == "pin-without-parent":
         # A snapshot stored before pins recorded parents.
         pins = {n: {k: v for k, v in p.items() if k != "parent"} for n, p in pins.items()}
+    elif case == "pin-without-parent-manifest-tampered":
+        # An old snapshot whose child's manifest no longer reads: never a root.
+        pins = {n: {k: v for k, v in p.items() if k != "parent"} for n, p in pins.items()}
+        edit_store(store_of(config_dir, addons_dir, "team-payments"), ADDON_JSON, "{}")
+        # A root now, so it reads before the dept; left out all the same.
+        expected[1:] = [("team-payments", None, _TAMPERED), expected[1]]
     elif case == "pin-parent-wins-over-its-store":
         # The pins name the parents: the stores' manifests are never asked.
         team = addon_json("team-payments", requires={"addons": {"company@acme": "1"}})
@@ -201,9 +220,9 @@ async def test_an_item_keeps_its_tree_across_a_parent_update(tree_home, case):
     known = load.for_item(pins, config_dir, addons_dir, repo_id=None)
 
     tree = [p for p in known if p.namespace in pins]
-    assert [p.namespace for p in tree] == _WHOLE_TREE
-    assert [(p.parent, p.left_out) for p in tree] == [
-        (None, None),
-        ("company@acme", None),
-        ("platform-dept@acme", None),
-    ]
+    assert [(p.namespace, p.parent, p.left_out) for p in tree] == expected
+    assert not any(p.quiet for p in tree)
+    if any(left_out for *_, left_out in expected):
+        # Left out by a fault, not built as a root: a launch that reads it stops.
+        with pytest.raises(agent.HarnessUnavailable, match=_TAMPERED):
+            launch_task(pins, skill=_SKILL)

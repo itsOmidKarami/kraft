@@ -623,6 +623,7 @@ def for_item(
     for namespace, pin in (pins or {}).items():
         addon_id, digest = str(pin["id"]), str(pin["digest"])
         root = store / digest.removeprefix("sha256:")
+        parent, unread = (pin.get("parent"), None) if "parent" in pin else _pinned_parent(root)
         pinned.append(
             InstalledAddon(
                 addon_id,
@@ -630,14 +631,14 @@ def for_item(
                 namespace,
                 str(pin["version"]),
                 root,
-                left_out=None
+                left_out=unread
                 if root.is_dir()
                 else _unrestored.get(root.name)
                 or "the version this work item started with is no longer in the store",
                 commit=pin.get("commit"),
                 tree=pin.get("tree"),
                 source=pin.get("source"),
-                parent=pin.get("parent") if "parent" in pin else _pinned_parent(root),
+                parent=parent,
             )
         )
     live = scoped(
@@ -671,21 +672,26 @@ def for_item(
     return (*loading, *reserved)
 
 
-def _pinned_parent(root: Path) -> str | None:
-    """The parent a pinned add-on's own manifest names, for a pin stored
-    before pins named parents, so a pinned child still builds as a child;
-    None for a root add-on, or a store that does not read (the launch says
-    why). Such a snapshot did not pin the ancestors either: they are the
-    instance's installed ones. Its range is not checked again here."""
+def _pinned_parent(root: Path) -> tuple[str | None, str | None]:
+    """`(parent, why not)` for a pin stored before pins named parents: the
+    parent its store's own manifest names, so a pinned child still builds as
+    a child. `(None, None)` for a root add-on, and for a store that is not
+    there (`for_item` says why). A store that is there but whose manifest
+    does not read gives why, and the add-on is left out with it: it is never
+    loaded as a root without what it inherits. Such a snapshot did not pin
+    the ancestors either: they are the instance's installed ones. Its range
+    is not checked again here."""
     from kraft.addons import fetch, inherit, manifest
 
     if not root.is_dir():
-        return None
+        return None, None
     try:
         declared = inherit.read_manifest(InstalledAddon("", "", "", "", root))
-    except (OSError, ValueError, fetch.StoreMismatch, fetch.AddonRefused, manifest.ManifestError):
-        return None  # the launch reads the store again and says why
-    return declared.parent[0] if declared.parent is not None else None
+    except (fetch.StoreMismatch, fetch.AddonRefused, manifest.ManifestError) as exc:
+        return None, str(exc)
+    except (OSError, ValueError) as exc:
+        return None, f"its manifest cannot be read: {exc}"
+    return (declared.parent[0] if declared.parent is not None else None), None
 
 
 def connected_ids(
