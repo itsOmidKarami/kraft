@@ -106,6 +106,6 @@ def test_a_directory_collections_catalogue_is_read_safely(tmp_path, make):
     make(tmp_path / ".kraft" / "collection.json")
 
     with pytest.raises(fetch.FetchError) as refused:
-        update._catalogue("acme", CollectionConfig(path=str(tmp_path)), tmp_path / "addons")
+        update.catalogue("acme", CollectionConfig(path=str(tmp_path)), tmp_path / "addons")
 
     assert refused.value.kind == "refused"

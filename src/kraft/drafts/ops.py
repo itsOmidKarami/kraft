@@ -805,7 +805,12 @@ def new_chain(d: Draft, **source: str) -> None:
             # references already made `<namespace>:<name>`, so the copy resolves.
             if origin not in library.chain_ids:
                 raise OpError(f"there is no chain {origin!r} to copy")
-            copied = yaml.safe_dump(plain(library.chain_data(origin)), sort_keys=False)
+            # A child add-on's reference into a hidden ancestor level becomes
+            # that ancestor's own name, so the copy resolves. The copy then
+            # reads the ancestor's entry as the ancestor serves it, not as the
+            # child inherits it: the child's overrides no longer reach it.
+            shown = library.public(library.chain_data(origin))
+            copied = yaml.safe_dump(plain(shown), sort_keys=False)
             d._chain = authored.load(copied)
             authored.put(d._chain, "", "id", d.key)
             d.exists = True
@@ -1048,7 +1053,9 @@ def copy_component(d: Draft, ref: str, name: str) -> dict:
         body = None if found is None else found.model_dump(mode="json", exclude_unset=True)
     else:
         raw = library.component(Namespace(section), qualified)
-        body = None if raw is None else plain(raw.data)
+        # As for a chain copy: a hidden level's name becomes the ancestor's
+        # own, and the child's overrides no longer reach what it extends.
+        body = None if raw is None else plain(library.public(raw.data))
     if body is None:
         raise OpError(f"there is no add-on component {ref!r} to copy")
     if not isinstance(d.library.get(section), dict):
@@ -1126,8 +1133,12 @@ def _refuse_addon_address(d: Draft, path: object) -> None:
     library = getattr(d.st, "library", None)
     if library is None or not isinstance(path, str):
         return
-    for segment in path.split(PATH_SEPARATOR):
-        if why := catalogue.read_only_message(library, segment):
+    sections = [ns.value for ns in Namespace]
+    segments = path.split(PATH_SEPARATOR)
+    for before, segment in zip([None, *segments], segments, strict=False):
+        # `tasks.release:base`: the section names which entry it is.
+        section = before if before in sections else None
+        if why := catalogue.read_only_message(library, segment, section):
             raise AddonReadOnly(why)
 
 

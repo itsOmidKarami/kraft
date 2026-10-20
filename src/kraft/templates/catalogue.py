@@ -39,8 +39,9 @@ def components(library: TemplateLibrary, issues: list[TemplateIssue]) -> list[di
                 for name, profile in library.steering.items()
             }
         else:
+            # A child add-on's entry reads its parent's by the parent's name.
             definitions = {
-                name: dict(library.component(namespace, name).data)
+                name: dict(library.public(library.component(namespace, name).data))
                 for name in library.component_names(namespace)
             }
         for name, definition in definitions.items():
@@ -71,13 +72,23 @@ def addon_view(library: TemplateLibrary, name: str) -> dict | None:
     return {"id": addon.id, "version": addon.version, "repo": addon.repo_id}
 
 
-def read_only_message(library: TemplateLibrary, name: str) -> str | None:
-    """Why `name` cannot be saved, when it is an add-on's; None for a local name."""
+def read_only_message(
+    library: TemplateLibrary, name: str, section: str | None = None
+) -> str | None:
+    """Why `name` cannot be saved, when it is an add-on's; None for a local
+    name. An entry a child add-on inherits names the ancestor that wrote it
+    too (`TemplateLibrary.authored_by`, which reads `section`)."""
     addon = library.addon_of(name)
     if addon is None:
         return None
     if addon.repo_id is not None:
         return f"{name} comes from {addon.repo_id}'s repo library; {EDIT_IN_ITS_REPO}"
+    author = library.authored_by(name, section)
+    if author is not None and author.id != addon.id:
+        return (
+            f"{name} comes from add-on {author.id} through {addon.id}; "
+            "extend it or copy it to your library"
+        )
     return f"{name} comes from add-on {addon.id}; extend it or copy it to your library"
 
 

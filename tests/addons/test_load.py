@@ -195,6 +195,123 @@ def test_a_broken_addon_library_affects_only_that_addon(tmp_path, instance):
     assert [issue.chain for issue in library.lint()] == ["local"]
 
 
+def _disable_company(config, store):
+    _edit(config, "addons.yaml", lambda d: d["addons"].update({"company@corp": False}))
+
+
+def _edit_company_store(config, store):
+    edit_store(store, manifest.ADDON_JSON, "{}")
+
+
+def _take_company_namespace(config, store):
+    write_yaml(config / "repos.yaml", {"repos": [{"id": "company", "path": "/work/company"}]})
+
+
+def _cap_budget(config, store):
+    _maximum(config, 5)
+
+
+def _edit_company_library(config, store):
+    edit_store(store, "library.yaml", "tasks: {}\n")
+
+
+#: The child is left out for its parent's reason, which names the parent's store.
+_PARENTS = "the parent's reason"
+
+
+@pytest.mark.parametrize(
+    ("team_library", "company_requires", "change", "why"),
+    [
+        pytest.param({"tasks": {"scan": AGENT}}, {}, None, None, id="child-loads"),
+        pytest.param(
+            {"tasks": {"scan": AGENT}},
+            {},
+            _disable_company,
+            "its parent company@corp is not loaded: is disabled",
+            id="parent-disabled",
+        ),
+        pytest.param(
+            {"tasks": {"scan": AGENT}},
+            {},
+            _edit_company_store,
+            "its parent company@corp is not loaded: its files do not match the locked digest",
+            id="parent-store-edited",
+        ),
+        pytest.param(
+            {"tasks": {"scan": {"extends": "company:base"}}},
+            {},
+            None,
+            None,
+            id="child-library-uses-parent",
+        ),
+        pytest.param(
+            {"tasks": {"scan": {"extends": "company:base", "policy": {"budget_usd": 8}}}},
+            {},
+            _cap_budget,
+            "n.main.t: task n.main.t sets budget_usd 8 > the administrator maximum 5"
+            " (maxima.tasks.budget_usd)",
+            id="child-limits-through-parent",
+        ),
+        pytest.param(
+            {"tasks": {"scan": AGENT}},
+            {},
+            _take_company_namespace,
+            "its parent company@corp is not loaded: its namespace 'company' is now a repository id",
+            id="parent-left-out-after-its-content-check",
+        ),
+        pytest.param(
+            {"tasks": {"scan": AGENT}},
+            {"profiles": ["deep"]},
+            None,
+            "its parent company@corp is not loaded: "
+            "requires agent profile 'deep', which harnesses.yaml does not define",
+            id="union-requirements",
+        ),
+        pytest.param(
+            {"tasks": {"scan": AGENT}},
+            {},
+            _edit_company_library,
+            _PARENTS,
+            id="parent-library-edited",
+        ),
+    ],
+)
+def test_installed_with_inheritance(tmp_path, team_library, company_requires, change, why):
+    """`team@payments` builds on `company@corp`: it loads only with its parent,
+    is judged together with it, and needs what its parent needs. The local
+    library loads whatever happens to the tree. Parents are judged first,
+    wherever `addons.yaml` lists them."""
+    config, addons = make_instance(tmp_path, chains={"local": chain("base")})
+    requires = {"kraft": "2", "harnesses": ["codex"]}
+    company = {
+        "library": {"tasks": {"base": AGENT}},
+        "manifest": {"requires": {**requires, **company_requires}},
+    }
+    team = {
+        "library": team_library,
+        "chains": {"scan": chain("scan")},
+        "manifest": {"requires": {**requires, "addons": {"company@corp": "1"}}},
+    }
+    # The child first: `addons.yaml` lists it before its parent.
+    install(config, addons, make_collection(tmp_path, {"team": team}, name="payments"), "team")
+    corp = make_collection(tmp_path, {"company": company}, name="corp")
+    store = install(config, addons, corp, "company")
+    if change:
+        change(config, store)
+    found = {p.id: p for p in load.installed(config, addons)}
+    child = found["team@payments"]
+    if why is _PARENTS:
+        parents = found["company@corp"].left_out
+        assert parents and "does not match its digest" in parents
+        why = f"its parent company@corp is not loaded: {parents}"
+    assert (child.parent, child.parent_range, child.left_out) == ("company@corp", "1", why)
+    assert found["company@corp"].parent is None
+    library = TemplateLibrary.from_yaml_dir(config, addons=tuple(found.values()))
+    assert "local" in library.chain_ids
+    assert ("team:scan" in library.chain_ids) is (why is None)
+    assert not library.lint()
+
+
 @pytest.mark.parametrize("file", ["addons.yaml", "addons.lock"])
 def test_an_unreadable_addons_file_loads_none_and_says_why(instance, file):
     config, addons, _ = instance

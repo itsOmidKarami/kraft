@@ -2,9 +2,11 @@
 listed with their add-on, refused for editing, and copied into the local
 library through the draft operations."""
 
+import json
+
 import pytest
 import yaml
-from support.addons import AGENT, load_release
+from support.addons import AGENT, chain, load_release
 
 from kraft.templates.models import MaterializedChain
 
@@ -119,6 +121,111 @@ def test_copy_from_an_addon(loaded, copy):
         assert "release:base" not in written["tasks"]
     assert loaded.post(f"/api/drafts/{kind}/{key}/publish").status_code == 200
     assert not loaded.get("/api/health").json()["invalid_templates"]
+
+
+def _load_team(client, tmp_path, parent_chain="ship", own_add=()):
+    """`team@pay`, a child of `release@acme`: a task and a chain (`own`, on
+    `parent_chain`, with `own_add` entries) that extend the parent's by its
+    name, which the library holds as a hidden level."""
+    from support.addons import install, make_collection
+
+    from kraft.api import deps
+
+    st = client.app.state
+    requires = {"kraft": "2", "harnesses": ["codex"], "addons": {"release@acme": "1"}}
+    own = {"extends": f"release:{parent_chain}", **({"add": own_add} if own_add else {})}
+    team = {
+        "manifest": {"requires": requires},
+        "library": {"tasks": {"scan": {"extends": "release:base", "prompt": "team scan"}}},
+        "chains": {"own": own},
+    }
+    collection = make_collection(tmp_path / "pay", {"team": team}, name="pay")
+    install(st.templates_dir, st.run_dirs.addons, collection, "team")
+    deps._reload_templates(st)
+
+
+@pytest.mark.parametrize(
+    "op, file, written",
+    [
+        (
+            {"op": "new_chain", "from": "team:own"},
+            "chains/mine.yaml",
+            {"id": "mine", "extends": "release:ship"},
+        ),
+        (
+            {"op": "copy_component", "ref": "tasks.team:scan", "name": "mine"},
+            "library.yaml",
+            {"extends": "release:base", "prompt": "team scan"},
+        ),
+    ],
+    ids=["child-chain", "child-component"],
+)
+def test_a_copy_from_a_child_addon_names_its_parent(loaded, tmp_path, op, file, written):
+    """A child's reference to its parent's entry comes along as the parent's
+    own id, never as the hidden level the child reads it through, so the copy
+    resolves (against the parent as the parent serves it)."""
+    _load_team(loaded, tmp_path)
+    kind, key = ("chains", "mine") if file.startswith("chains/") else ("library", "library")
+    answer = loaded.post(f"/api/drafts/{kind}/{key}/ops", json={"ops": [op]})
+    assert answer.status_code == 200, answer.text
+    text = loaded.get(f"/api/drafts/{kind}/{key}").json()["files"][file]
+    found = yaml.safe_load(text)
+
+    assert (found if kind == "chains" else found["tasks"]["mine"]) == written
+    assert "^" not in text
+    assert loaded.post(f"/api/drafts/{kind}/{key}/publish").status_code == 200
+    assert not loaded.get("/api/health").json()["invalid_templates"]
+
+
+def test_a_local_chain_through_a_child_addon_detaches(client, tmp_path):
+    """A local chain on `team:own`, which extends `release:tuned` through a
+    hidden level: its draft opens, and detaching it writes the node the
+    hidden level overrides as resolved."""
+    from kraft.api import deps
+
+    tuned = {"extends": "ship", "overrides": {"n.main.t": {"prompt": "tuned"}}}
+    load_release(client, tmp_path, chains={"ship": chain("base"), "tuned": tuned})
+    extra = {
+        "after": "n",
+        "node": {"id": "extra", "kind": "exec", "tasks": [{"id": "x", "extends": "release:base"}]},
+    }
+    _load_team(client, tmp_path, parent_chain="tuned", own_add=[extra])
+    st = client.app.state
+    (st.templates_dir / "chains" / "mine.yaml").write_text("id: mine\nextends: team:own\n")
+    deps._reload_templates(st)
+
+    viewed = client.get("/api/drafts/chains/mine")
+    detached = client.post("/api/drafts/chains/mine/ops", json={"ops": [{"op": "detach"}]})
+
+    assert viewed.status_code == 200, viewed.text
+    assert detached.status_code == 200, detached.text
+    text = client.get("/api/drafts/chains/mine").json()["files"]["chains/mine.yaml"]
+    written = yaml.safe_load(text)
+    task = written["nodes"][0]["tasks"][0]
+    assert task == {"id": "t", **AGENT, "skill": "release:notes", "prompt": "tuned"}
+    # The node the child added names its parent's task by the parent's id.
+    assert written["nodes"][1]["tasks"][0] == {"id": "x", "extends": "release:base"}
+    assert "^" not in text
+    assert client.post("/api/drafts/chains/mine/publish").status_code == 200
+    assert not client.get("/api/health").json()["invalid_templates"]
+
+
+def test_a_drafts_sources_name_inherited_chains_publicly(client, tmp_path):
+    """The draft view says which chain a field comes from; one reached through
+    a child add-on's hidden level reads as the ancestor's own id."""
+    from kraft.api import deps
+
+    tuned = {"extends": "ship", "overrides": {"n.main.t": {"prompt": "tuned"}}}
+    load_release(client, tmp_path, chains={"ship": chain("base"), "tuned": tuned})
+    _load_team(client, tmp_path, parent_chain="tuned")
+    st = client.app.state
+    (st.templates_dir / "chains" / "mine.yaml").write_text("id: mine\nextends: team:own\n")
+    deps._reload_templates(st)
+
+    sources = client.get("/api/drafts/chains/mine").json()["result"]["sources"]
+
+    assert sources["n.main.t"]["prompt"]["source"] == "chain:release:tuned"
+    assert "^" not in json.dumps(sources)
 
 
 @pytest.fixture

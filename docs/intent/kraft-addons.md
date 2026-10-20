@@ -78,6 +78,108 @@ IF the running Kraft's release is below an add-on's `requires.kraft` version or 
 enforced-by: tests/addons/test_manifest.py::test_kraft_compatibility[below-minimum], tests/addons/test_manifest.py::test_kraft_compatibility[next-major], tests/addons/test_manifest.py::test_kraft_compatibility[earlier-major], tests/addons/test_manifest.py::test_kraft_compatibility[release-candidate], tests/addons/test_load.py::test_an_addon_for_another_major_is_left_out, tests/addons/test_update.py::test_an_update_for_another_major_keeps_the_lock
 origin: src/kraft/addons/manifest.py §kraft_compatible
 
+## REQ an-addon-has-at-most-one-parent
+
+IF an add-on's `requires.addons` names more than one add-on, or one with the add-on's own name, THEN the system SHALL refuse the add-on.
+enforced-by: tests/addons/test_manifest.py::test_requires_addons[two-parents], tests/addons/test_manifest.py::test_requires_addons[own-name]
+origin: src/kraft/addons/manifest.py §AddonManifest
+
+## REQ a-parent-tree-has-no-cycle-and-bounded-depth
+
+IF an add-on's ancestry comes back to an add-on already in it, or holds more than 8 add-ons, root included, THEN the system SHALL leave the add-on out, naming the cycle or the depth.
+enforced-by: tests/addons/test_inherit.py::test_ancestry[cycle], tests/addons/test_inherit.py::test_ancestry[depth-9], tests/addons/test_inherit.py::test_ancestry[depth-8]
+origin: src/kraft/addons/inherit.py §ancestry
+
+## REQ an-ancestor-name-is-not-a-descendants
+
+IF an add-on's ancestor has the name of the add-on or of another add-on between them, THEN the system SHALL leave the add-on out, naming the ancestor.
+enforced-by: tests/addons/test_inherit.py::test_ancestry[same-name-ancestor]
+origin: src/kraft/addons/inherit.py §ancestry
+
+## REQ every-child-accepts-its-parents-version
+
+IF an add-on's parent is locked at a version outside the range its `requires.addons` gives, THEN the system SHALL leave the add-on out, naming the version and the range; and IF installing or updating an add-on would put it outside its parent's range, or its parent outside an installed child's range, THEN the system SHALL refuse that install or update, naming the version and the range.
+enforced-by: tests/addons/test_inherit.py::test_ancestry[out-of-range], tests/addons/test_inherit.py::test_ancestry[no-range-is-not-checked], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-out-of-range], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[parent-update-leaves-child-out-of-range]
+origin: src/kraft/addons/inherit.py §ancestry
+
+## REQ a-child-of-a-left-out-parent-is-left-out
+
+IF an add-on's parent is not installed as an add-on, or is not loaded, THEN the system SHALL leave the add-on out, with `its parent <id> is not loaded: <the parent's reason>` when the parent is installed, so a left-out add-on takes every descendant with it.
+enforced-by: tests/addons/test_inherit.py::test_ancestry[missing-parent], tests/addons/test_inherit.py::test_ancestry[left-out-parent], tests/addons/test_inherit.py::test_ancestry[repo-library-not-a-parent], tests/addons/test_inherit.py::test_cascade[left-out-root], tests/addons/test_inherit.py::test_cascade[below-a-cycle], tests/addons/test_load.py::test_installed_with_inheritance[parent-disabled], tests/addons/test_load.py::test_installed_with_inheritance[parent-store-edited], tests/addons/test_load.py::test_installed_with_inheritance[parent-library-edited], tests/addons/test_load.py::test_installed_with_inheritance[union-requirements], tests/addons/test_load.py::test_installed_with_inheritance[parent-left-out-after-its-content-check]
+origin: src/kraft/addons/inherit.py §cascade
+
+## REQ a-child-is-judged-with-its-ancestors
+
+WHEN the system decides whether an add-on with a parent loads, whether to install or update it, what its review shows, or whether a `policy.yaml` edit would leave it out, the system SHALL read its library with its ancestors' in place and check its limits against `maxima:` with them, so what it inherits and extends from them is resolved.
+enforced-by: tests/addons/test_load.py::test_installed_with_inheritance[child-library-uses-parent], tests/addons/test_load.py::test_installed_with_inheritance[child-limits-through-parent], tests/api/test_config_check.py::test_an_edit_that_drops_an_addon_is_reported[maxima-lowered-child-through-parent], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-installs-on-installed-parent], tests/addons/test_update_inheritance.py::test_a_childs_review_shows_its_chain_changes[child-drops-its-gate]
+origin: src/kraft/addons/load.py §_content_problem
+
+## REQ a-childs-requirements-include-its-ancestors
+
+IF a harness or agent profile that an add-on or any of its ancestors requires is not defined in `harnesses.yaml`, THEN the system SHALL leave the add-on out, naming what is missing.
+enforced-by: tests/addons/test_inherit.py::test_requirements[from-stores], tests/addons/test_inherit.py::test_requirements[from-manifests]
+origin: src/kraft/addons/inherit.py §requirements
+
+## REQ a-child-inherits-its-parents-library
+
+WHERE an add-on names a parent, the system SHALL serve under the add-on's namespace every chain, task, step, node, steering profile and skill of its parent's merged library that it does not override, so a grandchild inherits its grandparent's entries through its parent.
+enforced-by: tests/templates/test_library_inheritance.py::test_inherited_library[inherited-as-is], tests/templates/test_library_inheritance.py::test_inherited_library[skill-inherited], tests/templates/test_library_inheritance.py::test_inherited_library[steering-inherited]
+origin: src/kraft/templates/library.py §TemplateLibrary._add_inherited
+
+## REQ the-parents-name-means-the-inherited-layer
+
+WHEN a child add-on's `extends`, `steering`, `skill` or qualified `profile` names its parent by the parent's name, the system SHALL read the entry of the parent's merged library as the child inherits it, whatever namespace the instance gives the parent.
+enforced-by: tests/templates/test_library_inheritance.py::test_inherited_library[extend-inherited-component], tests/templates/test_library_inheritance.py::test_inherited_library[extend-inherited-chain], tests/templates/test_library_inheritance.py::test_inherited_library[alias-parent], tests/templates/test_library_inheritance.py::test_inherited_library[skill-by-parent-name], tests/templates/test_library_inheritance.py::test_inherited_library[steering-by-parent-name], tests/templates/test_library_inheritance.py::test_inherited_library[profile-by-parent-name]
+origin: src/kraft/addons/inherit.py §requalify
+
+## REQ an-inherited-entry-reads-the-childs-overrides
+
+WHEN an entry a child add-on inherits references another entry by its bare or own name, the system SHALL resolve that reference in the child's merged library, through `extends` too, so the inherited entry runs the child's override.
+enforced-by: tests/templates/test_library_inheritance.py::test_inherited_library[late-binding-through-extends], tests/templates/test_library_inheritance.py::test_inherited_library[late-binding-inherited-chain]
+origin: src/kraft/addons/inherit.py §requalify
+
+## REQ a-childs-entry-overrides-its-inherited-one
+
+WHEN a child add-on declares a chain, library entry or skill with the name of one it inherits, in the same section, the system SHALL serve the child's in place of the inherited one under the child's namespace.
+enforced-by: tests/templates/test_library_inheritance.py::test_inherited_library[override-replaces], tests/templates/test_library_inheritance.py::test_inherited_library[skill-overridden]
+origin: src/kraft/templates/library.py §TemplateLibrary._add_inherited
+
+## REQ a-child-removes-only-what-it-inherits
+
+WHERE a child add-on's `library.yaml` has a `remove:` naming entries of its inherited layer by section, the system SHALL serve none of them under that add-on's namespace or any descendant's while its ancestors keep serving their own, SHALL record a name the parent does not have as stale rather than refuse the add-on at load but refuse it at install and update, and SHALL refuse a `remove:` section or value it does not understand.
+enforced-by: tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[remove-typo], tests/templates/test_library_inheritance.py::test_remove[remove-chain], tests/templates/test_library_inheritance.py::test_remove[remove-task], tests/templates/test_library_inheritance.py::test_remove[remove-reaches-descendants], tests/templates/test_library_inheritance.py::test_remove[remove-skill], tests/templates/test_library_inheritance.py::test_remove[remove-steering], tests/templates/test_library_inheritance.py::test_remove[stale-name], tests/templates/test_library_inheritance.py::test_remove_is_refused[unknown-section], tests/templates/test_library_inheritance.py::test_remove_is_refused[not-a-list]
+origin: src/kraft/addons/inherit.py §removals
+
+## REQ a-removal-that-breaks-a-reference-is-refused
+
+IF a child add-on removes an entry that something remaining in its merged library still uses, THEN the system SHALL report the entry that uses it as not resolving, naming both, and SHALL refuse to install or update to that add-on.
+enforced-by: tests/templates/test_library_inheritance.py::test_remove[remove-breaks-ref], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[remove-breaks-a-reference]
+origin: src/kraft/templates/library.py §TemplateLibrary._add_inherited
+
+## REQ remove-is-refused-outside-a-child
+
+IF a `remove:` key is in the local `library.yaml`, in a repo library, or in an add-on that names no parent, the root of a child's ancestry included, THEN the system SHALL refuse it with "`remove:` is for an add-on that builds on another", leaving that add-on out at load instead of ignoring the key.
+enforced-by: tests/templates/test_library_inheritance.py::test_remove_is_refused[local-library], tests/templates/test_library_inheritance.py::test_remove_is_refused[root-of-tree], tests/templates/test_library_inheritance.py::test_a_root_addon_with_remove_is_left_out, tests/addons/test_repo_library.py::test_a_repo_library_is_refused_for_what_an_addon_is[repo-library-remove]
+origin: src/kraft/templates/library.py §_refuse_remove
+
+## REQ a-hidden-layer-is-reached-only-through-the-parent
+
+IF a local library, a chain file or an add-on's file names a child add-on's inherited layer directly rather than by the parent's name, THEN the system SHALL refuse the reference.
+enforced-by: tests/templates/test_library_inheritance.py::test_a_hidden_level_is_not_reachable_by_name[local-chain], tests/templates/test_library_inheritance.py::test_a_hidden_level_is_not_reachable_by_name[local-library], tests/templates/test_library_inheritance.py::test_a_hidden_level_is_not_reachable_by_name[addon-library]
+origin: src/kraft/templates/library.py §_refuse_layer_reference
+
+## REQ a-pinned-child-builds-with-its-parent
+
+WHEN a work item rebuilds its library from its pins and a pinned add-on names a parent, the system SHALL build that add-on as a child of the parent the instance has installed.
+enforced-by: tests/addons/test_pins.py::test_a_pinned_child_builds_with_its_parent[child-pin-resolves-with-current-ancestors]
+origin: src/kraft/addons/load.py §for_item
+
+## REQ addon-content-names-its-author
+
+The system SHALL know, for every chain and library entry a child add-on serves, the add-on whose file it was read from, telling apart a chain and a library entry of one name, and SHALL NOT show a hidden inherited layer's name in any listing, lint message, error or API payload.
+enforced-by: tests/templates/test_library_inheritance.py::test_read_only_names_the_author, tests/templates/test_library_inheritance.py::test_layers_never_leak[lint], tests/templates/test_library_inheritance.py::test_layers_never_leak[provenance-parent], tests/templates/test_library_inheritance.py::test_layers_never_leak[chains-extends], tests/templates/test_library_inheritance.py::test_layers_never_leak[catalogue]
+origin: src/kraft/templates/library.py §TemplateLibrary.authored_by
+
 ## REQ unknown-manifest-keys-are-ignored
 
 The system SHALL ignore a top-level `collection.json` or `addon.json` key it does not read, and SHALL refuse an unknown key inside `requires`.
@@ -87,7 +189,7 @@ origin: src/kraft/addons/manifest.py §AddonManifest
 ## REQ validate-warns-about-unknown-keys
 
 WHEN `validate` reads a manifest key Kraft does not read, the system SHALL list it as a warning.
-enforced-by: tests/cli/test_addon.py::test_validate[unknown-key-warning]
+enforced-by: tests/cli/test_addon_validate.py::test_validate[unknown-key-warning]
 origin: src/kraft/cli/addon.py §validate
 
 ## REQ addons-yaml-refuses-unknown-keys
@@ -116,9 +218,15 @@ origin: src/kraft/addons/config.py §CollectionConfig
 
 ## REQ validate-runs-the-install-checks
 
-WHEN an author validates a local collection or add-on, the system SHALL run the same extraction checks, add-on checks and whole-library lint as an install, SHALL report each problem with its file and key, and SHALL NOT change `addons.yaml`, `addons.lock` or the store.
-enforced-by: tests/cli/test_addon.py::test_validate[collection], tests/cli/test_addon.py::test_validate[single-addon], tests/cli/test_addon.py::test_validate[lint-failure], tests/cli/test_addon.py::test_validate[wrong-kraft-major], tests/cli/test_addon.py::test_validate[no-home], tests/cli/test_addon.py::test_validate[refused-content], tests/cli/test_addon.py::test_validate_writes_nothing_and_prints_json, tests/cli/test_addon.py::test_validate_against_a_kraft_home[same-id-is-not-a-clash], tests/cli/test_addon.py::test_validate_against_a_kraft_home[requires-unmet], tests/cli/test_addon.py::test_validate_against_a_kraft_home[breaks-a-chain]
+WHEN an author validates a local collection or add-on, the system SHALL run the same extraction checks, add-on checks and whole-library lint as an install, judging a child add-on together with its ancestors, SHALL report each problem with its file and key, and SHALL NOT change `addons.yaml`, `addons.lock` or the store.
+enforced-by: tests/cli/test_addon_validate.py::test_validate[collection], tests/cli/test_addon_validate.py::test_validate[single-addon], tests/cli/test_addon_validate.py::test_validate[lint-failure], tests/cli/test_addon_validate.py::test_validate[wrong-kraft-major], tests/cli/test_addon_validate.py::test_validate[no-home], tests/cli/test_addon_validate.py::test_validate[refused-content], tests/cli/test_addon_validate.py::test_validate_writes_nothing_and_prints_json, tests/cli/test_addon.py::test_validate_against_a_kraft_home[same-id-is-not-a-clash], tests/cli/test_addon.py::test_validate_against_a_kraft_home[requires-unmet], tests/cli/test_addon.py::test_validate_against_a_kraft_home[breaks-a-chain], tests/cli/test_addon_validate.py::test_validate[child-broken-against-parent], tests/cli/test_addon_validate.py::test_validate[child-removes-what-it-inherits], tests/cli/test_addon_validate.py::test_validate_against_an_instance_writes_nothing
 origin: src/kraft/cli/addon.py §validate
+
+## REQ validate-resolves-a-parent-from-path-or-with
+
+WHEN an author validates a child add-on, the system SHALL resolve each of its ancestors from, in order, the validated collection, each `--with` directory, the instance's installed add-on and the current version in the instance's collection, and IF an ancestor is found in none of them, or the tree is a cycle or too deep, THEN the system SHALL exit 1 saying so, alongside every problem the checks that need only the child's own files find.
+enforced-by: tests/cli/test_addon_validate.py::test_validate[child-with-parent-in-path], tests/cli/test_addon_validate.py::test_validate[child-with-grandparent-in-path], tests/cli/test_addon_validate.py::test_validate[child-with-parent-via-with], tests/cli/test_addon_validate.py::test_validate[child-parent-not-found], tests/cli/test_addon_validate.py::test_validate[child-against-instance], tests/cli/test_addon_validate.py::test_validate[child-against-instance-collection], tests/cli/test_addon_validate.py::test_validate_writes_nothing_and_prints_json, tests/cli/test_addon_validate.py::test_validate[child-parent-not-found-and-refused-content], tests/cli/test_addon_validate.py::test_validate[child-in-a-cycle], tests/cli/test_addon_validate.py::test_validate[with-dir-holds-neither], tests/cli/test_addon_validate.py::test_validate[with-dir-unreadable-before-the-parent]
+origin: src/kraft/cli/addon.py §_ancestors_for
 
 ## REQ addons-load-only-from-the-lock
 
@@ -128,8 +236,8 @@ origin: src/kraft/addons/load.py §installed
 
 ## REQ a-broken-addon-affects-only-itself
 
-IF an add-on fails a load-time check, THEN the system SHALL leave only that add-on out, report it under `invalid_templates`, and load the rest of the library.
-enforced-by: tests/addons/test_load.py::test_a_broken_addon_library_affects_only_that_addon, tests/addons/test_load.py::test_load_time_checks[requires-harness-removed], tests/addons/test_load.py::test_load_time_checks[repo-id-taken], tests/api/test_deps.py::test_health_names_an_addon_that_did_not_load[store-deleted], tests/addons/test_load.py::test_a_limit_above_a_lowered_maximum_leaves_the_addon_out
+IF an add-on fails a load-time check, THEN the system SHALL leave only that add-on and its descendants out, report it under `invalid_templates`, and load the rest of the library.
+enforced-by: tests/addons/test_inherit.py::test_cascade[left-out-root], tests/addons/test_load.py::test_a_broken_addon_library_affects_only_that_addon, tests/addons/test_load.py::test_load_time_checks[requires-harness-removed], tests/addons/test_load.py::test_load_time_checks[repo-id-taken], tests/api/test_deps.py::test_health_names_an_addon_that_did_not_load[store-deleted], tests/addons/test_load.py::test_a_limit_above_a_lowered_maximum_leaves_the_addon_out
 origin: src/kraft/addons/load.py §installed
 
 ## REQ a-hand-alias-or-ref-change-waits-for-update
@@ -162,11 +270,17 @@ IF a skill reference's qualifier is the namespace of an add-on in `addons.yaml` 
 enforced-by: tests/test_skill.py::test_addon_skill_references[unloaded-addon-is-an-error], tests/addons/test_load.py::test_what_loads[disabled]
 origin: src/kraft/skill.py §validate
 
-## REQ an-addon-is-self-contained
+## REQ an-addon-reaches-only-its-parent
 
-IF an add-on's qualified `extends`, `steering`, `profile` or `skill` reference names another installed Kraft add-on's namespace, THEN the system SHALL refuse the add-on.
-enforced-by: tests/addons/test_update.py::test_an_addon_cannot_carry[reference-to-another-addon], tests/addons/test_update.py::test_a_skill_may_not_reach_into_another_kraft_addon[another-kraft-addon], tests/cli/test_addon.py::test_validate_against_a_kraft_home[dependency], tests/addons/test_update.py::test_an_addon_cannot_carry[chain-extends-another-addon]
-origin: src/kraft/addons/update.py §check
+IF an add-on's qualified `extends`, `steering`, `profile` or `skill` reference names an add-on namespace other than its own or its parent's name, the grandparent's included, THEN the system SHALL refuse the add-on, saying an add-on reaches no add-on but its parent.
+enforced-by: tests/addons/test_update.py::test_an_addon_cannot_carry[reference-to-another-addon], tests/addons/test_update.py::test_a_skill_may_not_reach_into_another_kraft_addon[another-kraft-addon], tests/cli/test_addon.py::test_validate_against_a_kraft_home[dependency], tests/addons/test_update.py::test_an_addon_cannot_carry[chain-extends-another-addon], tests/addons/test_update_inheritance.py::test_an_addon_reaches_only_its_parent[parent-extends], tests/addons/test_update_inheritance.py::test_an_addon_reaches_only_its_parent[parent-steering], tests/addons/test_update_inheritance.py::test_an_addon_reaches_only_its_parent[parent-profile], tests/addons/test_update_inheritance.py::test_an_addon_reaches_only_its_parent[parent-skill], tests/addons/test_update_inheritance.py::test_an_addon_reaches_only_its_parent[other-extends], tests/addons/test_update_inheritance.py::test_an_addon_reaches_only_its_parent[other-skill], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-installs-on-installed-parent], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[qualifier-grandparent]
+origin: src/kraft/addons/update.py §problems
+
+## REQ install-refuses-a-missing-parent-collection
+
+IF an add-on being installed or updated names a parent that is not installed, THEN the system SHALL refuse it, naming the parent and the `kraft admin addon install` to run, or, when the parent's collection is not in `addons.yaml`, naming that collection and the `kraft admin addon collection add` to run, or, when the parent is disabled, the `kraft admin addon enable` to run; and an installed add-on with nothing to take SHALL be reported current, with why its ancestry does not hold, never refused.
+enforced-by: tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-missing-parent], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-missing-parent-collection], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-of-a-disabled-parent], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[current-child-of-a-disabled-parent]
+origin: src/kraft/addons/update.py §_ancestors
 
 ## REQ an-addon-cannot-run-commands-or-grant-permissions
 
@@ -177,7 +291,7 @@ origin: src/kraft/addons/update.py §check
 ## REQ update-shows-what-will-run-before-applying
 
 WHEN an install or update would change an installed add-on, the system SHALL list, before it writes anything, its changes to gates, merge steps, the order of a chain's nodes, forge targets, task harnesses and models, policy limits, `requires`, prompts, steering, skills, profiles and add-on skill references, the references its namespace captures, and whether it is a downgrade.
-enforced-by: tests/addons/test_review.py::test_review_calls_out[gate-removed], tests/addons/test_review.py::test_review_calls_out[gate-replaced], tests/addons/test_review.py::test_review_calls_out[auto-review], tests/addons/test_review.py::test_review_calls_out[merge-step], tests/addons/test_review.py::test_review_calls_out[forge-target], tests/addons/test_review.py::test_review_calls_out[target-used-by-a-sibling-chain], tests/addons/test_review.py::test_review_calls_out[harness], tests/addons/test_review.py::test_review_calls_out[limit-raised], tests/addons/test_review.py::test_review_calls_out[requires], tests/addons/test_review.py::test_review_calls_out[prompt], tests/addons/test_review.py::test_review_calls_out[steering], tests/addons/test_review.py::test_review_calls_out[skill], tests/addons/test_review.py::test_review_calls_out[profile], tests/addons/test_review.py::test_review_calls_out[plugin-ref], tests/addons/test_review.py::test_review_calls_out[downgrade], tests/addons/test_review.py::test_a_reordered_chain_is_reviewed[gate-after-merge], tests/addons/test_review.py::test_a_reordered_chain_is_reviewed[work-moved-past-a-gate], tests/addons/test_update.py::test_the_review_covers_the_instances_own_chains[captured-ref], tests/addons/test_update.py::test_the_review_covers_the_instances_own_chains[local-chain-through-the-addon], tests/addons/test_update_extends.py::test_the_review_shows_what_an_extending_chain_will_run
+enforced-by: tests/addons/test_review.py::test_review_calls_out[gate-removed], tests/addons/test_review.py::test_review_calls_out[gate-replaced], tests/addons/test_review.py::test_review_calls_out[auto-review], tests/addons/test_review.py::test_review_calls_out[merge-step], tests/addons/test_review.py::test_review_calls_out[forge-target], tests/addons/test_review.py::test_review_calls_out[target-used-by-a-sibling-chain], tests/addons/test_review.py::test_review_calls_out[harness], tests/addons/test_review.py::test_review_calls_out[limit-raised], tests/addons/test_review.py::test_review_calls_out[requires], tests/addons/test_review.py::test_review_calls_out[parent-range], tests/addons/test_review.py::test_review_calls_out[prompt], tests/addons/test_review.py::test_review_calls_out[steering], tests/addons/test_review.py::test_review_calls_out[skill], tests/addons/test_review.py::test_review_calls_out[profile], tests/addons/test_review.py::test_review_calls_out[plugin-ref], tests/addons/test_review.py::test_review_calls_out[downgrade], tests/addons/test_review.py::test_a_reordered_chain_is_reviewed[gate-after-merge], tests/addons/test_review.py::test_a_reordered_chain_is_reviewed[work-moved-past-a-gate], tests/addons/test_update.py::test_the_review_covers_the_instances_own_chains[captured-ref], tests/addons/test_update.py::test_the_review_covers_the_instances_own_chains[local-chain-through-the-addon], tests/addons/test_update_extends.py::test_the_review_shows_what_an_extending_chain_will_run, tests/addons/test_review.py::test_a_childs_chains_are_reviewed_with_its_ancestors[child-gate-added-is-reviewed], tests/addons/test_update_inheritance.py::test_a_childs_review_shows_its_chain_changes[child-drops-its-gate], tests/addons/test_update_inheritance.py::test_a_childs_review_shows_its_chain_changes[parent-update-changes-a-childs-chain]
 origin: src/kraft/addons/review.py §review
 
 ## REQ the-review-cannot-hide-text
@@ -224,8 +338,8 @@ origin: src/kraft/addons/update.py §update
 
 ## REQ update-refuses-a-change-that-breaks-a-chain
 
-IF an update's candidate add-ons would leave a currently resolving chain of the instance's own or of an add-on, a chain reference to one of those, or a profile fallback unresolved, THEN the system SHALL refuse that add-on and name each such reference.
-enforced-by: tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[local-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[repos-default-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[intake-schedule], tests/addons/test_update.py::test_a_captured_reference_the_addon_does_not_provide_is_refused, tests/addons/test_update.py::test_a_broken_profile_pairing_is_refused, tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[removed-node-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[anchor-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[override-path-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[added-id-taken]
+IF an update's candidate add-ons would leave a currently resolving chain of the instance's own or of an add-on, a chain reference to one of those, or a profile fallback unresolved, or would leave out a descendant add-on that loads now, THEN the system SHALL refuse that add-on and name each such reference or descendant.
+enforced-by: tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[local-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[repos-default-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[intake-schedule], tests/addons/test_update.py::test_a_captured_reference_the_addon_does_not_provide_is_refused, tests/addons/test_update.py::test_a_broken_profile_pairing_is_refused, tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[removed-node-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[anchor-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[override-path-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[added-id-taken], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[parent-update-breaks-child-chain], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[parent-update-drops-a-descendant]
 origin: src/kraft/addons/update.py §breaks
 
 ## REQ an-addon-lists-no-addons
@@ -266,8 +380,8 @@ origin: src/kraft/cli/addon.py §_cmd_update
 
 ## REQ removing-a-referenced-addon-is-refused
 
-IF local configuration (`library.yaml`, `chains/`, `repos.yaml`, `intake.yaml`, `policy.yaml` triggers or `harnesses.yaml` fallbacks) references the namespace of an add-on being uninstalled or disabled, or an accepted repo library lists it under `addons:`, THEN the system SHALL refuse and list each reference.
-enforced-by: tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[uninstall], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[disable], tests/cli/test_addon.py::test_removing_an_addon_a_chain_extends_is_refused, tests/cli/test_addon.py::test_removing_an_addon_a_repo_library_builds_on_is_refused[uninstall], tests/cli/test_addon.py::test_removing_an_addon_a_repo_library_builds_on_is_refused[disable], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[a-repo-library-builds-on-it]
+IF local configuration (`library.yaml`, `chains/`, `repos.yaml`, `intake.yaml`, `policy.yaml` triggers or `harnesses.yaml` fallbacks) references the namespace of an add-on being uninstalled or disabled, an accepted repo library lists it under `addons:`, or an installed, enabled add-on names it as its parent, THEN the system SHALL refuse and list each reference.
+enforced-by: tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[uninstall], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[disable], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[child-uninstall], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[child-disable], tests/cli/test_addon.py::test_removing_an_addon_a_chain_extends_is_refused, tests/cli/test_addon.py::test_removing_an_addon_a_repo_library_builds_on_is_refused[uninstall], tests/cli/test_addon.py::test_removing_an_addon_a_repo_library_builds_on_is_refused[disable], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[a-repo-library-builds-on-it]
 origin: src/kraft/cli/addon.py §_still_referenced
 
 ## REQ a-worker-does-not-change-addons
@@ -284,8 +398,8 @@ origin: src/kraft/apply.py §reload
 
 ## REQ an-addons-yaml-edit-is-checked
 
-IF a hand edit of `addons.yaml` would leave a currently resolving chain or reference unresolved, THEN the system SHALL report it on the pending reload with the reason, and SHALL list a changed `addons.yaml` or `addons.lock` as a pending reload.
-enforced-by: tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[breaks-a-chain], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[captures-a-reference], tests/api/test_deps.py::test_an_addon_reload_leaves_the_operators_pending_edits_pending
+IF a hand edit of `addons.yaml` would leave a currently resolving chain or reference unresolved, or leave out a loaded add-on whose own entry it keeps enabled, THEN the system SHALL report it on the pending reload with the reason, naming each descendant it leaves out, and SHALL list a changed `addons.yaml` or `addons.lock` as a pending reload.
+enforced-by: tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[breaks-a-chain], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[captures-a-reference], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[names-each-descendant-left-out], tests/api/test_deps.py::test_an_addon_reload_leaves_the_operators_pending_edits_pending
 origin: src/kraft/api/config_check.py §_check_addons
 
 ## REQ an-edit-that-drops-an-addon-is-reported
@@ -345,7 +459,7 @@ origin: src/kraft/addons/update.py §auto_update
 ## REQ auto-update-holds-what-widens-a-run
 
 IF an auto-update is a downgrade, a move onto a pre-release, or has a review call-out about what a run can reach, THEN the system SHALL hold it for a person and keep the locked version.
-enforced-by: tests/addons/test_auto_update.py::test_auto_update_holds[gate-removed], tests/addons/test_auto_update.py::test_auto_update_holds[limit-raised], tests/addons/test_auto_update.py::test_auto_update_holds[requires], tests/addons/test_auto_update.py::test_auto_update_holds[downgrade], tests/addons/test_auto_update.py::test_auto_update_holds[pre-release], tests/addons/test_auto_update.py::test_a_newer_pre_release_follows_a_pre_release
+enforced-by: tests/addons/test_auto_update.py::test_auto_update_holds[gate-removed], tests/addons/test_auto_update.py::test_auto_update_holds[limit-raised], tests/addons/test_auto_update.py::test_auto_update_holds[requires], tests/addons/test_auto_update.py::test_auto_update_holds[downgrade], tests/addons/test_auto_update.py::test_auto_update_holds[pre-release], tests/addons/test_auto_update.py::test_a_newer_pre_release_follows_a_pre_release, tests/addons/test_update_inheritance.py::test_a_childs_review_shows_its_chain_changes[parent-update-changes-a-childs-chain]
 origin: src/kraft/addons/update.py §may_apply_unattended
 
 ## REQ auto-update-never-installs-or-re-installs
@@ -368,14 +482,14 @@ origin: src/kraft/cli/admin.py §_confirm_dropped_addons
 
 ## REQ addon-content-is-read-only
 
-IF a write would save an add-on's component or chain, THEN the system SHALL answer 409 and name the add-on.
-enforced-by: tests/api/test_addon_content.py::test_saving_an_addon_entry_answers_409[put-chain], tests/api/test_addon_content.py::test_saving_an_addon_entry_answers_409[chains-draft], tests/api/test_addon_content.py::test_saving_an_addon_entry_answers_409[library-op]
+IF a write would save an add-on's component or chain, THEN the system SHALL answer 409 and name the add-on, and, for an entry a child add-on inherits, the ancestor that wrote it too.
+enforced-by: tests/api/test_addon_content.py::test_saving_an_addon_entry_answers_409[put-chain], tests/api/test_addon_content.py::test_saving_an_addon_entry_answers_409[chains-draft], tests/api/test_addon_content.py::test_saving_an_addon_entry_answers_409[library-op], tests/templates/test_library_inheritance.py::test_read_only_names_the_author
 origin: src/kraft/templates/catalogue.py §read_only_message
 
 ## REQ an-addon-copy-resolves-locally
 
-WHEN an add-on component or chain is copied into a local draft, the system SHALL carry its add-on-internal references qualified, so the copy resolves.
-enforced-by: tests/api/test_addon_content.py::test_copy_from_an_addon[chain], tests/api/test_addon_content.py::test_copy_from_an_addon[component]
+WHEN an add-on component or chain is copied into a local draft, the system SHALL carry its add-on-internal references qualified, and a child add-on's references to its parent's entries as the parent's own ids, so the copy resolves.
+enforced-by: tests/api/test_addon_content.py::test_copy_from_an_addon[chain], tests/api/test_addon_content.py::test_copy_from_an_addon[component], tests/api/test_addon_content.py::test_a_copy_from_a_child_addon_names_its_parent[child-chain], tests/api/test_addon_content.py::test_a_copy_from_a_child_addon_names_its_parent[child-component]
 origin: src/kraft/drafts/ops.py §copy_component
 
 ## REQ installed-addons-are-recomputed-only-when-an-input-changes
@@ -418,7 +532,7 @@ origin: src/kraft/executor/dispatch.py §restore_pins
 
 IF a directory collection's `collection.json` is a symlink, a FIFO or over the JSON cap, THEN the system SHALL refuse the collection.
 enforced-by: tests/addons/test_update_hardening.py::test_a_directory_collections_catalogue_is_read_safely[fifo], tests/addons/test_update_hardening.py::test_a_directory_collections_catalogue_is_read_safely[symlink], tests/addons/test_update_hardening.py::test_a_directory_collections_catalogue_is_read_safely[oversized]
-origin: src/kraft/addons/update.py §_catalogue
+origin: src/kraft/addons/update.py §catalogue
 
 ## REQ a-minted-repository-id-skips-addon-namespaces
 
@@ -431,3 +545,27 @@ origin: src/kraft/api/routes/repos.py §_repository_id
 IF connecting a repository would declare a workspace naming an entry whose `id` is `kraft` or an add-on's namespace, THEN the system SHALL refuse the connect, name the add-on, and write nothing.
 enforced-by: tests/api/test_repos_workspaces.py::test_a_member_whose_id_is_an_addon_namespace_refuses_the_connect[addon-namespace], tests/api/test_repos_workspaces.py::test_a_member_whose_id_is_an_addon_namespace_refuses_the_connect[reserved]
 origin: src/kraft/api/routes/repos.py §_declare_workspace
+
+## REQ a-parent-with-children-is-not-removed
+
+IF an add-on being uninstalled or disabled, by `kraft admin addon` or by an `addons.yaml` edit, is named as parent by an installed add-on whose entry stays enabled, THEN the system SHALL refuse with `something installed builds on it`, naming each such child, and SHALL allow disabling the child.
+enforced-by: tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[child-uninstall], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[child-disable], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[a-child-builds-on-it], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[parent-and-child-together]
+origin: src/kraft/addons/update.py §child_dependents
+
+## REQ a-child-is-not-enabled-without-its-parent
+
+IF `kraft admin addon enable` names an add-on whose parent, with the entry enabled, is not installed, not loaded, or outside its range, THEN the system SHALL refuse with why, naming the parent and, when it is not installed, the install to run, and write nothing.
+enforced-by: tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-disabled], tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-not-installed], tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-out-of-range], tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-loaded]
+origin: src/kraft/cli/addon.py §_parent_loads
+
+## REQ validate-names-a-parents-own-problems-by-its-real-path
+
+IF `kraft admin addon validate` finds a failure in an ancestor's own files, THEN the system SHALL report it once, against the directory that ancestor was read from, and SHALL NOT name a temporary copy or report the child's served copy of it as a second failure.
+enforced-by: tests/cli/test_addon_validate.py::test_validate[parent-broken-not-blamed-on-child]
+origin: src/kraft/cli/addon.py §_own_problems
+
+## REQ a-draft-names-an-inherited-entry-by-its-public-id
+
+WHERE a draft of a chain reads through a child add-on's inherited chains, the system SHALL write and show them under the ancestor's own id (detach, the per-field sources), never a hidden level's name.
+enforced-by: tests/api/test_addon_content.py::test_a_local_chain_through_a_child_addon_detaches, tests/api/test_addon_content.py::test_a_drafts_sources_name_inherited_chains_publicly
+origin: src/kraft/drafts/extending.py §detach

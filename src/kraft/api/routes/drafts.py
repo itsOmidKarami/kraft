@@ -40,7 +40,7 @@ def _area(area: str, key: str, st=None, *, read: bool = False) -> store.Area:
     # Before the key-shape check, which would answer 400 for a qualified id:
     # an add-on's chain has no draft.
     if area == "chains" and library is not None:
-        if why := catalogue.read_only_message(library, key):
+        if why := catalogue.read_only_message(library, key, "chains"):
             if read:
                 return found  # shown as published, never as a draft
             raise HTTPException(409, why)
@@ -59,7 +59,8 @@ def _state(st, area: str, key: str, draft: dict | None, history: list[dict]):
         # An add-on's chain is in its store, not under config/: shown as the
         # library holds it, its own references already qualified.
         if key in library.chain_ids:
-            published[f"chains/{key}.yaml"] = authored.dump(ops.plain(library.chain_data(key)))
+            shown = library.public(library.chain_data(key))
+            published[f"chains/{key}.yaml"] = authored.dump(ops.plain(shown))
     files = {n: t for n, t in published.items() if t is not None}
     files |= draft["files"] if draft else {}
     result = resolve.resolve(

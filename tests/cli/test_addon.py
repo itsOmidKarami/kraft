@@ -1,5 +1,6 @@
-"""`kraft admin addon`: an author validates a collection without installing
-anything; an operator adds collections and installs, updates and removes add-ons."""
+"""`kraft admin addon`: an operator adds collections and installs, updates and
+removes add-ons, and validates against this instance. An author's validate
+without one is `test_addon_validate`'s."""
 
 import json
 import socket
@@ -9,13 +10,14 @@ from support.addons import (
     AGENT,
     accept_repo_library,
     chain,
+    install,
     instance,
     make_collection,
     publish,
     repo_with_library,
 )
 
-from kraft import cli, update
+from kraft import cli
 from kraft.addons import fetch
 from kraft.addons.config import AddonsLock
 from kraft.cli import addon as addon_cli
@@ -35,116 +37,6 @@ def _run(capsys, *argv):
     if isinstance(code, str):  # `SystemExit("error: ...")`: printed, and exit 1
         return 1, out.out + out.err + code
     return code, out.out + out.err
-
-
-@pytest.mark.parametrize(
-    ("addons", "sub", "running", "code", "says"),
-    [
-        (GOOD, "", None, 0, "release 1.0.0"),
-        (GOOD, "addons/release", None, 0, "release 1.0.0"),
-        (
-            {"release": {**GOOD["release"], "chains": {"ship": chain("nope")}}},
-            "",
-            None,
-            1,
-            "extends no task named 'release:nope'",
-        ),
-        (
-            {
-                "release": {
-                    **GOOD["release"],
-                    "manifest": {"requires": {"kraft": "3.0", "harnesses": ["codex"]}},
-                }
-            },
-            "",
-            "2.4.0",
-            1,
-            "needs Kraft 3.x",
-        ),
-        (
-            {"release": {**GOOD["release"], "manifest": {"category": "delivery"}}},
-            "",
-            None,
-            0,
-            "'category' is not read by Kraft",
-        ),
-        (GOOD, "", None, 0, "no Kraft home"),
-        (
-            {"release": {**GOOD["release"], "files": {"chains/Review.yaml": "nodes: []\n"}}},
-            "",
-            None,
-            0,
-            "chains/Review.yaml is not part of the add-on layout",
-        ),
-        (GOOD, "addons", None, 1, "holds neither"),
-        (
-            {"release": {"library": {"tasks": {"run": {"kind": "subprocess", "command": "make"}}}}},
-            "",
-            None,
-            1,
-            "may not carry a subprocess task",
-        ),
-        (
-            {"release": {"files": {"library.yaml": "tasks: {'x:y': {kind: agent}}\n"}}},
-            "",
-            None,
-            1,
-            "addons/release/library.yaml",
-        ),
-    ],
-    ids=[
-        "collection",
-        "single-addon",
-        "lint-failure",
-        "wrong-kraft-major",
-        "unknown-key-warning",
-        "no-home",
-        "ignored-look-alike",
-        "not-an-addon",
-        "refused-content",
-        "library-error-names-the-authors-file",
-    ],
-)
-def test_validate(tmp_path, capsys, monkeypatch, addons, sub, running, code, says):
-    if running is not None:
-        monkeypatch.setattr(update, "installed", lambda: running)
-    collection = make_collection(tmp_path, addons)
-    got, out = _run(capsys, "validate", str(collection / sub))
-    assert got == code and says in out, out
-
-
-@pytest.mark.parametrize(
-    "manifest_path",
-    [
-        pytest.param(".kraft/collection.json", id="collection"),
-        pytest.param("addons/release/.kraft/addon.json", id="addon"),
-    ],
-)
-def test_validate_names_a_broken_manifest_once(tmp_path, capsys, manifest_path):
-    collection = make_collection(tmp_path, GOOD)
-    broken = collection / manifest_path
-    assert broken.is_file()
-    broken.write_text("{")
-
-    code, out = _run(capsys, "validate", str(collection))
-
-    assert code == 1 and f"error: {broken}: " in out and out.count(str(broken)) == 1, out
-
-
-def test_validate_writes_nothing_and_prints_json(tmp_path, capsys, monkeypatch):
-    """`validate` installs nothing: the instance's home is not touched, with a
-    home or without one. `--json` is the report itself."""
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setenv("KRAFT_HOME", str(home))
-    collection = make_collection(tmp_path, GOOD)
-    before = set(home.rglob("*"))
-    code, out = _run(capsys, "validate", str(collection), "--json")
-    report = json.loads(out)
-    assert code == 0 and set(home.rglob("*")) == before
-    assert [p["name"] for p in report["addons"]] == ["release"]
-    assert report["addons"][0]["digest"].startswith("sha256:")
-    assert report["problems"] == [] and report["skipped"]
 
 
 # ── collections, install, update ──
@@ -370,32 +262,82 @@ def test_collection_remove_refused_while_installed(installed, capsys):
     assert installed.yaml()["collections"] == {} and not mirror.exists()
 
 
-@pytest.mark.parametrize("verb", ["uninstall", "disable"])
-def test_removing_a_referenced_addon_is_refused(installed, capsys, verb):
-    chains = installed.config / "chains"
+TEAM = {
+    "library": {"tasks": {"scan": {"extends": "release:base"}}},
+    "chains": {"scan": chain("scan")},
+    "manifest": {"requires": {"kraft": "2", "harnesses": ["codex"], "addons": {ID: "1"}}},
+}
+
+
+def _install_team(home, tmp_path, accepts="1"):
+    """`team@payments`, which builds on the `release@acme` versions `accepts`
+    takes, installed and enabled."""
+    requires = {**TEAM["manifest"]["requires"], "addons": {ID: accepts}}
+    team = {**TEAM, "manifest": {"requires": requires}}
+    collection = make_collection(tmp_path, {"team": team}, name="payments")
+    install(home.config, home.addons, collection, "team")
+
+
+def _local_references(home, tmp_path, capsys):
+    """The instance's own chain and repos.yaml name the add-on; dropping both
+    lifts the refusal."""
+    chains = home.config / "chains"
     write_yaml(chains / "mine.yaml", chain("release:base"))
     write_yaml(
-        installed.config / "repos.yaml",
-        {"repos": [{"path": "/r", "default_chain": "release:ship"}]},
+        home.config / "repos.yaml", {"repos": [{"path": "/r", "default_chain": "release:ship"}]}
     )
+
+    def undo():
+        (chains / "mine.yaml").unlink()
+        (home.config / "repos.yaml").unlink()
+
+    return [
+        "chains/mine.yaml: nodes[n].tasks[t]: extends 'release:base'",
+        "repos.yaml: repos[0]: default_chain 'release:ship'",
+    ], undo
+
+
+def _a_child(home, tmp_path, capsys):
+    """An installed, enabled child names the add-on as its parent; disabling
+    the child, always allowed, lifts the refusal."""
+    _install_team(home, tmp_path)
+
+    def undo():
+        assert _run(capsys, "disable", "team@payments")[0] == 0
+        home.reloads.clear()
+
+    return ["team@payments builds on it (requires.addons)"], undo
+
+
+@pytest.mark.parametrize(
+    ("verb", "refers"),
+    [
+        pytest.param("uninstall", _local_references, id="uninstall"),
+        pytest.param("disable", _local_references, id="disable"),
+        pytest.param("uninstall", _a_child, id="child-uninstall"),
+        pytest.param("disable", _a_child, id="child-disable"),
+    ],
+)
+def test_removing_a_referenced_addon_is_refused(installed, capsys, tmp_path, verb, refers):
+    said, undo = refers(installed, tmp_path, capsys)
     before = installed.written()
 
     code, out = _run(capsys, verb, ID)
 
     assert code != 0 and f"cannot {verb} release@acme" in out
-    assert "chains/mine.yaml: nodes[n].tasks[t]: extends 'release:base'" in out
-    assert "repos.yaml: repos[0]: default_chain 'release:ship'" in out
+    assert all(line in out for line in said), out
     assert installed.written() == before and installed.reloads == []
 
-    (chains / "mine.yaml").unlink()
-    (installed.config / "repos.yaml").unlink()
+    undo()
+    rest = {k: v for k, v in installed.yaml()["addons"].items() if k != ID}
     assert _run(capsys, verb, ID)[0] == 0
     assert installed.reloads == [1]
     if verb == "uninstall":
-        assert installed.yaml()["addons"] == {} and installed.locked() is None
+        assert installed.yaml()["addons"] == rest and installed.locked() is None
     else:
-        assert installed.yaml()["addons"] == {ID: False} and installed.locked() is not None
-        assert _run(capsys, "enable", ID)[0] == 0 and installed.yaml()["addons"] == {ID: True}
+        assert installed.yaml()["addons"] == {**rest, ID: False} and installed.locked() is not None
+        assert _run(capsys, "enable", ID)[0] == 0
+        assert installed.yaml()["addons"] == {**rest, ID: True}
 
 
 @pytest.mark.parametrize("verb", ["uninstall", "disable"])
@@ -411,7 +353,7 @@ def test_removing_an_addon_a_repo_library_builds_on_is_refused(installed, capsys
     code, out = _run(capsys, verb, ID)
 
     assert code != 0, out
-    assert f"cannot {verb} release@acme: a connected repository's repo library builds on it" in out
+    assert f"cannot {verb} release@acme: something installed builds on it" in out
     said = "repository app: .kraft/library.yaml lists release@acme under addons:; disconnect"
     assert said in out and "is still referenced by" not in out, out
     assert installed.written() == before and installed.reloads == []

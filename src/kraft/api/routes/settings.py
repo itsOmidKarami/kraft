@@ -53,7 +53,8 @@ def _chain_summary(library: TemplateLibrary, id: str) -> dict:
     so are `extends`, the chain this one builds on, and `extended_by`, every
     chain whose `extends` reaches this one."""
     uses = {node: sorted(refs) for node, refs in library.references(id).items() if refs}
-    data = library.chain_data(id)
+    # A child add-on's parent level shows as its ancestor's own chain.
+    data = library.public(library.chain_data(id))
     description, parent = data.get("description"), data.get("extends")
     listed = {
         "id": id,
@@ -402,7 +403,7 @@ async def put_template(tid: str, body: ChainText, request: Request):
     st = request.app.state
     library = deps.library_or_503(st)
     # Before the id-shape check, which would answer 400 for a qualified id.
-    if why := catalogue.read_only_message(library, tid):
+    if why := catalogue.read_only_message(library, tid, "chains"):
         raise HTTPException(409, why)
     if not _CHAIN_ID.fullmatch(tid):
         raise HTTPException(400, f"invalid chain id {tid!r}")
