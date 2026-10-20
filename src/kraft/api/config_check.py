@@ -798,20 +798,37 @@ def _check_addons(path, data, ctx):
 
     issues: list[TemplateIssue] = []
     if loads(now) != loads(then):
+        # Each descendant the edit leaves out, though its own entry stays
+        # enabled, is named with why (`an-addons-yaml-edit-is-checked`).
+        loading = {p.id for p in now if p.left_out is None}
+        descendants = {
+            p.id: f"would leave add-on {p.id} out: {p.left_out}"
+            for p in then
+            if p.parent is not None and p.left_out is not None and p.id in loading
+        }
         # As `kraft admin addon disable` and `uninstall` refuse: while a repo
-        # library lists an add-on this edit unloads. Its chains then need no
+        # library lists an add-on this edit unloads, or a child it leaves
+        # enabled names it as parent. A repo library's chains then need no
         # judging of their own (`removing-a-referenced-addon-is-refused`).
+        # Children are read from the edit, so one disabled with its parent
+        # holds nothing; repo libraries as they load now.
         still = {p.id for p in then if p.left_out is None}
+        judged = [
+            *(p for p in now if p.repo_id is not None),
+            *(p for p in then if p.repo_id is None),
+        ]
         built_on = [
             why
             for p in now
-            if p.repo_id is None and p.left_out is None and p.id not in still
+            if p.repo_id is None and p.left_out is None
+            if p.id not in still and p.id not in descendants
             if (
                 why := addon_update.built_on_refusal(
-                    p.id, "disable" if p.id in config.addons else "uninstall", now
+                    p.id, "disable" if p.id in config.addons else "uninstall", judged
                 )
             )
         ]
+        built_on += descendants.values()
         libraries = {p.namespace for p in then if p.repo_id is not None}
         try:
             broken = addon_update.breaks(

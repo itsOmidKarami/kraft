@@ -26,7 +26,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from kraft import client, harness, update
-from kraft.addons import fetch, flow, load, manifest, review
+from kraft.addons import fetch, flow, inherit, load, manifest, review
 from kraft.addons import update as addon_update
 from kraft.addons.config import AddonsConfig, AddonsLock
 from kraft.addons.load import InstalledAddon
@@ -592,6 +592,27 @@ def _still_referenced(
         raise _refuse("\n".join(said))
 
 
+def _parent_loads(raw: dict, config_dir: Path, addons_dir: Path, addon_id: str) -> None:
+    """Refuse to enable a child whose parent is not installed, not loaded, or
+    outside its range, judged as the instance would load with the entry
+    enabled (`a-child-is-not-enabled-without-its-parent`)."""
+    try:
+        config = AddonsConfig.model_validate(raw)
+    except ValidationError:
+        return  # `_edit` refuses it, saying why
+    found = load.installed(config_dir, addons_dir, config=config)
+    for addon in found:
+        if addon.id != addon_id or addon.parent is None:
+            continue
+        try:
+            inherit.ancestry(addon, found)
+        except inherit.InheritanceError as exc:
+            why = str(exc)
+            if why == f"its parent {addon.parent} is not installed":
+                why += f"; install it first: kraft admin addon install {addon.parent}"
+            raise _refuse(f"cannot enable {addon_id}: {why}") from exc
+
+
 def _cmd_enable(ns: argparse.Namespace) -> None:
     _not_a_worker()
     on = ns.addon_verb == "enable"
@@ -603,6 +624,8 @@ def _cmd_enable(ns: argparse.Namespace) -> None:
             _still_referenced(config, config_dir, addons_dir, ns.addon, "disable")
         _long_entry(raw, ns.addon)["enabled"] = on
         _short_entry(raw, ns.addon)
+        if on:
+            _parent_loads(raw, config_dir, addons_dir, ns.addon)
 
     _edit(change)
     _reload()

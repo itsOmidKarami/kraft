@@ -9,6 +9,7 @@ from support.addons import (
     AGENT,
     accept_repo_library,
     chain,
+    install,
     instance,
     make_collection,
     publish,
@@ -370,32 +371,77 @@ def test_collection_remove_refused_while_installed(installed, capsys):
     assert installed.yaml()["collections"] == {} and not mirror.exists()
 
 
-@pytest.mark.parametrize("verb", ["uninstall", "disable"])
-def test_removing_a_referenced_addon_is_refused(installed, capsys, verb):
-    chains = installed.config / "chains"
+TEAM = {
+    "library": {"tasks": {"scan": {"extends": "release:base"}}},
+    "chains": {"scan": chain("scan")},
+    "manifest": {"requires": {"kraft": "2", "harnesses": ["codex"], "addons": {ID: "1"}}},
+}
+
+
+def _install_team(home, tmp_path):
+    """`team@payments`, which builds on `release@acme`, installed and enabled."""
+    collection = make_collection(tmp_path, {"team": TEAM}, name="payments")
+    install(home.config, home.addons, collection, "team")
+
+
+def _local_references(home, tmp_path, capsys):
+    """The instance's own chain and repos.yaml name the add-on; dropping both
+    lifts the refusal."""
+    chains = home.config / "chains"
     write_yaml(chains / "mine.yaml", chain("release:base"))
     write_yaml(
-        installed.config / "repos.yaml",
-        {"repos": [{"path": "/r", "default_chain": "release:ship"}]},
+        home.config / "repos.yaml", {"repos": [{"path": "/r", "default_chain": "release:ship"}]}
     )
+
+    def undo():
+        (chains / "mine.yaml").unlink()
+        (home.config / "repos.yaml").unlink()
+
+    return [
+        "chains/mine.yaml: nodes[n].tasks[t]: extends 'release:base'",
+        "repos.yaml: repos[0]: default_chain 'release:ship'",
+    ], undo
+
+
+def _a_child(home, tmp_path, capsys):
+    """An installed, enabled child names the add-on as its parent; disabling
+    the child, always allowed, lifts the refusal."""
+    _install_team(home, tmp_path)
+
+    def undo():
+        assert _run(capsys, "disable", "team@payments")[0] == 0
+        home.reloads.clear()
+
+    return ["team@payments builds on it (requires.addons)"], undo
+
+
+@pytest.mark.parametrize(
+    ("verb", "refers"),
+    [
+        pytest.param("uninstall", _local_references, id="uninstall"),
+        pytest.param("disable", _local_references, id="disable"),
+        pytest.param("uninstall", _a_child, id="child-uninstall"),
+        pytest.param("disable", _a_child, id="child-disable"),
+    ],
+)
+def test_removing_a_referenced_addon_is_refused(installed, capsys, tmp_path, verb, refers):
+    said, undo = refers(installed, tmp_path, capsys)
     before = installed.written()
 
     code, out = _run(capsys, verb, ID)
 
     assert code != 0 and f"cannot {verb} release@acme" in out
-    assert "chains/mine.yaml: nodes[n].tasks[t]: extends 'release:base'" in out
-    assert "repos.yaml: repos[0]: default_chain 'release:ship'" in out
+    assert all(line in out for line in said), out
     assert installed.written() == before and installed.reloads == []
 
-    (chains / "mine.yaml").unlink()
-    (installed.config / "repos.yaml").unlink()
+    undo()
     assert _run(capsys, verb, ID)[0] == 0
     assert installed.reloads == [1]
     if verb == "uninstall":
-        assert installed.yaml()["addons"] == {} and installed.locked() is None
+        assert ID not in installed.yaml()["addons"] and installed.locked() is None
     else:
-        assert installed.yaml()["addons"] == {ID: False} and installed.locked() is not None
-        assert _run(capsys, "enable", ID)[0] == 0 and installed.yaml()["addons"] == {ID: True}
+        assert installed.yaml()["addons"][ID] is False and installed.locked() is not None
+        assert _run(capsys, "enable", ID)[0] == 0 and installed.yaml()["addons"][ID] is True
 
 
 @pytest.mark.parametrize("verb", ["uninstall", "disable"])
@@ -411,7 +457,7 @@ def test_removing_an_addon_a_repo_library_builds_on_is_refused(installed, capsys
     code, out = _run(capsys, verb, ID)
 
     assert code != 0, out
-    assert f"cannot {verb} release@acme: a connected repository's repo library builds on it" in out
+    assert f"cannot {verb} release@acme: something installed builds on it" in out
     said = "repository app: .kraft/library.yaml lists release@acme under addons:; disconnect"
     assert said in out and "is still referenced by" not in out, out
     assert installed.written() == before and installed.reloads == []

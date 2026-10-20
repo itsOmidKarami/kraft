@@ -326,17 +326,27 @@ def repo_library_dependents(addon_id: str, addons: Sequence[load.InstalledAddon]
     return out
 
 
+def child_dependents(addon_id: str, addons: Sequence[load.InstalledAddon]) -> list[str]:
+    """One line for each installed, enabled add-on among `addons` that names
+    `addon_id` as its parent in `requires.addons`
+    (`a-parent-with-children-is-not-removed`). A disabled child names no
+    parent: its manifest is not read, and disabling a child is always allowed."""
+    return [
+        f"{addon.id} builds on it (requires.addons)"
+        for addon in addons
+        if addon.repo_id is None and not addon.quiet and addon.parent == addon_id
+    ]
+
+
 def built_on_refusal(addon_id: str, verb: str, addons: Sequence[load.InstalledAddon]) -> str | None:
-    """Why `verb` (`uninstall`, `disable`) is refused for `addon_id` while a
-    repo library among `addons` lists it under `addons:`; None when none does.
-    The CLI and the `addons.yaml` editor both say it this way."""
-    lines = repo_library_dependents(addon_id, addons)
+    """Why `verb` (`uninstall`, `disable`) is refused for `addon_id` while an
+    installed child among `addons` names it as its parent, or a repo library
+    lists it under `addons:`; None when nothing does. The CLI and the
+    `addons.yaml` editor both say it this way."""
+    lines = child_dependents(addon_id, addons) + repo_library_dependents(addon_id, addons)
     if not lines:
         return None
-    return (
-        f"cannot {verb} {addon_id}: a connected repository's repo library builds on it\n  "
-        + "\n  ".join(lines)
-    )
+    return f"cannot {verb} {addon_id}: something installed builds on it\n  " + "\n  ".join(lines)
 
 
 def check(
