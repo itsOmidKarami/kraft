@@ -264,7 +264,8 @@ def test_a_pinned_addon_wins_over_a_live_one_of_its_id(tree_home):
     builds) takes the last of an id, so the pinned one comes last, wherever
     the parents-first order put the live one. Here the pin is an old one
     whose store is gone, a root by its pin, while the live one is a
-    grandchild."""
+    grandchild. The live one is left out (another version of a pinned id),
+    but it is still listed, and still before the pinned one."""
     repo, config_dir, addons_dir = tree_home
     pins = resolve_chain(config_dir, addons_dir, "team-payments:default").addons
     pins = {n: {k: v for k, v in p.items() if k != "parent"} for n, p in pins.items()}
@@ -356,6 +357,20 @@ def _adding(node):
             "runs platform-dept@acme 1.0.0; a work item never mixes versions of one add-on tree",
             id="middle-ancestor-moved",
         ),
+        pytest.param(
+            "co:security_scan",
+            "1.1.0 as co",
+            "company@acme 1.1.0 is installed under co, and this work item runs company@acme "
+            "1.0.0; a work item never mixes versions of one add-on",
+            id="root-moved-to-an-alias",
+        ),
+        pytest.param(
+            "pay:security_scan",
+            "1.1.0 as pay",
+            "team-payments@acme 1.1.0 is installed under pay, and this work item runs "
+            "team-payments@acme 1.0.0; a work item never mixes versions of one add-on",
+            id="child-moved-to-an-alias",
+        ),
         pytest.param("team-payments:security_scan", None, None, id="ancestor-unchanged"),
         pytest.param("reads_skill", "1.1.0", "installed but not loaded", id="added-task-skill"),
         pytest.param(
@@ -386,6 +401,17 @@ def test_a_revision_never_mixes_ancestor_versions(request, tree_home, extends, u
         )
         snapshot, live = _company_only_item(
             repo, config_dir, addons_dir, update=update, filed_on="dept", moved=TREE[1]
+        )
+    elif case == "child-moved-to-an-alias":
+        # Filed on the team's chain: it pins the whole tree, and the team
+        # moves to 1.1.0 under the alias `pay`.
+        snapshot, live = _company_only_item(
+            repo,
+            config_dir,
+            addons_dir,
+            update=update,
+            filed_on="team-payments:default",
+            moved=TREE[2],
         )
     else:
         snapshot, live = _company_only_item(repo, config_dir, addons_dir, update=update)

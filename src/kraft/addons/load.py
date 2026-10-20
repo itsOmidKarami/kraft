@@ -620,7 +620,9 @@ def for_item(
 
     A live child whose locked ancestors are not the versions the item pinned
     is left out, saying both (`_mixed`), and its descendants with it: a work
-    item never mixes versions of one add-on tree."""
+    item never mixes versions of one add-on tree. So is a live add-on whose
+    own id the item pinned at another version, under the namespace it had
+    then (`_moved`)."""
     from kraft.addons import inherit  # inherit imports this module
 
     store = (Path(addons_root) if addons_root is not None else addons_dir()) / "store"
@@ -655,8 +657,10 @@ def for_item(
     live = tuple(
         replace(addon, left_out=why, quiet=False)
         if addon.left_out is None
-        and addon.parent is not None
-        and (why := _mixed(addon, lock, pins_by_id))
+        and (
+            (why := _moved(addon, pins_by_id))
+            or (addon.parent is not None and (why := _mixed(addon, lock, pins_by_id)))
+        )
         else addon
         for addon in live
     )
@@ -692,6 +696,20 @@ def for_item(
         if rid not in taken
     ]
     return (*loading, *reserved)
+
+
+def _moved(addon: InstalledAddon, pins_by_id: Mapping[str, Mapping[str, str | None]]) -> str | None:
+    """Why `addon`, live under a namespace the work item did not pin, cannot
+    be read beside its pins: the item pinned its own id (under the namespace
+    it had at intake) at another digest. None when its id is not pinned, and
+    when the pin is this very store under a new alias: that is one version."""
+    pin = pins_by_id.get(addon.id)
+    if pin is None or pin["digest"] == addon.pin["digest"]:
+        return None
+    return (
+        f"{addon.id} {addon.version} is installed under {addon.namespace}, and this work "
+        f"item runs {addon.id} {pin['version']}; a work item never mixes versions of one add-on"
+    )
 
 
 def _mixed(
