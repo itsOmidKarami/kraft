@@ -616,7 +616,11 @@ def for_item(
     for a pin stored before pins named parents), and the add-ons come back
     parents first. One whose ancestor is not loaded is left out with that
     ancestor's reason. A pinned add-on comes after a live one of its id (an
-    alias changed since intake), so a lookup by id finds the pinned one."""
+    alias changed since intake), so a lookup by id finds the pinned one.
+
+    A live child whose locked ancestors are not the versions the item pinned
+    is left out, saying both (`_mixed`), and its descendants with it: a work
+    item never mixes versions of one add-on tree."""
     from kraft.addons import inherit  # inherit imports this module
 
     store = (Path(addons_root) if addons_root is not None else addons_dir()) / "store"
@@ -642,9 +646,17 @@ def for_item(
                 parent=parent,
             )
         )
-    live = scoped(
-        (p for p in installed(config_dir, addons_root) if p.namespace not in (pins or {})),
-        repo_id,
+    lock = installed(config_dir, addons_root)
+    live = scoped((p for p in lock if p.namespace not in (pins or {})), repo_id)
+    # A live child built on another version of an ancestor the item pinned is
+    # left out, not quietly: a launch or revision that reads it stops.
+    live = tuple(
+        replace(addon, left_out=why, quiet=False)
+        if addon.left_out is None
+        and addon.parent is not None
+        and (why := _mixed(addon, lock, pins or {}))
+        else addon
+        for addon in live
     )
     # After `scoped`: a store out of this item's scope is never hashed.
     checked = (
@@ -678,6 +690,35 @@ def for_item(
         if rid not in taken
     ]
     return (*loading, *reserved)
+
+
+def _mixed(
+    addon: InstalledAddon,
+    lock: Sequence[InstalledAddon],
+    pins: Mapping[str, Mapping[str, str | None]],
+) -> str | None:
+    """Why `addon`, which a work item did not pin, cannot be read beside its
+    pins: an ancestor the lock builds it on is another version than the one
+    the item pinned. Matched by id, since an alias may have changed since
+    intake, and compared by digest, since a directory collection changes it
+    with no change of version. None when every pinned ancestor agrees, and
+    when its ancestry does not resolve (the load leaves it out for that)."""
+    from kraft.addons import inherit  # inherit imports this module
+
+    try:
+        chain = inherit.ancestry(addon, lock)
+    except inherit.InheritanceError:
+        return None
+    by_id = {str(pin["id"]): pin for pin in pins.values()}
+    for ancestor in chain[1:]:
+        pin = by_id.get(ancestor.id)
+        if pin is not None and pin["digest"] != ancestor.pin["digest"]:
+            return (
+                f"{addon.id} {addon.version} builds on {ancestor.id} {ancestor.version}, "
+                f"and this work item runs {ancestor.id} {pin['version']}; a work item "
+                "never mixes versions of one add-on tree"
+            )
+    return None
 
 
 def _pinned_parent(root: Path) -> tuple[str | None, str | None]:

@@ -23,6 +23,7 @@ from support.addons import (
     resolve_chain,
     store_of,
     stored_snapshot,
+    task_node,
     update_addons,
 )
 
@@ -351,18 +352,14 @@ _VIA = {
 }
 
 
-def _task(extends):
-    return {"id": "x", "tasks": [{"id": "t", "extends": extends}]}
-
-
 @pytest.mark.parametrize(
     "added, pinned, disable",
     [
         ({"id": "x", "extends": "via_release"}, ["release"], False),
         ({"id": "x", "extends": "via_tools"}, ["release", "tools"], False),
         ({"id": "x", "extends": "release:stage"}, ["release"], False),
-        (_task("release:base"), ["release"], False),
-        (_task("tools:base"), ["release", "tools"], False),
+        (task_node("release:base"), ["release"], False),
+        (task_node("tools:base"), ["release", "tools"], False),
         ({"id": "x", "extends": "release:stage"}, ["release"], True),
         ({"id": "x", "extends": "release:stage"}, ["release"], "edited"),
     ],
@@ -417,7 +414,7 @@ def test_a_revision_cannot_add_from_an_addon_that_is_not_loaded(home, gone):
     )
     if gone == "disabled":
         edit_addons_yaml(config_dir, lambda w: w["addons"].update({"tools@acme": False}))
-        added = _task("tools:base")
+        added = task_node("tools:base")
     elif gone == "pinned-version-gone":
         old = load.installed(config_dir, addons_dir)[0].root
         publish(repo, "release", **_release("1.1.0", "o3"))
@@ -427,7 +424,7 @@ def test_a_revision_cannot_add_from_an_addon_that_is_not_loaded(home, gone):
     live = TemplateLibrary.from_yaml_dir(config_dir, addons=load.installed(config_dir, addons_dir))
     if gone == "store-edited-since":
         edit_store(store_of(config_dir, addons_dir, "tools"), "library.yaml", "tasks: {}\n")
-        added = _task("tools:base")
+        added = task_node("tools:base")
     add = Add(after="n", node=AddedNode.model_validate(added), evidence="e")
 
     with pytest.raises(RevisionError, match=r"extends no (node|task) named"):

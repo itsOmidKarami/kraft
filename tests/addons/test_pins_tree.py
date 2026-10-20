@@ -3,6 +3,7 @@ carry every ancestor, root first, and a launch reads each pinned version,
 whatever the instance has taken since."""
 
 import json
+import re
 
 import pytest
 import yaml
@@ -21,6 +22,7 @@ from support.addons import (
     resolve_chain,
     store_of,
     stored_snapshot,
+    task_node,
     tree_collection,
     update_addons,
 )
@@ -28,8 +30,11 @@ from support.addons import (
 from kraft.adapters import agent
 from kraft.addons import load
 from kraft.addons.manifest import ADDON_JSON
+from kraft.drafts import item as item_draft
 from kraft.executor import dispatch
 from kraft.templates.library import TemplateLibrary
+from kraft.templates.models import MaterializedChain
+from kraft.templates.revision import Add, AddedNode, ChangeSet, RevisionError, revise
 
 #: The skill team-payments inherits from company, named by the team's name.
 _SKILL = "team-payments:deploy-review"
@@ -277,3 +282,151 @@ def test_a_pinned_addon_wins_over_a_live_one_of_its_id(tree_home):
     team = [(a.namespace, a.version) for a in known if a.id == TREE[2]]
     assert sorted(team) == [("pay", "1.1.0"), ("team-payments", "1.0.0")]
     assert team[-1] == ("team-payments", "1.0.0")
+
+
+#: Local library tasks a revision can add: one reading the team's inherited
+#: skill, one on the local profile `fast` (`_fast_falls_back_to`).
+_LOCAL_TASKS = {"tasks": {"reads_skill": _READS_SKILL, "quick": {**AGENT, "profile": "fast"}}}
+
+_MIXED = (
+    "team-payments@acme 1.0.0 builds on company@acme 1.1.0, and this work item runs "
+    "company@acme 1.0.0; a work item never mixes versions of one add-on tree"
+)
+
+
+def _company_only_item(repo, config_dir, addons_dir, *, update="1.1.0"):
+    """An item filed on `company:default`, so it pins company only, with the
+    local tasks `_LOCAL_TASKS` and `fast` falling back to `team-payments:slow`;
+    then, unless `update` is None, a new company taken at that version, which
+    the children's range `1` accepts, so their locks do not move (`1.0.0`: new
+    files under the same version). `<version> as <alias>` also moves company
+    to the namespace `alias` in the lock. Returns the snapshot and the live
+    library."""
+    (config_dir / "library.yaml").write_text(json.dumps(_LOCAL_TASKS))
+    _fast_falls_back_to(config_dir, "team-payments:slow")
+    resolved = resolve_chain(config_dir, addons_dir, "company:default")
+    assert list(resolved.addons) == ["company"]
+    if update:
+        version, _, alias = update.partition(" as ")
+        publish(repo, "company", version=version, skills={"deploy-review": f"{update} method"})
+        update_addons(config_dir, addons_dir, ["company@acme"], re_install=version == "1.0.0")
+        if alias:
+            lock = yaml.safe_load((config_dir / "addons.lock").read_text())
+            lock["addons"][TREE[0]]["namespace"] = alias
+            (config_dir / "addons.lock").write_text(yaml.safe_dump(lock))
+    live = TemplateLibrary.from_yaml_dir(config_dir, addons=load.installed(config_dir, addons_dir))
+    return MaterializedChain.from_json(stored_snapshot(resolved)), live
+
+
+def _adding(node):
+    """A change set adding `node` after `n`."""
+    add = Add(after="n", node=AddedNode.model_validate(node), evidence="e")
+    return ChangeSet(rationale="r", add=[add])
+
+
+@pytest.mark.parametrize(
+    ("extends", "update", "refused"),
+    [
+        pytest.param("team-payments:security_scan", "1.1.0", _MIXED, id="ancestor-moved"),
+        pytest.param(
+            "team-payments:security_scan", "1.1.0", _MIXED, id="ancestor-moved-in-a-draft"
+        ),
+        pytest.param(
+            "team-payments:security_scan",
+            "1.0.0",
+            "builds on company@acme 1.0.0, and this work item runs company@acme 1.0.0;",
+            id="ancestor-changed-under-its-version",
+        ),
+        pytest.param(
+            "team-payments:security_scan", "1.1.0 as co", _MIXED, id="ancestor-moved-to-an-alias"
+        ),
+        pytest.param("team-payments:security_scan", None, None, id="ancestor-unchanged"),
+        pytest.param("reads_skill", "1.1.0", "installed but not loaded", id="added-task-skill"),
+        pytest.param(
+            "quick",
+            "1.1.0",
+            "it reads add-on team-payments@acme, which is not loaded for this work item: " + _MIXED,
+            id="fallback-into-a-mixed-profile",
+        ),
+    ],
+)
+def test_a_revision_never_mixes_ancestor_versions(request, tree_home, extends, update, refused):
+    """An item that pinned company only adds a node reading team-payments,
+    which it had not read: the team is pinned at the lock's version, with its
+    ancestors, only while its locked company is the one the item runs.
+    Otherwise the revision is refused naming both versions, never run on
+    company 1.0.0 beside a team built on 1.1.0: matched by id, whatever its
+    namespace is now, and compared by digest, which changes under one
+    version too. An item draft goes through the
+    same revision. A skill refused this way says only that its add-on is not
+    loaded (the plan's known gap)."""
+    repo, config_dir, addons_dir = tree_home
+    snapshot, live = _company_only_item(repo, config_dir, addons_dir, update=update)
+    added = task_node(extends)
+
+    if request.node.callspec.id.endswith("in-a-draft"):
+        op = {"op": "add_node", "after": "n", "node": added}
+        problems = item_draft.evaluate(snapshot, None, [op], live).problems
+        assert [p["op"] for p in problems] == [0]
+        assert refused in problems[0]["message"]
+        return
+    changes = _adding(added)
+    if refused:
+        with pytest.raises(RevisionError, match=re.escape(refused)):
+            revise(snapshot, changes, at=None, library=live)
+        return
+    revised = revise(snapshot, changes, at=None, library=live)
+    assert list(revised.chain.addons) == _WHOLE_TREE
+    assert revised.chain.addons["company"]["version"] == "1.0.0"
+
+
+@pytest.mark.parametrize(
+    ("damage", "refused"),
+    [
+        pytest.param(
+            "store-edited",
+            "it reads add-on team-payments@acme, which is not loaded for this work item: "
+            "profiles.yaml",
+            id="store-edited-since",
+        ),
+        pytest.param("disabled", None, id="disabled-is-the-files-mistake"),
+    ],
+)
+def test_a_revision_reading_a_left_out_addon_is_refused_unless_left_out_on_purpose(
+    tree_home, damage, refused
+):
+    """A revision adding a fallback into an add-on whose store was edited is
+    refused, instead of pinning nothing and stopping at launch. One disabled
+    on purpose is no fault: the fallback naming it is the file's mistake, as
+    at launch, and the revision is accepted with nothing more pinned."""
+    repo, config_dir, addons_dir = tree_home
+    snapshot, live = _company_only_item(repo, config_dir, addons_dir, update=None)
+    if damage == "store-edited":
+        edit_store(store_of(config_dir, addons_dir, "team-payments"), "profiles.yaml", "{}\n")
+    else:
+        edit_addons_yaml(config_dir, lambda w: w["addons"].update({TREE[2]: False}))
+    changes = _adding(task_node("quick"))
+
+    if refused:
+        with pytest.raises(RevisionError, match=re.escape(refused)):
+            revise(snapshot, changes, at=None, library=live)
+    else:
+        assert list(revise(snapshot, changes, at=None, library=live).chain.addons) == ["company"]
+
+
+@pytest.mark.parametrize("case", ["launch-fallback-into-a-mixed-tree"])
+def test_a_launch_never_runs_a_child_on_an_older_ancestor(tree_home, case):
+    """A `harnesses.yaml` fallback into the team's profile, written after an
+    item that pinned company 1.0.0 was filed, while the instance took company
+    1.1.0: the launch stops naming the mismatch, never running the team built
+    on 1.1.0 on the item's 1.0.0."""
+    repo, config_dir, addons_dir = tree_home
+    pins = resolve_chain(config_dir, addons_dir, "company:default").addons
+    publish(repo, "company", version="1.1.0")
+    update_addons(config_dir, addons_dir, ["company@acme"])
+    _fast_falls_back_to(config_dir, "team-payments:slow")
+
+    with pytest.raises(agent.HarnessUnavailable) as stop:
+        launch_task(pins, profile="fast")
+
+    assert str(stop.value) == f"add-on team-payments@acme 1.0.0 could not be read: {_MIXED}"

@@ -988,11 +988,15 @@ class TemplateLibrary:
                 issues.append(replace(issue, message=self._humanize(issue.message)))
         return issues
 
-    def resolve_chain(self, id: str) -> ResolvedChain:
+    def resolve_chain(self, id: str, *, strict_pins: bool = False) -> ResolvedChain:
         """Expand one chain's `extends` references, validate the result into a
         typed `Chain`, and assign canonical execution paths
         (`resolved-chain-is-validated-before-use`). A child add-on's hidden
-        levels are named in its errors as the ancestors they hold."""
+        levels are named in its errors as the ancestors they hold.
+
+        With `strict_pins`, a chain that reads an add-on left out by a fault
+        (not quietly, as a disabled one is) is refused with why, instead of
+        not pinning it: what a revision adds to a work item runs on it."""
         # A hidden level resolves too: a child's chain extending it resolves it.
         raw = self._all_chains.get(id)
         if raw is None:
@@ -1000,13 +1004,13 @@ class TemplateLibrary:
                 f"no chain {id!r} in this library; known chains: {list(self._chains)}"
             )
         try:
-            return self._resolve(id, raw)
+            return self._resolve(id, raw, strict_pins=strict_pins)
         except TemplateLibraryError as exc:
             if self._layers:
                 exc.args = (self._humanize(str(exc)), *exc.args[1:])
             raise
 
-    def _resolve(self, id: str, raw: RawComponent) -> ResolvedChain:
+    def _resolve(self, id: str, raw: RawComponent, *, strict_pins: bool = False) -> ResolvedChain:
         resolution = _Resolution(self, raw.source)
         expanded = resolution.expand_chain(raw.data)
         if inherit.is_layer(id):
@@ -1085,7 +1089,7 @@ class TemplateLibrary:
                 for task in node.tasks()
                 for name in task.task.steering
             },
-            addons=self._pins(id, resolved, resolution.ancestors),
+            addons=self._pins(id, resolved, resolution.ancestors, strict=strict_pins),
         )
 
     def _fallback_profiles(self, chain: object) -> list[str]:
@@ -1115,13 +1119,19 @@ class TemplateLibrary:
         return reached
 
     def _pins(
-        self, id: str, resolved: ResolvedChain, ancestors: Sequence[str] = ()
+        self,
+        id: str,
+        resolved: ResolvedChain,
+        ancestors: Sequence[str] = (),
+        *,
+        strict: bool = False,
     ) -> dict[str, dict[str, str | None]]:
         """The loaded add-ons chain `id` reads anything from: the chain itself,
         every chain it extends (`an-extending-chain-pins-its-ancestors`), a
         component it extends or selects, or a skill or agent profile one of
         its tasks names; and every ancestor of each, root first
-        (`an-item-pins-every-ancestor`)."""
+        (`an-item-pins-every-ancestor`). One it reads that is left out is not
+        pinned; with `strict`, one left out by a fault raises instead."""
         data = resolved.chain.model_dump(mode="json")
         named = {
             id,
@@ -1135,6 +1145,14 @@ class TemplateLibrary:
             *self._fallback_profiles(data),
         }
         qualifiers = {name.partition(":")[0] for name in named if ":" in name}
+        if strict:
+            loaded = {a.namespace for a in self.addons if a.left_out is None}
+            for addon in self.addons:
+                if addon.namespace in qualifiers - loaded and not addon.quiet and addon.left_out:
+                    raise TemplateLibraryError(
+                        f"it reads add-on {addon.id}, which is not loaded for this work "
+                        f"item: {addon.left_out}"
+                    )
         # A child is read with its ancestors: an item that kept only the child
         # would run it on whatever parent the lock holds later.
         for addon in self.addons:

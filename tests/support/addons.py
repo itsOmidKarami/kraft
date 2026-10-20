@@ -27,6 +27,11 @@ def chain(extends: str) -> dict:
     return {"nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": extends}]}]}
 
 
+def task_node(extends: str) -> dict:
+    """A chain revision's added node `x`: one task extending `extends`."""
+    return {"id": "x", "tasks": [{"id": "t", "extends": extends}]}
+
+
 def home(tmp_path: Path, *, library: dict | None = None, chains: dict | None = None) -> Path:
     """A local template directory at `tmp_path/config`: `library.yaml` and one
     file per entry of `chains` (name to body)."""
@@ -490,15 +495,22 @@ def a_terminal(monkeypatch, typed: str | list[str]) -> None:
 
 
 def update_addons(
-    config_dir: Path, addons_dir: Path, ids: list[str], install: bool = False
+    config_dir: Path,
+    addons_dir: Path,
+    ids: list[str],
+    install: bool = False,
+    *,
+    re_install: bool = False,
 ) -> None:
     """`kraft admin addon update` (or `install`, with `install`) of `ids`,
-    every review accepted; each must apply."""
+    every review accepted; each must apply. `re_install` takes new files
+    under an unchanged version (`--re-install`)."""
     from kraft.addons import update
 
     results = update.update(
         ids,
         accept=lambda review: True,
+        re_install=re_install,
         entries={i: True for i in ids} if install else None,
         config_dir=config_dir,
         addons_root=addons_dir,

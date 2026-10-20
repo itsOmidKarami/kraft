@@ -424,7 +424,10 @@ def _added_nodes(
             Path(f"{CHAIN_REVISION}.yaml"),
             {"id": CHAIN_REVISION, "nodes": [add.node.authored() for add in adds]},
         )
-        resolved = candidate.resolve_chain(id)
+        # Strict: an add-on the node reads that is left out by a fault (its
+        # tree mixes versions with the item's pins, its store was edited) is
+        # refused here, not left unpinned to stop the launch.
+        resolved = candidate.resolve_chain(id, strict_pins=True)
     except TemplateLibraryError as exc:
         raise RevisionError(f"add: {exc}") from exc
     from kraft.addons import load
