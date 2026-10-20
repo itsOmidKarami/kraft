@@ -9,12 +9,15 @@ import yaml
 from support.addons import (
     AGENT,
     TREE,
+    addon_json,
     chain,
     drop_store,
     edit_addons_yaml,
+    edit_store,
     instance,
     launch_task,
     publish,
+    remove_from_store,
     resolve_chain,
     store_of,
     stored_snapshot,
@@ -24,6 +27,7 @@ from support.addons import (
 
 from kraft.adapters import agent
 from kraft.addons import load
+from kraft.addons.manifest import ADDON_JSON
 from kraft.executor import dispatch
 from kraft.templates.library import TemplateLibrary
 
@@ -144,6 +148,7 @@ def test_an_item_pins_its_whole_tree(tree_home, case, chain_id, expected):
         "restore-an-ancestor",
         "pin-without-parent",
         "child-disabled-since",
+        "pin-parent-wins-over-its-store",
     ],
 )
 async def test_an_item_keeps_its_tree_across_a_parent_update(tree_home, case):
@@ -185,6 +190,11 @@ async def test_an_item_keeps_its_tree_across_a_parent_update(tree_home, case):
     elif case == "pin-without-parent":
         # A snapshot stored before pins recorded parents.
         pins = {n: {k: v for k, v in p.items() if k != "parent"} for n, p in pins.items()}
+    elif case == "pin-parent-wins-over-its-store":
+        # The pins name the parents: the stores' manifests are never asked.
+        team = addon_json("team-payments", requires={"addons": {"company@acme": "1"}})
+        edit_store(store_of(config_dir, addons_dir, "team-payments"), ADDON_JSON, json.dumps(team))
+        remove_from_store(store_of(config_dir, addons_dir, "platform-dept"), ADDON_JSON)
     else:
         edit_addons_yaml(config_dir, lambda w: w["addons"].update({TREE[2]: False}))
 
