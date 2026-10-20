@@ -14,6 +14,7 @@ from support.addons import (
     drop_store,
     edit_addons_yaml,
     edit_store,
+    install,
     instance,
     make_collection,
     publish,
@@ -606,3 +607,26 @@ def test_a_launch_reads_only_its_own_repos_library(
         launch()
     assert stops in str(stop.value)
     assert (_SCOPED in str(stop.value)) == (stops == _SCOPED)
+
+
+@pytest.mark.parametrize(
+    "chain_id", ["team:ship"], ids=["child-pin-resolves-with-current-ancestors"]
+)
+def test_a_pinned_child_builds_with_its_parent(home, tmp_path, chain_id):
+    """A work item that pinned a child add-on rebuilds it as a child: its
+    pinned store's manifest names the parent, and the instance's installed
+    ancestors stand in for pins it does not have until slice 3. `team:ship`
+    exists only as the chain `team` inherits from `release`."""
+    repo, config_dir, addons_dir = home
+    requires = {"kraft": "2", "harnesses": ["codex"], "addons": {ID: "1"}}
+    payments = make_collection(tmp_path, {"team": {"manifest": {"requires": requires}}}, name="pay")
+    install(config_dir, addons_dir, payments, "team")
+    library = TemplateLibrary.from_yaml_dir(
+        config_dir, addons=load.installed(config_dir, addons_dir)
+    )
+    pins = library.resolve_chain(chain_id).addons
+
+    rebuilt = library.with_addons(load.for_item(pins, config_dir, addons_dir, repo_id=None))
+
+    assert "team" in pins
+    assert rebuilt.resolve_chain(chain_id).nodes[0].id == "n"

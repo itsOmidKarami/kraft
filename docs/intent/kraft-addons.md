@@ -129,7 +129,7 @@ origin: src/kraft/templates/library.py §TemplateLibrary._add_inherited
 ## REQ the-parents-name-means-the-inherited-layer
 
 WHEN a child add-on's `extends`, `steering`, `skill` or qualified `profile` names its parent by the parent's name, the system SHALL read the entry of the parent's merged library as the child inherits it, whatever namespace the instance gives the parent.
-enforced-by: tests/templates/test_library_inheritance.py::test_inherited_library[extend-inherited-component], tests/templates/test_library_inheritance.py::test_inherited_library[extend-inherited-chain], tests/templates/test_library_inheritance.py::test_inherited_library[alias-parent]
+enforced-by: tests/templates/test_library_inheritance.py::test_inherited_library[extend-inherited-component], tests/templates/test_library_inheritance.py::test_inherited_library[extend-inherited-chain], tests/templates/test_library_inheritance.py::test_inherited_library[alias-parent], tests/templates/test_library_inheritance.py::test_inherited_library[skill-by-parent-name], tests/templates/test_library_inheritance.py::test_inherited_library[steering-by-parent-name], tests/templates/test_library_inheritance.py::test_inherited_library[profile-by-parent-name]
 origin: src/kraft/addons/inherit.py §requalify
 
 ## REQ an-inherited-entry-reads-the-childs-overrides
@@ -143,6 +143,18 @@ origin: src/kraft/addons/inherit.py §requalify
 WHEN a child add-on declares a chain, library entry or skill with the name of one it inherits, in the same section, the system SHALL serve the child's in place of the inherited one under the child's namespace.
 enforced-by: tests/templates/test_library_inheritance.py::test_inherited_library[override-replaces], tests/templates/test_library_inheritance.py::test_inherited_library[skill-overridden]
 origin: src/kraft/templates/library.py §TemplateLibrary._add_inherited
+
+## REQ a-hidden-layer-is-reached-only-through-the-parent
+
+IF a local library, a chain file or an add-on's file names a child add-on's inherited layer directly rather than by the parent's name, THEN the system SHALL refuse the reference.
+enforced-by: tests/templates/test_library_inheritance.py::test_a_hidden_level_is_not_reachable_by_name[local-chain], tests/templates/test_library_inheritance.py::test_a_hidden_level_is_not_reachable_by_name[local-library]
+origin: src/kraft/templates/library.py §_refuse_layer_reference
+
+## REQ a-pinned-child-builds-with-its-parent
+
+WHEN a work item rebuilds its library from its pins and a pinned add-on names a parent, the system SHALL build that add-on as a child of the parent the instance has installed.
+enforced-by: tests/addons/test_pins.py::test_a_pinned_child_builds_with_its_parent[child-pin-resolves-with-current-ancestors]
+origin: src/kraft/addons/load.py §for_item
 
 ## REQ addon-content-names-its-author
 
@@ -446,8 +458,8 @@ origin: src/kraft/templates/catalogue.py §read_only_message
 
 ## REQ an-addon-copy-resolves-locally
 
-WHEN an add-on component or chain is copied into a local draft, the system SHALL carry its add-on-internal references qualified, so the copy resolves.
-enforced-by: tests/api/test_addon_content.py::test_copy_from_an_addon[chain], tests/api/test_addon_content.py::test_copy_from_an_addon[component]
+WHEN an add-on component or chain is copied into a local draft, the system SHALL carry its add-on-internal references qualified, and a child add-on's references to its parent's entries as the parent's own ids, so the copy resolves.
+enforced-by: tests/api/test_addon_content.py::test_copy_from_an_addon[chain], tests/api/test_addon_content.py::test_copy_from_an_addon[component], tests/api/test_addon_content.py::test_a_copy_from_a_child_addon_names_its_parent[child-chain], tests/api/test_addon_content.py::test_a_copy_from_a_child_addon_names_its_parent[child-component]
 origin: src/kraft/drafts/ops.py §copy_component
 
 ## REQ installed-addons-are-recomputed-only-when-an-input-changes

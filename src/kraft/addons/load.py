@@ -621,6 +621,7 @@ def for_item(
                 commit=pin.get("commit"),
                 tree=pin.get("tree"),
                 source=pin.get("source"),
+                parent=_pinned_parent(root),
             )
         )
     live = scoped(
@@ -649,6 +650,23 @@ def for_item(
         if rid not in taken
     ]
     return (*loading, *reserved)
+
+
+def _pinned_parent(root: Path) -> str | None:
+    """The parent a pinned add-on's own manifest names, so a pinned child
+    builds as a child; None for a root add-on, or a store that does not read
+    (the launch says why). Its ancestors are the instance's installed ones:
+    an item does not pin them until slice 3, and its range is not checked
+    again here."""
+    from kraft.addons import fetch, inherit, manifest
+
+    if not root.is_dir():
+        return None
+    try:
+        declared = inherit.read_manifest(InstalledAddon("", "", "", "", root))
+    except (OSError, ValueError, fetch.StoreMismatch, fetch.AddonRefused, manifest.ManifestError):
+        return None  # the launch reads the store again and says why
+    return declared.parent[0] if declared.parent is not None else None
 
 
 def connected_ids(

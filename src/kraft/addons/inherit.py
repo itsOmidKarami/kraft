@@ -140,7 +140,7 @@ def requirements(
 LAYER_MARK = "^"
 
 #: A layered name: `<top>^<k>:<name>`, wherever it sits in a text.
-_LAYERED = re.compile(r"(?<![\w-])([\w-]+\^\d+):([\w-]+)")
+_LAYERED = re.compile(r"(?<![\w-])([\w-]+\^\d+):([^\s'\"`:,;()\[\]{}<>]+)")
 
 
 def layer_namespace(top: str, depth: int) -> str:
@@ -164,6 +164,7 @@ def requalify(
     parent_name: str | None,
     skill_owner: Callable[[str, int], str],
     profile_owner: Callable[[str, int], str],
+    steering_owner: Callable[[str, int], str],
 ) -> object:
     """`data`, a file `author` wrote, with its references re-pointed for its
     place at `depth` in `top`'s ancestry. Walks it like `load.qualify`.
@@ -174,8 +175,11 @@ def requalify(
     A skill or qualified agent profile is a file in one store: it becomes the
     namespace of the nearest ancestor defining it, looked for from the top
     child down (own or bare) or from the author's parent down (the parent's
-    name). A bare `profile:` is the instance's and stays. Any other qualifier
-    is left as written."""
+    name). A steering profile holds no reference of its own, so the parent's
+    name in `steering` is re-pointed the same way, to the ancestor's own
+    namespace: a hidden layer's name never reaches a resolved chain. A bare
+    `profile:` is the instance's and stays. Any other qualifier is left as
+    written."""
     below = depth + 1
 
     def library_ref(value: str) -> str:
@@ -198,6 +202,12 @@ def requalify(
             return owner(name, below)
         return value
 
+    def steering_ref(value: str) -> str:
+        qualifier, colon, name = value.partition(":")
+        if colon and qualifier == parent_name:
+            return steering_owner(name, below)
+        return library_ref(value)
+
     def walk(node: object) -> object:
         if isinstance(node, list):
             return [walk(item) for item in node]
@@ -208,7 +218,7 @@ def requalify(
             if key == "extends" and isinstance(value, str):
                 out[key] = library_ref(value)
             elif key == "steering" and isinstance(value, list):
-                out[key] = [library_ref(v) if isinstance(v, str) else v for v in value]
+                out[key] = [steering_ref(v) if isinstance(v, str) else v for v in value]
             elif key == "skill" and isinstance(value, str):
                 out[key] = file_ref(value, skill_owner, bare_is_own=True)
             elif key == "profile" and isinstance(value, str):
@@ -222,8 +232,8 @@ def requalify(
 
 @dataclass(frozen=True)
 class Visible:
-    """Per depth of an ancestry, which ancestor defines each skill and agent
-    profile name: what a child sees of the files its ancestors ship, after
+    """Per depth of an ancestry, which ancestor defines each skill, agent
+    profile and steering profile name: what a child sees of the files its ancestors ship, after
     each level's removals."""
 
     #: `levels[d][kind][name]` is the `namespace:name` level `d` sees.
@@ -256,7 +266,7 @@ class Visible:
 
     def owner(self, kind: str, name: str, from_depth: int) -> str | None:
         """The `namespace:name` of the ancestor whose `kind` (`skills`,
-        `profiles`) `name` level `from_depth` sees; None when none does."""
+        `profiles`, `steering`) `name` level `from_depth` sees; None when none does."""
         if from_depth >= len(self.levels):
             return None
         return self.levels[from_depth].get(kind, {}).get(name)
@@ -264,7 +274,9 @@ class Visible:
 
 def humanize(text: str, layers: Mapping[str, str]) -> str:
     """`text` with each `<top>^<k>:<name>` written as `<ancestor>'s <name>, as
-    <top> inherits it`. `layers` maps `top^k` to that ancestor's name."""
+    <top> inherits it`. `layers` maps `top^k` to the namespace this instance
+    loads that ancestor under (its alias, when it has one), which is how the
+    instance's own listings name it."""
 
     def say(match: re.Match[str]) -> str:
         ancestor = layers.get(match[1])
@@ -287,3 +299,25 @@ def public(data: object, layers: Mapping[str, str]) -> object:
     if isinstance(data, Mapping):
         return {key: public(value, layers) for key, value in data.items()}
     return data
+
+
+#: The keys whose values name a library entry, a skill or an agent profile.
+_REFERENCE_KEYS = ("extends", "steering", "skill", "profile")
+
+
+def layer_reference(data: object) -> str | None:
+    """The first reference in `data`, an authored file, that names a hidden
+    layer (`team^1:scan`); None when there is none. Only a child's own
+    layering writes one: a person's file reaching it would bypass the
+    parent's name."""
+    if isinstance(data, list):
+        return next((found for item in data if (found := layer_reference(item))), None)
+    if not isinstance(data, Mapping):
+        return None
+    for key, value in data.items():
+        values = value if key == "steering" and isinstance(value, list) else [value]
+        if key in _REFERENCE_KEYS and any(isinstance(v, str) and is_layer(v) for v in values):
+            return next(v for v in values if isinstance(v, str) and is_layer(v))
+        if (found := layer_reference(value)) is not None:
+            return found
+    return None

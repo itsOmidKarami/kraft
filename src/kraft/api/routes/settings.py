@@ -53,7 +53,8 @@ def _chain_summary(library: TemplateLibrary, id: str) -> dict:
     so are `extends`, the chain this one builds on, and `extended_by`, every
     chain whose `extends` reaches this one."""
     uses = {node: sorted(refs) for node, refs in library.references(id).items() if refs}
-    data = library.chain_data(id)
+    # A child add-on's parent level shows as its ancestor's own chain.
+    data = library.public(library.chain_data(id))
     description, parent = data.get("description"), data.get("extends")
     listed = {
         "id": id,

@@ -281,6 +281,16 @@ def _refuse_qualified(path: Path, what: str, name: object) -> None:
         )
 
 
+def _refuse_layer_reference(path: Path, data: Mapping[str, object]) -> None:
+    """No file reaches a child add-on's hidden ancestor levels by name: a
+    child reads its parent's entries by the parent's name."""
+    if (found := inherit.layer_reference(data)) is not None:
+        raise TemplateLibraryError(
+            f"{path}: {found!r} is no name a library declares; an add-on reads its "
+            "parent's entries by the parent's name"
+        )
+
+
 def _section(path: Path, data: Mapping[str, object], namespace: Namespace) -> Mapping[str, object]:
     section = data.get(namespace.value) or {}
     if not isinstance(section, Mapping):
@@ -334,7 +344,6 @@ class TemplateLibrary:
             ns: {} for ns in _EXTENDABLE
         }
         self._layer_chains: dict[str, RawComponent] = {}
-        self._layer_steering: dict[str, SteeringProfile] = {}
         #: Each layer namespace (`team^1`) to the namespace of the ancestor
         #: it holds, for `inherit.humanize` and `inherit.public`.
         self._layers: dict[str, str] = {}
@@ -419,6 +428,7 @@ class TemplateLibrary:
         content and each chain is paired with the file it is named after --
         real for `from_yaml_dir`, nominal for an unsaved library, which is
         resolved without ever being written (`POST /templates/resolve`)."""
+        _refuse_layer_reference(library_path, library)
         components = {
             namespace: {
                 name: RawComponent(body, ComponentSource(library_path, namespace, name))
@@ -461,7 +471,9 @@ class TemplateLibrary:
         except fetch.StoreMismatch as exc:
             raise TemplateLibraryError(f"{addon.root / fetch.DIGEST_FILE}: {exc}") from exc
         library_path = addon.root / LIBRARY_FILE
-        library = qualify(_read_stored(store, LIBRARY_FILE, library_path, optional=True), addon)
+        written = _read_stored(store, LIBRARY_FILE, library_path, optional=True)
+        _refuse_layer_reference(library_path, written)
+        library = qualify(written, addon)
         assert isinstance(library, Mapping)
         aliases = self._listed_namespaces(addon, library)
         for namespace in _EXTENDABLE:
@@ -503,11 +515,19 @@ class TemplateLibrary:
             _read_stored(store, LIBRARY_FILE, author.root / LIBRARY_FILE, optional=True)
             for author, store in zip(chain, stores, strict=True)
         ]
+        for author, library in zip(chain, written, strict=True):
+            _refuse_layer_reference(author.root / LIBRARY_FILE, library)
         visible = inherit.Visible.build(
             chain,
             [
-                {"skills": _store_skills(store), "profiles": _store_profiles(store, author)}
-                for author, store in zip(chain, stores, strict=True)
+                {
+                    "skills": _store_skills(store),
+                    "profiles": _store_profiles(store, author),
+                    "steering": _section(
+                        author.root / LIBRARY_FILE, library, Namespace.STEERING
+                    ).keys(),
+                }
+                for author, store, library in zip(chain, stores, written, strict=True)
             ],
         )
 
@@ -531,6 +551,7 @@ class TemplateLibrary:
                     parent_name=chain[depth + 1].name if depth + 1 < len(chain) else None,
                     skill_owner=owner("skills"),
                     profile_owner=owner("profiles"),
+                    steering_owner=owner("steering"),
                 )
 
             library_path = author.root / LIBRARY_FILE
@@ -560,7 +581,9 @@ class TemplateLibrary:
                 if not rel.endswith(".yaml") or "/" in rel.removeprefix(f"{CHAINS_DIR}/"):
                     continue
                 chain_path = author.root / rel
-                body = requalify(_read_stored(store, rel, chain_path))
+                chain_written = _read_stored(store, rel, chain_path)
+                _refuse_layer_reference(chain_path, chain_written)
+                body = requalify(chain_written)
                 assert isinstance(body, Mapping)
                 id = _chain_id(chain_path, body)
                 _refuse_qualified(chain_path, "chain id", id)
@@ -590,26 +613,24 @@ class TemplateLibrary:
         public: bool,
     ) -> None:
         """One level of a child's layering under `namespace`: into the public
-        maps for the child's own (`public`), else into the hidden ones."""
+        maps for the child's own (`public`), else into the hidden ones. A
+        hidden level holds no steering: a reference to an ancestor's steering
+        profile names that ancestor's own (`inherit.requalify`). Namespaces
+        are unique and a local id holds no `:`, so no key here is taken."""
         components = self._components if public else self._layer_components
-        steering = self.steering if public else self._layer_steering
         chains = self._chains if public else self._layer_chains
         for section, items in merged.items():
             for name, (entry, author) in items.items():
                 key = f"{namespace}:{name}"
                 if section == _CHAINS:
                     chain_path, body = entry  # type: ignore[misc]
-                    if key in chains:
-                        claimed = chains[key].source.file
-                        raise TemplateLibraryError(
-                            f"{chain_path}: chain id {key!r} is already declared by {claimed}"
-                        )
                     chains[key] = RawComponent(
                         {**body, "id": key},
                         ComponentSource(chain_path, Namespace.NODES, key, chain=True),
                     )
                 elif section == Namespace.STEERING.value:
-                    steering[key] = entry  # type: ignore[assignment]
+                    if public:
+                        self.steering[key] = entry  # type: ignore[assignment]
                 else:
                     components[Namespace(section)][key] = entry  # type: ignore[assignment]
                 if public:
@@ -689,13 +710,18 @@ class TemplateLibrary:
     def _humanize(self, text: str) -> str:
         return inherit.humanize(text, self._layers) if self._layers else text
 
+    def _share_layers(self, other: TemplateLibrary) -> None:
+        """`other`'s children's hidden levels and authors, shared, not copied:
+        they are never changed once built."""
+        self._layer_components = other._layer_components
+        self._layer_chains = other._layer_chains
+        self._layers = other._layers
+        self._authors = other._authors
+
     @property
     def _all_chains(self) -> Mapping[str, RawComponent]:
         """The chains, with a child's hidden ancestor levels after them."""
         return ChainMap(self._chains, self._layer_chains)
-
-    def _steering(self, name: str) -> SteeringProfile | None:
-        return self.steering.get(name) or self._layer_steering.get(name)
 
     def with_addons(self, addons: Sequence[InstalledAddon]) -> TemplateLibrary:
         """This library's own components and chains with `addons` in place of
@@ -739,11 +765,7 @@ class TemplateLibrary:
             self.addons,
             self.library_path,
         )
-        candidate._layer_components = self._layer_components
-        candidate._layer_chains = self._layer_chains
-        candidate._layer_steering = self._layer_steering
-        candidate._layers = self._layers
-        candidate._authors = self._authors
+        candidate._share_layers(self)
         candidate._chains.pop(_chain_id(chain_path, body), None)
         return candidate, candidate._add_chain(chain_path, body)
 
@@ -756,6 +778,7 @@ class TemplateLibrary:
     ) -> str:
         id = _chain_id(chain_path, body)
         _refuse_qualified(chain_path, "chain id", id)
+        _refuse_layer_reference(chain_path, body)
         if addon is not None:
             id = f"{addon.namespace}:{id}"
         if id in self._chains:
@@ -776,11 +799,9 @@ class TemplateLibrary:
 
     def chain_data(self, id: str) -> Mapping[str, object]:
         """Chain `id` as authored, before `extends` expansion or validation.
-        A child add-on's reference into a hidden ancestor level reads as that
-        ancestor's own name (`public_name`)."""
-        shown = self.public(self._chains[id].data)
-        assert isinstance(shown, Mapping)
-        return shown
+        A child add-on's chain may name a hidden ancestor level: a screen or a
+        copy shows it through `public`."""
+        return self._chains[id].data
 
     def chain_file(self, id: str) -> Path:
         """The file chain `id` was read from -- what an edit of it rewrites."""
@@ -795,10 +816,10 @@ class TemplateLibrary:
         expansion follows, transitively, and every steering profile a task
         selects. A chain that stops expanding part-way answers with what it
         reached; why it stopped is `lint`'s to say."""
-        return {
-            node: {self.public_name(ref) for ref in refs}
-            for node, refs in self._expansion(id).references.items()
-        }
+        references = self._expansion(id).references
+        if not self._layers:
+            return references
+        return {node: {self.public_name(ref) for ref in refs} for node, refs in references.items()}
 
     def usages(self, id: str) -> dict[str, list[dict[str, object]]]:
         """Per library component chain `id` uses (as `references` names it),
@@ -987,7 +1008,7 @@ class TemplateLibrary:
                 )
             for task in node.tasks():
                 for name in task.task.steering:
-                    if self._steering(name) is None:
+                    if name not in self.steering:
                         raise TemplateLibraryError(
                             f"{resolution.at(task.path)}: selects no steering profile {name!r}",
                             **resolution.path_location(task.path),
@@ -1018,7 +1039,7 @@ class TemplateLibrary:
         return replace(
             resolved,
             steering={
-                name: self._steering(name).instructions  # type: ignore[union-attr]
+                name: self.steering[name].instructions
                 for node in resolved.nodes
                 for task in node.tasks()
                 for name in task.task.steering
@@ -1271,8 +1292,10 @@ class _Resolution:
             # to report: the child says once that it does not resolve.
             self._library.resolve_chain(name)
         except TemplateLibraryError as exc:
+            # A hidden level is not linted on its own: its cause is said here.
+            cause = f": {exc}" if inherit.is_layer(name) else ""
             raise TemplateLibraryError(
-                f"{file}: extends {name!r}, which does not resolve",
+                f"{file}: extends {name!r}, which does not resolve{cause}",
                 loc=("extends",),
                 addon_ref=exc.addon_ref,
             ) from exc

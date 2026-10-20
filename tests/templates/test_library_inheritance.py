@@ -6,6 +6,7 @@ The tree is the design's example: `team-payments` builds on `platform-dept`,
 which builds on `company`."""
 
 import json
+import re
 from dataclasses import replace
 
 import pytest
@@ -13,7 +14,7 @@ from support.addons import AGENT, chain, edit_store, home, installed
 
 from kraft.api.routes.settings import _chain_summary
 from kraft.templates import catalogue
-from kraft.templates.library import TemplateLibrary
+from kraft.templates.library import Namespace, TemplateLibrary
 
 COMPANY = {
     "library": {
@@ -39,6 +40,7 @@ COMPANY = {
         "hotfix": chain("hotfix"),
     },
     "skills": {"deploy-review": "company method"},
+    "profiles": {"slow": {"model": {"codex": "slow-model"}}},
 }
 DEPT = {"library": {"tasks": {"security_scan": {**AGENT, "prompt": "dept scan"}}}}
 TEAM = {
@@ -46,9 +48,17 @@ TEAM = {
         "tasks": {
             "security_scan": {"extends": "platform-dept:security_scan", "model": "pci-model"},
             "pci_review": {**AGENT, "prompt": "team pci"},
+            # Each file reference by the parent's name: the ancestor that ships it.
+            "supered": {
+                **AGENT,
+                "skill": "platform-dept:deploy-review",
+                "steering": ["platform-dept:house"],
+                "profile": "platform-dept:slow",
+            },
         }
     },
     "chains": {
+        "supers": chain("supered"),
         "default": {
             "extends": "platform-dept:default",
             "add": [
@@ -61,7 +71,7 @@ TEAM = {
                     },
                 }
             ],
-        }
+        },
     },
 }
 
@@ -90,8 +100,11 @@ def _inherited_as_is(library, dept):
 
 
 def _override_replaces(library, dept):
-    # The team's own override extends the dept's: the dept's prompt is what it reads.
-    assert _task(library, f"{dept}:default", "scan").prompt == "dept scan"
+    # A team that declares no `security_scan` inherits the dept's override of
+    # company's, and company's `default` runs it.
+    inherited = library.component(Namespace.TASKS, "team-payments:security_scan")
+    assert inherited.data["prompt"] == "dept scan"
+    assert _task(library, "team-payments:default", "scan").prompt == "dept scan"
 
 
 def _extend_inherited_component(library, dept):
@@ -133,35 +146,61 @@ def _steering_inherited(library, dept):
     assert resolved.steering == {"team-payments:house": "company rules"}
 
 
+def _skill_by_parent_name(library, dept):
+    # The team ships its own `deploy-review`; the parent's name reads company's.
+    assert _task(library, "team-payments:supers", "n").skill == "company:deploy-review"
+
+
+def _steering_by_parent_name(library, dept):
+    task = _task(library, "team-payments:supers", "n")
+    assert task.steering == ["company:house"]
+    resolved = library.resolve_chain("team-payments:supers")
+    assert resolved.steering == {"company:house": "company rules"}
+
+
+def _profile_by_parent_name(library, dept):
+    assert _task(library, "team-payments:supers", "n").profile == "company:slow"
+
+
+#: Every check over `TEAM`, which overrides `security_scan` itself.
 _ALL = [
     _inherited_as_is,
-    _override_replaces,
     _extend_inherited_component,
     _extend_inherited_chain,
     _late_binding_through_extends,
     _late_binding_inherited_chain,
     _skill_inherited,
     _steering_inherited,
+    _steering_by_parent_name,
+    _profile_by_parent_name,
 ]
+
+#: A team that inherits `security_scan` as the dept overrode it.
+TEAM_INHERITS_SCAN = {
+    **TEAM,
+    "library": {
+        "tasks": {k: v for k, v in TEAM["library"]["tasks"].items() if k != "security_scan"}
+    },
+}
+WITH_SKILL = {**TEAM, "skills": {"deploy-review": "team method"}}
 
 
 @pytest.mark.parametrize(
     ("tree", "checks"),
     [
         pytest.param({}, [_inherited_as_is], id="inherited-as-is"),
-        pytest.param({}, [_override_replaces], id="override-replaces"),
+        pytest.param({"team": TEAM_INHERITS_SCAN}, [_override_replaces], id="override-replaces"),
         pytest.param({}, [_extend_inherited_component], id="extend-inherited-component"),
         pytest.param({}, [_extend_inherited_chain], id="extend-inherited-chain"),
         pytest.param({}, [_late_binding_through_extends], id="late-binding-through-extends"),
         pytest.param({}, [_late_binding_inherited_chain], id="late-binding-inherited-chain"),
         pytest.param({"dept_alias": "plat"}, _ALL, id="alias-parent"),
         pytest.param({}, [_skill_inherited], id="skill-inherited"),
-        pytest.param(
-            {"team": {**TEAM, "skills": {"deploy-review": "team method"}}},
-            [_skill_overridden],
-            id="skill-overridden",
-        ),
+        pytest.param({"team": WITH_SKILL}, [_skill_overridden], id="skill-overridden"),
         pytest.param({}, [_steering_inherited], id="steering-inherited"),
+        pytest.param({"team": WITH_SKILL}, [_skill_by_parent_name], id="skill-by-parent-name"),
+        pytest.param({}, [_steering_by_parent_name], id="steering-by-parent-name"),
+        pytest.param({}, [_profile_by_parent_name], id="profile-by-parent-name"),
     ],
 )
 def test_inherited_library(tmp_path, tree, checks):
@@ -201,7 +240,8 @@ def _surfaces(library):
         pytest.param(TEAM, "component_names", "team-payments:verify", id="component-names"),
         pytest.param(TEAM, "steering", "team-payments:house", id="steering"),
         pytest.param(TEAM, "catalogue", "platform-dept:security_scan", id="catalogue"),
-        pytest.param(BROKEN, "lint", "platform-dept's default", id="lint"),
+        # The hidden level's own failure is said, not only that it fails.
+        pytest.param(BROKEN, "lint", "cannot change kind", id="lint"),
         pytest.param(TEAM, "provenance", "platform-dept:default", id="provenance-parent"),
         pytest.param(TEAM, "chains-extends", "platform-dept:default", id="chains-extends"),
     ],
@@ -221,7 +261,7 @@ def test_layers_never_leak(tmp_path, team, surface, shows):
         shown = _surfaces(library)[surface]
     text = json.dumps(shown, default=str)
     assert shows in text
-    assert "^" not in text
+    assert not re.search(r"[\w-]\^\d", text)
 
 
 def test_with_addons_drops_descendants(tmp_path):
@@ -253,3 +293,22 @@ def test_read_only_names_the_author(tmp_path):
     assert library.authored_by("team-payments:hotfix", "chains").id == "company@acme"
     assert library.authored_by("team-payments:verify", "tasks").id == "company@acme"
     assert library.authored_by("company:hotfix").id == "company@acme"
+
+
+@pytest.mark.parametrize(
+    "local",
+    [
+        {"chains": {"local": chain("team-payments^1:security_scan")}},
+        {"library": {"tasks": {"base": {"extends": "team-payments^1:security_scan"}}}},
+    ],
+    ids=["local-chain", "local-library"],
+)
+def test_a_hidden_level_is_not_reachable_by_name(tmp_path, local):
+    """Only a child reads its parent's entries, and only by the parent's name:
+    a file naming a hidden level is refused, not resolved."""
+    root = home(tmp_path, **local)
+    report = TemplateLibrary.lint_dir(root, addons=list(_tree(tmp_path)))
+    assert [issue.message.split(": ", 1)[1] for issue in report.issues] == [
+        "'team-payments^1:security_scan' is no name a library declares; an add-on reads "
+        "its parent's entries by the parent's name"
+    ]
