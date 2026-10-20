@@ -3,7 +3,7 @@ import type { ChainArc, ChainNode, Seam } from "../graph/layout";
 import { EDITOR_FIT } from "../graph/camera";
 import { StageGraph } from "../graph/StageGraph";
 import type { Op, Result, Scope } from "./draft/types";
-import { authoredNodes, changeAt, extendsOf, kindOf, nodeGlyph, inheritedAt, originOf, problemsAt, type NodeA } from "./draft/view";
+import { authoredNodes, changeAt, extendsOf, inheritedAt, inheritedName, kindOf, nodeGlyph, originOf, problemsAt, type NodeA } from "./draft/view";
 import { SeamMenu } from "./menus/SeamMenu";
 import { ReadOnly } from "./addon";
 import { problemWord } from "./problems";
@@ -61,7 +61,7 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
     const originMeta = origin === "added" ? "added here" : origin === "overridden" ? "overridden here" : undefined;
     // A child add-on's own task at this node ranks below a problem and below the chain-extends origin.
     const inh = inheritedAt(r, n.id);
-    const inhMeta = inh && `${inh.entry.slice(inh.entry.indexOf(".") + 1)} ${inh.origin} here`;
+    const inhMeta = inh && `${inheritedName(inh.entry)} ${inh.origin} here`;
     return {
       id: n.id,
       kind,
