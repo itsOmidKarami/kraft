@@ -779,7 +779,7 @@ def _ancestors(
     candidate: load.InstalledAddon,
     addons: Sequence[load.InstalledAddon],
     config: AddonsConfig,
-    locked: Collection[str] = (),
+    locked: Collection[str],
 ) -> tuple[load.InstalledAddon, ...]:
     """`candidate`'s ancestors among `addons` (the rest of the instance),
     parent first; empty for a root add-on. Raises `Refused` when its ancestry
@@ -1160,28 +1160,29 @@ def _resolve(addon_id: str, ctx: _Context) -> _Move | Result:
 def _choose(
     moves: dict[str, _Move],
     ctx: _Context,
-    pulled: Mapping[str, str] | None = None,
+    builders: Mapping[str, Sequence[str]] | None = None,
     gone: Mapping[str, Result] | None = None,
 ) -> dict[str, Result]:
     """Phases 2 and 3 together: which of `moves` apply. The set rule settles
     the moves not refused yet, each is judged against the ones it keeps
     (`_check_moves`), and a refusal settles and judges again, until none is
     refused. A dropped move is taken out of `moves`, and its `Result`
-    returned: a refusal stands over a hold. `pulled` maps each ancestor an
-    install pulled in to the child that builds on it, and `gone` holds what
-    was said of the installs refused before; what either leaves alone is
-    refused with them (`_orphans`)."""
-    pulled = pulled or {}
+    returned: a refusal stands over a hold. `builders` maps each ancestor an
+    install pulled in, or a re-install needs, to the children it is taken
+    for, and `gone` holds what was said of the installs refused before; what
+    either leaves alone is dropped with them (`_orphans`)."""
+    builders = builders or {}
     refused: dict[str, Result] = {}
     while True:
-        refused |= _orphans(moves, {**(gone or {}), **refused}, pulled, ctx)
+        refused |= _orphans(moves, {**(gone or {}), **refused}, builders, ctx)
         kept = dict(moves)
         held = _settle(kept, ctx)
         failing = _check_moves(moves, kept, ctx)
         if not failing:
-            # A pulled-in ancestor whose descendants the set rule dropped
-            # would be installed alone.
-            failing = _orphans(dict(kept), held, pulled, ctx)
+            # An ancestor taken for children the set rule dropped would move
+            # alone. (A range-dropped install is refused by `_check_moves`
+            # first; a re-installed child the set rule holds is not.)
+            failing = _orphans(dict(kept), held, builders, ctx)
             if not failing:
                 break
         for addon_id in failing:
@@ -1193,17 +1194,19 @@ def _choose(
 
 
 def _orphans(
-    moves: dict[str, _Move], gone: Mapping[str, Result], pulled: Mapping[str, str], ctx: _Context
+    moves: dict[str, _Move],
+    gone: Mapping[str, Result],
+    builders: Mapping[str, Sequence[str]],
+    ctx: _Context,
 ) -> dict[str, Result]:
-    """The installs among `moves` that `gone` (results of moves not taken)
-    leaves without their tree, to a fixed point, each taken out of `moves`
-    and refused: one whose parent is an install in `gone`, and an ancestor
-    in `pulled` that no move left builds on. Nothing of a half tree is
-    written."""
+    """The moves that `gone` (results of moves not taken) leaves without
+    their tree, to a fixed point, each taken out of `moves`: an install whose
+    parent is an install in `gone`, refused, and an ancestor in `builders`
+    none of whose children is left: refused when pulled in, held when a
+    re-install needed it. Nothing of a half tree is written."""
     out: dict[str, Result] = {}
     while True:
         said = {**gone, **out}
-        building = {m.candidate.parent for m in moves.values()}
         found: dict[str, Result] = {}
         for addon_id, move in moves.items():
             parent_id = move.candidate.parent
@@ -1214,11 +1217,20 @@ def _orphans(
                     "refused",
                     problems=(f"its parent {parent_id} cannot be installed: {why}",),
                 )
-            elif addon_id in pulled and addon_id not in building:
-                found[addon_id] = Result(
-                    addon_id,
-                    "refused",
-                    problems=(f"pulled in for {pulled[addon_id]}, which cannot be installed",),
+            elif addon_id in builders and not moves.keys() & set(builders[addon_id]):
+                children = ", ".join(builders[addon_id])
+                found[addon_id] = (
+                    Result(
+                        addon_id,
+                        "refused",
+                        problems=(f"pulled in for {children}, which cannot be installed",),
+                    )
+                    if move.locked is None
+                    else Result(
+                        addon_id,
+                        "held",
+                        problems=(f"needed by {children}, which cannot be re-installed",),
+                    )
                 )
         if not found:
             return out
@@ -1379,9 +1391,12 @@ def update(
     install, an alias), held in memory and written only for an add-on that
     was accepted. An install's ancestors that are not installed are pulled
     in with it, each with a default entry, and said after `ids` like a
-    relative, its refusals too. `re_install` takes the commit the ref
-    resolves to now even at an unchanged version, and takes no relative but
-    an ancestor whose locked version the re-installed range rejects. Raises
+    relative, its refusals too; each applies only with a child that builds
+    on it. `re_install` takes the commit the ref resolves to now even at an
+    unchanged version, and takes no relative (not a descendant's waiting
+    move, which a plain update takes) but the waiting move of an ancestor
+    whose locked version the re-installed range rejects and whose move it
+    accepts, and that only with the child. Raises
     `Refused` when `entries` do not fit `addons.yaml`; `ConfigError` or
     `PolicyError` when `addons.yaml`, the lock or `policy.yaml` cannot be
     read."""
@@ -1440,12 +1455,15 @@ def update(
         # moving are installed with it, each under its own name with a default
         # entry, up the tree. Each is said, and each refusal refuses the
         # installs below it (`_orphans`).
-        pulled: dict[str, str] = {}
+        pulled: dict[str, list[str]] = {}
         climbing = [i for i in order if i in moves]
         while climbing:
             child = moves[climbing.pop(0)]
             parent_id = child.candidate.parent
             if child.locked is not None or parent_id is None:
+                continue
+            if parent_id in pulled:
+                pulled[parent_id].append(child.addon_id)
                 continue
             if parent_id in lock.addons or parent_id in moves or parent_id in results:
                 continue
@@ -1455,7 +1473,7 @@ def update(
                     child.addon_id, "refused", problems=(_missing_collection(parent_id),)
                 )
                 continue
-            pulled[parent_id] = child.addon_id
+            pulled[parent_id] = [child.addon_id]
             name = parent_id.split("@", 1)[0]
             holders = {config.namespace(o): o for o in config.addons} | {
                 e.namespace: o for o, e in lock.addons.items()
@@ -1485,25 +1503,32 @@ def update(
             else:
                 results[parent_id] = resolved
         # Re-install: an installed ancestor stays at its locked version unless
-        # the re-installed range rejects it; then its waiting move is taken,
-        # up the tree. A re-install takes no other relative.
-        needs: dict[str, None] = {}
+        # the re-installed range rejects it; then its waiting move is taken
+        # when the range accepts it, up the tree, and only with the child
+        # (`_orphans`). A re-install takes no other relative.
+        needs: dict[str, list[str]] = {}
         climbing = [i for i in order if i in moves] if re_install else []
         while climbing:
             child = moves[climbing.pop(0)]
             parent_id = child.candidate.parent
             parent = next((p for p in loaded if p.id == parent_id and p.repo_id is None), None)
-            if parent is None or parent_id in moves or parent_id in results:
+            if parent is None or not _outside(child.candidate.parent_range, parent.version):
                 continue
-            if not _outside(child.candidate.parent_range, parent.version):
+            if parent_id in needs:
+                needs[parent_id].append(child.addon_id)
                 continue
-            needs[parent_id] = None
+            if parent_id in moves or parent_id in results:
+                continue
             resolved = _resolve(parent_id, ctx)
             if isinstance(resolved, _Move):
+                # One the range rejects too: the set rule holds the child.
+                if _outside(child.candidate.parent_range, resolved.found.version):
+                    continue
                 moves[parent_id] = resolved
                 climbing.append(parent_id)
             else:
                 results[parent_id] = resolved
+            needs[parent_id] = [child.addon_id]
         # Scope: a named add-on's installed relatives join with their waiting
         # moves. Anything else said of a relative is not said: it was not asked.
         # A named add-on that is refused or failed takes none, which would
@@ -1523,7 +1548,8 @@ def update(
         said_parents |= {i: m.candidate.parent for i, m in moves.items()}
         # 2. Check, and 3. settle, to a fixed point.
         gone = {i: r for i, r in results.items() if i not in lock.addons}
-        results |= _unasked(_choose(moves, ctx, pulled, gone), joined)
+        builders = {**pulled, **needs}
+        results |= _unasked(_choose(moves, ctx, builders, gone), joined)
         # 4. Trees: one review and one answer each.
         parents = {p.id: p.parent for p in loaded if p.repo_id is None}
         parents |= {i: m.candidate.parent for i, m in moves.items()}
@@ -1577,7 +1603,7 @@ def update(
                     # The needed moves were checked with the held ones in place,
                     # but apply over their locked sides: checked again so.
                     needed = {m.addon_id: m for m in members if m.addon_id in need}
-                    results |= _unasked(_choose(needed, ctx), joined)
+                    results |= _unasked(_choose(needed, ctx, builders), joined)
                     members = [m for m in members if m.addon_id in needed]
                     if not members:
                         continue
@@ -1643,9 +1669,13 @@ def update(
                     ),
                     content=(*reviewed.content, *(content if first else ())),
                 )
+            # A pulled-in ancestor names the members it is taken for.
+            here = {m.addon_id for m in members}
+            on = {i: [c for c in pulled[i] if c in here] for i in here & pulled.keys()}
             pulled_in = tuple(
                 f"pulls in {m.addon_id} {m.found.version} from collection "
-                f"{m.addon_id.split('@', 1)[1]}: {pulled[m.addon_id]} builds on it"
+                f"{m.addon_id.split('@', 1)[1]}: {', '.join(on[m.addon_id])} "
+                f"{'builds' if len(on[m.addon_id]) == 1 else 'build'} on it"
                 for m in members
                 if m.addon_id in pulled
             )

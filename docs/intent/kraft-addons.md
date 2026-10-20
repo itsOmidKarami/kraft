@@ -279,7 +279,7 @@ origin: src/kraft/addons/update.py §problems
 ## REQ install-refuses-a-missing-parent-collection
 
 IF any ancestor of an add-on being installed or updated comes from a collection that is not in `addons.yaml`, THEN the system SHALL refuse it, naming that ancestor and collection and the `kraft admin addon collection add` to run, or, when the parent is disabled, the `kraft admin addon enable` to run; and an installed add-on with nothing to take SHALL be reported current, with why its ancestry does not hold, never refused.
-enforced-by: tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-missing-parent-collection], tests/addons/test_update_tree.py::test_install_pulls_in_missing_ancestors[missing-collection], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-of-a-disabled-parent], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[current-child-of-a-disabled-parent]
+enforced-by: tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-missing-parent-collection], tests/addons/test_update_pull_in.py::test_install_pulls_in_missing_ancestors[missing-collection], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-of-a-disabled-parent], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[current-child-of-a-disabled-parent]
 origin: src/kraft/addons/update.py §_ancestors
 
 ## REQ an-addon-cannot-run-commands-or-grant-permissions
@@ -333,7 +333,7 @@ origin: src/kraft/addons/update.py §update
 ## REQ update-requires-acceptance
 
 IF an install or update is declined, refused, or run with `--check`, THEN the system SHALL NOT change `addons.yaml`, `addons.lock` or the store.
-enforced-by: tests/addons/test_update.py::test_a_declined_update_writes_nothing[install], tests/addons/test_update.py::test_a_declined_update_writes_nothing[update], tests/addons/test_update.py::test_a_batch_continues_past_a_refused_addon, tests/cli/test_addon.py::test_a_refused_install_writes_nothing, tests/cli/test_addon.py::test_update_check_exit_codes[update-waiting], tests/cli/test_addon.py::test_no_terminal_without_yes_declines, tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[tree-declined-writes-nothing], tests/addons/test_update_tree.py::test_install_pulls_in_missing_ancestors[ancestor-refused-writes-nothing], tests/addons/test_update_tree.py::test_install_pulls_in_missing_ancestors[pull-in-declined]
+enforced-by: tests/addons/test_update.py::test_a_declined_update_writes_nothing[install], tests/addons/test_update.py::test_a_declined_update_writes_nothing[update], tests/addons/test_update.py::test_a_batch_continues_past_a_refused_addon, tests/cli/test_addon.py::test_a_refused_install_writes_nothing, tests/cli/test_addon.py::test_update_check_exit_codes[update-waiting], tests/cli/test_addon.py::test_no_terminal_without_yes_declines, tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[tree-declined-writes-nothing], tests/addons/test_update_pull_in.py::test_install_pulls_in_missing_ancestors[ancestor-refused-writes-nothing], tests/addons/test_update_pull_in.py::test_install_pulls_in_missing_ancestors[pull-in-declined]
 origin: src/kraft/addons/update.py §update
 
 ## REQ update-refuses-a-change-that-breaks-a-chain
@@ -615,5 +615,5 @@ origin: src/kraft/addons/update.py §_settle
 ## REQ install-pulls-in-missing-ancestors
 
 WHEN an install's ancestors are not installed, the system SHALL install them with it, under one review and one accept, with `--as` and `--auto-update` applying to the named add-on only.
-enforced-by: tests/addons/test_update_tree.py::test_install_pulls_in_missing_ancestors[pulls-in-two], tests/addons/test_update_tree.py::test_install_pulls_in_missing_ancestors[as-names-only-the-child], tests/addons/test_update_tree.py::test_install_pulls_in_missing_ancestors[auto-update-only-the-child], tests/cli/test_addon.py::test_install_pulls_in_its_parent
+enforced-by: tests/addons/test_update_pull_in.py::test_install_pulls_in_missing_ancestors[pulls-in-two], tests/addons/test_update_pull_in.py::test_install_pulls_in_missing_ancestors[as-names-only-the-child], tests/addons/test_update_pull_in.py::test_install_pulls_in_missing_ancestors[auto-update-only-the-child], tests/cli/test_addon.py::test_install_pulls_in_its_parent
 origin: src/kraft/addons/update.py §update
