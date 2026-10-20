@@ -776,17 +776,21 @@ def connected_ids(
 
 
 def _launch_problem(addon: InstalledAddon) -> str | None:
-    """Why `addon`'s store cannot be read at this launch: its manifest, and
-    its `profiles.yaml`, which every launch's profile table reads, checked
-    against the digest the store was written with. An edited store leaves
-    only this add-on out, so only a launch that reads from it stops. Skills
-    are checked where they are read (`skill.read`)."""
+    """Why `addon`'s store cannot be read at this launch: its manifest, its
+    `profiles.yaml`, and its `library.yaml`, which every launch's profile
+    table reads (a child's inherited profiles go through each ancestor's
+    library), checked against the digest the store was written with. An
+    edited store leaves only this add-on out, and its descendants with it
+    (`inherit.cascade`), so only a launch that reads from that tree stops.
+    Skills are checked where they are read (`skill.read`)."""
     from kraft.addons import fetch
 
     if not addon.root.is_dir():
         return None  # the load checks say why
     try:
-        fetch.open_store(addon.root).read("profiles.yaml", optional=True)
+        store = fetch.open_store(addon.root)
+        for rel in ("profiles.yaml", "library.yaml"):
+            store.read(rel, optional=True)
     except fetch.StoreMismatch as exc:
         return str(exc)
     except OSError as exc:

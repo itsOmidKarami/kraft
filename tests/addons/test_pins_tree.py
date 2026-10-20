@@ -475,3 +475,45 @@ def test_a_launch_never_runs_a_child_on_an_older_ancestor(tree_home, case):
         launch_task(pins, profile="fast")
 
     assert str(stop.value) == f"add-on team-payments@acme 1.0.0 could not be read: {_MIXED}"
+
+
+_LIBRARY_EDITED = "library.yaml does not match its digest"
+
+
+@pytest.mark.parametrize(
+    ("edited", "pinned", "fields", "stops"),
+    [
+        pytest.param("company", False, {"prompt": "unrelated"}, None, id="ancestor-library-edited"),
+        pytest.param(
+            "company", True, {"prompt": "unrelated"}, None, id="pinned-ancestor-library-edited"
+        ),
+        pytest.param(
+            "company", False, {"profile": "fast"}, _LIBRARY_EDITED, id="ancestor-edited-read-stops"
+        ),
+        pytest.param(
+            "team-payments", False, {"profile": "company:slow"}, None, id="own-library-edited"
+        ),
+        pytest.param(
+            "team-payments", False, {"profile": "fast"}, _LIBRARY_EDITED, id="own-edited-read-stops"
+        ),
+    ],
+)
+def test_an_edited_library_leaves_only_its_tree_out(tree_home, edited, pinned, fields, stops):
+    """`harnesses.yaml`'s `fast` falls back to `team-payments:slow`, and then
+    a `library.yaml` in the tree is edited after it was installed: that
+    add-on is left out with the store's reason, and its descendants with it,
+    and nothing else. A launch that reads none of it runs, whatever profile
+    table the rest builds; one that reads it stops saying which store, never
+    that the fallback names a profile that is not defined."""
+    repo, config_dir, addons_dir = tree_home
+    pins = resolve_chain(config_dir, addons_dir, "inherited-skill").addons if pinned else None
+    _fast_falls_back_to(config_dir, "team-payments:slow")
+    edit_store(store_of(config_dir, addons_dir, edited), "library.yaml", "tasks: {}\n")
+
+    if stops:
+        with pytest.raises(agent.HarnessUnavailable) as stop:
+            launch_task(pins, **fields)
+        assert stops in str(stop.value)
+        assert "not defined" not in str(stop.value)
+    else:
+        assert launch_task(pins, **fields).harness
