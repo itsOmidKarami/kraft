@@ -199,13 +199,17 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams: chainSeams
         {lay.items.map(({ node: n, w, cx }) => {
           const key = nodeKey(n.id);
           const bold = n.id === selected || n.state === "current";
+          const nodeName = accessibleName(names ? { ...n, id: label(n) } : n, n.kind === "gate" ? "gate" : "node");
+          // The meta under the name ("security_scan overridden here", a problem word) describes the node, unless its name already says it.
+          const metaId = n.meta && !nodeName.includes(n.meta) ? `${ids}-meta-${n.id}` : undefined;
           return (
             <button
               key={key}
               ref={roving.ref(key)}
               type="button"
               tabIndex={roving.tabIndex(key)}
-              aria-label={accessibleName(names ? { ...n, id: label(n) } : n, n.kind === "gate" ? "gate" : "node")}
+              aria-label={nodeName}
+              aria-describedby={metaId}
               aria-pressed={n.id === selected}
               className={`graph-node${bold ? " is-bold" : ""}${clipped({ cx, w }) ? " is-clipped" : ""}${n.state === "todo" ? " is-todo" : ""}${n.state === "ghost" ? " is-ghost" : ""}${n.mark === "add" ? (n.prob ? " is-bad" : " is-add") : ""}${n.pending ? " is-pending" : ""}${n.faded ? " is-faded" : ""}${drag?.id === n.id ? " is-dragging" : ""}`}
               style={{ left: cx - w / 2, top: L.CY - L.BOX / 2, width: w }}
@@ -216,7 +220,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams: chainSeams
             >
               <NodeGlyph {...n} size="lg" sel={n.id === selected} />
               <span className="graph-label" style={{ maxWidth: w - 8 }}>{breakable(label(n))}</span>
-              {n.meta && <span className={`graph-meta tone-${n.metaTone ?? "muted"}`}>{n.meta}</span>}
+              {n.meta && <span id={metaId} className={`graph-meta tone-${n.metaTone ?? "muted"}`} style={{ maxWidth: w - 8 }}>{n.meta}</span>}
               {n.sub && <span className="graph-sub"><span className={`graph-sub-dot tone-${n.subTone ?? "amber"}`} />{n.sub}</span>}
             </button>
           );

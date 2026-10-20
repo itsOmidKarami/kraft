@@ -152,6 +152,8 @@
 .graph-node.is-task { gap: 5px; }
 .graph-node.is-task .graph-label { overflow-wrap: anywhere; }
 .graph-node.is-task .graph-meta { margin-top: -2px; }
+/* A chain node's meta stays inside its column, as its name does: a long one ("security_scan overridden here") wraps between words. */
+.graph-node:not(.is-task) > .graph-meta { white-space: normal; text-align: center; text-wrap: balance; line-height: 1.3; }
 .graph-node.is-warn .graph-label, .graph-node.is-side .graph-label { color: var(--warn); }
 .graph-node.is-slot .graph-label { color: var(--ok); }
 .edge.is-side { stroke: var(--warn); stroke-dasharray: 4 4; }

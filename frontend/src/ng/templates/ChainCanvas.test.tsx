@@ -89,6 +89,8 @@ describe("a child add-on's chain", () => {
     const el = nodeEl(node);
     if (meta) expect(el.querySelector(".graph-meta")?.textContent).toBe(meta);
     else expect(el).not.toHaveTextContent(/here/);
+    // The mark is a word for a screen reader too, not only a colour under the node.
+    expect(el).toHaveAccessibleDescription(meta ?? "");
     if (tone) expect(el.querySelector(".graph-meta")).toHaveClass(`tone-${tone}`);
   });
 });
