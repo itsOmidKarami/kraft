@@ -150,7 +150,10 @@ TREES = {
     "child-not-judged-against-refused-parent": {**TREE, TOOLS: TREE[COMPANY]},
 }
 #: Local chains a row's instance has.
-LOCAL = {"tree-skill-of-a-later-member-is-its-own": {"mine": {"extends": "team:check"}}}
+LOCAL = {
+    "tree-skill-of-a-later-member-is-its-own": {"mine": {"extends": "team:check"}},
+    "tree-own-lines-go-to-its-first-member": {"mine": {"extends": "team:check"}},
+}
 
 
 @pytest.mark.parametrize(
@@ -253,6 +256,13 @@ LOCAL = {"tree-skill-of-a-later-member-is-its-own": {"mine": {"extends": "team:c
             {},
             id="tree-skill-of-a-later-member-is-its-own",
         ),
+        pytest.param(
+            _team_takes_own_skill,
+            True,
+            {COMPANY: "applied", TEAM: "applied"},
+            {},
+            id="tree-own-lines-go-to-its-first-member",
+        ),
     ],
 )
 def test_a_tree_moves_as_a_set(tmp_path, request, published, accept, outcomes, problems):
@@ -288,6 +298,12 @@ def test_a_tree_moves_as_a_set(tmp_path, request, published, accept, outcomes, p
         lines = [line for g in groups for r in g.reviews for line in r.content]
         assert "mine.nodes[n].tasks[t]: skill set to 'team:x'" in lines, lines
         assert not any("plugin skill" in line for line in lines), lines
+    if row == "tree-own-lines-go-to-its-first-member":
+        # The instance's own chains are said once, in the first member's review.
+        (group,) = groups
+        said = {r.addon_id: r.content for r in group.reviews}
+        mine = "mine.nodes[n].tasks[t]: skill set to 'team:x'"
+        assert (mine in said[COMPANY], mine in said[TEAM]) == (True, False), said
 
 
 @pytest.mark.parametrize(
@@ -507,8 +523,8 @@ def test_update_takes_waiting_relatives(
 ):
     """`update <id>` also takes the waiting moves of the id's installed
     ancestors and descendants (design "Update moves a set", Scope). A
-    relative's move that breaks a chain the named moves do not is held (D2).
-    `--re-install <id>` takes none of a descendant's."""
+    relative's move that breaks a chain is held when the named moves, judged
+    again without the relatives, break none. `--re-install <id>` takes none of a descendant's."""
     row = request.node.callspec.id
     scratch, write_scratch = [], fetch.write_scratch
     monkeypatch.setattr(

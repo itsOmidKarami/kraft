@@ -1507,6 +1507,18 @@ def update(
                 continue
             if parent_id in lock.addons or parent_id in moves or parent_id in results:
                 continue
+            # One listed but turned off is the operator's to turn on, not ours.
+            if parent_id in config.addons and not config.entry(parent_id).enabled:
+                del moves[child.addon_id]
+                results[child.addon_id] = Result(
+                    child.addon_id,
+                    "refused",
+                    problems=(
+                        f"its parent {parent_id} is not loaded: {load.DISABLED}; "
+                        f"enable it first: kraft admin addon enable {parent_id}",
+                    ),
+                )
+                continue
             if parent_id.split("@", 1)[1] not in config.collections:
                 del moves[child.addon_id]
                 results[child.addon_id] = Result(
@@ -1584,6 +1596,9 @@ def update(
                 moves[addon_id] = resolved
                 joined[addon_id] = None
         # Said after `ids`, in tree order, with the parents their moves name.
+        # Taken before `_choose` drops a refused move: one refused
+        # there (a pulled-in ancestor, say) is still said in its tree.
+        # `parents` below is taken after it.
         said_parents = {p.id: p.parent for p in loaded if p.repo_id is None}
         said_parents |= {i: m.candidate.parent for i, m in moves.items()}
         # 2. Check, and 3. settle, to a fixed point.
@@ -1621,8 +1636,8 @@ def update(
             members = [moves[i] for i in tree]
             would_load, after, libraries, broken = judged(members)
             if broken and joined.keys() & set(tree):
-                # D2: judged again with only the named add-ons' moves and the
-                # moves they need. When that holds, each other relative waits.
+                # Judged again without the relatives: only the named add-ons'
+                # moves and the moves they need. When that holds, each other relative waits.
                 need = inherit.needed(
                     [i for i in tree if i not in joined],
                     sides,

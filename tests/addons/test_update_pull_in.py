@@ -35,6 +35,10 @@ NO_CORP = (
     "its parent company@corp comes from collection corp, which this instance has not added; "
     "add it first: kraft admin addon collection add"
 )
+DISABLED = (
+    "its parent dept@platform is not loaded: is disabled; enable it first: "
+    "kraft admin addon enable dept@platform"
+)
 TAKEN = (
     "dept@platform installs under its name dept, which dept@other holds; install it first "
     "with its own --as: kraft admin addon install dept@platform --as ALIAS"
@@ -129,6 +133,7 @@ PULL_TREES = {
             {DEPT: TAKEN, TEAM: f"its parent dept@platform cannot be installed: {TAKEN}"},
             id="ancestor-name-taken",
         ),
+        pytest.param(None, True, {TEAM: "refused"}, {TEAM: DISABLED}, id="ancestor-disabled"),
         pytest.param(
             None,
             True,
@@ -176,6 +181,10 @@ def test_install_pulls_in_missing_ancestors(
     repos, home = make_tree(tmp_path, tree, installed=installed, missing=missing)
     if published:
         published(repos)
+    if row == "ancestor-disabled":
+        # Listed but turned off, and never installed: it is not pulled in.
+        config = read_yaml(home[0] / "addons.yaml")
+        write_yaml(home[0] / "addons.yaml", {**config, "addons": {DEPT: {"enabled": False}}})
     before = _files(home)
     locked = AddonsLock.load(home[0] / "addons.lock").addons
     re_install = row.startswith("re-install-")
@@ -218,10 +227,11 @@ SQUAD = "squad@payments"
 XX = "xx@corp"
 
 
-def _d2_holds_company(tmp_path):
+def _relative_held_company(tmp_path):
     """company and xx (under it) installed; company 1.1.0 drops `gone`, which
     a local chain extends, for `extra`, which team (dept to be pulled in)
-    removes. Named with xx, company's move joins and D2 holds it."""
+    removes. Named with xx, company's move joins, and judged again without
+    the relatives it is held."""
     tree = {
         COMPANY: {"library": {"tasks": {"verify": AGENT, "gone": AGENT}}},
         XX: {"library": {"tasks": {"xt": AGENT}}, "parent": (COMPANY, "1")},
@@ -305,7 +315,7 @@ NEEDED = "needed by team@payments, which cannot be re-installed"
     ("setup", "ids", "installs", "outcomes", "problems", "pulled_in"),
     [
         pytest.param(
-            _d2_holds_company,
+            _relative_held_company,
             [TEAM, XX],
             [TEAM],
             {TEAM: "refused", XX: "current", COMPANY: "held", DEPT: "refused"},
@@ -314,7 +324,7 @@ NEEDED = "needed by team@payments, which cannot be re-installed"
                 DEPT: "pulled in for team@payments, which cannot be installed",
             },
             [],
-            id="d2-recheck-refuses-the-pulled-in",
+            id="recheck-without-relatives-refuses-the-pulled-in",
         ),
         pytest.param(
             _shared_dept({"t": {"kind": "subprocess", "command": "make"}}),

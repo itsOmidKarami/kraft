@@ -479,9 +479,9 @@ def review(
             offered, offered_before = after.get(section, {}), before.get(section, {})
             kind = _KINDS[section]
             reach += [
-                f"its {kind} {own} now overrides {offered[own]}'s new {kind} {own}"
-                for own in sorted(names)
-                if own in offered and own not in offered_before
+                f"its {kind} {declared} now overrides {offered[declared]}'s new {kind} {declared}"
+                for declared in sorted(names)
+                if declared in offered and declared not in offered_before
             ]
     _chain_diff(was, now, (name,), reach, content)
     for label, before_map, after_map in (

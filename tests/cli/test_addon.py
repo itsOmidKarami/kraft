@@ -434,6 +434,8 @@ BEYOND_RANGE = "release@acme: held: release@acme 2.0.0 is outside tools@acme's r
         (_held_by_range, [], 1, BEYOND_RANGE),
         (_held_beside_refused, [], 2, BEYOND_RANGE),
         (_broken_relative, [ID], 2, "tools@acme: held:"),
+        (_broken_relative, [ID, "--yes"], 2, "tools@acme: held:"),
+        (_a_refused_version, [ID, "--yes"], 1, "release@acme: refused"),
     ],
     ids=[
         "up-to-date",
@@ -443,19 +445,26 @@ BEYOND_RANGE = "release@acme: held: release@acme 2.0.0 is outside tools@acme's r
         "held-by-range",
         "held-beside-refused",
         "broken-relative-check-exits-2",
+        "broken-relative-update-exits-2",
+        "refused-update-exits-1",
     ],
 )
 def test_update_check_exit_codes(installed, capsys, happens, argv, code, says):
+    """`update --check`'s exit codes; a row with `--yes` runs `update` itself,
+    where a relative held by a chain break still exits 2 but a refused add-on
+    exits 1."""
     if happens:
         happens(installed)
     before = installed.written()
+    check = "--yes" not in argv
 
-    got, out = _run(capsys, "update", *argv, "--check")
+    got, out = _run(capsys, "update", *argv, *(["--check"] if check else []))
 
     assert got == code and says in out, out
     assert "no terminal" not in out  # nobody was going to be asked
     assert ("tools:scan" in out) is (happens is _broken_relative), out
-    assert installed.written() == before and installed.reloads == []
+    if check:
+        assert installed.written() == before and installed.reloads == []
 
 
 def test_install_pulls_in_its_parent(added, capsys, monkeypatch):

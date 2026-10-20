@@ -814,6 +814,8 @@ def _cmd_update(ns: argparse.Namespace) -> None:
     )
     if ns.check:
         raise SystemExit(max((_check_code(r) for r in results), default=0))
+    # A relative held by a chain break exits 2 here too: its own release would
+    # be refused, even though what the update applied went in.
     if any(r.outcome == "held" and r.kind == "breaks" for r in results):
         raise SystemExit(2)
     if {r.outcome for r in results} & {"failed", "refused", "declined", "held"}:
@@ -1018,7 +1020,12 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
     remove_c = verb(collections, "remove", _cmd_collection_remove, "forget a collection")
     remove_c.add_argument("name", metavar="NAME")
 
-    install_p = verb(verbs, "install", _cmd_install, "install an add-on, after a review")
+    install_p = verb(
+        verbs,
+        "install",
+        _cmd_install,
+        "install an add-on and its missing ancestors, after a review",
+    )
     addon_id(install_p)
     install_p.add_argument("--as", dest="alias", metavar="ALIAS", help="its namespace")
     install_p.add_argument("--auto-update", action="store_true")
@@ -1028,7 +1035,13 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
         help="take the newest commit even at an unchanged version",
     )
     install_p.add_argument("-y", "--yes", action="store_true", help="accept the review")
-    update_p = verb(verbs, "update", _cmd_update, "update installed add-ons, each after a review")
+    update_p = verb(
+        verbs,
+        "update",
+        _cmd_update,
+        "update installed add-ons, one review per tree; exit 1 when one is refused, declined, held "
+        "or failed, 2 when a relative is held because it breaks a chain",
+    )
     update_p.add_argument("addons", metavar="ADDON@COLLECTION", nargs="*")
     answer = update_p.add_mutually_exclusive_group()
     answer.add_argument("-y", "--yes", action="store_true", help="accept every review")
