@@ -22,6 +22,7 @@ from kraft import config as config_mod
 from kraft import harness as harness_mod
 from kraft import policy as policy_mod
 from kraft.adapters.agent import HarnessUnavailable, select_profile
+from kraft.addons import inherit
 from kraft.addons import load as addons_load
 from kraft.addons import manifest as addon_manifest
 from kraft.addons.config import AddonsConfig, AddonsLock, RepoLibrariesLock
@@ -360,12 +361,21 @@ def _check_policy(path, data, ctx):
     except policy_mod.PolicyError as exc:
         return [TemplateIssue(path, None, str(exc), loc=_first_loc(policy_mod.PolicyInput, data))]
     instance = parsed.instance_policy()
-    return [
-        TemplateIssue(path, None, f"would leave add-on {addon.id} out: {why}", loc=("maxima",))
-        for addon in ctx.addons
-        if addon.left_out is None
-        and (why := addons_load.limits_problem(addon, instance)) is not None
-    ] + scope_issues(path, data, ctx)
+    issues = []
+    for addon in ctx.addons:
+        if addon.left_out is not None:
+            continue
+        try:
+            ancestors = inherit.ancestry(addon, ctx.addons)[1:]
+        except inherit.InheritanceError:
+            continue  # left out already, by the cascade
+        if (why := addons_load.limits_problem(addon, instance, ancestors)) is not None:
+            issues.append(
+                TemplateIssue(
+                    path, None, f"would leave add-on {addon.id} out: {why}", loc=("maxima",)
+                )
+            )
+    return issues + scope_issues(path, data, ctx)
 
 
 # ── intake ──

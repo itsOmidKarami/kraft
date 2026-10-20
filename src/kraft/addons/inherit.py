@@ -6,13 +6,14 @@ loads only when every ancestor loads, accepts its parent's version, and the
 tree has no cycle, no ancestor sharing a descendant's name, and no more than
 `MAX_DEPTH` levels.
 
-Imports nothing from `kraft.templates` or `kraft.config` at module level, like
-`kraft.addons.load`: the template library reads this module.
+Kept a leaf like `kraft.addons.load`: nothing from `kraft.templates` or
+`kraft.config` is imported at module level, since the template library reads
+this module.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -26,7 +27,12 @@ MAX_DEPTH = 8
 
 
 class InheritanceError(Exception):
-    """Why an add-on's ancestry does not resolve, worded as its `left_out`."""
+    """Why an add-on's ancestry does not resolve, worded as its `left_out`.
+    `cycle` holds the ids of the add-ons in a cycle it found, else is empty."""
+
+    def __init__(self, message: str, cycle: Sequence[str] = ()) -> None:
+        super().__init__(message)
+        self.cycle = tuple(cycle)
 
 
 def ancestry(addon: InstalledAddon, addons: Sequence[InstalledAddon]) -> tuple[InstalledAddon, ...]:
@@ -44,8 +50,9 @@ def ancestry(addon: InstalledAddon, addons: Sequence[InstalledAddon]) -> tuple[I
         parent_id = current.parent
         ids = [a.id for a in chain]
         if parent_id in ids:
-            loop = [*ids[ids.index(parent_id) :], parent_id]
-            raise InheritanceError(f"its ancestry {' -> '.join(loop)} is a cycle")
+            members = ids[ids.index(parent_id) :]
+            loop = " -> ".join([*members, parent_id])
+            raise InheritanceError(f"its ancestry {loop} is a cycle", cycle=members)
         parent = by_id.get(parent_id)
         if parent is None:
             raise InheritanceError(f"its parent {parent_id} is not installed")
@@ -87,9 +94,12 @@ def cascade(addons: Sequence[InstalledAddon]) -> tuple[InstalledAddon, ...]:
         if not failing:
             return tuple(current)
         failing_ids = {current[i].id for i in failing}
-        # Parents first; when every failing add-on waits on another (a cycle),
-        # all of them go at once.
-        first = [i for i in failing if current[i].parent not in failing_ids] or list(failing)
+        # Parents first. When every failing add-on waits on another, there is a
+        # cycle: its members go, and what hangs below them waits a round more.
+        first = [i for i in failing if current[i].parent not in failing_ids]
+        if not first:
+            looped = {id for exc in failing.values() for id in exc.cycle}
+            first = [i for i in failing if current[i].id in looped] or list(failing)
         for i in first:
             current[i] = replace(current[i], left_out=str(failing[i]))
 
@@ -104,14 +114,18 @@ def read_manifest(addon: InstalledAddon) -> AddonManifest:
     return manifest.addon(manifest.parse(text, manifest.ADDON_JSON), manifest.ADDON_JSON)
 
 
-def requirements(chain: Sequence[InstalledAddon]) -> Requires:
+def requirements(
+    chain: Sequence[InstalledAddon], manifests: Mapping[str, AddonManifest] | None = None
+) -> Requires:
     """What `chain` (`ancestry`'s answer) needs from the instance together: the
-    union of every member's harnesses and agent profiles, and `chain[0]`'s
-    `requires.kraft`. Inherited tasks name the harnesses and bare profiles
-    their own authors required."""
+    union of every member's harnesses and agent profiles, in chain order, and
+    `chain[0]`'s `requires.kraft`. Inherited tasks name the harnesses and bare
+    profiles their own authors required. `manifests` (id to manifest) are
+    already-read manifests to use in place of reading the stores again."""
     from kraft.addons.manifest import Requires
 
-    declared = [read_manifest(a).requires for a in chain]
+    known = manifests or {}
+    declared = [(known.get(a.id) or read_manifest(a)).requires for a in chain]
     harnesses: list[str] = []
     profiles: list[str] = []
     for requires in declared:

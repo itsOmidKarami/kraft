@@ -1,12 +1,13 @@
 """An add-on's ancestry: the parents it builds on, up to a root, and why a
 tree does not resolve; and the left-out cascade down a tree."""
 
+import json
 from dataclasses import replace
 
 import pytest
-from support.addons import installed
+from support.addons import addon_json, installed
 
-from kraft.addons import inherit
+from kraft.addons import inherit, manifest
 
 
 def _tree(tmp_path, *links):
@@ -69,6 +70,14 @@ def _levels(n):
             id="out-of-range",
         ),
         pytest.param(
+            [
+                ("dept@platform", "company@corp", {"parent_range": None}),
+                ("company@corp", None, {"version": "4.0.0"}),
+            ],
+            ("dept@platform", "company@corp"),
+            id="no-range-is-not-checked",
+        ),
+        pytest.param(
             [("dept@platform", "company@corp"), ("company@corp", "dept@platform")],
             "its ancestry dept@platform -> company@corp -> dept@platform is a cycle",
             id="cycle",
@@ -101,24 +110,88 @@ def test_ancestry(tmp_path, links, expected):
         assert tuple(a.id for a in inherit.ancestry(addons[0], addons)) == expected
 
 
-def test_cascade(tmp_path):
-    """A root left out takes its whole tree with it, each add-on naming its own
-    parent, child listed first or not; an add-on outside the tree loads."""
-    addons = _tree(
-        tmp_path,
-        ("team@payments", "dept@platform"),
-        ("other@acme", None),
-        ("dept@platform", "company@corp"),
-        ("company@corp", None, {"left_out": "is disabled"}),
-    )
-    out = inherit.cascade(addons)
-    assert [(a.id, a.left_out) for a in out] == [
-        (
-            "team@payments",
-            "its parent dept@platform is not loaded: "
-            "its parent company@corp is not loaded: is disabled",
+_DEPT_LOOP = "dept@platform -> company@corp -> dept@platform"
+_COMPANY_LOOP = "company@corp -> dept@platform -> company@corp"
+
+
+@pytest.mark.parametrize(
+    ("links", "expected"),
+    [
+        pytest.param(
+            [
+                ("team@payments", "dept@platform"),
+                ("other@acme", None),
+                ("dept@platform", "company@corp"),
+                ("company@corp", None, {"left_out": "is disabled"}),
+            ],
+            [
+                (
+                    "team@payments",
+                    "its parent dept@platform is not loaded: "
+                    "its parent company@corp is not loaded: is disabled",
+                ),
+                ("other@acme", None),
+                ("dept@platform", "its parent company@corp is not loaded: is disabled"),
+                ("company@corp", "is disabled"),
+            ],
+            id="left-out-root",
         ),
-        ("other@acme", None),
-        ("dept@platform", "its parent company@corp is not loaded: is disabled"),
-        ("company@corp", "is disabled"),
-    ]
+        pytest.param(
+            [
+                ("team@payments", "dept@platform"),
+                ("other@acme", None),
+                ("dept@platform", "company@corp"),
+                ("company@corp", "dept@platform"),
+            ],
+            [
+                (
+                    "team@payments",
+                    f"its parent dept@platform is not loaded: its ancestry {_DEPT_LOOP} is a cycle",
+                ),
+                ("other@acme", None),
+                ("dept@platform", f"its ancestry {_DEPT_LOOP} is a cycle"),
+                ("company@corp", f"its ancestry {_COMPANY_LOOP} is a cycle"),
+            ],
+            id="below-a-cycle",
+        ),
+    ],
+)
+def test_cascade(tmp_path, links, expected):
+    """A broken tree takes every add-on below it out, each naming its own
+    parent, child listed first or not; an add-on outside the tree loads."""
+    out = inherit.cascade(_tree(tmp_path, *links))
+    assert [(a.id, a.left_out) for a in out] == expected
+
+
+def _requiring(name, kraft, harnesses, profiles):
+    return addon_json(name, requires={"kraft": kraft, "harnesses": harnesses, "profiles": profiles})
+
+
+#: team -> dept -> company, each with what it requires.
+_REQUIRED = {
+    "team": _requiring("team", "2.3", ["codex"], ["fast"]),
+    "dept": _requiring("dept", "2", ["codex", "claude"], ["deep", "fast"]),
+    "company": _requiring("company", "2", ["claude"], ["deep", "strong"]),
+}
+
+
+@pytest.mark.parametrize("read", ["from-stores", "from-manifests"])
+def test_requirements(tmp_path, read):
+    """The union along the chain, in chain order and without repeats, with
+    `requires.kraft` the child's own. Manifests already read are not read
+    again: the stores here then hold none."""
+    chain = []
+    for name in _REQUIRED:
+        files = {manifest.ADDON_JSON: json.dumps(_REQUIRED[name])} if read == "from-stores" else {}
+        chain.append(installed(tmp_path, name, files=files))
+    manifests = (
+        {f"{n}@acme": manifest.addon(m, manifest.ADDON_JSON) for n, m in _REQUIRED.items()}
+        if read == "from-manifests"
+        else None
+    )
+    required = inherit.requirements(chain, manifests)
+    assert (required.kraft, required.harnesses, required.profiles) == (
+        "2.3",
+        ["codex", "claude"],
+        ["fast", "deep", "strong"],
+    )

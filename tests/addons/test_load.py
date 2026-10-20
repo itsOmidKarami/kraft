@@ -215,15 +215,14 @@ def _edit_company_library(config, store):
     edit_store(store, "library.yaml", "tasks: {}\n")
 
 
-_NOTHING = None
-#: The child is left out with exactly its parent's reason.
+#: The child is left out for its parent's reason, which names the parent's store.
 _PARENTS = "the parent's reason"
 
 
 @pytest.mark.parametrize(
     ("team_library", "company_requires", "change", "why"),
     [
-        pytest.param({"tasks": {"scan": AGENT}}, {}, _NOTHING, None, id="child-loads"),
+        pytest.param({"tasks": {"scan": AGENT}}, {}, None, None, id="child-loads"),
         pytest.param(
             {"tasks": {"scan": AGENT}},
             {},
@@ -241,7 +240,7 @@ _PARENTS = "the parent's reason"
         pytest.param(
             {"tasks": {"scan": {"extends": "company:base"}}},
             {},
-            _NOTHING,
+            None,
             None,
             id="child-library-uses-parent",
         ),
@@ -263,7 +262,8 @@ _PARENTS = "the parent's reason"
         pytest.param(
             {"tasks": {"scan": AGENT}},
             {"profiles": ["deep"]},
-            _NOTHING,
+            None,
+            "its parent company@corp is not loaded: "
             "requires agent profile 'deep', which harnesses.yaml does not define",
             id="union-requirements",
         ),
@@ -279,28 +279,31 @@ _PARENTS = "the parent's reason"
 def test_installed_with_inheritance(tmp_path, team_library, company_requires, change, why):
     """`team@payments` builds on `company@corp`: it loads only with its parent,
     is judged together with it, and needs what its parent needs. The local
-    library loads whatever happens to the tree."""
+    library loads whatever happens to the tree. Parents are judged first,
+    wherever `addons.yaml` lists them."""
     config, addons = make_instance(tmp_path, chains={"local": chain("base")})
     requires = {"kraft": "2", "harnesses": ["codex"]}
     company = {
         "library": {"tasks": {"base": AGENT}},
         "manifest": {"requires": {**requires, **company_requires}},
     }
-    corp = make_collection(tmp_path, {"company": company}, name="corp")
-    store = install(config, addons, corp, "company")
     team = {
         "library": team_library,
         "chains": {"scan": chain("scan")},
         "manifest": {"requires": {**requires, "addons": {"company@corp": "1"}}},
     }
+    # The child first: `addons.yaml` lists it before its parent.
     install(config, addons, make_collection(tmp_path, {"team": team}, name="payments"), "team")
+    corp = make_collection(tmp_path, {"company": company}, name="corp")
+    store = install(config, addons, corp, "company")
     if change:
         change(config, store)
     found = {p.id: p for p in load.installed(config, addons)}
     child = found["team@payments"]
     if why is _PARENTS:
-        why = found["company@corp"].left_out
-        assert why and "does not match its digest" in why
+        parents = found["company@corp"].left_out
+        assert parents and "does not match its digest" in parents
+        why = f"its parent company@corp is not loaded: {parents}"
     assert (child.parent, child.parent_range, child.left_out) == ("company@corp", "1", why)
     assert found["company@corp"].parent is None
     library = TemplateLibrary.from_yaml_dir(config, addons=tuple(found.values()))

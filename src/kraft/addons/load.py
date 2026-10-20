@@ -315,7 +315,8 @@ def installed(
 def _installed(config_dir: Path, store: Path, verify: bool, config) -> tuple[InstalledAddon, ...]:
     """In four passes: each add-on's own store (and the parent its manifest
     names); the left-out cascade; each loading add-on's content, judged with
-    its ancestors; the cascade again, for a parent the third pass left out."""
+    its ancestors, parents before children; the cascade again, which leaves
+    out the children of a parent the third pass left out."""
     from kraft.addons import inherit
     from kraft.addons.config import AddonsConfig, AddonsLock
     from kraft.config import ConfigError
@@ -326,6 +327,8 @@ def _installed(config_dir: Path, store: Path, verify: bool, config) -> tuple[Ins
     except ConfigError:
         return ()  # `config_problem` says why
     found: list[InstalledAddon] = []
+    #: Every manifest pass 1 read, by add-on id: pass 3 never reads a store again.
+    manifests: dict[str, AddonManifest] = {}
     for addon_id in config.addons:
         name = addon_id.split("@", 1)[0]
         locked = lock.addons.get(addon_id)
@@ -355,7 +358,7 @@ def _installed(config_dir: Path, store: Path, verify: bool, config) -> tuple[Ins
         if not config.entry(addon_id).enabled:
             found.append(replace(addon, left_out="is disabled", quiet=True))
         else:
-            found.append(_with_store_problem(addon, verify))
+            found.append(_with_store_problem(addon, verify, manifests))
     for addon_id, locked in lock.addons.items():
         if addon_id not in config.addons:
             found.append(
@@ -369,21 +372,25 @@ def _installed(config_dir: Path, store: Path, verify: bool, config) -> tuple[Ins
                     quiet=True,
                 )
             )
-    found += _repo_libraries(config_dir, store, verify)
-    stored = inherit.cascade(found)
-    judged = tuple(
-        addon
-        if addon.left_out is not None
-        else replace(
-            addon,
-            left_out=_content_problem(addon, inherit.ancestry(addon, stored), config_dir),
-        )
-        for addon in stored
-    )
+    found += _repo_libraries(config_dir, store, verify, manifests)
+    judged = list(inherit.cascade(found))
+    depth = [len(inherit.ancestry(a, judged)) if a.left_out is None else 0 for a in judged]
+    for i in sorted(range(len(judged)), key=depth.__getitem__):
+        addon = judged[i]
+        if addon.left_out is not None:
+            continue
+        try:
+            chain = inherit.ancestry(addon, judged)
+        except inherit.InheritanceError:
+            continue  # an ancestor was just left out: the cascade says so
+        why = _content_problem(addon, chain, config_dir, manifests)
+        judged[i] = replace(addon, left_out=why)
     return inherit.cascade(judged)
 
 
-def _repo_libraries(config_dir: Path, store: Path, verify: bool) -> list[InstalledAddon]:
+def _repo_libraries(
+    config_dir: Path, store: Path, verify: bool, manifests: dict[str, AddonManifest]
+) -> list[InstalledAddon]:
     """Each repository's accepted repo library, as the add-on it is stored as.
     One whose repository is no longer in `repos.yaml` under that id is known
     and not loaded, and is no fault: the next accept or disconnect drops it."""
@@ -412,14 +419,18 @@ def _repo_libraries(config_dir: Path, store: Path, verify: bool) -> list[Install
         if repo_id not in connected:
             out.append(replace(addon, left_out="its repository is no longer connected", quiet=True))
         else:
-            out.append(_with_store_problem(addon, verify))
+            out.append(_with_store_problem(addon, verify, manifests))
     return out
 
 
-def _with_store_problem(addon: InstalledAddon, verify: bool) -> InstalledAddon:
+def _with_store_problem(
+    addon: InstalledAddon, verify: bool, manifests: dict[str, AddonManifest]
+) -> InstalledAddon:
     """`addon` with its store's problem as `left_out`, and the parent its
-    manifest names filled in."""
+    manifest names filled in. A manifest read is kept in `manifests`."""
     declared, why = _store_problem(addon, verify)
+    if declared is not None:
+        manifests[addon.id] = declared
     parent = declared.parent if declared is not None else None
     if parent is None:
         return replace(addon, left_out=why)
@@ -456,13 +467,16 @@ def _store_problem(addon: InstalledAddon, verify: bool) -> tuple[AddonManifest |
 
 
 def _content_problem(
-    addon: InstalledAddon, chain: tuple[InstalledAddon, ...], config_dir: Path
+    addon: InstalledAddon,
+    chain: tuple[InstalledAddon, ...],
+    config_dir: Path,
+    manifests: Mapping[str, AddonManifest],
 ) -> str | None:
     """The first check `addon`'s content fails on this instance, judged with
     its ancestors (`chain`, `inherit.ancestry`'s answer): what the tree
     requires of `harnesses.yaml` and `repos.yaml`, its library and agent
     profiles read with theirs, and its limits under `maxima:`. None when it
-    loads."""
+    loads. `manifests` is what the store pass read, by add-on id."""
     from kraft import harness
     from kraft.addons import inherit
     from kraft.config import ConfigError, read_yaml
@@ -472,7 +486,7 @@ def _content_problem(
 
     if why := instance_problem(
         addon.namespace,
-        inherit.requirements(chain),
+        inherit.requirements(chain, manifests),
         config_dir,
         repo_library=addon.repo_id is not None,
     ):

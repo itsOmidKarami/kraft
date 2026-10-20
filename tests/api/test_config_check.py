@@ -356,30 +356,65 @@ def test_a_lock_that_does_not_parse_is_an_issue(with_release):
     assert "lock_version" in issue.message
 
 
+def _install_child(st, tmp_path):
+    """`team@payments`, built on `release@acme`: its task extends the parent's
+    `base` and raises the budget to 9 dollars."""
+    from support.addons import chain, install, make_collection
+
+    team = {
+        "library": {"tasks": {"scan": {"extends": "release:base", "policy": {"budget_usd": 9}}}},
+        "chains": {"scan": chain("scan")},
+        "manifest": {
+            "requires": {"kraft": "2", "harnesses": ["codex"], "addons": {"release@acme": "1"}}
+        },
+    }
+    payments = make_collection(tmp_path, {"team": team}, name="payments")
+    install(st.templates_dir, st.run_dirs.addons, payments, "team")
+    deps._reload_templates(st)
+    assert "team:scan" in st.library.chain_ids and not deps.invalid_templates(st)
+
+
 @pytest.mark.parametrize(
-    "file, edit, says",
+    "file, edit, says, child",
     [
         (
             "policy.yaml",
             lambda d: d.update(maxima={"tasks": {"budget_usd": 5}}),
             "would leave add-on release@acme out: ",
+            False,
+        ),
+        (
+            "policy.yaml",
+            lambda d: d.update(maxima={"tasks": {"budget_usd": 8.5}}),
+            "would leave add-on team@payments out: ",
+            True,
         ),
         (
             "harnesses.yaml",
             lambda d: d["profiles"].pop("extra"),
             "would leave add-on release@acme out: requires agent profile 'extra'",
+            False,
         ),
         (
             "repos.yaml",
             lambda d: d.setdefault("repos", []).append({"path": "/r", "id": "release"}),
             "would leave add-on release@acme out: its namespace 'release' is now a repository id",
+            False,
         ),
     ],
-    ids=["maxima-lowered", "required-profile-removed", "namespace-becomes-a-repo-id"],
+    ids=[
+        "maxima-lowered",
+        "maxima-lowered-child-through-parent",
+        "required-profile-removed",
+        "namespace-becomes-a-repo-id",
+    ],
 )
-def test_an_edit_that_drops_an_addon_is_reported(with_release, file, edit, says):
-    """Reported on the pending reload, before it is applied."""
+def test_an_edit_that_drops_an_addon_is_reported(with_release, tmp_path, file, edit, says, child):
+    """Reported on the pending reload, before it is applied. A child's limits
+    are judged with its parent's library, which its task extends."""
     st = with_release
+    if child:
+        _install_child(st, tmp_path)
     written = st.templates_dir / file
     data = (yaml.safe_load(written.read_text()) if written.is_file() else None) or {}
     assert config_check.check(file, yaml.safe_dump(data), config_check.context(st)) == []
