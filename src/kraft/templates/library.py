@@ -17,7 +17,8 @@ author has to correct (`template-resolution-preserves-source-context`).
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections import ChainMap
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
@@ -26,6 +27,7 @@ import yaml
 from pydantic import ValidationError
 
 from kraft import skill as _skill
+from kraft.addons import inherit
 from kraft.addons.load import InstalledAddon, alias_extends, builds_on, qualify
 from kraft.config import bounded_yaml
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
@@ -49,6 +51,9 @@ LIBRARY_FILE = "library.yaml"
 CHAINS_DIR = "chains"
 #: Every pre-V1 home was seeded with one, and V1 has no reader for it.
 LEGACY_REGISTRY = "registry.yaml"
+
+#: The section a chain's author is filed under (`TemplateLibrary.authored_by`).
+_CHAINS = "chains"
 
 #: How many YAML nodes one add-on file may expand to (`config.bounded_yaml`):
 #: the same budget a repository's own config gets.
@@ -237,6 +242,27 @@ def _read_stored(store, rel: str, path: Path, *, optional: bool = False) -> Mapp
     return _as_mapping(path, data)
 
 
+def _store_skills(store) -> set[str]:
+    """The skills an add-on's store (`fetch.StoreFiles`) ships, by name."""
+    return {
+        parts[1]
+        for rel in store.paths("skills/")
+        if len(parts := rel.split("/")) == 3 and parts[2] == "SKILL.md"
+    }
+
+
+def _store_profiles(store, addon: InstalledAddon) -> set[str]:
+    """The agent profiles an add-on's store's `profiles.yaml` declares, by
+    name. A file that does not read declares none here: the profile table
+    says why."""
+    path = addon.root / "profiles.yaml"
+    try:
+        profiles = _read_stored(store, "profiles.yaml", path, optional=True).get("profiles")
+    except TemplateLibraryError:
+        return set()
+    return {str(name) for name in profiles} if isinstance(profiles, Mapping) else set()
+
+
 def _as_mapping(path: Path, data: object) -> Mapping[str, object]:
     if data is None:
         return {}
@@ -301,6 +327,20 @@ class TemplateLibrary:
         self._components = components
         self._chains = dict(chains)
         self.steering = steering
+        #: A child add-on's hidden ancestor levels (`inherit.layer_namespace`),
+        #: under `<top>^<depth>:<name>`: what its parent's name reads. Looked
+        #: up after the public maps, never listed.
+        self._layer_components: dict[Namespace, dict[str, RawComponent]] = {
+            ns: {} for ns in _EXTENDABLE
+        }
+        self._layer_chains: dict[str, RawComponent] = {}
+        self._layer_steering: dict[str, SteeringProfile] = {}
+        #: Each layer namespace (`team^1`) to the namespace of the ancestor
+        #: it holds, for `inherit.humanize` and `inherit.public`.
+        self._layers: dict[str, str] = {}
+        #: `(section, name)` to the add-on whose file a child's entry was read
+        #: from (`authored_by`); a root add-on's entries are not listed.
+        self._authors: dict[tuple[str, str], InstalledAddon] = {}
         #: The `library.yaml` this was read from, whose directory also holds
         #: `harnesses.yaml`. `None` for a library built with no file behind it.
         self.library_path = library_path
@@ -409,6 +449,13 @@ class TemplateLibrary:
         its manifest lists, so an edited store is refused, never read."""
         from kraft.addons import fetch  # fetch imports kraft.config, which imports templates
 
+        if addon.parent is not None:
+            try:
+                ancestry = inherit.ancestry(addon, self.addons)
+            except inherit.InheritanceError as exc:
+                raise TemplateLibraryError(f"{addon.root}: {exc}") from exc
+            self._add_inherited(addon, ancestry)
+            return
         try:
             store = fetch.open_store(addon.root)
         except fetch.StoreMismatch as exc:
@@ -434,6 +481,139 @@ class TemplateLibrary:
             body = alias_extends(written, qualify(written, addon), aliases)
             assert isinstance(body, Mapping)
             self._add_chain(chain_path, body, addon=addon)
+
+    def _add_inherited(self, addon: InstalledAddon, chain: tuple[InstalledAddon, ...]) -> None:
+        """A child add-on (`chain`, `inherit.ancestry`'s answer): each
+        ancestor's files re-pointed for `addon` (`inherit.requalify`), then
+        laid one over another from the root down. Level `d` is registered
+        under `inherit.layer_namespace(addon.namespace, d)`: the child's own
+        namespace is the merged result, and each hidden level below is what
+        that ancestor's name reads in the files one level up. Every entry's
+        `ComponentSource` is the file its author wrote."""
+        from kraft.addons import fetch  # fetch imports kraft.config, which imports templates
+
+        top = addon.namespace
+        stores = []
+        for author in chain:
+            try:
+                stores.append(fetch.open_store(author.root))
+            except fetch.StoreMismatch as exc:
+                raise TemplateLibraryError(f"{author.root / fetch.DIGEST_FILE}: {exc}") from exc
+        written = [
+            _read_stored(store, LIBRARY_FILE, author.root / LIBRARY_FILE, optional=True)
+            for author, store in zip(chain, stores, strict=True)
+        ]
+        visible = inherit.Visible.build(
+            chain,
+            [
+                {"skills": _store_skills(store), "profiles": _store_profiles(store, author)}
+                for author, store in zip(chain, stores, strict=True)
+            ],
+        )
+
+        def owner(kind: str) -> Callable[[str, int], str]:
+            # Defined nowhere visible: the level asked from names it, and its
+            # own lookup says what is missing.
+            return lambda name, depth: (
+                visible.owner(kind, name, depth)
+                or (f"{chain[min(depth, len(chain) - 1)].namespace}:{name}")
+            )
+
+        authored = []
+        for depth, (author, store, library) in enumerate(zip(chain, stores, written, strict=True)):
+
+            def requalify(data: object, depth: int = depth, author: InstalledAddon = author):
+                return inherit.requalify(
+                    data,
+                    top=top,
+                    depth=depth,
+                    author=author,
+                    parent_name=chain[depth + 1].name if depth + 1 < len(chain) else None,
+                    skill_owner=owner("skills"),
+                    profile_owner=owner("profiles"),
+                )
+
+            library_path = author.root / LIBRARY_FILE
+            library = requalify(library)
+            assert isinstance(library, Mapping)
+            entries: dict[str, dict[str, tuple[object, InstalledAddon]]] = {
+                namespace.value: {
+                    name: (
+                        RawComponent(body, ComponentSource(library_path, namespace, name)),
+                        author,
+                    )
+                    for name, body in _section(library_path, library, namespace).items()
+                }
+                for namespace in _EXTENDABLE
+            }
+            entries[Namespace.STEERING.value] = {
+                name: (
+                    _steering_profile(
+                        body, ComponentSource(library_path, Namespace.STEERING, name)
+                    ),
+                    author,
+                )
+                for name, body in _section(library_path, library, Namespace.STEERING).items()
+            }
+            chains: dict[str, tuple[object, InstalledAddon]] = {}
+            for rel in store.paths(f"{CHAINS_DIR}/"):
+                if not rel.endswith(".yaml") or "/" in rel.removeprefix(f"{CHAINS_DIR}/"):
+                    continue
+                chain_path = author.root / rel
+                body = requalify(_read_stored(store, rel, chain_path))
+                assert isinstance(body, Mapping)
+                id = _chain_id(chain_path, body)
+                _refuse_qualified(chain_path, "chain id", id)
+                if id in chains:
+                    claimed = chains[id][0][0]
+                    raise TemplateLibraryError(
+                        f"{chain_path}: chain id {id!r} is already declared by {claimed}"
+                    )
+                chains[id] = ((chain_path, body), author)
+            entries[_CHAINS] = chains
+            authored.append(entries)
+
+        merged: dict[str, dict[str, tuple[object, InstalledAddon]]] = {}
+        for depth in reversed(range(len(chain))):
+            for section, items in authored[depth].items():
+                merged[section] = {**merged.get(section, {}), **items}
+            namespace = inherit.layer_namespace(top, depth)
+            if depth:
+                self._layers[namespace] = chain[depth].namespace
+            self._register_layer(namespace, merged, public=depth == 0)
+
+    def _register_layer(
+        self,
+        namespace: str,
+        merged: Mapping[str, Mapping[str, tuple[object, InstalledAddon]]],
+        *,
+        public: bool,
+    ) -> None:
+        """One level of a child's layering under `namespace`: into the public
+        maps for the child's own (`public`), else into the hidden ones."""
+        components = self._components if public else self._layer_components
+        steering = self.steering if public else self._layer_steering
+        chains = self._chains if public else self._layer_chains
+        for section, items in merged.items():
+            for name, (entry, author) in items.items():
+                key = f"{namespace}:{name}"
+                if section == _CHAINS:
+                    chain_path, body = entry  # type: ignore[misc]
+                    if key in chains:
+                        claimed = chains[key].source.file
+                        raise TemplateLibraryError(
+                            f"{chain_path}: chain id {key!r} is already declared by {claimed}"
+                        )
+                    chains[key] = RawComponent(
+                        {**body, "id": key},
+                        ComponentSource(chain_path, Namespace.NODES, key, chain=True),
+                    )
+                elif section == Namespace.STEERING.value:
+                    steering[key] = entry  # type: ignore[assignment]
+                else:
+                    components[Namespace(section)][key] = entry  # type: ignore[assignment]
+                if public:
+                    self._authors[(section, key)] = author
 
     def _listed_namespaces(
         self, addon: InstalledAddon, library: Mapping[str, object]
@@ -477,6 +657,46 @@ class TemplateLibrary:
             (p for p in self.addons if p.left_out is None and p.namespace == qualifier), None
         )
 
+    def authored_by(self, name: str, section: str | None = None) -> InstalledAddon | None:
+        """The add-on whose file a qualified chain or component was read from:
+        for a child add-on's entry, the ancestor that wrote it, which
+        `addon_of` (the add-on it is served under) is not. `section` (`chains`,
+        `tasks`, `steps`, `nodes`, `steering`) says which entry when a chain
+        and components share the name; given as a `tasks.` prefix it is read
+        from `name`. None for a local name."""
+        if section is None:
+            head, dot, rest = name.partition(".")
+            if dot and head in (_CHAINS, *(ns.value for ns in Namespace)):
+                section, name = head, rest
+        sections = [section] if section else [_CHAINS, *(ns.value for ns in Namespace)]
+        for each in sections:
+            if (author := self._authors.get((each, name))) is not None:
+                return author
+        return self.addon_of(name)
+
+    def public_name(self, name: str) -> str:
+        """`name` as a listing shows it: a hidden layer's
+        (`team^1:default`) as its ancestor's own (`platform-dept:default`)."""
+        found = self.public(name)
+        assert isinstance(found, str)
+        return found
+
+    def public(self, data: object) -> object:
+        """`data`, an entry as authored, with every name in a hidden layer
+        written as `public_name` writes it: what a listing shows."""
+        return inherit.public(data, self._layers) if self._layers else data
+
+    def _humanize(self, text: str) -> str:
+        return inherit.humanize(text, self._layers) if self._layers else text
+
+    @property
+    def _all_chains(self) -> Mapping[str, RawComponent]:
+        """The chains, with a child's hidden ancestor levels after them."""
+        return ChainMap(self._chains, self._layer_chains)
+
+    def _steering(self, name: str) -> SteeringProfile | None:
+        return self.steering.get(name) or self._layer_steering.get(name)
+
     def with_addons(self, addons: Sequence[InstalledAddon]) -> TemplateLibrary:
         """This library's own components and chains with `addons` in place of
         the add-ons it was built with: what a work item that pinned other
@@ -500,8 +720,9 @@ class TemplateLibrary:
                     built._add_addon(addon)
                 except TemplateLibraryError as exc:
                     # Half added: build again with it left out (one more each time).
+                    # Its descendants go with it: they read it.
                     left = replace(addon, left_out=str(exc))
-                    return self.with_addons([*addons[:i], left, *addons[i + 1 :]])
+                    return self.with_addons(inherit.cascade([*addons[:i], left, *addons[i + 1 :]]))
         return built
 
     def with_chain(
@@ -518,6 +739,11 @@ class TemplateLibrary:
             self.addons,
             self.library_path,
         )
+        candidate._layer_components = self._layer_components
+        candidate._layer_chains = self._layer_chains
+        candidate._layer_steering = self._layer_steering
+        candidate._layers = self._layers
+        candidate._authors = self._authors
         candidate._chains.pop(_chain_id(chain_path, body), None)
         return candidate, candidate._add_chain(chain_path, body)
 
@@ -549,8 +775,12 @@ class TemplateLibrary:
         return tuple(self._chains)
 
     def chain_data(self, id: str) -> Mapping[str, object]:
-        """Chain `id` as authored, before `extends` expansion or validation."""
-        return self._chains[id].data
+        """Chain `id` as authored, before `extends` expansion or validation.
+        A child add-on's reference into a hidden ancestor level reads as that
+        ancestor's own name (`public_name`)."""
+        shown = self.public(self._chains[id].data)
+        assert isinstance(shown, Mapping)
+        return shown
 
     def chain_file(self, id: str) -> Path:
         """The file chain `id` was read from -- what an edit of it rewrites."""
@@ -565,20 +795,34 @@ class TemplateLibrary:
         expansion follows, transitively, and every steering profile a task
         selects. A chain that stops expanding part-way answers with what it
         reached; why it stopped is `lint`'s to say."""
-        return self._expansion(id).references
+        return {
+            node: {self.public_name(ref) for ref in refs}
+            for node, refs in self._expansion(id).references.items()
+        }
 
     def usages(self, id: str) -> dict[str, list[dict[str, object]]]:
         """Per library component chain `id` uses (as `references` names it),
         each component of the chain that extends or selects it:
         `{path, overrides, via?}` (`_Resolution.usages`)."""
-        return self._expansion(id).usages
+        usages = self._expansion(id).usages
+        if not self._layers:
+            return usages
+        out: dict[str, list[dict[str, object]]] = {}
+        for ref, uses in usages.items():
+            shown = self.public(uses)
+            assert isinstance(shown, list)
+            out.setdefault(self.public_name(ref), []).extend(shown)
+        return out
 
     def provenance(self, id: str) -> dict[str, object] | None:
         """For an extending chain: its parent, each resolved node's origin
         (`inherited`, `added`, `overridden`), the override paths per node, and
         the parent nodes it removed (`a-resolved-node-says-where-it-came-from`).
         None for a chain that extends none. Computed, never stored."""
-        return self._expansion(id).provenance
+        provenance = self._expansion(id).provenance
+        if provenance is None or not self._layers:
+            return provenance
+        return {**provenance, "parent": self.public_name(str(provenance["parent"]))}
 
     def extended_by(self, id: str) -> tuple[str, ...]:
         """Every chain whose `extends` reaches `id`, directly or through a chain
@@ -589,29 +833,31 @@ class TemplateLibrary:
             seen: set[str] = set()
             name = raw.data.get("extends")
             while isinstance(name, str) and name not in seen:
-                if name == id:
+                # A child's parent level is listed as the ancestor's own chain.
+                if self.public_name(name) == id:
                     out.append(other)
                     break
                 seen.add(name)
-                parent = self._chains.get(name)
+                parent = self._all_chains.get(name)
                 name = parent.data.get("extends") if parent is not None else None
         return tuple(sorted(out))
 
     def _expansion(self, id: str) -> _Resolution:
-        resolution = _Resolution(self, self._chains[id].source)
+        raw = self._all_chains[id]
+        resolution = _Resolution(self, raw.source)
         try:
-            resolution.expand_chain(self._chains[id].data)
+            resolution.expand_chain(raw.data)
         except TemplateLibraryError:
             pass
         return resolution
 
     def component(self, namespace: Namespace, name: str) -> RawComponent | None:
-        return self._components[namespace].get(name)
+        return self._components[namespace].get(name) or self._layer_components[namespace].get(name)
 
     def namespace_of(self, name: str) -> Namespace | None:
         """Which namespace declares `name`, for the cross-namespace `extends`
         error that says what the author actually referenced."""
-        return next((ns for ns in _EXTENDABLE if name in self._components[ns]), None)
+        return next((ns for ns in _EXTENDABLE if self.component(ns, name) is not None), None)
 
     @classmethod
     def lint_dir(
@@ -676,20 +922,35 @@ class TemplateLibrary:
                     else InstancePolicy.from_input(InstancePolicyInput())
                 )
             except (TemplateLibraryError, PolicyError) as exc:
-                issues.append(TemplateIssue.from_error(raw.source.file, id, exc))
+                issue = TemplateIssue.from_error(raw.source.file, id, exc)
+                issues.append(replace(issue, message=self._humanize(issue.message)))
         return issues
 
     def resolve_chain(self, id: str) -> ResolvedChain:
         """Expand one chain's `extends` references, validate the result into a
         typed `Chain`, and assign canonical execution paths
-        (`resolved-chain-is-validated-before-use`)."""
-        raw = self._chains.get(id)
+        (`resolved-chain-is-validated-before-use`). A child add-on's hidden
+        levels are named in its errors as the ancestors they hold."""
+        # A hidden level resolves too: a child's chain extending it resolves it.
+        raw = self._all_chains.get(id)
         if raw is None:
             raise TemplateLibraryError(
                 f"no chain {id!r} in this library; known chains: {list(self._chains)}"
             )
+        try:
+            return self._resolve(id, raw)
+        except TemplateLibraryError as exc:
+            if self._layers:
+                exc.args = (self._humanize(str(exc)), *exc.args[1:])
+            raise
+
+    def _resolve(self, id: str, raw: RawComponent) -> ResolvedChain:
         resolution = _Resolution(self, raw.source)
         expanded = resolution.expand_chain(raw.data)
+        if inherit.is_layer(id):
+            # A hidden level is resolved only for a child that extends it,
+            # which takes its nodes, never its id: an id holds no `^`.
+            expanded = {**expanded, "id": self.public_name(id)}
         try:
             chain = Chain.model_validate(expanded)
         except ValidationError as exc:
@@ -726,7 +987,7 @@ class TemplateLibrary:
                 )
             for task in node.tasks():
                 for name in task.task.steering:
-                    if name not in self.steering:
+                    if self._steering(name) is None:
                         raise TemplateLibraryError(
                             f"{resolution.at(task.path)}: selects no steering profile {name!r}",
                             **resolution.path_location(task.path),
@@ -757,7 +1018,7 @@ class TemplateLibrary:
         return replace(
             resolved,
             steering={
-                name: self.steering[name].instructions
+                name: self._steering(name).instructions  # type: ignore[union-attr]
                 for node in resolved.nodes
                 for task in node.tasks()
                 for name in task.task.steering
@@ -802,7 +1063,11 @@ class TemplateLibrary:
         named = {
             id,
             *ancestors,
-            *(name.partition(".")[2] for names in self.references(id).values() for name in names),
+            *(
+                name.partition(".")[2]
+                for names in self._expansion(id).references.values()
+                for name in names
+            ),
             *_qualified_names(data),
             *self._fallback_profiles(data),
         }
@@ -1016,7 +1281,7 @@ class _Resolution:
         except extension.ExtensionError as exc:
             # `first_error` already starts the message with its location.
             raise TemplateLibraryError(f"{file}: {exc}", loc=exc.loc) from exc
-        raw = self._library._chains[name]
+        raw = self._library._all_chains[name]
         parent = _Resolution(self._library, raw.source)
         expanded = parent.expand_chain(raw.data)
         paths = {located.path: loc for loc, located in parent._located.items()}
@@ -1070,7 +1335,7 @@ class _Resolution:
         not a chain and a cycle (`component-extends-has-one-parent`). A chain
         missing further up is the parent's own failure, reported as its not
         resolving."""
-        chains = self._library._chains
+        chains = self._library._all_chains
         if parent not in chains:
             raise self._no_chain(parent)
         seen = [self._chain.name]

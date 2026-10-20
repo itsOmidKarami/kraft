@@ -110,8 +110,8 @@ origin: src/kraft/addons/inherit.py §cascade
 
 ## REQ a-child-is-judged-with-its-ancestors
 
-WHEN the system decides whether an add-on with a parent loads, or whether a `policy.yaml` edit would leave it out, the system SHALL check its limits against `maxima:` with its ancestors' library in place, so what it extends from them is resolved.
-enforced-by: tests/addons/test_load.py::test_installed_with_inheritance[child-limits-through-parent], tests/api/test_config_check.py::test_an_edit_that_drops_an_addon_is_reported[maxima-lowered-child-through-parent]
+WHEN the system decides whether an add-on with a parent loads, or whether a `policy.yaml` edit would leave it out, the system SHALL read its library with its ancestors' in place and check its limits against `maxima:` with them, so what it inherits and extends from them is resolved.
+enforced-by: tests/addons/test_load.py::test_installed_with_inheritance[child-library-uses-parent], tests/addons/test_load.py::test_installed_with_inheritance[child-limits-through-parent], tests/api/test_config_check.py::test_an_edit_that_drops_an_addon_is_reported[maxima-lowered-child-through-parent]
 origin: src/kraft/addons/load.py §_content_problem
 
 ## REQ a-childs-requirements-include-its-ancestors
@@ -119,6 +119,36 @@ origin: src/kraft/addons/load.py §_content_problem
 IF a harness or agent profile that an add-on or any of its ancestors requires is not defined in `harnesses.yaml`, THEN the system SHALL leave the add-on out, naming what is missing.
 enforced-by: tests/addons/test_inherit.py::test_requirements[from-stores], tests/addons/test_inherit.py::test_requirements[from-manifests]
 origin: src/kraft/addons/inherit.py §requirements
+
+## REQ a-child-inherits-its-parents-library
+
+WHERE an add-on names a parent, the system SHALL serve under the add-on's namespace every chain, task, step, node, steering profile and skill of its parent's merged library that it does not override, so a grandchild inherits its grandparent's entries through its parent.
+enforced-by: tests/templates/test_library_inheritance.py::test_inherited_library[inherited-as-is], tests/templates/test_library_inheritance.py::test_inherited_library[skill-inherited], tests/templates/test_library_inheritance.py::test_inherited_library[steering-inherited]
+origin: src/kraft/templates/library.py §TemplateLibrary._add_inherited
+
+## REQ the-parents-name-means-the-inherited-layer
+
+WHEN a child add-on's `extends`, `steering`, `skill` or qualified `profile` names its parent by the parent's name, the system SHALL read the entry of the parent's merged library as the child inherits it, whatever namespace the instance gives the parent.
+enforced-by: tests/templates/test_library_inheritance.py::test_inherited_library[extend-inherited-component], tests/templates/test_library_inheritance.py::test_inherited_library[extend-inherited-chain], tests/templates/test_library_inheritance.py::test_inherited_library[alias-parent]
+origin: src/kraft/addons/inherit.py §requalify
+
+## REQ an-inherited-entry-reads-the-childs-overrides
+
+WHEN an entry a child add-on inherits references another entry by its bare or own name, the system SHALL resolve that reference in the child's merged library, through `extends` too, so the inherited entry runs the child's override.
+enforced-by: tests/templates/test_library_inheritance.py::test_inherited_library[late-binding-through-extends], tests/templates/test_library_inheritance.py::test_inherited_library[late-binding-inherited-chain]
+origin: src/kraft/addons/inherit.py §requalify
+
+## REQ a-childs-entry-overrides-its-inherited-one
+
+WHEN a child add-on declares a chain, library entry or skill with the name of one it inherits, in the same section, the system SHALL serve the child's in place of the inherited one under the child's namespace.
+enforced-by: tests/templates/test_library_inheritance.py::test_inherited_library[override-replaces], tests/templates/test_library_inheritance.py::test_inherited_library[skill-overridden]
+origin: src/kraft/templates/library.py §TemplateLibrary._add_inherited
+
+## REQ addon-content-names-its-author
+
+The system SHALL know, for every chain and library entry a child add-on serves, the add-on whose file it was read from, telling apart a chain and a library entry of one name, and SHALL NOT show a hidden inherited layer's name in any listing, lint message, error or API payload.
+enforced-by: tests/templates/test_library_inheritance.py::test_read_only_names_the_author, tests/templates/test_library_inheritance.py::test_layers_never_leak[lint], tests/templates/test_library_inheritance.py::test_layers_never_leak[provenance-parent], tests/templates/test_library_inheritance.py::test_layers_never_leak[chains-extends], tests/templates/test_library_inheritance.py::test_layers_never_leak[catalogue]
+origin: src/kraft/templates/library.py §TemplateLibrary.authored_by
 
 ## REQ unknown-manifest-keys-are-ignored
 
@@ -410,8 +440,8 @@ origin: src/kraft/cli/admin.py §_confirm_dropped_addons
 
 ## REQ addon-content-is-read-only
 
-IF a write would save an add-on's component or chain, THEN the system SHALL answer 409 and name the add-on.
-enforced-by: tests/api/test_addon_content.py::test_saving_an_addon_entry_answers_409[put-chain], tests/api/test_addon_content.py::test_saving_an_addon_entry_answers_409[chains-draft], tests/api/test_addon_content.py::test_saving_an_addon_entry_answers_409[library-op]
+IF a write would save an add-on's component or chain, THEN the system SHALL answer 409 and name the add-on, and, for an entry a child add-on inherits, the ancestor that wrote it too.
+enforced-by: tests/api/test_addon_content.py::test_saving_an_addon_entry_answers_409[put-chain], tests/api/test_addon_content.py::test_saving_an_addon_entry_answers_409[chains-draft], tests/api/test_addon_content.py::test_saving_an_addon_entry_answers_409[library-op], tests/templates/test_library_inheritance.py::test_read_only_names_the_author
 origin: src/kraft/templates/catalogue.py §read_only_message
 
 ## REQ an-addon-copy-resolves-locally

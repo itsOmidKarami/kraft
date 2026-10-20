@@ -13,8 +13,9 @@ this module.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import replace
+import re
+from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from kraft.addons.load import InstalledAddon
@@ -132,3 +133,157 @@ def requirements(
         harnesses += [h for h in requires.harnesses if h not in harnesses]
         profiles += [p for p in requires.profiles if p not in profiles]
     return Requires(kraft=declared[0].kraft, harnesses=harnesses, profiles=profiles)
+
+
+#: What separates a child's namespace from an ancestor level in a layer's
+#: namespace (`team^1`). Never shown: `humanize` and `public` take it out.
+LAYER_MARK = "^"
+
+#: A layered name: `<top>^<k>:<name>`, wherever it sits in a text.
+_LAYERED = re.compile(r"(?<![\w-])([\w-]+\^\d+):([\w-]+)")
+
+
+def layer_namespace(top: str, depth: int) -> str:
+    """Where level `depth` of `top`'s ancestry is registered: `top` itself for
+    the child's merged library (0), else `top^<depth>`, a hidden namespace
+    holding that ancestor's merged library as `top` inherits it."""
+    return top if depth == 0 else f"{top}{LAYER_MARK}{depth}"
+
+
+def is_layer(name: str) -> bool:
+    """Whether `name` (`team^1:scan`, or a bare qualifier) is in a hidden layer."""
+    return LAYER_MARK in name.partition(":")[0]
+
+
+def requalify(
+    data: object,
+    *,
+    top: str,
+    depth: int,
+    author: InstalledAddon,
+    parent_name: str | None,
+    skill_owner: Callable[[str, int], str],
+    profile_owner: Callable[[str, int], str],
+) -> object:
+    """`data`, a file `author` wrote, with its references re-pointed for its
+    place at `depth` in `top`'s ancestry. Walks it like `load.qualify`.
+
+    A bare `extends` or `steering` name, or one qualified by the author's own
+    name, means `top`'s merged library, so an inherited entry reads the
+    child's overrides; the parent's name means the layer below the author's.
+    A skill or qualified agent profile is a file in one store: it becomes the
+    namespace of the nearest ancestor defining it, looked for from the top
+    child down (own or bare) or from the author's parent down (the parent's
+    name). A bare `profile:` is the instance's and stays. Any other qualifier
+    is left as written."""
+    below = depth + 1
+
+    def library_ref(value: str) -> str:
+        qualifier, colon, name = value.partition(":")
+        if not colon:
+            return f"{top}:{value}"
+        if qualifier == author.name:
+            return f"{top}:{name}"
+        if qualifier == parent_name:
+            return f"{layer_namespace(top, below)}:{name}"
+        return value
+
+    def file_ref(value: str, owner: Callable[[str, int], str], *, bare_is_own: bool) -> str:
+        qualifier, colon, name = value.partition(":")
+        if not colon:
+            return owner(value, 0) if bare_is_own else value
+        if qualifier == author.name:
+            return owner(name, 0)
+        if qualifier == parent_name:
+            return owner(name, below)
+        return value
+
+    def walk(node: object) -> object:
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        if not isinstance(node, Mapping):
+            return node
+        out: dict[object, object] = {}
+        for key, value in node.items():
+            if key == "extends" and isinstance(value, str):
+                out[key] = library_ref(value)
+            elif key == "steering" and isinstance(value, list):
+                out[key] = [library_ref(v) if isinstance(v, str) else v for v in value]
+            elif key == "skill" and isinstance(value, str):
+                out[key] = file_ref(value, skill_owner, bare_is_own=True)
+            elif key == "profile" and isinstance(value, str):
+                out[key] = file_ref(value, profile_owner, bare_is_own=False)
+            else:
+                out[key] = walk(value)
+        return out
+
+    return walk(data)
+
+
+@dataclass(frozen=True)
+class Visible:
+    """Per depth of an ancestry, which ancestor defines each skill and agent
+    profile name: what a child sees of the files its ancestors ship, after
+    each level's removals."""
+
+    #: `levels[d][kind][name]` is the `namespace:name` level `d` sees.
+    levels: tuple[Mapping[str, Mapping[str, str]], ...]
+
+    @classmethod
+    def build(
+        cls,
+        chain: Sequence[InstalledAddon],
+        defined: Sequence[Mapping[str, Collection[str]]],
+        removed: Sequence[Mapping[str, Collection[str]]] = (),
+    ) -> Visible:
+        """From the root down: at each level, first drop that level's removed
+        names (`removed[d]`, kind to names), then add its own (`defined[d]`)."""
+        levels: list[Mapping[str, Mapping[str, str]]] = [{}] * len(chain)
+        seen: dict[str, dict[str, str]] = {}
+        for d in reversed(range(len(chain))):
+            gone = removed[d] if d < len(removed) else {}
+            seen = {
+                kind: {n: owner for n, owner in names.items() if n not in gone.get(kind, ())}
+                for kind, names in seen.items()
+            }
+            for kind, names in defined[d].items():
+                seen[kind] = {
+                    **seen.get(kind, {}),
+                    **{n: f"{chain[d].namespace}:{n}" for n in names},
+                }
+            levels[d] = seen
+        return cls(tuple(levels))
+
+    def owner(self, kind: str, name: str, from_depth: int) -> str | None:
+        """The `namespace:name` of the ancestor whose `kind` (`skills`,
+        `profiles`) `name` level `from_depth` sees; None when none does."""
+        if from_depth >= len(self.levels):
+            return None
+        return self.levels[from_depth].get(kind, {}).get(name)
+
+
+def humanize(text: str, layers: Mapping[str, str]) -> str:
+    """`text` with each `<top>^<k>:<name>` written as `<ancestor>'s <name>, as
+    <top> inherits it`. `layers` maps `top^k` to that ancestor's name."""
+
+    def say(match: re.Match[str]) -> str:
+        ancestor = layers.get(match[1])
+        if ancestor is None:
+            return match[0]
+        top = match[1].partition(LAYER_MARK)[0]
+        return f"{ancestor}'s {match[2]}, as {top} inherits it"
+
+    return _LAYERED.sub(say, text)
+
+
+def public(data: object, layers: Mapping[str, str]) -> object:
+    """`data` (a string, or a mapping or list of them) with each
+    `<top>^<k>:<name>` written as the ancestor's own `<ancestor>:<name>`: what
+    a listing shows as the parent of an entry a child builds on."""
+    if isinstance(data, str):
+        return _LAYERED.sub(lambda m: f"{layers[m[1]]}:{m[2]}" if m[1] in layers else m[0], data)
+    if isinstance(data, list):
+        return [public(item, layers) for item in data]
+    if isinstance(data, Mapping):
+        return {key: public(value, layers) for key, value in data.items()}
+    return data
