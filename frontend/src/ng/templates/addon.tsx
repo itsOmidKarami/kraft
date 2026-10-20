@@ -1,4 +1,5 @@
 import { createContext } from "react";
+import { Package } from "lucide-react";
 import type { Addon } from "../../types";
 import { addonLabel, addonRepo, inheritanceText, inheritanceTitle } from "../library/types";
 import "../library/library.css";
@@ -13,7 +14,10 @@ export const ReadOnly = createContext(false);
 export const AddonBadge = ({ addon }: { addon: Addon }) => {
   const repo = addonRepo(addon);
   const title = repo ? `From ${repo}'s repo library: read-only` : `From add-on ${addonLabel(addon)}: read-only`;
-  return <Badge className="addon-badge" data-allow-ellipsis title={title}>{addonLabel(addon)}</Badge>;
+  return <Badge className="addon-badge" data-allow-ellipsis title={title}>
+    <Package className="addon-badge-glyph" size={12} aria-hidden />
+    <span className="addon-badge-text">{addonLabel(addon)}</span>
+  </Badge>;
 };
 
 /** Beside an `AddonBadge`: "inherited from company", "overridden here" or "added here" on a child add-on's entry.

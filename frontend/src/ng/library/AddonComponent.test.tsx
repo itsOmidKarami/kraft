@@ -64,6 +64,10 @@ describe("An add-on's component in the Library", () => {
     const list = screen.getByRole("group", { name: "Library components" });
     await waitFor(() => expect(within(list).getByRole("option", { name: /release:base/ })).toHaveTextContent("overridden here"));
     expect(within(list).getByRole("option", { name: /^implementer/ })).not.toHaveTextContent("overridden here");
+    // Where the list is narrow the badge shows a glyph only; its text and title stay for assistive tech.
+    const badge = within(list).getByText("release@acme 1.0.0").parentElement!;
+    expect(badge).toHaveAttribute("title", "From add-on release@acme 1.0.0: read-only");
+    expect(badge.querySelector("svg.addon-badge-glyph")).toHaveAttribute("aria-hidden", "true");
     // The header beside the breadcrumb, outside the list.
     const header = screen.getAllByText("overridden here").filter((el) => !list.contains(el));
     expect(header).toHaveLength(1);
