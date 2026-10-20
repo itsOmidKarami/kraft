@@ -67,7 +67,7 @@ describe("An add-on's component in the Library", () => {
     // The header beside the breadcrumb, outside the list.
     const header = screen.getAllByText("overridden here").filter((el) => !list.contains(el));
     expect(header).toHaveLength(1);
-    expect(header[0]).toHaveAttribute("title", "Written by platform-dept@corp 1.0.0");
+    expect(header[0]).toHaveAttribute("title", "overridden here\nWritten by platform-dept@corp 1.0.0");
   });
 
   it("a repo library's component is badged with its repository and offers no copy", async () => {

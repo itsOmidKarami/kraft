@@ -16,8 +16,10 @@ export const AddonBadge = ({ addon }: { addon: Addon }) => {
   return <Badge className="addon-badge" data-allow-ellipsis title={title}>{addonLabel(addon)}</Badge>;
 };
 
-/** Beside an `AddonBadge`: "inherited from company", "overridden here" or "added here" on a child add-on's entry. */
-export const InheritanceMark = ({ addon }: { addon: Addon }) => {
+/** Beside an `AddonBadge`: "inherited from company", "overridden here" or "added here" on a child add-on's entry.
+ *  Where the row is tight it ends in an ellipsis, so its title carries the whole mark above its author; `inline`, in
+ *  a picker's second line, it wraps with that line instead. */
+export const InheritanceMark = ({ addon, inline }: { addon: Addon; inline?: boolean }) => {
   const text = inheritanceText(addon);
-  return text ? <span className={`inheritance-mark is-${addon.inheritance!.origin}`} data-allow-ellipsis title={inheritanceTitle(addon) ?? undefined}>{text}</span> : null;
+  return text ? <span className={`inheritance-mark is-${addon.inheritance!.origin}${inline ? " is-inline" : ""}`} data-allow-ellipsis title={`${text}\n${inheritanceTitle(addon)}`}>{text}</span> : null;
 };

@@ -9,6 +9,7 @@ import { IdRow } from "./menus/IdRow";
 import { isOpen } from "../board/counts";
 import type { Addon } from "../../types";
 import { AddonBadge, InheritanceMark } from "./addon";
+import { inheritanceText } from "../library/types";
 import { NoMatch } from "../ui/NoMatch";
 import { Empty } from "../ui/Empty";
 import { Segmented } from "../ui/Segmented";
@@ -113,9 +114,8 @@ export function Switcher({ chain, renamedTo, onGo, startDup, copy, extend = true
               {shown.map((r, k) => (
                 <button key={r.id} ref={(el) => void (refs.current[k] = el)} type="button" role="option" aria-selected={r.id === chain} className="menu-item sw-row" onKeyDown={(e) => move(e, k)} onClick={() => go({ kind: "switch", id: r.id })}>
                   <span className="sw-check" aria-hidden="true">{r.id === chain && <Check size={12} />}</span>
-                  <span className="sw-main"><span className="picklist-name">{r.id}</span><span className="picklist-sub">{r.nodes} nodes · {r.open} open</span></span>
+                  <span className="sw-main"><span className="picklist-name">{r.id}</span><span className="picklist-sub">{r.nodes} nodes · {r.open} open{inheritanceText(r.addon) && <> · <InheritanceMark addon={r.addon!} inline /></>}</span></span>
                   {r.addon && <AddonBadge addon={r.addon} />}
-                  {r.addon && <InheritanceMark addon={r.addon} />}
                   {r.draft && <span className="sw-dot" aria-label="unpublished draft" />}
                 </button>
               ))}

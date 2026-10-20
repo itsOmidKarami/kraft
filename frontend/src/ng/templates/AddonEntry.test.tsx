@@ -137,7 +137,7 @@ describe("An add-on's chain on the Chains page", () => {
       withMark(INHERITED);
       const first = mount(chain);
       const row = await find();
-      expect(within(row).getByText("inherited from company")).toHaveAttribute("title", "Written by company@corp 3.2.0");
+      expect(within(row).getByText("inherited from company")).toHaveAttribute("title", "inherited from company\nWritten by company@corp 3.2.0");
       first.unmount();
       cleanup();
 
