@@ -227,23 +227,29 @@ _KINDS = {
     "skills": "skill",
     "profiles": "agent profile",
 }
+if tuple(_KINDS) != inherit.REMOVABLE:
+    raise RuntimeError("review._KINDS must name every section `remove:` may name, in order")
 
 
 def _declared(extracted: Extracted) -> dict[str, frozenset[str]]:
     """The names `extracted`'s own files declare, for each removable section."""
     library = _yaml(extracted, "library.yaml")
     files = extracted.files
-    declared = {section: frozenset(_section(library, section)) for section in _KINDS}
-    declared["chains"] = frozenset(
-        rel.removeprefix("chains/").removesuffix(".yaml")
-        for rel in files
-        if rel.startswith("chains/") and rel.endswith(".yaml")
-    )
-    declared["skills"] = frozenset(
-        rel.split("/")[1] for rel in files if rel.startswith("skills/") and rel.count("/") > 1
-    )
-    declared["profiles"] = frozenset(_section(_yaml(extracted, "profiles.yaml"), "profiles"))
-    return declared
+    return {
+        "chains": frozenset(
+            rel.removeprefix("chains/").removesuffix(".yaml")
+            for rel in files
+            if rel.startswith("chains/") and rel.endswith(".yaml")
+        ),
+        **{
+            section: frozenset(_section(library, section))
+            for section in ("tasks", "steps", "nodes", "steering")
+        },
+        "skills": frozenset(
+            rel.split("/")[1] for rel in files if rel.startswith("skills/") and rel.count("/") > 1
+        ),
+        "profiles": frozenset(_section(_yaml(extracted, "profiles.yaml"), "profiles")),
+    }
 
 
 def _inherited(ancestors: Sequence[InstalledAddon]) -> dict[str, dict[str, str]]:
@@ -257,13 +263,14 @@ def _inherited(ancestors: Sequence[InstalledAddon]) -> dict[str, dict[str, str]]
     for ancestor in ancestors:
         try:
             files = fetch.verify_store(ancestor.root)
-            declared.append(_declared(files))
-            removed.append(
-                inherit.removals(ancestor.root / "library.yaml", _yaml(files, "library.yaml"))
+            level = (
+                _declared(files),
+                inherit.removals(ancestor.root / "library.yaml", _yaml(files, "library.yaml")),
             )
         except (fetch.AddonRefused, fetch.FetchError, TemplateLibraryError):
-            declared.append({})  # the store does not read; loading says why
-            removed.append({})
+            level = ({}, {})  # the store does not read; loading says why
+        declared.append(level[0])
+        removed.append(level[1])
     seen = inherit.Visible.build(ancestors, declared, removed).levels[0]
     ids = {a.namespace: a.id for a in ancestors}
     return {
@@ -442,11 +449,12 @@ def review(
         reach += _parent_lines(*(f.requires.get("addons") or {} for f in (was, now)))
         before, after = _inherited(old_ancestors), _inherited(new_ancestors)
         for section, names in _declared(new).items():
+            offered, offered_before = after.get(section, {}), before.get(section, {})
+            kind = _KINDS[section]
             reach += [
-                f"its {_KINDS[section]} {name} now overrides "
-                f"{after[section][name]}'s new {_KINDS[section]} {name}"
-                for name in sorted(names)
-                if name in after.get(section, {}) and name not in before.get(section, {})
+                f"its {kind} {own} now overrides {offered[own]}'s new {kind} {own}"
+                for own in sorted(names)
+                if own in offered and own not in offered_before
             ]
     _chain_diff(was, now, name, reach, content)
     for label, before_map, after_map in (
