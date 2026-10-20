@@ -226,3 +226,30 @@ async def test_an_item_keeps_its_tree_across_a_parent_update(tree_home, case):
         # Left out by a fault, not built as a root: a launch that reads it stops.
         with pytest.raises(agent.HarnessUnavailable, match=_TAMPERED):
             launch_task(pins, skill=_SKILL)
+
+
+def test_a_pinned_addon_wins_over_a_live_one_of_its_id(tree_home):
+    """The instance moved team-payments to 1.1.0 under a new alias `pay`
+    after intake, so the item's add-ons hold its id twice: pinned, and live
+    under `pay`. Every lookup by id (`inherit.ancestry`, the library's
+    builds) takes the last of an id, so the pinned one comes last, wherever
+    the parents-first order put the live one. Here the pin is an old one
+    whose store is gone, a root by its pin, while the live one is a
+    grandchild."""
+    repo, config_dir, addons_dir = tree_home
+    pins = resolve_chain(config_dir, addons_dir, "team-payments:default").addons
+    pins = {n: {k: v for k, v in p.items() if k != "parent"} for n, p in pins.items()}
+    old = store_of(config_dir, addons_dir, "team-payments")
+    requires = {"kraft": "2", "harnesses": ["codex"], "addons": {TREE[1]: "1"}}
+    publish(repo, "team-payments", version="1.1.0", manifest={"requires": requires})
+    update_addons(config_dir, addons_dir, [TREE[2]])
+    lock = yaml.safe_load((config_dir / "addons.lock").read_text())
+    lock["addons"][TREE[2]]["namespace"] = "pay"
+    (config_dir / "addons.lock").write_text(yaml.safe_dump(lock))
+    drop_store(old)
+
+    known = load.for_item(pins, config_dir, addons_dir, repo_id=None)
+
+    team = [(a.namespace, a.version) for a in known if a.id == TREE[2]]
+    assert sorted(team) == [("pay", "1.1.0"), ("team-payments", "1.0.0")]
+    assert team[-1] == ("team-payments", "1.0.0")

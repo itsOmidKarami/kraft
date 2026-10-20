@@ -615,7 +615,8 @@ def for_item(
     A pinned child builds on the parent its pin names (its store's manifest,
     for a pin stored before pins named parents), and the add-ons come back
     parents first. One whose ancestor is not loaded is left out with that
-    ancestor's reason."""
+    ancestor's reason. A pinned add-on comes after a live one of its id (an
+    alias changed since intake), so a lookup by id finds the pinned one."""
     from kraft.addons import inherit  # inherit imports this module
 
     store = (Path(addons_root) if addons_root is not None else addons_dir()) / "store"
@@ -655,6 +656,13 @@ def for_item(
     # A child of a pinned ancestor that is gone is left out with its reason,
     # never built on the lock's version of that ancestor.
     loading = inherit.tree_order(inherit.cascade(tuple(checked)))
+    # A live add-on of a pinned id (its alias changed since intake) goes
+    # first: every lookup by id takes the last, and the pinned one must win
+    # wherever the parents-first order put either.
+    shadowed = {p.id for p in pinned}
+    loading = tuple(
+        sorted(loading, key=lambda a: a.namespace in (pins or {}) or a.id not in shadowed)
+    )
     taken = {p.namespace for p in loading}
     reserved = [
         InstalledAddon(
