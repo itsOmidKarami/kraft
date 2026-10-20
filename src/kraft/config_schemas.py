@@ -26,6 +26,7 @@ from kraft import config as config_mod
 from kraft import detect as detect_mod
 from kraft import policy as policy_mod
 from kraft.addons.config import ADDON_ID_PATTERN, AddonsConfig
+from kraft.addons.inherit import REMOVABLE
 from kraft.templates import extension
 from kraft.templates import models as models_mod
 from kraft.templates.environment import AgentProfileInput, HarnessProfileInput
@@ -141,6 +142,15 @@ def library_schema() -> dict:
                 "description": "A repo library's .kraft/library.yaml only: the add-ons whose "
                 "chains its chains extend, as <addon>@<collection>. Ignored in the instance's "
                 "own library.yaml.",
+            },
+            "remove": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    section: {"type": "array", "items": {"type": "string"}} for section in REMOVABLE
+                },
+                "description": "A child add-on's library.yaml only: entries of the add-on it "
+                "builds on to leave out, by section. Refused anywhere else.",
             },
         },
         "$defs": defs,
