@@ -31,28 +31,39 @@ from kraft.addons.manifest import ADDON_JSON
 from kraft.executor import dispatch
 from kraft.templates.library import TemplateLibrary
 
+#: The skill team-payments inherits from company, named by the team's name.
+_SKILL = "team-payments:deploy-review"
+#: A local agent task that reads company only through team-payments.
+_READS_SKILL = {**AGENT, "skill": _SKILL}
+
 
 @pytest.fixture
 def tree_home(tmp_path, monkeypatch):
     """A Kraft home, this process's own, with the example tree (`TREE`)
-    installed root first from one collection `acme`. Company also ships a
-    chain `default` running its `security_scan`, which `team-payments`
-    inherits, and its `slow` falls back to its own `fast` by name: a bare
-    `profile:` in an add-on is the instance's, which this one lacks. The
-    other two ship an empty `library.yaml`: an install refuses an add-on that
-    would add nothing."""
+    installed root first from the collection `acme`: `(collection repo,
+    config dir, run/addons)`. Company ships the task `security_scan` (skill
+    `deploy-review`, "company method"), a chain `default` that runs it, and
+    the profiles `slow` (model `o3`, falling back to `company:fast`) and
+    `fast` (`gpt-5`), both models the codex harness takes; team-payments
+    inherits all of it. Dept and team ship an empty `library.yaml`: an
+    install refuses an add-on that would add nothing. The local chain
+    `inherited-skill` is one agent task naming `team-payments:deploy-review`
+    (`_SKILL`), so it reads company only through the child."""
     company = {
         "chains": {"default": chain("security_scan")},
         "profiles": {
             "slow": {
-                "model": {"codex": "company-model"},
+                "model": {"codex": "o3"},
                 "fallback": [{"profile": "company:fast"}],
             },
-            "fast": {"model": {"codex": "fast-model"}},
+            "fast": {"model": {"codex": "gpt-5"}},
         },
     }
     repo = tree_collection(tmp_path, company=company, dept={"library": {}}, team={"library": {}})
-    config_dir, addons_dir = instance(tmp_path, {"acme": {"git": repo.as_uri()}})
+    reads_skill = {"nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", **_READS_SKILL}]}]}
+    config_dir, addons_dir = instance(
+        tmp_path, {"acme": {"git": repo.as_uri()}}, chains={"inherited-skill": reads_skill}
+    )
     monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config_dir))
     monkeypatch.setenv("KRAFT_RUN_DIR", str(addons_dir.parent))
     for addon_id in TREE:
@@ -64,12 +75,9 @@ def test_a_launch_reads_an_inherited_skill_under_the_childs_name(tree_home):
     """A local task names the skill team-payments inherits from company by
     the team's name: the launch injects company's file."""
     repo, config_dir, addons_dir = tree_home
-    skill = "team-payments:deploy-review"
-    body = {"nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", **AGENT, "skill": skill}]}]}
-    (config_dir / "chains" / "outside.yaml").write_text(json.dumps(body))
-    resolved = resolve_chain(config_dir, addons_dir, "outside")
+    resolved = resolve_chain(config_dir, addons_dir, "inherited-skill")
 
-    inv = launch_task(resolved.addons, skill=skill)
+    inv = launch_task(resolved.addons, skill=_SKILL)
 
     assert "company method" in inv.method_text
 
@@ -91,40 +99,37 @@ def _fast_falls_back_to(config_dir, profile):
 
 _WHOLE_TREE = ["company", "platform-dept", "team-payments"]
 
-#: The skill team-payments inherits from company, named by the team's name.
-_SKILL = "team-payments:deploy-review"
-
 _TAMPERED = (
     ".kraft/addon.json does not match its digest; the store was changed after it was installed"
 )
 
 
 @pytest.mark.parametrize(
-    ("case", "chain_id", "expected"),
+    ("chain_id", "expected"),
     [
-        pytest.param("child-chain", "team-payments:default", _WHOLE_TREE, id="child-chain"),
-        pytest.param("outside-extends", "outside", _WHOLE_TREE, id="outside-extends"),
-        pytest.param("fallback", "quick", _WHOLE_TREE, id="fallback-into-inherited-profile"),
-        pytest.param("root-only", "company:default", ["company"], id="root-only"),
-        pytest.param(
-            "child-first", "team-payments:default", _WHOLE_TREE, id="lock-lists-the-child-first"
-        ),
+        pytest.param("team-payments:default", _WHOLE_TREE, id="child-chain"),
+        pytest.param("outside", _WHOLE_TREE, id="outside-extends"),
+        pytest.param("inherited-skill", _WHOLE_TREE, id="outside-skill"),
+        pytest.param("quick", _WHOLE_TREE, id="fallback-into-inherited-profile"),
+        pytest.param("company:default", ["company"], id="root-only"),
+        pytest.param("team-payments:default", _WHOLE_TREE, id="lock-lists-the-child-first"),
     ],
 )
-def test_an_item_pins_its_whole_tree(tree_home, case, chain_id, expected):
+def test_an_item_pins_its_whole_tree(request, tree_home, chain_id, expected):
     """A chain that reads a child add-on pins every ancestor too, root first,
     and each child's pin names its parent. A root's pin is what it always was."""
     _repo, config_dir, addons_dir = tree_home
+    case = request.node.callspec.id
     locked = load.installed(config_dir, addons_dir)
     if case == "outside-extends":
         # Names only the child; the dept is read through it and named nowhere.
         (config_dir / "chains" / "outside.yaml").write_text(
             json.dumps(chain("team-payments:security_scan"))
         )
-    elif case == "fallback":
+    elif case == "fallback-into-inherited-profile":
         _fast_falls_back_to(config_dir, "team-payments:slow")
         _write_chain(config_dir, "quick", profile="fast")
-    elif case == "child-first":
+    elif case == "lock-lists-the-child-first":
         locked = tuple(reversed(locked))
     library = TemplateLibrary.from_yaml_dir(config_dir, addons=locked)
 
@@ -145,6 +150,9 @@ def test_an_item_pins_its_whole_tree(tree_home, case, chain_id, expected):
     if "team-payments" in expected:
         assert pins["team-payments"]["parent"] == "platform-dept@acme"
         assert pins["platform-dept"]["parent"] == "company@acme"
+    if case == "fallback-into-inherited-profile":
+        # The profile it falls back to is company's, read under the child's name.
+        assert launch_task(pins, profile="team-payments:slow").model == "o3"
 
 
 @pytest.mark.parametrize(
@@ -157,6 +165,7 @@ def test_an_item_pins_its_whole_tree(tree_home, case, chain_id, expected):
         "child-disabled-since",
         "pin-parent-wins-over-its-store",
         "pin-without-parent-manifest-tampered",
+        "launch-names-the-pinned-parent-that-is-gone",
     ],
 )
 async def test_an_item_keeps_its_tree_across_a_parent_update(tree_home, case):
@@ -164,19 +173,34 @@ async def test_an_item_keeps_its_tree_across_a_parent_update(tree_home, case):
     with after company moves to 1.1.0, which the team's range `1` accepts: its
     pins carry the whole tree, a launch reads the pinned ancestor, and a pinned
     ancestor whose store is gone leaves its descendants out with its reason
-    until it is restored."""
+    until it is restored. Each pinned child builds on the parent its pin
+    names; an older pin with none reads its store's manifest, and one whose
+    manifest does not read is left out with why."""
     repo, config_dir, addons_dir = tree_home
     resolved = resolve_chain(config_dir, addons_dir, "team-payments:default")
     pins = resolved.addons
     skill = next(iter(resolved.nodes[0].tasks())).task.skill
+    # Filed beside it: a task that reads company only through the child.
+    reads_skill = resolve_chain(config_dir, addons_dir, "inherited-skill").addons
     old = store_of(config_dir, addons_dir, "company")
     publish(repo, "company", version="1.1.0", skills={"deploy-review": "company 1.1.0 method"})
     update_addons(config_dir, addons_dir, ["company@acme"])
 
     if case == "launch-reads-pinned-ancestor":
-        started, filed_now = launch_task(pins, skill=skill), launch_task(None, skill=skill)
+        # Only the pins' ancestor closure keeps company 1.0.0 for it.
+        started = launch_task(reads_skill, skill=_SKILL)
+        filed_now = launch_task(None, skill=_SKILL)
         assert "company method" in started.method_text
         assert "company 1.1.0 method" in filed_now.method_text
+        return
+    if case == "launch-names-the-pinned-parent-that-is-gone":
+        drop_store(store_of(config_dir, addons_dir, "platform-dept"))
+        with pytest.raises(agent.HarnessUnavailable) as stop:
+            launch_task(reads_skill, skill=_SKILL)
+        assert str(stop.value) == (
+            "add-on team-payments@acme 1.0.0 could not be read: its parent platform-dept@acme "
+            "is not loaded: the version this work item started with is no longer in the store"
+        )
         return
     if case == "restore-an-ancestor":
         drop_store(old)
