@@ -17,18 +17,29 @@
 .lib-problems:is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); }
 
 /* The list. */
-.lib-list { flex: none; width: 250px; box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); }
+.lib-list { position: relative; flex: none; width: var(--lib-w, 250px); box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); }
 .lib-head { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px; }
 .lib-search { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-muted); }
 .lib-search:focus-within { border-color: var(--focus); }
 .lib-q { flex: 1; min-width: 0; min-height: 26px; padding: 0; border: 0; background: transparent; font-size: var(--fs-label); color: var(--text); outline: none; }
 .lib-filter-dot { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--mark-change-line); }
 .lib-head .icon-btn { position: relative; }
-.lib-filter { width: 180px; padding: 4px; }
+.lib-filter { width: 220px; padding: 4px; }
+.lib-filter-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-right: 6px; }
+.lib-filter-head .menu-title { margin-bottom: 0; }
+.lib-filter-set { min-width: 0; margin: 0; padding: 0; border: 0; }
+.lib-filter-set + .lib-filter-set { margin-top: 8px; }
+.lib-filter-legend { padding: 4px 6px 2px; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.lib-filter-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-filter-name.is-id { font-family: ui-monospace, Menlo, monospace; }
 .lib-filter-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 5px; font-size: var(--fs-label); color: var(--text); cursor: pointer; }
 .lib-filter-row:hover { background: var(--surface-2); }
 .lib-filter-row:focus-within { outline: 2px solid var(--focus); outline-offset: -2px; }
 .lib-filter-row .lib-count { margin-left: auto; }
+/* The list's right edge: drag, ← →, Home/End, double click for the default width. */
+.lib-handle { position: absolute; top: 0; bottom: 0; right: -3px; width: 6px; z-index: 3; cursor: col-resize; touch-action: none; }
+.lib-handle:focus-visible { outline-offset: -2px; }
+.lib-handle:is(:hover, :focus-visible) { background: linear-gradient(90deg, transparent 2px, var(--text-muted) 2px, var(--text-muted) 4px, transparent 4px); }
 .lib-sr { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }
 .lib-rows { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 10px; }
 .lib-group { margin: 10px 0 4px; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
@@ -43,7 +54,7 @@
 .lib-row.is-sel { background: var(--surface-2); color: var(--text); }
 .lib-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 /* A long id stays on one line and ends in an ellipsis (the row's title has the whole id), so every row is one height. */
-.lib-name { flex: 1 1 0; min-width: 8ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--fs-label)/14px ui-monospace, Menlo, monospace; }
+.lib-name { flex: 1 1 auto; min-width: 8ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--fs-label)/14px ui-monospace, Menlo, monospace; }
 .lib-used { flex: none; font-size: var(--fs-label); line-height: 14px; color: var(--text-muted); white-space: nowrap; }
 .lib-mark, .lib-prob { flex: none; width: 6px; height: 6px; border-radius: 50%; }
 .lib-mark.is-add { background: var(--ok); }
@@ -53,6 +64,7 @@
 
 @media (max-width: 767px) {
   .lib-list { width: 100%; border-right: 0; }
+  .lib-handle { display: none; }
   .lib-page[data-ref] .lib-list { display: none; }
   .lib-page:not([data-ref]) .lib-main { display: none; }
   .lib-back { display: inline-flex; }
@@ -63,8 +75,8 @@
 .lib-use-chain { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .lib-use-chain:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
 .lib-use-path { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); overflow-wrap: anywhere; }
-/* In the list the name already carries the namespace: the badge gives way first, whole in its title. */
-.lib-row .addon-badge { flex: 0 100 auto; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; }
+/* In the list the name already carries the namespace: the badge gives way first (and never takes over half the row), whole in its title. */
+.lib-row .addon-badge { flex: 0 1000 auto; min-width: 3ch; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
 .lib-row > svg { flex: none; }
 
 /* A task on the canvas: its one glyph, centred in what the pane leaves. */

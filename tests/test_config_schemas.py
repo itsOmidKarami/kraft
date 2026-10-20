@@ -86,6 +86,18 @@ def test_the_library_schema_takes_a_repo_librarys_addons_list():
     assert not schema.is_valid({"addons": ["base"]})
 
 
+@pytest.mark.parametrize(
+    ("library", "valid"),
+    [
+        pytest.param({"remove": {"chains": ["a:b"], "skills": ["s"]}}, True, id="remove-sections"),
+        pytest.param({"remove": {"chain": ["a:b"]}}, False, id="remove-unknown-section"),
+        pytest.param({"remove": {"chains": "a:b"}}, False, id="remove-not-a-list"),
+    ],
+)
+def test_the_library_schema_takes_a_childs_remove(library, valid):
+    assert validator("library.schema.json").is_valid(library) is valid
+
+
 def test_the_addons_schema_catches_shape_and_typos():
     """What an editor can catch in `addons.yaml`; the rules that compare
     entries are the loader's."""

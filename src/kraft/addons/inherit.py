@@ -183,8 +183,23 @@ LAYER_MARK = "^"
 #: `... team^1:scan.` ends a sentence.
 _NAME_CHAR = r"[^\s'\"`:,;()\[\]{}<>]"
 _LAYERED = re.compile(rf"(?<![\w-])([\w-]+\^\d+):({_NAME_CHAR}+)(?<!\.)")
-#: A reference written in the layered shape (`team^1:scan`).
-_LAYER_REFERENCE = re.compile(r"[\w-]+\^\d+:")
+
+
+def _is_layer_reference(value: str) -> bool:
+    """Whether `value` starts in the layered shape `<top>^<k>:` (`team^1:scan`).
+    Scanned by hand, not a regex: authored text of many `-` would make a
+    backtracking pattern slow. A name char is alphanumeric, `_` or `-`
+    (`str.isalnum`, close to the old `\\w`)."""
+    head, colon, _ = value.partition(":")
+    name, caret, depth = head.rpartition("^")
+    return bool(
+        colon
+        and caret
+        and depth.isascii()
+        and depth.isdigit()
+        and name
+        and all(ch.isalnum() or ch in "_-" for ch in name)
+    )
 
 
 def layer_namespace(top: str, depth: int) -> str:
@@ -360,7 +375,7 @@ def layer_reference(data: object) -> str | None:
         return None
     for key, value in data.items():
         values = value if key == "steering" and isinstance(value, list) else [value]
-        layered = [v for v in values if isinstance(v, str) and _LAYER_REFERENCE.match(v)]
+        layered = [v for v in values if isinstance(v, str) and _is_layer_reference(v)]
         if key in _REFERENCE_KEYS and layered:
             return layered[0]
         if (found := layer_reference(value)) is not None:

@@ -195,3 +195,22 @@ def test_requirements(tmp_path, read):
         ["codex", "claude"],
         ["fast", "deep", "strong"],
     )
+
+
+@pytest.mark.parametrize(
+    ("value", "found"),
+    [
+        ("team^1:scan", "team^1:scan"),
+        ("team-payments^12:x", "team-payments^12:x"),
+        ("^1:base", None),
+        ("team^:x", None),
+        ("team^1x:y", None),
+        ("plain:name", None),
+        ("-" * 50000, None),
+    ],
+    ids=["found", "hyphenated", "no-name", "no-depth", "junk-depth", "no-caret", "long-hyphens"],
+)
+def test_layer_reference(value, found):
+    """A value in the layered shape is spotted, one that only resembles it is
+    not, and a long run of `-` is answered at once (no backtracking)."""
+    assert inherit.layer_reference({"extends": value}) == found

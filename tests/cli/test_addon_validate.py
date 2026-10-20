@@ -3,6 +3,7 @@ without installing anything, and a child add-on against its parent. The
 instance-side rows are `test_addon`'s `test_validate_against_a_kraft_home`."""
 
 import json
+import tempfile
 
 import pytest
 from support.addons import chain, install, instance, make_collection, publish
@@ -75,6 +76,13 @@ def _unreadable_with_before_the_parent(tmp_path, monkeypatch):
 def _broken_against_parent(tmp_path, monkeypatch):
     team = _team(tasks={"scan": {"extends": "release:nope"}})
     return _parent_in_path(tmp_path, monkeypatch, team)
+
+
+def _parent_broken(tmp_path, monkeypatch):
+    """`release`, the parent, does not itself resolve: `team` builds on it."""
+    release = {**GOOD["release"], "library": {"tasks": {"base": {"extends": "nope"}}}}
+    corp = make_collection(tmp_path, {"release": release})
+    return [str(make_collection(tmp_path, {"team": TEAM}, name="payments")), "--with", str(corp)]
 
 
 def _removes_what_it_inherits(tmp_path, monkeypatch):
@@ -180,6 +188,22 @@ def _parent_in_an_added_collection(tmp_path, monkeypatch):
         (_with_holds_neither, "", None, 1, "nothing: holds neither .kraft/collection.json"),
         (_unreadable_with_before_the_parent, "", None, 0, "team 1.0.0"),
         (_broken_against_parent, "", None, 1, "nope"),
+        (
+            _parent_broken,
+            "",
+            None,
+            1,
+            (
+                # The parent's failure is its own, named by where it was read from,
+                # once, and not as a copy under the child or a deleted scratch path.
+                "<tmp>/acme-kraft/addons/release: "
+                "<tmp>/acme-kraft/addons/release/chains/ship.yaml: "
+                "n.main.t: extends no task "
+                "named 'release:nope'",
+                "!ship.yaml: n.main.t: extends no task named 'team:nope'",
+                "!<scratch>",
+            ),
+        ),
         (_removes_what_it_inherits, "", None, 0, "team 1.0.0"),
         (_parent_installed, "", None, 0, "team 1.0.0"),
         (_parent_in_an_added_collection, "", None, 0, "team 1.0.0"),
@@ -204,6 +228,7 @@ def _parent_in_an_added_collection(tmp_path, monkeypatch):
         "with-dir-holds-neither",
         "with-dir-unreadable-before-the-parent",
         "child-broken-against-parent",
+        "parent-broken-not-blamed-on-child",
         "child-removes-what-it-inherits",
         "child-against-instance",
         "child-against-instance-collection",
@@ -219,7 +244,15 @@ def test_validate(tmp_path, capsys, monkeypatch, addons, sub, running, code, say
     else:
         argv = [str(make_collection(tmp_path, addons) / sub)]
     got, out = _run(capsys, "validate", *argv)
-    assert got == code and all(s in out for s in (says if isinstance(says, tuple) else [says])), out
+    # "<tmp>" is this test's directory; a "!" row must not be said, and
+    # "<scratch>" is where validate's own temporary copies are made.
+    said = [
+        s.replace("<tmp>", str(tmp_path)).replace("<scratch>", tempfile.gettempdir() + "/tmp")
+        for s in (says if isinstance(says, tuple) else [says])
+    ]
+    assert got == code, out
+    for s in said:
+        assert (s[1:] not in out) if s.startswith("!") else (s in out), out
 
 
 def test_validate_against_an_instance_writes_nothing(tmp_path, capsys, monkeypatch):

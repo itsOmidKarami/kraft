@@ -322,19 +322,55 @@ def test_an_addon_reaches_only_its_parent(parent, task, why):
         assert len(found) == 1 and why in found[0], found
 
 
-def test_a_childs_review_shows_its_chain_changes(tmp_path):
-    """A child's chains resolve only through its parent: its review reads them
-    with its ancestors in place, so a gate it drops is said before it applies."""
+def _child_drops_its_gate(tmp_path):
     gated = {"nodes": [*chain("check")["nodes"], {"id": "approve", "kind": "gate"}]}
     repos, home = _both_installed(
         tmp_path, team={**TEAM, "chains": {**TEAM["chains"], "ship": gated}}
     )
     publish(repos["payments"], "team", version="1.1.0", **_builds_on(TEAM))
+    return home, CHILD
+
+
+def _parent_turns_a_childs_gate(tmp_path):
+    """The parent ships a gate none of its own chains use; the child's chain
+    extends it, so the parent's update changes only the child's chain."""
+    company = {**COMPANY, "library": {**COMPANY["library"], "nodes": {"approve": {"kind": "gate"}}}}
+    approve = {"id": "approve", "extends": "company:approve"}
+    ship = {"nodes": [*chain("check")["nodes"], approve]}
+    team = {**TEAM, "chains": {**TEAM["chains"], "ship": ship}}
+    repos, home = _both_installed(tmp_path, company=company, team=team)
+    turned = {"approve": {"kind": "exec", "tasks": [{"id": "a", "extends": "verify"}]}}
+    publish(
+        repos["corp"],
+        "company",
+        **{**company, "version": "3.3.0", "library": {**company["library"], "nodes": turned}},
+    )
+    return home, PARENT
+
+
+@pytest.mark.parametrize(
+    "setup",
+    [
+        pytest.param(_child_drops_its_gate, id="child-drops-its-gate"),
+        pytest.param(_parent_turns_a_childs_gate, id="parent-update-changes-a-childs-chain"),
+    ],
+)
+def test_a_childs_review_shows_its_chain_changes(tmp_path, setup):
+    """A child's chains resolve only through its parent: its review reads them
+    with its ancestors in place, and a parent's review reads its descendants'
+    chains, so a gate either drops is said before it applies, and held from an
+    unattended apply."""
+    home, addon_id = setup(tmp_path)
     reviews = []
 
     (result,) = update.update(
-        [CHILD], accept=lambda r: reviews.append(r) or True, config_dir=home[0], addons_root=home[1]
+        [addon_id],
+        accept=lambda r: reviews.append(r) or True,
+        config_dir=home[0],
+        addons_root=home[1],
     )
 
     assert result.outcome == "applied", result.problems
-    assert "team:ship.nodes[approve]: gate removed" in reviews[0].reach, reviews[0].reach
+    gone = "team:ship.nodes[approve]: gate removed"
+    assert any(line.startswith(gone) for line in reviews[0].reach), reviews[0].reach
+    assert update.may_apply_unattended(reviews[0]) is not None

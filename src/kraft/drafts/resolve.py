@@ -247,13 +247,16 @@ def _chains(st, key: str, raw: dict, files: dict, published: dict) -> dict:
                                 f"resolving: {exc}",
                             }
                         )
-                sources = _sources(
-                    authored.normalise(copy.deepcopy(data)),
-                    _library_model(st, files),
-                    chain,
-                    deps.instance_policy(st),
-                    parent=lambda name: authored.normalise(
-                        copy.deepcopy(dict(candidate.chain_data(name)))
+                sources = _public_sources(
+                    candidate,
+                    _sources(
+                        authored.normalise(copy.deepcopy(data)),
+                        _library_model(st, files),
+                        chain,
+                        deps.instance_policy(st),
+                        parent=lambda name: authored.normalise(
+                            copy.deepcopy(dict(candidate.chain_data(name)))
+                        ),
                     ),
                 )
     return {
@@ -536,6 +539,17 @@ def _setter(layers: list[tuple[str, Mapping]], field: str) -> str:
         if value is not _MISSING:
             return label
     return "chain"
+
+
+def _public_sources(library, sources: dict) -> dict:
+    """`sources` with a `chain:<name>` label naming an inherited chain as the
+    ancestor add-on's own id, not the hidden level the library reads it through."""
+    for fields in sources.values():
+        for field in fields.values():
+            source = field.get("source")
+            if isinstance(source, str) and source.startswith("chain:"):
+                field["source"] = f"chain:{library.public_name(source[len('chain:') :])}"
+    return sources
 
 
 def _sources(
