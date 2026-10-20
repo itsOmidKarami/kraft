@@ -11,22 +11,40 @@ setup:
     cd frontend && npm ci
     @just setup-plugins
 
-# The Claude Code plugins .claude/settings.json turns on (superpowers,
-# impeccable). Committing `enabledPlugins` turns them on but does not download
-# one from an outside source, so each clone installs them once. Re-running is a
-# no-op. Skipped when `claude` is not installed, since it is optional here.
-[doc("Install the Claude Code plugins this repo uses (superpowers, impeccable)")]
+# superpowers and impeccable, for every agent this repo is worked on with.
+#
+# Claude Code: .claude/settings.json turns both plugins on, but committing
+# `enabledPlugins` does not download a plugin from an outside source, so each
+# clone installs them once.
+#
+# Every other agent Kraft runs (Codex, Cursor, Gemini CLI, OpenCode, Amp,
+# Antigravity) and GitHub Copilot reads skills from .agents/skills/. The
+# `skills` CLI copies them there; they are gitignored, and only beads is
+# committed in that folder. skills-lock.json records where each came from.
+#
+# Re-running refreshes both. Each half is skipped when its tool (`claude`,
+# `npx`) is missing, since neither is required to build or test Kraft.
+[doc("Install superpowers and impeccable for Claude Code and every other agent")]
 setup-plugins:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! command -v claude >/dev/null; then
+    if command -v claude >/dev/null; then
+        claude plugin marketplace add anthropics/claude-plugins-official >/dev/null
+        claude plugin marketplace add pbakaus/impeccable >/dev/null
+        claude plugin install superpowers@claude-plugins-official --scope project
+        claude plugin install impeccable@impeccable --scope project
+    else
         echo "claude not installed; skipping the Claude Code plugins"
-        exit 0
     fi
-    claude plugin marketplace add anthropics/claude-plugins-official >/dev/null
-    claude plugin marketplace add pbakaus/impeccable >/dev/null
-    claude plugin install superpowers@claude-plugins-official --scope project
-    claude plugin install impeccable@impeccable --scope project
+    if command -v npx >/dev/null; then
+        agents=(codex cursor gemini-cli opencode amp antigravity github-copilot)
+        for source in obra/superpowers pbakaus/impeccable; do
+            npx -y skills@1.7.4 add "$source" --skill '*' --agent "${agents[@]}" --copy -y >/dev/null
+            echo "Installed $source into .agents/skills/"
+        done
+    else
+        echo "npx not installed; skipping the skills for agents other than Claude Code"
+    fi
 
 # Install deps including semantic search (downloads a ~130MB model on first
 # search). Without this, /search still works in fts mode.
