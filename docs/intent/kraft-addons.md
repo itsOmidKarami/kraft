@@ -350,8 +350,8 @@ origin: src/kraft/cli/addon.py §_cmd_update
 
 ## REQ removing-a-referenced-addon-is-refused
 
-IF local configuration (`library.yaml`, `chains/`, `repos.yaml`, `intake.yaml`, `policy.yaml` triggers or `harnesses.yaml` fallbacks) references the namespace of an add-on being uninstalled or disabled, or an accepted repo library lists it under `addons:`, THEN the system SHALL refuse and list each reference.
-enforced-by: tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[uninstall], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[disable], tests/cli/test_addon.py::test_removing_an_addon_a_chain_extends_is_refused, tests/cli/test_addon.py::test_removing_an_addon_a_repo_library_builds_on_is_refused[uninstall], tests/cli/test_addon.py::test_removing_an_addon_a_repo_library_builds_on_is_refused[disable], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[a-repo-library-builds-on-it]
+IF local configuration (`library.yaml`, `chains/`, `repos.yaml`, `intake.yaml`, `policy.yaml` triggers or `harnesses.yaml` fallbacks) references the namespace of an add-on being uninstalled or disabled, an accepted repo library lists it under `addons:`, or an installed, enabled add-on names it as its parent, THEN the system SHALL refuse and list each reference.
+enforced-by: tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[uninstall], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[disable], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[child-uninstall], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[child-disable], tests/cli/test_addon.py::test_removing_an_addon_a_chain_extends_is_refused, tests/cli/test_addon.py::test_removing_an_addon_a_repo_library_builds_on_is_refused[uninstall], tests/cli/test_addon.py::test_removing_an_addon_a_repo_library_builds_on_is_refused[disable], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[a-repo-library-builds-on-it]
 origin: src/kraft/cli/addon.py §_still_referenced
 
 ## REQ a-worker-does-not-change-addons
@@ -368,8 +368,8 @@ origin: src/kraft/apply.py §reload
 
 ## REQ an-addons-yaml-edit-is-checked
 
-IF a hand edit of `addons.yaml` would leave a currently resolving chain or reference unresolved, THEN the system SHALL report it on the pending reload with the reason, and SHALL list a changed `addons.yaml` or `addons.lock` as a pending reload.
-enforced-by: tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[breaks-a-chain], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[captures-a-reference], tests/api/test_deps.py::test_an_addon_reload_leaves_the_operators_pending_edits_pending
+IF a hand edit of `addons.yaml` would leave a currently resolving chain or reference unresolved, or leave out a loaded add-on whose own entry it keeps enabled, THEN the system SHALL report it on the pending reload with the reason, naming each descendant it leaves out, and SHALL list a changed `addons.yaml` or `addons.lock` as a pending reload.
+enforced-by: tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[breaks-a-chain], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[captures-a-reference], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[names-each-descendant-left-out], tests/api/test_deps.py::test_an_addon_reload_leaves_the_operators_pending_edits_pending
 origin: src/kraft/api/config_check.py §_check_addons
 
 ## REQ an-edit-that-drops-an-addon-is-reported
@@ -515,3 +515,15 @@ origin: src/kraft/api/routes/repos.py §_repository_id
 IF connecting a repository would declare a workspace naming an entry whose `id` is `kraft` or an add-on's namespace, THEN the system SHALL refuse the connect, name the add-on, and write nothing.
 enforced-by: tests/api/test_repos_workspaces.py::test_a_member_whose_id_is_an_addon_namespace_refuses_the_connect[addon-namespace], tests/api/test_repos_workspaces.py::test_a_member_whose_id_is_an_addon_namespace_refuses_the_connect[reserved]
 origin: src/kraft/api/routes/repos.py §_declare_workspace
+
+## REQ a-parent-with-children-is-not-removed
+
+IF an add-on being uninstalled or disabled, by `kraft admin addon` or by an `addons.yaml` edit, is named as parent by an installed add-on whose entry stays enabled, THEN the system SHALL refuse with `something installed builds on it`, naming each such child, and SHALL allow disabling the child.
+enforced-by: tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[child-uninstall], tests/cli/test_addon.py::test_removing_a_referenced_addon_is_refused[child-disable], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[a-child-builds-on-it], tests/api/test_config_check.py::test_an_addons_yaml_edit_is_checked[parent-and-child-together]
+origin: src/kraft/addons/update.py §child_dependents
+
+## REQ a-child-is-not-enabled-without-its-parent
+
+IF `kraft admin addon enable` names an add-on whose parent, with the entry enabled, is not installed, not loaded, or outside its range, THEN the system SHALL refuse with why, naming the parent and, when it is not installed, the install to run, and write nothing.
+enforced-by: tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-disabled], tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-not-installed], tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-out-of-range], tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-loaded]
+origin: src/kraft/cli/addon.py §_parent_loads

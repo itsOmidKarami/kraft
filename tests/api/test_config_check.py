@@ -283,19 +283,70 @@ def _builds_on_release(st, tmp_path):
     deps._reload_templates(st)
 
 
+def _builds_on(st, tmp_path, addon, collection, parent):
+    """`<addon>@<collection>`, installed and enabled, naming `parent` in
+    `requires.addons`."""
+    from support.addons import AGENT, chain, install, make_collection
+
+    spec = {
+        "library": {"tasks": {"own": AGENT}},
+        "chains": {"run": chain("own")},
+        "manifest": {"requires": {"kraft": "2", "harnesses": ["codex"], "addons": {parent: "1"}}},
+    }
+    found = make_collection(tmp_path, {addon: spec}, name=collection)
+    install(st.templates_dir, st.run_dirs.addons, found, addon)
+
+
+def _a_child_of_release(st, tmp_path):
+    _builds_on(st, tmp_path, "team", "payments", "release@acme")
+    deps._reload_templates(st)
+
+
+def _a_tree_under_release(st, tmp_path):
+    _builds_on(st, tmp_path, "dept", "corp", "release@acme")
+    _builds_on(st, tmp_path, "team", "payments", "dept@corp")
+    deps._reload_templates(st)
+
+
+_PARENT_GONE = "its parent release@acme is not loaded: is disabled"
+
+
 @pytest.mark.parametrize(
-    "chain_text, edit, says",
+    "setup, chain_text, edit, says",
     [
-        (USES_RELEASE, {"release@acme": False}, "chain mine would stop resolving"),
+        (None, USES_RELEASE, {"release@acme": False}, "chain mine would stop resolving"),
         (
+            _builds_on_release,
             LOCAL,
             {"release@acme": False},
-            "cannot disable release@acme: a connected repository's repo library builds on it\n"
+            "cannot disable release@acme: something installed builds on it\n"
             "  repository app: .kraft/library.yaml lists release@acme under addons:",
         ),
-        (USES_ANOTHER_TOOLS_SKILL, {"tools@acme": True}, "chain mine would stop resolving"),
-        (USES_RELEASE, {"release@acme": {"auto_update": True}}, None),
-        (USES_RELEASE, {"release@acme": {"enabeld": False}}, "enabeld"),
+        (None, USES_ANOTHER_TOOLS_SKILL, {"tools@acme": True}, "chain mine would stop resolving"),
+        (None, USES_RELEASE, {"release@acme": {"auto_update": True}}, None),
+        (None, USES_RELEASE, {"release@acme": {"enabeld": False}}, "enabeld"),
+        (
+            _a_child_of_release,
+            LOCAL,
+            {"release@acme": False},
+            (
+                "cannot disable release@acme: something installed builds on it\n"
+                "  team@payments builds on it (requires.addons)",
+                f"would leave add-on team@payments out: {_PARENT_GONE}",
+            ),
+        ),
+        (_a_child_of_release, LOCAL, {"release@acme": False, "team@payments": False}, None),
+        (
+            _a_tree_under_release,
+            LOCAL,
+            {"release@acme": False},
+            (
+                "  dept@corp builds on it (requires.addons)",
+                f"would leave add-on dept@corp out: {_PARENT_GONE}",
+                "would leave add-on team@payments out: its parent dept@corp is not loaded: "
+                + _PARENT_GONE,
+            ),
+        ),
     ],
     ids=[
         "breaks-a-chain",
@@ -303,22 +354,28 @@ def _builds_on_release(st, tmp_path):
         "captures-a-reference",
         "an-edit-that-unloads-nothing",
         "typo",
+        "a-child-builds-on-it",
+        "parent-and-child-together",
+        "names-each-descendant-left-out",
     ],
 )
-def test_an_addons_yaml_edit_is_checked(with_release, tmp_path, chain_text, edit, says):
+def test_an_addons_yaml_edit_is_checked(with_release, tmp_path, setup, chain_text, edit, says):
     """A hand edit is refused for what it would stop resolving, with the reason,
-    and, as `kraft admin addon disable` is, while a repo library builds on the
-    add-on it unloads."""
+    and, as `kraft admin addon disable` is, while a repo library or a child
+    add-on builds on the add-on it unloads. Each descendant it would leave out
+    is named with why."""
     st = with_release
-    if chain_text is LOCAL:
-        _builds_on_release(st, tmp_path)
+    if setup:
+        setup(st, tmp_path)
     (st.templates_dir / "chains" / "mine.yaml").write_text(chain_text)
     deps._reload_templates(st)
     assert "mine" not in st.invalid_chains
 
     issues = config_check.check("addons.yaml", _addons_yaml(st, **edit), config_check.context(st))
 
-    assert [says in i.message for i in issues] == ([True] if says else [])
+    want = (says,) if isinstance(says, str) else says or ()
+    said = [i.message for i in issues]
+    assert len(said) == len(want) and all(w in m for w, m in zip(want, said, strict=True)), said
 
 
 def test_a_pending_addons_yaml_edit_is_linted_once(with_release, monkeypatch):
