@@ -85,7 +85,7 @@ describe("Library page: the list", () => {
   it("a tile's section shows even when the kind filter hides it", async () => {
     const u = userEvent.setup();
     mount();
-    await u.click(await screen.findByRole("button", { name: "Filter kinds" }));
+    await u.click(await screen.findByRole("button", { name: "Filter" }));
     await u.click(await screen.findByRole("checkbox", { name: /Tasks/ }));
     await u.keyboard("{Escape}");
     await u.click(within(await screen.findByRole("list", { name: "Components per section" })).getByRole("link", { name: /tasks/ }));
@@ -111,8 +111,8 @@ describe("Library page: the list", () => {
     const u = userEvent.setup();
     const { unmount } = mount();
     await list();
-    await u.click(screen.getByRole("button", { name: "Filter kinds" }));
-    await u.click(within(screen.getByRole("dialog", { name: "Show kinds" })).getByRole("checkbox", { name: /Steering/ }));
+    await u.click(screen.getByRole("button", { name: "Filter" }));
+    await u.click(within(screen.getByRole("dialog", { name: "Filter the library" })).getByRole("checkbox", { name: /Steering/ }));
     expect(within(await list()).queryByRole("listbox", { name: "Steering" })).toBeNull();
     unmount();
     mount();
@@ -124,13 +124,39 @@ describe("Library page: the list", () => {
     expect(await screen.findByRole("listbox", { name: "Steering" })).toBeInTheDocument();
   });
 
+  it("offers no source to choose between when nothing comes from an add-on", async () => {
+    const u = userEvent.setup();
+    mount();
+    await list();
+    await u.click(screen.getByRole("button", { name: "Filter" }));
+    expect(within(screen.getByRole("dialog", { name: "Filter the library" })).queryByRole("group", { name: "Source" })).toBeNull();
+  });
+
+  it("resizes the list from its edge, by key or by double click, and remembers the width", async () => {
+    const u = userEvent.setup();
+    const { unmount } = mount();
+    await list();
+    const edge = screen.getByRole("separator", { name: "Resize the list" });
+    const w = () => (document.querySelector(".lib-list") as HTMLElement).style.getPropertyValue("--lib-w");
+    expect(w()).toBe("250px");
+    edge.focus();
+    await u.keyboard("{ArrowRight}{ArrowRight}");
+    expect(w()).toBe("282px");
+    unmount();
+    mount();
+    await list();
+    expect(w()).toBe("282px");
+    await u.dblClick(screen.getByRole("separator", { name: "Resize the list" }));
+    expect(w()).toBe("250px");
+  });
+
   it("offers only the kinds the library has in the filter", async () => {
     const u = userEvent.setup();
     draftWith({ model: { "library.yaml": { ...LIB_MODEL, steps: {} } } });
     mount();
     await list();
-    await u.click(screen.getByRole("button", { name: "Filter kinds" }));
-    const kinds = within(screen.getByRole("dialog", { name: "Show kinds" })).getAllByRole("checkbox").map((c) => c.closest("label")!.textContent);
+    await u.click(screen.getByRole("button", { name: "Filter" }));
+    const kinds = within(screen.getByRole("dialog", { name: "Filter the library" })).getAllByRole("checkbox").map((c) => c.closest("label")!.textContent);
     expect(kinds.some((k) => /Steps/.test(k!))).toBe(false);
     expect(kinds.some((k) => /Tasks/.test(k!))).toBe(true);
   });

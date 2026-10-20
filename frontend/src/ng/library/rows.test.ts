@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { libView, PUBLISHED } from "./fixture";
-import { listRows, shownRows } from "./rows";
+import { listRows, shownRows, sourceLabel, sources } from "./rows";
 import type { Section } from "./types";
 
 const result = libView().result;
@@ -55,5 +55,17 @@ describe("library rows", () => {
     expect(shownRows(all, "REVIEW", new Set()).map((x) => x.id)).toEqual(["tasks.code_review"]);
     const hide = new Set<Section>(["tasks", "steering"]);
     expect(shownRows(all, "", hide).map((x) => x.section)).toEqual(["nodes", "nodes", "steps"]);
+  });
+
+  it("names where each component comes from, local first, and filters by it", () => {
+    const shipped = { tasks: { "release:base": { kind: "agent" }, "app:base": { kind: "agent" } } };
+    const published = [...PUBLISHED.components, { id: "tasks.release:base", kind: "tasks" as const, name: "release:base", used_by: [], used_by_paths: [], addon: { id: "release@acme", version: "1.0.0" } }, { id: "tasks.app:base", kind: "tasks" as const, name: "app:base", used_by: [], used_by_paths: [], addon: { id: "library@repo:app", version: "", repo: "app" } }];
+    const all = listRows(result, published, shipped);
+    expect(sources(all)).toEqual([{ source: "local", count: 9 }, { source: "release@acme", count: 1 }, { source: "repo:app", count: 1 }]);
+    expect(sources(all).map((x) => sourceLabel(x.source))).toEqual(["Local", "release@acme", "repo library app"]);
+    expect(shownRows(all, "", new Set(), new Set(["local"])).map((x) => x.id)).toEqual(["tasks.release:base", "tasks.app:base"]);
+    expect(shownRows(all, "", new Set(), new Set(["release@acme", "repo:app"])).length).toBe(9);
+    // A search and the source filter both apply.
+    expect(shownRows(all, "base", new Set(), new Set(["repo:app"])).map((x) => x.id)).toEqual(["tasks.release:base"]);
   });
 });

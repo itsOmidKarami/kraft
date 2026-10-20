@@ -1,7 +1,7 @@
 import { hint } from "../ui/Tooltip";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useResizable } from "../graph/useResizable";
+import { useResizable, useWidth } from "../graph/useResizable";
 import { detailOf, request } from "../http";
 import { isTextField } from "../keys";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
@@ -27,6 +27,7 @@ import { LIBRARY_FILE } from "../templates/draft/view";
 import { addonRepo, parseRef, refUrl, SECTIONS, type PublishedLibrary, type Section } from "./types";
 import "./library.css";
 import { usePane } from "../shell/usePane";
+import { useListWidth } from "./listWidth";
 import { REVIEW_AND_PUBLISH } from "./sharedWords";
 
 /** The published library, for its used-by figures and its text (the YAML view's left side). */
@@ -69,6 +70,8 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   const [collapsed, setCollapsed] = useState(false);
   const [frame, mainW, mainH] = useBox();
   const size = useResizable("library", mainW);
+  const [pageRef, pageW] = useWidth();
+  const listSize = useListWidth(pageW);
   const addons = draft.view!.addon_library;
   const rows = useMemo(() => listRows(r, published === "failed" ? [] : published?.components ?? null, addons), [r, published, addons]);
   const merged = useMemo(() => withAddons(r, addons), [r, addons]);
@@ -151,7 +154,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
 
   return (
     <DraftLibrary.Provider value={draftLibrary}>
-    <div className="lib-page" data-ref={refId}>
+    <div className="lib-page" data-ref={refId} ref={pageRef}>
       {row && <h1 className="lib-sr">Library: {row.name}</h1>}
       <HeaderTail>
         {row && (
@@ -176,7 +179,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         </Button>
         {surface === "canvas" && <Button variant={review ? undefined : "primary"} disabled={!review && !draft.view!.draft} aria-describedby={draft.view!.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={() => { setReview((v) => !v); setReviewOpen(true); }}>{review ? "Back to editing" : REVIEW_AND_PUBLISH}</Button>}
       </HeaderActions>
-      <LibraryList rows={rows} selected={id} only={only} onShowAll={() => setParams({}, { replace: true })} onSelect={(x) => navigate(go(x))} onAdd={add} />
+      <LibraryList rows={rows} selected={id} only={only} size={listSize} onShowAll={() => setParams({}, { replace: true })} onSelect={(x) => navigate(go(x))} onAdd={add} />
       <div className="lib-main" ref={frame}>
         {surface === "yaml" ? (
           <div className="lib-yaml">

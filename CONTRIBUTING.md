@@ -29,8 +29,58 @@ files work anyway and says so.
 ## Getting set up
 
 ```bash
-just setup      # uv sync + npm ci
+just setup      # uv sync + npm ci + the agent skills below
 just dev        # backend + vite, state in .dev/, agents faked, UI on :5173
+```
+
+`just setup` also installs [superpowers](https://github.com/obra/superpowers)
+and [impeccable](https://impeccable.style) for every agent this repo is worked
+on with. `just setup-plugins` runs that step alone. It skips whatever is already
+installed, and a missing tool or a failed download is a warning, not a failed
+setup. To refresh them, run `claude plugin update <id>` and `npx skills update -p`:
+
+- **Claude Code**, when `claude` is on your `PATH`: as plugins.
+  `.claude/settings.json` turns them on, but Claude Code does not download a
+  plugin from an outside source for you, so each clone installs them once.
+- **Codex, Cursor, Gemini CLI, OpenCode, Amp, Antigravity and GitHub Copilot**,
+  when `npx` is on your `PATH`: as skills in `.agents/skills/`, the folder all
+  of them read. They are gitignored; beads is the only skill committed there.
+
+A fresh git worktree has no gitignored files, so a worktree only gets the
+`.agents/skills/` copies after `just setup` runs in it. For Kraft workers, set this
+repo's `setup_command` to `just setup` in its `repos.yaml` entry (or pass
+`--setup-command "just setup"` to `kraft repo connect`); Kraft runs it in every
+new worktree. Claude Code's plugins live in `~/.claude` and need no setup per
+worktree.
+
+superpowers is off in Kraft workers: its skills ask a person questions and push
+or merge a finished branch, and a worker does neither. For Claude Code,
+`.claude/hooks/kraft-worker-superpowers.sh` refuses every superpowers skill in a
+session with `$KRAFT_WORK_ITEM_ID` set and tells the session so. For the other
+agents, a setup Kraft runs copies only impeccable into the worktree. An
+in-place item runs in your own checkout, so other agents there still see the
+superpowers copies you installed.
+
+Cloud agents start from a fresh clone, so give them the same step. Copilot's
+coding agent already runs `just setup` (`.github/workflows/copilot-setup-steps.yml`).
+For Codex cloud, Cursor background agents and the like, add this to the
+environment's setup script:
+
+```bash
+for source in obra/superpowers pbakaus/impeccable; do
+  npx -y skills@1.7.4 add "$source" --skill '*' --agent codex cursor gemini-cli opencode amp antigravity github-copilot --copy -y
+done
+```
+
+Claude Code's cloud sessions (claude.ai/code, the Claude app) never install the
+plugins a repository's settings turn on. Install them in the cloud environment's
+setup script instead, which runs before Claude Code starts and covers every
+session in that environment, whatever repositories it clones:
+
+```bash
+claude plugin marketplace add anthropics/claude-plugins-official
+claude plugin install superpowers@claude-plugins-official
+claude plugin install impeccable --marketplace pbakaus/impeccable
 ```
 
 `just dev` puts `fixtures/bin` on `PATH` ahead of the real agent, where `claude`
@@ -141,9 +191,9 @@ them unless you use the same tools:
 | `.github/` | CI workflows, issue and PR templates, CODEOWNERS | Yes: CI lives here |
 | `.claude-plugin/` | the marketplace manifest that publishes `plugins/` to Claude Code and Codex | Only to rename a plugin or add one |
 | `.cursor-plugin/` | the same marketplace for Cursor | Only to rename a plugin or add one |
-| `.claude/` | Claude Code settings: a hook that blocks raw `pytest` (needs `jq`) | Only with Claude Code |
+| `.claude/` | Claude Code settings: a hook that blocks raw `pytest` (needs `jq`), the plugins it turns on (superpowers, impeccable), and a hook that turns superpowers off in Kraft workers | Only with Claude Code |
 | `.beads/` | beads config and git hooks for the maintainer's private tracker | No |
-| `.agents/` | a beads skill for agent sessions | No |
+| `.agents/` | a beads skill for agent sessions; `just setup` adds superpowers and impeccable beside it, gitignored | Only with an agent other than Claude Code |
 | `.codex/` | Codex hooks that call `bd`; they fail without beads installed | No |
 | `.kraft-lite/` | this repo's Kraft Lite hook registry | No |
 | `.gitlab/` | the PR template for GitLab, from before the move to GitHub; a symlink to `.github/`'s | No |

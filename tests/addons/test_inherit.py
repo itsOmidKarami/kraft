@@ -353,3 +353,22 @@ def test_skill_dirs(tmp_path, edits, expected):
 def test_tree_order(tmp_path, links, expected):
     """Parents before children, and otherwise the order given."""
     assert [a.id for a in inherit.tree_order(_tree(tmp_path, *links))] == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "found"),
+    [
+        ("team^1:scan", "team^1:scan"),
+        ("team-payments^12:x", "team-payments^12:x"),
+        ("^1:base", None),
+        ("team^:x", None),
+        ("team^1x:y", None),
+        ("plain:name", None),
+        ("-" * 50000, None),
+    ],
+    ids=["found", "hyphenated", "no-name", "no-depth", "junk-depth", "no-caret", "long-hyphens"],
+)
+def test_layer_reference(value, found):
+    """A value in the layered shape is spotted, one that only resembles it is
+    not, and a long run of `-` is answered at once (no backtracking)."""
+    assert inherit.layer_reference({"extends": value}) == found
