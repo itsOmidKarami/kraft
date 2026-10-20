@@ -799,9 +799,15 @@ class TemplateLibrary:
 
     def chain_data(self, id: str) -> Mapping[str, object]:
         """Chain `id` as authored, before `extends` expansion or validation.
-        A child add-on's chain may name a hidden ancestor level: a screen or a
-        copy shows it through `public`."""
-        return self._chains[id].data
+        A child add-on's chain may name a hidden ancestor level, which reads
+        too, so a walk up `extends` reaches its ancestors: a screen or a copy
+        shows it through `public`."""
+        return self._all_chains[id].data
+
+    def has_chain(self, id: str) -> bool:
+        """Whether `chain_data(id)` reads: a listed chain, or a child add-on's
+        hidden ancestor level an `extends` names."""
+        return id in self._all_chains
 
     def chain_file(self, id: str) -> Path:
         """The file chain `id` was read from -- what an edit of it rewrites."""

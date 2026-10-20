@@ -403,7 +403,7 @@ async def put_template(tid: str, body: ChainText, request: Request):
     st = request.app.state
     library = deps.library_or_503(st)
     # Before the id-shape check, which would answer 400 for a qualified id.
-    if why := catalogue.read_only_message(library, tid):
+    if why := catalogue.read_only_message(library, tid, "chains"):
         raise HTTPException(409, why)
     if not _CHAIN_ID.fullmatch(tid):
         raise HTTPException(400, f"invalid chain id {tid!r}")

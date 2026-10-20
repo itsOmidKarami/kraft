@@ -4,7 +4,7 @@ library through the draft operations."""
 
 import pytest
 import yaml
-from support.addons import AGENT, load_release
+from support.addons import AGENT, chain, load_release
 
 from kraft.templates.models import MaterializedChain
 
@@ -121,9 +121,10 @@ def test_copy_from_an_addon(loaded, copy):
     assert not loaded.get("/api/health").json()["invalid_templates"]
 
 
-def _load_team(client, tmp_path):
-    """`team@pay`, a child of `release@acme`: a task and a chain that extend
-    the parent's by its name, which the library holds as a hidden level."""
+def _load_team(client, tmp_path, parent_chain="ship"):
+    """`team@pay`, a child of `release@acme`: a task and a chain (`own`, on
+    `parent_chain`) that extend the parent's by its name, which the library
+    holds as a hidden level."""
     from support.addons import install, make_collection
 
     from kraft.api import deps
@@ -133,7 +134,7 @@ def _load_team(client, tmp_path):
     team = {
         "manifest": {"requires": requires},
         "library": {"tasks": {"scan": {"extends": "release:base", "prompt": "team scan"}}},
-        "chains": {"own": {"extends": "release:ship"}},
+        "chains": {"own": {"extends": f"release:{parent_chain}"}},
     }
     collection = make_collection(tmp_path / "pay", {"team": team}, name="pay")
     install(st.templates_dir, st.run_dirs.addons, collection, "team")
@@ -171,6 +172,31 @@ def test_a_copy_from_a_child_addon_names_its_parent(loaded, tmp_path, op, file, 
     assert "^" not in text
     assert loaded.post(f"/api/drafts/{kind}/{key}/publish").status_code == 200
     assert not loaded.get("/api/health").json()["invalid_templates"]
+
+
+def test_a_local_chain_through_a_child_addon_detaches(client, tmp_path):
+    """A local chain on `team:own`, which extends `release:tuned` through a
+    hidden level: its draft opens, and detaching it writes the node the
+    hidden level overrides as resolved."""
+    from kraft.api import deps
+
+    tuned = {"extends": "ship", "overrides": {"n.main.t": {"prompt": "tuned"}}}
+    load_release(client, tmp_path, chains={"ship": chain("base"), "tuned": tuned})
+    _load_team(client, tmp_path, parent_chain="tuned")
+    st = client.app.state
+    (st.templates_dir / "chains" / "mine.yaml").write_text("id: mine\nextends: team:own\n")
+    deps._reload_templates(st)
+
+    viewed = client.get("/api/drafts/chains/mine")
+    detached = client.post("/api/drafts/chains/mine/ops", json={"ops": [{"op": "detach"}]})
+
+    assert viewed.status_code == 200, viewed.text
+    assert detached.status_code == 200, detached.text
+    written = yaml.safe_load(
+        client.get("/api/drafts/chains/mine").json()["files"]["chains/mine.yaml"]
+    )
+    task = written["nodes"][0]["tasks"][0]
+    assert task == {"id": "t", **AGENT, "skill": "release:notes", "prompt": "tuned"}
 
 
 @pytest.fixture

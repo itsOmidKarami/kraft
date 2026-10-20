@@ -147,7 +147,7 @@ origin: src/kraft/templates/library.py §TemplateLibrary._add_inherited
 ## REQ a-hidden-layer-is-reached-only-through-the-parent
 
 IF a local library, a chain file or an add-on's file names a child add-on's inherited layer directly rather than by the parent's name, THEN the system SHALL refuse the reference.
-enforced-by: tests/templates/test_library_inheritance.py::test_a_hidden_level_is_not_reachable_by_name[local-chain], tests/templates/test_library_inheritance.py::test_a_hidden_level_is_not_reachable_by_name[local-library]
+enforced-by: tests/templates/test_library_inheritance.py::test_a_hidden_level_is_not_reachable_by_name[local-chain], tests/templates/test_library_inheritance.py::test_a_hidden_level_is_not_reachable_by_name[local-library], tests/templates/test_library_inheritance.py::test_a_hidden_level_is_not_reachable_by_name[addon-library]
 origin: src/kraft/templates/library.py §_refuse_layer_reference
 
 ## REQ a-pinned-child-builds-with-its-parent

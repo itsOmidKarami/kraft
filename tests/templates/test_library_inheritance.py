@@ -295,19 +295,28 @@ def test_read_only_names_the_author(tmp_path):
     assert library.authored_by("company:hotfix").id == "company@acme"
 
 
+#: A reference to the team's hidden level, from wherever it is written.
+_HIDDEN = {"tasks": {"base": {"extends": "team-payments^1:security_scan"}}}
+
+
 @pytest.mark.parametrize(
-    "local",
+    ("local", "rogue"),
     [
-        {"chains": {"local": chain("team-payments^1:security_scan")}},
-        {"library": {"tasks": {"base": {"extends": "team-payments^1:security_scan"}}}},
+        ({"chains": {"local": chain("team-payments^1:security_scan")}}, None),
+        ({"library": _HIDDEN}, None),
+        ({}, _HIDDEN),
     ],
-    ids=["local-chain", "local-library"],
+    ids=["local-chain", "local-library", "addon-library"],
 )
-def test_a_hidden_level_is_not_reachable_by_name(tmp_path, local):
+def test_a_hidden_level_is_not_reachable_by_name(tmp_path, local, rogue):
     """Only a child reads its parent's entries, and only by the parent's name:
-    a file naming a hidden level is refused, not resolved."""
+    a file naming a hidden level is refused, not resolved, whether the
+    instance's own or another add-on's."""
     root = home(tmp_path, **local)
-    report = TemplateLibrary.lint_dir(root, addons=list(_tree(tmp_path)))
+    addons = list(_tree(tmp_path))
+    if rogue is not None:
+        addons.append(installed(tmp_path, "rogue", library=rogue))
+    report = TemplateLibrary.lint_dir(root, addons=addons)
     assert [issue.message.split(": ", 1)[1] for issue in report.issues] == [
         "'team-payments^1:security_scan' is no name a library declares; an add-on reads "
         "its parent's entries by the parent's name"

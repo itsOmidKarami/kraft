@@ -139,8 +139,13 @@ def requirements(
 #: namespace (`team^1`). Never shown: `humanize` and `public` take it out.
 LAYER_MARK = "^"
 
-#: A layered name: `<top>^<k>:<name>`, wherever it sits in a text.
-_LAYERED = re.compile(r"(?<![\w-])([\w-]+\^\d+):([^\s'\"`:,;()\[\]{}<>]+)")
+#: A layered name: `<top>^<k>:<name>`, wherever it sits in a text. A name
+#: runs to whitespace, a quote or a separator, and never ends in a period:
+#: `... team^1:scan.` ends a sentence.
+_NAME_CHAR = r"[^\s'\"`:,;()\[\]{}<>]"
+_LAYERED = re.compile(rf"(?<![\w-])([\w-]+\^\d+):({_NAME_CHAR}+)(?<!\.)")
+#: A reference written in the layered shape (`team^1:scan`).
+_LAYER_REFERENCE = re.compile(r"[\w-]+\^\d+:")
 
 
 def layer_namespace(top: str, depth: int) -> str:
@@ -316,8 +321,9 @@ def layer_reference(data: object) -> str | None:
         return None
     for key, value in data.items():
         values = value if key == "steering" and isinstance(value, list) else [value]
-        if key in _REFERENCE_KEYS and any(isinstance(v, str) and is_layer(v) for v in values):
-            return next(v for v in values if isinstance(v, str) and is_layer(v))
+        layered = [v for v in values if isinstance(v, str) and _LAYER_REFERENCE.match(v)]
+        if key in _REFERENCE_KEYS and layered:
+            return layered[0]
         if (found := layer_reference(value)) is not None:
             return found
     return None

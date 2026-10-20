@@ -392,7 +392,8 @@ def _touched(library, data: Mapping) -> set[str]:
     overrides = data.get("overrides")
     ids = {str(key).split(PATH_SEPARATOR)[0] for key in overrides or ()}
     parent = data.get("extends")
-    if isinstance(parent, str) and parent in library.chain_ids:
+    # Through a child add-on's hidden levels too: their overrides count.
+    if isinstance(parent, str) and library.has_chain(parent):
         ids |= _touched(library, library.chain_data(parent))
     return ids
 
