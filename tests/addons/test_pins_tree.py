@@ -294,25 +294,34 @@ _MIXED = (
 )
 
 
-def _company_only_item(repo, config_dir, addons_dir, *, update="1.1.0"):
-    """An item filed on `company:default`, so it pins company only, with the
-    local tasks `_LOCAL_TASKS` and `fast` falling back to `team-payments:slow`;
-    then, unless `update` is None, a new company taken at that version, which
-    the children's range `1` accepts, so their locks do not move (`1.0.0`: new
-    files under the same version). `<version> as <alias>` also moves company
-    to the namespace `alias` in the lock. Returns the snapshot and the live
-    library."""
+def _company_only_item(
+    repo, config_dir, addons_dir, *, update="1.1.0", filed_on="company:default", moved=TREE[0]
+):
+    """An item filed on `filed_on`, by default `company:default`, so it pins
+    company only, with the local tasks `_LOCAL_TASKS` and `fast` falling back
+    to `team-payments:slow`; then, unless `update` is None, a new `moved`
+    (company by default) taken at that version, which its children's range
+    `1` accepts, so their locks do not move (`1.0.0`: new files under the
+    same version). `<version> as <alias>` also moves it to the namespace
+    `alias` in the lock. Returns the snapshot and the live library."""
     (config_dir / "library.yaml").write_text(json.dumps(_LOCAL_TASKS))
     _fast_falls_back_to(config_dir, "team-payments:slow")
-    resolved = resolve_chain(config_dir, addons_dir, "company:default")
-    assert list(resolved.addons) == ["company"]
+    resolved = resolve_chain(config_dir, addons_dir, filed_on)
+    assert list(resolved.addons) == _WHOLE_TREE[: TREE.index(moved) + 1]
     if update:
         version, _, alias = update.partition(" as ")
-        publish(repo, "company", version=version, skills={"deploy-review": f"{update} method"})
-        update_addons(config_dir, addons_dir, ["company@acme"], re_install=version == "1.0.0")
+        name = moved.partition("@")[0]
+        if moved == TREE[0]:
+            publish(repo, name, version=version, skills={"deploy-review": f"{update} method"})
+        else:
+            # A child's manifest is rewritten whole: it keeps its parent.
+            parent = TREE[TREE.index(moved) - 1]
+            requires = {"kraft": "2", "harnesses": ["codex"], "addons": {parent: "1"}}
+            publish(repo, name, version=version, manifest={"requires": requires})
+        update_addons(config_dir, addons_dir, [moved], re_install=version == "1.0.0")
         if alias:
             lock = yaml.safe_load((config_dir / "addons.lock").read_text())
-            lock["addons"][TREE[0]]["namespace"] = alias
+            lock["addons"][moved]["namespace"] = alias
             (config_dir / "addons.lock").write_text(yaml.safe_dump(lock))
     live = TemplateLibrary.from_yaml_dir(config_dir, addons=load.installed(config_dir, addons_dir))
     return MaterializedChain.from_json(stored_snapshot(resolved)), live
@@ -340,6 +349,13 @@ def _adding(node):
         pytest.param(
             "team-payments:security_scan", "1.1.0 as co", _MIXED, id="ancestor-moved-to-an-alias"
         ),
+        pytest.param(
+            "team-payments:security_scan",
+            "1.1.0",
+            "team-payments@acme 1.0.0 builds on platform-dept@acme 1.1.0, and this work item "
+            "runs platform-dept@acme 1.0.0; a work item never mixes versions of one add-on tree",
+            id="middle-ancestor-moved",
+        ),
         pytest.param("team-payments:security_scan", None, None, id="ancestor-unchanged"),
         pytest.param("reads_skill", "1.1.0", "installed but not loaded", id="added-task-skill"),
         pytest.param(
@@ -361,10 +377,21 @@ def test_a_revision_never_mixes_ancestor_versions(request, tree_home, extends, u
     same revision. A skill refused this way says only that its add-on is not
     loaded (the plan's known gap)."""
     repo, config_dir, addons_dir = tree_home
-    snapshot, live = _company_only_item(repo, config_dir, addons_dir, update=update)
+    case = request.node.callspec.id
+    if case == "middle-ancestor-moved":
+        # Filed on the dept's inherited task: it pins company and the dept,
+        # and the dept moves while company stays where the item has it.
+        (config_dir / "chains" / "dept.yaml").write_text(
+            json.dumps(chain("platform-dept:security_scan"))
+        )
+        snapshot, live = _company_only_item(
+            repo, config_dir, addons_dir, update=update, filed_on="dept", moved=TREE[1]
+        )
+    else:
+        snapshot, live = _company_only_item(repo, config_dir, addons_dir, update=update)
     added = task_node(extends)
 
-    if request.node.callspec.id.endswith("in-a-draft"):
+    if case.endswith("in-a-draft"):
         op = {"op": "add_node", "after": "n", "node": added}
         problems = item_draft.evaluate(snapshot, None, [op], live).problems
         assert [p["op"] for p in problems] == [0]
@@ -390,16 +417,34 @@ def test_a_revision_never_mixes_ancestor_versions(request, tree_home, extends, u
             id="store-edited-since",
         ),
         pytest.param("disabled", None, id="disabled-is-the-files-mistake"),
+        pytest.param("pinned-store-gone", None, id="pinned-store-gone"),
     ],
 )
-def test_a_revision_reading_a_left_out_addon_is_refused_unless_left_out_on_purpose(
+async def test_a_revision_reading_a_left_out_addon_is_refused_unless_left_out_on_purpose(
     tree_home, damage, refused
 ):
     """A revision adding a fallback into an add-on whose store was edited is
     refused, instead of pinning nothing and stopping at launch. One disabled
     on purpose is no fault: the fallback naming it is the file's mistake, as
-    at launch, and the revision is accepted with nothing more pinned."""
+    at launch, and the revision is accepted with nothing more pinned. One the
+    item already pinned is no refusal either, whatever its store: it stays
+    pinned, and the launch restores the store it started with."""
     repo, config_dir, addons_dir = tree_home
+    if damage == "pinned-store-gone":
+        # Filed on the team's inherited skill: the item pins the whole tree.
+        (config_dir / "library.yaml").write_text(json.dumps(_LOCAL_TASKS))
+        _fast_falls_back_to(config_dir, "team-payments:slow")
+        resolved = resolve_chain(config_dir, addons_dir, "inherited-skill")
+        snapshot = MaterializedChain.from_json(stored_snapshot(resolved))
+        drop_store(store_of(config_dir, addons_dir, "team-payments"))
+        live = TemplateLibrary.from_yaml_dir(
+            config_dir, addons=load.installed(config_dir, addons_dir)
+        )
+        revised = revise(snapshot, _adding(task_node("quick")), at=None, library=live)
+        assert revised.chain.addons == resolved.addons
+        await dispatch.restore_pins({"materialized_chain": revised.to_json()})
+        assert launch_task(revised.chain.addons, profile="team-payments:slow").model == "o3"
+        return
     snapshot, live = _company_only_item(repo, config_dir, addons_dir, update=None)
     if damage == "store-edited":
         edit_store(store_of(config_dir, addons_dir, "team-payments"), "profiles.yaml", "{}\n")

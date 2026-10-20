@@ -649,12 +649,14 @@ def for_item(
     lock = installed(config_dir, addons_root)
     live = scoped((p for p in lock if p.namespace not in (pins or {})), repo_id)
     # A live child built on another version of an ancestor the item pinned is
-    # left out, not quietly: a launch or revision that reads it stops.
+    # left out, not quietly: a launch or revision that reads it stops. Pins
+    # are matched by id, since an alias may have changed since intake.
+    pins_by_id = {str(pin["id"]): pin for pin in (pins or {}).values()}
     live = tuple(
         replace(addon, left_out=why, quiet=False)
         if addon.left_out is None
         and addon.parent is not None
-        and (why := _mixed(addon, lock, pins or {}))
+        and (why := _mixed(addon, lock, pins_by_id))
         else addon
         for addon in live
     )
@@ -695,23 +697,24 @@ def for_item(
 def _mixed(
     addon: InstalledAddon,
     lock: Sequence[InstalledAddon],
-    pins: Mapping[str, Mapping[str, str | None]],
+    pins_by_id: Mapping[str, Mapping[str, str | None]],
 ) -> str | None:
     """Why `addon`, which a work item did not pin, cannot be read beside its
-    pins: an ancestor the lock builds it on is another version than the one
-    the item pinned. Matched by id, since an alias may have changed since
-    intake, and compared by digest, since a directory collection changes it
-    with no change of version. None when every pinned ancestor agrees, and
-    when its ancestry does not resolve (the load leaves it out for that)."""
+    pins (`pins_by_id`: each `InstalledAddon.pin` the item holds, by add-on
+    id): an ancestor the lock builds it on, at any depth, is another version
+    than the one the item pinned. Matched by id, since an alias may have
+    changed since intake, and compared by digest, since a directory
+    collection changes it with no change of version. None when every pinned
+    ancestor agrees, and when its ancestry does not resolve (the load leaves
+    it out for that)."""
     from kraft.addons import inherit  # inherit imports this module
 
     try:
         chain = inherit.ancestry(addon, lock)
     except inherit.InheritanceError:
         return None
-    by_id = {str(pin["id"]): pin for pin in pins.values()}
     for ancestor in chain[1:]:
-        pin = by_id.get(ancestor.id)
+        pin = pins_by_id.get(ancestor.id)
         if pin is not None and pin["digest"] != ancestor.pin["digest"]:
             return (
                 f"{addon.id} {addon.version} builds on {ancestor.id} {ancestor.version}, "

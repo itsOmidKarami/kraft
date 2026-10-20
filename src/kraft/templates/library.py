@@ -988,7 +988,9 @@ class TemplateLibrary:
                 issues.append(replace(issue, message=self._humanize(issue.message)))
         return issues
 
-    def resolve_chain(self, id: str, *, strict_pins: bool = False) -> ResolvedChain:
+    def resolve_chain(
+        self, id: str, *, strict_pins: bool = False, pinned: Iterable[str] = ()
+    ) -> ResolvedChain:
         """Expand one chain's `extends` references, validate the result into a
         typed `Chain`, and assign canonical execution paths
         (`resolved-chain-is-validated-before-use`). A child add-on's hidden
@@ -996,7 +998,10 @@ class TemplateLibrary:
 
         With `strict_pins`, a chain that reads an add-on left out by a fault
         (not quietly, as a disabled one is) is refused with why, instead of
-        not pinning it: what a revision adds to a work item runs on it."""
+        not pinning it: what a revision adds to a work item runs on it. An
+        add-on whose namespace is in `pinned`, which the work item already
+        pinned, is never refused: it stays pinned, and the launch restores
+        its store or says why it cannot."""
         # A hidden level resolves too: a child's chain extending it resolves it.
         raw = self._all_chains.get(id)
         if raw is None:
@@ -1004,13 +1009,15 @@ class TemplateLibrary:
                 f"no chain {id!r} in this library; known chains: {list(self._chains)}"
             )
         try:
-            return self._resolve(id, raw, strict_pins=strict_pins)
+            return self._resolve(id, raw, strict=frozenset(pinned) if strict_pins else None)
         except TemplateLibraryError as exc:
             if self._layers:
                 exc.args = (self._humanize(str(exc)), *exc.args[1:])
             raise
 
-    def _resolve(self, id: str, raw: RawComponent, *, strict_pins: bool = False) -> ResolvedChain:
+    def _resolve(
+        self, id: str, raw: RawComponent, *, strict: frozenset[str] | None = None
+    ) -> ResolvedChain:
         resolution = _Resolution(self, raw.source)
         expanded = resolution.expand_chain(raw.data)
         if inherit.is_layer(id):
@@ -1089,7 +1096,7 @@ class TemplateLibrary:
                 for task in node.tasks()
                 for name in task.task.steering
             },
-            addons=self._pins(id, resolved, resolution.ancestors, strict=strict_pins),
+            addons=self._pins(id, resolved, resolution.ancestors, strict=strict),
         )
 
     def _fallback_profiles(self, chain: object) -> list[str]:
@@ -1124,14 +1131,15 @@ class TemplateLibrary:
         resolved: ResolvedChain,
         ancestors: Sequence[str] = (),
         *,
-        strict: bool = False,
+        strict: frozenset[str] | None = None,
     ) -> dict[str, dict[str, str | None]]:
         """The loaded add-ons chain `id` reads anything from: the chain itself,
         every chain it extends (`an-extending-chain-pins-its-ancestors`), a
         component it extends or selects, or a skill or agent profile one of
         its tasks names; and every ancestor of each, root first
         (`an-item-pins-every-ancestor`). One it reads that is left out is not
-        pinned; with `strict`, one left out by a fault raises instead."""
+        pinned; with `strict`, the namespaces a work item already pinned, one
+        left out by a fault that is not among them raises instead."""
         data = resolved.chain.model_dump(mode="json")
         named = {
             id,
@@ -1145,10 +1153,14 @@ class TemplateLibrary:
             *self._fallback_profiles(data),
         }
         qualifiers = {name.partition(":")[0] for name in named if ":" in name}
-        if strict:
+        if strict is not None:
             loaded = {a.namespace for a in self.addons if a.left_out is None}
             for addon in self.addons:
-                if addon.namespace in qualifiers - loaded and not addon.quiet and addon.left_out:
+                if (
+                    addon.namespace in qualifiers - loaded - strict
+                    and not addon.quiet
+                    and addon.left_out
+                ):
                     raise TemplateLibraryError(
                         f"it reads add-on {addon.id}, which is not loaded for this work "
                         f"item: {addon.left_out}"
