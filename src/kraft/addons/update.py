@@ -299,16 +299,15 @@ def _removal_problems(
     anywhere else is refused by the library itself (`remove-is-refused-
     outside-a-child`), and a library that does not build says nothing here:
     the lint after it says why."""
-    from kraft.templates.library import TemplateLibrary, TemplateLibraryError
+    from kraft.templates.library import ADDON_YAML_NODES, TemplateLibrary, TemplateLibraryError
 
-    # `update` also sees these as the after-state library's `stale_removals`;
-    # they are worked out here as well because validate judges a child with
-    # `problems(ancestors=...)` and builds no state.
+    # Worked out from the candidate and its ancestors, not from any state:
+    # validate judges a child with `problems(ancestors=...)` and builds none.
     if parent_id is None or not ancestors:
         return []
     entry = files.get("library.yaml")
     try:
-        data = bounded_yaml(entry[1].decode(), [20_000]) if entry else None
+        data = bounded_yaml(entry[1].decode(), [ADDON_YAML_NODES]) if entry else None
     except (ValueError, yaml.YAMLError):
         return []  # `problems` says the file cannot be parsed
     if not isinstance(data, Mapping) or "remove" not in data:
@@ -811,6 +810,16 @@ def _ancestry_in(
         return ()
 
 
+def _descendants(addon_id: str, addons: Sequence[load.InstalledAddon]) -> set[str]:
+    """The namespaces of the add-ons among `addons` built on `addon_id`, at any
+    depth; one whose ancestry does not hold there is not among them."""
+    return {
+        a.namespace
+        for a in addons
+        if a.repo_id is None and addon_id in {p.id for p in _ancestry_in(a.id, addons)}
+    }
+
+
 def _outside(range_: str | None, version: str) -> str | None:
     """Why `version` is outside `range_`; None when it is inside, or there is
     no range. A version that does not read is outside."""
@@ -1107,12 +1116,15 @@ def update(
                 if locked is None or locked.namespace != namespace
                 else []
             )
+            # A descendant's chains read this add-on's components late, so an
+            # update here can change them: they are diffed like the instance's.
+            descendants = _descendants(addon_id, loaded) | _descendants(addon_id, would_load)
             reach, content = (
                 review_mod.local_changes(
                     state.library,
                     after.library,
                     namespace,
-                    extra=_chains_of(libraries, after),
+                    extra=_chains_of(libraries | descendants, after),
                 )
                 if after.library is not None
                 else ([], [])
