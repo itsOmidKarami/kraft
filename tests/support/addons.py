@@ -487,3 +487,58 @@ def a_terminal(monkeypatch, typed: str | list[str]) -> None:
             raise AssertionError(f"an unexpected prompt: {prompt}") from None
 
     monkeypatch.setattr("builtins.input", answer)
+
+
+def update_addons(
+    config_dir: Path, addons_dir: Path, ids: list[str], install: bool = False
+) -> None:
+    """`kraft admin addon update` (or `install`, with `install`) of `ids`,
+    every review accepted; each must apply."""
+    from kraft.addons import update
+
+    results = update.update(
+        ids,
+        accept=lambda review: True,
+        entries={i: True for i in ids} if install else None,
+        config_dir=config_dir,
+        addons_root=addons_dir,
+    )
+    assert [r.outcome for r in results] == ["applied"] * len(ids), results
+
+
+def resolve_chain(config_dir: Path, addons_dir: Path, chain_id: str):
+    """`chain_id` resolved against the local library and every installed add-on."""
+    from kraft.addons import load
+    from kraft.templates.library import TemplateLibrary
+
+    library = TemplateLibrary.from_yaml_dir(
+        config_dir, addons=load.installed(config_dir, addons_dir)
+    )
+    return library.resolve_chain(chain_id)
+
+
+def stored_snapshot(resolved) -> str:
+    """The snapshot as intake writes it into the work item's row."""
+    from kraft.policy import InstancePolicy, InstancePolicyInput
+    from kraft.templates.environment import WorkItemTarget
+
+    return resolved.materialize(
+        WorkItemTarget.for_repository("r"), InstancePolicy.from_input(InstancePolicyInput())
+    ).to_json()
+
+
+def store_of(config_dir: Path, addons_dir: Path, namespace: str) -> Path:
+    """The store the lock loads `namespace` from."""
+    from kraft.addons import load
+
+    return next(a.root for a in load.installed(config_dir, addons_dir) if a.namespace == namespace)
+
+
+def launch_task(pins, **fields):
+    """A launch of one agent task (`AGENT` with `fields`) for a work item that
+    pinned `pins` (None: filed now), with no repository."""
+    from kraft.adapters import agent
+    from kraft.templates.models import AgentTask
+
+    task = AgentTask.model_validate({"id": "t", **AGENT, **fields})
+    return agent.resolve_agent_task(task, None, steering={}, addons=pins)
