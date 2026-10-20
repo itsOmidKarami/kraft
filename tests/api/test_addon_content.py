@@ -2,6 +2,8 @@
 listed with their add-on, refused for editing, and copied into the local
 library through the draft operations."""
 
+import json
+
 import pytest
 import yaml
 from support.addons import AGENT, chain, load_release
@@ -206,6 +208,24 @@ def test_a_local_chain_through_a_child_addon_detaches(client, tmp_path):
     assert "^" not in text
     assert client.post("/api/drafts/chains/mine/publish").status_code == 200
     assert not client.get("/api/health").json()["invalid_templates"]
+
+
+def test_a_drafts_sources_name_inherited_chains_publicly(client, tmp_path):
+    """The draft view says which chain a field comes from; one reached through
+    a child add-on's hidden level reads as the ancestor's own id."""
+    from kraft.api import deps
+
+    tuned = {"extends": "ship", "overrides": {"n.main.t": {"prompt": "tuned"}}}
+    load_release(client, tmp_path, chains={"ship": chain("base"), "tuned": tuned})
+    _load_team(client, tmp_path, parent_chain="tuned")
+    st = client.app.state
+    (st.templates_dir / "chains" / "mine.yaml").write_text("id: mine\nextends: team:own\n")
+    deps._reload_templates(st)
+
+    sources = client.get("/api/drafts/chains/mine").json()["result"]["sources"]
+
+    assert sources["n.main.t"]["prompt"]["source"] == "chain:release:tuned"
+    assert "^" not in json.dumps(sources)
 
 
 @pytest.fixture
