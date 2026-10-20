@@ -146,8 +146,8 @@ origin: src/kraft/templates/library.py §TemplateLibrary._add_inherited
 
 ## REQ a-child-removes-only-what-it-inherits
 
-WHERE a child add-on's `library.yaml` has a `remove:` naming entries of its inherited layer by section, the system SHALL serve none of them under the child's namespace while the parent keeps serving its own, and SHALL record a name the parent does not have as stale rather than refuse the add-on at load.
-enforced-by: tests/templates/test_library_inheritance.py::test_remove[remove-chain], tests/templates/test_library_inheritance.py::test_remove[remove-task], tests/templates/test_library_inheritance.py::test_remove[remove-skill], tests/templates/test_library_inheritance.py::test_remove[stale-name], tests/templates/test_library_inheritance.py::test_remove[unknown-section]
+WHERE a child add-on's `library.yaml` has a `remove:` naming entries of its inherited layer by section, the system SHALL serve none of them under that add-on's namespace or any descendant's while its ancestors keep serving their own, SHALL record a name the parent does not have as stale rather than refuse the add-on at load, and SHALL refuse a `remove:` section or value it does not understand.
+enforced-by: tests/templates/test_library_inheritance.py::test_remove[remove-chain], tests/templates/test_library_inheritance.py::test_remove[remove-task], tests/templates/test_library_inheritance.py::test_remove[remove-reaches-descendants], tests/templates/test_library_inheritance.py::test_remove[remove-skill], tests/templates/test_library_inheritance.py::test_remove[remove-steering], tests/templates/test_library_inheritance.py::test_remove[stale-name], tests/templates/test_library_inheritance.py::test_remove_is_refused[unknown-section], tests/templates/test_library_inheritance.py::test_remove_is_refused[not-a-list]
 origin: src/kraft/addons/inherit.py §removals
 
 ## REQ a-removal-that-breaks-a-reference-is-refused
@@ -158,8 +158,8 @@ origin: src/kraft/templates/library.py §TemplateLibrary._add_inherited
 
 ## REQ remove-is-refused-outside-a-child
 
-IF a `remove:` key is in the local `library.yaml` or in an add-on that names no parent, THEN the system SHALL refuse it with "`remove:` is for an add-on that builds on another", leaving that add-on out at load instead of ignoring the key.
-enforced-by: tests/templates/test_library_inheritance.py::test_remove[local-library], tests/templates/test_library_inheritance.py::test_remove[root-addon-stray-remove]
+IF a `remove:` key is in the local `library.yaml` or in an add-on that names no parent, the root of a child's ancestry included, THEN the system SHALL refuse it with "`remove:` is for an add-on that builds on another", leaving that add-on out at load instead of ignoring the key.
+enforced-by: tests/templates/test_library_inheritance.py::test_remove_is_refused[local-library], tests/templates/test_library_inheritance.py::test_remove_is_refused[root-of-tree], tests/templates/test_library_inheritance.py::test_a_root_addon_with_remove_is_left_out
 origin: src/kraft/templates/library.py §_refuse_remove
 
 ## REQ a-hidden-layer-is-reached-only-through-the-parent

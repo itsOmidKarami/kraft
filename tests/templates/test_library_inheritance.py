@@ -86,16 +86,18 @@ TEAM = {
 }
 
 
-def _tree(tmp_path, *, dept_alias=None, team=None):
+def _tree(tmp_path, *, dept_alias=None, team=None, dept=None, company=None):
     """The three add-ons, each as installed, children naming their parents."""
-    root = installed(tmp_path, "company", **COMPANY)
-    dept = replace(installed(tmp_path, "platform-dept", alias=dept_alias, **DEPT), parent=root.id)
+    root = installed(tmp_path, "company", **(company or COMPANY))
+    dept = replace(
+        installed(tmp_path, "platform-dept", alias=dept_alias, **(dept or DEPT)), parent=root.id
+    )
     child = replace(installed(tmp_path, "team-payments", **(team or TEAM)), parent=dept.id)
     return root, dept, child
 
 
-def _library(tmp_path, **tree):
-    local = home(tmp_path, chains={"local": chain("base")})
+def _library(tmp_path, local=None, **tree):
+    local = home(tmp_path, library=local, chains={"local": chain("base")})
     return TemplateLibrary.from_yaml_dir(local, addons=list(_tree(tmp_path, **tree)))
 
 
@@ -202,6 +204,7 @@ def _without(team, **removed):
 
 #: A team that removes the `security_scan` its inherited `default` still runs.
 SCAN_REMOVED = _without(TEAM_INHERITS_SCAN, tasks=["security_scan"])
+REMOVE_OUTSIDE = "`remove:` is for an add-on that builds on another"
 
 
 @pytest.mark.parametrize(
@@ -343,37 +346,42 @@ def test_a_hidden_level_is_not_reachable_by_name(tmp_path, local, rogue):
     ]
 
 
-def _remove_chain(tmp_path):
-    library = _library(tmp_path, team=_without(TEAM, chains=["hotfix"]))
+def _remove_chain(library):
     assert "team-payments:hotfix" not in library.chain_ids
     assert "platform-dept:hotfix" in library.chain_ids
     assert not library.lint()
 
 
-def _remove_task(tmp_path):
-    library = _library(tmp_path, team=_without(TEAM, tasks=["hotfix"]))
+def _remove_task(library):
     assert "team-payments:hotfix" not in library.component_names("tasks")
     assert "platform-dept:hotfix" in library.component_names("tasks")
 
 
-def _remove_breaks_ref(tmp_path):
-    # Company's `default`, which the team's extends, still runs `security_scan`.
-    library = _library(tmp_path, team=SCAN_REMOVED)
-    messages = [issue.message for issue in library.lint()]
-    assert any(
-        "no task named 'team-payments:security_scan'" in m and "platform-dept's default" in m
-        for m in messages
-    ), messages
+def _remove_reaches_descendants(library):
+    # The dept removed it: neither the dept nor the team below it serves it.
+    assert "platform-dept:hotfix" not in library.chain_ids
+    assert "team-payments:hotfix" not in library.chain_ids
 
 
-def _remove_skill(tmp_path):
-    library = _library(tmp_path, team=_without(TEAM, skills=["deploy-review"]))
-    messages = [issue.message for issue in library.lint()]
-    assert any("deploy-review" in m and "no skill" in m for m in messages), messages
+def _lint_says(*parts):
+    def check(library):
+        messages = [issue.message for issue in library.lint()]
+        assert any(all(part in m for part in parts) for m in messages), messages
+
+    return check
 
 
-def _stale_name(tmp_path):
-    library = _library(tmp_path, team=_without(TEAM, tasks=["legacy_lint"], skills=["gone"]))
+def _remove_skill(library):
+    _lint_says("no skill 'deploy-review'")(library)
+    assert library.stale_removals == ()
+
+
+def _remove_steering(library):
+    assert "team-payments:house" not in library.steering
+    _lint_says("selects no steering profile 'team-payments:house'")(library)
+
+
+def _stale_name(library):
     assert sorted(library.stale_removals) == [
         "team-payments: remove.skills: gone is not inherited from platform-dept",
         "team-payments: remove.tasks: legacy_lint is not inherited from platform-dept",
@@ -381,45 +389,82 @@ def _stale_name(tmp_path):
     assert "team-payments:default" in library.chain_ids
 
 
-def _unknown_section(tmp_path):
-    with pytest.raises(TemplateLibraryError, match=r"remove\.widgets: no such section"):
-        _library(tmp_path, team=_without(TEAM, widgets=["x"]))
+@pytest.mark.parametrize(
+    ("tree", "check"),
+    [
+        pytest.param({"team": _without(TEAM, chains=["hotfix"])}, _remove_chain, id="remove-chain"),
+        pytest.param({"team": _without(TEAM, tasks=["hotfix"])}, _remove_task, id="remove-task"),
+        pytest.param(
+            {"dept": _without(DEPT, chains=["hotfix"])},
+            _remove_reaches_descendants,
+            id="remove-reaches-descendants",
+        ),
+        pytest.param(
+            {"team": SCAN_REMOVED},
+            # Company's `default`, which the team's extends, still runs it.
+            _lint_says("no task named 'team-payments:security_scan'", "platform-dept's default"),
+            id="remove-breaks-ref",
+        ),
+        pytest.param(
+            {"team": _without(TEAM, skills=["deploy-review"])}, _remove_skill, id="remove-skill"
+        ),
+        pytest.param(
+            {"team": _without(TEAM, steering=["house"])}, _remove_steering, id="remove-steering"
+        ),
+        pytest.param(
+            {"team": _without(TEAM, tasks=["legacy_lint"], skills=["gone"])},
+            _stale_name,
+            id="stale-name",
+        ),
+    ],
+)
+def test_remove(tmp_path, tree, check):
+    """A child's `remove:` drops entries from the library it inherits, for
+    itself and every add-on below it, and nothing else: the root keeps its
+    own, and a name it does not inherit is only recorded as stale."""
+    library = _library(tmp_path, **tree)
+    check(library)
+    assert "company:hotfix" in library.chain_ids
 
 
-def _local_library(tmp_path):
-    local = home(tmp_path, library={"tasks": {"base": AGENT}, "remove": {"tasks": ["base"]}})
-    with pytest.raises(TemplateLibraryError, match=re.escape(REMOVE_OUTSIDE)):
-        TemplateLibrary.from_yaml_dir(local)
+@pytest.mark.parametrize(
+    ("tree", "why"),
+    [
+        pytest.param(
+            {"team": _without(TEAM, widgets=["x"])},
+            r"remove\.widgets: no such section",
+            id="unknown-section",
+        ),
+        pytest.param(
+            {"team": {**TEAM, "library": {**TEAM["library"], "remove": {"tasks": "x"}}}},
+            r"remove\.tasks must be a list of names",
+            id="not-a-list",
+        ),
+        pytest.param(
+            {"local": {"tasks": {"base": AGENT}, "remove": {"tasks": ["base"]}}},
+            re.escape(REMOVE_OUTSIDE),
+            id="local-library",
+        ),
+        pytest.param(
+            {"company": {**COMPANY, "library": {**COMPANY["library"], "remove": {}}}},
+            re.escape(REMOVE_OUTSIDE),
+            id="root-of-tree",
+        ),
+    ],
+)
+def test_remove_is_refused(tmp_path, tree, why):
+    """A `remove:` the library cannot read, or one with no inherited layer to
+    drop from, is refused rather than ignored."""
+    with pytest.raises(TemplateLibraryError, match=why):
+        _library(tmp_path, **tree)
 
 
-def _root_addon_stray_remove(tmp_path):
-    # Review focus 5: an add-on installed before `remove:` meant anything.
+def test_a_root_addon_with_remove_is_left_out(tmp_path):
+    """Review focus 5: an add-on installed before `remove:` meant anything is
+    left out with why, not a traceback."""
     stray = {"tasks": {"base": AGENT}, "remove": {"tasks": ["base"]}}
     collection = make_collection(tmp_path, {"release": {"library": stray}})
     config, addons = instance(tmp_path)
     install(config, addons, collection, "release")
     (found,) = load.installed(config, addons)
     assert found.left_out.endswith(REMOVE_OUTSIDE)
-
-
-REMOVE_OUTSIDE = "`remove:` is for an add-on that builds on another"
-
-
-@pytest.mark.parametrize(
-    "assert_row",
-    [
-        pytest.param(_remove_chain, id="remove-chain"),
-        pytest.param(_remove_task, id="remove-task"),
-        pytest.param(_remove_breaks_ref, id="remove-breaks-ref"),
-        pytest.param(_remove_skill, id="remove-skill"),
-        pytest.param(_stale_name, id="stale-name"),
-        pytest.param(_unknown_section, id="unknown-section"),
-        pytest.param(_local_library, id="local-library"),
-        pytest.param(_root_addon_stray_remove, id="root-addon-stray-remove"),
-    ],
-)
-def test_remove(tmp_path, assert_row):
-    """A child's `remove:` drops entries from the library it inherits, and
-    nothing else: a name it does not inherit is stale, a section it cannot
-    name is refused, and a `remove:` anywhere but in a child is refused."""
-    assert_row(tmp_path)

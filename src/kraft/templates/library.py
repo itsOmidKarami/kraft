@@ -531,15 +531,9 @@ class TemplateLibrary:
         removed: list[dict[str, tuple[str, ...]]] = []
         for depth, (author, library) in enumerate(zip(chain, written, strict=True)):
             _refuse_layer_reference(author.root / LIBRARY_FILE, library)
-            try:
-                removed.append(inherit.removals(library))
-            except TemplateLibraryError as exc:
-                raise TemplateLibraryError(f"{author.root / LIBRARY_FILE}: {exc}") from exc
-            if depth == len(chain) - 1 and removed[-1]:
-                # The root of the tree builds on nothing.
-                raise TemplateLibraryError(
-                    f"{author.root / LIBRARY_FILE}: {inherit.REMOVE_OUTSIDE_A_CHILD}"
-                )
+            if depth == len(chain) - 1:
+                _refuse_remove(author.root / LIBRARY_FILE, library)  # the root builds on nothing
+            removed.append(inherit.removals(author.root / LIBRARY_FILE, library))
         visible = inherit.Visible.build(
             chain,
             [
@@ -624,17 +618,19 @@ class TemplateLibrary:
         stale: list[str] = []
         for depth in reversed(range(len(chain))):
             for section, names in removed[depth].items():
-                if section in ("skills", "profiles"):
-                    # Files in a store, not entries: what the parent's level sees.
-                    inherited = visible.levels[depth + 1].get(section, {})
-                else:
-                    inherited = merged.get(section, {})
-                for name in names:
-                    if name not in inherited and depth == 0:
-                        stale.append(
-                            f"{top}: remove.{section}: {name} is not inherited from "
-                            f"{chain[1].namespace}"
-                        )
+                # Only the top child's own: a middle level records its stale
+                # names when it loads as a top add-on itself.
+                if depth == 0:
+                    if section in inherit.FILE_SECTIONS:
+                        inherited = visible.levels[1].get(section, {})
+                    else:
+                        inherited = merged.get(section, {})
+                    stale += [
+                        f"{top}: remove.{section}: {name} is not inherited from "
+                        f"{chain[1].namespace}"
+                        for name in names
+                        if name not in inherited
+                    ]
                 if section in merged:
                     merged[section] = {
                         n: entry for n, entry in merged[section].items() if n not in names
@@ -753,8 +749,8 @@ class TemplateLibrary:
         return inherit.humanize(text, self._layers) if self._layers else text
 
     def _share_layers(self, other: TemplateLibrary) -> None:
-        """`other`'s children's hidden levels and authors, shared, not copied:
-        they are never changed once built."""
+        """`other`'s children's hidden levels, authors and stale removals,
+        shared, not copied: they are never changed once built."""
         self._layer_components = other._layer_components
         self._layer_chains = other._layer_chains
         self._layers = other._layers
