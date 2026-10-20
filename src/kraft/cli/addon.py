@@ -44,6 +44,45 @@ _NEEDS_AN_INSTANCE = (
 )
 
 
+def _real_paths(text: str, paths: Mapping[Path, Path | str]) -> str:
+    """`text` with each scratch store in `paths` written as the directory the
+    add-on was read from, so no message names a copy that is deleted by the time
+    it is read."""
+    for store, real in paths.items():
+        text = text.replace(str(store), str(real))
+    return text
+
+
+def _origins(
+    ancestors: Sequence[InstalledAddon], origins: Mapping[Path, Path | str] | None
+) -> dict[Path, Path | str]:
+    """Where each of `ancestors` was read from: its own store when it is
+    installed, else the directory `_ancestors_for` recorded in `origins`."""
+    return {a.root: (origins or {}).get(a.root, a.root) for a in ancestors}
+
+
+def _own_problems(
+    issues: Sequence, ancestors: Sequence[InstalledAddon], paths: Mapping[Path, Path | str]
+) -> list[tuple[Path | str | None, str]]:
+    """`(ancestor's real directory or None, message)` for each issue: None for
+    one in the add-on's own files. An ancestor's own chain failing also fails
+    the copy of it the child serves under its namespace; that copy is dropped
+    when the ancestor's own chain says it, so the failure is named once, as
+    the ancestor's."""
+    out = []
+    for issue in issues:
+        owner = next((a for a in ancestors if Path(issue.file).is_relative_to(a.root)), None)
+        if owner is not None and issue.chain is not None:
+            if issue.chain.partition(":")[0] != owner.namespace and any(
+                other.file == issue.file and other.chain.partition(":")[0] == owner.namespace
+                for other in issues
+                if other.chain is not None
+            ):
+                continue
+        out.append((paths[owner.root] if owner else None, _real_paths(issue.message, paths)))
+    return out
+
+
 def _lint(
     found: manifest.AddonManifest,
     extracted: fetch.Extracted,
@@ -51,27 +90,30 @@ def _lint(
     ancestors: Sequence[InstalledAddon] = (),
     *,
     addon_id: str | None = None,
+    origins: Mapping[Path, Path | str] | None = None,
 ) -> list[dict]:
     """Every chain of the add-on that does not resolve, with the add-on and its
     `ancestors` (parent first) as the only layers of an otherwise empty library.
     `addon_id` is its id in the collection validated, `<name>@validate` when
-    there is none."""
+    there is none. A failure in an ancestor's own files is named by the
+    directory that ancestor was read from (`origins`), not the add-on's."""
     with tempfile.TemporaryDirectory() as tmp:
         store = fetch.write_scratch(Path(tmp), extracted)
         addon_id = addon_id or f"{found.name}@validate"
         addons = [*ancestors, addon_update.as_installed(addon_id, found.name, found, store)]
+        paths = {**_origins(ancestors, origins), store: root}
         try:
             library = TemplateLibrary.from_mappings(
                 {}, (), library_path=store / "local-library.yaml", addons=addons
             )
-            messages = [issue.message for issue in library.lint()]
+            found_issues = _own_problems(library.lint(), ancestors, paths)
             HarnessProfileTable.from_mapping(
                 {}, store / "harnesses.yaml", harnesses=harness.load(None).valid, addons=addons
             )
         except (TemplateLibraryError, TemplateEnvironmentError) as exc:
-            messages = [str(exc)]
+            found_issues = [(None, _real_paths(str(exc), paths))]
         # The author's own path, not the temporary copy's.
-        return [{"file": str(root), "message": m.replace(str(store), str(root))} for m in messages]
+        return [{"file": str(where or root), "message": m} for where, m in found_issues]
 
 
 def _lint_in(
@@ -81,6 +123,7 @@ def _lint_in(
     collection: str | None,
     home: tuple[Path, Path],
     ancestors: Sequence[InstalledAddon] = (),
+    origins: Mapping[Path, Path | str] | None = None,
 ) -> tuple[list[dict], list[str]]:
     """`(problems, warnings)` for installing the add-on into the instance at
     `home`. Problems are what it would be refused for: an unmet `requires`, a
@@ -119,9 +162,10 @@ def _lint_in(
             held_lines = addon_update.held_breaks(before, after, libraries)
         except PolicyError as exc:
             broken = [str(exc)]
+        paths = {**_origins(ancestors, origins), store: root}
         return (
-            [{"file": str(root), "message": m.replace(str(store), str(root))} for m in broken],
-            [f"{root}: {m.replace(str(store), str(root))}" for m in held_lines],
+            [{"file": str(root), "message": _real_paths(m, paths)} for m in broken],
+            [f"{root}: {_real_paths(m, paths)}" for m in held_lines],
         )
 
 
@@ -140,13 +184,13 @@ def _read_extracted(
     return found, raw
 
 
-#: An ancestor read from files: its manifest and its files.
-_Read = tuple[manifest.AddonManifest, fetch.Extracted]
+#: An ancestor read from files: its manifest, its files, and where they were read from.
+_Read = tuple[manifest.AddonManifest, fetch.Extracted, Path | str]
 
 
 def _read_addon(where: Path | str, extracted: fetch.Extracted, entry: str | None) -> _Read:
-    """An ancestor's manifest, with the files it was read from."""
-    return _read_extracted(extracted, where, entry)[0], extracted
+    """An ancestor's manifest, with its files and the place they were read from."""
+    return _read_extracted(extracted, where, entry)[0], extracted, where
 
 
 def _collection_at(path: Path) -> tuple[str, dict[str, Path]] | None:
@@ -236,6 +280,7 @@ def _ancestors_for(
     *,
     held: Sequence[InstalledAddon] | None = None,
     catalogues: dict[str, tuple] | None = None,
+    origins: dict[Path, Path | str] | None = None,
 ) -> list[InstalledAddon]:
     """The ancestors (parent first) of the add-on `found` describes, each
     resolved from, in order: `own` (the add-on directories of the collection
@@ -246,7 +291,8 @@ def _ancestors_for(
     outside the instance is written to a store under `scratch`. Raises
     `addon_update.Refused` when one cannot be found or read, or the tree is a
     cycle or too deep. Whether each version is in range is the library's to
-    say, as it is at load."""
+    say, as it is at load. `origins`, when given, gets each store written under
+    `scratch` mapped to the place its files were read from."""
     if held is None:
         held = load.installed(*home) if home else ()
     catalogues = {} if catalogues is None else catalogues
@@ -277,8 +323,11 @@ def _ancestors_for(
                 ]
             )
         if not isinstance(parent, InstalledAddon):
-            store = fetch.write_scratch(scratch, parent[1])
-            parent = addon_update.as_installed(parent_id, parent[0].name, parent[0], store)
+            read_manifest, read_files, read_from = parent
+            store = fetch.write_scratch(scratch, read_files)
+            parent = addon_update.as_installed(parent_id, read_manifest.name, read_manifest, store)
+            if origins is not None:
+                origins[store] = read_from
         ancestors.append(parent)
         seen.add(parent_id)
         parent_id = parent.parent
@@ -350,6 +399,7 @@ def validate(
     own = {f"{entry}@{collection_name}": root for entry, root in targets if collection_name}
     held = load.installed(*home) if home else ()
     catalogues: dict[str, tuple] = {}
+    origins: dict[Path, Path | str] = {}
     # Each ancestor found outside the instance is a store here until the end.
     with tempfile.TemporaryDirectory() as scratch:
         for entry, root in targets:
@@ -369,6 +419,7 @@ def validate(
                         Path(scratch),
                         held=held,
                         catalogues=catalogues,
+                        origins=origins,
                     )
                 except addon_update.Refused as exc:
                     ancestors, no_tree = [], exc.problems
@@ -405,9 +456,14 @@ def validate(
             if not no_tree:
                 addon_id = f"{entry}@{collection_name}" if collection_name else None
                 problems, warnings = (
-                    _lint_in(found, extracted, root, collection_name, home, ancestors)
+                    _lint_in(found, extracted, root, collection_name, home, ancestors, origins)
                     if home
-                    else (_lint(found, extracted, root, ancestors, addon_id=addon_id), [])
+                    else (
+                        _lint(
+                            found, extracted, root, ancestors, addon_id=addon_id, origins=origins
+                        ),
+                        [],
+                    )
                 )
                 report["problems"] += problems
                 report["warnings"] += warnings

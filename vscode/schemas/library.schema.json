@@ -1740,6 +1740,55 @@
       },
       "type": "object"
     },
+    "remove": {
+      "additionalProperties": false,
+      "description": "A child add-on's library.yaml only: entries of the add-on it builds on to leave out, by section. Refused anywhere else.",
+      "properties": {
+        "chains": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "nodes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "profiles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "skills": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "steering": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "steps": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tasks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "steering": {
       "additionalProperties": {
         "$ref": "#/$defs/SteeringProfile"
