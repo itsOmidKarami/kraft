@@ -92,8 +92,9 @@ def render(review: Review) -> str:
 
 @dataclass(frozen=True)
 class Group:
-    """The reviews one answer covers: an add-on and the relatives its move
-    drags along, in tree order. `pulled_in` says what else came with them."""
+    """The reviews one answer covers: a tree's moves in tree order, a named
+    add-on's and those of the relatives its update takes alike, each a member
+    with its own review. `pulled_in` says what else came with them."""
 
     reviews: tuple[Review, ...]
     pulled_in: tuple[str, ...] = ()

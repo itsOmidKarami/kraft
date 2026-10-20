@@ -457,7 +457,8 @@ class Result:
     review: Review | None = None
     #: Why, for `held`, `refused`, `unpublished` and `failed`.
     problems: tuple[str, ...] = ()
-    #: For `failed`: `network`, `auth`, `refused` or `busy`.
+    #: For `failed`: `network`, `auth`, `refused` or `busy`. For `held`:
+    #: `breaks` when a relative's own move breaks a chain; None for a range.
     kind: str | None = None
     #: For `current`: its files changed at an unchanged version.
     note: str | None = None
@@ -1215,6 +1216,20 @@ def _settle(moves: dict[str, _Move], ctx: _Context) -> dict[str, Result]:
     return out
 
 
+def _relatives(ids: Sequence[str], addons: Sequence[load.InstalledAddon]) -> list[str]:
+    """Every installed ancestor and descendant of `ids` among `addons`,
+    following their `parent` links, `ids` themselves left out."""
+    parents = {a.id: a.parent for a in addons if a.repo_id is None}
+    lines = {i: inherit._path(i, parents) or (i,) for i in parents}
+    out = {
+        other
+        for addon_id in ids
+        for other, line in lines.items()
+        if addon_id in line or other in lines.get(addon_id, ())
+    }
+    return sorted(out - set(ids))
+
+
 def _review(
     move: _Move,
     old_ancestors: Sequence[load.InstalledAddon],
@@ -1256,9 +1271,15 @@ def update(
     entries: Mapping[str, AddonEntry | bool] | None = None,
     config_dir: Path | None = None,
     addons_root: Path | None = None,
+    relatives: bool = True,
 ) -> list[Result]:
     """Install or update `ids` (every add-on in `addons.yaml` when None), one
-    `Result` each, in `ids`' order. The moves are settled as a set
+    `Result` each, in `ids`' order. With `relatives`, named `ids` also take the
+    waiting moves of their installed ancestors and descendants, whose results
+    follow in tree order: a relative with no move, or whose move is refused
+    before the trees are judged, says nothing. One whose move breaks a chain
+    that the named moves, and the moves they need, do not is `held` with
+    `kind="breaks"`. The moves are settled as a set
     (`inherit.settle`): one a range drops is `held` (`refused` for an
     install). `accept` is asked once per tree that has something to take,
     with a `Group` of its members' reviews, and the tree applies or is
@@ -1316,13 +1337,32 @@ def update(
                 moves[addon_id] = resolved
             else:
                 results[addon_id] = resolved
+        # Scope: a named add-on's installed relatives join with their waiting
+        # moves. Anything else said of a relative is not said: it was not asked.
+        joined: dict[str, None] = {}
+        for addon_id in _relatives(order, loaded) if ids is not None and relatives else ():
+            resolved = _resolve(addon_id, ctx)
+            if isinstance(resolved, _Move):
+                moves[addon_id] = resolved
+                joined[addon_id] = None
         # 2. Check, and 3. settle, to a fixed point.
-        results |= _choose(moves, ctx)
+        chosen = _choose(moves, ctx)
+        results |= {i: r for i, r in chosen.items() if i not in joined or r.outcome != "refused"}
         # 4. Trees: one review and one answer each.
         parents = {p.id: p.parent for p in loaded if p.repo_id is None}
         parents |= {i: m.candidate.parent for i, m in moves.items()}
-        for tree in inherit.trees(moves, parents):
-            members = [moves[i] for i in tree]
+        sides = {
+            a.id: inherit.Side(a.version, a.parent, a.parent_range)
+            for a in loaded
+            if a.repo_id is None and a.left_out is None
+        }
+
+        def judged(
+            members: Sequence[_Move],
+        ) -> tuple[list[load.InstalledAddon], State, set[str], list[str]]:
+            """The instance with `members` applied, and what they break in it,
+            each scratch root said as its add-on's id."""
+            tree = {m.addon_id for m in members}
             would_load = list(
                 inherit.cascade(
                     [*(p for p in loaded if p.id not in tree), *(m.candidate for m in members)]
@@ -1330,6 +1370,42 @@ def update(
             )
             after = state_of(config_dir, would_load)
             libraries = {p.namespace for p in would_load if p.repo_id is not None}
+            said = breaks(
+                state, after, config_dir, [m.namespace for m in members], exempt=libraries
+            )
+            for m in members:
+                said = [why.replace(str(m.candidate.root), m.addon_id) for why in said]
+            return would_load, after, libraries, said
+
+        for tree in inherit.trees(moves, parents):
+            members = [moves[i] for i in tree]
+            would_load, after, libraries, broken = judged(members)
+            if broken and joined.keys() & set(tree):
+                # D2: judged again with only the named add-ons' moves and the
+                # moves they need. When that holds, each other relative waits.
+                need = inherit.needed(
+                    [i for i in tree if i not in joined],
+                    sides,
+                    {
+                        m.addon_id: inherit.Side(
+                            m.found.version, m.candidate.parent, m.candidate.parent_range
+                        )
+                        for m in members
+                    },
+                )
+                again = judged([m for m in members if m.addon_id in need])
+                if not again[3]:
+                    for m in members:
+                        if m.addon_id not in need:
+                            results[m.addon_id] = Result(
+                                m.addon_id, "held", problems=tuple(broken), kind="breaks"
+                            )
+                    members = [m for m in members if m.addon_id in need]
+                    would_load, after, libraries, broken = again
+                    if not members:
+                        continue
+                else:
+                    broken += [why for why in again[3] if why not in broken]
             reviews = [
                 _review(
                     m,
@@ -1339,15 +1415,11 @@ def update(
                 for m in members
             ]
             namespaces = [m.namespace for m in members]
-            # D2: every member of a tree is named here, so a break refuses
-            # every member.
-            if broken := breaks(state, after, config_dir, namespaces, exempt=libraries):
-                said = broken
-                for m in members:
-                    said = [why.replace(str(m.candidate.root), m.addon_id) for why in said]
+            # A break the named moves cannot shed refuses every member.
+            if broken:
                 for m, reviewed in zip(members, reviews, strict=True):
                     results[m.addon_id] = Result(
-                        m.addon_id, "refused", review=reviewed, problems=tuple(said)
+                        m.addon_id, "refused", review=reviewed, problems=tuple(broken)
                     )
                 continue
             held = held_breaks(state, after, libraries)
@@ -1435,7 +1507,8 @@ def update(
         else:
             # `auto_update` records its own outcome after this.
             clear_status(addons_root, {done.addon_id for done in accepted})
-    return [results[addon_id] for addon_id in order]
+    taken = [i for tree in inherit.trees(joined, parents) for i in tree]
+    return [results[i] for i in [*order, *taken] if i in results]
 
 
 #: Where each add-on's last auto-update is recorded, under `run/addons/`:
@@ -1564,7 +1637,11 @@ def auto_update(
                 }
             continue
         results += update(
-            collection_ids, accept=accept, config_dir=config_dir, addons_root=addons_root
+            collection_ids,
+            accept=accept,
+            config_dir=config_dir,
+            addons_root=addons_root,
+            relatives=False,
         )
     for result in results:
         said = "; ".join(result.problems)

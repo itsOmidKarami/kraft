@@ -339,7 +339,7 @@ origin: src/kraft/addons/update.py §update
 ## REQ update-refuses-a-change-that-breaks-a-chain
 
 IF an update's candidate add-ons would leave a currently resolving chain of the instance's own or of an add-on, a chain reference to one of those, or a profile fallback unresolved, or would leave out a descendant add-on that loads now, THEN the system SHALL refuse that add-on and name each such reference or descendant.
-enforced-by: tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[local-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[repos-default-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[intake-schedule], tests/addons/test_update.py::test_a_captured_reference_the_addon_does_not_provide_is_refused, tests/addons/test_update.py::test_a_broken_profile_pairing_is_refused, tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[removed-node-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[anchor-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[override-path-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[added-id-taken], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[parent-update-breaks-child-chain], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[parent-update-drops-a-descendant], tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[tree-break-refuses-every-member]
+enforced-by: tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[local-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[repos-default-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[intake-schedule], tests/addons/test_update.py::test_a_captured_reference_the_addon_does_not_provide_is_refused, tests/addons/test_update.py::test_a_broken_profile_pairing_is_refused, tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[removed-node-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[anchor-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[override-path-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[added-id-taken], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[parent-update-breaks-child-chain], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[parent-update-drops-a-descendant], tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[tree-break-refuses-every-member], tests/addons/test_update_tree.py::test_update_takes_waiting_relatives[broken-needed-relative-refuses]
 origin: src/kraft/addons/update.py §breaks
 
 ## REQ an-addon-lists-no-addons
@@ -452,8 +452,8 @@ origin: src/kraft/api/deps.py §collect_addon_stores
 
 ## REQ auto-update-is-opt-in
 
-WHERE an add-on's auto-update is on, through its collection's `auto_update: true` or its own, the system SHALL update that add-on in the background after the server starts and once a day while it runs, and SHALL NOT fetch a collection none of whose installed add-ons auto-update, except to restore a missing store.
-enforced-by: tests/addons/test_auto_update.py::test_who_auto_updates[addon-on], tests/addons/test_auto_update.py::test_who_auto_updates[collection-on], tests/addons/test_auto_update.py::test_who_auto_updates[neither-is-not-fetched], tests/api/test_deps.py::test_the_server_takes_an_auto_update_and_loads_it, tests/api/test_deps.py::test_a_running_server_checks_for_auto_updates_again
+WHERE an add-on's auto-update is on, through its collection's `auto_update: true` or its own, the system SHALL update that add-on in the background after the server starts and once a day while it runs, and SHALL NOT fetch a collection none of whose installed add-ons auto-update, except to restore a missing store; an add-on whose auto-update is off is never moved by a relative's.
+enforced-by: tests/addons/test_auto_update.py::test_who_auto_updates[addon-on], tests/addons/test_auto_update.py::test_who_auto_updates[collection-on], tests/addons/test_auto_update.py::test_who_auto_updates[neither-is-not-fetched], tests/addons/test_auto_update.py::test_auto_update_takes_no_relatives, tests/api/test_deps.py::test_the_server_takes_an_auto_update_and_loads_it, tests/api/test_deps.py::test_a_running_server_checks_for_auto_updates_again
 origin: src/kraft/addons/update.py §auto_update
 
 ## REQ auto-update-holds-what-widens-a-run
@@ -602,8 +602,8 @@ origin: src/kraft/addons/review.py §review
 
 ## REQ a-tree-is-reviewed-as-one
 
-WHEN moves in one tree are applied, the system SHALL show them in one review and apply them on one accept.
-enforced-by: tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[move-together], tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[unrelated-keep-their-own-review]
+WHEN moves in one tree are applied, the system SHALL show them in one review and apply them on one accept; an update of an id also takes the waiting moves of its installed ancestors and descendants; when one of those relatives' moves breaks a chain that the named add-ons' moves, and the moves they need, do not, that relative's move is held and the rest apply.
+enforced-by: tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[move-together], tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[unrelated-keep-their-own-review], tests/addons/test_update_tree.py::test_update_takes_waiting_relatives[id-takes-descendant], tests/addons/test_update_tree.py::test_update_takes_waiting_relatives[id-takes-ancestor], tests/addons/test_update_tree.py::test_update_takes_waiting_relatives[broken-relative-held]
 origin: src/kraft/addons/update.py §update
 
 ## REQ a-move-held-by-a-range-is-waiting

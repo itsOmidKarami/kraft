@@ -5,7 +5,7 @@ a range holds waits, and each tree is reviewed and accepted as one (design
 import pytest
 from support.addons import AGENT, chain, child_manifest, install, make_tree, publish
 
-from kraft.addons import update
+from kraft.addons import fetch, update
 from kraft.addons.config import AddonsLock
 
 COMPANY = "company@corp"
@@ -311,3 +311,95 @@ def test_a_parent_move_that_leaves_its_child_out_is_refused(tmp_path, team_moves
         "team@payments would no longer load: its ancestor team@tools has its name team",
     )
     assert _files(home) == before
+
+
+def _team_drops_scan(repos, range_):
+    """team 1.1.0 at `range_` without its task `scan`, which a local chain
+    extends as `team:scan`."""
+    _team(
+        repos,
+        "1.1.0",
+        range_,
+        library={"tasks": {"other": {"extends": "company:verify"}}},
+        chains={"check": chain("other")},
+    )
+
+
+@pytest.mark.parametrize(
+    ("published", "ids", "outcomes", "problems"),
+    [
+        pytest.param(
+            _move_together,
+            [COMPANY],
+            {COMPANY: "applied", TEAM: "applied"},
+            {},
+            id="id-takes-descendant",
+        ),
+        pytest.param(
+            _move_together,
+            [TEAM],
+            {TEAM: "applied", COMPANY: "applied"},
+            {},
+            id="id-takes-ancestor",
+        ),
+        pytest.param(
+            lambda repos: _company(repos, "1.1.0"),
+            [COMPANY],
+            {COMPANY: "applied"},
+            {},
+            id="relative-without-move-is-silent",
+        ),
+        pytest.param(_unrelated, [COMPANY], {COMPANY: "applied"}, {}, id="unrelated-is-not-taken"),
+        pytest.param(
+            lambda repos: (_company(repos, "1.1.0"), _team_drops_scan(repos, "1")),
+            [COMPANY],
+            {COMPANY: "applied", TEAM: "held"},
+            {TEAM: "team:scan"},
+            id="broken-relative-held",
+        ),
+        pytest.param(
+            lambda repos: (_company(repos, "2.0.0"), _team_drops_scan(repos, "2")),
+            [COMPANY],
+            {COMPANY: "refused", TEAM: "refused"},
+            {COMPANY: "team:scan", TEAM: "team:scan"},
+            id="broken-needed-relative-refuses",
+        ),
+    ],
+)
+def test_update_takes_waiting_relatives(
+    tmp_path, monkeypatch, request, published, ids, outcomes, problems
+):
+    """`update <id>` also takes the waiting moves of the id's installed
+    ancestors and descendants (design "Update moves a set", Scope). A
+    relative's move that breaks a chain the named moves do not is held (D2)."""
+    row = request.node.callspec.id
+    scratch, write_scratch = [], fetch.write_scratch
+    monkeypatch.setattr(
+        fetch, "write_scratch", lambda *a: scratch.append(write_scratch(*a)) or scratch[-1]
+    )
+    tree = {**TREE, TOOLS: TREE[COMPANY]} if row == "unrelated-is-not-taken" else TREE
+    local = {"mine": chain("team:scan")} if row.startswith("broken") else None
+    repos, home = make_tree(tmp_path, tree, chains=local)
+    published(repos)
+    before = _files(home)
+
+    results, groups = _update(home, ids)
+
+    assert {i: r.outcome for i, r in results.items()} == outcomes, results
+    assert list(results)[: len(ids)] == ids
+    for addon_id, said in problems.items():
+        assert any(said in why for why in results[addon_id].problems), results[addon_id]
+        assert not [
+            why for why in results[addon_id].problems for root in scratch if str(root) in why
+        ]
+    if "applied" not in outcomes.values():
+        assert _files(home) == before
+    if row in ("id-takes-descendant", "id-takes-ancestor"):
+        assert [g.title for g in groups] == ["company@corp, team@payments"]
+        assert (_version(home, COMPANY), _version(home, TEAM)) == ("2.0.0", "1.1.0")
+    if row == "unrelated-is-not-taken":
+        assert _version(home, TOOLS) == "1.0.0"
+    if row == "broken-relative-held":
+        assert results[TEAM].kind == "breaks"
+        assert [g.title for g in groups] == [COMPANY]
+        assert (_version(home, COMPANY), _version(home, TEAM)) == ("1.1.0", "1.0.0")

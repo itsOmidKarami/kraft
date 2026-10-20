@@ -7,6 +7,7 @@ import pytest
 from support.addons import (
     AGENT,
     chain,
+    child_manifest,
     edit_addons_yaml,
     instance,
     make_collection,
@@ -251,3 +252,41 @@ def test_a_range_held_auto_update_waits(tmp_path):
         "admin addon update to move it with its relatives, or wait for a release that fits",
     }
     assert (config_dir / "addons.lock").read_text() == before
+
+
+def test_auto_update_takes_no_relatives(tmp_path, monkeypatch):
+    """A relative whose own auto-update is off is not moved by its parent's,
+    and its collection is not fetched for it, though its waiting release is
+    the one that would let the parent move."""
+    company, team = RELEASE, {**RELEASE, "parent": ("company@corp", "1")}
+    repos, (config_dir, addons_dir) = make_tree(
+        tmp_path, {"company@corp": company, "team@payments": team}
+    )
+    on = {"company@corp": {"auto_update": True}}
+    edit_addons_yaml(config_dir, lambda w: w["addons"].update(on))
+    publish(repos["corp"], "company", version="2.0.0")
+    publish(
+        repos["payments"], "team", version="1.1.0", manifest=child_manifest("company@corp", "2")
+    )
+    before = (config_dir / "addons.lock").read_text()
+    fetched = []
+    real = fetch.fetch
+
+    def spy(addons_dir, name, url, ref):
+        fetched.append(url)
+        return real(addons_dir, name, url, ref)
+
+    monkeypatch.setattr(fetch, "fetch", spy)
+
+    outcomes = update.auto_update(config_dir, addons_dir)
+
+    assert outcomes == {
+        "company@corp": {
+            "outcome": "held",
+            "message": "company@corp 2.0.0 is outside team@payments's range 1 (needs 1.x); run "
+            "kraft admin addon update to move it with its relatives, or wait for a release "
+            "that fits",
+        }
+    }
+    assert (config_dir / "addons.lock").read_text() == before
+    assert fetched == [repos["corp"].as_uri()]
