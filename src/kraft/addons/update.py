@@ -729,7 +729,7 @@ def _chains_of(namespaces: Collection[str], state: State) -> set[str]:
     return {chain for chain in state.chains if _qualifier(chain) in namespaces}
 
 
-def _catalogue(
+def catalogue(
     name: str, collection: CollectionConfig, addons_dir: Path
 ) -> tuple[Path | None, str | None, manifest.CollectionManifest]:
     """The collection fetched at its ref: its mirror and commit (None for a
@@ -822,7 +822,7 @@ def _outside(range_: str | None, version: str) -> str | None:
         return str(exc)
 
 
-def _as_installed(
+def as_installed(
     addon_id: str, namespace: str, found: AddonManifest, root: Path
 ) -> load.InstalledAddon:
     """A candidate as the add-on it would load as, its parent from `found`."""
@@ -923,7 +923,7 @@ def update(
             try:
                 if collection_name not in catalogues:
                     try:
-                        catalogues[collection_name] = _catalogue(
+                        catalogues[collection_name] = catalogue(
                             collection_name, collection, addons_root
                         )
                     except (fetch.FetchError, fetch.AddonRefused, manifest.ManifestError) as exc:
@@ -980,7 +980,7 @@ def update(
                 # The candidate as the tree sees it; its root is swapped for the
                 # scratch copy once it is known to be pending. Neither the
                 # ancestry nor the cascade reads a root.
-                candidate = _as_installed(addon_id, namespace, found, Path(scratch))
+                candidate = as_installed(addon_id, namespace, found, Path(scratch))
                 # Why the move would not hold in this tree: said only if there
                 # is a move, so a current add-on whose parent is left out stays
                 # current rather than refused on every routine update.

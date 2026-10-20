@@ -48,6 +48,30 @@ def _parent_nowhere(tmp_path, monkeypatch):
     return [str(make_collection(tmp_path, {"team": TEAM}, name="payments"))]
 
 
+def _parent_nowhere_and_refused_content(tmp_path, monkeypatch):
+    team = _team(tasks={**TEAM["library"]["tasks"], "run": {"kind": "subprocess"}})
+    return [str(make_collection(tmp_path, {"team": team}, name="payments"))]
+
+
+def _a_cycle(tmp_path, monkeypatch):
+    """`team` builds on `release`, which builds on `team`."""
+    on_team = {"requires": {**TEAM["manifest"]["requires"], "addons": {"team@acme": "1"}}}
+    release = {**GOOD["release"], "manifest": on_team}
+    return [str(make_collection(tmp_path, {"release": release, "team": TEAM}))]
+
+
+def _with_holds_neither(tmp_path, monkeypatch):
+    return [*_parent_via_with(tmp_path, monkeypatch), "--with", str(tmp_path / "nothing")]
+
+
+def _unreadable_with_before_the_parent(tmp_path, monkeypatch):
+    broken = tmp_path / "broken"
+    (broken / ".kraft").mkdir(parents=True)
+    (broken / ".kraft" / "collection.json").write_text("{")
+    team, _, corp = _parent_via_with(tmp_path, monkeypatch)
+    return [team, "--with", str(broken), "--with", corp]
+
+
 def _broken_against_parent(tmp_path, monkeypatch):
     team = _team(tasks={"scan": {"extends": "release:nope"}})
     return _parent_in_path(tmp_path, monkeypatch, team)
@@ -139,6 +163,22 @@ def _parent_in_an_added_collection(tmp_path, monkeypatch):
         (_grandparent_in_path, "", None, 0, "team 1.0.0"),
         (_parent_via_with, "", None, 0, "team 1.0.0"),
         (_parent_nowhere, "", None, 1, NOT_FOUND),
+        (
+            _parent_nowhere_and_refused_content,
+            "",
+            None,
+            1,
+            (NOT_FOUND, "may not carry a subprocess task"),
+        ),
+        (
+            _a_cycle,
+            "",
+            None,
+            1,
+            "addons/team: its ancestry team@acme -> release@acme -> team@acme is a cycle",
+        ),
+        (_with_holds_neither, "", None, 1, "nothing: holds neither .kraft/collection.json"),
+        (_unreadable_with_before_the_parent, "", None, 0, "team 1.0.0"),
         (_broken_against_parent, "", None, 1, "nope"),
         (_removes_what_it_inherits, "", None, 0, "team 1.0.0"),
         (_parent_installed, "", None, 0, "team 1.0.0"),
@@ -159,6 +199,10 @@ def _parent_in_an_added_collection(tmp_path, monkeypatch):
         "child-with-grandparent-in-path",
         "child-with-parent-via-with",
         "child-parent-not-found",
+        "child-parent-not-found-and-refused-content",
+        "child-in-a-cycle",
+        "with-dir-holds-neither",
+        "with-dir-unreadable-before-the-parent",
         "child-broken-against-parent",
         "child-removes-what-it-inherits",
         "child-against-instance",
@@ -175,7 +219,24 @@ def test_validate(tmp_path, capsys, monkeypatch, addons, sub, running, code, say
     else:
         argv = [str(make_collection(tmp_path, addons) / sub)]
     got, out = _run(capsys, "validate", *argv)
-    assert got == code and says in out, out
+    assert got == code and all(s in out for s in (says if isinstance(says, tuple) else [says])), out
+
+
+def test_validate_against_an_instance_writes_nothing(tmp_path, capsys, monkeypatch):
+    """A parent read from the instance's collection is fetched into a
+    temporary directory: the home's config and add-ons are not touched."""
+    argv = _parent_in_an_added_collection(tmp_path, monkeypatch)
+
+    def files():
+        return {
+            p: p.read_bytes()
+            for p in [*(tmp_path / "config").rglob("*"), *(tmp_path / "run").rglob("*")]
+            if p.is_file()
+        }
+
+    before = files()
+    got, out = _run(capsys, "validate", *argv)
+    assert got == 0 and files() == before, out
 
 
 @pytest.mark.parametrize(

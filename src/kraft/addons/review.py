@@ -25,7 +25,7 @@ import yaml
 from kraft.addons import manifest
 from kraft.addons.fetch import Extracted, write_scratch
 from kraft.addons.load import InstalledAddon
-from kraft.addons.update import LIMITS, _as_installed
+from kraft.addons.update import LIMITS, as_installed
 from kraft.config import bounded_yaml
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
@@ -164,7 +164,7 @@ def _candidate(declared: object, name: str, root: Path) -> InstalledAddon:
         found = manifest.addon(declared, manifest.ADDON_JSON)
     except manifest.ManifestError:
         return InstalledAddon(f"{name}@review", name, name, "", root)
-    return _as_installed(f"{name}@review", name, found, root)
+    return as_installed(f"{name}@review", name, found, root)
 
 
 def _facts(extracted: Extracted | None, ancestors: Sequence[InstalledAddon] = ()) -> _Facts:
