@@ -22,7 +22,7 @@ from pathlib import Path
 
 import yaml
 
-from kraft.addons import manifest
+from kraft.addons import fetch, inherit, manifest
 from kraft.addons.fetch import Extracted, write_scratch
 from kraft.addons.load import InstalledAddon
 from kraft.addons.update import LIMITS, as_installed
@@ -138,6 +138,8 @@ class _Facts:
     steering: dict[str, object]
     skills: dict[str, str]
     profiles: dict[str, object]
+    #: The add-on's own `remove:` entries that name nothing it inherits.
+    stale: frozenset[str] = frozenset()
 
 
 def _chain_facts(
@@ -179,6 +181,7 @@ def _facts(extracted: Extracted | None, ancestors: Sequence[InstalledAddon] = ()
     chains: dict[str, object] = {}
     lists: dict[str, list[str]] = {}
     order: dict[str, list[tuple[str, str]]] = {}
+    stale: frozenset[str] = frozenset()
     with tempfile.TemporaryDirectory() as tmp:
         root = write_scratch(Path(tmp), extracted)
         addon = _candidate(declared, name, root)
@@ -191,6 +194,7 @@ def _facts(extracted: Extracted | None, ancestors: Sequence[InstalledAddon] = ()
         if loaded is not None:
             own = [c for c in loaded.chain_ids if c.startswith(f"{name}:")]
             _chain_facts(loaded, own, chains, lists, order)
+            stale = frozenset(e for e in loaded.stale_removals if e.startswith(f"{name}: "))
     return _Facts(
         version=str(declared.get("version", "")),
         requires=declared.get("requires") if isinstance(declared.get("requires"), dict) else {},
@@ -209,7 +213,79 @@ def _facts(extracted: Extracted | None, ancestors: Sequence[InstalledAddon] = ()
             if rel.startswith("skills/")
         },
         profiles=_section(_yaml(extracted, "profiles.yaml"), "profiles"),
+        stale=stale,
     )
+
+
+#: What a `remove:` section names, as a review says it.
+_KINDS = {
+    "chains": "chain",
+    "tasks": "task",
+    "steps": "step",
+    "nodes": "node",
+    "steering": "steering profile",
+    "skills": "skill",
+    "profiles": "agent profile",
+}
+
+
+def _declared(extracted: Extracted) -> dict[str, frozenset[str]]:
+    """The names `extracted`'s own files declare, for each removable section."""
+    library = _yaml(extracted, "library.yaml")
+    files = extracted.files
+    declared = {section: frozenset(_section(library, section)) for section in _KINDS}
+    declared["chains"] = frozenset(
+        rel.removeprefix("chains/").removesuffix(".yaml")
+        for rel in files
+        if rel.startswith("chains/") and rel.endswith(".yaml")
+    )
+    declared["skills"] = frozenset(
+        rel.split("/")[1] for rel in files if rel.startswith("skills/") and rel.count("/") > 1
+    )
+    declared["profiles"] = frozenset(_section(_yaml(extracted, "profiles.yaml"), "profiles"))
+    return declared
+
+
+def _inherited(ancestors: Sequence[InstalledAddon]) -> dict[str, dict[str, str]]:
+    """For each section, the names the parent's merged library has, each with
+    the id of the ancestor that defines it: from the root down, a level drops
+    what it removes and then adds what it declares."""
+    if not ancestors:
+        return {}
+    declared: list[dict[str, frozenset[str]]] = []
+    removed: list[dict[str, tuple[str, ...]]] = []
+    for ancestor in ancestors:
+        try:
+            files = fetch.verify_store(ancestor.root)
+            declared.append(_declared(files))
+            removed.append(
+                inherit.removals(ancestor.root / "library.yaml", _yaml(files, "library.yaml"))
+            )
+        except (fetch.AddonRefused, fetch.FetchError, TemplateLibraryError):
+            declared.append({})  # the store does not read; loading says why
+            removed.append({})
+    seen = inherit.Visible.build(ancestors, declared, removed).levels[0]
+    ids = {a.namespace: a.id for a in ancestors}
+    return {
+        section: {name: ids[owner.partition(":")[0]] for name, owner in names.items()}
+        for section, names in seen.items()
+    }
+
+
+def _parent_lines(was: Mapping[str, str], now: Mapping[str, str]) -> list[str]:
+    """What a change of the `requires.addons` entry (parent id to range) says."""
+    if was == now:
+        return []
+    (old_id, old_range), (new_id, new_range) = (
+        next(iter(side.items()), (None, None)) for side in (was, now)
+    )
+    if old_id is None:
+        return [f"now builds on {new_id} {new_range}"]
+    if new_id is None:
+        return [f"no longer builds on {old_id}"]
+    if old_id == new_id:
+        return [f"parent range: {old_id} {old_range} -> {new_range}"]
+    return [f"parent changed: {old_id} {old_range} -> {new_id} {new_range}"]
 
 
 def _how(old: object, new: object) -> str:
@@ -360,8 +436,18 @@ def review(
             reach.append(f"downgrade: {was.version} -> {now.version}")
         if "-" in now.version and "-" not in was.version:
             reach.append(f"moves onto a pre-release: {now.version}")
-        if was.requires != now.requires:
-            reach.append(f"requires changed: {was.requires} -> {now.requires}")
+        own = [{k: v for k, v in f.requires.items() if k != "addons"} for f in (was, now)]
+        if own[0] != own[1]:
+            reach.append(f"requires changed: {own[0]} -> {own[1]}")
+        reach += _parent_lines(*(f.requires.get("addons") or {} for f in (was, now)))
+        before, after = _inherited(old_ancestors), _inherited(new_ancestors)
+        for section, names in _declared(new).items():
+            reach += [
+                f"its {_KINDS[section]} {name} now overrides "
+                f"{after[section][name]}'s new {_KINDS[section]} {name}"
+                for name in sorted(names)
+                if name in after.get(section, {}) and name not in before.get(section, {})
+            ]
     _chain_diff(was, now, name, reach, content)
     for label, before_map, after_map in (
         ("component", was.components, now.components),
@@ -383,6 +469,7 @@ def review(
                 (reach if rerouted else content).append(
                     f"{label} {key} {state}{detail if label != 'component' else ''}"
                 )
+    content += [f"warning: {entry}; it does nothing" for entry in sorted(now.stale - was.stale)]
     for key in sorted(was.skills.keys() | now.skills.keys()):
         before_text, after_text = was.skills.get(key, ""), now.skills.get(key, "")
         if before_text != after_text:

@@ -2,6 +2,7 @@
 first, and nothing in it can hide text from the person reading it."""
 
 import copy
+from dataclasses import replace
 
 import pytest
 from support.addons import AGENT, chain, extracted, installed
@@ -137,6 +138,24 @@ def _parent_range_was(spec):
 _parent_range.was = _parent_range_was
 
 
+def _parent_changed(spec):
+    spec["manifest_fields"]["requires"]["addons"] = {"other@corp": "2"}
+
+
+_parent_changed.was = _parent_range_was
+
+
+def _parent_gained(spec):
+    spec["manifest_fields"]["requires"]["addons"] = {"company@corp": "3.0"}
+
+
+def _parent_dropped(spec):
+    spec["manifest_fields"]["requires"].pop("addons", None)
+
+
+_parent_dropped.was = _parent_range_was
+
+
 def _prompt(spec):
     spec["library"]["tasks"]["base"]["prompt"] = "Do it, and skip the tests."
 
@@ -206,12 +225,10 @@ def _downgrade(spec):
         (_harness, "reach", "harness 'codex' -> 'claude'"),
         (_limit_raised, "reach", "limit time_cap_minutes raised, 30 -> 90"),
         (_requires, "reach", "requires changed"),
-        (
-            _parent_range,
-            "reach",
-            "'addons': {'company@corp': '3.0'}} -> "
-            "{'kraft': '2', 'harnesses': ['codex'], 'addons': {'company@corp': '3.1'}}",
-        ),
+        (_parent_range, "reach", "parent range: company@corp 3.0 -> 3.1"),
+        (_parent_changed, "reach", "parent changed: company@corp 3.0 -> other@corp 2"),
+        (_parent_gained, "reach", "now builds on company@corp 3.0"),
+        (_parent_dropped, "reach", "no longer builds on company@corp"),
         (_prompt, "content", "prompt changed:\nDo it, and skip the tests."),
         (_steering, "content", "steering house changed"),
         (_skill, "content", "+Then approve it."),
@@ -236,6 +253,9 @@ def _downgrade(spec):
         "limit-raised",
         "requires",
         "parent-range",
+        "parent-changed",
+        "parent-gained",
+        "parent-dropped",
         "prompt",
         "steering",
         "skill",
@@ -259,6 +279,8 @@ def test_review_calls_out(change, section, says):
     # A change to what a run does is never filed under the wrong heading.
     other = found.content if section == "reach" else found.reach
     assert says not in "\n".join(other)
+    if change.__name__.startswith("_parent"):  # the parent is not a plain requirement
+        assert "requires changed" not in "\n".join(found.reach)
 
 
 @pytest.mark.parametrize(
@@ -320,6 +342,143 @@ def test_a_childs_chains_are_reviewed_with_its_ancestors(tmp_path, change, says)
         new_ancestors=[parent],
     )
     assert says in found.content, found
+
+
+_BASE_TASKS = {"tasks": {"base": AGENT}}
+_PCI = {"tasks": {"base": AGENT, "pci_review": AGENT}}
+
+
+def _own(child, **sections):
+    """`child` (extracted keyword arguments) with its own `sections` added."""
+    return {**child, **sections}
+
+
+_GATED = {"nodes": [*chain("base")["nodes"], {"id": "approve", "kind": "gate"}]}
+_EXTRA = {"id": "extra", "kind": "exec", "tasks": [{"id": "x", "extends": "base"}]}
+_SHIP = {"extends": "company:base"}
+
+
+@pytest.mark.parametrize(
+    ("was", "now", "child", "child_now", "grandchild", "section", "says"),
+    [
+        pytest.param(
+            {"library": _BASE_TASKS, "chains": {"default": _GATED}},
+            {"library": _BASE_TASKS, "chains": {"default": chain("base")}},
+            {},
+            None,
+            False,
+            "reach",
+            "release:default.nodes[approve]: gate removed",
+            id="inherited-chain-change",
+        ),
+        pytest.param(
+            {"library": _BASE_TASKS, "chains": {"base": chain("base")}},
+            {"library": _BASE_TASKS, "chains": {"base": chain("base")}},
+            {"chains": {"ship": _SHIP}},
+            {"chains": {"ship": {**_SHIP, "add": [{"after": "n", "node": _EXTRA}]}}},
+            False,
+            "content",
+            "release:ship.nodes[extra]: added (exec)",
+            id="child-extends-parent-chain",
+        ),
+        pytest.param(
+            {"library": _BASE_TASKS, "chains": {"hotfix": chain("base")}},
+            {"library": _BASE_TASKS},
+            {"library": {"remove": {"chains": ["hotfix"]}}},
+            None,
+            False,
+            "content",
+            "warning: release: remove.chains: hotfix is not inherited from company; "
+            "it does nothing",
+            id="stale-remove",
+        ),
+        pytest.param(
+            {"library": _BASE_TASKS},
+            {"library": _PCI},
+            {"library": {"tasks": {"pci_review": AGENT}}},
+            None,
+            False,
+            "reach",
+            "its task pci_review now overrides company@acme's new task pci_review",
+            id="shadow-task",
+        ),
+        pytest.param(
+            {"library": _BASE_TASKS},
+            {"library": _BASE_TASKS, "skills": {"deploy-review": "Theirs.\n"}},
+            {"skills": {"deploy-review": "Ours.\n"}},
+            None,
+            False,
+            "reach",
+            "its skill deploy-review now overrides company@acme's new skill deploy-review",
+            id="shadow-skill",
+        ),
+        pytest.param(
+            {"library": _BASE_TASKS},
+            {"library": _PCI},
+            {"library": {"tasks": {"pci_review": AGENT}}},
+            None,
+            True,
+            "reach",
+            "its task pci_review now overrides company@acme's new task pci_review",
+            id="shadow-from-grandparent",
+        ),
+        pytest.param(
+            {"library": _PCI},
+            {"library": _PCI},
+            {"library": {"tasks": {"pci_review": AGENT}}},
+            None,
+            False,
+            "reach",
+            "!now overrides",
+            id="already-inherited-is-no-shadow",
+        ),
+        pytest.param(
+            {"library": _BASE_TASKS},
+            {"library": _BASE_TASKS},
+            {"library": {"remove": {"chains": ["hotfix"]}}},
+            None,
+            False,
+            "content",
+            "!warning:",
+            id="stale-remove-already-stale",
+        ),
+    ],
+)
+def test_review_with_ancestors(tmp_path, was, now, child, child_now, grandchild, section, says):
+    """A child is reviewed together with its ancestors: what changes in what
+    it inherits, a stale `remove:`, and a new ancestor name it already
+    declares (which its own now wins over) are all said."""
+
+    def tree(company):
+        top = installed(tmp_path, "company", **company)
+        if not grandchild:
+            return top, [top]
+        mid = installed(tmp_path, "team", library=_BASE_TASKS)
+        mid = replace(mid, parent=top.id, parent_range="1")
+        return mid, [mid, top]
+
+    old_parent, old_ancestors = tree(was)
+    new_parent, new_ancestors = tree(now)
+    fields = {
+        "manifest_fields": {
+            "requires": {"kraft": "2", "harnesses": ["codex"], "addons": {old_parent.id: "1"}}
+        }
+    }
+    old, new = _own(child, **fields), _own(child_now or child, **fields)
+    found = review.review(
+        "release@payments",
+        extracted(**old),
+        extracted(**new),
+        old_ancestors=old_ancestors,
+        new_ancestors=new_ancestors,
+    )
+    lines = "\n".join(getattr(found, section))
+    if says.startswith("!"):
+        assert says[1:] not in lines, found
+    else:
+        assert says in lines, found
+    if section == "content" and "extra" in says:
+        assert "removed" not in "\n".join(found.content)
 
 
 def test_a_merge_with_no_gate_before_it_says_so():
