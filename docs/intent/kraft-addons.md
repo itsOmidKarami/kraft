@@ -417,7 +417,7 @@ origin: src/kraft/api/deps.py §_reload_templates
 ## REQ running-item-keeps-its-addon-versions
 
 WHILE a work item is not terminal, the system SHALL read its add-on skills and add-on agent profiles from the add-on versions its chain was materialized with, and SHALL refuse a skill of a pinned version whose store is gone instead of handing it to the agent.
-enforced-by: tests/addons/test_pins.py::test_a_resolved_chain_pins_the_addons_it_reads[local-chain], tests/addons/test_pins.py::test_a_resolved_chain_pins_the_addons_it_reads[addon-chain], tests/addons/test_pins.py::test_a_rebuilt_snapshot_keeps_the_items_pins[retry-override], tests/addons/test_pins.py::test_a_rebuilt_snapshot_keeps_the_items_pins[chain-revision], tests/addons/test_pins.py::test_a_launch_reads_the_version_the_item_started_with, tests/addons/test_pins.py::test_a_pinned_version_that_is_gone_is_refused_not_delegated, tests/addons/test_pins.py::test_every_launch_is_handed_the_items_pins, tests/addons/test_pins.py::test_a_revision_resolves_against_pinned_addons[through-a-pinned-addon], tests/addons/test_pins.py::test_a_revision_resolves_against_pinned_addons[through-an-addon-not-touched-yet], tests/addons/test_pins.py::test_a_chain_through_a_repo_library_pins_its_commit_and_is_restored
+enforced-by: tests/addons/test_pins.py::test_a_resolved_chain_pins_the_addons_it_reads[local-chain], tests/addons/test_pins.py::test_a_resolved_chain_pins_the_addons_it_reads[addon-chain], tests/addons/test_pins.py::test_a_rebuilt_snapshot_keeps_the_items_pins[retry-override], tests/addons/test_pins.py::test_a_rebuilt_snapshot_keeps_the_items_pins[chain-revision], tests/addons/test_pins.py::test_a_launch_reads_the_version_the_item_started_with, tests/addons/test_pins.py::test_a_pinned_version_that_is_gone_is_refused_not_delegated, tests/addons/test_pins.py::test_every_launch_is_handed_the_items_pins, tests/addons/test_pins.py::test_a_revision_resolves_against_pinned_addons[through-a-pinned-addon], tests/addons/test_pins.py::test_a_revision_resolves_against_pinned_addons[through-an-addon-not-touched-yet], tests/addons/test_pins.py::test_a_chain_through_a_repo_library_pins_its_commit_and_is_restored, tests/addons/test_pins.py::test_an_item_keeps_its_tree_across_a_parent_update[launch-reads-pinned-ancestor]
 origin: src/kraft/adapters/agent.py §resolve_agent_task
 
 ## REQ a-revision-can-add-an-addon-component
@@ -429,7 +429,7 @@ origin: src/kraft/templates/revision.py §AddedNode
 ## REQ a-missing-store-is-restored-from-its-commit
 
 WHEN a store that the lock or a work item's pin names is missing, the system SHALL restore it from the recorded commit, SHALL load it only if its tree and digest match, and SHALL restore a work item's pinned store before a launch reads it.
-enforced-by: tests/addons/test_load.py::test_a_missing_store_is_restored_from_the_locked_commit[mirror-has-it], tests/addons/test_load.py::test_a_missing_store_is_restored_from_the_locked_commit[fetched-by-its-id], tests/addons/test_pins.py::test_a_launch_restores_the_pinned_store_it_needs, tests/api/test_deps.py::test_a_reload_restores_a_store_the_lock_names_and_this_machine_lacks, tests/api/test_deps.py::test_intake_on_an_addon_whose_store_is_away_says_retry_not_unknown, tests/addons/test_load.py::test_a_missing_repo_library_store_is_restored_from_the_checkout, tests/addons/test_pins.py::test_a_chain_through_a_repo_library_pins_its_commit_and_is_restored
+enforced-by: tests/addons/test_load.py::test_a_missing_store_is_restored_from_the_locked_commit[mirror-has-it], tests/addons/test_load.py::test_a_missing_store_is_restored_from_the_locked_commit[fetched-by-its-id], tests/addons/test_pins.py::test_a_launch_restores_the_pinned_store_it_needs, tests/api/test_deps.py::test_a_reload_restores_a_store_the_lock_names_and_this_machine_lacks, tests/api/test_deps.py::test_intake_on_an_addon_whose_store_is_away_says_retry_not_unknown, tests/addons/test_load.py::test_a_missing_repo_library_store_is_restored_from_the_checkout, tests/addons/test_pins.py::test_a_chain_through_a_repo_library_pins_its_commit_and_is_restored, tests/addons/test_pins.py::test_an_item_keeps_its_tree_across_a_parent_update[restore-an-ancestor]
 origin: src/kraft/addons/load.py §restore
 
 ## REQ a-directory-store-is-restored-only-if-unchanged
@@ -518,8 +518,8 @@ origin: src/kraft/adapters/agent.py §resolve_agent_task
 
 ## REQ a-profile-fallback-pins-the-addon-it-names
 
-WHEN a chain selects a local agent profile whose `fallback` names an add-on profile, the system SHALL pin that add-on.
-enforced-by: tests/addons/test_pins.py::test_a_local_profiles_fallback_pins_the_addon_it_names
+WHEN a chain selects a local agent profile whose `fallback` names an add-on profile, the system SHALL pin that add-on and its ancestors.
+enforced-by: tests/addons/test_pins.py::test_a_local_profiles_fallback_pins_the_addon_it_names, tests/addons/test_pins.py::test_an_item_pins_its_whole_tree[fallback-into-inherited-profile]
 origin: src/kraft/templates/library.py §_pins
 
 ## REQ a-launch-restores-its-pins-before-reading-profiles
@@ -557,3 +557,9 @@ origin: src/kraft/addons/update.py §child_dependents
 IF `kraft admin addon enable` names an add-on whose parent, with the entry enabled, is not installed, not loaded, or outside its range, THEN the system SHALL refuse with why, naming the parent and, when it is not installed, the install to run, and write nothing.
 enforced-by: tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-disabled], tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-not-installed], tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-out-of-range], tests/cli/test_addon_inheritance.py::test_enable_a_child_without_its_parent[parent-loaded]
 origin: src/kraft/cli/addon.py §_parent_loads
+
+## REQ an-item-pins-every-ancestor
+
+WHEN a work item's chain pins an add-on, the system SHALL pin each of its ancestors too, record each pinned add-on's parent, and load the pinned tree parents first, reading a pinned add-on's parent from its store's manifest when its pin names none, and SHALL leave a pinned child out with its ancestor's reason when a pinned ancestor's store is gone, never building it on the lock's version of that ancestor.
+enforced-by: tests/addons/test_pins.py::test_an_item_pins_its_whole_tree[child-chain], tests/addons/test_pins.py::test_an_item_pins_its_whole_tree[outside-extends], tests/addons/test_pins.py::test_an_item_pins_its_whole_tree[lock-lists-the-child-first], tests/addons/test_pins.py::test_an_item_keeps_its_tree_across_a_parent_update[launch-reads-pinned-ancestor], tests/addons/test_pins.py::test_an_item_keeps_its_tree_across_a_parent_update[for-item-tree-order], tests/addons/test_pins.py::test_an_item_keeps_its_tree_across_a_parent_update[restore-an-ancestor], tests/addons/test_pins.py::test_an_item_keeps_its_tree_across_a_parent_update[pin-without-parent], tests/addons/test_pins.py::test_an_item_keeps_its_tree_across_a_parent_update[child-disabled-since]
+origin: src/kraft/templates/library.py §_pins

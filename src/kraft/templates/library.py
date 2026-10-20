@@ -1114,7 +1114,8 @@ class TemplateLibrary:
         """The loaded add-ons chain `id` reads anything from: the chain itself,
         every chain it extends (`an-extending-chain-pins-its-ancestors`), a
         component it extends or selects, or a skill or agent profile one of
-        its tasks names."""
+        its tasks names; and every ancestor of each, root first
+        (`an-item-pins-every-ancestor`)."""
         data = resolved.chain.model_dump(mode="json")
         named = {
             id,
@@ -1128,9 +1129,17 @@ class TemplateLibrary:
             *self._fallback_profiles(data),
         }
         qualifiers = {name.partition(":")[0] for name in named if ":" in name}
+        # A child is read with its ancestors: an item that kept only the child
+        # would run it on whatever parent the lock holds later.
+        for addon in self.addons:
+            if addon.left_out is None and addon.namespace in qualifiers:
+                try:
+                    qualifiers.update(a.namespace for a in inherit.ancestry(addon, self.addons))
+                except inherit.InheritanceError:
+                    pass
         return {
             addon.namespace: addon.pin
-            for addon in self.addons
+            for addon in inherit.tree_order(self.addons)
             if addon.left_out is None and addon.namespace in qualifiers
         }
 

@@ -252,3 +252,37 @@ def test_inherited(tmp_path, edits, kind, expected):
     if without is not None:
         del tree[without]
     assert inherit.inherited(kind, child, tree) == expected
+
+
+@pytest.mark.parametrize(
+    ("links", "expected"),
+    [
+        pytest.param(
+            [("release@acme", None), ("tools@acme", None)],
+            ["release@acme", "tools@acme"],
+            id="roots-keep-order",
+        ),
+        pytest.param(
+            [
+                ("team@acme", "dept@acme"),
+                ("company@acme", None),
+                ("dept@acme", "company@acme"),
+            ],
+            ["company@acme", "dept@acme", "team@acme"],
+            id="child-first",
+        ),
+        pytest.param(
+            [("team@acme", "dept@acme"), ("tools@acme", None)],
+            ["team@acme", "tools@acme"],
+            id="parent-absent",
+        ),
+        pytest.param(
+            [("a@acme", "b@acme"), ("b@acme", "a@acme"), ("root@acme", None)],
+            ["root@acme", "a@acme", "b@acme"],
+            id="cycle-ends",
+        ),
+    ],
+)
+def test_tree_order(tmp_path, links, expected):
+    """Parents before children, and otherwise the order given."""
+    assert [a.id for a in inherit.tree_order(_tree(tmp_path, *links))] == expected
