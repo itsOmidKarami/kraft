@@ -214,11 +214,8 @@ def _written(home):
         ),
         pytest.param(
             _parent_moves_out_of_range,
-            "refused",
-            (
-                "would leave team@payments outside its range 3.1",
-                "Disable team@payments first, then update it to a release that accepts 4.0.0",
-            ),
+            "held",
+            "company@corp 4.0.0 is outside team@payments's range 3.1 (needs 3.x)",
             id="parent-update-leaves-child-out-of-range",
         ),
         pytest.param(

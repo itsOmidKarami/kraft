@@ -4,7 +4,15 @@ watching, what is held for a person, and where the outcome is recorded."""
 import shutil
 
 import pytest
-from support.addons import AGENT, chain, edit_addons_yaml, instance, make_collection, publish
+from support.addons import (
+    AGENT,
+    chain,
+    edit_addons_yaml,
+    instance,
+    make_collection,
+    make_tree,
+    publish,
+)
 from support.harness import git
 
 from kraft.addons import fetch, review, update
@@ -221,3 +229,25 @@ def test_a_person_taking_a_held_update_clears_its_warning(home):
 
     assert update.read_status(addons_dir) == {}
     assert _versions(config_dir)[ID] == "1.1.0"
+
+
+def test_a_range_held_auto_update_waits(tmp_path):
+    """A parent's release that an installed child's range rejects waits, with
+    the range that holds it, for the child to accept it or a person to act."""
+    company, team = RELEASE, {**RELEASE, "parent": ("company@corp", "1")}
+    repos, (config_dir, addons_dir) = make_tree(
+        tmp_path, {"company@corp": company, "team@corp": team}
+    )
+    on = {"company@corp": {"auto_update": True}}
+    edit_addons_yaml(config_dir, lambda w: w["addons"].update(on))
+    publish(repos["corp"], "company", version="2.0.0")
+    before = (config_dir / "addons.lock").read_text()
+
+    outcome = update.auto_update(config_dir, addons_dir)["company@corp"]
+
+    assert outcome == {
+        "outcome": "held",
+        "message": "company@corp 2.0.0 is outside team@corp's range 1 (needs 1.x); run kraft "
+        "admin addon update to move it with its relatives, or wait for a release that fits",
+    }
+    assert (config_dir / "addons.lock").read_text() == before

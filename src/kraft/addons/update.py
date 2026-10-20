@@ -449,12 +449,13 @@ class Result:
 
     addon_id: str
     #: `applied`; `current` (nothing to take); `declined` (reviewed, not
-    #: accepted: an update is waiting); `refused` (a check failed);
+    #: accepted: an update is waiting); `held` (a range drops the move from
+    #: the set: it waits on its locked version); `refused` (a check failed);
     #: `unpublished` (gone from its collection, kept on its lock); `failed`
     #: (could not be checked or written).
     outcome: str
     review: Review | None = None
-    #: Why, for `refused`, `unpublished` and `failed`.
+    #: Why, for `held`, `refused`, `unpublished` and `failed`.
     problems: tuple[str, ...] = ()
     #: For `failed`: `network`, `auth`, `refused` or `busy`.
     kind: str | None = None
@@ -668,13 +669,14 @@ def breaks(
     before: State,
     after: State,
     config_dir: Path,
-    namespace: str | None = None,
+    namespace: str | Collection[str] | None = None,
     *,
     exempt: Collection[str] = (),
 ) -> list[str]:
     """Why what resolves in `before` would not in `after`. `namespace` is the
-    candidate add-on's, whose own chains must resolve too; None when no
-    add-on's content changes (an `addons.yaml` edit). `exempt`: repo-library
+    candidate add-on's, or every namespace of a tree moving together, whose
+    own chains must resolve too; None when no add-on's content changes (an
+    `addons.yaml` edit). `exempt`: repo-library
     namespaces whose chains `held_breaks` reports instead, as Reach
     (`a-broken-repo-library-chain-holds-an-update`)."""
     out = (
@@ -686,12 +688,13 @@ def breaks(
     # from, so a chain that failed before fails "anew" from a candidate's
     # scratch copy. One that already failed is not this change's break.
     failed = {chain for chain, _ in before.issues if chain is not None}
+    own = {namespace} if isinstance(namespace, str) else set(namespace or ())
     for chain, message in sorted(after.issues - before.issues, key=str):
         if chain is None:
             out.append(message)
         elif chain in failed:
             continue
-        elif namespace is not None and chain.startswith(f"{namespace}:"):
+        elif _qualifier(chain) in own:
             out.append(f"its chain {chain} does not resolve: {message}")
         elif _qualifier(chain) in exempt:
             continue
@@ -846,9 +849,9 @@ def _children_left_behind(
     addon_id: str, version: str, addons: Sequence[load.InstalledAddon]
 ) -> list[tuple[str, str]]:
     """`(child id, why)` for each loading child among `addons` whose range
-    `version` of its parent `addon_id` falls outside: moving the parent would
-    leave it out. Slice 1 refuses the move; it does not move the set, so the
-    way across is to take the child out first."""
+    `version` of its parent `addon_id` falls outside: it would not load. Said
+    of a current add-on only; a move a range rejects is the set rule's, which
+    holds it (`_settle`)."""
     return [
         (
             child.id,
@@ -865,11 +868,357 @@ def _children_left_behind(
 
 
 @dataclass(frozen=True)
-class _Candidate:
+class _Move:
+    """One add-on going from its locked version (none for an install) to its
+    collection's candidate, resolved and written to a scratch root."""
+
     addon_id: str
     extracted: fetch.Extracted
     mirror: Path | None
-    locks_as: LockEntry
+    name: str
+    namespace: str
+    found: AddonManifest
+    commit: str | None
+    source: str
+    digest: str
+    collection: CollectionConfig
+    locked: LockEntry | None
+    #: The locked store's files; None when nothing is installed or it does not read.
+    old: fetch.Extracted | None
+    #: Said first in its review: the collection URL that moved, and an
+    #: installed version that could not be read (`_said`).
+    said: tuple[str, ...]
+    #: The candidate as it would load, from its scratch root.
+    candidate: load.InstalledAddon
+
+    def locks_as(self) -> LockEntry:
+        return LockEntry(
+            namespace=self.namespace,
+            ref=self.collection.ref,
+            git=self.collection.git,
+            commit=self.commit,
+            tree=self.extracted.tree,
+            source=self.source,
+            digest=self.digest,
+            version=self.found.version,
+            updated_at=datetime.now(UTC),
+        )
+
+
+@dataclass(frozen=True)
+class _Context:
+    """What every move of one `update` is resolved and checked against."""
+
+    config: AddonsConfig
+    lock: AddonsLock
+    #: The add-ons installed when the update started.
+    loaded: Sequence[load.InstalledAddon]
+    running: str
+    #: Collection name to its `catalogue`, or the error fetching it gave.
+    catalogues: dict[str, tuple | Exception]
+    config_dir: Path
+    addons_root: Path
+    scratch: Path
+    re_install: bool
+
+
+def _said(
+    locked: LockEntry | None,
+    collection: CollectionConfig,
+    found: AddonManifest,
+    old: fetch.Extracted | None,
+) -> tuple[str, ...]:
+    """What a review says before its own lines: a collection URL that moved,
+    and an update nobody can compare, which holds it."""
+    from kraft.addons import review as review_mod
+
+    out = []
+    if locked is not None and _moved(collection, locked):
+        was = fetch.redact(locked.git) if locked.git else "a local directory"
+        now = fetch.redact(collection.git) if collection.git else "a local directory"
+        out.append(f"collection URL changed: {was} -> {now}")
+    if old is None and locked is not None:
+        out.append(f"the installed {locked.version} could not be read to compare with")
+        # The lock still knows the version: a step back is said as ever.
+        if review_mod.precedence(found.version) < review_mod.precedence(locked.version):
+            out.append(f"downgrade: {locked.version} -> {found.version}")
+    return tuple(out)
+
+
+def _judge(
+    found: AddonManifest,
+    files: Mapping[str, tuple[str, bytes]],
+    candidate: load.InstalledAddon,
+    rest: Sequence[load.InstalledAddon],
+    ctx: _Context,
+    manifests: Mapping[str, AddonManifest] | None = None,
+) -> list[str]:
+    """Raise `Refused` when `candidate` may not be taken among `rest` (the
+    instance as it would be around it): another add-on holds its namespace,
+    the instance lacks what it and its ancestors require, or its content is
+    refused. Returns why its ancestry does not hold there, which refuses a
+    move and is a note on a current add-on."""
+    addon_id, namespace = candidate.id, candidate.namespace
+    holders = {
+        held.namespace: other for other, held in ctx.lock.addons.items() if other != addon_id
+    }
+    if namespace in holders:
+        raise Refused(
+            [
+                f"namespace {namespace!r} is still held by {holders[namespace]}; "
+                "update that add-on first"
+            ]
+        )
+    held_by_tree: list[str] = []
+    try:
+        ancestors = _ancestors(candidate, rest, ctx.config)
+    except Refused as exc:
+        ancestors, held_by_tree = (), list(exc.problems)
+    try:
+        requires = inherit.requirements(
+            (candidate, *ancestors), {**(manifests or {}), addon_id: found}
+        )
+    except (fetch.AddonRefused, fetch.FetchError, manifest.ManifestError, OSError, ValueError):
+        requires = found.requires  # an ancestor's store does not read; loading says why
+    if why := load.instance_problem(namespace, requires, ctx.config_dir):
+        raise Refused([why])
+    others = (
+        set(holders)
+        | {ctx.config.namespace(o) for o in ctx.config.addons if o != addon_id}
+        | {p.namespace for p in ctx.loaded if p.repo_id is not None}
+    )
+    check(
+        found,
+        files,
+        other_namespaces=others,
+        named_by=referrers(namespace, rest),
+        repositories=load.connected_ids(ctx.config_dir),
+        ancestors=ancestors,
+    )
+    return held_by_tree
+
+
+def _dropped(
+    would_load: Sequence[load.InstalledAddon], loading: Collection[str], but: Collection[str] = ()
+) -> list[str]:
+    """A line for each of `loading` (ids) that `would_load` leaves out, `but`
+    those said otherwise: its chains would be gone, not broken."""
+    return [
+        f"{p.id} would no longer load: {p.left_out}"
+        for p in would_load
+        if p.id in loading and p.left_out is not None and p.id not in but
+    ]
+
+
+def _resolve(addon_id: str, ctx: _Context) -> _Move | Result:
+    """`addon_id`'s move, read from its collection; else what `update` says of
+    it: `current` with nothing to take (judged against the instance as it is),
+    or `refused`, `failed` or `unpublished`."""
+    if addon_id not in ctx.config.addons:
+        return Result(addon_id, "refused", problems=("is not in addons.yaml; install it first",))
+    name, collection_name = addon_id.split("@", 1)
+    collection = ctx.config.collections[collection_name]
+    locked = ctx.lock.addons.get(addon_id)
+    namespace = ctx.config.namespace(addon_id)
+    catalogues = ctx.catalogues
+    try:
+        if collection_name not in catalogues:
+            try:
+                catalogues[collection_name] = catalogue(
+                    collection_name, collection, ctx.addons_root
+                )
+            except (fetch.FetchError, fetch.AddonRefused, manifest.ManifestError) as exc:
+                catalogues[collection_name] = exc
+        if isinstance(catalogues[collection_name], Exception):
+            raise catalogues[collection_name]
+        mirror, commit, listed = catalogues[collection_name]
+        entry = next((e for e in listed.addons if e.name == name), None)
+        if entry is None and locked is not None:
+            return Result(
+                addon_id,
+                "unpublished",
+                problems=(
+                    f"is no longer published by {collection_name}; it stays on {locked.version}",
+                ),
+            )
+        if entry is None:
+            raise fetch.AddonRefused(f"collection {collection_name} has no add-on {name}")
+        if mirror is not None:
+            extracted = fetch.extract_git(mirror, commit, entry.source)
+        else:
+            extracted = fetch.extract_dir(Path(collection.path) / entry.source.removeprefix("./"))
+        if manifest.ADDON_JSON not in extracted.files:
+            raise manifest.ManifestError(f"no {manifest.ADDON_JSON}")
+        found = manifest.addon(
+            manifest.parse(extracted.files[manifest.ADDON_JSON][1].decode(), manifest.ADDON_JSON),
+            manifest.ADDON_JSON,
+        )
+        manifest.check_addon(found, name, extracted.files)
+        if not manifest.is_source_build(ctx.running):
+            if why := manifest.kraft_compatible(found.requires.kraft, ctx.running):
+                raise Refused([f"{found.version} {why}; this is Kraft {ctx.running}"])
+        digest = fetch.digest(extracted.files)
+        pending = (
+            locked is None
+            or ctx.re_install
+            or found.version != locked.version
+            or collection.ref != locked.ref
+            or _moved(collection, locked)
+            or namespace != locked.namespace
+            or (mirror is None and digest != locked.digest)
+        )
+        if not pending:
+            # Judged against the instance as it is. Why its ancestry would not
+            # hold is a note, so a current add-on whose parent is left out stays
+            # current rather than refused on every routine update.
+            rest = [p for p in ctx.loaded if p.id != addon_id]
+            candidate = as_installed(addon_id, namespace, found, ctx.scratch)
+            held_by_tree = _judge(found, extracted.files, candidate, rest, ctx)
+            behind = _children_left_behind(addon_id, found.version, rest)
+            held_by_tree += [why for _child, why in behind]
+            held_by_tree += _dropped(
+                inherit.cascade([*rest, candidate]),
+                {p.id for p in rest if p.left_out is None},
+                {child for child, _why in behind},
+            )
+            if extracted.tree != locked.tree:
+                held_by_tree.append(
+                    f"version {locked.version} unchanged, but its files changed at "
+                    f"{commit[:12]}; --re-install to take it"
+                )
+            return Result(addon_id, "current", note="; ".join(held_by_tree) or None)
+    except fetch.FetchError as exc:
+        return Result(addon_id, "failed", problems=(str(exc),), kind=exc.kind)
+    except Refused as exc:
+        return Result(addon_id, "refused", problems=tuple(exc.problems))
+    except (fetch.AddonRefused, manifest.ManifestError, OSError) as exc:
+        return Result(addon_id, "refused", problems=(str(exc),))
+
+    store = ctx.addons_root / "store" / locked.digest.removeprefix("sha256:") if locked else None
+    old = None
+    if store is not None and store.is_dir():
+        try:
+            old = fetch.verify_store(store)
+        except Exception:  # noqa: BLE001 -- an edited store can break in any way
+            old = None
+    root = fetch.write_scratch(ctx.scratch, extracted)
+    return _Move(
+        addon_id,
+        extracted,
+        mirror,
+        name=name,
+        namespace=namespace,
+        found=found,
+        commit=commit,
+        source=entry.source,
+        digest=digest,
+        collection=collection,
+        locked=locked,
+        old=old,
+        said=_said(locked, collection, found, old),
+        candidate=as_installed(addon_id, namespace, found, root),
+    )
+
+
+def _check_moves(moves: dict[str, _Move], ctx: _Context) -> dict[str, Result]:
+    """Phase 2: each move judged among the candidates of every move and the
+    loaded add-ons that are not moving. A refused move is taken out of
+    `moves`, and its `Result` returned. An update's ranges are left to the set
+    rule, which holds rather than refuses; an install's are judged here."""
+    world = [*(p for p in ctx.loaded if p.id not in moves), *(m.candidate for m in moves.values())]
+    unranged = [replace(p, parent_range=None) for p in world]
+    manifests = {i: m.found for i, m in moves.items()}
+    parents = {p.id: p.parent for p in [*ctx.loaded, *world] if p.repo_id is None}
+    # A descendant whose ancestry no longer holds is named: its chains would be
+    # gone, not broken. One a range leaves out is the set rule's.
+    loading = {p.id for p in ctx.loaded if p.left_out is None and p.id not in moves}
+    cascaded = inherit.cascade(unranged)
+    refused: dict[str, Result] = {}
+    for addon_id, move in moves.items():
+        on = world if move.locked is None else unranged
+        rest = [p for p in on if p.id != addon_id]
+        candidate = next(p for p in on if p.id == addon_id)
+        try:
+            held_by_tree = _judge(move.found, move.extracted.files, candidate, rest, ctx, manifests)
+        except Refused as exc:
+            refused[addon_id] = Result(addon_id, "refused", problems=tuple(exc.problems))
+            continue
+        except (fetch.AddonRefused, manifest.ManifestError, OSError) as exc:
+            refused[addon_id] = Result(addon_id, "refused", problems=(str(exc),))
+            continue
+        held_by_tree += _dropped(
+            [p for p in cascaded if addon_id in _lineage(p.id, parents)], loading
+        )
+        if held_by_tree:
+            refused[addon_id] = Result(addon_id, "refused", problems=tuple(held_by_tree))
+    for addon_id in refused:
+        del moves[addon_id]
+    return refused
+
+
+def _lineage(addon_id: str, parents: Mapping[str, str | None]) -> set[str]:
+    """The ancestors of `addon_id` through `parents`, at most `MAX_DEPTH`
+    steps, stopping at a cycle."""
+    out: set[str] = set()
+    current = parents.get(addon_id)
+    while current is not None and current not in out and len(out) < inherit.MAX_DEPTH:
+        out.add(current)
+        current = parents.get(current)
+    return out
+
+
+def _settle(moves: dict[str, _Move], ctx: _Context) -> dict[str, Result]:
+    """Phase 3: the set rule over `moves`. A dropped move is taken out of
+    `moves`: `held` when it has a lock, `refused` for an install. A loading
+    add-on's locked side counts; one left out (a disabled child) holds no
+    move."""
+    locked = {
+        a.id: inherit.Side(a.version, a.parent, a.parent_range)
+        for a in ctx.loaded
+        if a.repo_id is None and a.left_out is None
+    }
+    sides = {
+        i: inherit.Side(m.found.version, m.candidate.parent, m.candidate.parent_range)
+        for i, m in moves.items()
+    }
+    out: dict[str, Result] = {}
+    for addon_id, why in inherit.settle(locked, sides).items():
+        outcome = "held" if moves.pop(addon_id).locked is not None else "refused"
+        out[addon_id] = Result(addon_id, outcome, problems=(why,))
+    return out
+
+
+def _review(
+    move: _Move,
+    old_ancestors: Sequence[load.InstalledAddon],
+    new_ancestors: Sequence[load.InstalledAddon],
+) -> Review:
+    """`move`'s own review, its `said` lines first."""
+    from kraft.addons import review as review_mod
+
+    old, said = move.old, move.said
+    reviewed = None
+    if old is not None:
+        try:
+            reviewed = review_mod.review(
+                move.addon_id,
+                old,
+                move.extracted,
+                old_ancestors=old_ancestors,
+                new_ancestors=new_ancestors,
+            )
+        except Exception:  # noqa: BLE001 -- an edited store can break in any way
+            old, said = None, _said(move.locked, move.collection, move.found, None)
+    if reviewed is None:
+        # Nothing installed, or a store that is gone or does not read:
+        # everything in the candidate is shown as new.
+        reviewed = review_mod.review(
+            move.addon_id, None, move.extracted, new_ancestors=new_ancestors
+        )
+        if move.locked is not None:
+            # Still an update, and one nobody can compare: said first, and held.
+            reviewed = replace(reviewed, old_version=move.locked.version)
+    return replace(reviewed, reach=(*said, *reviewed.reach))
 
 
 def update(
@@ -882,9 +1231,12 @@ def update(
     addons_root: Path | None = None,
 ) -> list[Result]:
     """Install or update `ids` (every add-on in `addons.yaml` when None), one
-    `Result` each. `accept` is asked once per add-on that has something to
-    take, with its review. `entries` are new or changed `addons.yaml` entries
-    (an install, an alias), held in memory and written only for an add-on that
+    `Result` each, in `ids`' order. The moves are settled as a set
+    (`inherit.settle`): one a range drops is `held` (`refused` for an
+    install). `accept` is asked once per tree that has something to take,
+    with a `Group` of its members' reviews, and the tree applies or is
+    declined whole. `entries` are new or changed `addons.yaml` entries (an
+    install, an alias), held in memory and written only for an add-on that
     was accepted. `re_install` takes the commit the ref resolves to now even
     at an unchanged version. Raises `Refused` when `entries` do not fit
     `addons.yaml`; `ConfigError` or `PolicyError` when `addons.yaml`, the lock
@@ -912,251 +1264,115 @@ def update(
     except ValidationError as exc:
         raise Refused([first_error(exc, AddonsConfig.FILE)]) from exc
 
-    running = kraft_update.installed()
-    catalogues: dict[str, tuple | Exception] = {}
+    order = list(dict.fromkeys(ids if ids is not None else config.addons))
     results: dict[str, Result] = {}
-    accepted: list[_Candidate] = []
+    accepted: list[_Move] = []
     with tempfile.TemporaryDirectory() as scratch:
         loaded = list(load.installed(config_dir, addons_root))
         state = state_of(config_dir, loaded)
-        for addon_id in ids if ids is not None else list(config.addons):
-            if addon_id not in config.addons:
-                results[addon_id] = Result(
-                    addon_id, "refused", problems=("is not in addons.yaml; install it first",)
+        ctx = _Context(
+            config=config,
+            lock=lock,
+            loaded=tuple(loaded),
+            running=kraft_update.installed(),
+            catalogues={},
+            config_dir=config_dir,
+            addons_root=addons_root,
+            scratch=Path(scratch),
+            re_install=re_install,
+        )
+        # 1. Resolve.
+        moves: dict[str, _Move] = {}
+        for addon_id in order:
+            resolved = _resolve(addon_id, ctx)
+            if isinstance(resolved, _Move):
+                moves[addon_id] = resolved
+            else:
+                results[addon_id] = resolved
+        # 2. Check, and 3. settle.
+        results |= _check_moves(moves, ctx)
+        results |= _settle(moves, ctx)
+        # 4. Trees: one review and one answer each.
+        parents = {p.id: p.parent for p in loaded if p.repo_id is None}
+        parents |= {i: m.candidate.parent for i, m in moves.items()}
+        for tree in inherit.trees(moves, parents):
+            members = [moves[i] for i in tree]
+            would_load = list(
+                inherit.cascade(
+                    [*(p for p in loaded if p.id not in tree), *(m.candidate for m in members)]
                 )
-                continue
-            name, collection_name = addon_id.split("@", 1)
-            collection = config.collections[collection_name]
-            locked = lock.addons.get(addon_id)
-            namespace = config.namespace(addon_id)
-            try:
-                if collection_name not in catalogues:
-                    try:
-                        catalogues[collection_name] = catalogue(
-                            collection_name, collection, addons_root
-                        )
-                    except (fetch.FetchError, fetch.AddonRefused, manifest.ManifestError) as exc:
-                        catalogues[collection_name] = exc
-                if isinstance(catalogues[collection_name], Exception):
-                    raise catalogues[collection_name]
-                mirror, commit, listed = catalogues[collection_name]
-                entry = next((e for e in listed.addons if e.name == name), None)
-                if entry is None and locked is not None:
-                    results[addon_id] = Result(
-                        addon_id,
-                        "unpublished",
-                        problems=(
-                            f"is no longer published by {collection_name}; "
-                            f"it stays on {locked.version}",
-                        ),
-                    )
-                    continue
-                if entry is None:
-                    raise fetch.AddonRefused(f"collection {collection_name} has no add-on {name}")
-                if mirror is not None:
-                    extracted = fetch.extract_git(mirror, commit, entry.source)
-                else:
-                    extracted = fetch.extract_dir(
-                        Path(collection.path) / entry.source.removeprefix("./")
-                    )
-                if manifest.ADDON_JSON not in extracted.files:
-                    raise manifest.ManifestError(f"no {manifest.ADDON_JSON}")
-                found = manifest.addon(
-                    manifest.parse(
-                        extracted.files[manifest.ADDON_JSON][1].decode(), manifest.ADDON_JSON
-                    ),
-                    manifest.ADDON_JSON,
-                )
-                manifest.check_addon(found, name, extracted.files)
-                if not manifest.is_source_build(running):
-                    if why := manifest.kraft_compatible(found.requires.kraft, running):
-                        raise Refused([f"{found.version} {why}; this is Kraft {running}"])
-                holders = {
-                    held.namespace: other
-                    for other, held in lock.addons.items()
-                    if other != addon_id
-                }
-                if namespace in holders:
-                    raise Refused(
-                        [
-                            f"namespace {namespace!r} is still held by {holders[namespace]}; "
-                            "update that add-on first"
-                        ]
-                    )
-                if why := load.instance_problem(namespace, found.requires, config_dir):
-                    raise Refused([why])
-                rest = [p for p in loaded if p.id != addon_id]
-                # The candidate as the tree sees it; its root is swapped for the
-                # scratch copy once it is known to be pending. Neither the
-                # ancestry nor the cascade reads a root.
-                candidate = as_installed(addon_id, namespace, found, Path(scratch))
-                # Why the move would not hold in this tree: said only if there
-                # is a move, so a current add-on whose parent is left out stays
-                # current rather than refused on every routine update.
-                held_by_tree: list[str] = []
-                try:
-                    ancestors = _ancestors(candidate, rest, config)
-                except Refused as exc:
-                    ancestors, held_by_tree = (), list(exc.problems)
-                would_load = list(inherit.cascade([*rest, candidate]))
-                behind = _children_left_behind(addon_id, found.version, rest)
-                held_by_tree += [why for _child, why in behind]
-                # A descendant whose ancestry no longer holds is named: its
-                # chains would be gone, not broken.
-                loading = {p.id for p in rest if p.left_out is None}
-                held_by_tree += [
-                    f"{p.id} would no longer load: {p.left_out}"
-                    for p in would_load
-                    if p.id in loading
-                    and p.left_out is not None
-                    and p.id not in {child for child, _why in behind}
-                ]
-                others = (
-                    set(holders)
-                    | {config.namespace(o) for o in config.addons if o != addon_id}
-                    | {p.namespace for p in loaded if p.repo_id is not None}
-                )
-                check(
-                    found,
-                    extracted.files,
-                    other_namespaces=others,
-                    named_by=referrers(namespace, rest),
-                    repositories=load.connected_ids(config_dir),
-                    ancestors=ancestors,
-                )
-            except fetch.FetchError as exc:
-                results[addon_id] = Result(addon_id, "failed", problems=(str(exc),), kind=exc.kind)
-                continue
-            except Refused as exc:
-                results[addon_id] = Result(addon_id, "refused", problems=tuple(exc.problems))
-                continue
-            except (fetch.AddonRefused, manifest.ManifestError, OSError) as exc:
-                results[addon_id] = Result(addon_id, "refused", problems=(str(exc),))
-                continue
-
-            digest = fetch.digest(extracted.files)
-            pending = (
-                locked is None
-                or re_install
-                or found.version != locked.version
-                or collection.ref != locked.ref
-                or _moved(collection, locked)
-                or namespace != locked.namespace
-                or (mirror is None and digest != locked.digest)
             )
-            if not pending:
-                notes = list(held_by_tree)
-                if extracted.tree != locked.tree:
-                    notes.append(
-                        f"version {locked.version} unchanged, but its files changed at "
-                        f"{commit[:12]}; --re-install to take it"
-                    )
-                results[addon_id] = Result(addon_id, "current", note="; ".join(notes) or None)
-                continue
-            if held_by_tree:
-                results[addon_id] = Result(addon_id, "refused", problems=tuple(held_by_tree))
-                continue
-
-            store = (
-                addons_root / "store" / locked.digest.removeprefix("sha256:") if locked else None
-            )
-            old = reviewed = None
-            if store is not None and store.is_dir():
-                try:
-                    old = fetch.verify_store(store)
-                    reviewed = review_mod.review(
-                        addon_id,
-                        old,
-                        extracted,
-                        old_ancestors=_ancestry_in(addon_id, loaded),
-                        new_ancestors=_ancestry_in(addon_id, would_load),
-                    )
-                except Exception:  # noqa: BLE001 -- an edited store can break in any way
-                    old = None
-            if old is None:
-                # Nothing installed, or a store that is gone or does not read:
-                # everything in the candidate is shown as new.
-                reviewed = review_mod.review(
-                    addon_id, None, extracted, new_ancestors=_ancestry_in(addon_id, would_load)
-                )
-            if old is None and locked is not None:
-                # Still an update, and one nobody can compare: said first, and held.
-                said = [f"the installed {locked.version} could not be read to compare with"]
-                # The lock still knows the version: a step back is said as ever.
-                if review_mod.precedence(found.version) < review_mod.precedence(locked.version):
-                    said.append(f"downgrade: {locked.version} -> {found.version}")
-                reviewed = replace(
-                    reviewed, old_version=locked.version, reach=(*said, *reviewed.reach)
-                )
-            if locked is not None and _moved(collection, locked):
-                was = fetch.redact(locked.git) if locked.git else "a local directory"
-                now = fetch.redact(collection.git) if collection.git else "a local directory"
-                moved = f"collection URL changed: {was} -> {now}"
-                reviewed = replace(reviewed, reach=(moved, *reviewed.reach))
-
-            root = fetch.write_scratch(Path(scratch), extracted)
-            would_load = [replace(p, root=root) if p.id == addon_id else p for p in would_load]
             after = state_of(config_dir, would_load)
             libraries = {p.namespace for p in would_load if p.repo_id is not None}
-            if broken := breaks(state, after, config_dir, namespace, exempt=libraries):
-                results[addon_id] = Result(
-                    addon_id,
-                    "refused",
-                    review=reviewed,
-                    problems=tuple(why.replace(str(root), addon_id) for why in broken),
+            reviews = [
+                _review(
+                    m,
+                    old_ancestors=_ancestry_in(m.addon_id, loaded),
+                    new_ancestors=_ancestry_in(m.addon_id, would_load),
                 )
+                for m in members
+            ]
+            namespaces = [m.namespace for m in members]
+            # D2: every member of a tree is named here, so a break refuses
+            # every member.
+            if broken := breaks(state, after, config_dir, namespaces, exempt=libraries):
+                said = broken
+                for m in members:
+                    said = [why.replace(str(m.candidate.root), m.addon_id) for why in said]
+                for m, reviewed in zip(members, reviews, strict=True):
+                    results[m.addon_id] = Result(
+                        m.addon_id, "refused", review=reviewed, problems=tuple(said)
+                    )
                 continue
             held = held_breaks(state, after, libraries)
-            captured = (
-                [
-                    f"{where}: {key} {value!r} is now read from this add-on"
-                    for where, key, _kind, value in references(config_dir)
-                    if _qualifier(value) == namespace
-                ]
-                if locked is None or locked.namespace != namespace
-                else []
-            )
-            # A descendant's chains read this add-on's components late, so an
+            # A descendant's chains read a member's components late, so an
             # update here can change them: they are diffed like the instance's.
-            descendants = _descendants(addon_id, loaded) | _descendants(addon_id, would_load)
+            # A member's own chains are in its own review.
+            descendants = {
+                ns
+                for m in members
+                for ns in _descendants(m.addon_id, loaded) | _descendants(m.addon_id, would_load)
+            } - set(namespaces)
             reach, content = (
                 review_mod.local_changes(
                     state.library,
                     after.library,
-                    namespace,
+                    namespaces[0],
                     extra=_chains_of(libraries | descendants, after),
                 )
                 if after.library is not None
                 else ([], [])
             )
-            reviewed = replace(
-                reviewed,
-                reach=(*held, *reviewed.reach, *captured, *reach),
-                content=(*reviewed.content, *content),
-            )
-            if not accept(review_mod.Group((reviewed,))):
-                results[addon_id] = Result(addon_id, "declined", review=reviewed)
+            for index, (m, reviewed) in enumerate(zip(members, reviews, strict=True)):
+                captured = (
+                    [
+                        f"{where}: {key} {value!r} is now read from this add-on"
+                        for where, key, _kind, value in references(config_dir)
+                        if _qualifier(value) == m.namespace
+                    ]
+                    if m.locked is None or m.locked.namespace != m.namespace
+                    else []
+                )
+                # The tree's own lines go to its first member.
+                first = index == 0
+                reviews[index] = replace(
+                    reviewed,
+                    reach=(
+                        *(held if first else ()),
+                        *reviewed.reach,
+                        *captured,
+                        *(reach if first else ()),
+                    ),
+                    content=(*reviewed.content, *(content if first else ())),
+                )
+            if not accept(review_mod.Group(tuple(reviews))):
+                for m, reviewed in zip(members, reviews, strict=True):
+                    results[m.addon_id] = Result(m.addon_id, "declined", review=reviewed)
                 continue
             loaded, state = would_load, after
-            results[addon_id] = Result(addon_id, "applied", review=reviewed)
-            accepted.append(
-                _Candidate(
-                    addon_id,
-                    extracted,
-                    mirror,
-                    LockEntry(
-                        namespace=namespace,
-                        ref=collection.ref,
-                        git=collection.git,
-                        commit=commit,
-                        tree=extracted.tree,
-                        source=entry.source,
-                        digest=digest,
-                        version=found.version,
-                        updated_at=datetime.now(UTC),
-                    ),
-                )
-            )
+            for m, reviewed in zip(members, reviews, strict=True):
+                results[m.addon_id] = Result(m.addon_id, "applied", review=reviewed)
+                accepted.append(m)
 
     if accepted:
         try:
@@ -1166,7 +1382,7 @@ def update(
                 for done in accepted:
                     fetch.write_store(addons_root, done.extracted)
                     if done.mirror is not None:
-                        fetch.pin(done.mirror, done.locks_as.commit)
+                        fetch.pin(done.mirror, done.locks_as().commit)
                 took = {
                     d.addon_id: new_entries[d.addon_id]
                     for d in accepted
@@ -1180,7 +1396,7 @@ def update(
                     )
                 # A lock entry `addons.yaml` no longer lists is dropped here.
                 kept = {i: e for i, e in lock.addons.items() if i in config.addons}
-                locks = AddonsLock(addons=kept | {d.addon_id: d.locks_as for d in accepted})
+                locks = AddonsLock(addons=kept | {d.addon_id: d.locks_as() for d in accepted})
                 write_text(
                     files[1],
                     _LOCK_HEADER + yaml.safe_dump(locks.model_dump(mode="json"), sort_keys=False),
@@ -1193,7 +1409,7 @@ def update(
         else:
             # `auto_update` records its own outcome after this.
             clear_status(addons_root, {done.addon_id for done in accepted})
-    return list(results.values())
+    return [results[addon_id] for addon_id in order]
 
 
 #: Where each add-on's last auto-update is recorded, under `run/addons/`:
@@ -1333,6 +1549,11 @@ def auto_update(
             "declined": {
                 "outcome": "held",
                 "message": f"{held.get(result.addon_id)}; run kraft admin addon update",
+            },
+            "held": {
+                "outcome": "held",
+                "message": f"{said}; run kraft admin addon update to move it with its "
+                "relatives, or wait for a release that fits",
             },
             "refused": {"outcome": "failed", "kind": "refused", "message": said},
             "failed": {"outcome": "failed", "kind": result.kind, "message": said},

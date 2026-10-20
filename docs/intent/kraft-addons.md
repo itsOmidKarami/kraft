@@ -98,8 +98,8 @@ origin: src/kraft/addons/inherit.py §ancestry
 
 ## REQ every-child-accepts-its-parents-version
 
-IF an add-on's parent is locked at a version outside the range its `requires.addons` gives, THEN the system SHALL leave the add-on out, naming the version and the range; and IF installing or updating an add-on would put it outside its parent's range, or its parent outside an installed child's range, THEN the system SHALL refuse that install or update, naming the version and the range.
-enforced-by: tests/addons/test_inherit.py::test_ancestry[out-of-range], tests/addons/test_inherit.py::test_ancestry[no-range-is-not-checked], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-out-of-range], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[parent-update-leaves-child-out-of-range]
+IF an add-on's parent is locked at a version outside the range its `requires.addons` gives, THEN the system SHALL leave the add-on out, naming the version and the range; IF installing an add-on would put it outside its parent's range, THEN the system SHALL refuse that install, naming the version and the range; and IF updating an add-on would put it outside its parent's range, or its parent outside an installed child's range, THEN the system SHALL hold that update rather than refuse it, naming the version and the range.
+enforced-by: tests/addons/test_inherit.py::test_ancestry[out-of-range], tests/addons/test_inherit.py::test_ancestry[no-range-is-not-checked], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-out-of-range], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[parent-update-leaves-child-out-of-range], tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[child-held]
 origin: src/kraft/addons/inherit.py §ancestry
 
 ## REQ a-child-of-a-left-out-parent-is-left-out
@@ -333,13 +333,13 @@ origin: src/kraft/addons/update.py §update
 ## REQ update-requires-acceptance
 
 IF an install or update is declined, refused, or run with `--check`, THEN the system SHALL NOT change `addons.yaml`, `addons.lock` or the store.
-enforced-by: tests/addons/test_update.py::test_a_declined_update_writes_nothing[install], tests/addons/test_update.py::test_a_declined_update_writes_nothing[update], tests/addons/test_update.py::test_a_batch_continues_past_a_refused_addon, tests/cli/test_addon.py::test_a_refused_install_writes_nothing, tests/cli/test_addon.py::test_update_check_exit_codes[update-waiting], tests/cli/test_addon.py::test_no_terminal_without_yes_declines
+enforced-by: tests/addons/test_update.py::test_a_declined_update_writes_nothing[install], tests/addons/test_update.py::test_a_declined_update_writes_nothing[update], tests/addons/test_update.py::test_a_batch_continues_past_a_refused_addon, tests/cli/test_addon.py::test_a_refused_install_writes_nothing, tests/cli/test_addon.py::test_update_check_exit_codes[update-waiting], tests/cli/test_addon.py::test_no_terminal_without_yes_declines, tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[tree-declined-writes-nothing]
 origin: src/kraft/addons/update.py §update
 
 ## REQ update-refuses-a-change-that-breaks-a-chain
 
 IF an update's candidate add-ons would leave a currently resolving chain of the instance's own or of an add-on, a chain reference to one of those, or a profile fallback unresolved, or would leave out a descendant add-on that loads now, THEN the system SHALL refuse that add-on and name each such reference or descendant.
-enforced-by: tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[local-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[repos-default-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[intake-schedule], tests/addons/test_update.py::test_a_captured_reference_the_addon_does_not_provide_is_refused, tests/addons/test_update.py::test_a_broken_profile_pairing_is_refused, tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[removed-node-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[anchor-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[override-path-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[added-id-taken], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[parent-update-breaks-child-chain], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[parent-update-drops-a-descendant]
+enforced-by: tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[local-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[repos-default-chain], tests/addons/test_update.py::test_an_update_that_breaks_a_reference_is_refused[intake-schedule], tests/addons/test_update.py::test_a_captured_reference_the_addon_does_not_provide_is_refused, tests/addons/test_update.py::test_a_broken_profile_pairing_is_refused, tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[removed-node-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[anchor-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[override-path-gone], tests/addons/test_update_extends.py::test_an_update_that_breaks_an_extending_chain_is_refused[added-id-taken], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[parent-update-breaks-child-chain], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[parent-update-drops-a-descendant], tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[tree-break-refuses-every-member]
 origin: src/kraft/addons/update.py §breaks
 
 ## REQ an-addon-lists-no-addons
@@ -591,7 +591,7 @@ origin: src/kraft/drafts/extending.py §detach
 ## REQ update-applies-a-consistent-set
 
 WHEN an update judges waiting moves, the system SHALL drop every move that breaks a range, judged with the other moves applied, repeat until none breaks, then re-offer each dropped move, parents first and then by id, keeping one whose addition to the kept set breaks no range, repeat the re-offer until it keeps nothing new, and apply only what is kept.
-enforced-by: tests/addons/test_inherit.py::test_settle[cascade], tests/addons/test_inherit.py::test_settle[move-together], tests/addons/test_inherit.py::test_settle[order-independent], tests/addons/test_inherit.py::test_settle[child-keeps-old-range], tests/addons/test_inherit.py::test_settle[re-offer-second-round], tests/addons/test_inherit.py::test_settle[re-offer-parents-first], tests/addons/test_inherit.py::test_settle[re-offer-by-depth-not-id], tests/addons/test_inherit.py::test_settle[re-offer-depth-is-the-locked-one]
+enforced-by: tests/addons/test_inherit.py::test_settle[cascade], tests/addons/test_inherit.py::test_settle[move-together], tests/addons/test_inherit.py::test_settle[order-independent], tests/addons/test_inherit.py::test_settle[child-keeps-old-range], tests/addons/test_inherit.py::test_settle[re-offer-second-round], tests/addons/test_inherit.py::test_settle[re-offer-parents-first], tests/addons/test_inherit.py::test_settle[re-offer-by-depth-not-id], tests/addons/test_inherit.py::test_settle[re-offer-depth-is-the-locked-one], tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[move-together], tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[child-applies-parent-held]
 origin: src/kraft/addons/inherit.py §settle
 
 ## REQ a-new-parent-name-the-child-shadows-is-reach
@@ -599,3 +599,15 @@ origin: src/kraft/addons/inherit.py §settle
 WHEN an ancestor's update adds a name the add-on's own files declare, the system SHALL list it under Reach, naming the ancestor.
 enforced-by: tests/addons/test_review.py::test_review_with_ancestors[shadow-task], tests/addons/test_review.py::test_review_with_ancestors[shadow-skill], tests/addons/test_review.py::test_review_with_ancestors[shadow-from-grandparent], tests/addons/test_review.py::test_review_with_ancestors[already-inherited-is-no-shadow]
 origin: src/kraft/addons/review.py §review
+
+## REQ a-tree-is-reviewed-as-one
+
+WHEN moves in one tree are applied, the system SHALL show them in one review and apply them on one accept.
+enforced-by: tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[move-together], tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[unrelated-keep-their-own-review]
+origin: src/kraft/addons/update.py §update
+
+## REQ a-move-held-by-a-range-is-waiting
+
+IF a move is dropped by a range, THEN the system SHALL report it held with that range and keep the locked version.
+enforced-by: tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[parent-held], tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[child-held], tests/addons/test_auto_update.py::test_a_range_held_auto_update_waits
+origin: src/kraft/addons/update.py §_settle

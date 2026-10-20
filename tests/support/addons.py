@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+from collections.abc import Collection
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -275,6 +276,56 @@ def install(
         }
         write_yaml(config_dir / "harnesses.yaml", harnesses)
     return store
+
+
+def child_manifest(parent_id: str, range_: str) -> dict:
+    """`addon_json`'s `requires` building on `parent_id` at `range_`, as
+    `make_collection` and `publish` take it under `manifest`."""
+    requires = addon_json("child")["requires"]
+    return {"requires": {**requires, "addons": {parent_id: range_}}}
+
+
+def make_tree(
+    tmp_path: Path,
+    addons: dict[str, dict],
+    *,
+    installed: Collection[str] | None = None,
+    missing: Collection[str] = (),
+    **local,
+) -> tuple[dict[str, Path], tuple[Path, Path]]:
+    """Installed add-ons across collections: `addons` maps an id
+    (`<name>@<collection>`) to a spec as `make_collection` takes it, plus
+    `parent: (id, range)`. One git collection is made per collection name, and
+    an instance (`local` is what `instance` takes) that has added each one not
+    in `missing`. Each id in `installed` (default: all) is installed, parents
+    first. Returns `(repos by collection name, home)`."""
+    by_collection: dict[str, dict[str, dict]] = {}
+    parents: dict[str, str | None] = {}
+    for addon_id, spec in addons.items():
+        name, collection = addon_id.split("@", 1)
+        spec = dict(spec)
+        parent = spec.pop("parent", None)
+        parents[addon_id] = parent[0] if parent else None
+        if parent:
+            spec["manifest"] = {**spec.get("manifest", {}), **child_manifest(*parent)}
+        by_collection.setdefault(collection, {})[name] = spec
+    repos = {
+        name: make_collection(tmp_path, specs, name=name) for name, specs in by_collection.items()
+    }
+    home = instance(
+        tmp_path,
+        {name: {"git": repo.as_uri()} for name, repo in repos.items() if name not in missing},
+        **local,
+    )
+
+    def depth(addon_id: str) -> int:
+        parent = parents.get(addon_id)
+        return 0 if parent is None else 1 + depth(parent)
+
+    for addon_id in sorted(addons if installed is None else installed, key=depth):
+        name, collection = addon_id.split("@", 1)
+        install(*home, repos[collection], name)
+    return repos, home
 
 
 def extracted(
