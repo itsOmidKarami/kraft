@@ -9,6 +9,24 @@ _default:
 setup:
     uv sync
     cd frontend && npm ci
+    @just setup-plugins
+
+# The Claude Code plugins .claude/settings.json turns on (superpowers,
+# impeccable). Committing `enabledPlugins` turns them on but does not download
+# one from an outside source, so each clone installs them once. Re-running is a
+# no-op. Skipped when `claude` is not installed, since it is optional here.
+[doc("Install the Claude Code plugins this repo uses (superpowers, impeccable)")]
+setup-plugins:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v claude >/dev/null; then
+        echo "claude not installed; skipping the Claude Code plugins"
+        exit 0
+    fi
+    claude plugin marketplace add anthropics/claude-plugins-official >/dev/null
+    claude plugin marketplace add pbakaus/impeccable >/dev/null
+    claude plugin install superpowers@claude-plugins-official --scope project
+    claude plugin install impeccable@impeccable --scope project
 
 # Install deps including semantic search (downloads a ~130MB model on first
 # search). Without this, /search still works in fts mode.

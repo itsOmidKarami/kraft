@@ -29,8 +29,26 @@ files work anyway and says so.
 ## Getting set up
 
 ```bash
-just setup      # uv sync + npm ci
+just setup      # uv sync + npm ci + the Claude Code plugins
 just dev        # backend + vite, state in .dev/, agents faked, UI on :5173
+```
+
+`just setup` also installs the two Claude Code plugins this repo's
+`.claude/settings.json` turns on, [superpowers](https://github.com/obra/superpowers)
+and [impeccable](https://impeccable.style), when `claude` is on your `PATH`.
+`just setup-plugins` runs that step alone. The settings file only turns them on;
+Claude Code does not download a plugin from an outside source for you, so each
+clone installs them once.
+
+Cloud sessions (claude.ai/code, the Claude app) never install the plugins a
+repository's settings turn on. Install them in the cloud environment's setup
+script instead, which runs before Claude Code starts and covers every session in
+that environment, whatever repositories it clones:
+
+```bash
+claude plugin marketplace add anthropics/claude-plugins-official
+claude plugin install superpowers@claude-plugins-official
+claude plugin install impeccable --marketplace pbakaus/impeccable
 ```
 
 `just dev` puts `fixtures/bin` on `PATH` ahead of the real agent, where `claude`
@@ -141,7 +159,7 @@ them unless you use the same tools:
 | `.github/` | CI workflows, issue and PR templates, CODEOWNERS | Yes: CI lives here |
 | `.claude-plugin/` | the marketplace manifest that publishes `plugins/` to Claude Code and Codex | Only to rename a plugin or add one |
 | `.cursor-plugin/` | the same marketplace for Cursor | Only to rename a plugin or add one |
-| `.claude/` | Claude Code settings: a hook that blocks raw `pytest` (needs `jq`) | Only with Claude Code |
+| `.claude/` | Claude Code settings: a hook that blocks raw `pytest` (needs `jq`), and the plugins it turns on (superpowers, impeccable) | Only with Claude Code |
 | `.beads/` | beads config and git hooks for the maintainer's private tracker | No |
 | `.agents/` | a beads skill for agent sessions | No |
 | `.codex/` | Codex hooks that call `bd`; they fail without beads installed | No |
