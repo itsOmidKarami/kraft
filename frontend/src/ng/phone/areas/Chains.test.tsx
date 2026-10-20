@@ -135,6 +135,12 @@ describe("Chains (L.1)", () => {
     expect(screen.queryByRole("button", { name: /cap/ })).toBeNull();
   });
 
+  it("a child add-on's chain page says it is inherited in its header", async () => {
+    const addon = { id: "company@corp", version: "3.2.0", inheritance: { origin: "inherited" as const, parent: { id: "company@corp", namespace: "company" }, author: { id: "company@corp", version: "3.2.0" } } };
+    open("/templates/chains/docs_only", "/templates/chains/:chain", { "GET /drafts/chains/docs_only": [200, view("chains", "docs_only", { addon })], "GET /templates/chains": [200, [CHAINS[0], { ...CHAINS[1], addon }]] });
+    expect(await screen.findByText(/^company@corp 3.2.0 · inherited from company · /)).toBeInTheDocument();
+  });
+
   it("a node page reads its fields, a gate's reject target included", async () => {
     mountAt(<ChainNodeView />, "/templates/chains/default/nodes/spec_approval", "/templates/chains/:chain/nodes/:node", answers());
     expect(await screen.findByText("an agent reads it first")).toBeInTheDocument();

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { SECTION_LABEL, SECTIONS, parseRef, addonLabel, refUrl, type PublishedLibrary, type Section } from "../../library/types";
+import { SECTION_LABEL, SECTIONS, parseRef, addonLabel, inheritanceText, refUrl, type PublishedLibrary, type Section } from "../../library/types";
 import { listRows } from "../../library/rows";
 import { detailOf, request } from "../../http";
 import { useConfigDraft } from "../../templates/draft/useConfigDraft";
@@ -64,7 +64,7 @@ export function LibraryList() {
       {draft.status === "error" && <p className="ph-error" role="alert">The library could not be read.</p>}
       {draft.view && rows.length === 0 && (q.trim() ? <NoMatch className="ph-empty" query={q} onClear={() => set({ q: "" })} /> : <p className="ph-empty">{`No ${SECTION_LABEL[kind].toLowerCase()} yet.`}</p>)}
       <Group
-        rows={rows.map((r): RowSpec => ({ key: r.id, label: r.name, mono: true, sub: r.used ? `used in ${r.used}` : undefined, to: refUrl(r.id), icon: undefined, chips: r.addon ? [{ label: addonLabel(r.addon) }] : r.problem ? [{ label: "problem", tone: "bad" }] : r.mark ? [{ label: r.mark === "add" ? "new" : "changed", tone: "change" }] : undefined }))}
+        rows={rows.map((r): RowSpec => ({ key: r.id, label: r.name, mono: true, sub: r.used ? `used in ${r.used}` : undefined, to: refUrl(r.id), icon: undefined, chips: r.addon ? [{ label: addonLabel(r.addon) }, ...(inheritanceText(r.addon) ? [{ label: inheritanceText(r.addon)! }] : [])] : r.problem ? [{ label: "problem", tone: "bad" }] : r.mark ? [{ label: r.mark === "add" ? "new" : "changed", tone: "change" }] : undefined }))}
       />
     </AreaScreen>
   );
@@ -129,7 +129,7 @@ export function LibraryComponentView() {
   const problems = (draft.view?.result.problems ?? []).filter((p) => p.path === path || p.path?.startsWith(`${path}.`) || p.component === path);
 
   return (
-    <AreaScreen title={parsed?.name ?? "Library"} sub={parsed ? `${SECTION_LABEL[parsed.section].replace(/s$/, "")}${pub?.addon ? ` · ${addonLabel(pub.addon)}` : ""}` : undefined} draft={draft}>
+    <AreaScreen title={parsed?.name ?? "Library"} sub={parsed ? `${SECTION_LABEL[parsed.section].replace(/s$/, "")}${pub?.addon ? ` · ${addonLabel(pub.addon)}${inheritanceText(pub.addon) ? ` · ${inheritanceText(pub.addon)}` : ""}` : ""}` : undefined} draft={draft}>
       {draft.view && !own && <p className="ph-empty">There is no component {path}.</p>}
       {problems.length > 0 && <Group title="Problems" rows={problems.map((p, i): RowSpec => ({ key: `p${i}`, label: p.message.replace(/^Value error, /, ""), sub: [p.chain && `breaks ${p.chain}`, p.repo && `repo ${p.repo}`].filter(Boolean).join(" · ") || undefined }))} />}
       {own && <Group rows={[{ label: "kind", value: typeof own.kind === "string" ? own.kind : parsed?.section ?? "", mono: true }, ...(typeof own.extends === "string" ? [{ label: "extends", value: own.extends, mono: true } as RowSpec] : []), ...(route ? [{ label: "route", value: route, mono: true } as RowSpec] : []), ...settings]} />}

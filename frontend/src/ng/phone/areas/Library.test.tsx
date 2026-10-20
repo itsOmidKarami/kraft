@@ -112,6 +112,25 @@ describe("Library component (L.2)", () => {
     expect(posts(calls)).toEqual([]);
   });
 
+  it.each([
+    ["inherited", { origin: "inherited", parent: { id: "company@corp", namespace: "company" }, author: { id: "company@corp", version: "3.2.0" } }, "inherited from company"],
+    ["overridden", { origin: "overridden", parent: { id: "company@corp", namespace: "company" }, author: { id: "team@corp", version: "1.0.0" } }, "overridden here"],
+    ["none", undefined, null],
+  ])("a child add-on's task is marked in its row and its header: %s", async (_id, inheritance, text) => {
+    const addon = { id: "team@corp", version: "1.0.0", ...(inheritance ? { inheritance } : {}) };
+    const shipped = { addon_library: { tasks: { "release:base": { kind: "agent", profile: "strong", auto: true } } } };
+    const answers = { ...lib(shipped), "GET /templates/library": [200, { ...PUBLISHED, components: [...PUBLISHED.components, { id: "tasks.release:base", kind: "tasks", name: "release:base", used_by: [], used_by_paths: [], addon }] }] as [number, unknown] };
+    mountAt(<LibraryList />, "/templates/library?kind=tasks", "/templates/library", answers);
+    const row = await screen.findByRole("link", { name: /^release:base/ });
+    if (text) expect(row).toHaveTextContent(text);
+    else expect(row).not.toHaveTextContent(/inherited|overridden/);
+    cleanup();
+    open("tasks.release%3Abase", answers);
+    const head = await screen.findByText(/^Task · team@corp/);
+    if (text) expect(head).toHaveTextContent(`· ${text}`);
+    else expect(head).not.toHaveTextContent(/inherited|overridden/);
+  });
+
   it("an edit sends the desktop's set_field op for that component and field", async () => {
     const { calls } = open("tasks.implementer", { ...lib(), "POST /drafts/library/library/ops": [200, { ...view("library", "library", { draft: true }, { model: MODEL as never }), ops: [] }] });
     await userEvent.click(await screen.findByRole("button", { name: /^profile/ }));

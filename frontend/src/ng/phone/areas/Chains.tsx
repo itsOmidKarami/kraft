@@ -77,7 +77,7 @@ export function ChainView() {
   const origins = draft.view?.result.extending?.origins ?? {};
   const origin = (id: string) => (origins[id] === "added" || origins[id] === "overridden" ? [{ label: ORIGIN[origins[id] as keyof typeof ORIGIN] }] : undefined);
   return (
-    <AreaScreen title={chain} sub={c ? `${c.addon ? `${addonLabel(c.addon)} · ` : ""}${sizeOf(c)}` : undefined} draft={draft} yaml={draft.view ? true : text ?? ""}>
+    <AreaScreen title={chain} sub={c ? `${c.addon ? `${addonLabel(c.addon)} · ${inheritanceText(c.addon) ? `${inheritanceText(c.addon)} · ` : ""}` : ""}${sizeOf(c)}` : undefined} draft={draft} yaml={draft.view ? true : text ?? ""}>
       {error && <p className="ph-error" role="alert">{error}</p>}
       {chains && !c && <p className="ph-empty">There is no chain {chain}.</p>}
       <Group title={`Nodes · ${nodes.length}`} note={c && !c.addon ? STRUCTURE : undefined} rows={nodes.map((n) => ({ key: n.id, label: displayName(n), sub: `${n.id} · ${nodeSub(n)}`, subMono: true, chips: origin(n.id), to: `/templates/chains/${encodeURIComponent(chain)}/nodes/${encodeURIComponent(n.id)}` }))} />

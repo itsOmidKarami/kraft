@@ -481,6 +481,24 @@ describe("an extending chain", () => {
     expect(draft.ops).toHaveBeenLastCalledWith([{ op: "change_chain_base", base: "quick-task" }]);
   });
 
+  it.each([
+    ["inherited", { origin: "inherited", parent: { id: "company@corp", namespace: "company" }, author: { id: "company@corp", version: "3.2.0" } }, "inherited from company"],
+    ["overridden", { origin: "overridden", parent: { id: "company@corp", namespace: "company" }, author: { id: "team@corp", version: "1.0.0" } }, "overridden here"],
+    ["none", undefined, null],
+  ])("the Change base menu marks a child add-on's chain: %s", async (_id, inheritance, text) => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "team", nodes: [], gates: 0, extends: "default" },
+      { id: "default", nodes: [], gates: 0 },
+      { id: "quick-task", nodes: [], gates: 0, addon: { id: "company@corp", version: "3.2.0", ...(inheritance ? { inheritance } : {}) } },
+    ] as never);
+    mount("", {}, EXTENDING_VIEW);
+    await userEvent.click(screen.getByRole("button", { name: "Change base…" }));
+    const menu = await screen.findByRole("dialog", { name: "Change base" });
+    const option = await within(menu).findByRole("option", { name: /quick-task/ });
+    if (text) expect(option).toHaveTextContent(`· ${text}`);
+    else expect(option).not.toHaveTextContent(/inherited|overridden/);
+  });
+
   it("detaches the chain from its pane", async () => {
     const { draft } = mount("", {}, EXTENDING_VIEW);
     await userEvent.click(screen.getByRole("button", { name: "Detach…" }));
