@@ -1001,7 +1001,9 @@ class TemplateLibrary:
         not pinning it: what a revision adds to a work item runs on it. An
         add-on whose namespace is in `pinned`, which the work item already
         pinned, is never refused: it stays pinned, and the launch restores
-        its store or says why it cannot."""
+        its store or says why it cannot. A live child the item had not pinned
+        is refused when a pinned ancestor's store is merely gone, though the
+        launch would have restored it: it is left out with that ancestor."""
         # A hidden level resolves too: a child's chain extending it resolves it.
         raw = self._all_chains.get(id)
         if raw is None:
@@ -1138,8 +1140,9 @@ class TemplateLibrary:
         component it extends or selects, or a skill or agent profile one of
         its tasks names; and every ancestor of each, root first
         (`an-item-pins-every-ancestor`). One it reads that is left out is not
-        pinned; with `strict`, the namespaces a work item already pinned, one
-        left out by a fault that is not among them raises instead."""
+        pinned. `strict` is the namespaces a work item already pinned: with
+        it, one left out by a fault (not quietly, as a disabled one is)
+        raises instead, unless the item already pinned its namespace."""
         data = resolved.chain.model_dump(mode="json")
         named = {
             id,
