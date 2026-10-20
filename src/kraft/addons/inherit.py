@@ -361,6 +361,8 @@ def inherited(kind: str, addon: InstalledAddon, addons: Sequence[InstalledAddon]
     root add-on, one that is left out, and one whose ancestry or stores do not
     read. A name `addon` defines itself, or removed, is not in it."""
     from kraft.addons import fetch
+
+    # library imports this module at module level
     from kraft.templates.library import TemplateLibraryError
 
     if addon.left_out is not None or addon.parent is None:

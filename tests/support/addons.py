@@ -95,11 +95,10 @@ def example_tree(
     keyword arguments laid over the defaults; `alias` is platform-dept's
     namespace. Company ships a task `security_scan` that names the skill
     `deploy-review` ("company method") and the profiles `slow` and `fast`."""
-    defaults = _TREE_SPECS
     given = {"company": company, "platform-dept": dept, "team-payments": team}
     out: list[InstalledAddon] = []
     parent: InstalledAddon | None = None
-    for name, spec in defaults.items():
+    for name, spec in _TREE_SPECS.items():
         wanted = {**spec, **(given[name] or {})}
         requires = {"addons": {parent.id: "1"}} if parent else {}
         declared = addon_json(name, requires={**addon_json(name)["requires"], **requires})
@@ -188,10 +187,9 @@ def tree_collection(
     """`example_tree`'s three add-ons as a committed collection named `acme`
     (`make_collection`), `requires.addons` wired through `manifest`. Each
     keyword is a `make_collection` spec laid over the same defaults."""
-    base = _TREE_SPECS
     given = {"company": company, "platform-dept": dept, "team-payments": team}
     addons: dict[str, dict] = {}
-    for (name, spec), parent in zip(base.items(), (None, *TREE), strict=False):
+    for (name, spec), parent in zip(_TREE_SPECS.items(), (None, *TREE[:-1]), strict=True):
         wanted = {**spec, **(given[name] or {})}
         requires = {"kraft": "2", "harnesses": ["codex"]}
         if parent:

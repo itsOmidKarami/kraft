@@ -5,7 +5,7 @@ import json
 from dataclasses import replace
 
 import pytest
-from support.addons import addon_json, example_tree, installed
+from support.addons import addon_json, edit_store, example_tree, installed
 
 from kraft.addons import inherit, manifest
 
@@ -234,10 +234,21 @@ def _ships_deploy_review(text="dept method"):
             id="alias-parent",
         ),
         pytest.param({"asked": 0}, "skills", {}, id="root"),
+        pytest.param({"left_out": "not loaded"}, "skills", {}, id="left-out"),
+        pytest.param({"damage": 0}, "skills", {}, id="damaged-ancestor-store"),
+        pytest.param({"without": 1}, "skills", {}, id="ancestry-raises"),
     ],
 )
 def test_inherited(tmp_path, edits, kind, expected):
     edits = dict(edits)
     asked = edits.pop("asked", 2)
-    tree = example_tree(tmp_path, **edits)
-    assert inherit.inherited(kind, tree[asked], tree) == expected
+    left_out = edits.pop("left_out", None)
+    damage = edits.pop("damage", None)
+    without = edits.pop("without", None)
+    tree = list(example_tree(tmp_path, **edits))
+    if damage is not None:
+        edit_store(tree[damage].root, ".kraft-digest", "tampered")
+    child = replace(tree[asked], left_out=left_out)
+    if without is not None:
+        del tree[without]
+    assert inherit.inherited(kind, child, tree) == expected

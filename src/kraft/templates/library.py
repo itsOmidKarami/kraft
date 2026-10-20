@@ -534,7 +534,10 @@ class TemplateLibrary:
             # A stray `remove:` at the root is refused by the root's own
             # `_add_addon`: every load path loads the root by itself too.
             removed.append(inherit.removals(author.root / LIBRARY_FILE, library))
-        visible = inherit.visible(chain)
+        try:
+            visible = inherit.visible(chain)
+        except fetch.StoreMismatch as exc:
+            raise TemplateLibraryError(str(exc)) from exc
 
         def owner(kind: str) -> Callable[[str, int], str]:
             # Defined nowhere visible: the level asked from names it, and its
