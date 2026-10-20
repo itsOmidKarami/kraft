@@ -786,8 +786,16 @@ def _cmd_install(ns: argparse.Namespace) -> None:
 
 
 #: `update --check`'s exit code, worst first: could not check, would be
-#: refused, an update is waiting.
-_CHECK_CODES = (("failed", 3), ("refused", 2), ("declined", 1))
+#: refused, an update is waiting or held by a range.
+_CHECK_CODES = (("failed", 3), ("refused", 2), ("declined", 1), ("held", 1))
+
+
+def _check_code(result: addon_update.Result) -> int:
+    """`result`'s exit code under `_CHECK_CODES`, 0 for any other outcome. A
+    relative held because its own new release breaks a chain would be refused,
+    so it counts as `refused`."""
+    outcome = "refused" if result.outcome == "held" and result.kind == "breaks" else result.outcome
+    return next((code for name, code in _CHECK_CODES if name == outcome), 0)
 
 
 def _cmd_update(ns: argparse.Namespace) -> None:
@@ -804,10 +812,11 @@ def _cmd_update(ns: argparse.Namespace) -> None:
         ),
         ns.json,
     )
-    outcomes = {r.outcome for r in results}
     if ns.check:
-        raise SystemExit(next((code for outcome, code in _CHECK_CODES if outcome in outcomes), 0))
-    if outcomes & {"failed", "refused", "declined"}:
+        raise SystemExit(max((_check_code(r) for r in results), default=0))
+    if any(r.outcome == "held" and r.kind == "breaks" for r in results):
+        raise SystemExit(2)
+    if {r.outcome for r in results} & {"failed", "refused", "declined", "held"}:
         raise SystemExit(1)
 
 
@@ -1026,8 +1035,8 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
     answer.add_argument(
         "--check",
         action="store_true",
-        help="print the reviews and change nothing; exit 1 when an update is waiting, "
-        "2 when one would be refused, 3 when it could not check",
+        help="print the reviews and change nothing; exit 1 when an update is waiting or held by "
+        "a range, 2 when one would be refused, 3 when it could not check",
     )
     auto_p = verb(verbs, "auto-update", _cmd_auto_update, "set one add-on's auto-update")
     addon_id(auto_p)

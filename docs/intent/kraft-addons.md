@@ -374,8 +374,8 @@ origin: src/kraft/addons/update.py §write_lock
 
 ## REQ update-check-exit-codes
 
-WHEN `update --check` finishes, the system SHALL exit 0 when every add-on is current, 1 when an update is waiting, 2 when an update would be refused, and 3 when it could not check.
-enforced-by: tests/cli/test_addon.py::test_update_check_exit_codes[up-to-date], tests/cli/test_addon.py::test_update_check_exit_codes[update-waiting], tests/cli/test_addon.py::test_update_check_exit_codes[refused], tests/cli/test_addon.py::test_update_check_exit_codes[cannot-check]
+WHEN `update --check` finishes, the system SHALL exit 0 when every add-on is current, 1 when an update is waiting or held by a range, 2 when an update would be refused (a relative held because its own new release breaks a chain included), and 3 when it could not check.
+enforced-by: tests/cli/test_addon.py::test_update_check_exit_codes[up-to-date], tests/cli/test_addon.py::test_update_check_exit_codes[update-waiting], tests/cli/test_addon.py::test_update_check_exit_codes[refused], tests/cli/test_addon.py::test_update_check_exit_codes[cannot-check], tests/cli/test_addon.py::test_update_check_exit_codes[held-by-range], tests/cli/test_addon.py::test_update_check_exit_codes[held-beside-refused], tests/cli/test_addon.py::test_update_check_exit_codes[broken-relative-check-exits-2]
 origin: src/kraft/cli/addon.py §_cmd_update
 
 ## REQ removing-a-referenced-addon-is-refused
@@ -615,5 +615,5 @@ origin: src/kraft/addons/update.py §_settle
 ## REQ install-pulls-in-missing-ancestors
 
 WHEN an install's ancestors are not installed, the system SHALL install them with it, under one review and one accept, with `--as` and `--auto-update` applying to the named add-on only.
-enforced-by: tests/addons/test_update_tree.py::test_install_pulls_in_missing_ancestors[pulls-in-two], tests/addons/test_update_tree.py::test_install_pulls_in_missing_ancestors[as-names-only-the-child], tests/addons/test_update_tree.py::test_install_pulls_in_missing_ancestors[auto-update-only-the-child]
+enforced-by: tests/addons/test_update_tree.py::test_install_pulls_in_missing_ancestors[pulls-in-two], tests/addons/test_update_tree.py::test_install_pulls_in_missing_ancestors[as-names-only-the-child], tests/addons/test_update_tree.py::test_install_pulls_in_missing_ancestors[auto-update-only-the-child], tests/cli/test_addon.py::test_install_pulls_in_its_parent
 origin: src/kraft/addons/update.py §update

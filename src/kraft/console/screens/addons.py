@@ -304,7 +304,13 @@ class Addons(View):
         self.refresh_bindings()
         if not results:
             return
-        bad = {r.outcome for r in results} & {"refused", "failed", "unpublished"}
+        # Held by a range, a move waits (as a declined one does); held by its own
+        # chain break it would be refused, which the CLI's exit 2 says too.
+        bad = any(
+            r.outcome in ("refused", "failed", "unpublished")
+            or (r.outcome == "held" and r.kind == "breaks")
+            for r in results
+        )
         said = flow.render_results([flow.result_view(r) for r in results])
         self.app.notify(said, severity="error" if bad else "information", markup=False)
         if flow.applied(results):

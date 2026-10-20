@@ -2,14 +2,17 @@
 removes add-ons, and validates against this instance. An author's validate
 without one is `test_addon_validate`'s."""
 
+import builtins
 import json
 import socket
 
 import pytest
 from support.addons import (
     AGENT,
+    a_terminal,
     accept_repo_library,
     chain,
+    child_manifest,
     install,
     instance,
     make_collection,
@@ -388,26 +391,89 @@ def _an_unreachable_collection(home):
     write_yaml(home.config / "addons.yaml", written)
 
 
+def _tools_builds_on_release(home, **spec):
+    """`tools` is a child of `release` at range `1`, installed beside it."""
+    publish(home.repo, "tools", manifest=child_manifest(ID, "1"), **spec)
+    install(home.config, home.addons, home.repo, "tools")
+
+
+def _held_by_range(home):
+    _tools_builds_on_release(home)
+    publish(home.repo, "release", version="2.0.0")
+
+
+def _held_beside_refused(home):
+    _held_by_range(home)
+    publish(
+        home.repo,
+        "tools",
+        version="1.1.0",
+        library={"tasks": {"base": {**AGENT, "kind": "subprocess"}}},
+    )
+
+
+def _broken_relative(home):
+    """release 1.1.0 moves; tools 1.1.0, still at `1`, drops `scan`, which a
+    local chain extends as `tools:scan`."""
+    _tools_builds_on_release(home, library={"tasks": {"base": AGENT, "scan": AGENT}})
+    write_yaml(home.config / "chains" / "mine.yaml", chain("tools:scan"))
+    publish(home.repo, "release", version="1.1.0")
+    publish(home.repo, "tools", version="1.1.0", library={"tasks": {"base": AGENT}})
+
+
+BEYOND_RANGE = "release@acme: held: release@acme 2.0.0 is outside tools@acme's range 1 (needs 1.x)"
+
+
 @pytest.mark.parametrize(
-    "happens, code, says",
+    "happens, argv, code, says",
     [
-        (None, 0, "release@acme: current"),
-        (_a_new_version, 1, "release@acme: update waiting"),
-        (_a_refused_version, 2, "release@acme: refused"),
-        (_an_unreachable_collection, 3, "release@acme: failed"),
+        (None, [], 0, "release@acme: current"),
+        (_a_new_version, [], 1, "release@acme: update waiting"),
+        (_a_refused_version, [], 2, "release@acme: refused"),
+        (_an_unreachable_collection, [], 3, "release@acme: failed"),
+        (_held_by_range, [], 1, BEYOND_RANGE),
+        (_held_beside_refused, [], 2, BEYOND_RANGE),
+        (_broken_relative, [ID], 2, "tools@acme: held:"),
     ],
-    ids=["up-to-date", "update-waiting", "refused", "cannot-check"],
+    ids=[
+        "up-to-date",
+        "update-waiting",
+        "refused",
+        "cannot-check",
+        "held-by-range",
+        "held-beside-refused",
+        "broken-relative-check-exits-2",
+    ],
 )
-def test_update_check_exit_codes(installed, capsys, happens, code, says):
+def test_update_check_exit_codes(installed, capsys, happens, argv, code, says):
     if happens:
         happens(installed)
     before = installed.written()
 
-    got, out = _run(capsys, "update", "--check")
+    got, out = _run(capsys, "update", *argv, "--check")
 
     assert got == code and says in out, out
     assert "no terminal" not in out  # nobody was going to be asked
+    assert ("tools:scan" in out) is (happens is _broken_relative), out
     assert installed.written() == before and installed.reloads == []
+
+
+def test_install_pulls_in_its_parent(added, capsys, monkeypatch):
+    """Nothing is installed and tools builds on release: one prompt, one accept."""
+    publish(added.repo, "tools", manifest=child_manifest(ID, "1"))
+    a_terminal(monkeypatch, ["y"])
+    answer, asked = builtins.input, []
+    monkeypatch.setattr(
+        "builtins.input", lambda prompt="": (asked.append(prompt), answer(prompt))[1]
+    )
+
+    code, out = _run(capsys, "install", "tools@acme")
+
+    assert code == 0, out
+    assert asked == ["Apply release@acme, tools@acme? [y/N] "], asked
+    assert "pulls in release@acme 1.0.0 from collection acme: tools@acme builds on it" in out
+    assert "tools@acme: applied" in out and "release@acme: applied" in out, out
+    assert added.locked("tools@acme") and added.locked(ID)
 
 
 def test_update_check_notes_changed_files_at_the_same_version(installed, capsys):
