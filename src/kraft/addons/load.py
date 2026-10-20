@@ -10,9 +10,13 @@ from __future__ import annotations
 
 import os
 import threading
-from collections.abc import Callable, Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kraft.addons.manifest import AddonManifest
 
 #: A repo library's id is `library@repo:<repository id>`. `:` is in no
 #: collection name, so `addons.yaml` can never hold one.
@@ -49,6 +53,11 @@ class InstalledAddon:
     commit: str | None = None
     tree: str | None = None
     source: str | None = None
+    #: The id of the add-on this one builds on (`requires.addons`), and the
+    #: range of its versions accepted; None for a root add-on, and until its
+    #: manifest has been read.
+    parent: str | None = None
+    parent_range: str | None = None
 
     @property
     def pin(self) -> dict[str, str | None]:
@@ -234,7 +243,7 @@ def signature(config_dir: Path, found: tuple[InstalledAddon, ...] = ()) -> tuple
     """Everything `installed()` reads, as stat triples (None: absent), so an
     unchanged answer can be told without re-parsing: the six config files,
     the harness overlay directory, `found`'s stores (existence, manifest,
-    digest file), the restore failures `_why_left_out` quotes, and this
+    digest file), the restore failures `_store_problem` quotes, and this
     Kraft's version, which decides `requires.kraft`."""
     from kraft import paths, update
     from kraft.addons import fetch, manifest
@@ -304,6 +313,10 @@ def installed(
 
 
 def _installed(config_dir: Path, store: Path, verify: bool, config) -> tuple[InstalledAddon, ...]:
+    """In four passes: each add-on's own store (and the parent its manifest
+    names); the left-out cascade; each loading add-on's content, judged with
+    its ancestors; the cascade again, for a parent the third pass left out."""
+    from kraft.addons import inherit
     from kraft.addons.config import AddonsConfig, AddonsLock
     from kraft.config import ConfigError
 
@@ -342,7 +355,7 @@ def _installed(config_dir: Path, store: Path, verify: bool, config) -> tuple[Ins
         if not config.entry(addon_id).enabled:
             found.append(replace(addon, left_out="is disabled", quiet=True))
         else:
-            found.append(replace(addon, left_out=_why_left_out(addon, config_dir, verify)))
+            found.append(_with_store_problem(addon, verify))
     for addon_id, locked in lock.addons.items():
         if addon_id not in config.addons:
             found.append(
@@ -357,7 +370,17 @@ def _installed(config_dir: Path, store: Path, verify: bool, config) -> tuple[Ins
                 )
             )
     found += _repo_libraries(config_dir, store, verify)
-    return tuple(found)
+    stored = inherit.cascade(found)
+    judged = tuple(
+        addon
+        if addon.left_out is not None
+        else replace(
+            addon,
+            left_out=_content_problem(addon, inherit.ancestry(addon, stored), config_dir),
+        )
+        for addon in stored
+    )
+    return inherit.cascade(judged)
 
 
 def _repo_libraries(config_dir: Path, store: Path, verify: bool) -> list[InstalledAddon]:
@@ -389,79 +412,110 @@ def _repo_libraries(config_dir: Path, store: Path, verify: bool) -> list[Install
         if repo_id not in connected:
             out.append(replace(addon, left_out="its repository is no longer connected", quiet=True))
         else:
-            out.append(replace(addon, left_out=_why_left_out(addon, config_dir, verify)))
+            out.append(_with_store_problem(addon, verify))
     return out
 
 
-def _why_left_out(addon: InstalledAddon, config_dir: Path, verify: bool) -> str | None:
-    """The first load-time check `addon` fails, as a reason; None when it loads."""
-    from kraft import harness, update
-    from kraft.addons import fetch, manifest
+def _with_store_problem(addon: InstalledAddon, verify: bool) -> InstalledAddon:
+    """`addon` with its store's problem as `left_out`, and the parent its
+    manifest names filled in."""
+    declared, why = _store_problem(addon, verify)
+    parent = declared.parent if declared is not None else None
+    if parent is None:
+        return replace(addon, left_out=why)
+    return replace(addon, left_out=why, parent=parent[0], parent_range=parent[1])
+
+
+def _store_problem(addon: InstalledAddon, verify: bool) -> tuple[AddonManifest | None, str | None]:
+    """`addon`'s manifest, and the first check of its own store it fails: the
+    store is there, its files match the locked digest, its `addon.json`
+    parses, and this Kraft is one it accepts. The manifest is None when it
+    could not be read; the problem is None when all pass."""
+    from kraft import update
+    from kraft.addons import fetch, inherit, manifest
+
+    root = addon.root
+    if not root.is_dir():
+        if why := _unrestored.get(root.name):
+            return None, f"its store could not be restored: {why}"
+        return None, "its store is missing and has not been restored"
+    try:
+        # Bounded and no-follow: the manifest must hash to the store's name.
+        if verify:
+            fetch.verify_store(root)
+        declared = inherit.read_manifest(addon)
+    except fetch.StoreMismatch:
+        return None, "its files do not match the locked digest"
+    except (OSError, ValueError, fetch.AddonRefused, manifest.ManifestError) as exc:
+        return None, f"its store cannot be read: {exc}"
+    running = update.installed()
+    if addon.repo_id is None and not manifest.is_source_build(running):
+        if why := manifest.kraft_compatible(declared.requires.kraft, running):
+            return declared, why
+    return declared, None
+
+
+def _content_problem(
+    addon: InstalledAddon, chain: tuple[InstalledAddon, ...], config_dir: Path
+) -> str | None:
+    """The first check `addon`'s content fails on this instance, judged with
+    its ancestors (`chain`, `inherit.ancestry`'s answer): what the tree
+    requires of `harnesses.yaml` and `repos.yaml`, its library and agent
+    profiles read with theirs, and its limits under `maxima:`. None when it
+    loads."""
+    from kraft import harness
+    from kraft.addons import inherit
     from kraft.config import ConfigError, read_yaml
     from kraft.policy import PolicyError, PolicyInput
     from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
     from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
-    root = addon.root
-    if not root.is_dir():
-        if why := _unrestored.get(root.name):
-            return f"its store could not be restored: {why}"
-        return "its store is missing and has not been restored"
-    mismatch = "its files do not match the locked digest"
-    try:
-        # Bounded and no-follow: the manifest must hash to the store's name.
-        if verify:
-            fetch.verify_store(root)
-        # `addon.json` too: never a FIFO's endless read, and never an edit.
-        text = (fetch.open_store(root).read(manifest.ADDON_JSON) or b"").decode()
-        declared = manifest.addon(manifest.parse(text, manifest.ADDON_JSON), manifest.ADDON_JSON)
-    except fetch.StoreMismatch:
-        return mismatch
-    except (OSError, ValueError, fetch.AddonRefused, manifest.ManifestError) as exc:
-        return f"its store cannot be read: {exc}"
-    running = update.installed()
-    if addon.repo_id is None and not manifest.is_source_build(running):
-        if why := manifest.kraft_compatible(declared.requires.kraft, running):
-            return why
     if why := instance_problem(
-        addon.namespace, declared.requires, config_dir, repo_library=addon.repo_id is not None
+        addon.namespace,
+        inherit.requirements(chain),
+        config_dir,
+        repo_library=addon.repo_id is not None,
     ):
         return why
     try:
         harnesses = read_yaml(config_dir / "harnesses.yaml")
     except ConfigError:
         return None  # that file's own check says why
-    # Its own files, read alone: an add-on that does not load must not take the
-    # library or the profile table down with it.
+    # Its own files and its ancestors', read without the rest: an add-on that
+    # does not load must not take the library or the profile table down with it.
     try:
         TemplateLibrary.from_mappings(
-            {}, (), library_path=config_dir / "library.yaml", addons=[addon]
+            {}, (), library_path=config_dir / "library.yaml", addons=list(chain)
         )
         HarnessProfileTable.from_mapping(
             harnesses,
             config_dir / "harnesses.yaml",
             harnesses=harness.load(None).valid,
-            addons=[addon],
+            addons=list(chain),
         )
     except (TemplateLibraryError, TemplateEnvironmentError) as exc:
-        if str(root) in str(exc) or f"profiles.{addon.namespace}:" in str(exc):
+        if any(str(a.root) in str(exc) or f"profiles.{a.namespace}:" in str(exc) for a in chain):
             return str(exc)
         return None
     try:
         policy = PolicyInput.from_yaml(config_dir / "policy.yaml").instance_policy()
     except PolicyError:
         return None  # no policy.yaml, or one whose own check says why
-    return limits_problem(addon, policy)
+    return limits_problem(addon, policy, chain[1:])
 
 
-def limits_problem(addon: InstalledAddon, instance_policy) -> str | None:
+def limits_problem(
+    addon: InstalledAddon, instance_policy, ancestors: Sequence[InstalledAddon] = ()
+) -> str | None:
     """Why one of `addon`'s limits no longer fits under `instance_policy`'s
-    `maxima:`, lowered since the add-on was installed; None when all fit."""
+    `maxima:`, lowered since the add-on was installed; None when all fit.
+    `ancestors` (parent first) are read with it, so what it inherits and
+    extends is checked too."""
     from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
     try:
         library = TemplateLibrary.from_mappings(
-            {}, (), library_path=addon.root / "local-library.yaml", addons=[addon]
+            {}, (), library_path=addon.root / "local-library.yaml", addons=[addon, *ancestors]
         )
     except TemplateLibraryError:
         return None

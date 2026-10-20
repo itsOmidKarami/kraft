@@ -84,6 +84,42 @@ IF an add-on's `requires.addons` names more than one add-on, or one with the add
 enforced-by: tests/addons/test_manifest.py::test_requires_addons[two-parents], tests/addons/test_manifest.py::test_requires_addons[own-name]
 origin: src/kraft/addons/manifest.py §AddonManifest
 
+## REQ a-parent-tree-has-no-cycle-and-bounded-depth
+
+IF an add-on's ancestry comes back to an add-on already in it, or holds more than 8 add-ons, root included, THEN the system SHALL leave the add-on out, naming the cycle or the depth.
+enforced-by: tests/addons/test_inherit.py::test_ancestry[cycle], tests/addons/test_inherit.py::test_ancestry[depth-9], tests/addons/test_inherit.py::test_ancestry[depth-8]
+origin: src/kraft/addons/inherit.py §ancestry
+
+## REQ an-ancestor-name-is-not-a-descendants
+
+IF an add-on's ancestor has the name of the add-on or of another add-on between them, THEN the system SHALL leave the add-on out, naming the ancestor.
+enforced-by: tests/addons/test_inherit.py::test_ancestry[same-name-ancestor]
+origin: src/kraft/addons/inherit.py §ancestry
+
+## REQ every-child-accepts-its-parents-version
+
+IF an add-on's parent is locked at a version outside the range its `requires.addons` gives, THEN the system SHALL leave the add-on out, naming the version and the range.
+enforced-by: tests/addons/test_inherit.py::test_ancestry[out-of-range]
+origin: src/kraft/addons/inherit.py §ancestry
+
+## REQ a-child-of-a-left-out-parent-is-left-out
+
+IF an add-on's parent is not installed as an add-on, or is not loaded, THEN the system SHALL leave the add-on out, with `its parent <id> is not loaded: <the parent's reason>` when the parent is installed, so a left-out add-on takes every descendant with it.
+enforced-by: tests/addons/test_inherit.py::test_ancestry[missing-parent], tests/addons/test_inherit.py::test_ancestry[left-out-parent], tests/addons/test_inherit.py::test_ancestry[repo-library-not-a-parent], tests/addons/test_inherit.py::test_cascade, tests/addons/test_load.py::test_installed_with_inheritance[parent-disabled], tests/addons/test_load.py::test_installed_with_inheritance[parent-store-edited], tests/addons/test_load.py::test_installed_with_inheritance[parent-left-out-after-its-content-check]
+origin: src/kraft/addons/inherit.py §cascade
+
+## REQ a-child-is-judged-with-its-ancestors
+
+WHEN the system decides whether an add-on with a parent loads, the system SHALL read its library, agent profiles and limits together with every ancestor's, and leave it out for a fault that names any of their stores.
+enforced-by: tests/addons/test_load.py::test_installed_with_inheritance[child-library-uses-parent], tests/addons/test_load.py::test_installed_with_inheritance[child-limits-through-parent], tests/addons/test_load.py::test_installed_with_inheritance[parent-library-edited]
+origin: src/kraft/addons/load.py §_content_problem
+
+## REQ a-childs-requirements-include-its-ancestors
+
+IF a harness or agent profile that an add-on or any of its ancestors requires is not defined in `harnesses.yaml`, THEN the system SHALL leave the add-on out, naming what is missing.
+enforced-by: tests/addons/test_load.py::test_installed_with_inheritance[union-requirements]
+origin: src/kraft/addons/inherit.py §requirements
+
 ## REQ unknown-manifest-keys-are-ignored
 
 The system SHALL ignore a top-level `collection.json` or `addon.json` key it does not read, and SHALL refuse an unknown key inside `requires`.
@@ -134,8 +170,8 @@ origin: src/kraft/addons/load.py §installed
 
 ## REQ a-broken-addon-affects-only-itself
 
-IF an add-on fails a load-time check, THEN the system SHALL leave only that add-on out, report it under `invalid_templates`, and load the rest of the library.
-enforced-by: tests/addons/test_load.py::test_a_broken_addon_library_affects_only_that_addon, tests/addons/test_load.py::test_load_time_checks[requires-harness-removed], tests/addons/test_load.py::test_load_time_checks[repo-id-taken], tests/api/test_deps.py::test_health_names_an_addon_that_did_not_load[store-deleted], tests/addons/test_load.py::test_a_limit_above_a_lowered_maximum_leaves_the_addon_out
+IF an add-on fails a load-time check, THEN the system SHALL leave only that add-on and its descendants out, report it under `invalid_templates`, and load the rest of the library.
+enforced-by: tests/addons/test_inherit.py::test_cascade, tests/addons/test_load.py::test_a_broken_addon_library_affects_only_that_addon, tests/addons/test_load.py::test_load_time_checks[requires-harness-removed], tests/addons/test_load.py::test_load_time_checks[repo-id-taken], tests/api/test_deps.py::test_health_names_an_addon_that_did_not_load[store-deleted], tests/addons/test_load.py::test_a_limit_above_a_lowered_maximum_leaves_the_addon_out
 origin: src/kraft/addons/load.py §installed
 
 ## REQ a-hand-alias-or-ref-change-waits-for-update
