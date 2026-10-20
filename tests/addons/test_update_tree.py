@@ -8,7 +8,8 @@ import pytest
 from support.addons import AGENT, chain, child_manifest, install, make_tree, publish
 
 from kraft.addons import fetch, update
-from kraft.addons.config import AddonsLock
+from kraft.addons.config import AddonEntry, AddonsLock
+from kraft.config import read_yaml
 
 COMPANY = "company@corp"
 TEAM = "team@payments"
@@ -40,9 +41,14 @@ def _update(home, ids=None, *, accept=True, entries=None, **kw):
 
 
 def _files(home):
-    """Both files `update` writes, and the store's entries."""
+    """Both files `update` writes, and the store's entries (None and empty
+    before anything is installed)."""
     files = [home[0] / "addons.yaml", home[0] / "addons.lock"]
-    return [f.read_text() for f in files], sorted(p.name for p in (home[1] / "store").iterdir())
+    store = home[1] / "store"
+    return (
+        [f.read_text() if f.exists() else None for f in files],
+        sorted(p.name for p in store.iterdir()) if store.exists() else [],
+    )
 
 
 def _version(home, addon_id):
@@ -531,3 +537,196 @@ def test_update_takes_waiting_relatives(
         assert groups == []
     if row == "current-id-takes-relatives":
         assert _version(home, COMPANY) == "1.1.0"
+
+
+DEPT = "dept@platform"
+#: company 1.0.0, then dept 1.0.0 under it at range `1`, then team 1.0.0
+#: under dept at `1`.
+ANCESTRY = {
+    COMPANY: TREE[COMPANY],
+    DEPT: {"library": {"tasks": {"scan": {"extends": "company:verify"}}}, "parent": (COMPANY, "1")},
+    TEAM: {"library": {"tasks": {"check": {"extends": "dept:scan"}}}, "parent": (DEPT, "1")},
+}
+PULLS_COMPANY = "pulls in company@corp 1.0.0 from collection corp: dept@platform builds on it"
+PULLS_DEPT = "pulls in dept@platform 1.0.0 from collection platform: team@payments builds on it"
+NO_CORP = (
+    "its parent company@corp comes from collection corp, which this instance has not added; "
+    "add it first: kraft admin addon collection add"
+)
+TAKEN = (
+    "dept@platform installs under its name dept, which dept@other holds; install it first "
+    "with its own --as: kraft admin addon install dept@platform --as ALIAS"
+)
+SUBPROCESS = {"verify": AGENT, "run": {"kind": "subprocess", "command": "make"}}
+#: A row's tree, the ids installed and the collections not added, when not
+#: `ANCESTRY` with nothing installed.
+PULL_TREES = {
+    "uses-installed-ancestor": (ANCESTRY, [COMPANY], ()),
+    "missing-collection": (ANCESTRY, [], ["corp"]),
+    "installed-ancestor-too-old": (
+        {**ANCESTRY, DEPT: {**ANCESTRY[DEPT], "parent": (COMPANY, "2")}},
+        [COMPANY],
+        (),
+    ),
+    "ancestor-name-taken": (
+        {**ANCESTRY, "dept@other": {"library": {"tasks": {"x": AGENT}}}},
+        ["dept@other"],
+        (),
+    ),
+    "ancestor-refused-writes-nothing": (
+        {**ANCESTRY, COMPANY: {"library": {"tasks": SUBPROCESS}}},
+        [],
+        (),
+    ),
+    "re-install-moves-a-needed-ancestor": (TREE, None, ()),
+    "re-install-keeps-ancestor": (TREE, None, ()),
+}
+
+
+@pytest.mark.parametrize(
+    ("published", "entry", "outcomes", "problems"),
+    [
+        pytest.param(
+            None,
+            True,
+            {TEAM: "applied", COMPANY: "applied", DEPT: "applied"},
+            {},
+            id="pulls-in-two",
+        ),
+        pytest.param(
+            None, True, {TEAM: "applied", DEPT: "applied"}, {}, id="uses-installed-ancestor"
+        ),
+        pytest.param(
+            None,
+            True,
+            {TEAM: "refused", DEPT: "refused"},
+            {DEPT: NO_CORP, TEAM: f"its parent dept@platform cannot be installed: {NO_CORP}"},
+            id="missing-collection",
+        ),
+        pytest.param(
+            lambda repos: _company(repos, "2.0.0"),
+            True,
+            {TEAM: "refused", COMPANY: "refused", DEPT: "refused"},
+            {
+                DEPT: "company@corp 2.0.0 is outside dept@platform's range 1 (needs 1.x); point "
+                "collection corp's ref at a 1.x tag, or wait for dept@platform to accept 2",
+                TEAM: "its parent dept@platform cannot be installed: company@corp 2.0.0 is outside",
+                COMPANY: "pulled in for dept@platform, which cannot be installed",
+            },
+            id="ancestor-too-new",
+        ),
+        pytest.param(
+            None,
+            True,
+            {TEAM: "refused", DEPT: "refused"},
+            {
+                DEPT: "its parent company@corp is 1.0.0, outside its range 2 (needs 2.x)",
+                TEAM: "its parent dept@platform cannot be installed: its parent company@corp is "
+                "1.0.0, outside its range 2",
+            },
+            id="installed-ancestor-too-old",
+        ),
+        pytest.param(
+            None,
+            {"as": "tp"},
+            {TEAM: "applied", COMPANY: "applied", DEPT: "applied"},
+            {},
+            id="as-names-only-the-child",
+        ),
+        pytest.param(
+            None,
+            {"auto_update": True},
+            {TEAM: "applied", COMPANY: "applied", DEPT: "applied"},
+            {},
+            id="auto-update-only-the-child",
+        ),
+        pytest.param(
+            None,
+            True,
+            {TEAM: "refused", DEPT: "refused"},
+            {DEPT: TAKEN, TEAM: f"its parent dept@platform cannot be installed: {TAKEN}"},
+            id="ancestor-name-taken",
+        ),
+        pytest.param(
+            None,
+            True,
+            {TEAM: "refused", COMPANY: "refused", DEPT: "refused"},
+            {
+                COMPANY: "an add-on may not carry a subprocess task",
+                DEPT: "its parent company@corp cannot be installed: ",
+                TEAM: "its parent dept@platform cannot be installed: its parent company@corp "
+                "cannot be installed: ",
+            },
+            id="ancestor-refused-writes-nothing",
+        ),
+        pytest.param(
+            None,
+            True,
+            {TEAM: "declined", COMPANY: "declined", DEPT: "declined"},
+            {},
+            id="pull-in-declined",
+        ),
+        pytest.param(
+            _move_together,
+            None,
+            {TEAM: "applied", COMPANY: "applied"},
+            {},
+            id="re-install-moves-a-needed-ancestor",
+        ),
+        pytest.param(
+            lambda repos: _company(repos, "1.1.0"),
+            None,
+            {TEAM: "applied"},
+            {},
+            id="re-install-keeps-ancestor",
+        ),
+    ],
+)
+def test_install_pulls_in_missing_ancestors(
+    tmp_path, request, published, entry, outcomes, problems
+):
+    """Installing a child installs its missing ancestors with it, under one
+    review and one accept; `--as` and `--auto-update` reach only the child,
+    and `--re-install` moves an ancestor only when the child's range needs it
+    (design "Install pulls in missing ancestors")."""
+    row = request.node.callspec.id
+    tree, installed, missing = PULL_TREES.get(row, (ANCESTRY, [], ()))
+    repos, home = make_tree(tmp_path, tree, installed=installed, missing=missing)
+    if published:
+        published(repos)
+    before = _files(home)
+    locked = AddonsLock.load(home[0] / "addons.lock").addons
+    re_install = row.startswith("re-install-")
+    entries = {TEAM: entry if entry is True else AddonEntry(**entry)} if entry else None
+
+    results, groups = _update(
+        home, [TEAM], accept=row != "pull-in-declined", entries=entries, re_install=re_install
+    )
+
+    assert {i: r.outcome for i, r in results.items()} == outcomes, results
+    # The named id first, then the rest in tree order: `outcomes`' own.
+    assert list(results) == list(outcomes), results
+    for addon_id, said in problems.items():
+        assert any(said in why for why in results[addon_id].problems), results[addon_id]
+    if "applied" not in outcomes.values():
+        assert _files(home) == before
+    if not re_install and "applied" in outcomes.values():
+        (group,) = groups
+        assert group.title == ", ".join(i for i in ANCESTRY if i in outcomes)
+        pulled = [PULLS_COMPANY, PULLS_DEPT] if COMPANY in outcomes else [PULLS_DEPT]
+        assert list(group.pulled_in) == pulled
+        written = read_yaml(home[0] / "addons.yaml")["addons"]
+        assert {i: written[i] for i in outcomes} == {
+            TEAM: entry,
+            DEPT: True,
+            **({COMPANY: True} if COMPANY in outcomes else {}),
+        }
+        assert AddonsLock.load(home[0] / "addons.lock").addons[DEPT].namespace == "dept"
+    if row == "uses-installed-ancestor":
+        assert AddonsLock.load(home[0] / "addons.lock").addons[COMPANY] == locked[COMPANY]
+    if row == "re-install-moves-a-needed-ancestor":
+        assert [g.title for g in groups] == ["company@corp, team@payments"]
+        assert (_version(home, COMPANY), _version(home, TEAM)) == ("2.0.0", "1.1.0")
+    if row == "re-install-keeps-ancestor":
+        assert [g.title for g in groups] == [TEAM]
+        assert AddonsLock.load(home[0] / "addons.lock").addons[COMPANY] == locked[COMPANY]
