@@ -4,7 +4,7 @@ first, and nothing in it can hide text from the person reading it."""
 import copy
 
 import pytest
-from support.addons import AGENT, extracted
+from support.addons import AGENT, chain, extracted, installed
 
 from kraft.addons import review
 
@@ -286,6 +286,40 @@ def test_a_reordered_chain_is_reviewed(change, section):
     found = review.review("release@acme", extracted(**base), extracted(**candidate))
     assert "order changed" in "\n".join(getattr(found, section))
     assert found.changed
+
+
+def _child_gate_added(spec):
+    _nodes(spec).append({"id": "approve", "kind": "gate"})
+
+
+@pytest.mark.parametrize(
+    ("change", "says"),
+    [(_child_gate_added, "release:ship.nodes[approve]: added (gate)")],
+    ids=["child-gate-added-is-reviewed"],
+)
+def test_a_childs_chains_are_reviewed_with_its_ancestors(tmp_path, change, says):
+    """A child's chain resolves only through its parent: each side is read
+    with that side's ancestors, so what changes in it is said."""
+    parent = installed(
+        tmp_path, "company", library={"tasks": {"base": AGENT}}, chains={"hotfix": chain("base")}
+    )
+    requires = {"kraft": "2", "harnesses": ["codex"], "addons": {parent.id: "1"}}
+    child = {
+        "manifest_fields": {"requires": requires},
+        # Only a child may drop what it inherits: read as a root, it is refused.
+        "library": {"remove": {"chains": ["hotfix"]}},
+        "chains": {"ship": chain("company:base")},
+    }
+    candidate = copy.deepcopy(child)
+    change(candidate)
+    found = review.review(
+        "release@payments",
+        extracted(**child),
+        extracted(**candidate),
+        old_ancestors=[parent],
+        new_ancestors=[parent],
+    )
+    assert says in found.content, found
 
 
 def test_a_merge_with_no_gate_before_it_says_so():

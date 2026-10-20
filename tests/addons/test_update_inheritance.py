@@ -320,3 +320,21 @@ def test_an_addon_reaches_only_its_parent(parent, task, why):
         assert found == []
     else:
         assert len(found) == 1 and why in found[0], found
+
+
+def test_a_childs_review_shows_its_chain_changes(tmp_path):
+    """A child's chains resolve only through its parent: its review reads them
+    with its ancestors in place, so a gate it drops is said before it applies."""
+    gated = {"nodes": [*chain("check")["nodes"], {"id": "approve", "kind": "gate"}]}
+    repos, home = _both_installed(
+        tmp_path, team={**TEAM, "chains": {**TEAM["chains"], "ship": gated}}
+    )
+    publish(repos["payments"], "team", version="1.1.0", **_builds_on(TEAM))
+    reviews = []
+
+    (result,) = update.update(
+        [CHILD], accept=lambda r: reviews.append(r) or True, config_dir=home[0], addons_root=home[1]
+    )
+
+    assert result.outcome == "applied", result.problems
+    assert "team:ship.nodes[approve]: gate removed" in reviews[0].reach, reviews[0].reach

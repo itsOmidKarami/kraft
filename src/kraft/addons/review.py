@@ -16,7 +16,7 @@ import json
 import re
 import tempfile
 import unicodedata
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,7 +25,7 @@ import yaml
 from kraft.addons import manifest
 from kraft.addons.fetch import Extracted, write_scratch
 from kraft.addons.load import InstalledAddon
-from kraft.addons.update import LIMITS
+from kraft.addons.update import LIMITS, _as_installed
 from kraft.config import bounded_yaml
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
@@ -157,7 +157,20 @@ def _chain_facts(
         order[chain_id] = [(node["id"], node["kind"]) for node in dumped["nodes"]]
 
 
-def _facts(extracted: Extracted | None) -> _Facts:
+def _candidate(declared: object, name: str, root: Path) -> InstalledAddon:
+    """The add-on whose `addon.json` says `declared`, as it would load from
+    `root`: its parent named when the manifest reads."""
+    try:
+        found = manifest.addon(declared, manifest.ADDON_JSON)
+    except manifest.ManifestError:
+        return InstalledAddon(f"{name}@review", name, name, "", root)
+    return _as_installed(f"{name}@review", name, found, root)
+
+
+def _facts(extracted: Extracted | None, ancestors: Sequence[InstalledAddon] = ()) -> _Facts:
+    """What `extracted` declares and its chains resolve to. A child's chains
+    resolve only with its `ancestors` (parent first) in place; only its own
+    chains are read, not theirs."""
     if extracted is None:
         return _Facts("", {}, {}, {}, {}, {}, {}, {}, {})
     declared = json.loads(extracted.files[manifest.ADDON_JSON][1])
@@ -168,15 +181,16 @@ def _facts(extracted: Extracted | None) -> _Facts:
     order: dict[str, list[tuple[str, str]]] = {}
     with tempfile.TemporaryDirectory() as tmp:
         root = write_scratch(Path(tmp), extracted)
-        addon = InstalledAddon(f"{name}@review", name, name, "", root)
+        addon = _candidate(declared, name, root)
         try:
             loaded = TemplateLibrary.from_mappings(
-                {}, (), library_path=root / "local.yaml", addons=[addon]
+                {}, (), library_path=root / "local.yaml", addons=[*ancestors, addon]
             )
         except TemplateLibraryError:
             loaded = None  # lint refuses it; there is nothing to compare
         if loaded is not None:
-            _chain_facts(loaded, loaded.chain_ids, chains, lists, order)
+            own = [c for c in loaded.chain_ids if c.startswith(f"{name}:")]
+            _chain_facts(loaded, own, chains, lists, order)
     return _Facts(
         version=str(declared.get("version", "")),
         requires=declared.get("requires") if isinstance(declared.get("requires"), dict) else {},
@@ -325,9 +339,19 @@ def local_changes(
     return reach, content
 
 
-def review(addon_id: str, old: Extracted | None, new: Extracted) -> Review:
-    """What replacing `old` (None on install) with `new` would change."""
-    was, now = _facts(old), _facts(new)
+def review(
+    addon_id: str,
+    old: Extracted | None,
+    new: Extracted,
+    *,
+    old_ancestors: Sequence[InstalledAddon] = (),
+    new_ancestors: Sequence[InstalledAddon] = (),
+) -> Review:
+    """What replacing `old` (None on install) with `new` would change. A child
+    add-on's chains resolve only through its parent: each side is read with
+    that side's ancestors (parent first) in place, the installed tree for
+    `old` and the one it would load in for `new`."""
+    was, now = _facts(old, old_ancestors), _facts(new, new_ancestors)
     name = addon_id.split("@", 1)[0]
     reach: list[str] = []
     content: list[str] = []

@@ -797,6 +797,20 @@ def _ancestors(
         raise Refused([f"{exc}{hint}"]) from exc
 
 
+def _ancestry_in(
+    addon_id: str, addons: Sequence[load.InstalledAddon]
+) -> tuple[load.InstalledAddon, ...]:
+    """`addon_id`'s ancestors among `addons`, parent first; empty for a root
+    add-on, one not among them, or one whose ancestry does not hold there."""
+    addon = next((a for a in addons if a.id == addon_id and a.repo_id is None), None)
+    if addon is None or addon.parent is None:
+        return ()
+    try:
+        return inherit.ancestry(addon, addons)[1:]
+    except inherit.InheritanceError:
+        return ()
+
+
 def _outside(range_: str | None, version: str) -> str | None:
     """Why `version` is outside `range_`; None when it is inside, or there is
     no range. A version that does not read is outside."""
@@ -1041,13 +1055,21 @@ def update(
             if store is not None and store.is_dir():
                 try:
                     old = fetch.verify_store(store)
-                    reviewed = review_mod.review(addon_id, old, extracted)
+                    reviewed = review_mod.review(
+                        addon_id,
+                        old,
+                        extracted,
+                        old_ancestors=_ancestry_in(addon_id, loaded),
+                        new_ancestors=_ancestry_in(addon_id, would_load),
+                    )
                 except Exception:  # noqa: BLE001 -- an edited store can break in any way
                     old = None
             if old is None:
                 # Nothing installed, or a store that is gone or does not read:
                 # everything in the candidate is shown as new.
-                reviewed = review_mod.review(addon_id, None, extracted)
+                reviewed = review_mod.review(
+                    addon_id, None, extracted, new_ancestors=_ancestry_in(addon_id, would_load)
+                )
             if old is None and locked is not None:
                 # Still an update, and one nobody can compare: said first, and held.
                 said = [f"the installed {locked.version} could not be read to compare with"]
