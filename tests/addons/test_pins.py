@@ -76,6 +76,34 @@ def home(tmp_path, monkeypatch):
     return repo, config_dir, addons_dir
 
 
+@pytest.fixture
+def tree_home(tmp_path, monkeypatch):
+    """A Kraft home, this process's own, with the example tree (`TREE`)
+    installed root first from one collection `acme`. Company also ships a
+    chain `default` running its `security_scan`, which `team-payments`
+    inherits, and its `slow` falls back to its own `fast` by name: a bare
+    `profile:` in an add-on is the instance's, which this one lacks. The
+    other two ship an empty `library.yaml`: an install refuses an add-on that
+    would add nothing."""
+    company = {
+        "chains": {"default": chain("security_scan")},
+        "profiles": {
+            "slow": {
+                "model": {"codex": "company-model"},
+                "fallback": [{"profile": "company:fast"}],
+            },
+            "fast": {"model": {"codex": "fast-model"}},
+        },
+    }
+    repo = tree_collection(tmp_path, company=company, dept={"library": {}}, team={"library": {}})
+    config_dir, addons_dir = instance(tmp_path, {"acme": {"git": repo.as_uri()}})
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(addons_dir.parent))
+    for addon_id in TREE:
+        _update(config_dir, addons_dir, [addon_id], install=True)
+    return repo, config_dir, addons_dir
+
+
 def _update(config_dir, addons_dir, ids, install=False):
     results = update.update(
         ids,
@@ -99,25 +127,6 @@ def _resolved(config_dir, addons_dir, chain_id):
         config_dir, addons=load.installed(config_dir, addons_dir)
     )
     return library.resolve_chain(chain_id)
-
-
-@pytest.fixture
-def tree_home(tmp_path, monkeypatch):
-    """A Kraft home, this process's own, with the example tree (`TREE`:
-    company, platform-dept, team-payments, from one collection `acme`)
-    installed root first. The instance defines the agent profile `fast` that
-    company's `slow` falls back to, and each child ships an empty
-    `library.yaml`: install refuses an add-on that holds nothing."""
-    repo = tree_collection(tmp_path, dept={"library": {}}, team={"library": {}})
-    config_dir, addons_dir = instance(tmp_path, {"acme": {"git": repo.as_uri()}})
-    harnesses = yaml.safe_load((config_dir / "harnesses.yaml").read_text())
-    harnesses["profiles"] = {"fast": {"model": {"codex": "instance-fast"}}}
-    (config_dir / "harnesses.yaml").write_text(yaml.safe_dump(harnesses))
-    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config_dir))
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(addons_dir.parent))
-    for addon_id in TREE:
-        _update(config_dir, addons_dir, [addon_id], install=True)
-    return repo, config_dir, addons_dir
 
 
 def test_a_chain_that_only_extends_an_addon_pins_it_and_a_trim_keeps_the_pin(home):
@@ -665,3 +674,132 @@ def test_a_launch_reads_an_inherited_skill_under_the_childs_name(tree_home):
     inv = _launch(resolved.addons, skill=skill)
 
     assert "company method" in inv.method_text
+
+
+def _write_chain(config_dir, name, **task):
+    """A local one-node chain `name` whose single task is an agent task with
+    `task`'s fields."""
+    body = {"nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", **AGENT, **task}]}]}
+    (config_dir / "chains" / f"{name}.yaml").write_text(json.dumps(body))
+
+
+def _fast_falls_back_to(config_dir, profile):
+    """`harnesses.yaml` gains a local profile `fast` that falls back to `profile`."""
+    harnesses = yaml.safe_load((config_dir / "harnesses.yaml").read_text()) or {}
+    fast = {"model": {"codex": "gpt-5"}, "fallback": [{"profile": profile}]}
+    harnesses["profiles"] = {**(harnesses.get("profiles") or {}), "fast": fast}
+    (config_dir / "harnesses.yaml").write_text(yaml.safe_dump(harnesses))
+
+
+_WHOLE_TREE = ["company", "platform-dept", "team-payments"]
+
+
+@pytest.mark.parametrize(
+    ("case", "chain_id", "expected"),
+    [
+        pytest.param("child-chain", "team-payments:default", _WHOLE_TREE, id="child-chain"),
+        pytest.param("outside-extends", "outside", _WHOLE_TREE, id="outside-extends"),
+        pytest.param("fallback", "quick", _WHOLE_TREE, id="fallback-into-inherited-profile"),
+        pytest.param("root-only", "company:default", ["company"], id="root-only"),
+        pytest.param(
+            "child-first", "team-payments:default", _WHOLE_TREE, id="lock-lists-the-child-first"
+        ),
+    ],
+)
+def test_an_item_pins_its_whole_tree(tree_home, case, chain_id, expected):
+    """A chain that reads a child add-on pins every ancestor too, root first,
+    and each child's pin names its parent. A root's pin is what it always was."""
+    _repo, config_dir, addons_dir = tree_home
+    locked = load.installed(config_dir, addons_dir)
+    if case == "outside-extends":
+        # Names only the child; the dept is read through it and named nowhere.
+        (config_dir / "chains" / "outside.yaml").write_text(
+            json.dumps(chain("team-payments:security_scan"))
+        )
+    elif case == "fallback":
+        _fast_falls_back_to(config_dir, "team-payments:slow")
+        _write_chain(config_dir, "quick", profile="fast")
+    elif case == "child-first":
+        locked = tuple(reversed(locked))
+    library = TemplateLibrary.from_yaml_dir(config_dir, addons=locked)
+
+    pins = library.resolve_chain(chain_id).addons
+
+    assert list(pins) == expected
+    by_namespace = {a.namespace: a for a in locked}
+    # The ancestors' digests are what GC keeps (D11).
+    assert pins == {n: by_namespace[n].pin for n in expected}
+    assert pins["company"] == {
+        "id": "company@acme",
+        "commit": by_namespace["company"].commit,
+        "tree": by_namespace["company"].tree,
+        "source": "./addons/company",
+        "digest": f"sha256:{by_namespace['company'].root.name}",
+        "version": "1.0.0",
+    }
+    if "team-payments" in expected:
+        assert pins["team-payments"]["parent"] == "platform-dept@acme"
+        assert pins["platform-dept"]["parent"] == "company@acme"
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "launch-reads-pinned-ancestor",
+        "for-item-tree-order",
+        "restore-an-ancestor",
+        "pin-without-parent",
+        "child-disabled-since",
+    ],
+)
+async def test_an_item_keeps_its_tree_across_a_parent_update(tree_home, case):
+    """An item that read `team-payments` keeps the company version it started
+    with after company moves to 1.1.0, which the team's range `1` accepts: its
+    pins carry the whole tree, a launch reads the pinned ancestor, and a pinned
+    ancestor whose store is gone leaves its descendants out with its reason
+    until it is restored."""
+    repo, config_dir, addons_dir = tree_home
+    resolved = _resolved(config_dir, addons_dir, "team-payments:default")
+    pins = resolved.addons
+    skill = next(iter(resolved.nodes[0].tasks())).task.skill
+    old = _store_of(config_dir, addons_dir, "company")
+    publish(repo, "company", version="1.1.0", skills={"deploy-review": "company 1.1.0 method"})
+    _update(config_dir, addons_dir, ["company@acme"])
+
+    if case == "launch-reads-pinned-ancestor":
+        started, filed_now = _launch(pins, skill=skill), _launch(None, skill=skill)
+        assert "company method" in started.method_text
+        assert "company 1.1.0 method" in filed_now.method_text
+        return
+    if case == "restore-an-ancestor":
+        drop_store(old)
+        reason = (
+            "its parent platform-dept@acme is not loaded: its parent company@acme is not "
+            "loaded: the version this work item started with is no longer in the store"
+        )
+        with pytest.raises(agent.HarnessUnavailable) as stop:
+            # Reads only the team; its pinned grandparent is what is gone.
+            _launch(pins, fallback=[{"profile": "team-payments:slow"}])
+        assert str(stop.value) == f"add-on team-payments@acme 1.0.0 could not be read: {reason}"
+
+        await dispatch.restore_pins({"materialized_chain": _stored(resolved)})
+
+        assert "company method" in _launch(pins, skill=skill).method_text
+        return
+    if case == "for-item-tree-order":
+        pins = dict(reversed(pins.items()))
+    elif case == "pin-without-parent":
+        # A snapshot stored before pins recorded parents.
+        pins = {n: {k: v for k, v in p.items() if k != "parent"} for n, p in pins.items()}
+    else:
+        edit_addons_yaml(config_dir, lambda w: w["addons"].update({TREE[2]: False}))
+
+    known = load.for_item(pins, config_dir, addons_dir, repo_id=None)
+
+    tree = [p for p in known if p.namespace in pins]
+    assert [p.namespace for p in tree] == _WHOLE_TREE
+    assert [(p.parent, p.left_out) for p in tree] == [
+        (None, None),
+        ("company@acme", None),
+        ("platform-dept@acme", None),
+    ]

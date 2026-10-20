@@ -66,8 +66,10 @@ class InstalledAddon:
     @property
     def pin(self) -> dict[str, str | None]:
         """What a work item records of this add-on: enough to find its store,
-        and to restore it from its commit when the store is gone."""
-        return {
+        and to restore it from its commit when the store is gone. A child's
+        also names its parent, so the pinned tree is rebuilt as it was even
+        when a store is gone; a root's has no `parent` key."""
+        pin: dict[str, str | None] = {
             "id": self.id,
             "commit": self.commit,
             "tree": self.tree,
@@ -75,6 +77,9 @@ class InstalledAddon:
             "digest": f"sha256:{self.root.name}",
             "version": self.version,
         }
+        if self.parent is not None:
+            pin["parent"] = self.parent
+        return pin
 
     @property
     def repo_id(self) -> str | None:
@@ -605,7 +610,14 @@ def for_item(
     Every connected repository id that names no loaded or pinned add-on
     comes back too, left out: `<repo-id>:<skill>` is then refused, never
     handed to the agent as another tool's plugin, whether or not that
-    repository's library is accepted."""
+    repository's library is accepted.
+
+    A pinned child builds on the parent its pin names (its store's manifest,
+    for a pin stored before pins named parents), and the add-ons come back
+    parents first. One whose ancestor is not loaded is left out with that
+    ancestor's reason."""
+    from kraft.addons import inherit  # inherit imports this module
+
     store = (Path(addons_root) if addons_root is not None else addons_dir()) / "store"
     pinned = []
     for namespace, pin in (pins or {}).items():
@@ -625,7 +637,7 @@ def for_item(
                 commit=pin.get("commit"),
                 tree=pin.get("tree"),
                 source=pin.get("source"),
-                parent=_pinned_parent(root),
+                parent=pin.get("parent") if "parent" in pin else _pinned_parent(root),
             )
         )
     live = scoped(
@@ -633,12 +645,15 @@ def for_item(
         repo_id,
     )
     # After `scoped`: a store out of this item's scope is never hashed.
-    loading = tuple(
+    checked = (
         replace(addon, left_out=why)
         if addon.left_out is None and (why := _launch_problem(addon))
         else addon
         for addon in (*live, *pinned)
     )
+    # A child of a pinned ancestor that is gone is left out with its reason,
+    # never built on the lock's version of that ancestor.
+    loading = inherit.tree_order(inherit.cascade(tuple(checked)))
     taken = {p.namespace for p in loading}
     reserved = [
         InstalledAddon(
@@ -657,11 +672,11 @@ def for_item(
 
 
 def _pinned_parent(root: Path) -> str | None:
-    """The parent a pinned add-on's own manifest names, so a pinned child
-    builds as a child; None for a root add-on, or a store that does not read
-    (the launch says why). Its ancestors are the instance's installed ones:
-    an item does not pin them until slice 3, and its range is not checked
-    again here."""
+    """The parent a pinned add-on's own manifest names, for a pin stored
+    before pins named parents, so a pinned child still builds as a child;
+    None for a root add-on, or a store that does not read (the launch says
+    why). Such a snapshot did not pin the ancestors either: they are the
+    instance's installed ones. Its range is not checked again here."""
     from kraft.addons import fetch, inherit, manifest
 
     if not root.is_dir():

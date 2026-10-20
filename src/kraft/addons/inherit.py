@@ -106,6 +106,24 @@ def cascade(addons: Sequence[InstalledAddon]) -> tuple[InstalledAddon, ...]:
             current[i] = replace(current[i], left_out=str(failing[i]))
 
 
+def tree_order(addons: Sequence[InstalledAddon]) -> tuple[InstalledAddon, ...]:
+    """`addons`, parents before children: a stable sort on how many ancestors
+    each reaches by `parent` id among `addons` that are not repo libraries,
+    counted up to `MAX_DEPTH` or a repeat. Roots, and add-ons whose parent is
+    not among them, keep the order given."""
+    by_id = {a.id: a for a in addons if a.repo_id is None}
+
+    def depth(addon: InstalledAddon) -> int:
+        seen = {addon.id}
+        current = by_id.get(addon.parent) if addon.parent is not None else None
+        while current is not None and current.id not in seen and len(seen) < MAX_DEPTH:
+            seen.add(current.id)
+            current = by_id.get(current.parent) if current.parent is not None else None
+        return len(seen) - 1
+
+    return tuple(sorted(addons, key=depth))
+
+
 def read_manifest(addon: InstalledAddon) -> AddonManifest:
     """`addon`'s `addon.json`, read through its store's digest: never a FIFO's
     endless read, and never an edit. Raises what the store or the manifest
