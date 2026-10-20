@@ -526,3 +526,21 @@ def test_an_inherited_skill_is_named_under_the_child(tmp_path, tree, reads):
     library, resolved = resolve()
     assert next(iter(resolved.nodes[0].tasks())).task.skill == ref
     assert skill.read(None, ref, library.addon_dirs) == reads
+
+
+def test_a_chain_checked_against_the_library_reuses_its_skill_dirs(tmp_path):
+    """`with_chain` builds a candidate per chain it checks, on the same add-ons:
+    the candidate takes the library's `addon_dirs`, which reads every child's
+    tree, rather than reading them all again."""
+    library = TemplateLibrary.from_mappings(
+        {"tasks": {"base": AGENT}},
+        (),
+        library_path=tmp_path / "config" / "library.yaml",
+        addons=example_tree(tmp_path),
+    )
+    dirs = library.addon_dirs
+
+    candidate, _ = library.with_chain(tmp_path / "config" / "chains" / "c.yaml", chain("base"))
+
+    assert "team-payments:deploy-review" in dirs
+    assert candidate.addon_dirs is dirs

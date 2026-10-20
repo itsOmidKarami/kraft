@@ -797,6 +797,10 @@ class TemplateLibrary:
             self.library_path,
         )
         candidate._share_layers(self)
+        if "addon_dirs" in self.__dict__:
+            # The same add-ons, so the same answer: never read every child's
+            # tree again for each chain a check or a draft tries.
+            candidate.__dict__["addon_dirs"] = self.addon_dirs
         candidate._chains.pop(_chain_id(chain_path, body), None)
         return candidate, candidate._add_chain(chain_path, body)
 
