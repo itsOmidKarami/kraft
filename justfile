@@ -5,7 +5,7 @@ set shell := ["bash", "-uc"]
 _default:
     @just --list
 
-# Install backend + frontend deps
+# Install backend + frontend deps, then the agent skills (`setup-plugins`)
 setup:
     uv sync
     cd frontend && npm ci
@@ -15,35 +15,53 @@ setup:
 #
 # Claude Code: .claude/settings.json turns both plugins on, but committing
 # `enabledPlugins` does not download a plugin from an outside source, so each
-# clone installs them once.
+# machine installs them once, into ~/.claude, which every checkout and worktree
+# shares.
 #
 # Every other agent Kraft runs (Codex, Cursor, Gemini CLI, OpenCode, Amp,
 # Antigravity) and GitHub Copilot reads skills from .agents/skills/. The
 # `skills` CLI copies them there; they are gitignored, and only beads is
-# committed in that folder. skills-lock.json records where each came from.
+# committed in that folder, so each checkout and worktree installs its own.
 #
-# Re-running refreshes both. Each half is skipped when its tool (`claude`,
-# `npx`) is missing, since neither is required to build or test Kraft.
+# Kraft runs `just setup` in every worktree, more than once, so each half skips
+# what is already installed, and a missing tool or a failed download is a
+# warning, never a failed setup: neither is needed to build or test Kraft. To
+# refresh: `claude plugin update <id>` and `npx skills update -p`.
 [doc("Install superpowers and impeccable for Claude Code and every other agent")]
 setup-plugins:
     #!/usr/bin/env bash
-    set -euo pipefail
-    if command -v claude >/dev/null; then
-        claude plugin marketplace add anthropics/claude-plugins-official >/dev/null
-        claude plugin marketplace add pbakaus/impeccable >/dev/null
-        claude plugin install superpowers@claude-plugins-official --scope project
+    set -uo pipefail
+    claude_plugins() {
+        claude plugin marketplace add anthropics/claude-plugins-official >/dev/null &&
+        claude plugin marketplace add pbakaus/impeccable >/dev/null &&
+        claude plugin install superpowers@claude-plugins-official --scope project &&
         claude plugin install impeccable@impeccable --scope project
-    else
-        echo "claude not installed; skipping the Claude Code plugins"
-    fi
-    if command -v npx >/dev/null; then
-        agents=(codex cursor gemini-cli opencode amp antigravity github-copilot)
+    }
+    agent_skills() {
+        local source
         for source in obra/superpowers pbakaus/impeccable; do
-            npx -y skills@1.7.4 add "$source" --skill '*' --agent "${agents[@]}" --copy -y >/dev/null
-            echo "Installed $source into .agents/skills/"
+            DISABLE_TELEMETRY=1 NPM_CONFIG_UPDATE_NOTIFIER=false npx -y skills@1.7.4 add "$source" --skill '*' \
+                --agent codex cursor gemini-cli opencode amp antigravity github-copilot \
+                --copy -y >/dev/null || return 1
         done
-    else
+    }
+    if ! command -v claude >/dev/null; then
+        echo "claude not installed; skipping the Claude Code plugins"
+    elif listed=$(claude plugin list --json 2>/dev/null) &&
+        grep -q '"superpowers@claude-plugins-official"' <<<"$listed" &&
+        grep -q '"impeccable@impeccable"' <<<"$listed"; then
+        echo "Claude Code plugins already installed"
+    elif ! claude_plugins; then
+        echo "warning: could not install the Claude Code plugins; run 'just setup-plugins' to retry" >&2
+    fi
+    if ! command -v npx >/dev/null; then
         echo "npx not installed; skipping the skills for agents other than Claude Code"
+    elif [[ -f .agents/skills/using-superpowers/SKILL.md && -f .agents/skills/impeccable/SKILL.md ]]; then
+        echo "Agent skills already in .agents/skills/"
+    elif agent_skills; then
+        echo "Installed superpowers and impeccable into .agents/skills/"
+    else
+        echo "warning: could not install the skills into .agents/skills/; run 'just setup-plugins' to retry" >&2
     fi
 
 # Install deps including semantic search (downloads a ~130MB model on first

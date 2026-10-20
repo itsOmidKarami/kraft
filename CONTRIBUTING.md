@@ -35,8 +35,9 @@ just dev        # backend + vite, state in .dev/, agents faked, UI on :5173
 
 `just setup` also installs [superpowers](https://github.com/obra/superpowers)
 and [impeccable](https://impeccable.style) for every agent this repo is worked
-on with. `just setup-plugins` runs that step alone, and re-running it refreshes
-both:
+on with. `just setup-plugins` runs that step alone. It skips whatever is already
+installed, and a missing tool or a failed download is a warning, not a failed
+setup. To refresh them, run `claude plugin update <id>` and `npx skills update -p`:
 
 - **Claude Code**, when `claude` is on your `PATH`: as plugins.
   `.claude/settings.json` turns them on, but Claude Code does not download a
