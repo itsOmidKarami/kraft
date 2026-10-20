@@ -6,10 +6,12 @@ an accepted review leaves `addons.yaml`, the lock and the store as they were.
 
 `check` is what an add-on's own files may not say, whatever instance takes it:
 an add-on never runs a command, never grants a permission, runs only on the
-harnesses it lists, and reaches into no other add-on. The rules read the
-files as the author wrote them. An add-on is self-contained, so everything one
-of its chains can inherit is in these same files: checking each file checks
-every chain after `extends:` expansion, and the components no chain uses yet.
+harnesses it lists, and reaches into no add-on but its parent. The rules read
+the files as the author wrote them. What a root add-on's chains can inherit is
+in these same files, and what a child's inherit is in its ancestors', each
+checked when it was installed: checking each file checks every chain after
+`extends:` expansion, and the components no chain uses yet. A child is judged
+with its ancestors in place (`problems(ancestors=...)`, `_ancestors`).
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ from typing import TYPE_CHECKING
 import yaml
 from pydantic import ValidationError
 
-from kraft.addons import fetch, load, manifest
+from kraft.addons import fetch, inherit, load, manifest
 from kraft.addons.config import (
     ADDON_ID_PATTERN,
     AddonEntry,
@@ -188,6 +190,7 @@ def problems(
     other_namespaces: Collection[str] = (),
     repositories: Collection[str] = (),
     repo_library: str | None = None,
+    ancestors: Sequence[load.InstalledAddon] = (),
 ) -> list[str]:
     """Every reason this add-on's content is refused; empty when it is taken.
     `other_namespaces` are the installed add-ons' namespaces, this one's own
@@ -196,9 +199,17 @@ def problems(
     that repository's library, whether or not one is accepted.
     `repo_library`: the repository id, when the content is a repo library's,
     whose `addons:` list lets a chain's top-level `extends` name a listed
-    add-on (`a-repo-library-chain-may-extend-a-listed-addon-chain`)."""
+    add-on (`a-repo-library-chain-may-extend-a-listed-addon-chain`).
+    A child add-on may name its parent (`requires.addons`) by the parent's
+    name wherever a qualified name goes, and no other add-on
+    (`an-addon-reaches-only-its-parent`). `ancestors` (parent first, root
+    last) are the add-ons it builds on: given, a `remove:` name the parent's
+    merged library lacks is refused, not only recorded as stale."""
     out: list[str] = []
     listed = _listed_addons(found, files, repo_library, out)
+    parent_id = found.parent[0] if found.parent and not repo_library else None
+    parent_name = parent_id.split("@", 1)[0] if parent_id else None
+    out += _removal_problems(found, files, parent_id, ancestors)
     allowed_harnesses = set(found.requires.harnesses)
     for rel in sorted(files):
         if not (rel in ("library.yaml", "profiles.yaml") or rel.startswith("chains/")):
@@ -229,6 +240,7 @@ def problems(
                     f"{where}: harness {harness!r} is not listed in requires.harnesses "
                     f"({sorted(allowed_harnesses)})"
                 )
+            reach = f"an add-on reaches no add-on but its parent ({parent_id})"
             steering = component.get("steering")
             references = [
                 ("extends", component.get("extends")),
@@ -237,7 +249,7 @@ def problems(
             ]
             for key, value in references:
                 qualifier = _qualifier(value)
-                if qualifier is None or qualifier == found.name:
+                if qualifier is None or qualifier in (found.name, parent_name):
                     continue
                 # `at` is empty only at a chain file's top level: a library or
                 # profiles entry always sits under its section.
@@ -258,8 +270,8 @@ def problems(
                 else:
                     hint = ""
                 out.append(
-                    f"{where}: {key} {value!r} reaches outside the add-on; an add-on is "
-                    f"self-contained{hint}"
+                    f"{where}: {key} {value!r} reaches outside the add-on; "
+                    + (reach if parent_id else f"an add-on is self-contained{hint}")
                 )
             skill = component.get("skill")
             if (qualifier := _qualifier(skill)) in set(repositories) - {found.name}:
@@ -267,22 +279,72 @@ def problems(
                     f"{where}: skill {skill!r} names repository {qualifier}'s repo library "
                     "namespace; there are no add-on dependencies"
                 )
-            elif _qualifier(skill) in set(other_namespaces) - {found.name, _KRAFT}:
+            elif qualifier in set(other_namespaces) - {found.name, parent_name, _KRAFT}:
                 out.append(
-                    f"{where}: skill {skill!r} names another installed Kraft add-on; there are "
-                    "no add-on dependencies"
+                    f"{where}: skill {skill!r} names another installed Kraft add-on; "
+                    + (reach if parent_id else "there are no add-on dependencies")
                 )
     return out
+
+
+def _removal_problems(
+    found: AddonManifest,
+    files: Mapping[str, tuple[str, bytes]],
+    parent_id: str | None,
+    ancestors: Sequence[load.InstalledAddon],
+) -> list[str]:
+    """Why a child's (`parent_id`) `remove:` is refused when judged with its
+    `ancestors`: each name the parent's merged library lacks, which load only
+    records as stale (`a-child-removes-only-what-it-inherits`). A `remove:`
+    anywhere else is refused by the library itself (`remove-is-refused-
+    outside-a-child`), and a library that does not build says nothing here:
+    the lint after it says why."""
+    from kraft.templates.library import TemplateLibrary, TemplateLibraryError
+
+    if parent_id is None or not ancestors:
+        return []
+    entry = files.get("library.yaml")
+    try:
+        data = bounded_yaml(entry[1].decode(), [20_000]) if entry else None
+    except (ValueError, yaml.YAMLError):
+        return []  # `problems` says the file cannot be parsed
+    if not isinstance(data, Mapping) or "remove" not in data:
+        return []
+    with tempfile.TemporaryDirectory() as scratch:
+        root = fetch.write_scratch(Path(scratch), fetch.Extracted(dict(files)))
+        child = load.InstalledAddon(
+            f"{found.name}@candidate",
+            found.name,
+            found.name,
+            found.version,
+            root,
+            parent=parent_id,
+            parent_range=found.parent[1] if found.parent else None,
+        )
+        try:
+            library = TemplateLibrary.from_mappings(
+                {}, (), library_path=root / "local.yaml", addons=[*ancestors, child]
+            )
+        except TemplateLibraryError:
+            return []
+    own = f"{found.name}: "
+    return [
+        f"library.yaml: {stale.removeprefix(own)}"
+        for stale in library.stale_removals
+        if stale.startswith(own)
+    ]
 
 
 def referrers(namespace: str, addons: Sequence[load.InstalledAddon]) -> list[str]:
     """Why `namespace` may not be taken: each skill of `addons`, the other
     installed add-ons, that already names `<namespace>:`. It resolved to no
     add-on when it was installed; an add-on installed now would answer it, and
-    there are no add-on dependencies. A store that does not read says nothing:
-    loading says why it is left out."""
+    there are no add-on dependencies. A child's reference by its parent's
+    name is to its inherited layer, never to a namespace. A store that does
+    not read says nothing: loading says why it is left out."""
     out: list[str] = []
     for addon in addons:
+        parent_name = addon.parent.split("@", 1)[0] if addon.parent else None
         try:
             files = fetch.extract_dir(addon.root).files
         except Exception:  # noqa: BLE001 -- an edited store can break in any way
@@ -296,7 +358,7 @@ def referrers(namespace: str, addons: Sequence[load.InstalledAddon]) -> list[str
                 continue
             for at, component in _components(rel, data):
                 skill = component.get("skill")
-                if _qualifier(skill) == namespace:
+                if _qualifier(skill) == namespace != parent_name:
                     out.append(
                         f"{addon.id}: {rel}: {at or 'file'}: skill {skill!r} names this "
                         f"add-on's namespace {namespace!r}; there are no add-on dependencies"
@@ -356,11 +418,19 @@ def check(
     other_namespaces: Collection[str] = (),
     named_by: Sequence[str] = (),
     repositories: Collection[str] = (),
+    ancestors: Sequence[load.InstalledAddon] = (),
 ) -> None:
     """Raise `Refused` when this add-on's content may not be installed.
-    `named_by` is what `referrers()` says of its namespace."""
+    `named_by` is what `referrers()` says of its namespace; `ancestors` are
+    what `problems` takes."""
     if found_problems := [
-        *problems(found, files, other_namespaces=other_namespaces, repositories=repositories),
+        *problems(
+            found,
+            files,
+            other_namespaces=other_namespaces,
+            repositories=repositories,
+            ancestors=ancestors,
+        ),
         *named_by,
     ]:
         raise Refused(found_problems)
@@ -681,6 +751,75 @@ def _catalogue(
     return mirror, commit, listed
 
 
+def _ancestors(
+    candidate: load.InstalledAddon, addons: Sequence[load.InstalledAddon], config: AddonsConfig
+) -> tuple[load.InstalledAddon, ...]:
+    """`candidate`'s ancestors among `addons` (the rest of the instance),
+    parent first; empty for a root add-on. Raises `Refused` when its ancestry
+    does not hold, with what to run: install the parent, add its collection,
+    or take another release (`install-refuses-a-missing-parent-collection`,
+    `every-child-accepts-its-parents-version`). Slice 1 installs no ancestor
+    itself."""
+    parent_id = candidate.parent
+    if parent_id is None:
+        return ()
+    parent = next((a for a in addons if a.id == parent_id and a.repo_id is None), None)
+    if parent is None:
+        collection = parent_id.split("@", 1)[1]
+        if collection not in config.collections:
+            raise Refused(
+                [
+                    f"its parent {parent_id} comes from collection {collection}, which this "
+                    "instance has not added; add it first: kraft admin addon collection add "
+                    "<its git URL or directory>"
+                ]
+            )
+        raise Refused(
+            [
+                f"its parent {parent_id} is not installed; install it first: "
+                f"kraft admin addon install {parent_id}"
+            ]
+        )
+    try:
+        return inherit.ancestry(candidate, addons)[1:]
+    except inherit.InheritanceError as exc:
+        hint = ""
+        if parent.left_out is None and _outside(candidate.parent_range, parent.version):
+            hint = (
+                f"; point collection {parent_id.split('@', 1)[1]}'s ref at a release it "
+                f"accepts, or wait for {candidate.id} to accept {parent.version}"
+            )
+        raise Refused([f"{exc}{hint}"]) from exc
+
+
+def _outside(range_: str | None, version: str) -> str | None:
+    """Why `version` is outside `range_`; None when it is inside, or there is
+    no range. A version that does not read is outside."""
+    if range_ is None:
+        return None
+    try:
+        return manifest.version_in_range(range_, version)
+    except ValueError as exc:
+        return str(exc)
+
+
+def _children_left_behind(
+    addon_id: str, version: str, addons: Sequence[load.InstalledAddon]
+) -> list[str]:
+    """One line for each loading child among `addons` whose range `version`
+    of its parent `addon_id` falls outside: moving the parent would leave it
+    out. Slice 1 refuses the move; it does not move the set."""
+    return [
+        f"{version} would leave {child.id} outside its range {child.parent_range} ({why}); "
+        "it would no longer load"
+        for child in addons
+        if child.repo_id is None
+        and child.left_out is None
+        and child.parent == addon_id
+        and (why := _outside(child.parent_range, version))
+    ]
+
+
 @dataclass(frozen=True)
 class _Candidate:
     addon_id: str
@@ -802,6 +941,21 @@ def update(
                     )
                 if why := load.instance_problem(namespace, found.requires, config_dir):
                     raise Refused([why])
+                parent = found.parent or (None, None)
+                # Its root is the scratch copy, written once it is known to be pending.
+                candidate = load.InstalledAddon(
+                    addon_id,
+                    name,
+                    namespace,
+                    found.version,
+                    Path(scratch),
+                    parent=parent[0],
+                    parent_range=parent[1],
+                )
+                rest = [p for p in loaded if p.id != addon_id]
+                ancestors = _ancestors(candidate, rest, config)
+                if behind := _children_left_behind(addon_id, found.version, rest):
+                    raise Refused(behind)
                 others = (
                     set(holders)
                     | {config.namespace(o) for o in config.addons if o != addon_id}
@@ -813,6 +967,7 @@ def update(
                     other_namespaces=others,
                     named_by=referrers(namespace, [p for p in loaded if p.id != addon_id]),
                     repositories=load.connected_ids(config_dir),
+                    ancestors=ancestors,
                 )
             except fetch.FetchError as exc:
                 results[addon_id] = Result(addon_id, "failed", problems=(str(exc),), kind=exc.kind)
@@ -874,11 +1029,21 @@ def update(
                 reviewed = replace(reviewed, reach=(moved, *reviewed.reach))
 
             root = fetch.write_scratch(Path(scratch), extracted)
-            candidate = load.InstalledAddon(addon_id, name, namespace, found.version, root)
-            would_load = [p for p in loaded if p.id != addon_id] + [candidate]
+            # A descendant whose ancestry no longer holds drops before it is
+            # judged, and is named: its chains are gone, not broken.
+            would_load = list(inherit.cascade([*rest, replace(candidate, root=root)]))
+            loading = {p.id for p in rest if p.left_out is None}
+            dropped = [
+                f"{p.id} would no longer load: {p.left_out}"
+                for p in would_load
+                if p.id in loading and p.left_out is not None
+            ]
             after = state_of(config_dir, would_load)
             libraries = {p.namespace for p in would_load if p.repo_id is not None}
-            if broken := breaks(state, after, config_dir, namespace, exempt=libraries):
+            if broken := [
+                *dropped,
+                *breaks(state, after, config_dir, namespace, exempt=libraries),
+            ]:
                 results[addon_id] = Result(
                     addon_id,
                     "refused",

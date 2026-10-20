@@ -224,6 +224,12 @@ def test_a_remote_with_no_library_is_none_not_a_fault(app, home):
             id="its-own-repo-id-as-a-qualifier",
         ),
         pytest.param(None, {"ship": chain("missing")}, "does not resolve", id="broken-chain"),
+        pytest.param(
+            {"tasks": {"base": AGENT}, "remove": {"tasks": ["base"]}},
+            None,
+            "library.yaml: `remove:` is for an add-on that builds on another",
+            id="repo-library-remove",
+        ),
     ],
 )
 def test_a_repo_library_is_refused_for_what_an_addon_is(app, home, library, chains, why):
