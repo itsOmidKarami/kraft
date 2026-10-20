@@ -27,7 +27,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import yaml
 from pydantic import ValidationError
@@ -923,6 +923,16 @@ class _Context:
     re_install: bool
 
 
+class _Judged(NamedTuple):
+    """The instance with a tree's moves applied, and what they break in it."""
+
+    would_load: list[load.InstalledAddon]
+    after: State
+    #: The namespaces of the repo libraries loading in it.
+    libraries: set[str]
+    broken: list[str]
+
+
 def _said(
     locked: LockEntry | None,
     collection: CollectionConfig,
@@ -1161,7 +1171,7 @@ def _check_moves(
         parents |= {i: moves[i].candidate.parent for i in applied}
         parents[addon_id] = move.candidate.parent
         # A cycle is `_judge`'s to name; no ancestor's move is taken onto it.
-        on = {i for i in inherit._path(addon_id, parents) or () if i in applied} | {addon_id}
+        on = {i for i in inherit.path(addon_id, parents) or () if i in applied} | {addon_id}
         above[addon_id] = on - {addon_id}
         view = [*(p for p in ctx.loaded if p.id not in on), *(moves[i].candidate for i in on)]
         unranged = [replace(p, parent_range=None) for p in view]
@@ -1185,7 +1195,7 @@ def _check_moves(
             [
                 p
                 for p in inherit.cascade(unranged)
-                if addon_id in (inherit._path(p.id, tree) or ())[1:]
+                if addon_id in (inherit.path(p.id, tree) or ())[1:]
             ],
             loading,
         )
@@ -1220,7 +1230,7 @@ def _relatives(ids: Sequence[str], addons: Sequence[load.InstalledAddon]) -> lis
     """Every installed ancestor and descendant of `ids` among `addons`,
     following their `parent` links, `ids` themselves left out."""
     parents = {a.id: a.parent for a in addons if a.repo_id is None}
-    lines = {i: inherit._path(i, parents) or (i,) for i in parents}
+    lines = {i: inherit.path(i, parents) or (i,) for i in parents}
     out = {
         other
         for addon_id in ids
@@ -1228,6 +1238,12 @@ def _relatives(ids: Sequence[str], addons: Sequence[load.InstalledAddon]) -> lis
         if addon_id in line or other in lines.get(addon_id, ())
     }
     return sorted(out - set(ids))
+
+
+def _unasked(chosen: Mapping[str, Result], joined: Collection[str]) -> dict[str, Result]:
+    """`chosen` without the refusals of `joined` (relatives' moves): they were
+    not asked for."""
+    return {i: r for i, r in chosen.items() if i not in joined or r.outcome != "refused"}
 
 
 def _review(
@@ -1275,9 +1291,10 @@ def update(
 ) -> list[Result]:
     """Install or update `ids` (every add-on in `addons.yaml` when None), one
     `Result` each, in `ids`' order. With `relatives`, named `ids` also take the
-    waiting moves of their installed ancestors and descendants, whose results
-    follow in tree order: a relative with no move, or whose move is refused
-    before the trees are judged, says nothing. One whose move breaks a chain
+    waiting moves of their installed ancestors and descendants (none for one
+    that is refused or failed), whose results follow in tree order: a
+    relative with no move, or whose move is refused before the trees are
+    judged, says nothing. One whose move breaks a chain
     that the named moves, and the moves they need, do not is `held` with
     `kind="breaks"`. The moves are settled as a set
     (`inherit.settle`): one a range drops is `held` (`refused` for an
@@ -1339,15 +1356,18 @@ def update(
                 results[addon_id] = resolved
         # Scope: a named add-on's installed relatives join with their waiting
         # moves. Anything else said of a relative is not said: it was not asked.
+        # A named add-on that is refused or failed takes none, which would
+        # move without it; one that is current takes them.
         joined: dict[str, None] = {}
-        for addon_id in _relatives(order, loaded) if ids is not None and relatives else ():
+        taking = [i for i in order if i in moves or results[i].outcome not in ("refused", "failed")]
+        scope = _relatives(taking, loaded) if ids is not None and relatives else []
+        for addon_id in [i for i in scope if i not in order]:
             resolved = _resolve(addon_id, ctx)
             if isinstance(resolved, _Move):
                 moves[addon_id] = resolved
                 joined[addon_id] = None
         # 2. Check, and 3. settle, to a fixed point.
-        chosen = _choose(moves, ctx)
-        results |= {i: r for i, r in chosen.items() if i not in joined or r.outcome != "refused"}
+        results |= _unasked(_choose(moves, ctx), joined)
         # 4. Trees: one review and one answer each.
         parents = {p.id: p.parent for p in loaded if p.repo_id is None}
         parents |= {i: m.candidate.parent for i, m in moves.items()}
@@ -1357,9 +1377,7 @@ def update(
             if a.repo_id is None and a.left_out is None
         }
 
-        def judged(
-            members: Sequence[_Move],
-        ) -> tuple[list[load.InstalledAddon], State, set[str], list[str]]:
+        def judged(members: Sequence[_Move]) -> _Judged:
             """The instance with `members` applied, and what they break in it,
             each scratch root said as its add-on's id."""
             tree = {m.addon_id for m in members}
@@ -1375,7 +1393,7 @@ def update(
             )
             for m in members:
                 said = [why.replace(str(m.candidate.root), m.addon_id) for why in said]
-            return would_load, after, libraries, said
+            return _Judged(would_load, after, libraries, said)
 
         for tree in inherit.trees(moves, parents):
             members = [moves[i] for i in tree]
@@ -1394,18 +1412,24 @@ def update(
                     },
                 )
                 again = judged([m for m in members if m.addon_id in need])
-                if not again[3]:
+                if not again.broken:
                     for m in members:
                         if m.addon_id not in need:
                             results[m.addon_id] = Result(
                                 m.addon_id, "held", problems=tuple(broken), kind="breaks"
                             )
-                    members = [m for m in members if m.addon_id in need]
-                    would_load, after, libraries, broken = again
+                    # The needed moves were checked with the held ones in place,
+                    # but apply over their locked sides: checked again so.
+                    needed = {m.addon_id: m for m in members if m.addon_id in need}
+                    results |= _unasked(_choose(needed, ctx), joined)
+                    members = [m for m in members if m.addon_id in needed]
                     if not members:
                         continue
+                    if len(needed) < len(need):
+                        again = judged(members)
+                    would_load, after, libraries, broken = again
                 else:
-                    broken += [why for why in again[3] if why not in broken]
+                    broken += [why for why in again.broken if why not in broken]
             reviews = [
                 _review(
                     m,

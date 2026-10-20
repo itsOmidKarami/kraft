@@ -174,15 +174,15 @@ def _breaks(addon_id: str, sides: Mapping[str, Side]) -> list[tuple[str, str]]:
     return out
 
 
-def _path(addon_id: str, parents: Mapping[str, str | None]) -> tuple[str, ...] | None:
+def path(addon_id: str, parents: Mapping[str, str | None]) -> tuple[str, ...] | None:
     """`(addon_id, parent, ..., root)` through `parents`, at most `MAX_DEPTH`
     steps; None when `addon_id` meets a cycle on the way."""
-    path = [addon_id]
-    while len(path) <= MAX_DEPTH and (parent := parents.get(path[-1])) is not None:
-        if parent in path:
+    line = [addon_id]
+    while len(line) <= MAX_DEPTH and (parent := parents.get(line[-1])) is not None:
+        if parent in line:
             return None
-        path.append(parent)
-    return tuple(path)
+        line.append(parent)
+    return tuple(line)
 
 
 def settle(locked: Mapping[str, Side], moves: Mapping[str, Side]) -> dict[str, str]:
@@ -207,7 +207,7 @@ def settle(locked: Mapping[str, Side], moves: Mapping[str, Side]) -> dict[str, s
         kept -= failing
     parents = {i: s.parent for i, s in locked.items()}
     parents |= {i: s.parent for i, s in moves.items() if i not in locked}
-    order = sorted(set(moves) - kept, key=lambda i: (len(_path(i, parents) or (i,)), i))
+    order = sorted(set(moves) - kept, key=lambda i: (len(path(i, parents) or (i,)), i))
     offered = True
     while offered:
         offered = False
@@ -259,9 +259,9 @@ def trees(ids: Iterable[str], parents: Mapping[str, str | None]) -> list[tuple[s
     id. An id that meets a cycle forms a group of its own."""
     groups: dict[object, list[tuple[int, str]]] = {}
     for addon_id in dict.fromkeys(ids):
-        path = _path(addon_id, parents)
-        root: object = path[-1] if path is not None else (addon_id,)
-        groups.setdefault(root, []).append((len(path or ()), addon_id))
+        line = path(addon_id, parents)
+        root: object = line[-1] if line is not None else (addon_id,)
+        groups.setdefault(root, []).append((len(line or ()), addon_id))
     return [tuple(i for _, i in sorted(members)) for members in groups.values()]
 
 

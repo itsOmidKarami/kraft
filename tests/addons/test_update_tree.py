@@ -2,6 +2,8 @@
 a range holds waits, and each tree is reviewed and accepted as one (design
 "Update moves a set")."""
 
+import shutil
+
 import pytest
 from support.addons import AGENT, chain, child_manifest, install, make_tree, publish
 
@@ -325,6 +327,50 @@ def _team_drops_scan(repos, range_):
     )
 
 
+def _company_drops_gone(repos):
+    """company 1.1.0 without `gone`, which a local chain extends as
+    `company:gone`, and with `extra`."""
+    _company(repos, "1.1.0", library={"tasks": {"verify": AGENT, "extra": AGENT}})
+
+
+def _team_names_a_harness(repos):
+    """team 1.1.0 whose `profiles.yaml` chooses a harness: refused as it is read."""
+    _team(repos, "1.1.0", "1", files={"profiles.yaml": "harnesses: {}\n"})
+
+
+def _payments_gone(repos):
+    """team's collection cannot be fetched any more."""
+    shutil.rmtree(repos["payments"])
+
+
+AUDIT = "audit@corp"
+#: company keeps a task `gone` that a local chain extends.
+GONE = {
+    COMPANY: {
+        "library": {"tasks": {"verify": AGENT, "gone": AGENT}},
+        "chains": {"default": chain("verify")},
+    },
+    TEAM: TREE[TEAM],
+}
+#: The tree each row runs on, when it is not `TREE`, and the local chains it has.
+RELATED_TREES = {
+    "unrelated-is-not-taken": {**TREE, TOOLS: TREE[COMPANY]},
+    "refused-relative-is-silent": {**TREE, TOOLS: TREE[COMPANY]},
+    "relatives-follow-in-tree-order": {
+        **TREE,
+        AUDIT: {"library": {"tasks": {"t": AGENT}}, "parent": (TEAM, "1")},
+    },
+    "named-child-stale-remove-after-relative-held": GONE,
+    "only-relatives-move-held": GONE,
+}
+RELATED_LOCAL = {
+    "broken-relative-held": {"mine": chain("team:scan")},
+    "broken-needed-relative-refuses": {"mine": chain("team:scan")},
+    "named-child-stale-remove-after-relative-held": {"mine": chain("company:gone")},
+    "only-relatives-move-held": {"mine": chain("company:gone")},
+}
+
+
 @pytest.mark.parametrize(
     ("published", "ids", "outcomes", "problems"),
     [
@@ -364,6 +410,84 @@ def _team_drops_scan(repos, range_):
             {COMPANY: "team:scan", TEAM: "team:scan"},
             id="broken-needed-relative-refuses",
         ),
+        pytest.param(
+            lambda repos: (
+                _company(repos, "2.0.0"),
+                _team(repos, "1.1.0", "2", chains={"check": chain("nosuch")}),
+            ),
+            [COMPANY],
+            {COMPANY: "refused", TEAM: "refused"},
+            {COMPANY: "team:check", TEAM: "team:check"},
+            id="broken-needed-relative-own-chain-refuses",
+        ),
+        pytest.param(
+            lambda repos: (
+                _company(repos, "1.1.0"),
+                _team(repos, "1.1.0", "1", library={"tasks": {"scan": _skilled("tools")}}),
+            ),
+            [COMPANY],
+            {COMPANY: "applied"},
+            {},
+            id="refused-relative-is-silent",
+        ),
+        pytest.param(
+            lambda repos: (
+                _move_together(repos),
+                publish(
+                    repos["corp"], "audit", version="1.1.0", manifest=child_manifest(TEAM, "1")
+                ),
+            ),
+            [COMPANY],
+            {COMPANY: "applied", TEAM: "applied", AUDIT: "applied"},
+            {},
+            id="relatives-follow-in-tree-order",
+        ),
+        pytest.param(
+            lambda repos: (
+                _company_drops_gone(repos),
+                _team(
+                    repos,
+                    "1.1.0",
+                    "1",
+                    library={
+                        "tasks": {"scan": {"extends": "company:verify"}},
+                        "remove": {"tasks": ["extra"]},
+                    },
+                ),
+            ),
+            [TEAM],
+            {TEAM: "refused", COMPANY: "held"},
+            {TEAM: NOT_INHERITED, COMPANY: "company:gone"},
+            id="named-child-stale-remove-after-relative-held",
+        ),
+        pytest.param(
+            _company_drops_gone,
+            [TEAM],
+            {TEAM: "current", COMPANY: "held"},
+            {COMPANY: "company:gone"},
+            id="only-relatives-move-held",
+        ),
+        pytest.param(
+            lambda repos: _company(repos, "1.1.0"),
+            [TEAM],
+            {TEAM: "current", COMPANY: "applied"},
+            {},
+            id="current-id-takes-relatives",
+        ),
+        pytest.param(
+            lambda repos: (_company(repos, "1.1.0"), _team_names_a_harness(repos)),
+            [TEAM],
+            {TEAM: "refused"},
+            {TEAM: "'harnesses' is refused"},
+            id="refused-id-takes-no-relatives",
+        ),
+        pytest.param(
+            lambda repos: (_company(repos, "1.1.0"), _payments_gone(repos)),
+            [TEAM],
+            {TEAM: "failed"},
+            {},
+            id="failed-id-takes-no-relatives",
+        ),
     ],
 )
 def test_update_takes_waiting_relatives(
@@ -377,16 +501,15 @@ def test_update_takes_waiting_relatives(
     monkeypatch.setattr(
         fetch, "write_scratch", lambda *a: scratch.append(write_scratch(*a)) or scratch[-1]
     )
-    tree = {**TREE, TOOLS: TREE[COMPANY]} if row == "unrelated-is-not-taken" else TREE
-    local = {"mine": chain("team:scan")} if row.startswith("broken") else None
-    repos, home = make_tree(tmp_path, tree, chains=local)
+    repos, home = make_tree(tmp_path, RELATED_TREES.get(row, TREE), chains=RELATED_LOCAL.get(row))
     published(repos)
     before = _files(home)
 
     results, groups = _update(home, ids)
 
     assert {i: r.outcome for i, r in results.items()} == outcomes, results
-    assert list(results)[: len(ids)] == ids
+    # The named ids first, then the relatives in tree order: `outcomes`' own.
+    assert list(results) == list(outcomes), results
     for addon_id, said in problems.items():
         assert any(said in why for why in results[addon_id].problems), results[addon_id]
         assert not [
@@ -403,3 +526,8 @@ def test_update_takes_waiting_relatives(
         assert results[TEAM].kind == "breaks"
         assert [g.title for g in groups] == [COMPANY]
         assert (_version(home, COMPANY), _version(home, TEAM)) == ("1.1.0", "1.0.0")
+    if row in ("named-child-stale-remove-after-relative-held", "only-relatives-move-held"):
+        assert results[COMPANY].kind == "breaks"
+        assert groups == []
+    if row == "current-id-takes-relatives":
+        assert _version(home, COMPANY) == "1.1.0"
