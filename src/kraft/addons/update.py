@@ -53,7 +53,7 @@ from kraft.config import (
 )
 
 if TYPE_CHECKING:
-    from kraft.addons.review import Review
+    from kraft.addons.review import Group, Review
     from kraft.templates.library import TemplateLibrary
 
 #: How long a second writer waits for the update lock before it fails.
@@ -875,7 +875,7 @@ class _Candidate:
 def update(
     ids: Sequence[str] | None = None,
     *,
-    accept: Callable[[Review], bool],
+    accept: Callable[[Group], bool],
     re_install: bool = False,
     entries: Mapping[str, AddonEntry | bool] | None = None,
     config_dir: Path | None = None,
@@ -1134,7 +1134,7 @@ def update(
                 reach=(*held, *reviewed.reach, *captured, *reach),
                 content=(*reviewed.content, *content),
             )
-            if not accept(reviewed):
+            if not accept(review_mod.Group((reviewed,))):
                 results[addon_id] = Result(addon_id, "declined", review=reviewed)
                 continue
             loaded, state = would_load, after
@@ -1217,6 +1217,17 @@ def may_apply_unattended(review: Review) -> str | None:
     return None
 
 
+def unattended_holds(group: Group) -> dict[str, str]:
+    """Why an auto-update holds this group, member by member; empty when it
+    may apply on its own. A group goes whole or not at all: a member with no
+    reason of its own is held `with` the first member that has one."""
+    own = {r.addon_id: may_apply_unattended(r) for r in group.reviews}
+    first = next(((i, why) for i, why in own.items() if why is not None), None)
+    if first is None:
+        return {}
+    return {i: why if why is not None else f"with {first[0]}: {first[1]}" for i, why in own.items()}
+
+
 def clear_status(addons_root: Path, addon_ids: Collection[str]) -> None:
     """Forget the last auto-update outcome of `addon_ids`: a person has just
     acted on them (applied the update, uninstalled the add-on), so "held" or
@@ -1292,11 +1303,10 @@ def auto_update(
             ids.append(addon_id)
     held: dict[str, str] = {}
 
-    def accept(review: Review) -> bool:
-        why = may_apply_unattended(review)
-        if why is not None:
-            held[review.addon_id] = why
-        return why is None
+    def accept(group: Group) -> bool:
+        whys = unattended_holds(group)
+        held.update(whys)
+        return not whys
 
     by_collection: dict[str, list[str]] = {}
     for addon_id in ids:

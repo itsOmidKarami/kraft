@@ -683,6 +683,45 @@ def test_review_escapes_what_it_prints():
     assert not any(ch in text for ch in "\u202e\u200b\x1b")
 
 
+def _member(addon_id, content=()):
+    return review.Review(addon_id, "1.0.0", "1.1.0", content=content)
+
+
+@pytest.mark.parametrize(
+    "group, title, first_line",
+    [
+        (review.Group((_member("release@acme"),)), "release@acme", "release@acme 1.0.0 -> 1.1.0"),
+        (
+            review.Group(
+                (_member("company@acme"), _member("release@acme")), ("company@acme comes too",)
+            ),
+            "company@acme, release@acme",
+            "company@acme comes too",
+        ),
+        (
+            review.Group((_member("release@acme", ("a\u202eb",)),), ("pulled\x1b[2K in",)),
+            "release@acme",
+            "pulled\\u{001B}[2K in",
+        ),
+    ],
+    ids=["one-review", "pulled-in-first", "escapes"],
+)
+def test_render_group(group, title, first_line):
+    """A group reads as what it pulled in, then its members in order; a group
+    of one reads as its review; no raw control character survives anywhere."""
+    text = review.render_group(group)
+
+    assert group.title == title
+    assert text.splitlines()[0] == first_line
+    members = "\n".join(review.render(r) for r in group.reviews)
+    assert text.endswith(members)
+    if not group.pulled_in:
+        assert text == review.render(group.reviews[0])
+    assert not any(ch in text for ch in "\u202e\x1b")
+    if group.reviews[0].content:
+        assert "a\\u{202E}b" in text
+
+
 def test_versions_sort_by_semver_precedence():
     ordered = [
         "1.0.0-alpha",

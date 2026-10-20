@@ -90,6 +90,27 @@ def render(review: Review) -> str:
     return escape("\n".join(lines))
 
 
+@dataclass(frozen=True)
+class Group:
+    """The reviews one answer covers: an add-on and the relatives its move
+    drags along, in tree order. `pulled_in` says what else came with them."""
+
+    reviews: tuple[Review, ...]
+    pulled_in: tuple[str, ...] = ()
+
+    @property
+    def title(self) -> str:
+        return ", ".join(r.addon_id for r in self.reviews)
+
+
+def render_group(group: Group) -> str:
+    """The group as the terminal and the console's dialog print it: the
+    `pulled_in` lines, then each member's review. A group of one with nothing
+    pulled in reads exactly as `render`."""
+    lines = [*group.pulled_in, *(render(r) for r in group.reviews)]
+    return escape("\n".join(lines))
+
+
 def _flatten(value: object, at: str, out: dict[str, object], lists: dict[str, list[str]]) -> None:
     """Facts go to `out`; the order of each id-keyed list, which a fact keyed
     by id cannot show, goes to `lists`."""

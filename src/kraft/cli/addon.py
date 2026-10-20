@@ -750,16 +750,16 @@ def _run_update(
     answered: no under `--check`, yes under `-y`, else asked at the terminal."""
     declined_blind = []
 
-    def accept(reviewed: review.Review) -> bool:
-        print(review.render(reviewed), file=sys.stderr if ns.json else sys.stdout)
+    def accept(group: review.Group) -> bool:
+        print(review.render_group(group), file=sys.stderr if ns.json else sys.stdout)
         if check:
             return False
         if ns.yes:
             return True
         if not sys.stdin.isatty():
-            declined_blind.append(reviewed.addon_id)
+            declined_blind.append(group.title)
             return False
-        return input(f"Apply {reviewed.addon_id}? [y/N] ").strip().lower() in ("y", "yes")
+        return input(f"Apply {group.title}? [y/N] ").strip().lower() in ("y", "yes")
 
     with _as_cli():
         results = flow.update(ids, accept, **kw)

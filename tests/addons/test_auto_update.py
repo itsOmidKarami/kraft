@@ -7,7 +7,7 @@ import pytest
 from support.addons import AGENT, chain, edit_addons_yaml, instance, make_collection, publish
 from support.harness import git
 
-from kraft.addons import fetch, update
+from kraft.addons import fetch, review, update
 from kraft.addons.config import AddonEntry, AddonsLock
 
 ID = "release@acme"
@@ -101,6 +101,39 @@ def test_auto_update_holds(home, new, why):
     assert outcome["message"].endswith("; run kraft admin addon update")
     assert (config_dir / "addons.lock").read_text() == before
     assert update.read_status(addons_dir)[ID]["outcome"] == "held"
+
+
+def _member(addon_id, reach):
+    return review.Review(addon_id, "1.0.0", "1.1.0", reach=("gate removed",) if reach else ())
+
+
+@pytest.mark.parametrize(
+    "reaches, expected",
+    [
+        ({"release@acme": False}, {}),
+        ({"release@acme": True}, {"release@acme": "gate removed"}),
+        (
+            {"company@acme": True, "team@acme": False},
+            {"company@acme": "gate removed", "team@acme": "with company@acme: gate removed"},
+        ),
+        (
+            {"company@acme": True, "team@acme": True},
+            {"company@acme": "gate removed", "team@acme": "gate removed"},
+        ),
+    ],
+    ids=["one-clean", "one-held", "relative-holds", "each-own-reason"],
+)
+def test_a_group_is_held_whole(reaches, expected):
+    """A relative that widens nothing is held with the one that does; a group
+    of one is held for its own reason, as before."""
+    group = review.Group(tuple(_member(i, reach) for i, reach in reaches.items()))
+
+    assert update.unattended_holds(group) == expected
+    if len(reaches) == 1:
+        (only,) = group.reviews
+        assert update.unattended_holds(group) == (
+            {only.addon_id: update.may_apply_unattended(only)} if reaches[only.addon_id] else {}
+        )
 
 
 def _listed_not_locked(repo, config_dir):

@@ -365,7 +365,7 @@ def test_a_childs_review_shows_its_chain_changes(tmp_path, setup):
 
     (result,) = update.update(
         [addon_id],
-        accept=lambda r: reviews.append(r) or True,
+        accept=lambda g: reviews.extend(g.reviews) or True,
         config_dir=home[0],
         addons_root=home[1],
     )

@@ -297,7 +297,7 @@ origin: src/kraft/addons/review.py §review
 ## REQ the-review-cannot-hide-text
 
 WHEN the system prints a review, it SHALL escape every control, bidi and format character in it.
-enforced-by: tests/addons/test_review.py::test_review_escapes_what_it_prints
+enforced-by: tests/addons/test_review.py::test_review_escapes_what_it_prints, tests/addons/test_review.py::test_render_group[escapes]
 origin: src/kraft/addons/review.py §render
 
 ## REQ an-addon-limit-above-maxima-is-refused
@@ -459,7 +459,7 @@ origin: src/kraft/addons/update.py §auto_update
 ## REQ auto-update-holds-what-widens-a-run
 
 IF an auto-update is a downgrade, a move onto a pre-release, or has a review call-out about what a run can reach, THEN the system SHALL hold it for a person and keep the locked version.
-enforced-by: tests/addons/test_auto_update.py::test_auto_update_holds[gate-removed], tests/addons/test_auto_update.py::test_auto_update_holds[limit-raised], tests/addons/test_auto_update.py::test_auto_update_holds[requires], tests/addons/test_auto_update.py::test_auto_update_holds[downgrade], tests/addons/test_auto_update.py::test_auto_update_holds[pre-release], tests/addons/test_auto_update.py::test_a_newer_pre_release_follows_a_pre_release, tests/addons/test_update_inheritance.py::test_a_childs_review_shows_its_chain_changes[parent-update-changes-a-childs-chain]
+enforced-by: tests/addons/test_auto_update.py::test_auto_update_holds[gate-removed], tests/addons/test_auto_update.py::test_auto_update_holds[limit-raised], tests/addons/test_auto_update.py::test_auto_update_holds[requires], tests/addons/test_auto_update.py::test_auto_update_holds[downgrade], tests/addons/test_auto_update.py::test_auto_update_holds[pre-release], tests/addons/test_auto_update.py::test_a_newer_pre_release_follows_a_pre_release, tests/addons/test_update_inheritance.py::test_a_childs_review_shows_its_chain_changes[parent-update-changes-a-childs-chain], tests/addons/test_auto_update.py::test_a_group_is_held_whole[relative-holds]
 origin: src/kraft/addons/update.py §may_apply_unattended
 
 ## REQ auto-update-never-installs-or-re-installs
