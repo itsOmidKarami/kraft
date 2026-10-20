@@ -161,7 +161,13 @@ async def put_library(body: LibraryText, request: Request):
 # library the daemon is running (`st.library`).
 
 
-def _resolved_view(chain: ResolvedChain, provenance: dict | None = None) -> dict:
+def _resolved_view(
+    chain: ResolvedChain,
+    provenance: dict | None = None,
+    *,
+    addon: dict | None = None,
+    inherited_nodes: dict[str, dict] | None = None,
+) -> dict:
     """A resolved chain as the API shows it: the chain with `extends` expanded
     -- what the author wrote plus what it inherited, no defaults filled in --
     its canonical task paths, the steering text it selects, and the nodes in
@@ -171,7 +177,10 @@ def _resolved_view(chain: ResolvedChain, provenance: dict | None = None) -> dict
     `documents` lists, per gate, the kinds the execution nodes before it
     produce, in chain order: what that gate's `artifact` can name.
     `provenance` is `TemplateLibrary.provenance`: for a chain that extends
-    another, where each node came from; None for one that extends none."""
+    another, where each node came from; None for one that extends none.
+    `addon` is `catalogue.addon_view`'s, and `inherited_nodes`
+    `catalogue.node_inheritance`'s: for a child add-on's chain, each node the
+    child overrides or adds a component of (`an-inherited-entry-is-marked`)."""
     documents: dict[str, list[str]] = {}
     produced: list[str] = []
     for node in chain.nodes:
@@ -187,7 +196,23 @@ def _resolved_view(chain: ResolvedChain, provenance: dict | None = None) -> dict
         "nodes": [store.node_view(n) for n in chain.nodes],
         "documents": documents,
         "provenance": provenance,
+        "addon": addon,
+        "inherited_nodes": inherited_nodes or {},
     }
+
+
+def library_resolved_view(
+    library: TemplateLibrary, id: str, chain: ResolvedChain | None = None
+) -> dict:
+    """`_resolved_view` of `library`'s chain `id` (resolved here unless given
+    as `chain`), with its provenance, its add-on and its node marks. Raises
+    `TemplateLibraryError` for a chain that does not resolve."""
+    return _resolved_view(
+        chain or library.resolve_chain(id),
+        library.provenance(id),
+        addon=catalogue.addon_view(library, id),
+        inherited_nodes=catalogue.node_inheritance(library, id),
+    )
 
 
 @api_router.get("/templates/lint")
@@ -213,7 +238,7 @@ async def get_resolved_template(tid: str, request: Request):
     if tid not in library.chain_ids:
         raise HTTPException(404, f"unknown chain {tid!r}")
     try:
-        return _resolved_view(library.resolve_chain(tid), library.provenance(tid))
+        return library_resolved_view(library, tid)
     except TemplateLibraryError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -344,7 +369,7 @@ async def resolve_templates(body: ResolveBody, request: Request):
     chains = []
     for id in ids:
         try:
-            chains.append(_resolved_view(library.resolve_chain(id), library.provenance(id)))
+            chains.append(library_resolved_view(library, id))
         except TemplateLibraryError as exc:
             issues.append(TemplateIssue.from_error(_UNSAVED, id, exc))
     return {"chains": chains, "issues": [positions.issue_view(i) for i in issues]}

@@ -279,6 +279,115 @@ def load_release(client, tmp_path: Path, **spec) -> Path:
     return store
 
 
+#: The design's example tree ("Example"), as `example_tree` installs it:
+#: `team-payments` builds on `platform-dept`, which builds on `company`.
+COMPANY = {
+    "library": {
+        "steering": {"house": {"instructions": "company rules"}},
+        "tasks": {
+            "verify": {
+                **AGENT,
+                "prompt": "company verify",
+                "skill": "deploy-review",
+                "steering": ["house"],
+            },
+            "security_scan": {**AGENT, "prompt": "company scan"},
+            "hotfix": {**AGENT, "prompt": "company hotfix"},
+        },
+    },
+    "chains": {
+        "default": {
+            "nodes": [
+                {"id": "verification", "kind": "exec", "tasks": [{"id": "v", "extends": "verify"}]},
+                {"id": "scan", "kind": "exec", "tasks": [{"id": "s", "extends": "security_scan"}]},
+            ]
+        },
+        "hotfix": chain("hotfix"),
+    },
+    "skills": {"deploy-review": "company method"},
+    "profiles": {"slow": {"model": {"codex": "slow-model"}}},
+}
+DEPT = {"library": {"tasks": {"security_scan": {**AGENT, "prompt": "dept scan"}}}}
+TEAM = {
+    "library": {
+        "tasks": {
+            "security_scan": {"extends": "platform-dept:security_scan", "model": "pci-model"},
+            "pci_review": {**AGENT, "prompt": "team pci"},
+            # Each file reference by the parent's name: the ancestor that ships it.
+            "supered": {
+                **AGENT,
+                "skill": "platform-dept:deploy-review",
+                "steering": ["platform-dept:house"],
+                "profile": "platform-dept:slow",
+            },
+        }
+    },
+    "chains": {
+        "supers": chain("supered"),
+        "default": {
+            "extends": "platform-dept:default",
+            "add": [
+                {
+                    "after": "verification",
+                    "node": {
+                        "id": "pci_review",
+                        "kind": "exec",
+                        "tasks": [{"id": "p", "extends": "pci_review"}],
+                    },
+                }
+            ],
+        },
+    },
+}
+#: Each add-on of the example tree, root first, and the one it builds on.
+TREE: dict[str, tuple[dict, str | None]] = {
+    "company": (COMPANY, None),
+    "platform-dept": (DEPT, "company"),
+    "team-payments": (TEAM, "platform-dept"),
+}
+
+
+def example_tree(
+    tmp_path: Path, *, dept_alias=None, team=None, dept=None, company=None
+) -> tuple[InstalledAddon, InstalledAddon, InstalledAddon]:
+    """The three add-ons of `TREE`, each as `installed` lays it out, children
+    naming their parents; `team`, `dept` and `company` replace one's spec,
+    and `dept_alias` is the namespace the dept is installed under."""
+    from dataclasses import replace
+
+    root = installed(tmp_path, "company", **(company or COMPANY))
+    dept = replace(
+        installed(tmp_path, "platform-dept", alias=dept_alias, **(dept or DEPT)), parent=root.id
+    )
+    child = replace(installed(tmp_path, "team-payments", **(team or TEAM)), parent=dept.id)
+    return root, dept, child
+
+
+def tree_collection(tmp_path: Path, **specs) -> Path:
+    """`TREE` as one collection `acme`, each child's manifest requiring its
+    parent; `specs` replaces an add-on's spec by name."""
+    addons = {}
+    for name, (spec, parent) in TREE.items():
+        spec = specs.get(name.replace("-", "_"), spec)
+        if parent is not None:
+            requires = {"kraft": "2", "harnesses": ["codex"], "addons": {f"{parent}@acme": "1"}}
+            spec = {**spec, "manifest": {"requires": requires}}
+        addons[name] = spec
+    return make_collection(tmp_path, addons)
+
+
+def load_tree(client, tmp_path: Path, **specs) -> None:
+    """`tree_collection` installed into a running test server, parents
+    first, and loaded."""
+    from kraft.api import deps
+
+    st = client.app.state
+    collection = tree_collection(tmp_path, **specs)
+    for name in TREE:
+        install(st.templates_dir, st.run_dirs.addons, collection, name)
+    deps._reload_templates(st)
+
+
 def install_release(
     tmp_path: Path, version: str = "1.0.0", *, fallback: bool = True, provider: str = "fake"
 ) -> tuple[dict, Path]:

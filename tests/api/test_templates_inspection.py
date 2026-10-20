@@ -147,8 +147,10 @@ def test_resolved_shows_a_saved_chain_expanded_and_not_materialized(client):
         "nodes",
         "documents",
         "provenance",
+        "addon",
+        "inherited_nodes",
     }
-    assert body["provenance"] is None
+    assert (body["provenance"], body["addon"], body["inherited_nodes"]) == (None, None, {})
     assert {"spec_approval", "plan_approval"} <= {n["id"] for n in body["chain"]["nodes"]}
 
 

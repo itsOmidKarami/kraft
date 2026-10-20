@@ -22,6 +22,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import ValidationError
@@ -326,6 +327,19 @@ def _steering_profile(body: object, source: ComponentSource) -> SteeringProfile:
             f"{source}: {first_error(exc)}",
             loc=(Namespace.STEERING.value, source.name, *exc.errors()[0]["loc"]),
         ) from exc
+
+
+@dataclass(frozen=True)
+class Inheritance:
+    """Where an entry served under a child add-on's namespace stands against
+    the library it inherits (`TemplateLibrary.inheritance`): `inherited` as an
+    ancestor wrote it, `overridden` by the child under a name its parent has
+    in the same section, or `added` by the child. `parent` is the serving
+    add-on's direct parent, `author` the add-on whose file it was read from."""
+
+    origin: Literal["inherited", "overridden", "added"]
+    parent: InstalledAddon
+    author: InstalledAddon
 
 
 class TemplateLibrary:
@@ -732,6 +746,36 @@ class TemplateLibrary:
             if (author := self._authors.get((each, name))) is not None:
                 return author
         return self.addon_of(name)
+
+    def inheritance(self, name: str) -> Inheritance | None:
+        """For a chain id or a `<section>.<qualified name>` served under a
+        child add-on's namespace, whether the child inherited, overrode or
+        added it (`an-inherited-entry-is-marked`). None for a local name, a
+        repo library's entry, an add-on with no parent, a hidden level's name,
+        and an entry the loaded layering cannot place."""
+        head, dot, rest = name.partition(".")
+        sections = (_CHAINS, *(ns.value for ns in Namespace))
+        section, entry = (head, rest) if dot and head in sections else (_CHAINS, name)
+        top = self.addon_of(entry)
+        if top is None or top.parent is None or top.repo_id is not None:
+            return None
+        author = self._authors.get((section, entry))
+        parent = next((a for a in self.addons if a.id == top.parent), None)
+        if author is None or parent is None:
+            return None
+        if author.id != top.id:
+            return Inheritance("inherited", parent, author)
+        bare = entry.partition(":")[2]
+        if section == _CHAINS:
+            has = f"{inherit.layer_namespace(top.namespace, 1)}:{bare}" in self._layer_chains
+        elif section == Namespace.STEERING.value:
+            # A hidden level holds no steering: the parent's own namespace is
+            # the same merged library it inherits.
+            has = f"{parent.namespace}:{bare}" in self.steering
+        else:
+            hidden = self._layer_components[Namespace(section)]
+            has = f"{inherit.layer_namespace(top.namespace, 1)}:{bare}" in hidden
+        return Inheritance("overridden" if has else "added", parent, author)
 
     def public_name(self, name: str) -> str:
         """`name` as a listing shows it: a hidden layer's
