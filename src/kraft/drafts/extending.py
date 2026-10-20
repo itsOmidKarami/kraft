@@ -433,7 +433,9 @@ def detach(d: Draft) -> dict:
             flat[key] = resolved[key]
     flat["nodes"] = [
         copy.deepcopy(
-            n if n["id"] in touched else ops.plain(_authored_node(candidate, raw, n["id"]))
+            n
+            if n["id"] in touched
+            else ops.plain(candidate.public(_authored_node(candidate, raw, n["id"])))
         )
         for n in resolved["nodes"]
     ]

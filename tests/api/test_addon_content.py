@@ -121,20 +121,21 @@ def test_copy_from_an_addon(loaded, copy):
     assert not loaded.get("/api/health").json()["invalid_templates"]
 
 
-def _load_team(client, tmp_path, parent_chain="ship"):
+def _load_team(client, tmp_path, parent_chain="ship", own_add=()):
     """`team@pay`, a child of `release@acme`: a task and a chain (`own`, on
-    `parent_chain`) that extend the parent's by its name, which the library
-    holds as a hidden level."""
+    `parent_chain`, with `own_add` entries) that extend the parent's by its
+    name, which the library holds as a hidden level."""
     from support.addons import install, make_collection
 
     from kraft.api import deps
 
     st = client.app.state
     requires = {"kraft": "2", "harnesses": ["codex"], "addons": {"release@acme": "1"}}
+    own = {"extends": f"release:{parent_chain}", **({"add": own_add} if own_add else {})}
     team = {
         "manifest": {"requires": requires},
         "library": {"tasks": {"scan": {"extends": "release:base", "prompt": "team scan"}}},
-        "chains": {"own": {"extends": f"release:{parent_chain}"}},
+        "chains": {"own": own},
     }
     collection = make_collection(tmp_path / "pay", {"team": team}, name="pay")
     install(st.templates_dir, st.run_dirs.addons, collection, "team")
@@ -182,7 +183,11 @@ def test_a_local_chain_through_a_child_addon_detaches(client, tmp_path):
 
     tuned = {"extends": "ship", "overrides": {"n.main.t": {"prompt": "tuned"}}}
     load_release(client, tmp_path, chains={"ship": chain("base"), "tuned": tuned})
-    _load_team(client, tmp_path, parent_chain="tuned")
+    extra = {
+        "after": "n",
+        "node": {"id": "extra", "kind": "exec", "tasks": [{"id": "x", "extends": "release:base"}]},
+    }
+    _load_team(client, tmp_path, parent_chain="tuned", own_add=[extra])
     st = client.app.state
     (st.templates_dir / "chains" / "mine.yaml").write_text("id: mine\nextends: team:own\n")
     deps._reload_templates(st)
@@ -192,11 +197,15 @@ def test_a_local_chain_through_a_child_addon_detaches(client, tmp_path):
 
     assert viewed.status_code == 200, viewed.text
     assert detached.status_code == 200, detached.text
-    written = yaml.safe_load(
-        client.get("/api/drafts/chains/mine").json()["files"]["chains/mine.yaml"]
-    )
+    text = client.get("/api/drafts/chains/mine").json()["files"]["chains/mine.yaml"]
+    written = yaml.safe_load(text)
     task = written["nodes"][0]["tasks"][0]
     assert task == {"id": "t", **AGENT, "skill": "release:notes", "prompt": "tuned"}
+    # The node the child added names its parent's task by the parent's id.
+    assert written["nodes"][1]["tasks"][0] == {"id": "x", "extends": "release:base"}
+    assert "^" not in text
+    assert client.post("/api/drafts/chains/mine/publish").status_code == 200
+    assert not client.get("/api/health").json()["invalid_templates"]
 
 
 @pytest.fixture
