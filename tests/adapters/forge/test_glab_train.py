@@ -78,7 +78,12 @@ def _car(status: str) -> dict:
         pytest.param(
             {"api projects/:id": '{"id":1}'}, forge.QueueRead(), None, id="no-train-field-absent"
         ),
-        pytest.param({"api projects/:id": FAIL}, forge.QueueRead(), None, id="no-train-403"),
+        pytest.param(
+            {"api projects/:id": FailWith("glab: 403 Forbidden")},
+            forge.QueueRead(),
+            None,
+            id="no-train-403",
+        ),
         pytest.param(
             {"api projects/:id": '{"merge_trains_enabled":false,"merge_pipelines_enabled":true}'},
             forge.QueueRead(),
@@ -249,6 +254,56 @@ async def test_merge_queue_reads_the_train(cli, tmp_path, routes, expected, fail
     assert replace(got, failure=None) == expected
     if expected.kind == "none" and "403" not in str(routes.get(_TRAIN_CAR)):
         assert cli.calls("glab") == ["api projects/:id"], "asked more of a repo with no train"
+
+
+def _iid_routes(iid: int, car) -> dict:
+    return {
+        "api projects/:id": TRAIN_PROJECT,
+        "mr view": json.dumps({"iid": iid, "state": "opened", "head_pipeline": None}),
+        f"api projects/:id/merge_trains/merge_requests/{iid}": car,
+        _TRAIN_NOTES.replace("/7/", f"/{iid}/"): "[]",
+    }
+
+
+@pytest.mark.parametrize("iid", [7, 403, 404, 1404, 4040])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        pytest.param(FailWith("glab: 500 Internal Server Error"), id="500"),
+        pytest.param(FailWith("glab: dial tcp: connection refused"), id="network"),
+        pytest.param("timeout", id="timeout"),
+    ],
+)
+async def test_merge_queue_does_not_read_a_failed_call_as_a_drop(
+    cli, tmp_path, monkeypatch, iid, failure
+):
+    """The car call's own argv holds the iid, and a ForgeError's text holds the
+    argv: an iid that contains 404 (or 403) must not make a 500, a dead network
+    or a timeout read as a drop (or as no train). Reading it wrongly would have
+    Kraft re-queue a merge request still on the train (Kraft-l98h6)."""
+    car = FAIL if failure == "timeout" else failure
+    cli.stub("glab", routes=_iid_routes(iid, car), default=FAIL)
+    if failure == "timeout":
+        real = forge.git.run_git
+
+        async def slow_car(repo, args, **kw):
+            if args[-1].endswith(f"merge_trains/merge_requests/{iid}"):
+                raise forge.ForgeError(f"{' '.join(args)} timed out after 120s")
+            return await real(repo, args, **kw)
+
+        monkeypatch.setattr(forge.git, "run_git", slow_car)
+
+    with pytest.raises(forge.ForgeError):
+        await forge.GlabCli().merge_queue(repo=tmp_path, branch="kraft/abc", base="main")
+
+
+@pytest.mark.parametrize("iid", [404, 1404])
+async def test_merge_queue_reads_the_forges_own_404_as_a_drop_whatever_the_iid(cli, tmp_path, iid):
+    cli.stub("glab", routes=_iid_routes(iid, NOT_FOUND), default=FAIL)
+
+    got = await forge.GlabCli().merge_queue(repo=tmp_path, branch="kraft/abc", base="main")
+
+    assert (got.state, got.cause) == ("dropped", "other")
 
 
 async def test_merge_queue_reads_a_merged_merge_request_as_merged_not_dropped(cli, tmp_path):

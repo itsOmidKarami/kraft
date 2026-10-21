@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -652,6 +653,10 @@ class GlabCli(mr_ops.CliWaits):
         return True
 
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
+        """Ask GitLab to merge. On a merge train project the merge request is
+        added to the train; if `projects/:id` cannot be read, Kraft falls back
+        to `glab mr merge` (an outage must not block a merge), which on GitLab
+        before 19.1 could skip a train."""
         await git._assert_pushed(repo, branch)
         if await self._train_enabled(repo):
             await self._add_to_train(repo, branch, mr)
@@ -720,9 +725,10 @@ class GlabCli(mr_ops.CliWaits):
                 repo, ["api", f"projects/:id/merge_trains/merge_requests/{iid}"], "glab api car"
             )
         except ForgeError as exc:
-            if "403" in str(exc):
+            status = _http_status(exc)
+            if status == 403:
                 return QueueRead()
-            if "404" not in str(exc):
+            if status != 404:
                 raise
             # GitLab destroys a car when it drops the merge request.
             if str(view.get("state")) not in ("opened", "locked"):
@@ -823,6 +829,23 @@ class GlabCli(mr_ops.CliWaits):
                 for r in rows
             ]
         )
+
+
+_HTTP_STATUS = re.compile(r"\bHTTP (40[34])\b|\b(404 Not Found|403 Forbidden)\b", re.IGNORECASE)
+
+
+def _http_status(exc: ForgeError) -> int | None:
+    """The 403 or 404 a failed `glab api` call reports, else None.
+
+    Only what the CLI said, after `run_git`'s `<argv> failed: `: the argv holds
+    the merge request's iid, which can contain "404" itself, and a timeout has
+    no detail at all. A 500, a network error or a timeout is not a status here.
+    """
+    _, sep, detail = str(exc).partition(" failed: ")
+    if not sep:
+        return None
+    found = _HTTP_STATUS.search(detail)
+    return int(next(g for g in found.groups() if g)[:3]) if found else None
 
 
 def _pipeline_number(top: dict) -> int:
