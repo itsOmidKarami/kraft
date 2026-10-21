@@ -48,6 +48,32 @@ WAITED_LABEL = "kraft-waited:"
 #: never passed. Every write carries this, so both clocks in a summary are one.
 AT_LABEL = "kraft-at:"
 
+#: A feature split into slices is more records in the same store, none of them
+#: part of the feature chain. Their ids hold no `.`, which is what keeps them out
+#: of `chain_index`: it groups a record under the chain named by the id's prefix
+#: before the first `.`, so a slice id with one would be read as a node.
+SLICE_OF_LABEL = "kraft-slice-of:"
+SLICE_KEY_LABEL = "kraft-slice-key:"
+#: The slice's 0-based position in the plan. `bd export` promises no order, so the
+#: plan's order has to travel with the record.
+SLICE_POS_LABEL = "kraft-slice-pos:"
+SLICE_STATUS_LABEL = "kraft-slice-status:"
+#: The plan's task numbers this slice implements, joined with commas.
+TASKS_LABEL = "kraft-tasks:"
+SESSION_LABEL = "kraft-session:"
+BRANCH_LABEL = "kraft-branch:"
+FORK_LABEL = "kraft-fork:"
+#: Marks the run record, valued with the feature chain id it belongs to.
+RUN_LABEL = "kraft-slices-run:"
+MODE_LABEL = "kraft-slices-mode:"
+FEATURE_BRANCH_LABEL = "kraft-feature-branch:"
+STATE_BRANCH_LABEL = "kraft-state-branch:"
+#: The last decision id reported to the user, so a report is not repeated.
+REPORTED_LABEL = "kraft-reported:"
+
+SLICE_STATUSES = ("waiting", "starting", "running", "in_review", "ready_to_merge", "merged")
+MODES = ("feature", "main")
+
 
 def dep_ids(record: dict) -> list[str]:
     """The ids a record waits on. bd accepts `depends_on_id` or `to`."""
@@ -393,6 +419,134 @@ def chain_index(records: list[dict]) -> dict[str, list[dict]]:
         if owner in by_chain:
             by_chain[owner].append(record)
     return by_chain
+
+
+def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
+    """The plan's slices if the whole graph is sound, else a `SystemExit` naming
+    the first problem. Checked before any record is built: a half-made graph in
+    the store is worse than none."""
+    if mode not in MODES:
+        raise SystemExit(f"kraft-lite: unknown slices mode {mode!r}. Modes: {', '.join(MODES)}")
+    if not plan.get("state_branch"):
+        raise SystemExit("kraft-lite: the slice plan has no state_branch")
+    if mode == "feature" and not plan.get("feature_branch"):
+        raise SystemExit("kraft-lite: feature mode needs a feature_branch in the slice plan")
+    slices = plan.get("slices") or []
+    if not slices:
+        raise SystemExit("kraft-lite: the slice plan has no slices")
+    keys: set[str] = set()
+    for spec in slices:
+        key = spec["key"]
+        if key in keys:
+            raise SystemExit(f"kraft-lite: duplicate slice key {key!r}")
+        keys.add(key)
+        if not spec.get("tasks"):
+            raise SystemExit(f"kraft-lite: slice {key!r} has no tasks")
+    for spec in slices:
+        for after in spec.get("after", []):
+            if after not in keys:
+                raise SystemExit(
+                    f"kraft-lite: slice {spec['key']!r} comes after {after!r}, which is not a slice"
+                )
+    after_of = {spec["key"]: spec.get("after", []) for spec in slices}
+    done: set[str] = set()
+
+    def visit(key: str, path: list[str]) -> None:
+        if key in path:
+            loop = " -> ".join([*path[path.index(key) :], key])
+            raise SystemExit(f"kraft-lite: slices form a cycle: {loop}")
+        if key in done:
+            return
+        for after in after_of[key]:
+            visit(after, [*path, key])
+        done.add(key)
+
+    for key in after_of:
+        visit(key, [])
+    return slices
+
+
+def materialize_slices(plan: dict, chain_id: str, mode_default: str = "feature") -> list[dict]:
+    """The run record, then one record per slice, each waiting on what it comes after.
+
+    Nothing is returned for a plan that is not sound, so a caller writes all of
+    it or none. Slice ids are random and carry no `.` (see `SLICE_OF_LABEL`); the
+    `after` keys are resolved to those ids here, so the dependency links are the
+    same `blocks` objects a node's are.
+    """
+    mode = plan.get("mode") or mode_default
+    slices = _refuse_slice_plan(plan, mode)
+    run_labels = [
+        f"{RUN_LABEL}{chain_id}",
+        f"{MODE_LABEL}{mode}",
+        f"{STATE_BRANCH_LABEL}{plan['state_branch']}",
+    ]
+    # Null in main mode, where slices merge into the base branch directly.
+    if plan.get("feature_branch"):
+        run_labels.append(f"{FEATURE_BRANCH_LABEL}{plan['feature_branch']}")
+    records = [
+        {
+            "_type": "issue",
+            "id": f"ksr-{uuid.uuid4().hex[:8]}",
+            "title": f"Slices of {chain_id}",
+            "status": "open",
+            "labels": run_labels,
+            "dependencies": [],
+        }
+    ]
+    ids = {spec["key"]: f"ks-{uuid.uuid4().hex[:8]}" for spec in slices}
+    for position, spec in enumerate(slices):
+        slice_id = ids[spec["key"]]
+        records.append(
+            {
+                "_type": "issue",
+                "id": slice_id,
+                "title": spec["title"],
+                "status": "open",
+                "labels": [
+                    f"{SLICE_OF_LABEL}{chain_id}",
+                    f"{SLICE_KEY_LABEL}{spec['key']}",
+                    f"{SLICE_POS_LABEL}{position}",
+                    f"{SLICE_STATUS_LABEL}waiting",
+                    f"{TASKS_LABEL}{','.join(str(t) for t in spec['tasks'])}",
+                ],
+                "dependencies": [_dep(slice_id, ids[a]) for a in spec.get("after", [])],
+            }
+        )
+    return records
+
+
+def run_record(records: list[dict], chain_id: str) -> dict | None:
+    return next((r for r in records if label_value(r, RUN_LABEL) == chain_id), None)
+
+
+def slice_records(records: list[dict], chain_id: str) -> list[dict]:
+    """The chain's slices in plan order. Sorted on the position label, because
+    `bd export` returns records in no order worth relying on."""
+    mine = [r for r in records if label_value(r, SLICE_OF_LABEL) == chain_id]
+    return sorted(mine, key=lambda r: int(label_value(r, SLICE_POS_LABEL) or 0))
+
+
+def slice_done(record: dict, mode: str) -> bool:
+    """Whether what comes after this slice may start. In `main` mode a slice
+    that is ready to merge is enough, because nothing merges into a feature
+    branch for the next one to build on."""
+    done = ("merged", "ready_to_merge") if mode == "main" else ("merged",)
+    return label_value(record, SLICE_STATUS_LABEL) in done
+
+
+def ready_slices(records: list[dict], chain_id: str) -> list[dict]:
+    """Slices still waiting whose every dependency is done."""
+    run = run_record(records, chain_id)
+    mode = label_value(run, MODE_LABEL) or "feature"
+    slices = slice_records(records, chain_id)
+    by_id = {r["id"]: r for r in slices}
+    return [
+        r
+        for r in slices
+        if label_value(r, SLICE_STATUS_LABEL) == "waiting"
+        and all(slice_done(by_id[d], mode) for d in dep_ids(r) if d in by_id)
+    ]
 
 
 def _by_age(by_chain: dict[str, list[dict]]) -> list[str]:

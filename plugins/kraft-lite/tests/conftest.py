@@ -3,6 +3,8 @@ pytest (CI's lite-floor job), so it imports nothing from Kraft."""
 
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -37,3 +39,27 @@ def _isolated_home(request, tmp_path_factory, monkeypatch):
     monkeypatch.setattr(kl, "SKILL_ROOTS", tuple(moved(root) for root in kl.SKILL_ROOTS))
     if request.node.get_closest_marker("e2e") is None:
         monkeypatch.setenv("HOME", str(home))
+
+
+@pytest.fixture
+def kl_cli():
+    """`kl.py` run as a child in `cwd`, as the human's session runs it.
+
+    `ok=True` asserts a clean exit and hands back the parsed JSON (`{}` for no
+    output); `ok=False` asserts a refusal and hands back the process, so a test
+    can read what it said on stderr."""
+
+    def run(cwd: Path, *args: str, ok: bool = True):
+        result = subprocess.run(
+            [sys.executable, str(PLUGIN / "kl.py"), *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+        if not ok:
+            assert result.returncode != 0, result.stdout
+            return result
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout) if result.stdout.strip() else {}
+
+    return run
