@@ -609,3 +609,107 @@ def test_auto_update_moves_a_tree(tree_home, setup, outcomes, versions, says, un
     if setup is _team_names_a_new_parent:
         assert "audit@corp" not in (config_dir / "addons.yaml").read_text()
         assert "audit@corp" not in AddonsLock.load(config_dir / "addons.lock").addons
+
+
+def _a_and_b(budget):
+    """company's library: `a` and `b` alike but for `budget`, a `default`
+    chain with one node, `scan`, running `a`; and `base` for `ship`."""
+    tasks = {name: {**AGENT, "policy": {"budget_usd": budget}} for name in ("a", "b")}
+    return {"tasks": {**RELEASE["library"]["tasks"], **tasks}}
+
+
+def _scan(task):
+    return {"nodes": [{"id": "scan", "kind": "exec", "tasks": [{"id": "t", "extends": task}]}]}
+
+
+def _settle_team_first(repos, config_dir, addons_dir, team_library):
+    """company 1.0.1 (`a`, `b` and a `default` chain) and team 1.0.1 with its
+    library, taken by a person, so that the release under test moves company
+    alone."""
+    chains = {"ship": GATED, "default": _scan("a")}
+    _put(repos, COMPANY, "1.0.1", library=_a_and_b(5), chains=chains)
+    _put(repos, TEAM, "1.0.1", library=team_library, chains={"ship": GATED})
+    taken = update.update(
+        [COMPANY, TEAM],
+        accept=lambda group: True,
+        config_dir=config_dir,
+        addons_root=addons_dir,
+    )
+    assert {r.addon_id: r.outcome for r in taken} == {COMPANY: "applied", TEAM: "applied"}, taken
+
+
+def _team_widens_b(repos, config_dir, addons_dir):
+    """company's `scan` runs `a` and moves to `b` in 1.1.0, same limits; team
+    overrides `b` with a higher budget, so only team's `scan` is widened."""
+    _settle_team_first(
+        repos, config_dir, addons_dir, {"tasks": {"b": {**AGENT, "policy": {"budget_usd": 9}}}}
+    )
+    _put(repos, COMPANY, "1.1.0", chains={"ship": GATED, "default": _scan("b")})
+
+
+def _team_widens_b_and_is_off(repos, config_dir, addons_dir):
+    _team_widens_b(repos, config_dir, addons_dir)
+    _no_auto_update(config_dir, TEAM)
+
+
+def _team_declares_pci_review(repos, config_dir, addons_dir):
+    _settle_team_first(repos, config_dir, addons_dir, {"tasks": {"pci_review": AGENT}})
+    library = {"tasks": {**_a_and_b(5)["tasks"], "pci_review": AGENT}}
+    _put(repos, COMPANY, "1.1.0", library=library)
+
+
+def _company_changes_a_prompt_team_inherits(repos, config_dir, addons_dir):
+    _settle_team_first(repos, config_dir, addons_dir, {"tasks": {"mine": AGENT}})
+    base = {**AGENT, "prompt": "a new prompt", "policy": {"budget_usd": 5}}
+    _put(repos, COMPANY, "1.1.0", library={"tasks": {**_a_and_b(5)["tasks"], "base": base}})
+
+
+#: A descendant's chain line is named by its chain (`team-payments:default...`),
+#: its other lines by its id (`team-payments@payments: `).
+NAMESPACE = "team-payments:default.nodes[scan]"
+
+
+@pytest.mark.parametrize(
+    "setup, outcome, says",
+    [
+        (_team_widens_b, "held", (NAMESPACE, "limit budget_usd raised, 5 -> 9")),
+        (_team_declares_pci_review, "held", (f"{TEAM}: ", "now overrides")),
+        (_team_widens_b_and_is_off, "held", (NAMESPACE, "limit budget_usd raised, 5 -> 9")),
+        (_company_changes_a_prompt_team_inherits, "applied", ()),
+    ],
+    ids=[
+        "descendant-limit-raised",
+        "descendant-shadow",
+        "descendant-off-still-protected",
+        "descendant-content-only",
+    ],
+)
+def test_auto_update_holds_for_a_descendant(tree_home, setup, outcome, says):
+    """A parent's release that gives an installed descendant a line about what
+    a run can reach is held for a person, though the parent's own review has
+    none and the descendant is not in the set, or is off; a line that is only
+    content is not."""
+    repos, config_dir, addons_dir, _ = tree_home
+    setup(repos, config_dir, addons_dir)
+    lock = (config_dir / "addons.lock").read_text()
+    if setup is _team_widens_b:
+        asked = []
+        update.update(
+            [COMPANY],
+            accept=lambda group: asked.append(group) is None and False,
+            relatives=False,
+            config_dir=config_dir,
+            addons_root=addons_dir,
+        )
+        [mine] = [r for g in asked for r in g.reviews if r.addon_id == COMPANY]
+        assert mine.reach, "the review has the descendant's line"
+        assert all(line.startswith("team-payments:") for line in mine.reach), mine.reach
+
+    result = update.auto_update(config_dir, addons_dir)[COMPANY]
+
+    assert result["outcome"] == outcome, result
+    for fragment in says:
+        assert fragment in result["message"], result
+    expected = lock if outcome == "held" else (config_dir / "addons.lock").read_text()
+    assert (config_dir / "addons.lock").read_text() == expected
+    assert (_versions(config_dir)[COMPANY] == "1.0.1") == (outcome == "held")

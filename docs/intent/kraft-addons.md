@@ -458,8 +458,8 @@ origin: src/kraft/addons/update.py §auto_update
 
 ## REQ auto-update-holds-what-widens-a-run
 
-IF an auto-update is a downgrade, a move onto a pre-release, or has a review call-out about what a run can reach, THEN the system SHALL hold it for a person and keep the locked version.
-enforced-by: tests/addons/test_auto_update.py::test_auto_update_holds[gate-removed], tests/addons/test_auto_update.py::test_auto_update_holds[limit-raised], tests/addons/test_auto_update.py::test_auto_update_holds[requires], tests/addons/test_auto_update.py::test_auto_update_holds[downgrade], tests/addons/test_auto_update.py::test_auto_update_holds[pre-release], tests/addons/test_auto_update.py::test_a_newer_pre_release_follows_a_pre_release, tests/addons/test_update_inheritance.py::test_a_childs_review_shows_its_chain_changes[parent-update-changes-a-childs-chain], tests/addons/test_auto_update.py::test_a_group_is_held_whole[relative-holds]
+IF an auto-update is a downgrade, a move onto a pre-release, or has a review call-out about what a run can reach, in its own chains or in a descendant's, THEN the system SHALL hold it for a person and keep the locked version.
+enforced-by: tests/addons/test_auto_update.py::test_auto_update_holds[gate-removed], tests/addons/test_auto_update.py::test_auto_update_holds[limit-raised], tests/addons/test_auto_update.py::test_auto_update_holds[requires], tests/addons/test_auto_update.py::test_auto_update_holds[downgrade], tests/addons/test_auto_update.py::test_auto_update_holds[pre-release], tests/addons/test_auto_update.py::test_a_newer_pre_release_follows_a_pre_release, tests/addons/test_update_inheritance.py::test_a_childs_review_shows_its_chain_changes[parent-update-changes-a-childs-chain], tests/addons/test_auto_update.py::test_a_group_is_held_whole[relative-holds], tests/addons/test_auto_update.py::test_auto_update_holds_for_a_descendant[descendant-limit-raised]
 origin: src/kraft/addons/update.py §may_apply_unattended
 
 ## REQ auto-update-never-installs-or-re-installs
@@ -629,3 +629,9 @@ origin: src/kraft/addons/update.py §_below
 WHEN auto-update runs, the system SHALL judge the waiting moves of each inheritance tree's auto-update-on add-ons as one set, across collections, counting every add-on whose auto-update is off at its locked version, and SHALL apply the set only if no move in it is held for a person; otherwise it SHALL hold the whole set.
 enforced-by: tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[cross-collection-set], tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[one-member-off], tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[child-needs-off-parent], tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[person-hold-holds-tree], tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[held-through-an-off-member], tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[hand-change-holds-tree]
 origin: src/kraft/addons/update.py §auto_update
+
+## REQ auto-update-holds-a-move-that-widens-a-descendant
+
+IF a parent's move gives any installed descendant's effective chains a review line about what a run can reach, including a name the descendant now shadows, THEN auto-update SHALL hold the move's whole set for a person, even when the parent's own review has none.
+enforced-by: tests/addons/test_auto_update.py::test_auto_update_holds_for_a_descendant[descendant-limit-raised], tests/addons/test_auto_update.py::test_auto_update_holds_for_a_descendant[descendant-shadow], tests/addons/test_auto_update.py::test_auto_update_holds_for_a_descendant[descendant-off-still-protected]
+origin: src/kraft/addons/update.py §_below
