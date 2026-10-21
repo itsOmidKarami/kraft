@@ -4,11 +4,15 @@ promises too is in test_forge_cli_contract.py."""
 
 from __future__ import annotations
 
+import json
+import re
+from dataclasses import replace
+
 import pytest
 
 from kraft.adapters import forge
 
-from .nodes import FAIL
+from .nodes import FAIL, FailWith
 from .outputs import GH_PR_VIEW, GH_PR_VIEW_CONFLICT, GH_PR_VIEW_NEEDS_APPROVAL
 
 PR = forge.MR(7, "http://x/7")
@@ -372,3 +376,299 @@ async def test_gh_mr_body_reads_the_live_description(cli, tmp_path):
 
     assert await forge.GhCli().mr_body(repo=tmp_path, branch="b") == "the live body"
     assert cli.argv("gh") == ["pr", "view", "b", "--json", "body"]
+
+
+_PR_URL = "https://github.com/o/r/pull/7"
+_RUN_URL = "https://github.com/o/r/actions/runs/555"
+_QUEUE_BRANCH = "gh-readonly-queue/main/pr-7-" + "a" * 40
+_JOBS = "api repos/{owner}/{repo}/actions/runs/555/jobs?per_page=100"
+
+
+def _graphql(
+    *, queue: bool = True, state: str = "OPEN", entry: str | None = None, removal: str | None = None
+) -> str:
+    """`gh api graphql`'s answer for the merge queue query: the base's queue
+    (or none), and the pull request's state, queue entry and last removal."""
+    nodes = [{"reason": removal, "createdAt": "2026-10-21T10:00:00Z"}] if removal else []
+    pr = {
+        "state": state,
+        "mergeQueueEntry": {"state": entry, "position": 1} if entry else None,
+        "timelineItems": {"nodes": nodes},
+    }
+    repository = {"mergeQueue": {"id": "MQ_1"} if queue else None, "pullRequest": pr}
+    return json.dumps({"data": {"repository": repository}})
+
+
+def _merge_group_run(branch: str = _QUEUE_BRANCH, conclusion: str = "failure", id: int = 555):
+    return {
+        "databaseId": id,
+        "headBranch": branch,
+        "conclusion": conclusion,
+        "url": f"https://github.com/o/r/actions/runs/{id}",
+    }
+
+
+def _queue_routes(graphql: str, runs: list[dict] | None = None, **routes: str) -> dict:
+    return {
+        "pr list": json.dumps([{"number": 7, "url": _PR_URL, "state": "OPEN"}]),
+        "api graphql": graphql,
+        "run list": json.dumps(runs or []),
+        _JOBS: json.dumps(
+            {
+                "jobs": [
+                    {"id": 1, "name": "lint", "conclusion": "success"},
+                    {"id": 2, "name": "test", "conclusion": "failure", "html_url": _RUN_URL},
+                ]
+            }
+        ),
+        "run view": "test\tRun tests\t2026-10-21T10:00:00Z FAILED tests/test_x.py::test_y",
+        **routes,
+    }
+
+
+def _queue(url: str = _PR_URL, **fields) -> forge.QueueRead:
+    return forge.QueueRead(kind="queue", url=url, **fields)
+
+
+@pytest.mark.parametrize(
+    "routes, expected, failure_state",
+    [
+        pytest.param(
+            _queue_routes(_graphql(queue=False, entry="QUEUED")),
+            forge.QueueRead(),
+            None,
+            id="no-queue",
+        ),
+        pytest.param(
+            _queue_routes(_graphql(entry="QUEUED")), _queue(state="queued"), None, id="queued"
+        ),
+        pytest.param(
+            _queue_routes(_graphql(entry="AWAITING_CHECKS")),
+            _queue(state="queued"),
+            None,
+            id="awaiting-checks",
+        ),
+        pytest.param(
+            _queue_routes(_graphql(entry="LOCKED")), _queue(state="queued"), None, id="locked"
+        ),
+        pytest.param(
+            _queue_routes(_graphql(entry="MERGEABLE")),
+            _queue(state="merging"),
+            None,
+            id="mergeable",
+        ),
+        pytest.param(
+            _queue_routes(_graphql(entry="UNMERGEABLE")),
+            _queue(state="queued"),
+            None,
+            id="unmergeable-is-about-to-be-removed",
+        ),
+        pytest.param(
+            _queue_routes(_graphql(state="MERGED")), _queue(state="merged"), None, id="merged"
+        ),
+        pytest.param(
+            _queue_routes(_graphql(state="CLOSED", removal="Closed")),
+            _queue(),
+            None,
+            id="closed-is-not-dropped",
+        ),
+        pytest.param(
+            _queue_routes(_graphql(removal="Required status checks failed"), [_merge_group_run()]),
+            _queue(
+                state="dropped", cause="code", reason="Required status checks failed", url=_RUN_URL
+            ),
+            "failed",
+            id="dropped-ci-failed",
+        ),
+        pytest.param(
+            _queue_routes(
+                _graphql(removal="Merge conflict with the base branch"), [_merge_group_run()]
+            ),
+            _queue(
+                state="dropped",
+                cause="conflict",
+                reason="Merge conflict with the base branch",
+                url=_RUN_URL,
+            ),
+            "failed",
+            id="dropped-conflict",
+        ),
+        pytest.param(
+            _queue_routes(_graphql(removal="Removed by omid from the merge queue")),
+            _queue(state="dropped", cause="other", reason="Removed by omid from the merge queue"),
+            None,
+            id="dropped-by-person",
+        ),
+        pytest.param(
+            _queue_routes(_graphql()),
+            _queue(
+                state="dropped",
+                cause="other",
+                reason="dropped from the merge queue; GitHub gave no reason",
+            ),
+            None,
+            id="dropped-no-reason",
+        ),
+    ],
+)
+async def test_merge_queue_reads_the_queue(cli, tmp_path, routes, expected, failure_state):
+    cli.stub("gh", routes=routes, default=FAIL)
+
+    got = await forge.GhCli().merge_queue(repo=tmp_path, branch="kraft/abc", base="main")
+
+    assert (got.failure is not None) == (failure_state is not None)
+    assert got.failure is None or got.failure.state == failure_state
+    assert replace(got, failure=None) == expected
+    if expected.kind == "none":
+        assert not any(c.startswith("run ") for c in cli.calls("gh")), "asked a repo with no queue"
+
+
+def _run_for(branch: str, conclusion: str = "failure", id: int = 900) -> dict:
+    return _merge_group_run(branch, conclusion, id)
+
+
+@pytest.mark.parametrize(
+    "runs, run_id",
+    [
+        pytest.param([_merge_group_run(id=555)], 555, id="the-failed-run"),
+        pytest.param(
+            [_run_for(_QUEUE_BRANCH, id=555), _run_for(_QUEUE_BRANCH, id=400)], 555, id="newest"
+        ),
+        pytest.param(
+            [_run_for("gh-readonly-queue/main/pr-70-" + "b" * 40), _run_for(_QUEUE_BRANCH, id=555)],
+            555,
+            id="not-another-pull-request-sharing-the-prefix",
+        ),
+        pytest.param(
+            [_run_for("gh-readonly-queue/dev/pr-7-" + "b" * 40), _run_for(_QUEUE_BRANCH, id=555)],
+            555,
+            id="not-another-base",
+        ),
+        pytest.param(
+            [_run_for(_QUEUE_BRANCH, "cancelled", id=700), _run_for(_QUEUE_BRANCH, id=555)],
+            555,
+            id="not-a-cancelled-run",
+        ),
+        pytest.param([_run_for(_QUEUE_BRANCH, "success", id=700)], None, id="not-a-green-run"),
+        pytest.param([_run_for("kraft/abc")], None, id="not-a-run-of-the-branch-itself"),
+    ],
+)
+async def test_merge_queue_blames_the_failed_merge_group_run_of_this_pull_request(
+    cli, tmp_path, runs, run_id
+):
+    routes = _queue_routes(_graphql(removal="Required status checks failed"), runs)
+    cli.stub("gh", routes=routes, default=FAIL)
+
+    got = await forge.GhCli().merge_queue(repo=tmp_path, branch="kraft/abc", base="main")
+
+    assert got.state == "dropped"
+    if run_id is None:
+        assert (got.failure, got.cause, got.url) == (None, "other", _PR_URL)
+    else:
+        assert got.failure is not None and got.failure.url.endswith(f"/runs/{run_id}")
+        assert got.cause == "code"
+    assert "--event merge_group" in " ".join(cli.argv("gh")).replace("\n", " ")
+
+
+async def test_merge_queue_hands_over_the_failed_jobs_with_two_log_tails_of_fifteen_lines(
+    cli, tmp_path
+):
+    """The failure is what a repair agent is given: every failed job named (the
+    rest only by name), the first two with the tail of their log."""
+    jobs = {
+        "jobs": [
+            {"id": i, "name": f"job{i}", "conclusion": "failure", "html_url": f"{_RUN_URL}/job/{i}"}
+            for i in (1, 2, 3)
+        ]
+        + [{"id": 4, "name": "lint", "conclusion": "success"}]
+    }
+    log = "\n".join(f"job1\tstep\t2026-10-21T10:00:00Z line {n}" for n in range(1, 31))
+    routes = _queue_routes(
+        _graphql(removal="Required status checks failed"),
+        [_merge_group_run()],
+        **{_JOBS: json.dumps(jobs), "run view": log},
+    )
+    cli.stub("gh", routes=routes, default=FAIL)
+
+    got = await forge.GhCli().merge_queue(repo=tmp_path, branch="kraft/abc", base="main")
+
+    failure = got.failure
+    assert failure is not None and failure.sha == ""
+    assert [j.name for j in failure.failed_jobs] == ["job1", "job2", "job3"]
+    assert all(j.failure_reason == "script_failure" for j in failure.failed_jobs)
+    assert failure.failed_jobs[0].detail_url == f"{_RUN_URL}/job/1"
+    views = [c for c in cli.calls("gh") if c.startswith("run view")]
+    assert views == [f"run view 555 --log-failed --job {i}" for i in (1, 2)]
+    tails = [line for line in failure.jobs if line.startswith("  ")]
+    assert len(tails) == 30
+    assert tails[0].endswith("line 16") and tails[14].endswith("line 30")
+    assert not any("line 15" in line for line in failure.jobs)
+
+
+async def test_merge_queue_a_failed_run_whose_jobs_cannot_be_read_is_not_infra(cli, tmp_path):
+    """No failed job to name must mean GitHub said there is none, never that the
+    read failed: `ci.is_infra_red` takes an empty list for a runner problem and
+    would retry a code failure instead of repairing it."""
+    routes = _queue_routes(
+        _graphql(removal="Required status checks failed"),
+        [_merge_group_run()],
+        **{_JOBS: FailWith("gh: HTTP 502")},
+    )
+    cli.stub("gh", routes=routes, default=FAIL)
+
+    got = await forge.GhCli().merge_queue(repo=tmp_path, branch="kraft/abc", base="main")
+
+    assert got.failure is not None and got.cause == "code"
+    assert [j.name for j in got.failure.failed_jobs] == ["(unreadable)"]
+    assert not forge.ci.is_infra_red(got.failure)
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        pytest.param("api graphql", id="graphql"),
+        pytest.param("pr list", id="pr-list"),
+    ],
+)
+@pytest.mark.parametrize(
+    "failure",
+    [
+        pytest.param(FailWith("gh: HTTP 404 not found"), id="404"),
+        pytest.param(FailWith("gh: HTTP 502 Bad Gateway"), id="502"),
+        pytest.param(FAIL, id="exit-1"),
+    ],
+)
+async def test_merge_queue_does_not_read_a_failed_call_as_no_queue_or_a_drop(
+    cli, tmp_path, broken, failure
+):
+    """A read that failed says nothing: Kraft would otherwise take a merge
+    request still in the queue for one that left it, and ask to merge it twice
+    (Kraft-l98h6)."""
+    cli.stub(
+        "gh", routes={**_queue_routes(_graphql(entry="QUEUED")), broken: failure}, default=FAIL
+    )
+
+    with pytest.raises(forge.ForgeError):
+        await forge.GhCli().merge_queue(repo=tmp_path, branch="kraft/abc", base="main")
+
+
+async def test_merge_queue_with_no_pull_request_is_no_queue_read(cli, tmp_path):
+    cli.stub("gh", routes={"pr list": "[]"}, default=FAIL)
+
+    got = await forge.GhCli().merge_queue(repo=tmp_path, branch="kraft/abc", base="main")
+
+    assert got == forge.QueueRead()
+    assert [c.split()[:2] for c in cli.calls("gh")] == [["pr", "list"]]
+
+
+async def test_merge_queue_asks_for_the_base_branch_queue_of_this_pull_request(cli, tmp_path):
+    cli.stub("gh", routes=_queue_routes(_graphql(entry="QUEUED")), default=FAIL)
+
+    await forge.GhCli().merge_queue(repo=tmp_path, branch="kraft/abc", base="release")
+
+    argv = cli.argv("gh")
+    fields = dict(a.split("=", 1) for a in argv if re.match(r"(owner|name|base|n)=", a))
+    assert argv[argv.index("graphql") - 1] == "api"
+    assert (fields["base"], fields["n"]) == ("release", "7")
+    assert (fields["owner"], fields["name"]) == ("{owner}", "{repo}")
+    assert "mergeQueue(branch: $base)" in "\n".join(argv)

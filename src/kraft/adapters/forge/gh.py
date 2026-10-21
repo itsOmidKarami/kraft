@@ -11,9 +11,12 @@ from kraft.adapters.forge.models import (
     MR,
     CIState,
     CIStatus,
+    DropCause,
     FailedJob,
     ForgeError,
     MRRef,
+    QueueRead,
+    QueueState,
     ReviewResult,
 )
 
@@ -48,6 +51,53 @@ def _cancelled_at(rows: list[dict], *, at: str) -> str:
 
 
 _RUN_ID_RE = re.compile(r"/actions/runs/(\d+)")
+
+#: `MergeQueueEntryState` onto the forge-neutral queue states. UNMERGEABLE is
+#: queued: GitHub is about to remove the entry, and the next read sees the drop.
+_GH_QUEUE_STATES: dict[str, QueueState] = {
+    "QUEUED": "queued",
+    "AWAITING_CHECKS": "queued",
+    "LOCKED": "queued",
+    "UNMERGEABLE": "queued",
+    "MERGEABLE": "merging",
+}
+_NO_REASON = "dropped from the merge queue; GitHub gave no reason"
+#: The branch GitHub builds a queued pull request's merge group on.
+_QUEUE_BRANCH = "gh-readonly-queue/{base}/pr-{number}-"
+_QUEUE_QUERY = """
+query($owner: String!, $name: String!, $base: String!, $n: Int!) {
+  repository(owner: $owner, name: $name) {
+    mergeQueue(branch: $base) { id }
+    pullRequest(number: $n) {
+      state
+      mergeQueueEntry { state position }
+      timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {
+        nodes { ... on RemovedFromMergeQueueEvent { reason createdAt enqueuer { login } } }
+      }
+    }
+  }
+}
+"""
+#: What a run's job list stands in for when it could not be read: a failure
+#: that is code-red until proven otherwise, never `ci.is_infra_red`'s empty
+#: list (the forge confirmed no job ran).
+_UNREADABLE_JOBS = (FailedJob("(unreadable)", "failed", None),)
+
+
+def _red_jobs(rows: list[dict], *, url: str) -> tuple[FailedJob, ...]:
+    """A `FailedJob` for every red row of `rows` (check or workflow-job rows
+    alike): its `conclusion` coarsened by `_GH_FAILURE_REASON`, and the link
+    `retry_jobs` reads the run id from, which row field `url` names."""
+    return tuple(
+        FailedJob(
+            str(r.get("name", "")),
+            "failed",
+            _GH_FAILURE_REASON.get(str(r.get("conclusion") or "").upper()),
+            str(r.get(url) or "") or None,
+        )
+        for r in rows
+        if str(r.get("conclusion") or "").upper() in _GH_RED
+    )
 
 
 def _latest_by_name(rows: list[dict], *, name: str, started: str) -> list[dict]:
@@ -193,16 +243,7 @@ class GhCli(mr_ops.CliWaits):
             state = "success"
         else:
             state = "pending"
-        failed_jobs = tuple(
-            FailedJob(
-                str(c.get("name", "")),
-                "failed",
-                _GH_FAILURE_REASON.get(str(c.get("conclusion") or "")),
-                c.get("detailsUrl"),
-            )
-            for c in checks
-            if str(c.get("conclusion") or "") in _GH_RED
-        )
+        failed_jobs = _red_jobs(checks, url="detailsUrl")
         return CIStatus(
             state=state,
             url=str(data.get("url", "")),
@@ -387,16 +428,7 @@ class GhCli(mr_ops.CliWaits):
                 state = "success"
             else:
                 state = "pending"
-        failed_jobs = tuple(
-            FailedJob(
-                str(r.get("name", "")),
-                "failed",
-                _GH_FAILURE_REASON.get(str(r.get("conclusion") or "").upper()),
-                str(r.get("url") or "") or None,
-            )
-            for r in current
-            if str(r.get("conclusion") or "").upper() in _GH_RED
-        )
+        failed_jobs = _red_jobs(current, url="url")
         return CIStatus(
             state=state,
             url=str(current[0].get("url", "")),
@@ -456,6 +488,158 @@ class GhCli(mr_ops.CliWaits):
 
     async def reopen_mr(self, *, repo: Path, mr: MRRef) -> None:
         await git.run_git(repo, ["gh", "pr", "reopen", str(mr.number)])
+
+    async def merge_queue(self, *, repo: Path, branch: str, base: str) -> QueueRead:
+        """Where this branch's pull request stands in `base`'s merge queue.
+
+        One GraphQL read: whether `base` has a queue at all, the pull request's
+        state and queue entry, and the last time GitHub removed it. A call that
+        fails raises: only a `null` queue is "no queue", and only a missing entry
+        on an open pull request is a drop."""
+        mr = await self.find_mr(repo=repo, branch=branch)
+        if mr is None:
+            return QueueRead()
+        data = await self._json(
+            repo,
+            [
+                "api",
+                "graphql",
+                "-F",
+                "owner={owner}",
+                "-F",
+                "name={repo}",
+                "-F",
+                f"base={base}",
+                "-F",
+                f"n={mr.number}",
+                "-f",
+                f"query={_QUEUE_QUERY}",
+            ],
+            "gh api graphql",
+        )
+        try:
+            repository = data["data"]["repository"]
+            queued = repository["mergeQueue"]
+            pull = repository["pullRequest"]
+        except (KeyError, TypeError) as exc:
+            raise ForgeError(
+                f"gh api graphql answered without the merge queue: {data!r:.200}"
+            ) from exc
+        if not queued:
+            return QueueRead()
+        if not isinstance(pull, dict):
+            return QueueRead(kind="queue", url=mr.url)
+        if pull.get("state") == "MERGED":
+            return QueueRead(kind="queue", state="merged", url=mr.url)
+        entry = pull.get("mergeQueueEntry")
+        if isinstance(entry, dict):
+            state = _GH_QUEUE_STATES.get(str(entry.get("state")), "queued")
+            return QueueRead(kind="queue", state=state, url=mr.url)
+        if pull.get("state") != "OPEN":
+            return QueueRead(kind="queue", url=mr.url)
+        return await self._dropped(repo, pull, mr, base)
+
+    async def _dropped(self, repo: Path, pull: dict, mr: MRRef, base: str) -> QueueRead:
+        """A pull request GitHub took out of the queue: why, in GitHub's words,
+        and the merge group's failed run when there is one."""
+        nodes = (pull.get("timelineItems") or {}).get("nodes") or []
+        removal = next((n for n in reversed(nodes) if isinstance(n, dict)), {})
+        reason = str(removal.get("reason") or "").strip() or _NO_REASON
+        failure = await self._merge_group_failure(repo, base, mr.number)
+        cause: DropCause = "other"
+        if "conflict" in reason.lower():
+            cause = "conflict"
+        elif failure is not None and failure.state == "failed":
+            cause = "code"
+        return QueueRead(
+            kind="queue",
+            state="dropped",
+            cause=cause,
+            reason=reason,
+            failure=failure,
+            url=(failure.url if failure is not None else "") or mr.url,
+        )
+
+    async def _merge_group_failure(self, repo: Path, base: str, number: int) -> CIStatus | None:
+        """The newest failed `merge_group` run for pull request `number`, read
+        as a red `CIStatus`, else None. Best effort: a drop was already
+        established, and a run that cannot be listed leaves GitHub's own
+        removal reason as the only finding."""
+        try:
+            rows = await self._json(
+                repo,
+                [
+                    "run",
+                    "list",
+                    "--event",
+                    "merge_group",
+                    "--json",
+                    "databaseId,headBranch,conclusion,url",
+                    "-L",
+                    "30",
+                ],
+                "gh run list",
+            )
+        except ForgeError:
+            return None
+        if not isinstance(rows, list):
+            return None
+        prefix = _QUEUE_BRANCH.format(base=base, number=number)
+        run = next(
+            (
+                r
+                for r in rows
+                if isinstance(r, dict)
+                and str(r.get("headBranch") or "").startswith(prefix)
+                and str(r.get("conclusion") or "").lower() == "failure"
+            ),
+            None,
+        )
+        if run is None:
+            return None
+        run_id = str(run.get("databaseId") or "")
+        url = str(run.get("url") or "")
+        jobs, failed_jobs = await self._run_failure(repo, run_id)
+        return CIStatus(
+            state="failed", url=url, jobs=(f"run {run_id}: failure", *jobs), failed_jobs=failed_jobs
+        )
+
+    async def _run_failure(
+        self, repo: Path, run_id: str
+    ) -> tuple[tuple[str, ...], tuple[FailedJob, ...]]:
+        """A failed run's red jobs, and the tail of the first two jobs' failed
+        steps' logs. A job list that cannot be read is `_UNREADABLE_JOBS`, not
+        an empty one, which `ci.is_infra_red` would read as a runner problem."""
+        if not run_id:
+            return (), _UNREADABLE_JOBS
+        try:
+            data = await self._json(
+                repo,
+                ["api", f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs?per_page=100"],
+                "gh api run jobs",
+            )
+        except ForgeError:
+            return (), _UNREADABLE_JOBS
+        rows = (
+            [j for j in data.get("jobs") or [] if isinstance(j, dict)]
+            if isinstance(data, dict)
+            else []
+        )
+        failed_jobs = _red_jobs(rows, url="html_url")
+        red = [j for j in rows if str(j.get("conclusion") or "").upper() in _GH_RED]
+        detail: tuple[str, ...] = ()
+        # ponytail: first two failed jobs, last 15 log lines each, as `glab`.
+        for job, row in zip(failed_jobs[:2], red[:2], strict=True):
+            reason = job.failure_reason
+            detail += (f"job {job.name}: failed" + (f" ({reason})" if reason else ""),)
+            try:
+                log = await git.run_git(
+                    repo, ["gh", "run", "view", run_id, "--log-failed", "--job", str(row.get("id"))]
+                )
+            except ForgeError:
+                continue
+            detail += tuple(f"  {line}" for line in log.strip().splitlines()[-15:])
+        return detail, failed_jobs
 
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None:
         raw = await git.run_git(

@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from kraft.adapters import forge
+from kraft.adapters.forge.gh import _QUEUE_QUERY
 from kraft.adapters.forge.mr import MRMeta
 from kraft.automated_review import AutomatedReview
 
@@ -289,3 +290,50 @@ def test_glab_train_payload_shapes():
     assert car["status"]
     assert car["pipeline"]["ref"]
     assert car["merge_request"]["iid"] == int(iid)
+
+
+@pytest.mark.e2e("gh")
+def test_gh_merge_queue_fields_exist(record_property):
+    """GitHub's schema accepts the query `GhCli.merge_queue` sends: `mergeQueue`,
+    a pull request's `mergeQueueEntry`, and `RemovedFromMergeQueueEvent`'s
+    `reason`, `createdAt` and `enqueuer`. It runs against `KRAFT_E2E_GH_REPO`
+    (`owner/name`, any repository you can read) at pull request
+    `KRAFT_E2E_GH_PR` into `KRAFT_E2E_GH_BASE` (default `main`); a repository
+    with no queue answers `mergeQueue: null`, which is the query being valid.
+
+    Whether `gh pr merge --squash` is accepted where a queue is required is
+    recorded when `KRAFT_E2E_GH_QUEUE_PR` names a pull request of that
+    repository on such a branch, and it is then really asked to merge. It is
+    not exercised otherwise, and the test skips saying so."""
+    slug, number = os.environ.get("KRAFT_E2E_GH_REPO"), os.environ.get("KRAFT_E2E_GH_PR")
+    if not (slug and number):
+        pytest.skip("e2e: set KRAFT_E2E_GH_REPO (owner/name) and KRAFT_E2E_GH_PR")
+    owner, _, name = slug.partition("/")
+    base = os.environ.get("KRAFT_E2E_GH_BASE", "main")
+    done = subprocess.run(
+        ["gh", "api", "graphql", "-F", f"owner={owner}", "-F", f"name={name}"]
+        + ["-F", f"base={base}", "-F", f"n={number}", "-f", f"query={_QUEUE_QUERY}"],
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr
+    data = json.loads(done.stdout)
+    assert "errors" not in data
+    repository = data["data"]["repository"]
+    assert "mergeQueue" in repository
+    pull = repository["pullRequest"]
+    assert {"state", "mergeQueueEntry", "timelineItems"} <= pull.keys()
+
+    queue_pr = os.environ.get("KRAFT_E2E_GH_QUEUE_PR")
+    if not queue_pr:
+        pytest.skip(
+            "schema accepted; `gh pr merge --squash` on a queue-required branch not "
+            "exercised: set KRAFT_E2E_GH_QUEUE_PR (it will really be asked to merge)"
+        )
+    merged = subprocess.run(
+        ["gh", "pr", "merge", queue_pr, "--squash", "--repo", slug],
+        capture_output=True,
+        text=True,
+    )
+    record_property("gh_pr_merge_squash_on_queue_rc", merged.returncode)
+    record_property("gh_pr_merge_squash_on_queue_output", (merged.stdout + merged.stderr)[-500:])
