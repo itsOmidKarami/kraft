@@ -5,12 +5,14 @@ description: "Runs the next node of a Kraft Lite chain from its recorded state: 
 
 # Running the next node
 
-This skill holds no state in the conversation. Everything comes from `state`,
-which is what makes it survive a `/clear`. Below, `KL` is short for
+This skill holds no state in the conversation: everything comes from `state`,
+so it survives a `/clear`. Below, `KL` is short for
 `python3 "$CLAUDE_PLUGIN_ROOT/kl.py"`, and every `KL` command carries
 `--chain-id <id>`. Omit it only when you know this directory holds one chain. If
 a verb exits saying there is more than one unfinished chain, show the human the
-list it printed and ask which - do not pick.
+list it printed and ask which - do not pick. A verb that refuses with
+`Run: python3 kl.py migrate` means a run or registry from an older Kraft Lite:
+run `migrate` as `kraft-lite:start` says, then go on with the new id it prints.
 
 ## 1. Read the state
 
@@ -31,8 +33,8 @@ and `sliced`.
     slice is done. Stop.
   - `scoped_verify` - a quick check of the seams between slices before the
     feature PR. In the feature worktree (below), first set it up as the repo says:
-    a fresh one has nothing installed. Then run only the node's tasks whose
-    `source` names `kraft.verify_changed_test_scopes`, on the files
+    a fresh one has nothing installed. Then run only the node's tasks with
+    `task_kind` `builtin` and `ref` `kraft.verify_changed_test_scopes`, on the files
     `git diff --name-only <base branch>...<feature branch>` lists: a `subprocess`
     `command` gets their test paths appended, and one that takes no paths is a
     reason to stop and say so, never to run the whole suite. Run none of its other
@@ -54,8 +56,8 @@ and `sliced`.
 
 In a sliced `feature` run, every task from the first build node on runs in a
 worktree of the feature branch, never in the state branch's checkout: the rebase
-task rebases, and the merge request task opens the PR from, the branch it runs
-in. Make the worktree once, from origin's feature branch, where the slices merged:
+and the merge request are made from the branch they run in. Make the worktree
+once, from origin's feature branch, where the slices merged:
 
     git fetch origin
     git worktree add -B <feature branch> <path> origin/<feature branch>
@@ -70,9 +72,8 @@ every `KL` command runs from the controller's checkout, the one whose
 ## 2. Run an exec node
 
 Run `steps` in order. The tasks inside one step may run in any order, or in
-parallel as subagents; set each subagent's model explicitly, from the task's
-`hints` where they name one, not the strongest by default. Run each task by its
-`kind`:
+parallel as subagents (set each one's model explicitly, from the task's `hints`
+where they name one, not the strongest by default). Run each task by its `kind`:
 
 - `skill` - invoke `skill`, with `prompt` as the instruction.
 - `prompt` - follow `prompt`. A `source` ending `(skill missing)` means the bound
@@ -90,25 +91,24 @@ branch's base (a rebase or sync that did work) has not failed. If
 walk from `on_base_changed.restart_from` through this node. Then this skill
 again. It refuses past 3 restarts: stop and ask the human, as for `over_cap`.
 
-Every step passed: `KL close`, then this skill again. In a sliced run (`sliced` not
-null), export state after every `close`, as `kraft-lite:run-slices` describes under
-State branch.
+Every step passed: `KL close`, then this skill again. In a sliced run (`sliced`
+not null), export state after every `close`, as `kraft-lite:run-slices`
+describes under State branch.
 
 Resuming replays a node from its first step: keep tasks idempotent, and stop and
 ask rather than run twice one that is not. The chain froze at `start` and cannot
 be reordered, but `.kraft-lite/bindings.yaml` is read again at every `state`, so
 rebinding a task there is how a live chain is corrected.
 
-## 3. When a step fails
+## 3. When a step fails, in Kraft's order
 
-In this order, as Kraft does:
-
-1. A task failed, `on_failure` is set and `on_failure_ran` is false: run
+1. The node failed, `on_failure` is set and `on_failure_ran` is false: run
    `on_failure.steps` as in section 2, `KL mark --on-failure-ran`, then the
    whole node again from its first step.
-2. Every failure is a builtin or forge task (its `source` names `builtins.` or
-   `forge.`) that reported an error and no findings - credentials, no PR, a tool
-   missing: stop and tell the human. No repair can change that; spend no attempt.
+2. Every failure is a task with `task_kind` `builtin` or `forge` that ended in
+   an error no repair can change - credentials, a tool missing, no merge request:
+   stop and tell the human, and spend no attempt. Failing tests or failing checks
+   such a task reports are findings, for the fix loop below.
 3. `fix_loop` null: stop and report. A node with no fix loop has no retry budget.
 4. `KL attempt`. When it prints `attempt` 2 or more and `fix_loop.judge` is set,
    run the judge first, with every round's findings and the attempts used of

@@ -82,7 +82,8 @@
     "expected_behavior": [
       "Presents the gate's message ('Review the proposed change to the rest of this chain.') and the chain revision file at gate.artifact_path, with its two proposed changes",
       "Says Kraft Lite cannot apply a chain revision to a running chain: the chain was frozen at start",
-      "Offers the two ways on: approve without the change (the chain continues as frozen), or stop and start again on an edited chain (`start --chain <edited chain file>`)",
+      "Offers the two ways on: approve without the change (the chain continues as frozen), or stop and start again by invoking kraft-lite:start with `--chain <edited chain file>` (a new title and a new chain id), never a bare `start --chain` on this chain's id",
+      "Says the old chain then stays unfinished in `chains`, and the human decides what to do with it",
       "Runs no `approve` or `reject` until the human chooses, and edits no frozen chain or state file"
     ]
   }

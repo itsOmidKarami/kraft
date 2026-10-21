@@ -19,9 +19,9 @@ Then show the human what the gate is about: `gate.message`, and the file at
 `gate.artifact_path`, the newest file of kind `gate.artifact` the run produced
 (when it is null, find the file and say so); at the slice gate
 (`gate.slice_gate` true), the slicing proposal beside it, if there is one. A gate
-answered without the artefact in front of the person has stopped meaning anything.
+answered without the artifact in front of the person has stopped meaning anything.
 
-A good presentation names the artefact, says where it lives, and asks the gate's
+A good presentation names the artifact, says where it lives, and asks the gate's
 one question: "`plan_approval`: the plan is `docs/plan.md` (read it, or I can
 summarise). Approve it as the way to build this, or send it back with a reason?"
 
@@ -32,7 +32,9 @@ an earlier "just do it", is not an answer.
 When `gate.artifact` is `chain_revision` and the file proposes any change, say
 Kraft Lite cannot apply it: the chain froze at `start`. Offer two ways on, and
 record nothing until they choose: approve without the change, so the chain goes
-on as frozen; or stop, and start again on an edited copy of the chain (`KL start --chain <edited file>`).
+on as frozen; or stop, and invoke `kraft-lite:start` with `--chain <edited file>`
+to start again on an edited copy of the chain. The old chain then stays
+unfinished in `chains`, and the human decides what to do with it.
 
 ## 2. Record the answer
 
@@ -43,7 +45,7 @@ At the slice gate, `state`'s `sliced` and the proposal file say which command
 records the answer:
 
 - `sliced` null and `.kraft-lite/proposals/<chain-id>.json` exists: the proposal
-  is this gate's artefact too, the one section 1 presents. An approval carries it:
+  is this gate's artifact too, the one section 1 presents. An approval carries it:
 
       python3 "$CLAUDE_PLUGIN_ROOT/kl.py" approve --slices .kraft-lite/proposals/<chain-id>.json --chain-id <id>
 
@@ -56,27 +58,25 @@ records the answer:
 
 A plain `reject` lands on `gate.reject_to` (with none, the nearest exec node
 before the gate) and reopens it and every node after it, so the redone work is
-verified again on the way back. Check that it is the node the human wants
-redone: a `reject_to` is often the build node, which redoes the code even when
-only the document the gate presents was wrong. To land anywhere else, name it:
+verified again. Check that is the node the human wants redone: a `reject_to` is
+often the first build node, which redoes the code even when only the document
+the gate presents was wrong. To land anywhere else, name it (an unknown `<node>`
+makes the verb list the chain's nodes):
 
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" reject --note "<reason>" --from-node <node> --chain-id <id>
-
-An unknown `<node>` makes the verb list the chain's nodes.
 
 In a sliced run (`sliced` not null), where it lands decides the slices' fate:
 
 - The slice gate or earlier: the plan or its slicing is redone, so the rewind
   retires every slice. Archive their children. `slices` then lists none, and the
   chain is sliced again, from a new proposal, at the slice gate.
-- The first build node, to redo some slices: reopen each slice to redo first,
-  `KL slice-set --slice <key> --status running`, then reject. With every slice
-  still done the rewind is refused, as the first build node would close at once.
-  `kraft-lite:run-slices` reopens their children.
+- The first build node, or a node between the slice gate and it, to redo some
+  slices: reopen each slice to redo first, `KL slice-set --slice <key> --status
+  running`, then reject. With every slice still done the rewind is refused, as
+  the first build node would close at once. `kraft-lite:run-slices` reopens their children.
 - Later: the slices stay as they are.
 
-`--note` is required. A rejection with no reason strands whoever picks the work
-up next, including you after a compaction.
+`--note` is required: a rejection with no reason strands whoever picks the work up next.
 
 ## 3. Check and continue
 

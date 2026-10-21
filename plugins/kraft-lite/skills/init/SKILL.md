@@ -10,11 +10,16 @@ is two directories above this file - use that path instead of an empty one.
 Every command here runs on `python3` 3.10 or newer; if it is missing or older, tell the
 human and stop, because Lite has no other runner.
 
-If `.kraft-lite/registry.yaml` exists, it is an older Kraft Lite's: do not write
-bindings by hand. Run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" migrate`, which writes
-`.kraft-lite/bindings.yaml` from it, renames it `registry.yaml.migrated`, and
-moves each unfinished run to a new id. Report what it wrote, what it dropped and
-each run's new id, then go to the last paragraph.
+If `.kraft-lite/registry.yaml` exists and `.kraft-lite/bindings.yaml` does not,
+the directory is an older Kraft Lite's: do not write bindings by hand. Run
+`python3 "$CLAUDE_PLUGIN_ROOT/kl.py" migrate`, which writes `bindings.yaml` from
+the registry, renames it `registry.yaml.migrated`, and moves each unfinished run
+to a new id. Report what it wrote, what it dropped and each run's new id, then go
+to the last paragraph. If it refuses a run (a sliced one, or one on another
+legacy chain), nothing was migrated: tell the human the two ways on it names -
+finish that run on the previous Kraft Lite version, or start again - and let them
+choose. With both files present, `bindings.yaml` is what the walk reads: leave
+the registry alone and carry on below.
 
 Every binding is optional. A task with none runs on its default: an agent task's
 own skill or prompt, and an instruction for each builtin and forge task. The file

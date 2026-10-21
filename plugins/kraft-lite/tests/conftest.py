@@ -46,6 +46,12 @@ def _isolated_home(request, tmp_path_factory, monkeypatch):
             monkeypatch.delenv(name, raising=False)
 
 
+@pytest.fixture(scope="module")
+def texts():
+    """Every skill's SKILL.md, by skill name."""
+    return {path.parent.name: path.read_text() for path in (PLUGIN / "skills").glob("*/SKILL.md")}
+
+
 @pytest.fixture
 def default_chain(_isolated_home, tmp_path_factory):
     """Kraft's packaged V1 `default`, as `start` resolves and freezes it from

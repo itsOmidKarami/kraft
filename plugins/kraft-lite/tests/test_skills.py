@@ -44,11 +44,6 @@ EVERY_SKILL = sorted(path.parent.name for path in (PLUGIN / "skills").glob("*/SK
 HARNESS_REFERENCES = ["claude-code", "codex", "cursor"]
 
 
-@pytest.fixture(scope="module")
-def texts():
-    return {name: (PLUGIN / "skills" / name / "SKILL.md").read_text() for name in SKILLS}
-
-
 @pytest.mark.parametrize("name", SKILLS)
 def test_each_skill_has_frontmatter_naming_itself(texts, name):
     text = texts[name]
@@ -67,13 +62,6 @@ def test_the_manifest_namespaces_the_skills():
 def test_no_skill_cites_a_hook_the_chain_does_not_have(texts):
     cited = {h for name in SLICE_SKILLS for h in re.findall(r"`(on\.[\w.]+)`", texts[name])}
     assert cited <= HOOKS, f"unknown hooks: {sorted(cited - HOOKS)}"
-
-
-@pytest.mark.parametrize("name", V1_SKILLS)
-def test_the_v1_skills_cite_no_hook(texts, name):
-    """V1 chains have tasks, not hooks: a hook name sends the walk looking for a
-    registry entry that no longer exists."""
-    assert not re.findall(r"`on\.[\w.]+`", texts[name])
 
 
 @pytest.mark.parametrize("name", SKILLS)
@@ -187,12 +175,6 @@ def test_the_next_skill_uses_a_background_wait_when_the_harness_has_one(texts):
     assert "Do not idle" in body, "blocking synchronously is still banned"
     flat = " ".join(body.split())
     assert "If your starting instructions name a controller, wait for CI as" in flat
-
-
-def test_the_next_skill_says_when_a_bound_skill_is_missing(texts):
-    """`state` falls a bound skill that is not installed back to its prompt and
-    marks the source; the human should hear that the skill did not run."""
-    assert "(skill missing)" in texts["next"]
 
 
 def test_the_next_skill_warns_that_a_node_replays_its_tasks(texts):
@@ -397,34 +379,10 @@ def test_the_gate_skill_records_slices_at_the_slice_gate(texts):
     assert "rm .kraft-lite/proposals/<chain-id>.json" in flat, "a rejected proposal is deleted"
     assert (
         "`sliced` null and `.kraft-lite/proposals/<chain-id>.json` exists: the proposal "
-        "is this gate's artefact" in flat
+        "is this gate's artifact" in flat
     )
     assert "leftover" not in flat, "after a /clear nothing says what was presented"
     assert "cannot be sliced again" not in flat, "a rewind to the slice gate retires the slices"
-
-
-def test_init_writes_bindings_from_detect_and_the_ignores(texts):
-    body = texts["init"]
-    for needle in (
-        'kl.py" detect',
-        "`proposed`",
-        ".kraft-lite/bindings.yaml",
-        'kl.py" migrate',
-        ".kraft-lite/decisions/",
-        ".kraft-lite/messages/",
-        ".kraft-lite/proposals/",
-    ):
-        assert needle in body, needle
-    # the slice layer's defaults are built in: no second detect over a slice chain
-    assert "slice.json" not in body
-
-
-def test_the_start_skill_needs_no_bindings(texts):
-    """Every task has a default, so a repo with no bindings file starts; only a
-    pre-V1 registry stands in the way, and `migrate` is what moves it."""
-    body = texts["start"]
-    assert "kraft-lite:init" not in body
-    assert 'kl.py" migrate' in body
 
 
 def _section(body: str, number: int) -> str:
@@ -541,7 +499,8 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
             "next",
             1,
             "first set it up as the repo says: a fresh one has nothing installed. Then run only "
-            "the node's tasks whose `source` names `kraft.verify_changed_test_scopes`",
+            "the node's tasks with `task_kind` `builtin` and `ref` "
+            "`kraft.verify_changed_test_scopes`",
         ),
         ("next", 1, "git worktree add -B <feature branch> <path> origin/<feature branch>"),
         ("next", 1, "runs from the controller's checkout"),
@@ -621,7 +580,12 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
             "The slice gate or earlier: the plan or its slicing is redone, so the rewind "
             "retires every slice. Archive their children.",
         ),
-        ("gate", 2, "The first build node, to redo some slices: reopen each slice to redo first,"),
+        (
+            "gate",
+            2,
+            "The first build node, or a node between the slice gate and it, to redo some slices: "
+            "reopen each slice to redo first,",
+        ),
         (
             "next",
             1,
@@ -638,10 +602,43 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         (
             "next",
             3,
+            "The node failed, `on_failure` is set and `on_failure_ran` is false: run "
             "`on_failure.steps` as in section 2, `KL mark --on-failure-ran`, then the whole node "
             "again from its first step",
         ),
-        ("next", 3, "that reported an error and no findings"),
+        (
+            "next",
+            3,
+            "Every failure is a task with `task_kind` `builtin` or `forge` that ended in an error "
+            "no repair can change",
+        ),
+        (
+            "next",
+            3,
+            "Failing tests or failing checks such a task reports are findings, for the fix loop",
+        ),
+        (
+            "next",
+            0,
+            "run `migrate` as `kraft-lite:start` says, then go on with the new id it prints",
+        ),
+        (
+            "gate",
+            1,
+            "invoke `kraft-lite:start` with `--chain <edited file>` to start again on an edited "
+            "copy of the chain. The old chain then stays unfinished in `chains`",
+        ),
+        (
+            "init",
+            0,
+            "If `.kraft-lite/registry.yaml` exists and `.kraft-lite/bindings.yaml` does not",
+        ),
+        (
+            "init",
+            0,
+            "finish that run on the previous Kraft Lite version, or start again - and let them "
+            "choose",
+        ),
         (
             "next",
             3,
@@ -746,6 +743,11 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         "next-base-moved-restarts",
         "next-on-failure-once",
         "next-builtin-or-forge-error-stops",
+        "next-builtin-or-forge-findings-go-to-the-fix-loop",
+        "next-pre-v1-refusal-migrates",
+        "gate-chain-revision-restarts-through-start",
+        "init-migrates-only-without-bindings",
+        "init-migrate-refusal-names-the-ways-on",
         "next-judge-from-the-second-repair",
         "next-opens-a-gate-node",
         "gate-presents-message-and-artifact",

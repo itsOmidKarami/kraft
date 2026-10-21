@@ -36,5 +36,29 @@
       "Does not write a new registry.yaml or any `on.*` key",
       "Says bindings.yaml is meant to be committed (in place of registry.yaml)"
     ]
+  },
+  {
+    "skills": [
+      "kraft-lite:init"
+    ],
+    "query": "[user] Set up Kraft Lite here.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger (a Python project with a justfile whose `test` recipe runs pytest; origin on GitHub, gh installed), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed, superpowers and engineering plugins installed. The repo has a committed `.kraft-lite/registry.yaml` from an older Kraft Lite and no `.kraft-lite/bindings.yaml`. `migrate` exits 1 with `kraft-lite: migrate moves only unsliced runs of the legacy default chain; finish it on the previous Kraft Lite version, or start again: kl-1d2e3f40 (sliced). Nothing was migrated`.",
+    "expected_behavior": [
+      "Runs `migrate` first, because registry.yaml exists and bindings.yaml does not",
+      "Reports the refusal and the two ways on it names: finish kl-1d2e3f40 on the previous Kraft Lite version, or start again; asks the human which",
+      "Writes no bindings.yaml by hand and does not delete, rename or edit registry.yaml"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:init"
+    ],
+    "query": "[user] Refresh the Kraft Lite bindings for this repo.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger (a Python project with a justfile whose `test` recipe runs pytest; origin on GitHub, gh installed), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed, superpowers and engineering plugins installed. The repo has both `.kraft-lite/bindings.yaml` (hand-written last week; it binds tasks.code_review to skill engineering:code-review) and an old `.kraft-lite/registry.yaml` someone left behind. `migrate` would refuse: `.kraft-lite/bindings.yaml and .kraft-lite/registry.yaml both exist`. `python3 \"$CLAUDE_PLUGIN_ROOT/kl.py\" detect` prints: {\"test_command\": [\"just\", \"test\"], \"ci_command\": [\"gh\", \"pr\", \"checks\"], \"chain\": \"default\", \"candidates\": {\"tasks\": {\"spec_author\": [\"superpowers:brainstorming\"], \"plan_author\": [\"superpowers:executing-plans\", \"superpowers:writing-plans\"], \"revise_chain\": [], \"implementer\": [\"superpowers:test-driven-development\"], \"code_review\": [\"engineering:code-review\", \"superpowers:receiving-code-review\", \"superpowers:requesting-code-review\"], \"repair_verification\": [], \"strict_judge\": [], \"write_work_brief\": [], \"describe_mr\": [], \"repair_mr_checks\": [], \"repair_mr_feedback\": [], \"write_summary\": []}, \"builtins\": {\"kraft.verify_changed_test_scopes\": [], \"kraft.mr_rebase\": []}, \"forge\": {\"mr.open_draft\": [\"superpowers:finishing-a-development-branch\"], \"mr.ci\": [], \"mr.automated_review\": [], \"mr.sync\": [], \"mr.mark_ready\": [], \"mr.external_approval\": [], \"mr.merge\": [\"superpowers:finishing-a-development-branch\"], \"mr.post_merge_ci\": []}}, \"proposed\": {\"tasks\": {\"spec_author\": {\"kind\": \"skill\", \"skill\": \"superpowers:brainstorming\", \"prompt\": \"Produce the work item's specification.\"}, \"implementer\": {\"kind\": \"skill\", \"skill\": \"superpowers:test-driven-development\", \"prompt\": \"Implement the approved plan.\"}}, \"builtins\": {\"kraft.verify_changed_test_scopes\": {\"kind\": \"subprocess\", \"command\": [\"just\", \"test\"]}}, \"forge\": {\"mr.ci\": {\"kind\": \"subprocess\", \"command\": [\"gh\", \"pr\", \"checks\"]}}}}",
+    "expected_behavior": [
+      "Does not run `migrate`: with bindings.yaml present the registry is not what the walk reads",
+      "Runs detect and builds the new bindings from `proposed` plus the existing file's choices, then shows a diff against the existing bindings.yaml and asks before replacing it",
+      "Keeps the hand-written code_review binding unless the human chooses otherwise"
+    ]
   }
 ]

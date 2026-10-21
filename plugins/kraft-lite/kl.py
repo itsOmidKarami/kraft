@@ -2182,7 +2182,9 @@ VERBS: dict[str, frozenset[str]] = {
 }
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """Every verb and its flags; `--chain-id` on the verbs whose `VERBS` entry
+    reads one chain."""
     parser = argparse.ArgumentParser(prog="kl")
     sub = parser.add_subparsers(dest="verb", required=True)
 
@@ -2237,8 +2239,11 @@ def main(argv: list[str] | None = None) -> int:
     for name, needs in VERBS.items():
         if "chain" in needs:
             sub.choices[name].add_argument("--chain-id", default=None)
+    return parser
 
-    args = parser.parse_args(argv)
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     root = repo_root()
     chain_id = getattr(args, "chain_id", None)
 

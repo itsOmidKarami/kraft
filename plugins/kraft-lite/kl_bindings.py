@@ -232,7 +232,9 @@ def dispatch(
     """What to do for `task`: the first matching rule, as a dispatch record.
 
     `installed` says whether a skill is available in this harness; a skill that
-    is not falls back to its prompt."""
+    is not falls back to its prompt. `task_kind`, `ref` and `target` are the
+    task's own, whatever ran it: the walk keys Kraft's rules for builtin and
+    forge tasks on them, never on `source`, which a path binding hides."""
     chosen = _choose(task, bindings, slice_layer)
     if chosen is None:
         chosen = _default(task, installed)
@@ -253,6 +255,9 @@ def dispatch(
         "produces": task.get("produces"),
         "hints": {key: task.get(key) for key in ("profile", "model", "effort")},
         "source": source,
+        "task_kind": task.get("kind"),
+        "ref": task.get("ref"),
+        "target": task.get("target"),
     }
 
 
@@ -282,8 +287,11 @@ def _keys(task: dict) -> list[tuple[str, str]]:
 def _default(task: dict, installed: Callable[[str], bool]) -> tuple[dict, str]:
     kind = task.get("kind")
     if kind == "agent":
-        usable = bool(task.get("skill")) and installed(task["skill"])
-        return {"kind": "skill" if usable else "prompt", **_fields(task)}, "default:agent"
+        skill = task.get("skill")
+        if skill and not installed(skill):
+            # Said in the source, as for a bound skill, so the walk can say it fell back.
+            return {"kind": "prompt", **_fields(task)}, "default:agent" + SKILL_MISSING
+        return {"kind": "skill" if skill else "prompt", **_fields(task)}, "default:agent"
     if kind == "subprocess":
         return {"kind": "subprocess", "command": task.get("command") or []}, "default:subprocess"
     table, section, name = (
