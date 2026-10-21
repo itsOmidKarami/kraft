@@ -756,34 +756,3 @@ def test_a_skip_and_an_attachment_trim_are_one_drop_not_two():
             attachment_kinds=frozenset({"plan"}),
             skip_nodes=frozenset({"implementation"}),
         )
-
-
-def test_a_skip_that_orphans_a_reject_target_clears_it_rather_than_dangling():
-    """Same rule the attachment trim gets, because both go through
-    `without_nodes`: a dangling `reject_to` stops the stored snapshot
-    re-validating as a `Chain` when it is read back."""
-    resolved = _resolved(
-        [
-            {
-                "id": "spec",
-                "kind": "exec",
-                "tasks": [{"id": "write", "kind": "subprocess", "command": "true"}],
-            },
-            {"id": "spec_approval", "kind": "gate", "reject_to": "spec"},
-            {
-                "id": "implementation",
-                "kind": "exec",
-                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
-            },
-        ]
-    )
-    kept = resolved.without_nodes({"spec"})
-    gate = next(n for n in kept.chain.nodes if n.id == "spec_approval")
-    assert gate.reject_to is None
-    # And it still round-trips: that is the failure a dangling target causes.
-    tm.MaterializedChain.from_json(
-        kept.materialize(
-            WorkItemTarget.for_repository("target"),
-            InstancePolicy.from_input(InstancePolicyInput()),
-        ).to_json()
-    )

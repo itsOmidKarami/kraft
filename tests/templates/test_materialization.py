@@ -377,6 +377,66 @@ def test_filing_refuses_to_skip_a_node_that_does_not_allow_skipping():
         resolved.materialize(target, effective, skip_nodes=frozenset({"lint"}))
 
 
+_TRUE = [{"id": "t", "kind": "subprocess", "command": "true"}]
+_MERGE_TASK = [{"id": "merge", "kind": "forge", "target": "mr.merge"}]
+_REJECTED = {"restart_from": "feedback", "repair": {"tasks": _TRUE}}
+
+
+@pytest.mark.parametrize(
+    ("nodes", "skip", "node", "field", "target"),
+    [
+        (
+            [
+                {"id": "spec", "kind": "exec", "tasks": _TRUE},
+                {"id": "spec_approval", "kind": "gate", "reject_to": "spec"},
+            ],
+            "spec",
+            "spec_approval",
+            "reject_to",
+            None,
+        ),
+        ("default", "verification", "merge_request_feedback", "on_base_changed", "implementation"),
+        ("default", "merge_request_feedback", "merge", "on_merge_rejected", "draft_merge_request"),
+        (
+            [
+                {"id": "feedback", "kind": "exec", "tasks": _TRUE},
+                {
+                    "id": "merge",
+                    "kind": "exec",
+                    "tasks": _MERGE_TASK,
+                    "on_merge_rejected": _REJECTED,
+                },
+            ],
+            "feedback",
+            "merge",
+            "on_merge_rejected",
+            None,
+        ),
+    ],
+    ids=["reject-to", "base-change-restart", "merge-rejection-restart", "nothing-earlier"],
+)
+def test_a_skip_that_orphans_a_restart_target_repoints_or_clears_it(
+    nodes, skip, node, field, target
+):
+    """`ResolvedChain.without_nodes`, which the attachment trim shares: a
+    target naming a skipped node stops the stored snapshot re-validating as a
+    `Chain` on read-back. A `reject_to` is cleared; a `restart_from` moves to
+    the nearest kept execution node before its target, and with none there its
+    policy goes (`nothing-earlier`: a drop then stops the node, as with no
+    policy)."""
+    resolved = (
+        TemplateLibrary.from_yaml_dir(SEEDED).resolve_chain(nodes)
+        if isinstance(nodes, str)
+        else ResolvedChain.from_chain(Chain.model_validate({"id": "c", "nodes": nodes}))
+    )
+    stored = resolved.materialize(
+        repository_target(), policy(), skip_nodes=frozenset({skip})
+    ).to_json()
+    [kept] = [n.node for n in MaterializedChain.from_json(stored).chain.nodes if n.id == node]
+    value = getattr(kept, field)
+    assert (value.restart_from if hasattr(value, "restart_from") else value) == target
+
+
 def test_a_materialized_chain_cannot_be_changed_while_the_item_executes():
     """`materialized-chain-is-immutable-work-item-input`: the snapshot, its
     target and the resolved chain it wraps all refuse assignment, so nothing

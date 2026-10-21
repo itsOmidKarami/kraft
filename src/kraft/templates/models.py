@@ -1616,10 +1616,14 @@ class ResolvedChain:
         One function for both reasons a node leaves a chain at intake -- an
         attachment made it redundant, or the person filing the item skipped it
         -- because the two have the same two consequences and had better not
-        disagree about either: a chain emptied by the drop is refused, and a
-        surviving gate whose `reject_to` named a dropped node has that target
-        nulled rather than left dangling (a dangling target stops the stored
-        snapshot re-validating as a `Chain` on read-back).
+        disagree about either: a chain emptied by the drop is refused, and no
+        surviving node is left naming a dropped one (a dangling target stops
+        the stored snapshot re-validating as a `Chain` on read-back). A gate's
+        `reject_to` is nulled. An `on_base_changed` or `on_merge_rejected`
+        `restart_from` moves to the nearest kept execution node at or before
+        where its target stood, which keeps the span it restarts covering the
+        same work; with none there the policy goes, and the node behaves as
+        one that never declared it.
         """
         dropped = {n.id for n in self.nodes if n.id in dropped}
         if not dropped:
@@ -1628,13 +1632,33 @@ class ResolvedChain:
             raise ValueError(
                 f"dropping {sorted(dropped)} would leave chain {self.id!r} with no nodes"
             )
-        kept = [
-            node.model_copy(update={"reject_to": None})
-            if isinstance(node, GateNode) and node.reject_to in dropped
-            else node
-            for node in self.chain.nodes
-            if node.id not in dropped
-        ]
+        nodes = self.chain.nodes
+
+        def kept_restart(target: str) -> str | None:
+            """The nearest kept execution node before the dropped `target`."""
+            at = next(i for i, n in enumerate(nodes) if n.id == target)
+            earlier = (n for n in reversed(nodes[:at]) if n.id not in dropped)
+            return next((n.id for n in earlier if isinstance(n, ExecNode)), None)
+
+        def repointed(node: AnyNode) -> AnyNode:
+            if isinstance(node, GateNode):
+                return (
+                    node.model_copy(update={"reject_to": None})
+                    if node.reject_to in dropped
+                    else node
+                )
+            update = {}
+            for name in ("on_base_changed", "on_merge_rejected"):
+                policy = getattr(node, name)
+                if policy is None or policy.restart_from not in dropped:
+                    continue
+                target = kept_restart(policy.restart_from)
+                update[name] = (
+                    None if target is None else policy.model_copy(update={"restart_from": target})
+                )
+            return node.model_copy(update=update) if update else node
+
+        kept = [repointed(node) for node in nodes if node.id not in dropped]
         return ResolvedChain.from_chain(
             self.chain.model_copy(update={"nodes": kept}),
             steering=self.steering,
