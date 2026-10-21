@@ -228,7 +228,10 @@ def _probe() -> str | None:
     if (bwrap := shutil.which("bwrap")) is None:
         return "bubblewrap is not installed (apt install bubblewrap)"
     if missing := [n for n in ("sh", "curl") if shutil.which(n) is None]:
-        return f"{' and '.join(missing)} is not installed on this host (the `kraft` shim needs it)"
+        verb = "are" if len(missing) > 1 else "is"
+        return (
+            f"{' and '.join(missing)} {verb} not installed on this host (the `kraft` shim needs it)"
+        )
     helped = _run([bwrap, "--help"])
     if isinstance(helped, str):
         return f"bwrap --help failed: {helped}"
@@ -286,7 +289,9 @@ class OsBackend:
         if problem := await asyncio.to_thread(probe_host):
             return problem
         home, cwd, kh = Path(os.environ.get("HOME") or Path.home()), Path.cwd(), kraft_home()
-        search = os.environ["PATH"]  # the daemon's, as `open_session` builds the session's
+        search = os.environ.get(
+            "PATH", os.defpath
+        )  # the daemon's, as `open_session` builds the session's
         # shortcut: probe cannot see the worktree, so a path-named executable (./gradlew,
         # a worktree path) is checked at `wrap` only; upgrade if probe is given the checkout.
         if "/" in executable:
@@ -358,7 +363,7 @@ class OsBackend:
             workdir=Path(workdir) if workdir is not None else None,
             sock_path=sock_path,
             started=Path(cidfile) if cidfile is not None else None,
-            search_path=env.get("PATH") or os.environ["PATH"],
+            search_path=env.get("PATH") or os.environ.get("PATH", os.defpath),
             run_dirs=_run_dirs(),
         )
 
@@ -371,7 +376,7 @@ class OsBackend:
         mounts = [Mount(cwd, cwd, True)]
         if home.is_dir():
             mounts.append(Mount(home, Path(ONESHOT_HOME_RO), True))
-        search = os.environ["PATH"]
+        search = os.environ.get("PATH", os.defpath)
         try:
             prefix = bwrap_argv(
                 ["sh", "-c", _ONESHOT_SH, ONESHOT_HOME_RO],
@@ -424,7 +429,10 @@ class OsBackend:
     async def open_session(
         self, session_id: str, sandbox: dict, sock_path: Path | None, *, work_item_id: str
     ) -> dict:
-        return {**RELAY_PROXY_ENV, "PATH": f"{shim.CONTAINER_DIR}:{os.environ['PATH']}"}
+        return {
+            **RELAY_PROXY_ENV,
+            "PATH": f"{shim.CONTAINER_DIR}:{os.environ.get('PATH', os.defpath)}",
+        }
 
     async def close_session(self, session_id: str, *, work_item_id: str) -> None:
         pass

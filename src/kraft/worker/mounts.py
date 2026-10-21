@@ -79,7 +79,7 @@ def session_mounts(
     # Each its own file mount: a bind-mounted file cannot be removed or
     # swapped for a symlink from inside the container.
     mounts += [Mount(p, p, False) for p in own]
-    mounts += [Mount(Path(p), Path(p), False) for p in dict.fromkeys(str(d) for d in rw_dirs)]
+    mounts += [Mount(p, p, False) for p in dict.fromkeys(Path(d) for d in rw_dirs)]
     mounts += _gitdir_mounts(cwd, refstores)
     mounts += [Mount(Path(p), Path(p), True) for p in ro_paths]
     return mounts

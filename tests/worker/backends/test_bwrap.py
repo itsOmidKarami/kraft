@@ -244,6 +244,7 @@ def test_session_only_from_kraft_home(scene, monkeypatch):
     sockdir.mkdir(parents=True)
     session = mounts.session_mounts(scene.wt, None, result_path=result, rw_dirs=[item / "docs"])
     argv = scene.build(
+        cmd=[str(scene.link)],  # a credential file beside it is shadowed by the empty file
         session=session,
         run_dirs=dirs,
         home=home,
@@ -252,8 +253,10 @@ def test_session_only_from_kraft_home(scene, monkeypatch):
     )
     sources = {argv[i + 1] for i, a in enumerate(argv) if a in ("--bind", "--ro-bind")}
     under = {s for s in sources if Path(s).is_relative_to(kh)}
+    empty = dirs.base / "os-sandbox" / "empty"
     allowed = {str(m.src) for m in session} | {str(home), str(sockdir), str(shim.HOST_DIR)}
-    assert under <= allowed
+    assert str(empty) in sources
+    assert under <= allowed | {str(empty)}
     assert str(folder) not in sources
     assert str(bwrap.seccomp_file(dirs)) not in sources
     assert not Path(bwrap.seccomp_file(dirs)).stat().st_mode & 0o077
@@ -327,6 +330,10 @@ def host(tmp_path, monkeypatch):
         (lambda h, mp: (h.bindir / "bwrap").unlink(), "bubblewrap is not installed"),
         (lambda h, mp: (h.bindir / "sh").unlink(), "sh is not installed"),
         (lambda h, mp: (h.bindir / "curl").unlink(), "curl is not installed"),
+        (
+            lambda h, mp: ((h.bindir / "curl").unlink(), (h.bindir / "sh").unlink()),
+            "sh and curl are not installed",
+        ),
         (lambda h, mp: h.fake(flags=("--die-with-parent",)), "--size, --disable-userns"),
         (
             lambda h, mp: (h.fake(rc=1), h.sysctls.update({"user/max_user_namespaces": "0"})),
@@ -362,6 +369,7 @@ def host(tmp_path, monkeypatch):
         "no-bwrap",
         "no-sh",
         "no-curl",
+        "no-sh-no-curl",
         "missing-flag",
         "max-userns-0",
         "userns-clone-0",
@@ -378,6 +386,12 @@ def test_probe_explains(host, monkeypatch, setup, expect):
         assert problem is None
     else:
         assert expect in problem
+
+
+async def test_open_session_env_without_a_path(monkeypatch):
+    monkeypatch.delenv("PATH")
+    env = await bwrap.OsBackend().open_session("s1", SANDBOX, None, work_item_id="w1")
+    assert env["PATH"] == f"/opt/kraft/bin:{os.defpath}"
 
 
 async def test_open_session_env():
@@ -556,3 +570,16 @@ def test_wrap_forwards_its_launch_arguments(scene, run_dirs, monkeypatch):
     assert "MY_TOKEN" in argv[argv.index("--keep") + 1].split(",")
     assert _at(argv, ("--setenv", "HOME", str(home))) > 0
     assert argv[argv.index("--chdir") + 1] == str(sub)
+
+
+async def test_probe_without_a_path_uses_the_default(monkeypatch):
+    monkeypatch.setattr(bwrap, "probe_host", lambda **kw: None)
+    monkeypatch.delenv("PATH")
+    assert await bwrap.OsBackend().probe(SANDBOX, "nosuchcmd-anywhere", None) is not None
+
+
+def test_system_args_never_bind_lib32(monkeypatch):
+    """Not even where the host has them: the table is the whole list."""
+    monkeypatch.setattr(bwrap.os.path, "isdir", lambda p: True)
+    monkeypatch.setattr(bwrap.os.path, "islink", lambda p: False)
+    assert not [a for a in bwrap.system_args() if a in ("/lib32", "/libx32")]
