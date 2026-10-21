@@ -50,6 +50,7 @@ def test_a_decision_is_recorded_with_who_answered(walk, kl_cli, tmp_path):
         "answered_by": "controller",
         "answered_at": entry["at"],
         "reported": False,
+        "seq": 1,
     }
     assert kl_cli(tmp_path, "decisions") == [entry]
     path = kl._decisions_path(tmp_path, chain_id)
@@ -76,6 +77,7 @@ def test_a_held_question_has_no_answer_until_the_user_gives_one(walk, kl_cli, tm
         "held": False,
         "answered_by": "user",
         "answered_at": answered["answered_at"],
+        "seq": 2,
     }
     assert answered["answered_at"] >= held["at"]
     assert kl_cli(tmp_path, "decisions") == [answered]
@@ -125,6 +127,8 @@ def test_decisions_filters_held_and_unreported_and_mark_moves_the_cursor(walk, k
 
     reported = kl_cli(tmp_path, "decisions", "--unreported", "--mark")
     assert ids(reported) == [first["id"], held["id"]]
+    # Marking is a write of each entry, counted as `decide` and `answer` are.
+    assert [e["seq"] for e in kl_cli(tmp_path, "decisions")] == [2, 2]
     assert kl_cli(tmp_path, "decisions", "--unreported") == []
     assert ids(kl_cli(tmp_path, "decisions", "--held")) == [held["id"]], "still held, reported"
 
@@ -259,6 +263,7 @@ def test_decision_verbs_refuse_to_guess_between_two_unfinished_chains(verb, walk
 def test_decision_verbs_still_answer_after_the_chain_is_done(walk, kl_cli, tmp_path):
     walk.slice(tmp_path)
     held = kl_cli(tmp_path, "decide", "--question", "q", "--why", "w", "--held")
+    walk.merge_slices(tmp_path)
     while kl_cli(tmp_path, "state")["status"] != "done":
         kl_cli(tmp_path, "close")
 

@@ -116,6 +116,21 @@ def test_after_becomes_a_bd_shaped_blocks_dependency():
             id="task_in_two_slices",
         ),
         pytest.param(
+            plan(slices=[{"key": "a", "title": "A", "tasks": [1, 2, 1]}]),
+            "slice 1 ('a') lists task 1 twice",
+            id="task_twice_in_one_slice",
+        ),
+        pytest.param(
+            plan(
+                slices=[
+                    {"key": "a", "title": "A", "tasks": [1]},
+                    {"key": "b", "title": "B", "tasks": [2], "after": ["a", "a"]},
+                ]
+            ),
+            "slice 2 ('b') comes after 'a' twice",
+            id="after_twice",
+        ),
+        pytest.param(
             plan(slices=[{"key": "a", "title": "A", "tasks": [1]}, {"title": "B", "tasks": [2]}]),
             "slice 2 has no key",
             id="missing_key",
@@ -246,17 +261,15 @@ def test_main_mode_allows_no_feature_branch():
 
 def test_ready_slices_waits_for_what_a_slice_comes_after():
     records = kl.materialize_slices(plan(), CHAIN_ID)
-    keys = lambda rs: [kl.label_value(r, kl.SLICE_KEY_LABEL) for r in rs]  # noqa: E731
 
-    assert keys(kl.ready_slices(records, CHAIN_ID)) == ["a", "c"]
+    assert kl.slices_view(records, CHAIN_ID)["ready"] == ["a", "c"]
     records = with_status(records, "a", "merged")
-    assert keys(kl.ready_slices(records, CHAIN_ID)) == ["b", "c"]
+    assert kl.slices_view(records, CHAIN_ID)["ready"] == ["b", "c"]
 
 
 def test_a_slice_that_has_started_is_not_ready_again():
     records = with_status(kl.materialize_slices(plan(), CHAIN_ID), "a", "running")
-    ready = [kl.label_value(r, kl.SLICE_KEY_LABEL) for r in kl.ready_slices(records, CHAIN_ID)]
-    assert ready == ["c"]
+    assert kl.slices_view(records, CHAIN_ID)["ready"] == ["c"]
 
 
 #: b comes after a; d comes after a and c, so no one slice's branch holds both.
@@ -325,11 +338,8 @@ def test_a_slice_starts_once_its_afters_merge_or_early_after_one(mode, statuses,
     for done, status in statuses.items():
         records = with_status(records, done, status)
 
-    ready = [kl.label_value(r, kl.SLICE_KEY_LABEL) for r in kl.ready_slices(records, CHAIN_ID)]
-    early = [kl.label_value(r, kl.SLICE_KEY_LABEL) for r in kl.early_slices(records, CHAIN_ID)]
-    assert (key in ready, key in early) == (listed == "ready", listed == "early")
     view = kl.slices_view(records, CHAIN_ID)
-    assert (view["ready"], view["early"]) == (ready, early)
+    assert (key in view["ready"], key in view["early"]) == (listed == "ready", listed == "early")
 
 
 @pytest.mark.parametrize("mode, done", [("main", True), ("feature", False)])
@@ -604,8 +614,81 @@ def test_slice_set_allows_a_start_from_ready_or_early_and_any_later_move(
     assert kl_cli(tmp_path, "slice-set", "--slice", key, "--status", status)["status"] == status
 
 
+@pytest.mark.parametrize(
+    "mode, moves, not_done",
+    [
+        pytest.param("feature", [], "a (waiting), b (waiting), c (waiting)", id="none_started"),
+        pytest.param(
+            "feature",
+            [("a", "running"), ("a", "merged"), ("c", "running"), ("c", "ready_to_merge")],
+            "b (waiting), c (ready_to_merge)",
+            id="feature_ready_to_merge_is_not_done",
+        ),
+        pytest.param(
+            "main",
+            [("a", "running"), ("a", "merged"), ("c", "running"), ("c", "ready_to_merge")],
+            "b (waiting)",
+            id="main_one_not_done",
+        ),
+        pytest.param(
+            "feature", [(k, s) for k in "abc" for s in ("running", "merged")], None, id="all_merged"
+        ),
+        pytest.param(
+            "main",
+            [("a", "running"), ("a", "merged"), ("b", "running"), ("b", "ready_to_merge")]
+            + [("c", "running"), ("c", "ready_to_merge")],
+            None,
+            id="main_all_ready_to_merge",
+        ),
+        # Only the node that runs the slices waits for them.
+        pytest.param("feature", "spec", None, id="another_node"),
+    ],
+)
+def test_implementation_closes_only_once_every_slice_is_done(
+    walk, mode, moves, not_done, kl_cli, tmp_path
+):
+    walk.slice(tmp_path, plan(mode=mode))
+    if moves == "spec":
+        kl_cli(tmp_path, "reject", "--note", "again", "--from-node", "spec")
+        assert kl_cli(tmp_path, "close")["node"] == "plan"
+        return
+    for key, status in moves:
+        kl_cli(tmp_path, "slice-set", "--slice", key, "--status", status)
+
+    if not_done is None:
+        assert kl_cli(tmp_path, "close")["node"] == "verify"
+        return
+    refused = kl_cli(tmp_path, "close", ok=False)
+    assert f"not done: {not_done}" in refused.stderr and "Traceback" not in refused.stderr
+    assert kl_cli(tmp_path, "state")["node"] == "implementation"
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        pytest.param(["--status", "running"], id="same_status"),
+        pytest.param(["--session", "s-1", "--branch", "x-a", "--fork", "f1"], id="same_fields"),
+        pytest.param([], id="no_flags"),
+    ],
+)
+def test_slice_set_that_changes_nothing_writes_nothing(walk, flags, kl_cli, tmp_path):
+    """Every write moves `kraft-seq:` on, and `import` ranks copies by it: a
+    no-op counted as a write would beat a real one made in another checkout."""
+    walk.slice(tmp_path, plan())
+    set_a = ("slice-set", "--slice", "a", "--status", "running", "--session", "s-1")
+    kl_cli(tmp_path, *set_a, "--branch", "x-a", "--fork", "f1")
+    store = tmp_path / ".kraft-lite" / "chain.jsonl"
+    written = store.read_text()
+
+    again = kl_cli(tmp_path, "slice-set", "--slice", "a", *flags)
+
+    assert store.read_text() == written
+    assert (again["key"], again["status"], again["session"]) == ("a", "running", "s-1")
+
+
 def test_slice_verbs_still_answer_after_the_chain_is_done(walk, kl_cli, tmp_path):
     walk.slice(tmp_path, plan())
+    walk.merge_slices(tmp_path)
     while kl_cli(tmp_path, "state")["status"] != "done":
         kl_cli(tmp_path, "close")
 
@@ -630,6 +713,7 @@ def test_a_finished_chain_still_refuses_the_verbs_that_need_an_open_node(
     walk, verb, kl_cli, tmp_path
 ):
     walk.slice(tmp_path, plan())
+    walk.merge_slices(tmp_path)
     while kl_cli(tmp_path, "state")["status"] != "done":
         kl_cli(tmp_path, "close")
 
@@ -646,131 +730,3 @@ def test_slice_verbs_refuse_to_guess_between_two_unfinished_chains(walk, verb, k
     refused = kl_cli(tmp_path, *verb, ok=False)
 
     assert "more than one unfinished chain" in refused.stderr
-
-
-# --- what a node means in a sliced run, and the standing rules -------------------
-
-
-#: The spec's table, typed out again rather than read from `kl.SLICED_ACTIONS`, so
-#: the test fails when the code drifts from the spec rather than following it.
-SLICED_TABLE = {
-    "implementation": ("run_slices", "run_slices"),
-    "verify": ("scoped_verify", "skip"),
-    "open_mr": ("hooks", "skip"),
-    "mr_checks": ("hooks", "skip"),
-    "human_review": ("hooks", "await_user_merges"),
-    "merge": ("hooks", "await_user_merges"),
-    # Main mode has no single merge to watch: each slice merged on its own.
-    "post_merge_watch": ("hooks", "skip"),
-}
-
-
-@pytest.mark.parametrize(
-    "mode, node, action",
-    [
-        pytest.param(mode, node, actions[column], id=f"{mode}-{node}")
-        for column, mode in enumerate(("feature", "main"))
-        for node, actions in SLICED_TABLE.items()
-    ]
-    + [pytest.param("feature", "spec", "hooks", id="feature-spec")],
-)
-def test_state_says_what_each_node_means_in_a_sliced_run(
-    walk, mode, node, action, kl_cli, tmp_path
-):
-    walk.slice(tmp_path, plan(mode=mode))
-    if node == "spec":
-        kl_cli(tmp_path, "reject", "--note", "again", "--from-node", "spec")
-    while kl_cli(tmp_path, "state")["node"] != node:
-        kl_cli(tmp_path, "close")
-
-    assert kl_cli(tmp_path, "state")["sliced"] == {"mode": mode, "action": action}
-
-
-def test_an_unsliced_chain_reports_sliced_null(walk, kl_cli, tmp_path):
-    assert kl_cli(tmp_path, "state")["sliced"] is None
-    walk.to_chain_review(tmp_path)
-    assert kl_cli(tmp_path, "state")["sliced"] is None
-
-
-def test_a_finished_or_unstarted_chain_still_reports_sliced(walk, kl_cli, tmp_path):
-    assert kl_cli(tmp_path, "state")["status"] == "unstarted"
-    walk.slice(tmp_path, plan(mode="main"))
-    while kl_cli(tmp_path, "state")["status"] != "done":
-        kl_cli(tmp_path, "close")
-
-    assert kl_cli(tmp_path, "state")["sliced"] == {"mode": "main", "action": "hooks"}
-
-
-def settings_file(cwd, content):
-    path = cwd / ".kraft-lite" / "slices.json"
-    path.parent.mkdir(exist_ok=True)
-    path.write_text(content if isinstance(content, str) else json.dumps(content))
-
-
-def test_settings_merge_over_the_defaults(kl_cli, tmp_path):
-    defaults = kl_cli(tmp_path, "settings")
-    assert defaults == {
-        "mode": "feature",
-        "rights": {
-            "plan_question": "controller",
-            "slice_review": "controller",
-            "merge_slice": "controller",
-            "merge_main": "user",
-            "push_outside_branch": "user",
-        },
-    }
-
-    settings_file(tmp_path, {"mode": "main"})
-    assert kl_cli(tmp_path, "settings") == defaults | {"mode": "main"}
-
-    settings_file(tmp_path, {"rights": {"merge_main": "controller"}})
-    merged = kl_cli(tmp_path, "settings")
-    assert merged["mode"] == "feature"
-    assert merged["rights"] == defaults["rights"] | {"merge_main": "controller"}
-
-
-@pytest.mark.parametrize(
-    "content, named",
-    [
-        pytest.param({"colour": "red"}, "colour", id="unknown_key"),
-        pytest.param({"mode": "sideways"}, "sideways", id="bad_mode"),
-        pytest.param({"rights": {"merge_main": "nobody"}}, "merge_main", id="bad_right"),
-        pytest.param({"rights": {"fly": "user"}}, "fly", id="unknown_right"),
-        pytest.param({"rights": "controller"}, "rights", id="rights_not_an_object"),
-        pytest.param("{nope", "slices.json", id="not_json"),
-        pytest.param("[]", "not a JSON object", id="not_an_object"),
-    ],
-)
-def test_bad_settings_are_refused(content, named, kl_cli, tmp_path):
-    settings_file(tmp_path, content)
-
-    refused = kl_cli(tmp_path, "settings", ok=False)
-
-    assert named in refused.stderr and "Traceback" not in refused.stderr
-
-
-@pytest.mark.parametrize("mode", kl.MODES)
-def test_a_slicing_plan_without_a_mode_takes_the_settings_mode(walk, mode, kl_cli, tmp_path):
-    settings_file(tmp_path, {"mode": mode})
-    walk.to_chain_review(tmp_path)
-    kl_cli(tmp_path, "gate", "--name", "chain_finalized")
-    unnamed = plan(feature_branch=None) if mode == "main" else plan()
-    kl_cli(tmp_path, "approve", "--slices", str(walk.write_plan(tmp_path, unnamed)))
-
-    assert kl_cli(tmp_path, "slices")["mode"] == mode
-    assert kl_cli(tmp_path, "state")["sliced"]["mode"] == mode
-
-
-@pytest.mark.parametrize(
-    "content",
-    [
-        pytest.param({"mode": "main"}, id="settings_say_main"),
-        # Not read at all: a plan that names its mode needs nothing from the file.
-        pytest.param("{nope", id="settings_unreadable"),
-    ],
-)
-def test_the_plans_own_mode_beats_the_settings_mode(walk, content, kl_cli, tmp_path):
-    settings_file(tmp_path, content)
-    walk.slice(tmp_path, plan(mode="feature"))
-
-    assert kl_cli(tmp_path, "slices")["mode"] == "feature"

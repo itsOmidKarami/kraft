@@ -283,11 +283,15 @@ def read_jsonl(path: Path) -> list[dict]:
     return list(merged.values())
 
 
+def _jsonl(records: list[dict]) -> str:
+    """One JSON object per line, as `read_jsonl`, `bd import` and `bd export` read and write."""
+    return "".join(json.dumps(record) + "\n" for record in records)
+
+
 def append_jsonl(path: Path, records: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as handle:
-        for record in records:
-            handle.write(json.dumps(record) + "\n")
+        handle.write(_jsonl(records))
 
 
 NOTE_PREFIX = "Rejected: "
@@ -443,8 +447,7 @@ class BdStore:
         return [json.loads(line) for line in out.splitlines() if line.strip()]
 
     def write(self, records: list[dict]) -> None:
-        payload = "".join(json.dumps(r) + "\n" for r in _prepare(records))
-        self._bd(["import", "-"], stdin=payload)
+        self._bd(["import", "-"], stdin=_jsonl(_prepare(records)))
 
     def write_raw(self, records: list[dict], local: list[dict]) -> None:
         """Records as exported, for `import`, past bd's guard without `_prepare`.
@@ -455,7 +458,7 @@ class BdStore:
         what `import` loaded, so the store is not exported a second time.
         """
         out = _past_local(records, local)
-        self._bd(["import", "-"], stdin="".join(json.dumps(r) + "\n" for r in out))
+        self._bd(["import", "-"], stdin=_jsonl(out))
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -639,6 +642,9 @@ def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
             raise SystemExit(
                 f"kraft-lite: slice {position} ({key!r}) tasks must be a list of task numbers"
             )
+        twice = next((t for i, t in enumerate(tasks) if t in tasks[:i]), None)
+        if twice is not None:
+            raise SystemExit(f"kraft-lite: slice {position} ({key!r}) lists task {twice} twice")
         for task in tasks:
             if task_owner.get(task, key) != key:
                 raise SystemExit(
@@ -650,6 +656,11 @@ def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
             raise SystemExit(
                 f"kraft-lite: slice {position} ({key!r}) after must be a list of slice keys"
             )
+        # Read back as two links, a slice after one slice would count as after two,
+        # and lose its early start.
+        twice = next((a for i, a in enumerate(after) if a in after[:i]), None)
+        if twice is not None:
+            raise SystemExit(f"kraft-lite: slice {position} ({key!r}) comes after {twice!r} twice")
     for spec in slices:
         for after in spec.get("after", []):
             if after not in keys:
@@ -728,9 +739,10 @@ def run_record(records: list[dict], chain_id: str) -> dict | None:
     return next((r for r in records if label_value(r, RUN_LABEL) == chain_id), None)
 
 
-def _run_mode(run: dict | None) -> str:
-    """The run's mode; a run record from before the label is in the default one."""
-    return label_value(run, MODE_LABEL) or DEFAULT_SETTINGS["mode"]
+def _run_mode(run: dict | None) -> str | None:
+    """The run's mode, which `materialize_slices` writes on every run record;
+    None for a chain that was never sliced."""
+    return label_value(run, MODE_LABEL)
 
 
 def slice_records(records: list[dict], chain_id: str) -> list[dict]:
@@ -771,14 +783,6 @@ def _startable(slices: list[dict]) -> tuple[list[dict], list[dict]]:
     return ready, early
 
 
-def ready_slices(records: list[dict], chain_id: str) -> list[dict]:
-    return _startable(slice_records(records, chain_id))[0]
-
-
-def early_slices(records: list[dict], chain_id: str) -> list[dict]:
-    return _startable(slice_records(records, chain_id))[1]
-
-
 def _slice_entry(record: dict, by_id: dict[str, dict], mode: str) -> dict:
     """One slice as the `slices` and `slice-set` verbs print it. `after` is
     keys, not ids: ids are an implementation detail the controller never types."""
@@ -805,7 +809,7 @@ def slices_view(records: list[dict], chain_id: str | None) -> dict:
     by_id = {r["id"]: r for r in slices}
     ready, early = _startable(slices)
     return {
-        "mode": label_value(run, MODE_LABEL),
+        "mode": _run_mode(run),
         "feature_branch": label_value(run, FEATURE_BRANCH_LABEL),
         "state_branch": label_value(run, STATE_BRANCH_LABEL),
         "slices": [_slice_entry(r, by_id, _run_mode(run)) for r in slices],
@@ -1275,6 +1279,29 @@ def _refuse_slice_move(slices: list[dict], record: dict, status: str) -> None:
     )
 
 
+def _refuse_close_before_slices(everything: list[dict], chain_id: str, node_record: dict) -> None:
+    """A `SystemExit` for closing a sliced run's `run_slices` node while a slice
+    is not done for the run's mode. Closing it moves the walk to `verify`, which
+    checks seams between slices that are not all there yet."""
+    run = run_record(everything, chain_id)
+    if run is None:
+        return
+    mode = _run_mode(run)
+    if SLICED_ACTIONS.get(label_value(node_record, NODE_LABEL), {}).get(mode) != "run_slices":
+        return
+    left = [r for r in slice_records(everything, chain_id) if not slice_done(r, mode)]
+    if left:
+        named = ", ".join(
+            f"{label_value(r, SLICE_KEY_LABEL)} ({label_value(r, SLICE_STATUS_LABEL)})"
+            for r in left
+        )
+        done = "merged or ready to merge" if mode == "main" else "merged"
+        raise SystemExit(
+            f"kraft-lite: {label_value(node_record, NODE_LABEL)} closes once every slice is "
+            f"{done}; not done: {named}"
+        )
+
+
 def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dict:
     """Move one slice: its status, the session running it, its branch, its fork
     point. `merged` closes the record too, so a store that shows only open work
@@ -1283,6 +1310,7 @@ def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dic
     user's merges, so this is the one place a finished run is seen in both."""
     slices = slice_records(everything, chain_id) if chain_id else []
     record = _slice_by_key(everything, chain_id, args.slice)
+    before = record
     if args.status is not None and args.status not in SLICE_STATUSES:
         raise SystemExit(
             f"kraft-lite: unknown slice status {args.status!r}. "
@@ -1299,14 +1327,21 @@ def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dic
     ):
         if value is not None:
             record = set_label(record, prefix, value)
-    writes = [record]
+    # A move that changes nothing is not written: every write counts toward
+    # `kraft-seq:`, and `import` would rank a no-op over a real write elsewhere.
+    # `set_label` moves a label to the end, so labels compare as a set.
+    same = dict(record, labels=sorted(record["labels"])) == dict(
+        before, labels=sorted(before["labels"])
+    )
+    writes = [] if same else [record]
     run = run_record(everything, chain_id)
     others = [r for r in slices if r["id"] != record["id"]]
     finished = all(label_value(r, SLICE_STATUS_LABEL) == "merged" for r in [*others, record])
     # Reopened too, when a call overturned at the wrap-up puts a slice back to work.
     if run is not None and run["status"] != ("closed" if finished else "open"):
         writes.append(dict(run, status="closed" if finished else "open"))
-    store.write(writes)
+    if writes:
+        store.write(writes)
     by_id = {r["id"]: r for r in slices}
     return _slice_entry(record, by_id, _run_mode(run))
 
@@ -1339,6 +1374,8 @@ def _decide(root: Path, everything: list[dict], chain_id: str, args) -> dict:
         # entry where it was first written, so an answer, or an import, that
         # rewrites one already reported would land behind a position.
         "reported": False,
+        # The count of this entry's writes, which `import` ranks copies by.
+        "seq": 1,
     }
     append_jsonl(_decisions_path(root, chain_id), [entry])
     return entry
@@ -1367,6 +1404,7 @@ def _answer(root: Path, chain_id: str, args) -> dict:
         answered_at=_now().strftime(BD_TIME),
         # A new answer is news, whether or not the question was reported held.
         reported=False,
+        seq=_decision_seq(entries[args.decision]) + 1,
     )
     append_jsonl(path, [entry])
     return entry
@@ -1396,7 +1434,7 @@ def _decisions(root: Path, everything: list[dict], chain_id: str, args) -> list[
     if args.held:
         entries = [e for e in entries if e["held"]]
     if args.mark and entries:
-        append_jsonl(path, [dict(e, reported=True) for e in entries])
+        append_jsonl(path, [dict(e, reported=True, seq=_decision_seq(e) + 1) for e in entries])
     return entries
 
 
@@ -1422,9 +1460,9 @@ def _export(root: Path, everything: list[dict], chain_id: str, to: Path) -> dict
         shutil.copyfile(frozen, template)
     else:
         template.write_text(json.dumps(_chain(root, None, chain_id), indent=2) + "\n")
-    (to / EXPORT_RECORDS).write_text("".join(json.dumps(r) + "\n" for r in records))
+    (to / EXPORT_RECORDS).write_text(_jsonl(records))
     decisions = read_jsonl(_decisions_path(root, chain_id))
-    (to / EXPORT_DECISIONS).write_text("".join(json.dumps(e) + "\n" for e in decisions))
+    (to / EXPORT_DECISIONS).write_text(_jsonl(decisions))
     return {
         "chain_id": chain_id,
         "to": str(to),
@@ -1465,17 +1503,26 @@ def _import_records(local: list[dict], exported: list[dict]) -> tuple[list[dict]
     return write, kept
 
 
+def _decision_seq(entry: dict) -> int:
+    """How many times this decision was written; an entry from before the count, 0."""
+    return int(entry.get("seq") or 0)
+
+
 def _merge_decisions(local: list[dict], exported: list[dict]) -> tuple[list[dict], int]:
     """Which exported decisions to append, and how many local ones win instead.
-    The later of `answered_at or at` wins; on a tie, an answer beats a held
-    question, so a held copy never takes back the user's answer, and then a
-    reported copy beats an unreported one. That is the order an entry's own
-    writes come in, so the copy further along always wins."""
 
-    def rank(entry: dict) -> tuple[str, bool, bool]:
+    The copy written more times wins, as `_import_records` ranks records, so a
+    clock that runs behind cannot make the later write the older one. On a tie,
+    as when each checkout wrote once since the last import, an answer beats a
+    held question, so a held copy never takes back the user's answer; then the
+    later of `answered_at or at`, which is all an entry from before the count
+    has; then a reported copy beats an unreported one."""
+
+    def rank(entry: dict) -> tuple[int, bool, str, bool]:
         return (
-            entry.get("answered_at") or entry.get("at") or "",
+            _decision_seq(entry),
             not entry.get("held"),
+            entry.get("answered_at") or entry.get("at") or "",
             bool(entry.get("reported")),
         )
 
@@ -1491,6 +1538,9 @@ def _import(root: Path, store, source: Path) -> dict:
     Records are written through `write_raw`, never `store.write`: `_prepare`
     would restamp every one with the time of the import, and the summary would
     report a run that started, and finished every node, just now."""
+    # Refused here, not read as empty: a mistyped path is not an export of nothing.
+    if not (source / EXPORT_RECORDS).is_file():
+        raise SystemExit(f"kraft-lite: no export at {source}: {source / EXPORT_RECORDS} is missing")
     exported = read_jsonl(source / EXPORT_RECORDS)
     epics = [r["id"] for r in exported if label_value(r, CHAIN_LABEL)]
     if len(epics) != 1:
@@ -1685,6 +1735,8 @@ def main(argv: list[str] | None = None) -> int:
         made = slices_for_gate(everything, node_record, resolved_id, args.slices, root)
         store.write([bank_wait(dict(node_record, status="closed")), *made])
     elif args.verb in ("close", "approve"):
+        if args.verb == "close":
+            _refuse_close_before_slices(everything, resolved_id, node_record)
         store.write([bank_wait(dict(node_record, status="closed"))])
     elif args.verb == "gate":
         store.write([open_gate(dict(node_record, status="blocked"), args.name)])

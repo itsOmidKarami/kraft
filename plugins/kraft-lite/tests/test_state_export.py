@@ -214,8 +214,9 @@ def test_import_writes_a_record_only_over_an_older_local_copy(local, exported, w
     assert (write, kept) == (([exported], 0) if written else ([], 1))
 
 
-def decision(at, answered_at=None, held=False, reported=False):
-    return {"id": "kd-1", "at": at, "held": held, "answered_at": answered_at, "reported": reported}
+def decision(at, answered_at=None, held=False, reported=False, seq=None):
+    out = {"id": "kd-1", "at": at, "held": held, "answered_at": answered_at, "reported": reported}
+    return out if seq is None else dict(out, seq=seq)
 
 
 @pytest.mark.parametrize(
@@ -238,6 +239,37 @@ def decision(at, answered_at=None, held=False, reported=False):
         pytest.param(
             decision(T0, held=True, reported=True), decision(T0, T0), True, id="answer_beats_report"
         ),
+        # The write count decides first: an answer given where the clock runs
+        # behind is still the later write, and the held copy never takes it back.
+        pytest.param(
+            decision(T1, held=True, seq=1),
+            decision(T1, T0, seq=2),
+            True,
+            id="skewed_clock_export_answered",
+        ),
+        pytest.param(
+            decision(T1, T0, seq=2),
+            decision(T1, held=True, seq=1),
+            False,
+            id="skewed_clock_local_answered",
+        ),
+        # Answered here, then reported there where the clock runs behind: the
+        # report is the later write, and is not made again here.
+        pytest.param(
+            decision(T1, T1, seq=2),
+            decision(T0, T0, reported=True, seq=3),
+            True,
+            id="skewed_clock_export_reported",
+        ),
+        # Marked reported here, answered there: one write each, and the answer wins.
+        pytest.param(
+            decision(T1, held=True, reported=True, seq=2),
+            decision(T0, T0, seq=2),
+            True,
+            id="same_seq_answer_beats_report",
+        ),
+        # An entry from before the count counts as 0.
+        pytest.param(decision(T1, T1), decision(T0, T0, seq=1), True, id="local_unsequenced"),
     ],
 )
 def test_import_keeps_the_later_decision_and_an_answer_wins_a_tie(local, exported, taken):
@@ -346,12 +378,27 @@ def test_import_works_with_two_unfinished_chains_present(walk, kl_cli, tmp_path)
     assert len(kl_cli(there, "chains")) == 3
 
 
-@pytest.mark.parametrize("problem", ["no_epic", "two_epics", "no_template"])
-def test_import_refuses_an_export_that_names_no_single_chain(problem, kl_cli, tmp_path):
-    there, out = dirs(tmp_path, "there", "state")
+@pytest.mark.parametrize(
+    "problem, named",
+    [
+        # A mistyped path is not an export of nothing.
+        pytest.param("no_directory", "no export at {out}", id="no_directory"),
+        pytest.param("no_records", "no export at {out}: {out}/records.jsonl", id="no_records"),
+        pytest.param("no_epic", "holds 0 chain epics", id="no_epic"),
+        pytest.param("two_epics", "holds 2 chain epics", id="two_epics"),
+        pytest.param("no_template", "no frozen template", id="no_template"),
+    ],
+)
+def test_import_refuses_an_export_that_names_no_single_chain(problem, named, kl_cli, tmp_path):
+    (there,) = dirs(tmp_path, "there")
+    out = tmp_path / "state"
+    if problem != "no_directory":
+        out.mkdir()
+    if problem == "no_epic":
+        (out / "records.jsonl").write_text("")
     chain = json.loads(kl.DEFAULT_CHAIN.read_text())
-    epics = {"no_epic": [], "two_epics": ["kl-aaaa", "kl-bbbb"], "no_template": ["kl-aaaa"]}
-    for chain_id in epics[problem]:
+    epics = {"two_epics": ["kl-aaaa", "kl-bbbb"], "no_template": ["kl-aaaa"]}
+    for chain_id in epics.get(problem, []):
         kl.append_jsonl(out / "records.jsonl", kl.materialize(chain, "t", chain_id))
         if problem != "no_template":
             (out / "chains").mkdir(exist_ok=True)
@@ -359,7 +406,8 @@ def test_import_refuses_an_export_that_names_no_single_chain(problem, kl_cli, tm
 
     refused = kl_cli(there, "import", "--from", str(out), ok=False)
 
-    assert "Traceback" not in refused.stderr and "export" in refused.stderr
+    assert "Traceback" not in refused.stderr
+    assert named.format(out=out) in refused.stderr
     assert not (there / ".kraft-lite").exists()
 
 

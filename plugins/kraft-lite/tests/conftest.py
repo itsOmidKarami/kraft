@@ -128,6 +128,12 @@ class Walk:
         assert self.run(cwd, "state")["node"] == "chain_review"
         return chain_id
 
+    def plan(self, **over) -> dict:
+        """`SLICE_PLAN` with `over` on top. Main mode has no feature branch, so
+        a main-mode plan names none unless `over` does."""
+        base = dict(SLICE_PLAN, feature_branch=None if over.get("mode") == "main" else "feature/x")
+        return {**base, **over}
+
     def write_plan(self, cwd: Path, plan: dict | None = None) -> Path:
         path = cwd / "plan.json"
         path.write_text(json.dumps(plan or SLICE_PLAN))
@@ -139,6 +145,14 @@ class Walk:
         self.run(cwd, "gate", "--name", "chain_finalized")
         self.run(cwd, "approve", "--slices", str(self.write_plan(cwd, plan)))
         return chain_id
+
+    def merge_slices(self, cwd: Path) -> None:
+        """Every slice started from `ready` and merged, so a sliced run's
+        `implementation` may close."""
+        while ready := self.run(cwd, "slices")["ready"]:
+            for key in ready:
+                self.run(cwd, "slice-set", "--slice", key, "--status", "running")
+                self.run(cwd, "slice-set", "--slice", key, "--status", "merged")
 
 
 @pytest.fixture
