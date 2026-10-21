@@ -12,10 +12,11 @@ import errno
 import platform
 import struct
 
-#: The mount API of Linux 5.2+ (and 5.12's mount_setattr): numbered alike on both arches.
+#: The mount API of Linux 5.2+ (5.12's mount_setattr, 6.15's open_tree_attr): numbered
+#: alike on both arches.
 _NEW_MOUNT_API = {
     "open_tree": 428, "move_mount": 429, "fsopen": 430, "fsconfig": 431,
-    "fsmount": 432, "fspick": 433, "mount_setattr": 442,
+    "fsmount": 432, "fspick": 433, "mount_setattr": 442, "open_tree_attr": 467,
 }  # fmt: skip
 # Kernel syscall numbers: x86_64 from asm/unistd_64.h, aarch64 from the generic table.
 DENY: dict[str, dict[str, int]] = {
