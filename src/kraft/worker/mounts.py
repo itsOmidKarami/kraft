@@ -54,7 +54,7 @@ def docker_args(ms: Iterable[Mount]) -> list[str]:
 
 def session_mounts(
     cwd: Path,
-    results: Iterable[Path] | None,
+    results: Iterable[Path | str] | None,
     *,
     result_path: Path | str | None = None,
     rw_files: Iterable[Path | str] = (),
@@ -70,14 +70,15 @@ def session_mounts(
         raise TypeError("`results` is the files to mount, never the results folder itself")
     cwd = cwd.resolve()
     mounts = [Mount(cwd, cwd, False)]
-    own = list(dict.fromkeys(str(p) for p in (*([result_path] if result_path else ()), *rw_files)))
-    for path in dict.fromkeys(str(p) for p in results or ()):
+    # Keyed on `Path`, as rendered: "/x/" and "/x" are one target.
+    own = list(dict.fromkeys(Path(p) for p in (*([result_path] if result_path else ()), *rw_files)))
+    for path in dict.fromkeys(Path(p) for p in results or ()):
         # Its own are mounted read-write below; docker refuses a target twice.
         if path not in own:
-            mounts.append(Mount(Path(path), Path(path), True))
+            mounts.append(Mount(path, path, True))
     # Each its own file mount: a bind-mounted file cannot be removed or
     # swapped for a symlink from inside the container.
-    mounts += [Mount(Path(p), Path(p), False) for p in own]
+    mounts += [Mount(p, p, False) for p in own]
     mounts += [Mount(Path(p), Path(p), False) for p in dict.fromkeys(str(d) for d in rw_dirs)]
     mounts += _gitdir_mounts(cwd, refstores)
     mounts += [Mount(Path(p), Path(p), True) for p in ro_paths]

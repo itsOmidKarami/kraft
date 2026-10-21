@@ -272,7 +272,10 @@ def test_docker_argv_shadows_config_worktree_read_only(tmp_path):
     assert f"{worktree_config}:{worktree_config}:ro" in argv
 
 
-def test_docker_argv_mounts_only_this_session_s_result_file_read_write():
+@pytest.mark.parametrize(
+    "twice", ["/run/results/s0.json", "/run/results/s1.json/"], ids=["repeated", "trailing-slash"]
+)
+def test_docker_argv_mounts_only_this_session_s_result_file_read_write(twice):
     """The results folder is one directory for every work item, so it is never
     mounted itself (Kraft-dni4n): only the files the caller lists, which are
     this item's. Each is read-only, since a worker that could write one could
@@ -284,7 +287,7 @@ def test_docker_argv_mounts_only_this_session_s_result_file_read_write():
         "/work/item-1",
         {"kind": "docker", "image": "x"},
         # Named twice: docker refuses the same mount target a second time.
-        [earlier, package, mine, earlier],
+        [earlier, package, mine, twice],
         result_path=mine,
     )
     assert [v for v in _volumes(argv) if v.startswith("/run/results")] == [
