@@ -17,10 +17,16 @@ sys.path.insert(0, str(PLUGIN))
 
 import kl  # noqa: E402
 
-SKILLS = ["init", "start", "next", "gate", "status"]
+SKILLS = ["init", "start", "next", "gate", "status", "run-slices"]
 CHAIN = json.loads((PLUGIN / "chains" / "default.json").read_text())
-HOOKS = {hook for node in CHAIN["nodes"] for hook in node["tasks"]}
-GATES = {node["gate_after"] for node in CHAIN["nodes"]} - {None}
+SLICE_CHAIN = json.loads((PLUGIN / "chains" / "slice.json").read_text())
+# A skill may cite what either shipped chain has: the controller walks the
+# feature chain, and a child walks the slice chain.
+NODES = [node for chain in (CHAIN, SLICE_CHAIN) for node in chain["nodes"]]
+HOOKS = {hook for node in NODES for hook in node["tasks"]}
+GATES = {node["gate_after"] for node in NODES} - {None}
+EVERY_SKILL = sorted(path.parent.name for path in (PLUGIN / "skills").glob("*/SKILL.md"))
+HARNESS_REFERENCES = ["claude-code", "codex", "cursor"]
 
 
 @pytest.fixture(scope="module")
@@ -211,3 +217,56 @@ def test_kl_parses_on_the_oldest_supported_python():
     parse."""
     source = (PLUGIN / "kl.py").read_text()
     ast.parse(source, feature_version=(3, 10))
+
+
+@pytest.mark.parametrize("name", EVERY_SKILL)
+def test_core_skills_name_no_harness_tool(name):
+    """Skills name abilities; a harness's tool names live only in the
+    run-slices references, so a skill written against one harness's tools does
+    not strand a controller running on another."""
+    text = (PLUGIN / "skills" / name / "SKILL.md").read_text()
+    found = re.findall(
+        r"create_session|send_message|archive_session|unarchive_session|SendMessage"
+        r"|send_later|ScheduleWakeup|list_events|get_session",
+        text,
+    )
+    assert not found, f"{name} names harness tools: {sorted(set(found))}"
+
+
+@pytest.mark.parametrize("name", ["run-slices"])
+def test_the_slice_skills_name_no_repo_rule_and_no_superpowers_skill(texts, name):
+    """The slice skills ship into any repo. A repo's rules come from its own
+    CLAUDE.md and CONTRIBUTING.md, and installed skills through the registry."""
+    for banned in ("superpowers:", "kraft/", "screenshot", "just test", "just lint"):
+        assert banned not in texts[name], f"{name} says {banned!r}"
+
+
+def test_the_run_slices_skill_cites_every_verb_it_needs(texts):
+    """Every state write is an exact command; a verb the skill only describes
+    is one the controller improvises."""
+    for verb in (
+        "approve --slices",
+        "slice-set",
+        "decide",
+        "--held",
+        "--unreported",
+        "export --to",
+        "import --from",
+    ):
+        assert verb in texts["run-slices"], verb
+
+
+@pytest.mark.parametrize("harness", HARNESS_REFERENCES)
+def test_every_harness_reference_covers_the_four_abilities(harness):
+    """The skill says which ability it needs; the reference is where each
+    harness says how, or says it cannot and names the fallback."""
+    path = PLUGIN / "skills" / "run-slices" / "references" / f"{harness}.md"
+    headings = set(re.findall(r"^#+\s+(.+?)\s*$", path.read_text(), re.M))
+    for ability in (
+        "Start a child",
+        "Message a child",
+        "Be messaged",
+        "Archive a child",
+        "Check in later",
+    ):
+        assert ability in headings, f"{harness}.md has no {ability!r} heading"
