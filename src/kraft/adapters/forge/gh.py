@@ -71,8 +71,11 @@ query($owner: String!, $name: String!, $base: String!, $n: Int!) {
     pullRequest(number: $n) {
       state
       mergeQueueEntry { state position }
-      timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {
+      removals: timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {
         nodes { ... on RemovedFromMergeQueueEvent { reason createdAt enqueuer { login } } }
+      }
+      enqueues: timelineItems(last: 1, itemTypes: [ADDED_TO_MERGE_QUEUE_EVENT]) {
+        nodes { ... on AddedToMergeQueueEvent { createdAt } }
       }
     }
   }
@@ -82,6 +85,16 @@ query($owner: String!, $name: String!, $base: String!, $n: Int!) {
 #: that is code-red until proven otherwise, never `ci.is_infra_red`'s empty
 #: list (the forge confirmed no job ran).
 _UNREADABLE_JOBS = (FailedJob("(unreadable)", "failed", None),)
+
+
+def _newest_node(items: object) -> dict:
+    """The last node of a `timelineItems` alias, else an empty one."""
+    nodes = items.get("nodes") if isinstance(items, dict) else None
+    return next((n for n in reversed(nodes or []) if isinstance(n, dict)), {})
+
+
+def _newest_at(items: object) -> str:
+    return str(_newest_node(items).get("createdAt") or "")
 
 
 def _red_jobs(rows: list[dict], *, url: str) -> tuple[FailedJob, ...]:
@@ -504,11 +517,14 @@ class GhCli(mr_ops.CliWaits):
             [
                 "api",
                 "graphql",
+                # `-F` expands the `{owner}`/`{repo}` placeholders (`-f` does
+                # not) and types the number; the branch is `-f`, so a base
+                # named `123` or `null` stays a string.
                 "-F",
                 "owner={owner}",
                 "-F",
                 "name={repo}",
-                "-F",
+                "-f",
                 f"base={base}",
                 "-F",
                 f"n={mr.number}",
@@ -542,10 +558,15 @@ class GhCli(mr_ops.CliWaits):
     async def _dropped(self, repo: Path, pull: dict, mr: MRRef, base: str) -> QueueRead:
         """A pull request GitHub took out of the queue: why, in GitHub's words,
         and the merge group's failed run when there is one."""
-        nodes = (pull.get("timelineItems") or {}).get("nodes") or []
-        removal = next((n for n in reversed(nodes) if isinstance(n, dict)), {})
-        reason = str(removal.get("reason") or "").strip() or _NO_REASON
-        failure = await self._merge_group_failure(repo, base, mr.number)
+        enqueued_at = _newest_at(pull.get("enqueues"))
+        removal = _newest_node(pull.get("removals"))
+        # A removal older than the latest enqueue belongs to an earlier entry:
+        # it says nothing about why this one is gone (ISO times sort as text).
+        reason = ""
+        if str(removal.get("createdAt") or "") >= enqueued_at:
+            reason = str(removal.get("reason") or "").strip()
+        reason = reason or _NO_REASON
+        failure = await self._merge_group_failure(repo, base, mr.number, since=enqueued_at)
         cause: DropCause = "other"
         if "conflict" in reason.lower():
             cause = "conflict"
@@ -560,11 +581,16 @@ class GhCli(mr_ops.CliWaits):
             url=(failure.url if failure is not None else "") or mr.url,
         )
 
-    async def _merge_group_failure(self, repo: Path, base: str, number: int) -> CIStatus | None:
-        """The newest failed `merge_group` run for pull request `number`, read
-        as a red `CIStatus`, else None. Best effort: a drop was already
-        established, and a run that cannot be listed leaves GitHub's own
-        removal reason as the only finding."""
+    async def _merge_group_failure(
+        self, repo: Path, base: str, number: int, *, since: str
+    ) -> CIStatus | None:
+        """The newest failed `merge_group` run for pull request `number` made
+        at or after `since` (the latest enqueue; "" when unknown), read as a
+        red `CIStatus`, else None. An earlier entry's failed run is not this
+        entry's: blaming it would send a repair at code already fixed.
+
+        Best effort: a drop was already established, and a run that cannot be
+        listed leaves GitHub's own removal reason as the only finding."""
         try:
             rows = await self._json(
                 repo,
@@ -574,7 +600,7 @@ class GhCli(mr_ops.CliWaits):
                     "--event",
                     "merge_group",
                     "--json",
-                    "databaseId,headBranch,conclusion,url",
+                    "databaseId,headBranch,conclusion,url,createdAt",
                     "-L",
                     "30",
                 ],
@@ -592,6 +618,7 @@ class GhCli(mr_ops.CliWaits):
                 if isinstance(r, dict)
                 and str(r.get("headBranch") or "").startswith(prefix)
                 and str(r.get("conclusion") or "").lower() == "failure"
+                and str(r.get("createdAt") or "") >= since
             ),
             None,
         )
