@@ -2053,21 +2053,25 @@ origin: src/kraft/adapters/forge/glab.py §merge_queue -- the merge-train recove
 
 ## REQ an-unreadable-merge-queue-is-not-a-drop
 
-IF the forge's merge train or queue cannot be read, THEN the merge node SHALL
-keep waiting for the merge to land and SHALL NOT read the failure as a drop, as
-no queue, or as a merge.
-enforced-by: tests/adapters/forge/test_glab_train.py::test_merge_queue_does_not_read_a_failed_call_as_a_drop[500-7], tests/adapters/forge/test_glab_train.py::test_merge_queue_does_not_read_a_failed_call_as_a_drop[network-7], tests/adapters/forge/test_glab_train.py::test_merge_queue_does_not_read_a_failed_call_as_a_drop[timeout-7], tests/adapters/forge/test_gh.py::test_merge_queue_does_not_read_a_failed_call_as_no_queue_or_a_drop[graphql-502], tests/adapters/forge/test_gh.py::test_merge_queue_does_not_read_a_failed_call_as_no_queue_or_a_drop[graphql-exit-1], tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[queue-unreadable]
+IF the forge's merge train or queue cannot be read -- the GitLab project read
+included, unless it answers 403 or 404 -- THEN the merge node SHALL keep
+waiting for the merge to land and SHALL NOT read the failure as a drop, as no
+queue, or as a merge.
+enforced-by: tests/adapters/forge/test_glab_train.py::test_merge_queue_does_not_read_a_failed_call_as_a_drop[500-7], tests/adapters/forge/test_glab_train.py::test_merge_queue_does_not_read_a_failed_call_as_a_drop[network-7], tests/adapters/forge/test_glab_train.py::test_merge_queue_does_not_read_a_failed_call_as_a_drop[timeout-7], tests/adapters/forge/test_gh.py::test_merge_queue_does_not_read_a_failed_call_as_no_queue_or_a_drop[graphql-502], tests/adapters/forge/test_gh.py::test_merge_queue_does_not_read_a_failed_call_as_no_queue_or_a_drop[graphql-exit-1], tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[queue-unreadable], tests/adapters/forge/test_glab_train.py::test_a_project_read_that_failed_is_not_read_as_no_train[merge_queue-500], tests/adapters/forge/test_glab_train.py::test_a_project_read_that_failed_is_not_read_as_no_train[merge_queue-network], tests/adapters/forge/test_glab_train.py::test_a_project_read_that_failed_is_not_read_as_no_train[merge_queue-timeout], tests/adapters/forge/test_glab_train.py::test_a_project_read_that_failed_is_not_read_as_no_train[merge_queue-unparseable], tests/adapters/forge/test_glab_train.py::test_a_project_read_that_failed_is_not_read_as_no_train[merge_queue-not-the-project]
 origin: src/kraft/adapters/forge/run.py §_run_one -- an outage of the train API says nothing about the merge, and stopping an item for it would be a regression for every repository whose forge hiccups.
 
 ## REQ merge-queues-through-the-train-with-the-reviewed-head
 
 WHERE the project merges through a GitLab merge train, the system SHALL add the
 merge request to the train through the merge-train API with the reviewed head's
-sha. WHERE it does not, the system SHALL ask for the merge with `glab mr
-merge`, which on a GitLab older than 19.1 could skip a train and so is not used
-on a train project.
-enforced-by: tests/adapters/forge/test_glab_train.py::test_merge_on_a_train_project_posts_to_the_train_with_the_reviewed_sha, tests/adapters/forge/test_glab_train.py::test_merge_off_a_train_project_still_runs_glab_mr_merge
-origin: src/kraft/adapters/forge/glab.py §merge -- when the project cannot be read, Kraft falls back to `glab mr merge` rather than block a merge on an outage.
+sha. WHERE the project read says plainly that it does not -- the train
+fields absent or false, or a 403 or 404 -- the system SHALL ask for the merge
+with `glab mr merge`, which on a GitLab older than 19.1 could skip a train and
+so is not used on a train project. IF the project read fails any other way (a
+5xx, a dead network, a timeout, an answer that is not the project), THEN the
+merge SHALL fail as a failed `glab mr merge` does, and SHALL NOT fall back.
+enforced-by: tests/adapters/forge/test_glab_train.py::test_merge_on_a_train_project_posts_to_the_train_with_the_reviewed_sha, tests/adapters/forge/test_glab_train.py::test_merge_off_a_train_project_still_runs_glab_mr_merge[fields-absent], tests/adapters/forge/test_glab_train.py::test_merge_off_a_train_project_still_runs_glab_mr_merge[off], tests/adapters/forge/test_glab_train.py::test_merge_off_a_train_project_still_runs_glab_mr_merge[404], tests/adapters/forge/test_glab_train.py::test_merge_off_a_train_project_still_runs_glab_mr_merge[403], tests/adapters/forge/test_glab_train.py::test_a_project_read_that_failed_is_not_read_as_no_train[merge-500], tests/adapters/forge/test_glab_train.py::test_a_project_read_that_failed_is_not_read_as_no_train[merge-network], tests/adapters/forge/test_glab_train.py::test_a_project_read_that_failed_is_not_read_as_no_train[merge-timeout], tests/adapters/forge/test_glab_train.py::test_a_project_read_that_failed_is_not_read_as_no_train[merge-unparseable], tests/adapters/forge/test_glab_train.py::test_a_project_read_that_failed_is_not_read_as_no_train[merge-not-the-project]
+origin: src/kraft/adapters/forge/glab.py §_train_enabled -- an API blip failing the merge node costs a retry; reading it as no train could merge round the train unseen.
 
 ## REQ github-blames-only-the-current-queue-entrys-failed-run
 
@@ -2077,6 +2081,27 @@ was created after its latest enqueue, and SHALL NOT blame a run of an earlier
 drop, a run of another pull request or another base, or a run that did not fail.
 enforced-by: tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[stale-failed-run-from-an-earlier-drop], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[stale-removal-from-an-earlier-drop], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[the-failed-run-of-the-latest-entry], tests/adapters/forge/test_gh.py::test_merge_queue_blames_the_failed_merge_group_run_of_this_pull_request[the-failed-run], tests/adapters/forge/test_gh.py::test_merge_queue_blames_the_failed_merge_group_run_of_this_pull_request[newest], tests/adapters/forge/test_gh.py::test_merge_queue_blames_the_failed_merge_group_run_of_this_pull_request[not-another-pull-request-sharing-the-prefix], tests/adapters/forge/test_gh.py::test_merge_queue_blames_the_failed_merge_group_run_of_this_pull_request[not-another-base], tests/adapters/forge/test_gh.py::test_merge_queue_blames_the_failed_merge_group_run_of_this_pull_request[not-a-green-run]
 origin: src/kraft/adapters/forge/gh.py §merge_queue -- a stale failed run would send the repair agent after a failure the code no longer has.
+
+## REQ github-a-checks-failure-reason-is-code-without-a-run
+
+WHEN GitHub removed a pull request from the merge queue with no failed
+merge-group run to blame -- its checks run outside GitHub Actions -- and the
+removal reason names failed or timed-out checks or CI, the system SHALL read
+the drop's cause as `code`, with that reason as its one finding. A reason that
+names none of them SHALL stay `other`; a word merely containing one SHALL NOT
+count.
+enforced-by: tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[no-actions-run-checks-failed], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[no-actions-run-ci-failed], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[no-actions-run-timed-out], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[no-actions-run-timeout], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[not-a-checks-reason-by-hand], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[not-a-checks-reason-words-containing-ci], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[not-a-checks-reason-statuses-of-something-else], tests/adapters/forge/test_gh.py::test_merge_queue_blames_the_failed_merge_group_run_of_this_pull_request[not-a-green-run], tests/adapters/forge/test_gh.py::test_merge_queue_blames_the_failed_merge_group_run_of_this_pull_request[not-a-run-of-the-branch-itself], tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[conflict-clean-rebase]
+origin: src/kraft/adapters/forge/gh.py §_CHECKS_FAILED -- the merge-train recovery design, §1: a repository whose CI is not on Actions must still get a repair for red checks.
+
+## REQ a-drop-with-no-reason-yet-is-read-again
+
+IF the merge train or queue no longer holds the merge request and the forge has
+recorded no reason for it yet -- no GitLab system note, no GitHub removal event
+newer than the latest enqueue -- THEN the merge node SHALL keep waiting, record
+no drop, and read it again at the next observation, bounded by the merge wait's
+own timeout. A removal the forge did record for a person SHALL stop at once.
+enforced-by: tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[no-reason-recorded-yet], tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[removed-by-person], tests/adapters/forge/test_glab_train.py::test_merge_queue_reads_the_train[no-note-yet], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[dropped-no-removal-event-yet], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[stale-removal-from-an-earlier-drop]
+origin: src/kraft/adapters/forge/run.py §_merge_dropped -- GitLab writes its note, and GitHub its removal event or the merge, a moment after the entry goes: a premature `other` would stop the item for good.
 
 ## REQ a-merge-drop-is-recorded-with-its-cause
 
@@ -2119,6 +2144,20 @@ repair's commit unseen.
 enforced-by: tests/executor/test_merge_rejection.py::test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from[question-after-commit], tests/executor/test_merge_rejection.py::test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from[failed-after-commit], tests/executor/test_merge_rejection.py::test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from[paused-after-commit], tests/executor/test_merge_rejection.py::test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from[budget], tests/executor/test_merge_rejection.py::test_a_rewind_whose_clock_ran_out_during_the_repair_holds_the_item
 origin: src/kraft/executor/walk.py §_hold_at_restart
 
+## REQ a-restart-mid-rejection-never-merges-the-repair-unseen
+
+IF Kraft restarts while a merge rejection is unanswered -- the repair running,
+or the rewind's writes cut short -- THEN the resume SHALL stop the item for a
+person rather than walk or stop it at the merge node, and WHEN the dropped
+checkout's head is no longer the one the drop recorded, or cannot be read, it
+SHALL first reopen the approved gates and hold the item at `restart_from`. A
+drop the walk already answered SHALL NOT hold the item again. The hold SHALL be
+written before any stop, and a rewind SHALL stand the item at `restart_from`
+before the walk enters it, so that no crash leaves the repair's commit one
+retry away from the forge.
+enforced-by: tests/executor/test_merge_rejection.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[during-the-repair-after-it-committed], tests/executor/test_merge_rejection.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[during-the-repair-before-any-commit], tests/executor/test_merge_rejection.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[restarting-before-the-gates-reopened], tests/executor/test_merge_rejection.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[restarting-after-the-gates-reopened], tests/executor/test_merge_rejection.py::test_the_cursor_leaves_merge_before_the_walk_stops_or_moves_on[the-repair-s-stop], tests/executor/test_merge_rejection.py::test_the_cursor_leaves_merge_before_the_walk_stops_or_moves_on[the-cap-stop], tests/executor/test_merge_rejection.py::test_the_cursor_leaves_merge_before_the_walk_stops_or_moves_on[the-restart], tests/executor/test_merge_rejection.py::test_a_restart_back_on_merge_does_not_answer_the_old_drop_again
+origin: src/kraft/executor/walk.py §hold_interrupted_repair -- a retry's default target is the node the item stands on: left on `merge`, a retry pushes and merges code no gate saw.
+
 ## REQ a-repair-that-commits-nothing-stops-for-a-person
 
 IF the merge-rejection repair commits nothing, or fails, THEN the system SHALL
@@ -2142,8 +2181,10 @@ origin: src/kraft/executor/walk.py §MERGE_REJECTED_CAP -- the span never clears
 
 IF a merge request is taken off the merge train or queue by a person, or for a
 reason Kraft cannot read, THEN the system SHALL stop the item for a person and
-SHALL NOT re-queue it, rebase it or run a repair.
-enforced-by: tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[removed-by-person], tests/adapters/forge/test_glab_train.py::test_merge_queue_reads_the_train[cancelled-by-person], tests/adapters/forge/test_glab_train.py::test_merge_queue_reads_the_train[no-note], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[dropped-by-person], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[dropped-no-reason]
+SHALL NOT re-queue it, rebase it, or run a repair or any recovery for it, even
+where the merge node declares `on_merge_rejected`; and the stop SHALL NOT be
+one automatic escalation answers.
+enforced-by: tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[removed-by-person], tests/adapters/forge/test_glab_train.py::test_merge_queue_reads_the_train[cancelled-by-person], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[dropped-by-person], tests/executor/test_merge_rejection.py::test_a_drop_nothing_may_repair_stops_promptly_for_a_person[taken-off-by-hand]
 origin: src/kraft/adapters/forge/run.py §_merge_dropped -- Kraft never fights a person who took the merge request off the train.
 
 ## REQ train-infra-failure-requeues-the-same-head
@@ -2158,7 +2199,10 @@ origin: src/kraft/adapters/forge/run.py §_merge_dropped -- asking again after a
 ## REQ a-merge-drop-without-the-policy-stops-promptly
 
 IF the merge train or queue drops a merge request and the merge node declares
-no `on_merge_rejected`, THEN the system SHALL stop the item as a failed task at
-once, without waiting out the merge timeout, running a repair or rewinding.
-enforced-by: tests/executor/test_merge_rejection.py::test_a_drop_without_the_policy_stops_promptly
-origin: src/kraft/executor/dispatch.py §_recoverable
+no `on_merge_rejected`, THEN the system SHALL stop the item for a person at
+once, without waiting out the merge timeout, running a repair, a task's or the
+node's `on_failure` or a fix loop, or rewinding; and the stop SHALL NOT be one
+automatic escalation answers, whose retry could re-queue it or merge its own
+commit unseen.
+enforced-by: tests/executor/test_merge_rejection.py::test_a_drop_nothing_may_repair_stops_promptly_for_a_person[no-policy], tests/executor/test_merge_rejection.py::test_a_drop_nothing_may_repair_stops_promptly_for_a_person[on-failure-is-no-drop-s-repair]
+origin: src/kraft/executor/dispatch.py §measure_node

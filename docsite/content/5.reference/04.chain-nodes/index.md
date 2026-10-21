@@ -174,8 +174,10 @@ onto the train.
 | `restart_from` | string | required | Names an exec node strictly before this one, never a gate or this node itself. |
 | `repair` | mapping | required | The tasks or steps that fix the branch, written like an `on_failure` plan. The shipped `repair_merge_queue_failure` runs the `kraft:merge-queue-repair` skill on the `strong` [agent profile](/reference/harnesses/agent-profiles). |
 
-Without `on_merge_rejected`, a drop stops the item at once as a failed `merge`
-task, with the forge's reason in the stop.
+Without `on_merge_rejected`, a drop stops the item at once, with the forge's
+reason in the stop. No `on_failure` or fix loop on the node runs for it, and no
+escalation agent is sent to the stop: Kraft never re-queues a merge request on
+its own.
 
 ### Merge trains and merge queues
 
@@ -194,16 +196,23 @@ to turn on. A repository without one waits for the merge exactly as before.
   forge refuses (403 or 404), counts as having no train.
 - GitLab, queueing: on a train project Kraft adds the merge request through the
   merge-train API with the reviewed commit's sha, so it never merges a head
-  nobody reviewed. If it cannot read the project, it falls back to
-  `glab mr merge`, which on GitLab before 19.1 could merge without going
-  through the train.
+  nobody reviewed. Only when the project read says there is no train does Kraft
+  merge with `glab mr merge`. A read that fails any other way, such as a 5xx,
+  a timeout or an answer that is not the project, fails the merge as a failed
+  `glab mr merge` would: on GitLab before 19.1 `glab mr merge` can merge
+  without going through the train.
 - GitHub: the target branch has a merge queue. Kraft blames only a failed
   merge-group run created after the pull request's latest enqueue, so a failure
-  from an earlier drop is never held against the current head.
+  from an earlier drop is never held against the current head. When there is
+  no such run, for example because the checks do not run on GitHub Actions, a
+  removal reason that names failed or timed-out checks or CI counts as `code`,
+  and that reason is what the repair is given.
 
 A read of the train or queue that fails says nothing about the merge, so Kraft
 keeps waiting and notes it in the log. A drop is noticed on the next poll of the
-merge wait.
+merge wait. When the forge has not yet written why (no GitLab system note, no
+GitHub removal event for this entry), Kraft keeps waiting and reads it again on
+the next poll, up to the merge wait's own timeout.
 
 **The drop.** Each drop is recorded as a `merge_queue_dropped` event with its
 cause, the forge's reason, the failed jobs and the head. See the
@@ -215,7 +224,7 @@ cause, the forge's reason, the failed jobs and the head. See the
 | `conflict` | The merge request no longer merges cleanly with the target. | Rebases the branch. A clean rebase restarts with no agent. A rebase that conflicts goes to the `repair` to resolve, then Kraft restarts. |
 | `not_added` | GitLab only: the merge request never reached the train, because its own checks failed while it waited to be added. | Treated as `code`. |
 | `infra` | The train or queue's own runners failed. | Asks the forge to queue the same head again, with no agent and no restart, up to 2 times. Then it stops for you. |
-| `other` | A person took it off the train or queue, or the forge's reason cannot be read. | Stops for you. Kraft never re-queues what a person removed. |
+| `other` | A person took it off the train or queue, or the forge's reason cannot be read. | Stops for you. Kraft never re-queues what a person removed, and no repair, recovery or escalation agent runs for it. |
 
 **The restart.** After the repair commits, or after a clean conflict rebase,
 Kraft reopens the approved gates in the span, gives the span's fix loops a
@@ -230,8 +239,10 @@ what the repair changed.
 rejected would only be rejected again, so a repair that commits nothing, fails,
 or asks a question stops for you. When a repair had already committed before it
 stopped, whether it asked, failed, was paused or ran out of budget, the item is
-held at `restart_from` with the span's gates reopened. A retry then walks back
-through `final_review`, and the commit is never merged unseen.
+held at `restart_from` with the span's gates reopened. The same goes for a
+Kraft restart while the repair works or the restart is under way: if the head
+moved, the resume holds the item there and stops for you. A retry then walks
+back through `final_review`, and the commit is never merged unseen.
 
 **The cap.** Rewinds are counted under `<node>.on_merge_rejected`: 3 attempts
 over 7 days unless `policy.yaml` names that key under `loops:`. See
