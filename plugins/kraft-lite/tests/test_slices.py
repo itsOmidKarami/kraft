@@ -104,6 +104,16 @@ def test_after_becomes_a_bd_shaped_blocks_dependency():
             plan(slices=[{"key": "a", "title": "A", "tasks": []}]), "'a'", id="empty_tasks"
         ),
         pytest.param(
+            plan(
+                slices=[
+                    {"key": "a", "title": "A", "tasks": [1, 2]},
+                    {"key": "b", "title": "B", "tasks": [2, 3]},
+                ]
+            ),
+            "task 2 is in two slices, 'a' and 'b'",
+            id="task_in_two_slices",
+        ),
+        pytest.param(
             plan(slices=[{"key": "a", "title": "A", "tasks": [1]}, {"title": "B", "tasks": [2]}]),
             "slice 2 has no key",
             id="missing_key",

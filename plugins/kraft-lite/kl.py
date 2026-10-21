@@ -537,6 +537,8 @@ def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
     if not slices:
         raise SystemExit("kraft-lite: the slice plan has no slices")
     keys: set[str] = set()
+    # A task in two slices is built twice, by two children that never see each other.
+    task_owner: dict[int, str] = {}
     for position, spec in enumerate(slices, 1):
         # `approve --slices` feeds this a person's JSON, so a slice missing a
         # field is refused by position rather than left to a KeyError traceback.
@@ -563,6 +565,12 @@ def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
             raise SystemExit(
                 f"kraft-lite: slice {position} ({key!r}) tasks must be a list of task numbers"
             )
+        for task in tasks:
+            if task_owner.get(task, key) != key:
+                raise SystemExit(
+                    f"kraft-lite: task {task} is in two slices, {task_owner[task]!r} and {key!r}"
+                )
+            task_owner[task] = key
         after = spec.get("after", [])
         if not isinstance(after, list) or not all(isinstance(a, str) for a in after):
             raise SystemExit(
