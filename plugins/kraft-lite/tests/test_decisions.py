@@ -178,20 +178,34 @@ def test_an_answer_to_a_reported_question_is_unreported_again(where, walk, kl_cl
     [
         pytest.param("controller", id="a_controller_decision"),
         pytest.param("user", id="an_earlier_user_answer"),
+        # An entry is a person's JSON once it travels: one imported without `held`
+        # is not held, and no verb reading it fails on the missing key.
+        pytest.param("import", id="an_imported_entry_without_held"),
     ],
 )
 def test_answer_refuses_a_decision_that_is_not_held(answered_by, walk, kl_cli, tmp_path):
-    walk.slice(tmp_path)
-    if answered_by == "controller":
-        entry = kl_cli(tmp_path, "decide", "--question", "q", "--why", "w", "--answer", "mine")
+    here = tmp_path / "here"
+    here.mkdir()
+    walk.slice(here)
+    if answered_by == "user":
+        held = kl_cli(here, "decide", "--question", "q", "--why", "w", "--held")
+        entry = kl_cli(here, "answer", "--decision", held["id"], "--answer", "theirs")
     else:
-        held = kl_cli(tmp_path, "decide", "--question", "q", "--why", "w", "--held")
-        entry = kl_cli(tmp_path, "answer", "--decision", held["id"], "--answer", "theirs")
+        entry = kl_cli(here, "decide", "--question", "q", "--why", "w", "--answer", "mine")
+    if answered_by == "import":
+        out = tmp_path / "state"
+        kl_cli(here, "export", "--to", str(out))
+        entry = {k: v for k, v in entry.items() if k not in ("held", "answered_by")}
+        (out / "decisions.jsonl").write_text(json.dumps(entry) + "\n")
+        here = tmp_path / "there"
+        here.mkdir()
+        kl_cli(here, "import", "--from", str(out))
 
-    refused = kl_cli(tmp_path, "answer", "--decision", entry["id"], "--answer", "x", ok=False)
+    refused = kl_cli(here, "answer", "--decision", entry["id"], "--answer", "x", ok=False)
 
     assert "not held" in refused.stderr and "Traceback" not in refused.stderr
-    assert kl_cli(tmp_path, "decisions") == [entry]
+    assert kl_cli(here, "decisions") == [entry]
+    assert kl_cli(here, "decisions", "--held") == []
 
 
 @pytest.mark.parametrize(

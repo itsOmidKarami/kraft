@@ -403,6 +403,30 @@ BAD_CHAIN_IDS = {
 }
 
 
+#: A record in an export that is not its chain's, by the id it carries.
+STRAYS = {
+    "another_chains_node": "kl-bbbbbbbb.plan",
+    "another_chains_slice": "ks-bbbbbbbb",
+    "another_chains_run": "ksr-bbbbbbbb",
+    "an_issue_of_no_chain": "bd-12",
+}
+
+
+def stray_record(problem: str) -> dict:
+    labels = {
+        "another_chains_slice": [f"{kl.SLICE_OF_LABEL}kl-bbbbbbbb"],
+        "another_chains_run": [f"{kl.RUN_LABEL}kl-bbbbbbbb"],
+    }
+    return {
+        "_type": "issue",
+        "id": STRAYS[problem],
+        "title": "not this chain's",
+        "status": "open",
+        "labels": labels.get(problem, []),
+        "dependencies": [],
+    }
+
+
 @pytest.mark.parametrize(
     "problem, named",
     [
@@ -412,6 +436,16 @@ BAD_CHAIN_IDS = {
         pytest.param("no_epic", "holds 0 chain epics", id="no_epic"),
         pytest.param("two_epics", "holds 2 chain epics", id="two_epics"),
         pytest.param("no_template", "no frozen template", id="no_template"),
+        # Everything else in the store is the directory's own: an export brings
+        # its chain's epic and nodes, its run and its slices, and nothing more.
+        *[
+            pytest.param(
+                problem,
+                "{out}/records.jsonl holds records that are not chain kl-aaaaaaaa's: " + stray,
+                id=problem,
+            )
+            for problem, stray in STRAYS.items()
+        ],
         # The id names files under `.kraft-lite/`, so only the shape `start` mints
         # is taken: anything else is refused before a file is read or written.
         *[
@@ -428,7 +462,11 @@ def test_import_refuses_an_export_that_names_no_single_chain(problem, named, kl_
     if problem == "no_epic":
         (out / "records.jsonl").write_text("")
     chain = json.loads(kl.DEFAULT_CHAIN.read_text())
-    epics = {"two_epics": ["kl-aaaaaaaa", "kl-bbbbbbbb"], "no_template": ["kl-aaaaaaaa"]}
+    epics = {
+        "two_epics": ["kl-aaaaaaaa", "kl-bbbbbbbb"],
+        "no_template": ["kl-aaaaaaaa"],
+        **dict.fromkeys(STRAYS, ["kl-aaaaaaaa"]),
+    }
     for chain_id in epics.get(problem, [BAD_CHAIN_IDS.get(problem)]):
         if chain_id is None:
             continue
@@ -439,6 +477,8 @@ def test_import_refuses_an_export_that_names_no_single_chain(problem, named, kl_
             template = out / "chains" / f"{chain_id}.json"
             template.parent.mkdir(parents=True, exist_ok=True)
             template.write_text(json.dumps(chain))
+    if problem in STRAYS:
+        kl.append_jsonl(out / "records.jsonl", [stray_record(problem)])
     before = files_under(tmp_path)
 
     refused = kl_cli(there, "import", "--from", str(out), ok=False)

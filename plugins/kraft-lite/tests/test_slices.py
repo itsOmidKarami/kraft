@@ -230,6 +230,22 @@ def test_after_becomes_a_bd_shaped_blocks_dependency():
             "state_branch",
             id="no_state_branch",
         ),
+        # A branch name is a label value and an argument to git: one string, no spaces.
+        *[
+            pytest.param(
+                plan(**{field: value}),
+                f"the slice plan's {field} must be a branch name, a string with no "
+                f"whitespace, not {value!r}",
+                id=f"{field}_{name}",
+            )
+            for field in ("state_branch", "feature_branch")
+            for name, value in (
+                ("not_a_string", 7),
+                ("a_list", ["x"]),
+                ("with_a_space", "kraft lite/x"),
+                ("with_a_newline", "kraft-lite/x\n"),
+            )
+        ],
     ],
 )
 def test_a_broken_slice_plan_is_refused(bad, named):

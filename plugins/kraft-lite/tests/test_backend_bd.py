@@ -272,6 +272,9 @@ def test_write_stamps_a_strictly_newer_updated_at(monkeypatch, stored, expected)
         ("2026-09-07T10:00:00+0200", None),
         ("2026-09-07T10:00:00.Z", None),
         ("2026-09-07T10:00:00Z\n", None),
+        # An offset that carries the time out of the years `datetime` holds.
+        ("0001-01-01T00:30:00+01:00", None),
+        ("9999-12-31T23:30:00-01:00", None),
         ("yesterday", None),
         ("", None),
         (None, None),

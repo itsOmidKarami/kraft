@@ -82,6 +82,9 @@ MODES = ("feature", "main")
 #: A slice key becomes a label value, a directory, a file name and part of a
 #: session title, so it holds nothing any of those would read differently.
 SLICE_KEY = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
+#: What a plan's branch has to be. Git refuses more than this, and says so; what
+#: is checked here is what a label and a command line would read differently.
+BRANCH = re.compile(r"\S+")
 
 #: What a node of the feature chain means once the run is sliced, by mode. The
 #: chain's own node list is untouched; `state` reports the action beside it so
@@ -362,9 +365,9 @@ STAMP = re.compile(
 
 
 def _parse_stamp(stamp: str | None) -> dt.datetime | None:
-    """A stamp as a naive UTC time, or None for anything in no `STAMP` shape.
-    Compared as text, `10:00:00Z` sorts after `10:00:00.5Z`, and `12:00+02:00`
-    after `11:00Z`."""
+    """A stamp as a naive UTC time, or None for anything in no `STAMP` shape, or
+    one whose offset carries it outside the years `datetime` holds. Compared as
+    text, `10:00:00Z` sorts after `10:00:00.5Z`, and `12:00+02:00` after `11:00Z`."""
     match = STAMP.fullmatch(stamp) if isinstance(stamp, str) else None
     if match is None:
         return None
@@ -375,7 +378,10 @@ def _parse_stamp(stamp: str | None) -> dt.datetime | None:
         return None
     if zone != "Z":
         offset = dt.timedelta(hours=int(zone[1:3]), minutes=int(zone[4:6]))
-        moment = moment - offset if zone[0] == "+" else moment + offset
+        try:
+            moment = moment - offset if zone[0] == "+" else moment + offset
+        except OverflowError:
+            return None
     return moment
 
 
@@ -616,6 +622,14 @@ def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
         raise SystemExit("kraft-lite: the slice plan has no state_branch")
     if mode == "feature" and not plan.get("feature_branch"):
         raise SystemExit("kraft-lite: feature mode needs a feature_branch in the slice plan")
+    for field in ("state_branch", "feature_branch"):
+        # Both become a label value and an argument to git.
+        value = plan.get(field)
+        if value and not (isinstance(value, str) and BRANCH.fullmatch(value)):
+            raise SystemExit(
+                f"kraft-lite: the slice plan's {field} must be a branch name, a string "
+                f"with no whitespace, not {value!r}"
+            )
     if mode == "main" and plan.get("feature_branch"):
         # Refused, not dropped: a plan that names one expects slices to merge into it.
         raise SystemExit(
@@ -1460,12 +1474,15 @@ def _answer(root: Path, chain_id: str, args) -> dict:
             f"kraft-lite: no decision {args.decision!r} in this chain. Decisions: "
             + (", ".join(entries) or "(none)")
         )
-    if not entries[args.decision]["held"]:
+    # `.get`: an entry is a person's JSON once it travels, and an import takes it
+    # as it comes. One without `held` was never held.
+    if not entries[args.decision].get("held", False):
         # Answering it again would put the user's name on the controller's call,
         # or overwrite what the user already said.
         raise SystemExit(
             f"kraft-lite: decision {args.decision} is not held: "
-            f"{entries[args.decision]['answered_by']} answered it. `answer` is for a held question"
+            f"{entries[args.decision].get('answered_by') or 'someone'} answered it. "
+            "`answer` is for a held question"
         )
     entry = dict(
         entries[args.decision],
@@ -1503,7 +1520,7 @@ def _decisions(root: Path, everything: list[dict], chain_id: str, args) -> list[
     if args.unreported:
         entries = [e for e in entries if not e.get("reported")]
     if args.held:
-        entries = [e for e in entries if e["held"]]
+        entries = [e for e in entries if e.get("held", False)]
     if args.mark and entries:
         append_jsonl(path, [dict(e, reported=True, seq=_decision_seq(e) + 1) for e in entries])
     return entries
@@ -1605,6 +1622,17 @@ def _merge_decisions(local: list[dict], exported: list[dict]) -> tuple[list[dict
     return write, len(exported) - len(write)
 
 
+def _of_chain(record: dict, chain_id: str) -> bool:
+    """Whether `record` is one an export of `chain_id` carries: its epic, a
+    node, its run record or a slice."""
+    return (
+        record["id"] == chain_id
+        or record["id"].startswith(f"{chain_id}.")
+        or label_value(record, RUN_LABEL) == chain_id
+        or label_value(record, SLICE_OF_LABEL) == chain_id
+    )
+
+
 def _import(root: Path, store, source: Path) -> dict:
     """Resume, or catch up, from an export. Dispatched before `_ours`: the
     export names its own chain, and the directory may hold others.
@@ -1625,6 +1653,14 @@ def _import(root: Path, store, source: Path) -> dict:
     chain_id = epics[0]
     # Built first: it is what refuses an id `start` never minted, before any read.
     frozen = _frozen_path(root, chain_id)
+    # Upserted as they come, so anything not this chain's would land on the
+    # directory's own records: another run's, or bd's other issues.
+    strays = [r["id"] for r in exported if not _of_chain(r, chain_id)]
+    if strays:
+        raise SystemExit(
+            f"kraft-lite: {source / EXPORT_RECORDS} holds records that are not chain "
+            f"{chain_id}'s: {', '.join(strays)}"
+        )
     template = source / "chains" / frozen.name
     if not template.is_file():
         raise SystemExit(f"kraft-lite: the export has no frozen template {template}")
