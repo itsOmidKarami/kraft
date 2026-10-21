@@ -28,6 +28,11 @@ def chain(extends: str) -> dict:
     return {"nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": extends}]}]}
 
 
+def exec_node(id: str, task: str, extends: str) -> dict:
+    """Execution node `id` with one task, `task`, extending `extends`."""
+    return {"id": id, "kind": "exec", "tasks": [{"id": task, "extends": extends}]}
+
+
 def task_node(extends: str) -> dict:
     """A chain revision's added node `x`: one task extending `extends`."""
     return {"id": "x", "tasks": [{"id": "t", "extends": extends}]}

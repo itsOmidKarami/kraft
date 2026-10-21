@@ -812,17 +812,15 @@ def new_chain(d: Draft, **source: str) -> None:
             # takes no later change to the chain it came from.
             data = library.chain_data(origin)
             addon = library.addon_of(origin)
-            if data.get("extends") is not None and addon is not None and addon.parent:
-                from kraft.drafts import extending  # it builds on this module
+            try:
+                if data.get("extends") is not None and addon is not None and addon.parent:
+                    from kraft.drafts import extending  # it builds on this module
 
-                try:
                     shown = extending.flatten(library, origin, data, d.key)
-                except TemplateLibraryError as exc:
-                    raise OpError(
-                        f"{origin} does not resolve, so it can't be copied: {exc}"
-                    ) from None
-            else:
-                shown = library.flattened(data)
+                else:
+                    shown = library.flattened(data)
+            except TemplateLibraryError as exc:
+                raise OpError(f"{origin} does not resolve, so it can't be copied: {exc}") from None
             copied = yaml.safe_dump(plain(shown), sort_keys=False)
             d._chain = authored.load(copied)
             authored.put(d._chain, "", "id", d.key)
@@ -1068,7 +1066,10 @@ def copy_component(d: Draft, ref: str, name: str) -> dict:
         raw = library.component(Namespace(section), qualified)
         # As for a chain copy: what it extends through a hidden level is
         # merged in, so the copy is the entry as the child serves it.
-        body = None if raw is None else plain(library.flattened(raw.data, Namespace(section)))
+        try:
+            body = None if raw is None else plain(library.flattened(raw.data, Namespace(section)))
+        except TemplateLibraryError as exc:
+            raise OpError(f"{ref} does not resolve, so it can't be copied: {exc}") from None
     if body is None:
         raise OpError(f"there is no add-on component {ref!r} to copy")
     if not isinstance(d.library.get(section), dict):
