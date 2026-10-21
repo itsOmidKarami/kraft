@@ -71,6 +71,15 @@ CHAIN_FILES = {
               kind: exec
               tasks: [{id: lint, kind: subprocess, command: just lint}]
         """,
+    # A check between the plan and the gate presenting it: the plan is not settled yet.
+    "check_node_between_plan_and_its_gate": """\
+        nodes:
+          - {id: plan, kind: exec, tasks: [{id: t, kind: agent, prompt: P., produces: plan}]}
+          - {id: lint, kind: exec, tasks: [{id: t, kind: subprocess, command: just lint}]}
+          - {id: plan_approval, kind: gate, artifact: plan}
+          - {id: impl, kind: exec, tasks: [{id: t, kind: agent, prompt: Build.}]}
+          - {id: open_mr, kind: exec, tasks: [{id: t, kind: forge, target: mr.open_draft}]}
+        """,
     "no_build": """\
         nodes:
           - {id: plan, kind: exec, tasks: [{id: t, kind: agent, prompt: P., produces: plan}]}
@@ -132,6 +141,11 @@ def chain_of(default_chain, tmp_path):
             "check_node_before_plan",
             ("chain_revision_approval", "implementation", "draft_merge_request", DEFAULT_CHILD),
             id="check_node_before_plan",
+        ),
+        pytest.param(
+            "check_node_between_plan_and_its_gate",
+            ("plan_approval", "impl", "open_mr", ("impl", "open_mr")),
+            id="check_node_between_plan_and_its_gate",
         ),
         # By position and declaration, never by name.
         pytest.param(
@@ -508,6 +522,24 @@ def broken_default(path: Path, node: str, edit) -> None:
             "is not a usable V1 chain: exec node 'implementation' has a task with no path",
             id="v1_task_without_path",
         ),
+        # `start` answers with the chain's id and source, and the child is named from its id.
+        *[
+            pytest.param(
+                lambda p, key=key: p.write_text(
+                    json.dumps(
+                        {
+                            k: v
+                            for k, v in kl_chains.resolve(p.parent, {}, "default").items()
+                            if k != key
+                        }
+                    )
+                ),
+                [],
+                f"is not a usable V1 chain: it has no {key}",
+                id=f"v1_chain_without_{key}",
+            )
+            for key in ("id", "source")
+        ],
         pytest.param(
             lambda p: None,
             ["--chain", "default"],

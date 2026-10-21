@@ -42,8 +42,8 @@ chain's source file from the frozen `.kraft-lite/chains/<chain-id>.json`: its
 Copy it to a new `.yaml` file and make the change there. For a `repo:` chain,
 put the copy in `.kraft/chains/` with a new `id`, so its `extends` still
 resolve, and pass `--chain repo:<new id>`. Invoke `kraft-lite:start` with
-`--chain <that file>`, and `--spec`/`--plan` set to the spec and plan the
-earlier gates approved, so the new chain starts at the chain revision rather
+`--chain <that file>` (or `repo:<new id>`), and `--spec`/`--plan` set to the spec
+and plan the earlier gates approved, so the new chain starts at the chain revision rather
 than writing and approving them again. The old chain then stays unfinished in
 `chains`, and the user decides what to do with it.
 

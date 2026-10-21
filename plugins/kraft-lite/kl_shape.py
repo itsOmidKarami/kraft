@@ -26,7 +26,7 @@ class SliceShape:
     #: The last gate before the first build node: the plan is settled there.
     slice_gate: str
     #: The first exec node none of whose tasks produces anything, after the
-    #: last node producing the plan when one does: the build.
+    #: last node producing the plan and the last gate presenting it: the build.
     first_build: str
     #: The first node with a forge task opening the merge request.
     mr_node: str
@@ -34,7 +34,7 @@ class SliceShape:
     child_nodes: tuple[str, ...]
 
 
-#: What a plan node produces: the build comes after the last one.
+#: What a plan node produces, and a plan gate presents: the build comes after the last of either.
 PLAN = "plan"
 
 
@@ -66,9 +66,15 @@ def slice_shape(chain: dict) -> SliceShape:
     def refuse(why: str) -> kl_chains.ChainError:
         return kl_chains.ChainError(f"chain {chain['id']!r} cannot be sliced: {why}")
 
-    # A check before the plan (a lint node after the spec's approval) builds
-    # nothing: the build comes after the last node producing the plan.
-    plans = [i for i, n in enumerate(nodes) if PLAN in _produces(n)]
+    # A check before the plan (a lint node after the spec's approval), or one
+    # between the plan and the gate presenting it, builds nothing: the build
+    # comes after the last node producing the plan and the last gate
+    # presenting it.
+    plans = [
+        i
+        for i, n in enumerate(nodes)
+        if PLAN in _produces(n) or (n["kind"] == "gate" and n["artifact"] == PLAN)
+    ]
     after = plans[-1] + 1 if plans else 0
     build = next(
         (

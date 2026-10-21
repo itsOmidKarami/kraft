@@ -2018,8 +2018,9 @@ def _task_flaw(task: object, where: str) -> str | None:
 
 def _chain_flaw(chain: dict) -> str | None:
     """What a chain that says it is V1 lacks of the frozen shape the walk reads,
-    or None: for every node an id and a kind; for a gate its `message`,
-    `artifact`, `reject_to` and `chain_finalized`; for an exec node its steps,
+    or None: the chain's own `id` and `source`; for every node an id and a
+    kind; for a gate its `message`, `artifact`, `reject_to` and
+    `chain_finalized`; for an exec node its steps,
     `fix_loop`, `on_failure` and `on_base_changed`, each handler's steps, the
     judge, and every task's `path` and `kind`. A file from outside this process
     - an export, a hand-edited copy - is checked here, by `import`,
@@ -2062,6 +2063,11 @@ def _chain_flaw(chain: dict) -> str | None:
             isinstance(base, dict) and isinstance(base.get("restart_from"), str)
         ):
             return f"{where}'s on_base_changed has no restart_from"
+    # Read by `start`, which names the chain and its source in its answer, and
+    # by the child chain a slice walks.
+    for key in ("id", "source"):
+        if not isinstance(chain.get(key), str):
+            return f"it has no {key}"
     return None
 
 

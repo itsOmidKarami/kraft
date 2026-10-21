@@ -554,7 +554,8 @@ def _task_chain(task: str) -> str:
                     "{id: s, extends: worker, produces: spec}, {id: t, extends: worker}"
                 )
             },
-            r"a: node 'a' does not agree on what it produces \['\(none\)', 'spec'\]",
+            r"a: node 'a' does not agree on what it produces \(\['\(none\)', 'spec'\]\); "
+            r"a node either wholly produces one kind or declares none",
             id="produces_some_and_none",
         ),
         pytest.param(
@@ -564,7 +565,8 @@ def _task_chain(task: str) -> str:
                     "{id: p, extends: worker, produces: plan}"
                 )
             },
-            r"a: node 'a' does not agree on what it produces \['plan', 'spec'\]",
+            r"a: node 'a' does not agree on what it produces \(\['plan', 'spec'\]\); "
+            r"a node either wholly produces one kind or declares none",
             id="produces_two_kinds",
         ),
     ],

@@ -335,9 +335,10 @@ chain you wrote slices as the default does. `state` marks the slice gate, and
 `slices` reports the `shape` it found.
 
 - The **first build node** is the first exec node none of whose tasks
-  produces a document. When a node produces the `plan`, it is the first such
-  node after the last one that does, so a check node before the plan is not
-  it. In the default chain, `implementation`.
+  produces a document. When a node produces the `plan`, or a gate presents
+  it, it is the first such node after the last of them, so a check node before
+  the plan, or between the plan and its gate, is not it. In the default chain,
+  `implementation`.
 - The **slice gate** is the last gate before the first build node, and is
   never the `chain_finalized` gate. In the default chain,
   `chain_revision_approval`. In a chain with a plan gate and then the build,
@@ -624,8 +625,9 @@ and deletes nothing: the records and the frozen chain stay. It refuses an id
 that is not an unfinished run in the old format.
 
 A run that finished in the old format has nothing to move, and blocks
-nothing. `state` reports it `done` and `chains` lists it, but `summary`
-refuses, because its summary needs the previous Kraft Lite.
+nothing. `state` reports it `done` and `chains` lists it, but every other
+verb that reads its chain, `summary` and `export` among them, refuses,
+because its reports need the previous Kraft Lite.
 
 `migrate` is safe to run twice: it renames the registry last, so a run
 interrupted halfway finishes when you run it again. With nothing left to

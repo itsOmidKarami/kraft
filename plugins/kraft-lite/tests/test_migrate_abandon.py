@@ -94,7 +94,8 @@ def test_abandon_refuses_what_is_not_an_unfinished_legacy_run(run, abandon, kl_c
 )
 def test_a_finished_legacy_run_blocks_nothing(how, verb, kl_cli, tmp_path):
     """A run that finished, or was abandoned, before V1 has nothing to move: it
-    answers `state` and `chains`, and only its summary needs the previous plugin."""
+    answers `state` and `chains`; its summary, export and other reports need the
+    previous plugin, and every chain verb but `state` refuses it."""
     if how == "finished":
         legacy_run(tmp_path, at="post_merge_watch", state="closed")
     else:

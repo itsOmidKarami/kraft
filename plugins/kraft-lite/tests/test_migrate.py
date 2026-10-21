@@ -659,24 +659,44 @@ def test_bindings_exist_refused(kl_cli, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "registry, named",
+    "registry, frozen, named",
     [
         pytest.param(
             SMALL_REGISTRY + "on.deploy.staging:\n  kind: prompt\n  prompt: Deploy.\n",
+            None,
             "hooks that no V1 task replaces: on.deploy.staging",
             id="custom_hook",
         ),
         pytest.param(
             "on.spec.requested:\n  kind: skill\n  skill: a:b\n",
+            None,
             "tasks.spec_author.prompt: a skill binding needs a prompt",
             id="skill_without_prompt",
         ),
+        # Each refusal names its way on: the init skill promises it.
+        pytest.param(
+            "on.spec.requested: just-a-string\n",
+            None,
+            "on.spec.requested: expected a mapping with a kind. Nothing was migrated. "
+            "Fix that entry in the registry by hand",
+            id="hook_entry_without_a_kind",
+        ),
+        pytest.param(
+            SMALL_REGISTRY,
+            "{nope",
+            "cannot read the chain .kraft-lite/chains/kl-aaaaaaaa.json",
+            id="corrupt_frozen_chain",
+        ),
     ],
 )
-def test_a_registry_that_cannot_be_carried_is_refused_whole(registry, named, kl_cli, tmp_path):
+def test_a_registry_that_cannot_be_carried_is_refused_whole(
+    registry, frozen, named, kl_cli, tmp_path
+):
     (tmp_path / ".kraft-lite").mkdir()
     (tmp_path / ".kraft-lite" / "registry.yaml").write_text(registry)
     legacy_run(tmp_path)
+    if frozen:
+        (tmp_path / ".kraft-lite" / "chains" / f"{TEMPLATE}.json").write_text(frozen)
     before = snapshot(tmp_path)
 
     refused = kl_cli(tmp_path, "migrate", ok=False)

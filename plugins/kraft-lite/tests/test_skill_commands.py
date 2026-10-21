@@ -216,6 +216,19 @@ def _section(body: str, number: int) -> str:
             id="gate-restart-repo-chain-stays-in-the-repo-library",
         ),
         pytest.param(
+            "gate",
+            1,
+            "`--chain <that file>` (or `repo:<new id>`), and `--spec`/`--plan`",
+            id="gate-restart-names-both-chain-forms",
+        ),
+        pytest.param(
+            "init",
+            0,
+            "its `summary`, `export` and other reports need the previous Kraft Lite, and "
+            "`kl.py` refuses every chain verb but `state` for it",
+            id="init-finished-legacy-run-only-state",
+        ),
+        pytest.param(
             "init",
             0,
             "which closes the run's open records, labelled `kraft-abandoned`, and keeps them",

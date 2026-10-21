@@ -589,7 +589,7 @@ class _Validator:
                     raise self.fail(
                         id,
                         f"node {id!r} does not agree on what it produces "
-                        f"{sorted(k or '(none)' for k in produces)}; a node either wholly "
+                        f"({sorted(k or '(none)' for k in produces)}); a node either wholly "
                         "produces one kind or declares none",
                     )
                 policy = node.get("policy")

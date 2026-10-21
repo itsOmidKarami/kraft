@@ -76,7 +76,8 @@ replaces; `{}` when there was no registry, so no file was written - and
 later verb takes. Report each, say a written `bindings.yaml` is to be committed
 and the registry is now `registry.yaml.migrated`, then go straight to the
 setup's last paragraph above, the one starting `Then print the path`. A run that finished before V1 needs no
-migrate: `state` says `done`, and only its `summary` needs the previous Kraft Lite.
+migrate: `state` says `done`; its `summary`, `export` and other reports need the
+previous Kraft Lite, and `kl.py` refuses every chain verb but `state` for it.
 
 It refuses, and moves nothing, in these cases; any other refusal names its own
 way on: follow it.

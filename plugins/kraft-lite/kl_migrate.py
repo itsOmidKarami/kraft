@@ -174,7 +174,11 @@ def convert_registry(
             dropped.append(hook)
             continue
         if not isinstance(entry, Mapping):
-            raise _refuse(f".kraft-lite/{REGISTRY}: {hook}: expected a mapping with a kind")
+            raise _refuse(
+                f".kraft-lite/{REGISTRY}: {hook}: expected a mapping with a kind. Nothing was "
+                "migrated. Fix that entry in the registry by hand (a mapping with a `kind`, as "
+                "the other hooks have), or take it out, then run migrate again"
+            )
         section, key = target
         defaults = (_bundled_default(library, section, key), LEGACY_DEFAULTS.get((section, key)))
         if any(_is_default(dict(entry), default) for default in defaults):
@@ -271,7 +275,14 @@ def _frozen(host, root: Path, chain_id: str) -> dict | None:
     path = host._frozen_file(root, chain_id)
     if path is None:
         return None
-    chain = host._read_json(path, "the chain")
+    try:
+        chain = json.loads(path.read_text())
+    except (OSError, ValueError) as error:
+        raise _refuse(
+            f"cannot read the chain {path.relative_to(root)}: {error}. Nothing was migrated. "
+            "Restore it (from version control or a backup), or remove the file, then run "
+            "migrate again"
+        ) from error
     return chain if isinstance(chain, dict) else {}
 
 

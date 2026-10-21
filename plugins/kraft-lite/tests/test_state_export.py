@@ -475,6 +475,14 @@ BAD_CHAINS = {
 }
 
 
+#: A chain.json that is the default but for one top-level string it lacks.
+LACKING = {"chain_without_id": "id", "chain_without_source": "source"}
+
+
+def lacking(chain: dict, problem: str) -> dict:
+    return {k: v for k, v in chain.items() if k != LACKING.get(problem)}
+
+
 def stray_record(problem: str) -> dict:
     labels = {
         "another_chains_slice": [f"{kl.SLICE_OF_LABEL}kl-bbbbbbbb"],
@@ -530,6 +538,8 @@ def stray_record(problem: str) -> dict:
                 "chain_gate_without_message": (
                     "is not a usable V1 chain: gate node 'g' has no message"
                 ),
+                "chain_without_id": "is not a usable V1 chain: it has no id",
+                "chain_without_source": "is not a usable V1 chain: it has no source",
                 "corrupt_local_chain": "cannot read the chain {there}/.kraft-lite/chains/kl-a",
             }.items()
         ],
@@ -559,14 +569,18 @@ def test_import_refuses_an_export_that_names_no_single_chain(
     epics = {
         "two_epics": ["kl-aaaaaaaa", "kl-bbbbbbbb"],
         "no_template": ["kl-aaaaaaaa"],
-        **dict.fromkeys([*STRAYS, *MALFORMED, *BAD_CHAINS, "corrupt_local_chain"], ["kl-aaaaaaaa"]),
+        **dict.fromkeys(
+            [*STRAYS, *MALFORMED, *BAD_CHAINS, *LACKING, "corrupt_local_chain"], ["kl-aaaaaaaa"]
+        ),
     }
     for chain_id in epics.get(problem, [BAD_CHAIN_IDS.get(problem)]):
         if chain_id is None:
             continue
         kl.append_jsonl(out / "records.jsonl", kl.materialize(chain, "t", chain_id))
         if problem != "no_template":
-            (out / "chain.json").write_text(json.dumps(BAD_CHAINS.get(problem, chain)))
+            (out / "chain.json").write_text(
+                json.dumps(BAD_CHAINS.get(problem, lacking(chain, problem)))
+            )
     if problem in STRAYS:
         kl.append_jsonl(out / "records.jsonl", [stray_record(problem)])
     if problem in MALFORMED:
