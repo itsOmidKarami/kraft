@@ -367,11 +367,27 @@ def test_init_interpreter(fresh_interpreter, monkeypatch, tmp_path, system):
         ("missing.pem", False),
         (".ssh/ca.pem", False),
         ("link.pem", True),
+        ("unreadable.pem", False),
     ],
-    ids=["file", "dir", "missing-skipped", "protected-skipped", "symlink-as-written"],
+    ids=[
+        "file",
+        "dir",
+        "missing-skipped",
+        "protected-skipped",
+        "symlink-as-written",
+        "unreadable-skipped",
+    ],
 )
-def test_ca_mounts(host, where, kept):
+def test_ca_mounts(host, where, kept, monkeypatch):
     home, kraft, _ = host
+    real_exists = Path.exists
+
+    def exists(self, *a, **kw):  # a parent the user cannot search, as root cannot be made to
+        if self.name == "unreadable.pem":
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_exists(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "exists", exists)
     (home / "ca.pem").write_text("x")
     (home / "cadir").mkdir()
     (home / ".ssh/ca.pem").write_text("x")
