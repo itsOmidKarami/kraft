@@ -409,6 +409,32 @@ def _task_chain(task: str) -> str:
             "a.main.t: selects no steering profile 'nope'",
             id="unknown_steering",
         ),
+        pytest.param(
+            {
+                "c": "nodes:\n  - {id: a, kind: exec, steps: [{id: s, tasks: [{id: t, "
+                "extends: worker}], on_failure: {tasks: [{id: fix, extends: worker}]}}]}\n"
+            },
+            "a.s.on_failure: a step's own on_failure is not supported by Kraft Lite",
+            id="step_on_failure",
+        ),
+        pytest.param(
+            {
+                "c": _task_chain(
+                    "{id: t, extends: worker, on_failure: {tasks: [{id: fix, extends: worker}]}}"
+                )
+            },
+            "a.main.t.on_failure: a task's own on_failure is not supported by Kraft Lite",
+            id="task_on_failure",
+        ),
+        pytest.param(
+            {
+                "c": "nodes:\n  - {id: a, kind: exec, tasks: [{id: t, extends: worker}], "
+                "on_base_changed: {restart_from: a, "
+                "on_conflict: {tasks: [{id: fix, extends: worker}]}}}\n"
+            },
+            "a.on_base_changed.on_conflict: on_conflict is not supported by Kraft Lite",
+            id="on_conflict",
+        ),
     ],
 )
 def test_chain_extension_refusals(tmp_path, home, chains, match):

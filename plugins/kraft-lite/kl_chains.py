@@ -57,6 +57,9 @@ ROUTES = (("profile",), ("model", "effort"))
 OWN = "library"
 REPO = "repo:"
 MAIN = "main"
+#: Recovery Kraft runs that Lite's frozen shape has no place for: refused at
+#: resolve rather than walked past without it.
+UNSUPPORTED = "is not supported by Kraft Lite"
 #: Where expansion keeps a task's `extends` names, nearest first. Not a YAML key
 #: an author can write: it holds a NUL.
 _COMPONENTS = "\0components"
@@ -564,8 +567,10 @@ class _Validator:
                     self.task(escalation, f"{id}.escalation.{escalation.get('id')}")
                 base = node.get("on_base_changed")
                 if base is not None:
-                    if isinstance(base.get("on_conflict"), dict):
-                        self.shape(base["on_conflict"], f"{id}.on_base_changed.on_conflict")
+                    if base.get("on_conflict") is not None:
+                        raise self.fail(
+                            f"{id}.on_base_changed.on_conflict", f"on_conflict {UNSUPPORTED}"
+                        )
                     target = base.get("restart_from")
                     if seen.get(target) != "exec" and target != id:
                         raise self.fail(
@@ -599,8 +604,8 @@ class _Validator:
             _unique(self.fail, where, "task", step["tasks"])
             for task in step["tasks"]:
                 self.task(task, f"{where}.{task['id']}")
-            if isinstance(step.get("on_failure"), dict):
-                self.shape(step["on_failure"], f"{where}.on_failure")
+            if step.get("on_failure") is not None:
+                raise self.fail(f"{where}.on_failure", f"a step's own on_failure {UNSUPPORTED}")
 
     def task(self, task: dict, path: str) -> None:
         kind = task.get("kind")
@@ -620,8 +625,8 @@ class _Validator:
         for name in task.get("steering") or ():
             if name not in self.library.steering:
                 raise self.fail(path, f"selects no steering profile {name!r}")
-        if isinstance(task.get("on_failure"), dict):
-            self.shape(task["on_failure"], f"{path}.on_failure")
+        if task.get("on_failure") is not None:
+            raise self.fail(f"{path}.on_failure", f"a task's own on_failure {UNSUPPORTED}")
 
 
 def _unique(fail, path: str, what: str, items: list) -> None:
