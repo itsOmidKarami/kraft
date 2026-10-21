@@ -18,7 +18,7 @@ from kraft.config import ConfigError
 from kraft.executor.context import LaunchContext
 from kraft.worker import backends, ca, channel, reattach
 from kraft.worker.backends import docker as docker_backend
-from kraft.worker.sandbox import Checkout, SandboxNotReady
+from kraft.worker.sandbox import Checkout, SandboxNotReady, SandboxRefused
 
 _CHAIN = """
 - id: implementation
@@ -50,6 +50,8 @@ class Remote:
         self.wrapped_env: list[dict] = []
         #: What `owner_refusal` answers.
         self.foreign: str | None = None
+        #: The reason `wrap` raises `SandboxRefused` with, when set.
+        self.refuse: str | None = None
 
     def home(self, run_dirs, work_item_id):
         return run_dirs.base / "remote-home" / work_item_id
@@ -71,6 +73,8 @@ class Remote:
         return None
 
     def wrap(self, cmd, cwd, sandbox, results_dir, env=None, *, session_id, work_item_id, **kw):
+        if self.refuse:
+            raise SandboxRefused(self.refuse)
         self.wrapped_with.append(kw.get("ca_bundle"))
         self.wrapped_env.append(env)
         self.calls.append("wrap")
@@ -291,6 +295,30 @@ async def test_a_session_whose_backend_is_not_ready_stops_before_it_launches(
     assert remote.wrapped_with == []
     log = own_files(run_dirs, "s1").log.read_text()
     assert "roots could not be read" in log
+
+
+@pytest.mark.parametrize(
+    ("sandbox", "calls"),
+    [
+        ({"kind": "remote"}, []),
+        (
+            {"kind": "remote", "network": {"runtime": {"allow": ["a.io"]}}},
+            ["open_session", "close_session"],
+        ),
+    ],
+    ids=["no-network", "network-route-closed"],
+)
+async def test_a_refused_wrap_stops_the_session_as_config_error(
+    database, run_dirs, tmp_path, remote, channels, sandbox, calls
+):
+    remote.refuse = "this host cannot run the sandbox"
+    assert await _run_on_remote(database, run_dirs, tmp_path, sandbox) == "config_error"
+    assert remote.calls == calls
+    assert "this host cannot run the sandbox" in own_files(run_dirs, "s1").log.read_text()
+    row = database.read(
+        lambda c: c.execute("SELECT status FROM worker_sessions WHERE id = 's1'").fetchone()
+    )
+    assert row["status"] == "config_error"
 
 
 # --- network: the session's egress route -------------------------------------------------
@@ -724,3 +752,20 @@ async def test_a_setup_command_under_network_without_a_channel_or_route_never_ru
     assert ran == [] and "wrap" not in remote.calls
     if missing == "route":
         assert remote.calls[-1] == "close_session" and not remote.sock_path.exists()
+
+
+async def test_a_setup_command_whose_wrap_is_refused_never_runs(remote, tmp_path, monkeypatch):
+    remote.refuse = "this host cannot run the sandbox"
+    ran = []
+    monkeypatch.setattr(kraft_builtins, "_run_setup", lambda *a, **kw: ran.append(a))
+
+    with pytest.raises(RuntimeError, match="cannot run: this host cannot run"):
+        await kraft_builtins.run_setup_command(
+            tmp_path,
+            tmp_path,
+            entry_of({"setup_command": "true"}),
+            sandbox={"kind": "remote"},
+            checkout=Checkout(tmp_path, {}),
+        )
+
+    assert ran == []
