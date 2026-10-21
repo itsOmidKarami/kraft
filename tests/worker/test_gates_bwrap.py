@@ -33,9 +33,10 @@ from worker.test_egress_docker import _unavailable, short_run  # noqa: F401
 
 SANDBOX = {"kind": "os", "network": {"runtime": {"allow": ["x.io"]}}}
 SECRET = "kraft-test-secret-value"
-WAIT_S = 120
+WAIT_S = 60  # under pyproject's per-test timeout, so a finally still runs
 CHECKS = (
-    *("shim-works", "loopback-api", "kraft-home", "operator-home", "pid1-environ"),
+    *("shim-works", "loopback-api", "kraft-home", "daemon-run-dir", "operator-home"),
+    "pid1-environ",
     *("log-untouchable", "nested-userns", "shm-capped", "approve-refused", "commit-lands"),
     *("orphan-started", "no-orphans"),
 )
@@ -86,6 +87,8 @@ def daemon(short_run, tmp_path, monkeypatch):  # noqa: F811
     with _client(short_run.base, monkeypatch, templates_dir=tpl) as client:
         app = client.app
         seed_session()
+        # The daemon's own run dir (databases, token) is not under the Kraft home here.
+        (app.state.run_dirs.base / "mcp-token").write_text("secret\n")
         _force_node("w1", "implementation", "active")
         work = app.state.run_dirs.worktrees / "w1"
         git(repo, "worktree", "add", "-q", "-b", "kraft/t-w1", str(work))
@@ -163,6 +166,7 @@ check shim-works kraft view show
 curl --noproxy '*' -m 2 -s http://127.0.0.1:{d.api_port}/api/health >/dev/null 2>&1
 [ $? -eq 7 ]; echo "loopback-api $?" >> "$out"
 check kraft-home test ! -e {d.kraft_home}/run/mcp-token
+check daemon-run-dir test ! -e {d.run_dirs.base}/mcp-token
 check operator-home test ! -e {d.home}/.ssh/kraft-sentinel
 environ=$(tr '\\0' '\\n' < /proc/1/environ) || environ=KRAFT_TEST_SECRET
 ! printf %s "$environ" | grep -qE 'KRAFT_TEST_SECRET|^KRAFT_HOME='
@@ -232,12 +236,19 @@ while :; do sleep 0.2; done
 """,
         sid,
     )
-    _wait_for(daemon.work / "ready", "the agent")
-    assert daemon.client.post("/api/work-items/w1/pause").status_code == 200
-    status, _ = fut.result(WAIT_S)
+    try:
+        _wait_for(daemon.work / "ready", "the agent")
+        assert daemon.client.post("/api/work-items/w1/pause").status_code == 200
+        status, _ = fut.result(WAIT_S)
 
-    assert status == "paused"
-    assert files.result.read_text().strip() == "flushed"
+        assert status == "paused"
+        assert files.result.read_text().strip() == "flushed"
+    finally:  # a hang must not leave the agent's loop running
+        for p in _procs("sleep", "0.2"):
+            p.kill()
+        for p in psutil.process_iter(["cmdline"]):
+            if any("s-pause.sh" in a for a in p.info["cmdline"] or ()):
+                p.kill()
 
 
 @pytest.mark.e2e("bwrap")
