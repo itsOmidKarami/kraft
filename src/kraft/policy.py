@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import math
+import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -1212,6 +1213,17 @@ class SandboxPolicy(BaseModel):
         for path in value or ():
             if not (path.startswith("/") or path.startswith("~/")):
                 raise ValueError(f"{path!r} is not an absolute or ~/ path")
+        if value:
+            # Inside the validator: `host_view` is reached from `backends`,
+            # which imports this module.
+            from kraft.paths import kraft_home
+            from kraft.worker import host_view
+
+            home = Path(os.environ.get("HOME") or Path.home())
+            for path in value:
+                p = home / path[2:] if path.startswith("~/") else Path(path)
+                if why := host_view.protected_refusal(p, home, kraft_home()):
+                    raise ValueError(f"expose {path!r} is protected: {why}")
         return value or None
 
     @field_validator("resources")

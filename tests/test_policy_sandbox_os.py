@@ -49,9 +49,10 @@ def test_os_round_trips():
     ("expose", "error"),
     [
         (["x"], "'x' is not an absolute or ~/ path"),
+        (["~/.ssh"], "protected"),
         ([], None),
     ],
-    ids=["relative", "empty"],
+    ids=["relative", "protected", "empty"],
 )
 def test_expose_paths(expose, error):
     data = {**OS, "expose": expose}
