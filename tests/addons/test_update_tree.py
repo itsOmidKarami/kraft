@@ -621,7 +621,7 @@ DESCENDANTS = {
         _chain_dropped,
         [],
         [
-            "team@payments: warning: team: remove.chains: hotfix is not inherited from company; "
+            "team@payments: warning: remove.chains: hotfix is not inherited from company; "
             "it does nothing"
         ],
     ),

@@ -738,3 +738,23 @@ def test_versions_sort_by_semver_precedence():
         "2.0.0",
     ]
     assert sorted(reversed(ordered), key=review.precedence) == ordered
+
+
+def test_a_descendants_stale_remove_line_has_one_prefix(tmp_path):
+    """In a parent's review the warning names the descendant once: the
+    `<name>: ` that `stale_removals` writes is not said again."""
+    was = installed(tmp_path, "company", library=_BASE_TASKS, chains={"hotfix": chain("base")})
+    now = installed(tmp_path, "company", library=_BASE_TASKS)
+    child = {
+        "library": {"remove": {"chains": ["hotfix"]}},
+        "manifest_fields": {
+            "requires": {"kraft": "2", "harnesses": ["codex"], "addons": {was.id: "1"}}
+        },
+    }
+
+    _reach, content = review.descendant_lines("release@payments", extracted(**child), [was], [now])
+
+    assert content == [
+        "release@payments: warning: remove.chains: hotfix is not inherited from company; "
+        "it does nothing"
+    ]
