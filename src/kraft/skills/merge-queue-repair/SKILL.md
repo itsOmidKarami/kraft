@@ -28,11 +28,18 @@ So the failure comes from one or both of:
 If the prompt tells you to rebase this branch first, do that before anything
 else: the rest of this method assumes the branch already sits on the target.
 
-Read the failed jobs the prompt names, then their logs: open the pipeline from
-the prompt's link with the forge's own read-only CLI (`glab ci view`, `glab ci
-trace <job>`, `gh run view --log-failed`) or its web page. A log names the
-failing test or check far more precisely than a job name does; read it before
-you change anything.
+Read the failed jobs the prompt names, then their logs, from the pipeline or
+run the prompt links to (its id is the number at the end of that link) with
+the forge's own read-only CLI, or its web page:
+
+- GitLab: `glab ci get --pipeline-id <id> -F json` lists the train
+  pipeline's jobs, and `glab ci trace <job> --pipeline-id <id>` prints one
+  job's log. Always pass `--pipeline-id`: without it both read this branch's
+  latest pipeline, not the train's.
+- GitHub: `gh run view <run-id> --log-failed`.
+
+A log names the failing test or check far more precisely than a job name
+does; read it before you change anything.
 
 Then reproduce it where you can. Fetch the target branch and run the failing
 job's command on this branch combined with `origin/<base>`, the way the train

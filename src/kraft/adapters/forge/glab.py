@@ -89,10 +89,20 @@ _TRAIN_CAR_STATES: dict[str, QueueState] = {
     "skip_merged": "merged",
 }
 
-#: The three system notes `SystemNotes::MergeTrainService` writes when a merge
-#: request leaves a train without merging.
+#: The system notes `SystemNotes::MergeTrainService` writes when a merge
+#: request leaves a train without merging: removed from it (by a person when
+#: no reason follows), never added to it, or a person cancelling the add.
 _REMOVED_NOTE = "removed this merge request from the merge train"
 _ABORTED_NOTE = "aborted automatic add to merge train because "
+_CANCELLED_ADD_NOTE = "cancelled automatic add to merge train"
+#: The ones it writes when a merge request joins a train, or is set to join
+#: one once its pipeline succeeds. A leaving note older than these belongs to
+#: an earlier entry, not to this one.
+_ENQUEUE_NOTES = (
+    "started a merge train",
+    "added this merge request to the merge train",
+    "enabled automatic add to merge train",
+)
 
 
 class GlabCli(mr_ops.CliWaits):
@@ -736,8 +746,11 @@ class GlabCli(mr_ops.CliWaits):
                 return QueueRead()
             if status != 404:
                 raise
-            # GitLab destroys a car when it drops the merge request.
-            if str(view.get("state")) not in ("opened", "locked"):
+            # GitLab destroys a car when it drops the merge request -- and when
+            # it merges it: `locked` is a merge in progress, so a wait.
+            if str(view.get("state")) == "locked":
+                return QueueRead(kind="train", state="merging", url=str(view.get("web_url") or ""))
+            if str(view.get("state")) != "opened":
                 return QueueRead(kind="train", url=str(view.get("web_url") or ""))
             return await self._dropped(repo, view, str(iid))
         if not isinstance(car, dict):
@@ -773,12 +786,18 @@ class GlabCli(mr_ops.CliWaits):
             cause, reason = "not_added", note[len(_ABORTED_NOTE) :]
         elif note.startswith(_REMOVED_NOTE + " because "):
             reason = note[len(_REMOVED_NOTE + " because ") :]
-            if "conflict" in reason.lower():
+            # GitLab's reason may only say "not mergeable"; the merge request
+            # itself says whether that is a conflict.
+            if (
+                "conflict" in reason.lower()
+                or view.get("has_conflicts") is True
+                or view.get("detailed_merge_status") == "conflict"
+            ):
                 cause = "conflict"
             elif failure is not None and failure.state == "failed":
                 cause = "code"
-        elif note.rstrip(".") == _REMOVED_NOTE:
-            reason = _REMOVED_NOTE
+        elif note.rstrip(".") in (_REMOVED_NOTE, _CANCELLED_ADD_NOTE):
+            reason = note.rstrip(".")
         url = (failure.url if failure is not None else "") or str(view.get("web_url") or "")
         return QueueRead(
             kind="train",
@@ -792,7 +811,10 @@ class GlabCli(mr_ops.CliWaits):
     async def _removal_note(self, repo: Path, iid: str) -> str:
         """The newest system note that says the merge request left the train,
         else "". A note that cannot be read is no note: the drop itself was
-        already established."""
+        already established. Newest first, a note that it joined the train
+        reached before any leaving note is this entry's: GitLab has not
+        written why it left yet, and an older leaving note is an earlier
+        drop's, so no note either."""
         try:
             notes = await self._json(
                 repo,
@@ -809,8 +831,10 @@ class GlabCli(mr_ops.CliWaits):
             if not isinstance(note, dict) or not note.get("system"):
                 continue
             body = str(note.get("body") or "").strip()
-            if body.startswith((_ABORTED_NOTE, _REMOVED_NOTE)):
+            if body.startswith((_ABORTED_NOTE, _REMOVED_NOTE, _CANCELLED_ADD_NOTE)):
                 return body
+            if body.startswith(_ENQUEUE_NOTES):
+                return ""
         return ""
 
     async def close_mr(self, *, repo: Path, mr: MRRef) -> None:
@@ -840,7 +864,11 @@ class GlabCli(mr_ops.CliWaits):
         )
 
 
-_HTTP_STATUS = re.compile(r"\bHTTP (40[34])\b|\b(404 Not Found|403 Forbidden)\b", re.IGNORECASE)
+#: `HTTP 404`, or a status that GitLab's own message follows with its name
+#: later on the line ("404 Merge Train Merge Request Not Found").
+_HTTP_STATUS = re.compile(
+    r"\bHTTP (40[34])\b|\b(40[34])\b[^\n]*?\b(?:Not Found|Forbidden)\b", re.IGNORECASE
+)
 
 
 def _http_status(exc: ForgeError) -> int | None:

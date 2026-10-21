@@ -62,11 +62,29 @@ _GH_QUEUE_STATES: dict[str, QueueState] = {
     "MERGEABLE": "merging",
 }
 _NO_REASON = "dropped from the merge queue; GitHub gave no reason"
+#: A removal event this entry has, with no reason in it: GitHub says the pull
+#: request left the queue but not why, which is a person's to look at.
+_NO_REASON_GIVEN = "removed from the merge queue; GitHub gave no reason"
 #: A removal reason that names failed or timed-out checks or CI: the code's to
 #: repair even with no `merge_group` run to read (CI outside GitHub Actions).
-#: Whole words only, so "circumstantial" or "statuses" says nothing.
+#: Only a phrase that says the checks or CI failed or timed out: a bare "ci",
+#: "check" or "fail" is in "Removed by ci-bot" or "to check something" too, and
+#: reading those as a red build would re-queue what a person took out.
 _CHECKS_FAILED = re.compile(
-    r"\b(?:checks?|ci|fail(?:s|ed|ure|ing)?|timed\s+out|time-?outs?)\b", re.IGNORECASE
+    r"\b(?:"
+    r"(?:status\s+)?checks?\s+(?:(?:have|has)\s+)?(?:failed|timed\s+out)"
+    r"|(?:failed|failing)\s+(?:(?:required\s+)?status\s+)?checks?"
+    r"|checks?\s+time-?outs?"
+    r"|ci\s+(?:(?:has|have)\s+)?(?:failed|failure|timed\s+out)"
+    r"|failed\s+ci|ci\s+failures?"
+    r"|timed\s+out\s+waiting\s+for\s+(?:(?:required\s+)?status\s+)?checks?"
+    r")\b",
+    re.IGNORECASE,
+)
+#: A removal reason that names a person, or a removal by hand: theirs to
+#: decide, whatever the merge group's runs say.
+_REMOVED_BY_HAND = re.compile(
+    r"\b(?:removed\s+by|dequeued\s+by|manual(?:ly)?|by\s+hand)\b", re.IGNORECASE
 )
 #: The branch GitHub builds a queued pull request's merge group on.
 _QUEUE_BRANCH = "gh-readonly-queue/{base}/pr-{number}-"
@@ -568,20 +586,27 @@ class GhCli(mr_ops.CliWaits):
         removal = _newest_node(pull.get("removals"))
         # A removal older than the latest enqueue belongs to an earlier entry:
         # it says nothing about why this one is gone (ISO times sort as text).
-        # No reason at all is no removal event for this entry yet -- or a
-        # pull request about to show merged -- which `run._merge_dropped`
+        # No removal event at all for this entry yet -- or a pull request
+        # about to show merged -- is no reason, which `run._merge_dropped`
         # reads again next poll rather than as a person's removal.
-        reason = ""
-        if str(removal.get("createdAt") or "") >= enqueued_at:
-            reason = str(removal.get("reason") or "").strip()
+        removed = bool(removal) and str(removal.get("createdAt") or "") >= enqueued_at
+        reason = str(removal.get("reason") or "").strip() if removed else ""
         failure = await self._merge_group_failure(repo, base, mr.number, since=enqueued_at)
+        # GitHub's own words first: a person's removal is theirs whatever the
+        # runs say (a run that failed and was rebuilt green is no verdict on a
+        # removal by hand). The merge group's run is evidence only when the
+        # reason names failed checks or says nothing.
         cause: DropCause = "other"
-        if "conflict" in reason.lower():
+        if _REMOVED_BY_HAND.search(reason):
+            cause = "other"
+        elif "conflict" in reason.lower():
             cause = "conflict"
-        elif (failure is not None and failure.state == "failed") or _CHECKS_FAILED.search(reason):
+        elif _CHECKS_FAILED.search(reason) or (not reason and failure is not None):
             cause = "code"
-        if cause != "other":
+        if cause == "code":
             reason = reason or _NO_REASON
+        elif removed and not reason:
+            reason = _NO_REASON_GIVEN
         return QueueRead(
             kind="queue",
             state="dropped",
@@ -594,10 +619,16 @@ class GhCli(mr_ops.CliWaits):
     async def _merge_group_failure(
         self, repo: Path, base: str, number: int, *, since: str
     ) -> CIStatus | None:
-        """The newest failed `merge_group` run for pull request `number` made
+        """The newest settled `merge_group` run for pull request `number` made
         at or after `since` (the latest enqueue; "" when unknown), read as a
-        red `CIStatus`, else None. An earlier entry's failed run is not this
-        entry's: blaming it would send a repair at code already fixed.
+        red `CIStatus` when it failed, else None. An earlier entry's failed run
+        is not this entry's: blaming it would send a repair at code already
+        fixed. Nor is a failed run GitHub rebuilt since -- the group failed for
+        a pull request ahead, and the rebuild went green -- so only the newest
+        run is a verdict, whatever its conclusion. A cancelled run is no
+        verdict (`_GH_RED`), nor is one still running.
+
+        `gh run list` is repo-wide, so it reads a hundred runs, not a few.
 
         Best effort: a drop was already established, and a run that cannot be
         listed leaves GitHub's own removal reason as the only finding."""
@@ -612,7 +643,7 @@ class GhCli(mr_ops.CliWaits):
                     "--json",
                     "databaseId,headBranch,conclusion,url,createdAt",
                     "-L",
-                    "30",
+                    "100",
                 ],
                 "gh run list",
             )
@@ -621,24 +652,29 @@ class GhCli(mr_ops.CliWaits):
         if not isinstance(rows, list):
             return None
         prefix = _QUEUE_BRANCH.format(base=base, number=number)
-        run = next(
-            (
-                r
-                for r in rows
-                if isinstance(r, dict)
-                and str(r.get("headBranch") or "").startswith(prefix)
-                and str(r.get("conclusion") or "").lower() == "failure"
-                and str(r.get("createdAt") or "") >= since
-            ),
-            None,
-        )
-        if run is None:
+        settled = [
+            r
+            for r in rows
+            if isinstance(r, dict)
+            and str(r.get("headBranch") or "").startswith(prefix)
+            and str(r.get("conclusion") or "").upper() not in ("", "CANCELLED")
+            and str(r.get("createdAt") or "") >= since
+        ]
+        if not settled:
+            return None
+        # Newest first as `gh` lists them; `max` keeps the first of a tie.
+        run = max(settled, key=lambda r: str(r.get("createdAt") or ""))
+        conclusion = str(run.get("conclusion") or "").lower()
+        if conclusion.upper() not in _GH_RED:
             return None
         run_id = str(run.get("databaseId") or "")
         url = str(run.get("url") or "")
         jobs, failed_jobs = await self._run_failure(repo, run_id)
         return CIStatus(
-            state="failed", url=url, jobs=(f"run {run_id}: failure", *jobs), failed_jobs=failed_jobs
+            state="failed",
+            url=url,
+            jobs=(f"run {run_id}: {conclusion}", *jobs),
+            failed_jobs=failed_jobs,
         )
 
     async def _run_failure(

@@ -28,15 +28,21 @@ _TRAIN_PIPELINE = {
 }
 
 
-def _train_view(state: str = "opened", head_pipeline: dict | None = None) -> str:
+def _train_view(state: str = "opened", head_pipeline: dict | None = None, **fields) -> str:
     return json.dumps(
         {
             "iid": 7,
             "state": state,
             "head_pipeline": head_pipeline,
             "web_url": _MR_URL,
+            **fields,
         }
     )
+
+
+def _notes(*bodies: str) -> str:
+    """System notes as GitLab lists them, newest first."""
+    return json.dumps([{"id": 20 - n, "system": True, "body": b} for n, b in enumerate(bodies)])
 
 
 def _note(body: str, *, system: bool = True) -> str:
@@ -49,12 +55,14 @@ def _dropped(
     *,
     notes: str | None = None,
     state: str = "opened",
+    **view,
 ) -> dict:
     """A train project whose car for !7 is gone (404), with `note` the newest
-    note on the merge request (or `notes`, the whole list as GitLab sends it)."""
+    note on the merge request (or `notes`, the whole list as GitLab sends it)
+    and `view` more of the merge request's own fields."""
     return {
         "api projects/:id": TRAIN_PROJECT,
-        "mr view": _train_view(state, head_pipeline),
+        "mr view": _train_view(state, head_pipeline, **view),
         _TRAIN_CAR: NOT_FOUND,
         _TRAIN_NOTES: notes or (_note(note) if note is not None else "[]"),
         "ci get": GLAB_CI_GET_FAILED,
@@ -191,6 +199,33 @@ def _car(status: str) -> dict:
             None,
             id="closed-is-not-dropped",
         ),
+        # `locked` is GitLab merging it: the car is gone, the merge is not.
+        pytest.param(
+            _dropped(_REMOVED + "the pipeline did not succeed", state="locked"),
+            forge.QueueRead(kind="train", state="merging", url=_MR_URL),
+            None,
+            id="locked-is-merging-not-dropped",
+        ),
+        # GitLab's reason need not say "conflict"; the merge request does.
+        *(
+            pytest.param(
+                _dropped(_REMOVED + "the merge request is not mergeable", **view),
+                forge.QueueRead(
+                    kind="train",
+                    state="dropped",
+                    cause=cause,
+                    reason="the merge request is not mergeable",
+                    url=_TRAIN_PIPELINE["web_url"],
+                ),
+                "failed",
+                id=f"not-mergeable-{id}",
+            )
+            for view, cause, id in [
+                ({"has_conflicts": True}, "conflict", "has-conflicts"),
+                ({"detailed_merge_status": "conflict"}, "conflict", "conflict-status"),
+                ({"has_conflicts": False, "detailed_merge_status": "mergeable"}, "code", "clean"),
+            ]
+        ),
         pytest.param(
             _dropped(
                 _REMOVED + "the pipeline was cancelled",
@@ -229,6 +264,65 @@ def _car(status: str) -> dict:
             ),
             None,
             id="never-added",
+        ),
+        pytest.param(
+            _dropped("cancelled automatic add to merge train", None),
+            forge.QueueRead(
+                kind="train",
+                state="dropped",
+                cause="other",
+                reason="cancelled automatic add to merge train",
+                url=_MR_URL,
+            ),
+            None,
+            id="a-person-cancelled-the-add",
+        ),
+        # Newest first, a note that it joined the train before any leaving
+        # note: GitLab has not written why this entry left, and the older
+        # removal is an earlier drop's. No reason yet, so a wait.
+        *(
+            pytest.param(
+                _dropped(
+                    None,
+                    notes=_notes(joined, _REMOVED + "the pipeline did not succeed"),
+                ),
+                forge.QueueRead(
+                    kind="train",
+                    state="dropped",
+                    cause="other",
+                    reason="",
+                    url=_TRAIN_PIPELINE["web_url"],
+                ),
+                "failed",
+                id=f"stale-removal-before-{id}",
+            )
+            for joined, id in [
+                ("started a merge train", "started"),
+                ("added this merge request to the merge train at position 2", "added"),
+                (
+                    "enabled automatic add to merge train when the pipeline for abc123 succeeds",
+                    "auto-add",
+                ),
+            ]
+        ),
+        pytest.param(
+            _dropped(
+                None,
+                notes=_notes(
+                    _REMOVED + "the pipeline did not succeed",
+                    "started a merge train",
+                    "removed this merge request from the merge train",
+                ),
+            ),
+            forge.QueueRead(
+                kind="train",
+                state="dropped",
+                cause="code",
+                reason="the pipeline did not succeed",
+                url=_TRAIN_PIPELINE["web_url"],
+            ),
+            "failed",
+            id="this-entry-s-removal-after-its-enqueue",
         ),
         # GitLab has not written its system note yet: no reason, which the
         # merge node reads as "look again next poll", never as a person's.
@@ -300,8 +394,17 @@ async def test_merge_queue_does_not_read_a_failed_call_as_a_drop(
 
 
 @pytest.mark.parametrize("iid", [404, 1404])
-async def test_merge_queue_reads_the_forges_own_404_as_a_drop_whatever_the_iid(cli, tmp_path, iid):
-    cli.stub("glab", routes=_iid_routes(iid, NOT_FOUND), default=FAIL)
+@pytest.mark.parametrize(
+    "not_found",
+    [
+        pytest.param(NOT_FOUND, id="404-not-found"),
+        pytest.param(FailWith("glab: 404 Merge Train Merge Request Not Found"), id="gitlab-words"),
+    ],
+)
+async def test_merge_queue_reads_the_forges_own_404_as_a_drop_whatever_the_iid(
+    cli, tmp_path, iid, not_found
+):
+    cli.stub("glab", routes=_iid_routes(iid, not_found), default=FAIL)
 
     got = await forge.GlabCli().merge_queue(repo=tmp_path, branch="kraft/abc", base="main")
 
