@@ -268,6 +268,36 @@ def _run(host, base, executable, path_dirs=(), visible=()):
             "tool",
             id="shebang-interpreter-missing",
         ),
+        pytest.param(
+            [("~/tc/bin/tool", "#!/usr/bin/env FOO=1 sh\n")],
+            "tool",
+            ["~/tc/bin"],
+            [],
+            ["~/tc"],
+            None,
+            "tool",
+            id="env-assignment-skipped",
+        ),
+        pytest.param(
+            [("~/tc/bin/tool", "#!/usr/bin/env no-such-interp-xyz\n")],
+            "tool",
+            ["~/tc/bin"],
+            [],
+            NotFound,
+            None,
+            "tool",
+            id="env-target-missing",
+        ),
+        pytest.param(
+            [("~/dotlocal/bin/uv", None), ("~/.local", "L:~/dotlocal")],
+            "uv",
+            ["~/.local/bin"],
+            [],
+            ["~/dotlocal/bin"],
+            None,
+            "uv",
+            id="local-is-symlink",
+        ),
     ],
 )
 def test_install_roots(host, files, executable, path_dirs, visible, roots, links, argv0):
@@ -348,3 +378,36 @@ def test_ca_mounts(host, where, kept):
     (home / "link.pem").symlink_to(home / "ca.pem")
     got = host_view.ca_mounts({"SSL_CERT_FILE": str(home / where)}, home, kraft)
     assert got == ([home / where] if kept else [])
+
+
+@pytest.mark.parametrize(
+    ("files", "executable", "error"),
+    [
+        pytest.param(
+            [("~/Documents/secret/bin/tool", None), ("./evil", "L:~/Documents/secret/bin/tool")],
+            "./evil",
+            Refused,
+            id="checkout-via-symlink-refused",
+        ),
+        pytest.param(
+            [("./script", "#!~/.mozilla/ff/x\n"), ("~/.local/bin/tool", "L:./script")],
+            "tool",
+            None,
+            id="final-in-checkout-no-shebang",
+        ),
+    ],
+)
+def test_checkout_by_any_spelling(host, tmp_path, files, executable, error):
+    """The checkout is a symlinked directory; a path reaching it through the
+    link, or a link leading into it, is still the repo's own."""
+    home, kraft, checkout = host
+    alias = tmp_path / "alias"
+    alias.symlink_to(checkout)
+    _build(host, files)
+    search = f"{home / '.local/bin'}:{SYSTEM_PATH}"
+    args = (executable, search, alias, checkout, home, kraft)
+    if error:
+        with pytest.raises(error):
+            host_view.resolve(*args)
+    else:
+        assert host_view.resolve(*args).roots == ()

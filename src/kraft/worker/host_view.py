@@ -114,9 +114,7 @@ def _root_of(final: Path, home: Path, kraft_home: Path) -> Path | None:
     root = final.parent
     if root.name == "bin":
         up = root.parent
-        if up not in (Path("/"), home, (home / ".local").resolve()) and not protected_refusal(
-            up, home, kraft_home
-        ):
+        if up not in (Path("/"), home) and not protected_refusal(up, home, kraft_home):
             root = up
     if why := protected_refusal(root, home, kraft_home):
         raise Refused(f"cannot show {final} to the sandbox: {why}; add its toolchain with expose")
@@ -179,13 +177,16 @@ def resolve(
     hops: list[tuple[Path, Path]] = []
     cur_hops, final = _expand(path)
     hops += cur_hops
-    if _within(Path(os.path.abspath(path)), checkout):
+    # By its real spelling: the checkout is resolved, and a path may reach it
+    # through a symlinked directory.
+    named = Path(os.path.realpath(path.parent)) / path.name
+    if _within(named, checkout):
         if not any(_within(final, d) for d in shown):
             raise Refused(
                 f"{executable} leads to {final}, outside the sandbox's view; "
                 "add its directory to the sandbox's expose list"
             )
-    else:
+    elif not _within(final, checkout):
         targets = [final]
         if interp := _interpreter(final, search_path):
             more, interp_final = _expand(interp)
