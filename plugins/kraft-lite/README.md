@@ -233,9 +233,10 @@ one never started no further than `running`.
 done: merged, or in `main` mode merged or ready to merge. The refusal names the
 slices that are not.
 
-`import` refuses a directory with no `records.jsonl`, naming the path. It ranks
-decisions as it ranks records, so a held copy never takes back an answer given
-where the clock runs behind.
+`import` refuses a directory with no `records.jsonl`, naming the path, and a
+chain id that `start` would not mint (`kl-` and 8 of `0-9a-f`), before it reads
+or writes a file. It ranks decisions as it ranks records, so a held copy never
+takes back an answer given where the clock runs behind.
 
 `approve --slices` also refuses a task listed twice in one slice, a slice
 named twice in one `after`, and a key that is not 1 to 40 lowercase letters,

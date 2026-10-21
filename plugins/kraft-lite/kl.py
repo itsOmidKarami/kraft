@@ -130,6 +130,23 @@ def new_chain_id() -> str:
     return f"kl-{uuid.uuid4().hex[:8]}"
 
 
+#: The shape `new_chain_id` mints. A chain id names files under `.kraft-lite/` and
+#: in an export, and one from outside this process - an export's epic, a store
+#: written by hand or through bd - could hold `..` or a `/`. Every path built
+#: from one goes through `_checked`, which refuses anything else.
+CHAIN_ID = re.compile(r"kl-[0-9a-f]{8}")
+
+
+def _checked(chain_id: str) -> str:
+    """`chain_id`, or a `SystemExit` before it reaches a path."""
+    if not isinstance(chain_id, str) or not CHAIN_ID.fullmatch(chain_id):
+        raise SystemExit(
+            f"kraft-lite: {chain_id!r} is not a chain id: kl- and 8 of 0-9, a-f, "
+            "as `start` mints them"
+        )
+    return chain_id
+
+
 def materialize(chain: dict, title: str, chain_id: str) -> list[dict]:
     """The epic, then one record per node, linked so each waits on the last."""
     epic = {
@@ -534,7 +551,7 @@ DEFAULT_CHAIN = Path(__file__).parent / "chains" / "default.json"
 
 
 def _frozen_path(root: Path, chain_id: str) -> Path:
-    return root / STATE_DIR / "chains" / f"{chain_id}.json"
+    return root / STATE_DIR / "chains" / f"{_checked(chain_id)}.json"
 
 
 def _chain(root: Path, path: Path | None, chain_id: str | None = None) -> dict:
@@ -1349,7 +1366,7 @@ def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dic
 def _decisions_path(root: Path, chain_id: str) -> Path:
     """The decisions log. Not the issue store, even with bd: what the controller
     decided for the human is a log for the human to read, not work to track."""
-    return root / STATE_DIR / "decisions" / f"{chain_id}.jsonl"
+    return root / STATE_DIR / "decisions" / f"{_checked(chain_id)}.jsonl"
 
 
 def _decide(root: Path, everything: list[dict], chain_id: str, args) -> dict:
@@ -1453,9 +1470,9 @@ def _export(root: Path, everything: list[dict], chain_id: str, to: Path) -> dict
         *([run] if run else []),
         *slice_records(everything, chain_id),
     ]
-    template = to / "chains" / f"{chain_id}.json"
-    template.parent.mkdir(parents=True, exist_ok=True)
     frozen = _frozen_path(root, chain_id)
+    template = to / "chains" / frozen.name
+    template.parent.mkdir(parents=True, exist_ok=True)
     if frozen.is_file():
         shutil.copyfile(frozen, template)
     else:
@@ -1549,10 +1566,11 @@ def _import(root: Path, store, source: Path) -> dict:
             f"it holds {len(epics)} chain epics ({', '.join(epics) or 'none'})"
         )
     chain_id = epics[0]
-    template = source / "chains" / f"{chain_id}.json"
+    # Built first: it is what refuses an id `start` never minted, before any read.
+    frozen = _frozen_path(root, chain_id)
+    template = source / "chains" / frozen.name
     if not template.is_file():
         raise SystemExit(f"kraft-lite: the export has no frozen template {template}")
-    frozen = _frozen_path(root, chain_id)
     if not frozen.is_file():
         frozen.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(template, frozen)

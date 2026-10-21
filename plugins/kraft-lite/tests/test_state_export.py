@@ -378,6 +378,18 @@ def test_import_works_with_two_unfinished_chains_present(walk, kl_cli, tmp_path)
     assert len(kl_cli(there, "chains")) == 3
 
 
+#: Chain ids `start` never mints, each as an export's epic would carry it. The
+#: climbs are spelled `"../" * n`: the plugin's own check refuses the literal.
+BAD_CHAIN_IDS = {
+    "id_climbs_out": "../" * 2 + "x",
+    "id_climbs_out_after_a_real_one": "kl-1234abcd/" + "../" * 3 + "x",
+    "id_uppercase": "kl-1234ABCD",
+    "id_too_short": "kl-1234abc",
+    "id_too_long": "kl-1234abcd0",
+    "id_trailing_newline": "kl-1234abcd\n",
+}
+
+
 @pytest.mark.parametrize(
     "problem, named",
     [
@@ -387,6 +399,12 @@ def test_import_works_with_two_unfinished_chains_present(walk, kl_cli, tmp_path)
         pytest.param("no_epic", "holds 0 chain epics", id="no_epic"),
         pytest.param("two_epics", "holds 2 chain epics", id="two_epics"),
         pytest.param("no_template", "no frozen template", id="no_template"),
+        # The id names files under `.kraft-lite/`, so only the shape `start` mints
+        # is taken: anything else is refused before a file is read or written.
+        *[
+            pytest.param(problem, f"{bad!r} is not a chain id: kl- and 8 of 0-9, a-f", id=problem)
+            for problem, bad in BAD_CHAIN_IDS.items()
+        ],
     ],
 )
 def test_import_refuses_an_export_that_names_no_single_chain(problem, named, kl_cli, tmp_path):
@@ -397,18 +415,66 @@ def test_import_refuses_an_export_that_names_no_single_chain(problem, named, kl_
     if problem == "no_epic":
         (out / "records.jsonl").write_text("")
     chain = json.loads(kl.DEFAULT_CHAIN.read_text())
-    epics = {"two_epics": ["kl-aaaa", "kl-bbbb"], "no_template": ["kl-aaaa"]}
-    for chain_id in epics.get(problem, []):
+    epics = {"two_epics": ["kl-aaaaaaaa", "kl-bbbbbbbb"], "no_template": ["kl-aaaaaaaa"]}
+    for chain_id in epics.get(problem, [BAD_CHAIN_IDS.get(problem)]):
+        if chain_id is None:
+            continue
         kl.append_jsonl(out / "records.jsonl", kl.materialize(chain, "t", chain_id))
         if problem != "no_template":
             (out / "chains").mkdir(exist_ok=True)
-            (out / "chains" / f"{chain_id}.json").write_text(json.dumps(chain))
+            # The template sits where the id points, as an export made to escape would.
+            template = out / "chains" / f"{chain_id}.json"
+            template.parent.mkdir(parents=True, exist_ok=True)
+            template.write_text(json.dumps(chain))
+    before = files_under(tmp_path)
 
     refused = kl_cli(there, "import", "--from", str(out), ok=False)
 
     assert "Traceback" not in refused.stderr
     assert named.format(out=out) in refused.stderr
-    assert not (there / ".kraft-lite").exists()
+    assert files_under(tmp_path) == before and not (there / ".kraft-lite").exists()
+
+
+@pytest.mark.parametrize("bad", BAD_CHAIN_IDS.values(), ids=BAD_CHAIN_IDS.keys())
+@pytest.mark.parametrize("build", [kl._frozen_path, kl._decisions_path], ids=lambda f: f.__name__)
+def test_no_path_is_built_from_a_chain_id_start_never_minted(build, bad, tmp_path):
+    with pytest.raises(SystemExit) as refused:
+        build(tmp_path, bad)
+    assert f"{bad!r} is not a chain id" in str(refused.value)
+    assert build(tmp_path, "kl-1234abcd").parent.parent == tmp_path / ".kraft-lite"
+
+
+@pytest.mark.parametrize(
+    "verb",
+    [
+        ["state"],
+        ["close"],
+        ["slices"],
+        ["decide", "--question", "q", "--why", "w", "--answer", "a"],
+        ["decisions"],
+        ["export", "--to", "out"],
+    ],
+    ids=lambda verb: verb[0],
+)
+def test_a_stored_chain_id_that_start_never_minted_reaches_no_path(verb, kl_cli, tmp_path):
+    """A store written by hand, or by another tool through bd, can hold any epic
+    id; every verb that builds a path from it refuses before reading or writing.
+    An absolute id is the one that walks: `chain_index` groups a chain under the
+    id's prefix before its first `.`, so one holding `..` has no nodes."""
+    (here,) = dirs(tmp_path, "here")
+    evil = str(tmp_path / "evil")
+    assert "." not in evil, "a `.` in the temporary path would hide the chain's nodes"
+    chain = json.loads(kl.DEFAULT_CHAIN.read_text())
+    records = kl.materialize(chain, "t", evil)
+    records[0]["status"] = "closed"
+    kl.append_jsonl(here / ".kraft-lite" / "chain.jsonl", records)
+    before = files_under(tmp_path)
+
+    refused = kl_cli(here, *verb, ok=False)
+
+    assert f"{evil!r} is not a chain id" in refused.stderr
+    assert "Traceback" not in refused.stderr
+    assert files_under(tmp_path) == before
 
 
 @pytest.mark.parametrize("backend", ["jsonl", "bd"])
