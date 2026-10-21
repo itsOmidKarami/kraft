@@ -165,7 +165,7 @@ on.slice.test.run:
 SMALL_REGISTRY = "on.spec.requested:\n  kind: prompt\n  prompt: Write the spec.\n"
 
 #: What `REGISTRY` becomes. The two hooks V1 has no task for are dropped, and so
-#: is `on.slice.test.run`, whose prompt is the packaged slice default word for word.
+#: are the two slice hooks, whose bindings are the packaged slice defaults word for word.
 EXPECTED_BINDINGS = {
     "tasks": {
         "spec_author": {
@@ -246,24 +246,13 @@ EXPECTED_BINDINGS = {
             "prompt": "Watch the merge until it lands or fails, then report which.",
         },
     },
-    "slice": {
-        "tasks": {
-            "implementer": {
-                "kind": "skill",
-                "skill": "superpowers:subagent-driven-development",
-                "prompt": (
-                    "Implement the slice's tasks with one subagent per task, each working test "
-                    "first. After each task run a spec-compliance review and then a code-quality "
-                    "review, with a capped fix round. Run independent tasks in parallel, each in "
-                    "its own isolated worktree. Set a model explicitly on every subagent. Stop "
-                    "after the last task's review: no final whole-branch review and no finishing "
-                    "or merge step, since on.review.local.run and open_mr are those."
-                ),
-            },
-        },
-    },
 }
-DROPPED = ["on.env.prepare", "on.repos.scan", "on.slice.test.run"]
+DROPPED = [
+    "on.env.prepare",
+    "on.repos.scan",
+    "on.slice.implementation.start",
+    "on.slice.test.run",
+]
 
 TEMPLATE = "kl-aaaaaaaa"
 NODES = list(kl_migrate.LEGACY_NODES)
@@ -285,6 +274,7 @@ def legacy_run(
     template: str = "default",
     chain_id: str = TEMPLATE,
     sliced: bool = False,
+    keep_epic: bool = True,
 ) -> str:
     """A run as the pre-V1 plugin left it: frozen on the legacy `template`, the
     nodes before `at` closed, `at` in `state`, the rest open. Its gate node
@@ -340,7 +330,7 @@ def legacy_run(
                 "dependencies": [],
             }
         )
-    kl.append_jsonl(cwd / ".kraft-lite" / "chain.jsonl", records)
+    kl.append_jsonl(cwd / ".kraft-lite" / "chain.jsonl", records if keep_epic else records[1:])
     return chain_id
 
 
@@ -506,6 +496,18 @@ def test_emitted_yaml_reads_back(data):
             {"node": "verification", "status": "open", "kind": "exec", "attempt": 0, "note": ""},
             id="blocked_where_v1_has_no_gate",
         ),
+        # Blocked ad hoc at a gate its node does not have: nothing was done for the
+        # work_brief yet, so it runs, rather than being marked done behind a gate.
+        pytest.param(
+            {"at": "open_mr", "state": "blocked", "gate": "ad_hoc", "waited": 30},
+            {"node": "work_brief", "status": "open", "kind": "exec", "attempt": 0, "note": ""},
+            id="blocked_ad_hoc_at_open_mr",
+        ),
+        pytest.param(
+            {"at": "spec", "state": "blocked", "gate": "plan_approval"},
+            {"node": "spec", "status": "open", "kind": "exec", "attempt": 0, "note": ""},
+            id="blocked_at_another_nodes_gate",
+        ),
         pytest.param(
             {"at": "implementation", "attempt": 1, "note": "Rejected: tests are flaky"},
             {
@@ -570,6 +572,11 @@ def test_legacy_run_carried(legacy, expected, kl_cli, tmp_path):
     "legacy, named",
     [
         pytest.param({"sliced": True}, f"{TEMPLATE} (it is sliced)", id="sliced"),
+        pytest.param(
+            {"keep_epic": False},
+            f"{TEMPLATE} (its chain record is missing)",
+            id="no_epic",
+        ),
         pytest.param(
             {"template": "slice"}, f"{TEMPLATE} (it is a slice's child chain)", id="slice_child"
         ),
@@ -697,3 +704,21 @@ def test_a_v1_run_is_left_alone(walk, kl_cli, tmp_path):
     assert [m["from"] for m in moved] == [legacy]
     after = stored(tmp_path)
     assert all(after[i] == r for i, r in before.items() if not i.startswith(legacy))
+
+
+def test_an_interrupted_migrate_is_finished_by_running_it_again(kl_cli, tmp_path):
+    done, interrupted = tmp_path / "done", tmp_path / "interrupted"
+    for cwd in (done, interrupted):
+        (cwd / ".kraft-lite").mkdir(parents=True)
+        (cwd / ".kraft-lite" / "registry.yaml").write_text(REGISTRY)
+    expected = kl_cli(done, "migrate")
+    # As a crash between writing the bindings and renaming the registry leaves it.
+    (interrupted / ".kraft-lite" / "bindings.yaml").write_text(
+        (done / ".kraft-lite" / "bindings.yaml").read_text()
+    )
+
+    resumed = kl_cli(interrupted, "migrate")
+
+    assert resumed == expected
+    assert snapshot(interrupted) == snapshot(done)
+    assert not (interrupted / ".kraft-lite" / "registry.yaml").exists()

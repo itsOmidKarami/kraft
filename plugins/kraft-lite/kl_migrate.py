@@ -8,12 +8,19 @@ refused: finish it on the previous Kraft Lite version, or start again.
 
 `migrate(host, root, store)` takes `host`, the `kl` module that is running, for
 the record helpers and label names; `kl` imports this module, so this one
-cannot import it back.
+cannot import it back. What it relies on in `kl` (rename one and this breaks):
+- labels and settings: `ATTEMPT_LABEL`, `BLOCKED_LABEL`, `CHAIN_LABEL`, `FORMAT`,
+  `GATE_LABEL`, `NODE_LABEL`, `SPENT_LABEL`, `STATE_DIR`, `WAITED_LABEL`, `CHAIN_ID`;
+- record helpers: `bank_wait`, `chain_index`, `label_value`, `run_record`,
+  `set_label`, `slice_records`, `new_chain_id`;
+- private helpers: `_freeze_chain`, `_frozen_path`, `_note`, `_read_json`,
+  `_start_records`.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import tempfile
@@ -28,6 +35,14 @@ REGISTRY = "registry.yaml"
 MIGRATED_REGISTRY = "registry.yaml.migrated"
 #: Written on every legacy record `migrate` closes, naming the run that replaces it.
 MIGRATED_LABEL = "kraft-migrated-to:"
+#: The gate each legacy node held its human at (`gate_after` in the legacy chain).
+#: A node blocked at any other name was blocked ad hoc, before its work was done.
+LEGACY_GATES = {
+    "spec": "spec_approval",
+    "plan": "plan_approval",
+    "chain_review": "chain_finalized",
+    "human_review": "human_review_approval",
+}
 #: What a refused legacy run is told.
 FINISH_OR_RESTART = "finish it on the previous Kraft Lite version, or start again"
 
@@ -96,19 +111,16 @@ def _bundled_default(section: str, key: str) -> dict | None:
 
 
 def _is_default(entry: dict, default: dict | None) -> bool:
-    """Whether a `prompt` binding says what the bundled default for its key already says."""
-    return (
-        default is not None
-        and default.get("kind") == "prompt"
-        and entry.get("kind") == "prompt"
-        and set(entry) == {"kind", "prompt"}
-        and _norm(entry["prompt"]) == _norm(default["prompt"])
-    )
+    """Whether a binding says what the bundled default for its key already says:
+    the same kind and fields, prompts compared with their whitespace folded."""
+    if default is None or set(entry) != set(default):
+        return False
+    return all(_norm(entry[key]) == _norm(default[key]) for key in default)
 
 
 def convert_registry(registry: object) -> tuple[dict, list[str]]:
     """The bindings a legacy registry becomes, and the hooks left out of them: those
-    V1 has no task for, and those whose binding is the bundled default's own.
+    V1 has no task for, and those whose binding is the bundled default's own, of any kind.
     A hook that is not in `LEGACY_HOOKS` is a `SystemExit` naming it."""
     if registry is None:
         return {}, []
@@ -212,6 +224,10 @@ def _checked(bindings: dict) -> str:
 # -- the runs -----------------------------------------------------------------
 
 
+def _same_file(path: Path, text: str) -> bool:
+    return path.is_file() and path.read_text() == text
+
+
 def _label(host, record: dict, prefix: str, value: str) -> None:
     record["labels"] = host.set_label(record, prefix, value)["labels"]
 
@@ -253,6 +269,17 @@ def _legacy_runs(host, root: Path, everything: list[dict]) -> tuple[list[dict], 
             found.append({"id": chain_id, "records": records})
             continue
         refused.append(f"{chain_id} ({why})")
+    # Node records whose epic is gone: no chain lists them, so they would be left unfinished.
+    known = host.chain_index(everything)
+    orphans = {
+        r["id"].split(".")[0]
+        for r in everything
+        if host.label_value(r, host.NODE_LABEL) and r["status"] != "closed" and "." in r["id"]
+    } - set(known)
+    for owner in sorted(orphans):
+        frozen = _frozen(host, root, owner) if host.CHAIN_ID.fullmatch(owner) else None
+        if frozen is not None and frozen.get("format") != host.FORMAT:
+            refused.append(f"{owner} (its chain record is missing)")
     return found, refused
 
 
@@ -269,8 +296,11 @@ def _carry(host, legacy: dict, title: str, chain: dict) -> tuple[str, list[dict]
         before = old.get(legacy_id)
         status = before["status"] if before else "open"
         gate = next((i for i, n in enumerate(mapped) if kinds[n] == "gate"), None)
-        if status == "blocked" and gate is None:
-            # Nothing in V1 to hold it: the node runs again, its wait banked.
+        if status == "blocked" and (
+            gate is None or host.label_value(before, host.GATE_LABEL) != LEGACY_GATES.get(legacy_id)
+        ):
+            # Nothing in V1 to hold it, or held ad hoc before its work was done:
+            # the node runs, its wait banked.
             status = "open"
         states = ["open"] * len(mapped)
         if status == "closed":
@@ -283,7 +313,11 @@ def _carry(host, legacy: dict, title: str, chain: dict) -> tuple[str, list[dict]
             continue
         if status != "blocked":
             before = host.bank_wait(before)
-        first, held = new[mapped[0]], new[mapped[0 if gate is None else gate]]
+        # The wait sits on the gate that was held, or on the node that runs again.
+        first, held = (
+            new[mapped[0]],
+            new[mapped[gate if status != "open" and gate is not None else 0]],
+        )
         for prefix in (host.ATTEMPT_LABEL, host.SPENT_LABEL):
             value = host.label_value(before, prefix)
             if value is not None:
@@ -311,15 +345,23 @@ def migrate(host, root: Path, store) -> dict:
     bindings: dict = {}
     dropped: list[str] = []
     text = None
+    written_already = False
     if registry.is_file():
-        if bindings_path.is_file():
+        try:
+            bindings, dropped = convert_registry(kl_yaml.read(registry))
+            text = _checked(bindings)
+        except SystemExit:
+            if not bindings_path.is_file():
+                raise
+        # What an interrupted migrate leaves: the bindings written, the registry
+        # not yet renamed. Exactly what this would write, so finish it.
+        written_already = text is not None and _same_file(bindings_path, text)
+        if bindings_path.is_file() and not written_already:
             raise _refuse(
                 f"{kl_bindings.BINDINGS} and {host.STATE_DIR}/{REGISTRY} both exist: migrate "
                 f"would overwrite the bindings. Move {kl_bindings.BINDINGS} aside, run migrate, "
                 "and merge the two by hand"
             )
-        bindings, dropped = convert_registry(kl_yaml.read(registry))
-        text = _checked(bindings)
 
     everything = store.load()
     legacy, refused = _legacy_runs(host, root, everything)
@@ -334,7 +376,7 @@ def migrate(host, root: Path, store) -> dict:
     if legacy:
         chain = kl_chains.resolve_bundled()
         for run in legacy:
-            epic = next(r for r in run["records"] if host.label_value(r, host.CHAIN_LABEL))
+            epic = next(r for r in run["records"] if r["id"] == run["id"])
             new_id, records = _carry(host, run, epic.get("title", ""), chain)
             moved.append({"from": run["id"], "to": new_id, "chain": chain, "records": records})
             closed = [
@@ -348,8 +390,12 @@ def migrate(host, root: Path, store) -> dict:
     if written:
         store.write(written)
     if text is not None:
-        bindings_path.parent.mkdir(parents=True, exist_ok=True)
-        bindings_path.write_text(text)
+        if not written_already:
+            bindings_path.parent.mkdir(parents=True, exist_ok=True)
+            # Whole or not at all: a half-written file is not what a rerun can finish.
+            partial = bindings_path.with_name(bindings_path.name + ".tmp")
+            partial.write_text(text)
+            os.replace(partial, bindings_path)
         registry.rename(state / MIGRATED_REGISTRY)
 
     result: dict = {"bindings": {}, "chains": [{"from": m["from"], "to": m["to"]} for m in moved]}
