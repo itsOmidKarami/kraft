@@ -9,6 +9,8 @@ endless. No service, no port, no database process.
     /kraft-lite:next            # run the next node; also the resume point
     /kraft-lite:gate            # approve or reject
     /kraft-lite:status          # where the chain got to
+    /kraft-lite:run-slices      # controller: build a large plan as slices, one session each
+    /kraft-lite:build-slice     # child: build one slice for its controller
 
 ## Install
 
@@ -71,12 +73,152 @@ Lite refuses to guess which run a gate belongs to. Frozen chain templates live i
 `.kraft-lite/chains/<chain-id>.json`, one per run, so two chains can walk
 different templates side by side.
 
+## Slices: one plan, several sessions
+
+A large plan strains one session: one context carries every task, and nothing
+runs in parallel. Slices split the plan across sessions. The session that walks
+the feature chain becomes the **controller**. Each slice is one or more plan
+tasks, built by its own **child** session.
+
+### When to slice
+
+Slice at the `chain_review` node, when the approved plan is large. The
+controller reads the plan's `## Slices` section, whose bullets look like
+`- **Slice 2: <title>.** Tasks 3-5. Comes after slice 1.` A plan without that
+section gets a proposed grouping. Either way the proposal shows which slices
+run in parallel, and gives each helper or fixture that two slices would create
+one owner.
+
+The proposal is shown at the `chain_finalized` gate, and your answer is the
+approval. A small plan is not sliced: the controller says so, and the chain
+continues as one. Slicing is accepted only at that gate. A rejection leaves no
+slice behind.
+
+### Controller and children
+
+The controller starts a child for each slice whose "comes after" slices are done,
+so independent slices run in parallel. A child walks `chains/slice.json`:
+`implementation`, `verify`, `open_mr` and `mr_checks`. It runs scoped tests
+only, and CI runs the full suite.
+
+Where Lite would stop for you, the child asks the controller, never you. The
+controller answers, reviews each child's pull request, merges, archives the
+finished child, and keeps the run's state. Every subagent and child gets a
+model set on purpose: the cheapest for reading and relaying, the middle for
+implementation and child sessions, the strongest for reviews and judgment calls.
+
+The controller does not start a child until you have finished giving
+instructions for the run. Say "go" when you have.
+
+### Two pull request modes
+
+The default is the **feature** mode. Each slice opens its pull request into a
+feature branch, and the controller reviews it and merges it there on green CI.
+When every slice is in, the controller opens the pull request from the feature
+branch to `main`. You approve and merge that one. `verify` checks only what the
+feature branch changed, where CI cannot cover it.
+
+In the **main** mode, each slice opens its own pull request to `main`. The
+controller reviews it and reports, and you merge it. A slice counts as done for
+the slices after it once its review has passed, so the run does not wait on your
+merges. The nodes after `implementation` then close with nothing to do, until
+you have merged every slice pull request.
+
+Set the mode in `.kraft-lite/slices.json`, or say so when the run starts.
+
+### Who decides what
+
+These are the defaults:
+
+| Decision | Setting | Default |
+|---|---|---|
+| A plan question a child raises | `plan_question` | controller |
+| Its review verdict on a slice | `slice_review` | controller |
+| Approving and merging a slice pull request into the feature branch | `merge_slice` | controller |
+| The pull request from the feature branch to `main` | `merge_main` | user |
+| A push outside the child's own slice branch | `push_outside_branch` | user |
+
+Change any of them for one run by saying so when it starts, or as a standing
+rule in `.kraft-lite/slices.json`, which you commit beside `registry.yaml`:
+
+```json
+{
+  "mode": "main",
+  "rights": { "merge_slice": "user" }
+}
+```
+
+A right you leave out keeps its default. An unknown key or value is refused,
+naming it. `kl.py settings` prints what is in effect.
+
+The controller writes down every call it makes on its own: the question, the
+answer and why. It shows you the log when you next check in, and again before
+the work wraps up, while a call is still cheap to overturn. The log is
+`.kraft-lite/decisions/<chain-id>.jsonl`.
+
+The controller may hold a critical question, or one that is costly to undo, for
+you. The child keeps working on whatever does not depend on it. Silence is never
+an answer: a held question stays at the top of every status until you answer
+it. A decision that is only yours, such as a push the child was not given, is
+passed up to you with the words to type and the session to type them in.
+
+### The state branch
+
+`.kraft-lite/` is not in git, and a cloud container comes back as a fresh clone.
+So after every change the controller exports the run to a branch of its own and
+pushes it. The export is the feature chain's and the slices' records, the frozen
+chain template and the decisions log. A resumed controller imports it before it
+writes anything.
+
+In a cloud session the state branch is the controller's own session branch.
+Locally it is the feature branch's name plus `-state`. It holds state only,
+never product code, specs or plans, and is never merged. Specs and plans reach
+the children as messages. A cloud proxy refuses to delete branches, so at the
+end the controller lists the ones that are safe for you to delete.
+
+Add `.kraft-lite/decisions/`, `.kraft-lite/messages/` and
+`.kraft-lite/proposals/` to `.gitignore`. `/kraft-lite:init` tells you to.
+
+### Harness support
+
+Slices need four abilities from the harness: start a child session, message it,
+be messaged by it, and archive it. The controller also needs a way to check in
+later. `skills/run-slices/references/` maps them to the tools of Claude Code,
+Codex and Cursor, and marks the ones it could not confirm.
+
+Where a harness lacks an ability, there is a fallback. A child on the same
+machine writes to a file under `.kraft-lite/messages/`. A child on another
+machine comments on its own draft pull request. A controller that cannot be
+woken says so, and you run `/kraft-lite:next` to continue the run. If the
+harness has no session tools at all, the controller walks the slices itself, one
+after another.
+
+A cloud session cannot message a controller on another machine. For a local
+controller with cloud children, pull request comments are the channel.
+
+### Verbs for slices
+
+The skills run these. `kl.py state` also reports `sliced` once a run is sliced.
+
+| Verb | What it does |
+|---|---|
+| `approve --slices FILE` | Approves `chain_finalized` and creates the slices from the proposal. A cycle, an unknown `after`, a duplicate key or an empty task list is refused, and nothing is written. |
+| `slices` | Lists the slices with their status, what they come after, session and branch, and which are `ready` to start. |
+| `slice-set --slice KEY` | Sets `--status`, `--session`, `--branch` or `--fork`. Statuses: `waiting`, `starting`, `running`, `in_review`, `ready_to_merge`, `merged`. |
+| `settings` | Prints the mode and the rights in effect. |
+| `decide` | Logs a decision. With `--held`, holds the question for you. |
+| `answer --decision ID --answer TEXT` | Records your answer to a held question. |
+| `decisions` | Lists the log. `--held` shows held questions, `--unreported` what is new since the last report, and `--mark` moves that cursor. |
+| `export --to DIR`, `import --from DIR` | Copy a run to the state branch's checkout, and back. An import never overwrites a newer local record. |
+
 ## What it does not do
 
 Unattended execution, a web board, waiting on CI while you are away, spend caps,
 cross-repo search. Lite is the attended case: the chain is in front of you,
 resumable across sessions but not outliving your terminal. Several chains can
-share a directory, but nothing walks one while you are away. Those other things
+share a directory, but nothing walks one while you are away. Slices spread one
+plan over several sessions, so it no longer needs just one, but someone still
+starts the run and wakes the controller where its harness cannot. Those other things
 need a process that keeps running when you close the lid, which is a different
 piece of software.
 
