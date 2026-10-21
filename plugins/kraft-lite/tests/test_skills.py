@@ -263,7 +263,8 @@ def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
         "part i of n",
         "You may push to <branch>.",
         "For the user: configuration",
-        "Cut from: <target | slice key> at <sha>",
+        "Cut from: target at <sha>",
+        "Cut from: <slice key> at <sha>",
         "--path-format=absolute --git-common-dir)/kraft-lite/<chain-id>",
     ],
     ids=[
@@ -272,7 +273,8 @@ def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
         "part-marker",
         "push-words",
         "config",
-        "cut-from-line",
+        "cut-from-target",
+        "cut-from-slice",
         "child-folder",
     ],
 )
@@ -472,8 +474,27 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
             "run-slices",
             3,
             "`early`: it comes after exactly one slice, and that slice is in review or ready "
-            "to merge. You may start it now, cut from that slice's branch",
+            "to merge. It is cut from that slice's branch",
         ),
+        (
+            "run-slices",
+            3,
+            "Start it now when your review of that slice has no findings or only small ones; "
+            "otherwise it waits for `ready`.",
+        ),
+        ("run-slices", 3, "where `target` is the word itself, never a branch name"),
+        ("build-slice", 1, "where `target` is the word itself, never a branch name"),
+        ("build-slice", 1, "`base` holds the word `target` or a slice key, never a branch name"),
+        ("build-slice", 1, 'echo <the word after "Cut from:", as given> > <run>/<slice key>/base'),
+        ("build-slice", 5, "git rebase --onto origin/<target branch>"),
+        (
+            "run-slices",
+            6,
+            "`KL slice-set --slice <key> --status in_review`, then start what `KL slices` lists",
+        ),
+        ("status", 0, "one in `early` may start now from the branch of the one slice it comes"),
+        ("status", 0, "| can start early from <key> |"),
+        ("status", 0, "not even a slice in `ready` or `early`"),
         ("run-slices", 3, "write `none; continue on the controller's check-in` in its place"),
         ("run-slices", 5, "- [ ] Report (section 8). - [ ] Re-arm the check-in"),
         ("run-slices", 4, "then run one check-in (section 5): it reports and re-arms"),
@@ -524,6 +545,16 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         "controller-deletes-unused-proposal",
         "controller-two-afters-wait-for-all-merges",
         "controller-early-start",
+        "controller-early-start-after-a-clean-review",
+        "controller-target-is-a-word",
+        "child-target-is-a-word",
+        "child-base-is-a-word",
+        "child-base-as-given",
+        "child-rebase-onto-target-branch",
+        "controller-review-starts-what-slices-lists",
+        "status-early",
+        "status-early-template",
+        "status-starts-nothing",
         "controller-child-wake-up-unconfirmed",
         "controller-check-in-reports",
         "controller-resume-runs-a-check-in",
@@ -547,7 +578,9 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
     ],
 )
 def test_a_skill_carries_the_final_review_fixes(texts, name, section, needle):
-    assert needle in _section(texts[name], section), f"{name} section {section} lacks {needle!r}"
+    """Section 0 is the whole skill."""
+    text = _section(texts[name], section) if section else " ".join(texts[name].split())
+    assert needle in text, f"{name} section {section} lacks {needle!r}"
 
 
 @pytest.mark.parametrize("harness", ["codex", "cursor"])

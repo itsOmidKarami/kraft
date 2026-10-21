@@ -43,18 +43,20 @@ Copy this and tick it off; the walk starts when all four are ticked.
    Confirm with a `status`: parts joined, line count of each file, your plan
    tasks by their headings.
 3. Record where your branch was cut, for section 5. The **Slice** item's line
-   `Cut from: <target | slice key> at <sha>` gives both. Make the folder
-   `<run>/<slice key>/` (yours alone, as worktree slices share the repo) and
-   write each file only if absent, so a resumed session keeps the real ones:
+   gives both: `Cut from: target at <sha>` from the target's tip, where `target`
+   is the word itself, never a branch name, or `Cut from: <slice key> at <sha>`
+   from that slice's branch. In `<run>/<slice key>/` (yours alone, as worktree
+   slices share the repo), write each file only if absent, so a resume keeps it:
 
    ```
    [ -f <run>/<slice key>/fork ] || echo <sha> > <run>/<slice key>/fork
-   [ -f <run>/<slice key>/base ] || echo <target or the slice key> > <run>/<slice key>/base
+   [ -f <run>/<slice key>/base ] || echo <the word after "Cut from:", as given> > <run>/<slice key>/base
    ```
 
-   With no `Cut from:` line and no commits of your own on the branch, write
-   `target` and `git rev-parse HEAD`. With commits of your own, never `HEAD`:
-   ask the controller for the line.
+   `base` holds the word `target` or a slice key, never a branch name. With no
+   `Cut from:` line and no commits of your own, write `target` and
+   `git rev-parse HEAD`; with commits of your own, never `HEAD`: ask the
+   controller for the line.
 4. Your slice chain's id lives in `<run>/<slice key>/chain`, never in the
    `chains` list, which shows every chain in a shared store, siblings included.
    If the file holds an id, resume that chain. If it is absent:
@@ -82,9 +84,8 @@ documents went with it. The pushed commits are the work done.
    `--force-with-lease` would then not see the pushed work.
 2. Send the controller a `status`: fresh container, your pushed head and PR.
    Ask it for the spec and the plan again.
-3. Run setup. `fork` and `base` come from the latest `Cut from:` line in this
-   conversation (your starting instructions', or your last rebase `status`),
-   never from `HEAD`.
+3. Run setup. `fork` and `base` come from the latest `Cut from:` line here (your
+   starting instructions or your last rebase `status`), never from `HEAD`.
 4. At the new chain's `implementation`, build only the plan tasks your pushed
    commits do not hold. Never redo, reset or force-push away pushed work.
 
@@ -129,8 +130,7 @@ Try in this order, and read answers in the same order each time you wake:
 2. On the same machine, one JSON line appended to
    `.kraft-lite/messages/<chain-id>/<slice key>.jsonl` under the controller's
    checkout path in your starting instructions: `{"at", "from": "child", "kind",
-   "body"}`. This `<chain-id>` is the feature chain's, never your own slice
-   chain's `<id>`.
+   "body"}`, where `<chain-id>` is the feature chain's, never your slice chain's.
 3. A comment on your own draft PR, opened into the target at your first commit.
 
 `kind` is `question`, `status` or `done`; the controller answers with `answer`.
@@ -181,12 +181,12 @@ To rebase:
    rebase: send the controller a `question` with both shas, and keep working.
    - `git merge-base --is-ancestor "$(cat <run>/<slice key>/fork)" HEAD` succeeds.
    - The fork is not `HEAD` itself while your branch has commits of your own.
-3. `git rebase --onto origin/<target> "$(cat <run>/<slice key>/fork)"`. That
+3. `git rebase --onto origin/<target branch> "$(cat <run>/<slice key>/fork)"`. That
    commit is where your branch was cut, so this works after a start from a
    slice branch that was since force-pushed or deleted. Once it succeeds, your
    branch is cut from the target, so record that:
-   `git rev-parse origin/<target> > <run>/<slice key>/fork` and
-   `echo target > <run>/<slice key>/base`.
+   `git rev-parse origin/<target branch> > <run>/<slice key>/fork` and
+   `echo target > <run>/<slice key>/base` (the word `target`).
 4. Re-run your scoped tests, then `git push --force-with-lease origin <your slice branch>`.
 5. Send a `status` with the new head, the test result, and the line
    `Cut from: target at <the new fork>`.

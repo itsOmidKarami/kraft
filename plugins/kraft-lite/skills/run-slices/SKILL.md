@@ -74,9 +74,10 @@ A slice's **target** is the branch its PR goes into: the feature branch, or in
 - `ready`: every slice it comes after is merged. Start it, cut from the
   target's tip (`Cut from: target`).
 - `early`: it comes after exactly one slice, and that slice is in review or
-  ready to merge. You may start it now, cut from that slice's branch
-  (`Cut from: <that slice's key>`) and logged in step 3, or let it wait for
-  `ready`.
+  ready to merge. It is cut from that slice's branch
+  (`Cut from: <that slice's key>`) and logged in step 3. Start it now when your
+  review of that slice has no findings or only small ones; otherwise it waits
+  for `ready`.
 
 A slice that comes after two or more slices starts only from `ready`, once all
 of them are merged: one branch cannot hold two slices' unmerged work.
@@ -111,9 +112,10 @@ The starting instructions, in this order:
 
 1. **Slice:** the feature chain's id, then key, title, its plan tasks, what it
    comes after, which slices run beside it, what it owns or must take from an
-   owner's branch, and the line `Cut from: <target | slice key> at <sha>`, the
-   `--fork` sha: `target` when cut from the target, else the key of the slice
-   whose branch it was cut from.
+   owner's branch, and its line with the `--fork` sha: `Cut from: target at <sha>`
+   when cut from the target's tip, `Cut from: <slice key> at <sha>` when cut
+   from that slice's branch, where `target` is the word itself, never a branch
+   name.
 2. **Controller:** this session's id, and locally its name too (a local session
    message is addressed by name). The child's own tools, copied from your
    reference's "Be messaged" and "Check in later": the one that messages you,
@@ -244,8 +246,8 @@ Red flags - stop and hold the question: you are about to type "I've authorized",
 
 ## 6. Reviewing and merging
 
-Starting a review: `KL slice-set --slice <key> --status in_review`; a slice
-after it may now be in `early` (section 3). Your review is the slice's PR
+Starting a review: `KL slice-set --slice <key> --status in_review`, then start
+what `KL slices` lists, as section 3 says. Your review is the slice's PR
 review, on the strongest tier. Read CI at the head you review and the scoped
 test paths the PR body lists, and run no tests or checks yourself. What neither
 covers goes to the child as a finding.

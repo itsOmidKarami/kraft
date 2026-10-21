@@ -40,8 +40,10 @@ with `--held`, so they are separate commands:
 
 Report held questions first, each with why it is held and how to answer it: they
 wait on the user, and stay at the top until answered. A slice's `after` slices not
-yet merged are what it waits on; one in `ready` is ready to start. Then what starts
-or merges next, the decisions since the last report, and what the user needs to do.
+yet merged are what it waits on; one in `ready` is ready to start, and one in
+`early` may start now from the branch of the one slice it comes after. Then
+what starts or merges next, the decisions since the last report, and what the
+user needs to do.
 A held question is also in the `--unreported` list: report it once, under held.
 A held push is answered in that slice's own session, where the user types
 `You may push to <branch>.`; any other held question, to the controller. The
@@ -50,7 +52,7 @@ shape, in this order:
     Held for you (first, every time until answered):
     - <slice>: <question> - <why held>. To answer: <exact words, and where>
     Slices:
-    - <key> <title>: waiting on <keys> | ready to start | running (<session>) | in review | ready to merge | merged
+    - <key> <title>: waiting on <keys> | ready to start | can start early from <key> | running (<session>) | in review | ready to merge | merged
     Next: <what starts or merges next>
     Decided since the last report:
     - <slice>: <question> -> <answer> (<why>)
@@ -68,6 +70,6 @@ unfinished run instant. It has no token or cost figures: Lite runs inside your
 session and cannot see them.
 
 Advance, close, approve, answer or start nothing from here, not even a slice in
-`ready`: that is what `kraft-lite:next`, `kraft-lite:gate` and
+`ready` or `early`: that is what `kraft-lite:next`, `kraft-lite:gate` and
 `kraft-lite:run-slices` are for. When `kraft-lite:run-slices` invoked you,
 return to it after the report.

@@ -41,6 +41,7 @@
       "Re-runs only the scoped test paths after the rebase, not the full suite",
       "Force-pushes only ledger/b-writers (force-with-lease is fine); pushes nothing else",
       "After the rebase succeeds, updates the fork file to the feature branch commit it rebased onto (`git rev-parse origin/feat/ledger-export`), so a later rebase does not replay slice a",
+      "After the rebase succeeds, writes the word `target` to `<run>/b/base`, not the branch name feat/ledger-export",
       "Sends the controller a status message with the new head and the scoped test result",
       "Carries on with plan task 5"
     ]
