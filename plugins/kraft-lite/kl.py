@@ -203,6 +203,19 @@ def _tasks(container: dict) -> list[dict]:
     return [task for step in container["steps"] for task in step["tasks"]]
 
 
+def _dispatched_tasks(chain: dict) -> list[dict]:
+    """Every task the walk dispatches, in chain order: each exec node's own steps,
+    its failure handler's, its fix loop's, then the loop's judge."""
+    found = []
+    for node in (n for n in chain["nodes"] if n["kind"] == "exec"):
+        loop = node["fix_loop"]
+        for container in (node, node["on_failure"], loop):
+            found += _tasks(container) if container else []
+        if loop and loop["judge"]:
+            found.append(loop["judge"])
+    return found
+
+
 def _describe(node: dict) -> str:
     if node["kind"] == "gate":
         return f"gate: {node['message']}"
@@ -1963,26 +1976,28 @@ def _artifact_path(root: Path, path: Path) -> str:
         return str(resolved)
 
 
+def _resolve_chain(root: Path, chain: str | Path | None) -> dict:
+    """`chain` resolved as a library id or, ending in `.yaml`/`.yml` or holding a
+    `/`, as a chain file; the default chain when it is None. The rule `start` and
+    `detect` share for their `--chain`."""
+    ref = None if chain is None else str(chain)
+    if ref is not None and (ref.endswith((".yaml", ".yml")) or "/" in ref):
+        return kl_chains.resolve(root, os.environ, path=Path(ref))
+    return kl_chains.resolve(root, os.environ, ref=ref)
+
+
 def _start_chain(root: Path, chain: str | None, attached: dict[str, Path]) -> dict:
-    """The chain `start` freezes: `chain` resolved as a library id or, ending in
-    `.yaml`/`.yml` or holding a `/`, as a chain file; then trimmed for the
-    attached kinds. Every task is dispatched once before anything is written, so
+    """The chain `start` freezes: `chain` resolved by `_resolve_chain`; then
+    trimmed for the attached kinds. Every task is dispatched once before anything is written, so
     a bindings file Lite cannot use, or a task it has no instruction for, stops
     `start` rather than the walk at that node."""
     for kind, path in attached.items():
         if not path.is_file():
             raise SystemExit(f"kraft-lite: --{kind} {path}: no such file")
-    if chain is not None and (chain.endswith((".yaml", ".yml")) or "/" in chain):
-        resolved = kl_chains.resolve(root, os.environ, path=Path(chain))
-    else:
-        resolved = kl_chains.resolve(root, os.environ, ref=chain)
-    resolved = kl_chains.trim(resolved, set(attached))
+    resolved = kl_chains.trim(_resolve_chain(root, chain), set(attached))
     dispatch = _dispatcher(root)
-    for node in (n for n in resolved["nodes"] if n["kind"] == "exec"):
-        loop = node["fix_loop"]
-        tasks = [t for c in (node, node["on_failure"], loop) if c for t in _tasks(c)]
-        for task in [*tasks, *([loop["judge"]] if loop and loop["judge"] else [])]:
-            dispatch(task)
+    for task in _dispatched_tasks(resolved):
+        dispatch(task)
     return resolved
 
 
@@ -2084,7 +2099,8 @@ def main(argv: list[str] | None = None) -> int:
     for kind in ATTACHMENT_KINDS:
         start.add_argument(f"--{kind}", type=Path, default=None)
     detect_parser = sub.add_parser("detect")
-    detect_parser.add_argument("--chain", type=Path, default=None)
+    # A chain id from the libraries or a chain file, as for `start`.
+    detect_parser.add_argument("--chain", default=None)
     sub.add_parser("chains").add_argument("--available", action="store_true")
     sub.add_parser("settings")
     produced = sub.add_parser("produced")
@@ -2277,61 +2293,83 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-#: Which installed skill names plausibly serve which hook. Deliberately keyword
-#: matching and deliberately generous: init reports every candidate and asks the
-#: human only when there is more than one. A wrong guess offered as a choice is
-#: cheap; a missing candidate is a hook the human has to fill in by hand.
-HOOK_KEYWORDS = {
-    "on.spec.requested": ("brainstorm", "spec", "requirement"),
-    "on.plan.requested": ("plan",),
-    "on.chain.review_ready": ("chain-review",),
-    "on.env.prepare": ("worktree", "env"),
-    "on.implementation.start": ("test-driven", "tdd", "implement"),
-    # No candidates: scanning repos for undeclared submodule changes is the
-    # forge adapter's own job, not something an installed skill serves.
-    "on.repos.scan": (),
-    "on.test.run": (),
-    # A slice's implementation runs as subagents, one per task.
-    "on.slice.implementation.start": ("subagent-driven", "subagent"),
-    # No candidates: which tests to run comes from the slice's own instructions.
-    "on.slice.test.run": (),
-    "on.review.local.run": ("review",),
-    # No candidates: rebasing onto the repo's current HEAD is the forge
-    # adapter's own job, not something an installed skill serves.
-    "on.mr.rebase": (),
-    "on.mr.describe": ("mr-metadata",),
-    "on.mr.open": ("finishing", "branch", "pull-request", "merge-request"),
-    # No candidates: rewriting a merge request description from the branch is
-    # the forge adapter's own job, not something an installed skill serves.
-    "on.mr.sync": (),
-    "on.ci.poll": (),
-    "on.review.mr.run": ("review",),
-    "on.human_review.requested": (),
-    "on.merge": ("finishing", "merge"),
-    # No candidates: watching the pipeline the merge itself just triggered on
-    # the target branch is the forge adapter's own job, not something an
-    # installed skill serves.
-    "on.merge.watch": (),
+#: Which installed skill names plausibly serve which task. Keyed by the library
+#: component an agent task extends, and by the ref or target of a builtin or
+#: forge step. Deliberately keyword matching and deliberately generous: init
+#: reports every candidate and asks the human only when there is more than one.
+#: A wrong guess offered as a choice is cheap; a missing candidate is a skill
+#: the human has to name by hand. An empty tuple says no installed skill serves
+#: the task; a name missing from the table derives its keywords from its own
+#: words (see `_task_keywords`).
+TASK_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "spec_author": ("brainstorm", "spec", "design"),
+    "plan_author": ("plan",),
+    "revise_chain": ("chain-review",),
+    "implementer": ("test-driven", "tdd", "implement"),
+    "code_review": ("review",),
+    # No candidates: the repair tasks and the judge act on what their node's
+    # verification reported, not on anything an installed skill is for.
+    "repair_verification": (),
+    "repair_mr_feedback": (),
+    "repair_mr_checks": (),
+    "strict_judge": (),
+    "write_work_brief": ("brief",),
+    "write_summary": ("summary",),
+    "describe_mr": ("mr", "pr", "metadata", "describe"),
+    # No candidates: which tests to run and how to rebase are the repo's own
+    # commands and the walk's own builtins, not something a skill serves.
+    "kraft.verify_changed_test_scopes": (),
+    "kraft.mr_rebase": (),
+    "mr.open_draft": ("finishing", "branch", "pull-request", "merge-request"),
+    # No candidates: pushing the branch, watching CI or review, and marking the
+    # draft ready are the forge adapter's own job.
+    "mr.sync": (),
+    "mr.ci": (),
+    "mr.automated_review": (),
+    "mr.mark_ready": (),
+    "mr.external_approval": (),
+    "mr.merge": ("finishing", "merge"),
+    "mr.post_merge_ci": (),
 }
 
-#: Words in a hook name that say when it fires, not what it does. A custom hook
-#: derives its candidates from the words that are left, so these must not match
-#: a skill: `on.deploy.staging` should look for deploy skills, not for every
+#: Words in a task name that say when it runs, not what it does. A repo's own
+#: task derives its candidates from the words that are left, so these must not
+#: match a skill: `deploy_staging` should look for deploy skills, not for every
 #: skill with "start" in its name.
-HOOK_STOPWORDS = frozenset({"on", "requested", "run", "start", "prepare", "poll", "open", "ready"})
+TASK_STOPWORDS = frozenset(
+    {"task", "main", "step", "run", "start", "prepare", "poll", "open", "ready", "await"}
+)
 
 
-def _hook_keywords(hook: str) -> tuple[str, ...]:
+def _task_keywords(name: str, words_of: str) -> tuple[str, ...]:
     """Keywords to match installed skill names against.
 
-    `HOOK_KEYWORDS` is the curated answer for the hooks that ship with the default
-    chain — it encodes judgements the name alone cannot, like `on.mr.open` wanting
-    `finishing`. It is not the list of hooks that exist: a custom chain names
-    hooks nobody curated, and those derive from their own words.
+    `TASK_KEYWORDS` is the curated answer for the tasks the bundled library
+    ships; it encodes judgements the name alone cannot, like `mr.open_draft`
+    wanting `finishing`. It is not the list of tasks that exist: a repo's own
+    task names nothing curated, and those derive from `words_of`.
     """
-    if hook in HOOK_KEYWORDS:
-        return HOOK_KEYWORDS[hook]
-    return tuple(w for w in re.split(r"[._]", hook) if w and w not in HOOK_STOPWORDS)
+    if name in TASK_KEYWORDS:
+        return TASK_KEYWORDS[name]
+    return tuple(w for w in re.split(r"[._-]", words_of) if w and w not in TASK_STOPWORDS)
+
+
+def _keyword_in(keyword: str, name: str) -> bool:
+    """Whether `keyword`'s words begin consecutive words of the skill `name`.
+
+    Whole words, because `pr` inside `compress` or `project-artifact` is not a
+    pull request. A word of three letters or fewer must match exactly (or take
+    an `s`); a longer one matches the start of a word, so `plan` finds `plans`
+    and `brainstorm` finds `brainstorming`."""
+    parts, words = re.findall(r"[a-z0-9]+", keyword.lower()), re.findall(r"[a-z0-9]+", name.lower())
+
+    def same(part: str, word: str) -> bool:
+        return word in (part, part + "s") if len(part) <= 3 else word.startswith(part)
+
+    return any(
+        all(same(part, words[i + j]) for j, part in enumerate(parts))
+        for i in range(len(words) - len(parts) + 1)
+    )
 
 
 SKILL_ROOTS = (
@@ -2455,25 +2493,57 @@ def _installed_skills(root: Path) -> list[str]:
     return sorted(names)
 
 
-#: The pre-V1 chain `detect` still reads its hook names from, until it is keyed
-#: by V1 task names, refs and targets. Nothing else in this file reads it.
-LEGACY_CHAIN = Path(__file__).parent / "chains" / "default.json"
-
-
-def detect(root: Path, chain_path: Path | None = None) -> dict:
-    chain = json.loads((chain_path or LEGACY_CHAIN).read_text())
-    # dict.fromkeys, not set: init writes the registry in this order, and a
-    # registry whose keys follow the chain reads like the run it configures.
-    hooks = dict.fromkeys(task for node in chain["nodes"] for task in node["tasks"])
+def detect(root: Path, chain_ref: str | Path | None = None) -> dict:
+    """What `init` needs to write the bindings: the repo's test and CI commands,
+    the installed skills that could serve each task of the chain (a library id
+    or a chain file, as `start` takes it), and `proposed`, the bindings that
+    differ from the defaults and need no question."""
+    chain = _resolve_chain(root, chain_ref)
     installed = _installed_skills(root)
-    skills = {}
-    for hook in hooks:
-        keywords = _hook_keywords(hook)
-        skills[hook] = [n for n in installed if any(k in n.lower() for k in keywords)]
+    candidates: dict[str, dict[str, list[str]]] = {"tasks": {}, "builtins": {}, "forge": {}}
+    agents: dict[str, dict] = {}
+    for task in _dispatched_tasks(chain):
+        kind = task["kind"]
+        if kind == "agent":
+            section, name = "tasks", (task["components"] or [task["path"]])[0]
+            words_of = name if task["components"] else task["id"]
+        elif kind in ("builtin", "forge"):
+            section = "builtins" if kind == "builtin" else "forge"
+            name = task["ref"] if kind == "builtin" else task["target"]
+            words_of = name
+        else:
+            continue
+        keywords = _task_keywords(name, words_of)
+        found = {n for n in installed if any(_keyword_in(k, n) for k in keywords)}
+        if task.get("skill") in installed:
+            found.add(task["skill"])
+        candidates[section][name] = sorted(found | set(candidates[section].get(name, ())))
+        if section == "tasks":
+            agents.setdefault(name, task)
+
+    test, ci = _test_command(root), _ci_command(root)
+    proposed: dict[str, dict] = {}
+    # A task with exactly one candidate that is not already its own skill is
+    # bound to it; two or more are the human's to choose between.
+    bound = {
+        name: {"kind": "skill", "skill": found[0], "prompt": agents[name]["prompt"]}
+        for name, found in candidates["tasks"].items()
+        if len(found) == 1 and found[0] != agents[name].get("skill")
+    }
+    if bound:
+        proposed["tasks"] = bound
+    if test:
+        proposed["builtins"] = {
+            "kraft.verify_changed_test_scopes": {"kind": "subprocess", "command": list(test)}
+        }
+    if ci:
+        proposed["forge"] = {"mr.ci": {"kind": "subprocess", "command": list(ci)}}
     return {
-        "test_command": _test_command(root),
-        "ci_command": _ci_command(root),
-        "skills": skills,
+        "test_command": test,
+        "ci_command": ci,
+        "chain": chain["id"],
+        "candidates": candidates,
+        "proposed": proposed,
     }
 
 

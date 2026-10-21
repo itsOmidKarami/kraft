@@ -2,16 +2,15 @@
 artifact test that watched it (the legacy template system it exercised is
 gone), and nothing has validated the file since — a typo in a field kl.py
 actually dereferences (`gate_after` misspelled, a `fix_loop` naming a loop that
-was renamed, a task with no curated hook keywords) would only surface mid-walk,
+was renamed) would only surface mid-walk,
 after the earlier nodes had already run and spent the human's attention.
 
 This is the smallest honest check: the file parses, and every field kl.py's own
 code reads off it is there with the shape the code expects. Not an invented
-schema — the set below is exactly what `materialize`, `_state`, `chain_summaries`
-and `detect` dereference (`chain["id"]`, `chain["nodes"]`, `chain["loops"]`;
+schema — the set below is exactly what `materialize`, `_state` and
+`chain_summaries` dereference (`chain["id"]`, `chain["nodes"]`, `chain["loops"]`;
 `node["id"]`, `node["tasks"]`, `node.get("gate_after")`, `node.get("fix_loop")`;
-`loops[name]["attempts"]`), plus `HOOK_KEYWORDS`, the curated keyword table
-`detect` uses for exactly the hooks this chain ships (see its own docstring).
+`loops[name]["attempts"]`).
 """
 
 from __future__ import annotations
@@ -24,8 +23,6 @@ import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN))
-
-import kl  # noqa: E402
 
 DEFAULT_CHAIN = PLUGIN / "chains" / "default.json"
 SLICE_CHAIN = PLUGIN / "chains" / "slice.json"
@@ -77,14 +74,6 @@ def test_every_loop_declares_a_positive_attempt_budget(chain):
     for loop in chain["loops"].values():
         assert isinstance(loop["attempts"], int)
         assert loop["attempts"] > 0
-
-
-def test_every_task_has_a_curated_hook_keyword_entry(chain):
-    """A task with no `HOOK_KEYWORDS` entry silently falls back to splitting its
-    own name into keywords — the behaviour meant for a *custom* chain's hooks,
-    not one this file curated on purpose. See `_hook_keywords`'s docstring."""
-    tasks = {t for n in chain["nodes"] for t in n["tasks"]}
-    assert tasks <= kl.HOOK_KEYWORDS.keys()
 
 
 def test_the_slice_chain_has_no_gates_and_no_mr_review():
