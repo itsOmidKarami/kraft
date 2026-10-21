@@ -53,6 +53,7 @@ shape, in this order:
     - <slice>: <question> - <why held>. To answer: <exact words, and where>
     Slices:
     - <key> <title>: waiting on <keys> | ready to start | can start early from <key> | running (<session>) | in review | ready to merge | merged
+    - rebase pending: <key> onto <its cut_from> (each key in `base_moved`)
     Next: <what starts or merges next>
     Decided since the last report:
     - <slice>: <question> -> <answer> (<why>)

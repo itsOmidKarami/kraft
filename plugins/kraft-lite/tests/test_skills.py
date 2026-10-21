@@ -266,6 +266,7 @@ def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
         "Cut from: target at <sha>",
         "Cut from: <slice key> at <sha>",
         "--path-format=absolute --git-common-dir)/kraft-lite/<chain-id>",
+        "new tip",
     ],
     ids=[
         "message-path",
@@ -276,6 +277,7 @@ def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
         "cut-from-target",
         "cut-from-slice",
         "child-folder",
+        "new-tip",
     ],
 )
 def test_the_child_and_controller_skills_name_the_same_thing(texts, needle):
@@ -430,7 +432,8 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
     rebase = _section(texts["build-slice"], 5)
     for needle in (
         "`<run>/<slice key>/base` says when you rebase",
-        "| a slice key | the controller says that slice merged | nothing to do",
+        "| a slice key | the controller says that slice merged | `origin/<target branch>` | "
+        "nothing to do",
         "echo target > <run>/<slice key>/base",
         "Cut from: target at <the new fork>",
     ):
@@ -486,7 +489,12 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         ("build-slice", 1, "where `target` is the word itself, never a branch name"),
         ("build-slice", 1, "`base` holds the word `target` or a slice key, never a branch name"),
         ("build-slice", 1, 'echo <the word after "Cut from:", as given> > <run>/<slice key>/base'),
-        ("build-slice", 5, "git rebase --onto origin/<target branch>"),
+        (
+            "build-slice",
+            5,
+            "| `target` | `on.mr.rebase` runs, or the controller says to | "
+            "`origin/<target branch>` |",
+        ),
         ("run-slices", 6, "Starting a review: `KL slice-set --slice <key> --status in_review`."),
         (
             "run-slices",
@@ -561,15 +569,34 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
             "run-slices",
             1,
             "On a chain without them, `approve --slices` refuses and names what is missing: "
-            "draw no proposal; say so and walk it unsliced.",
+            "draw no proposal; say so, and approve the gate `state.gate` names, unsliced.",
         ),
         ("run-slices", 1, "A rewind to `chain_review` or earlier retires the slices"),
         (
             "run-slices",
             6,
-            "`KL slices` then lists in `base_moved` each slice cut early from it: once it is "
-            "back in review, tell each to rebase onto its branch's new tip",
+            "`KL slices` then lists in `base_moved` each slice cut early from it, and each cut "
+            "early from those: once it is back in review, tell each to rebase onto the new tip "
+            "of the slice its `cut_from` names, one after another down the line",
         ),
+        ("run-slices", 6, "A recorded fork flags the slices cut from that one."),
+        ("run-slices", 5, "A non-empty `base_moved`: the rebase in section 6."),
+        (
+            "run-slices",
+            6,
+            "`cut_from` in `KL slices` says which: the parent's key, or null for the target.",
+        ),
+        ("run-slices", 3, "from the slice its `cut_from` names, or `target` when that is null"),
+        ("status", 0, "- rebase pending: <key> onto <its cut_from> (each key in `base_moved`)"),
+        (
+            "build-slice",
+            5,
+            "| a slice key | the controller says to rebase onto that slice's new tip | "
+            "`origin/<that slice's branch>` |",
+        ),
+        ("build-slice", 5, "with `<onto>` a remote branch, never a sha from a message"),
+        ("build-slice", 5, "Onto a slice's new tip, `base` keeps that slice's key."),
+        ("build-slice", 5, "onto a slice's new tip `Cut from: <slice key> at <the new fork>`"),
         (
             "gate",
             2,
@@ -580,9 +607,9 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
             "gate",
             2,
             "`chain_review` or earlier: the plan or its slicing is redone, so the rewind "
-            "retires every slice.",
+            "retires every slice. Archive their children.",
         ),
-        ("gate", 2, "`implementation`, to redo some slices: reopen each first,"),
+        ("gate", 2, "`implementation`, to redo some slices: reopen each slice to redo first,"),
     ],
     ids=[
         "child-fork-never-head",
@@ -650,6 +677,15 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         "controller-unsliceable-chain-walks-unsliced",
         "controller-rewind-retires-the-slices",
         "controller-base-moved-rebases-onto-the-new-tip",
+        "controller-recorded-fork-flags-its-cuts",
+        "controller-check-in-acts-on-base-moved",
+        "controller-cut-from-says-which",
+        "controller-replacement-reads-cut-from",
+        "status-rebase-pending",
+        "child-rebase-onto-a-slices-new-tip",
+        "child-rebase-onto-a-remote-branch",
+        "child-new-tip-keeps-base",
+        "child-new-tip-cut-from-line",
         "gate-unsliceable-chain-asks",
         "gate-rewind-before-implementation-retires",
         "gate-rewind-to-implementation-reopens-first",

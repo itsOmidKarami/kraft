@@ -61,9 +61,9 @@ the chain's nodes.
 In a sliced run (`sliced` not null), where it lands decides the slices' fate:
 
 - `chain_review` or earlier: the plan or its slicing is redone, so the rewind
-  retires every slice. `slices` then lists none, and the chain is sliced again,
-  from a new proposal, at `chain_review`.
-- `implementation`, to redo some slices: reopen each first,
+  retires every slice. Archive their children. `slices` then lists none, and the
+  chain is sliced again, from a new proposal, at `chain_review`.
+- `implementation`, to redo some slices: reopen each slice to redo first,
   `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" slice-set --slice <key> --status running --chain-id <id>`,
   then rewind. With every slice still done the rewind is refused, as
   `implementation` would close at once. `kraft-lite:run-slices` reopens their

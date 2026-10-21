@@ -187,5 +187,19 @@
       "Re-runs only tests/export/test_writers.py and force-pushes only ledger/b-writers (force-with-lease is fine)",
       "Sends the controller a status with the new head, the test result and the line `Cut from: a at 9c1e7f0`"
     ]
+  },
+  {
+    "skills": [
+      "kraft-lite:build-slice"
+    ],
+    "query": "[Message from session_01Ctrl00] answer | c | implementation\nb went back to work after my review and has rebased onto a's new tip; b is not merged. Rebase onto b's new tip: ledger/b-writers is now at 3e8b9f4.",
+    "setup": "A cloud Claude Code child session for slice c 'Importer' of chain kl-7f3a91c2 (repo acme/ledger), slice chain kl-c19d0e77, own branch ledger/c-importer, controller session_01Ctrl00. Its starting instructions are the eleven items of kraft-lite:run-slices section 3, for slice c (plan task 4, after slice b), with the line `Cut from: b at 7d21e0a`: it was cut early from b's branch ledger/b-writers while b was in review; b was itself cut early from a's branch. The target is the feature branch feat/ledger-export. At setup it wrote `<git common dir>/kraft-lite/kl-7f3a91c2/c/fork` holding 7d21e0a and `<git common dir>/kraft-lite/kl-7f3a91c2/c/base` holding `b`. Slice chain at node implementation, working tree clean, two commits of its own on ledger/c-importer, draft PR into feat/ledger-export open. Scoped test paths: tests/export/test_importer.py. Neither a nor b is merged.",
+    "expected_behavior": [
+      "Runs `git fetch origin`, checks the fork with `git merge-base --is-ancestor 7d21e0a HEAD`, then `git rebase --onto origin/ledger/b-writers 7d21e0a`",
+      "Does not rebase onto feat/ledger-export or a's branch, and leaves `base` holding `b`: never writes `target` there while b is unmerged",
+      "Writes the fork file as b's new tip (3e8b9f4, `git rev-parse origin/ledger/b-writers`)",
+      "Re-runs only tests/export/test_importer.py and force-pushes only ledger/c-importer (force-with-lease is fine)",
+      "Sends the controller a status with the new head, the test result and the line `Cut from: b at 3e8b9f4`"
+    ]
   }
 ]

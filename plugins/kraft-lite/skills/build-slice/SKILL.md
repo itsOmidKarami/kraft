@@ -164,15 +164,16 @@ Checks: <name: state, ...>
 Next: <wake-up time, or "none armed; continue on the controller's check-in">
 ```
 
-## 5. Rebasing onto the target
+## 5. Rebasing
 
 The target squash-merges, so an earlier slice's own commits never reach it.
-`<run>/<slice key>/base` says when you rebase:
+`<run>/<slice key>/base` says when you rebase, and `<onto>` is what onto:
 
-| `base` holds | Rebase when | When `on.mr.rebase` runs |
-|---|---|---|
-| `target` | `on.mr.rebase` runs, or the controller says to | rebase |
-| a slice key | the controller says that slice merged | nothing to do: that slice's commits are on your branch and not yet on the target, so a rebase would drop them |
+| `base` holds | Rebase when | `<onto>` | When `on.mr.rebase` runs |
+|---|---|---|---|
+| `target` | `on.mr.rebase` runs, or the controller says to | `origin/<target branch>` | rebase |
+| a slice key | the controller says that slice merged | `origin/<target branch>` | nothing to do: that slice's commits are on your branch and not yet on the target, so a rebase would drop them |
+| a slice key | the controller says to rebase onto that slice's new tip | `origin/<that slice's branch>` | as above |
 
 To rebase:
 
@@ -181,15 +182,17 @@ To rebase:
    rebase: send the controller a `question` with both shas, and keep working.
    - `git merge-base --is-ancestor "$(cat <run>/<slice key>/fork)" HEAD` succeeds.
    - The fork is not `HEAD` itself while your branch has commits of your own.
-3. `git rebase --onto origin/<target branch> "$(cat <run>/<slice key>/fork)"`. That
-   commit is where your branch was cut, so this works after a start from a
-   slice branch that was since force-pushed or deleted. Once it succeeds, your
-   branch is cut from the target, so record that:
-   `git rev-parse origin/<target branch> > <run>/<slice key>/fork` and
-   `echo target > <run>/<slice key>/base` (the word `target`).
+3. `git rebase --onto <onto> "$(cat <run>/<slice key>/fork)"`, with `<onto>` a
+   remote branch, never a sha from a message. That commit is where your branch
+   was cut, so this works after a start from a slice branch that was since
+   force-pushed or deleted. Once it succeeds, record where you are now cut:
+   `git rev-parse <onto> > <run>/<slice key>/fork`, and onto the target branch
+   `echo target > <run>/<slice key>/base` (the word `target`). Onto a slice's
+   new tip, `base` keeps that slice's key.
 4. Re-run your scoped tests, then `git push --force-with-lease origin <your slice branch>`.
 5. Send a `status` with the new head, the test result, and the line
-   `Cut from: target at <the new fork>`.
+   `Cut from: target at <the new fork>`, or onto a slice's new tip
+   `Cut from: <slice key> at <the new fork>`.
 
 ## 6. Pushes, tests and review
 

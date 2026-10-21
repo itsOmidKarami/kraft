@@ -252,5 +252,20 @@
       "Does not edit the frozen chain or the template to add the missing nodes",
       "Walks it unsliced: `gate --name chain_finalized` and kraft-lite:gate for a plain approval, or asks the user to choose between that and starting a new chain on the default template"
     ]
+  },
+  {
+    "skills": [
+      "kraft-lite:run-slices",
+      "kraft-lite:status"
+    ],
+    "query": "kraft-lite:run-slices check-in, chain kl-7f3a91c2: read state first.",
+    "setup": "The cloud controller session session_01Ctrl00 for chain kl-7f3a91c2 'Ledger export' in repo acme/ledger (base branch main), on its own branch claude/ledger-export-x1, which is the run's state branch and its checkout. `$CLAUDE_PLUGIN_ROOT` is set and the kraft-lite skills are installed; the claude-code-remote tools are loaded. The context was compacted since the last turn. Sliced in feature mode, feature branch feat/ledger-export; `kl.py state` shows node implementation, sliced action run_slices. `kl.py slices` prints: a 'Row model' (task 1) in_review, branch ledger/a-rows, session session_01Aaa, cut_from null; b 'Writers' (tasks 2-3, after a) running, branch ledger/b-writers, session session_01Bbb, fork 5aa01c2, cut_from \"a\"; c 'Importer' (task 4, after b) waiting; ready [], early [], base_moved [\"b\"]. The decisions log has 'Start b from a's branch?' -> 'Forked from ledger/a-rows at 5aa01c2', nothing unreported and nothing held. No new session messages and no files under .kraft-lite/messages/kl-7f3a91c2/. a's status summary: idle, its last message 'Fixed both findings; new head 9c1e7f0'; your second review of a's PR #51 at 9c1e7f0 is not started. b's status summary: working on task 3; `git log origin/ledger/b-writers` shows three commits on top of 5aa01c2. Default rights.",
+    "expected_behavior": [
+      "Reads `kl.py state` and `kl.py slices` first, and acts on `base_moved` listing b: tells b's child (session_01Bbb) to rebase onto a's new tip, origin/ledger/a-rows at 9c1e7f0, using `cut_from` \"a\" to know which; not onto feat/ledger-export, because a is not merged",
+      "Says it records the fork b reports after that rebase with `kl.py slice-set --slice b --fork <sha>`, and exports state",
+      "Does not merge a or record it merged before its review at 9c1e7f0 finds it clean on green CI, and does not start c",
+      "Its report, in kraft-lite:status's shape, carries a line saying b's rebase onto a is pending (e.g. `Rebase pending: b onto a`)",
+      "Re-arms the check-in"
+    ]
   }
 ]

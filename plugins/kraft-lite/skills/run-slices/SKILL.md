@@ -33,7 +33,8 @@ Slicing needs the default chain's `chain_finalized` gate after `chain_review`,
 and its nodes `implementation`, `verify`, `open_mr`, `mr_checks`,
 `human_review`, `merge` and `post_merge_watch`: check the frozen chain,
 `.kraft-lite/chains/<chain-id>.json`. On a chain without them, `approve --slices`
-refuses and names what is missing: draw no proposal; say so and walk it unsliced.
+refuses and names what is missing: draw no proposal; say so, and approve the
+gate `state.gate` names, unsliced.
 
 At `chain_review`, after its bound `on.chain.review_ready` hook. A plan with no
 `## Slices` section and few enough tasks for one session's context is not
@@ -60,8 +61,8 @@ earlier round, then `KL gate --name chain_finalized` and invoke
 6. On the user's answer, invoke `kraft-lite:gate`, which records it: an
    approval as `approve --slices .kraft-lite/proposals/<chain-id>.json`, a
    rejection by deleting the proposal. No slice records exist before the
-   approval. A rewind to `chain_review` or earlier retires the slices: `slices`
-   lists none, archive their children, and this section runs again.
+   approval. A rewind to `chain_review` or earlier retires the slices
+   (`kraft-lite:gate`): `slices` lists none, and this section runs again.
 
 ## 2. Before the first child
 
@@ -113,7 +114,7 @@ For each key you start:
 
 A replacement child for a slice whose branch already holds work (a resume)
 continues that branch. Its `Cut from:` line carries the fork `KL slices`
-records: `target` once the old child reported a rebase, else as first given.
+records, from the slice its `cut_from` names, or `target` when that is null.
 On the same machine, delete the old child's folder first,
 `$(git rev-parse --path-format=absolute --git-common-dir)/kraft-lite/<chain-id>/<key>/`,
 so the new child writes its own `fork`, `base` and `chain` files.
@@ -199,7 +200,7 @@ A check-in is armed while any slice is not merged; in `main` mode, while
 `kraft-lite:run-slices check-in, chain <id>: read state first.` Every check-in:
 
 ```
-- [ ] `KL state` and `KL slices`. Past `implementation`: invoke `kraft-lite:next`, which records the user's merges, and skip to the last line.
+- [ ] `KL state` and `KL slices`. Past `implementation`: invoke `kraft-lite:next`, which records the user's merges, and skip to the last line. A non-empty `base_moved`: the rebase in section 6.
 - [ ] Read messages, then `.kraft-lite/messages/<chain-id>/`, then each slice PR's comments.
 - [ ] Per running child: its status summary (fields in the reference), and `git fetch` + `git log` of its branch. Never its full transcript.
 - [ ] A child shown as blocked: find out on what (often its own subagents) before telling the user anything.
@@ -265,9 +266,10 @@ says.
 
 - Findings to fix: send them to the child, `KL slice-set --slice <key> --status running`,
   and review again when it reports the fix. `KL slices` then lists in
-  `base_moved` each slice cut early from it: once it is back in review, tell
-  each to rebase onto its branch's new tip, and record the fork it reports
-  (section 5).
+  `base_moved` each slice cut early from it, and each cut early from those:
+  once it is back in review, tell each to rebase onto the new tip of the slice
+  its `cut_from` names, one after another down the line, and record the fork
+  each reports (section 5). A recorded fork flags the slices cut from that one.
 - `feature` mode: merge into the feature branch only on green CI at the exact
   head you reviewed (pin the head SHA), and only once every slice it comes after
   is merged; a head that moved, read the new commits.
@@ -283,9 +285,9 @@ After a merge (yours, or in `main` mode the user's), in order:
    until it is merged.
 2. Tell each slice cut from this slice's branch, and each slice cut from the
    target, to rebase onto the target. Never one cut from another slice that is
-   still unmerged: it rebases when that slice merges, or onto its new tip as
-   above. The `Cut from:` line you
-   gave each child, and its fork decision, say which it is.
+   still unmerged: it rebases when that slice merges. Until then, it rebases
+   onto that slice's new tip as above. `cut_from` in `KL slices` says which:
+   the parent's key, or null for the target.
 3. Archive the child.
 4. Start what `KL slices` now lists, as section 3 says.
 5. Export state.
