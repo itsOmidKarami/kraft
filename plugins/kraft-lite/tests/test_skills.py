@@ -1,6 +1,6 @@
 """The skills are the executor, so their prose is load-bearing. These check the
-things that go silently wrong: a hook named that the chain does not have, a gate
-invented, a kind Lite cannot run, a missing frontmatter name."""
+things that go silently wrong: a legacy hook named, a gate invented, a binding
+kind the walk does not dispatch, a missing frontmatter name."""
 
 from __future__ import annotations
 
@@ -15,9 +15,24 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN))
 
+import kl_bindings  # noqa: E402
+import kl_chains  # noqa: E402
 import kl_shape  # noqa: E402
 
 SKILLS = ["init", "start", "next", "gate", "status", "run-slices", "build-slice"]
+#: The skills that walk Kraft's V1 chains. The slice skills still name the legacy
+#: chains' hooks and gates until their own rewrite, so the legacy checks below
+#: cover only them.
+V1_SKILLS = ["init", "start", "next", "gate", "status"]
+SLICE_SKILLS = ["run-slices", "build-slice"]
+#: Every gate node the bundled library's chains have, and `chain_finalized`, the
+#: gate field a skill reads by name.
+V1_GATES = {
+    node["id"]
+    for ref in ("default", "quick-task")
+    for node in kl_chains.resolve_bundled(ref)["nodes"]
+    if node["kind"] == "gate"
+} | {"chain_finalized"}
 CHAIN = json.loads((PLUGIN / "chains" / "default.json").read_text())
 SLICE_CHAIN = json.loads((PLUGIN / "chains" / "slice.json").read_text())
 # A skill may cite what either shipped chain has: the controller walks the
@@ -50,23 +65,29 @@ def test_the_manifest_namespaces_the_skills():
 
 
 def test_no_skill_cites_a_hook_the_chain_does_not_have(texts):
-    cited = {h for text in texts.values() for h in re.findall(r"`(on\.[\w.]+)`", text)}
-    assert cited, "the skills cite no hooks at all"
+    cited = {h for name in SLICE_SKILLS for h in re.findall(r"`(on\.[\w.]+)`", texts[name])}
     assert cited <= HOOKS, f"unknown hooks: {sorted(cited - HOOKS)}"
 
 
-def test_no_skill_invents_a_gate(texts):
-    cited = {
-        g for text in texts.values() for g in re.findall(r"`(\w*(?:approval|finalized))`", text)
-    }
-    assert cited <= GATES, f"unknown gates: {sorted(cited - GATES)}"
+@pytest.mark.parametrize("name", V1_SKILLS)
+def test_the_v1_skills_cite_no_hook(texts, name):
+    """V1 chains have tasks, not hooks: a hook name sends the walk looking for a
+    registry entry that no longer exists."""
+    assert not re.findall(r"`on\.[\w.]+`", texts[name])
 
 
-def test_the_next_skill_refuses_kraft_only_handler_kinds(texts):
-    """A registry copied from Kraft will contain `agent` and `builtin`. Lite must
-    say so by name rather than running something unexpected."""
-    for kind in ("agent", "builtin"):
-        assert f"`kind: {kind}`" in texts["next"]
+@pytest.mark.parametrize("name", SKILLS)
+def test_no_skill_invents_a_gate(texts, name):
+    cited = set(re.findall(r"`(\w*(?:approval|finalized))`", texts[name]))
+    known = V1_GATES if name in V1_SKILLS else GATES
+    assert cited <= known, f"unknown gates: {sorted(cited - known)}"
+
+
+def test_the_next_skill_dispatches_every_binding_kind(texts):
+    """`state` hands each task over already dispatched; a kind the skill does not
+    name is one it improvises."""
+    for kind in kl_bindings.KINDS:
+        assert f"- `{kind}` -" in _section(texts["next"], 2), kind
 
 
 def test_the_next_skill_states_the_cap_behaviour(texts):
@@ -168,23 +189,23 @@ def test_the_next_skill_uses_a_background_wait_when_the_harness_has_one(texts):
     assert "If your starting instructions name a controller, wait for CI as" in flat
 
 
-def test_the_next_skill_handles_a_hook_with_no_registry_entry(texts):
-    """It has an instruction for a bound-but-missing skill and none for a hook
-    that is not in the registry at all."""
-    assert "not in the registry" in texts["next"] or "no registry entry" in texts["next"]
+def test_the_next_skill_says_when_a_bound_skill_is_missing(texts):
+    """`state` falls a bound skill that is not installed back to its prompt and
+    marks the source; the human should hear that the skill did not run."""
+    assert "(skill missing)" in texts["next"]
 
 
-def test_the_next_skill_warns_that_a_node_replays_its_hooks(texts):
-    """State is per node, not per hook, so resuming re-runs earlier hooks."""
+def test_the_next_skill_warns_that_a_node_replays_its_tasks(texts):
+    """State is per node, not per task, so resuming re-runs earlier tasks."""
     assert "idempotent" in texts["next"]
 
 
-def test_a_skill_says_the_registry_can_be_edited_mid_run(texts):
-    """Chains freeze at start and cannot be reordered; registries are re-read at
-    every dispatch, so rebinding is the only mid-run correction."""
-    body = texts["next"]
+def test_a_skill_says_the_bindings_can_be_edited_mid_run(texts):
+    """Chains freeze at start and cannot be reordered; bindings are re-read at
+    every `state`, so rebinding is the only mid-run correction."""
+    body = " ".join(texts["next"].split())
     assert "cannot be reordered" in body or "cannot be changed" in body
-    assert "registry.yaml" in body
+    assert "bindings.yaml" in body
 
 
 def test_kl_parses_on_the_oldest_supported_python():
@@ -337,8 +358,8 @@ def test_the_next_skill_hands_each_sliced_action_to_its_owner(texts):
     assert "kraft-lite:run-slices" in body
     assert "slice-set" in body and "--status merged" in body
     assert "git diff --name-only" in body, "the scoped verify has to name what it scopes to"
-    assert "Never open" in body, "await_user_merges must forbid opening the gate"
     flat = " ".join(body.split())
+    assert "Never open" in flat, "await_user_merges must forbid opening the gate"
     assert "`sliced` not null, `status` neither `done` nor `blocked`" in flat
     assert "then export state, as `kraft-lite:run-slices` describes under State branch" in flat
     assert "`sliced`." in flat.split("You get")[1].split("- `status: unstarted`")[0]
@@ -367,10 +388,10 @@ def test_the_status_skill_reports_slices_and_held_questions(texts):
         assert part in body, f"the sliced report template lacks {part!r}"
 
 
-def test_the_gate_skill_records_slices_at_chain_finalized(texts):
+def test_the_gate_skill_records_slices_at_the_slice_gate(texts):
     body = texts["gate"]
     assert "approve --slices .kraft-lite/proposals/<chain-id>.json" in body
-    assert "chain_finalized" in body
+    assert "`gate.slice_gate`" in body
     assert "`sliced`" in body, "a sliced run's rewind decides the slices' fate"
     flat = " ".join(body.split())
     assert "rm .kraft-lite/proposals/<chain-id>.json" in flat, "a rejected proposal is deleted"
@@ -379,21 +400,31 @@ def test_the_gate_skill_records_slices_at_chain_finalized(texts):
         "is this gate's artefact" in flat
     )
     assert "leftover" not in flat, "after a /clear nothing says what was presented"
-    assert "cannot be sliced again" not in flat, "a rewind to chain_review retires the slices"
+    assert "cannot be sliced again" not in flat, "a rewind to the slice gate retires the slices"
 
 
-def test_init_binds_both_slice_hooks_and_the_ignores(texts):
+def test_init_writes_bindings_from_detect_and_the_ignores(texts):
     body = texts["init"]
     for needle in (
-        "chains/slice.json",
-        "on.slice.implementation.start",
+        'kl.py" detect',
+        "`proposed`",
+        ".kraft-lite/bindings.yaml",
+        'kl.py" migrate',
         ".kraft-lite/decisions/",
         ".kraft-lite/messages/",
         ".kraft-lite/proposals/",
     ):
         assert needle in body, needle
-    # the slice test hook is never the whole-suite subprocess
-    assert re.search(r"on\.slice\.test\.run:\n\s+kind: prompt", body)
+    # the slice layer's defaults are built in: no second detect over a slice chain
+    assert "slice.json" not in body
+
+
+def test_the_start_skill_needs_no_bindings(texts):
+    """Every task has a default, so a repo with no bindings file starts; only a
+    pre-V1 registry stands in the way, and `migrate` is what moves it."""
+    body = texts["start"]
+    assert "kraft-lite:init" not in body
+    assert 'kl.py" migrate' in body
 
 
 def _section(body: str, number: int) -> str:
@@ -506,7 +537,12 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         ("run-slices", 1, "few enough tasks for one session's context"),
         ("build-slice", 4, "Ask no one to run a skill or a command for you, the user included"),
         ("build-slice", 1, "git checkout -B <your slice branch> origin/<your slice branch>"),
-        ("next", 1, "setup hook, `on.env.prepare`, then its test hook, `on.test.run`"),
+        (
+            "next",
+            1,
+            "first set it up as the repo says: a fresh one has nothing installed. Then run only "
+            "the node's tasks whose `source` names `kraft.verify_changed_test_scopes`",
+        ),
         ("next", 1, "git worktree add -B <feature branch> <path> origin/<feature branch>"),
         ("next", 1, "runs from the controller's checkout"),
         ("next", 1, "never in the state branch's checkout"),
@@ -516,8 +552,8 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
             "tell each slice cut from its branch or from the target to rebase onto the "
             "target, and archive its child",
         ),
-        ("next", 3, "At `chain_review`, invoke `kraft-lite:run-slices` instead"),
-        ("next", 3, "export state after every `close`"),
+        ("next", 4, "`gate.slice_gate` true and `sliced` null: invoke `kraft-lite:run-slices`"),
+        ("next", 2, "export state after every `close`"),
         ("next", 1, "Record a slice merged only once every slice it comes after is"),
         ("run-slices", 6, "and only once every slice it comes after is merged"),
         ("run-slices", 6, "naming any slice it comes after that the user must merge first"),
@@ -577,16 +613,53 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         (
             "gate",
             2,
-            "If it refuses, naming nodes or a gate the chain lacks, tell the human and ask "
-            "whether to approve unsliced.",
+            "If it refuses, tell the human what it said and ask whether to approve unsliced.",
         ),
         (
             "gate",
             2,
-            "`chain_review` or earlier: the plan or its slicing is redone, so the rewind "
+            "The slice gate or earlier: the plan or its slicing is redone, so the rewind "
             "retires every slice. Archive their children.",
         ),
-        ("gate", 2, "`implementation`, to redo some slices: reopen each slice to redo first,"),
+        ("gate", 2, "The first build node, to redo some slices: reopen each slice to redo first,"),
+        (
+            "next",
+            1,
+            "one that takes no paths is a reason to stop and say so, never to run the whole suite",
+        ),
+        (
+            "next",
+            1,
+            "`KL close` with nothing run (`KL approve` on a gate node: `close` refuses one)",
+        ),
+        ("next", 2, "run `command` as an argument list, without a shell"),
+        ("next", 2, "`KL produced --kind <produces> --path <file>`"),
+        ("next", 2, "If `on_base_changed` is set, stop the node there and `KL restart`"),
+        (
+            "next",
+            3,
+            "`on_failure.steps` as in section 2, `KL mark --on-failure-ran`, then the whole node "
+            "again from its first step",
+        ),
+        ("next", 3, "that reported an error and no findings"),
+        (
+            "next",
+            3,
+            "When it prints `attempt` 2 or more and `fix_loop.judge` is set, run the judge first",
+        ),
+        ("next", 4, "Otherwise `KL gate`, then invoke `kraft-lite:gate`."),
+        ("gate", 1, "`gate.message`, and the file at `gate.artifact_path`"),
+        ("gate", 1, "Kraft Lite cannot apply it: the chain froze at `start`"),
+        ("gate", 2, "A plain `reject` lands on `gate.reject_to`"),
+        ("start", 0, 'kl.py" chains --available'),
+        ("start", 0, "`--spec <path>` and `--plan <path>`"),
+        ("status", 0, "For an exec node, its `steps` in order"),
+        (
+            "status",
+            0,
+            "For a gate node, `gate.message`, the file at `gate.artifact_path`, and that a "
+            "rejection goes back to `gate.reject_to`.",
+        ),
     ],
     ids=[
         "child-fork-never-head",
@@ -642,7 +715,7 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         "next-kl-from-the-controller-checkout",
         "next-feature-worktree",
         "next-archives-merged-child",
-        "next-chain-review-to-run-slices",
+        "next-slice-gate-to-run-slices",
         "next-exports-after-close",
         "next-records-merges-after-what-they-come-after",
         "controller-merges-after-what-it-comes-after",
@@ -663,9 +736,25 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         "child-rebase-onto-a-remote-branch",
         "child-new-tip-keeps-base",
         "child-new-tip-cut-from-line",
-        "gate-unsliceable-chain-asks",
-        "gate-rewind-before-implementation-retires",
-        "gate-rewind-to-implementation-reopens-first",
+        "gate-refused-slices-asks",
+        "gate-rewind-to-the-slice-gate-or-earlier-retires",
+        "gate-rewind-to-the-first-build-node-reopens-first",
+        "next-scoped-verify-never-the-whole-suite",
+        "next-skip-approves-a-gate-node",
+        "next-subprocess-without-a-shell",
+        "next-records-what-a-task-produced",
+        "next-base-moved-restarts",
+        "next-on-failure-once",
+        "next-builtin-or-forge-error-stops",
+        "next-judge-from-the-second-repair",
+        "next-opens-a-gate-node",
+        "gate-presents-message-and-artifact",
+        "gate-chain-revision-cannot-apply",
+        "gate-reject-lands-on-reject-to",
+        "start-lists-available-chains",
+        "start-attachments-skip-their-gates",
+        "status-exec-node-steps",
+        "status-gate-node",
     ],
 )
 def test_a_skill_carries_the_final_review_fixes(texts, name, section, needle):

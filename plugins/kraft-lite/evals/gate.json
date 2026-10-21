@@ -4,7 +4,7 @@
       "kraft-lite:gate"
     ],
     "query": "[user, replying to the proposal] Looks good, go ahead.",
-    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. `state --chain-id kl-7f3a91c2` prints node chain_review, status blocked, gate chain_finalized, sliced null. `.kraft-lite/proposals/kl-7f3a91c2.json` holds the controller's slicing proposal: mode feature, feature branch feat/ledger-export, state branch claude/ledger-x1, slices a 'Row model' (task 1), b 'Writers' (tasks 2-4, after a), c 'Importer' (task 5, no dependency). The controller (kraft-lite:run-slices) ran `gate --name chain_finalized` and presented that proposal to the human as the gate's artefact: the human has seen all three slices and what each comes after, and has answered.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite chain kl-7f3a91c2, titled 'Ledger export', on the default chain, is the only chain in the directory. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"chain_revision_approval\", \"kind\": \"gate\", \"status\": \"blocked\", \"attempt\": 0, \"cap\": null, \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": null, \"steps\": [], \"on_failure\": null, \"on_failure_ran\": false, \"fix_loop\": null, \"on_base_changed\": null, \"gate\": {\"message\": \"Review the proposed change to the rest of this chain.\", \"artifact\": \"chain_revision\", \"artifact_path\": \".kraft-lite/docs/kl-7f3a91c2/chain-revision.md\", \"reject_to\": \"chain_revision\", \"chain_finalized\": false, \"slice_gate\": true}}. `.kraft-lite/proposals/kl-7f3a91c2.json` holds the controller's slicing proposal: mode feature, feature branch feat/ledger-export, state branch claude/ledger-x1, slices a 'Row model' (task 1), b 'Writers' (tasks 2-4, after a), c 'Importer' (task 5, no dependency). The chain revision proposes no change. The controller (kraft-lite:run-slices) ran `gate` and presented that proposal to the human beside the chain revision: the human has seen all three slices and what each comes after, and has answered.",
     "expected_behavior": [
       "Records the answer with `approve --slices .kraft-lite/proposals/kl-7f3a91c2.json --chain-id kl-7f3a91c2`, so the slice records are created with the approval",
       "Does not run a plain `approve` without --slices",
@@ -16,12 +16,12 @@
       "kraft-lite:gate"
     ],
     "query": "[user, replying to the proposal] No - b and c should be one slice, the importer reads what the writers produce. Redo it.",
-    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. `state --chain-id kl-7f3a91c2` prints node chain_review, status blocked, gate chain_finalized, sliced null. `.kraft-lite/proposals/kl-7f3a91c2.json` holds the controller's slicing proposal: mode feature, feature branch feat/ledger-export, state branch claude/ledger-x1, slices a 'Row model' (task 1), b 'Writers' (tasks 2-4, after a), c 'Importer' (task 5, no dependency). The controller ran `gate --name chain_finalized` and presented that proposal to the human, who has answered.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite chain kl-7f3a91c2, titled 'Ledger export', on the default chain, is the only chain in the directory. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"chain_revision_approval\", \"kind\": \"gate\", \"status\": \"blocked\", \"attempt\": 0, \"cap\": null, \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": null, \"steps\": [], \"on_failure\": null, \"on_failure_ran\": false, \"fix_loop\": null, \"on_base_changed\": null, \"gate\": {\"message\": \"Review the proposed change to the rest of this chain.\", \"artifact\": \"chain_revision\", \"artifact_path\": \".kraft-lite/docs/kl-7f3a91c2/chain-revision.md\", \"reject_to\": \"chain_revision\", \"chain_finalized\": false, \"slice_gate\": true}}. `.kraft-lite/proposals/kl-7f3a91c2.json` holds the controller's slicing proposal: mode feature, feature branch feat/ledger-export, state branch claude/ledger-x1, slices a 'Row model' (task 1), b 'Writers' (tasks 2-4, after a), c 'Importer' (task 5, no dependency). The controller ran `gate` and presented that proposal to the human, who has answered.",
     "expected_behavior": [
       "Records the rejection with `reject --note \"<their reason>\" --chain-id kl-7f3a91c2`, with the human's reason in the note",
       "Does not run `approve`, with or without --slices, and creates no slice record",
       "Deletes .kraft-lite/proposals/kl-7f3a91c2.json, so the rejected proposal cannot be approved later",
-      "Says the proposal will be redrawn when the node reopens, and invokes kraft-lite:next"
+      "Says the proposal will be redrawn when the work comes back to the gate, and invokes kraft-lite:next"
     ]
   },
   {
@@ -29,10 +29,10 @@
       "kraft-lite:gate"
     ],
     "query": "[user] No. Exports have to stream rows instead of building the whole file in memory, and that changes the plan. Send it back to planning.",
-    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. It was sliced in feature mode: slices a 'Row model', b 'CSV writer' (after a) and c 'Importer' are all merged into feat/ledger-export, and their children are archived. The feature PR #70 from feat/ledger-export to main is open and green. `state --chain-id kl-7f3a91c2` prints node human_review, status blocked, gate human_review_approval, sliced {\"mode\": \"feature\", \"action\": \"hooks\"}. You presented PR #70 for that gate, and the human has answered.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite chain kl-7f3a91c2, titled 'Ledger export', on the default chain, is the only chain in the directory. It was sliced in feature mode at its slice gate, chain_revision_approval: slices a 'Row model', b 'CSV writer' (after a) and c 'Importer' are all merged into feat/ledger-export, and their children are archived. The feature PR #70 from feat/ledger-export to main is open and green. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"final_review\", \"kind\": \"gate\", \"status\": \"blocked\", \"attempt\": 0, \"cap\": null, \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"feature\", \"action\": \"run\"}, \"steps\": [], \"on_failure\": null, \"on_failure_ran\": false, \"fix_loop\": null, \"on_base_changed\": null, \"gate\": {\"message\": \"Review the complete work item and merge-request summary.\", \"artifact\": \"review_brief\", \"artifact_path\": \".kraft-lite/docs/kl-7f3a91c2/review-brief.md\", \"reject_to\": \"implementation\", \"chain_finalized\": true, \"slice_gate\": false}}. You presented the review brief and PR #70 for that gate, and the human has answered.",
     "expected_behavior": [
       "Records the rejection with `reject --note \"<their reason>\" --from-node plan --chain-id kl-7f3a91c2`",
-      "Says the rewind retires the slices (`slices` lists none and `sliced` is null again) and that the chain is sliced again at chain_review from a new proposal; never that it cannot be sliced again",
+      "Says the rewind retires the slices (`slices` lists none and `sliced` is null again) and that the chain is sliced again at the slice gate from a new proposal; never that it cannot be sliced again",
       "Runs no `slice-set` on the old slices and edits no record by hand",
       "Checks the new state (node plan, open, with the note) and invokes kraft-lite:next"
     ]
@@ -41,10 +41,10 @@
     "skills": [
       "kraft-lite:gate"
     ],
-    "query": "[user] Approve chain_finalized.",
-    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. The user ran /clear a moment ago, so nothing said earlier in this conversation is visible. `state --chain-id kl-7f3a91c2` prints node chain_review, status blocked, gate chain_finalized, note 'Regroup: b and c should be one slice', sliced null. `.kraft-lite/proposals/kl-7f3a91c2.json` exists: mode feature, feature branch feat/ledger-export, state branch claude/ledger-x1, slices a 'Row model' (task 1) and b 'Writers and importer' (tasks 2-5, after a).",
+    "query": "[user] Approve chain_revision_approval.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite chain kl-7f3a91c2, titled 'Ledger export', on the default chain, is the only chain in the directory. The user ran /clear a moment ago, so nothing said earlier in this conversation is visible. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"chain_revision_approval\", \"kind\": \"gate\", \"status\": \"blocked\", \"attempt\": 0, \"cap\": null, \"note\": \"Rejected: Regroup: b and c should be one slice\", \"backend\": \"jsonl\", \"sliced\": null, \"steps\": [], \"on_failure\": null, \"on_failure_ran\": false, \"fix_loop\": null, \"on_base_changed\": null, \"gate\": {\"message\": \"Review the proposed change to the rest of this chain.\", \"artifact\": \"chain_revision\", \"artifact_path\": \".kraft-lite/docs/kl-7f3a91c2/chain-revision.md\", \"reject_to\": \"chain_revision\", \"chain_finalized\": false, \"slice_gate\": true}}. `.kraft-lite/proposals/kl-7f3a91c2.json` exists: mode feature, feature branch feat/ledger-export, state branch claude/ledger-x1, slices a 'Row model' (task 1) and b 'Writers and importer' (tasks 2-5, after a). The chain revision proposes no change.",
     "expected_behavior": [
-      "Treats .kraft-lite/proposals/kl-7f3a91c2.json as this gate's artefact: shows its slices to the user, or approves on their word, but never calls it a leftover",
+      "Treats .kraft-lite/proposals/kl-7f3a91c2.json as part of this gate's artefact: shows its slices to the user, or approves on their word, but never calls it a leftover",
       "Records the approval with `approve --slices .kraft-lite/proposals/kl-7f3a91c2.json --chain-id kl-7f3a91c2` (now, or once the user approves it with the proposal in front of them)",
       "Does not delete the proposal file and does not run a plain `approve`"
     ]
@@ -54,11 +54,36 @@
       "kraft-lite:gate"
     ],
     "query": "[user] Not yet: slice b's CSV writer quotes fields wrong, see my comment on PR #70. Send b back to be fixed; the rest is fine.",
-    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. It was sliced in feature mode: slices a 'Row model', b 'CSV writer' (after a) and c 'Importer' are all merged into feat/ledger-export, and their children are archived. The feature PR #70 from feat/ledger-export to main is open and green. `state --chain-id kl-7f3a91c2` prints node human_review, status blocked, gate human_review_approval, sliced {\"mode\": \"feature\", \"action\": \"hooks\"}. You presented PR #70 for that gate, and the human has answered.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite chain kl-7f3a91c2, titled 'Ledger export', on the default chain, is the only chain in the directory. It was sliced in feature mode at its slice gate, chain_revision_approval: slices a 'Row model', b 'CSV writer' (after a) and c 'Importer' are all merged into feat/ledger-export, and their children are archived. The feature PR #70 from feat/ledger-export to main is open and green. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"final_review\", \"kind\": \"gate\", \"status\": \"blocked\", \"attempt\": 0, \"cap\": null, \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"feature\", \"action\": \"run\"}, \"steps\": [], \"on_failure\": null, \"on_failure_ran\": false, \"fix_loop\": null, \"on_base_changed\": null, \"gate\": {\"message\": \"Review the complete work item and merge-request summary.\", \"artifact\": \"review_brief\", \"artifact_path\": \".kraft-lite/docs/kl-7f3a91c2/review-brief.md\", \"reject_to\": \"implementation\", \"chain_finalized\": true, \"slice_gate\": false}}. You presented the review brief and PR #70 for that gate, and the human has answered.",
     "expected_behavior": [
-      "Reopens b first with `slice-set --slice b --status running --chain-id kl-7f3a91c2`, then records `reject --note \"<their reason>\" --from-node implementation --chain-id kl-7f3a91c2`, in that order",
-      "Does not rewind to chain_review or earlier, which would retire every slice, and does not rewind to implementation while every slice is still merged",
+      "Reopens b first with `slice-set --slice b --status running --chain-id kl-7f3a91c2`, then records the rejection so it lands on implementation: `reject --note \"<their reason>\" --chain-id kl-7f3a91c2` (gate.reject_to is implementation) or the same with `--from-node implementation`, in that order",
+      "Does not rewind to the slice gate or earlier, which would retire every slice, and does not reject while every slice is still merged",
       "Hands the fix to the controller's loop: b's archived child reopened, or a fresh one started on b's branch, as kraft-lite:run-slices says; invokes kraft-lite:next"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:gate"
+    ],
+    "query": "[user] No. The brief says the export streams rows; it doesn't, and that's fine - the code is right. Just rewrite the brief.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite chain kl-7f3a91c2, titled 'Ledger export', on the default chain, is the only chain in the directory. The chain is unsliced. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"local_review\", \"kind\": \"gate\", \"status\": \"blocked\", \"attempt\": 0, \"cap\": null, \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": null, \"steps\": [], \"on_failure\": null, \"on_failure_ran\": false, \"fix_loop\": null, \"on_base_changed\": null, \"gate\": {\"message\": \"Approve creating a draft merge request.\", \"artifact\": \"work_brief\", \"artifact_path\": \".kraft-lite/docs/kl-7f3a91c2/work-brief.md\", \"reject_to\": \"implementation\", \"chain_finalized\": false, \"slice_gate\": false}}. You presented the work brief at that path for the gate, and the human has answered. The chain's nodes before local_review are spec, spec_approval, plan, plan_approval, chain_revision, chain_revision_approval, implementation, verification and work_brief.",
+    "expected_behavior": [
+      "Records the rejection with `reject --note \"<their reason>\" --from-node work_brief --chain-id kl-7f3a91c2`",
+      "Does not run a plain `reject`, which would land on gate.reject_to (implementation) and redo the code the human said is right",
+      "Checks the new state (node work_brief, open, with the note) and invokes kraft-lite:next"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:gate"
+    ],
+    "query": "[user] /kraft-lite:gate",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite chain kl-7f3a91c2, titled 'Ledger export', on the default chain, is the only chain in the directory. The chain is unsliced. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"chain_revision_approval\", \"kind\": \"gate\", \"status\": \"blocked\", \"attempt\": 0, \"cap\": null, \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": null, \"steps\": [], \"on_failure\": null, \"on_failure_ran\": false, \"fix_loop\": null, \"on_base_changed\": null, \"gate\": {\"message\": \"Review the proposed change to the rest of this chain.\", \"artifact\": \"chain_revision\", \"artifact_path\": \".kraft-lite/docs/kl-7f3a91c2/chain-revision.md\", \"reject_to\": \"chain_revision\", \"chain_finalized\": false, \"slice_gate\": true}}. There is no .kraft-lite/proposals/kl-7f3a91c2.json: the controller decided not to slice. The file .kraft-lite/docs/kl-7f3a91c2/chain-revision.md proposes two changes to the rest of the chain: add an exec node `security_review` after verification, and drop the external_approval node.",
+    "expected_behavior": [
+      "Presents the gate's message ('Review the proposed change to the rest of this chain.') and the chain revision file at gate.artifact_path, with its two proposed changes",
+      "Says Kraft Lite cannot apply a chain revision to a running chain: the chain was frozen at start",
+      "Offers the two ways on: approve without the change (the chain continues as frozen), or stop and start again on an edited chain (`start --chain <edited chain file>`)",
+      "Runs no `approve` or `reject` until the human chooses, and edits no frozen chain or state file"
     ]
   }
 ]

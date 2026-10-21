@@ -1,6 +1,6 @@
 ---
 name: status
-description: "Reports where a Kraft Lite chain has got to (its node, running or blocked at a gate, attempts spent, and a sliced run's slices and held questions) and, on request, what a finished run took. Use when asked where a Kraft Lite chain or its slices are, whether it is stuck, or how long it ran, and when `kraft-lite:run-slices` reports; `kraft-lite:next` continues a chain and `kraft-lite:gate` answers a gate."
+description: "Reports where a Kraft Lite chain has got to (its node and kind, the steps it runs or the gate it waits at, attempts spent, and a sliced run's slices and held questions) and, on request, what a finished run took. Use when asked where a Kraft Lite chain or its slices are, whether it is stuck, or how long it ran, and when `kraft-lite:run-slices` reports; `kraft-lite:next` continues a chain and `kraft-lite:gate` answers a gate."
 ---
 
 # Where the chain is
@@ -22,14 +22,16 @@ Then, for each chain:
 
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>
 
-Report, in a sentence or two: the node, whether it is running or blocked at a
-gate, attempts spent against the cap if there is one, and which backend holds the
-state. `status: unstarted` means no chain exists here yet - say that, rather than
-that nothing is running.
+Report, in a sentence or two: the node and its `kind`, whether it is running or
+blocked, and which backend holds the state. For an exec node, its `steps` in
+order with what each task runs (its skill, prompt or command), and attempts spent
+against `cap` if there is one. For a gate node, `gate.message`, the file at
+`gate.artifact_path`, and that a rejection goes back to `gate.reject_to`.
+`status: unstarted` means no chain exists here yet: say that, not that nothing runs.
 
-An illustration, not a template: "`Add export` is at `plan`, blocked at
-`plan_approval`, no fix loop so no cap, state in `jsonl`. It needs your answer
-before anything runs."
+An illustration, not a template: "`Add export` is at `plan_approval`, a gate,
+blocked: review and approve the plan, `docs/plan.md`; a rejection goes back to
+`plan`. State in `jsonl`. It needs your answer before anything runs."
 
 If `state` shows `sliced` not null, also run these. `--mark` is refused together
 with `--held`, so they are separate commands:
@@ -63,12 +65,10 @@ For a chain that has finished - or when the human asks what a run has cost so fa
 
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" summary --chain-id <id>
 
-That adds per-node times, how much of each was spent waiting on a human at a
-gate, attempts spent, gates answered and rejection notes. The run's wall-clock
-`duration_seconds` is null until the chain is done - report the nodes it has
-walked so far and say the total lands at the end, rather than calling an
-unfinished run instant. It has no token or cost figures: Lite runs inside your
-session and cannot see them.
+That adds per-node times, the waiting on a human at gates, attempts, gates
+answered and rejection notes. `duration_seconds` is null until the chain is done:
+report the nodes walked so far and say the total lands at the end. It has no
+token or cost figures: Lite runs inside your session and cannot see them.
 
 Advance, close, approve, answer or start nothing from here, not even a slice in
 `ready` or `early`: that is what `kraft-lite:next`, `kraft-lite:gate` and

@@ -1,0 +1,27 @@
+[
+  {
+    "skills": [
+      "kraft-lite:start"
+    ],
+    "query": "[user] Start Kraft Lite on 'Add CSV export'. Use the quick-task chain, and here's the spec I already wrote: docs/specs/csv-export.md.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger (GitHub, gh installed), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. There is no .kraft-lite/ directory: no bindings.yaml and no registry.yaml. `chains` prints []. `chains --available` prints: [{\"id\": \"default\", \"source\": \"bundled\", \"path\": \"/plugins/kraft-lite/config/chains/default.yaml\"}, {\"id\": \"quick-task\", \"source\": \"bundled\", \"path\": \"/plugins/kraft-lite/config/chains/quick-task.yaml\"}]. `start` would print {\"chain_id\": \"kl-5c4b3a21\", \"backend\": \"jsonl\"}.",
+    "expected_behavior": [
+      "Starts without invoking kraft-lite:init first and without writing any bindings: a repo with no bindings.yaml runs on the defaults",
+      "Runs `start --title \"Add CSV export\" --chain quick-task --spec docs/specs/csv-export.md` (the chain by its id from `chains --available`), so the spec's gate is skipped",
+      "Reports the chain id kl-5c4b3a21 and the jsonl backend, and carries `--chain-id kl-5c4b3a21` onward",
+      "Invokes kraft-lite:next"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:start"
+    ],
+    "query": "[user] Kick off a new chain for 'Retry failed imports'.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger (GitHub, gh installed), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. The repo has `.kraft-lite/registry.yaml` from an older Kraft Lite and no `.kraft-lite/bindings.yaml`. `chains` prints [] (no unfinished chain). Every verb but `chains`, `detect` and `migrate` exits 1 with `kraft-lite: .kraft-lite/registry.yaml is the pre-V1 hook registry. Run: python3 kl.py migrate`. `migrate` would print {\"bindings\": {\"builtins\": {\"kraft.verify_changed_test_scopes\": {\"kind\": \"subprocess\", \"command\": [\"just\", \"test\"]}}, \"dropped\": []}, \"chains\": []}.",
+    "expected_behavior": [
+      "Runs `migrate` before `start` (it is what the registry needs, not kraft-lite:init and not deleting the registry)",
+      "Tells the human migrate wrote .kraft-lite/bindings.yaml from the registry, to be committed",
+      "Then runs `start --title \"Retry failed imports\"` and invokes kraft-lite:next"
+    ]
+  }
+]
