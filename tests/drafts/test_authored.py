@@ -21,6 +21,7 @@ from kraft.templates.models import (
     FixLoop,
     ForgeTask,
     GateNode,
+    MergeRejectionPolicy,
     RecoveryPlan,
     Step,
     SubprocessTask,
@@ -126,6 +127,7 @@ CANONICAL = [
     (RecoveryPlan, authored.SHAPE_KEYS),
     (FixLoop, authored.SHAPE_KEYS),
     (BaseChangePolicy, authored.NESTED_KEYS["on_base_changed"]),
+    (MergeRejectionPolicy, authored.NESTED_KEYS["on_merge_rejected"]),
     *((task, authored.TASK_KEYS) for task in (AgentTask, BuiltinTask, SubprocessTask, ForgeTask)),
 ]
 
@@ -155,6 +157,10 @@ nodes:
   - id: g
     kind: gate
     auto_review: {id: rv, kind: agent, harness: claude, prompt: p}
+  - id: m
+    kind: exec
+    tasks: [{id: merge, kind: forge, target: mr.merge}]
+    on_merge_rejected: {restart_from: a, repair: {tasks: [{id: rp, kind: subprocess, command: x}]}}
 """  # noqa: E501
 
 
@@ -173,6 +179,8 @@ def test_every_canonical_task_path_addresses_its_authored_task(library):
         "b.s.u": "u",
         "b.s.on_failure.main.v": "v",
         "g.auto_review": "rv",
+        "m.main.merge": "merge",
+        "m.on_merge_rejected.repair.main.rp": "rp",
     }
     assert authored.at(model, "a.escalation")["id"] == "e"
     assert authored.at(model, "a.escalation.other") is None
