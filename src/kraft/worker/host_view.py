@@ -34,7 +34,15 @@ _PROTECTED_IN_HOME = (
 #: The system directories every sandbox mounts, so a file in one adds no root.
 _SYSTEM = tuple(Path(p) for p in ("/usr", "/bin", "/sbin", "/lib", "/lib64"))
 SYSTEM_PYTHON = Path("/usr/bin/python3")
-CREDENTIAL_FILES = ("credentials.toml", ".npmrc", ".netrc", ".pypirc", ".git-credentials")
+#: `credentials` is cargo's legacy name for `credentials.toml`, still read.
+CREDENTIAL_FILES = (
+    "credentials.toml",
+    "credentials",
+    ".npmrc",
+    ".netrc",
+    ".pypirc",
+    ".git-credentials",
+)
 _SHADOW_DEPTH = 3
 
 
@@ -161,7 +169,8 @@ def resolve(
 
     An executable inside the checkout is the repo's own, so it adds no root
     and its `#!` is not followed; its symlinks may lead only into what the
-    sandbox shows anyway (the system, the checkout, `visible`)."""
+    sandbox shows anyway (the system, the checkout, `visible`). A file
+    already inside `visible` adds no root either."""
     if "/" in executable:
         path = Path(os.path.abspath(workdir / executable))
     else:
@@ -193,7 +202,10 @@ def resolve(
             hops += more
             targets.append(interp_final)
         for target in targets:
-            root = None if _within(target, checkout) else _root_of(target, home, kraft_home)
+            # Already shown (an `expose` path, say): no wider root, so exposing
+            # `~/.cargo/bin` never mounts `~/.cargo` for a cargo in it.
+            shown_already = any(_within(target, d) for d in shown)
+            root = None if shown_already else _root_of(target, home, kraft_home)
             if root is not None and root not in roots:
                 roots.append(root)
     links = tuple(

@@ -200,6 +200,16 @@ def _run(host, base, executable, path_dirs=(), visible=()):
             "x",
             id="cargo-install",
         ),
+        pytest.param(
+            [("~/.cargo/bin/cargo", None), ("~/.cargo/credentials", "token")],
+            "cargo",
+            ["~/.cargo/bin"],
+            ["~/.cargo/bin"],
+            [],
+            [],
+            "cargo",
+            id="exposed-bin-not-widened",
+        ),
         pytest.param([], "sh", [], [], [], [], "sh", id="system"),
         pytest.param(
             [("./run.sh", "#!~/.mozilla/ff/x\n")],
@@ -315,8 +325,13 @@ def test_install_roots(host, files, executable, path_dirs, visible, roots, links
 
 @pytest.mark.parametrize(
     ("rel", "found"),
-    [("a/b/c/credentials.toml", True), ("a/b/c/d/credentials.toml", False), (".npmrc", True)],
-    ids=["depth-3-found", "depth-4-ignored", "top-level"],
+    [
+        ("a/b/c/credentials.toml", True),
+        ("a/b/c/d/credentials.toml", False),
+        (".npmrc", True),
+        ("credentials", True),
+    ],
+    ids=["depth-3-found", "depth-4-ignored", "top-level", "cargo-legacy"],
 )
 def test_credential_shadows(tmp_path, rel, found):
     _file(tmp_path / rel, "token")
