@@ -213,13 +213,36 @@ def _sysctl(path: str) -> str | None:
         return None
 
 
-def _run(argv: Sequence[str]) -> subprocess.CompletedProcess[str] | str:
+def _run(
+    argv: Sequence[str], pass_fds: Sequence[int] = ()
+) -> subprocess.CompletedProcess[str] | str:
     try:
         return subprocess.run(
-            argv, capture_output=True, text=True, timeout=15, stdin=subprocess.DEVNULL
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            stdin=subprocess.DEVNULL,
+            pass_fds=pass_fds,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return str(exc)
+
+
+def _trial(bwrap: str, arch: str) -> subprocess.CompletedProcess[str] | str:
+    """`true` under bwrap as a session runs: its flags, the system mounts and the
+    real seccomp filter, so a kernel that rejects the filter fails here, not at launch."""
+    r, w = os.pipe()
+    try:
+        os.write(w, os_seccomp.build(arch))  # a few hundred bytes: well under a pipe's buffer
+        os.close(w)
+        w = -1
+        argv = [os.path.abspath(bwrap), "--seccomp", str(r), *_BWRAP_FLAGS, *system_args()]
+        return _run([*argv, "true"], pass_fds=(r,))
+    finally:
+        os.close(r)
+        if w != -1:
+            os.close(w)
 
 
 def _probe() -> str | None:
@@ -242,8 +265,7 @@ def _probe() -> str | None:
     text = helped.stdout + helped.stderr
     if lacking := [f for f in _NEEDED_FLAGS if f not in text]:
         return f"this bubblewrap lacks {', '.join(lacking)}: install a newer bubblewrap"
-    # shortcut: the trial omits --seccomp, so a filter the kernel rejects shows up at launch.
-    trial = _run([os.path.abspath(bwrap), *_BWRAP_FLAGS, *system_args(), "true"])
+    trial = _trial(bwrap, arch)
     if not isinstance(trial, str) and trial.returncode == 0:
         return None
     for path, blocking, fix in _NAMESPACE_KNOBS:

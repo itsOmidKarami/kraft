@@ -294,6 +294,14 @@ _FLAGS = (
 )
 
 
+#: A trial that runs only when given the filter, as `--seccomp FD` first, FD not
+#: empty. Builtins only, as `host`'s PATH has no `wc`; by /dev/fd, as dash's `<&` takes one digit.
+_TAKES_THE_FILTER = (
+    '[ "$1" = --seccomp ] && IFS= read -r f < /dev/fd/"$2"; [ -n "$f" ] || '
+    '{ echo "no filter" >&2; exit 1; }'
+)
+
+
 @pytest.fixture(autouse=True)
 def _fresh_probe(monkeypatch):
     monkeypatch.setattr(bwrap, "_probed", None)
@@ -315,12 +323,13 @@ def host(tmp_path, monkeypatch):
     sysctls: dict[str, str] = {}
     monkeypatch.setattr(bwrap, "_sysctl", sysctls.get)
 
-    def fake(flags=_FLAGS, rc=0, err=""):
+    def fake(flags=_FLAGS, rc=0, err="", trial=None):
         script = bindir / "bwrap"
+        trial = trial or f'echo "{err}" >&2; exit {rc}'
         script.write_text(
             "#!/bin/sh\n"
             f'case "$1" in --help) echo "{" ".join(flags)}";; '
-            f'--version) echo "bubblewrap 0.9.0";; *) echo "{err}" >&2; exit {rc};; esac\n'
+            f'--version) echo "bubblewrap 0.9.0";; *) {trial};; esac\n'
         )
         script.chmod(0o755)
 
@@ -370,6 +379,7 @@ def host(tmp_path, monkeypatch):
             None,
         ),
         (lambda h, mp: h.fake(rc=1, err="bwrap: no way"), "bwrap: no way"),
+        (lambda h, mp: h.fake(trial=_TAKES_THE_FILTER), None),
     ],
     ids=[
         "not-linux",
@@ -385,6 +395,7 @@ def host(tmp_path, monkeypatch):
         "apparmor",
         "apparmor-but-trial-passes",
         "trial-fails",
+        "trial-under-the-filter",
     ],
 )
 def test_probe_explains(host, monkeypatch, setup, expect):
