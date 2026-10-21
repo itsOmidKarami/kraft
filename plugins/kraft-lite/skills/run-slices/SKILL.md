@@ -70,27 +70,30 @@ For each key in `KL slices`'s `ready`:
 3. `KL slice-set --slice <key> --status running --session <id> --branch <slice-branch>`.
    Starting early from an earlier slice's branch, during its final review, adds
    `--fork <sha>` and a `KL decide --slice <key> --question "Start <key> early?" --answer "Forked from <branch> at <sha>" --why "..."`.
-4. Have a cheapest-tier subagent send the spec and the plan, each in numbered
-   parts under the message limit. On the same machine, send their paths instead.
+4. Have a cheapest-tier subagent send the spec and the plan, each in parts
+   marked `part i of n` under the message limit. On the same machine, send their
+   paths instead.
 5. Arm the check-in if none is armed (section 5).
 6. Export state (section 7).
 
 The starting instructions, in this order:
 
 1. **Slice:** key, title, its plan tasks, what it comes after, which slices run
-   beside it, what it owns or must take from an owner's branch.
+   beside it, what it owns or must take from an owner's branch. For an early
+   start: "started early from `<branch>` at `<sha>`", the `--fork` sha.
 2. **Controller:** this session's id, and the channels in the order to try them:
    a session message; on the same machine
-   `.kraft-lite/messages/<chain-id>/<key>.jsonl` in this checkout (one JSON per
-   line: `at`, `from`, `kind`: question|answer|status|done, `body`); else
+   `.kraft-lite/messages/<chain-id>/<key>.jsonl` under this checkout's absolute
+   path (the feature chain's id; one JSON per line: `at`, `from`, `kind`:
+   question|answer|status|done, `body`); else
    comments on its own draft PR into the feature branch, opened at its first
    commit.
 3. **Kraft Lite:** invoke `kraft-lite:build-slice`; if the plugin is missing,
    install it through the harness, else run
    `python3 <marketplace checkout>/plugins/kraft-lite/kl.py` and read the skills
    as files there.
-4. **Documents:** the spec and plan arrive next in numbered parts (or as paths on
-   the same machine); join them, write them down, and confirm.
+4. **Documents:** the spec and plan arrive next in parts marked `part i of n` (or
+   as paths on the same machine); join them, write them down, and confirm.
 5. **Setup:** the working setup line from section 2.
 6. **Method:** one subagent per task, TDD, a spec-compliance review and a
    code-quality review per task, a capped fix round, parallel tasks in isolated
@@ -101,8 +104,9 @@ The starting instructions, in this order:
    suite runs on CI. The PR body lists the paths run.
 9. **Branches and PRs:** push only its own slice branch; the PR goes into the
    feature branch; `on.mr.rebase`'s target is the feature branch; when told an
-   earlier slice merged, `git rebase --onto origin/<feature> <fork commit>` and
-   force-push its own branch. The repo's rules, quoted from its `CLAUDE.md` and
+   earlier slice merged, `git rebase --onto origin/<feature> <fork commit>` (the
+   commit its branch was cut from, which it records at setup) and force-push its
+   own branch. The repo's rules, quoted from its `CLAUDE.md` and
    `CONTRIBUTING.md`.
 10. **Rights:** what it may decide alone, and that every other question comes to
     the controller, never the user; keep working on whatever does not depend on
@@ -137,6 +141,7 @@ While any child runs, a check-in is armed. Every check-in:
 - [ ] Per running child: its status summary (fields in the reference), and `git fetch` + `git log` of its branch. Never its full transcript.
 - [ ] A child shown as blocked: find out on what (often its own subagents) before telling the user anything.
 - [ ] Answer every question (below). Export state.
+- [ ] A child that is idle after reporting CI pending, or after a held answer: message it to continue.
 - [ ] Re-arm the check-in.
 ```
 
@@ -151,7 +156,7 @@ Answering a question:
 - A fix loop over its cap arrives with its traces: re-steer the child once, and
   log it with `decide`, or hold it for the user. A child's hook bound to
   `kind: agent` or `kind: builtin`, or with no registry entry, is configuration:
-  it goes to the user.
+  its question opens `For the user: configuration`, and it goes to the user.
 
 ### User-only decisions, and silence
 
@@ -198,7 +203,8 @@ subagent never runs `tsc` or `npm` through a shared `node_modules`.
 After a merge (yours, or in `main` mode the user's), in order:
 
 1. `KL slice-set --slice <key> --status merged`
-2. `feature` mode: tell every later slice to rebase onto the feature branch.
+2. `feature` mode: tell every later slice that started before this merge to
+   rebase onto the feature branch; one that started after it needs nothing.
 3. Archive the child.
 4. Start what `KL slices` now lists in `ready`.
 5. Export state.

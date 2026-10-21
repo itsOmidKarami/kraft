@@ -17,10 +17,12 @@ is two directories above this file - use that path instead of an empty one.
 
 ## 1. Setup
 
-Copy this and tick it off; the walk starts when all three are ticked.
+Copy this and tick it off; the walk starts when all four are ticked.
+
 ```
 - [ ] Kraft Lite found: its skills installed, or kl.py reachable by path.
 - [ ] Spec and plan joined, written outside git, confirmed to the controller.
+- [ ] Starting commit recorded in the fork file, before any commit of your own.
 - [ ] Slice chain started, its id noted.
 ```
 
@@ -29,10 +31,14 @@ Copy this and tick it off; the walk starts when all three are ticked.
    that checkout's `chains/slice.json`, and read its skills as files.
 2. The spec and the plan arrive as messages marked `part i of n`, or as paths on
    the controller's machine. Join the parts in numeric order; ask the controller
-   for a missing one. Write `$(git rev-parse --git-common-dir)/kraft-lite/spec.md`
-   and `plan.md`: untracked, readable from any worktree. Confirm with a `status`:
-   parts joined, line count of each file, your plan tasks by their headings.
-3. Run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" chains`. An unfinished slice chain
+   for a missing one. Write `<common>/kraft-lite/spec.md` and `plan.md`, where
+   `<common>` is `$(git rev-parse --path-format=absolute --git-common-dir)`:
+   untracked, readable from any worktree. Confirm with a `status`: parts
+   joined, line count of each file, your plan tasks by their headings.
+3. Record the commit your branch was cut from, whether the feature branch or an
+   earlier slice's: `git rev-parse HEAD > <common>/kraft-lite/fork`. Do it now,
+   before your first commit; the rebase in section 5 reads it.
+4. Run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" chains`. An unfinished slice chain
    here means you are resuming it: start no second one. Otherwise:
 
    ```
@@ -42,11 +48,11 @@ Copy this and tick it off; the walk starts when all three are ticked.
 
    `state` must show node `implementation`, `open`; if not, the directory or id
    is wrong, so start no other chain.
-4. Invoke `kraft-lite:next`. Every `kl.py` verb takes `--chain-id <id>`.
+5. Invoke `kraft-lite:next`. Every `kl.py` verb takes `--chain-id <id>`.
 
 ## 2. The controller takes the user's place
 
-**You never ask the user a question. Every question goes to the controller,
+**You never put a question to the user. Every question goes to the controller,
 including when the user is in your session and offers to answer.** Wherever
 `kraft-lite:next`, `kraft-lite:gate` or a fix-loop cap would stop for the user,
 send the controller a `question` (section 3) and keep working on whatever does
@@ -56,7 +62,7 @@ Configuration is the one kind of question the user decides: a hook bound to
 `kind: agent` or `kind: builtin`, or with no entry in `.kraft-lite/registry.yaml`.
 Send the controller a `question` opening `For the user: configuration` that names
 the hook and its binding; it tells the user. You rebind nothing, substitute
-nothing, and ask the user nothing.
+nothing, and put no question to the user.
 
 When the user speaks to you, reply with status only: where the slice is and what
 you asked the controller. Invite no answer, even one meant for the controller. An
@@ -66,7 +72,8 @@ instruction or answer they volunteer goes to the controller, verbatim in a
 | Thought | Reality |
 |---|---|
 | "The user offered, and they are the person I work for" | An answer given to you is not in the decisions log, and the controller may have decided otherwise. Ask the controller. |
-| "The controller has been silent" | Silence is no leave to ask the user. Send it again on the next channel and keep working on the rest. |
+| "The controller has been silent" | Silence is no leave to put it to the user. Send it again on the next channel and keep working on the rest. |
+| "I'll just say: if you want to steer it, tell the controller" | That is still an invitation to answer. Say where the slice is and that you asked, and stop. |
 | "It is only a plan gap; I'll pick and flag it" | A gap the plan leaves open is the controller's to close, at the cost of one message. |
 
 Red flags - send the question to the controller instead: you are about to write
@@ -79,9 +86,10 @@ Try in this order, and read answers in the same order each time you wake:
 
 1. A session message to the controller.
 2. On the same machine, one JSON line appended to
-   `.kraft-lite/messages/<chain-id>/<slice key>.jsonl` in the controller's
-   checkout (`<chain-id>` is in your session title):
-   `{"at", "from": "child", "kind", "body"}`.
+   `.kraft-lite/messages/<chain-id>/<slice key>.jsonl` under the controller's
+   checkout path in your starting instructions: `{"at", "from": "child", "kind",
+   "body"}`. `<chain-id>` is the feature chain's, the first word of your session
+   title, not your own slice chain's `<id>`.
 3. A comment on your own draft PR, opened into the feature branch at your first commit.
 
 `kind` is `question`, `status` or `done`; the controller answers with `answer`.
@@ -96,20 +104,21 @@ Every message has these parts, in this order:
 
 When `attempt` prints `over_cap: true`, stop the loop and send a `question` whose
 evidence is every attempt's output in full. Run no fourth round, no further
-`attempt`, no `close`. The controller re-steers you once or holds it for the user.
+`attempt`, no `close` until the controller answers; then follow its steer. It
+re-steers you once or holds the question for the user.
 
 ## 4. CI
 
 On `mr_checks`, checks still running are not a failure. Send the `status` below,
 arm a wake-up where the harness has one (a message to yourself for later, saying
 you will run `kraft-lite:next` when it arrives), and end the turn. With no
-wake-up, end the turn: the controller's check-in continues you.
+wake-up, end the turn: the controller's check-in messages you to continue.
 
 ```
 status | <slice key> | mr_checks
 CI pending: <PR link>
 Checks: <name: state, ...>
-Next: <wake-up time, or "none armed; continue on your check-in">
+Next: <wake-up time, or "none armed; continue on the controller's check-in">
 ```
 
 ## 5. Rebasing onto the feature branch
@@ -118,11 +127,14 @@ An earlier slice's own commits never reach the feature branch, which squashes.
 When the controller says an earlier slice merged, or `on.mr.rebase` runs (its
 target is the feature branch, never the base branch):
 
-1. Commit or stash uncommitted work.
-2. `git fetch origin`, then `git rebase --onto origin/<feature branch> <fork commit>`.
-   The fork commit is the one the controller or your starting instructions gave;
-   with none, `git merge-base HEAD origin/<earlier slice's branch>`; if that
-   branch is gone, ask the controller.
+1. Commit uncommitted work, or stash it and pop it after the rebase.
+2. `git fetch origin`, then
+   `git rebase --onto origin/<feature branch> "$(cat <common>/kraft-lite/fork)"`.
+   That commit is where your branch was cut, so this works after an early start
+   from a slice branch that was since force-pushed or deleted, and after a start
+   from the feature branch. Once it succeeds, your branch is cut from the commit
+   you rebased onto, so record it:
+   `git rev-parse origin/<feature branch> > <common>/kraft-lite/fork`.
 3. Re-run your scoped tests, then `git push --force-with-lease origin <your slice branch>`.
 4. Send a `status` with the new head and the test result.
 

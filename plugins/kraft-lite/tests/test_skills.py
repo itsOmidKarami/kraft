@@ -249,7 +249,39 @@ def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
     body = texts["build-slice"]
     for needle in ("controller", "slice.json", "rebase --onto"):
         assert needle in body, needle
-    assert "ask the human" not in body.lower()
+    for banned in ("ask the human", "ask the user"):
+        assert banned not in body.lower(), banned
+
+
+@pytest.mark.parametrize(
+    "needle",
+    [
+        ".kraft-lite/messages/<chain-id>/",
+        "<chain-id> <key>: <slice title>",
+        "part i of n",
+        "rebase --onto origin/<feature",
+        "You may push to <branch>.",
+        "For the user: configuration",
+    ],
+    ids=["message-path", "session-title", "part-marker", "rebase-command", "push-words", "config"],
+)
+def test_the_child_and_controller_skills_name_the_same_thing(texts, needle):
+    """What one skill sends the other must be spelled the same in both, or a child
+    writes where the controller does not read."""
+    for name in ("run-slices", "build-slice"):
+        assert needle in texts[name], f"{name} lacks {needle!r}"
+
+
+def test_the_child_rebase_reads_the_commit_recorded_at_setup(texts):
+    """The fork commit is where the branch was cut: recorded before the first
+    commit and read back at the rebase. A merge-base against another slice's branch
+    breaks once that branch is squash-merged, force-pushed or deleted."""
+    body = texts["build-slice"]
+    assert "kraft-lite/fork" in body.split("## 5.")[1].split("## 6.")[0]
+    assert "kraft-lite/fork" in body.split("## 1.")[1].split("## 2.")[0]
+    assert "merge-base" not in body
+    assert "--path-format=absolute" in body
+    assert body.count("git-common-dir") == body.count("--path-format=absolute --git-common-dir")
 
 
 def test_the_run_slices_skill_cites_every_verb_it_needs(texts):
