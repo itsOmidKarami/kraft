@@ -4,7 +4,7 @@ Kraft's own forced rebase already cleared, to no agent at all -- and the chain
 rewinds to `restart_from` under its own cap, carrying a note of why."""
 
 import pytest
-from support.harness import IN_PLACE, commit_all, git, v1_node, v1_task, write
+from support.harness import IN_PLACE, commit_all, git, make_repo, v1_node, v1_task, write
 from support.item_walk import approve, walk_once
 
 from kraft import events, inplace, store
@@ -32,11 +32,14 @@ def _starts(it):
     ]
 
 
-def _drops(it, script, cause="code", *, rebased=True, times=1, folder=None, moves_base=False):
+def _drops(
+    it, script, cause="code", *, rebased=True, times=1, folder=None, moves_base=False, repo=None
+):
     """`merge` answers `merge_rejected` `times` times, then `done`, recording
-    each drop as the forge's merge handler does, at the head it left -- and,
-    `moves_base`, the `base_ref` its forced rebase persists. No `cause`
-    records nothing."""
+    each drop as the forge's merge handler does, at the head it left in
+    `folder` -- and, `moves_base`, the `base_ref` its forced rebase persists.
+    `repo` is the dropped merge request's repository, the item's own unless
+    given. No `cause` records nothing."""
     script.plan["merge"] = ["merge_rejected"] * times + ["done"]
     dropped = [0]
 
@@ -54,7 +57,7 @@ def _drops(it, script, cause="code", *, rebased=True, times=1, folder=None, move
                 ForgeEvent.MERGE_QUEUE_DROPPED,
                 {
                     "node_id": "merge",
-                    "repo": str(it.repo),
+                    "repo": str(repo or it.repo),
                     "kind": "train",
                     "cause": cause,
                     "reason": "pipeline failed on the train",
@@ -67,6 +70,13 @@ def _drops(it, script, cause="code", *, rebased=True, times=1, folder=None, move
         )
 
     script.effects["merge"] = effect
+
+
+async def _walk_through_review(it, policy=None):
+    """Walk, approving `review` each time a rewind reopened it."""
+    while (status := await walk_once(it, policy)) == "awaiting_gate":
+        await approve(it, "review")
+    return status
 
 
 def _commits_a_fix(it, folder=None):
@@ -117,23 +127,27 @@ async def test_a_code_drop_runs_the_repair_and_rewinds_with_gates_reopened(item_
     ],
     ids=["plain", "the-task-declares-on-failure", "the-node-declares-on-base-changed"],
 )
-async def test_a_clean_conflict_rebase_rewinds_without_an_agent_and_keeps_gates(
+async def test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates(
     item_on, script, merge, fields
 ):
-    """Ruling 162: Kraft's forced rebase cleared the conflict and changed
-    nothing a gate saw, so no repair runs and `review` keeps its approval. The
-    drop is `on_merge_rejected`'s alone: no task recovery spends itself on it,
-    and the base that forced rebase moved is not a second, base-change
-    restart."""
+    """Kraft's forced rebase cleared the conflict, so no repair runs; the span's
+    approved `review` still reopens, because the rewound span's own fix loops
+    can commit before any gate sees the head again. The drop is
+    `on_merge_rejected`'s alone: no task recovery spends itself on it, and the
+    base that forced rebase moved is not a second, base-change restart."""
     it = await item_on(_chain(merge, on_merge_rejected=_POLICY, **fields))
     await approve(it, "review")
     _drops(it, script, "conflict", moves_base=True)
 
+    assert await walk_once(it) == "awaiting_gate"
+    assert [e["payload"] for e in it.events("gate_reopened")] == [
+        {"gate": "review", "reason": "merge_rejected"}
+    ]
+    await approve(it, "review")
     assert await walk_once(it) == "completed"
     assert _starts(it) == ["feedback", "merge", "feedback", "merge"]
     assert script.calls == ["ci", "merge", "ci", "merge"]
     assert not it.events("node_recovery_started")
-    assert not it.events("gate_reopened")
     assert len(it.events("merge_rejection_restart")) == 1
     assert not it.events("base_change_restart")
 
@@ -144,47 +158,97 @@ _NOTHING = (
 
 
 @pytest.mark.parametrize(
-    ("cause", "rebased", "calls", "reason", "kind"),
+    ("cause", "rebased", "member", "calls", "reason", "kind"),
     [
-        ("code", True, ["ci", "merge", "repair"], _NOTHING, "failed"),
-        ("conflict", False, ["ci", "merge", "repair"], _NOTHING, "conflict"),
+        ("code", True, False, ["ci", "merge", "repair"], _NOTHING, "failed"),
+        ("conflict", False, False, ["ci", "merge", "repair"], _NOTHING, "conflict"),
         (
             None,
             True,
+            False,
             ["ci", "merge"],
             "node merge reported merge_rejected but recorded no merge_queue_dropped",
             "failed",
         ),
+        ("code", True, True, ["ci", "merge", "repair"], _NOTHING, "failed"),
     ],
-    ids=["code", "unrebased-conflict", "no-drop-recorded"],
+    ids=["code", "unrebased-conflict", "no-drop-recorded", "a-members-drop"],
 )
 async def test_a_repair_that_commits_nothing_stops_for_a_human(
-    item_on, script, cause, rebased, calls, reason, kind
+    item_on, script, cause, rebased, member, calls, reason, kind
 ):
     """No rewind on an unchanged head: the train would only reject it again.
-    Nor on a drop with nothing recorded to tell a repair."""
+    Nor on a drop with nothing recorded to tell a repair. A workspace member's
+    drop is judged in that member's checkout: a commit in the root is not its
+    fix."""
     it = await item_on(_chain(on_merge_rejected=_POLICY))
     await approve(it, "review")
-    _drops(it, script, cause, rebased=rebased)
+    lib = make_repo(it.run_dirs.base, "lib") if member else None
+    if lib is not None:
+        await it.database.write(
+            lambda c: store.add_repo(
+                c, work_item_id=it.id, repo_path=str(lib), role="submodule", merge_rank=0
+            )
+        )
+        script.effects["repair"] = _commits_a_fix(it)
+    _drops(it, script, cause, rebased=rebased, folder=lib, repo=lib)
 
     assert await walk_once(it) == "needs_human"
     assert script.calls == calls
     assert not it.events("merge_rejection_restart")
     assert it.events("work_item_needs_human")[-1]["payload"]["reason"] == reason
     assert it.row()["stop_kind"] == kind
+    if lib is not None:
+        assert f"Its merge request is the one in {lib}; fix it there." in (
+            script.steers["repair"][0].take()
+        )
 
 
-async def test_merge_rejection_rewinds_are_capped(item_on, script):
-    """Its own `<node>.on_merge_rejected` counter, which the span never
-    clears: a train that rejects every pass stops for a person."""
+async def test_a_members_repair_rewinds_and_leaves_the_roots_base_ref(item_on, script):
+    """A member's fix is committed in that member's checkout, and that is what
+    rewinds; `base_ref` is the root's, so the member's base never becomes it."""
     it = await item_on(_chain(on_merge_rejected=_POLICY))
     await approve(it, "review")
-    _drops(it, script, "conflict", times=5)
+    lib = make_repo(it.run_dirs.base, "lib")
+    write(lib, "lib.txt", "the member's own history\n")
+    commit_all(lib, "a member is not a copy of the root")
+    await it.database.write(
+        lambda c: store.add_repo(
+            c, work_item_id=it.id, repo_path=str(lib), role="submodule", merge_rank=0
+        )
+    )
+    _drops(it, script, folder=lib, repo=lib)
+    script.effects["repair"] = _commits_a_fix(it, lib)
+    before = {}
+
+    async def record(_row):
+        before.setdefault("base_ref", it.row()["base_ref"])
+
+    script.effects["ci"] = record
+
+    assert await walk_once(it) == "awaiting_gate"
+    assert len(it.events("merge_rejection_restart")) == 1
+    assert it.row()["base_ref"] == before["base_ref"]
+
+
+@pytest.mark.parametrize(
+    ("cause", "repairs"), [("conflict", 0), ("code", 1)], ids=["no-agent", "cap-after-repair"]
+)
+async def test_merge_rejection_rewinds_are_capped(item_on, script, cause, repairs):
+    """Its own `<node>.on_merge_rejected` counter, which the span never
+    clears: a train that rejects every pass stops for a person -- read before
+    the repair, so no agent commits code a rewind the cap refuses would leave
+    unseen."""
+    it = await item_on(_chain(on_merge_rejected=_POLICY))
+    await approve(it, "review")
+    _drops(it, script, cause, times=5)
+    script.effects["repair"] = _commits_a_fix(it)
     policy = _policy.Policy(
         loops={"merge.on_merge_rejected": _policy.Cap(1, 604800)}, default=_policy.Cap(3, 3600)
     )
 
-    assert await walk_once(it, policy) == "needs_human"
+    assert await _walk_through_review(it, policy) == "needs_human"
+    assert script.calls.count("repair") == repairs
     assert len(it.events("merge_rejection_restart")) == 1
     reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
     assert reason == "merge.on_merge_rejected exhausted after 1 restart(s) from 'feedback'"
@@ -199,7 +263,7 @@ async def test_merge_rejection_rewinds_never_take_the_policy_default(item_on, sc
     _drops(it, script, "conflict", times=2)
     policy = _policy.Policy(loops={}, default=_policy.Cap(1, 3600))
 
-    assert await walk_once(it, policy) == "completed"
+    assert await _walk_through_review(it, policy) == "completed"
     assert len(it.events("merge_rejection_restart")) == 2
 
 
@@ -230,16 +294,19 @@ async def _upstream_moves(it) -> str:
 _TOLD = {
     "rebased": ([], ["First rebase onto origin/main", "This is a person's own checkout"]),
     "unrebased": (
-        ["First rebase onto origin/main and resolve any conflict.", "`git rebase origin/main`"],
-        ["This is a person's own checkout", "--autostash"],
+        [
+            "First rebase onto origin/main and resolve any conflict.",
+            "Run the rebase (`git rebase origin/main`)",
+        ],
+        ["This is a person's own checkout", "--autostash", "Re-run"],
     ),
     "unrebased-in-place": (
         [
             "First rebase onto origin/main and resolve any conflict.",
             "This is a person's own checkout",
-            "`git -c rebase.updateRefs=false rebase --autostash origin/main`",
+            "Run the rebase with `git -c rebase.updateRefs=false rebase --autostash origin/main`",
         ],
-        ["`git rebase origin/main`"],
+        ["`git rebase origin/main`", "Re-run"],
     ),
 }
 
@@ -311,6 +378,81 @@ async def test_a_fix_needed_in_a_landed_member_stops_with_its_question(item_on, 
     assert reason.startswith("needs_context: ")
     assert it.row()["stop_kind"] == "question"
     assert not it.events("merge_rejection_restart")
+
+
+@pytest.mark.parametrize(
+    ("ending", "result", "kind"),
+    [
+        ("needs_context", "needs_human", "question"),
+        ("failed", "needs_human", "failed"),
+        ("paused", "paused", None),
+        ("budget", "needs_human", "budget"),
+    ],
+    ids=["question-after-commit", "failed-after-commit", "paused-after-commit", "budget"],
+)
+async def test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from(
+    item_on, script, ending, result, kind
+):
+    """The repair committed, then did not finish: whatever walks the item next
+    must go back through the span, never merge its commit unseen. The approved
+    `review` reopens and the item stands at `feedback`, not at `merge`."""
+    it = await item_on(_chain(on_merge_rejected=_POLICY))
+    await approve(it, "review")
+    _drops(it, script)
+    script.plan["repair"] = [ending]
+    commit = _commits_a_fix(it)
+
+    async def commits_then_ends(_row):
+        await commit(_row)
+        if ending in ("needs_context", "failed"):  # a session's own ending, not a stop
+            await it.session("s-repair", "merge.on_merge_rejected.repair.main.repair", ending)
+
+    script.effects["repair"] = commits_then_ends
+
+    assert await walk_once(it) == result
+    assert kind is None or it.row()["stop_kind"] == kind
+    assert [e["payload"] for e in it.events("gate_reopened")] == [
+        {"gate": "review", "reason": "merge_rejected"}
+    ]
+    assert (it.row()["current_node_id"], it.row()["current_step"]) == ("feedback", 0)
+    assert not it.events("merge_rejection_restart")
+    if result == "paused":  # still active here: what a resume does next
+        assert await walk_once(it) == "awaiting_gate"
+        assert script.calls[-2:] == ["repair", "ci"]
+
+
+async def test_a_rewind_whose_clock_ran_out_during_the_repair_holds_the_item(
+    item_on, script, monkeypatch
+):
+    """The cap is read before the repair, but its wall clock can run out while
+    the repair works: the refused rewind still reopens `review` and stands the
+    item at `feedback`, the repair's commit unseen by any gate."""
+    from kraft.executor import walk
+
+    it = await item_on(_chain(on_merge_rejected=_POLICY))
+    await approve(it, "review")
+    _drops(it, script, times=2)
+    commit = _commits_a_fix(it)
+    late = []
+
+    async def repair(_row):
+        await commit(_row)
+        if script.calls.count("repair") == 2:
+            late.append(True)
+
+    script.effects["repair"] = repair
+    real_now = walk._now
+    monkeypatch.setattr(walk, "_now", lambda: "2999-01-01T00:00:00+00:00" if late else real_now())
+    policy = _policy.Policy(
+        loops={"merge.on_merge_rejected": _policy.Cap(3, 3600)}, default=_policy.Cap(3, 3600)
+    )
+
+    assert await _walk_through_review(it, policy) == "needs_human"
+    assert it.row()["stop_kind"] == "cap"
+    assert script.calls.count("repair") == 2
+    assert len(it.events("merge_rejection_restart")) == 1
+    assert len(it.events("gate_reopened")) == 2
+    assert it.row()["current_node_id"] == "feedback"
 
 
 def _landed(c, it):

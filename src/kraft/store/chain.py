@@ -56,6 +56,17 @@ def enter_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
     events.append(conn, work_item_id, ChainEvent.NODE_STARTED, {"node_id": node_id})
 
 
+def stand_at(conn: sqlite3.Connection, work_item_id, node_id) -> None:
+    """Put the item's cursor on `node_id`'s first step without entering it:
+    the next walk from the cursor -- a resume, a poller, a retry's default
+    target -- starts there. For a stop that must not resume where it stood
+    (`walk._hold_at_restart`)."""
+    conn.execute(
+        "UPDATE work_items SET current_node_id = ?, current_step = 0, updated_at = ? WHERE id = ?",
+        (node_id, _now(), work_item_id),
+    )
+
+
 def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
     # Idempotent: resume can re-enter an already-completed node (a reconciled
     # non-fix node, or a fix_loop node re-measured after a crash in the
