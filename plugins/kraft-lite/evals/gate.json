@@ -35,5 +35,17 @@
       "Does not treat the proposal file left on disk as a new slicing",
       "Checks the new state and invokes kraft-lite:next"
     ]
+  },
+  {
+    "skills": [
+      "kraft-lite:gate"
+    ],
+    "query": "[user] Approve chain_finalized.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. The user ran /clear a moment ago, so nothing said earlier in this conversation is visible. `state --chain-id kl-7f3a91c2` prints node chain_review, status blocked, gate chain_finalized, note 'Regroup: b and c should be one slice', sliced null. `.kraft-lite/proposals/kl-7f3a91c2.json` exists: mode feature, feature branch feat/ledger-export, state branch claude/ledger-x1, slices a 'Row model' (task 1) and b 'Writers and importer' (tasks 2-5, after a).",
+    "expected_behavior": [
+      "Treats .kraft-lite/proposals/kl-7f3a91c2.json as this gate's artefact: shows its slices to the user, or approves on their word, but never calls it a leftover",
+      "Records the approval with `approve --slices .kraft-lite/proposals/kl-7f3a91c2.json --chain-id kl-7f3a91c2` (now, or once the user approves it with the proposal in front of them)",
+      "Does not delete the proposal file and does not run a plain `approve`"
+    ]
   }
 ]

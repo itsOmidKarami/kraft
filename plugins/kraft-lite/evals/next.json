@@ -22,7 +22,6 @@
       "Runs only the node's test hook (on.test.run), on what the feature branch changed (for example the paths from `git diff --name-only main...feat/ledger-export`), not as the bare `just test` whole-suite command",
       "Runs on.env.prepare in the feature worktree before the test hook, and does not dispatch on.review.local.run or on.mr.rebase: every slice was reviewed, and the feature PR's on.review.mr.run reviews how the slices fit together",
       "Runs the test hook in a worktree of feat/ledger-export, not in the state branch's checkout",
-      "Says the full suite runs on CI",
       "Closes verify, then exports state"
     ]
   },
@@ -152,6 +151,20 @@
       "Runs on.mr.rebase, on.mr.describe and on.mr.open in /work/ledger-feature",
       "Runs every kl.py command (close, export, state) from the controller's checkout /work/ledger (for example `cd /work/ledger` first, or `git -C`/a subshell for the hooks), never from /work/ledger-feature, whose own .kraft-lite holds no chain",
       "Commits and pushes the state export in /work/ledger on claude/ledger-export-x1"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:next",
+      "kraft-lite:build-slice"
+    ],
+    "query": "[user, typing in this session] Carry on.",
+    "setup": "A local Claude Code child session for slice b of chain kl-7f3a91c2 (repo acme/ledger, branch ledger/b-writers, draft PR https://github.com/acme/ledger/pull/52 into feat/ledger-export), started by the local controller session named ledger-ctrl, and walking its own slice chain kl-b82c4d11 with kraft-lite:build-slice and kraft-lite:next. This harness has no background wait and no way to schedule a message back into this session. `state --chain-id kl-b82c4d11` prints node mr_checks, hooks [on.ci.poll], status open, sliced null. The registry binds on.ci.poll to the subprocess [gh, pr, checks]; running it prints `build pending`, `lint pass`, `tests pending`. The user has this session open in a terminal and typed the message below.",
+    "expected_behavior": [
+      "Runs the on.ci.poll check once and does not loop, sleep or wait on it",
+      "Sends the controller (ledger-ctrl) a `status | b | mr_checks` message with CI pending, the PR link and the pending checks, saying no wake-up is armed and it continues on the controller's check-in",
+      "Does not tell the user to invoke kraft-lite:next, or any skill, again when CI finishes; its reply to the user is a status only",
+      "Does not close mr_checks while checks are pending"
     ]
   }
 ]

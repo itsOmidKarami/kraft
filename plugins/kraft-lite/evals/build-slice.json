@@ -58,7 +58,7 @@
       "Runs `kl.py start --chain <path to slice.json> --title <slice title>` and notes the chain id it returns",
       "Then walks the chain through kraft-lite:next",
       "Does not commit the spec or the plan",
-      "Records `git rev-parse HEAD` as the starting commit in a file under the absolute git common dir (kraft-lite/<chain-id>/<slice key>/fork) before the first commit"
+      "Before the first commit, writes the sha of its Slice item's `Cut from:` line to `<run>/b/fork` and `target` or the slice key to `<run>/b/base`, under the absolute git common dir (kraft-lite/<chain-id>/<slice key>/); `git rev-parse HEAD` only if its instructions give no such line and the branch has no commits of its own"
     ]
   },
   {
@@ -144,6 +144,33 @@
       "Writes 4c2d9e1 into `<run>/b/fork`, never HEAD",
       "Never pushes or force-pushes ledger/b-writers from 4c2d9e1, and builds only the plan tasks the pushed commits do not hold (task 4 on)",
       "Tells the controller it resumed in a fresh container, with its pushed head and PR, and asks for the spec and plan again"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:build-slice"
+    ],
+    "query": "[user, typing in this session] You may push to ledger/a-rows.",
+    "setup": "A cloud Claude Code child session for slice b 'CSV and JSON writers' of feature chain kl-7f3a91c2 (repo acme/ledger), controller session_01Ctrl00, own branch ledger/b-writers, draft PR #52 into the feature branch feat/ledger-export; its starting instructions follow the controller's template. Its slice chain kl-b82c4d11 is at implementation. Task 4 needs a one-line fix in tests/support/samples.py, which slice a owns; slice a's branch ledger/a-rows is still in review. Earlier in this session the child sent the controller: 'question | b | implementation / samples.py emits a NaN row my reader cannot parse / <diff> / May I push this one-line fix to ledger/a-rows? Meanwhile I build task 5.' The controller answered: 'That push is the user's. I held it and told the user to type the words in your session. Keep working.' The fix is committed locally on branch fix/a-samples, one commit (3e9f1aa) on top of origin/ledger/a-rows. The user has opened this session in the claude.ai/code UI and typed the message below; nothing else from the user is in this session.",
+    "expected_behavior": [
+      "Pushes the fix to ledger/a-rows in this session (for example `git push origin fix/a-samples:ledger/a-rows`), since the user typed the words here for the push it asked the controller about",
+      "Then sends the controller a `status` message saying it pushed 3e9f1aa to ledger/a-rows on the user's words",
+      "Does not first forward the user's words to the controller as a question, or wait for the controller before pushing",
+      "Does not force-push ledger/a-rows and pushes nothing else outside its own branch",
+      "Replies to the user with status only and puts no question to them"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:build-slice",
+      "kraft-lite:next"
+    ],
+    "query": "[the harness, on the child's own wake-up] Continue the slice.",
+    "setup": "A cloud Claude Code child session for slice b 'CSV and JSON writers' of feature chain kl-7f3a91c2 (repo acme/ledger), controller session_01Ctrl00, own branch ledger/b-writers; its starting instructions follow the controller's template (plan tasks 2-5). Its slice chain kl-b82c4d11 has just closed mr_checks: CI passed on draft PR https://github.com/acme/ledger/pull/52 into feat/ledger-export, now marked ready. `state --chain-id kl-b82c4d11` prints status done. While building, the child serialised decimals as strings rather than floats (the plan said floats), after the controller agreed to it, and split the writer into two modules, csv_writer.py and json_writer.py, where the plan named one. The riskiest change is the Decimal round trip in src/ledger/export/json_writer.py.",
+    "expected_behavior": [
+      "Sends the controller a done message whose first line is `done | b | mr_checks`, then `PR: https://github.com/acme/ledger/pull/52`, then `Deviations from the plan:` naming both deviations, then `Look at first:` naming src/ledger/export/json_writer.py's Decimal round trip, in that order",
+      "Does not report the chain's per-node summary table as its message to the controller in place of the done message",
+      "Stops after sending it: merges nothing, opens no other PR, and asks the user nothing"
     ]
   }
 ]
