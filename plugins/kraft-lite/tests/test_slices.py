@@ -465,13 +465,12 @@ def test_approve_with_slices_at_the_slice_gate_creates_them(walk, kl_cli, tmp_pa
         # Sliced wins over "wrong gate": the first check is the one a person can act on.
         pytest.param("already_sliced", "already sliced", id="already_sliced"),
         pytest.param("sliced_and_open", "already sliced", id="sliced_and_not_blocked"),
-        # Slicing is keyed to the default chain's node ids: a custom chain without
-        # them is refused, not walked with no slice guard at all.
+        # A chain without the shape is refused naming what it lacks, not walked
+        # with no slice guard at all.
         pytest.param(
-            "chain_without_nodes",
-            "slicing needs the default chain's nodes; this run's chain 'custom' has no "
-            "merge_request_feedback, post_merge_ci",
-            id="custom_chain_without_nodes",
+            "chain_without_the_shape",
+            "chain 'quick-task' cannot be sliced: no gate before the first build node",
+            id="chain_without_the_shape",
         ),
     ],
 )
@@ -480,12 +479,8 @@ def test_slices_are_only_accepted_at_the_slice_gate(walk, setup, message, kl_cli
         walk.start(tmp_path)
         walk.to(tmp_path, "spec_approval")
         kl_cli(tmp_path, "gate")
-    elif setup == "chain_without_nodes":
-        custom = tmp_path / "custom.yaml"
-        custom.write_text("extends: default\nremove: [merge_request_feedback, post_merge_ci]\n")
-        kl_cli(tmp_path, "start", "--title", "t", "--chain", str(custom))
-        walk.to(tmp_path, "chain_revision_approval")
-        kl_cli(tmp_path, "gate")
+    elif setup == "chain_without_the_shape":
+        kl_cli(tmp_path, "start", "--title", "t", "--chain", "quick-task")
     else:
         walk.slice(tmp_path, plan())
         if setup == "already_sliced":

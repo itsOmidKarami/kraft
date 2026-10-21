@@ -24,6 +24,7 @@ from pathlib import Path
 
 import kl_bindings
 import kl_chains
+import kl_shape
 
 #: bd stores a dependency as an object, not an id string. The fallback file uses
 #: the same shape on purpose: the promise that `bd import .kraft-lite/chain.jsonl`
@@ -130,24 +131,10 @@ SLICE_SPEC_KEYS = ("key", "title", "tasks", "after")
 RUN_ID = re.compile(r"ksr-[0-9a-f]{8}")
 SLICE_ID = re.compile(r"ks-[0-9a-f]{8}")
 
-#: What a node of the feature chain means once the run is sliced, by mode. The
-#: chain's own node list is untouched; `state` reports the action beside it so
-#: the `next` skill knows whether to run the node's tasks or do something else.
-#: A node absent from the table runs its tasks in both modes. Keyed to the V1
-#: `default` chain's node ids until the shape rules replace it.
-SLICED_ACTIONS: dict[str, dict[str, str]] = {
-    "implementation": {"feature": "run_slices", "main": "run_slices"},
-    "verification": {"feature": "scoped_verify", "main": "skip"},
-    "describe_merge_request": {"feature": "run", "main": "skip"},
-    "draft_merge_request": {"feature": "run", "main": "skip"},
-    "merge_request_feedback": {"feature": "run", "main": "skip"},
-    "final_review": {"feature": "run", "main": "await_user_merges"},
-    "merge": {"feature": "run", "main": "await_user_merges"},
-    # Main mode has no one merge to watch: each slice merged into main on its own.
-    "post_merge_ci": {"feature": "run", "main": "skip"},
-}
-#: The gate a chain is sliced at: the plan is settled, the build not begun.
-SLICE_GATE = "chain_revision_approval"
+#: On a child's epic: it walks a slice of a controller's chain (`start
+#: --slice-of`), so `state` dispatches its tasks with the slice bindings layer,
+#: and it is never sliced itself.
+SLICE_LAYER_LABEL = "kraft-slice-layer"
 
 #: Who decides what, unless `.kraft-lite/slices.json` says otherwise.
 DEFAULT_SETTINGS = {
@@ -913,7 +900,7 @@ def slice_records(records: list[dict], chain_id: str) -> list[dict]:
 
 
 def slice_done(record: dict, mode: str) -> bool:
-    """Whether this slice counts as done for closing `implementation`. In `main`
+    """Whether this slice counts as done for closing the first build node. In `main`
     mode a slice ready to merge is enough: the user merges it, and the run does
     not wait on that. What may start after it is `_startable`'s to say, and it
     waits for the merge in both modes."""
@@ -992,32 +979,36 @@ def slices_view(records: list[dict], chain_id: str | None) -> dict:
     }
 
 
-def _refuse_unsliceable(chain: dict) -> None:
-    """A `SystemExit` for a chain that slicing would walk wrong. What a node means
-    in a sliced run is keyed to the default chain's node ids (`SLICED_ACTIONS`):
-    a chain without them would run its slices with no guard on closing the nodes
-    that wait for them."""
-    ids = [n["id"] for n in chain["nodes"]]
-    missing = [n for n in SLICED_ACTIONS if n not in ids]
-    if missing:
-        raise SystemExit(
-            f"kraft-lite: slicing needs the default chain's nodes; this run's chain "
-            f"{chain.get('id')!r} has no {', '.join(missing)}"
-        )
+def _shape(chain: dict | None) -> kl_shape.SliceShape | None:
+    """Where `chain` slices, or None for a chain without the shape: walked
+    unsliced, with no slice gate."""
+    if chain is None:
+        return None
+    try:
+        return kl_shape.slice_shape(chain)
+    except kl_chains.ChainError:
+        return None
 
 
 def slices_for_gate(
     records: list[dict], node_record: dict, chain_id: str, path: Path, root: Path, chain: dict
 ) -> list[dict]:
     """The records `approve --slices` writes with the approval, or a `SystemExit`.
-    Slicing happens once, at `SLICE_GATE`, once the plan and the chain's revision
-    are settled: anywhere else a plan has nothing settled to be split from, and a
-    second time it would replace work already handed to children."""
+    Slicing happens once, at the chain's slice gate (`kl_shape.slice_shape`),
+    once the plan is settled: anywhere else a plan has nothing settled to be
+    split from, and a second time it would replace work already handed to
+    children. A child walks a slice already, and a chain without the shape is
+    refused naming what it lacks."""
+    epic = next(r for r in records if r["id"] == chain_id)
+    if label_value(epic, SLICE_LAYER_LABEL) is not None:
+        raise SystemExit(
+            "kraft-lite: this run walks a slice: a slice's child chain is never sliced"
+        )
     if run_record(records, chain_id) is not None:
         raise SystemExit("kraft-lite: this chain is already sliced")
-    if node_record["status"] != "blocked" or label_value(node_record, GATE_LABEL) != SLICE_GATE:
-        raise SystemExit(f"kraft-lite: --slices is only accepted at {SLICE_GATE}")
-    _refuse_unsliceable(chain)
+    gate = kl_shape.slice_shape(chain).slice_gate
+    if node_record["status"] != "blocked" or label_value(node_record, GATE_LABEL) != gate:
+        raise SystemExit(f"kraft-lite: --slices is only accepted at {gate}")
     try:
         plan = json.loads(path.read_text())
     except (OSError, ValueError) as error:
@@ -1091,31 +1082,34 @@ def rewind(
     return out
 
 
-def rewind_slices(everything: list[dict], chain_id: str, tail: list[dict]) -> list[dict]:
+def rewind_slices(
+    everything: list[dict], chain_id: str, tail: list[dict], chain: dict
+) -> list[dict]:
     """What a rewind that reopens `tail` writes to the run's slices, or a
-    `SystemExit`. Rewound to a node before the slices were cut, the plan or its
-    slicing is redone, so the run and its slices are retired: closed, and labelled
-    so that nothing reads them as the chain's. The chain is then sliced again at
-    the next `SLICE_GATE`. Rewound to the node that builds them, every slice
-    done would close it at once with nothing redone, so that is refused until a
-    slice is reopened. Rewound past it, the slices stand."""
+    `SystemExit`. Rewound to the slice gate or before it, the plan or its
+    slicing is redone, so the run and its slices are retired: closed, and
+    labelled so that nothing reads them as the chain's. The chain is then sliced
+    again at the slice gate. Rewound to the first build node, or to a node
+    between the slice gate and it, every slice done would close the build at
+    once with nothing redone, so that is refused until a slice is reopened.
+    Rewound past it, the slices stand."""
     run = run_record(everything, chain_id)
-    if run is None:
+    shape = _shape(chain)
+    if run is None or shape is None:
         return []
     mode = _run_mode(run)
     nodes = [label_value(r, NODE_LABEL) for r in tail]
-    builds = next((n for n in nodes if SLICED_ACTIONS.get(n, {}).get(mode) == "run_slices"), None)
-    if builds is None:
-        return []
-    slices = slice_records(everything, chain_id)
-    if nodes[0] != builds:
+    if shape.slice_gate in nodes:
+        slices = slice_records(everything, chain_id)
         retired = [dict(r, status="closed") for r in [run, *slices]]
         return [set_label(r, RETIRED_LABEL, nodes[0]) for r in retired]
-    if all(slice_done(r, mode) for r in slices):
+    if shape.first_build in nodes and all(
+        slice_done(r, mode) for r in slice_records(everything, chain_id)
+    ):
         raise SystemExit(
-            f"kraft-lite: every slice is done, so {builds} would close at once with nothing "
-            "redone. Reopen the slices to redo first (slice-set --slice KEY --status running), "
-            "or rewind further back to slice the chain again"
+            f"kraft-lite: every slice is done, so {shape.first_build} would close at once with "
+            "nothing redone. Reopen the slices to redo first (slice-set --slice KEY --status "
+            "running), or rewind further back to slice the chain again"
         )
     return []
 
@@ -1335,7 +1329,18 @@ def _ours(records: list[dict], chain_id: str | None = None) -> list[dict]:
     return by_chain[(live or _by_age(by_chain))[-1]]
 
 
-def _sliced(everything: list[dict], epic: dict | None, node_id: str | None) -> dict | None:
+def _action(chain: dict | None, node_id: str | None, mode: str) -> str:
+    """What `node_id` means in a run sliced in `mode` (`kl_shape.sliced_action`);
+    `run` once the walk is done, or for a chain that lost its shape."""
+    shape = _shape(chain)
+    if shape is None or node_id is None:
+        return "run"
+    return kl_shape.sliced_action(chain, shape, node_id, mode)
+
+
+def _sliced(
+    everything: list[dict], epic: dict | None, node_id: str | None, chain: dict | None
+) -> dict | None:
     """`null` for a chain that was never sliced, else the run's mode and what
     the current node means in it. Read from the whole store: `_ours` returns only
     the epic and its nodes, and the run record is neither."""
@@ -1343,7 +1348,7 @@ def _sliced(everything: list[dict], epic: dict | None, node_id: str | None) -> d
     if run is None:
         return None
     mode = _run_mode(run)
-    return {"mode": mode, "action": SLICED_ACTIONS.get(node_id, {}).get(mode, "run")}
+    return {"mode": mode, "action": _action(chain, node_id, mode)}
 
 
 def _cap(definition: dict) -> int | None:
@@ -1368,16 +1373,16 @@ def _definition(root: Path, chain: dict, chain_id: str | None, node_id: str | No
     return definition
 
 
-def _dispatcher(root: Path):
+def _dispatcher(root: Path, slice_layer: bool = False):
     """How `state` turns a frozen task into the one instruction the walk
     follows: this repo's bindings over the defaults, with the skills installed
-    in this harness. Read per call, so a binding edited mid-run counts from the
-    next `state`."""
+    in this harness, and for a child walking a slice the slice layer over both.
+    Read per call, so a binding edited mid-run counts from the next `state`."""
     bindings = kl_bindings.read_bindings(root)
     installed = set(_installed_skills(root))
 
     def dispatch(task: dict) -> dict:
-        return kl_bindings.dispatch(task, bindings, installed.__contains__)
+        return kl_bindings.dispatch(task, bindings, installed.__contains__, slice_layer=slice_layer)
 
     return dispatch
 
@@ -1458,7 +1463,9 @@ def _state(
     if node_record is None:
         # "done" and "never started" are different answers. Reporting both as
         # done tells the `next` skill a chain that does not exist has finished.
-        state.update(status="done" if epic else "unstarted", sliced=_sliced(everything, epic, None))
+        state.update(
+            status="done" if epic else "unstarted", sliced=_sliced(everything, epic, None, chain)
+        )
         return state
     node_id = label_value(node_record, NODE_LABEL)
     definition = _definition(root, chain, state["chain_id"], node_id)
@@ -1468,7 +1475,7 @@ def _state(
         status=node_record["status"],
         attempt=attempts(node_record),
         note=_note(node_record.get("description", "")),
-        sliced=_sliced(everything, epic, node_id),
+        sliced=_sliced(everything, epic, node_id, chain),
     )
     if definition["kind"] == "gate":
         state["gate"] = {
@@ -1477,11 +1484,10 @@ def _state(
             "artifact_path": _artifact(records, definition["artifact"]),
             "reject_to": definition["reject_to"],
             "chain_finalized": definition["chain_finalized"],
-            # Task 7 marks the slice gate from the chain's shape.
-            "slice_gate": False,
+            "slice_gate": node_id == getattr(_shape(chain), "slice_gate", None),
         }
         return state
-    dispatch = _dispatcher(root)
+    dispatch = _dispatcher(root, label_value(epic, SLICE_LAYER_LABEL) is not None)
     loop, base = definition["fix_loop"], definition["on_base_changed"]
     state.update(
         cap=_cap(definition),
@@ -1561,10 +1567,12 @@ def _refuse_slice_move(slices: list[dict], record: dict, status: str) -> None:
     )
 
 
-def _refuse_close_before_slices(everything: list[dict], chain_id: str, node_record: dict) -> None:
+def _refuse_close_before_slices(
+    everything: list[dict], chain_id: str, node_record: dict, chain: dict
+) -> None:
     """A `SystemExit` for closing a sliced run's node before the slices it waits
     on, by `close` or by `approve`. `run_slices` waits for every slice done for the
-    run's mode: closing it moves the walk to `verification`, which checks seams between
+    run's mode: closing it moves the walk on to what checks seams between
     slices that are not all there yet. `await_user_merges` waits for every slice
     merged: the user's merges are all it waits on, and closing it first finishes
     the run before any of them."""
@@ -1573,7 +1581,7 @@ def _refuse_close_before_slices(everything: list[dict], chain_id: str, node_reco
         return
     mode = _run_mode(run)
     node = label_value(node_record, NODE_LABEL)
-    action = SLICED_ACTIONS.get(node, {}).get(mode)
+    action = _action(chain, node, mode)
     slices = slice_records(everything, chain_id)
     if action == "run_slices":
         left = [r for r in slices if not slice_done(r, mode)]
@@ -1796,11 +1804,14 @@ def _decisions(root: Path, everything: list[dict], chain_id: str, args) -> list[
 
 EXPORT_RECORDS = "records.jsonl"
 EXPORT_DECISIONS = "decisions.jsonl"
+#: The run's frozen chain, beside its records: what an import resumes it on,
+#: and what a child starts from (`start --slice-of`).
+EXPORT_CHAIN = "chain.json"
 
 
 def _export(root: Path, everything: list[dict], chain_id: str, to: Path) -> dict:
     """The run's state as three files for the state branch: its records as the
-    store holds them, its frozen template, and its decisions log. Nothing else
+    store holds them, its frozen chain, and its decisions log. Nothing else
     is written, and nothing else in `to` is touched, because `to` is usually a
     checkout of that branch. Specs and plans travel by message, never here."""
     # Retired ones too: an import is what retires them in a checkout where they are live.
@@ -1808,13 +1819,8 @@ def _export(root: Path, everything: list[dict], chain_id: str, to: Path) -> dict
         *chain_index(everything)[chain_id],
         *(r for r in everything if _slicing_of(r, chain_id)),
     ]
-    frozen = _frozen_path(root, chain_id)
-    template = to / "chains" / frozen.name
-    template.parent.mkdir(parents=True, exist_ok=True)
-    if frozen.is_file():
-        shutil.copyfile(frozen, template)
-    else:
-        template.write_text(json.dumps(_chain(root, chain_id), indent=2) + "\n")
+    to.mkdir(parents=True, exist_ok=True)
+    (to / EXPORT_CHAIN).write_text(json.dumps(_chain(root, chain_id), indent=2) + "\n")
     (to / EXPORT_RECORDS).write_text(_jsonl(records))
     decisions = read_jsonl(_decisions_path(root, chain_id))
     (to / EXPORT_DECISIONS).write_text(_jsonl(decisions))
@@ -1909,6 +1915,21 @@ def _of_chain(record: dict, chain_id: str) -> bool:
     )
 
 
+def _exported_chain(path: Path, written: str, missing: str) -> dict:
+    """The V1 frozen chain at `path`, or a `SystemExit`: `missing` when there is
+    no file, and the older-Kraft-Lite refusal, which `written` opens, for one
+    that is not V1."""
+    if not path.is_file():
+        raise SystemExit(f"kraft-lite: {missing}")
+    try:
+        chain = json.loads(path.read_text())
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"kraft-lite: cannot read the chain {path}: {error}") from error
+    if not isinstance(chain, dict) or chain.get("format") != FORMAT:
+        raise SystemExit(f"kraft-lite: {written} by an older Kraft Lite: not a V1 chain")
+    return chain
+
+
 def _import(root: Path, store, source: Path) -> dict:
     """Resume, or catch up, from an export. Dispatched before `_ours`: the
     export names its own chain, and the directory may hold others.
@@ -1939,12 +1960,20 @@ def _import(root: Path, store, source: Path) -> dict:
             f"kraft-lite: {source / EXPORT_RECORDS} holds records that are not chain "
             f"{chain_id}'s: {', '.join(strays)}"
         )
-    template = source / "chains" / frozen.name
-    if not template.is_file():
-        raise SystemExit(f"kraft-lite: the export has no frozen template {template}")
+    chain = _exported_chain(
+        source / EXPORT_CHAIN,
+        f"{source} was exported",
+        f"{source} was exported by an older Kraft Lite: no {EXPORT_CHAIN}",
+    )
+    # A run's chain never changes after `start`: an export carrying another is
+    # not this run's to resume, and the frozen copy here is never replaced.
+    if frozen.is_file() and json.loads(frozen.read_text()) != chain:
+        raise SystemExit(
+            f"kraft-lite: {source / EXPORT_CHAIN} is not the chain {chain_id} started with, "
+            f"which is {frozen}. A run's chain never changes after start"
+        )
     if not frozen.is_file():
-        frozen.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(template, frozen)
+        _freeze_chain(root, chain, chain_id)
     local = store.load()
     write, kept = _import_records(local, exported)
     if write:
@@ -2001,6 +2030,24 @@ def _start_chain(root: Path, chain: str | None, attached: dict[str, Path]) -> di
     return resolved
 
 
+def _start_slice(root: Path, path: Path, chain: str | None, attached: dict) -> dict:
+    """The chain a child freezes for its slice: the child chain of the
+    controller's frozen chain at `path` (its export's `chain.json`), never
+    resolved from templates, so the child walks exactly what the controller
+    froze. Every task is dispatched with the slice layer before anything is
+    written, as `_start_chain` does."""
+    if chain is not None or attached:
+        raise SystemExit("kraft-lite: --slice-of takes no --chain, --spec or --plan")
+    parent = _exported_chain(
+        path, f"{path} was written", f"cannot read the chain {path}: no such file"
+    )
+    child = kl_shape.child_chain(parent)
+    dispatch = _dispatcher(root, slice_layer=True)
+    for task in _dispatched_tasks(child):
+        dispatch(task)
+    return child
+
+
 def _exec_before(chain: dict, node_id: str) -> str:
     """The nearest exec node before `node_id`: where a gate with no `reject_to`
     sends its rejection."""
@@ -2015,7 +2062,12 @@ def _exec_before(chain: dict, node_id: str) -> str:
 
 
 def _restart(
-    everything: list[dict], records: list[dict], chain_id: str, node_record: dict, definition: dict
+    everything: list[dict],
+    records: list[dict],
+    chain_id: str,
+    node_record: dict,
+    definition: dict,
+    chain: dict,
 ) -> list[dict]:
     """What `restart` writes: the walk sent back to `on_base_changed.restart_from`
     through this node, their attempts reset, this node's restarts counted. The
@@ -2040,7 +2092,7 @@ def _restart(
         else r
         for r in tail
     ]
-    return [*tail, *rewind_slices(everything, chain_id, tail)]
+    return [*tail, *rewind_slices(everything, chain_id, tail, chain)]
 
 
 #: The verbs that answer beside a pre-V1 registry no bindings file replaced yet:
@@ -2098,6 +2150,8 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--chain", default=None)
     for kind in ATTACHMENT_KINDS:
         start.add_argument(f"--{kind}", type=Path, default=None)
+    # A child's start: the controller's exported chain, which it slices from.
+    start.add_argument("--slice-of", type=Path, default=None)
     detect_parser = sub.add_parser("detect")
     # A chain id from the libraries or a chain file, as for `start`.
     detect_parser.add_argument("--chain", default=None)
@@ -2176,12 +2230,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.verb == "start":
         new_id = new_chain_id()
         attached = {k: getattr(args, k) for k in ATTACHMENT_KINDS if getattr(args, k)}
-        chain = _start_chain(root, args.chain, attached)
+        if args.slice_of is None:
+            chain = _start_chain(root, args.chain, attached)
+        else:
+            chain = _start_slice(root, args.slice_of, args.chain, attached)
         _freeze_chain(root, chain, new_id)
         records = materialize(chain, args.title, new_id)
         # The epic is a container, not a step: close it now so the walk starts at
         # the first real node.
         records[0]["status"] = "closed"
+        if args.slice_of is not None:
+            records[0] = set_label(records[0], SLICE_LAYER_LABEL, "")
         for kind, path in attached.items():
             records[0] = set_label(
                 records[0], f"{ARTIFACT_LABEL}{kind}=", _artifact_path(root, path)
@@ -2242,7 +2301,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.verb in ("close", "approve"):
         if args.verb == "close" and definition["kind"] == "gate":
             raise SystemExit(f"kraft-lite: {node_id} is a gate: approve or reject it")
-        _refuse_close_before_slices(everything, resolved_id, node_record)
+        _refuse_close_before_slices(everything, resolved_id, node_record, chain)
         store.write([bank_wait(dict(node_record, status="closed"))])
     elif args.verb == "gate":
         if definition["kind"] != "gate":
@@ -2254,9 +2313,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.verb == "reject" and (args.from_node or definition["kind"] == "gate"):
         target = args.from_node or definition["reject_to"] or _exec_before(chain, node_id)
         tail = rewind(records, target, args.note)
-        store.write([*tail, *rewind_slices(everything, resolved_id, tail)])
+        store.write([*tail, *rewind_slices(everything, resolved_id, tail, chain)])
     elif args.verb == "restart":
-        store.write(_restart(everything, records, resolved_id, node_record, definition))
+        store.write(_restart(everything, records, resolved_id, node_record, definition, chain))
     elif args.verb == "produced":
         if not ARTIFACT_KIND.fullmatch(args.kind):
             raise SystemExit(

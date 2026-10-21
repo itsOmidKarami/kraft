@@ -325,14 +325,19 @@ def test_export_carries_the_frozen_template(walk, kl_cli, tmp_path, default_chai
 
     kl_cli(here, "export", "--to", str(out))
 
-    assert json.loads((out / "chains" / f"{chain_id}.json").read_text()) == custom
+    assert json.loads((out / "chain.json").read_text()) == custom
     kl_cli(there, "import", "--from", str(out))
     assert json.loads(kl._frozen_path(there, chain_id).read_text()) == custom
     assert kl_cli(there, "state") == kl_cli(here, "state")
 
-    # A frozen template already here is the run's own; an export never replaces it.
-    (out / "chains" / f"{chain_id}.json").write_text(json.dumps(default_chain))
-    kl_cli(there, "import", "--from", str(out))
+    # A frozen chain already here is the run's own: a run's chain never changes
+    # after start, so an export carrying another is refused, naming both.
+    (out / "chain.json").write_text(json.dumps(default_chain))
+    refused = kl_cli(there, "import", "--from", str(out), ok=False)
+    assert (
+        f"{out / 'chain.json'} is not the chain {chain_id} started with, which is "
+        f"{kl._frozen_path(there, chain_id)}" in refused.stderr
+    )
     assert json.loads(kl._frozen_path(there, chain_id).read_text()) == custom
 
 
@@ -355,7 +360,7 @@ def test_export_writes_no_documents(walk, kl_cli, tmp_path):
 
     kl_cli(tmp_path, "export", "--to", str(out))
 
-    assert files_under(out) == ["chains/" + chain_id + ".json", "decisions.jsonl", "records.jsonl"]
+    assert files_under(out) == ["chain.json", "decisions.jsonl", "records.jsonl"]
 
 
 def test_export_into_a_checkout_replaces_only_its_own_files(walk, kl_cli, tmp_path):
@@ -473,7 +478,11 @@ def stray_record(problem: str) -> dict:
         pytest.param("no_records", "no export at {out}: {out}/records.jsonl", id="no_records"),
         pytest.param("no_epic", "holds 0 chain epics", id="no_epic"),
         pytest.param("two_epics", "holds 2 chain epics", id="two_epics"),
-        pytest.param("no_template", "no frozen template", id="no_template"),
+        pytest.param(
+            "no_template",
+            "{out} was exported by an older Kraft Lite: no chain.json",
+            id="no_template",
+        ),
         # Everything else in the store is the directory's own: an export brings
         # its chain's epic and nodes, its run and its slices, and nothing more.
         *[
@@ -517,11 +526,7 @@ def test_import_refuses_an_export_that_names_no_single_chain(
             continue
         kl.append_jsonl(out / "records.jsonl", kl.materialize(chain, "t", chain_id))
         if problem != "no_template":
-            (out / "chains").mkdir(exist_ok=True)
-            # The template sits where the id points, as an export made to escape would.
-            template = out / "chains" / f"{chain_id}.json"
-            template.parent.mkdir(parents=True, exist_ok=True)
-            template.write_text(json.dumps(chain))
+            (out / "chain.json").write_text(json.dumps(chain))
     if problem in STRAYS:
         kl.append_jsonl(out / "records.jsonl", [stray_record(problem)])
     if problem in MALFORMED:

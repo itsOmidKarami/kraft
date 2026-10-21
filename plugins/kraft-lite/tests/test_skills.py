@@ -15,7 +15,7 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN))
 
-import kl  # noqa: E402
+import kl_shape  # noqa: E402
 
 SKILLS = ["init", "start", "next", "gate", "status", "run-slices", "build-slice"]
 CHAIN = json.loads((PLUGIN / "chains" / "default.json").read_text())
@@ -320,7 +320,7 @@ def test_the_run_slices_skill_spells_the_helper_in_copyable_blocks(texts):
     assert not [line for line in lines if re.match(r"\s*KL\b", line)]
 
 
-SLICED_ACTION_NAMES = sorted({a for modes in kl.SLICED_ACTIONS.values() for a in modes.values()})
+SLICED_ACTION_NAMES = sorted(kl_shape.ACTIONS)
 
 
 @pytest.mark.parametrize("action", SLICED_ACTION_NAMES)
