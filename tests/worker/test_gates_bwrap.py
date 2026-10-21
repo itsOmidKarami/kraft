@@ -164,7 +164,7 @@ curl --noproxy '*' -m 2 -s http://127.0.0.1:{d.api_port}/api/health >/dev/null 2
 check kraft-home test ! -e {d.kraft_home}/run/mcp-token
 check operator-home test ! -e {d.home}/.ssh/kraft-sentinel
 environ=$(tr '\\0' '\\n' < /proc/1/environ) || environ=KRAFT_TEST_SECRET
-! printf %s "$environ" | grep -q KRAFT_TEST_SECRET
+! printf %s "$environ" | grep -qE 'KRAFT_TEST_SECRET|^KRAFT_HOME='
 echo "pid1-environ $?" >> "$out"
 python3 -c 'import os; os.ftruncate(os.open("/proc/self/fd/1", os.O_RDWR), 0)' 2>/dev/null
 echo "log-untouchable 0" >> "$out"
