@@ -900,23 +900,41 @@ MERGE_REJECTED_CAP = _policy.Cap(attempts=3, wall_clock_s=604800)
 _DROP_PAGE = 200
 
 
-def _answers_a_drop(event, node_id: str) -> bool:
-    """Whether `event` answers an earlier drop of `node_id`: any node entered,
-    a gate included (the walk moved on, or came back through the span or a
-    retry of an earlier node), or the drop's own span restarted. A retry or
-    resume of the dropped node itself, or a poller's relaunch of it, answers
-    nothing: they come back to the drop."""
+def _answering_nodes(nodes, node_id: str) -> frozenset[str]:
+    """The nodes whose entry answers a drop of `node_id`: those at or before
+    the last gate ahead of it, the gate included -- a walk through them comes
+    back to the merge past that gate, which shows a person the head again.
+    Never the dropped node itself, nor a node between that gate and it: a
+    retry there, or a failed start that entered the node, would reach the
+    forge with the rejected head no gate saw. With no gate ahead of it, every
+    earlier node."""
+    at = next(i for i, n in enumerate(nodes) if n.id == node_id)
+    gate = max((i for i in range(at) if isinstance(nodes[i].node, GateNode)), default=at - 1)
+    return frozenset(n.id for n in nodes[: gate + 1])
+
+
+def _answers_a_drop(event, node_id: str, answering: frozenset[str]) -> bool:
+    """Whether `event` answers an earlier drop of `node_id`: one of the
+    `answering` nodes entered (`_answering_nodes`), or the drop's own span
+    restarted. A retry or resume of the dropped node itself, or a poller's
+    relaunch of it, answers nothing: they come back to the drop."""
     if event["type"] == ChainEvent.NODE_STARTED:
-        return True
+        return event["payload"].get("node_id") in answering
     return (
         event["type"] == ChainEvent.MERGE_REJECTION_RESTART
         and event["payload"].get("node_id") == node_id
     )
 
 
-def _drop_scan(c, work_item_id: str, node_id: str, *, unanswered: bool) -> tuple[dict | None, bool]:
-    """`_latest_drop`, and whether a merge-rejection repair of `node_id` started
-    after it (`dispatch.run_recovery`'s `node_recovery_started`)."""
+def _drop_scan(
+    c, work_item_id: str, node_id: str, answering: frozenset[str] | None = None
+) -> tuple[dict | None, bool]:
+    """The newest `merge_queue_dropped` the forge's merge handler recorded for
+    `node_id` -- why the train or queue rejected the merge request, and the
+    head Kraft's forced rebase left (`adapters.forge.run._merge_dropped`) --
+    and whether a merge-rejection repair of `node_id` started after it
+    (`dispatch.run_recovery`'s `node_recovery_started`). Given `answering`,
+    None once anything answered the drop since (`_answers_a_drop`)."""
     before = 2**63 - 1
     repaired = False
     while True:
@@ -927,9 +945,9 @@ def _drop_scan(c, work_item_id: str, node_id: str, *, unanswered: bool) -> tuple
                 if payload.get("node_id") == node_id:
                     return payload, repaired
                 continue
-            if not unanswered:
+            if answering is None:
                 continue
-            if _answers_a_drop(event, node_id):
+            if _answers_a_drop(event, node_id, answering):
                 return None, False
             if (
                 event["type"] == ChainEvent.NODE_RECOVERY_STARTED
@@ -942,12 +960,9 @@ def _drop_scan(c, work_item_id: str, node_id: str, *, unanswered: bool) -> tuple
         before = page[0]["seq"]
 
 
-def _latest_drop(c, work_item_id: str, node_id: str, *, unanswered: bool = False) -> dict | None:
-    """The newest `merge_queue_dropped` the forge's merge handler recorded for
-    `node_id`: why the train or queue rejected the merge request, and the head
-    Kraft's forced rebase left (`adapters.forge.run._merge_dropped`).
-    `unanswered`: None once anything answered it since (`_answers_a_drop`)."""
-    return _drop_scan(c, work_item_id, node_id, unanswered=unanswered)[0]
+def _latest_drop(c, work_item_id: str, node_id: str) -> dict | None:
+    """The newest drop of `node_id`, answered or not (`_drop_scan`)."""
+    return _drop_scan(c, work_item_id, node_id)[0]
 
 
 def _branch_tip(checkout, row) -> str | None:
@@ -971,7 +986,7 @@ def _branch_tips(db, work_item_id: str, row, worktree) -> dict[str, str | None]:
 
 
 def _unanswered_drop(
-    db, work_item_id: str, node: ResolvedNode
+    db, work_item_id: str, node: ResolvedNode, row
 ) -> tuple[dict, list[ResolvedTask], bool] | None:
     """The drop a node's merge task is still standing on: its latest session
     ended `merge_rejected` and nothing answered the drop since. With the tasks
@@ -983,7 +998,8 @@ def _unanswered_drop(
     rejected = [own[r["hook_point"]] for r in latest if r["status"] == MERGE_REJECTED]
     if not rejected:
         return None
-    drop, repaired = db.read(lambda c: _drop_scan(c, work_item_id, node.id, unanswered=True))
+    answering = _answering_nodes(chain_of(row).chain.nodes, node.id)
+    drop, repaired = db.read(lambda c: _drop_scan(c, work_item_id, node.id, answering))
     return None if drop is None else (drop, rejected, repaired)
 
 
@@ -1237,7 +1253,7 @@ async def hold_interrupted_repair(
     checkout's branch is not at the head the drop recorded (or cannot be
     read), held at `restart_from` with the span's gates reopened first
     (`_hold_at_restart`). None when nothing is pending."""
-    pending = _unanswered_drop(db, work_item_id, node)
+    pending = _unanswered_drop(db, work_item_id, node, row)
     if pending is None:
         return None
     drop, _rejected, repair_started = pending
@@ -1385,7 +1401,7 @@ async def walk_node(
     # Measuring would ask the forge to merge the head it rejected -- rebased,
     # or with a repair's commit, that no gate saw -- so the repair (or the
     # rewind) answers it first, on every entry.
-    pending = _unanswered_drop(db, work_item_id, node)
+    pending = _unanswered_drop(db, work_item_id, node, row)
     if pending is not None and _unrepaired_drop(node, pending[0]) is None:
         return await _repair_merge_rejection(
             db,

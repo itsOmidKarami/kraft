@@ -5,8 +5,10 @@ None of them asks the forge to merge a head the train rejected, or a repair's
 commit, before a gate saw it."""
 
 import pytest
+from support.harness import v1_node, v1_task
 from support.item_walk import (
     MERGE_POLICY,
+    MERGE_TASK,
     NO_SETUP,
     approve,
     commits_a_fix,
@@ -240,6 +242,24 @@ async def _relaunch(it):
 _STEER = "the lockfile is what the train rejects"
 
 
+async def _fails_to_start_then_retried(it):
+    """The poller's relaunch fails before the walk (the Kit cannot be
+    fetched), which enters the node it stands on; then a person's retry."""
+    from kraft.executor import dispatch
+
+    real = dispatch.ensure_kit
+
+    async def unreachable(*_args, **_kwargs):
+        raise RuntimeError("the Kit could not be fetched")
+
+    dispatch.ensure_kit = unreachable
+    try:
+        assert await _relaunch(it) == "needs_human"
+    finally:
+        dispatch.ensure_kit = real
+    return await _retry_where_it_stands(it, _STEER)
+
+
 @pytest.mark.parametrize(
     ("first", "again", "steered"),
     [
@@ -247,8 +267,15 @@ _STEER = "the lockfile is what the train rejects"
         ("paused", _relaunch, False),
         ("done", lambda it: _retry_where_it_stands(it, _STEER), True),
         ("needs_context", lambda it: _retry_where_it_stands(it, _STEER), True),
+        ("rate_limited", _fails_to_start_then_retried, True),
     ],
-    ids=["rate-limited", "paused", "retry-after-nothing-committed", "retry-after-a-question"],
+    ids=[
+        "rate-limited",
+        "paused",
+        "retry-after-nothing-committed",
+        "retry-after-a-question",
+        "retry-after-a-failed-start",
+    ],
 )
 async def test_back_on_merge_after_an_unfinished_repair_the_repair_runs_again(
     item_on, script, first, again, steered
@@ -304,3 +331,25 @@ async def test_a_retry_back_through_the_gate_answers_the_drop(item_on, script, a
     await approve(it, "review")
     assert await walk_once(it) == "completed"
     assert script.calls == ["ci", "merge", "repair", *calls]
+
+
+async def test_a_retry_past_the_gate_does_not_answer_the_drop(item_on, script):
+    """A node between the last gate and `merge` is not a way back past a
+    person: retried from there -- by a person or an escalation agent -- the
+    walk reaches `merge` with the rejected head no gate saw again, so the
+    repair answers it, never the forge."""
+    it = await item_on(
+        [
+            v1_node("feedback", tasks=[v1_task("ci")]),
+            v1_node("review", "gate"),
+            v1_node("post", tasks=[v1_task("lint")]),
+            v1_node("merge", tasks=[MERGE_TASK], on_merge_rejected=MERGE_POLICY),
+        ]
+    )
+    await approve(it, "review")
+    merge_drops(it, script)
+    records_merge_sessions(it, script)
+    assert await walk_once(it) == "needs_human"
+
+    assert await _retry_where_it_stands(it, at="post") == "needs_human"
+    assert script.calls == ["ci", "lint", "merge", "repair", "lint", "repair"]

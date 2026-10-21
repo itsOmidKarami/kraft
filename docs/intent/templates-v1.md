@@ -2182,10 +2182,12 @@ WHEN the walk comes back to a merge node whose drop nothing has answered since
 -- a rate-limit relaunch, a resume after a pause, or a person's retry of that
 node after the repair stopped -- the system SHALL run the node's
 `on_merge_rejected` repair again, with the person's steer, or finish the
-rewind, and SHALL NOT ask the forge to merge the head it rejected. Entering any
-node or gate after the drop, as a retry from an earlier node does, answers it,
-and the walk then queues the reviewed head.
-enforced-by: tests/executor/test_merge_rejection_resume.py::test_back_on_merge_after_an_unfinished_repair_the_repair_runs_again[rate-limited], tests/executor/test_merge_rejection_resume.py::test_back_on_merge_after_an_unfinished_repair_the_repair_runs_again[paused], tests/executor/test_merge_rejection_resume.py::test_back_on_merge_after_an_unfinished_repair_the_repair_runs_again[retry-after-nothing-committed], tests/executor/test_merge_rejection_resume.py::test_back_on_merge_after_an_unfinished_repair_the_repair_runs_again[retry-after-a-question], tests/executor/test_merge_rejection_resume.py::test_a_retry_back_through_the_gate_answers_the_drop[from-the-gate], tests/executor/test_merge_rejection_resume.py::test_a_retry_back_through_the_gate_answers_the_drop[from-an-earlier-node], tests/executor/test_merge_rejection.py::test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from[paused-after-commit]
+rewind, and SHALL NOT ask the forge to merge the head it rejected. Only
+entering the last gate before the merge node, or a node before that gate, as a
+retry from there does, answers the drop, and the walk then queues the reviewed
+head; entering the merge node itself, or a node between that gate and it,
+SHALL NOT.
+enforced-by: tests/executor/test_merge_rejection_resume.py::test_back_on_merge_after_an_unfinished_repair_the_repair_runs_again[rate-limited], tests/executor/test_merge_rejection_resume.py::test_back_on_merge_after_an_unfinished_repair_the_repair_runs_again[paused], tests/executor/test_merge_rejection_resume.py::test_back_on_merge_after_an_unfinished_repair_the_repair_runs_again[retry-after-nothing-committed], tests/executor/test_merge_rejection_resume.py::test_back_on_merge_after_an_unfinished_repair_the_repair_runs_again[retry-after-a-question], tests/executor/test_merge_rejection_resume.py::test_a_retry_back_through_the_gate_answers_the_drop[from-the-gate], tests/executor/test_merge_rejection_resume.py::test_a_retry_back_through_the_gate_answers_the_drop[from-an-earlier-node], tests/executor/test_merge_rejection_resume.py::test_back_on_merge_after_an_unfinished_repair_the_repair_runs_again[retry-after-a-failed-start], tests/executor/test_merge_rejection_resume.py::test_a_retry_past_the_gate_does_not_answer_the_drop, tests/executor/test_merge_rejection.py::test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from[paused-after-commit]
 origin: src/kraft/executor/walk.py §walk_node -- the rate-limit poller and the resume door walk from the cursor without reconciling the node, and a retry's default target is the node the item stands on.
 
 ## REQ merge-rejection-rewinds-are-bounded

@@ -254,8 +254,9 @@ not only in the one whose merge request was dropped.
 A repair that stopped before committing leaves the item on the merge node.
 Whatever brings it back there, a resume, the rate-limit retry or your
 `kraft item retry`, runs the repair again, with your steer, and never queues
-the head the train rejected. A retry from an earlier node or gate goes through
-`final_review` and then queues the head again.
+the head the train rejected. Only a retry from the last gate before the merge
+node, or from a node before it, goes through that gate and then queues the
+head again.
 
 The same goes for a Kraft restart while the repair works or the restart is
 under way: if a repair had started or the branch moved, the resume holds the
