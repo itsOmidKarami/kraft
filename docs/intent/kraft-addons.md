@@ -507,7 +507,7 @@ origin: src/kraft/api/config_check.py §_check_addons
 ## REQ shutdown-stops-every-addon-background-task
 
 WHEN the server shuts down, the system SHALL cancel every add-on background task and stop its worker thread before the next add-on write.
-enforced-by: tests/api/test_deps_addon_tasks.py::test_shutdown_cancels_every_addon_task_and_stops_the_thread, tests/api/test_deps_addon_tasks.py::test_shutdown_names_a_thread_that_outlives_the_grace, tests/addons/test_load.py::test_restore_missing_stops_between_addons_once_cancelled, tests/addons/test_update_hardening.py::test_auto_update_stops_between_collections_once_cancelled
+enforced-by: tests/api/test_deps_addon_tasks.py::test_shutdown_cancels_every_addon_task_and_stops_the_thread, tests/api/test_deps_addon_tasks.py::test_shutdown_names_a_thread_that_outlives_the_grace, tests/addons/test_load.py::test_restore_missing_stops_between_addons_once_cancelled, tests/addons/test_update_hardening.py::test_auto_update_stops_between_trees_once_cancelled
 origin: src/kraft/api/startup.py §lifespan
 
 ## REQ a-launch-stops-only-for-an-addon-it-reads

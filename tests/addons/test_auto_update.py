@@ -44,6 +44,19 @@ def home(tmp_path):
     return repo, config_dir, addons_dir
 
 
+def _spy_on_fetch(monkeypatch):
+    """Every URL `fetch.fetch` is called with, from here on."""
+    urls = []
+    real = fetch.fetch
+
+    def spy(addons_dir, name, url, ref):
+        urls.append(url)
+        return real(addons_dir, name, url, ref)
+
+    monkeypatch.setattr(fetch, "fetch", spy)
+    return urls
+
+
 def _versions(config_dir):
     return {i: e.version for i, e in AddonsLock.load(config_dir / "addons.lock").addons.items()}
 
@@ -269,14 +282,7 @@ def test_auto_update_takes_no_relatives(tmp_path, monkeypatch):
         repos["payments"], "team", version="1.1.0", manifest=child_manifest("company@corp", "2")
     )
     before = (config_dir / "addons.lock").read_text()
-    fetched = []
-    real = fetch.fetch
-
-    def spy(addons_dir, name, url, ref):
-        fetched.append(url)
-        return real(addons_dir, name, url, ref)
-
-    monkeypatch.setattr(fetch, "fetch", spy)
+    fetched = _spy_on_fetch(monkeypatch)
 
     outcomes = update.auto_update(config_dir, addons_dir)
 
@@ -355,8 +361,7 @@ UNDER = {DEPT: COMPANY, TEAM: DEPT}
 def tree_home(tmp_path, monkeypatch):
     """`company@corp` <- `platform-dept@platform` <- `team-payments@payments`,
     each from its own collection at range 1 and set to update itself, beside
-    `tools@acme`, a root of its own that is not; then every URL `fetch.fetch`
-    is called with, from here on."""
+    `tools@acme`, a root of its own that is not; and the `fetched` URLs."""
     company, tools = RELEASE, RELEASE
     dept, team = ({**RELEASE, "parent": (UNDER[i], "1")} for i in (DEPT, TEAM))
     repos, (config_dir, addons_dir) = make_tree(
@@ -364,18 +369,10 @@ def tree_home(tmp_path, monkeypatch):
     )
     on = {i: {"auto_update": True} for i in (COMPANY, DEPT, TEAM)}
     edit_addons_yaml(config_dir, lambda w: w["addons"].update(on))
-    fetched = []
-    real = fetch.fetch
-
-    def spy(addons_dir, name, url, ref):
-        fetched.append(url)
-        return real(addons_dir, name, url, ref)
-
-    monkeypatch.setattr(fetch, "fetch", spy)
-    return repos, config_dir, addons_dir, fetched
+    return repos, config_dir, addons_dir, _spy_on_fetch(monkeypatch)
 
 
-def _off(config_dir, *ids):
+def _no_auto_update(config_dir, *ids):
     edit_addons_yaml(config_dir, lambda w: w["addons"].update(dict.fromkeys(ids, True)))
 
 
@@ -402,18 +399,18 @@ def _cross_collection(repos, config_dir):
 
 
 def _team_off(repos, config_dir):
-    _off(config_dir, TEAM)
+    _no_auto_update(config_dir, TEAM)
     _each_publishes(repos, config_dir)
 
 
 def _dept_off_moves(repos, config_dir):
-    _off(config_dir, DEPT)
+    _no_auto_update(config_dir, DEPT)
     _put(repos, DEPT, "2.0.0")
     _put(repos, TEAM, "1.1.0", "2")
 
 
 def _team_off_moves(repos, config_dir):
-    _off(config_dir, TEAM)
+    _no_auto_update(config_dir, TEAM)
     _put(repos, TEAM, "1.1.0", "2")
     _put(repos, DEPT, "2.0.0")
 
@@ -435,7 +432,7 @@ def _company_drops_a_gate(repos, config_dir):
 
 
 def _company_drops_a_gate_over_dept_off(repos, config_dir):
-    _off(config_dir, DEPT)
+    _no_auto_update(config_dir, DEPT)
     _put(repos, COMPANY, "1.1.0", chains={"ship": chain("base")})
     _put(repos, TEAM, "1.1.0", note="content only")
 
@@ -609,4 +606,6 @@ def test_auto_update_moves_a_tree(tree_home, setup, outcomes, versions, says, un
         assert stores[TEAM] == next(
             a.root for a in load.installed(config_dir, addons_dir) if a.id == TEAM
         )
-    assert "audit@corp" not in (config_dir / "addons.yaml").read_text()
+    if setup is _team_names_a_new_parent:
+        assert "audit@corp" not in (config_dir / "addons.yaml").read_text()
+        assert "audit@corp" not in AddonsLock.load(config_dir / "addons.lock").addons
