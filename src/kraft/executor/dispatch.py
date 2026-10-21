@@ -1756,7 +1756,7 @@ def kept_past_checkout_stop(c, wid: str, node_id: str, task_path: str, round: in
         "SELECT 1 FROM events WHERE work_item_id = ? AND seq > ? AND ("
         "(type = ? AND json_extract(payload, '$.node_id') != ?) "
         "OR (type = ? AND json_extract(payload, '$.node_id') = ?) "
-        "OR type IN (?, ?, ?, ?)) LIMIT 1",
+        "OR type IN (?, ?, ?, ?, ?)) LIMIT 1",
         (
             wid,
             stop["seq"],
@@ -1767,6 +1767,7 @@ def kept_past_checkout_stop(c, wid: str, node_id: str, task_path: str, round: in
             GateEvent.REJECTED,
             ChainEvent.RUN_FORKED,
             ChainEvent.BASE_CHANGE_RESTART,
+            ChainEvent.MERGE_REJECTION_RESTART,
             ChainEvent.FIX_CYCLE_STARTED,
         ),
     ).fetchone()

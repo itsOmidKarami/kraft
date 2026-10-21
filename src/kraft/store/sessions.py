@@ -250,6 +250,14 @@ def sessions_for_round(
     )
 
 
+#: What starts a new pass a session from before it may not stand in for.
+_RESTARTED = (
+    WorkItemEvent.RETRIED,
+    ChainEvent.BASE_CHANGE_RESTART,
+    ChainEvent.MERGE_REJECTION_RESTART,
+)
+
+
 def reusable_session(
     conn: sqlite3.Connection,
     work_item_id: str,
@@ -343,7 +351,8 @@ def reusable_session(
     at all and is unaffected.
 
     Also excluded: a session from before a `/retry` (`work_item_retried`) or
-    a base-change restart (`base_change_restart`). Both start a new pass that
+    a base-change or merge-rejection restart (`base_change_restart`,
+    `merge_rejection_restart`). Each starts a new pass that
     restarts the round numbers -- a retry deletes the loop counter a round is
     seeded from, a restart clears every counter in its span -- so a new pass
     measures, repairs and recovers at the very rounds the old one used, and a
@@ -364,7 +373,7 @@ def reusable_session(
         "  SELECT 1 FROM events restarted "
         "  WHERE restarted.work_item_id = worker_sessions.work_item_id "
         "  AND restarted.type IN "
-        f"({in_list((WorkItemEvent.RETRIED, ChainEvent.BASE_CHANGE_RESTART))}) "
+        f"({in_list(_RESTARTED)}) "
         "  AND restarted.created_at > worker_sessions.created_at"
         ") "
         "AND NOT EXISTS ("

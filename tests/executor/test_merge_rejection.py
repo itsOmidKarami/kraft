@@ -180,7 +180,7 @@ async def test_a_repair_that_commits_nothing_stops_for_a_human(
     """No rewind on an unchanged head: the train would only reject it again.
     Nor on a drop with nothing recorded to tell a repair. A workspace member's
     drop is judged in that member's checkout: a commit in the root is not its
-    fix."""
+    fix, though it still holds the item for the gates."""
     it = await item_on(_chain(on_merge_rejected=_POLICY))
     await approve(it, "review")
     lib = make_repo(it.run_dirs.base, "lib") if member else None
@@ -198,6 +198,13 @@ async def test_a_repair_that_commits_nothing_stops_for_a_human(
     assert not it.events("merge_rejection_restart")
     assert it.events("work_item_needs_human")[-1]["payload"]["reason"] == reason
     assert it.row()["stop_kind"] == kind
+    # The member's repair committed in the root, which no gate saw either:
+    # held at `feedback` with `review` reopened. Nothing changed: left as is.
+    held = lib is not None
+    assert [e["payload"] for e in it.events("gate_reopened")] == (
+        [{"gate": "review", "reason": "merge_rejected"}] if held else []
+    )
+    assert it.row()["current_node_id"] == ("feedback" if held else "merge")
     if lib is not None:
         assert f"Its merge request is the one in {lib}; fix it there." in (
             script.steers["repair"][0].take()
@@ -408,9 +415,13 @@ async def test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from(
             await it.session("s-repair", "merge.on_merge_rejected.repair.main.repair", ending)
 
     script.effects["repair"] = commits_then_ends
+    spent = _policy.Cap(3, 3600)
+    await it.database.write(lambda c: store.bump_counter(c, it.id, "feedback.escalation", spent))
 
     assert await walk_once(it) == result
     assert kind is None or it.row()["stop_kind"] == kind
+    # The span runs again from scratch: a fresh budget, as after a rewind.
+    assert it.database.read(lambda c: store.read_counter(c, it.id, "feedback.escalation")) is None
     assert [e["payload"] for e in it.events("gate_reopened")] == [
         {"gate": "review", "reason": "merge_rejected"}
     ]

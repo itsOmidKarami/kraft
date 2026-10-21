@@ -8,7 +8,12 @@ from kraft.vocab import ChainEvent, GateEvent
 from kraft.vocab.sql import in_list
 
 #: What sends a node back to run again, and so starts a new pass of it.
-_BOUNDARIES = (GateEvent.REJECTED, ChainEvent.RUN_FORKED, ChainEvent.BASE_CHANGE_RESTART)
+_BOUNDARIES = (
+    GateEvent.REJECTED,
+    ChainEvent.RUN_FORKED,
+    ChainEvent.BASE_CHANGE_RESTART,
+    ChainEvent.MERGE_REJECTION_RESTART,
+)
 
 
 def _started_by(event: dict, node: str, order: Sequence[str]) -> dict | None:
@@ -16,8 +21,8 @@ def _started_by(event: dict, node: str, order: Sequence[str]) -> dict | None:
 
     A rejection re-runs from its re-entry node up to its gate; a retry, its
     node and every later one, but a retry of one step or task leaves its own
-    node on the pass it is on (that is another attempt); a base-change restart,
-    the nodes it lists. A node or gate the chain no longer names cannot be
+    node on the pass it is on (that is another attempt); a base-change or
+    merge-rejection restart, the nodes it lists. A node or gate the chain no longer names cannot be
     placed, and is taken as re-run.
     """
     at = {n: i for i, n in enumerate(order)}
@@ -39,7 +44,10 @@ def _started_by(event: dict, node: str, order: Sequence[str]) -> dict | None:
         target = (payload.get("path") or "").split(".")[0] or None
         inside = target == node and payload.get("scope") in ("step", "task")
         return {"reason": "retry"} if before(target) and not inside else None
-    return {"reason": "base_change"} if node in payload.get("nodes", [node]) else None
+    reason = (
+        "merge_rejected" if event["type"] == ChainEvent.MERGE_REJECTION_RESTART else "base_change"
+    )
+    return {"reason": reason} if node in payload.get("nodes", [node]) else None
 
 
 def number_passes(

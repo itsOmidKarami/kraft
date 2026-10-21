@@ -943,6 +943,11 @@ async def _hold_at_restart(db, work_item_id: str, nodes, index: int, restart_fro
     the next entry into the merge node would merge code no gate saw."""
     target = next(j for j, n in enumerate(nodes) if n.id == restart_from)
     await _reopen_gates(db, work_item_id, nodes[target:index], "merge_rejected")
+    # The span will run again from scratch, as after a rewind: a fresh fix-loop
+    # budget for it (Kraft-s7c04.25). No seeded note, unlike a rewind: the only
+    # place a stop keeps one is `pending_steer_context`, which every later door
+    # reads as a person's steer and which may already hold a person's own.
+    await _clear_span_counters(db, work_item_id, nodes[target : index + 1])
     await db.write(lambda c: store.stand_at(c, work_item_id, restart_from))
 
 
@@ -1036,6 +1041,13 @@ async def _repair_merge_rejection(
         landed=landed,
         member=str(member) if member is not None else None,
     )
+    # The repair runs in the item's worktree whichever checkout was dropped: a
+    # member's repair that commits in the root changed code no gate saw too.
+    root_before = (
+        _config.git_read(Path(worktree), "rev-parse", "HEAD", expected_failure=True)
+        if member is not None
+        else None
+    )
     verdict, h_failed, _excs = await dispatch.run_recovery(
         db,
         run_dirs,
@@ -1055,11 +1067,22 @@ async def _repair_merge_rejection(
         loop_severities=loop_severities,
     )
     head = _config.git_read(checkout, "rev-parse", "HEAD", expected_failure=True)
-    # Unreadable counts as changed: holding the item costs a re-review at
-    # most, while letting it resume at the merge node could merge unseen code.
-    changed = head is None or head != drop.get("head_sha")
+    # Only a commit in the dropped checkout is its fix.
+    fixed = head is not None and head != drop.get("head_sha")
+    # What no gate saw: that, a head that cannot be read (holding costs a
+    # re-review at most; resuming at the merge node could merge unseen code),
+    # or, for a member, a commit the repair made in the root instead.
+    changed = (
+        head is None
+        or fixed
+        or (
+            member is not None
+            and _config.git_read(Path(worktree), "rev-parse", "HEAD", expected_failure=True)
+            != root_before
+        )
+    )
     stop = await _sentinel_stop(db, work_item_id, node, verdict, h_failed, budget)
-    if stop is None and verdict == "ok" and changed and head is not None:
+    if stop is None and verdict == "ok" and fixed:
         moved = (
             member is None
             and new_base is not None
@@ -2091,6 +2114,18 @@ async def _stop_span_capped(
     )
 
 
+async def _clear_span_counters(db, work_item_id: str, span) -> None:
+    """A fresh fix-loop budget for every execution node among `span`'s: re-running
+    a node is a fresh pass over it (Kraft-s7c04.25)."""
+    for n in span:
+        if isinstance(n.node, ExecNode):
+            await db.write(
+                lambda c, n=n: store.clear_loop_counters(
+                    c, work_item_id, n.id, _loop_key(n) if n.node.fix_loop else None
+                )
+            )
+
+
 async def _reopen_gates(db, work_item_id: str, span, reason: str) -> None:
     """Reopen every approved gate among `span`'s nodes, saying `reason`."""
     for gate in span:
@@ -2167,12 +2202,7 @@ async def _restart_span(
     span = [n for n in nodes[target : index + 1] if isinstance(n.node, ExecNode)]
     if reopen_gates:
         await _reopen_gates(db, work_item_id, nodes[target:index], reopen_reason)
-    for n in span:
-        await db.write(
-            lambda c, n=n: store.clear_loop_counters(
-                c, work_item_id, n.id, _loop_key(n) if n.node.fix_loop else None
-            )
-        )
+    await _clear_span_counters(db, work_item_id, span)
     await db.write(
         lambda c: events.append(
             c,

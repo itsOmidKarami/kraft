@@ -39,7 +39,7 @@ export const passesOf = (item: ItemDetail, node: string): NodePass[] => item.nod
 
 /** What sent the chain back to start a pass, in words; nothing for a node's first pass. */
 export const passWhy = (p: NodePass | undefined, nodes?: ApiNode[]): string =>
-  p?.reason === "reject" ? `after changes were requested${p.gate ? ` at ${gateName(nodes, p.gate)}` : ""}` : p?.reason === "fixed" ? `after a fix${p.gate ? ` at ${gateName(nodes, p.gate)}` : ""}` : p?.reason === "retry" ? "after a retry" : p?.reason === "base_change" ? "after a base change" : p && p.pass > 1 ? "started over" : "";
+  p?.reason === "reject" ? `after changes were requested${p.gate ? ` at ${gateName(nodes, p.gate)}` : ""}` : p?.reason === "fixed" ? `after a fix${p.gate ? ` at ${gateName(nodes, p.gate)}` : ""}` : p?.reason === "retry" ? "after a retry" : p?.reason === "base_change" ? "after a base change" : p?.reason === "merge_rejected" ? "after the merge train or queue rejected it" : p && p.pass > 1 ? "started over" : "";
 
 /** The pass a node's view shows: the one picked when the node has it, else the newest. Undefined for a node with one pass. */
 export const passShown = (item: ItemDetail, node: string, picked?: number): number | undefined => {
