@@ -178,16 +178,30 @@ def stamp(minute):
     return (STAMPED_FROM + dt.timedelta(minutes=minute)).strftime(kl.BD_TIME)
 
 
-def test_summary_times_the_run_from_the_epic_to_the_last_node(chain):
+#: bd's `updated_at` in the forms it can take, which a chain from before
+#: `kraft-at:` is timed by: `BD_TIME`, a fraction, an offset, and a mix of them.
+STAMP_FORMS = {
+    "bd-time": lambda m: stamp(m),
+    "fraction": lambda m: stamp(m).replace("Z", ".250Z"),
+    "offset": lambda m: (STAMPED_FROM + dt.timedelta(hours=2, minutes=m)).strftime(
+        "%Y-%m-%dT%H:%M:%S+02:00"
+    ),
+    "mixed": lambda m: STAMP_FORMS["offset" if m % 2 else "bd-time"](m),
+}
+
+
+@pytest.mark.parametrize("form", STAMP_FORMS)
+def test_summary_times_the_run_from_the_epic_to_the_last_node(chain, form):
     count = len(chain["nodes"])
-    records = walked(chain, [stamp(m) for m in range(count + 1)])
+    at = STAMP_FORMS[form]
+    records = walked(chain, [at(m) for m in range(count + 1)])
     out = kl.summary(records, chain)
 
     assert out["chain_id"] == "kl-abc123"
     assert out["title"] == "Add a flag"
     assert out["status"] == "done"
-    assert out["started"] == stamp(0)
-    assert out["finished"] == stamp(count)
+    assert out["started"] == at(0)
+    assert out["finished"] == at(count)
     assert out["duration_seconds"] == count * 60
     # Each node is timed from the close of the one before it, the epic for the first.
     assert [n["seconds"] for n in out["nodes"]] == [60] * count

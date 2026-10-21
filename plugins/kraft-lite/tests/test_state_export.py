@@ -90,10 +90,53 @@ def test_import_keeps_the_copy_written_last(newer, walk_in_process, monkeypatch,
         assert result["kept_local"] >= 1 and result["imported"] == 0
 
 
-def record(id_, at=None, epic=False, updated_at=None):
+def test_every_write_moves_the_records_sequence_on(walk_in_process, tmp_path):
+    run = walk_in_process.run
+    walk_in_process.slice(tmp_path)
+
+    def seq():
+        [alpha] = [
+            r
+            for r in kl.read_jsonl(tmp_path / ".kraft-lite" / "chain.jsonl")
+            if kl.label_value(r, kl.SLICE_KEY_LABEL) == "a"
+        ]
+        return kl.label_value(alpha, kl.SEQ_LABEL)
+
+    assert seq() == "1"
+    run(tmp_path, "slice-set", "--slice", "a", "--status", "running")
+    run(tmp_path, "slice-set", "--slice", "a", "--session", "s-1")
+    assert seq() == "3"
+
+
+def test_import_keeps_the_later_write_when_its_clock_runs_behind(
+    walk_in_process, monkeypatch, tmp_path
+):
+    """The controller moved machines, and the new one's clock is an hour slow:
+    its write is still the later one."""
+    clock = {"now": dt.datetime(2026, 10, 20, 11, 0, 0)}
+    monkeypatch.setattr(kl, "_now", lambda: clock["now"])
+    here, there = dirs(tmp_path, "here", "there")
+    old, new = tmp_path / "old", tmp_path / "new"
+    run = walk_in_process.run
+    walk_in_process.slice(here)
+    run(here, "slice-set", "--slice", "a", "--status", "running")
+    run(here, "export", "--to", str(old))
+    run(there, "import", "--from", str(old))
+    clock["now"] = dt.datetime(2026, 10, 20, 10, 0, 0)
+    run(there, "slice-set", "--slice", "a", "--status", "in_review")
+    run(there, "export", "--to", str(new))
+
+    run(here, "import", "--from", str(new))
+
+    assert run(here, "slices")["slices"][0]["status"] == "in_review"
+
+
+def record(id_, at=None, epic=False, updated_at=None, seq=None):
     labels = [f"{kl.CHAIN_LABEL}default"] if epic else []
     if at:
         labels.append(f"{kl.AT_LABEL}{at}")
+    if seq is not None:
+        labels.append(f"{kl.SEQ_LABEL}{seq}")
     out = {"_type": "issue", "id": id_, "status": "open", "labels": labels, "dependencies": []}
     return dict(out, updated_at=updated_at) if updated_at else out
 
@@ -118,6 +161,41 @@ def record(id_, at=None, epic=False, updated_at=None):
             record("ks-1", T0, updated_at=T0),
             False,
             id="same_second_local_written_later",
+        ),
+        # bd's guard in another form: compared as times, not as text.
+        pytest.param(
+            record("ks-1", T0, updated_at="2026-10-20T12:00:00+02:00"),
+            record("ks-1", T0, updated_at="2026-10-20T10:00:01Z"),
+            True,
+            id="same_second_local_guard_with_offset",
+        ),
+        pytest.param(
+            record("ks-1", T0, updated_at="2026-10-20T10:00:01Z"),
+            record("ks-1", T0, updated_at="2026-10-20T12:00:00.5+02:00"),
+            False,
+            id="same_second_export_guard_with_offset",
+        ),
+        # The write sequence decides first: a clock that runs behind on the
+        # machine that wrote last does not make its write the older one.
+        pytest.param(
+            record("ks-1", T1, seq=3),
+            record("ks-1", T0, seq=4),
+            True,
+            id="skewed_clock_export_later",
+        ),
+        pytest.param(
+            record("ks-1", T0, seq=4),
+            record("ks-1", T1, seq=3),
+            False,
+            id="skewed_clock_local_later",
+        ),
+        # A record from before the sequence counts as 0.
+        pytest.param(record("ks-1", T1), record("ks-1", T0, seq=1), True, id="local_unsequenced"),
+        pytest.param(record("ks-1", T0, seq=1), record("ks-1", T1), False, id="export_unsequenced"),
+        # Same sequence, as two machines that each wrote once since the last
+        # import: the clocks decide, as before.
+        pytest.param(
+            record("ks-1", T0, seq=2), record("ks-1", T1, seq=2), True, id="same_seq_export_later"
         ),
         pytest.param(record("ks-1", T0), record("ks-1"), False, id="export_unstamped"),
         pytest.param(record("ks-1"), record("ks-1", T0), True, id="local_unstamped"),

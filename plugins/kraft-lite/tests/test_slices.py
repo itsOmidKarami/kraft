@@ -172,6 +172,25 @@ def test_after_becomes_a_bd_shaped_blocks_dependency():
             "slice 1 key must be a string",
             id="key_not_a_string",
         ),
+        # A key becomes a label value, a directory, a file name and a session title.
+        *[
+            pytest.param(
+                plan(slices=[{"key": key, "title": "A", "tasks": [1]}]),
+                f"slice 1 key {key!r} must be 1 to 40 of a-z, 0-9, '-' and '_'",
+                id=f"key_{name}",
+            )
+            for name, key in (
+                ("uppercase", "Alpha"),
+                ("slash", "a/b"),
+                ("dot", "a.b"),
+                ("space", "a b"),
+                ("leading_dash", "-a"),
+                ("leading_underscore", "_a"),
+                ("too_long", "a" * 41),
+                ("trailing_newline", "a\n"),
+                ("unicode", "café"),
+            )
+        ],
         pytest.param(
             plan(slices=[{"key": "a", "title": 7, "tasks": [1]}]),
             "slice 1 ('a') title must be a string",
@@ -202,6 +221,14 @@ def test_a_broken_slice_plan_is_refused(bad, named):
     with pytest.raises(SystemExit) as refused:
         kl.materialize_slices(copy.deepcopy(bad), CHAIN_ID)
     assert named in str(refused.value)
+
+
+@pytest.mark.parametrize("key", ["a", "0", "slice-2_b", "a" * 40])
+def test_a_slice_key_of_lowercase_letters_digits_dashes_and_underscores_is_taken(key):
+    records = kl.materialize_slices(
+        plan(slices=[{"key": key, "title": "A", "tasks": [1]}]), CHAIN_ID
+    )
+    assert list(by_key(records)) == [key]
 
 
 @pytest.mark.parametrize("mode", [None, *kl.MODES])
@@ -242,41 +269,76 @@ JOIN = [
 
 
 @pytest.mark.parametrize(
-    "mode, statuses, key, ready",
+    "mode, statuses, key, listed",
     [
-        pytest.param("main", {"a": "ready_to_merge"}, "b", True, id="main-after-one-ready"),
-        # In feature mode the same status is not enough: the slice has to be merged.
-        pytest.param("feature", {"a": "ready_to_merge"}, "b", False, id="feature-after-one-ready"),
-        # Two unmerged branches, and the slice can be cut from only one: it waits
-        # for the user's merges.
+        # `ready` is every after slice merged, in both modes: main mode's
+        # `ready_to_merge` is not merged until the user merges it.
+        pytest.param("main", {"a": "merged"}, "b", "ready", id="main-after-one-merged"),
+        pytest.param("feature", {"a": "merged"}, "b", "ready", id="feature-after-one-merged"),
+        # One after slice in its final review or ready to merge: `early`, which the
+        # controller may start from that slice's branch.
+        pytest.param("main", {"a": "ready_to_merge"}, "b", "early", id="main-after-one-ready"),
+        pytest.param(
+            "feature", {"a": "ready_to_merge"}, "b", "early", id="feature-after-one-ready"
+        ),
+        pytest.param("feature", {"a": "in_review"}, "b", "early", id="feature-after-one-in-review"),
+        pytest.param("main", {"a": "in_review"}, "b", "early", id="main-after-one-in-review"),
+        pytest.param("feature", {"a": "running"}, "b", None, id="after-one-running"),
+        pytest.param("feature", {}, "b", None, id="after-one-waiting"),
+        # Already started: in neither list.
+        pytest.param(
+            "feature", {"a": "in_review", "b": "running"}, "b", None, id="started-is-not-early"
+        ),
+        # Two after slices: one branch cannot hold two slices' unmerged work, so it
+        # waits until both are merged, with no early start.
         pytest.param(
             "main",
             {"a": "ready_to_merge", "c": "ready_to_merge"},
             "d",
-            False,
+            None,
             id="main-after-two-ready",
         ),
-        # One left unmerged: cut from that one's branch.
         pytest.param(
             "main",
             {"a": "merged", "c": "ready_to_merge"},
             "d",
-            True,
+            None,
             id="main-one-merged-one-ready",
         ),
-        pytest.param("main", {"a": "merged", "c": "merged"}, "d", True, id="main-after-two-merged"),
         pytest.param(
-            "feature", {"a": "merged", "c": "merged"}, "d", True, id="feature-after-two-merged"
+            "feature",
+            {"a": "merged", "c": "in_review"},
+            "d",
+            None,
+            id="feature-one-merged-one-review",
         ),
+        pytest.param("main", {"a": "merged", "c": "merged"}, "d", "ready", id="main-two-merged"),
+        pytest.param(
+            "feature", {"a": "merged", "c": "merged"}, "d", "ready", id="feature-two-merged"
+        ),
+        # No after slice at all: ready, never early.
+        pytest.param("feature", {}, "a", "ready", id="no-after"),
     ],
 )
-def test_in_main_mode_ready_to_merge_counts_as_done(mode, statuses, key, ready):
+def test_a_slice_starts_once_its_afters_merge_or_early_after_one(mode, statuses, key, listed):
     records = kl.materialize_slices(plan(mode=mode, slices=JOIN), CHAIN_ID)
     for done, status in statuses.items():
         records = with_status(records, done, status)
 
-    keys = [kl.label_value(r, kl.SLICE_KEY_LABEL) for r in kl.ready_slices(records, CHAIN_ID)]
-    assert (key in keys) is ready
+    ready = [kl.label_value(r, kl.SLICE_KEY_LABEL) for r in kl.ready_slices(records, CHAIN_ID)]
+    early = [kl.label_value(r, kl.SLICE_KEY_LABEL) for r in kl.early_slices(records, CHAIN_ID)]
+    assert (key in ready, key in early) == (listed == "ready", listed == "early")
+    view = kl.slices_view(records, CHAIN_ID)
+    assert (view["ready"], view["early"]) == (ready, early)
+
+
+@pytest.mark.parametrize("mode, done", [("main", True), ("feature", False)])
+def test_ready_to_merge_still_counts_as_done_for_closing_implementation(mode, done):
+    """Only the start rules wait for merges: main mode's `implementation` closes
+    once every slice is ready to merge."""
+    records = with_status(kl.materialize_slices(plan(mode=mode), CHAIN_ID), "a", "ready_to_merge")
+    [alpha] = [s for s in kl.slices_view(records, CHAIN_ID)["slices"] if s["key"] == "a"]
+    assert alpha["done"] is done
 
 
 def test_slice_records_come_back_in_plan_order_whatever_the_store_returns():
@@ -333,6 +395,7 @@ def test_approve_with_slices_at_chain_finalized_creates_them(walk, kl_cli, tmp_p
     assert out["feature_branch"] == "feature/x" and out["state_branch"] == "kraft-lite/state"
     assert keys(out["slices"]) == ["a", "b", "c"]
     assert out["ready"] == ["a", "c"]
+    assert out["early"] == []
     beta = out["slices"][1]
     assert beta | {"id": None} == {
         "id": None,
@@ -462,8 +525,10 @@ def test_the_run_record_closes_when_every_slice_is_merged(walk, mode, kl_cli, tm
         return kl.run_record(stored, chain_id)["status"]
 
     for key in ("a", "b"):
+        kl_cli(tmp_path, "slice-set", "--slice", key, "--status", "running")
         kl_cli(tmp_path, "slice-set", "--slice", key, "--status", "merged")
     assert run_status() == "open", "a slice is still unmerged"
+    kl_cli(tmp_path, "slice-set", "--slice", "c", "--status", "running")
     kl_cli(tmp_path, "slice-set", "--slice", "c", "--status", "ready_to_merge")
     assert run_status() == "open", "ready to merge is not merged, in main mode too"
 
@@ -482,6 +547,27 @@ def test_the_run_record_closes_when_every_slice_is_merged(walk, mode, kl_cli, tm
         pytest.param(
             ["--slice", "a", "--status", "done"], "waiting, starting", id="unknown_status"
         ),
+        # b comes after a, which has not started: b is in neither `ready` nor `early`.
+        pytest.param(
+            ["--slice", "b", "--status", "starting"],
+            "slice 'b' is not in `ready` or `early`: it comes after a (waiting)",
+            id="start_before_its_after",
+        ),
+        pytest.param(
+            ["--slice", "b", "--status", "running", "--session", "s-1"],
+            "slice 'b' is not in `ready` or `early`",
+            id="run_before_its_after",
+        ),
+        pytest.param(
+            ["--slice", "a", "--status", "merged"],
+            "slice 'a' was never started: it is waiting",
+            id="merge_never_started",
+        ),
+        pytest.param(
+            ["--slice", "c", "--status", "in_review"],
+            "slice 'c' was never started: it is waiting",
+            id="review_never_started",
+        ),
     ],
 )
 def test_slice_set_refuses_an_unknown_key_or_status(walk, flags, named, kl_cli, tmp_path):
@@ -494,12 +580,37 @@ def test_slice_set_refuses_an_unknown_key_or_status(walk, flags, named, kl_cli, 
     assert kl_cli(tmp_path, "slices") == before
 
 
+@pytest.mark.parametrize(
+    "moves, last",
+    [
+        # From `ready`, and from `early` (b's only after slice is in its review).
+        pytest.param([("a", "starting")], ("a", "running"), id="ready_then_running"),
+        pytest.param([("a", "running"), ("a", "in_review")], ("b", "starting"), id="early"),
+        # Already started: no longer in `ready`, and still allowed to move on.
+        pytest.param([("a", "starting")], ("a", "starting"), id="same_status_again"),
+        pytest.param([], ("b", "waiting"), id="waiting_again"),
+        # A call overturned at the wrap-up puts a merged slice back to work.
+        pytest.param([("a", "running"), ("a", "merged")], ("a", "running"), id="reopen_merged"),
+    ],
+)
+def test_slice_set_allows_a_start_from_ready_or_early_and_any_later_move(
+    walk, moves, last, kl_cli, tmp_path
+):
+    walk.slice(tmp_path, plan())
+    for key, status in moves:
+        kl_cli(tmp_path, "slice-set", "--slice", key, "--status", status)
+
+    key, status = last
+    assert kl_cli(tmp_path, "slice-set", "--slice", key, "--status", status)["status"] == status
+
+
 def test_slice_verbs_still_answer_after_the_chain_is_done(walk, kl_cli, tmp_path):
     walk.slice(tmp_path, plan())
     while kl_cli(tmp_path, "state")["status"] != "done":
         kl_cli(tmp_path, "close")
 
     assert keys(kl_cli(tmp_path, "slices")["slices"]) == ["a", "b", "c"]
+    kl_cli(tmp_path, "slice-set", "--slice", "a", "--status", "running")
     assert kl_cli(tmp_path, "slice-set", "--slice", "a", "--status", "merged")["done"] is True
 
 
@@ -549,7 +660,8 @@ SLICED_TABLE = {
     "mr_checks": ("hooks", "skip"),
     "human_review": ("hooks", "await_user_merges"),
     "merge": ("hooks", "await_user_merges"),
-    "post_merge_watch": ("hooks", "hooks"),
+    # Main mode has no single merge to watch: each slice merged on its own.
+    "post_merge_watch": ("hooks", "skip"),
 }
 
 

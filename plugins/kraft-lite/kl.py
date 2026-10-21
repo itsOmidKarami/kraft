@@ -47,6 +47,11 @@ WAITED_LABEL = "kraft-waited:"
 #: writes land inside the same second, so a run timed with it reports seconds that
 #: never passed. Every write carries this, so both clocks in a summary are one.
 AT_LABEL = "kraft-at:"
+#: How many times this record has been written, counted by `_prepare`. `import`
+#: ranks two copies of a record by it before any clock: the machine that wrote
+#: last can be the one whose clock runs behind, as when a controller moves from a
+#: laptop to the cloud. A record from before this label counts as 0.
+SEQ_LABEL = "kraft-seq:"
 
 #: A feature split into slices is more records in the same store, none of them
 #: part of the feature chain. Their ids hold no `.`, which is what keeps them out
@@ -70,7 +75,13 @@ FEATURE_BRANCH_LABEL = "kraft-feature-branch:"
 STATE_BRANCH_LABEL = "kraft-state-branch:"
 
 SLICE_STATUSES = ("waiting", "starting", "running", "in_review", "ready_to_merge", "merged")
+#: A slice in its final review: the one slice another comes after may be cut
+#: from its branch early, before it merges.
+EARLY_FROM = ("in_review", "ready_to_merge")
 MODES = ("feature", "main")
+#: A slice key becomes a label value, a directory, a file name and part of a
+#: session title, so it holds nothing any of those would read differently.
+SLICE_KEY = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
 
 #: What a node of the feature chain means once the run is sliced, by mode. The
 #: chain's own node list is untouched; `state` reports the action beside it so
@@ -83,6 +94,8 @@ SLICED_ACTIONS: dict[str, dict[str, str]] = {
     "mr_checks": {"feature": "hooks", "main": "skip"},
     "human_review": {"feature": "hooks", "main": "await_user_merges"},
     "merge": {"feature": "hooks", "main": "await_user_merges"},
+    # Main mode has no one merge to watch: each slice merged into main on its own.
+    "post_merge_watch": {"feature": "hooks", "main": "skip"},
 }
 
 #: Who decides what, unless `.kraft-lite/slices.json` says otherwise.
@@ -317,13 +330,51 @@ class JsonlStore:
 
 #: How bd writes timestamps, and the granularity it compares them at.
 BD_TIME = "%Y-%m-%dT%H:%M:%SZ"
+#: Every stamp this file compares, as read: `BD_TIME`, or RFC 3339 with a
+#: fraction of a second, an offset in place of `Z`, or both, which is how a bd
+#: row's `updated_at` can come back. Spelled out rather than left to
+#: `fromisoformat`, which reads neither `Z` nor a short fraction before 3.11.
+STAMP = re.compile(
+    r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})"
+    r"(?:\.([0-9]+))?(Z|[+-][0-9]{2}:[0-9]{2})"
+)
+
+
+def _parse_stamp(stamp: str | None) -> dt.datetime | None:
+    """A stamp as a naive UTC time, or None for anything in no `STAMP` shape.
+    Compared as text, `10:00:00Z` sorts after `10:00:00.5Z`, and `12:00+02:00`
+    after `11:00Z`."""
+    match = STAMP.fullmatch(stamp) if isinstance(stamp, str) else None
+    if match is None:
+        return None
+    *fields, fraction, zone = match.groups()
+    try:
+        moment = dt.datetime(*map(int, fields), int((fraction or "")[:6].ljust(6, "0")))
+    except ValueError:
+        return None
+    if zone != "Z":
+        offset = dt.timedelta(hours=int(zone[1:3]), minutes=int(zone[4:6]))
+        moment = moment - offset if zone[0] == "+" else moment + offset
+    return moment
+
+
+def _when(stamp: str | None) -> dt.datetime:
+    """A stamp as a sort key: one that cannot be read sorts oldest."""
+    return _parse_stamp(stamp) or dt.datetime.min
+
+
+def _seq(record: dict) -> int:
+    return int(label_value(record, SEQ_LABEL) or 0)
 
 
 def _prepare(records: list[dict]) -> list[dict]:
     """What every write does to every record, whichever store is behind it: bump
-    bd's guard, and stamp the wall clock the summary reads back."""
+    bd's guard, stamp the wall clock the summary reads back, and count the write."""
     at = _now().strftime(BD_TIME)
-    return [set_label(_bump_updated(r), AT_LABEL, at) for r in records]
+    return [
+        set_label(set_label(_bump_updated(r), AT_LABEL, at), SEQ_LABEL, str(_seq(r) + 1))
+        for r in records
+    ]
 
 
 def _at(record: dict | None) -> str | None:
@@ -346,14 +397,14 @@ def _past(stamp: str | None, previous: str | None) -> str | None:
     `bd import` is an upsert guarded by `updated_at`, and it is documented to
     keep every local column on a *tie*. Its granularity is one second, so a
     write is silently dropped unless its stamp is strictly past the row bd
-    holds. `BD_TIME` sorts as a string; a `previous` in no `BD_TIME` shape is
-    no floor at all.
+    holds. A `previous` in no `STAMP` shape is no floor at all.
     """
-    try:
-        floor = dt.datetime.strptime(previous, BD_TIME) + dt.timedelta(seconds=1)
-    except (TypeError, ValueError):
+    held = _parse_stamp(previous)
+    if held is None:
         return stamp
-    return max(stamp or "", floor.strftime(BD_TIME))
+    floor = held.replace(microsecond=0) + dt.timedelta(seconds=1)
+    mine = _parse_stamp(stamp)
+    return stamp if mine is not None and mine >= floor else floor.strftime(BD_TIME)
 
 
 def _bump_updated(record: dict) -> dict:
@@ -565,6 +616,12 @@ def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
         key = spec["key"]
         if not isinstance(key, str):
             raise SystemExit(f"kraft-lite: slice {position} key must be a string")
+        if not SLICE_KEY.fullmatch(key):
+            raise SystemExit(
+                f"kraft-lite: slice {position} key {key!r} must be 1 to 40 of a-z, 0-9, '-' "
+                "and '_', starting with a letter or digit: it names a label, a directory, "
+                "a file and a session title"
+            )
         if not isinstance(spec["title"], str):
             raise SystemExit(f"kraft-lite: slice {position} ({key!r}) title must be a string")
         if key in keys:
@@ -671,6 +728,11 @@ def run_record(records: list[dict], chain_id: str) -> dict | None:
     return next((r for r in records if label_value(r, RUN_LABEL) == chain_id), None)
 
 
+def _run_mode(run: dict | None) -> str:
+    """The run's mode; a run record from before the label is in the default one."""
+    return label_value(run, MODE_LABEL) or DEFAULT_SETTINGS["mode"]
+
+
 def slice_records(records: list[dict], chain_id: str) -> list[dict]:
     """The chain's slices in plan order. Sorted on the position label, because
     `bd export` returns records in no order worth relying on."""
@@ -679,28 +741,42 @@ def slice_records(records: list[dict], chain_id: str) -> list[dict]:
 
 
 def slice_done(record: dict, mode: str) -> bool:
-    """Whether what comes after this slice may start. In `main` mode a slice
-    that is ready to merge is enough, because nothing merges into a feature
-    branch for the next one to build on."""
+    """Whether this slice counts as done for closing `implementation`. In `main`
+    mode a slice ready to merge is enough: the user merges it, and the run does
+    not wait on that. What may start after it is `_startable`'s to say, and it
+    waits for the merge in both modes."""
     done = ("merged", "ready_to_merge") if mode == "main" else ("merged",)
     return label_value(record, SLICE_STATUS_LABEL) in done
 
 
-def ready_slices(records: list[dict], chain_id: str) -> list[dict]:
-    """Slices still waiting whose every dependency is done, with at most one of
-    them unmerged. A slice is cut from one branch: two unmerged slices' work is
-    on two branches, so one that comes after both waits for the merges."""
-    run = run_record(records, chain_id)
-    mode = label_value(run, MODE_LABEL) or "feature"
-    slices = slice_records(records, chain_id)
+def _startable(slices: list[dict]) -> tuple[list[dict], list[dict]]:
+    """`ready` and `early`, of one chain's slices in plan order, both still waiting.
+
+    `ready`: every slice it comes after is merged, in both modes; in main mode
+    that is the user's merge. `early`: it comes after exactly one slice, which
+    is in review or ready to merge, so that slice's branch holds all it builds on
+    and the controller may cut it from there. A slice after two or more has no
+    early start: one branch cannot hold two slices' unmerged work."""
     by_id = {r["id"]: r for r in slices}
+    ready: list[dict] = []
+    early: list[dict] = []
+    for record in slices:
+        if label_value(record, SLICE_STATUS_LABEL) != "waiting":
+            continue
+        after = [label_value(by_id[d], SLICE_STATUS_LABEL) for d in dep_ids(record) if d in by_id]
+        if all(status == "merged" for status in after):
+            ready.append(record)
+        elif len(after) == 1 and after[0] in EARLY_FROM:
+            early.append(record)
+    return ready, early
 
-    def ready(record: dict) -> bool:
-        after = [by_id[d] for d in dep_ids(record) if d in by_id]
-        unmerged = [a for a in after if label_value(a, SLICE_STATUS_LABEL) != "merged"]
-        return all(slice_done(a, mode) for a in after) and len(unmerged) <= 1
 
-    return [r for r in slices if label_value(r, SLICE_STATUS_LABEL) == "waiting" and ready(r)]
+def ready_slices(records: list[dict], chain_id: str) -> list[dict]:
+    return _startable(slice_records(records, chain_id))[0]
+
+
+def early_slices(records: list[dict], chain_id: str) -> list[dict]:
+    return _startable(slice_records(records, chain_id))[1]
 
 
 def _slice_entry(record: dict, by_id: dict[str, dict], mode: str) -> dict:
@@ -725,17 +801,16 @@ def slices_view(records: list[dict], chain_id: str | None) -> dict:
     """The run and its slices, for the whole store: a chain that was never
     sliced reports an empty run rather than an error."""
     run = run_record(records, chain_id) if chain_id else None
-    mode = label_value(run, MODE_LABEL)
     slices = slice_records(records, chain_id) if chain_id else []
     by_id = {r["id"]: r for r in slices}
+    ready, early = _startable(slices)
     return {
-        "mode": mode,
+        "mode": label_value(run, MODE_LABEL),
         "feature_branch": label_value(run, FEATURE_BRANCH_LABEL),
         "state_branch": label_value(run, STATE_BRANCH_LABEL),
-        "slices": [_slice_entry(r, by_id, mode or "feature") for r in slices],
-        "ready": [label_value(r, SLICE_KEY_LABEL) for r in ready_slices(records, chain_id)]
-        if run
-        else [],
+        "slices": [_slice_entry(r, by_id, _run_mode(run)) for r in slices],
+        "ready": [label_value(r, SLICE_KEY_LABEL) for r in ready],
+        "early": [label_value(r, SLICE_KEY_LABEL) for r in early],
     }
 
 
@@ -776,9 +851,9 @@ def _by_age(by_chain: dict[str, list[dict]]) -> list[str]:
     stable does anyway.
     """
 
-    def stamp(chain_id: str) -> str:
+    def stamp(chain_id: str) -> dt.datetime:
         epic = next((r for r in by_chain[chain_id] if label_value(r, CHAIN_LABEL)), None)
-        return (epic or {}).get("updated_at", "")
+        return _when((epic or {}).get("updated_at"))
 
     return sorted(by_chain, key=stamp)
 
@@ -846,14 +921,10 @@ def chain_summaries(records: list[dict]) -> list[dict]:
 
 
 def _seconds(earlier: str | None, later: str | None) -> int | None:
-    try:
-        return int(
-            (
-                dt.datetime.strptime(later, BD_TIME) - dt.datetime.strptime(earlier, BD_TIME)
-            ).total_seconds()
-        )
-    except (TypeError, ValueError):
+    start, end = _parse_stamp(earlier), _parse_stamp(later)
+    if start is None or end is None:
         return None
+    return int((end - start).total_seconds())
 
 
 #: Every key `summary` reports a total under, so an unstarted chain and a walked
@@ -907,17 +978,19 @@ def summary(records: list[dict], chain: dict) -> dict:
     #: are otherwise indistinguishable — the later of the two then finds nothing
     #: earlier and falls all the way back to the epic (Kraft-ao6). Position
     #: breaks ties only; it never picks the predecessor.
+    # Sorted as times, each kept beside the stamp as written: a chain timed by
+    # bd's `updated_at` can hold stamps in more than one `STAMP` form.
     order = {r["id"]: i for i, r in enumerate([epic, *walk])}
-    events = sorted((x, order.get(r["id"], -1)) for r in records if (x := _at(r)))
+    events = sorted((_when(x), order.get(r["id"], -1), x) for r in records if (x := _at(r)))
 
     def since(record: dict) -> str | None:
         closed_at = _at(record)
         if not closed_at:
             return _at(epic)
-        key = (closed_at, order.get(record["id"], -1))
+        key = (_when(closed_at), order.get(record["id"], -1))
         # `< key` excludes the record's own entry without a separate id test.
-        earlier = [e for e in events if e < key]
-        return earlier[-1][0] if earlier else _at(epic)
+        earlier = [e for e in events if e[:2] < key]
+        return earlier[-1][2] if earlier else _at(epic)
 
     rows = []
     for record in walk:
@@ -973,7 +1046,7 @@ def summary(records: list[dict], chain: dict) -> dict:
     # the wall clock stamp existed falls back to `updated_at`, which a node written
     # several times pushes past the node that ran after it.
     closed_stamps = [_at(r) for r in walk if r["status"] == "closed" and _at(r)]
-    finished = max(closed_stamps, default=None) if node_record is None else None
+    finished = max(closed_stamps, key=_when, default=None) if node_record is None else None
     return {
         "chain_id": (epic or {}).get("id"),
         "title": (epic or {}).get("title", ""),
@@ -1046,7 +1119,7 @@ def _sliced(everything: list[dict], epic: dict | None, node_id: str | None) -> d
     run = run_record(everything, epic["id"]) if epic else None
     if run is None:
         return None
-    mode = label_value(run, MODE_LABEL) or "feature"
+    mode = _run_mode(run)
     return {"mode": mode, "action": SLICED_ACTIONS.get(node_id, {}).get(mode, "hooks")}
 
 
@@ -1173,6 +1246,35 @@ def _slice_by_key(everything: list[dict], chain_id: str | None, key: str) -> dic
     return by_key[key]
 
 
+def _refuse_slice_move(slices: list[dict], record: dict, status: str) -> None:
+    """A `SystemExit` for a move a waiting slice cannot make. It starts only from
+    `ready` or `early`, and what was never started cannot be reviewed or merged.
+    Every other move is allowed, the same status again included: a started slice
+    has left `ready`, and a call overturned at the wrap-up reopens a merged one."""
+    if label_value(record, SLICE_STATUS_LABEL) != "waiting" or status == "waiting":
+        return
+    key = label_value(record, SLICE_KEY_LABEL)
+    if status not in ("starting", "running"):
+        raise SystemExit(
+            f"kraft-lite: slice {key!r} was never started: it is waiting, so it cannot be "
+            f"{status}. Start it with --status starting first"
+        )
+    ready, early = _startable(slices)
+    if record["id"] in {r["id"] for r in [*ready, *early]}:
+        return
+    by_id = {r["id"]: r for r in slices}
+    after = ", ".join(
+        f"{label_value(by_id[d], SLICE_KEY_LABEL)} ({label_value(by_id[d], SLICE_STATUS_LABEL)})"
+        for d in dep_ids(record)
+        if d in by_id
+    )
+    raise SystemExit(
+        f"kraft-lite: slice {key!r} is not in `ready` or `early`: it comes after {after}. "
+        "It starts once all of those are merged, or early from the one slice it comes "
+        "after once that is in review or ready to merge"
+    )
+
+
 def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dict:
     """Move one slice: its status, the session running it, its branch, its fork
     point. `merged` closes the record too, so a store that shows only open work
@@ -1187,6 +1289,7 @@ def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dic
             f"Statuses: {', '.join(SLICE_STATUSES)}"
         )
     if args.status is not None:
+        _refuse_slice_move(slices, record, args.status)
         record = set_label(record, SLICE_STATUS_LABEL, args.status)
         record = dict(record, status="closed" if args.status == "merged" else "open")
     for prefix, value in (
@@ -1204,9 +1307,8 @@ def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dic
     if run is not None and run["status"] != ("closed" if finished else "open"):
         writes.append(dict(run, status="closed" if finished else "open"))
     store.write(writes)
-    mode = label_value(run, MODE_LABEL) or "feature"
     by_id = {r["id"]: r for r in slices}
-    return _slice_entry(record, by_id, mode)
+    return _slice_entry(record, by_id, _run_mode(run))
 
 
 def _decisions_path(root: Path, chain_id: str) -> Path:
@@ -1335,16 +1437,19 @@ def _import_records(local: list[dict], exported: list[dict]) -> tuple[list[dict]
     """Which exported records to write, and how many local ones win instead.
 
     A record is written only where the local copy is missing or was last written
-    earlier, by `kraft-at:`: `BD_TIME` sorts as a string, and no stamp is oldest.
-    Two writes inside one second tie there, so `updated_at` breaks the tie: every
-    write moves it strictly forward (`_bump_updated`), and `kraft-at:` is not
-    moved, because the summary times the run by it. A tie on both keeps the
-    local copy. The epic is written only where it is missing: it is never
-    written after `start`, and its stamp is the run's start time.
+    earlier. Earlier is first by `kraft-seq:`, the count of the record's writes,
+    which no clock can skew; a record without one counts as 0. Two machines that
+    each wrote once since the last import tie there, and then `kraft-at:` decides,
+    where no stamp is oldest. Two writes inside one second tie on that too, so
+    `updated_at` breaks the tie: every write moves it strictly forward
+    (`_bump_updated`), and `kraft-at:` is not moved, because the summary times the
+    run by it. A tie on all three keeps the local copy. The epic is written only
+    where it is missing: it is never written after `start`, and its stamp is the
+    run's start time.
     """
 
-    def written(record: dict) -> tuple[str, str]:
-        return (label_value(record, AT_LABEL) or "", record.get("updated_at") or "")
+    def written(record: dict) -> tuple[int, dt.datetime, dt.datetime]:
+        return (_seq(record), _when(label_value(record, AT_LABEL)), _when(record.get("updated_at")))
 
     held = {r["id"]: r for r in local}
     write: list[dict] = []
@@ -1418,6 +1523,36 @@ def _import(root: Path, store, source: Path) -> dict:
     }
 
 
+#: What each verb needs before it runs, declared once for `main`:
+#: - `chain`: it reads or writes one chain's state, so it takes `--chain-id` and
+#:   resolves that chain through `_ours`. `start` mints its own id, and `detect`,
+#:   `chains`, `settings` and `import` (whose export names its chain) take none.
+#: - `open_node`: it acts on the chain's open node, so a finished chain refuses
+#:   it. The rest answer after the walk, because wrap-up and status need them.
+#: - `log`: it reads or writes the decisions log or the export, so it needs a
+#:   chain that was started.
+VERBS: dict[str, frozenset[str]] = {
+    "start": frozenset(),
+    "detect": frozenset(),
+    "chains": frozenset(),
+    "settings": frozenset(),
+    "import": frozenset(),
+    "state": frozenset({"chain"}),
+    "summary": frozenset({"chain"}),
+    "slices": frozenset({"chain"}),
+    "slice-set": frozenset({"chain"}),
+    "decide": frozenset({"chain", "log"}),
+    "answer": frozenset({"chain", "log"}),
+    "decisions": frozenset({"chain", "log"}),
+    "export": frozenset({"chain", "log"}),
+    "close": frozenset({"chain", "open_node"}),
+    "approve": frozenset({"chain", "open_node"}),
+    "attempt": frozenset({"chain", "open_node"}),
+    "gate": frozenset({"chain", "open_node"}),
+    "reject": frozenset({"chain", "open_node"}),
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="kl")
     sub = parser.add_subparsers(dest="verb", required=True)
@@ -1436,10 +1571,6 @@ def main(argv: list[str] | None = None) -> int:
     # The last gate rejects work that an earlier node produced: its own hook only
     # presents it. Without this the gate is approve-or-stall.
     reject.add_argument("--from-node", default=None)
-    for name in ("state", "summary", "close", "approve", "attempt"):
-        sub.add_parser(name)
-    sub.choices["approve"].add_argument("--slices", type=Path, default=None)
-    sub.add_parser("slices")
     slice_set = sub.add_parser("slice-set")
     slice_set.add_argument("--slice", required=True)
     slice_set.add_argument("--status", default=None)
@@ -1460,26 +1591,15 @@ def main(argv: list[str] | None = None) -> int:
     decisions.add_argument("--unreported", action="store_true")
     decisions.add_argument("--mark", action="store_true")
     sub.add_parser("export").add_argument("--to", type=Path, required=True)
-    # No `--chain-id`: the export names its chain.
     sub.add_parser("import").add_argument("--from", dest="source", type=Path, required=True)
-    # Every verb that reads or writes chain state can be told which chain. `start`
-    # mints its own id and `detect` touches no state, so neither takes one.
-    for name in (
-        "state",
-        "summary",
-        "close",
-        "approve",
-        "attempt",
-        "gate",
-        "reject",
-        "slices",
-        "slice-set",
-        "decide",
-        "answer",
-        "decisions",
-        "export",
-    ):
-        sub.choices[name].add_argument("--chain-id", default=None)
+    # The verbs with no arguments of their own.
+    for name in VERBS:
+        if name not in sub.choices:
+            sub.add_parser(name)
+    sub.choices["approve"].add_argument("--slices", type=Path, default=None)
+    for name, needs in VERBS.items():
+        if "chain" in needs:
+            sub.choices[name].add_argument("--chain-id", default=None)
 
     args = parser.parse_args(argv)
     root = repo_root()
@@ -1528,21 +1648,10 @@ def main(argv: list[str] | None = None) -> int:
     resolved_id = epic["id"] if epic else None
     chain = _chain(root, None, resolved_id)
     node_record = current(records)
-    # Wrap-up and status read after the walk is over, so these are not refused
-    # for want of an open node.
-    if node_record is None and args.verb not in (
-        "state",
-        "summary",
-        "slices",
-        "slice-set",
-        "decisions",
-        "decide",
-        "answer",
-        "export",
-    ):
+    if node_record is None and "open_node" in VERBS[args.verb]:
         raise SystemExit("kraft-lite: no open node — the chain is finished or was never started")
 
-    if args.verb in ("decide", "answer", "decisions", "export"):
+    if "log" in VERBS[args.verb]:
         if resolved_id is None:
             raise SystemExit("kraft-lite: no chain in this directory — start one first")
         if args.verb == "decide":

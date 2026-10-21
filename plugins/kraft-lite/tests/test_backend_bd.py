@@ -232,8 +232,11 @@ def test_a_custom_chain_survives_the_verbs_that_follow_start(tmp_path, monkeypat
         # Written by a machine whose clock runs ahead of ours: the clock alone
         # would go backwards.
         ("2026-09-07T10:00:05Z", "2026-09-07T10:00:06Z"),
+        # bd's own stamps can carry a fraction or an offset; they are still a floor.
+        ("2026-09-07T10:00:00.5Z", "2026-09-07T10:00:01Z"),
+        ("2026-09-07T12:00:05+02:00", "2026-09-07T10:00:06Z"),
     ],
-    ids=["same-second", "stored-ahead-of-our-clock"],
+    ids=["same-second", "stored-ahead-of-our-clock", "stored-with-fraction", "stored-with-offset"],
 )
 def test_write_stamps_a_strictly_newer_updated_at(monkeypatch, stored, expected):
     """bd's upsert keeps the local row on an `updated_at` tie, and its
@@ -252,6 +255,36 @@ def test_write_stamps_a_strictly_newer_updated_at(monkeypatch, stored, expected)
 
     written = json.loads(seen[0].strip())
     assert written["updated_at"] == expected, "must beat the row already stored"
+
+
+@pytest.mark.parametrize(
+    "stamp, parsed",
+    [
+        ("2026-09-07T10:00:00Z", dt.datetime(2026, 9, 7, 10, 0, 0)),
+        ("2026-09-07T10:00:00.5Z", dt.datetime(2026, 9, 7, 10, 0, 0, 500000)),
+        ("2026-09-07T10:00:00.123456789Z", dt.datetime(2026, 9, 7, 10, 0, 0, 123456)),
+        ("2026-09-07T12:00:00+02:00", dt.datetime(2026, 9, 7, 10, 0, 0)),
+        ("2026-09-07T04:30:00-05:30", dt.datetime(2026, 9, 7, 10, 0, 0)),
+        ("2026-09-07T12:00:00.25+02:00", dt.datetime(2026, 9, 7, 10, 0, 0, 250000)),
+        ("2026-09-07T00:30:00+01:00", dt.datetime(2026, 9, 6, 23, 30, 0)),
+        ("2026-09-07T10:00:00", None),
+        ("2026-09-07 10:00:00Z", None),
+        ("2026-09-07T10:00:00+0200", None),
+        ("2026-09-07T10:00:00.Z", None),
+        ("2026-09-07T10:00:00Z\n", None),
+        ("yesterday", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_a_stamp_parses_with_a_fraction_and_a_zone(stamp, parsed):
+    """bd's `updated_at` is RFC 3339, not always `BD_TIME`: a fraction or an
+    offset must not turn a later write into an earlier one."""
+    assert kl._parse_stamp(stamp) == parsed
+
+
+def test_seconds_reads_stamps_in_any_zone():
+    assert kl._seconds("2026-09-07T10:00:00Z", "2026-09-07T12:00:30.5+02:00") == 30
 
 
 def test_write_stamps_updated_at_even_when_the_record_has_none():
@@ -558,7 +591,16 @@ def test_a_finished_chain_is_listed_as_done(tmp_path, monkeypatch, capsys):
     assert row["node"] is None
 
 
-def test_the_newest_chain_is_the_one_most_recently_updated(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "older_at, newer_at",
+    [
+        ("2026-01-01T00:00:00Z", "2026-06-01T00:00:00Z"),
+        # 11:00 UTC is older than 12:00 UTC, though it sorts later as text.
+        ("2026-06-01T13:00:00+02:00", "2026-06-01T12:00:00Z"),
+    ],
+    ids=["bd-time", "offset"],
+)
+def test_the_newest_chain_is_the_one_most_recently_updated(older_at, newer_at):
     """`bd export` promises neither insertion nor sorted order, so reading the
     last record as the newest is a coin flip. With every chain finished, that
     choice decides which one a `done` report describes."""
@@ -568,10 +610,10 @@ def test_the_newest_chain_is_the_one_most_recently_updated(tmp_path, monkeypatch
         "title": "older",
         "status": "closed",
         "labels": [f"{kl.CHAIN_LABEL}default"],
-        "updated_at": "2026-01-01T00:00:00Z",
+        "updated_at": older_at,
         "dependencies": [],
     }
-    newer = dict(older, id="kl-newer", title="newer", updated_at="2026-06-01T00:00:00Z")
+    newer = dict(older, id="kl-newer", title="newer", updated_at=newer_at)
     # Store order puts the newer chain first, which is what bd is free to do.
     picked = kl._ours([newer, older])
     assert picked[0]["id"] == "kl-newer", "newest by timestamp, not by position"
