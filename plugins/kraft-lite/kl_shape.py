@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from kl_chains import ChainError
+from kl_chains import ChainError, restart_target
 
 #: What a node means to a sliced controller (`state.sliced.action`).
 ACTIONS = ("run_slices", "scoped_verify", "run", "skip", "await_user_merges")
@@ -116,21 +116,18 @@ def child_chain(chain: dict) -> dict:
     """The chain a child walks for one slice: `chain`'s child nodes, frozen
     as the controller froze them. A kept node's `on_base_changed.restart_from`
     naming a node the child lacks is redirected to the nearest kept exec node
-    before that one, else the child's first node."""
+    before that one, else the child's first node (`kl_chains.restart_target`).
+    `first_build` names the first build node, whose agent tasks the slice
+    layer binds to the slice implementer whatever component they extend."""
     shape = slice_shape(chain)
-    ids = [n["id"] for n in chain["nodes"]]
     kept = [n for n in chain["nodes"] if n["id"] in shape.child_nodes]
-
-    def redirected(target: str) -> str:
-        if target in shape.child_nodes:
-            return target
-        before = [n["id"] for n in kept if ids.index(n["id"]) < ids.index(target)]
-        return before[-1] if before else shape.child_nodes[0]
-
     nodes = [
-        dict(node, on_base_changed={"restart_from": redirected(base["restart_from"])})
+        dict(
+            node,
+            on_base_changed={"restart_from": restart_target(chain, kept, base["restart_from"])},
+        )
         if (base := node.get("on_base_changed"))
         else node
         for node in kept
     ]
-    return dict(chain, id=f"{chain['id']}/slice", nodes=nodes)
+    return dict(chain, id=f"{chain['id']}/slice", first_build=shape.first_build, nodes=nodes)

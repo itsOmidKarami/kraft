@@ -6,6 +6,7 @@ directory is published as its own repo, with no `config/` above it and no PyYAML
 from __future__ import annotations
 
 import importlib.util
+import shlex
 import shutil
 import subprocess
 import sys
@@ -138,6 +139,14 @@ EXTENDING = {
         add:
           - after: work_brief
             node: {id: lint, kind: exec, tasks: [{id: run, extends: verify_changed_scopes}]}
+          - after: local_review
+            node:
+              id: typecheck
+              kind: exec
+              policy: {max_attempts: 5}
+              tasks:
+                - {id: tsc, kind: subprocess, command: "sh -c 'npm run lint && npx tsc --noEmit'"}
+              fix_loop: {tasks: [{id: fix, extends: repair_mr_checks}]}
         """,
     "ship-fast": """\
         extends: ship
@@ -154,11 +163,14 @@ def _project_kraft(resolved) -> list:
     """`TemplateLibrary.resolve_chain`'s answer, reduced to what Lite reads."""
 
     def task(t):
+        command = getattr(t.task, "command", None)
         return (
             t.path,
             t.task.kind.value,
             *(getattr(t.task, key, None) for key in ("skill", "prompt", "produces")),
             *(getattr(getattr(t.task, key, None), "value", None) for key in ("ref", "target")),
+            # What Kraft runs (`executor.dispatch`): the string split like a shell.
+            shlex.split(command) if command is not None else None,
         )
 
     def steps(group):
@@ -172,10 +184,12 @@ def _project_kraft(resolved) -> list:
             continue
         loop = n.node.fix_loop
         base = n.node.on_base_changed
+        policy = n.node.policy
         out.append(
             (
                 n.id,
                 "exec",
+                policy.max_attempts if policy else None,
                 steps(n.steps),
                 steps(n.on_failure),
                 (steps(n.fix_loop), task(n.judge) if n.judge else None, loop.max_attempts)
@@ -192,7 +206,8 @@ def _project_lite(chain: dict) -> list:
 
     def task(t):
         return tuple(
-            t[key] for key in ("path", "kind", "skill", "prompt", "produces", "ref", "target")
+            t[key]
+            for key in ("path", "kind", "skill", "prompt", "produces", "ref", "target", "command")
         )
 
     def steps(group):
@@ -208,6 +223,7 @@ def _project_lite(chain: dict) -> list:
             (
                 n["id"],
                 "exec",
+                (n["policy"] or {}).get("max_attempts"),
                 steps(n["steps"]),
                 steps(n["on_failure"]["steps"]) if n["on_failure"] else [],
                 (

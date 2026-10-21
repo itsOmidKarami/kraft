@@ -33,7 +33,7 @@ def skill(name: str, text: str = "fallback") -> dict:
 
 
 @pytest.mark.parametrize(
-    ("chain_task", "bindings", "installed", "slice_layer", "expect"),
+    ("chain_task", "bindings", "installed", "first_build", "expect"),
     [
         pytest.param(
             task(path="spec.main.author", components=["spec_author"]),
@@ -44,7 +44,7 @@ def skill(name: str, text: str = "fallback") -> dict:
                 }
             },
             lambda name: True,
-            False,
+            None,
             {
                 "kind": "prompt",
                 "prompt": "by path",
@@ -56,7 +56,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(components=["spec_author"]),
             {"tasks": {"spec_author": prompt("by name")}},
             lambda name: True,
-            False,
+            None,
             {
                 "kind": "prompt",
                 "prompt": "by name",
@@ -68,7 +68,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(components=["spec_author", "author"]),
             {"tasks": {"author": prompt("by ancestor")}},
             lambda name: True,
-            False,
+            None,
             {
                 "kind": "prompt",
                 "prompt": "by ancestor",
@@ -80,7 +80,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(kind="builtin", ref="kraft.mr_rebase"),
             {"builtins": {"kraft.mr_rebase": prompt("rebase it")}},
             lambda name: True,
-            False,
+            None,
             {
                 "kind": "prompt",
                 "prompt": "rebase it",
@@ -92,7 +92,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(kind="forge", target="mr.ci", path="mrf.ci.await_ci"),
             {"tasks": {"mrf.ci.await_ci": {"kind": "subprocess", "command": ["gh", "pr"]}}},
             lambda name: True,
-            False,
+            None,
             {
                 "kind": "subprocess",
                 "source": "bindings:tasks.mrf.ci.await_ci",
@@ -106,7 +106,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(kind="forge", target="mr.ci"),
             {"forge": {"mr.ci": {"kind": "subprocess", "command": ["gh", "pr", "checks"]}}},
             lambda name: True,
-            False,
+            None,
             {
                 "kind": "subprocess",
                 "command": ["gh", "pr", "checks"],
@@ -118,7 +118,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(skill="superpowers:brainstorming", prompt="Write a spec."),
             {},
             lambda name: True,
-            False,
+            None,
             {
                 "kind": "skill",
                 "skill": "superpowers:brainstorming",
@@ -131,7 +131,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(skill="superpowers:brainstorming", prompt="Write a spec."),
             {},
             lambda name: False,
-            False,
+            None,
             {
                 "kind": "prompt",
                 "prompt": "Write a spec.",
@@ -144,7 +144,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(prompt="Write a spec."),
             {},
             lambda name: False,
-            False,
+            None,
             {"kind": "prompt", "prompt": "Write a spec.", "source": "default:agent"},
             id="agent_without_skill_uses_prompt",
         ),
@@ -152,7 +152,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(components=["spec_author"]),
             {"tasks": {"spec_author": skill("gone:skill", "Do it by hand.")}},
             lambda name: False,
-            False,
+            None,
             {
                 "kind": "prompt",
                 "prompt": "Do it by hand.",
@@ -161,13 +161,14 @@ def skill(name: str, text: str = "fallback") -> dict:
             id="skill_binding_missing_falls_back",
         ),
         pytest.param(
-            task(kind="subprocess", command=["just", "lint"]),
+            # As `kl_chains` freezes `command: sh -c 'npm run lint && npx tsc --noEmit'`.
+            task(kind="subprocess", command=["sh", "-c", "npm run lint && npx tsc --noEmit"]),
             {},
             lambda name: True,
-            False,
+            None,
             {
                 "kind": "subprocess",
-                "command": ["just", "lint"],
+                "command": ["sh", "-c", "npm run lint && npx tsc --noEmit"],
                 "source": "default:subprocess",
             },
             id="subprocess_task",
@@ -176,7 +177,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(kind="builtin", ref="kraft.verify_changed_test_scopes"),
             {},
             lambda name: True,
-            False,
+            None,
             {
                 "kind": "prompt",
                 "prompt": kl_bindings.BUILTIN_DEFAULTS["kraft.verify_changed_test_scopes"][
@@ -193,7 +194,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(kind="forge", target="mr.merge"),
             {},
             lambda name: True,
-            False,
+            None,
             {
                 "kind": "prompt",
                 "prompt": kl_bindings.FORGE_DEFAULTS["mr.merge"]["prompt"],
@@ -208,7 +209,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(prompt="Implement it.", steering=["Be brief.", "No mocks."]),
             {},
             lambda name: False,
-            False,
+            None,
             {
                 "kind": "prompt",
                 "prompt": "Implement it.\n\nBe brief.\n\nNo mocks.",
@@ -220,7 +221,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(components=["reviewer"]),
             {"tasks": {"reviewer": {"kind": "skip", "why": "reviewed elsewhere"}}},
             lambda name: True,
-            False,
+            None,
             {
                 "kind": "skip",
                 "why": "reviewed elsewhere",
@@ -235,7 +236,7 @@ def skill(name: str, text: str = "fallback") -> dict:
                 "slice": {"tasks": {"implementer": prompt("inner")}},
             },
             lambda name: True,
-            True,
+            "build",
             {
                 "kind": "prompt",
                 "prompt": "inner",
@@ -247,7 +248,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(components=["implementer"]),
             {"tasks": {"implementer": prompt("outer")}},
             lambda name: True,
-            True,
+            "build",
             {
                 "kind": "skill",
                 "skill": "superpowers:subagent-driven-development",
@@ -260,7 +261,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(components=["implementer"]),
             {},
             lambda name: False,
-            True,
+            "build",
             {
                 "kind": "prompt",
                 "skill": None,
@@ -269,11 +270,61 @@ def skill(name: str, text: str = "fallback") -> dict:
             },
             id="slice_layer_default_implementer_skill_missing",
         ),
+        # The slice implementer goes by the shape: the first build node's agent
+        # tasks, whatever component they extend.
+        pytest.param(
+            task(components=["builder"]),
+            {"tasks": {"builder": prompt("outer")}},
+            lambda name: True,
+            "build",
+            {
+                "kind": "skill",
+                "skill": "superpowers:subagent-driven-development",
+                "source": "slice-default:tasks.implementer",
+            },
+            id="slice_layer_default_by_first_build_node",
+        ),
+        pytest.param(
+            task(path="build.main.main_task", components=["builder"]),
+            {"slice": {"tasks": {"build.main.main_task": prompt("mine")}}},
+            lambda name: True,
+            "build",
+            {
+                "kind": "prompt",
+                "prompt": "mine",
+                "source": "bindings:slice.tasks.build.main.main_task",
+            },
+            id="slice_layer_user_binding_beats_first_build_default",
+        ),
+        pytest.param(
+            task(path="verification.main.check", components=["implementer"]),
+            {},
+            lambda name: True,
+            "build",
+            {"kind": "prompt", "source": "default:agent"},
+            id="slice_layer_implementer_outside_the_first_build_node",
+        ),
+        pytest.param(
+            task(path="build.fix_loop.main.repair", components=["fixer"]),
+            {},
+            lambda name: True,
+            "build",
+            {"kind": "prompt", "source": "default:agent"},
+            id="slice_layer_first_build_repair_is_not_the_implementer",
+        ),
+        pytest.param(
+            task(path="build.main.check", kind="builtin", ref="kraft.mr_rebase"),
+            {},
+            lambda name: True,
+            "build",
+            {"kind": "prompt", "source": "default:builtins.kraft.mr_rebase"},
+            id="slice_layer_first_build_builtin_is_not_the_implementer",
+        ),
         pytest.param(
             task(kind="builtin", ref="kraft.verify_changed_test_scopes"),
             {},
             lambda name: True,
-            True,
+            "build",
             {
                 "kind": "prompt",
                 "prompt": kl_bindings.SLICE_DEFAULTS["builtins"][
@@ -287,14 +338,14 @@ def skill(name: str, text: str = "fallback") -> dict:
             task(components=["implementer"]),
             {"slice": {"tasks": {"implementer": prompt("inner")}}},
             lambda name: True,
-            False,
+            None,
             {"kind": "prompt", "prompt": None, "source": "default:agent"},
             id="slice_layer_off_ignores_slice_section",
         ),
     ],
 )
-def test_dispatch(chain_task, bindings, installed, slice_layer, expect):
-    got = kl_bindings.dispatch(chain_task, bindings, installed, slice_layer=slice_layer)
+def test_dispatch(chain_task, bindings, installed, first_build, expect):
+    got = kl_bindings.dispatch(chain_task, bindings, installed, first_build=first_build)
     assert {key: got[key] for key in expect} == expect
 
 
@@ -316,7 +367,7 @@ def test_slice_default_skips_the_automated_review():
         task(kind="forge", target="mr.automated_review"),
         {},
         lambda name: False,
-        slice_layer=True,
+        first_build="build",
     )
     assert (got["kind"], got["why"], got["source"]) == (
         "skip",

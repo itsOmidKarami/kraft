@@ -231,6 +231,7 @@ def test_child_chain_redirects_restart_from(default_chain, target, redirected):
     child = kl_shape.child_chain(chain)
 
     assert (child["format"], child["id"]) == ("v1", "default/slice")
+    assert child["first_build"] == "implementation"
     assert tuple(n["id"] for n in child["nodes"]) == DEFAULT_CHILD
     feedback = child["nodes"][-1]
     assert feedback["on_base_changed"] == {"restart_from": redirected}
@@ -370,6 +371,59 @@ def test_child_start_uses_slice_layer(walk, kl_cli, default_chain, tmp_path):
     # A child chain is never sliced again.
     refused = kl_cli(child, "approve", "--slices", str(walk.write_plan(child)), ok=False)
     assert "a slice's child chain is never sliced" in refused.stderr
+
+
+#: A repo library whose build node's task extends `builder`, not `implementer`.
+BUILDER_LIBRARY = """\
+    tasks:
+      builder: {kind: agent, prompt: Build the approved plan.}
+    """
+BUILDER_CHAIN = """\
+    nodes:
+      - {id: plan, kind: exec, tasks: [{id: write, kind: agent, prompt: P., produces: plan}]}
+      - {id: plan_ok, kind: gate, artifact: plan}
+      - id: build
+        kind: exec
+        steps:
+          - id: code
+            tasks: [{id: impl, extends: builder}, {id: notes, kind: agent, prompt: Notes.}]
+        fix_loop:
+          tasks: [{id: repair, extends: builder}]
+      - {id: open, kind: exec, tasks: [{id: t, kind: forge, target: mr.open_draft}]}
+    """
+
+
+@pytest.mark.parametrize(
+    "path, source",
+    [
+        pytest.param("build.code.impl", "slice-default:tasks.implementer", id="extends_builder"),
+        pytest.param("build.code.notes", "slice-default:tasks.implementer", id="no_component"),
+    ],
+)
+def test_a_child_binds_its_first_build_node_by_shape(kl_cli, path, source, tmp_path):
+    """The slice implementer reaches the first build node's agent tasks
+    whatever component they extend: the shape is name-free, so the slice
+    layer is too. The node's fix loop repair is not the implementer."""
+    (tmp_path / ".kraft" / "chains").mkdir(parents=True)
+    (tmp_path / ".kraft" / "library.yaml").write_text(textwrap.dedent(BUILDER_LIBRARY))
+    (tmp_path / ".kraft" / "chains" / "ship.yaml").write_text(textwrap.dedent(BUILDER_CHAIN))
+    exported = tmp_path / "chain.json"
+    exported.write_text(json.dumps(kl_chains.resolve(tmp_path, {}, "repo:ship")))
+    child = tmp_path / "child"
+    child.mkdir()
+    installed_skill(child, "superpowers", "subagent-driven-development")
+
+    kl_cli(child, "start", "--slice-of", str(exported), "--title", "Slice a")
+
+    state = kl_cli(child, "state")
+    assert state["node"] == "build"
+    tasks = {t["path"]: t for step in state["steps"] for t in step["tasks"]}
+    assert (tasks[path]["source"], tasks[path]["skill"]) == (
+        source,
+        "superpowers:subagent-driven-development",
+    )
+    [repair] = state["fix_loop"]["steps"][0]["tasks"]
+    assert repair["source"] == "default:agent"
 
 
 @pytest.mark.parametrize(

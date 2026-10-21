@@ -164,8 +164,11 @@ on.slice.test.run:
 
 SMALL_REGISTRY = "on.spec.requested:\n  kind: prompt\n  prompt: Write the spec.\n"
 
-#: What `REGISTRY` becomes. The two hooks V1 has no task for are dropped, and so
-#: are the two slice hooks, whose bindings are the packaged slice defaults word for word.
+#: What `REGISTRY` becomes. The hooks no V1 task does the job of are dropped:
+#: the two V1 has no task for, `on.mr.sync` (it pulled, and V1's `mr.sync` pushes)
+#: and `on.human_review.requested` (its sign-off is the `final_review` gate's, not
+#: `write_summary`'s). So are the two slice hooks, whose bindings are the packaged
+#: slice defaults word for word.
 EXPECTED_BINDINGS = {
     "tasks": {
         "spec_author": {
@@ -202,13 +205,6 @@ EXPECTED_BINDINGS = {
             "skill": "mr-metadata",
             "prompt": "Write the merge request's title and description from the finished diff.",
         },
-        "write_summary": {
-            "kind": "prompt",
-            "prompt": (
-                "Present the finished work to the human for sign-off: what changed, what was "
-                "verified, and anything deliberately left out."
-            ),
-        },
     },
     "builtins": {
         "kraft.verify_changed_test_scopes": {"kind": "subprocess", "command": ["just", "test"]},
@@ -234,13 +230,6 @@ EXPECTED_BINDINGS = {
             "skill": "superpowers:finishing-a-development-branch",
             "prompt": "Merge the branch and clean up the worktree.",
         },
-        "mr.sync": {
-            "kind": "prompt",
-            "prompt": (
-                "Pull the merge request's latest remote state into the local branch before "
-                "continuing."
-            ),
-        },
         "mr.post_merge_ci": {
             "kind": "prompt",
             "prompt": "Watch the merge until it lands or fails, then report which.",
@@ -249,7 +238,9 @@ EXPECTED_BINDINGS = {
 }
 DROPPED = [
     "on.env.prepare",
+    "on.human_review.requested",
     "on.repos.scan",
+    "on.mr.sync",
     "on.slice.implementation.start",
     "on.slice.test.run",
 ]

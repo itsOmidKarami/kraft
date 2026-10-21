@@ -261,6 +261,33 @@ def _first_task(chain: dict) -> dict:
             (None, "m", None),
             id="model_drops_profile",
         ),
+        # Kraft splits a subprocess `command` like a shell and runs it without one.
+        pytest.param(
+            "",
+            "{id: only, kind: exec, tasks: [{id: lint, kind: subprocess, "
+            "command: \"sh -c 'npm run lint && npx tsc --noEmit'\"}]}",
+            lambda chain: _first_task(chain)["command"],
+            ["sh", "-c", "npm run lint && npx tsc --noEmit"],
+            id="subprocess_command_split_like_a_shell",
+        ),
+        # Only the key that caps the node's fix loop; the rest Lite cannot enforce.
+        pytest.param(
+            "",
+            "{id: only, kind: exec, tasks: [{id: work, extends: worker}], "
+            "policy: {max_attempts: 5, timeout_minutes: 9}, "
+            "fix_loop: {tasks: [{id: fix, extends: worker}]}}",
+            lambda chain: chain["nodes"][0]["policy"],
+            {"max_attempts": 5},
+            id="node_policy_max_attempts_carried",
+        ),
+        pytest.param(
+            "",
+            "{id: only, kind: exec, tasks: [{id: work, extends: worker}], "
+            "policy: {timeout_minutes: 9}}",
+            lambda chain: chain["nodes"][0]["policy"],
+            None,
+            id="node_policy_without_max_attempts",
+        ),
     ],
 )
 def test_merge_rules(tmp_path, home, components, written, pick, expected):
@@ -470,6 +497,33 @@ def _task_chain(task: str) -> str:
                 ("_text", "two", "'two'"),
             )
         ),
+        pytest.param(
+            {
+                "c": "nodes:\n  - {id: a, kind: exec, tasks: [{id: t, extends: worker}], "
+                "policy: {max_attempts: 0}}\n"
+            },
+            "a.policy.max_attempts: must be a whole number above 0, not 0",
+            id="node_policy_max_attempts_not_positive_int",
+        ),
+        pytest.param(
+            {
+                "c": "nodes:\n  - {id: a, kind: exec, tasks: [{id: t, extends: worker}], "
+                "policy: strict}\n"
+            },
+            "a.policy: must be a mapping",
+            id="node_policy_not_a_mapping",
+        ),
+        # Kraft stops the item naming a command it cannot split; Lite stops at resolve.
+        pytest.param(
+            {"c": _task_chain('{id: t, kind: subprocess, command: "sh -c \'oops"}')},
+            'a.main.t: cannot split command "sh -c \'oops": No closing quotation',
+            id="subprocess_command_unsplittable",
+        ),
+        pytest.param(
+            {"c": _task_chain("{id: t, kind: subprocess, command: '  '}")},
+            "a.main.t: a subprocess task needs its 'command'",
+            id="subprocess_command_blank",
+        ),
     ],
 )
 def test_chain_extension_refusals(tmp_path, home, chains, match):
@@ -550,6 +604,29 @@ CROSSED = """\
     """
 
 
+#: A chain whose last node restarts, on a base change, from the plan's author.
+RESTARTING = """\
+    nodes:
+      - id: author
+        kind: exec
+        tasks:
+          - {id: write, extends: worker, produces: spec}
+      - id: planner
+        kind: exec
+        tasks:
+          - {id: write, extends: worker, produces: plan}
+      - id: build
+        kind: exec
+        tasks:
+          - {id: work, extends: worker}
+      - id: ship
+        kind: exec
+        tasks:
+          - {id: work, extends: worker}
+        on_base_changed: {restart_from: planner}
+    """
+
+
 def _drop(*dropped: str) -> list[str]:
     return [n for n in DEFAULT_IDS if n not in dropped]
 
@@ -572,19 +649,38 @@ def _drop(*dropped: str) -> list[str]:
             "crossed", {"spec"}, ["planner", "check->None", "build"], id="reject_to_cleared"
         ),
         pytest.param("crossed", {"plan"}, ["author", "build"], id="node_and_gate"),
+        # A `restart_from` naming a dropped node moves to the nearest kept exec
+        # node before it, else the first kept one, as a child chain's does.
+        pytest.param(
+            "restarting",
+            {"plan"},
+            ["author", "build", "ship~author"],
+            id="restart_from_redirected_to_an_earlier_node",
+        ),
+        pytest.param(
+            "restarting",
+            {"spec", "plan"},
+            ["build", "ship~build"],
+            id="restart_from_redirected_to_the_first_node",
+        ),
+        pytest.param("restarting", {"spec"}, ["planner", "build", "ship~planner"], id="kept"),
     ],
 )
 def test_trim(tmp_path, home, chain, kinds, kept):
-    lib = write_library(tmp_path / "lib", LIBRARY, {"crossed": CROSSED})
+    lib = write_library(tmp_path / "lib", LIBRARY, {"crossed": CROSSED, "restarting": RESTARTING})
     env = {} if chain == "default" else {"KRAFT_CONFIG_DIR": str(lib)}
     resolved = kl_chains.resolve(tmp_path, env, chain)
 
     trimmed = kl_chains.trim(resolved, kinds)
 
-    shown = [
-        f"{n['id']}->{n['reject_to']}" if n["kind"] == "gate" and chain == "crossed" else n["id"]
-        for n in trimmed["nodes"]
-    ]
+    def show(n: dict) -> str:
+        if n["kind"] == "gate" and chain == "crossed":
+            return f"{n['id']}->{n['reject_to']}"
+        if chain == "restarting" and n["on_base_changed"]:
+            return f"{n['id']}~{n['on_base_changed']['restart_from']}"
+        return n["id"]
+
+    shown = [show(n) for n in trimmed["nodes"]]
     assert shown == kept
     assert dict(trimmed, nodes=None) == dict(resolved, nodes=None)
 

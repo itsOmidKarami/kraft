@@ -9,11 +9,11 @@ refused: finish it on the previous Kraft Lite version, or start again.
 `migrate(host, root, store)` takes `host`, the `kl` module that is running, for
 the record helpers and label names; `kl` imports this module, so this one
 cannot import it back. What it relies on in `kl` (rename one and this breaks):
-- labels and settings: `ATTEMPT_LABEL`, `BLOCKED_LABEL`, `CHAIN_LABEL`, `FORMAT`,
-  `GATE_LABEL`, `NODE_LABEL`, `SPENT_LABEL`, `STATE_DIR`, `WAITED_LABEL`, `CHAIN_ID`;
+- labels and settings: `ATTEMPT_LABEL`, `BLOCKED_LABEL`, `FORMAT`, `GATE_LABEL`,
+  `NODE_LABEL`, `SPENT_LABEL`, `STATE_DIR`, `WAITED_LABEL`, `CHAIN_ID`;
 - record helpers: `bank_wait`, `chain_index`, `label_value`, `run_record`,
   `set_label`, `slice_records`, `new_chain_id`;
-- private helpers: `_freeze_chain`, `_frozen_path`, `_note`, `_read_json`,
+- private helpers: `_freeze_chain`, `_frozen_file`, `_note`, `_read_json`,
   `_start_records`.
 """
 
@@ -48,7 +48,7 @@ FINISH_OR_RESTART = "finish it on the previous Kraft Lite version, or start agai
 
 #: Each legacy hook -> the (section, key) of `bindings.yaml` that serves the same
 #: task now; `slice.tasks` and `slice.builtins` are the `slice:` layer's sections.
-#: None: nothing in V1 runs it, so its binding is dropped.
+#: None: no V1 task does its job, so its binding is dropped.
 LEGACY_HOOKS: dict[str, tuple[str, str] | None] = {
     "on.spec.requested": ("tasks", "spec_author"),
     "on.plan.requested": ("tasks", "plan_author"),
@@ -61,9 +61,13 @@ LEGACY_HOOKS: dict[str, tuple[str, str] | None] = {
     "on.mr.open": ("forge", "mr.open_draft"),
     "on.ci.poll": ("forge", "mr.ci"),
     "on.review.mr.run": ("forge", "mr.automated_review"),
-    "on.human_review.requested": ("tasks", "write_summary"),
+    # Its job, presenting the work for sign-off, is the `final_review` gate's:
+    # `write_summary` only writes the brief that gate presents.
+    "on.human_review.requested": None,
     "on.merge": ("forge", "mr.merge"),
-    "on.mr.sync": ("forge", "mr.sync"),
+    # It pulled the merge request into the branch; V1's `mr.sync` pushes the
+    # branch after a repair, so the binding would undo the job it is bound to.
+    "on.mr.sync": None,
     "on.merge.watch": ("forge", "mr.post_merge_ci"),
     "on.slice.implementation.start": ("slice.tasks", "implementer"),
     "on.slice.test.run": ("slice.builtins", "kraft.verify_changed_test_scopes"),
@@ -254,10 +258,8 @@ def _label(host, record: dict, prefix: str, value: str) -> None:
 def _frozen(host, root: Path, chain_id: str) -> dict | None:
     """The chain a run was frozen on: its own file, else the single `chain.json`
     that came before; None when there is neither."""
-    path = host._frozen_path(root, chain_id)
-    if not path.is_file():
-        path = root / host.STATE_DIR / "chain.json"
-    if not path.is_file():
+    path = host._frozen_file(root, chain_id)
+    if path is None:
         return None
     chain = host._read_json(path, "the chain")
     return chain if isinstance(chain, dict) else {}

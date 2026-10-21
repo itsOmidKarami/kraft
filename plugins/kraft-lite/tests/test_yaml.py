@@ -203,10 +203,22 @@ def test_read_names_the_file_in_a_refusal(tmp_path, monkeypatch):
         kl_yaml.read(path)
 
 
-def test_read_turns_a_pyyaml_error_into_a_yaml_error(tmp_path):
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [
+        pytest.param("a: [unterminated\n", "", id="syntax_error"),
+        # `safe_load` reads these as values JSON has no place for, and Kraft's
+        # models refuse them (StrictStr): stopped here, not as a TypeError at `start`.
+        pytest.param("message: 2026-10-21\n", "message: 2026-10-21 is a date", id="timestamp"),
+        pytest.param("2026-10-21: x\n", "key 2026-10-21 is a date", id="timestamp_key"),
+        pytest.param("a: [!!binary aGk=]\n", "a[0]: b'hi' is a bytes", id="binary"),
+    ],
+)
+def test_read_turns_a_pyyaml_error_into_a_yaml_error(tmp_path, text, said):
     if kl_yaml._safe_load is None:
         pytest.skip("PyYAML is not installed")
     path = tmp_path / "x.yaml"
-    path.write_text("a: [unterminated\n")
-    with pytest.raises(kl_yaml.YamlError, match=r"^kraft-lite: .*x\.yaml"):
+    path.write_text(text)
+    with pytest.raises(kl_yaml.YamlError, match=r"^kraft-lite: .*x\.yaml") as refused:
         kl_yaml.read(path)
+    assert said in str(refused.value)

@@ -13,6 +13,7 @@ canonical path Kraft gives it (`implementation.main.implement`).
 from __future__ import annotations
 
 import copy
+import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -569,6 +570,11 @@ class _Validator:
                     raise self.fail(f"{id}.{key}", "must be a mapping")
             if kind == "exec":
                 self.shape(node, id)
+                policy = node.get("policy")
+                if policy is not None:
+                    if not isinstance(policy, dict):
+                        raise self.fail(f"{id}.policy", "must be a mapping")
+                    self.count(policy.get("max_attempts"), f"{id}.policy.max_attempts")
                 for key in ("on_failure", "fix_loop"):
                     if isinstance(node.get(key), dict):
                         self.shape(node[key], f"{id}.{key}")
@@ -607,10 +613,13 @@ class _Validator:
             if not isinstance(judge, dict) or not isinstance(judge.get("id"), str):
                 raise self.fail(f"{path}.judge", "must be a task with an id")
             self.task(judge, f"{path}.judge")
-        cap = loop.get("max_attempts")
+        self.count(loop.get("max_attempts"), f"{path}.max_attempts")
+
+    def count(self, cap: object, path: str) -> None:
+        """A fix-loop cap, the loop's or the node policy's: absent, or a count."""
         # `bool` is an `int`, and `true` would be read as one attempt.
         if cap is not None and (not isinstance(cap, int) or isinstance(cap, bool) or cap < 1):
-            raise self.fail(f"{path}.max_attempts", f"must be a whole number above 0, not {cap!r}")
+            raise self.fail(path, f"must be a whole number above 0, not {cap!r}")
 
     def shape(self, container: dict, path: str) -> None:
         present = [key for key in ("tasks", "steps") if container.get(key) is not None]
@@ -646,6 +655,16 @@ class _Validator:
         needs = {"agent": "prompt", "subprocess": "command"}.get(kind)
         if needs and not isinstance(task.get(needs), str):
             raise self.fail(path, f"a {kind} task needs its '{needs}'")
+        if kind == "subprocess":
+            # Split as Kraft splits it to run it; one it cannot split stops here.
+            try:
+                argv = shlex.split(task["command"])
+            except ValueError as error:
+                raise self.fail(
+                    path, f"cannot split command {task['command']!r}: {error}"
+                ) from None
+            if not argv:
+                raise self.fail(path, "a subprocess task needs its 'command'")
         for name in task.get("steering") or ():
             if name not in self.library.steering:
                 raise self.fail(path, f"selects no steering profile {name!r}")
@@ -671,7 +690,7 @@ def _unique(fail, path: str, what: str, items: list) -> None:
 
 def _freeze(library: Library, chain_id: str, source: str, expanded: dict) -> dict:
     def task(raw: dict, path: str) -> dict:
-        return {
+        frozen = {
             "id": raw["id"],
             "path": path,
             "kind": raw["kind"],
@@ -679,6 +698,11 @@ def _freeze(library: Library, chain_id: str, source: str, expanded: dict) -> dic
             **{key: raw.get(key) for key in TASK_KEYS},
             "steering": [library.steering[name] for name in raw.get("steering") or ()],
         }
+        if raw["kind"] == "subprocess":
+            # A string in the chain, as Kraft's `StrictStr`; split like a shell
+            # and run without one, as Kraft runs it (`shlex.split`).
+            frozen["command"] = shlex.split(raw["command"])
+        return frozen
 
     def steps(container: dict, prefix: str) -> list[dict]:
         groups = container.get("steps") or [{"id": MAIN, "tasks": container["tasks"]}]
@@ -710,10 +734,13 @@ def _freeze(library: Library, chain_id: str, source: str, expanded: dict) -> dic
             node.get("fix_loop"),
             node.get("on_base_changed"),
         )
+        # Of the node's policy, only what caps its fix loop: Lite enforces no other.
+        cap = (node.get("policy") or {}).get("max_attempts")
         nodes.append(
             {
                 "id": id,
                 "kind": "exec",
+                "policy": {"max_attempts": cap} if cap is not None else None,
                 "steps": steps(node, id),
                 "on_failure": {"steps": steps(failure, f"{id}.on_failure")} if failure else None,
                 "fix_loop": {
@@ -741,11 +768,24 @@ def _covered_by(node: dict) -> str | None:
     return produces.pop() if len(produces) == 1 else None
 
 
+def restart_target(chain: dict, kept: list[dict], target: str) -> str:
+    """Where a kept node's `on_base_changed.restart_from` points once `chain`
+    is cut down to `kept`: `target` when it is kept, else the nearest kept
+    exec node before it, else the first kept exec node."""
+    kept_exec = [node["id"] for node in kept if node["kind"] == "exec"]
+    if target in kept_exec:
+        return target
+    ids = [node["id"] for node in chain["nodes"]]
+    before = [id for id in kept_exec if ids.index(id) < ids.index(target)]
+    return before[-1] if before else kept_exec[0]
+
+
 def trim(chain: dict, kinds: set[str]) -> dict:
     """`chain` without the nodes an attachment of each kind in `kinds` makes
     redundant, as Kraft's `ResolvedChain.trim_for_attachments`: a surviving
     gate whose `reject_to` named a dropped node loses the target, and falls
-    back as a gate that declared none."""
+    back as a gate that declared none. A surviving `restart_from` naming a
+    dropped node moves by `restart_target`."""
     dropped = {node["id"] for node in chain["nodes"] if _covered_by(node) in kinds}
     if not dropped:
         return chain
@@ -753,11 +793,15 @@ def trim(chain: dict, kinds: set[str]) -> dict:
         raise ChainError(
             f"dropping {sorted(dropped)} would leave chain {chain['id']!r} with no nodes"
         )
-    kept = [
-        dict(node, reject_to=None)
-        if node["kind"] == "gate" and node["reject_to"] in dropped
-        else node
-        for node in chain["nodes"]
-        if node["id"] not in dropped
-    ]
-    return dict(chain, nodes=kept)
+    kept = [node for node in chain["nodes"] if node["id"] not in dropped]
+
+    def cut(node: dict) -> dict:
+        if node["kind"] == "gate":
+            return dict(node, reject_to=None) if node["reject_to"] in dropped else node
+        base = node.get("on_base_changed")
+        if base and base["restart_from"] in dropped:
+            target = restart_target(chain, kept, base["restart_from"])
+            return dict(node, on_base_changed={"restart_from": target})
+        return node
+
+    return dict(chain, nodes=[cut(node) for node in kept])

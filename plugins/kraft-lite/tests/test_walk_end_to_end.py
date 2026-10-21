@@ -5,6 +5,9 @@ The unit tests cover the rules; this covers the thing the human sees."""
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -164,16 +167,32 @@ UNCAPPED = """\
     """
 
 
+#: Chain files whose fix-loop cap comes from somewhere else, by file name: the
+#: loop's own `max_attempts`, else the node policy's, else Kraft's default.
+CAPPED = {
+    "uncapped.yaml": UNCAPPED,
+    "node_policy.yaml": UNCAPPED.replace(
+        "        fix_loop:\n", "        policy: {max_attempts: 5}\n        fix_loop:\n"
+    ),
+    "loop_and_policy.yaml": UNCAPPED.replace(
+        "        fix_loop:\n",
+        "        policy: {max_attempts: 5}\n        fix_loop:\n          max_attempts: 2\n",
+    ),
+}
+
+
 @pytest.mark.parametrize(
     ("chain", "node", "cap"),
     [
         pytest.param("default", "verification", 2, id="declared_max_attempts"),
         pytest.param("uncapped.yaml", "build", 3, id="default_cap"),
+        pytest.param("node_policy.yaml", "build", 5, id="node_policy_max_attempts"),
+        pytest.param("loop_and_policy.yaml", "build", 2, id="loop_beats_node_policy"),
     ],
 )
 def test_fix_loop_cap(walk, kl_cli, tmp_path, chain, node, cap):
     if chain != "default":
-        (tmp_path / chain).write_text(textwrap.dedent(UNCAPPED))
+        (tmp_path / chain).write_text(textwrap.dedent(CAPPED[chain]))
     kl_cli(tmp_path, "start", "--title", "t", "--chain", chain)
     walk.to(tmp_path, node)
     assert kl_cli(tmp_path, "state")["cap"] == cap
@@ -272,6 +291,11 @@ RUN_VERBS = [["state"], ["close"], ["summary"], ["export", "--to", "out"]]
             pytest.param("registry", verb, id=f"registry-{verb[0]}")
             for verb in (["start", "--title", "again"], ["approve"], ["settings"])
         ),
+        # An unfinished legacy run refuses a second start, registry or none.
+        *(
+            pytest.param(where, ["start", "--title", "again"], id=f"{where}-start")
+            for where in ("per_chain", "pre_per_chain_file")
+        ),
     ],
 )
 def test_legacy_frozen_chain_is_refused(kl_cli, tmp_path, where, verb):
@@ -318,6 +342,8 @@ def test_start_without_bindings_runs(kl_cli, tmp_path, files):
         assert not (tmp_path / kl.STATE_DIR / "chain.jsonl").exists()
         return
     assert started["backend"] == "jsonl"
+    # Which chain it froze, and from where, so the start skill can say so.
+    assert (started["chain"], started["source"]) == ("default", "bundled")
     assert kl_cli(tmp_path, "state")["node"] == "spec"
 
 
@@ -368,6 +394,27 @@ def test_a_rejection_puts_the_node_back_with_its_reason(kl_cli, tmp_path):
     assert state["node"] == "spec"
     assert state["status"] == "open"
     assert "wrong scope" in state["note"]
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        pytest.param({}, id="plain"),
+        # Python 3.11+ then leaves the script's own directory off `sys.path`.
+        pytest.param({"PYTHONSAFEPATH": "1"}, id="safe_path"),
+    ],
+)
+def test_kl_py_finds_its_sibling_modules(tmp_path, env):
+    result = subprocess.run(
+        [sys.executable, str(PLUGIN / "kl.py"), "chains", "--available"],
+        cwd=tmp_path,
+        env={**os.environ, **env},
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "default" in {chain["id"] for chain in json.loads(result.stdout)}
 
 
 def test_nothing_in_the_plugin_reaches_outside_the_plugin():

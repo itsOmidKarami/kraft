@@ -93,6 +93,9 @@ FORGE_DEFAULTS: dict[str, dict] = {
 }
 
 #: What a child walking a slice runs unless `slice:` in the bindings says otherwise.
+#: `tasks.implementer` goes to every agent task in the child chain's first build
+#: node's own steps, whatever component it extends (`IMPLEMENTER`); the rest by
+#: ref and target.
 SLICE_DEFAULTS: dict[str, dict] = {
     "tasks": {
         "implementer": {
@@ -125,6 +128,10 @@ SLICE_DEFAULTS: dict[str, dict] = {
         },
     },
 }
+
+IMPLEMENTER = "implementer"
+#: The containers under a node that hold recovery, not the node's own work.
+HANDLERS = ("on_failure", "fix_loop", "escalation")
 
 SKILL_MISSING = " (skill missing)"
 
@@ -227,15 +234,17 @@ def dispatch(
     bindings: dict,
     installed: Callable[[str], bool],
     *,
-    slice_layer: bool = False,
+    first_build: str | None = None,
 ) -> dict:
     """What to do for `task`: the first matching rule, as a dispatch record.
 
     `installed` says whether a skill is available in this harness; a skill that
-    is not falls back to its prompt. `task_kind`, `ref` and `target` are the
-    task's own, whatever ran it: the walk keys Kraft's rules for builtin and
-    forge tasks on them, never on `source`, which a path binding hides."""
-    chosen = _choose(task, bindings, slice_layer)
+    is not falls back to its prompt. `first_build` is set only in a child
+    walking a slice: its chain's first build node, and it turns the slice
+    layer on. `task_kind`, `ref` and `target` are the task's own, whatever ran
+    it: the walk keys Kraft's rules for builtin and forge tasks on them, never
+    on `source`, which a path binding hides."""
+    chosen = _choose(task, bindings, first_build)
     if chosen is None:
         chosen = _default(task, installed)
     entry, source = chosen
@@ -261,18 +270,37 @@ def dispatch(
     }
 
 
-def _choose(task: dict, bindings: Mapping, slice_layer: bool) -> tuple[dict, str] | None:
-    layers = []
-    if slice_layer:
-        layers.append(("bindings:slice.", bindings.get(SLICE) or {}))
-        layers.append(("slice-default:", SLICE_DEFAULTS))
-    layers.append(("bindings:", bindings))
-    for prefix, layer in layers:
-        for section, key in _keys(task):
-            entry = (layer.get(section) or {}).get(key)
-            if entry is not None:
-                return entry, f"{prefix}{section}.{key}"
+def _choose(task: dict, bindings: Mapping, first_build: str | None) -> tuple[dict, str] | None:
+    """The user's `slice:` layer, then the slice defaults, then the top-level
+    bindings: the first two only in a child walking a slice."""
+    if first_build is not None:
+        if found := _lookup("bindings:slice.", bindings.get(SLICE) or {}, task):
+            return found
+        if _builds(task, first_build):
+            return SLICE_DEFAULTS["tasks"][IMPLEMENTER], f"slice-default:tasks.{IMPLEMENTER}"
+        by_ref = {key: SLICE_DEFAULTS[key] for key in ("builtins", "forge")}
+        if found := _lookup("slice-default:", by_ref, task):
+            return found
+    return _lookup("bindings:", bindings, task)
+
+
+def _lookup(prefix: str, layer: Mapping, task: dict) -> tuple[dict, str] | None:
+    for section, key in _keys(task):
+        entry = (layer.get(section) or {}).get(key)
+        if entry is not None:
+            return entry, f"{prefix}{section}.{key}"
     return None
+
+
+def _builds(task: dict, first_build: str) -> bool:
+    """An agent task in the first build node's own steps, not its recovery:
+    the slice implementer's, by the chain's shape rather than a name."""
+    node, _, rest = task["path"].partition(".")
+    return (
+        task.get("kind") == "agent"
+        and node == first_build
+        and rest.partition(".")[0] not in HANDLERS
+    )
 
 
 def _keys(task: dict) -> list[tuple[str, str]]:

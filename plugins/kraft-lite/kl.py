@@ -22,10 +22,16 @@ import sys
 import uuid
 from pathlib import Path
 
-import kl_bindings
-import kl_chains
-import kl_migrate
-import kl_shape
+# The sibling modules sit beside this file. Python puts the script's directory
+# on `sys.path` only without `PYTHONSAFEPATH` (3.11+), so say it here.
+_HERE = str(Path(__file__).resolve().parent)
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+import kl_bindings  # noqa: E402
+import kl_chains  # noqa: E402
+import kl_migrate  # noqa: E402
+import kl_shape  # noqa: E402
 
 #: bd stores a dependency as an object, not an id string. The fallback file uses
 #: the same shape on purpose: the promise that `bd import .kraft-lite/chain.jsonl`
@@ -647,21 +653,31 @@ def _chain(root: Path, chain_id: str | None) -> dict | None:
     """
     if chain_id is None:
         return None
-    path = _frozen_path(root, chain_id)
-    if not path.is_file():
-        path = root / STATE_DIR / "chain.json"
-    if not path.is_file():
+    path = _frozen_file(root, chain_id)
+    if path is None:
         raise SystemExit(
             f"kraft-lite: {_frozen_path(root, chain_id).relative_to(root)} is missing: it is "
             "the chain this run started with — restore it, or start a new chain."
         )
     chain = _read_json(path, "the chain")
     if not isinstance(chain, dict) or chain.get("format") != FORMAT:
-        raise SystemExit(
-            f"kraft-lite: chain {chain_id} was started on the pre-V1 format. "
-            "Run: python3 kl.py migrate"
-        )
+        raise _pre_v1(chain_id)
     return chain
+
+
+def _frozen_file(root: Path, chain_id: str) -> Path | None:
+    """The file a run's chain is frozen in: its own, else the single
+    `chain.json` from before one file per chain; None when there is neither."""
+    path = _frozen_path(root, chain_id)
+    if not path.is_file():
+        path = root / STATE_DIR / "chain.json"
+    return path if path.is_file() else None
+
+
+def _pre_v1(chain_id: str) -> SystemExit:
+    return SystemExit(
+        f"kraft-lite: chain {chain_id} was started on the pre-V1 format. Run: python3 kl.py migrate"
+    )
 
 
 def _freeze_chain(root: Path, chain: dict, chain_id: str) -> None:
@@ -1372,10 +1388,13 @@ def _sliced(
 
 
 def _cap(definition: dict) -> int | None:
-    """A node's fix-loop cap: the loop's `max_attempts`, else Kraft's default;
-    None for a node with no fix loop."""
+    """A node's fix-loop cap: the loop's `max_attempts`, else the node
+    policy's, else Kraft's default; None for a node with no fix loop."""
     loop = definition.get("fix_loop")
-    return (loop.get("max_attempts") or DEFAULT_CAP) if loop else None
+    if not loop:
+        return None
+    policy = definition.get("policy") or {}
+    return loop.get("max_attempts") or policy.get("max_attempts") or DEFAULT_CAP
 
 
 def _definition(root: Path, chain: dict, chain_id: str | None, node_id: str | None) -> dict:
@@ -1393,18 +1412,24 @@ def _definition(root: Path, chain: dict, chain_id: str | None, node_id: str | No
     return definition
 
 
-def _dispatcher(root: Path, slice_layer: bool = False):
+def _dispatcher(root: Path, first_build: str | None = None):
     """How `state` turns a frozen task into the one instruction the walk
     follows: this repo's bindings over the defaults, with the skills installed
-    in this harness, and for a child walking a slice the slice layer over both.
-    Read per call, so a binding edited mid-run counts from the next `state`."""
+    in this harness, and for a child walking a slice (`first_build`, its
+    chain's first build node) the slice layer over both. Read per call, so a
+    binding edited mid-run counts from the next `state`."""
     bindings = kl_bindings.read_bindings(root)
     installed = set(_installed_skills(root))
 
     def dispatch(task: dict) -> dict:
-        return kl_bindings.dispatch(task, bindings, installed.__contains__, slice_layer=slice_layer)
+        return kl_bindings.dispatch(task, bindings, installed.__contains__, first_build=first_build)
 
     return dispatch
+
+
+def _first_build(chain: dict) -> str:
+    """A child chain's first build node, as `kl_shape.child_chain` recorded it."""
+    return chain.get("first_build") or chain["nodes"][0]["id"]
 
 
 def _dispatched(container: dict | None, dispatch) -> list[dict] | None:
@@ -1507,7 +1532,8 @@ def _state(
             "slice_gate": node_id == getattr(_shape(chain), "slice_gate", None),
         }
         return state
-    dispatch = _dispatcher(root, label_value(epic, SLICE_LAYER_LABEL) is not None)
+    sliced = label_value(epic, SLICE_LAYER_LABEL) is not None
+    dispatch = _dispatcher(root, _first_build(chain) if sliced else None)
     loop, base = definition["fix_loop"], definition["on_base_changed"]
     state.update(
         cap=_cap(definition),
@@ -2102,7 +2128,7 @@ def _start_slice(root: Path, path: Path, chain: str | None, attached: dict) -> d
         path, f"{path} was written", f"cannot read the chain {path}: no such file"
     )
     child = kl_shape.child_chain(parent)
-    dispatch = _dispatcher(root, slice_layer=True)
+    dispatch = _dispatcher(root, _first_build(child))
     for task in _dispatched_tasks(child):
         dispatch(task)
     return child
@@ -2164,6 +2190,19 @@ def _legacy_registry(root: Path) -> bool:
     """A `registry.yaml` from before V1 with no `bindings.yaml` written from it."""
     state = root / STATE_DIR
     return (state / "registry.yaml").is_file() and not (root / kl_bindings.BINDINGS).is_file()
+
+
+def _refuse_beside_a_legacy_run(root: Path, everything: list[dict]) -> None:
+    """`start` beside an unfinished run frozen before V1 is refused, registry or
+    none, as every verb but `migrate`, `chains` and `detect` refuses a legacy
+    run: a second unfinished chain would only end in "pass --chain-id"."""
+    for chain_id, records in chain_index(everything).items():
+        if all(r["status"] == "closed" for r in records) or not CHAIN_ID.fullmatch(chain_id):
+            continue
+        path = _frozen_file(root, chain_id)
+        frozen = _read_json(path, "the chain") if path else None
+        if path and (not isinstance(frozen, dict) or frozen.get("format") != FORMAT):
+            raise _pre_v1(chain_id)
 
 
 #: What each verb needs before it runs, declared once for `main`:
@@ -2299,6 +2338,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.verb == "start":
+        _refuse_beside_a_legacy_run(root, store.load())
         new_id = new_chain_id()
         attached = {k: getattr(args, k) for k in ATTACHMENT_KINDS if getattr(args, k)}
         if args.slice_of is None:
@@ -2314,7 +2354,16 @@ def main(argv: list[str] | None = None) -> int:
                 records[0], f"{ARTIFACT_LABEL}{kind}=", _artifact_path(root, path)
             )
         store.write(records)
-        print(json.dumps({"chain_id": new_id, "backend": backend(root)}))
+        print(
+            json.dumps(
+                {
+                    "chain_id": new_id,
+                    "backend": backend(root),
+                    "chain": chain["id"],
+                    "source": chain["source"],
+                }
+            )
+        )
         return 0
 
     everything = store.load()

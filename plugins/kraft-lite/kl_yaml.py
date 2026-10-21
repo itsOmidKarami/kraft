@@ -49,9 +49,41 @@ def read(path: Path) -> object:
     if _safe_load is None:
         return load(text, str(path))
     try:
-        return _safe_load(text)
+        data = _safe_load(text)
     except _YAML_ERRORS as exc:
         raise YamlError(f"kraft-lite: {path}: {' '.join(str(exc).split())}") from exc
+    if (flaw := _not_json(data, "")) is not None:
+        raise YamlError(
+            f"kraft-lite: {path}: {flaw}, not a string, number, boolean or null; quote it"
+        )
+    return data
+
+
+#: What a value in a chain or bindings file may be: what the subset reader
+#: gives, what JSON (the frozen chain) holds, and what Kraft's models accept.
+_JSON_SCALARS = (str, int, float, bool, type(None))
+
+
+def _not_json(value: object, where: str) -> str | None:
+    """Where `safe_load` gave a value outside `_JSON_SCALARS` (a timestamp, a
+    `!!binary` or `!!set`), as a key or a value, and what it is; None if none."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, _JSON_SCALARS):
+                return f"key {key} is a {type(key).__name__}"
+            here = f"{where}.{key}" if where else str(key)
+            if (flaw := _not_json(item, here)) is not None:
+                return flaw
+        return None
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            if (flaw := _not_json(item, f"{where}[{index}]")) is not None:
+                return flaw
+        return None
+    if isinstance(value, _JSON_SCALARS):
+        return None
+    shown = value.isoformat() if hasattr(value, "isoformat") else repr(value)
+    return f"{where}: {shown} is a {type(value).__name__}"
 
 
 # -- scalars ----------------------------------------------------------------
