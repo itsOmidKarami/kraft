@@ -197,9 +197,10 @@ to turn on. A repository without one waits for the merge exactly as before.
 - GitLab, queueing: on a train project Kraft adds the merge request through the
   merge-train API with the reviewed commit's sha, so it never merges a head
   nobody reviewed. Only when the project read says there is no train does Kraft
-  merge with `glab mr merge`. A read that fails any other way, such as a 5xx,
+  merge with `glab mr merge`.
+- GitLab, a failed project read: a read that fails any other way, such as a 5xx,
   a timeout or an answer that is not the project, fails the merge as a failed
-  `glab mr merge` would: on GitLab before 19.1 `glab mr merge` can merge
+  `glab mr merge` would. On GitLab before 19.1 `glab mr merge` can merge
   without going through the train.
 - GitHub: the target branch has a merge queue. Kraft blames only a failed
   merge-group run created after the pull request's latest enqueue, so a failure
@@ -237,10 +238,13 @@ what the repair changed.
 
 **What stops the item.** The repair must commit: a head the train already
 rejected would only be rejected again, so a repair that commits nothing, fails,
-or asks a question stops for you. When a repair had already committed before it
+or asks a question stops for you.
+
+When a repair had already committed before it
 stopped, whether it asked, failed, was paused or ran out of budget, the item is
-held at `restart_from` with the span's gates reopened. The same goes for a
-Kraft restart while the repair works or the restart is under way: if the head
+held at `restart_from` with the span's gates reopened.
+
+The same goes for a Kraft restart while the repair works or the restart is under way: if the head
 moved, the resume holds the item there and stops for you. A retry then walks
 back through `final_review`, and the commit is never merged unseen.
 
