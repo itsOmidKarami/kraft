@@ -131,11 +131,11 @@ def test_the_docs_page_lists_exactly_each_familys_types(family):
 
 #: `end_work_item` appends the two types it unpacked from `MANUAL_ENDS`,
 #: which holds members; `_restart_span` appends the `ChainEvent` its caller
-#: names (`event: ChainEvent`).
+#: names (`restart_event: ChainEvent`).
 _UNPACKED = {
     ("store/work_items.py", "audit"),
     ("store/work_items.py", "ordinary"),
-    ("executor/walk.py", "event"),
+    ("executor/walk.py", "restart_event"),
 }
 
 

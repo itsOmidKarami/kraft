@@ -123,7 +123,7 @@ def test_retry_without_explicit_steer_still_works_on_a_node_with_no_agent_task(c
     working even on a node with nothing to steer."""
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
-    _force_node(wid, "merge", "needs_human")
+    _force_node(wid, "post_merge_ci", "needs_human")
 
     r = client.post(f"/api/work-items/{wid}/retry", json={})
 

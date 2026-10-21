@@ -36,14 +36,17 @@ Read, in this order:
 
 ## What the brief contains
 
-- **Merge train/queue rejection**, first, as its own section, whenever a drop
+- **Merge train/queue rejection**, at the top, as its own section, whenever a drop
   is newer than the last `final_review` approval. The reviewer approved this
   change once, it went to merge, and it came back: they need to know that
   before anything else. Give the cause, the reason, the failed jobs, and what
   the repair commits changed, so they can review that change rather than
   re-read the whole one. A `conflict` drop that Kraft's own rebase cleared has
   no repair commit; say the branch was rebased onto the target and nothing
-  else changed. Leave the section out when there is no such drop.
+  else changed. Leave the section out when there is no such drop. A red
+  pipeline still goes in the first line, ahead of this section: the two
+  never compete, because one line saying CI is red comes first, then this
+  section, then the rest.
 - **What changed**, in the terms of this repo: files, functions, behaviour. Not
   a restatement of the work item's title or description.
 - **What CI said**, plainly, including the job names. If the pipeline is red,

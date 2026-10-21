@@ -540,7 +540,9 @@ BEFORE = [
 ]
 
 #: Agent tasks shipped since, which an rc home never got.
-SINCE = [("default", "merge.on_merge_rejected.repair.main.repair", "claude", "sonnet", None, None)]
+SINCE = [
+    ("default", "merge.on_merge_rejected.repair.main.repair", "claude", "sonnet", "high", None),
+]
 
 #: What the shipped library launches: `BEFORE`, with `SINCE` in chain order.
 SHIPPED_LAUNCHES = [*BEFORE[:-1], *SINCE, BEFORE[-1]]
@@ -554,6 +556,7 @@ def test_the_shipped_library_selects_profiles_and_launches_as_before(monkeypatch
         "repair_verification",
         "repair_mr_feedback",
         "repair_mr_checks",
+        "repair_merge_queue_failure",
         "strict_judge",
     }
     assert {t.get("profile") for t in library.values()} == {None, "strong"}

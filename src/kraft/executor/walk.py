@@ -2161,7 +2161,7 @@ async def _restart_span(
     *,
     key: str,
     cap: Callable[[_policy.Policy | None], _policy.Cap],
-    event: ChainEvent,
+    restart_event: ChainEvent,
     reopen_gates: bool,
     reopen_reason: str,
 ) -> int | None:
@@ -2169,7 +2169,7 @@ async def _restart_span(
     worktree base (`base-change-restarts-a-declared-chain-span`) or had its
     merge request rejected by a merge train or queue (`on_merge_rejected`), or
     stop for a human once the node's restarts under `key` are spent. `cap`
-    resolves that counter's bound from the policy, `event` records the
+    resolves that counter's bound from the policy, `restart_event` records the
     restart, and `reopen_reason` is what a reopened gate says.
 
     A base change is not an execution failure
@@ -2207,7 +2207,7 @@ async def _restart_span(
         lambda c: events.append(
             c,
             work_item_id,
-            event,
+            restart_event,
             {
                 "node_id": node.id,
                 "restart_from": restart_from,
@@ -2294,7 +2294,7 @@ async def _door_conflict(
         policy,
         key=f"{node.id}.on_base_changed",
         cap=_base_change_cap(f"{node.id}.on_base_changed"),
-        event=ChainEvent.BASE_CHANGE_RESTART,
+        restart_event=ChainEvent.BASE_CHANGE_RESTART,
         reopen_gates=True,
         reopen_reason="conflict_resolved",
     )
@@ -2636,7 +2636,7 @@ async def run_once(
                 policy,
                 key=key,
                 cap=_merge_rejected_cap(key),
-                event=ChainEvent.MERGE_REJECTION_RESTART,
+                restart_event=ChainEvent.MERGE_REJECTION_RESTART,
                 # Both: a clean rebase too, since the rewound span's own fix
                 # loops can commit before any gate sees the head again.
                 reopen_gates=True,
@@ -2667,7 +2667,7 @@ async def run_once(
                 policy,
                 key=key,
                 cap=_base_change_cap(key),
-                event=ChainEvent.BASE_CHANGE_RESTART,
+                restart_event=ChainEvent.BASE_CHANGE_RESTART,
                 reopen_gates=result == CONFLICT_RESOLVED,
                 reopen_reason="conflict_resolved",
             )

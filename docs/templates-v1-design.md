@@ -316,6 +316,7 @@ tasks:
   repair_merge_queue_failure:
     kind: agent
     harness: claude
+    profile: strong
     prompt: Fix what made the merge train or merge queue reject this merge request.
     skill: kraft:merge-queue-repair
 
