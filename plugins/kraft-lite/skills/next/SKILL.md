@@ -19,7 +19,7 @@ Every command in this skill takes `--chain-id`. Omit it only when you know this
 directory holds one chain. If a verb exits saying there is more than one
 unfinished chain, show the human the list it printed and ask which - do not pick.
 
-You get `node`, `hooks`, `gate`, `attempt`, `cap`, `status` and `note`.
+You get `node`, `hooks`, `gate`, `attempt`, `cap`, `status`, `note` and `sliced`.
 
 - `status: unstarted` - there is no chain here. Invoke `kraft-lite:start`, or say
   so if you were not asked to start one. Do not report this as finished.
@@ -32,12 +32,14 @@ You get `node`, `hooks`, `gate`, `attempt`, `cap`, `status` and `note`.
     slice is done. Stop.
   - `scoped_verify` - step 2, with the test hook run on the files
     `git diff --name-only <base branch>...<feature branch>` lists, not the whole
-    suite: the children tested their slices, and CI runs the full suite.
+    suite: the children tested their slices and CI runs the full suite, so check
+    only what CI cannot cover.
   - `skip` - `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" close --chain-id <id>` with no hooks
     run, then this skill again.
   - `await_user_merges` - check the PR of each slice that `slices` does not show as
     `merged`. For each the user merged:
-    `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" slice-set --slice <key> --status merged --chain-id <id>`.
+    `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" slice-set --slice <key> --status merged --chain-id <id>`,
+    then export state, as `kraft-lite:run-slices` describes under State branch.
     Name the slices still waiting and stop. Once all are merged, `close`, then this
     skill again. Never open this node's gate: the user's merges are the answer.
   - `hooks` - step 2.

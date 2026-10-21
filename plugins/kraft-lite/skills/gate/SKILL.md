@@ -38,8 +38,8 @@ At `chain_finalized`, when `state` shows `sliced` null and
 A plain `approve` there leaves the chain unsliced for good, since slicing is only
 accepted at this gate. A reject needs nothing extra: it leaves no slices behind, and
 the proposal is redrawn when the node reopens. When `sliced` is not null the chain
-was sliced before and rewound past this gate; it cannot be sliced again, so
-`--slices` is refused, so use a plain `approve`.
+was sliced before and rewound past this gate; it cannot be sliced again.
+`--slices` is refused there; use a plain `approve`.
 
 A plain reject reopens the node being gated. That is right for a gate on the node
 that made the artefact - a rejected spec re-runs the spec node. It is wrong for a

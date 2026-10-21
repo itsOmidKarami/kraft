@@ -347,6 +347,11 @@ def test_the_next_skill_hands_each_sliced_action_to_its_owner(texts):
     assert "slice-set" in body and "--status merged" in body
     assert "git diff --name-only" in body, "the scoped verify has to name what it scopes to"
     assert "Never open" in body, "await_user_merges must forbid opening the gate"
+    flat = " ".join(body.split())
+    assert "`sliced` not null, `status` neither `done` nor `blocked`" in flat
+    assert "then export state, as `kraft-lite:run-slices` describes under State branch" in flat
+    assert "`sliced`." in flat.split("You get")[1].split("- `status: unstarted`")[0]
+    assert "check only what CI cannot cover" in flat
     # a done sliced chain reports action `hooks`: status is read before the action
     assert body.index("`status: done`") < body.index("`sliced.action`")
 
@@ -358,6 +363,7 @@ def test_the_status_skill_reports_slices_and_held_questions(texts):
     assert "`ready`" in body
     # held questions lead the report, and `--mark` is refused together with `--held`
     assert body.index("held questions first") < body.index("`ready`") < body.index("last report")
+    assert "`after` slices not yet merged" in " ".join(body.split())
     assert "--held --unreported" not in body and "--unreported --held" not in body
     assert "two commands" in body or "separate" in body
 
@@ -367,7 +373,9 @@ def test_the_gate_skill_records_slices_at_chain_finalized(texts):
     assert "approve --slices .kraft-lite/proposals/<chain-id>.json" in body
     assert "chain_finalized" in body
     assert "`sliced`" in body, "an already sliced chain must take a plain approve"
-    assert "reject" in body.split("chain_finalized")[1], "a reject at this gate is covered"
+    flat = " ".join(body.split())
+    assert "A reject needs nothing extra: it leaves no slices behind" in flat
+    assert "`--slices` is refused there; use a plain `approve`" in flat
 
 
 def test_init_binds_both_slice_hooks_and_the_ignores(texts):

@@ -86,5 +86,17 @@
       "Reports the pending CI to the controller (session_01Ctrl00) as a status message, in the build-slice template",
       "Ends its turn without asking the human to invoke any skill again"
     ]
+  },
+  {
+    "skills": [
+      "kraft-lite:next"
+    ],
+    "query": "[user] I merged slice a's PR. Carry on.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. This session is the controller of a sliced run in main mode: each slice's PR goes to main and the user merges them. A cloud session on its own branch claude/ledger-x1, which `slices` reports as the run's state_branch. The run's state is copied to that branch after every change, and a new session resumes from it. `.kraft-lite/registry.yaml` binds: on.mr.rebase to a prompt; on.env.prepare to skill superpowers:using-git-worktrees; on.implementation.start to skill superpowers:subagent-driven-development; on.repos.scan to a prompt; on.test.run to kind subprocess, command [just, test]; on.review.local.run to skill engineering:code-review; on.mr.describe to a prompt; on.mr.open to skill superpowers:finishing-a-development-branch; on.ci.poll to kind subprocess, command [gh, pr, checks]; on.human_review.requested to a prompt; on.mr.sync and on.merge to prompts. All of those skills are installed. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"human_review\", \"hooks\": [\"on.human_review.requested\"], \"gate\": null, \"attempt\": 0, \"cap\": null, \"status\": \"open\", \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"main\", \"action\": \"await_user_merges\"}}. `slices --chain-id kl-7f3a91c2` prints three slices a, b and c, each with status ready_to_merge, on branches ledger/a-rows, ledger/b-writers and ledger/c-importer. `gh pr view <branch> --json state` shows a's PR MERGED and the PRs of b and c OPEN.",
+    "expected_behavior": [
+      "Checks the three PRs and records a's merge with `slice-set --slice a --status merged --chain-id kl-7f3a91c2`, and not b or c",
+      "After recording it, exports the run's state to the state branch as kraft-lite:run-slices describes under State branch (invoking that skill for the exact commands, or running them): `export --to <checkout>/kraft-lite-state --chain-id kl-7f3a91c2`, then `git add`, `git commit` and `git push origin HEAD:claude/ledger-x1` (checking first that the checked-out branch is the state branch)",
+      "Names slices b and c as still waiting for the user's merge, and runs neither `close` nor `gate`"
+    ]
   }
 ]

@@ -35,9 +35,9 @@ with `--held`, so they are separate commands:
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" decisions --unreported --mark --chain-id <id>
 
 Report held questions first, each with why it is held: they wait on the user, and
-stay at the top until answered. Then each slice with its status, what it comes
-`after` and so waits on, and whether it is in `ready`. Then the decisions since the
-last report, each with its answer and why. A held question is also in the
+stay at the top until answered. Then each slice with its status, its `after` slices
+not yet merged (what it waits on), and whether it is in `ready`. Then the decisions
+since the last report, each with its answer and why. A held question is also in the
 `--unreported` list: report it once, under held.
 
 An illustration, not a template: "`Add export` is at `plan`, blocked at
