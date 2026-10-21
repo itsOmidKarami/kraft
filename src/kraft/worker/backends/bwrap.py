@@ -15,8 +15,9 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Literal
 
-from kraft.paths import kraft_home
+from kraft.paths import RunDirs, kraft_home
 from kraft.worker import host_view, os_init, os_seccomp, shim
+from kraft.worker.ca import write_whole
 from kraft.worker.mounts import RELAY_PORT, Mount
 from kraft.worker.sandbox import _HARDENED_GIT_CONFIG, FORWARDED_ENV, SandboxRefused, _pin
 
@@ -26,22 +27,22 @@ SHM_BYTES = 268435456
 _BASELINE_NAMES = ("LANG", "LC_ALL", "TZ", "TERM", "USER", "LOGNAME", "SHELL")
 
 
-def _private_file(path: Path, data: bytes, mode: int) -> Path:
-    """`path` holding `data`, written once; other launches may race to it."""
+def _once(path: Path, data: bytes, mode: int) -> Path:
     if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f".{path.name}.{os.getpid()}")
-        tmp.write_bytes(data)
-        tmp.chmod(mode)
-        os.replace(tmp, path)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path.parent.chmod(0o700)
+        write_whole(path, data, mode)
     return path
 
 
-def seccomp_file(run_dirs) -> Path:
+def seccomp_file(run_dirs: RunDirs) -> Path:
     arch = os_seccomp.machine()
-    data = os_seccomp.build(arch)
+    try:
+        data = os_seccomp.build(arch)
+    except ValueError as exc:
+        raise SandboxRefused(str(exc)) from exc
     name = f"seccomp-{arch}-{hashlib.sha256(data).hexdigest()[:12]}.bpf"
-    return _private_file(run_dirs.base / "os-sandbox" / name, data, 0o600)
+    return _once(run_dirs.base / "os-sandbox" / name, data, 0o600)
 
 
 def system_args() -> list[str]:
@@ -77,26 +78,26 @@ def bwrap_argv(
     sock_path: Path | None,
     started: Path | None,
     search_path: str,
-    run_dirs,
+    run_dirs: RunDirs,
+    agent: str | None = None,
     mode: Literal["launch", "oneshot"] = "launch",
 ) -> list[str]:
     cwd = Path(cwd).resolve()
     operator_home = Path(os.environ.get("HOME") or Path.home())
     kh = kraft_home()
-    if (path := shutil.which("bwrap")) is None:
+    if (bwrap := shutil.which("bwrap")) is None:
         raise SandboxRefused("bubblewrap is not installed (apt install bubblewrap)")
     try:
         interp, interp_roots = host_view.init_interpreter()
         exposed = host_view.expose_roots(sandbox.get("expose") or (), operator_home, kh)
-        resolved = host_view.resolve(
-            cmd[0],
-            search_path,
-            workdir or cwd,
-            cwd,
-            operator_home,
-            kh,
-            visible=exposed,
+        where = (workdir or cwd, cwd, operator_home, kh)
+        # The agent CLI first: what it shows is visible to the command too.
+        first = (
+            host_view.resolve(agent, search_path, *where, visible=exposed)
+            if agent
+            else host_view.Resolved(cmd[0], (), ())
         )
+        resolved = host_view.resolve(cmd[0], search_path, *where, visible=(*first.roots, *exposed))
         ca = host_view.ca_mounts(os.environ, operator_home, kh)
     except (host_view.Refused, host_view.NotFound) as exc:
         raise SandboxRefused(str(exc)) from exc
@@ -108,27 +109,27 @@ def bwrap_argv(
         mode,
         *("--keep", ",".join(keep)),
         *("--seccomp-file", str(seccomp_file(run_dirs))),
-        *(("--started", str(started)) if started else ()),
+        # os_init refuses a oneshot that records a start.
+        *(("--started", str(started)) if started and mode == "launch" else ()),
         "--",
-        os.path.abspath(path),
+        os.path.abspath(bwrap),
         *("--unshare-all", "--unshare-user", "--disable-userns", "--die-with-parent"),
         *("--cap-drop", "ALL", "--as-pid-1"),
         *system_args(),
     ]
     for root in (*interp_roots, Path(os_init.__file__)):
         argv += _bind(root)
-    roots = list(dict.fromkeys((*resolved.roots, *exposed)))
+    roots = list(dict.fromkeys((*first.roots, *resolved.roots, *exposed)))
     for root in roots:
         argv += _bind(root)
     # Not /dev/null: bwrap mounts binds nodev, so it would read as permission denied.
-    empty = _private_file(run_dirs.base / "os-sandbox" / "empty", b"", 0o444)
-    for root in roots:
-        for hit in host_view.credential_shadows(root):
-            argv += _bind(empty, hit)
-    for link, target in resolved.links:
+    empty = _once(run_dirs.base / "os-sandbox" / "empty", b"", 0o444)
+    for hit in dict.fromkeys(h for root in roots for h in host_view.credential_shadows(root)):
+        argv += _bind(empty, hit)
+    for link, target in dict.fromkeys((*first.links, *resolved.links)):
         argv += ["--symlink", str(target), str(link)]
-    for path_ in ca:
-        argv += _bind(path_)
+    for ca_path in ca:
+        argv += _bind(ca_path)
     for m in sorted(session, key=lambda m: len(m.dst.parts)):
         argv += _bind(m.src, m.dst, ro=m.ro)
     argv += _bind(shim.HOST_DIR, shim.CONTAINER_DIR)

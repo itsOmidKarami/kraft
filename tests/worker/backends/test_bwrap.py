@@ -37,6 +37,8 @@ def scene(tmp_path, run_dirs, monkeypatch):
     (real / "credentials.toml").write_text("secret")
     link = tmp_path / "opt" / "cli-link"
     link.symlink_to(cli)
+    tool = wt / "tool"
+    tool.symlink_to(cli)
     sockdir = tmp_path / "chan"
     sockdir.mkdir()
     interp, _ = host_view.init_interpreter()
@@ -63,6 +65,7 @@ def scene(tmp_path, run_dirs, monkeypatch):
         real=real,
         cli=cli,
         link=link,
+        tool=tool,
         sockdir=sockdir,
         interp=str(interp),
         init=str(Path(bwrap.os_init.__file__)),
@@ -78,34 +81,21 @@ def _at(argv, frag):
     return next((i for i in range(len(argv) - n + 1) if tuple(argv[i : i + n]) == frag), -1)
 
 
+def _row(kw, frags, absent=()):
+    return (kw, frags, lambda s: list(absent(s)) if callable(absent) else list(absent))
+
+
 @pytest.mark.parametrize(
     ("kw", "frags", "absent"),
     [
-        (
+        _row(lambda s: {}, lambda s: [("--unshare-all",), ("--die-with-parent",)]),
+        _row(lambda s: {}, lambda s: [("--unshare-all",), ("--disable-userns",)]),
+        _row(lambda s: {}, lambda s: [("--unshare-all",), ("--cap-drop", "ALL")]),
+        _row(
             lambda s: {},
-            lambda s: [("--unshare-all",), ("--die-with-parent",), ("--cap-drop", "ALL")],
-            lambda s: [],
+            lambda s: [("--unshare-all",), ("--as-pid-1",), ("--ro-bind", "/usr", "/usr")],
         ),
-        (
-            lambda s: {},
-            lambda s: [("--unshare-user",), ("--disable-userns",), ("--die-with-parent",)],
-            lambda s: [],
-        ),
-        (
-            lambda s: {},
-            lambda s: [("--die-with-parent",), ("--cap-drop", "ALL"), ("--as-pid-1",)],
-            lambda s: [],
-        ),
-        (
-            lambda s: {},
-            lambda s: [
-                ("--as-pid-1",),
-                ("--ro-bind", "/usr", "/usr"),
-                ("--ro-bind", "/etc", "/etc"),
-            ],
-            lambda s: [],
-        ),
-        (
+        _row(
             lambda s: {},
             lambda s: [
                 ("--proc", "/proc"),
@@ -113,30 +103,28 @@ def _at(argv, frag):
                 ("--size", "2147483648", "--tmpfs", "/tmp"),
                 ("--bind", str(s.wt), str(s.wt)),
             ],
-            lambda s: [],
         ),
-        (
+        _row(
             lambda s: {},
             lambda s: [
                 ("--size", "268435456", "--tmpfs", "/dev/shm"),
                 ("--symlink", "/tmp", "/var/tmp"),
             ],
-            lambda s: [],
         ),
-        (
-            lambda s: {},
-            lambda s: [("--", s.bwrap, "--unshare-all")],
-            lambda s: [],
-        ),
-        (
+        _row(lambda s: {}, lambda s: [("--", s.bwrap, "--unshare-all")]),
+        _row(
             lambda s: {"started": s.wt.parent / "cid"},
             lambda s: [
                 (s.interp, "-I", "-S", s.init, "launch", "--keep"),
                 ("--seccomp-file", s.seccomp, "--started", str(s.wt.parent / "cid"), "--"),
             ],
-            lambda s: [],
         ),
-        (
+        _row(
+            lambda s: {"mode": "oneshot", "started": s.wt.parent / "cid"},
+            lambda s: [(s.interp, "-I", "-S", s.init, "oneshot", "--keep")],
+            lambda s: [("--started", str(s.wt.parent / "cid"))],
+        ),
+        _row(
             lambda s: {"sock_path": s.sockdir / "s.sock", "home": s.wt.parent / "h"},
             lambda s: [
                 ("--ro-bind", str(shim.HOST_DIR), "/opt/kraft/bin"),
@@ -149,27 +137,34 @@ def _at(argv, frag):
             ],
             lambda s: [("--bind", str(s.sockdir), str(s.sockdir))],
         ),
-        (
-            lambda s: {"cmd": [str(s.link)]},
-            lambda s: [
-                ("--ro-bind", str(s.real), str(s.real)),
-                ("--symlink", str(s.cli), str(s.link)),
-            ],
-            lambda s: [],
+        _row(
+            lambda s: {},
+            lambda s: [("--setenv", "HOME", "/tmp/home")],
+            lambda s: [("--bind", "/tmp/home", "/tmp/home")],
         ),
-        (
+        _row(
+            lambda s: {
+                "session": [
+                    mounts.Mount(s.wt.parent / "p" / "c", s.wt.parent / "p" / "c", False),
+                    mounts.Mount(s.wt.parent / "p", s.wt.parent / "p", True),
+                ]
+            },
+            lambda s: [
+                ("--ro-bind", str(s.wt.parent / "p"), str(s.wt.parent / "p")),
+                ("--bind", str(s.wt.parent / "p" / "c"), str(s.wt.parent / "p" / "c")),
+            ],
+        ),
+        _row(
             lambda s: {"cmd": [str(s.link)]},
             lambda s: [
                 ("--ro-bind", str(s.real), str(s.real)),
                 ("--ro-bind", "ZERO", str(s.real / "credentials.toml")),
                 ("--symlink", str(s.cli), str(s.link)),
             ],
-            lambda s: [],
         ),
-        (
-            lambda s: {},
-            lambda s: [("--ro-bind", "/usr", "/usr")],
-            lambda s: [("--ro-bind", "/lib32", "/lib32"), ("--ro-bind", "/libx32", "/libx32")],
+        _row(
+            lambda s: {"agent": str(s.cli), "cmd": [str(s.tool)]},
+            lambda s: [("--ro-bind", str(s.real), str(s.real))],
         ),
     ],
     ids=[
@@ -181,10 +176,12 @@ def _at(argv, frag):
         "shm-capped",
         "bwrap-absolute",
         "launcher-prefix",
+        "oneshot-no-started",
         "socket-dir-ro",
-        "link-recreated",
-        "cred-shadow-zero-byte",
-        "no-lib32",
+        "default-home",
+        "session-sorted-by-depth",
+        "link-and-cred-shadow",
+        "agent-roots-visible-to-command",
     ],
 )
 def test_argv_has(scene, kw, frags, absent):
@@ -211,13 +208,23 @@ def test_system_dirs_are_as_the_host_has_them():
 
 
 @pytest.mark.parametrize(
-    "sandbox",
-    [{**SANDBOX, "expose": ["/does/not/exist"]}, {**SANDBOX, "expose": ["~/.ssh"]}],
-    ids=["expose-missing-refused", "expose-protected-refused"],
+    "kw",
+    [
+        lambda s: {"sandbox": {**SANDBOX, "expose": ["/does/not/exist"]}},
+        lambda s: {"sandbox": {**SANDBOX, "expose": ["~/.ssh"]}},
+        lambda s: {"cmd": [str(s.tool)]},
+    ],
+    ids=["expose-missing-refused", "expose-protected-refused", "checkout-link-outside-view"],
 )
-def test_refusals_raise_sandbox_refused(scene, sandbox):
+def test_refusals_raise_sandbox_refused(scene, kw):
     with pytest.raises(SandboxRefused, match="expose"):
-        scene.build(sandbox=sandbox)
+        scene.build(**kw(scene))
+
+
+def test_unknown_architecture_is_refused(run_dirs, monkeypatch):
+    monkeypatch.setattr(bwrap.os_seccomp, "machine", lambda: "riscv64")
+    with pytest.raises(SandboxRefused, match="riscv64"):
+        bwrap.seccomp_file(run_dirs)
 
 
 def test_session_only_from_kraft_home(scene, monkeypatch):
