@@ -1456,6 +1456,15 @@ class _Resolution:
                     base_change["on_conflict"], where, (*loc, "on_base_changed", "on_conflict")
                 ),
             }
+        rejected = expanded.get("on_merge_rejected")
+        if isinstance(rejected, Mapping) and isinstance(rejected.get("repair"), Mapping):
+            where = f"{path}{PATH_SEPARATOR}on_merge_rejected{PATH_SEPARATOR}repair"
+            expanded["on_merge_rejected"] = {
+                **rejected,
+                "repair": self._container(
+                    rejected["repair"], where, (*loc, "on_merge_rejected", "repair")
+                ),
+            }
         return expanded
 
     def _with_handler(

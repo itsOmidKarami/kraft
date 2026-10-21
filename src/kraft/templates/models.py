@@ -69,7 +69,16 @@ from kraft.templates.environment import (
 #: make a resolved path ambiguous (docs/templates-v1-design.md "Resolution and
 #: execution"; `task-group-shorthand-resolves-to-one-step`).
 RESERVED_SEGMENTS = frozenset(
-    {"main", "on_failure", "fix_loop", "judge", "escalation", "on_base_changed", "on_conflict"}
+    {
+        "main",
+        "on_failure",
+        "fix_loop",
+        "judge",
+        "escalation",
+        "on_base_changed",
+        "on_conflict",
+        "on_merge_rejected",
+    }
 )
 
 #: The separator between canonical path segments. An authored identifier cannot
@@ -787,6 +796,24 @@ class BaseChangePolicy(BaseModel):
     on_conflict: RecoveryPlan | None = None
 
 
+class MergeRejectionPolicy(BaseModel):
+    """`on_merge_rejected`: what an execution node does when the forge drops
+    the merge request it asked to merge from a merge train or merge queue.
+
+    `repair` is a recovery-shaped handler that fixes the branch against the
+    target as it is now; then the chain restarts at `restart_from`, which
+    must name an *earlier* execution node (checked by `Chain`, which alone can
+    see the order): the repaired head goes back through the merge request's
+    own checks before it is offered to the forge again. Only a node with an
+    `mr.merge` task can have a merge rejected, which `Chain` checks too, on
+    the expanded node."""
+
+    model_config = _CONFIG
+
+    restart_from: Identifier
+    repair: RecoveryPlan
+
+
 class FixLoop(ExecutionShape):
     model_config = _CONFIG
 
@@ -823,10 +850,12 @@ class ExecNode(ExecutionShape):
     #: so -- unlike a fix loop's judge -- this id *is* a path segment.
     escalation: AnyTask | None = None
     on_base_changed: BaseChangePolicy | None = None
+    on_merge_rejected: MergeRejectionPolicy | None = None
     #: The node scope's policy. Everything the node runs inherits it -- its
     #: steps, its recovery plan, its fix loop and judge, its escalation task,
-    #: its conflict handler -- and only here may `max_attempts`/
-    #: `timeout_minutes` appear, because they bound this node's fix loop.
+    #: its conflict handler, its merge-rejection repair -- and only here may
+    #: `max_attempts`/`timeout_minutes` appear, because they bound this node's
+    #: fix loop.
     policy: TemplatePolicyOverride | None = None
     #: `task-step-and-node-are-skippable-by-default`: an operator may skip this
     #: component unless it says `false` here.
@@ -953,7 +982,8 @@ class Chain(BaseModel):
                         f"node {node.id!r}: reject_to {node.reject_to!r} must name an earlier "
                         f"execution node in {where}"
                     )
-            elif node.on_base_changed is not None:
+                continue
+            if node.on_base_changed is not None:
                 # This node itself is allowed: restarting the node whose work
                 # moved the base is the narrowest span there is.
                 target = node.on_base_changed.restart_from
@@ -961,6 +991,25 @@ class Chain(BaseModel):
                     raise ValueError(
                         f"node {node.id!r}: on_base_changed.restart_from {target!r} must name "
                         f"this or an earlier execution node in {where}"
+                    )
+            if node.on_merge_rejected is not None:
+                # Strictly earlier: the repaired head must pass the merge
+                # request's own checks again before it is offered to the forge.
+                target = node.on_merge_rejected.restart_from
+                if not backward_exec(target, position - 1):
+                    raise ValueError(
+                        f"node {node.id!r}: on_merge_rejected.restart_from {target!r} must name "
+                        f"an earlier execution node in {where}"
+                    )
+                # The node's own tasks, after `extends` expansion: a merge in
+                # one of its handlers is not the merge the forge rejects.
+                if not any(
+                    isinstance(t, ForgeTask) and t.target == ForgeAction.MR_MERGE
+                    for t in node.own_tasks()
+                ):
+                    raise ValueError(
+                        f"node {node.id!r}: on_merge_rejected needs an mr.merge task in the "
+                        "same node"
                     )
         return self
 
@@ -973,9 +1022,10 @@ class Chain(BaseModel):
         run in a node before it. The positions come from `ResolvedNode.tasks`,
         the one walker of them (node and step tasks, every recovery plan down
         to a task's own, the fix loop and its judge, escalation, on_conflict,
-        a gate's reviewer), never a second list here that could drift from it
-        (Kraft-nwonj). A chain with no final gate declares no approval to wait
-        for, and is not constrained here (Kraft-8tjh7)."""
+        on_merge_rejected's repair, a gate's reviewer), never a second list
+        here that could drift from it (Kraft-nwonj). A chain with no final
+        gate declares no approval to wait for, and is not constrained here
+        (Kraft-8tjh7)."""
         final = next(
             (i for i, n in enumerate(self.nodes) if isinstance(n, GateNode) and n.chain_finalized),
             None,
@@ -1074,6 +1124,8 @@ class ResolvedNode:
     auto_review: ResolvedTask | None = None
     #: `on_base_changed.on_conflict`, at `<node>.on_base_changed.on_conflict`.
     on_conflict: tuple[ResolvedStep, ...] = ()
+    #: `on_merge_rejected.repair`, at `<node>.on_merge_rejected.repair`.
+    on_merge_rejected: tuple[ResolvedStep, ...] = ()
     #: The node's own policy override, if it declares one. Its fix loop's
     #: bounds resolve here (`walk.walk_node`).
     scopes: Scopes = ()
@@ -1092,7 +1144,13 @@ class ResolvedNode:
 
     def steps_in(self) -> Iterator[ResolvedStep]:
         """Every step this node runs, handlers' steps included."""
-        for group in (self.steps, self.on_failure, self.fix_loop, self.on_conflict):
+        for group in (
+            self.steps,
+            self.on_failure,
+            self.fix_loop,
+            self.on_conflict,
+            self.on_merge_rejected,
+        ):
             for step in group:
                 yield step
                 for handler in (step.on_failure, *(t.on_failure for t in step.tasks)):
@@ -1231,6 +1289,14 @@ class ResolvedChain:
                         )
                         if node.on_base_changed is not None
                         and node.on_base_changed.on_conflict is not None
+                        else ()
+                    ),
+                    on_merge_rejected=(
+                        node.on_merge_rejected.repair.resolve_steps(
+                            f"{node.id}{PATH_SEPARATOR}on_merge_rejected{PATH_SEPARATOR}repair",
+                            node_scopes,
+                        )
+                        if node.on_merge_rejected is not None
                         else ()
                     ),
                     scopes=node_scopes,

@@ -424,6 +424,17 @@
           ],
           "default": null
         },
+        "on_merge_rejected": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MergeRejectionPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "policy": {
           "anyOf": [
             {
@@ -857,6 +868,22 @@
         }
       },
       "title": "GateNode",
+      "type": "object"
+    },
+    "MergeRejectionPolicy": {
+      "additionalProperties": false,
+      "description": "`on_merge_rejected`: what an execution node does when the forge drops\nthe merge request it asked to merge from a merge train or merge queue.\n\n`repair` is a recovery-shaped handler that fixes the branch against the\ntarget as it is now; then the chain restarts at `restart_from`, which\nmust name an *earlier* execution node (checked by `Chain`, which alone can\nsee the order): the repaired head goes back through the merge request's\nown checks before it is offered to the forge again. Only a node with an\n`mr.merge` task can have a merge rejected, which `Chain` checks too, on\nthe expanded node.",
+      "properties": {
+        "repair": {
+          "$ref": "#/$defs/RecoveryPlan"
+        },
+        "restart_from": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Restart From",
+          "type": "string"
+        }
+      },
+      "title": "MergeRejectionPolicy",
       "type": "object"
     },
     "NetworkPhase": {
