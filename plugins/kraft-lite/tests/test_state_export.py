@@ -3,6 +3,7 @@ three files, and an older copy of those files never undoes newer local work."""
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import sys
 from pathlib import Path
@@ -67,23 +68,34 @@ def test_a_fresh_directory_resumes_from_an_export(
     assert stored_in(there) == stored_in(here)
 
 
-def test_an_older_export_never_overwrites_newer_local_records(walk, kl_cli, tmp_path):
-    out = tmp_path / "state"
-    walk.slice(tmp_path)
-    kl_cli(tmp_path, "export", "--to", str(out))
-    kl_cli(tmp_path, "slice-set", "--slice", "a", "--status", "running")
+@pytest.mark.parametrize("newer", ["local", "exported"])
+def test_import_keeps_the_copy_written_last(newer, walk_in_process, monkeypatch, tmp_path):
+    """Every write inside one second, as a controller's back-to-back verbs are:
+    the wall-clock stamp ties, and the later write must still win."""
+    monkeypatch.setattr(kl, "_now", lambda: dt.datetime(2026, 10, 20, 10, 0, 0))
+    here, there = dirs(tmp_path, "here", "there")
+    old, new = tmp_path / "old", tmp_path / "new"
+    run = walk_in_process.run
+    walk_in_process.slice(here)
+    run(here, "export", "--to", str(old))
+    run(there, "import", "--from", str(old))
+    run(here, "slice-set", "--slice", "a", "--status", "running")
+    run(here, "export", "--to", str(new))
+    target, source = (here, old) if newer == "local" else (there, new)
 
-    result = kl_cli(tmp_path, "import", "--from", str(out))
+    result = run(target, "import", "--from", str(source))
 
-    assert kl_cli(tmp_path, "slices")["slices"][0]["status"] == "running"
-    assert result["kept_local"] >= 1 and result["imported"] == 0
+    assert run(target, "slices")["slices"][0]["status"] == "running"
+    if newer == "local":
+        assert result["kept_local"] >= 1 and result["imported"] == 0
 
 
-def record(id_, at=None, epic=False):
+def record(id_, at=None, epic=False, updated_at=None):
     labels = [f"{kl.CHAIN_LABEL}default"] if epic else []
     if at:
         labels.append(f"{kl.AT_LABEL}{at}")
-    return {"_type": "issue", "id": id_, "status": "open", "labels": labels, "dependencies": []}
+    out = {"_type": "issue", "id": id_, "status": "open", "labels": labels, "dependencies": []}
+    return dict(out, updated_at=updated_at) if updated_at else out
 
 
 @pytest.mark.parametrize(
@@ -93,6 +105,20 @@ def record(id_, at=None, epic=False):
         pytest.param(record("ks-1", T0), record("ks-1", T1), True, id="local_older"),
         pytest.param(record("ks-1", T1), record("ks-1", T0), False, id="local_newer"),
         pytest.param(record("ks-1", T0), record("ks-1", T0), False, id="same_stamp"),
+        # Two writes inside one second: `kraft-at:` ties, and bd's guard, which
+        # every write moves strictly forward, says which came second.
+        pytest.param(
+            record("ks-1", T0, updated_at=T0),
+            record("ks-1", T0, updated_at="2026-10-20T10:00:01Z"),
+            True,
+            id="same_second_export_written_later",
+        ),
+        pytest.param(
+            record("ks-1", T0, updated_at="2026-10-20T10:00:01Z"),
+            record("ks-1", T0, updated_at=T0),
+            False,
+            id="same_second_local_written_later",
+        ),
         pytest.param(record("ks-1", T0), record("ks-1"), False, id="export_unstamped"),
         pytest.param(record("ks-1"), record("ks-1", T0), True, id="local_unstamped"),
         pytest.param(None, record("kl-1", T0, epic=True), True, id="epic_missing_locally"),

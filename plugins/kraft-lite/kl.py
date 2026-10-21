@@ -83,7 +83,6 @@ SLICED_ACTIONS: dict[str, dict[str, str]] = {
     "mr_checks": {"feature": "hooks", "main": "skip"},
     "human_review": {"feature": "hooks", "main": "await_user_merges"},
     "merge": {"feature": "hooks", "main": "await_user_merges"},
-    "post_merge_watch": {"feature": "hooks", "main": "hooks"},
 }
 
 #: Who decides what, unless `.kraft-lite/slices.json` says otherwise.
@@ -536,6 +535,19 @@ def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
         raise SystemExit("kraft-lite: the slice plan has no state_branch")
     if mode == "feature" and not plan.get("feature_branch"):
         raise SystemExit("kraft-lite: feature mode needs a feature_branch in the slice plan")
+    if mode == "main" and plan.get("feature_branch"):
+        # Refused, not dropped: a plan that names one expects slices to merge into it.
+        raise SystemExit(
+            "kraft-lite: main mode has no feature branch: "
+            "set feature_branch to null in the slice plan"
+        )
+    if plan.get("feature_branch") == plan["state_branch"]:
+        # The state branch's checkout holds only the export; slices merged there
+        # would be overwritten by the next one.
+        raise SystemExit(
+            f"kraft-lite: feature_branch and state_branch are both {plan['state_branch']!r}: "
+            "the state branch is a branch of its own"
+        )
     slices = plan.get("slices") or []
     if not slices:
         raise SystemExit("kraft-lite: the slice plan has no slices")
@@ -553,6 +565,8 @@ def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
         key = spec["key"]
         if not isinstance(key, str):
             raise SystemExit(f"kraft-lite: slice {position} key must be a string")
+        if not isinstance(spec["title"], str):
+            raise SystemExit(f"kraft-lite: slice {position} ({key!r}) title must be a string")
         if key in keys:
             raise SystemExit(f"kraft-lite: duplicate slice key {key!r}")
         keys.add(key)
@@ -603,7 +617,7 @@ def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
     return slices
 
 
-def materialize_slices(plan: dict, chain_id: str, mode_default: str = "feature") -> list[dict]:
+def materialize_slices(plan: dict, chain_id: str) -> list[dict]:
     """The run record, then one record per slice, each waiting on what it comes after.
 
     Nothing is returned for a plan that is not sound, so a caller writes all of
@@ -611,7 +625,7 @@ def materialize_slices(plan: dict, chain_id: str, mode_default: str = "feature")
     `after` keys are resolved to those ids here, so the dependency links are the
     same `blocks` objects a node's are.
     """
-    mode = plan.get("mode") or mode_default
+    mode = plan.get("mode") or DEFAULT_SETTINGS["mode"]
     slices = _refuse_slice_plan(plan, mode)
     run_labels = [
         f"{RUN_LABEL}{chain_id}",
@@ -673,17 +687,20 @@ def slice_done(record: dict, mode: str) -> bool:
 
 
 def ready_slices(records: list[dict], chain_id: str) -> list[dict]:
-    """Slices still waiting whose every dependency is done."""
+    """Slices still waiting whose every dependency is done, with at most one of
+    them unmerged. A slice is cut from one branch: two unmerged slices' work is
+    on two branches, so one that comes after both waits for the merges."""
     run = run_record(records, chain_id)
     mode = label_value(run, MODE_LABEL) or "feature"
     slices = slice_records(records, chain_id)
     by_id = {r["id"]: r for r in slices}
-    return [
-        r
-        for r in slices
-        if label_value(r, SLICE_STATUS_LABEL) == "waiting"
-        and all(slice_done(by_id[d], mode) for d in dep_ids(r) if d in by_id)
-    ]
+
+    def ready(record: dict) -> bool:
+        after = [by_id[d] for d in dep_ids(record) if d in by_id]
+        unmerged = [a for a in after if label_value(a, SLICE_STATUS_LABEL) != "merged"]
+        return all(slice_done(a, mode) for a in after) and len(unmerged) <= 1
+
+    return [r for r in slices if label_value(r, SLICE_STATUS_LABEL) == "waiting" and ready(r)]
 
 
 def _slice_entry(record: dict, by_id: dict[str, dict], mode: str) -> dict:
@@ -742,11 +759,11 @@ def slices_for_gate(
         raise SystemExit(f"kraft-lite: cannot read the slice plan {path}: {error}") from error
     if not isinstance(plan, dict):
         raise SystemExit(f"kraft-lite: the slice plan {path} is not a JSON object")
-    # Read only when the plan names no mode: a slices.json that cannot be read
-    # has nothing to say to a plan that already decided.
-    return materialize_slices(
-        plan, chain_id, mode_default=plan.get("mode") or settings(root)["mode"]
-    )
+    if not plan.get("mode"):
+        # Read only when the plan names no mode: a slices.json that cannot be read
+        # has nothing to say to a plan that already decided.
+        plan = dict(plan, mode=settings(root)["mode"])
+    return materialize_slices(plan, chain_id)
 
 
 def _by_age(by_chain: dict[str, list[dict]]) -> list[str]:
@@ -1033,8 +1050,7 @@ def _sliced(everything: list[dict], epic: dict | None, node_id: str | None) -> d
     return {"mode": mode, "action": SLICED_ACTIONS.get(node_id, {}).get(mode, "hooks")}
 
 
-def _state(root: Path, chain: dict, chain_id: str | None = None) -> dict:
-    everything = store_for(root).load()
+def _state(root: Path, chain: dict, everything: list[dict], chain_id: str | None = None) -> dict:
     records = _ours(everything, chain_id)
     node_record = current(records)
     epic = next((r for r in records if label_value(r, CHAIN_LABEL)), None)
@@ -1145,6 +1161,18 @@ def validate_hooks(root: Path, chain: dict) -> None:
         )
 
 
+def _slice_by_key(everything: list[dict], chain_id: str | None, key: str) -> dict:
+    """The slice `key` names, or a `SystemExit` listing the ones there are."""
+    slices = slice_records(everything, chain_id) if chain_id else []
+    by_key = {label_value(r, SLICE_KEY_LABEL): r for r in slices}
+    if key not in by_key:
+        raise SystemExit(
+            f"kraft-lite: no slice {key!r} in this chain. Slices: "
+            + (", ".join(by_key) or "(none)")
+        )
+    return by_key[key]
+
+
 def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dict:
     """Move one slice: its status, the session running it, its branch, its fork
     point. `merged` closes the record too, so a store that shows only open work
@@ -1152,18 +1180,12 @@ def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dic
     Main mode's slices reach `merged` too, as the `next` skill records the
     user's merges, so this is the one place a finished run is seen in both."""
     slices = slice_records(everything, chain_id) if chain_id else []
-    by_key = {label_value(r, SLICE_KEY_LABEL): r for r in slices}
-    if args.slice not in by_key:
-        raise SystemExit(
-            f"kraft-lite: no slice {args.slice!r} in this chain. Slices: "
-            + (", ".join(by_key) or "(none)")
-        )
+    record = _slice_by_key(everything, chain_id, args.slice)
     if args.status is not None and args.status not in SLICE_STATUSES:
         raise SystemExit(
             f"kraft-lite: unknown slice status {args.status!r}. "
             f"Statuses: {', '.join(SLICE_STATUSES)}"
         )
-    record = by_key[args.slice]
     if args.status is not None:
         record = set_label(record, SLICE_STATUS_LABEL, args.status)
         record = dict(record, status="closed" if args.status == "merged" else "open")
@@ -1193,7 +1215,9 @@ def _decisions_path(root: Path, chain_id: str) -> Path:
     return root / STATE_DIR / "decisions" / f"{chain_id}.jsonl"
 
 
-def _decide(root: Path, chain_id: str, args) -> dict:
+def _decide(root: Path, everything: list[dict], chain_id: str, args) -> dict:
+    if args.slice is not None:
+        _slice_by_key(everything, chain_id, args.slice)
     if args.held and args.answer is not None:
         raise SystemExit("kraft-lite: a --held question has no answer yet; drop --answer")
     if not args.held and args.answer is None:
@@ -1312,17 +1336,23 @@ def _import_records(local: list[dict], exported: list[dict]) -> tuple[list[dict]
 
     A record is written only where the local copy is missing or was last written
     earlier, by `kraft-at:`: `BD_TIME` sorts as a string, and no stamp is oldest.
-    A tie keeps the local copy. The epic is written only where it is missing:
-    it is never written after `start`, and its stamp is the run's start time.
+    Two writes inside one second tie there, so `updated_at` breaks the tie: every
+    write moves it strictly forward (`_bump_updated`), and `kraft-at:` is not
+    moved, because the summary times the run by it. A tie on both keeps the
+    local copy. The epic is written only where it is missing: it is never
+    written after `start`, and its stamp is the run's start time.
     """
+
+    def written(record: dict) -> tuple[str, str]:
+        return (label_value(record, AT_LABEL) or "", record.get("updated_at") or "")
+
     held = {r["id"]: r for r in local}
     write: list[dict] = []
     kept = 0
     for record in exported:
         mine = held.get(record["id"])
         if mine is None or (
-            label_value(record, CHAIN_LABEL) is None
-            and (label_value(mine, AT_LABEL) or "") < (label_value(record, AT_LABEL) or "")
+            label_value(record, CHAIN_LABEL) is None and written(mine) < written(record)
         ):
             write.append(record)
         else:
@@ -1516,7 +1546,7 @@ def main(argv: list[str] | None = None) -> int:
         if resolved_id is None:
             raise SystemExit("kraft-lite: no chain in this directory — start one first")
         if args.verb == "decide":
-            out = _decide(root, resolved_id, args)
+            out = _decide(root, everything, resolved_id, args)
         elif args.verb == "answer":
             out = _answer(root, resolved_id, args)
         elif args.verb == "decisions":
@@ -1527,7 +1557,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.verb == "state":
-        print(json.dumps(_state(root, chain, resolved_id), indent=2))
+        print(json.dumps(_state(root, chain, everything, resolved_id), indent=2))
         return 0
 
     if args.verb == "summary":
@@ -1570,12 +1600,14 @@ def main(argv: list[str] | None = None) -> int:
         charged = spend_attempt(node_record)
         count = attempts(charged)
         store.write([charged])
-        state = _state(root, chain, resolved_id)
+        # Read again: the write above is what this reports.
+        state = _state(root, chain, store.load(), resolved_id)
         state["over_cap"] = state["cap"] is not None and count > state["cap"]
         print(json.dumps(state, indent=2))
         return 0
 
-    print(json.dumps(_state(root, chain, resolved_id), indent=2))
+    # Read again: the write above is what this reports.
+    print(json.dumps(_state(root, chain, store.load(), resolved_id), indent=2))
     return 0
 
 

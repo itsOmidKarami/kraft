@@ -20,7 +20,9 @@ CHAIN_ID = "kl-feature1"
 
 def plan(**over):
     base = {
-        "feature_branch": "feature/x",
+        # Main mode has no feature branch, so a main-mode plan names none unless
+        # a test says otherwise.
+        "feature_branch": None if over.get("mode") == "main" else "feature/x",
         "state_branch": "kraft-lite/state",
         "slices": [
             {"key": "a", "title": "Alpha", "tasks": [1, 2]},
@@ -170,6 +172,21 @@ def test_after_becomes_a_bd_shaped_blocks_dependency():
             "slice 1 key must be a string",
             id="key_not_a_string",
         ),
+        pytest.param(
+            plan(slices=[{"key": "a", "title": 7, "tasks": [1]}]),
+            "slice 1 ('a') title must be a string",
+            id="title_not_a_string",
+        ),
+        pytest.param(
+            plan(feature_branch="kraft-lite/state"),
+            "feature_branch and state_branch are both 'kraft-lite/state'",
+            id="feature_branch_is_the_state_branch",
+        ),
+        pytest.param(
+            plan(mode="main", feature_branch="feature/x"),
+            "main mode has no feature branch",
+            id="main_mode_with_a_feature_branch",
+        ),
         pytest.param(plan(mode="sideways"), "sideways", id="unknown_mode"),
         pytest.param(
             plan(feature_branch=None), "feature_branch", id="feature_mode_without_feature_branch"
@@ -187,14 +204,14 @@ def test_a_broken_slice_plan_is_refused(bad, named):
     assert named in str(refused.value)
 
 
-@pytest.mark.parametrize("mode_default", kl.MODES)
-def test_a_plan_without_a_mode_takes_the_default(mode_default):
-    records = kl.materialize_slices(plan(), CHAIN_ID, mode_default)
-    assert kl.label_value(kl.run_record(records, CHAIN_ID), kl.MODE_LABEL) == mode_default
+@pytest.mark.parametrize("mode", [None, *kl.MODES])
+def test_a_plan_takes_its_own_mode_or_feature(mode):
+    records = kl.materialize_slices(plan(mode=mode), CHAIN_ID)
+    assert kl.label_value(kl.run_record(records, CHAIN_ID), kl.MODE_LABEL) == (mode or "feature")
 
 
 def test_main_mode_allows_no_feature_branch():
-    records = kl.materialize_slices(plan(mode="main", feature_branch=None), CHAIN_ID)
+    records = kl.materialize_slices(plan(mode="main"), CHAIN_ID)
     run = kl.run_record(records, CHAIN_ID)
     assert kl.label_value(run, kl.MODE_LABEL) == "main"
     assert kl.label_value(run, kl.FEATURE_BRANCH_LABEL) is None
@@ -215,16 +232,51 @@ def test_a_slice_that_has_started_is_not_ready_again():
     assert ready == ["c"]
 
 
-def test_in_main_mode_ready_to_merge_counts_as_done():
-    records = kl.materialize_slices(plan(mode="main", feature_branch=None), CHAIN_ID)
-    records = with_status(records, "a", "ready_to_merge")
-    ready = [kl.label_value(r, kl.SLICE_KEY_LABEL) for r in kl.ready_slices(records, CHAIN_ID)]
-    assert "b" in ready
+#: b comes after a; d comes after a and c, so no one slice's branch holds both.
+JOIN = [
+    {"key": "a", "title": "Alpha", "tasks": [1]},
+    {"key": "b", "title": "Beta", "tasks": [2], "after": ["a"]},
+    {"key": "c", "title": "Gamma", "tasks": [3]},
+    {"key": "d", "title": "Delta", "tasks": [4], "after": ["a", "c"]},
+]
 
-    # In feature mode the same status is not enough: the slice has to be merged.
-    feature = with_status(kl.materialize_slices(plan(), CHAIN_ID), "a", "ready_to_merge")
-    ready = [kl.label_value(r, kl.SLICE_KEY_LABEL) for r in kl.ready_slices(feature, CHAIN_ID)]
-    assert "b" not in ready
+
+@pytest.mark.parametrize(
+    "mode, statuses, key, ready",
+    [
+        pytest.param("main", {"a": "ready_to_merge"}, "b", True, id="main-after-one-ready"),
+        # In feature mode the same status is not enough: the slice has to be merged.
+        pytest.param("feature", {"a": "ready_to_merge"}, "b", False, id="feature-after-one-ready"),
+        # Two unmerged branches, and the slice can be cut from only one: it waits
+        # for the user's merges.
+        pytest.param(
+            "main",
+            {"a": "ready_to_merge", "c": "ready_to_merge"},
+            "d",
+            False,
+            id="main-after-two-ready",
+        ),
+        # One left unmerged: cut from that one's branch.
+        pytest.param(
+            "main",
+            {"a": "merged", "c": "ready_to_merge"},
+            "d",
+            True,
+            id="main-one-merged-one-ready",
+        ),
+        pytest.param("main", {"a": "merged", "c": "merged"}, "d", True, id="main-after-two-merged"),
+        pytest.param(
+            "feature", {"a": "merged", "c": "merged"}, "d", True, id="feature-after-two-merged"
+        ),
+    ],
+)
+def test_in_main_mode_ready_to_merge_counts_as_done(mode, statuses, key, ready):
+    records = kl.materialize_slices(plan(mode=mode, slices=JOIN), CHAIN_ID)
+    for done, status in statuses.items():
+        records = with_status(records, done, status)
+
+    keys = [kl.label_value(r, kl.SLICE_KEY_LABEL) for r in kl.ready_slices(records, CHAIN_ID)]
+    assert (key in keys) is ready
 
 
 def test_slice_records_come_back_in_plan_order_whatever_the_store_returns():
@@ -590,7 +642,8 @@ def test_a_slicing_plan_without_a_mode_takes_the_settings_mode(walk, mode, kl_cl
     settings_file(tmp_path, {"mode": mode})
     walk.to_chain_review(tmp_path)
     kl_cli(tmp_path, "gate", "--name", "chain_finalized")
-    kl_cli(tmp_path, "approve", "--slices", str(walk.write_plan(tmp_path, plan())))
+    unnamed = plan(feature_branch=None) if mode == "main" else plan()
+    kl_cli(tmp_path, "approve", "--slices", str(walk.write_plan(tmp_path, unnamed)))
 
     assert kl_cli(tmp_path, "slices")["mode"] == mode
     assert kl_cli(tmp_path, "state")["sliced"]["mode"] == mode

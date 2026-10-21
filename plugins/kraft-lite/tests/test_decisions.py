@@ -90,9 +90,13 @@ def test_a_held_question_has_no_answer_until_the_user_gives_one(walk, kl_cli, tm
     [
         pytest.param(["--held", "--answer", "yes"], "--held", id="held_with_answer"),
         pytest.param([], "--answer", id="unheld_without_answer"),
+        # As `slice-set` does: a decision filed under no real slice is lost to it.
+        pytest.param(
+            ["--answer", "yes", "--slice", "ghost"], "no slice 'ghost'", id="unknown_slice"
+        ),
     ],
 )
-def test_decide_requires_an_answer_unless_held(flags, named, walk, kl_cli, tmp_path):
+def test_decide_refuses_what_it_cannot_record(flags, named, walk, kl_cli, tmp_path):
     walk.slice(tmp_path)
 
     refused = kl_cli(tmp_path, "decide", "--question", "q", "--why", "w", *flags, ok=False)
