@@ -120,12 +120,17 @@ and merge that one. `verify` tests only what the feature branch changed, where
 CI cannot cover it.
 
 In the **main** mode, each slice opens its own pull request to `main`. The
-controller reviews it and reports, and you merge it. A slice counts as done for
-the slices after it once it is ready to merge, so the run does not wait on your
-merges: the next slice starts from that slice's branch, and moves onto `main`
-once you merge that slice. `verify`, `open_mr` and `mr_checks` close with nothing to do.
-`human_review` and `merge` wait until you have merged every slice pull request,
-and `post_merge_watch` runs as usual.
+controller reviews it and reports, and you merge it.
+
+A slice counts as done for the slices after it once it is ready to merge, so the
+run does not wait on your merges: the next slice starts from that slice's
+branch, and moves onto `main` once you merge that slice. A slice that comes
+after two or more slices still unmerged waits for your merges, then starts from
+`main`.
+
+`verify`, `open_mr` and `mr_checks` close with nothing to do. `human_review` and
+`merge` wait until you have merged every slice pull request, and
+`post_merge_watch` runs as usual.
 
 Set the mode in `.kraft-lite/slices.json`, or say so when the run starts.
 
