@@ -157,12 +157,16 @@ slice defaults, then in the top-level sections.
 With no match, the task runs on its default:
 
 - An **agent** task runs its `skill` if that is installed in this harness,
-  else its `prompt`, with any `steering` text appended. Its `profile`,
-  `model` and `effort` reach the session as hints for choosing a subagent's
-  model.
-- A **subprocess** task runs its `command`.
+  else its `prompt`.
+- A **subprocess** task runs its `command`, split like a shell and run
+  without one, as Kraft runs it. A command Lite cannot split, such as one
+  with an unclosed quote, stops `start`.
 - A **builtin** or **forge** task runs an instruction Lite carries for every
   ref and target Kraft allows, written for this repo's forge.
+
+Every task that runs a skill or a prompt, bound or default, gets the task's
+`steering` text appended. Its `profile`, `model` and `effort` reach the
+session as hints for choosing a subagent's model.
 
 `start` works out the instruction for every task before it writes anything, so
 a bindings file Lite cannot use, or a task with no instruction, stops `start`
@@ -171,8 +175,8 @@ and names the entry. The file is read again on every dispatch.
 ## What Lite reads past, and what it refuses
 
 Lite runs inside one session, so it cannot enforce a budget, a time cap, an
-allowed-tools list, a sandbox or a harness choice. It reads past `policy`,
-`wait`, `scope`, `execution`, `harness`, `inputs`, `skippable`, `read_only`,
+allowed-tools list, a sandbox or a harness choice. It reads past `policy`
+(all but a node's `max_attempts`, which caps its fix loop), `wait`, `scope`, `execution`, `harness`, `inputs`, `skippable`, `read_only`,
 `icon`, `timeout`, `artifact_required`, `escalation`, and a gate's
 `auto_review`. A chain that sets them still runs. An escalation is you, as
 for a fix loop past its cap.
@@ -210,7 +214,8 @@ A node that fails goes through its fix loop, in Kraft's order:
    has one, rules first: continue, stop for you, or finish with the findings
    left.
 4. Past the cap, the chain stops and shows you every attempt's output. The
-   cap is the loop's `max_attempts`, else 3.
+   cap is the loop's `max_attempts`, else the node policy's
+   `max_attempts`, else 3.
 5. The loop's repair steps run, then the whole node again from its first
    step.
 
@@ -230,7 +235,8 @@ node before it, and every node after that, carrying your note. `reject
 A gate on a `chain_revision` artifact is the one case Lite cannot finish: it
 cannot apply a change set to a running chain. If the proposal changes
 anything, Lite says so and offers two ways on: approve without the change, or
-stop and start again on an edited copy of the chain.
+stop and start again on an edited copy of the chain's file, whose path
+`kl.py chains --available` lists.
 
 ### What `state` reports
 
@@ -253,7 +259,9 @@ and `target` come from the chain, whatever binding ran it.
 have. For each kind, Lite drops the gate that approves it, never the
 `chain_finalized` gate, and the exec node whose tasks all produce it. A
 surviving gate whose `reject_to` named a dropped node falls back to the
-nearest exec node before it.
+nearest exec node before it. A surviving `on_base_changed.restart_from` that
+named a dropped node moves to the nearest kept exec node before it, else the
+first one kept.
 
 Lite records the path, relative to the repo when the file is inside it, and
 does not copy the file. The gates that remain present it as that kind's
@@ -348,13 +356,14 @@ A child walks the child chain (above), cut from the controller's frozen
 chain. It starts with `kl.py start --slice-of <state checkout>/chain.json
 --title "<slice>"`, so it never resolves a library itself and walks exactly
 what the controller froze. A kept node's `on_base_changed.restart_from` that
-names a dropped node moves to the nearest kept exec node before it.
+names a dropped node moves to the nearest kept exec node before it, else to
+the child chain's first node.
 
 The child's `slice:` bindings win over everything else. Without them, the
-build node's `implementer` task runs the subagent-driven skill, the changed-scope
-tests run only the paths the slice touches, and the merge request's automated
-review is skipped, because the controller's review is that review. CI runs
-the full suite.
+agent tasks of the first build node run the subagent-driven skill, whatever
+component they extend. The changed-scope tests run only the paths the slice
+touches, and the merge request's automated review is skipped, because the
+controller's review is that review. CI runs the full suite.
 
 Where Lite would stop for you, the child asks the controller, never you. The
 controller answers, reviews each child's pull request, merges, archives the
@@ -446,7 +455,8 @@ the children as messages. At the end the controller lists the branches that are
 safe for you to delete.
 
 Add `.kraft-lite/decisions/`, `.kraft-lite/messages/` and
-`.kraft-lite/proposals/` to `.gitignore`. `/kraft-lite:init` tells you to.
+`.kraft-lite/proposals/` to `.gitignore`, and `.kraft-lite/registry.yaml.migrated`
+if `migrate` left one. `/kraft-lite:init` tells you to.
 
 ### Harness support
 
@@ -550,7 +560,7 @@ refuses with one line telling you to run `migrate`. Only `chains`, `detect` and
   target that now does its job (the table below). A binding that says what
   the default already says is dropped, and so is a hook V1 has no task for.
   The command lists what it dropped. Comments are not carried. The old file is
-  renamed `registry.yaml.migrated`.
+  renamed `registry.yaml.migrated`: add it to `.gitignore`, or delete it.
 - **Each unfinished run moves to a new id** on Kraft's bundled `default`, not a
   `default` from your library or the repo's. Closed nodes stay closed, and
   the node the run was at keeps its attempts and note. The old run is closed
@@ -560,13 +570,15 @@ refuses with one line telling you to run `migrate`. Only `chains`, `detect` and
 |---|---|
 | `on.spec.requested`, `on.plan.requested`, `on.chain.review_ready` | `tasks`: `spec_author`, `plan_author`, `revise_chain` |
 | `on.implementation.start`, `on.review.local.run` | `tasks`: `implementer`, `code_review` |
-| `on.mr.describe`, `on.human_review.requested` | `tasks`: `describe_mr`, `write_summary` |
+| `on.mr.describe` | `tasks`: `describe_mr` |
 | `on.test.run`, `on.mr.rebase` | `builtins`: `kraft.verify_changed_test_scopes`, `kraft.mr_rebase` |
-| `on.mr.open`, `on.mr.sync` | `forge`: `mr.open_draft`, `mr.sync` |
+| `on.mr.open` | `forge`: `mr.open_draft` |
 | `on.ci.poll`, `on.review.mr.run` | `forge`: `mr.ci`, `mr.automated_review` |
 | `on.merge`, `on.merge.watch` | `forge`: `mr.merge`, `mr.post_merge_ci` |
 | `on.slice.implementation.start`, `on.slice.test.run` | `slice`: `tasks.implementer`, `builtins.kraft.verify_changed_test_scopes` |
 | `on.env.prepare`, `on.repos.scan` | dropped: Kraft's worktree setup has no such task |
+| `on.mr.sync` | dropped: it pulled the merge request into the branch, and V1's `mr.sync` pushes the branch |
+| `on.human_review.requested` | dropped: presenting the work for sign-off is the `final_review` gate's job; `write_summary` only writes the brief it shows |
 
 A legacy node becomes one or more V1 nodes, so a run lands on the same work:
 `spec` and `plan` each become the node and its approval gate; `chain_review`

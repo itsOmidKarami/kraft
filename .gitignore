@@ -65,6 +65,7 @@ src/kraft/_bundled/
 .kraft-lite/decisions/
 .kraft-lite/messages/
 .kraft-lite/proposals/
+.kraft-lite/registry.yaml.migrated
 
 # Kraft's own artifacts -- specs, plans, chain reviews, review briefs, session
 # summaries. Since MR113 these are ingested straight into Kraft's index

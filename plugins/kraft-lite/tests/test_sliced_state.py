@@ -16,8 +16,8 @@ sys.path.insert(0, str(PLUGIN))
 
 import kl  # noqa: E402
 
-#: The spec's table, typed out again rather than read from `kl.SLICED_ACTIONS`, so
-#: the test fails when the code drifts from the spec rather than following it.
+#: The spec's table, typed out again rather than worked out by `kl_shape.sliced_action`,
+#: so the test fails when the code drifts from the spec rather than following it.
 SLICED_TABLE = {
     "implementation": ("run_slices", "run_slices"),
     "verification": ("scoped_verify", "skip"),

@@ -1,5 +1,7 @@
-# Kraft Lite bindings, written by `kl.py migrate` from registry.yaml (kept beside it as
-# registry.yaml.migrated). Comments were not carried. Keys are Kraft's task names.
+# This repo's Kraft Lite bindings: which local skill, instruction or command runs a
+# chain task here, where Lite's default does not fit. Keys are Kraft's own names:
+# a library task component (or canonical path) under `tasks`, a builtin ref under
+# `builtins`, a forge target under `forge`. A task left out runs its default.
 tasks:
   spec_author:
     kind: skill
@@ -20,9 +22,6 @@ tasks:
     kind: skill
     skill: superpowers:requesting-code-review
     prompt: "Review the working tree for correctness and for anything simpler that would do."
-  write_summary:
-    kind: prompt
-    prompt: "Present the finished work to the human for sign-off: what changed, what was verified, and anything deliberately left out."
   describe_mr:
     kind: skill
     skill: mr-metadata
@@ -53,9 +52,6 @@ forge:
     kind: skill
     skill: superpowers:finishing-a-development-branch
     prompt: "Merge the branch and clean up the worktree."
-  mr.sync:
-    kind: prompt
-    prompt: "Pull the merge request's latest remote state into the local branch before continuing."
   mr.post_merge_ci:
     kind: prompt
     prompt: "Watch the merge until it lands or fails, then report which."
