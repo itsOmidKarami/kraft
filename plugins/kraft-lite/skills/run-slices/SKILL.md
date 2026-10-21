@@ -34,7 +34,9 @@ not sliced: say so, and the chain continues as one.
    in parallel, and one owning slice for every shared helper, fixture or file
    two slices would both create. The other slice waits for it or uses it from
    the owner's branch.
-3. Add the mode (`KL settings`), the feature branch (a new branch from the base
+3. Add the mode: the user's words for this run if they named one, logged with
+   `KL decide --question "Mode for this run" --answer "<their words>" --why "set by the user"`,
+   else the mode `KL settings` prints. Add the feature branch (a new branch from the base
    branch, named by the repo's own rules) and the state branch (section 7). The
    feature branch is never the state branch.
 4. Write it to `.kraft-lite/proposals/<chain-id>.json`:

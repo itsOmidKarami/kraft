@@ -369,7 +369,7 @@ itself:
   390px wide, in light and dark. Take them from a seeded `just dev` instance
   (`just dev-seed` fills it), the "before" from `main` and the "after" from your
   branch.
-- Push the pictures to a separate `kraft/<branch>-shots` branch, not to the
+- Push the pictures to a separate `kraft/<branch>-screenshots` branch, not to the
   pull request's own branch, and link them in the pull request body.
 
 In a cloud session, pushing that branch needs the user's approval in the session

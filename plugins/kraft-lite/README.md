@@ -120,9 +120,10 @@ feature branch changed, where CI cannot cover it.
 
 In the **main** mode, each slice opens its own pull request to `main`. The
 controller reviews it and reports, and you merge it. A slice counts as done for
-the slices after it once its review has passed, so the run does not wait on your
-merges. The nodes after `implementation` then close with nothing to do, until
-you have merged every slice pull request.
+the slices after it once it is ready to merge, so the run does not wait on your
+merges. `verify`, `open_mr` and `mr_checks` close with nothing to do.
+`human_review` and `merge` wait until you have merged every slice pull request,
+and `post_merge_watch` runs as usual.
 
 Set the mode in `.kraft-lite/slices.json`, or say so when the run starts.
 
@@ -193,7 +194,7 @@ woken says so, and you run `/kraft-lite:next` to continue the run. If the
 harness has no session tools at all, the controller walks the slices itself, one
 after another.
 
-A cloud session cannot message a controller on another machine. For a local
+A cloud child cannot message a controller on another machine. For a local
 controller with cloud children, pull request comments are the channel.
 
 ### Verbs for slices
@@ -216,11 +217,13 @@ The skills run these. `kl.py state` also reports `sliced` once a run is sliced.
 Unattended execution, a web board, waiting on CI while you are away, spend caps,
 cross-repo search. Lite is the attended case: the chain is in front of you,
 resumable across sessions but not outliving your terminal. Several chains can
-share a directory, but nothing walks one while you are away. Slices spread one
-plan over several sessions, so it no longer needs just one, but someone still
-starts the run and wakes the controller where its harness cannot. Those other things
+share a directory, but nothing walks one while you are away. Those other things
 need a process that keeps running when you close the lid, which is a different
 piece of software.
+
+Slices spread one plan over several sessions, so a large plan no longer needs one
+session. Someone still starts the run, and wakes the controller where its harness
+cannot.
 
 ## Tests
 
