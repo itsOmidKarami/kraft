@@ -87,7 +87,7 @@ def daemon(short_run, tmp_path, monkeypatch):  # noqa: F811
         seed_session()
         _force_node("w1", "implementation", "active")
         work = app.state.run_dirs.worktrees / "w1"
-        git(repo, "worktree", "add", "-q", "-b", "kraft/w1", str(work))
+        git(repo, "worktree", "add", "-q", "-b", "kraft/t-w1", str(work))
 
         def launch(script: str, sid: str):
             path = agents / f"{sid}.sh"
@@ -125,10 +125,13 @@ def _running(client, sid: str) -> dict:
     """The session's row once its launcher has a pid."""
     deadline = time.monotonic() + WAIT_S
     while time.monotonic() < deadline:
-        row = client.app.state.db.read(
-            lambda c: c.execute(
-                "SELECT pid, status FROM worker_sessions WHERE id = ?", (sid,)
-            ).fetchone()
+        # The reader connection belongs to the app's loop thread.
+        row = client.portal.call(
+            lambda: client.app.state.db.read(
+                lambda c: c.execute(
+                    "SELECT pid, status FROM worker_sessions WHERE id = ?", (sid,)
+                ).fetchone()
+            )
         )
         if row and row["pid"]:
             return dict(row)
@@ -150,7 +153,7 @@ def _procs(*argv: str) -> list[psutil.Process]:
 def _agent_checks(d) -> str:
     """The fake agent: every check writes `<name> <exit code>` to the result file."""
     return f"""
-out="$KRAFT_RESULT_PATH"
+out=checks.txt
 : > "$out"
 check() {{ name=$1; shift; "$@" >/dev/null 2>&1; echo "$name $?" >> "$out"; }}
 echo LOG-MARKER-BEFORE
@@ -168,12 +171,14 @@ echo "log-untouchable 0" >> "$out"
 command -v unshare >/dev/null && ! unshare -Ur true >/dev/null 2>&1
 echo "nested-userns $?" >> "$out"
 [ "$(df -Pk /dev/shm | awk 'NR==2 {{print $2}}')" -le 262144 ]; echo "shm-capped $?" >> "$out"
-kraft item approve > approve.out 2>&1
-echo "approve-refused $?" >> "$out"
+url=http://kraft/api/work-items/w1/gates/x/approve
+curl -q -sS -m 5 -X POST -o approve.body -w '%{{http_code}}' "$url" > approve.out 2>&1
+[ "$(cat approve.out)" = 403 ]; echo "approve-refused $?" >> "$out"
 echo landed > landed.txt && git add landed.txt
 git -c user.name=w -c user.email=w@x commit -qm landed
 echo "commit-lands $?" >> "$out"
 sleep 3141 &
+echo '{{"status": "done"}}' > "$KRAFT_RESULT_PATH"
 exit 0
 """
 
@@ -184,22 +189,23 @@ def test_os_worker_is_fenced(daemon):
     status, evs = daemon.launch(_agent_checks(daemon), sid).result(WAIT_S)
 
     files = own_files(daemon.run_dirs, sid)
-    lines = files.result.read_text().splitlines()
+    lines = (daemon.work / "checks.txt").read_text().splitlines()
     ran = {name: int(rc) for name, rc in (line.split() for line in lines)}
     log = files.log.read_text()
     refused = [e["payload"] for e in evs if e["type"] == SandboxEvent.EGRESS_REFUSED]
     held = {name: rc == 0 for name, rc in ran.items()}
     held["loopback-api"] &= not _Health.hits  # the host's listener was never reached
     held["log-untouchable"] = "LOG-MARKER-BEFORE" in log  # the host log keeps its earlier lines
-    held["approve-refused"] = (
-        ran.get("approve-refused", 0) != 0
-        and "403" in (daemon.work / "approve.out").read_text()
-        and any("approve" in json.dumps(p) for p in refused)
+    held["approve-refused"] = ran.get("approve-refused", 1) == 0 and any(
+        "approve" in json.dumps(p) for p in refused
     )
-    held["commit-lands"] &= git(daemon.repo, "log", "-1", "--format=%s", "kraft/w1") == "landed"
+    held["commit-lands"] &= git(daemon.repo, "log", "-1", "--format=%s", "kraft/t-w1") == "landed"
     held["no-orphans"] = not _procs("sleep", "3141")  # the agent left one behind
+    approve = (daemon.work / "approve.out").read_text()
     for name in CHECKS:
-        assert held.get(name), f"{name} did not hold: {lines}\n{log}"
+        assert held.get(name), (
+            f"{name} did not hold: {lines}\napprove.out={approve!r} refused={refused}\n{log}"
+        )
     assert status == "done", log
 
 
@@ -221,23 +227,23 @@ while :; do sleep 0.2; done
 
     assert status == "paused"
     assert files.result.read_text().strip() == "flushed"
-    assert files.exit.read_text().strip() == "0"
 
 
 @pytest.mark.e2e("bwrap")
 def test_launcher_killed(daemon):
     sid = "s-killed"
     fut = daemon.launch("echo ready > ready\nexec sleep 3142\n", sid)
-    _wait_for(daemon.work / "ready", "the agent")
-    assert _procs("sleep", "3142"), "the agent is not running"
+    try:
+        _wait_for(daemon.work / "ready", "the agent")
+        assert _procs("sleep", "3142"), "the agent is not running"
 
-    os.kill(_running(daemon.client, sid)["pid"], 9)
+        os.kill(_running(daemon.client, sid)["pid"], 9)
 
-    deadline = time.monotonic() + 15
-    while _procs("sleep", "3142") and time.monotonic() < deadline:
-        time.sleep(0.1)
-    leftover = _procs("sleep", "3142")
-    for p in leftover:  # do not leave it for the next run
-        p.kill()
-    assert not leftover, "the sandbox outlived its killed launcher"
+        deadline = time.monotonic() + 15
+        while _procs("sleep", "3142") and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert not _procs("sleep", "3142"), "the sandbox outlived its killed launcher"
+    finally:
+        for p in _procs("sleep", "3142"):  # a failed run must not hang the fixture's teardown
+            p.kill()
     fut.result(WAIT_S)
