@@ -15,6 +15,7 @@ BARE = {"kind": "docker", "image": "x"}
 #: that still apply to it.
 DOCKER = {**BARE, "unrestricted_network": True}
 NETWORKED = {**BARE, "network": {"runtime": {"allow": ["x.io"]}}}
+OS = {"kind": "os", "network": {"runtime": {"allow": ["x.io"]}}}
 PROVIDERS = sorted(p.stem for p in harness.BUNDLED.glob("*.yaml"))
 
 
@@ -167,9 +168,10 @@ def test_codex_leaves_isolation_to_the_container(run, tmp_path, sandbox, mode, e
     ("sandbox", "servers"),
     [
         (NETWORKED, {"kraft": {"type": "http", "url": "http://kraft/mcp"}}),
+        (OS, {"kraft": {"type": "http", "url": "http://kraft/mcp"}}),
         (None, None),
     ],
-    ids=["network", "host"],
+    ids=["network", "os", "host"],
 )
 def test_claude_under_network_asks_its_session_mcp_server_alone(run, tmp_path, sandbox, servers):
     """The host's registration of Kraft's MCP server is out of the
