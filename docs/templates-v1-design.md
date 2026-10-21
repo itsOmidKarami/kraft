@@ -669,6 +669,15 @@ what was asked, what changed, what was verified and reviewed, what is
 unresolved, and that approving opens the draft merge request and starts CI.
 `merge_request_feedback` declares `on_base_changed.restart_from:
 verification`, so a rebase there re-tests and re-reviews the rebased head.
+`merge` declares `on_merge_rejected`: when a GitLab merge train or GitHub merge
+queue drops the merge request, the `repair_merge_queue_failure` task fixes the
+branch against the target as it now is, the approved gates between
+`merge_request_feedback` and `merge` (notably `final_review`) reopen, and the
+chain restarts at `merge_request_feedback`. The policy is a sibling of
+`on_base_changed` with the same `restart_from` rule, except that it must name
+an *earlier* execution node and only a node holding an `mr.merge` task may
+declare it. Its rewinds count under `<node>.on_merge_rejected`, 3 attempts over
+a week unless `loops:` overrides them, checked before the repair runs.
 
 The optional `local_review` gate is omitted by chains that should create a
 draft immediately after local verification. This example also includes an
@@ -691,11 +700,14 @@ addressing:
 - `merge_request_feedback.fix_loop.repair.repair`
 - `verification.fix_loop.main.repair`
 - `merge_request_feedback.fix_loop.judge`
+- `merge.on_merge_rejected.repair.main.repair`
 
 This makes every ordinary, recovery, and fix-loop step or task unambiguous in
 events, sessions, diagnostics, steering, and operator controls. `main`,
-`on_failure`, `fix_loop`, `judge`, `escalation`, `on_base_changed`, and
-`on_conflict` are reserved step identifiers.
+`on_failure`, `fix_loop`, `judge`, `escalation`, `on_base_changed`,
+`on_conflict`, and `on_merge_rejected` are reserved step identifiers. A node's
+merge-rejection repair resolves under `<node>.on_merge_rejected.repair`, as
+`merge.on_merge_rejected.repair.main.repair`.
 
 Because a canonical path is its container's path plus one local identifier,
 global uniqueness is not a global property to enforce -- it follows from

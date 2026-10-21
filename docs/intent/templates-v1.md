@@ -503,8 +503,8 @@ resolved task SHALL therefore belong to an addressable step and every ordinary
 execution path SHALL have the same shape. A dedicated fix-loop judge or stuck
 escalation task SHALL take its container as its path segment, such as
 `node.fix_loop.judge` and `node.escalation.task`. The reserved identifiers
-`main`, `on_failure`, `fix_loop`, `judge`, `escalation`, `on_base_changed`, and
-`on_conflict` SHALL NOT be used as authored step identifiers, nor as the
+`main`, `on_failure`, `fix_loop`, `judge`, `escalation`, `on_base_changed`,
+`on_conflict`, and `on_merge_rejected` SHALL NOT be used as authored step identifiers, nor as the
 identifier of a dedicated task that occupies a step position.
 enforced-by: tests/templates/test_models.py::test_a_tasks_group_resolves_to_one_step_named_main, tests/templates/test_models.py::test_a_fix_loop_tasks_group_resolves_to_a_main_step_under_its_container, tests/templates/test_models.py::test_a_reserved_segment_is_rejected_as_a_step_identifier, tests/templates/test_models.py::test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task
 origin: docs/templates-v1-design.md "Resolution and execution" -- a fix loop's judge is a named slot whose own name is its canonical segment, so its authored id is never a path segment and the reserved rule does not apply to it; the escalation task's id does become a segment (`node.escalation.<id>`) and is checked.
@@ -2037,3 +2037,128 @@ origin: src/kraft/api/routes/harnesses.py §put_harness -- `HarnessProfileTable.
 the library tasks that select it, and `kraft admin harnesses <id>` one profile's
 settings and users.
 enforced-by: tests/cli/test_admin_harnesses.py::test_the_table_lists_each_profile_its_provider_and_the_tasks_using_it, tests/cli/test_admin_harnesses.py::test_one_profile_prints_its_settings_and_users
+
+## REQ merge-train-is-detected-from-the-forge
+
+WHEN the merge node asks the forge to merge, the system SHALL read from the
+forge, on every entry, whether the base branch merges through a merge train or
+merge queue, and SHALL NOT need a per-repository setting for it. A GitLab
+project is a train project only when both `merge_trains_enabled` and
+`merge_pipelines_enabled` are true; a GitHub repository only when the base
+branch has a merge queue. A field the forge does not carry, or a read it
+refuses with a 403 or a 404, SHALL read as no train, and the merge node SHALL
+then behave as it does without one.
+enforced-by: tests/adapters/forge/test_glab_train.py::test_merge_queue_reads_the_train[no-train-field-absent], tests/adapters/forge/test_glab_train.py::test_merge_queue_reads_the_train[no-train-403], tests/adapters/forge/test_glab_train.py::test_merge_queue_reads_the_train[no-train-disabled], tests/adapters/forge/test_glab_train.py::test_merge_queue_reads_the_train[no-train-without-merged-results-pipelines], tests/adapters/forge/test_glab_train.py::test_merge_queue_reads_the_train[no-train-car-endpoint-403], tests/adapters/forge/test_glab_train.py::test_merge_queue_reads_the_train[queued-fresh], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[no-queue], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[queued], tests/adapters/forge/test_gh.py::test_merge_queue_asks_for_the_base_branch_queue_of_this_pull_request, tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[no-queue-unchanged], tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[train-state-logged]
+origin: src/kraft/adapters/forge/glab.py §merge_queue -- the merge-train recovery design: trains and queues are detected from the forge, never configured, and a repository without one must not change.
+
+## REQ an-unreadable-merge-queue-is-not-a-drop
+
+IF the forge's merge train or queue cannot be read, THEN the merge node SHALL
+keep waiting for the merge to land and SHALL NOT read the failure as a drop, as
+no queue, or as a merge.
+enforced-by: tests/adapters/forge/test_glab_train.py::test_merge_queue_does_not_read_a_failed_call_as_a_drop[500-7], tests/adapters/forge/test_glab_train.py::test_merge_queue_does_not_read_a_failed_call_as_a_drop[network-7], tests/adapters/forge/test_glab_train.py::test_merge_queue_does_not_read_a_failed_call_as_a_drop[timeout-7], tests/adapters/forge/test_gh.py::test_merge_queue_does_not_read_a_failed_call_as_no_queue_or_a_drop[graphql-502], tests/adapters/forge/test_gh.py::test_merge_queue_does_not_read_a_failed_call_as_no_queue_or_a_drop[graphql-exit-1], tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[queue-unreadable]
+origin: src/kraft/adapters/forge/run.py §_run_one -- an outage of the train API says nothing about the merge, and stopping an item for it would be a regression for every repository whose forge hiccups.
+
+## REQ merge-queues-through-the-train-with-the-reviewed-head
+
+WHERE the project merges through a GitLab merge train, the system SHALL add the
+merge request to the train through the merge-train API with the reviewed head's
+sha. WHERE it does not, the system SHALL ask for the merge with `glab mr
+merge`, which on a GitLab older than 19.1 could skip a train and so is not used
+on a train project.
+enforced-by: tests/adapters/forge/test_glab_train.py::test_merge_on_a_train_project_posts_to_the_train_with_the_reviewed_sha, tests/adapters/forge/test_glab_train.py::test_merge_off_a_train_project_still_runs_glab_mr_merge
+origin: src/kraft/adapters/forge/glab.py §merge -- when the project cannot be read, Kraft falls back to `glab mr merge` rather than block a merge on an outage.
+
+## REQ github-blames-only-the-current-queue-entrys-failed-run
+
+WHEN GitHub removed a pull request from the merge queue, the system SHALL blame
+only a failed merge-group run of that pull request, for the base branch, that
+was created after its latest enqueue, and SHALL NOT blame a run of an earlier
+drop, a run of another pull request or another base, or a run that did not fail.
+enforced-by: tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[stale-failed-run-from-an-earlier-drop], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[stale-removal-from-an-earlier-drop], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[the-failed-run-of-the-latest-entry], tests/adapters/forge/test_gh.py::test_merge_queue_blames_the_failed_merge_group_run_of_this_pull_request[the-failed-run], tests/adapters/forge/test_gh.py::test_merge_queue_blames_the_failed_merge_group_run_of_this_pull_request[newest], tests/adapters/forge/test_gh.py::test_merge_queue_blames_the_failed_merge_group_run_of_this_pull_request[not-another-pull-request-sharing-the-prefix], tests/adapters/forge/test_gh.py::test_merge_queue_blames_the_failed_merge_group_run_of_this_pull_request[not-another-base], tests/adapters/forge/test_gh.py::test_merge_queue_blames_the_failed_merge_group_run_of_this_pull_request[not-a-green-run]
+origin: src/kraft/adapters/forge/gh.py §merge_queue -- a stale failed run would send the repair agent after a failure the code no longer has.
+
+## REQ a-merge-drop-is-recorded-with-its-cause
+
+WHEN the forge drops a merge request Kraft asked to merge, the system SHALL
+record a `merge_queue_dropped` event carrying the cause (`code`, `conflict`,
+`not_added`, `infra` or `other`), the forge's reason, the failed jobs, the
+pipeline URL and the head, and SHALL read the drop even after Kraft restarted.
+enforced-by: tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[code-red], tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[conflict-clean-rebase], tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[never-added], tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[queued-then-dropped], tests/adapters/forge/test_run_merge_queue.py::test_a_drop_is_seen_after_a_restart_of_the_wait_reader
+origin: src/kraft/adapters/forge/run.py §_merge_dropped
+
+## REQ merge-rejection-restarts-from-its-declared-node
+
+WHEN the merge train or queue drops a merge request for its code, for a
+conflict with the target, or because it never reached the train, and the merge
+node declares `on_merge_rejected`, the system SHALL run the node's repair where
+the code needs one, then restart the chain at the declared `restart_from`,
+which SHALL name an earlier execution node. The default chain SHALL declare
+`merge_request_feedback`.
+enforced-by: tests/executor/test_merge_rejection.py::test_a_code_drop_runs_the_repair_and_rewinds_with_gates_reopened, tests/executor/test_merge_rejection.py::test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates[plain], tests/executor/test_default_chain.py::test_default_chain_rewinds_a_train_drop_through_final_review, tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[merge-rejected-missing], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[merge-rejected-gate], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[merge-rejected-later], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[merge-rejected-itself], tests/templates/test_failure_controls.py::test_a_backward_restart_target_is_accepted[merge-rejected-earlier], tests/templates/test_failure_controls.py::test_a_merge_rejection_policy_needs_a_merge_in_its_own_node[no-forge-task], tests/templates/test_failure_controls.py::test_a_merge_rejection_policy_needs_a_merge_in_its_own_node[another-forge-target], tests/templates/test_failure_controls.py::test_a_merge_rejection_policy_needs_a_merge_in_its_own_node[only-in-a-recovery-plan], tests/templates/test_materialization.py::test_a_skip_that_orphans_a_restart_target_repoints_or_clears_it[merge-rejection-restart]
+origin: src/kraft/executor/walk.py §_repair_merge_rejection -- skipping the named node at intake repoints `restart_from` to the nearest earlier kept execution node, or drops the policy when none is left.
+
+## REQ merge-rejection-reopens-approved-gates
+
+WHEN a merge rejection restarts the chain, the system SHALL reopen every
+approved gate between `restart_from` and the merge node, with the reason
+`merge_rejected`, after a repair's commit and after a conflict that Kraft's
+own rebase cleared alike, so the repaired head is approved again before it is
+queued. A gate before `restart_from` SHALL keep its approval.
+enforced-by: tests/executor/test_merge_rejection.py::test_a_code_drop_runs_the_repair_and_rewinds_with_gates_reopened, tests/executor/test_merge_rejection.py::test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates[plain], tests/executor/test_merge_rejection.py::test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates[the-node-declares-on-base-changed], tests/executor/test_default_chain.py::test_default_chain_rewinds_a_train_drop_through_final_review
+origin: src/kraft/executor/walk.py §run_once -- the owner's anti-goal: code an agent wrote must not reach the target branch without being seen at `final_review`. A clean rebase reopens too, since the rewound span's own fix loops can commit before any gate sees the head again.
+
+## REQ a-repair-that-stops-after-committing-holds-the-item-at-restart-from
+
+IF the merge-rejection repair changed the head and then did not finish, whether
+it asked a question, failed, was paused or ran out of budget, or the rewind's
+wall clock ran out meanwhile, THEN the system SHALL reopen the approved gates
+between `restart_from` and the merge node and hold the item at `restart_from`,
+so that whatever resumes it walks back through them and never merges the
+repair's commit unseen.
+enforced-by: tests/executor/test_merge_rejection.py::test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from[question-after-commit], tests/executor/test_merge_rejection.py::test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from[failed-after-commit], tests/executor/test_merge_rejection.py::test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from[paused-after-commit], tests/executor/test_merge_rejection.py::test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from[budget], tests/executor/test_merge_rejection.py::test_a_rewind_whose_clock_ran_out_during_the_repair_holds_the_item
+origin: src/kraft/executor/walk.py §_hold_at_restart
+
+## REQ a-repair-that-commits-nothing-stops-for-a-person
+
+IF the merge-rejection repair commits nothing, or fails, THEN the system SHALL
+stop the item for a person and SHALL NOT rewind, since a head the train already
+rejected would only be rejected again.
+enforced-by: tests/executor/test_merge_rejection.py::test_a_repair_that_commits_nothing_stops_for_a_human[code], tests/executor/test_merge_rejection.py::test_a_repair_that_commits_nothing_stops_for_a_human[unrebased-conflict], tests/executor/test_merge_rejection.py::test_a_repair_that_commits_nothing_stops_for_a_human[no-drop-recorded], tests/executor/test_merge_rejection.py::test_a_repair_that_commits_nothing_stops_for_a_human[a-members-drop]
+origin: src/kraft/executor/walk.py §_repair_merge_rejection
+
+## REQ merge-rejection-rewinds-are-bounded
+
+The system SHALL count a node's merge-rejection rewinds under
+`<node>.on_merge_rejected`, with 3 attempts over 7 days unless `policy.yaml`'s
+`loops:` names that key, and SHALL NOT take the policy's `default:`. WHEN a
+rewind would pass the cap, the system SHALL stop the item with the stop kind
+`cap` before running the repair agent. A person's retry SHALL give the count
+back.
+enforced-by: tests/executor/test_merge_rejection.py::test_merge_rejection_rewinds_are_capped[no-agent], tests/executor/test_merge_rejection.py::test_merge_rejection_rewinds_are_capped[cap-after-repair], tests/executor/test_merge_rejection.py::test_merge_rejection_rewinds_never_take_the_policy_default, tests/store/test_counters.py::test_a_persons_retry_gives_every_restart_counter_back
+origin: src/kraft/executor/walk.py §MERGE_REJECTED_CAP -- the span never clears this counter; that is what stops a train that rejects every pass from looping forever, and the policy default's one-hour clock would run out while `final_review` waits for a person.
+
+## REQ a-merge-taken-off-by-hand-is-not-requeued
+
+IF a merge request is taken off the merge train or queue by a person, or for a
+reason Kraft cannot read, THEN the system SHALL stop the item for a person and
+SHALL NOT re-queue it, rebase it or run a repair.
+enforced-by: tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[removed-by-person], tests/adapters/forge/test_glab_train.py::test_merge_queue_reads_the_train[cancelled-by-person], tests/adapters/forge/test_glab_train.py::test_merge_queue_reads_the_train[no-note], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[dropped-by-person], tests/adapters/forge/test_gh.py::test_merge_queue_reads_the_queue[dropped-no-reason]
+origin: src/kraft/adapters/forge/run.py §_merge_dropped -- Kraft never fights a person who took the merge request off the train.
+
+## REQ train-infra-failure-requeues-the-same-head
+
+WHEN the merge train or queue drops a merge request because its own runners
+failed, the system SHALL ask the forge to queue the same head again, with no
+agent, no rebase and no rewind, up to the `ci_infra:<node>` budget of 2
+re-queues, and SHALL then stop the item for a person.
+enforced-by: tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[infra-requeues], tests/adapters/forge/test_run_merge_queue.py::test_merge_handles_a_dropped_queue[infra-cap-spent]
+origin: src/kraft/adapters/forge/run.py §_merge_dropped -- asking again after a drop does not break "ask at most once per head" (Kraft-l98h6): that rule guards against asking while the forge still holds the request.
+
+## REQ a-merge-drop-without-the-policy-stops-promptly
+
+IF the merge train or queue drops a merge request and the merge node declares
+no `on_merge_rejected`, THEN the system SHALL stop the item as a failed task at
+once, without waiting out the merge timeout, running a repair or rewinding.
+enforced-by: tests/executor/test_merge_rejection.py::test_a_drop_without_the_policy_stops_promptly
+origin: src/kraft/executor/dispatch.py §_recoverable
