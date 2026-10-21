@@ -37,6 +37,8 @@ def run_bpf(program: bytes, nr: int, audit_arch: int, arg1: int = 0) -> int:
 
 
 TIOCSTI, TIOCLINUX, TCGETS = 0x5412, 0x541C, 0x5401
+#: open_tree, move_mount, fsopen, fsconfig, fsmount, fspick, mount_setattr.
+NEW_MOUNT_API = (428, 429, 430, 431, 432, 433, 442)
 _REQUEST = {
     TIOCSTI: "TIOCSTI",
     TIOCLINUX: "TIOCLINUX",
@@ -49,6 +51,8 @@ _REQUEST = {
     ("arch", "name", "nr", "audit_arch", "expected", "arg1"),
     [
         *[(a, n, None, a, EPERM, None) for a, table in os_seccomp.DENY.items() for n in table],
+        # By number, not read from DENY: a call dropped from it fails here.
+        *[(a, None, nr, a, EPERM, None) for a in os_seccomp.DENY for nr in NEW_MOUNT_API],
         ("x86_64", None, 0, "x86_64", ALLOW, None),
         ("x86_64", "keyctl", None, "i386", ENOSYS, None),
         ("x86_64", None, X32 | 0, "x86_64", ENOSYS, None),
@@ -78,7 +82,7 @@ def test_unknown_arch_refused():
 @pytest.mark.e2e("bwrap")
 def test_filter_under_bwrap(tmp_path):
     arch = os_seccomp.machine()
-    nrs = (os_seccomp.DENY[arch]["keyctl"], os_seccomp.DENY[arch]["io_uring_setup"])
+    nrs = tuple(os_seccomp.DENY[arch][n] for n in ("keyctl", "io_uring_setup", "fsopen"))
     probe = (
         "import ctypes\n"
         "libc = ctypes.CDLL(None, use_errno=True)\n"
@@ -112,6 +116,6 @@ def test_filter_under_bwrap(tmp_path):
             os.close(fd)
 
     py = bwrap(sys.executable, "-I", "-c", probe)
-    assert py.stdout.split() == [str(errno.EPERM)] * 3, py.stderr
+    assert py.stdout.split() == [str(errno.EPERM)] * 4, py.stderr
     git = bwrap("git", "--version")
     assert git.returncode == 0 and git.stdout.startswith("git version"), git.stderr

@@ -12,6 +12,11 @@ import errno
 import platform
 import struct
 
+#: The mount API of Linux 5.2+ (and 5.12's mount_setattr): numbered alike on both arches.
+_NEW_MOUNT_API = {
+    "open_tree": 428, "move_mount": 429, "fsopen": 430, "fsconfig": 431,
+    "fsmount": 432, "fspick": 433, "mount_setattr": 442,
+}  # fmt: skip
 # Kernel syscall numbers: x86_64 from asm/unistd_64.h, aarch64 from the generic table.
 DENY: dict[str, dict[str, int]] = {
     "x86_64": {
@@ -21,6 +26,7 @@ DENY: dict[str, dict[str, int]] = {
         "kexec_load": 246, "kexec_file_load": 320,
         "init_module": 175, "finit_module": 313, "delete_module": 176,
         "mount": 165, "umount2": 166, "pivot_root": 155,
+        **_NEW_MOUNT_API,
     },
     "aarch64": {
         "keyctl": 219, "add_key": 217, "request_key": 218,
@@ -29,6 +35,7 @@ DENY: dict[str, dict[str, int]] = {
         "kexec_load": 104, "kexec_file_load": 294,
         "init_module": 105, "finit_module": 273, "delete_module": 106,
         "mount": 40, "umount2": 39, "pivot_root": 41,
+        **_NEW_MOUNT_API,
     },
 }  # fmt: skip
 
