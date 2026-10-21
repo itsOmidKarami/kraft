@@ -274,10 +274,11 @@ async def _merge_dropped(
     cause = queue.cause or "other"
     if cause == "code" and queue.failure is not None and ci.is_infra_red(queue.failure):
         cause = "infra"
-    rebased = False
-    log = f"dropped from the merge {which}: {queue.reason or 'no reason given'}\n"
+    reason = queue.reason or "no reason given"
+    log = f"dropped from the merge {which}: {reason}\n"
+    before = await git._head_sha(repo, branch)
     if cause in ("code", "conflict", "not_added"):
-        rebase_log, rebase_status = await _rebase_conflict_away(
+        rebase_log, _ = await _rebase_conflict_away(
             db,
             forge,
             repo=repo,
@@ -289,8 +290,11 @@ async def _merge_dropped(
             run_dirs=run_dirs,
         )
         log += rebase_log
-        rebased = rebase_status == "done"
     head_sha = await git._head_sha(repo, branch)
+    # Whether the head actually moved: `_rebase_conflict_away` also answers
+    # "done" for a branch that already held the target's tip, which changed
+    # nothing a gate saw.
+    rebased = head_sha != before
     failed_jobs = queue.failure.failed_jobs if queue.failure is not None else ()
     await db.write(
         lambda c: events.append(
@@ -318,7 +322,7 @@ async def _merge_dropped(
         return log, "merge_pending", None
     if cause == "other":
         return (
-            f"dropped from the merge {which}: {queue.reason}; Kraft does not re-queue a merge "
+            f"dropped from the merge {which}: {reason}; Kraft does not re-queue a merge "
             "request that was taken off by hand or for a reason it cannot read\n",
             "failed",
             None,
@@ -326,7 +330,7 @@ async def _merge_dropped(
     if failed_jobs:
         findings = _job_findings(queue.failure, "\n".join(queue.failure.jobs), hook_point)
     else:
-        findings = [{"severity": "important", "message": queue.reason, "source_plugin": hook_point}]
+        findings = [{"severity": "important", "message": reason, "source_plugin": hook_point}]
     return log, "merge_rejected", findings
 
 
@@ -758,11 +762,17 @@ async def _run_one(
                 # longer held for merging is what both forges show once a
                 # merge train or queue drops a merge request. Only then is the
                 # train or queue read for why -- the cheap signal first.
-                queue = (
-                    None
-                    if existing.merge_queued
-                    else await forge.merge_queue(repo=repo, branch=branch, base=base)
-                )
+                queue, unread = None, ""
+                if not existing.merge_queued:
+                    try:
+                        queue = await forge.merge_queue(repo=repo, branch=branch, base=base)
+                    except ForgeError as exc:
+                        if isinstance(exc, git.UnsafeWorktree):
+                            raise
+                        # A read that failed (a GraphQL 5xx, a rate limit, a
+                        # GHES with no merge queue) says nothing about the
+                        # merge: keep waiting, as before this read existed.
+                        unread = f"could not read the merge train or queue: {exc}\n"
                 if queue is not None and queue.state == "dropped":
                     return await _merge_dropped(
                         db,
@@ -784,6 +794,7 @@ async def _run_one(
                     else ""
                 )
                 log = f"!{existing.number} is still open; waiting for the merge to land{where}\n"
+                log += unread
                 status = "merge_pending"
             else:
                 # The same push ci_poll makes, for the same reason: a

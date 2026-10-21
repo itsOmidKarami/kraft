@@ -4,6 +4,7 @@ request after Kraft asked for it: seen, classified, and handed back as
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -42,7 +43,8 @@ INFRA = _dropped(
 )
 CONFLICT = _dropped("conflict", "merge conflict with main")
 NOT_ADDED = _dropped("not_added", "aborted automatic add to merge train")
-BY_HAND = _dropped("other", "removed from the merge train by a person")
+#: Taken off with nothing said, as a person's cancel note reads.
+BY_HAND = _dropped("other", "")
 
 
 class _Unanswered(forge.FakeForge):
@@ -53,16 +55,39 @@ class _Unanswered(forge.FakeForge):
         self.merge_calls.append(1)
 
 
-def _on_branch(repo: Path, *, upstream_moved: bool = False) -> str:
-    """`repo` on the item's branch, one commit ahead of `main`; with
-    `upstream_moved`, `main` has moved on since (a clean rebase away).
-    Returns the branch head before anything rebases it."""
+class _QueueUnreadable(_Unanswered):
+    """The train or queue cannot be read: a GraphQL 5xx, a rate limit, a GHES
+    with no merge queue."""
+
+    async def merge_queue(self, *, repo, branch, base):
+        raise forge.ForgeError("GraphQL: 502 Bad Gateway")
+
+
+class _SeenQueued(forge.FakeForge):
+    """The forge holds the merge for the first `held` reads after `merge`
+    (`merge_queued`), and only then lets the scripted drop show."""
+
+    held = 2
+
+    async def find_mr(self, *, repo, branch):
+        ref = await super().find_mr(repo=repo, branch=branch)
+        if ref is None or not self.merge_calls or self.held == 0:
+            return ref
+        self.held -= 1
+        return dataclasses.replace(ref, merge_queued=True)
+
+
+def _on_branch(repo: Path, *, upstream: str | None = None) -> str:
+    """`repo` on the item's branch, one commit ahead of `main`, which adds
+    `feature.txt`. With `upstream`, `main` has since committed that file too:
+    `upstream.txt` rebases away cleanly, `feature.txt` conflicts. Returns the
+    branch head before anything rebases it."""
     git(repo, "checkout", "-qb", BRANCH)
     write(repo, "feature.txt", "the item's change\n")
     head = commit_all(repo, "the item's change")
-    if upstream_moved:
+    if upstream:
         git(repo, "checkout", "-q", "main")
-        write(repo, "upstream.txt", "landed on main meanwhile\n")
+        write(repo, upstream, "landed on main meanwhile\n")
         commit_all(repo, "upstream moved")
         git(repo, "checkout", "-q", BRANCH)
     return head
@@ -84,12 +109,12 @@ def _train(*drops: forge.QueueRead, **kw) -> forge.FakeForge:
 
 
 @pytest.mark.parametrize(
-    "make, moved, expected, causes, asks, pushes, phrase, messages",
+    "make, upstream, rebased, expected, causes, asks, pushes, phrase, messages",
     [
         # No train or queue: exactly today's wait, byte for byte, no event.
         pytest.param(
             lambda: _Unanswered(ci_states=["success"]),
-            *(False, ["waiting", "waiting"], [], 1, 1),
+            *(None, False, ["waiting", "waiting"], [], 1, 1),
             "!1 is still open; waiting for the merge to land\n",
             None,
             id="no-queue-unchanged",
@@ -98,16 +123,29 @@ def _train(*drops: forge.QueueRead, **kw) -> forge.FakeForge:
         # what the train said.
         pytest.param(
             lambda: _Unanswered(queue_kind="train", ci_states=["success"]),
-            *(False, ["waiting", "waiting"], [], 1, 1),
+            *(None, False, ["waiting", "waiting"], [], 1, 1),
             "waiting for the merge to land (merge train: absent)\n",
             None,
             id="train-state-logged",
         ),
-        # The train's pipeline went red on the code: rebased onto the target
-        # and handed back for repair, one finding per failed job.
+        # A train or queue that cannot be read says nothing about the merge:
+        # still waiting, as before the read existed, and the log says why.
+        pytest.param(
+            lambda: _QueueUnreadable(queue_kind="queue", ci_states=["success"]),
+            *(None, False, ["waiting", "waiting"], [], 1, 1),
+            "waiting for the merge to land\ncould not read the merge train or queue: GraphQL: 502",
+            None,
+            id="queue-unreadable",
+        ),
+        # The train's pipeline went red on the code: handed back for repair,
+        # one finding per failed job. The fake drops it at once, so Kraft never
+        # read it as queued (`merge_queued` was never true): the wait's own
+        # record that it asked is what makes the drop a drop -- the plan's
+        # `drop-before-first-queued-read`. The branch already holds the
+        # target's tip: the rebase moves nothing (though it re-pushes).
         pytest.param(
             lambda: _train(CODE),
-            *(False, ["waiting", "merge_rejected"], ["code"], 1, 2),
+            *(None, False, ["waiting", "merge_rejected"], ["code"], 1, 2),
             "dropped from the merge train: pipeline failed\n",
             ["job unit: failed (script_failure)"],
             id="code-red",
@@ -116,16 +154,34 @@ def _train(*drops: forge.QueueRead, **kw) -> forge.FakeForge:
         # failed job, the forge's reason is the finding.
         pytest.param(
             lambda: _train(CONFLICT),
-            *(True, ["waiting", "merge_rejected"], ["conflict"], 1, 2),
+            *("upstream.txt", True, ["waiting", "merge_rejected"], ["conflict"], 1, 2),
             "re-pushed",
             ["merge conflict with main"],
             id="conflict-clean-rebase",
+        ),
+        # A textual conflict the rebase cannot take: aborted, nothing pushed,
+        # the head unmoved, for the repair agent to resolve.
+        pytest.param(
+            lambda: _train(CONFLICT),
+            *("feature.txt", False, ["waiting", "merge_rejected"], ["conflict"], 1, 1),
+            "rebase onto main failed",
+            ["merge conflict with main"],
+            id="conflict-textual",
+        ),
+        # A conflict the forge reports, giving no reason, while the branch
+        # already holds the target's tip: nothing to rebase, so not rebased.
+        pytest.param(
+            lambda: _train(_dropped("conflict", "")),
+            *(None, False, ["waiting", "merge_rejected"], ["conflict"], 1, 2),
+            "dropped from the merge train: no reason given\n",
+            ["no reason given"],
+            id="conflict-already-on-tip",
         ),
         # The train's runners broke: the same head is queued again, never
         # rebased or pushed, no rewind.
         pytest.param(
             lambda: _train(INFRA),
-            *(False, ["waiting", "waiting"], ["infra"], 2, 1),
+            *(None, False, ["waiting", "waiting"], ["infra"], 2, 1),
             "queue the same head again",
             None,
             id="infra-requeues",
@@ -133,6 +189,7 @@ def _train(*drops: forge.QueueRead, **kw) -> forge.FakeForge:
         # ... until `ci_infra:<node>` is spent, which stops for a person.
         pytest.param(
             lambda: _train(*[INFRA] * (ci._INFRA_RETRY_CAP + 1)),
+            None,
             False,
             ["waiting"] * (ci._INFRA_RETRY_CAP + 1) + ["infra_stop"],
             ["infra"] * (ci._INFRA_RETRY_CAP + 1),
@@ -145,8 +202,8 @@ def _train(*drops: forge.QueueRead, **kw) -> forge.FakeForge:
         # re-queued, never rebased.
         pytest.param(
             lambda: _train(BY_HAND),
-            *(False, ["waiting", "failed"], ["other"], 1, 1),
-            "Kraft does not re-queue",
+            *(None, False, ["waiting", "failed"], ["other"], 1, 1),
+            "dropped from the merge train: no reason given; Kraft does not re-queue",
             None,
             id="removed-by-person",
         ),
@@ -154,31 +211,31 @@ def _train(*drops: forge.QueueRead, **kw) -> forge.FakeForge:
         # after Kraft asked. Rebased, then repaired, as code red is.
         pytest.param(
             lambda: _train(NOT_ADDED),
-            *(True, ["waiting", "merge_rejected"], ["not_added"], 1, 2),
+            *("upstream.txt", True, ["waiting", "merge_rejected"], ["not_added"], 1, 2),
             "re-pushed",
             ["aborted automatic add to merge train"],
             id="never-added",
         ),
-        # Queued and dropped between two observations, so Kraft never read it
-        # as queued (`merge_queued` was never true): the wait's own record
-        # that it asked is what makes the drop a drop.
+        # Read as queued first -- the cheap signal says the forge holds it, so
+        # the train is not read -- and dropped later.
         pytest.param(
-            lambda: _train(CODE, merge_delay=3),
-            *(False, ["waiting", "merge_rejected"], ["code"], 1, 2),
-            "dropped from the merge train",
+            lambda: _SeenQueued(queue_kind="train", queue_drops=[CODE], ci_states=["success"]),
+            *(None, False, ["waiting", "waiting", "merge_rejected"], ["code"], 1, 2),
+            "!1 is still open; waiting for the merge to land\ndropped from the merge train",
             ["job unit: failed (script_failure)"],
-            id="drop-before-first-queued-read",
+            id="queued-then-dropped",
         ),
     ],
 )
 async def test_merge_handles_a_dropped_queue(
-    run_forge, repo, make, moved, expected, causes, asks, pushes, phrase, messages
+    run_forge, repo, make, upstream, rebased, expected, causes, asks, pushes, phrase, messages
 ):
     """One merge node, entered once per scheduler observation: the first asks
     for the merge, every later one reads whether it landed. `asks` is how
     often the forge was asked to merge, `pushes` how often the branch was
-    pushed (once before the merge, once more after a rebase)."""
-    before = _on_branch(repo, upstream_moved=moved)
+    pushed (once before the merge, once more after a rebase that did not
+    conflict). `rebased`: whether the head actually moved."""
+    before = _on_branch(repo, upstream=upstream)
     fake = await _open(make(), repo)
     drops = list(fake.queue_drops)
 
@@ -202,8 +259,8 @@ async def test_merge_handles_a_dropped_queue(
     assert [e["failed_jobs"] for e in dropped] == [
         [j.name for j in (d.failure.failed_jobs if d.failure else ())] for d in drops
     ][: len(dropped)]
-    if moved:
-        assert head != before and dropped[-1]["rebased"] is True, "rebased onto the moved target"
+    assert [e["rebased"] for e in dropped] == [rebased] * len(dropped)
+    assert (head != before) is rebased
     if "infra_stop" in expected:
         assert run_forge.events("ci_infra_exhausted")
 
