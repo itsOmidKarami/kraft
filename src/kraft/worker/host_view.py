@@ -68,6 +68,8 @@ def protected_refusal(path: Path, home: Path, kraft_home: Path) -> str | None:
     is or holds `home`, or is, holds or is inside Kraft's home or a secrets
     directory. Inside `home` alone is fine: home-installed CLIs live there."""
     p, h = path.resolve(), home.resolve()
+    if p.name in CREDENTIAL_FILES:
+        return f"{p} is a credential file"
     if _within(h, p):
         return f"{p} is or holds your home directory"
     for q in _protected(home, kraft_home):
@@ -81,7 +83,7 @@ def _follow(path: Path) -> tuple[list[tuple[Path, Path]], Path]:
     hops: list[tuple[Path, Path]] = []
     cur = path
     while cur.is_symlink() and len(hops) < 40:
-        target = Path(os.path.normpath(cur.parent / os.readlink(cur)))
+        target = Path(os.path.normpath(cur.parent.resolve() / os.readlink(cur)))
         hops.append((cur, target))
         cur = target
     return hops, cur.resolve()
@@ -156,7 +158,10 @@ def resolve(
         if root is not None and root not in roots:
             roots.append(root)
         # The command's `#!` interpreter is followed once, not the interpreter's own.
-        cur = _interpreter(final, search_path) if cur is path else None
+        # A script in the checkout is the repo's own: its `#!` line must not
+        # choose what the operator's home shows.
+        follows = cur is path and root is not None
+        cur = _interpreter(final, search_path) if follows else None
     links = tuple(
         (link, target)
         for link, target in hops

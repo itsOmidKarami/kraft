@@ -46,12 +46,22 @@ def _link(path: Path, target) -> Path:
         ("home/.config/gh/hosts.yml", True),
         (".", True),
         ("home/.cargo/bin", False),
+        ("home/.netrc", True),
     ],
-    ids=["home", "kraft-home", "inside-kraft-home", "inside-gh", "holds-home", "inside-home"],
+    ids=[
+        "home",
+        "kraft-home",
+        "inside-kraft-home",
+        "inside-gh",
+        "holds-home",
+        "inside-home",
+        "credential-file",
+    ],
 )
 def test_protected_refusal(host, tmp_path, rel, refused):
     home, kraft, _ = host
     (tmp_path / "home" / ".cargo" / "bin").mkdir(parents=True)
+    (tmp_path / "home" / ".netrc").write_text("x")
     got = host_view.protected_refusal((tmp_path / rel).resolve(), home, kraft)
     assert (got is not None) is refused
 
@@ -125,6 +135,14 @@ def _at(base: dict[str, Path], text: str) -> Path:
         ),
         ([("~/.cargo/bin/x", None)], "x", ["~/.cargo/bin"], ["~/.cargo"], [], "x"),
         ([], "sh", [], [], [], "sh"),
+        (
+            [("./run.sh", "#!~/.mozilla/ff/x\n")],
+            "./run.sh",
+            [],
+            [],
+            [],
+            "./run.sh",
+        ),
     ],
     ids=[
         "native-claude",
@@ -135,6 +153,7 @@ def _at(base: dict[str, Path], text: str) -> Path:
         "node-cli",
         "cargo-install",
         "system",
+        "checkout-script-shebang",
     ],
 )
 def test_install_roots(host, files, executable, path_dirs, roots, links, argv0):
@@ -145,7 +164,7 @@ def test_install_roots(host, files, executable, path_dirs, roots, links, argv0):
         if what and what.startswith("L:"):
             _link(path, _at(base, what[2:]))
         else:
-            _file(path, what or "")
+            _file(path, (what or "").replace("#!~", f"#!{home}"))
     got = host_view.resolve(
         executable,
         ":".join([*(str(_at(base, d + "/x").parent) for d in path_dirs), SYSTEM_PATH]),
