@@ -345,6 +345,36 @@ def test_child_start_uses_slice_layer(walk, kl_cli, default_chain, tmp_path):
         pytest.param(lambda p: None, [], "cannot read", id="no_such_file"),
         pytest.param(lambda p: p.write_text("{nope"), [], "cannot read", id="not_json"),
         pytest.param(
+            lambda p: p.write_text(json.dumps({"format": "v1", "id": "slice"})),
+            [],
+            "is not a usable V1 chain: it has no list of nodes",
+            id="v1_without_nodes",
+        ),
+        pytest.param(
+            lambda p: p.write_text(
+                json.dumps({"format": "v1", "id": "x", "nodes": [{"id": "a", "steps": []}]})
+            ),
+            [],
+            "is not a usable V1 chain: node 'a' has no kind (exec or gate)",
+            id="v1_node_without_kind",
+        ),
+        pytest.param(
+            lambda p: p.write_text(
+                json.dumps({"format": "v1", "id": "x", "nodes": [{"kind": "gate"}]})
+            ),
+            [],
+            "is not a usable V1 chain: node 1 has no id",
+            id="v1_node_without_id",
+        ),
+        pytest.param(
+            lambda p: p.write_text(
+                json.dumps({"format": "v1", "id": "x", "nodes": [{"id": "a", "kind": "exec"}]})
+            ),
+            [],
+            "is not a usable V1 chain: exec node 'a' has no steps",
+            id="v1_exec_without_steps",
+        ),
+        pytest.param(
             lambda p: None,
             ["--chain", "default"],
             "--slice-of takes no --chain, --spec or --plan",

@@ -24,6 +24,7 @@ from pathlib import Path
 
 import kl_bindings
 import kl_chains
+import kl_migrate
 import kl_shape
 
 #: bd stores a dependency as an object, not an id string. The fallback file uses
@@ -654,7 +655,7 @@ def _chain(root: Path, chain_id: str | None) -> dict | None:
             f"kraft-lite: {_frozen_path(root, chain_id).relative_to(root)} is missing: it is "
             "the chain this run started with — restore it, or start a new chain."
         )
-    chain = json.loads(path.read_text())
+    chain = _read_json(path, "the chain")
     if not isinstance(chain, dict) or chain.get("format") != FORMAT:
         raise SystemExit(
             f"kraft-lite: chain {chain_id} was started on the pre-V1 format. "
@@ -1927,7 +1928,39 @@ def _exported_chain(path: Path, written: str, missing: str) -> dict:
         raise SystemExit(f"kraft-lite: cannot read the chain {path}: {error}") from error
     if not isinstance(chain, dict) or chain.get("format") != FORMAT:
         raise SystemExit(f"kraft-lite: {written} by an older Kraft Lite: not a V1 chain")
+    flaw = _chain_flaw(chain)
+    if flaw:
+        raise SystemExit(f"kraft-lite: {path} is not a usable V1 chain: {flaw}")
     return chain
+
+
+def _chain_flaw(chain: dict) -> str | None:
+    """What a chain that says it is V1 lacks of what the walk reads from every
+    node (an id, a kind, and for an exec node its steps), or None. A file from
+    outside this process - an export, a hand-edited copy - is checked here so a
+    missing key is a refusal, not a `KeyError` in the middle of a verb."""
+    nodes = chain.get("nodes")
+    if not isinstance(nodes, list) or not nodes:
+        return "it has no list of nodes"
+    for number, node in enumerate(nodes, 1):
+        if not isinstance(node, dict) or not isinstance(node.get("id"), str):
+            return f"node {number} has no id"
+        if node.get("kind") not in ("exec", "gate"):
+            return f"node {node['id']!r} has no kind (exec or gate)"
+        if node["kind"] == "exec" and not (
+            isinstance(node.get("steps"), list)
+            and all(isinstance(s, dict) and isinstance(s.get("tasks"), list) for s in node["steps"])
+        ):
+            return f"exec node {node['id']!r} has no steps"
+    return None
+
+
+def _read_json(path: Path, what: str) -> object:
+    """The JSON in `path`, or a `SystemExit` saying it cannot be read."""
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"kraft-lite: cannot read {what} {path}: {error}") from error
 
 
 def _import(root: Path, store, source: Path) -> dict:
@@ -1967,7 +2000,7 @@ def _import(root: Path, store, source: Path) -> dict:
     )
     # A run's chain never changes after `start`: an export carrying another is
     # not this run's to resume, and the frozen copy here is never replaced.
-    if frozen.is_file() and json.loads(frozen.read_text()) != chain:
+    if frozen.is_file() and _read_json(frozen, "the chain") != chain:
         raise SystemExit(
             f"kraft-lite: {source / EXPORT_CHAIN} is not the chain {chain_id} started with, "
             f"which is {frozen}. A run's chain never changes after start"
@@ -2028,6 +2061,14 @@ def _start_chain(root: Path, chain: str | None, attached: dict[str, Path]) -> di
     for task in _dispatched_tasks(resolved):
         dispatch(task)
     return resolved
+
+
+def _start_records(chain: dict, title: str, chain_id: str) -> list[dict]:
+    """A new run's records: `materialize`, with the epic closed. The epic is a
+    container, not a step, so the walk starts at the first real node."""
+    records = materialize(chain, title, chain_id)
+    records[0]["status"] = "closed"
+    return records
 
 
 def _start_slice(root: Path, path: Path, chain: str | None, attached: dict) -> dict:
@@ -2096,8 +2137,8 @@ def _restart(
 
 
 #: The verbs that answer beside a pre-V1 registry no bindings file replaced yet:
-#: listing chains, and what `init` reads to write the bindings.
-BEFORE_MIGRATE = frozenset({"chains", "detect"})
+#: listing chains, what `init` reads to write the bindings, and `migrate` itself.
+BEFORE_MIGRATE = frozenset({"chains", "detect", "migrate"})
 
 
 def _legacy_registry(root: Path) -> bool:
@@ -2121,6 +2162,7 @@ VERBS: dict[str, frozenset[str]] = {
     "chains": frozenset(),
     "settings": frozenset(),
     "import": frozenset(),
+    "migrate": frozenset(),
     "state": frozenset({"chain"}),
     "summary": frozenset({"chain"}),
     "slices": frozenset({"chain"}),
@@ -2227,6 +2269,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(_import(root, store, args.source), indent=2))
         return 0
 
+    # Before `_ours`: a legacy run is what it moves, and `_chain` refuses one.
+    if args.verb == "migrate":
+        print(json.dumps(kl_migrate.migrate(sys.modules[__name__], root, store), indent=2))
+        return 0
+
     if args.verb == "start":
         new_id = new_chain_id()
         attached = {k: getattr(args, k) for k in ATTACHMENT_KINDS if getattr(args, k)}
@@ -2235,10 +2282,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             chain = _start_slice(root, args.slice_of, args.chain, attached)
         _freeze_chain(root, chain, new_id)
-        records = materialize(chain, args.title, new_id)
-        # The epic is a container, not a step: close it now so the walk starts at
-        # the first real node.
-        records[0]["status"] = "closed"
+        records = _start_records(chain, args.title, new_id)
         if args.slice_of is not None:
             records[0] = set_label(records[0], SLICE_LAYER_LABEL, "")
         for kind, path in attached.items():

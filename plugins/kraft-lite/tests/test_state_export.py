@@ -452,6 +452,18 @@ MALFORMED = {
 }
 
 
+#: A chain.json that says V1 and lacks what the walk reads, by the problem.
+BAD_CHAINS = {
+    "chain_without_nodes": {"format": "v1", "id": "x"},
+    "chain_node_without_kind": {"format": "v1", "id": "x", "nodes": [{"id": "a", "steps": []}]},
+    "chain_exec_without_steps": {
+        "format": "v1",
+        "id": "x",
+        "nodes": [{"id": "a", "kind": "exec"}],
+    },
+}
+
+
 def stray_record(problem: str) -> dict:
     labels = {
         "another_chains_slice": [f"{kl.SLICE_OF_LABEL}kl-bbbbbbbb"],
@@ -493,6 +505,17 @@ def stray_record(problem: str) -> dict:
             )
             for problem, stray in STRAYS.items()
         ],
+        # A chain.json that says V1 but lacks what the walk reads, and a local
+        # frozen chain that cannot be compared with it.
+        *[
+            pytest.param(problem, named, id=problem)
+            for problem, named in {
+                "chain_without_nodes": "is not a usable V1 chain: it has no list of nodes",
+                "chain_node_without_kind": "is not a usable V1 chain: node 'a' has no kind",
+                "chain_exec_without_steps": "is not a usable V1 chain: exec node 'a' has no steps",
+                "corrupt_local_chain": "cannot read the chain {there}/.kraft-lite/chains/kl-a",
+            }.items()
+        ],
         # Read from elsewhere, so a line it cannot read is named, not a traceback.
         *[
             pytest.param(problem, "{out}/" + name + " line 1", id=problem)
@@ -519,14 +542,14 @@ def test_import_refuses_an_export_that_names_no_single_chain(
     epics = {
         "two_epics": ["kl-aaaaaaaa", "kl-bbbbbbbb"],
         "no_template": ["kl-aaaaaaaa"],
-        **dict.fromkeys([*STRAYS, *MALFORMED], ["kl-aaaaaaaa"]),
+        **dict.fromkeys([*STRAYS, *MALFORMED, *BAD_CHAINS, "corrupt_local_chain"], ["kl-aaaaaaaa"]),
     }
     for chain_id in epics.get(problem, [BAD_CHAIN_IDS.get(problem)]):
         if chain_id is None:
             continue
         kl.append_jsonl(out / "records.jsonl", kl.materialize(chain, "t", chain_id))
         if problem != "no_template":
-            (out / "chain.json").write_text(json.dumps(chain))
+            (out / "chain.json").write_text(json.dumps(BAD_CHAINS.get(problem, chain)))
     if problem in STRAYS:
         kl.append_jsonl(out / "records.jsonl", [stray_record(problem)])
     if problem in MALFORMED:
@@ -534,13 +557,17 @@ def test_import_refuses_an_export_that_names_no_single_chain(
         # First in its file, so the line named is line 1.
         bad = out / name
         bad.write_text(line + "\n" + (bad.read_text() if bad.exists() else ""))
+    if problem == "corrupt_local_chain":
+        kl._frozen_path(there, "kl-aaaaaaaa").parent.mkdir(parents=True)
+        kl._frozen_path(there, "kl-aaaaaaaa").write_text("{nope")
     before = files_under(tmp_path)
 
     refused = kl_cli(there, "import", "--from", str(out), ok=False)
 
     assert "Traceback" not in refused.stderr
-    assert named.format(out=out) in refused.stderr
-    assert files_under(tmp_path) == before and not (there / ".kraft-lite").exists()
+    assert named.format(out=out, there=there) in refused.stderr
+    assert files_under(tmp_path) == before
+    assert problem == "corrupt_local_chain" or not (there / ".kraft-lite").exists()
 
 
 @pytest.mark.parametrize("bad", BAD_CHAIN_IDS.values(), ids=BAD_CHAIN_IDS.keys())

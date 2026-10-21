@@ -191,6 +191,19 @@ def resolve(
     return _freeze(library, ref, library.name, expanded)
 
 
+def bundled_library() -> Library:
+    """Kraft's packaged library, whatever user or repo library there is."""
+    return _load("bundled", BUNDLED)
+
+
+def resolve_bundled(ref: str = "default") -> dict:
+    """The chain `ref` from the bundled library alone, in Lite's frozen shape:
+    what `migrate` moves a run onto."""
+    library = bundled_library()
+    expanded = _Resolver(library, library.files[ref], ref).chain(library.chains[ref])
+    return _freeze(library, ref, library.name, expanded)
+
+
 # -- merging -----------------------------------------------------------------
 
 
