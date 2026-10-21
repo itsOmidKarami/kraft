@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import copy
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -233,28 +232,11 @@ def test_slices_of_another_chain_are_not_ours():
     assert len(kl.slice_records([*other, *mine], CHAIN_ID)) == 3
 
 
-class FakeBd:
-    """A bd that holds what was imported and exports it newest first, as
-    `bd export` promises no order."""
-
-    def __init__(self):
-        self.stored: dict[str, dict] = {}
-
-    def __call__(self, cmd, **kwargs):
-        if cmd[1] == "import":
-            for line in kwargs["input"].splitlines():
-                record = json.loads(line)
-                self.stored[record["id"]] = record
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        lines = [json.dumps(r) for r in reversed(list(self.stored.values()))]
-        return subprocess.CompletedProcess(cmd, 0, stdout="\n".join(lines) + "\n", stderr="")
-
-
 @pytest.mark.parametrize("backend", ["jsonl", "bd"])
-def test_slice_records_are_invisible_to_the_chain_machinery(backend, tmp_path):
+def test_slice_records_are_invisible_to_the_chain_machinery(backend, fake_bd, tmp_path):
     chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
     store = (
-        kl.JsonlStore(tmp_path / "chain.jsonl") if backend == "jsonl" else kl.BdStore(run=FakeBd())
+        kl.JsonlStore(tmp_path / "chain.jsonl") if backend == "jsonl" else kl.BdStore(run=fake_bd)
     )
     store.write(kl.materialize(chain, "A feature", CHAIN_ID))
     store.write(kl.materialize_slices(plan(), CHAIN_ID))
@@ -274,42 +256,14 @@ def test_slice_records_are_invisible_to_the_chain_machinery(backend, tmp_path):
 # --- the verbs, through the real CLI ---------------------------------------------
 
 
-def write_plan(cwd, **over):
-    path = cwd / "plan.json"
-    path.write_text(json.dumps(plan(**over)))
-    return path
-
-
-def start_chain(kl_cli, cwd):
-    return kl_cli(cwd, "start", "--title", "A feature")["chain_id"]
-
-
-def to_chain_review(kl_cli, cwd):
-    """A chain whose spec and plan gates are approved, so the next node is
-    `chain_review`. Returns the chain id."""
-    chain_id = start_chain(kl_cli, cwd)
-    for name in ("spec_approval", "plan_approval"):
-        kl_cli(cwd, "gate", "--name", name)
-        kl_cli(cwd, "approve")
-    assert kl_cli(cwd, "state")["node"] == "chain_review"
-    return chain_id
-
-
-def slice_the_chain(kl_cli, cwd):
-    chain_id = to_chain_review(kl_cli, cwd)
-    kl_cli(cwd, "gate", "--name", "chain_finalized")
-    kl_cli(cwd, "approve", "--slices", str(write_plan(cwd)))
-    return chain_id
-
-
 def keys(entries):
     return [e["key"] for e in entries]
 
 
-def test_approve_with_slices_at_chain_finalized_creates_them(kl_cli, tmp_path):
-    to_chain_review(kl_cli, tmp_path)
+def test_approve_with_slices_at_chain_finalized_creates_them(walk, kl_cli, tmp_path):
+    walk.to_chain_review(tmp_path)
     kl_cli(tmp_path, "gate", "--name", "chain_finalized")
-    state = kl_cli(tmp_path, "approve", "--slices", str(write_plan(tmp_path)))
+    state = kl_cli(tmp_path, "approve", "--slices", str(walk.write_plan(tmp_path, plan())))
 
     assert state["node"] == "implementation" and state["status"] == "open"
     out = kl_cli(tmp_path, "slices")
@@ -344,12 +298,12 @@ def test_approve_with_slices_at_chain_finalized_creates_them(kl_cli, tmp_path):
         pytest.param("sliced_and_other_gate", "already sliced", id="sliced_and_other_gate"),
     ],
 )
-def test_slices_are_only_accepted_at_chain_finalized(setup, message, kl_cli, tmp_path):
+def test_slices_are_only_accepted_at_chain_finalized(walk, setup, message, kl_cli, tmp_path):
     if setup == "at_spec_gate":
-        start_chain(kl_cli, tmp_path)
+        walk.start(tmp_path)
         kl_cli(tmp_path, "gate", "--name", "spec_approval")
     else:
-        slice_the_chain(kl_cli, tmp_path)
+        walk.slice(tmp_path, plan())
         if setup == "already_sliced":
             kl_cli(tmp_path, "reject", "--note", "x", "--from-node", "chain_review")
             kl_cli(tmp_path, "gate", "--name", "chain_finalized")
@@ -357,14 +311,16 @@ def test_slices_are_only_accepted_at_chain_finalized(setup, message, kl_cli, tmp
             kl_cli(tmp_path, "gate", "--name", "something_else")
     before = (kl_cli(tmp_path, "slices"), kl_cli(tmp_path, "state"))
 
-    refused = kl_cli(tmp_path, "approve", "--slices", str(write_plan(tmp_path)), ok=False)
+    refused = kl_cli(
+        tmp_path, "approve", "--slices", str(walk.write_plan(tmp_path, plan())), ok=False
+    )
 
     assert message in refused.stderr
     assert (kl_cli(tmp_path, "slices"), kl_cli(tmp_path, "state")) == before
 
 
-def test_a_rejected_slicing_leaves_nothing_behind(kl_cli, tmp_path):
-    to_chain_review(kl_cli, tmp_path)
+def test_a_rejected_slicing_leaves_nothing_behind(walk, kl_cli, tmp_path):
+    walk.to_chain_review(tmp_path)
     kl_cli(tmp_path, "gate", "--name", "chain_finalized")
     kl_cli(tmp_path, "reject", "--note", "regroup")
 
@@ -385,8 +341,10 @@ def test_a_rejected_slicing_leaves_nothing_behind(kl_cli, tmp_path):
         ),
     ],
 )
-def test_a_broken_plan_file_is_refused_and_the_gate_stays_shut(write, named, kl_cli, tmp_path):
-    to_chain_review(kl_cli, tmp_path)
+def test_a_broken_plan_file_is_refused_and_the_gate_stays_shut(
+    walk, write, named, kl_cli, tmp_path
+):
+    walk.to_chain_review(tmp_path)
     kl_cli(tmp_path, "gate", "--name", "chain_finalized")
     path = tmp_path / "plan.json"
     write(path)
@@ -398,8 +356,8 @@ def test_a_broken_plan_file_is_refused_and_the_gate_stays_shut(write, named, kl_
     assert kl_cli(tmp_path, "slices")["slices"] == []
 
 
-def test_slice_set_moves_a_slice_and_merged_closes_it(kl_cli, tmp_path):
-    slice_the_chain(kl_cli, tmp_path)
+def test_slice_set_moves_a_slice_and_merged_closes_it(walk, kl_cli, tmp_path):
+    walk.slice(tmp_path, plan())
     stored = lambda: {  # noqa: E731
         r["id"]: r for r in kl.read_jsonl(tmp_path / ".kraft-lite" / "chain.jsonl")
     }
@@ -441,8 +399,8 @@ def test_slice_set_moves_a_slice_and_merged_closes_it(kl_cli, tmp_path):
         ),
     ],
 )
-def test_slice_set_refuses_an_unknown_key_or_status(flags, named, kl_cli, tmp_path):
-    slice_the_chain(kl_cli, tmp_path)
+def test_slice_set_refuses_an_unknown_key_or_status(walk, flags, named, kl_cli, tmp_path):
+    walk.slice(tmp_path, plan())
     before = kl_cli(tmp_path, "slices")
 
     refused = kl_cli(tmp_path, "slice-set", *flags, ok=False)
@@ -451,8 +409,8 @@ def test_slice_set_refuses_an_unknown_key_or_status(flags, named, kl_cli, tmp_pa
     assert kl_cli(tmp_path, "slices") == before
 
 
-def test_slice_verbs_still_answer_after_the_chain_is_done(kl_cli, tmp_path):
-    slice_the_chain(kl_cli, tmp_path)
+def test_slice_verbs_still_answer_after_the_chain_is_done(walk, kl_cli, tmp_path):
+    walk.slice(tmp_path, plan())
     while kl_cli(tmp_path, "state")["status"] != "done":
         kl_cli(tmp_path, "close")
 
@@ -472,8 +430,10 @@ def test_slice_verbs_still_answer_after_the_chain_is_done(kl_cli, tmp_path):
     ],
     ids=["close", "approve", "gate", "reject", "attempt", "approve_slices"],
 )
-def test_a_finished_chain_still_refuses_the_verbs_that_need_an_open_node(verb, kl_cli, tmp_path):
-    slice_the_chain(kl_cli, tmp_path)
+def test_a_finished_chain_still_refuses_the_verbs_that_need_an_open_node(
+    walk, verb, kl_cli, tmp_path
+):
+    walk.slice(tmp_path, plan())
     while kl_cli(tmp_path, "state")["status"] != "done":
         kl_cli(tmp_path, "close")
 
@@ -483,9 +443,9 @@ def test_a_finished_chain_still_refuses_the_verbs_that_need_an_open_node(verb, k
 
 
 @pytest.mark.parametrize("verb", [["slices"], ["slice-set", "--slice", "a"]])
-def test_slice_verbs_refuse_to_guess_between_two_unfinished_chains(verb, kl_cli, tmp_path):
-    start_chain(kl_cli, tmp_path)
-    start_chain(kl_cli, tmp_path)
+def test_slice_verbs_refuse_to_guess_between_two_unfinished_chains(walk, verb, kl_cli, tmp_path):
+    walk.start(tmp_path)
+    walk.start(tmp_path)
 
     refused = kl_cli(tmp_path, *verb, ok=False)
 
@@ -493,12 +453,6 @@ def test_slice_verbs_refuse_to_guess_between_two_unfinished_chains(verb, kl_cli,
 
 
 # --- what a node means in a sliced run, and the standing rules -------------------
-
-
-def slice_in_mode(kl_cli, cwd, mode):
-    to_chain_review(kl_cli, cwd)
-    kl_cli(cwd, "gate", "--name", "chain_finalized")
-    kl_cli(cwd, "approve", "--slices", str(write_plan(cwd, mode=mode)))
 
 
 #: The spec's table, typed out again rather than read from `kl.SLICED_ACTIONS`, so
@@ -523,8 +477,10 @@ SLICED_TABLE = {
     ]
     + [pytest.param("feature", "spec", "hooks", id="feature-spec")],
 )
-def test_state_says_what_each_node_means_in_a_sliced_run(mode, node, action, kl_cli, tmp_path):
-    slice_in_mode(kl_cli, tmp_path, mode)
+def test_state_says_what_each_node_means_in_a_sliced_run(
+    walk, mode, node, action, kl_cli, tmp_path
+):
+    walk.slice(tmp_path, plan(mode=mode))
     if node == "spec":
         kl_cli(tmp_path, "reject", "--note", "again", "--from-node", "spec")
     while kl_cli(tmp_path, "state")["node"] != node:
@@ -533,15 +489,15 @@ def test_state_says_what_each_node_means_in_a_sliced_run(mode, node, action, kl_
     assert kl_cli(tmp_path, "state")["sliced"] == {"mode": mode, "action": action}
 
 
-def test_an_unsliced_chain_reports_sliced_null(kl_cli, tmp_path):
+def test_an_unsliced_chain_reports_sliced_null(walk, kl_cli, tmp_path):
     assert kl_cli(tmp_path, "state")["sliced"] is None
-    to_chain_review(kl_cli, tmp_path)
+    walk.to_chain_review(tmp_path)
     assert kl_cli(tmp_path, "state")["sliced"] is None
 
 
-def test_a_finished_or_unstarted_chain_still_reports_sliced(kl_cli, tmp_path):
+def test_a_finished_or_unstarted_chain_still_reports_sliced(walk, kl_cli, tmp_path):
     assert kl_cli(tmp_path, "state")["status"] == "unstarted"
-    slice_in_mode(kl_cli, tmp_path, "main")
+    walk.slice(tmp_path, plan(mode="main"))
     while kl_cli(tmp_path, "state")["status"] != "done":
         kl_cli(tmp_path, "close")
 
@@ -597,18 +553,18 @@ def test_bad_settings_are_refused(content, named, kl_cli, tmp_path):
 
 
 @pytest.mark.parametrize("mode", kl.MODES)
-def test_a_slicing_plan_without_a_mode_takes_the_settings_mode(mode, kl_cli, tmp_path):
+def test_a_slicing_plan_without_a_mode_takes_the_settings_mode(walk, mode, kl_cli, tmp_path):
     settings_file(tmp_path, {"mode": mode})
-    to_chain_review(kl_cli, tmp_path)
+    walk.to_chain_review(tmp_path)
     kl_cli(tmp_path, "gate", "--name", "chain_finalized")
-    kl_cli(tmp_path, "approve", "--slices", str(write_plan(tmp_path)))
+    kl_cli(tmp_path, "approve", "--slices", str(walk.write_plan(tmp_path, plan())))
 
     assert kl_cli(tmp_path, "slices")["mode"] == mode
     assert kl_cli(tmp_path, "state")["sliced"]["mode"] == mode
 
 
-def test_the_plans_own_mode_beats_the_settings_mode(kl_cli, tmp_path):
+def test_the_plans_own_mode_beats_the_settings_mode(walk, kl_cli, tmp_path):
     settings_file(tmp_path, {"mode": "main"})
-    slice_in_mode(kl_cli, tmp_path, "feature")
+    walk.slice(tmp_path, plan(mode="feature"))
 
     assert kl_cli(tmp_path, "slices")["mode"] == "feature"

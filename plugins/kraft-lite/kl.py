@@ -310,6 +310,11 @@ class JsonlStore:
         # row on a tie — importing a chain two gates in rewinds it to `open`.
         append_jsonl(self.path, _prepare(records))
 
+    def write_raw(self, records: list[dict]) -> None:
+        """Records exactly as given, for `import`: their stamps are the truth
+        about when the run that exported them wrote them."""
+        append_jsonl(self.path, records)
+
 
 #: How bd writes timestamps, and the granularity it compares them at.
 BD_TIME = "%Y-%m-%dT%H:%M:%SZ"
@@ -334,6 +339,13 @@ def _now() -> dt.datetime:
     # noqa UP017: `dt.UTC` is 3.11+. This file ships standalone and is tested
     # against the floor in the CI matrix, so the older spelling stays.
     return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)  # noqa: UP017
+
+
+def _one_second_after(stamp: str | None) -> str | None:
+    try:
+        return (dt.datetime.strptime(stamp, BD_TIME) + dt.timedelta(seconds=1)).strftime(BD_TIME)
+    except (TypeError, ValueError):
+        return None
 
 
 def _bump_updated(record: dict) -> dict:
@@ -375,6 +387,22 @@ class BdStore:
     def write(self, records: list[dict]) -> None:
         payload = "".join(json.dumps(r) + "\n" for r in _prepare(records))
         self._bd(["import", "-"], stdin=payload)
+
+    def write_raw(self, records: list[dict]) -> None:
+        """Records as exported, for `import`, past bd's guard without `_prepare`.
+
+        `kraft-at:` is left alone, so the summary still times the run that wrote
+        them. `updated_at` cannot be: `import` has already decided these records
+        win, and bd keeps the local row on a tie or a newer guard, so each one is
+        moved past the row bd holds when it is not past it already.
+        """
+        held = {r["id"]: r.get("updated_at") for r in self.load()}
+        out = []
+        for record in records:
+            stamps = [record.get("updated_at"), _one_second_after(held.get(record["id"]))]
+            stamps = [x for x in stamps if x]
+            out.append(dict(record, updated_at=max(stamps)) if stamps else record)
+        self._bd(["import", "-"], stdin="".join(json.dumps(r) + "\n" for r in out))
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -1135,6 +1163,183 @@ def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dic
     return _slice_entry(record, by_id, mode)
 
 
+def _decisions_path(root: Path, chain_id: str) -> Path:
+    """The decisions log. Not the issue store, even with bd: what the controller
+    decided for the human is a log for the human to read, not work to track."""
+    return root / STATE_DIR / "decisions" / f"{chain_id}.jsonl"
+
+
+def _decide(root: Path, chain_id: str, args) -> dict:
+    if args.held and args.answer is not None:
+        raise SystemExit("kraft-lite: a --held question has no answer yet; drop --answer")
+    if not args.held and args.answer is None:
+        raise SystemExit("kraft-lite: a decision needs --answer, or --held to hold it for the user")
+    at = _now().strftime(BD_TIME)
+    entry = {
+        "id": f"kd-{uuid.uuid4().hex[:8]}",
+        "at": at,
+        "slice": args.slice,
+        "question": args.question,
+        "answer": args.answer,
+        "why": args.why,
+        "held": args.held,
+        "answered_by": None if args.held else "controller",
+        "answered_at": None if args.held else at,
+    }
+    append_jsonl(_decisions_path(root, chain_id), [entry])
+    return entry
+
+
+def _answer(root: Path, chain_id: str, args) -> dict:
+    path = _decisions_path(root, chain_id)
+    entries = {e["id"]: e for e in read_jsonl(path)}
+    if args.decision not in entries:
+        raise SystemExit(
+            f"kraft-lite: no decision {args.decision!r} in this chain. Decisions: "
+            + (", ".join(entries) or "(none)")
+        )
+    entry = dict(
+        entries[args.decision],
+        answer=args.answer,
+        held=False,
+        answered_by="user",
+        answered_at=_now().strftime(BD_TIME),
+    )
+    append_jsonl(path, [entry])
+    return entry
+
+
+def _decisions(root: Path, store, everything: list[dict], chain_id: str, args) -> list[dict]:
+    """The log in write order. `--unreported` is what follows the run record's
+    cursor, so a status report never repeats itself; `--mark` moves the cursor
+    to the last entry it returned."""
+    if args.mark and not args.unreported:
+        raise SystemExit("kraft-lite: --mark moves the --unreported cursor; pass --unreported too")
+    run = run_record(everything, chain_id)
+    if args.mark and run is None:
+        raise SystemExit("kraft-lite: this chain is not sliced, so it has no report cursor to mark")
+    entries = read_jsonl(_decisions_path(root, chain_id))
+    if args.unreported:
+        seen = [e["id"] for e in entries]
+        cursor = label_value(run, REPORTED_LABEL)
+        # A cursor naming nothing here reports everything: repeating a report
+        # is cheaper than losing one.
+        if cursor in seen:
+            entries = entries[seen.index(cursor) + 1 :]
+    if args.held:
+        entries = [e for e in entries if e["held"]]
+    if args.mark and entries:
+        store.write([set_label(run, REPORTED_LABEL, entries[-1]["id"])])
+    return entries
+
+
+EXPORT_RECORDS = "records.jsonl"
+EXPORT_DECISIONS = "decisions.jsonl"
+
+
+def _export(root: Path, everything: list[dict], chain_id: str, to: Path) -> dict:
+    """The run's state as three files for the state branch: its records as the
+    store holds them, its frozen template, and its decisions log. Nothing else
+    is written, and nothing else in `to` is touched, because `to` is usually a
+    checkout of that branch. Specs and plans travel by message, never here."""
+    run = run_record(everything, chain_id)
+    records = [
+        *chain_index(everything)[chain_id],
+        *([run] if run else []),
+        *slice_records(everything, chain_id),
+    ]
+    template = to / "chains" / f"{chain_id}.json"
+    template.parent.mkdir(parents=True, exist_ok=True)
+    frozen = _frozen_path(root, chain_id)
+    if frozen.is_file():
+        shutil.copyfile(frozen, template)
+    else:
+        template.write_text(json.dumps(_chain(root, None, chain_id), indent=2) + "\n")
+    (to / EXPORT_RECORDS).write_text("".join(json.dumps(r) + "\n" for r in records))
+    decisions = read_jsonl(_decisions_path(root, chain_id))
+    (to / EXPORT_DECISIONS).write_text("".join(json.dumps(e) + "\n" for e in decisions))
+    return {
+        "chain_id": chain_id,
+        "to": str(to),
+        "records": len(records),
+        "decisions": len(decisions),
+    }
+
+
+def _import_records(local: list[dict], exported: list[dict]) -> tuple[list[dict], int]:
+    """Which exported records to write, and how many local ones win instead.
+
+    A record is written only where the local copy is missing or was last written
+    earlier, by `kraft-at:`: `BD_TIME` sorts as a string, and no stamp is oldest.
+    A tie keeps the local copy. The epic is written only where it is missing:
+    it is never written after `start`, and its stamp is the run's start time.
+    """
+    held = {r["id"]: r for r in local}
+    write: list[dict] = []
+    kept = 0
+    for record in exported:
+        mine = held.get(record["id"])
+        if mine is None or (
+            label_value(record, CHAIN_LABEL) is None
+            and (label_value(mine, AT_LABEL) or "") < (label_value(record, AT_LABEL) or "")
+        ):
+            write.append(record)
+        else:
+            kept += 1
+    return write, kept
+
+
+def _merge_decisions(local: list[dict], exported: list[dict]) -> tuple[list[dict], int]:
+    """Which exported decisions to append, and how many local ones win instead.
+    The later of `answered_at or at` wins; on a tie, an answer beats a held
+    question, so a held copy never takes back the user's answer."""
+
+    def rank(entry: dict) -> tuple[str, bool]:
+        return (entry.get("answered_at") or entry.get("at") or "", not entry.get("held"))
+
+    held = {e["id"]: e for e in local}
+    write = [e for e in exported if e["id"] not in held or rank(e) > rank(held[e["id"]])]
+    return write, len(exported) - len(write)
+
+
+def _import(root: Path, store, source: Path) -> dict:
+    """Resume, or catch up, from an export. Dispatched before `_ours`: the
+    export names its own chain, and the directory may hold others.
+
+    Records are written through `write_raw`, never `store.write`: `_prepare`
+    would restamp every one with the time of the import, and the summary would
+    report a run that started, and finished every node, just now."""
+    exported = read_jsonl(source / EXPORT_RECORDS)
+    epics = [r["id"] for r in exported if label_value(r, CHAIN_LABEL)]
+    if len(epics) != 1:
+        raise SystemExit(
+            f"kraft-lite: {source / EXPORT_RECORDS} is not an export of one chain: "
+            f"it holds {len(epics)} chain epics ({', '.join(epics) or 'none'})"
+        )
+    chain_id = epics[0]
+    template = source / "chains" / f"{chain_id}.json"
+    if not template.is_file():
+        raise SystemExit(f"kraft-lite: the export has no frozen template {template}")
+    frozen = _frozen_path(root, chain_id)
+    if not frozen.is_file():
+        frozen.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(template, frozen)
+    write, kept = _import_records(store.load(), exported)
+    if write:
+        store.write_raw(write)
+    path = _decisions_path(root, chain_id)
+    decided, kept_decisions = _merge_decisions(
+        read_jsonl(path), read_jsonl(source / EXPORT_DECISIONS)
+    )
+    if decided:
+        append_jsonl(path, decided)
+    return {
+        "chain_id": chain_id,
+        "imported": len(write) + len(decided),
+        "kept_local": kept + kept_decisions,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="kl")
     sub = parser.add_subparsers(dest="verb", required=True)
@@ -1163,6 +1368,22 @@ def main(argv: list[str] | None = None) -> int:
     slice_set.add_argument("--session", default=None)
     slice_set.add_argument("--branch", default=None)
     slice_set.add_argument("--fork", default=None)
+    decide = sub.add_parser("decide")
+    decide.add_argument("--question", required=True)
+    decide.add_argument("--why", required=True)
+    decide.add_argument("--answer", default=None)
+    decide.add_argument("--slice", default=None)
+    decide.add_argument("--held", action="store_true")
+    answer = sub.add_parser("answer")
+    answer.add_argument("--decision", required=True)
+    answer.add_argument("--answer", required=True)
+    decisions = sub.add_parser("decisions")
+    decisions.add_argument("--held", action="store_true")
+    decisions.add_argument("--unreported", action="store_true")
+    decisions.add_argument("--mark", action="store_true")
+    sub.add_parser("export").add_argument("--to", type=Path, required=True)
+    # No `--chain-id`: the export names its chain.
+    sub.add_parser("import").add_argument("--from", dest="source", type=Path, required=True)
     # Every verb that reads or writes chain state can be told which chain. `start`
     # mints its own id and `detect` touches no state, so neither takes one.
     for name in (
@@ -1175,6 +1396,10 @@ def main(argv: list[str] | None = None) -> int:
         "reject",
         "slices",
         "slice-set",
+        "decide",
+        "answer",
+        "decisions",
+        "export",
     ):
         sub.choices[name].add_argument("--chain-id", default=None)
 
@@ -1195,6 +1420,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     store = store_for(root)
+
+    if args.verb == "import":
+        print(json.dumps(_import(root, store, args.source), indent=2))
+        return 0
 
     if args.verb == "start":
         new_id = new_chain_id()
@@ -1223,8 +1452,31 @@ def main(argv: list[str] | None = None) -> int:
     node_record = current(records)
     # Wrap-up and status read after the walk is over, so these are not refused
     # for want of an open node.
-    if node_record is None and args.verb not in ("state", "summary", "slices", "slice-set"):
+    if node_record is None and args.verb not in (
+        "state",
+        "summary",
+        "slices",
+        "slice-set",
+        "decisions",
+        "decide",
+        "answer",
+        "export",
+    ):
         raise SystemExit("kraft-lite: no open node — the chain is finished or was never started")
+
+    if args.verb in ("decide", "answer", "decisions", "export"):
+        if resolved_id is None:
+            raise SystemExit("kraft-lite: no chain in this directory — start one first")
+        if args.verb == "decide":
+            out = _decide(root, resolved_id, args)
+        elif args.verb == "answer":
+            out = _answer(root, resolved_id, args)
+        elif args.verb == "decisions":
+            out = _decisions(root, store, everything, resolved_id, args)
+        else:
+            out = _export(root, everything, resolved_id, args.to)
+        print(json.dumps(out, indent=2))
+        return 0
 
     if args.verb == "state":
         print(json.dumps(_state(root, chain, resolved_id), indent=2))
