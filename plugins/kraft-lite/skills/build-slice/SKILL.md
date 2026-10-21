@@ -75,12 +75,16 @@ Copy this and tick it off; the walk starts when all four are ticked.
 commits of your own: the container was replaced, and the chain state and the
 documents went with it. The pushed commits are the work done.
 
-1. Send the controller a `status`: fresh container, your pushed head and PR.
+1. Put your branch at its pushed head before anything else:
+   `git fetch origin`, then `git checkout -B <your slice branch> origin/<your slice branch>`.
+   A fresh clone can check out an older revision, and the fork checks and
+   `--force-with-lease` would then not see the pushed work.
+2. Send the controller a `status`: fresh container, your pushed head and PR.
    Ask it for the spec and the plan again.
-2. Run setup. `fork` and `base` come from the latest `Cut from:` line in this
+3. Run setup. `fork` and `base` come from the latest `Cut from:` line in this
    conversation (your starting instructions', or your last rebase `status`),
    never from `HEAD`.
-3. At the new chain's `implementation`, build only the plan tasks your pushed
+4. At the new chain's `implementation`, build only the plan tasks your pushed
    commits do not hold. Never redo, reset or force-push away pushed work.
 
 ## 2. The controller takes the user's place

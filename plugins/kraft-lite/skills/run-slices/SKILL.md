@@ -143,8 +143,12 @@ The starting instructions, in this order:
 There is no feature branch: nothing is pushed for one, and every slice PR goes
 to the base branch. A slice whose `after` slices are ready to merge is in
 `ready`, so start it then, from the branch of the one it builds on, without
-waiting for the user's merge. When the user merges a slice, the steps after a
-merge (section 6) apply, with the base branch as the target.
+waiting for the user's merge. That is for a slice that comes after one slice.
+One that comes after two or more has no one branch holding all their work:
+while two or more of them are unmerged, leave it waiting; once the user has
+merged every one, start it from the base branch, `Cut from: target`. When the
+user merges a slice, the steps after a merge (section 6) apply, with the base
+branch as the target.
 
 ## 4. Resuming
 
@@ -260,7 +264,7 @@ A call overturned later reopens the archived child, or starts a fresh one on the
 target. When every slice is done:
 
 1. Show the whole decisions log, `KL decisions`, while a call is cheap to overturn.
-2. `KL decisions --unreported --mark`, to move the report cursor past it.
+2. `KL decisions --unreported --mark`, to mark it reported.
 3. `KL close`, and export state. The rest of the feature chain then runs per
    `state.sliced.action`, through `kraft-lite:next`. In `feature` mode its hooks
    run in a worktree of the feature branch, never in the state branch's

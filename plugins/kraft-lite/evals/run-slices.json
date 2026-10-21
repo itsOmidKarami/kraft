@@ -116,5 +116,18 @@
       "The check-in's message is `kraft-lite:run-slices check-in, chain kl-7f3a91c2: read state first.`",
       "Ends its turn after arming it"
     ]
+  },
+  {
+    "skills": [
+      "kraft-lite:run-slices"
+    ],
+    "query": "Your review of slice b's PR #62 passed: nothing to fix, and CI is green at head 8b1c3d4, the head you reviewed. Carry on with the run.",
+    "setup": "The cloud controller session for chain kl-7f3a91c2 'Ledger export' in repo acme/ledger (base branch main), on its own branch claude/ledger-export-x1, which is the run's state branch and its checkout. `$CLAUDE_PLUGIN_ROOT` is set and the kraft-lite skills are installed; the claude-code-remote tools are loaded. Sliced in main mode, as the user asked for this run; `slices` reports mode main and feature_branch null. Slices: a 'Row model' (task 1; ready_to_merge, PR #61 into main from ledger/a-rows at 5aa01c2, cut from main; the user has not merged it), b 'Writers' (tasks 2-3; in_review; child session_01Bbb on ledger/b-writers, PR #62 into main, cut from main), c 'Exporter' (tasks 4-5, after a and b; waiting). The repo squash-merges. Setup and the scoped tests were smoke-tested at the start, and the user said go. After `slice-set --slice b --status ready_to_merge`, `slices` prints ready: [\"c\"].",
+    "expected_behavior": [
+      "Does not merge b's PR; reports the verdict to the user and runs `slice-set --slice b --status ready_to_merge`",
+      "Does not start c now: c comes after two slices still unmerged (a and b), so no one branch holds both; it waits for the user's merges",
+      "Says c starts from the base branch main once the user has merged a and b, cut from target at origin/main's sha then",
+      "Keeps the check-in armed, and says it watches a's and b's PRs for the user's merges"
+    ]
   }
 ]

@@ -20,7 +20,7 @@
     "setup": "A cloud Claude Code controller session in the repo acme/ledger (base branch main), on its own branch claude/ledger-export-x1, which `slices` reports as the run's state branch, `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. All three slices (a, b, c) are merged into the feature branch feat/ledger-export, which changed src/ledger/rows.py, src/ledger/export/csv.py, src/ledger/export/json.py, tests/export/test_csv.py and tests/export/test_json.py against main. Mode is feature. `.kraft-lite/registry.yaml` binds: on.mr.rebase to a prompt; on.env.prepare to skill superpowers:using-git-worktrees; on.implementation.start to skill superpowers:subagent-driven-development; on.repos.scan to a prompt; on.test.run to kind subprocess, command [just, test]; on.review.local.run to skill engineering:code-review; on.mr.describe to a prompt; on.mr.open to skill superpowers:finishing-a-development-branch; on.ci.poll to kind subprocess, command [gh, pr, checks]; on.human_review.requested to a prompt; on.mr.sync and on.merge to prompts. All of those skills are installed. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"verify\", \"hooks\": [\"on.mr.rebase\", \"on.env.prepare\", \"on.test.run\", \"on.review.local.run\"], \"gate\": null, \"attempt\": 0, \"cap\": 3, \"status\": \"open\", \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"feature\", \"action\": \"scoped_verify\"}}",
     "expected_behavior": [
       "Runs only the node's test hook (on.test.run), on what the feature branch changed (for example the paths from `git diff --name-only main...feat/ledger-export`), not as the bare `just test` whole-suite command",
-      "Does not dispatch on.review.local.run (nor on.mr.rebase or on.env.prepare): every slice was reviewed, and the feature PR's on.review.mr.run reviews how the slices fit together",
+      "Runs on.env.prepare in the feature worktree before the test hook, and does not dispatch on.review.local.run or on.mr.rebase: every slice was reviewed, and the feature PR's on.review.mr.run reviews how the slices fit together",
       "Runs the test hook in a worktree of feat/ledger-export, not in the state branch's checkout",
       "Says the full suite runs on CI",
       "Closes verify, then exports state"
@@ -110,10 +110,48 @@
     "query": "[user] Keep going with the ledger export chain.",
     "setup": "A cloud Claude Code controller session in the repo acme/ledger (base branch main), on its own branch claude/ledger-export-x1, which `slices` reports as the run's state branch. `$CLAUDE_PLUGIN_ROOT` is set and the kraft-lite skills are installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. All three slices are merged into the feature branch feat/ledger-export, and verify has closed. `.kraft-lite/registry.yaml` binds: on.mr.rebase to a prompt; on.env.prepare to skill superpowers:using-git-worktrees; on.implementation.start to skill superpowers:subagent-driven-development; on.repos.scan to a prompt; on.test.run to kind subprocess, command [just, test]; on.review.local.run to skill engineering:code-review; on.mr.describe to a prompt; on.mr.open to skill superpowers:finishing-a-development-branch; on.ci.poll to kind subprocess, command [gh, pr, checks]; on.review.mr.run to skill engineering:code-review; on.human_review.requested to a prompt; on.mr.sync and on.merge to prompts. All of those skills are installed. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"open_mr\", \"hooks\": [\"on.mr.rebase\", \"on.mr.describe\", \"on.mr.open\"], \"gate\": null, \"attempt\": 0, \"cap\": null, \"status\": \"open\", \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"feature\", \"action\": \"hooks\"}}",
     "expected_behavior": [
-      "Runs the hooks in a worktree of feat/ledger-export (for example `git worktree add <path> feat/ledger-export` after `git fetch`), not in the state branch's checkout",
+      "Runs the hooks in a worktree of origin's feat/ledger-export (`git fetch origin`, then `git worktree add -B feat/ledger-export <path> origin/feat/ledger-export`), not in the state branch's checkout",
       "on.mr.rebase rebases feat/ledger-export onto main, never claude/ledger-export-x1",
       "on.mr.open opens the PR from feat/ledger-export into main, not from the state branch",
       "Then closes open_mr and exports state"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:next"
+    ],
+    "query": "[user] Keep going with the ledger export chain.",
+    "setup": "A cloud Claude Code controller session in the repo acme/ledger (base branch main), on its own branch claude/ledger-export-x1, which `slices` reports as the run's state branch; its checkout is /work/ledger. `$CLAUDE_PLUGIN_ROOT` is set and the kraft-lite skills are installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. Mode is feature. All three slices are merged into the feature branch feat/ledger-export, and verify has closed. This clone also has the local branch feat/ledger-export, which the controller created and pushed when the run started. No worktree of feat/ledger-export exists yet. `.kraft-lite/registry.yaml` binds: on.mr.rebase to a prompt; on.env.prepare to skill superpowers:using-git-worktrees; on.implementation.start to skill superpowers:subagent-driven-development; on.repos.scan to a prompt; on.test.run to kind subprocess, command [just, test]; on.review.local.run to skill engineering:code-review; on.mr.describe to a prompt; on.mr.open to skill superpowers:finishing-a-development-branch; on.ci.poll to kind subprocess, command [gh, pr, checks]; on.review.mr.run to skill engineering:code-review; on.human_review.requested to a prompt; on.mr.sync and on.merge to prompts. All of those skills are installed. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"open_mr\", \"hooks\": [\"on.mr.rebase\", \"on.mr.describe\", \"on.mr.open\"], \"gate\": null, \"attempt\": 0, \"cap\": null, \"status\": \"open\", \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"feature\", \"action\": \"hooks\"}}",
+    "expected_behavior": [
+      "Makes the feature worktree from origin's feature branch, so it holds the slice merges: for example `git fetch origin` then `git worktree add -B feat/ledger-export <path> origin/feat/ledger-export`; never a worktree of the local feat/ledger-export, which is still at the run's start",
+      "on.mr.rebase and on.mr.open run in that worktree, and nothing it pushes drops the merged slices: no push or force-push of the stale local branch",
+      "Opens the PR from feat/ledger-export into main, not from the state branch",
+      "Then closes open_mr and exports state"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:next"
+    ],
+    "query": "[user] Carry on with the chain.",
+    "setup": "A cloud Claude Code controller session in the repo acme/ledger (base branch main), on its own branch claude/ledger-export-x1, which `slices` reports as the run's state branch; its checkout is /work/ledger. `$CLAUDE_PLUGIN_ROOT` is set and the kraft-lite skills are installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. Mode is feature. All three slices (a, b, c) are merged into the feature branch feat/ledger-export, which changed src/ledger/rows.py, src/ledger/export/csv.py, tests/export/test_csv.py and tests/export/test_json.py against main. No worktree of feat/ledger-export exists yet. `.kraft-lite/registry.yaml` binds: on.mr.rebase to a prompt; on.env.prepare to kind subprocess, command [make, setup] (the Makefile's setup target installs the project's dependencies); on.implementation.start to skill superpowers:subagent-driven-development; on.repos.scan to a prompt; on.test.run to kind subprocess, command [just, test]; on.review.local.run to skill engineering:code-review; on.mr.describe to a prompt; on.mr.open to skill superpowers:finishing-a-development-branch; on.ci.poll to kind subprocess, command [gh, pr, checks]; on.review.mr.run to skill engineering:code-review; on.human_review.requested to a prompt; on.mr.sync and on.merge to prompts. All of those skills are installed. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"verify\", \"hooks\": [\"on.mr.rebase\", \"on.env.prepare\", \"on.test.run\", \"on.review.local.run\"], \"gate\": null, \"attempt\": 0, \"cap\": 3, \"status\": \"open\", \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"feature\", \"action\": \"scoped_verify\"}}",
+    "expected_behavior": [
+      "In the new feature worktree, runs on.env.prepare (`make setup`) before the test hook",
+      "Then runs on.test.run scoped to what the feature branch changed (the paths from `git diff --name-only main...feat/ledger-export`), not the bare whole-suite command",
+      "Does not dispatch on.review.local.run or on.mr.rebase",
+      "Closes verify, then exports state"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:next"
+    ],
+    "query": "[user] Next.",
+    "setup": "A cloud Claude Code controller session in the repo acme/ledger (base branch main), on its own branch claude/ledger-export-x1, which `slices` reports as the run's state branch; its checkout is /work/ledger. `$CLAUDE_PLUGIN_ROOT` is set and the kraft-lite skills are installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. Mode is feature. All three slices are merged into the feature branch feat/ledger-export, and verify has closed. Earlier in this session you made the feature worktree /work/ledger-feature (a checkout of feat/ledger-export at origin's tip) and ran verify's hooks there. `.kraft-lite/registry.yaml` binds: on.mr.rebase to a prompt; on.env.prepare to skill superpowers:using-git-worktrees; on.implementation.start to skill superpowers:subagent-driven-development; on.repos.scan to a prompt; on.test.run to kind subprocess, command [just, test]; on.review.local.run to skill engineering:code-review; on.mr.describe to a prompt; on.mr.open to skill superpowers:finishing-a-development-branch; on.ci.poll to kind subprocess, command [gh, pr, checks]; on.review.mr.run to skill engineering:code-review; on.human_review.requested to a prompt; on.mr.sync and on.merge to prompts. All of those skills are installed. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"open_mr\", \"hooks\": [\"on.mr.rebase\", \"on.mr.describe\", \"on.mr.open\"], \"gate\": null, \"attempt\": 0, \"cap\": null, \"status\": \"open\", \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"feature\", \"action\": \"hooks\"}}",
+    "expected_behavior": [
+      "Runs on.mr.rebase, on.mr.describe and on.mr.open in /work/ledger-feature",
+      "Runs every kl.py command (close, export, state) from the controller's checkout /work/ledger (for example `cd /work/ledger` first, or `git -C`/a subshell for the hooks), never from /work/ledger-feature, whose own .kraft-lite holds no chain",
+      "Commits and pushes the state export in /work/ledger on claude/ledger-export-x1"
     ]
   }
 ]

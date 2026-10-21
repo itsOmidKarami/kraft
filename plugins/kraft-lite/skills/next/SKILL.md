@@ -30,11 +30,13 @@ You get `node`, `hooks`, `gate`, `attempt`, `cap`, `status`, `note` and `sliced`
   what this node is:
   - `run_slices` - invoke `kraft-lite:run-slices`, which closes this node when every
     slice is done. Stop.
-  - `scoped_verify` - run only the node's test hook, `on.test.run`, on the files
+  - `scoped_verify` - in the feature worktree (below), run the node's setup hook,
+    `on.env.prepare`, then its test hook, `on.test.run`, on the files
     `git diff --name-only <base branch>...<feature branch>` lists, not the whole
     suite: the children tested their slices and CI runs the full suite, so check
-    only what CI cannot cover. Run none of the node's other hooks: every slice
-    was reviewed, and the feature PR's review covers how they fit. Then step 3.
+    only what CI cannot cover. A fresh worktree has nothing installed, so setup
+    comes first. Run none of the node's other hooks: every slice was reviewed,
+    and the feature PR's review covers how they fit. Then step 3.
   - `skip` - `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" close --chain-id <id>` with no hooks
     run, then this skill again.
   - `await_user_merges` - check the PR of each slice that `slices` does not show as
@@ -47,9 +49,22 @@ You get `node`, `hooks`, `gate`, `attempt`, `cap`, `status`, `note` and `sliced`
   - `hooks` - step 2.
 
 In a sliced `feature` run, every hook from `verify` on runs in a worktree of the
-feature branch (`git fetch origin`, then `git worktree add <path> <feature branch>`
-once), never in the state branch's checkout: `on.mr.rebase` rebases, and
-`on.mr.open` opens the PR from, the branch it runs in. There the feature PR's
+feature branch, never in the state branch's checkout: `on.mr.rebase` rebases, and
+`on.mr.open` opens the PR from, the branch it runs in. Make it once, from origin's
+feature branch, where the slice PRs merged:
+
+    git fetch origin
+    git worktree add -B <feature branch> <path> origin/<feature branch>
+
+The local feature branch is as old as the run's start: a worktree of it tests
+none of the slices, and a push from it drops them. If `git worktree list` shows
+the feature branch checked out already, use that checkout instead, after
+`git -C <it> merge --ff-only origin/<feature branch>`.
+
+Only the hooks run in the worktree. Every `kl.py` command (`state`, `close`,
+`attempt`, the export) runs from the controller's checkout, the one whose
+`.kraft-lite/` holds the chain: run from the worktree, it finds that worktree's
+own, empty `.kraft-lite/`. There the feature PR's
 `on.review.mr.run` reviews the seams - shared helpers, contracts between
 slices, the decisions log - on the strongest tier, not each slice again.
 

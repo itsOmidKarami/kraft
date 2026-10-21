@@ -131,5 +131,19 @@
       "Starts no new slice chain",
       "Continues at verify through kraft-lite:next"
     ]
+  },
+  {
+    "skills": [
+      "kraft-lite:build-slice",
+      "kraft-lite:next"
+    ],
+    "query": "[the harness] This session's container was restored. Continue the slice.",
+    "setup": "A cloud Claude Code child session for slice b 'CSV and JSON writers' of feature chain kl-7f3a91c2 (repo acme/ledger, base branch main), started by controller session_01Ctrl00, own branch ledger/b-writers; kraft-lite:start, :next and :gate are installed and `$CLAUDE_PLUGIN_ROOT` is set. Its starting instructions follow the controller's template, and their Slice item says 'Cut from: target at 4c2d9e1.' (plan tasks 2-5; Tests: scoped paths tests/export/test_csv_writer.py; Branches and PRs: push only ledger/b-writers, PR into the feature branch feat/ledger-export). `<run>` below is `$(git rev-parse --path-format=absolute --git-common-dir)/kraft-lite/kl-7f3a91c2`. The session's cloud container was reclaimed while idle and has come back as a fresh clone with ledger/b-writers checked out. Its draft PR #52 into feat/ledger-export is open, and origin/ledger/b-writers holds six pushed commits of its own (plan tasks 2 and 3 done and reviewed, task 4 half done). The conversation survives but was compacted: its starting instructions are kept, the spec and plan messages are not. `<run>` does not exist in this clone, and `kl.py chains` prints []. `.kraft-lite/registry.yaml` binds on.mr.rebase to kind prompt 'Rebase the branch onto its target if it has drifted before merging.', on.env.prepare to a prompt, on.slice.implementation.start to kind skill superpowers:subagent-driven-development (installed) with a prompt sibling, and on.repos.scan to a prompt.",
+    "expected_behavior": [
+      "Before anything else on the branch, puts the local branch at the remote head: `git fetch origin` then `git checkout -B ledger/b-writers origin/ledger/b-writers` (or an equivalent reset to origin/ledger/b-writers), whatever revision the fresh clone checked out",
+      "Writes 4c2d9e1 into `<run>/b/fork`, never HEAD",
+      "Never pushes or force-pushes ledger/b-writers from 4c2d9e1, and builds only the plan tasks the pushed commits do not hold (task 4 on)",
+      "Tells the controller it resumed in a fresh container, with its pushed head and PR, and asks for the spec and plan again"
+    ]
   }
 ]

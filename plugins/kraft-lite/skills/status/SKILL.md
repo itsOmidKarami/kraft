@@ -55,7 +55,6 @@ walked so far and say the total lands at the end, rather than calling an
 unfinished run instant. It has no token or cost figures: Lite runs inside your
 session and cannot see them.
 
-Read-only, except that `--mark` moves the report cursor past what you just
-reported. Do not advance, close, approve or answer anything from here, and start no
+Read-only, except that `--mark` marks what you just reported as reported. Do not advance, close, approve or answer anything from here, and start no
 slice that is `ready` - that is what `kraft-lite:next`, `kraft-lite:gate` and
 `kraft-lite:run-slices` are for.
