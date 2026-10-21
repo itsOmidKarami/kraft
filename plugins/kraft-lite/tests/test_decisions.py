@@ -145,15 +145,24 @@ def test_decisions_filters_held_and_unreported_and_mark_moves_the_cursor(walk, k
         pytest.param(
             False, ["--unreported", "--mark"], "not sliced", id="mark_on_an_unsliced_chain"
         ),
+        # `--held` would cut the window before the cursor is placed, and every
+        # unheld entry in it would be marked reported without being reported.
+        pytest.param(
+            True, ["--held", "--unreported", "--mark"], "without --held", id="mark_with_held"
+        ),
     ],
 )
 def test_mark_needs_unreported_and_a_sliced_run(sliced, flags, named, walk, kl_cli, tmp_path):
-    (walk.slice if sliced else walk.start)(tmp_path)
+    chain_id = (walk.slice if sliced else walk.start)(tmp_path)
     kl_cli(tmp_path, "decide", "--question", "q", "--why", "w", "--answer", "a")
+    kl_cli(tmp_path, "decide", "--question", "q", "--why", "w", "--held")
 
     refused = kl_cli(tmp_path, "decisions", *flags, ok=False)
 
     assert named in refused.stderr and "Traceback" not in refused.stderr
+    run = kl.run_record(kl.read_jsonl(tmp_path / ".kraft-lite" / "chain.jsonl"), chain_id)
+    assert kl.label_value(run, kl.REPORTED_LABEL) is None
+    assert len(kl_cli(tmp_path, "decisions", "--unreported")) == 2
 
 
 def test_decisions_never_reach_the_issue_store(walk_in_process, fake_bd, monkeypatch, tmp_path):
@@ -161,15 +170,25 @@ def test_decisions_never_reach_the_issue_store(walk_in_process, fake_bd, monkeyp
     run = walk_in_process.run
     chain_id = walk_in_process.slice(tmp_path)
 
-    held = run(tmp_path, "decide", "--question", "q", "--why", "w", "--held")
-    run(tmp_path, "decide", "--question", "q", "--why", "w", "--answer", "a", "--slice", "a")
-    run(tmp_path, "answer", "--decision", held["id"], "--answer", "b")
+    texts = ("QUESTION-ONE", "WHY-ONE", "QUESTION-TWO", "WHY-TWO", "ANSWER-ONE", "ANSWER-TWO")
+    held = run(tmp_path, "decide", "--question", texts[0], "--why", texts[1], "--held")
+    run(tmp_path, "decide", "--question", texts[2], "--why", texts[3], "--answer", texts[4])
+    run(tmp_path, "answer", "--decision", held["id"], "--answer", texts[5])
+    marked = run(tmp_path, "decisions", "--unreported", "--mark")
     run(tmp_path, "export", "--to", str(tmp_path / "state"))
+    run(tmp_path, "import", "--from", str(tmp_path / "state"))
 
-    assert len(run(tmp_path, "decisions")) == 2
+    assert len(marked) == 2
     assert kl.read_jsonl(kl._decisions_path(tmp_path, chain_id))
     assert any(chain_id in payload for payload in fake_bd.imports), "the chain itself is in bd"
-    assert [p for p in fake_bd.imports if "kd-" in p] == []
+    sent = [json.loads(line) for payload in fake_bd.imports for line in payload.splitlines()]
+    # The report cursor is a pointer to a decision, and is allowed; the decision is not.
+    pointers = [x for r in sent for x in r["labels"] if x.startswith(kl.REPORTED_LABEL)]
+    assert pointers == [f"{kl.REPORTED_LABEL}{marked[-1]['id']}"]
+    for record in sent:
+        rest = dict(record, labels=[x for x in record["labels"] if x not in pointers])
+        assert "kd-" not in json.dumps(rest)
+        assert not [t for t in texts if t in json.dumps(record)]
 
 
 DECISION_VERBS = [

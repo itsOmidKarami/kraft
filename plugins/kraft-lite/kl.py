@@ -1215,6 +1215,12 @@ def _decisions(root: Path, store, everything: list[dict], chain_id: str, args) -
     to the last entry it returned."""
     if args.mark and not args.unreported:
         raise SystemExit("kraft-lite: --mark moves the --unreported cursor; pass --unreported too")
+    if args.mark and args.held:
+        # The cursor is one position in the whole log. Placed after a held-only
+        # list, it would pass over every unheld entry the report left out.
+        raise SystemExit(
+            "kraft-lite: --mark marks the whole unreported window, so run it without --held"
+        )
     run = run_record(everything, chain_id)
     if args.mark and run is None:
         raise SystemExit("kraft-lite: this chain is not sliced, so it has no report cursor to mark")

@@ -3,6 +3,7 @@ pytest (CI's lite-floor job), so it imports nothing from Kraft."""
 
 from __future__ import annotations
 
+import collections
 import json
 import subprocess
 import sys
@@ -88,6 +89,12 @@ class FakeBd:
 @pytest.fixture
 def fake_bd():
     return FakeBd()
+
+
+@pytest.fixture
+def fake_bds():
+    """One `FakeBd` per repo root, for a test that moves a run between two."""
+    return collections.defaultdict(FakeBd)
 
 
 #: What `Walk.slice` splits a feature into when a test names no plan of its own.

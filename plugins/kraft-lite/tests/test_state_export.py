@@ -34,24 +34,37 @@ def dirs(tmp_path, *names):
     return made
 
 
-def test_a_fresh_directory_resumes_from_an_export(walk, kl_cli, tmp_path):
+@pytest.mark.parametrize("backend", ["jsonl", "bd"])
+def test_a_fresh_directory_resumes_from_an_export(
+    backend, walk, walk_in_process, fake_bds, monkeypatch, tmp_path
+):
     here, there = dirs(tmp_path, "here", "there")
     out = tmp_path / "state"
+    if backend == "bd":
+        # One bd per directory, each exporting newest first, in no useful order.
+        monkeypatch.setattr(kl, "store_for", lambda root: kl.BdStore(run=fake_bds[root]))
+        walk = walk_in_process
+
+        def stored_in(cwd):
+            return sorted(fake_bds[cwd.resolve()].stored.values(), key=lambda r: r["id"])
+    else:
+        stored_in = stored
+    run = walk.run
     chain_id = walk.slice(here)
-    kl_cli(here, "slice-set", "--slice", "a", "--status", "running", "--session", "s-1")
-    kl_cli(here, "decide", "--question", "q1", "--why", "w", "--answer", "a1", "--slice", "a")
-    kl_cli(here, "decide", "--question", "q2", "--why", "w", "--held")
-    assert kl_cli(here, "state")["node"] == "implementation"
-    before = views(kl_cli, here, chain_id)
+    run(here, "slice-set", "--slice", "a", "--status", "running", "--session", "s-1")
+    run(here, "decide", "--question", "q1", "--why", "w", "--answer", "a1", "--slice", "a")
+    run(here, "decide", "--question", "q2", "--why", "w", "--held")
+    assert run(here, "state")["node"] == "implementation"
+    before = views(run, here, chain_id)
 
-    kl_cli(here, "export", "--to", str(out))
-    result = kl_cli(there, "import", "--from", str(out))
+    run(here, "export", "--to", str(out))
+    result = run(there, "import", "--from", str(out))
 
-    assert result == {"chain_id": chain_id, "imported": len(stored(here)) + 2, "kept_local": 0}
-    assert views(kl_cli, there, chain_id) == before
+    assert result == {"chain_id": chain_id, "imported": len(stored_in(here)) + 2, "kept_local": 0}
+    assert views(run, there, chain_id) == before
     assert before["summary"]["started"] is not None
     # Written as exported: no stamp moved, so the run's clock reads the same.
-    assert stored(there) == stored(here)
+    assert stored_in(there) == stored_in(here)
 
 
 def test_an_older_export_never_overwrites_newer_local_records(walk, kl_cli, tmp_path):
