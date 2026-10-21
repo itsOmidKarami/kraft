@@ -269,12 +269,17 @@ def ca_names() -> tuple[str, ...]:
 def ca_mounts(environ: Mapping[str, str], home: Path, kraft_home: Path) -> list[Path]:
     """The files and directories the daemon's CA variables name, absolute but
     as written (bwrap follows a source symlink, so the path the variable
-    names exists inside), skipping any that is missing or whose resolved
+    names exists inside), skipping any that is missing or unreadable, or whose resolved
     path is protected."""
     out: list[Path] = []
     for name in ca_names():
         value = environ.get(name)
-        if not value or not Path(value).exists():
+        if not value:
+            continue
+        try:
+            if not Path(value).exists():
+                continue
+        except OSError:  # EACCES on a parent: not there for this user
             continue
         p = Path(os.path.abspath(value))
         if protected_refusal(p, home, kraft_home) is None and p not in out:

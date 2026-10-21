@@ -278,7 +278,7 @@ the full suite.
 | `test report` *(code)* | the shards' junit annotations and the coverage comment; reports only, so it is not part of `test` | nothing to run |
 | `docs tests` (docs-only pull requests) | the unit test files that name a docs path, on Python 3.14 | `just test` on the files the `git grep` in `test.yml`'s `docs-tests` job lists |
 | `test` | passes only when `lint`, every `test (python …)` leg, `e2e (real CLIs)`, `frontend`, `vscode`, `playwright` and `ui contract` all pass; a job that skips because of the paths changed (*(python)*, and on a docs-only pull request *(code)* too) counts as passing, and on a docs-only pull request `docs tests` must pass instead. Branch protection requires it alongside those jobs by name; once the ruleset names only `test` (with the kraft-lite checks, `removals declared` and `release impact declared`), the supported range and the job list can change without editing repo settings | nothing to run |
-| `e2e (real CLIs)` *(python)* | the e2e tier against real `bd`, docker and podman | `just test -m e2e --no-testmon`; a test whose CLI is missing skips |
+| `e2e (real CLIs)` *(python)* | the e2e tier against real `bd`, bubblewrap, docker and podman | `just test -m e2e --no-testmon`; a test whose CLI is missing skips |
 | `kraft-lite on python 3.10 / 3.14` | `plugins/kraft-lite/tests` with nothing installed but pytest | `just test plugins/kraft-lite/tests` |
 | `frontend` *(code)* | `npm ci`, `npm run build` (which typechecks), `npm test` | `just test-ui` |
 | `vscode` *(code)* | typecheck, unit tests, integration tests | `just test-vscode`, then `npm run test:integration` in `vscode/` |
