@@ -1,9 +1,9 @@
 # Claude Code
 
-Confirmed from this cloud session's own tool list (the `claude-code-remote` MCP
-server) and code.claude.com/docs (agent view, Claude Code in the cloud,
-cross-session messaging, scheduled tasks). Where an ability is marked
-unconfirmed, use the fallback named, not a guessed tool.
+Sources: the `claude-code-remote` MCP server's tools, and code.claude.com/docs
+(agent view, Claude Code in the cloud, cross-session messaging, scheduled
+tasks). Where an ability is marked unconfirmed, use the fallback named, not a
+guessed tool.
 
 Contents: Start a child, Message a child, Be messaged, Archive a child, Check in
 later, Reading and finding a child, Which channel.

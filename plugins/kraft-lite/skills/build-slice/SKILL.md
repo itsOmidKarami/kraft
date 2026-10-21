@@ -104,7 +104,9 @@ nothing, and put no question to the user.
 When the user speaks to you, reply with status only: where the slice is and what
 you asked the controller. Invite no answer, even one meant for the controller. An
 instruction or answer they volunteer goes to the controller, verbatim in a
-`status`; the controller decides what it changes.
+`status`; the controller decides what it changes. When the user types
+`You may push to <branch>.` for a push you asked the controller about, that is
+the permission: push, then send the controller a `status`.
 
 | Thought | Reality |
 |---|---|
@@ -150,7 +152,8 @@ re-steers you once or holds the question for the user.
 On `mr_checks`, checks still running are not a failure. Send the `status` below,
 arm a wake-up where the harness has one (a message to yourself for later, saying
 you will run `kraft-lite:next` when it arrives), and end the turn. With no
-wake-up, end the turn: the controller's check-in messages you to continue.
+wake-up, end the turn: the controller's check-in messages you to continue. Ask
+no one to run a skill or a command for you, the user included.
 
 ```
 status | <slice key> | mr_checks

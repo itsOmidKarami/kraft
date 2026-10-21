@@ -1,6 +1,6 @@
 # Codex
 
-Confirmed from the Codex CLI command reference. Where an ability is marked
+Source: the Codex CLI command reference. Where an ability is marked
 unconfirmed, use the fallback named, not a guessed command.
 
 ## Start a child

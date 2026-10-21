@@ -1,7 +1,7 @@
 # Cursor
 
-Confirmed from Cursor's CLI and Cloud Agents API documentation. Where an ability
-is marked unconfirmed, use the fallback named, not a guessed tool.
+Sources: Cursor's CLI and Cloud Agents API documentation. Where an ability is
+marked unconfirmed, use the fallback named, not a guessed tool.
 
 ## Start a child
 

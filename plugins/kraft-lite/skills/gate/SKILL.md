@@ -30,20 +30,21 @@ an earlier "just do it", is not an answer.
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" approve --chain-id <id>
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" reject --note "<their reason>" --chain-id <id>
 
-At `chain_finalized`, when `state` shows `sliced` null and
-`.kraft-lite/proposals/<chain-id>.json` exists and is the proposal presented at
-this gate, the approval carries the slices:
+At `chain_finalized`, `state`'s `sliced` and the proposal file say which
+command records the answer:
 
-    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" approve --slices .kraft-lite/proposals/<chain-id>.json --chain-id <id>
+- `sliced` null and `.kraft-lite/proposals/<chain-id>.json` exists: the proposal
+  is this gate's artefact, the one section 1 presents. An approval carries it:
 
-A plain `approve` there leaves the chain unsliced for good, since slicing is only
-accepted at this gate. A proposal file that was not presented at this gate is a
-leftover from a rejected round: delete it, and approve plainly. A reject there
-also deletes the proposal, `rm .kraft-lite/proposals/<chain-id>.json`, so it
-cannot be approved later. It leaves no slices behind, and the proposal is
-redrawn when the node reopens. When `sliced` is not null the chain
-was sliced before and rewound past this gate; it cannot be sliced again.
-`--slices` is refused there; use a plain `approve`.
+      python3 "$CLAUDE_PLUGIN_ROOT/kl.py" approve --slices .kraft-lite/proposals/<chain-id>.json --chain-id <id>
+
+  A plain `approve` here leaves the chain unsliced for good.
+- `sliced` null and no proposal file: a plain `approve`.
+- `sliced` not null: the chain was sliced and rewound past this gate, and
+  cannot be sliced again. `--slices` is refused there; use a plain `approve`.
+- A rejection: also `rm .kraft-lite/proposals/<chain-id>.json`, so it cannot be
+  approved later. No slices exist yet; the proposal is redrawn when the node
+  reopens.
 
 A plain reject reopens the node being gated. That is right for a gate on the node
 that made the artefact - a rejected spec re-runs the spec node. It is wrong for a

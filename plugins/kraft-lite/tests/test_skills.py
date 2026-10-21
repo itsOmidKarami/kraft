@@ -164,6 +164,8 @@ def test_the_next_skill_uses_a_background_wait_when_the_harness_has_one(texts):
     assert "background" in body
     assert "wake" in body or "notif" in body
     assert "Do not idle" in body, "blocking synchronously is still banned"
+    flat = " ".join(body.split())
+    assert "If your starting instructions name a controller, wait for CI as" in flat
 
 
 def test_the_next_skill_handles_a_hook_with_no_registry_entry(texts):
@@ -259,7 +261,6 @@ def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
         ".kraft-lite/messages/<chain-id>/",
         "<chain-id> <key>: <slice title>",
         "part i of n",
-        "rebase --onto origin/<target>",
         "You may push to <branch>.",
         "For the user: configuration",
         "Cut from: <target | slice key> at <sha>",
@@ -269,7 +270,6 @@ def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
         "message-path",
         "session-title",
         "part-marker",
-        "rebase-command",
         "push-words",
         "config",
         "cut-from-line",
@@ -362,7 +362,7 @@ def test_the_next_skill_hands_each_sliced_action_to_its_owner(texts):
     assert "`sliced` not null, `status` neither `done` nor `blocked`" in flat
     assert "then export state, as `kraft-lite:run-slices` describes under State branch" in flat
     assert "`sliced`." in flat.split("You get")[1].split("- `status: unstarted`")[0]
-    assert "check only what CI cannot cover" in flat
+    assert "a quick check of the seams between slices before the feature PR" in flat
     # a done sliced chain reports action `hooks`: status is read before the action
     assert body.index("`status: done`") < body.index("`sliced.action`")
 
@@ -377,6 +377,14 @@ def test_the_status_skill_reports_slices_and_held_questions(texts):
     assert "`after` slices not yet merged" in " ".join(body.split())
     assert "--held --unreported" not in body and "--unreported --held" not in body
     assert "two commands" in body or "separate" in body
+    for part in (
+        "Held for you",
+        "Slices:",
+        "Next:",
+        "Decided since the last report:",
+        "Needs from you:",
+    ):
+        assert part in body, f"the sliced report template lacks {part!r}"
 
 
 def test_the_gate_skill_records_slices_at_chain_finalized(texts):
@@ -386,7 +394,11 @@ def test_the_gate_skill_records_slices_at_chain_finalized(texts):
     assert "`sliced`" in body, "an already sliced chain must take a plain approve"
     flat = " ".join(body.split())
     assert "rm .kraft-lite/proposals/<chain-id>.json" in flat, "a rejected proposal is deleted"
-    assert "is the proposal presented at this gate" in flat
+    assert (
+        "`sliced` null and `.kraft-lite/proposals/<chain-id>.json` exists: the proposal "
+        "is this gate's artefact" in flat
+    )
+    assert "leftover" not in flat, "after a /clear nothing says what was presented"
     assert "`--slices` is refused there; use a plain `approve`" in flat
 
 
@@ -447,10 +459,20 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         ("run-slices", 5, "`KL slice-set --slice <key> --fork <sha>`"),
         ("run-slices", 6, "Never one cut from another slice that is still unmerged"),
         ("run-slices", 6, "--status running`, and review again"),
-        ("run-slices", 6, "never in the state branch's checkout"),
+        ("run-slices", 6, "through `kraft-lite:next`, which says where its hooks run"),
         ("run-slices", 2, "A missing ability is never a block"),
         ("run-slices", 1, "delete any `.kraft-lite/proposals/<chain-id>.json`"),
-        ("run-slices", 3, "once the user has merged every one, start it from the base branch"),
+        ("run-slices", 3, "stays out of `ready` until the user merges all but one"),
+        (
+            "build-slice",
+            2,
+            "for a push you asked the controller about, that is the permission: push, "
+            "then send the controller a `status`",
+        ),
+        ("run-slices", 3, 'copied from your reference\'s "Be messaged" and "Check in later"'),
+        ("run-slices", 8, "Report by invoking `kraft-lite:status`"),
+        ("run-slices", 1, "few enough tasks for one session's context"),
+        ("build-slice", 4, "Ask no one to run a skill or a command for you, the user included"),
         ("build-slice", 1, "git checkout -B <your slice branch> origin/<your slice branch>"),
         ("next", 1, "setup hook, `on.env.prepare`, then its test hook, `on.test.run`"),
         ("next", 1, "git worktree add -B <feature branch> <path> origin/<feature branch>"),
@@ -483,6 +505,11 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         "controller-missing-ability",
         "controller-deletes-unused-proposal",
         "controller-main-mode-waits-for-two-merges",
+        "child-pushes-on-the-users-words",
+        "controller-gives-the-child-its-tools",
+        "controller-status-report-owned-by-status",
+        "controller-small-plan-heuristic",
+        "child-asks-no-one-to-continue-it",
         "child-fresh-container-takes-the-remote-head",
         "next-scoped-verify-setup-then-test",
         "next-feature-worktree-from-origin",

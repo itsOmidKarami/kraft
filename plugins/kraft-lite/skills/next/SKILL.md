@@ -30,13 +30,13 @@ You get `node`, `hooks`, `gate`, `attempt`, `cap`, `status`, `note` and `sliced`
   what this node is:
   - `run_slices` - invoke `kraft-lite:run-slices`, which closes this node when every
     slice is done. Stop.
-  - `scoped_verify` - in the feature worktree (below), run the node's setup hook,
+  - `scoped_verify` - a quick check of the seams between slices before the
+    feature PR. In the feature worktree (below), run the node's setup hook,
     `on.env.prepare`, then its test hook, `on.test.run`, on the files
     `git diff --name-only <base branch>...<feature branch>` lists, not the whole
-    suite: the children tested their slices and CI runs the full suite, so check
-    only what CI cannot cover. A fresh worktree has nothing installed, so setup
-    comes first. Run none of the node's other hooks: every slice was reviewed,
-    and the feature PR's review covers how they fit. Then step 3.
+    suite. A fresh worktree has nothing installed, so setup comes first. Run none
+    of the node's other hooks: every slice was reviewed, and the feature PR's
+    review covers how they fit. Then step 3.
   - `skip` - `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" close --chain-id <id>` with no hooks
     run, then this skill again.
   - `await_user_merges` - check the PR of each slice that `slices` does not show as
@@ -50,8 +50,10 @@ You get `node`, `hooks`, `gate`, `attempt`, `cap`, `status`, `note` and `sliced`
 
 In a sliced `feature` run, every hook from `verify` on runs in a worktree of the
 feature branch, never in the state branch's checkout: `on.mr.rebase` rebases, and
-`on.mr.open` opens the PR from, the branch it runs in. Make it once, from origin's
-feature branch, where the slice PRs merged:
+`on.mr.open` opens the PR from, the branch it runs in. In that worktree the
+feature PR's `on.review.mr.run` reviews the seams - shared helpers, contracts
+between slices, the decisions log - on the strongest tier, not each slice again.
+Make the worktree once, from origin's feature branch, where the slice PRs merged:
 
     git fetch origin
     git worktree add -B <feature branch> <path> origin/<feature branch>
@@ -64,9 +66,7 @@ the feature branch checked out already, use that checkout instead, after
 Only the hooks run in the worktree. Every `kl.py` command (`state`, `close`,
 `attempt`, the export) runs from the controller's checkout, the one whose
 `.kraft-lite/` holds the chain: run from the worktree, it finds that worktree's
-own, empty `.kraft-lite/`. There the feature PR's
-`on.review.mr.run` reviews the seams - shared helpers, contracts between
-slices, the decisions log - on the strongest tier, not each slice again.
+own, empty `.kraft-lite/`.
 
 ## 2. Run the node's hooks, in order
 
@@ -160,9 +160,12 @@ background and wake you when the wait finishes, use it: start the poll in the
 background, say you have done so, and report once when the pipeline settles. That
 costs the human nothing.
 
-If your harness has no background primitive, run the check once, report, and tell
-the human to invoke this skill again when it finishes. Making them re-invoke by
-hand is the fallback, not the design.
+If your starting instructions name a controller, wait for CI as
+`kraft-lite:build-slice` says.
+
+With no controller and no background primitive, run the check once, report, and
+tell the human to invoke this skill again when it finishes. Making them re-invoke
+by hand is the fallback, not the design.
 
 `$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
 is two directories above this file - use that path instead of an empty one.
