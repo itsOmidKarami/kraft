@@ -393,7 +393,7 @@ def test_the_gate_skill_records_slices_at_chain_finalized(texts):
     body = texts["gate"]
     assert "approve --slices .kraft-lite/proposals/<chain-id>.json" in body
     assert "chain_finalized" in body
-    assert "`sliced`" in body, "an already sliced chain must take a plain approve"
+    assert "`sliced`" in body, "a sliced run's rewind decides the slices' fate"
     flat = " ".join(body.split())
     assert "rm .kraft-lite/proposals/<chain-id>.json" in flat, "a rejected proposal is deleted"
     assert (
@@ -401,7 +401,7 @@ def test_the_gate_skill_records_slices_at_chain_finalized(texts):
         "is this gate's artefact" in flat
     )
     assert "leftover" not in flat, "after a /clear nothing says what was presented"
-    assert "`--slices` is refused there; use a plain `approve`" in flat
+    assert "cannot be sliced again" not in flat, "a rewind to chain_review retires the slices"
 
 
 def test_init_binds_both_slice_hooks_and_the_ignores(texts):
@@ -557,6 +557,32 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
             "or with the abilities really missing after searching deferred tools: say which, "
             "and walk the slices here",
         ),
+        (
+            "run-slices",
+            1,
+            "On a chain without them, `approve --slices` refuses and names what is missing: "
+            "draw no proposal; say so and walk it unsliced.",
+        ),
+        ("run-slices", 1, "A rewind to `chain_review` or earlier retires the slices"),
+        (
+            "run-slices",
+            6,
+            "`KL slices` then lists in `base_moved` each slice cut early from it: once it is "
+            "back in review, tell each to rebase onto its branch's new tip",
+        ),
+        (
+            "gate",
+            2,
+            "If it refuses, naming nodes or a gate the chain lacks, tell the human and ask "
+            "whether to approve unsliced.",
+        ),
+        (
+            "gate",
+            2,
+            "`chain_review` or earlier: the plan or its slicing is redone, so the rewind "
+            "retires every slice.",
+        ),
+        ("gate", 2, "`implementation`, to redo some slices: reopen each first,"),
     ],
     ids=[
         "child-fork-never-head",
@@ -621,6 +647,12 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         "controller-done-is-what-slices-says",
         "controller-state-commit-skips-a-no-op",
         "controller-no-reference-walks-here",
+        "controller-unsliceable-chain-walks-unsliced",
+        "controller-rewind-retires-the-slices",
+        "controller-base-moved-rebases-onto-the-new-tip",
+        "gate-unsliceable-chain-asks",
+        "gate-rewind-before-implementation-retires",
+        "gate-rewind-to-implementation-reopens-first",
     ],
 )
 def test_a_skill_carries_the_final_review_fixes(texts, name, section, needle):

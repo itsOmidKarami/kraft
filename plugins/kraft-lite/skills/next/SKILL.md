@@ -46,8 +46,9 @@ You get `node`, `hooks`, `gate`, `attempt`, `cap`, `status`, `note` and `sliced`
     target, and archive its child, as `kraft-lite:run-slices` says after a merge,
     then export state, as `kraft-lite:run-slices` describes under State branch.
     Record a slice merged only once every slice it comes after is: `slice-set`
-    refuses it before. Name the slices still waiting and stop. Once all are merged, `close`, then this
-    skill again. Never open this node's gate: the user's merges are the answer.
+    refuses it before. Name the slices still waiting and stop. Once all are
+    merged, `close`, then this skill again. Never open this node's gate: the
+    user's merges are the answer.
   - `hooks` - step 2.
 
 In a sliced `feature` run, every hook from `verify` on runs in a worktree of the

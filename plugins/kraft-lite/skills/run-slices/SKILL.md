@@ -29,10 +29,16 @@ wakes this session, so they invoke `kraft-lite:run-slices` to continue it.
 
 ## 1. When to slice
 
+Slicing needs the default chain's `chain_finalized` gate after `chain_review`,
+and its nodes `implementation`, `verify`, `open_mr`, `mr_checks`,
+`human_review`, `merge` and `post_merge_watch`: check the frozen chain,
+`.kraft-lite/chains/<chain-id>.json`. On a chain without them, `approve --slices`
+refuses and names what is missing: draw no proposal; say so and walk it unsliced.
+
 At `chain_review`, after its bound `on.chain.review_ready` hook. A plan with no
 `## Slices` section and few enough tasks for one session's context is not
-sliced: say so, delete any `.kraft-lite/proposals/<chain-id>.json` left by a
-rejected round, then `KL gate --name chain_finalized` and invoke
+sliced: say so, delete any `.kraft-lite/proposals/<chain-id>.json` left by an
+earlier round, then `KL gate --name chain_finalized` and invoke
 `kraft-lite:gate`; the chain continues as one.
 
 1. Read the plan's `## Slices` section (bullets like `- **Slice 2: <title>.**
@@ -54,7 +60,8 @@ rejected round, then `KL gate --name chain_finalized` and invoke
 6. On the user's answer, invoke `kraft-lite:gate`, which records it: an
    approval as `approve --slices .kraft-lite/proposals/<chain-id>.json`, a
    rejection by deleting the proposal. No slice records exist before the
-   approval. A chain rewound past `chain_finalized` cannot be sliced again.
+   approval. A rewind to `chain_review` or earlier retires the slices: `slices`
+   lists none, archive their children, and this section runs again.
 
 ## 2. Before the first child
 
@@ -257,7 +264,10 @@ has no findings or only small ones, start what `KL slices` lists, as section 3
 says.
 
 - Findings to fix: send them to the child, `KL slice-set --slice <key> --status running`,
-  and review again when it reports the fix.
+  and review again when it reports the fix. `KL slices` then lists in
+  `base_moved` each slice cut early from it: once it is back in review, tell
+  each to rebase onto its branch's new tip, and record the fork it reports
+  (section 5).
 - `feature` mode: merge into the feature branch only on green CI at the exact
   head you reviewed (pin the head SHA), and only once every slice it comes after
   is merged; a head that moved, read the new commits.
@@ -273,7 +283,8 @@ After a merge (yours, or in `main` mode the user's), in order:
    until it is merged.
 2. Tell each slice cut from this slice's branch, and each slice cut from the
    target, to rebase onto the target. Never one cut from another slice that is
-   still unmerged: it rebases when that slice merges. The `Cut from:` line you
+   still unmerged: it rebases when that slice merges, or onto its new tip as
+   above. The `Cut from:` line you
    gave each child, and its fork decision, say which it is.
 3. Archive the child.
 4. Start what `KL slices` now lists, as section 3 says.

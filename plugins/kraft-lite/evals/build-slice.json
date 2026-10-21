@@ -173,5 +173,19 @@
       "Does not report the chain's per-node summary table as its message to the controller in place of the done message",
       "Stops after sending it: merges nothing, opens no other PR, and asks the user nothing"
     ]
+  },
+  {
+    "skills": [
+      "kraft-lite:build-slice"
+    ],
+    "query": "[Message from session_01Ctrl00] Slice a's branch moved: my review sent it back, and its fix is at 9c1e7f0 on ledger/a-rows. a is not merged. Rebase onto a's new tip.",
+    "setup": "A cloud Claude Code child session for slice b 'Writers' of chain kl-7f3a91c2 (repo acme/ledger), slice chain kl-b82c4d11, own branch ledger/b-writers, controller session_01Ctrl00. Its starting instructions are the eleven items of kraft-lite:run-slices section 3, for slice b (plan tasks 2-3, after slice a), with the line `Cut from: a at 5aa01c2`: it was cut early from a's branch ledger/a-rows while a was in review. At setup it wrote `<git common dir>/kraft-lite/kl-7f3a91c2/b/fork` holding 5aa01c2 and `<git common dir>/kraft-lite/kl-7f3a91c2/b/base` holding `a`. Slice chain at node implementation, working tree clean, three commits of its own on ledger/b-writers, draft PR into feat/ledger-export open. Scoped test paths: tests/export/test_writers.py. Since the cut, a's branch was force-pushed with fixes to the row model that b builds on.",
+    "expected_behavior": [
+      "Runs `git fetch origin`, checks the fork with `git merge-base --is-ancestor 5aa01c2 HEAD`, then `git rebase --onto origin/ledger/a-rows 5aa01c2`",
+      "Does not rebase onto feat/ledger-export, and leaves `base` holding `a`: never writes `target` there while a is unmerged",
+      "Updates the fork file to the tip it rebased onto (9c1e7f0, `git rev-parse origin/ledger/a-rows`)",
+      "Re-runs only tests/export/test_writers.py and force-pushes only ledger/b-writers (force-with-lease is fine)",
+      "Sends the controller a status with the new head, the test result and the line `Cut from: a at 9c1e7f0`"
+    ]
   }
 ]

@@ -211,5 +211,46 @@
       "Applies the fallbacks: walks the slices in this session one after another in `ready` order, starting with a, with the same review, merge and state steps (`kl.py slice-set` for each slice it starts, then export state)",
       "Says that nothing will wake this session for a check-in, so the user invokes `kraft-lite:run-slices` to continue the run"
     ]
+  },
+  {
+    "skills": [
+      "kraft-lite:run-slices",
+      "kraft-lite:gate"
+    ],
+    "query": "Carry on.",
+    "setup": "The cloud controller session session_01Ctrl00 for chain kl-7f3a91c2 'Ledger export' in repo acme/ledger (base branch main), on its own branch claude/ledger-export-x1, which is the run's state branch and its checkout. `$CLAUDE_PLUGIN_ROOT` is set and the kraft-lite skills are installed; the claude-code-remote tools are loaded. The chain was started from the repo's own template 'quick' (`.kraft-lite/chains/kl-7f3a91c2.json`), which has no mr_checks and no post_merge_watch node; its chain_review node is gated chain_finalized. The plan has a `## Slices` section with three slices. You wrote `.kraft-lite/proposals/kl-7f3a91c2.json`, ran `gate --name chain_finalized`, and presented the proposal; the user approved it. You then ran `python3 \"$CLAUDE_PLUGIN_ROOT/kl.py\" approve --slices .kraft-lite/proposals/kl-7f3a91c2.json --chain-id kl-7f3a91c2`, which exited 1 printing `kraft-lite: slicing needs the default chain's nodes; this run's chain 'quick' has no mr_checks, post_merge_watch`. `state` still prints node chain_review, status blocked, gate chain_finalized, sliced null.",
+    "expected_behavior": [
+      "Tells the user the chain cannot be sliced, naming what the refusal names: the template 'quick' lacks mr_checks and post_merge_watch",
+      "Does not edit the frozen chain, the template or kl.py, writes no slice or run record by hand, and does not run `approve --slices` again",
+      "Walks the chain unsliced: a plain `approve --chain-id kl-7f3a91c2` at chain_finalized, recorded only once the user agrees to go on unsliced (asking them is fine)",
+      "Starts no child session"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:run-slices"
+    ],
+    "query": "[Message from session_01Aaa] status | a | Fixed both findings from your review. New head 9c1e7f0 on ledger/a-rows; scoped tests pass. Ready for review again.",
+    "setup": "The cloud controller session session_01Ctrl00 for chain kl-7f3a91c2 'Ledger export' in repo acme/ledger (base branch main), on its own branch claude/ledger-export-x1, which is the run's state branch and its checkout. `$CLAUDE_PLUGIN_ROOT` is set and the kraft-lite skills are installed; the claude-code-remote tools are loaded. Sliced in feature mode, feature branch feat/ledger-export. Slices: a 'Row model' (task 1; your review of its PR #51 at head 5aa01c2 found two must-fix findings, so you sent them to its child session_01Aaa and ran `slice-set --slice a --status running`); b 'Writers' (tasks 2-3, after a; running as session_01Bbb on ledger/b-writers, started early from a's branch before that review: the decisions log has 'Start b from a's branch?' -> 'Forked from ledger/a-rows at 5aa01c2', and its starting instructions carry `Cut from: a at 5aa01c2`); c 'Importer' (task 4, after b; waiting). `kl.py slices` prints ready [], early [], base_moved [\"b\"], and b's entry has cut_from \"a\". Default rights.",
+    "expected_behavior": [
+      "Records a back in review with `kl.py slice-set --slice a --status in_review` and reviews PR #51 again at head 9c1e7f0",
+      "Tells b's child (session_01Bbb) to rebase onto a's new tip, origin/ledger/a-rows at 9c1e7f0, now or once a is back in review: not onto the feature branch, because a is not merged",
+      "Says it records the fork b reports after that rebase with `kl.py slice-set --slice b --fork <sha>`",
+      "Does not merge a or record it merged, and does not start c",
+      "Exports state after its writes"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:run-slices"
+    ],
+    "query": "The plan is approved and it's big. Split it across sessions and run it.",
+    "setup": "The cloud controller session session_01Ctrl00 for chain kl-7f3a91c2 'Ledger export' in repo acme/ledger (base branch main), on its own branch claude/ledger-export-x1. `$CLAUDE_PLUGIN_ROOT` is set and the kraft-lite skills are installed; the claude-code-remote tools are loaded. The chain was started with `--chain .kraft-lite/quick.json`, the repo's own template 'quick', frozen at `.kraft-lite/chains/kl-7f3a91c2.json`: its nodes are spec, plan, chain_review (gated chain_finalized), implementation, verify, open_mr, human_review and merge - no mr_checks and no post_merge_watch. `state --chain-id kl-7f3a91c2` prints node chain_review, status open, sliced null, and its bound on.chain.review_ready hook has just run. The plan has twelve tasks and a `## Slices` section with four slices. No proposal file exists.",
+    "expected_behavior": [
+      "Tells the user this chain cannot be sliced: slicing needs the default chain's nodes and its chain_finalized gate, and 'quick' has no mr_checks or post_merge_watch",
+      "Does not write a slicing proposal or try `approve --slices` expecting it to work, and starts no child session",
+      "Does not edit the frozen chain or the template to add the missing nodes",
+      "Walks it unsliced: `gate --name chain_finalized` and kraft-lite:gate for a plain approval, or asks the user to choose between that and starting a new chain on the default template"
+    ]
   }
 ]

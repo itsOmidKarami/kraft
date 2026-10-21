@@ -38,10 +38,10 @@ command records the answer:
 
       python3 "$CLAUDE_PLUGIN_ROOT/kl.py" approve --slices .kraft-lite/proposals/<chain-id>.json --chain-id <id>
 
-  A plain `approve` here leaves the chain unsliced for good.
+  A plain `approve` here leaves the chain unsliced. If it refuses, naming
+  nodes or a gate the chain lacks, tell the human and ask whether to approve
+  unsliced.
 - `sliced` null and no proposal file: a plain `approve`.
-- `sliced` not null: the chain was sliced and rewound past this gate, and
-  cannot be sliced again. `--slices` is refused there; use a plain `approve`.
 - A rejection: also `rm .kraft-lite/proposals/<chain-id>.json`, so it cannot be
   approved later. No slices exist yet; the proposal is redrawn when the node
   reopens.
@@ -57,6 +57,18 @@ something built further back, name where it goes:
 That reopens that node and every node after it, so the redone work is verified
 again on the way back rather than skipped. An unknown `<node>` makes the verb list
 the chain's nodes.
+
+In a sliced run (`sliced` not null), where it lands decides the slices' fate:
+
+- `chain_review` or earlier: the plan or its slicing is redone, so the rewind
+  retires every slice. `slices` then lists none, and the chain is sliced again,
+  from a new proposal, at `chain_review`.
+- `implementation`, to redo some slices: reopen each first,
+  `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" slice-set --slice <key> --status running --chain-id <id>`,
+  then rewind. With every slice still done the rewind is refused, as
+  `implementation` would close at once. `kraft-lite:run-slices` reopens their
+  children.
+- Later: the slices stay as they are.
 
 `--chain-id` is what stops an answer landing on the wrong chain, and with two
 unfinished chains in the directory the verb refuses to guess. `--note` is
