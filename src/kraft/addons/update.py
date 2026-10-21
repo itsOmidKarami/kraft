@@ -1854,10 +1854,14 @@ def auto_update(
     each one's outcome in `status.json`: `applied`, `up to date`, `held` or
     `failed` (with `kind`: `network`, `auth`, `refused` or `busy`). Never
     installs, never re-installs, and never applies a ref or alias changed by
-    hand: those wait for a person's `update`. A collection none of whose
-    add-ons auto-update is not fetched. `cancel` (set at shutdown) is checked
-    before each collection: the rest are reported `cancelled`, and not
-    recorded, so a restart does not read a stop as a failure."""
+    hand: those wait for a person's `update`. An inheritance tree's add-ons
+    move as one set, across collections, and a hand change pending on one
+    holds the rest of its tree with it. An add-on whose auto-update is off
+    stays at its locked version, so a move that needs it to move is held. A
+    collection none of whose add-ons auto-update is not fetched. `cancel` (set
+    at shutdown) is checked before each tree: the rest are reported
+    `cancelled`, and not recorded, so a restart does not read a stop as a
+    failure."""
     import json
 
     from kraft import paths
@@ -1871,6 +1875,7 @@ def auto_update(
         return {}  # the load says why
     outcomes: dict[str, dict] = {}
     ids = []
+    pending_in: dict[str, str] = {}
     for addon_id, locked in lock.addons.items():
         if addon_id not in config.addons:
             continue
@@ -1886,13 +1891,9 @@ def auto_update(
             )
             if changed
         ]
+        ids.append(addon_id)
         if pending:
-            outcomes[addon_id] = {
-                "outcome": "held",
-                "message": f"{pending[0]} change pending; run kraft admin addon update",
-            }
-        else:
-            ids.append(addon_id)
+            pending_in[addon_id] = pending[0]
     held: dict[str, str] = {}
 
     def accept(group: Group) -> bool:
@@ -1900,21 +1901,32 @@ def auto_update(
         held.update(whys)
         return not whys
 
-    by_collection: dict[str, list[str]] = {}
-    for addon_id in ids:
-        by_collection.setdefault(addon_id.split("@", 1)[1], []).append(addon_id)
+    # Off add-ons are in the map too, so a tree through one still groups.
+    parents = {a.id: a.parent for a in load.installed(config_dir, addons_root) if a.repo_id is None}
     results: list[Result] = []
-    for collection_ids in by_collection.values():
+    for tree in inherit.trees(ids, parents):
         if cancel is not None and cancel.is_set():
-            for addon_id in collection_ids:
+            for addon_id in tree:
                 outcomes[addon_id] = {
                     "outcome": "failed",
                     "kind": "cancelled",
                     "message": "stopped at shutdown",
                 }
             continue
+        first = next((i for i in tree if i in pending_in), None)
+        if first is not None:
+            for addon_id in tree:
+                what = pending_in.get(addon_id)
+                outcomes[addon_id] = {
+                    "outcome": "held",
+                    "message": f"{what} change pending; run kraft admin addon update"
+                    if what is not None
+                    else f"with {first}: its {pending_in[first]} change is pending; "
+                    "run kraft admin addon update",
+                }
+            continue
         results += update(
-            collection_ids,
+            tree,
             accept=accept,
             config_dir=config_dir,
             addons_root=addons_root,

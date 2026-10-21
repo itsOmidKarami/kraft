@@ -345,3 +345,268 @@ def test_a_descendant_that_cannot_be_read_holds_its_parents_auto_update(tmp_path
     assert result["outcome"] == "held", result
     assert "team@corp: its store does not read" in result["message"], result
     assert _versions(config_dir)["company@corp"] == "1.0.0"
+
+
+COMPANY, DEPT, TEAM = "company@corp", "platform-dept@platform", "team-payments@payments"
+UNDER = {DEPT: COMPANY, TEAM: DEPT}
+
+
+@pytest.fixture
+def tree_home(tmp_path, monkeypatch):
+    """`company@corp` <- `platform-dept@platform` <- `team-payments@payments`,
+    each from its own collection at range 1 and set to update itself, beside
+    `tools@acme`, a root of its own that is not; then every URL `fetch.fetch`
+    is called with, from here on."""
+    company, tools = RELEASE, RELEASE
+    dept, team = ({**RELEASE, "parent": (UNDER[i], "1")} for i in (DEPT, TEAM))
+    repos, (config_dir, addons_dir) = make_tree(
+        tmp_path, {COMPANY: company, DEPT: dept, TEAM: team, "tools@acme": tools}
+    )
+    on = {i: {"auto_update": True} for i in (COMPANY, DEPT, TEAM)}
+    edit_addons_yaml(config_dir, lambda w: w["addons"].update(on))
+    fetched = []
+    real = fetch.fetch
+
+    def spy(addons_dir, name, url, ref):
+        fetched.append(url)
+        return real(addons_dir, name, url, ref)
+
+    monkeypatch.setattr(fetch, "fetch", spy)
+    return repos, config_dir, addons_dir, fetched
+
+
+def _off(config_dir, *ids):
+    edit_addons_yaml(config_dir, lambda w: w["addons"].update(dict.fromkeys(ids, True)))
+
+
+def _put(repos, addon_id, version, range_=None, *, note=None, **spec):
+    """Publish `addon_id` at `version`, under its tree parent at `range_` (1
+    when not given) unless it is a root. `note` is content only: a skill
+    named for the add-on, so no relative's skill shadows it."""
+    name, collection = addon_id.split("@", 1)
+    if note is not None:
+        spec["skills"] = {f"{name}-notes": note}
+    if addon_id in UNDER:
+        spec["manifest"] = child_manifest(UNDER[addon_id], range_ or "1")
+    publish(repos[collection], name, version=version, **spec)
+
+
+def _each_publishes(repos, config_dir):
+    for addon_id in (COMPANY, DEPT, TEAM):
+        _put(repos, addon_id, "1.1.0", note="new in 1.1.0")
+
+
+def _cross_collection(repos, config_dir):
+    _put(repos, COMPANY, "2.0.0")
+    _put(repos, DEPT, "1.1.0", "2")
+
+
+def _team_off(repos, config_dir):
+    _off(config_dir, TEAM)
+    _each_publishes(repos, config_dir)
+
+
+def _dept_off_moves(repos, config_dir):
+    _off(config_dir, DEPT)
+    _put(repos, DEPT, "2.0.0")
+    _put(repos, TEAM, "1.1.0", "2")
+
+
+def _team_off_moves(repos, config_dir):
+    _off(config_dir, TEAM)
+    _put(repos, TEAM, "1.1.0", "2")
+    _put(repos, DEPT, "2.0.0")
+
+
+def _team_a_directory(repos, config_dir):
+    def to_path(written):
+        written["collections"]["payments"] = {"path": str(repos["payments"])}
+        written["addons"][TEAM] = True
+
+    edit_addons_yaml(config_dir, to_path)
+    _put(repos, TEAM, "1.0.0", note="changed on disk")
+    for addon_id in (COMPANY, DEPT):
+        _put(repos, addon_id, "1.1.0", note="new in 1.1.0")
+
+
+def _company_drops_a_gate(repos, config_dir):
+    _put(repos, COMPANY, "1.1.0", chains={"ship": chain("base")})
+    _put(repos, DEPT, "1.1.0", note="content only")
+
+
+def _company_drops_a_gate_over_dept_off(repos, config_dir):
+    _off(config_dir, DEPT)
+    _put(repos, COMPANY, "1.1.0", chains={"ship": chain("base")})
+    _put(repos, TEAM, "1.1.0", note="content only")
+
+
+def _company_outgrows_dept(repos, config_dir):
+    _put(repos, COMPANY, "2.0.0")
+
+
+def _team_ref_by_hand(repos, config_dir):
+    git(repos["payments"], "tag", "v2")
+    _put(repos, TEAM, "1.1.0", note="new")
+    edit_addons_yaml(config_dir, lambda w: w["collections"]["payments"].update(ref="main"))
+    _put(repos, COMPANY, "1.1.0", note="new")
+
+
+def _tools_drops_a_gate(repos, config_dir):
+    on = {"tools@acme": {"auto_update": True}}
+    edit_addons_yaml(config_dir, lambda w: w["addons"].update(on))
+    publish(repos["acme"], "tools", version="1.1.0", chains={"ship": chain("base")})
+    _each_publishes(repos, config_dir)
+
+
+def _team_names_a_new_parent(repos, config_dir):
+    publish(repos["corp"], "audit", **RELEASE)
+    publish(
+        repos["payments"],
+        "team-payments",
+        version="1.1.0",
+        manifest=child_manifest("audit@corp", "1"),
+    )
+
+
+ALL = ("corp", "platform", "payments", "acme")
+TEAM_OFF = (
+    f"{TEAM}'s range 2 does not accept {DEPT} 1.0.0 (needs 2.x); run kraft admin addon update "
+    "to move it with its relatives, or wait for a release that fits"
+)
+OUTGROWN = (
+    f"{COMPANY} 2.0.0 is outside {DEPT}'s range 1 (needs 1.x); run kraft admin addon update "
+    "to move it with its relatives, or wait for a release that fits"
+)
+RANGE_RAISED = f"parent range: {COMPANY} 1 -> 2; run kraft admin addon update"
+PENDING = f"with {TEAM}: its ref change is pending; run kraft admin addon update"
+
+
+@pytest.mark.parametrize(
+    "setup, outcomes, versions, says, unfetched",
+    [
+        (
+            _each_publishes,
+            {COMPANY: "applied", DEPT: "applied", TEAM: "applied"},
+            {COMPANY: "1.1.0", DEPT: "1.1.0", TEAM: "1.1.0"},
+            {},
+            ("acme",),
+        ),
+        (
+            _cross_collection,
+            {COMPANY: "held", DEPT: "held", TEAM: "up to date"},
+            {COMPANY: "1.0.0", DEPT: "1.0.0", TEAM: "1.0.0"},
+            {COMPANY: f"with {DEPT}: {RANGE_RAISED}", DEPT: RANGE_RAISED},
+            ("acme",),
+        ),
+        (
+            _team_off,
+            {COMPANY: "applied", DEPT: "applied"},
+            {COMPANY: "1.1.0", DEPT: "1.1.0", TEAM: "1.0.0"},
+            {},
+            ("payments", "acme"),
+        ),
+        (
+            _dept_off_moves,
+            {COMPANY: "up to date", TEAM: "held"},
+            {COMPANY: "1.0.0", DEPT: "1.0.0", TEAM: "1.0.0"},
+            {TEAM: TEAM_OFF},
+            ("platform", "acme"),
+        ),
+        (
+            _team_off_moves,
+            {COMPANY: "up to date", DEPT: "held"},
+            {COMPANY: "1.0.0", DEPT: "1.0.0", TEAM: "1.0.0"},
+            {DEPT: f"{DEPT} 2.0.0 is outside {TEAM}'s range 1 (needs 1.x); run kraft admin addon"},
+            ("payments", "acme"),
+        ),
+        (
+            _team_a_directory,
+            {COMPANY: "applied", DEPT: "applied"},
+            {COMPANY: "1.1.0", DEPT: "1.1.0", TEAM: "1.0.0"},
+            {},
+            ("payments", "acme"),
+        ),
+        (
+            _company_drops_a_gate,
+            {COMPANY: "held", DEPT: "held", TEAM: "up to date"},
+            {COMPANY: "1.0.0", DEPT: "1.0.0", TEAM: "1.0.0"},
+            {COMPANY: ("gate removed",), DEPT: (f"with {COMPANY}: ", "gate removed")},
+            ("acme",),
+        ),
+        (
+            _company_drops_a_gate_over_dept_off,
+            {COMPANY: "held", TEAM: "held"},
+            {COMPANY: "1.0.0", DEPT: "1.0.0", TEAM: "1.0.0"},
+            {COMPANY: ("gate removed",), TEAM: (f"with {COMPANY}: ", "gate removed")},
+            ("platform", "acme"),
+        ),
+        (
+            _company_outgrows_dept,
+            {COMPANY: "held", DEPT: "up to date", TEAM: "up to date"},
+            {COMPANY: "1.0.0", DEPT: "1.0.0", TEAM: "1.0.0"},
+            {COMPANY: OUTGROWN},
+            ("acme",),
+        ),
+        (
+            _team_ref_by_hand,
+            {COMPANY: "held", DEPT: "held", TEAM: "held"},
+            {COMPANY: "1.0.0", DEPT: "1.0.0", TEAM: "1.0.0"},
+            {
+                TEAM: "ref change pending; run kraft admin addon update",
+                COMPANY: PENDING,
+                DEPT: PENDING,
+            },
+            ALL,
+        ),
+        (
+            _tools_drops_a_gate,
+            {COMPANY: "applied", DEPT: "applied", TEAM: "applied", "tools@acme": "held"},
+            {COMPANY: "1.1.0", DEPT: "1.1.0", TEAM: "1.1.0", "tools@acme": "1.0.0"},
+            {"tools@acme": "gate removed"},
+            (),
+        ),
+        (
+            _team_names_a_new_parent,
+            {COMPANY: "up to date", DEPT: "up to date", TEAM: "failed"},
+            {COMPANY: "1.0.0", DEPT: "1.0.0", TEAM: "1.0.0"},
+            {TEAM: "its parent audit@corp is not installed; install it first"},
+            ("acme",),
+        ),
+    ],
+    ids=[
+        "whole-tree-moves",
+        "cross-collection-set",
+        "one-member-off",
+        "child-needs-off-parent",
+        "parent-needs-off-child",
+        "directory-member-changed",
+        "person-hold-holds-tree",
+        "held-through-an-off-member",
+        "range-hold-waits",
+        "hand-change-holds-tree",
+        "unrelated-tree-independent",
+        "never-pulls-in",
+    ],
+)
+def test_auto_update_moves_a_tree(tree_home, setup, outcomes, versions, says, unfetched):
+    """A tree's auto-update-on add-ons move as one set, across collections; an
+    add-on whose auto-update is off counts at its locked version, gets no
+    entry, and its collection is not fetched for it."""
+    repos, config_dir, addons_dir, fetched = tree_home
+    setup(repos, config_dir)
+    stores = {a.id: a.root for a in load.installed(config_dir, addons_dir)}
+
+    result = update.auto_update(config_dir, addons_dir)
+
+    assert {i: o["outcome"] for i, o in result.items()} == outcomes, result
+    for addon_id, fragments in says.items():
+        for fragment in fragments if isinstance(fragments, tuple) else (fragments,):
+            assert fragment in result[addon_id]["message"], result[addon_id]
+    assert _versions(config_dir) == {**versions, "tools@acme": versions.get("tools@acme", "1.0.0")}
+    assert sorted(update.read_status(addons_dir)) == sorted(outcomes)
+    assert not {repos[c].as_uri() for c in unfetched} & set(fetched), fetched
+    if TEAM not in outcomes:
+        assert stores[TEAM] == next(
+            a.root for a in load.installed(config_dir, addons_dir) if a.id == TEAM
+        )
+    assert "audit@corp" not in (config_dir / "addons.yaml").read_text()

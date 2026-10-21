@@ -453,7 +453,7 @@ origin: src/kraft/api/deps.py §collect_addon_stores
 ## REQ auto-update-is-opt-in
 
 WHERE an add-on's auto-update is on, through its collection's `auto_update: true` or its own, the system SHALL update that add-on in the background after the server starts and once a day while it runs, and SHALL NOT fetch a collection none of whose installed add-ons auto-update, except to restore a missing store; an add-on whose auto-update is off is never moved by a relative's.
-enforced-by: tests/addons/test_auto_update.py::test_who_auto_updates[addon-on], tests/addons/test_auto_update.py::test_who_auto_updates[collection-on], tests/addons/test_auto_update.py::test_who_auto_updates[neither-is-not-fetched], tests/addons/test_auto_update.py::test_auto_update_takes_no_relatives, tests/api/test_deps.py::test_the_server_takes_an_auto_update_and_loads_it, tests/api/test_deps.py::test_a_running_server_checks_for_auto_updates_again
+enforced-by: tests/addons/test_auto_update.py::test_who_auto_updates[addon-on], tests/addons/test_auto_update.py::test_who_auto_updates[collection-on], tests/addons/test_auto_update.py::test_who_auto_updates[neither-is-not-fetched], tests/addons/test_auto_update.py::test_auto_update_takes_no_relatives, tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[one-member-off], tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[child-needs-off-parent], tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[parent-needs-off-child], tests/api/test_deps.py::test_the_server_takes_an_auto_update_and_loads_it, tests/api/test_deps.py::test_a_running_server_checks_for_auto_updates_again
 origin: src/kraft/addons/update.py §auto_update
 
 ## REQ auto-update-holds-what-widens-a-run
@@ -464,8 +464,8 @@ origin: src/kraft/addons/update.py §may_apply_unattended
 
 ## REQ auto-update-never-installs-or-re-installs
 
-The system SHALL NOT auto-update an add-on that has no lock entry, to a newer commit at an unchanged version, or to a changed alias, ref or collection URL.
-enforced-by: tests/addons/test_auto_update.py::test_auto_update_never[installs], tests/addons/test_auto_update.py::test_auto_update_never[re-installs], tests/addons/test_auto_update.py::test_auto_update_never[applies-a-ref-change], tests/addons/test_auto_update.py::test_auto_update_never[follows-a-new-url]
+The system SHALL NOT auto-update an add-on that has no lock entry, to a newer commit at an unchanged version, or to a changed alias, ref or collection URL, or install an ancestor a new version names.
+enforced-by: tests/addons/test_auto_update.py::test_auto_update_never[installs], tests/addons/test_auto_update.py::test_auto_update_never[re-installs], tests/addons/test_auto_update.py::test_auto_update_never[applies-a-ref-change], tests/addons/test_auto_update.py::test_auto_update_never[follows-a-new-url], tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[never-pulls-in]
 origin: src/kraft/addons/update.py §auto_update
 
 ## REQ failed-auto-update-keeps-the-locked-version
@@ -609,7 +609,7 @@ origin: src/kraft/addons/update.py §update
 ## REQ a-move-held-by-a-range-is-waiting
 
 IF a move is dropped by a range, THEN the system SHALL report it held with that range and keep the locked version.
-enforced-by: tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[parent-held], tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[child-held], tests/addons/test_auto_update.py::test_a_range_held_auto_update_waits
+enforced-by: tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[parent-held], tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[child-held], tests/addons/test_auto_update.py::test_a_range_held_auto_update_waits, tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[range-hold-waits]
 origin: src/kraft/addons/update.py §_settle
 
 ## REQ install-pulls-in-missing-ancestors
@@ -623,3 +623,9 @@ origin: src/kraft/addons/update.py §update
 WHEN an ancestor moves, the system SHALL list in the review of each installed descendant's nearest moving ancestor the names that descendant newly shadows and its `remove:` entries that stop doing anything, each line naming the descendant by its id, and the chain changes it sees, each line carrying only its namespace; SHALL read the descendant's files as loading does, and when it cannot, say so in a Reach line; and SHALL hold an unattended update for a person when a descendant gains a Reach line from it.
 enforced-by: tests/addons/test_update_tree.py::test_a_parent_review_shows_each_descendants_changes[shadow], tests/addons/test_update_tree.py::test_a_parent_review_shows_each_descendants_changes[stale-remove], tests/addons/test_update_tree.py::test_a_descendant_that_cannot_be_read_holds_its_parents_update[edited-file-still-shown], tests/addons/test_update_tree.py::test_a_descendant_that_cannot_be_read_holds_its_parents_update[unreadable-store], tests/addons/test_update_tree.py::test_a_descendants_lines_go_to_its_nearest_moving_ancestor, tests/addons/test_auto_update.py::test_a_descendants_reach_holds_its_parents_auto_update[descendant-shadows-a-new-name], tests/addons/test_auto_update.py::test_a_descendant_that_cannot_be_read_holds_its_parents_auto_update
 origin: src/kraft/addons/update.py §_below
+
+## REQ auto-update-groups-by-tree
+
+WHEN auto-update runs, the system SHALL judge the waiting moves of each inheritance tree's auto-update-on add-ons as one set, across collections, counting every add-on whose auto-update is off at its locked version, and SHALL apply the set only if no move in it is held for a person; otherwise it SHALL hold the whole set.
+enforced-by: tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[cross-collection-set], tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[one-member-off], tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[child-needs-off-parent], tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[person-hold-holds-tree], tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[held-through-an-off-member], tests/addons/test_auto_update.py::test_auto_update_moves_a_tree[hand-change-holds-tree]
+origin: src/kraft/addons/update.py §auto_update
