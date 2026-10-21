@@ -94,3 +94,47 @@ async def test_fake_forge_records_labels_and_retries():
     await f.retry_jobs(repo="/r", ci=forge.CIStatus(state="failed", url="http://x/1"))
 
     assert (f.labels, f.retried) == (["release::patch"], ["http://x/1"])
+
+
+_DROP = forge.QueueRead(kind="train", state="dropped", cause="code", reason="pipeline failed")
+
+
+@pytest.mark.parametrize(
+    ("kind", "drops", "state", "cause"),
+    [
+        pytest.param("train", [_DROP], "dropped", "code", id="train-drop"),
+        pytest.param("none", [], "absent", None, id="no-queue"),
+    ],
+)
+async def test_a_queue_drop_leaves_the_mr_open_and_unqueued(kind, drops, state, cause):
+    f = forge.FakeForge(queue_kind=kind, queue_drops=list(drops), merge_delay=2)
+    mr = await _opened(f)
+
+    await f.merge(repo="/r", branch="kraft/abc", mr=mr)
+
+    read = await f.merge_queue(repo="/r", branch="kraft/abc", base="main")
+    found = await f.find_mr(repo="/r", branch="kraft/abc")
+    assert (read.state, read.cause) == (state, cause)
+    assert f.merge_calls == [mr.number]
+    if kind == "none":
+        assert read == forge.QueueRead()
+        assert found.merge_queued is True
+    else:
+        assert (found.state, found.merge_queued, f.merged) == ("open", False, [])
+        assert read == _DROP
+
+
+async def test_a_second_merge_clears_the_drop_and_consumes_the_next():
+    again = forge.QueueRead(kind="train", state="dropped", cause="conflict")
+    f = forge.FakeForge(queue_kind="train", queue_drops=[_DROP, again])
+    mr = await _opened(f)
+
+    await f.merge(repo="/r", branch="kraft/abc", mr=mr)
+    await f.merge(repo="/r", branch="kraft/abc", mr=mr)
+    assert (await f.merge_queue(repo="/r", branch="kraft/abc", base="main")).cause == "conflict"
+
+    await f.merge(repo="/r", branch="kraft/abc", mr=mr)
+
+    found = await f.find_mr(repo="/r", branch="kraft/abc")
+    assert (found.state, f.merge_calls) == ("merged", [1, 1, 1])
+    assert (await f.merge_queue(repo="/r", branch="kraft/abc", base="main")).state == "merged"
