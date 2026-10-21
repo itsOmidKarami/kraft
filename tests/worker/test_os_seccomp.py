@@ -37,7 +37,7 @@ def run_bpf(program: bytes, nr: int, audit_arch: int, arg1: int = 0) -> int:
 
 
 TIOCSTI, TIOCLINUX, TCGETS = 0x5412, 0x541C, 0x5401
-#: open_tree, move_mount, fsopen, fsconfig, fsmount, fspick, mount_setattr.
+#: open_tree, move_mount, fsopen, fsconfig, fsmount, fspick, mount_setattr, open_tree_attr.
 NEW_MOUNT_API = (428, 429, 430, 431, 432, 433, 442, 467)
 _REQUEST = {
     TIOCSTI: "TIOCSTI",
