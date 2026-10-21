@@ -559,9 +559,7 @@ class _Validator:
                 for key in ("on_failure", "fix_loop"):
                     if isinstance(node.get(key), dict):
                         self.shape(node[key], f"{id}.{key}")
-                loop = node.get("fix_loop") or {}
-                if isinstance(loop.get("judge"), dict):
-                    self.task(loop["judge"], f"{id}.fix_loop.judge")
+                self.loop(node.get("fix_loop") or {}, f"{id}.fix_loop")
                 if isinstance(node.get("escalation"), dict):
                     escalation = node["escalation"]
                     self.task(escalation, f"{id}.escalation.{escalation.get('id')}")
@@ -587,6 +585,19 @@ class _Validator:
             else:
                 raise self.fail(id, f"kind must be 'exec' or 'gate', not {kind!r}")
             seen[id] = kind
+
+    def loop(self, loop: dict, path: str) -> None:
+        """A fix loop's judge is a task with an id, and its cap a count: the
+        walk reads both (`kraft.templates.models.FixLoop`)."""
+        judge = loop.get("judge")
+        if judge is not None:
+            if not isinstance(judge, dict) or not isinstance(judge.get("id"), str):
+                raise self.fail(f"{path}.judge", "must be a task with an id")
+            self.task(judge, f"{path}.judge")
+        cap = loop.get("max_attempts")
+        # `bool` is an `int`, and `true` would be read as one attempt.
+        if cap is not None and (not isinstance(cap, int) or isinstance(cap, bool) or cap < 1):
+            raise self.fail(f"{path}.max_attempts", f"must be a whole number above 0, not {cap!r}")
 
     def shape(self, container: dict, path: str) -> None:
         present = [key for key in ("tasks", "steps") if container.get(key) is not None]
@@ -705,3 +716,35 @@ def _freeze(library: Library, chain_id: str, source: str, expanded: dict) -> dic
             }
         )
     return {"format": "v1", "id": chain_id, "source": source, "nodes": nodes}
+
+
+def _covered_by(node: dict) -> str | None:
+    """The attachment kind that makes `node` redundant: a gate's `artifact`
+    (never a `chain_finalized` gate's), or the one kind every task in an exec
+    node's own steps produces (`kraft.templates.models.ResolvedNode.covered_by`)."""
+    if node["kind"] == "gate":
+        return None if node["chain_finalized"] else node["artifact"]
+    produces = {task["produces"] for step in node["steps"] for task in step["tasks"]}
+    return produces.pop() if len(produces) == 1 else None
+
+
+def trim(chain: dict, kinds: set[str]) -> dict:
+    """`chain` without the nodes an attachment of each kind in `kinds` makes
+    redundant, as Kraft's `ResolvedChain.trim_for_attachments`: a surviving
+    gate whose `reject_to` named a dropped node loses the target, and falls
+    back as a gate that declared none."""
+    dropped = {node["id"] for node in chain["nodes"] if _covered_by(node) in kinds}
+    if not dropped:
+        return chain
+    if len(dropped) == len(chain["nodes"]):
+        raise ChainError(
+            f"dropping {sorted(dropped)} would leave chain {chain['id']!r} with no nodes"
+        )
+    kept = [
+        dict(node, reject_to=None)
+        if node["kind"] == "gate" and node["reject_to"] in dropped
+        else node
+        for node in chain["nodes"]
+        if node["id"] not in dropped
+    ]
+    return dict(chain, nodes=kept)

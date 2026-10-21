@@ -154,32 +154,36 @@ def test_default_ref(tmp_path, home, repo_chains, expected):
     assert kl_chains.default_chain_ref(tmp_path, {}) == expected
 
 
+#: The bundled `default` chain's nodes, in order.
+DEFAULT_IDS = [
+    "spec",
+    "spec_approval",
+    "plan",
+    "plan_approval",
+    "chain_revision",
+    "chain_revision_approval",
+    "implementation",
+    "verification",
+    "work_brief",
+    "local_review",
+    "describe_merge_request",
+    "draft_merge_request",
+    "merge_request_feedback",
+    "work_item_summary",
+    "final_review",
+    "mark_ready",
+    "external_approval",
+    "merge",
+    "post_merge_ci",
+]
+
+
 def test_resolve_bundled_default(tmp_path, home):
     chain = kl_chains.resolve(tmp_path, {})
     nodes = {node["id"]: node for node in chain["nodes"]}
 
     assert (chain["format"], chain["id"], chain["source"]) == ("v1", "default", "bundled")
-    assert [node["id"] for node in chain["nodes"]] == [
-        "spec",
-        "spec_approval",
-        "plan",
-        "plan_approval",
-        "chain_revision",
-        "chain_revision_approval",
-        "implementation",
-        "verification",
-        "work_brief",
-        "local_review",
-        "describe_merge_request",
-        "draft_merge_request",
-        "merge_request_feedback",
-        "work_item_summary",
-        "final_review",
-        "mark_ready",
-        "external_approval",
-        "merge",
-        "post_merge_ci",
-    ]
+    assert [node["id"] for node in chain["nodes"]] == DEFAULT_IDS
     verification = nodes["verification"]
     assert [step["id"] for step in verification["steps"]] == ["tests", "review"]
     assert verification["fix_loop"]["max_attempts"] == 2
@@ -331,6 +335,14 @@ def test_chain_extends_chain(tmp_path, home, chains, ids, pick, expected):
         assert pick(chain) == expected
 
 
+def _looped(loop: str) -> str:
+    """A one-node chain whose fix loop holds `loop` beside its repair task."""
+    return (
+        "nodes:\n  - {id: a, kind: exec, tasks: [{id: t, extends: worker}], "
+        f"fix_loop: {{tasks: [{{id: fix, extends: worker}}], {loop}}}}}\n"
+    )
+
+
 def _task_chain(task: str) -> str:
     return f"nodes:\n  - {{id: a, kind: exec, tasks: [{task}]}}\n"
 
@@ -435,6 +447,29 @@ def _task_chain(task: str) -> str:
             "a.on_base_changed.on_conflict: on_conflict is not supported by Kraft Lite",
             id="on_conflict",
         ),
+        pytest.param(
+            {"c": _looped("judge: {extends: worker}")},
+            "a.fix_loop.judge: must be a task with an id",
+            id="judge_without_id",
+        ),
+        pytest.param(
+            {"c": _looped("judge: strict")},
+            "a.fix_loop.judge: must be a task with an id",
+            id="judge_not_a_mapping",
+        ),
+        *(
+            pytest.param(
+                {"c": _looped(f"max_attempts: {value}")},
+                f"a.fix_loop.max_attempts: must be a whole number above 0, not {shown}",
+                id=f"max_attempts_not_positive_int{name}",
+            )
+            for name, value, shown in (
+                ("", "0", "0"),
+                # `bool` is an `int` to Python, and `true` would read as 1.
+                ("_bool", "true", "True"),
+                ("_text", "two", "'two'"),
+            )
+        ),
     ],
 )
 def test_chain_extension_refusals(tmp_path, home, chains, match):
@@ -491,3 +526,72 @@ def test_resolve_path_argument(tmp_path, home):
     assert (chain["id"], chain["source"]) == ("mine", str(file))
     assert [node["id"] for node in chain["nodes"]] == ["implementation"]
     assert _first_task(chain)["components"] == ["implementer"]
+
+
+#: A chain whose gate on the plan sends a rejection back to the spec's author.
+CROSSED = """\
+    nodes:
+      - id: author
+        kind: exec
+        tasks:
+          - {id: write, extends: worker, produces: spec}
+      - id: planner
+        kind: exec
+        tasks:
+          - {id: write, extends: worker, produces: plan}
+      - id: check
+        kind: gate
+        artifact: plan
+        reject_to: author
+      - id: build
+        kind: exec
+        tasks:
+          - {id: work, extends: worker}
+    """
+
+
+def _drop(*dropped: str) -> list[str]:
+    return [n for n in DEFAULT_IDS if n not in dropped]
+
+
+@pytest.mark.parametrize(
+    ("chain", "kinds", "kept"),
+    [
+        pytest.param("default", set(), DEFAULT_IDS, id="nothing_attached"),
+        pytest.param("default", {"spec"}, _drop("spec", "spec_approval"), id="spec"),
+        pytest.param(
+            "default",
+            {"spec", "plan"},
+            _drop("spec", "spec_approval", "plan", "plan_approval"),
+            id="spec_and_plan",
+        ),
+        # A `chain_finalized` gate is never dropped, whatever its artifact says.
+        pytest.param("default", {"review_brief"}, _drop("work_item_summary"), id="final_gate_kept"),
+        # The gate survives; its `reject_to` named a dropped node, so the target goes.
+        pytest.param(
+            "crossed", {"spec"}, ["planner", "check->None", "build"], id="reject_to_cleared"
+        ),
+        pytest.param("crossed", {"plan"}, ["author", "build"], id="node_and_gate"),
+    ],
+)
+def test_trim(tmp_path, home, chain, kinds, kept):
+    lib = write_library(tmp_path / "lib", LIBRARY, {"crossed": CROSSED})
+    env = {} if chain == "default" else {"KRAFT_CONFIG_DIR": str(lib)}
+    resolved = kl_chains.resolve(tmp_path, env, chain)
+
+    trimmed = kl_chains.trim(resolved, kinds)
+
+    shown = [
+        f"{n['id']}->{n['reject_to']}" if n["kind"] == "gate" and chain == "crossed" else n["id"]
+        for n in trimmed["nodes"]
+    ]
+    assert shown == kept
+    assert dict(trimmed, nodes=None) == dict(resolved, nodes=None)
+
+
+def test_trim_refuses_to_empty_a_chain():
+    gate = {"id": "g", "kind": "gate", "artifact": "spec", "reject_to": None}
+    chain = {"format": "v1", "id": "c", "source": "s", "nodes": [dict(gate, chain_finalized=False)]}
+
+    with pytest.raises(kl_chains.ChainError, match="would leave chain 'c' with no nodes"):
+        kl_chains.trim(chain, {"spec"})
