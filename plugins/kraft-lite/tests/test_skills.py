@@ -227,7 +227,8 @@ def test_core_skills_name_no_harness_tool(name):
     text = (PLUGIN / "skills" / name / "SKILL.md").read_text()
     found = re.findall(
         r"create_session|send_message|archive_session|unarchive_session|SendMessage"
-        r"|send_later|ScheduleWakeup|list_events|get_session",
+        r"|send_later|ScheduleWakeup|list_events|get_session|CronCreate|ListAgents"
+        r"|list_sessions|ToolSearch",
         text,
     )
     assert not found, f"{name} names harness tools: {sorted(set(found))}"
@@ -247,7 +248,9 @@ def test_the_run_slices_skill_cites_every_verb_it_needs(texts):
     for verb in (
         "approve --slices",
         "slice-set",
-        "decide",
+        "--status running --session",
+        "--status in_review",
+        "decide --",
         "--held",
         "--unreported",
         "export --to",
@@ -270,3 +273,12 @@ def test_every_harness_reference_covers_the_four_abilities(harness):
         "Check in later",
     ):
         assert ability in headings, f"{harness}.md has no {ability!r} heading"
+
+
+def test_the_run_slices_skill_spells_the_helper_in_copyable_blocks(texts):
+    """A fenced block is what gets pasted. Shorthand in one runs nothing, so
+    every command there names the helper the way it is invoked."""
+    blocks = re.findall(r"```\n(.*?)```", texts["run-slices"], re.S)
+    lines = [line for block in blocks for line in block.splitlines()]
+    assert any('"$CLAUDE_PLUGIN_ROOT/kl.py"' in line for line in lines)
+    assert not [line for line in lines if re.match(r"\s*KL\b", line)]

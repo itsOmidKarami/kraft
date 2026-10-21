@@ -1,7 +1,12 @@
 # Claude Code
 
+Confirmed from this cloud session's own tool list (the `claude-code-remote` MCP
+server) and code.claude.com/docs (agent view, Claude Code in the cloud,
+cross-session messaging, scheduled tasks). Where an ability is marked
+unconfirmed, use the fallback named, not a guessed tool.
+
 Contents: Start a child, Message a child, Be messaged, Archive a child, Check in
-later, then which channel each pairing of controller and child has.
+later, Reading and finding a child, Which channel.
 
 Tools can be deferred: listed by name only until loaded. Search for them (for
 example with ToolSearch) before deciding one is missing.
@@ -13,7 +18,8 @@ example with ToolSearch) before deciding one is missing.
 - `source_url`: the repo; `source_revision`: the feature branch, or the earlier
   slice's branch for an early start;
 - `outcome_branch`: the slice branch, so the child's pushes need no approval;
-- `model`: always set; `tags`: `["<chain-id>"]`; `title`: the slice key and title;
+- `model`: always set; `title`: `<chain-id> <key>: <slice title>`, which is how
+  resuming finds it; `tags`: `["<chain-id>"]`;
 - `prompt`: the starting instructions.
 
 It returns the session id. A cloud controller starts cloud children.
@@ -23,7 +29,7 @@ It returns the session id. A cloud controller starts cloud children.
 It prints a short id. The child runs under a supervisor without a terminal, and
 moves into its own worktree under `.claude/worktrees/` before editing, so tell
 it to check out the slice branch there. Tags: unconfirmed; the name carries the
-chain id instead, and `claude agents --json` lists the sessions.
+chain id instead, and `claude agents --json` lists the sessions by name.
 
 **Local controller, cloud child.** `claude --cloud "<starting instructions>"`
 from a checkout on the child's base branch, pushed: the cloud clones the remote
@@ -74,14 +80,20 @@ message.
   and is restored on `--resume`. Recurring tasks expire after seven days.
 - To learn when a local child finishes: `SendMessage` with `notify_when_idle`.
 
-## Reading a child
+## Reading and finding a child
 
-- Cloud: `claude-code-remote:get_session` gives its status, `status_bucket`
-  and a summary of its last turn. `claude-code-remote:list_sessions` filters by
-  tag, which is how resuming finds the run's children.
+- Cloud, the status summary: `claude-code-remote:get_session` returns
+  `status_bucket` (working, blocked, review_ready, completed, failed) and
+  `post_turn_summary` with `status_category` and `status_detail`.
+- Cloud, finding the run's children on resume: `claude-code-remote:get_session`
+  on each recorded session id, then `claude-code-remote:list_sessions` without
+  a `tags` filter, matched by title `<chain-id> <key>`. Its `tags` filter
+  returns an error for in-session callers, so searching by tag from a
+  controller session is unconfirmed; use the title.
 - `claude-code-remote:list_events` is the transcript, and overflows; use it only
   with a small `limit` and a `kinds` filter, when the summary is not enough.
-- Local: `claude logs <id>` prints a session's recent output.
+- Local: `claude agents --json` lists sessions with their names; `claude logs
+  <id>` prints a session's recent output.
 
 ## Which channel
 

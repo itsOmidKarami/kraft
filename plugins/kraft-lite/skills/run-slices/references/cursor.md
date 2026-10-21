@@ -20,7 +20,9 @@ is marked unconfirmed, use the fallback named, not a guessed tool.
 
 - Cloud: `POST /v1/agents/{id}/runs` with a `prompt` starts a follow-up run. It
   answers `409 agent_busy` while a run is active; send it at the next check-in.
-- Local: `agent --resume <chatId> -p "<message>"` continues that chat.
+- Local: `--resume [chatId]` resumes a chat and `-p` runs without a terminal,
+  but the docs do not show the two together on a running chat: unconfirmed;
+  use the fallback, the messages file on the same machine.
 
 ## Be messaged
 
