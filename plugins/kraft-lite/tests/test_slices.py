@@ -116,6 +116,51 @@ def test_after_becomes_a_bd_shaped_blocks_dependency():
             plan(slices=[{"key": "a", "title": "A"}]), "slice 1 ('a') has no tasks", id="no_tasks"
         ),
         pytest.param(plan(slices=[]), "no slices", id="no_slices"),
+        pytest.param(
+            plan(slices=[{"key": "a", "title": "A", "tasks": ["3-4"]}]),
+            "slice 1 ('a') tasks must be a list of task numbers",
+            id="tasks_not_numbers",
+        ),
+        pytest.param(
+            plan(slices=[{"key": "a", "title": "A", "tasks": ["Task 3"]}]),
+            "tasks must be a list of task numbers",
+            id="tasks_words",
+        ),
+        pytest.param(
+            plan(slices=[{"key": "a", "title": "A", "tasks": [True]}]),
+            "tasks must be a list of task numbers",
+            id="tasks_bool",
+        ),
+        pytest.param(
+            plan(slices=[{"key": "a", "title": "A", "tasks": "1,2"}]),
+            "tasks must be a list of task numbers",
+            id="tasks_string",
+        ),
+        pytest.param(
+            plan(slices=[{"key": "a", "title": "A", "tasks": [1], "after": None}]),
+            "slice 1 ('a') after must be a list of slice keys",
+            id="after_null",
+        ),
+        pytest.param(
+            plan(
+                slices=[
+                    {"key": "a", "title": "A", "tasks": [1]},
+                    {"key": "b", "title": "B", "tasks": [2], "after": "a"},
+                ]
+            ),
+            "slice 2 ('b') after must be a list of slice keys",
+            id="after_string",
+        ),
+        pytest.param(
+            plan(slices=[{"key": "a", "title": "A", "tasks": [1], "after": [["a"]]}]),
+            "after must be a list of slice keys",
+            id="after_nested",
+        ),
+        pytest.param(
+            plan(slices=[{"key": 7, "title": "A", "tasks": [1]}]),
+            "slice 1 key must be a string",
+            id="key_not_a_string",
+        ),
         pytest.param(plan(mode="sideways"), "sideways", id="unknown_mode"),
         pytest.param(
             plan(feature_branch=None), "feature_branch", id="feature_mode_without_feature_branch"
@@ -290,20 +335,26 @@ def test_approve_with_slices_at_chain_finalized_creates_them(kl_cli, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "already_sliced, message",
+    "setup, message",
     [
-        pytest.param(False, "only accepted at chain_finalized", id="at_spec_gate"),
-        pytest.param(True, "already sliced", id="already_sliced"),
+        pytest.param("at_spec_gate", "only accepted at chain_finalized", id="at_spec_gate"),
+        pytest.param("already_sliced", "already sliced", id="already_sliced"),
+        # Sliced wins over "wrong gate": the first check is the one a person can act on.
+        pytest.param("sliced_and_open", "already sliced", id="sliced_and_not_blocked"),
+        pytest.param("sliced_and_other_gate", "already sliced", id="sliced_and_other_gate"),
     ],
 )
-def test_slices_are_only_accepted_at_chain_finalized(already_sliced, message, kl_cli, tmp_path):
-    if already_sliced:
-        slice_the_chain(kl_cli, tmp_path)
-        kl_cli(tmp_path, "reject", "--note", "x", "--from-node", "chain_review")
-        kl_cli(tmp_path, "gate", "--name", "chain_finalized")
-    else:
+def test_slices_are_only_accepted_at_chain_finalized(setup, message, kl_cli, tmp_path):
+    if setup == "at_spec_gate":
         start_chain(kl_cli, tmp_path)
         kl_cli(tmp_path, "gate", "--name", "spec_approval")
+    else:
+        slice_the_chain(kl_cli, tmp_path)
+        if setup == "already_sliced":
+            kl_cli(tmp_path, "reject", "--note", "x", "--from-node", "chain_review")
+            kl_cli(tmp_path, "gate", "--name", "chain_finalized")
+        elif setup == "sliced_and_other_gate":
+            kl_cli(tmp_path, "gate", "--name", "something_else")
     before = (kl_cli(tmp_path, "slices"), kl_cli(tmp_path, "state"))
 
     refused = kl_cli(tmp_path, "approve", "--slices", str(write_plan(tmp_path)), ok=False)
@@ -404,10 +455,31 @@ def test_slice_verbs_still_answer_after_the_chain_is_done(kl_cli, tmp_path):
     slice_the_chain(kl_cli, tmp_path)
     while kl_cli(tmp_path, "state")["status"] != "done":
         kl_cli(tmp_path, "close")
-    kl_cli(tmp_path, "close", ok=False)  # the walk really is over
 
     assert keys(kl_cli(tmp_path, "slices")["slices"]) == ["a", "b", "c"]
     assert kl_cli(tmp_path, "slice-set", "--slice", "a", "--status", "merged")["done"] is True
+
+
+@pytest.mark.parametrize(
+    "verb",
+    [
+        ["close"],
+        ["approve"],
+        ["gate", "--name", "x"],
+        ["reject", "--note", "x"],
+        ["attempt"],
+        ["approve", "--slices", "plan.json"],
+    ],
+    ids=["close", "approve", "gate", "reject", "attempt", "approve_slices"],
+)
+def test_a_finished_chain_still_refuses_the_verbs_that_need_an_open_node(verb, kl_cli, tmp_path):
+    slice_the_chain(kl_cli, tmp_path)
+    while kl_cli(tmp_path, "state")["status"] != "done":
+        kl_cli(tmp_path, "close")
+
+    refused = kl_cli(tmp_path, *verb, ok=False)
+
+    assert "no open node" in refused.stderr
 
 
 @pytest.mark.parametrize("verb", [["slices"], ["slice-set", "--slice", "a"]])

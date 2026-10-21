@@ -444,11 +444,28 @@ def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
             if not spec.get(field):
                 raise SystemExit(f"kraft-lite: slice {position} has no {field}")
         key = spec["key"]
+        if not isinstance(key, str):
+            raise SystemExit(f"kraft-lite: slice {position} key must be a string")
         if key in keys:
             raise SystemExit(f"kraft-lite: duplicate slice key {key!r}")
         keys.add(key)
         if not spec.get("tasks"):
             raise SystemExit(f"kraft-lite: slice {position} ({key!r}) has no tasks")
+        # What is written is read back as numbers and keys by `slices`, so what
+        # cannot be read back is refused here, while nothing has been written.
+        tasks = spec["tasks"]
+        # `bool` is an `int`, and `True` would be stored as the task "True".
+        if not isinstance(tasks, list) or not all(
+            isinstance(t, int) and not isinstance(t, bool) for t in tasks
+        ):
+            raise SystemExit(
+                f"kraft-lite: slice {position} ({key!r}) tasks must be a list of task numbers"
+            )
+        after = spec.get("after", [])
+        if not isinstance(after, list) or not all(isinstance(a, str) for a in after):
+            raise SystemExit(
+                f"kraft-lite: slice {position} ({key!r}) after must be a list of slice keys"
+            )
     for spec in slices:
         for after in spec.get("after", []):
             if after not in keys:
