@@ -20,6 +20,7 @@
     "expected_behavior": [
       "Records the rejection with `reject --note \"<their reason>\" --chain-id kl-7f3a91c2`, with the human's reason in the note",
       "Does not run `approve`, with or without --slices, and creates no slice record",
+      "Deletes .kraft-lite/proposals/kl-7f3a91c2.json, so the rejected proposal cannot be approved later",
       "Says the proposal will be redrawn when the node reopens, and invokes kraft-lite:next"
     ]
   },

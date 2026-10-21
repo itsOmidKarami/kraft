@@ -30,19 +30,28 @@ You get `node`, `hooks`, `gate`, `attempt`, `cap`, `status`, `note` and `sliced`
   what this node is:
   - `run_slices` - invoke `kraft-lite:run-slices`, which closes this node when every
     slice is done. Stop.
-  - `scoped_verify` - step 2, with the test hook run on the files
+  - `scoped_verify` - run only the node's test hook, `on.test.run`, on the files
     `git diff --name-only <base branch>...<feature branch>` lists, not the whole
     suite: the children tested their slices and CI runs the full suite, so check
-    only what CI cannot cover.
+    only what CI cannot cover. Run none of the node's other hooks: every slice
+    was reviewed, and the feature PR's review covers how they fit. Then step 3.
   - `skip` - `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" close --chain-id <id>` with no hooks
     run, then this skill again.
   - `await_user_merges` - check the PR of each slice that `slices` does not show as
     `merged`. For each the user merged:
     `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" slice-set --slice <key> --status merged --chain-id <id>`,
-    then export state, as `kraft-lite:run-slices` describes under State branch.
+    tell the slices to rebase and archive its child, as `kraft-lite:run-slices`
+    says after a merge, then export state, as `kraft-lite:run-slices` describes under State branch.
     Name the slices still waiting and stop. Once all are merged, `close`, then this
     skill again. Never open this node's gate: the user's merges are the answer.
   - `hooks` - step 2.
+
+In a sliced `feature` run, every hook from `verify` on runs in a worktree of the
+feature branch (`git fetch origin`, then `git worktree add <path> <feature branch>`
+once), never in the state branch's checkout: `on.mr.rebase` rebases, and
+`on.mr.open` opens the PR from, the branch it runs in. There the feature PR's
+`on.review.mr.run` reviews the seams - shared helpers, contracts between
+slices, the decisions log - on the strongest tier, not each slice again.
 
 ## 2. Run the node's hooks, in order
 
@@ -68,9 +77,13 @@ stop and ask, not to run it twice.
 All hooks succeeded:
 
 - `gate` is set - `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" gate --name <gate> --chain-id <id>`, then
-  invoke `kraft-lite:gate`. Stop.
+  invoke `kraft-lite:gate`. Stop. At `chain_review`, invoke `kraft-lite:run-slices`
+  instead: it decides whether to slice, and opens the gate itself.
 - `gate` is null - `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" close --chain-id <id>`, then run this
   skill again for the next node.
+
+In a sliced run (`sliced` not null), export state after every `close`, as
+`kraft-lite:run-slices` describes under State branch.
 
 A hook failed and `cap` is set:
 

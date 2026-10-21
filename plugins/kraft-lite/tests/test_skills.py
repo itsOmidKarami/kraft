@@ -385,7 +385,8 @@ def test_the_gate_skill_records_slices_at_chain_finalized(texts):
     assert "chain_finalized" in body
     assert "`sliced`" in body, "an already sliced chain must take a plain approve"
     flat = " ".join(body.split())
-    assert "A reject needs nothing extra: it leaves no slices behind" in flat
+    assert "rm .kraft-lite/proposals/<chain-id>.json" in flat, "a rejected proposal is deleted"
+    assert "is the proposal presented at this gate" in flat
     assert "`--slices` is refused there; use a plain `approve`" in flat
 
 
@@ -449,6 +450,11 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         ("run-slices", 6, "never in the state branch's checkout"),
         ("run-slices", 2, "A missing ability is never a block"),
         ("run-slices", 1, "delete any `.kraft-lite/proposals/<chain-id>.json`"),
+        ("next", 1, "run only the node's test hook, `on.test.run`"),
+        ("next", 1, "never in the state branch's checkout"),
+        ("next", 1, "tell the slices to rebase and archive its child"),
+        ("next", 3, "At `chain_review`, invoke `kraft-lite:run-slices` instead"),
+        ("next", 3, "export state after every `close`"),
     ],
     ids=[
         "child-fork-never-head",
@@ -472,6 +478,11 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         "controller-feature-worktree",
         "controller-missing-ability",
         "controller-deletes-unused-proposal",
+        "next-scoped-verify-test-only",
+        "next-feature-worktree",
+        "next-archives-merged-child",
+        "next-chain-review-to-run-slices",
+        "next-exports-after-close",
     ],
 )
 def test_a_skill_carries_the_final_review_fixes(texts, name, section, needle):

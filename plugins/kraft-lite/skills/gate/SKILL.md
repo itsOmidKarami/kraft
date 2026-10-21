@@ -31,13 +31,17 @@ an earlier "just do it", is not an answer.
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" reject --note "<their reason>" --chain-id <id>
 
 At `chain_finalized`, when `state` shows `sliced` null and
-`.kraft-lite/proposals/<chain-id>.json` exists, the approval carries the slices:
+`.kraft-lite/proposals/<chain-id>.json` exists and is the proposal presented at
+this gate, the approval carries the slices:
 
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" approve --slices .kraft-lite/proposals/<chain-id>.json --chain-id <id>
 
 A plain `approve` there leaves the chain unsliced for good, since slicing is only
-accepted at this gate. A reject needs nothing extra: it leaves no slices behind, and
-the proposal is redrawn when the node reopens. When `sliced` is not null the chain
+accepted at this gate. A proposal file that was not presented at this gate is a
+leftover from a rejected round: delete it, and approve plainly. A reject there
+also deletes the proposal, `rm .kraft-lite/proposals/<chain-id>.json`, so it
+cannot be approved later. It leaves no slices behind, and the proposal is
+redrawn when the node reopens. When `sliced` is not null the chain
 was sliced before and rewound past this gate; it cannot be sliced again.
 `--slices` is refused there; use a plain `approve`.
 
