@@ -975,6 +975,12 @@ class Chain(BaseModel):
             at = index.get(target)
             return at is not None and isinstance(self.nodes[at], ExecNode) and at <= limit
 
+        # The first final gate: a merge-rejection rewind must pass it again.
+        final = next(
+            (i for i, n in enumerate(self.nodes) if isinstance(n, GateNode) and n.chain_finalized),
+            None,
+        )
+
         for position, node in enumerate(self.nodes):
             if isinstance(node, GateNode):
                 if node.reject_to is not None and not backward_exec(node.reject_to, position - 1):
@@ -1001,6 +1007,22 @@ class Chain(BaseModel):
                         f"node {node.id!r}: on_merge_rejected.restart_from {target!r} must name "
                         f"an earlier execution node in {where}"
                     )
+                # Before the final gate, when the merge comes after it: a rewind
+                # that starts past it would merge the repair's commit unseen.
+                if final is not None and final < position and index[target] > final:
+                    raise ValueError(
+                        f"node {node.id!r}: on_merge_rejected.restart_from {target!r} must name "
+                        f"an execution node before the final gate {self.nodes[final].id!r} "
+                        f"in {where}"
+                    )
+                # A drop is answered by the repair alone: a fix cycle or a node
+                # repair would commit code the next measure merges unseen.
+                for other in ("fix_loop", "on_failure"):
+                    if getattr(node, other) is not None:
+                        raise ValueError(
+                            f"node {node.id!r}: on_merge_rejected cannot share a node with "
+                            f"{other} in {where}"
+                        )
                 # The node's own tasks, after `extends` expansion: a merge in
                 # one of its handlers is not the merge the forge rejects.
                 if not any(
@@ -1623,7 +1645,10 @@ class ResolvedChain:
         `restart_from` moves to the nearest kept execution node at or before
         where its target stood, which keeps the span it restarts covering the
         same work; with none there the policy goes, and the node behaves as
-        one that never declared it.
+        one that never declared it. Moving only earlier, an
+        `on_merge_rejected` target stays before the first final gate, as
+        `Chain` requires: an attachment never drops that gate, and a person
+        who skips it leaves only later final gates, if any.
         """
         dropped = {n.id for n in self.nodes if n.id in dropped}
         if not dropped:

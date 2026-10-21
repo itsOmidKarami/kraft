@@ -675,9 +675,16 @@ branch against the target as it now is, the approved gates between
 `merge_request_feedback` and `merge` (notably `final_review`) reopen, and the
 chain restarts at `merge_request_feedback`. The policy is a sibling of
 `on_base_changed` with the same `restart_from` rule, except that it must name
-an *earlier* execution node and only a node holding an `mr.merge` task may
-declare it. Its rewinds count under `<node>.on_merge_rejected`, 3 attempts over
-a week unless `loops:` overrides them, checked before the repair runs.
+an *earlier* execution node -- before the chain's first `chain_finalized`
+gate when that gate comes before the merge node, so a rewind always passes it
+-- and only a node holding an `mr.merge` task may declare it. A node that
+declares it may not also declare a `fix_loop` or a node-level `on_failure`:
+only the repair answers a drop, and a fix cycle's commit would be merged by the
+next measure unseen. Its rewinds count under `<node>.on_merge_rejected`, 3
+attempts over a week unless `loops:` overrides them, checked before the repair
+runs. Coming back to the merge node with the drop unanswered -- a resume, a
+rate-limit relaunch, a person's retry of that node -- runs the repair again;
+it never asks the forge to merge the head it rejected.
 
 The optional `local_review` gate is omitted by chains that should create a
 draft immediately after local verification. This example also includes an

@@ -506,7 +506,7 @@ escalation task SHALL take its container as its path segment, such as
 `main`, `on_failure`, `fix_loop`, `judge`, `escalation`, `on_base_changed`,
 `on_conflict`, and `on_merge_rejected` SHALL NOT be used as authored step identifiers, nor as the
 identifier of a dedicated task that occupies a step position.
-enforced-by: tests/templates/test_models.py::test_a_tasks_group_resolves_to_one_step_named_main, tests/templates/test_models.py::test_a_fix_loop_tasks_group_resolves_to_a_main_step_under_its_container, tests/templates/test_models.py::test_a_reserved_segment_is_rejected_as_a_step_identifier, tests/templates/test_models.py::test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task
+enforced-by: tests/templates/test_models.py::test_a_tasks_group_resolves_to_one_step_named_main, tests/templates/test_models.py::test_a_fix_loop_tasks_group_resolves_to_a_main_step_under_its_container, tests/templates/test_models.py::test_a_reserved_segment_is_rejected_as_a_step_identifier[main], tests/templates/test_models.py::test_a_reserved_segment_is_rejected_as_a_step_identifier[on_failure], tests/templates/test_models.py::test_a_reserved_segment_is_rejected_as_a_step_identifier[fix_loop], tests/templates/test_models.py::test_a_reserved_segment_is_rejected_as_a_step_identifier[judge], tests/templates/test_models.py::test_a_reserved_segment_is_rejected_as_a_step_identifier[escalation], tests/templates/test_models.py::test_a_reserved_segment_is_rejected_as_a_step_identifier[on_base_changed], tests/templates/test_models.py::test_a_reserved_segment_is_rejected_as_a_step_identifier[on_conflict], tests/templates/test_models.py::test_a_reserved_segment_is_rejected_as_a_step_identifier[on_merge_rejected], tests/templates/test_models.py::test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task[main], tests/templates/test_models.py::test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task[on_failure], tests/templates/test_models.py::test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task[fix_loop], tests/templates/test_models.py::test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task[judge], tests/templates/test_models.py::test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task[escalation], tests/templates/test_models.py::test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task[on_base_changed], tests/templates/test_models.py::test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task[on_conflict], tests/templates/test_models.py::test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task[on_merge_rejected]
 origin: docs/templates-v1-design.md "Resolution and execution" -- a fix loop's judge is a named slot whose own name is its canonical segment, so its authored id is never a path segment and the reserved rule does not apply to it; the escalation task's id does become a segment (`node.escalation.<id>`) and is checked.
 
 ## REQ gate-is-an-ordered-node
@@ -2120,10 +2120,14 @@ WHEN the merge train or queue drops a merge request for its code, for a
 conflict with the target, or because it never reached the train, and the merge
 node declares `on_merge_rejected`, the system SHALL run the node's repair where
 the code needs one, then restart the chain at the declared `restart_from`,
-which SHALL name an earlier execution node. The default chain SHALL declare
+which SHALL name an earlier execution node, and one before the chain's first
+`chain_finalized` gate when that gate comes before the merge node. A node that
+declares `on_merge_rejected` SHALL NOT also declare a `fix_loop` or a
+node-level `on_failure`. The repair's commit SHALL be read on the item's
+branch, which the merge pushes, not at `HEAD`. The default chain SHALL declare
 `merge_request_feedback`.
-enforced-by: tests/executor/test_merge_rejection.py::test_a_code_drop_runs_the_repair_and_rewinds_with_gates_reopened, tests/executor/test_merge_rejection.py::test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates[plain], tests/executor/test_default_chain.py::test_default_chain_rewinds_a_train_drop_through_final_review, tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[merge-rejected-missing], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[merge-rejected-gate], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[merge-rejected-later], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[merge-rejected-itself], tests/templates/test_failure_controls.py::test_a_backward_restart_target_is_accepted[merge-rejected-earlier], tests/templates/test_failure_controls.py::test_a_merge_rejection_policy_needs_a_merge_in_its_own_node[no-forge-task], tests/templates/test_failure_controls.py::test_a_merge_rejection_policy_needs_a_merge_in_its_own_node[another-forge-target], tests/templates/test_failure_controls.py::test_a_merge_rejection_policy_needs_a_merge_in_its_own_node[only-in-a-recovery-plan], tests/templates/test_materialization.py::test_a_skip_that_orphans_a_restart_target_repoints_or_clears_it[merge-rejection-restart]
-origin: src/kraft/executor/walk.py §_repair_merge_rejection -- skipping the named node at intake repoints `restart_from` to the nearest earlier kept execution node, or drops the policy when none is left.
+enforced-by: tests/executor/test_merge_rejection.py::test_a_code_drop_runs_the_repair_and_rewinds_with_gates_reopened[commits], tests/executor/test_merge_rejection.py::test_a_code_drop_runs_the_repair_and_rewinds_with_gates_reopened[leaves-head-behind], tests/executor/test_merge_rejection.py::test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates[plain], tests/executor/test_default_chain.py::test_default_chain_rewinds_a_train_drop_through_final_review, tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[merge-rejected-missing], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[merge-rejected-gate], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[merge-rejected-later], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[merge-rejected-itself], tests/templates/test_failure_controls.py::test_a_backward_restart_target_is_accepted[merge-rejected-earlier], tests/templates/test_failure_controls.py::test_a_merge_rejection_policy_needs_a_merge_in_its_own_node[no-forge-task], tests/templates/test_failure_controls.py::test_a_merge_rejection_policy_needs_a_merge_in_its_own_node[another-forge-target], tests/templates/test_failure_controls.py::test_a_merge_rejection_policy_needs_a_merge_in_its_own_node[only-in-a-recovery-plan], tests/templates/test_materialization.py::test_a_skip_that_orphans_a_restart_target_repoints_or_clears_it[merge-rejection-restart], tests/templates/test_failure_controls.py::test_a_merge_rejection_rewind_must_pass_the_final_gate_and_only_the_repair_answers[restart-after-the-final-gate], tests/templates/test_failure_controls.py::test_a_merge_rejection_rewind_must_pass_the_final_gate_and_only_the_repair_answers[with-a-fix-loop], tests/templates/test_failure_controls.py::test_a_merge_rejection_rewind_must_pass_the_final_gate_and_only_the_repair_answers[with-node-on-failure], tests/templates/test_failure_controls.py::test_a_merge_rejection_rewind_from_before_the_final_gate_is_accepted
+origin: src/kraft/executor/walk.py §_repair_merge_rejection -- a rewind that starts past the final gate, or a fix cycle on the merge node, would merge an agent's commit no person saw. Skipping the named node at intake repoints `restart_from` to the nearest earlier kept execution node, or drops the policy when none is left.
 
 ## REQ merge-rejection-reopens-approved-gates
 
@@ -2132,7 +2136,7 @@ approved gate between `restart_from` and the merge node, with the reason
 `merge_rejected`, after a repair's commit and after a conflict that Kraft's
 own rebase cleared alike, so the repaired head is approved again before it is
 queued. A gate before `restart_from` SHALL keep its approval.
-enforced-by: tests/executor/test_merge_rejection.py::test_a_code_drop_runs_the_repair_and_rewinds_with_gates_reopened, tests/executor/test_merge_rejection.py::test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates[plain], tests/executor/test_merge_rejection.py::test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates[the-node-declares-on-base-changed], tests/executor/test_default_chain.py::test_default_chain_rewinds_a_train_drop_through_final_review
+enforced-by: tests/executor/test_merge_rejection.py::test_a_code_drop_runs_the_repair_and_rewinds_with_gates_reopened[commits], tests/executor/test_merge_rejection.py::test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates[plain], tests/executor/test_merge_rejection.py::test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates[the-node-declares-on-base-changed], tests/executor/test_default_chain.py::test_default_chain_rewinds_a_train_drop_through_final_review
 origin: src/kraft/executor/walk.py §run_once -- the owner's anti-goal: code an agent wrote must not reach the target branch without being seen at `final_review`. A clean rebase reopens too, since the rewound span's own fix loops can commit before any gate sees the head again.
 
 ## REQ a-repair-that-stops-after-committing-holds-the-item-at-restart-from
@@ -2150,23 +2154,38 @@ origin: src/kraft/executor/walk.py §_hold_at_restart
 
 IF Kraft restarts while a merge rejection is unanswered -- the repair running,
 or the rewind's writes cut short -- THEN the resume SHALL stop the item for a
-person rather than walk or stop it at the merge node, and WHEN the dropped
-checkout's head is no longer the one the drop recorded, or cannot be read, it
-SHALL first reopen the approved gates and hold the item at `restart_from`. A
-drop the walk already answered SHALL NOT hold the item again. The hold SHALL be
+person rather than walk or stop it at the merge node, and WHEN a repair
+started after the drop, or the dropped checkout's branch is no longer at the
+head the drop recorded, or cannot be read, it SHALL first reopen the approved
+gates and hold the item at `restart_from`. A drop the walk already answered
+SHALL NOT hold the item again. The hold SHALL be
 written before any stop, and a rewind SHALL stand the item at `restart_from`
 before the walk enters it, so that no crash leaves the repair's commit one
 retry away from the forge.
-enforced-by: tests/executor/test_merge_rejection.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[during-the-repair-after-it-committed], tests/executor/test_merge_rejection.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[during-the-repair-before-any-commit], tests/executor/test_merge_rejection.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[restarting-before-the-gates-reopened], tests/executor/test_merge_rejection.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[restarting-after-the-gates-reopened], tests/executor/test_merge_rejection.py::test_the_cursor_leaves_merge_before_the_walk_stops_or_moves_on[the-repair-s-stop], tests/executor/test_merge_rejection.py::test_the_cursor_leaves_merge_before_the_walk_stops_or_moves_on[the-cap-stop], tests/executor/test_merge_rejection.py::test_the_cursor_leaves_merge_before_the_walk_stops_or_moves_on[the-restart], tests/executor/test_merge_rejection.py::test_a_restart_back_on_merge_does_not_answer_the_old_drop_again
+enforced-by: tests/executor/test_merge_rejection_resume.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[during-the-repair-after-it-committed], tests/executor/test_merge_rejection_resume.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[during-the-repair-before-any-commit], tests/executor/test_merge_rejection_resume.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[restarting-before-the-gates-reopened], tests/executor/test_merge_rejection_resume.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[restarting-after-the-gates-reopened], tests/executor/test_merge_rejection_resume.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[before-a-rebased-conflict-s-rewind], tests/executor/test_merge_rejection_resume.py::test_the_cursor_leaves_merge_before_the_walk_stops_or_moves_on[the-repair-s-stop], tests/executor/test_merge_rejection_resume.py::test_the_cursor_leaves_merge_before_the_walk_stops_or_moves_on[the-cap-stop], tests/executor/test_merge_rejection_resume.py::test_the_cursor_leaves_merge_before_the_walk_stops_or_moves_on[the-restart], tests/executor/test_merge_rejection_resume.py::test_a_restart_back_on_merge_does_not_answer_the_old_drop_again
 origin: src/kraft/executor/walk.py §hold_interrupted_repair -- a retry's default target is the node the item stands on: left on `merge`, a retry pushes and merges code no gate saw.
 
 ## REQ a-repair-that-commits-nothing-stops-for-a-person
 
 IF the merge-rejection repair commits nothing, or fails, THEN the system SHALL
 stop the item for a person and SHALL NOT rewind, since a head the train already
-rejected would only be rejected again.
-enforced-by: tests/executor/test_merge_rejection.py::test_a_repair_that_commits_nothing_stops_for_a_human[code], tests/executor/test_merge_rejection.py::test_a_repair_that_commits_nothing_stops_for_a_human[unrebased-conflict], tests/executor/test_merge_rejection.py::test_a_repair_that_commits_nothing_stops_for_a_human[no-drop-recorded], tests/executor/test_merge_rejection.py::test_a_repair_that_commits_nothing_stops_for_a_human[a-members-drop]
+rejected would only be rejected again. A commit it made on the item's branch in
+any checkout other than the dropped one -- the root, or a workspace member
+still to merge -- SHALL hold the item at `restart_from` with the gates reopened.
+enforced-by: tests/executor/test_merge_rejection.py::test_a_repair_that_commits_nothing_stops_for_a_human[code], tests/executor/test_merge_rejection.py::test_a_repair_that_commits_nothing_stops_for_a_human[unrebased-conflict], tests/executor/test_merge_rejection.py::test_a_repair_that_commits_nothing_stops_for_a_human[no-drop-recorded], tests/executor/test_merge_rejection.py::test_a_repair_that_commits_nothing_stops_for_a_human[a-members-drop], tests/executor/test_merge_rejection.py::test_a_repair_that_commits_nothing_stops_for_a_human[another-member]
 origin: src/kraft/executor/walk.py §_repair_merge_rejection
+
+## REQ returning-to-a-dropped-merge-repairs-before-it-merges
+
+WHEN the walk comes back to a merge node whose drop nothing has answered since
+-- a rate-limit relaunch, a resume after a pause, or a person's retry of that
+node after the repair stopped -- the system SHALL run the node's
+`on_merge_rejected` repair again, with the person's steer, or finish the
+rewind, and SHALL NOT ask the forge to merge the head it rejected. Entering any
+node or gate after the drop, as a retry from an earlier node does, answers it,
+and the walk then queues the reviewed head.
+enforced-by: tests/executor/test_merge_rejection_resume.py::test_back_on_merge_after_an_unfinished_repair_the_repair_runs_again[rate-limited], tests/executor/test_merge_rejection_resume.py::test_back_on_merge_after_an_unfinished_repair_the_repair_runs_again[paused], tests/executor/test_merge_rejection_resume.py::test_back_on_merge_after_an_unfinished_repair_the_repair_runs_again[retry-after-nothing-committed], tests/executor/test_merge_rejection_resume.py::test_back_on_merge_after_an_unfinished_repair_the_repair_runs_again[retry-after-a-question], tests/executor/test_merge_rejection_resume.py::test_a_retry_back_through_the_gate_answers_the_drop[from-the-gate], tests/executor/test_merge_rejection_resume.py::test_a_retry_back_through_the_gate_answers_the_drop[from-an-earlier-node], tests/executor/test_merge_rejection.py::test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from[paused-after-commit]
+origin: src/kraft/executor/walk.py §walk_node -- the rate-limit poller and the resume door walk from the cursor without reconciling the node, and a retry's default target is the node the item stands on.
 
 ## REQ merge-rejection-rewinds-are-bounded
 
@@ -2206,6 +2225,7 @@ no `on_merge_rejected`, THEN the system SHALL stop the item for a person at
 once, without waiting out the merge timeout, running a repair, a task's or the
 node's `on_failure` or a fix loop, or rewinding; and the stop SHALL NOT be one
 automatic escalation answers, whose retry could re-queue it or merge its own
-commit unseen.
-enforced-by: tests/executor/test_merge_rejection.py::test_a_drop_nothing_may_repair_stops_promptly_for_a_person[no-policy], tests/executor/test_merge_rejection.py::test_a_drop_nothing_may_repair_stops_promptly_for_a_person[on-failure-is-no-drop-s-repair]
+commit unseen -- the drop on the re-measure after the node's `on_failure`
+included.
+enforced-by: tests/executor/test_merge_rejection.py::test_a_drop_nothing_may_repair_stops_promptly_for_a_person[no-policy], tests/executor/test_merge_rejection.py::test_a_drop_nothing_may_repair_stops_promptly_for_a_person[on-failure-is-no-drop-s-repair], tests/executor/test_merge_rejection.py::test_a_drop_on_a_re_measure_stops_promptly_for_a_person[after-on-failure], tests/executor/test_merge_rejection.py::test_a_drop_on_a_re_measure_stops_promptly_for_a_person[after-on-failure-in-a-fix-loop]
 origin: src/kraft/executor/dispatch.py §measure_node

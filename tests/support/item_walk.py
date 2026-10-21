@@ -1,17 +1,31 @@
 """`walk_once` and `approve`: one `run_once` pass over a `support.harness.Item`
 and a gate approved under it, for the restart suites (`test_base_change`,
 `test_merge_rejection`, `test_default_chain`); `merge_drops` and
-`commits_a_fix` script a merge train/queue drop and the repair that fixes it."""
+`commits_a_fix` script a merge train/queue drop and the repair that fixes it,
+on `merge_chain`."""
 
 from __future__ import annotations
 
 from kraft import events, executor, store
 from kraft import policy as _policy
 from kraft.vocab import ForgeEvent
-from support.harness import commit_all, entry_of, git, write
+from support.harness import commit_all, entry_of, git, v1_node, v1_task, write
 
 #: The repo declaring it needs no preparation: without one no worktree is cut.
 NO_SETUP = entry_of({"setup_command": ""})
+
+#: `merge_chain`'s merge task, and an `on_merge_rejected` for its merge node.
+MERGE_TASK = v1_task("merge", kind="forge", target="mr.merge")
+MERGE_POLICY = {"restart_from": "feedback", "repair": {"tasks": [v1_task("repair")]}}
+
+
+def merge_chain(merge=MERGE_TASK, **merge_fields):
+    """feedback -> review (a gate) -> merge, which declares `merge_fields`."""
+    return [
+        v1_node("feedback", tasks=[v1_task("ci")]),
+        v1_node("review", "gate"),
+        v1_node("merge", tasks=[merge], **merge_fields),
+    ]
 
 
 def walk_once(it, policy=None):
@@ -30,6 +44,13 @@ async def approve(it, gate: str) -> None:
     """`gate` requested and approved, as a person's decision leaves it."""
     await it.database.write(lambda c: store.request_gate(c, it.id, gate, gate))
     await it.database.write(lambda c: store.approve_gate(c, it.id, gate))
+
+
+async def walk_through_review(it, policy=None):
+    """Walk, approving `review` each time a rewind reopened it."""
+    while (status := await walk_once(it, policy)) == "awaiting_gate":
+        await approve(it, "review")
+    return status
 
 
 def merge_drops(
@@ -80,3 +101,17 @@ def commits_a_fix(it, folder=None):
         commit_all(folder or it.worktree, "fix the train failure")
 
     return effect
+
+
+def records_merge_sessions(it, script) -> None:
+    """`merge`'s own session, as `run_task` records it: what a resume, and a
+    walk coming back to the node, read."""
+    drops, n = script.effects["merge"], [0]
+
+    async def effect(row):
+        await drops(row)
+        n[0] += 1
+        status = script.plan["merge"][0] if len(script.plan["merge"]) > 1 else "done"
+        await it.session(f"s-merge-{n[0]}", "merge.main.merge", status)
+
+    script.effects["merge"] = effect

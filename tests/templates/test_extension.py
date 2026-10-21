@@ -335,7 +335,7 @@ _RE_POINT_AFTER = {"after": {"on_base_changed": {"restart_from": "after"}}}
                 "remove": ["ship"],
                 "overrides": {
                     **_RE_POINT_AFTER,
-                    "merge": {"on_merge_rejected": {"restart_from": "after"}},
+                    "merge": {"on_merge_rejected": {"restart_from": "build"}},
                 },
             },
             None,
@@ -355,7 +355,8 @@ def test_a_removed_pointer_target_is_named(tmp_path, parent, child, why):
         assert "ship" not in ids(resolved)
         if parent is MERGING:
             merging = resolved.nodes[-1]
-            assert merging.node.on_merge_rejected.restart_from == "after"
+            # Before the final gate: a rewind from past it would see no gate.
+            assert merging.node.on_merge_rejected.restart_from == "build"
             # Re-pointing keeps the repair the parent declared.
             assert [t.path for s in merging.on_merge_rejected for t in s.tasks] == [
                 "merge.on_merge_rejected.repair.main.repair"

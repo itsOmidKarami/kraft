@@ -214,6 +214,58 @@ def test_a_backward_restart_target_is_accepted(policy, target):
     assert getattr(chain.nodes[2], policy).restart_from == target
 
 
+def _finalized(restart_from: str, **merge_fields) -> dict:
+    """early -> final (the final gate) -> ready -> merge, which restarts at
+    `restart_from` and declares `merge_fields` besides."""
+    return {
+        "id": "c",
+        "nodes": [
+            exec_node("early", tasks=[sub()]),
+            {"id": "final", "kind": "gate", "chain_finalized": True},
+            exec_node("ready", tasks=[sub()]),
+            exec_node(
+                "merge",
+                tasks=[merge()],
+                on_merge_rejected={"restart_from": restart_from, "repair": plan(sub("repair"))},
+                **merge_fields,
+            ),
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ("chain", "why"),
+    [
+        (
+            _finalized("ready"),
+            "node 'merge': on_merge_rejected.restart_from 'ready' must name an execution node "
+            "before the final gate 'final' in c",
+        ),
+        (
+            _finalized("early", fix_loop=plan(sub("fix"))),
+            "node 'merge': on_merge_rejected cannot share a node with fix_loop in c",
+        ),
+        (
+            _finalized("early", on_failure=plan(sub("fix"))),
+            "node 'merge': on_merge_rejected cannot share a node with on_failure in c",
+        ),
+    ],
+    ids=["restart-after-the-final-gate", "with-a-fix-loop", "with-node-on-failure"],
+)
+def test_a_merge_rejection_rewind_must_pass_the_final_gate_and_only_the_repair_answers(chain, why):
+    """A rewind that starts past the final gate would merge the repair's
+    commit with no person seeing it, and a fix cycle or a node repair on the
+    merge node would commit code its next measure merges unseen."""
+    with pytest.raises(ValidationError) as refused:
+        tm.Chain.model_validate(chain)
+    assert why in str(refused.value)
+
+
+def test_a_merge_rejection_rewind_from_before_the_final_gate_is_accepted():
+    chain = tm.Chain.model_validate(_finalized("early"))
+    assert chain.nodes[3].on_merge_rejected.restart_from == "early"
+
+
 @pytest.mark.parametrize(
     "tasks",
     [

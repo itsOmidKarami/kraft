@@ -171,13 +171,18 @@ onto the train.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `restart_from` | string | required | Names an exec node strictly before this one, never a gate or this node itself. |
+| `restart_from` | string | required | Names an exec node strictly before this one, never a gate or this node itself. When a `chain_finalized` gate comes before this node, it must name a node before that gate, so every rewind passes it. |
 | `repair` | mapping | required | The tasks or steps that fix the branch, written like an `on_failure` plan. The shipped `repair_merge_queue_failure` runs the `kraft:merge-queue-repair` skill on the `strong` [agent profile](/reference/harnesses/agent-profiles). |
 
+A node with `on_merge_rejected` cannot also declare a `fix_loop` or a
+node-level `on_failure`: only the repair answers a drop. A task's own
+`on_failure` is allowed.
+
 Without `on_merge_rejected`, a drop stops the item at once, with the forge's
-reason in the stop. No `on_failure` or fix loop on the node runs for it, and no
-escalation agent is sent to the stop: Kraft never re-queues a merge request on
-its own.
+reason in the stop, even when the drop comes on the re-measure after the
+node's `on_failure`. No `on_failure` or fix loop on the node runs for it, and
+no escalation agent is sent to the stop: Kraft never re-queues a merge request
+on its own.
 
 ### Merge trains and merge queues
 
@@ -242,11 +247,20 @@ or asks a question stops for you.
 
 When a repair had already committed before it
 stopped, whether it asked, failed, was paused or ran out of budget, the item is
-held at `restart_from` with the span's gates reopened.
+held at `restart_from` with the span's gates reopened. A commit counts on the
+item's branch in its own checkout or in any workspace member still to merge,
+not only in the one whose merge request was dropped.
 
-The same goes for a Kraft restart while the repair works or the restart is under way: if the head
-moved, the resume holds the item there and stops for you. A retry then walks
-back through `final_review`, and the commit is never merged unseen.
+A repair that stopped before committing leaves the item on the merge node.
+Whatever brings it back there, a resume, the rate-limit retry or your
+`kraft item retry`, runs the repair again, with your steer, and never queues
+the head the train rejected. A retry from an earlier node or gate goes through
+`final_review` and then queues the head again.
+
+The same goes for a Kraft restart while the repair works or the restart is
+under way: if a repair had started or the branch moved, the resume holds the
+item there and stops for you. A retry then walks back through `final_review`,
+and the commit is never merged unseen.
 
 **The cap.** Rewinds are counted under `<node>.on_merge_rejected`: 3 attempts
 over 7 days unless `policy.yaml` names that key under `loops:`. See

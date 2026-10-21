@@ -900,29 +900,91 @@ MERGE_REJECTED_CAP = _policy.Cap(attempts=3, wall_clock_s=604800)
 _DROP_PAGE = 200
 
 
-#: What answers a drop: the node entered again, or its span restarted.
-_PAST_A_DROP = (ChainEvent.NODE_STARTED, ChainEvent.MERGE_REJECTION_RESTART)
+def _answers_a_drop(event, node_id: str) -> bool:
+    """Whether `event` answers an earlier drop of `node_id`: any node entered,
+    a gate included (the walk moved on, or came back through the span or a
+    retry of an earlier node), or the drop's own span restarted. A retry or
+    resume of the dropped node itself, or a poller's relaunch of it, answers
+    nothing: they come back to the drop."""
+    if event["type"] == ChainEvent.NODE_STARTED:
+        return True
+    return (
+        event["type"] == ChainEvent.MERGE_REJECTION_RESTART
+        and event["payload"].get("node_id") == node_id
+    )
+
+
+def _drop_scan(c, work_item_id: str, node_id: str, *, unanswered: bool) -> tuple[dict | None, bool]:
+    """`_latest_drop`, and whether a merge-rejection repair of `node_id` started
+    after it (`dispatch.run_recovery`'s `node_recovery_started`)."""
+    before = 2**63 - 1
+    repaired = False
+    while True:
+        page = events.read_before(c, before, work_item_id, limit=_DROP_PAGE)
+        for event in reversed(page):
+            payload = event["payload"]
+            if event["type"] == ForgeEvent.MERGE_QUEUE_DROPPED:
+                if payload.get("node_id") == node_id:
+                    return payload, repaired
+                continue
+            if not unanswered:
+                continue
+            if _answers_a_drop(event, node_id):
+                return None, False
+            if (
+                event["type"] == ChainEvent.NODE_RECOVERY_STARTED
+                and payload.get("node_id") == node_id
+                and payload.get("scope") == "merge_rejected"
+            ):
+                repaired = True
+        if len(page) < _DROP_PAGE:
+            return None, False
+        before = page[0]["seq"]
 
 
 def _latest_drop(c, work_item_id: str, node_id: str, *, unanswered: bool = False) -> dict | None:
     """The newest `merge_queue_dropped` the forge's merge handler recorded for
     `node_id`: why the train or queue rejected the merge request, and the head
     Kraft's forced rebase left (`adapters.forge.run._merge_dropped`).
-    `unanswered`: None once the node was entered again or its span restarted
-    after it -- a drop the walk already answered."""
-    before = 2**63 - 1
-    while True:
-        page = events.read_before(c, before, work_item_id, limit=_DROP_PAGE)
-        for event in reversed(page):
-            if event["payload"].get("node_id") != node_id:
-                continue
-            if event["type"] == ForgeEvent.MERGE_QUEUE_DROPPED:
-                return event["payload"]
-            if unanswered and event["type"] in _PAST_A_DROP:
-                return None
-        if len(page) < _DROP_PAGE:
-            return None
-        before = page[0]["seq"]
+    `unanswered`: None once anything answered it since (`_answers_a_drop`)."""
+    return _drop_scan(c, work_item_id, node_id, unanswered=unanswered)[0]
+
+
+def _branch_tip(checkout, row) -> str | None:
+    """The item's branch tip in `checkout`, or None when git cannot read it:
+    `refs/heads/<branch>`, what the merge pushes, never `HEAD`, which an agent
+    may have moved off the branch (or, in place, a person's)."""
+    return _config.git_read(
+        Path(checkout), "rev-parse", f"refs/heads/{store.branch_for(row)}", expected_failure=True
+    )
+
+
+def _branch_tips(db, work_item_id: str, row, worktree) -> dict[str, str | None]:
+    """The item's branch tip in its own checkout and in every workspace member
+    whose merge request has not merged: everything a later merge could push."""
+    checkouts = [str(worktree)] + [
+        r["path"]
+        for r in db.read(lambda c: store.repos_for(c, work_item_id))
+        if r["role"] == "submodule" and r["state"] != "merged"
+    ]
+    return {path: _branch_tip(path, row) for path in dict.fromkeys(checkouts)}
+
+
+def _unanswered_drop(
+    db, work_item_id: str, node: ResolvedNode
+) -> tuple[dict, list[ResolvedTask], bool] | None:
+    """The drop a node's merge task is still standing on: its latest session
+    ended `merge_rejected` and nothing answered the drop since. With the tasks
+    it rejected and whether a repair started after it. None otherwise."""
+    if not isinstance(node.node, ExecNode):
+        return None
+    own = {t.path: t for step in node.steps for t in step.tasks}
+    latest = db.read(lambda c: store.latest_session_per_task(c, work_item_id, node.id, list(own)))
+    rejected = [own[r["hook_point"]] for r in latest if r["status"] == MERGE_REJECTED]
+    if not rejected:
+        return None
+    drop, repaired = db.read(lambda c: _drop_scan(c, work_item_id, node.id, unanswered=True))
+    return None if drop is None else (drop, rejected, repaired)
 
 
 def _dropped_member(db, work_item_id: str, drop: dict) -> Path | None:
@@ -1079,13 +1141,10 @@ async def _repair_merge_rejection(
         landed=landed,
         member=str(member) if member is not None else None,
     )
-    # The repair runs in the item's worktree whichever checkout was dropped: a
-    # member's repair that commits in the root changed code no gate saw too.
-    root_before = (
-        _config.git_read(Path(worktree), "rev-parse", "HEAD", expected_failure=True)
-        if member is not None
-        else None
-    )
+    # The repair runs in the item's worktree whichever checkout was dropped:
+    # a commit in the root, or in any member still to merge, is code no gate
+    # saw too.
+    tips_before = _branch_tips(db, work_item_id, row, worktree)
     verdict, h_failed, _excs = await dispatch.run_recovery(
         db,
         run_dirs,
@@ -1104,21 +1163,14 @@ async def _repair_merge_rejection(
         round=round,
         loop_severities=loop_severities,
     )
-    head = _config.git_read(checkout, "rev-parse", "HEAD", expected_failure=True)
+    head = _branch_tip(checkout, row)
     # Only a commit in the dropped checkout is its fix.
     fixed = head is not None and head != drop.get("head_sha")
     # What no gate saw: that, a head that cannot be read (holding costs a
     # re-review at most; resuming at the merge node could merge unseen code),
-    # or, for a member, a commit the repair made in the root instead.
-    changed = (
-        head is None
-        or fixed
-        or (
-            member is not None
-            and _config.git_read(Path(worktree), "rev-parse", "HEAD", expected_failure=True)
-            != root_before
-        )
-    )
+    # or a commit the repair made in any other checkout a merge would push.
+    tips = _branch_tips(db, work_item_id, row, worktree)
+    changed = head is None or fixed or tips != tips_before
     repaired = verdict == "ok" and fixed
     if changed and not repaired:
         # Held before the stop is written: a crash between the two leaves the
@@ -1133,7 +1185,12 @@ async def _repair_merge_rejection(
             member is None
             and new_base is not None
             and _config.git_read(
-                checkout, "merge-base", "--is-ancestor", new_base, "HEAD", expected_failure=True
+                checkout,
+                "merge-base",
+                "--is-ancestor",
+                new_base,
+                f"refs/heads/{store.branch_for(row)}",
+                expected_failure=True,
             )
             is not None
         )
@@ -1142,8 +1199,9 @@ async def _repair_merge_rejection(
         return MERGE_REPAIRED
     if stop is None:
         if verdict == "ok":
+            where = f" in {checkout}" if member is not None else ""
             reason = (
-                f"the merge-rejection repair in node {node.id} committed nothing: {why}"
+                f"the merge-rejection repair in node {node.id} committed nothing{where}: {why}"
                 if head is not None
                 else f"the merge-rejection repair in node {node.id} left a head git could not "
                 f"read in {checkout}: {why}"
@@ -1174,41 +1232,22 @@ async def hold_interrupted_repair(
     the repair interrupted, or the rewind's writes cut short. Walking the node
     again would ask the forge to merge, and stopping on it would make the
     node a retry's default target: either merges a repair's commit no gate
-    saw. So `"needs_human"`, never `stuck` -- and when the dropped checkout's
-    head is not the one the drop recorded (or cannot be read), or a member's
-    repair moved the root, held at `restart_from` with the span's gates
-    reopened first (`_hold_at_restart`). None when nothing is pending."""
-    if not isinstance(node.node, ExecNode):
+    saw. So `"needs_human"`, never `stuck` -- and when a repair started after
+    the drop (whatever it left, in whichever checkout), or the dropped
+    checkout's branch is not at the head the drop recorded (or cannot be
+    read), held at `restart_from` with the span's gates reopened first
+    (`_hold_at_restart`). None when nothing is pending."""
+    pending = _unanswered_drop(db, work_item_id, node)
+    if pending is None:
         return None
-    measured = [t.path for step in node.steps for t in step.tasks]
-    latest = db.read(lambda c: store.latest_session_per_task(c, work_item_id, node.id, measured))
-    rejected = [r for r in latest if r["status"] == MERGE_REJECTED]
-    if not rejected:
-        return None
-    drop = db.read(lambda c: _latest_drop(c, work_item_id, node.id, unanswered=True))
-    if drop is None:
-        return None
+    drop, _rejected, repair_started = pending
     reason = _unrepaired_drop(node, drop)
     if reason is None:
         why = drop.get("reason") or "no reason given"
         reason = f"resume: the merge-rejection repair in node {node.id} did not finish: {why}"
         member = _dropped_member(db, work_item_id, drop)
-        head = _config.git_read(
-            member or Path(worktree), "rev-parse", "HEAD", expected_failure=True
-        )
-        root = (
-            _config.git_read(Path(worktree), "rev-parse", "HEAD", expected_failure=True)
-            if member is not None
-            else None
-        )
-        unseen = (
-            head is None
-            or head != drop.get("head_sha")
-            # A member's repair that committed in the root: the merge task
-            # dispatched at the root head it found.
-            or (member is not None and (root is None or root != rejected[0]["head_sha"]))
-        )
-        if unseen:
+        head = _branch_tip(member or Path(worktree), row)
+        if repair_started or head is None or head != drop.get("head_sha"):
             nodes = chain_of(row).chain.nodes
             index = next(j for j, n in enumerate(nodes) if n.id == node.id)
             await _hold_at_restart(
@@ -1340,6 +1379,29 @@ async def walk_node(
     # next node it enters -- every task that node dispatches, and every wait
     # it observes (Kraft-ab1bh).
     row = fresh_row if fresh_row is not None else row
+    # Back on a node whose merge request the forge dropped, the drop not yet
+    # answered: a rate limit or a pause relaunching the repair, a person's
+    # retry or resume after it stopped, a crash after Kraft's forced rebase.
+    # Measuring would ask the forge to merge the head it rejected -- rebased,
+    # or with a repair's commit, that no gate saw -- so the repair (or the
+    # rewind) answers it first, on every entry.
+    pending = _unanswered_drop(db, work_item_id, node)
+    if pending is not None and _unrepaired_drop(node, pending[0]) is None:
+        return await _repair_merge_rejection(
+            db,
+            run_dirs,
+            work_item_id,
+            node,
+            row,
+            worktree,
+            pending[1],
+            policy=policy,
+            steer=steer,
+            launch=launch,
+            budget=budget,
+            round=0,
+            loop_severities=policy.loop_severities if policy else _policy.DEFAULT_LOOP_SEVERITIES,
+        )
     while True:
         result = await _walk_node_once(
             db,
@@ -1494,6 +1556,25 @@ async def _walk_node_once(
                     return stop
                 if verdict == BASE_MOVED:
                     return await _moved_base(db, work_item_id, node)
+                if verdict == MERGE_REJECTED:
+                    # The re-measure asked the forge to merge, and it was
+                    # dropped: never a stuck stop an escalation's retry answers
+                    # by re-queueing it.
+                    return await _repair_merge_rejection(
+                        db,
+                        run_dirs,
+                        work_item_id,
+                        node,
+                        row,
+                        worktree,
+                        failed,
+                        policy=policy,
+                        steer=steer,
+                        launch=launch,
+                        budget=budget,
+                        round=1,
+                        loop_severities=loop_severities,
+                    )
                 recovered = verdict == "ok"
                 if not recovered:
                     question = dispatch.needs_context_question(db, work_item_id, node, round=1)
@@ -1684,6 +1765,24 @@ async def _walk_node_once(
                 return stop
             if r_verdict == BASE_MOVED:
                 return await _moved_base(db, work_item_id, node)
+            if r_verdict == MERGE_REJECTED:
+                # Never a paid fix cycle whose commit the next measure would
+                # merge unseen.
+                return await _repair_merge_rejection(
+                    db,
+                    run_dirs,
+                    work_item_id,
+                    node,
+                    row,
+                    worktree,
+                    r_failed,
+                    policy=policy,
+                    steer=steer,
+                    launch=launch,
+                    budget=budget,
+                    round=_REPAIR_ROUND,
+                    loop_severities=loop_severities,
+                )
             if r_verdict == "ok":
                 await node_runs.completed(
                     db,
