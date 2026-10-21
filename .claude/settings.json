@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/kraft-worker-superpowers.sh"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/kraft-worker-plugins.sh"
           }
         ]
       }
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/kraft-worker-superpowers.sh"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/kraft-worker-plugins.sh"
           }
         ]
       }
@@ -33,13 +33,35 @@
   },
   "enabledPlugins": {
     "superpowers@claude-plugins-official": true,
-    "impeccable@impeccable": true
+    "impeccable@impeccable": true,
+    "ponytail@ponytail": true,
+    "techdocs-authoring@techdocs-authoring": true,
+    "engineering@knowledge-work-plugins": true,
+    "design@knowledge-work-plugins": true
   },
   "extraKnownMarketplaces": {
     "impeccable": {
       "source": {
         "source": "github",
         "repo": "pbakaus/impeccable"
+      }
+    },
+    "ponytail": {
+      "source": {
+        "source": "github",
+        "repo": "DietrichGebert/ponytail"
+      }
+    },
+    "techdocs-authoring": {
+      "source": {
+        "source": "github",
+        "repo": "pkloehn1/techdocs-authoring"
+      }
+    },
+    "knowledge-work-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/knowledge-work-plugins"
       }
     }
   }

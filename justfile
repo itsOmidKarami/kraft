@@ -13,10 +13,11 @@ setup:
 
 # superpowers and impeccable, for every agent this repo is worked on with.
 #
-# Claude Code: .claude/settings.json turns both plugins on, but committing
-# `enabledPlugins` does not download a plugin from an outside source, so each
-# machine installs them once, into ~/.claude, which every checkout and worktree
-# shares.
+# Claude Code: also ponytail, techdocs-authoring, and the engineering and
+# design plugins from anthropics/knowledge-work-plugins. .claude/settings.json
+# turns them all on, but committing `enabledPlugins` does not download a plugin
+# from an outside source, so each machine installs them once, into ~/.claude,
+# which every checkout and worktree shares.
 #
 # Every other agent Kraft runs (Codex, Cursor, Gemini CLI, OpenCode, Amp,
 # Antigravity) and GitHub Copilot reads skills from .agents/skills/. The
@@ -29,11 +30,12 @@ setup:
 # refresh: `claude plugin update <id>` and `npx skills update -p`.
 #
 # superpowers is off in Kraft workers (its skills ask a person questions, and
-# push or merge, which a worker never does). For Claude Code the hook
-# .claude/hooks/kraft-worker-superpowers.sh does that. For the other agents, a
+# push or merge, which a worker never does), and so is ponytail (its own coding
+# mode, where a worker follows Kraft's instructions). For Claude Code the hook
+# .claude/hooks/kraft-worker-plugins.sh does that. For the other agents, a
 # setup Kraft runs ($KRAFT_DAEMON_PID is set in everything the daemon starts)
 # copies only impeccable into the worktree's .agents/skills/.
-[doc("Install superpowers and impeccable for Claude Code and every other agent")]
+[doc("Install superpowers, impeccable and the other Claude Code plugins for every agent")]
 setup-plugins:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -43,12 +45,20 @@ setup-plugins:
     limit() {
         if command -v timeout >/dev/null; then timeout 300 "$@"; else "$@"; fi
     }
+    # The marketplaces and plugins .claude/settings.json names.
+    claude_marketplaces=(anthropics/claude-plugins-official pbakaus/impeccable DietrichGebert/ponytail
+        pkloehn1/techdocs-authoring anthropics/knowledge-work-plugins)
+    claude_plugin_ids=(superpowers@claude-plugins-official impeccable@impeccable ponytail@ponytail
+        techdocs-authoring@techdocs-authoring engineering@knowledge-work-plugins design@knowledge-work-plugins)
     claude_plugins() {
         local failed=0
-        limit claude plugin marketplace add anthropics/claude-plugins-official >/dev/null || failed=1
-        limit claude plugin marketplace add pbakaus/impeccable >/dev/null || failed=1
-        limit claude plugin install superpowers@claude-plugins-official --scope project || failed=1
-        limit claude plugin install impeccable@impeccable --scope project || failed=1
+        local marketplace plugin
+        for marketplace in "${claude_marketplaces[@]}"; do
+            limit claude plugin marketplace add "$marketplace" >/dev/null || failed=1
+        done
+        for plugin in "${claude_plugin_ids[@]}"; do
+            limit claude plugin install "$plugin" --scope project || failed=1
+        done
         return $failed
     }
     sources=(obra/superpowers pbakaus/impeccable)
@@ -66,6 +76,10 @@ setup-plugins:
                 --copy -y >/dev/null || return 1
         done
     }
+    all_installed() {
+        local plugin
+        for plugin in "${claude_plugin_ids[@]}"; do grep -qs "\"$plugin\"" "$installed" || return 1; done
+    }
     all_present() {
         local marker
         for marker in "${markers[@]}"; do [[ -f $marker ]] || return 1; done
@@ -75,8 +89,7 @@ setup-plugins:
     installed="${CLAUDE_CODE_PLUGIN_CACHE_DIR:-$HOME/.claude/plugins}/installed_plugins.json"
     if ! command -v claude >/dev/null; then
         echo "claude not installed; skipping the Claude Code plugins"
-    elif grep -qs '"superpowers@claude-plugins-official"' "$installed" &&
-        grep -qs '"impeccable@impeccable"' "$installed"; then
+    elif all_installed; then
         echo "Claude Code plugins already installed"
     elif ! claude_plugins; then
         echo "warning: could not install the Claude Code plugins; run 'just setup-plugins' to retry" >&2

@@ -35,7 +35,11 @@ just dev        # backend + vite, state in .dev/, agents faked, UI on :5173
 
 `just setup` also installs [superpowers](https://github.com/obra/superpowers)
 and [impeccable](https://impeccable.style) for every agent this repo is worked
-on with. `just setup-plugins` runs that step alone. It skips whatever is already
+on with, and for Claude Code also
+[ponytail](https://github.com/DietrichGebert/ponytail),
+[techdocs-authoring](https://github.com/pkloehn1/techdocs-authoring), and the
+engineering and design plugins from
+[knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins). `just setup-plugins` runs that step alone. It skips whatever is already
 installed, and a missing tool or a failed download is a warning, not a failed
 setup. To refresh them, run `claude plugin update <id>` and `npx skills update -p`:
 
@@ -54,9 +58,15 @@ new worktree. Claude Code's plugins live in `~/.claude` and need no setup per
 worktree.
 
 superpowers is off in Kraft workers: its skills ask a person questions and push
-or merge a finished branch, and a worker does neither. For Claude Code,
-`.claude/hooks/kraft-worker-superpowers.sh` refuses every superpowers skill in a
-session with `$KRAFT_WORK_ITEM_ID` set and tells the session so. For the other
+or merge a finished branch, and a worker does neither. So is ponytail, which
+puts a session into its own coding mode where a worker follows Kraft's
+instructions. For Claude Code, `.claude/hooks/kraft-worker-plugins.sh` refuses
+every superpowers and ponytail skill in a session with `$KRAFT_WORK_ITEM_ID` set
+and tells the session so. Both plugins also run hooks the worker hook cannot
+stop; to silence them, add `PONYTAIL_DEFAULT_MODE: "off"` and
+`TECHDOCS_SHORT_FORM_GATE: "off"` to `env:` in this repo's `repos.yaml` entry
+(techdocs-authoring's otherwise turns back a worker's first commit once, with a
+checklist for its message). For the other
 agents, a setup Kraft runs copies only impeccable into the worktree. An
 in-place item runs in your own checkout, so other agents there still see the
 superpowers copies you installed.
@@ -81,6 +91,10 @@ session in that environment, whatever repositories it clones:
 claude plugin marketplace add anthropics/claude-plugins-official
 claude plugin install superpowers@claude-plugins-official
 claude plugin install impeccable --marketplace pbakaus/impeccable
+claude plugin install ponytail --marketplace DietrichGebert/ponytail
+claude plugin install techdocs-authoring --marketplace pkloehn1/techdocs-authoring
+claude plugin install engineering --marketplace anthropics/knowledge-work-plugins
+claude plugin install design --marketplace anthropics/knowledge-work-plugins
 ```
 
 `just dev` puts `fixtures/bin` on `PATH` ahead of the real agent, where `claude`
@@ -191,7 +205,7 @@ them unless you use the same tools:
 | `.github/` | CI workflows, issue and PR templates, CODEOWNERS | Yes: CI lives here |
 | `.claude-plugin/` | the marketplace manifest that publishes `plugins/` to Claude Code and Codex | Only to rename a plugin or add one |
 | `.cursor-plugin/` | the same marketplace for Cursor | Only to rename a plugin or add one |
-| `.claude/` | Claude Code settings: a hook that blocks raw `pytest` (needs `jq`), the plugins it turns on (superpowers, impeccable), and a hook that turns superpowers off in Kraft workers | Only with Claude Code |
+| `.claude/` | Claude Code settings: a hook that blocks raw `pytest` (needs `jq`), the plugins it turns on (superpowers, impeccable, ponytail, techdocs-authoring, engineering, design), and a hook that turns superpowers and ponytail off in Kraft workers | Only with Claude Code |
 | `.beads/` | beads config and git hooks for the maintainer's private tracker | No |
 | `.agents/` | a beads skill for agent sessions; `just setup` adds superpowers and impeccable beside it, gitignored | Only with an agent other than Claude Code |
 | `.codex/` | Codex hooks that call `bd`; they fail without beads installed | No |
