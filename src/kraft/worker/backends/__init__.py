@@ -26,6 +26,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from kraft.worker.backends.bwrap import OsBackend
 from kraft.worker.backends.docker import DockerBackend, OomKill
 
 if TYPE_CHECKING:
@@ -80,10 +81,12 @@ class SandboxBackend(Protocol):
         `session_id=` and `work_item_id=` name the session it runs, together
         or not at all."""
 
-    def oneshot(self, sandbox: dict, cwd, home):
+    def oneshot(self, sandbox: dict, cwd, home, executables: Iterable[str] = ()):
         """Short commands in the session's image, asked as its session would
         but with no network, stdin attached: `.argv()` per command (the
-        argv up to it), `await .close()` after. `worker.sandbox.SandboxNotReady`
+        argv up to it), `await .close()` after. `executables` are the commands
+        it will run, for a backend that shows the host's own (`kind: os`
+        resolves them; Docker's image has its own). `worker.sandbox.SandboxNotReady`
         where it cannot."""
 
     def client_cwd(self, session_id: str, *, work_item_id: str) -> Path | None:
@@ -157,7 +160,7 @@ class SandboxBackend(Protocol):
         asks once per run."""
 
 
-_BACKENDS: dict[str, SandboxBackend] = {b.kind: b for b in (DockerBackend(),)}
+_BACKENDS: dict[str, SandboxBackend] = {b.kind: b for b in (DockerBackend(), OsBackend())}
 
 
 def for_sandbox(sandbox: Mapping) -> SandboxBackend:

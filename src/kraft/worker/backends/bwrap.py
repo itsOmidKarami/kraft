@@ -8,23 +8,46 @@ by name (`--keep`), through the launcher's environment.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import shutil
-from collections.abc import Iterable, Mapping
+import subprocess
+import sys
+import time
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from kraft import item_paths
 from kraft.paths import RunDirs, kraft_home
+from kraft.worker import channel as _channel
 from kraft.worker import host_view, os_init, os_seccomp, shim
+from kraft.worker import mounts as _mounts
+from kraft.worker import refstore as _refstore
+from kraft.worker.backends.docker import _ONESHOT_SH, ONESHOT_HOME_RO, OomKill, _run_dirs
 from kraft.worker.ca import write_whole
-from kraft.worker.mounts import RELAY_PORT, Mount
-from kraft.worker.sandbox import _HARDENED_GIT_CONFIG, FORWARDED_ENV, SandboxRefused, _pin
+from kraft.worker.mounts import RELAY_PORT, RELAY_PROXY_ENV, Mount
+from kraft.worker.refstore import RefStore
+from kraft.worker.sandbox import (
+    _HARDENED_GIT_CONFIG,
+    FORWARDED_ENV,
+    SandboxNotReady,
+    SandboxRefused,
+    _pin,
+)
 
 TMP_BYTES = 2147483648
 SHM_BYTES = 268435456
 #: The worker baseline's names that cross (the CA ones come from `ca_names`).
 _BASELINE_NAMES = ("LANG", "LC_ALL", "TZ", "TERM", "USER", "LOGNAME", "SHELL")
+
+
+_BWRAP_FLAGS = (
+    *("--unshare-all", "--unshare-user", "--disable-userns", "--die-with-parent"),
+    *("--cap-drop", "ALL", "--as-pid-1"),
+)
 
 
 def _once(path: Path, data: bytes, mode: int) -> Path:
@@ -113,8 +136,7 @@ def bwrap_argv(
         *(("--started", str(started)) if started and mode == "launch" else ()),
         "--",
         os.path.abspath(bwrap),
-        *("--unshare-all", "--unshare-user", "--disable-userns", "--die-with-parent"),
-        *("--cap-drop", "ALL", "--as-pid-1"),
+        *_BWRAP_FLAGS,
         *system_args(),
     ]
     for root in (*interp_roots, Path(os_init.__file__)):
@@ -147,3 +169,261 @@ def bwrap_argv(
     if sock_path is not None:
         argv += ["--sock", str(sock_path), "--port", str(RELAY_PORT)]
     return [*argv, "--", *cmd]
+
+
+#: What `bwrap --help` must list: the flags Kraft passes beyond bubblewrap 0.4's.
+_NEEDED_FLAGS = (
+    "--size",
+    "--disable-userns",
+    "--as-pid-1",
+    "--cap-drop",
+    "--seccomp",
+    "--die-with-parent",
+)
+#: `(path under /proc/sys, the value that blocks, the fix)`, read only when the trial fails.
+_NAMESPACE_KNOBS = (
+    ("user/max_user_namespaces", "0", "sysctl user.max_user_namespaces=15000"),
+    ("kernel/unprivileged_userns_clone", "0", "sysctl kernel.unprivileged_userns_clone=1"),
+    (
+        "kernel/apparmor_restrict_unprivileged_userns",
+        "1",
+        "install bubblewrap's AppArmor profile, or "
+        "sysctl kernel.apparmor_restrict_unprivileged_userns=0",
+    ),
+)
+_PROBE_TTL = 60.0
+_probed: tuple[float, str | None] | None = None
+
+
+def _sysctl(path: str) -> str | None:
+    try:
+        return Path("/proc/sys", path).read_text().strip()
+    except OSError:
+        return None
+
+
+def _run(argv: Sequence[str]) -> subprocess.CompletedProcess[str] | str:
+    try:
+        return subprocess.run(
+            argv, capture_output=True, text=True, timeout=15, stdin=subprocess.DEVNULL
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return str(exc)
+
+
+def _probe() -> str | None:
+    if sys.platform != "linux":
+        return "kind: os runs on Linux only in this release"
+    if os.geteuid() == 0:
+        return "kind: os does not run while Kraft runs as root"
+    if (arch := os_seccomp.machine()) not in ("x86_64", "aarch64"):
+        return f"kind: os supports x86_64 and aarch64, not {arch}"
+    if (bwrap := shutil.which("bwrap")) is None:
+        return "bubblewrap is not installed (apt install bubblewrap)"
+    if missing := [n for n in ("sh", "curl") if shutil.which(n) is None]:
+        return f"{' and '.join(missing)} is not installed on this host (the `kraft` shim needs it)"
+    helped = _run([bwrap, "--help"])
+    if isinstance(helped, str):
+        return f"bwrap --help failed: {helped}"
+    text = helped.stdout + helped.stderr
+    if lacking := [f for f in _NEEDED_FLAGS if f not in text]:
+        return f"this bubblewrap lacks {', '.join(lacking)}: install a newer bubblewrap"
+    trial = _run([os.path.abspath(bwrap), *_BWRAP_FLAGS, *system_args(), "true"])
+    if not isinstance(trial, str) and trial.returncode == 0:
+        return None
+    for path, blocking, fix in _NAMESPACE_KNOBS:
+        if _sysctl(path) == blocking:
+            return f"bubblewrap cannot create a user namespace here: {fix}"
+    err = trial if isinstance(trial, str) else trial.stderr.strip() or f"exit {trial.returncode}"
+    return f"bubblewrap cannot start a sandbox here: {err}"
+
+
+def probe_host(*, refresh: bool = False) -> str | None:
+    """Why `kind: os` cannot run on this machine, with its fix, or None.
+    Cached for a minute."""
+    global _probed
+    if refresh or _probed is None or time.monotonic() - _probed[0] > _PROBE_TTL:
+        _probed = (time.monotonic(), _probe())
+    return _probed[1]
+
+
+@dataclass
+class OsOneshot:
+    """`worker.backends.docker.Oneshot` for bwrap: nothing outlives a client,
+    since `--die-with-parent` ends the sandbox with it."""
+
+    prefix: list[str]
+
+    def argv(self) -> list[str]:
+        return list(self.prefix)
+
+    async def close(self) -> None:
+        pass
+
+
+class OsBackend:
+    """`kraft.worker.backends.SandboxBackend` over bubblewrap (Linux)."""
+
+    kind = "os"
+
+    def home(self, run_dirs, work_item_id: str) -> Path:
+        return item_paths.sandbox_home(run_dirs, work_item_id)
+
+    async def owner_refusal(self, run_dirs, cwd, work_item_id, result_path, **kw) -> str | None:
+        return None
+
+    async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
+        if problem := await asyncio.to_thread(probe_host):
+            return problem
+        home, cwd, kh = Path(os.environ.get("HOME") or Path.home()), Path.cwd(), kraft_home()
+        search = (env or {}).get("PATH") or os.environ["PATH"]
+        try:
+            exposed = host_view.expose_roots(sandbox.get("expose") or (), home, kh)
+            host_view.resolve(executable, search, cwd, cwd, home, kh, visible=exposed)
+        except (host_view.Refused, host_view.NotFound) as exc:
+            return str(exc)
+        return None
+
+    async def prepare(self, sandbox: dict, *, kraft_ca: Path | None = None) -> Path | None:
+        return None
+
+    def code_in(self, run_base: Path, cwd: Path, branch: str | None, **kw) -> Sequence[RefStore]:
+        return _refstore.prepare_stores(run_base, cwd, branch, **kw)
+
+    def wrap(
+        self,
+        cmd: list[str],
+        cwd: str | Path,
+        sandbox: dict,
+        results: Iterable[str | Path] | None,
+        env: dict | None = None,
+        *,
+        session_id: str | None = None,
+        work_item_id: str | None = None,
+        result_path: str | Path | None = None,
+        rw_files: Iterable[str | Path] = (),
+        rw_dirs: Iterable[str | Path] = (),
+        cidfile: str | Path | None = None,
+        refs: Sequence[RefStore] = (),
+        workdir: str | Path | None = None,
+        home: str | Path | None = None,
+        passthrough: Iterable[str] = (),
+        ro_paths: Iterable[str | Path] = (),
+        ca_bundle: str | Path | None = None,  # unused: the host's trust store applies
+        sentinels: dict[str, str] | None = None,  # unused: `kind: os` refuses credentials
+    ) -> list[str]:
+        if session_id is not None and work_item_id is None:
+            raise TypeError("wrap: a session's sandbox is found by its work item too")
+        sock_path = None
+        if sandbox.get("network") and session_id is not None:
+            if (registry := _channel.current()) is None:
+                raise SandboxRefused(
+                    "a kind: os sandbox reaches out only through the Kraft server's egress "
+                    "channel, and this process has none"
+                )
+            sock_path = registry.socket_path(session_id, work_item_id=work_item_id)
+        env = dict(env or {})
+        # shortcut: wrap is not told the harness's CLI, so no agent= and only cmd[0]'s
+        # roots are shown; pass it when wrap learns the executable.
+        return bwrap_argv(
+            cmd,
+            cwd,
+            sandbox,
+            _mounts.session_mounts(
+                Path(cwd),
+                results,
+                result_path=result_path,
+                rw_files=rw_files,
+                rw_dirs=rw_dirs,
+                refstores=refs,
+                ro_paths=ro_paths,
+            ),
+            env=env,
+            passthrough=passthrough,
+            home=Path(home) if home is not None else None,
+            workdir=Path(workdir) if workdir is not None else None,
+            sock_path=sock_path,
+            started=Path(cidfile) if cidfile is not None else None,
+            search_path=env.get("PATH") or os.environ["PATH"],
+            run_dirs=_run_dirs(),
+        )
+
+    def oneshot(
+        self, sandbox: dict, cwd: str | Path, home: str | Path, executables: Iterable[str] = ()
+    ) -> OsOneshot:
+        if problem := probe_host():
+            raise SandboxNotReady(problem)
+        cwd, home = Path(cwd).resolve(), Path(home)
+        mounts = [Mount(cwd, cwd, True)]
+        if home.is_dir():
+            mounts.append(Mount(home, Path(ONESHOT_HOME_RO), True))
+        search = os.environ["PATH"]
+        try:
+            prefix = bwrap_argv(
+                ["sh", "-c", _ONESHOT_SH, ONESHOT_HOME_RO],
+                cwd,
+                sandbox,
+                mounts,
+                env={"PATH": f"{shim.CONTAINER_DIR}:{search}"},
+                passthrough=(),
+                home=None,  # HOME is then /tmp/home, on the tmpfs
+                workdir=None,
+                sock_path=None,
+                started=None,
+                search_path=search,
+                run_dirs=_run_dirs(),
+                # shortcut: one agent CLI is resolved, the first; callers pass one.
+                agent=next(iter(executables), None),
+                mode="oneshot",
+            )
+        except SandboxRefused as exc:
+            raise SandboxNotReady(str(exc)) from exc
+        return OsOneshot(prefix)
+
+    def client_cwd(self, session_id: str, *, work_item_id: str) -> Path | None:
+        return None
+
+    def launch_failed(self, cidfile: Path, returncode: int | None = None) -> bool:
+        try:
+            return cidfile.read_text().strip() != "started"
+        except OSError:
+            return True
+
+    def code_out(self, refs: Sequence[RefStore], session_id: str) -> list[str]:
+        return _refstore.sync_all(refs, session_id)
+
+    def code_out_item(self, run_base: Path, work_item_id: str) -> list[str]:
+        return []  # Docker's already runs for every backend's sessions
+
+    async def collect(self, session_id: str, result_path: Path, *, work_item_id: str) -> None:
+        pass
+
+    async def oom_killed(self, session_id: str, *, work_item_id: str) -> OomKill | None:
+        return None
+
+    async def close(self, session_id: str, *, work_item_id: str) -> None:
+        pass
+
+    async def egress_transport(self) -> str:
+        return "unix"
+
+    async def open_session(
+        self, session_id: str, sandbox: dict, sock_path: Path | None, *, work_item_id: str
+    ) -> dict:
+        return {**RELAY_PROXY_ENV, "PATH": f"{shim.CONTAINER_DIR}:{os.environ['PATH']}"}
+
+    async def close_session(self, session_id: str, *, work_item_id: str) -> None:
+        pass
+
+    async def sweep(self, keep_sessions: Iterable[tuple[str, str]]) -> list[str]:
+        return []
+
+    def release(self, run_dirs, worktree: Path, work_item_id: str) -> None:
+        pass  # Docker's already runs for every backend's sessions
+
+    async def health(self, sandbox: dict, *, refresh: bool = True) -> tuple[bool, str]:
+        if problem := await asyncio.to_thread(probe_host, refresh=refresh):
+            return False, problem
+        out = await asyncio.to_thread(_run, [shutil.which("bwrap") or "bwrap", "--version"])
+        version = "" if isinstance(out, str) else out.stdout.strip().removeprefix("bubblewrap ")
+        return True, f"bubblewrap {version}".rstrip()

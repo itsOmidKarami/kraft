@@ -144,8 +144,13 @@ def docker_closed(monkeypatch):
 
 @pytest.mark.parametrize(
     ("kind", "asked"),
-    [("docker", ["docker"]), (None, ["docker", "remote"]), ("retired", ["docker", "remote"])],
-    ids=["recorded", "none-recorded", "no-longer-registered"],
+    [
+        ("docker", ["docker"]),
+        ("os", ["os"]),
+        (None, ["docker", "os", "remote"]),
+        ("retired", ["docker", "os", "remote"]),
+    ],
+    ids=["recorded", "recorded-os", "none-recorded", "no-longer-registered"],
 )
 def test_a_session_is_closed_by_the_backend_it_recorded_else_by_every_one(remote, kind, asked):
     assert [b.kind for b in backends.for_session(kind)] == asked

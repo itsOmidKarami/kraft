@@ -3,17 +3,21 @@ no secret is on it. Argv only; the real bwrap is proven by the e2e tier."""
 
 from __future__ import annotations
 
+import asyncio
 import os
+import shutil
 import stat
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from kraft.paths import RunDirs, kraft_home
-from kraft.worker import host_view, mounts, shim
+from kraft.worker import channel, host_view, mounts, refstore, shim
 from kraft.worker.backends import bwrap
-from kraft.worker.sandbox import FORWARDED_ENV, SandboxRefused
+from kraft.worker.backends.docker import _ONESHOT_SH, ONESHOT_HOME_RO
+from kraft.worker.sandbox import FORWARDED_ENV, SandboxNotReady, SandboxRefused
 
 SANDBOX = {"kind": "os", "network": {"runtime": {"allow": ["a.io"]}}}
 
@@ -266,3 +270,190 @@ def test_no_secret_on_argv(scene, monkeypatch):
     assert not [a for a in argv for v in secrets.values() if v in a]
     keep = argv[argv.index("--keep") + 1].split(",")
     assert {"MY_TOKEN", "ANTHROPIC_API_KEY", *FORWARDED_ENV} <= set(keep)
+
+
+# --- OsBackend ----------------------------------------------------------------------------
+
+_FLAGS = (
+    "--size",
+    "--disable-userns",
+    "--as-pid-1",
+    "--cap-drop",
+    "--seccomp",
+    "--die-with-parent",
+)
+
+
+@pytest.fixture
+def host(tmp_path, monkeypatch):
+    """A Linux, non-root host whose `PATH` holds only a fake `bwrap` (its
+    `--help` and trial run set by the test), `sh` and `curl`; no sysctl set."""
+    bindir = tmp_path / "hostbin"
+    bindir.mkdir()
+    (bindir / "sh").symlink_to("/bin/sh")
+    (bindir / "curl").write_text("#!/bin/sh\n")
+    (bindir / "curl").chmod(0o755)
+    monkeypatch.setenv("PATH", str(bindir))
+    monkeypatch.setattr(bwrap.sys, "platform", "linux")
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(bwrap.os_seccomp, "machine", lambda: "x86_64")
+    sysctls: dict[str, str] = {}
+    monkeypatch.setattr(bwrap, "_sysctl", sysctls.get)
+
+    def fake(flags=_FLAGS, rc=0, err=""):
+        script = bindir / "bwrap"
+        script.write_text(
+            "#!/bin/sh\n"
+            f'case "$1" in --help) echo "{" ".join(flags)}";; '
+            f'--version) echo "bubblewrap 0.9.0";; *) echo "{err}" >&2; exit {rc};; esac\n'
+        )
+        script.chmod(0o755)
+
+    return SimpleNamespace(bindir=bindir, sysctls=sysctls, fake=fake)
+
+
+@pytest.mark.parametrize(
+    ("setup", "expect"),
+    [
+        (lambda h, mp: mp.setattr(bwrap.sys, "platform", "darwin"), "Linux only"),
+        (
+            lambda h, mp: mp.setattr(os, "geteuid", lambda: 0),
+            "does not run while Kraft runs as root",
+        ),
+        (lambda h, mp: mp.setattr(bwrap.os_seccomp, "machine", lambda: "riscv64"), "not riscv64"),
+        (lambda h, mp: (h.bindir / "bwrap").unlink(), "bubblewrap is not installed"),
+        (lambda h, mp: (h.bindir / "curl").unlink(), "curl"),
+        (lambda h, mp: h.fake(flags=("--die-with-parent",)), "--size, --disable-userns"),
+        (
+            lambda h, mp: (h.fake(rc=1), h.sysctls.update({"user/max_user_namespaces": "0"})),
+            "sysctl user.max_user_namespaces=15000",
+        ),
+        (
+            lambda h, mp: (
+                h.fake(rc=1),
+                h.sysctls.update({"kernel/unprivileged_userns_clone": "0"}),
+            ),
+            "sysctl kernel.unprivileged_userns_clone=1",
+        ),
+        (
+            lambda h, mp: (
+                h.fake(rc=1),
+                h.sysctls.update({"kernel/apparmor_restrict_unprivileged_userns": "1"}),
+            ),
+            "kernel.apparmor_restrict_unprivileged_userns=0",
+        ),
+        (
+            lambda h, mp: (
+                h.fake(rc=0),
+                h.sysctls.update({"kernel/apparmor_restrict_unprivileged_userns": "1"}),
+            ),
+            None,
+        ),
+        (lambda h, mp: h.fake(rc=1, err="bwrap: no way"), "bwrap: no way"),
+    ],
+    ids=[
+        "not-linux",
+        "root",
+        "arch",
+        "no-bwrap",
+        "no-curl",
+        "missing-flag",
+        "max-userns-0",
+        "userns-clone-0",
+        "apparmor",
+        "apparmor-but-trial-passes",
+        "trial-fails",
+    ],
+)
+def test_probe_explains(host, monkeypatch, setup, expect):
+    host.fake()
+    setup(host, monkeypatch)
+    problem = bwrap.probe_host(refresh=True)
+    if expect is None:
+        assert problem is None
+    else:
+        assert expect in problem
+
+
+async def test_open_session_env():
+    backend = bwrap.OsBackend()
+    assert await backend.egress_transport() == "unix"
+    assert await backend.open_session("s1", SANDBOX, None, work_item_id="w1") == {
+        **mounts.RELAY_PROXY_ENV,
+        "PATH": f"/opt/kraft/bin:{os.environ['PATH']}",
+    }
+
+
+@pytest.mark.parametrize(
+    ("content", "failed"),
+    [(None, True), ("", True), ("started\n", False)],
+    ids=["missing", "empty", "started"],
+)
+def test_launch_failed(tmp_path, content, failed):
+    cid = tmp_path / "cid"
+    if content is not None:
+        cid.write_text(content)
+    assert bwrap.OsBackend().launch_failed(cid) is failed
+
+
+def test_wrap_finds_socket_by_ids(scene, run_dirs, monkeypatch):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dirs.base))
+    base = Path(tempfile.mkdtemp(prefix="kraft-sn-", dir="/tmp"))
+    registry = channel.ChannelRegistry(RunDirs(base).ensure(), None)
+    kw = {"session_id": "s1", "work_item_id": "w1", "cwd": scene.wt}
+    try:
+        with pytest.raises(SandboxRefused, match="egress channel"):
+            bwrap.OsBackend().wrap(["true"], sandbox=SANDBOX, results=None, **kw)
+        channel.install(registry)
+        argv = bwrap.OsBackend().wrap(["true"], sandbox=SANDBOX, results=None, **kw)
+        sock = registry.socket_path("s1", work_item_id="w1")
+        assert _at(argv, ("--sock", str(sock), "--port", "3128")) > 0
+    finally:
+        channel.install(None)
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def test_oneshot_argv(scene, run_dirs, tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dirs.base))
+    monkeypatch.setattr(bwrap, "probe_host", lambda **kw: None)
+    home = tmp_path / "item-home"
+    home.mkdir()
+    shot = bwrap.OsBackend().oneshot(SANDBOX, scene.wt, home, executables=(str(scene.cli),))
+    argv = shot.argv()
+    assert _at(argv, (scene.interp, "-I", "-S", scene.init, "oneshot", "--keep")) == 0
+    for frag in [
+        ("--ro-bind", str(scene.wt), str(scene.wt)),
+        ("--ro-bind", str(home), ONESHOT_HOME_RO),
+        ("--ro-bind", str(scene.real), str(scene.real)),
+        ("--setenv", "HOME", "/tmp/home"),
+        ("--setenv", "PATH", f"/opt/kraft/bin:{os.environ['PATH']}"),
+        (
+            scene.interp,
+            "-I",
+            "-S",
+            scene.init,
+            "init",
+            "--",
+            "sh",
+            "-c",
+            _ONESHOT_SH,
+            ONESHOT_HOME_RO,
+        ),
+    ]:
+        assert _at(argv, frag) > 0, frag
+    assert "--started" not in argv and "--sock" not in argv
+    assert argv[-4:] == ["sh", "-c", _ONESHOT_SH, ONESHOT_HOME_RO]
+    assert asyncio.run(shot.close()) is None
+
+
+def test_oneshot_not_ready_where_the_host_cannot(scene, monkeypatch):
+    monkeypatch.setattr(bwrap, "probe_host", lambda **kw: "no bwrap here")
+    with pytest.raises(SandboxNotReady, match="no bwrap here"):
+        bwrap.OsBackend().oneshot(SANDBOX, scene.wt, scene.wt.parent)
+
+
+def test_os_leaves_item_sync_to_docker(tmp_path, monkeypatch):
+    called = []
+    monkeypatch.setattr(refstore, "sync_item", lambda *a: called.append(a) or ["twice"])
+    assert bwrap.OsBackend().code_out_item(tmp_path, "w1") == []
+    assert called == []

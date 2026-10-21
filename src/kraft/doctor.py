@@ -1247,6 +1247,13 @@ def _ignored_ca_check(repo: config.RepoEntry) -> dict | None:
     their image's roots. Read from doctor's own environment, like
     `_proxy_check`. A `sandbox.yaml` that does not parse is the sandbox row's
     to report."""
+    if (policy := repo.effective_sandbox) is not None and policy.kind == "os":
+        return _check(
+            f"ca {_label(repo)}",
+            True,
+            "a kind: os sandbox trusts the host's trust store plus the CA files the daemon "
+            "forwards (SSL_CERT_FILE and the like); ca_bundle is not used",
+        )
     try:
         why = docker_forward.ignored_ssl_cert_file()
     except config.ConfigError:
