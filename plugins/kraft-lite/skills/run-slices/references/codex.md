@@ -40,4 +40,7 @@ fallback, which is to list it for the user.
 Codex thread automations return to the same thread on a schedule. Whether the
 controller can create one itself: unconfirmed; use the fallback. Say plainly
 that nothing will wake this session, and tell the user to invoke
-`kraft-lite:next` to continue the run.
+`kraft-lite:run-slices` to continue the run.
+
+Child: scheduling its own wake-up is unconfirmed too. Its starting instructions
+say `none; continue on the controller's check-in`.

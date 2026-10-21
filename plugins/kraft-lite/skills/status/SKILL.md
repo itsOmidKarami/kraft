@@ -69,4 +69,5 @@ session and cannot see them.
 
 Advance, close, approve, answer or start nothing from here, not even a slice in
 `ready`: that is what `kraft-lite:next`, `kraft-lite:gate` and
-`kraft-lite:run-slices` are for.
+`kraft-lite:run-slices` are for. When `kraft-lite:run-slices` invoked you,
+return to it after the report.

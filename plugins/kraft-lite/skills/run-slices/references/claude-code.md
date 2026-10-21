@@ -15,8 +15,8 @@ example with ToolSearch) before deciding one is missing.
 
 **Cloud controller.** `claude-code-remote:create_session`, with:
 
-- `source_url`: the repo; `source_revision`: the feature branch, or the earlier
-  slice's branch for an early start;
+- `source_url`: the repo; `source_revision`: the commit `--fork` records, on the
+  target, or for a slice started from `early`, on the earlier slice's branch;
 - `outcome_branch`: the slice branch, so the child's pushes need no approval;
 - `model`: always set; `title`: `<chain-id> <key>: <slice title>`, which is how
   resuming finds it; `tags`: `["<chain-id>"]`;
@@ -32,11 +32,11 @@ it to check out the slice branch there. Tags: unconfirmed; the name carries the
 chain id instead, and `claude agents --json` lists the sessions by name.
 
 **Local controller, cloud child.** `claude --cloud "<starting instructions>"`
-from a checkout on the child's base branch, pushed: the cloud clones the remote
-at the current branch, not the local checkout. Choosing the cloud child's model
-or its branch from this command: unconfirmed; use the fallback, which is to
-name both in the instructions and have the child confirm them in its first
-message.
+from a checkout on the branch or commit the slice is cut from, pushed: the
+cloud clones the remote at the current branch, not the local checkout. Choosing
+the cloud child's model or its branch from this command: unconfirmed; use the
+fallback, which is to name both in the instructions and have the child confirm
+them in its first message.
 
 ## Message a child
 
@@ -79,6 +79,8 @@ message.
   `CronDelete` to manage). It fires only while this session is running and idle,
   and is restored on `--resume`. Recurring tasks expire after seven days.
 - To learn when a local child finishes: `SendMessage` with `notify_when_idle`.
+- Child: the same tool schedules its own wake-up, `claude-code-remote:send_later`
+  in a cloud child and `CronCreate` in a local one.
 
 ## Reading and finding a child
 

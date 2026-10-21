@@ -48,10 +48,10 @@ rejected round, then `KL gate --name chain_finalized` and invoke
    `{"mode", "feature_branch", "state_branch", "slices": [{"key", "title", "tasks": [N], "after": [key]}]}`.
 5. `KL gate --name chain_finalized`, then present the proposal as that gate's
    artefact and end your turn. The user's answer is the approval.
-6. On approval: `KL approve --slices .kraft-lite/proposals/<chain-id>.json`. On
-   a rejection, `kraft-lite:gate` handles it and deletes the proposal; no slice
-   records exist yet. A chain rewound past `chain_finalized` cannot be sliced
-   again.
+6. On the user's answer, invoke `kraft-lite:gate`, which records it: an
+   approval as `approve --slices .kraft-lite/proposals/<chain-id>.json`, a
+   rejection by deleting the proposal. No slice records exist before the
+   approval. A chain rewound past `chain_finalized` cannot be sliced again.
 
 ## 2. Before the first child
 
@@ -69,12 +69,19 @@ Copy this and tick it off; while a line is unticked, no child starts.
 ## 3. Starting a child
 
 A slice's **target** is the branch its PR goes into: the feature branch, or in
-`main` mode the base branch. A slice is cut from the target's tip, or from an
-earlier slice's branch: started early during that slice's final review, or in
-`main` mode after a slice it comes after is ready to merge but not merged, since
-that work is on its branch alone.
+`main` mode the base branch. `KL slices` lists what may start:
 
-For each key in `KL slices`'s `ready`:
+- `ready`: every slice it comes after is merged. Start it, cut from the
+  target's tip (`Cut from: target`).
+- `early`: it comes after exactly one slice, and that slice is in review or
+  ready to merge. You may start it now, cut from that slice's branch
+  (`Cut from: <that slice's key>`) and logged in step 3, or let it wait for
+  `ready`.
+
+A slice that comes after two or more slices starts only from `ready`, once all
+of them are merged: one branch cannot hold two slices' unmerged work.
+
+For each key you start:
 
 1. `KL slice-set --slice <key> --status starting --branch <slice-branch> --fork <sha>`,
    where `<sha>` is the commit it is cut from (`git rev-parse origin/<branch>`).
@@ -85,7 +92,7 @@ For each key in `KL slices`'s `ready`:
    it is tagged with the chain id where the reference confirms tags; it has
    **an explicit model** (middle tier).
 3. `KL slice-set --slice <key> --status running --session <id> --branch <slice-branch>`.
-   Cut from another slice's branch, also
+   Started from `early`, also
    `KL decide --slice <key> --question "Start <key> from <slice>'s branch?" --answer "Forked from <branch> at <sha>" --why "..."`.
    Export state.
 4. Have a cheapest-tier subagent send the spec and the plan, each in parts
@@ -110,7 +117,9 @@ The starting instructions, in this order:
 2. **Controller:** this session's id, and locally its name too (a local session
    message is addressed by name). The child's own tools, copied from your
    reference's "Be messaged" and "Check in later": the one that messages you,
-   and the one that schedules a message back into its own session. The channels
+   and the one that schedules a message back into its own session. Where the
+   reference marks the child's wake-up unconfirmed, write
+   `none; continue on the controller's check-in` in its place. The channels
    in the order to try them: a session message; on the same machine
    `.kraft-lite/messages/<chain-id>/<key>.jsonl` under this checkout's absolute
    path (the feature chain's id; one JSON per line: `at`, `from`, `kind`:
@@ -144,14 +153,10 @@ The starting instructions, in this order:
 ### In `main` mode
 
 There is no feature branch: nothing is pushed for one, and every slice PR goes
-to the base branch. `ready` lists a slice once every slice it comes after is
-ready to merge or merged, with at most one of them unmerged. Start it then,
-without waiting for the user's merge: from the branch of the one still unmerged,
-`Cut from: <its key>`, or from the base branch when all are merged,
-`Cut from: target`. One branch cannot hold two unmerged slices' work, so a slice
-after two or more stays out of `ready` until the user merges all but one. When
-the user merges a slice, the steps after a merge (section 6) apply, with the
-base branch as the target.
+to the base branch. Merged means the user merged it: a slice after one ready to
+merge is in `early` until then, and a slice after two or more waits for all of
+the user's merges. When the user merges a slice, the steps after a merge
+(section 6) apply, with the base branch as the target.
 
 ## 4. Resuming
 
@@ -161,9 +166,9 @@ Before any other write and before starting anything:
    then `KL chains` for the chain id. An empty `chains` before the import is a
    missing import: never `start` a new chain.
 2. `KL slices`. For every `starting` or `running` slice, and every `waiting`
-   one in `ready`, find its session, in the ways the reference confirms: the
-   recorded session id; a session whose title or name carries `<chain-id>` and
-   `<key>`; the chain-id tag; and its slice branch on the remote
+   one in `ready` or `early`, find its session, in the ways the reference
+   confirms: the recorded session id; a session whose title or name carries
+   `<chain-id>` and `<key>`; the chain-id tag; and its slice branch on the remote
    (`git ls-remote origin <slice-branch>`) as evidence a child ran.
    - Found: `KL slice-set --slice <key> --status running --session <id> --branch <slice-branch>`.
    - Not found, and `starting`, `running`, or its slice branch on the remote:
@@ -171,9 +176,9 @@ Before any other write and before starting anything:
      `KL decide --held --slice <key> --question "No session found for <key>: start a fresh child?" --why "starting a session twice duplicates the work"`,
      tell the user what you found (a pushed branch, an archived session), and
      start one only on their answer.
-   - Not found, `waiting` in `ready`, and no slice branch on the remote: start
-     it (section 3).
-3. Export state, arm the check-in (section 5), then report (section 8).
+   - Not found, `waiting` in `ready` or `early`, and no slice branch on the
+     remote: start it (section 3).
+3. Export state, then run one check-in (section 5): it reports and re-arms.
 
 ## 5. Following up
 
@@ -189,6 +194,7 @@ A check-in is armed while any slice is not merged; in `main` mode, while
 - [ ] `main` mode: each `ready_to_merge` slice's PR. One the user merged takes the steps after a merge (section 6).
 - [ ] Answer every question (below). Export state.
 - [ ] A child that is idle after reporting CI pending, or after a held answer: message it to continue.
+- [ ] Report (section 8).
 - [ ] Re-arm the check-in while its condition holds.
 ```
 
@@ -238,9 +244,11 @@ Red flags - stop and hold the question: you are about to type "I've authorized",
 
 ## 6. Reviewing and merging
 
-Starting a review: `KL slice-set --slice <key> --status in_review`. Your review
-is the slice's PR review, on the strongest tier. Rely on CI and the child's
-reported scoped run; run checks only for what CI cannot cover.
+Starting a review: `KL slice-set --slice <key> --status in_review`; a slice
+after it may now be in `early` (section 3). Your review is the slice's PR
+review, on the strongest tier. Read CI at the head you review and the scoped
+test paths the PR body lists, and run no tests or checks yourself. What neither
+covers goes to the child as a finding.
 
 - Findings to fix: send them to the child, `KL slice-set --slice <key> --status running`,
   and review again when it reports the fix.
@@ -248,7 +256,7 @@ reported scoped run; run checks only for what CI cannot cover.
   head you reviewed (pin the head SHA); a head that moved, read the new commits.
 - `main` mode: report the verdict to the user, then
   `KL slice-set --slice <key> --status ready_to_merge`. The user merges it.
-  Start what `KL slices` now lists in `ready`, and export state.
+  Start what `KL slices` lists, as section 3 says, and export state.
 
 After a merge (yours, or in `main` mode the user's), in order:
 
@@ -258,7 +266,7 @@ After a merge (yours, or in `main` mode the user's), in order:
    still unmerged: it rebases when that slice merges. The `Cut from:` line you
    gave each child, and its fork decision, say which it is.
 3. Archive the child.
-4. Start what `KL slices` now lists in `ready`.
+4. Start what `KL slices` now lists, as section 3 says.
 5. Export state.
 
 A call overturned later reopens the archived child, or starts a fresh one on the

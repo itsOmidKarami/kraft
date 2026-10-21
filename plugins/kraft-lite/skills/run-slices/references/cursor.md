@@ -39,5 +39,8 @@ checkout; otherwise comments on the child's draft PR.
 ## Check in later
 
 Unconfirmed; use the fallback. Say plainly that nothing will wake this session,
-and tell the user to invoke `kraft-lite:next` to continue the run.
+and tell the user to invoke `kraft-lite:run-slices` to continue the run.
 `GET /v1/agents/{id}` reads a cloud child's status when it is woken.
+
+Child: scheduling its own wake-up is unconfirmed too. Its starting instructions
+say `none; continue on the controller's check-in`.

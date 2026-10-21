@@ -67,7 +67,8 @@ Copy this and tick it off; the walk starts when all four are ticked.
 
    `state` must show node `implementation`, `open`; if not, the directory or id
    is wrong, so start no other chain.
-5. Invoke `kraft-lite:next`. Every `kl.py` verb takes `--chain-id <id>`.
+5. Invoke `kraft-lite:next`. Pass your slice chain's `--chain-id <id>` to every
+   verb but `start`.
 
 ### A fresh container
 
@@ -150,10 +151,11 @@ re-steers you once or holds the question for the user.
 ## 4. CI
 
 On `mr_checks`, checks still running are not a failure. Send the `status` below,
-arm a wake-up where the harness has one (a message to yourself for later, saying
-you will run `kraft-lite:next` when it arrives), and end the turn. With no
-wake-up, end the turn: the controller's check-in messages you to continue. Ask
-no one to run a skill or a command for you, the user included.
+arm a wake-up (the scheduling tool your **Controller** item names: a message to
+yourself for later, saying you will run `kraft-lite:next` when it arrives), and
+end the turn. Where it names none, end the turn: the controller's check-in
+messages you to continue. Ask no one to run a skill or a command for you, the
+user included.
 
 ```
 status | <slice key> | mr_checks

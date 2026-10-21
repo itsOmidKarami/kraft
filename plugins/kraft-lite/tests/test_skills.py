@@ -453,7 +453,7 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         ("run-slices", 3, "locally its name too"),
         ("run-slices", 3, "### In `main` mode"),
         ("run-slices", 3, "Implementation stops after the last task's reviews"),
-        ("run-slices", 4, "and every `waiting` one in `ready`, find its session"),
+        ("run-slices", 4, "and every `waiting` one in `ready` or `early`, find its session"),
         ("run-slices", 5, "A check-in is armed while any slice is not merged"),
         ("run-slices", 5, "`kraft-lite:run-slices check-in, chain <id>: read state first.`"),
         ("run-slices", 5, "`KL slice-set --slice <key> --fork <sha>`"),
@@ -462,7 +462,25 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         ("run-slices", 6, "through `kraft-lite:next`, which says where its hooks run"),
         ("run-slices", 2, "A missing ability is never a block"),
         ("run-slices", 1, "delete any `.kraft-lite/proposals/<chain-id>.json`"),
-        ("run-slices", 3, "stays out of `ready` until the user merges all but one"),
+        (
+            "run-slices",
+            3,
+            "A slice that comes after two or more slices starts only from `ready`, once all "
+            "of them are merged",
+        ),
+        (
+            "run-slices",
+            3,
+            "`early`: it comes after exactly one slice, and that slice is in review or ready "
+            "to merge. You may start it now, cut from that slice's branch",
+        ),
+        ("run-slices", 3, "write `none; continue on the controller's check-in` in its place"),
+        ("run-slices", 5, "- [ ] Report (section 8). - [ ] Re-arm the check-in"),
+        ("run-slices", 4, "then run one check-in (section 5): it reports and re-arms"),
+        ("run-slices", 1, "invoke `kraft-lite:gate`, which records it"),
+        ("run-slices", 6, "run no tests or checks yourself"),
+        ("build-slice", 4, "the scheduling tool your **Controller** item names"),
+        ("build-slice", 1, "Pass your slice chain's `--chain-id <id>` to every verb but `start`"),
         (
             "build-slice",
             2,
@@ -504,7 +522,15 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         "controller-feature-worktree",
         "controller-missing-ability",
         "controller-deletes-unused-proposal",
-        "controller-main-mode-waits-for-two-merges",
+        "controller-two-afters-wait-for-all-merges",
+        "controller-early-start",
+        "controller-child-wake-up-unconfirmed",
+        "controller-check-in-reports",
+        "controller-resume-runs-a-check-in",
+        "controller-gate-records-the-answer",
+        "controller-review-runs-nothing",
+        "child-wake-up-from-the-controller-item",
+        "child-chain-id-to-every-verb-but-start",
         "child-pushes-on-the-users-words",
         "controller-gives-the-child-its-tools",
         "controller-status-report-owned-by-status",
@@ -522,6 +548,31 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
 )
 def test_a_skill_carries_the_final_review_fixes(texts, name, section, needle):
     assert needle in _section(texts[name], section), f"{name} section {section} lacks {needle!r}"
+
+
+@pytest.mark.parametrize("harness", ["codex", "cursor"])
+def test_a_reference_with_no_check_in_sends_the_user_to_run_slices(harness):
+    """The controller's fallback continues the run, which is run-slices' to do;
+    the child's own wake-up is a separate line, so its instructions carry no
+    request that anyone invoke a skill."""
+    path = PLUGIN / "skills" / "run-slices" / "references" / f"{harness}.md"
+    check_in = " ".join(path.read_text().split("## Check in later")[1].split())
+    assert "tell the user to invoke `kraft-lite:run-slices`" in check_in
+    assert "kraft-lite:next" not in check_in
+    assert "Child: scheduling its own wake-up is unconfirmed too" in check_in
+    assert "`none; continue on the controller's check-in`" in check_in
+
+
+def test_the_claude_code_reference_starts_a_child_from_its_fork():
+    body = " ".join((PLUGIN / "skills/run-slices/references/claude-code.md").read_text().split())
+    assert "`source_revision`: the commit `--fork` records" in body
+    assert "a checkout on the branch or commit the slice is cut from" in body
+    assert "Child: the same tool schedules its own wake-up" in body
+
+
+def test_the_status_skill_hands_back_to_run_slices(texts):
+    flat = " ".join(texts["status"].split())
+    assert "When `kraft-lite:run-slices` invoked you, return to it after the report." in flat
 
 
 def test_the_run_slices_skill_names_every_verb_without_a_chain_id(texts):
