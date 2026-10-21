@@ -6,6 +6,8 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+from collections.abc import Collection
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -13,7 +15,7 @@ import yaml
 
 from kraft import client
 from kraft.addons import fetch, manifest, repo_library
-from kraft.addons.load import InstalledAddon
+from kraft.addons.load import InstalledAddon, repo_library_id
 from kraft.config import read_yaml, write_yaml
 from support.harness import commit_all, git, make_repo, write
 
@@ -24,6 +26,16 @@ AGENT = {"kind": "agent", "harness": "codex", "prompt": "local base"}
 def chain(extends: str) -> dict:
     """A one-node chain whose single task extends `extends`."""
     return {"nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": extends}]}]}
+
+
+def exec_node(id: str, task: str, extends: str) -> dict:
+    """Execution node `id` with one task, `task`, extending `extends`."""
+    return {"id": id, "kind": "exec", "tasks": [{"id": task, "extends": extends}]}
+
+
+def task_node(extends: str) -> dict:
+    """A chain revision's added node `x`: one task extending `extends`."""
+    return {"id": "x", "tasks": [{"id": "t", "extends": extends}]}
 
 
 def home(tmp_path: Path, *, library: dict | None = None, chains: dict | None = None) -> Path:
@@ -59,6 +71,64 @@ def installed(
     return InstalledAddon(
         id=f"{name}@acme", name=name, namespace=alias or name, version="1.0.0", root=root
     )
+
+
+#: The design's example tree, root first, as `tree_collection` installs it.
+TREE = ("company@acme", "platform-dept@acme", "team-payments@acme")
+
+#: What each add-on of the example tree ships by default, as `installed` and
+#: `make_collection` both take it.
+_TREE_SPECS: dict[str, dict] = {
+    "company": {
+        "library": {"tasks": {"security_scan": {**AGENT, "skill": "deploy-review"}}},
+        "skills": {"deploy-review": "company method"},
+        "profiles": {
+            "slow": {
+                "model": {"codex": "company-model"},
+                "fallback": [{"profile": "company:fast"}],
+            },
+            "fast": {"model": {"codex": "fast-model"}},
+        },
+    },
+    "platform-dept": {},
+    "team-payments": {},
+}
+
+
+def example_tree(
+    tmp_path: Path,
+    *,
+    company: dict | None = None,
+    dept: dict | None = None,
+    team: dict | None = None,
+    alias: str | None = None,
+    team_alias: str | None = None,
+) -> tuple[InstalledAddon, InstalledAddon, InstalledAddon]:
+    """`(company, platform_dept, team_payments)`, root first: three stores that
+    each hold a `.kraft/addon.json` naming their parent with range `"1"`, and
+    the `InstalledAddon`s that say so. Each keyword is a dict of `installed`
+    keyword arguments laid over the defaults; `alias` is platform-dept's
+    namespace and `team_alias` team-payments'. Company ships a task
+    `security_scan` that names the skill `deploy-review` ("company method")
+    and the profiles `slow` and `fast`."""
+    given = {"company": company, "platform-dept": dept, "team-payments": team}
+    out: list[InstalledAddon] = []
+    parent: InstalledAddon | None = None
+    for name, spec in _TREE_SPECS.items():
+        wanted = {**spec, **(given[name] or {})}
+        requires = {"addons": {parent.id: "1"}} if parent else {}
+        declared = addon_json(name, requires={**addon_json(name)["requires"], **requires})
+        wanted["files"] = {
+            **(wanted.get("files") or {}),
+            manifest.ADDON_JSON: json.dumps(declared),
+        }
+        aliased = {"platform-dept": alias, "team-payments": team_alias}.get(name)
+        made = installed(tmp_path, name, alias=aliased, **wanted)
+        if parent:
+            made = replace(made, parent=parent.id, parent_range="1")
+        out.append(made)
+        parent = made
+    return out[0], out[1], out[2]
 
 
 def _layout(library, chains, skills, profiles, files) -> dict[str, tuple[str, bytes]]:
@@ -122,6 +192,27 @@ def make_collection(tmp_path: Path, addons: dict[str, dict], *, name: str = "acm
     )
     commit_all(repo, "collection")
     return repo
+
+
+def tree_collection(
+    tmp_path: Path,
+    *,
+    company: dict | None = None,
+    dept: dict | None = None,
+    team: dict | None = None,
+) -> Path:
+    """`example_tree`'s three add-ons as a committed collection named `acme`
+    (`make_collection`), `requires.addons` wired through `manifest`. Each
+    keyword is a `make_collection` spec laid over the same defaults."""
+    given = {"company": company, "platform-dept": dept, "team-payments": team}
+    addons: dict[str, dict] = {}
+    for (name, spec), parent in zip(_TREE_SPECS.items(), (None, *TREE[:-1]), strict=True):
+        wanted = {**spec, **(given[name] or {})}
+        requires = {"kraft": "2", "harnesses": ["codex"]}
+        if parent:
+            requires["addons"] = {parent: "1"}
+        addons[name] = {**wanted, "manifest": {**wanted.get("manifest", {}), "requires": requires}}
+    return make_collection(tmp_path, addons)
 
 
 def publish(repo: Path, addon: str, **spec) -> str:
@@ -193,6 +284,56 @@ def install(
         }
         write_yaml(config_dir / "harnesses.yaml", harnesses)
     return store
+
+
+def child_manifest(parent_id: str, range_: str) -> dict:
+    """`addon_json`'s `requires` building on `parent_id` at `range_`, as
+    `make_collection` and `publish` take it under `manifest`."""
+    requires = addon_json("child")["requires"]
+    return {"requires": {**requires, "addons": {parent_id: range_}}}
+
+
+def make_tree(
+    tmp_path: Path,
+    addons: dict[str, dict],
+    *,
+    installed: Collection[str] | None = None,
+    missing: Collection[str] = (),
+    **local,
+) -> tuple[dict[str, Path], tuple[Path, Path]]:
+    """Installed add-ons across collections: `addons` maps an id
+    (`<name>@<collection>`) to a spec as `make_collection` takes it, plus
+    `parent: (id, range)`. One git collection is made per collection name, and
+    an instance (`local` is what `instance` takes) that has added each one not
+    in `missing`. Each id in `installed` (default: all) is installed, parents
+    first. Returns `(repos by collection name, home)`."""
+    by_collection: dict[str, dict[str, dict]] = {}
+    parents: dict[str, str | None] = {}
+    for addon_id, spec in addons.items():
+        name, collection = addon_id.split("@", 1)
+        spec = dict(spec)
+        parent = spec.pop("parent", None)
+        parents[addon_id] = parent[0] if parent else None
+        if parent:
+            spec["manifest"] = {**spec.get("manifest", {}), **child_manifest(*parent)}
+        by_collection.setdefault(collection, {})[name] = spec
+    repos = {
+        name: make_collection(tmp_path, specs, name=name) for name, specs in by_collection.items()
+    }
+    home = instance(
+        tmp_path,
+        {name: {"git": repo.as_uri()} for name, repo in repos.items() if name not in missing},
+        **local,
+    )
+
+    def depth(addon_id: str) -> int:
+        parent = parents.get(addon_id)
+        return 0 if parent is None else 1 + depth(parent)
+
+    for addon_id in sorted(addons if installed is None else installed, key=depth):
+        name, collection = addon_id.split("@", 1)
+        install(*home, repos[collection], name)
+    return repos, home
 
 
 def extracted(
@@ -279,6 +420,123 @@ def load_release(client, tmp_path: Path, **spec) -> Path:
     return store
 
 
+#: The specs of the design's example tree, richer than `example_tree`'s defaults:
+#: `team-payments` builds on `platform-dept`, which builds on `company`.
+COMPANY = {
+    "library": {
+        "steering": {"house": {"instructions": "company rules"}},
+        "tasks": {
+            "verify": {
+                **AGENT,
+                "prompt": "company verify",
+                "skill": "deploy-review",
+                "steering": ["house"],
+            },
+            "security_scan": {**AGENT, "prompt": "company scan"},
+            "hotfix": {**AGENT, "prompt": "company hotfix"},
+        },
+    },
+    "chains": {
+        "default": {
+            "nodes": [
+                {"id": "verification", "kind": "exec", "tasks": [{"id": "v", "extends": "verify"}]},
+                {"id": "scan", "kind": "exec", "tasks": [{"id": "s", "extends": "security_scan"}]},
+            ]
+        },
+        "hotfix": chain("hotfix"),
+    },
+    "skills": {"deploy-review": "company method"},
+    "profiles": {"slow": {"model": {"codex": "slow-model"}}},
+}
+DEPT = {"library": {"tasks": {"security_scan": {**AGENT, "prompt": "dept scan"}}}}
+TEAM = {
+    "library": {
+        "tasks": {
+            "security_scan": {"extends": "platform-dept:security_scan", "model": "pci-model"},
+            "pci_review": {**AGENT, "prompt": "team pci"},
+            # Each file reference by the parent's name: the ancestor that ships it.
+            "supered": {
+                **AGENT,
+                "skill": "platform-dept:deploy-review",
+                "steering": ["platform-dept:house"],
+                "profile": "platform-dept:slow",
+            },
+        }
+    },
+    "chains": {
+        "supers": chain("supered"),
+        "default": {
+            "extends": "platform-dept:default",
+            "add": [
+                {
+                    "after": "verification",
+                    "node": {
+                        "id": "pci_review",
+                        "kind": "exec",
+                        "tasks": [{"id": "p", "extends": "pci_review"}],
+                    },
+                }
+            ],
+        },
+    },
+}
+
+
+def inherited_tree(
+    tmp_path: Path,
+    *,
+    company: dict | None = None,
+    dept: dict | None = None,
+    team: dict | None = None,
+    dept_alias: str | None = None,
+    team_alias: str | None = None,
+) -> tuple[InstalledAddon, InstalledAddon, InstalledAddon]:
+    """`example_tree` with `COMPANY`, `DEPT` and `TEAM` as the default specs,
+    for the checks that need their chains, steering and overrides; a keyword
+    replaces one; `dept_alias` is the dept's namespace and `team_alias` the team's."""
+    return example_tree(
+        tmp_path,
+        company=company or COMPANY,
+        dept=dept or DEPT,
+        team=team or TEAM,
+        alias=dept_alias,
+        team_alias=team_alias,
+    )
+
+
+def repo_library_child(
+    tmp_path: Path, repo_id: str, parent: InstalledAddon, **spec
+) -> InstalledAddon:
+    """A repo library that names `parent` as its parent, which a real one never
+    does: it is served under `repo_id`, read by that repository's items only,
+    so the inheritance mark has to refuse it."""
+    return replace(
+        installed(tmp_path, "library", **spec),
+        id=repo_library_id(repo_id),
+        namespace=repo_id,
+        parent=parent.id,
+    )
+
+
+def load_tree(client, tmp_path: Path, *, aliases: dict[str, str] | None = None, **specs) -> Path:
+    """`tree_collection` of `COMPANY`, `DEPT` and `TEAM` (`specs` replaces one
+    by `company`, `dept` or `team`) installed into a running test server,
+    parents first, and loaded. `aliases` maps an add-on's name to the
+    namespace it is installed under. Returns the collection, for `publish`."""
+    from kraft.api import deps
+
+    st = client.app.state
+    collection = tree_collection(
+        tmp_path, **{"company": COMPANY, "dept": DEPT, "team": TEAM, **specs}
+    )
+    for addon_id in TREE:
+        name = addon_id.split("@")[0]
+        alias = (aliases or {}).get(name)
+        install(st.templates_dir, st.run_dirs.addons, collection, name, alias=alias)
+    deps._reload_templates(st)
+    return collection
+
+
 def install_release(
     tmp_path: Path, version: str = "1.0.0", *, fallback: bool = True, provider: str = "fake"
 ) -> tuple[dict, Path]:
@@ -316,8 +574,6 @@ def pinned_chain(nodes, pins: dict, *, repo):
     """`nodes` (authored V1 node mappings) materialized as a snapshot that
     pins `pins`, the way an item filed while those add-on versions were the
     lock's records it."""
-    from dataclasses import replace
-
     from support.harness import v1_chain, v1_resolved
 
     return v1_chain(replace(v1_resolved(nodes), addons=pins), repo=repo)
@@ -410,3 +666,65 @@ def a_terminal(monkeypatch, typed: str | list[str]) -> None:
             raise AssertionError(f"an unexpected prompt: {prompt}") from None
 
     monkeypatch.setattr("builtins.input", answer)
+
+
+def update_addons(
+    config_dir: Path,
+    addons_dir: Path,
+    ids: list[str],
+    install: bool = False,
+    *,
+    re_install: bool = False,
+) -> None:
+    """`kraft admin addon update` (or `install`, with `install`) of `ids`,
+    every review accepted; each must apply. `re_install` takes new files
+    under an unchanged version (`--re-install`)."""
+    from kraft.addons import update
+
+    results = update.update(
+        ids,
+        accept=lambda review: True,
+        re_install=re_install,
+        entries={i: True for i in ids} if install else None,
+        config_dir=config_dir,
+        addons_root=addons_dir,
+    )
+    assert [r.outcome for r in results] == ["applied"] * len(ids), results
+
+
+def resolve_chain(config_dir: Path, addons_dir: Path, chain_id: str):
+    """`chain_id` resolved against the local library and every installed add-on."""
+    from kraft.addons import load
+    from kraft.templates.library import TemplateLibrary
+
+    library = TemplateLibrary.from_yaml_dir(
+        config_dir, addons=load.installed(config_dir, addons_dir)
+    )
+    return library.resolve_chain(chain_id)
+
+
+def stored_snapshot(resolved) -> str:
+    """The snapshot as intake writes it into the work item's row."""
+    from kraft.policy import InstancePolicy, InstancePolicyInput
+    from kraft.templates.environment import WorkItemTarget
+
+    return resolved.materialize(
+        WorkItemTarget.for_repository("r"), InstancePolicy.from_input(InstancePolicyInput())
+    ).to_json()
+
+
+def store_of(config_dir: Path, addons_dir: Path, namespace: str) -> Path:
+    """The store the lock loads `namespace` from."""
+    from kraft.addons import load
+
+    return next(a.root for a in load.installed(config_dir, addons_dir) if a.namespace == namespace)
+
+
+def launch_task(pins, **fields):
+    """A launch of one agent task (`AGENT` with `fields`) for a work item that
+    pinned `pins` (None: filed now), with no repository."""
+    from kraft.adapters import agent
+    from kraft.templates.models import AgentTask
+
+    task = AgentTask.model_validate({"id": "t", **AGENT, **fields})
+    return agent.resolve_agent_task(task, None, steering={}, addons=pins)

@@ -156,7 +156,7 @@ def install_entries(
 
 def update(
     ids: Sequence[str] | None,
-    accept: Callable[[review.Review], bool],
+    accept: Callable[[review.Group], bool],
     *,
     re_install: bool = False,
     entries: dict | None = None,

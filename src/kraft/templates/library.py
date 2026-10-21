@@ -17,11 +17,13 @@ author has to correct (`template-resolution-preserves-source-context`).
 
 from __future__ import annotations
 
+import functools
 from collections import ChainMap
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import ValidationError
@@ -176,6 +178,18 @@ class Namespace(StrEnum):
 #: composable component.
 _EXTENDABLE = (Namespace.TASKS, Namespace.STEPS, Namespace.NODES)
 
+#: The namespace of what an authored key holds, where its place says it:
+#: `TemplateLibrary.flattened` reads a nested `extends` in it.
+_PLACED = {
+    "nodes": Namespace.NODES,
+    "node": Namespace.NODES,
+    "steps": Namespace.STEPS,
+    "tasks": Namespace.TASKS,
+    JUDGE_SEGMENT: Namespace.TASKS,
+    "escalation": Namespace.TASKS,
+    AUTO_REVIEW_SEGMENT: Namespace.TASKS,
+}
+
 
 @dataclass(frozen=True)
 class ComponentSource:
@@ -328,6 +342,28 @@ def _steering_profile(body: object, source: ComponentSource) -> SteeringProfile:
         ) from exc
 
 
+@dataclass(frozen=True)
+class Inheritance:
+    """Where an entry served under a child add-on's namespace stands against
+    the library it inherits (`TemplateLibrary.inheritance`): `inherited` as an
+    ancestor wrote it, `overridden` by the child under a name its parent has
+    in the same section, or `added` by the child. `parent` is the serving
+    add-on's direct parent, `author` the add-on whose file it was read from."""
+
+    origin: Literal["inherited", "overridden", "added"]
+    parent: InstalledAddon
+    author: InstalledAddon
+
+
+def _split_section(name: str, default: str | None) -> tuple[str | None, str]:
+    """`name` as `(section, entry)`: a `<section>.<entry>` name split at its
+    section prefix, any other as `(default, name)`."""
+    head, dot, rest = name.partition(".")
+    if dot and head in (_CHAINS, *(ns.value for ns in Namespace)):
+        return head, rest
+    return default, name
+
+
 class TemplateLibrary:
     """One template directory's authored configuration: reusable components,
     named steering profiles, and the selectable chains."""
@@ -370,15 +406,16 @@ class TemplateLibrary:
         #: The installed add-ons whose declarations sit in the maps above under
         #: `<namespace>:<name>`.
         self.addons = tuple(addons)
-        #: Namespace to store directory, for `skill.validate`.
-        #: None for an add-on that is known but not loaded: a reference into it
-        #: is refused, never handed to the agent as another tool's skill.
-        self.addon_dirs: dict[str, Path | None] = {}
-        for addon in self.addons:
-            if addon.left_out is None:
-                self.addon_dirs[addon.namespace] = addon.root
-            else:
-                self.addon_dirs.setdefault(addon.namespace, None)
+
+    @functools.cached_property
+    def addon_dirs(self) -> dict[str, Path | None]:
+        """Namespace to store directory, for `skill.validate`, and each skill a
+        child inherits as `<child>:<skill>` to its defining ancestor's store
+        (`inherit.skill_dirs`). None for an add-on that is known but not
+        loaded: a reference into it is refused, never handed to the agent as
+        another tool's skill. Computed on first use: it reads each child's
+        tree, after `_add_addon` has taken every add-on."""
+        return inherit.skill_dirs(self.addons)
 
     @classmethod
     def from_yaml_dir(
@@ -534,20 +571,10 @@ class TemplateLibrary:
             # A stray `remove:` at the root is refused by the root's own
             # `_add_addon`: every load path loads the root by itself too.
             removed.append(inherit.removals(author.root / LIBRARY_FILE, library))
-        visible = inherit.Visible.build(
-            chain,
-            [
-                {
-                    "skills": _store_skills(store),
-                    "profiles": _store_profiles(store, author),
-                    "steering": _section(
-                        author.root / LIBRARY_FILE, library, Namespace.STEERING
-                    ).keys(),
-                }
-                for author, store, library in zip(chain, stores, written, strict=True)
-            ],
-            removed,
-        )
+        try:
+            visible = inherit.visible(chain)
+        except fetch.StoreMismatch as exc:
+            raise TemplateLibraryError(str(exc)) from exc
 
         def owner(kind: str) -> Callable[[str, int], str]:
             # Defined nowhere visible: the level asked from names it, and its
@@ -724,14 +751,40 @@ class TemplateLibrary:
         and components share the name; given as a `tasks.` prefix it is read
         from `name`. None for a local name."""
         if section is None:
-            head, dot, rest = name.partition(".")
-            if dot and head in (_CHAINS, *(ns.value for ns in Namespace)):
-                section, name = head, rest
+            section, name = _split_section(name, None)
         sections = [section] if section else [_CHAINS, *(ns.value for ns in Namespace)]
         for each in sections:
             if (author := self._authors.get((each, name))) is not None:
                 return author
         return self.addon_of(name)
+
+    def inheritance(self, name: str) -> Inheritance | None:
+        """For a chain id or a `<section>.<qualified name>` served under a
+        child add-on's namespace, whether the child inherited, overrode or
+        added it (`an-inherited-entry-is-marked`). None for a local name, a
+        repo library's entry, an add-on with no parent, a hidden level's name,
+        and an entry the loaded layering cannot place."""
+        section, entry = _split_section(name, _CHAINS)
+        top = self.addon_of(entry)
+        if top is None or top.parent is None or top.repo_id is not None:
+            return None
+        author = self._authors.get((section, entry))
+        parent = next((a for a in self.addons if a.id == top.parent), None)
+        if author is None or parent is None:
+            return None
+        if author.id != top.id:
+            return Inheritance("inherited", parent, author)
+        bare = entry.partition(":")[2]
+        if section == _CHAINS:
+            has = f"{inherit.layer_namespace(top.namespace, 1)}:{bare}" in self._layer_chains
+        elif section == Namespace.STEERING.value:
+            # A hidden level holds no steering: the parent's own namespace is
+            # the same merged library it inherits.
+            has = f"{parent.namespace}:{bare}" in self.steering
+        else:
+            hidden = self._layer_components[Namespace(section)]
+            has = f"{inherit.layer_namespace(top.namespace, 1)}:{bare}" in hidden
+        return Inheritance("overridden" if has else "added", parent, author)
 
     def public_name(self, name: str) -> str:
         """`name` as a listing shows it: a hidden layer's
@@ -744,6 +797,68 @@ class TemplateLibrary:
         """`data`, an entry as authored, with every name in a hidden layer
         written as `public_name` writes it: what a listing shows."""
         return inherit.public(data, self._layers) if self._layers else data
+
+    def flattened(self, data: object, namespace: Namespace | None = None) -> object:
+        """`data`, an entry as authored (`namespace`'s, else found by its
+        place), with every component that `extends` a hidden layer merged
+        onto that layer's entry, itself flattened, as `extends` merges it: what
+        a copy into the local library writes (`an-addon-copy-resolves-locally`).
+        Every other reference is kept, so one late-bound to a child add-on
+        names the child's own entry and the copy runs what the child serves.
+        A component that reaches a hidden layer is merged onto its whole
+        `extends` line as authored, then what it holds is flattened: the
+        resolver's order (`_Resolution._node` merges a node's line before it
+        expands each slot's task), so the copy runs exactly what it does. An
+        `extends` that names nothing stays, written by its public name: no
+        hidden level's name is returned. Raises `TemplateLibraryError` for an
+        entry that changes its parent's kind. Unchanged for a library with no
+        child add-on."""
+        if not self._layers:
+            return data
+        if isinstance(data, list):
+            return [self.flattened(item, namespace) for item in data]
+        if not isinstance(data, Mapping):
+            return data
+        name = data.get("extends")
+        if isinstance(name, str) and inherit.is_layer(name):
+            data = self._merged_line(data, namespace, seen=())
+        return self._flattened_inside(data)
+
+    def _flattened_inside(self, data: Mapping[str, object]) -> dict[str, object]:
+        """`data` with what each of its keys holds `flattened`."""
+        return {key: self.flattened(value, _PLACED.get(key)) for key, value in data.items()}
+
+    def _merged_line(
+        self, own: Mapping[str, object], namespace: Namespace | None, *, seen: tuple[str, ...]
+    ) -> dict[str, object]:
+        """`own`, as authored, merged onto its `extends` parent, itself merged
+        onto its own, down to the root, as `_Resolution._merge_chain` merges
+        them: whole lines first, so a nested slot is merged before what it
+        `extends` is. A parent that is missing, of no namespace or in a cycle
+        stays its `extends`, by its public name. Raises
+        `TemplateLibraryError` where an entry changes its parent's `kind`
+        (`extends-cannot-change-kind`), naming the parent publicly."""
+        name = own.get("extends")
+        if not isinstance(name, str):
+            return dict(own)
+        where = namespace or self.namespace_of(name)
+        parent = None if where is None or name in seen else self.component(where, name)
+        if parent is None:
+            return {**own, "extends": self.public_name(name)}
+        base = self._merged_line(parent.data, where, seen=(*seen, name))
+        child = {key: value for key, value in own.items() if key != "extends"}
+        inherited, declared = base.get("kind"), child.get("kind")
+        if inherited is not None and declared is not None and inherited != declared:
+            raise TemplateLibraryError(
+                f"extends {self.public_name(name)!r} and cannot change kind "
+                f"{str(inherited)!r} to {str(declared)!r}"
+            )
+        if where is Namespace.TASKS:
+            displaced = displaced_route(child)
+            base = {key: value for key, value in base.items() if key not in displaced}
+        merged = _merge(base, child)
+        assert isinstance(merged, dict)
+        return merged
 
     def _humanize(self, text: str) -> str:
         return inherit.humanize(text, self._layers) if self._layers else text
@@ -805,6 +920,10 @@ class TemplateLibrary:
             self.library_path,
         )
         candidate._share_layers(self)
+        if "addon_dirs" in self.__dict__:
+            # The same add-ons, so the same answer: never read every child's
+            # tree again for each chain a check or a draft tries.
+            candidate.__dict__["addon_dirs"] = self.addon_dirs
         candidate._chains.pop(_chain_id(chain_path, body), None)
         return candidate, candidate._add_chain(chain_path, body)
 
@@ -992,11 +1111,22 @@ class TemplateLibrary:
                 issues.append(replace(issue, message=self._humanize(issue.message)))
         return issues
 
-    def resolve_chain(self, id: str) -> ResolvedChain:
+    def resolve_chain(
+        self, id: str, *, strict_pins: bool = False, pinned: Iterable[str] = ()
+    ) -> ResolvedChain:
         """Expand one chain's `extends` references, validate the result into a
         typed `Chain`, and assign canonical execution paths
         (`resolved-chain-is-validated-before-use`). A child add-on's hidden
-        levels are named in its errors as the ancestors they hold."""
+        levels are named in its errors as the ancestors they hold.
+
+        With `strict_pins`, a chain that reads an add-on left out by a fault
+        (not quietly, as a disabled one is) is refused with why, instead of
+        not pinning it: what a revision adds to a work item runs on it. An
+        add-on whose namespace is in `pinned`, which the work item already
+        pinned, is never refused: it stays pinned, and the launch restores
+        its store or says why it cannot. A live child the item had not pinned
+        is refused when a pinned ancestor's store is merely gone, though the
+        launch would have restored it: it is left out with that ancestor."""
         # A hidden level resolves too: a child's chain extending it resolves it.
         raw = self._all_chains.get(id)
         if raw is None:
@@ -1004,13 +1134,15 @@ class TemplateLibrary:
                 f"no chain {id!r} in this library; known chains: {list(self._chains)}"
             )
         try:
-            return self._resolve(id, raw)
+            return self._resolve(id, raw, strict=frozenset(pinned) if strict_pins else None)
         except TemplateLibraryError as exc:
             if self._layers:
                 exc.args = (self._humanize(str(exc)), *exc.args[1:])
             raise
 
-    def _resolve(self, id: str, raw: RawComponent) -> ResolvedChain:
+    def _resolve(
+        self, id: str, raw: RawComponent, *, strict: frozenset[str] | None = None
+    ) -> ResolvedChain:
         resolution = _Resolution(self, raw.source)
         expanded = resolution.expand_chain(raw.data)
         if inherit.is_layer(id):
@@ -1089,7 +1221,7 @@ class TemplateLibrary:
                 for task in node.tasks()
                 for name in task.task.steering
             },
-            addons=self._pins(id, resolved, resolution.ancestors),
+            addons=self._pins(id, resolved, resolution.ancestors, strict=strict),
         )
 
     def _fallback_profiles(self, chain: object) -> list[str]:
@@ -1119,12 +1251,21 @@ class TemplateLibrary:
         return reached
 
     def _pins(
-        self, id: str, resolved: ResolvedChain, ancestors: Sequence[str] = ()
+        self,
+        id: str,
+        resolved: ResolvedChain,
+        ancestors: Sequence[str] = (),
+        *,
+        strict: frozenset[str] | None = None,
     ) -> dict[str, dict[str, str | None]]:
         """The loaded add-ons chain `id` reads anything from: the chain itself,
         every chain it extends (`an-extending-chain-pins-its-ancestors`), a
         component it extends or selects, or a skill or agent profile one of
-        its tasks names."""
+        its tasks names; and every ancestor of each, root first
+        (`an-item-pins-every-ancestor`). One it reads that is left out is not
+        pinned. `strict` is the namespaces a work item already pinned: with
+        it, one left out by a fault (not quietly, as a disabled one is)
+        raises instead, unless the item already pinned its namespace."""
         data = resolved.chain.model_dump(mode="json")
         named = {
             id,
@@ -1138,9 +1279,29 @@ class TemplateLibrary:
             *self._fallback_profiles(data),
         }
         qualifiers = {name.partition(":")[0] for name in named if ":" in name}
+        if strict is not None:
+            loaded = {a.namespace for a in self.addons if a.left_out is None}
+            for addon in self.addons:
+                if (
+                    addon.namespace in qualifiers - loaded - strict
+                    and not addon.quiet
+                    and addon.left_out
+                ):
+                    raise TemplateLibraryError(
+                        f"it reads add-on {addon.id}, which is not loaded for this work "
+                        f"item: {addon.left_out}"
+                    )
+        # A child is read with its ancestors: an item that kept only the child
+        # would run it on whatever parent the lock holds later.
+        for addon in self.addons:
+            if addon.left_out is None and addon.namespace in qualifiers:
+                try:
+                    qualifiers.update(a.namespace for a in inherit.ancestry(addon, self.addons))
+                except inherit.InheritanceError:
+                    pass
         return {
             addon.namespace: addon.pin
-            for addon in self.addons
+            for addon in inherit.tree_order(self.addons)
             if addon.left_out is None and addon.namespace in qualifiers
         }
 

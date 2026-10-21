@@ -129,6 +129,15 @@ export interface Addon {
   version: string;
   /** The repository whose repo library this is; null for an add-on. */
   repo?: string | null;
+  /** Under a child add-on's name: who wrote this entry. Absent for a local entry, a repo library's and a root add-on's. */
+  inheritance?: Inheritance | null;
+}
+
+/** How a child add-on's chain or component relates to its parent's (`addon.inheritance`). */
+export interface Inheritance {
+  origin: "inherited" | "overridden" | "added";
+  parent: { id: string; namespace: string };
+  author: { id: string; version: string };
 }
 
 /** One reusable component of `library.yaml` (`GET /templates/library`). */

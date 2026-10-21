@@ -22,7 +22,7 @@ import { LibraryPane } from "./LibraryPane";
 import { componentOf } from "./problemTarget";
 import { ProblemWhere } from "./ProblemWhere";
 import { listRows, withAddons } from "./rows";
-import { AddonBadge, ReadOnly } from "../templates/addon";
+import { AddonBadge, InheritanceMark, ReadOnly } from "../templates/addon";
 import { LIBRARY_FILE } from "../templates/draft/view";
 import { addonRepo, parseRef, refUrl, SECTIONS, type PublishedLibrary, type Section } from "./types";
 import "./library.css";
@@ -164,6 +164,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
           </>
         )}
         {row?.addon && <AddonBadge addon={row.addon} />}
+        {row?.addon && <InheritanceMark addon={row.addon} />}
         {draft.view!.draft
           ? <span className="lib-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span>
           : <><span className="lib-published" id={publishedId}>published</span><span className="reason is-quiet" id={`${publishedId}-why`}>{NOTHING_TO_PUBLISH}</span></>}

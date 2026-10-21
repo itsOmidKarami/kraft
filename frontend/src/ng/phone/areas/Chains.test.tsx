@@ -28,6 +28,14 @@ describe("Chains (L.1)", () => {
     expect(where()).toBe("/templates/chains/default");
   });
 
+  it("an inherited chain's row has an `inherited from` chip", async () => {
+    const inherited = { ...CHAINS[1], id: "platform:default", addon: { id: "company@corp", version: "3.2.0", inheritance: { origin: "inherited" as const, parent: { id: "company@corp", namespace: "company" }, author: { id: "company@corp", version: "3.2.0" } } } };
+    mountAt(<ChainsList />, "/templates/chains", "/templates/chains", answers({ "GET /templates/chains": [200, [CHAINS[0], CHAINS[1], inherited]] }));
+    const row = await screen.findByRole("link", { name: /^platform:default/ });
+    expect(within(row).getByText("inherited from company")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^docs_only/ })).not.toHaveTextContent("inherited from");
+  });
+
   const src = (value: unknown, source = "default") => ({ value, source });
   const SOURCES = {
     "": {},
@@ -125,6 +133,12 @@ describe("Chains (L.1)", () => {
     expect(await screen.findByRole("link", { name: /^spec/ })).toBeInTheDocument();
     expect(screen.queryByText(/on desktop/)).toBeNull();
     expect(screen.queryByRole("button", { name: /cap/ })).toBeNull();
+  });
+
+  it("a child add-on's chain page says it is inherited in its header", async () => {
+    const addon = { id: "company@corp", version: "3.2.0", inheritance: { origin: "inherited" as const, parent: { id: "company@corp", namespace: "company" }, author: { id: "company@corp", version: "3.2.0" } } };
+    open("/templates/chains/docs_only", "/templates/chains/:chain", { "GET /drafts/chains/docs_only": [200, view("chains", "docs_only", { addon })], "GET /templates/chains": [200, [CHAINS[0], { ...CHAINS[1], addon }]] });
+    expect(await screen.findByText(/^company@corp 3.2.0 · inherited from company · /)).toBeInTheDocument();
   });
 
   it("a node page reads its fields, a gate's reject target included", async () => {

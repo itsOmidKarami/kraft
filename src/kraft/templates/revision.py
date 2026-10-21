@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import replace
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -295,7 +296,7 @@ def revise(
     addons = chain.chain.addons
     if changes.add:
         added, added_steering, added_addons = _added_nodes(
-            changes.add, _pinned(library, chain, repo_id), repo_id
+            changes.add, _pinned(library, chain, repo_id), repo_id, pinned=addons or {}
         )
         # An add-on the item had not touched yet is pinned now, at the lock's version.
         addons = {**(added_addons or {}), **(addons or {})} or None
@@ -412,11 +413,16 @@ def _pinned(
 
 
 def _added_nodes(
-    adds: list[Add], library: TemplateLibrary | None, repo_id: str | None
+    adds: list[Add],
+    library: TemplateLibrary | None,
+    repo_id: str | None,
+    *,
+    pinned: Iterable[str] = (),
 ) -> tuple[list[ExecNode], dict[str, str] | None, dict | None]:
     """Each added node expanded out of `library`, by the resolution a chain
     file gets (`TemplateLibrary.resolve_chain`: `extends`, steering, skills, a
-    node agreeing on what it produces), with the steering text it selects."""
+    node agreeing on what it produces), with the steering text it selects.
+    `pinned` is the namespaces the item already pinned, never refused here."""
     if library is None:
         raise RevisionError("adding a node needs the template library, and none is loaded")
     try:
@@ -424,7 +430,12 @@ def _added_nodes(
             Path(f"{CHAIN_REVISION}.yaml"),
             {"id": CHAIN_REVISION, "nodes": [add.node.authored() for add in adds]},
         )
-        resolved = candidate.resolve_chain(id)
+        # Strict: an add-on the node reads that is left out by a fault (its
+        # tree mixes versions with the item's pins, its store was edited) is
+        # refused here, not left unpinned to stop the launch. One the item
+        # already pinned stays pinned, whatever its store: the launch
+        # restores it.
+        resolved = candidate.resolve_chain(id, strict_pins=True, pinned=pinned)
     except TemplateLibraryError as exc:
         raise RevisionError(f"add: {exc}") from exc
     from kraft.addons import load

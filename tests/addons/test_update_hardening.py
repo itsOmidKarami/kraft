@@ -5,7 +5,15 @@ import os
 import threading
 
 import pytest
-from support.addons import AGENT, chain, instance, make_collection, publish
+from support.addons import (
+    AGENT,
+    chain,
+    edit_addons_yaml,
+    instance,
+    make_collection,
+    make_tree,
+    publish,
+)
 
 from kraft.addons import fetch, update
 from kraft.addons.config import AddonEntry, AddonsLock, CollectionConfig
@@ -36,9 +44,10 @@ def two_collections(tmp_path):
     return config_dir, addons_dir
 
 
-def test_auto_update_stops_between_collections_once_cancelled(two_collections, monkeypatch):
-    """A shutdown does not start the next collection's fetch, and what it did
-    not do is not recorded as an outcome: a restart reports honestly."""
+def test_auto_update_stops_between_trees_once_cancelled(two_collections, monkeypatch):
+    """A shutdown does not start the next tree's update (here each add-on is a
+    tree of its own, in its own collection), and what it did not do is not
+    recorded as an outcome: a restart reports honestly."""
     config_dir, addons_dir = two_collections
     cancel = threading.Event()
     real, seen = update.update, []
@@ -60,6 +69,25 @@ def test_auto_update_stops_between_collections_once_cancelled(two_collections, m
         "message": "stopped at shutdown",
     }
     assert list(update.read_status(addons_dir)) == ["release@acme"]
+
+
+def test_auto_update_cancelled_before_a_tree_cancels_every_member(tmp_path):
+    """Cancel is per tree: a tree not yet started reports all its members
+    `cancelled`, none of them recorded."""
+    parent, child = "company@corp", "team@corp"
+    repos, (config_dir, addons_dir) = make_tree(
+        tmp_path, {parent: RELEASE, child: {**RELEASE, "parent": (parent, "1")}}
+    )
+    on = {i: {"auto_update": True} for i in (parent, child)}
+    edit_addons_yaml(config_dir, lambda w: w["addons"].update(on))
+    cancel = threading.Event()
+    cancel.set()
+
+    outcomes = update.auto_update(config_dir, addons_dir, cancel=cancel)
+
+    stopped = {"outcome": "failed", "kind": "cancelled", "message": "stopped at shutdown"}
+    assert outcomes == {parent: stopped, child: stopped}
+    assert update.read_status(addons_dir) == {}
 
 
 def test_installing_a_namespace_an_installed_addon_already_references_is_refused(tmp_path):

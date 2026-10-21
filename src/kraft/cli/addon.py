@@ -750,16 +750,16 @@ def _run_update(
     answered: no under `--check`, yes under `-y`, else asked at the terminal."""
     declined_blind = []
 
-    def accept(reviewed: review.Review) -> bool:
-        print(review.render(reviewed), file=sys.stderr if ns.json else sys.stdout)
+    def accept(group: review.Group) -> bool:
+        print(review.render_group(group), file=sys.stderr if ns.json else sys.stdout)
         if check:
             return False
         if ns.yes:
             return True
         if not sys.stdin.isatty():
-            declined_blind.append(reviewed.addon_id)
+            declined_blind.append(group.title)
             return False
-        return input(f"Apply {reviewed.addon_id}? [y/N] ").strip().lower() in ("y", "yes")
+        return input(f"Apply {group.title}? [y/N] ").strip().lower() in ("y", "yes")
 
     with _as_cli():
         results = flow.update(ids, accept, **kw)
@@ -786,8 +786,16 @@ def _cmd_install(ns: argparse.Namespace) -> None:
 
 
 #: `update --check`'s exit code, worst first: could not check, would be
-#: refused, an update is waiting.
-_CHECK_CODES = (("failed", 3), ("refused", 2), ("declined", 1))
+#: refused, an update is waiting or held by a range.
+_CHECK_CODES = (("failed", 3), ("refused", 2), ("declined", 1), ("held", 1))
+
+
+def _check_code(result: addon_update.Result) -> int:
+    """`result`'s exit code under `_CHECK_CODES`, 0 for any other outcome. A
+    relative held because its own new release breaks a chain would be refused,
+    so it counts as `refused`."""
+    outcome = "refused" if result.outcome == "held" and result.kind == "breaks" else result.outcome
+    return next((code for name, code in _CHECK_CODES if name == outcome), 0)
 
 
 def _cmd_update(ns: argparse.Namespace) -> None:
@@ -804,10 +812,10 @@ def _cmd_update(ns: argparse.Namespace) -> None:
         ),
         ns.json,
     )
-    outcomes = {r.outcome for r in results}
     if ns.check:
-        raise SystemExit(next((code for outcome, code in _CHECK_CODES if outcome in outcomes), 0))
-    if outcomes & {"failed", "refused", "declined"}:
+        raise SystemExit(max((_check_code(r) for r in results), default=0))
+    # The graded codes are `--check`'s; here anything not applied or current is 1.
+    if {r.outcome for r in results} & {"failed", "refused", "declined", "held"}:
         raise SystemExit(1)
 
 
@@ -1009,7 +1017,12 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
     remove_c = verb(collections, "remove", _cmd_collection_remove, "forget a collection")
     remove_c.add_argument("name", metavar="NAME")
 
-    install_p = verb(verbs, "install", _cmd_install, "install an add-on, after a review")
+    install_p = verb(
+        verbs,
+        "install",
+        _cmd_install,
+        "install an add-on and its missing ancestors, after a review",
+    )
     addon_id(install_p)
     install_p.add_argument("--as", dest="alias", metavar="ALIAS", help="its namespace")
     install_p.add_argument("--auto-update", action="store_true")
@@ -1019,15 +1032,21 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
         help="take the newest commit even at an unchanged version",
     )
     install_p.add_argument("-y", "--yes", action="store_true", help="accept the review")
-    update_p = verb(verbs, "update", _cmd_update, "update installed add-ons, each after a review")
+    update_p = verb(
+        verbs,
+        "update",
+        _cmd_update,
+        "update installed add-ons, one review per tree; exit 1 when one is refused, declined, held "
+        "or failed",
+    )
     update_p.add_argument("addons", metavar="ADDON@COLLECTION", nargs="*")
     answer = update_p.add_mutually_exclusive_group()
     answer.add_argument("-y", "--yes", action="store_true", help="accept every review")
     answer.add_argument(
         "--check",
         action="store_true",
-        help="print the reviews and change nothing; exit 1 when an update is waiting, "
-        "2 when one would be refused, 3 when it could not check",
+        help="print the reviews and change nothing; exit 1 when an update is waiting or held by "
+        "a range, 2 when one would be refused, 3 when it could not check",
     )
     auto_p = verb(verbs, "auto-update", _cmd_auto_update, "set one add-on's auto-update")
     addon_id(auto_p)

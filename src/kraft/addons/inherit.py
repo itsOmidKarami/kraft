@@ -14,10 +14,10 @@ this module.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from kraft.addons.load import InstalledAddon
 
@@ -104,6 +104,184 @@ def cascade(addons: Sequence[InstalledAddon]) -> tuple[InstalledAddon, ...]:
             first = [i for i in failing if current[i].id in looped] or list(failing)
         for i in first:
             current[i] = replace(current[i], left_out=str(failing[i]))
+
+
+def tree_order(addons: Sequence[InstalledAddon]) -> tuple[InstalledAddon, ...]:
+    """`addons`, parents before children: a stable sort on how many ancestors
+    each reaches by `parent` id among `addons` that are not repo libraries,
+    counted up to `MAX_DEPTH` or a repeat. Roots, and add-ons whose parent is
+    not among them, keep the order given."""
+    by_id = {a.id: a for a in addons if a.repo_id is None}
+
+    def depth(addon: InstalledAddon) -> int:
+        seen = {addon.id}
+        current = by_id.get(addon.parent) if addon.parent is not None else None
+        while current is not None and current.id not in seen and len(seen) < MAX_DEPTH:
+            seen.add(current.id)
+            current = by_id.get(current.parent) if current.parent is not None else None
+        return len(seen) - 1
+
+    return tuple(sorted(addons, key=depth))
+
+
+class Side(NamedTuple):
+    """One add-on as the set rule sees it, locked or moved: its version, and
+    the parent and range it builds on."""
+
+    version: str
+    parent: str | None
+    range: str | None
+
+
+def _breaks(addon_id: str, sides: Mapping[str, Side]) -> list[tuple[str, str]]:
+    """Each range `addon_id` breaks against `sides` (every add-on present, at
+    its kept or locked side), as `(other id, why)`: its own range or missing
+    parent first, then each child's range, in child-id order. A range that
+    does not parse breaks, worded with its error."""
+    from kraft.addons import manifest
+
+    def outside(range_: str, version: str) -> str | None:
+        try:
+            return manifest.version_in_range(range_, version)
+        except ValueError as exc:
+            return str(exc)
+
+    side = sides[addon_id]
+    out: list[tuple[str, str]] = []
+    if side.parent is not None:
+        parent = sides.get(side.parent)
+        if parent is None:
+            out.append((side.parent, f"its parent {side.parent} is not installed"))
+        elif side.range is not None and (why := outside(side.range, parent.version)):
+            out.append(
+                (
+                    side.parent,
+                    f"{addon_id}'s range {side.range} does not accept "
+                    f"{side.parent} {parent.version} ({why})",
+                )
+            )
+    for child_id in sorted(sides):
+        child = sides[child_id]
+        if child_id != addon_id and child.parent == addon_id and child.range is not None:
+            if why := outside(child.range, side.version):
+                out.append(
+                    (
+                        child_id,
+                        f"{addon_id} {side.version} is outside {child_id}'s range "
+                        f"{child.range} ({why})",
+                    )
+                )
+    return out
+
+
+def path(addon_id: str, parents: Mapping[str, str | None]) -> tuple[str, ...] | None:
+    """`(addon_id, parent, ..., root)` through `parents`, at most `MAX_DEPTH`
+    steps; None when `addon_id` meets a cycle on the way."""
+    line = [addon_id]
+    while len(line) <= MAX_DEPTH and (parent := parents.get(line[-1])) is not None:
+        if parent in line:
+            return None
+        line.append(parent)
+    return tuple(line)
+
+
+def settle(locked: Mapping[str, Side], moves: Mapping[str, Side]) -> dict[str, str]:
+    """Which of `moves` (id to its new side) the set rule drops, each mapped
+    to why; the rest are kept. `locked` holds every installed add-on, so a move
+    not in it is an install. Every move that breaks a range, judged with the
+    other kept moves applied, is dropped at once, until none breaks. Then each
+    dropped move is offered again, parents first and then by id, and kept when
+    the kept set with it breaks nothing, until a pass keeps nothing new. A move
+    still dropped is judged once more, alone with the final kept set, for its
+    reason: never one about a move that was later dropped or kept."""
+
+    def sides(kept: Collection[str]) -> dict[str, Side]:
+        return {**locked, **{i: moves[i] for i in kept}}
+
+    kept = set(moves)
+    while True:
+        applied = sides(kept)
+        failing = {i for i in kept if _breaks(i, applied)}
+        if not failing:
+            break
+        kept -= failing
+    parents = {i: s.parent for i, s in locked.items()}
+    parents |= {i: s.parent for i, s in moves.items() if i not in locked}
+    order = sorted(set(moves) - kept, key=lambda i: (len(path(i, parents) or (i,)), i))
+    offered = True
+    while offered:
+        offered = False
+        for addon_id in order:
+            if addon_id in kept:
+                continue
+            if not _breaks(addon_id, sides(kept | {addon_id})):
+                kept.add(addon_id)
+                offered = True
+    dropped: dict[str, str] = {}
+
+    def reason(addon_id: str, asking: tuple[str, ...] = ()) -> str:
+        # A parent install that is dropped too is worded first, whatever its
+        # depth, since a locked add-on's new parent can be one.
+        if addon_id not in dropped:
+            other, why = _breaks(addon_id, sides(kept | {addon_id}))[0]
+            if other in moves and other not in kept and other not in locked and other not in asking:
+                parent_why = reason(other, (*asking, addon_id))
+                why = f"its parent {other} cannot be installed: {parent_why}"
+            dropped[addon_id] = why
+        return dropped[addon_id]
+
+    for addon_id in order:
+        if addon_id not in kept:
+            reason(addon_id)
+    return dropped
+
+
+def needed(
+    named: Collection[str], locked: Mapping[str, Side], kept: Mapping[str, Side]
+) -> frozenset[str]:
+    """The ids of `named` among `kept` (moves the set rule kept), plus each
+    other kept move they cannot apply without, to a fixed point: one whose
+    add-on, back at its locked side or not there for an install, breaks a
+    range with a move already needed. The moves returned settle on their own."""
+    need = {i for i in named if i in kept}
+    while True:
+        sides = {**locked, **{i: kept[i] for i in need}}
+        more = {other for i in need for other, _ in _breaks(i, sides) if other in kept}
+        if more <= need:
+            return frozenset(need)
+        need |= more
+
+
+def trees(
+    ids: Iterable[str], parents: Mapping[str, str | None], *more: Mapping[str, str | None]
+) -> list[tuple[str, ...]]:
+    """`ids` grouped by the root each reaches through `parents`, which may
+    hold add-ons not among `ids`, followed at most `MAX_DEPTH` steps. With
+    `more` maps (the locked parents that move, say), the roots an id reaches
+    through any of them are one group: a child that changes parent joins its
+    old parent's tree. Groups come in the order they first appear in `ids`;
+    within one, by depth through `parents`, then id. An id that meets a
+    cycle forms a group of its own, unless another map joins it to one, and
+    then sorts at depth 0 within it."""
+    joined: dict[object, object] = {}
+
+    def find(root: object) -> object:
+        while (up := joined.setdefault(root, root)) != root:
+            root = up
+        return root
+
+    roots: dict[str, tuple[object, int]] = {}
+    for addon_id in dict.fromkeys(ids):
+        lines = [path(addon_id, m) for m in (parents, *more)]
+        reached = [line[-1] if line is not None else (addon_id,) for line in lines]
+        for root in reached[1:]:
+            if (a := find(root)) != (b := find(reached[0])):
+                joined[a] = b
+        roots[addon_id] = (reached[0], len(lines[0] or ()))
+    groups: dict[object, list[tuple[int, str]]] = {}
+    for addon_id, (root, depth) in roots.items():
+        groups.setdefault(find(root), []).append((depth, addon_id))
+    return [tuple(i for _, i in sorted(members)) for members in groups.values()]
 
 
 def read_manifest(addon: InstalledAddon) -> AddonManifest:
@@ -323,12 +501,120 @@ class Visible:
             levels[d] = seen
         return cls(tuple(levels))
 
+    def names(self, kind: str, from_depth: int = 0) -> tuple[str, ...]:
+        """Every `kind` name level `from_depth` sees, sorted."""
+        if from_depth >= len(self.levels):
+            return ()
+        return tuple(sorted(self.levels[from_depth].get(kind, {})))
+
     def owner(self, kind: str, name: str, from_depth: int) -> str | None:
         """The `namespace:name` of the ancestor whose `kind` (`skills`,
         `profiles`, `steering`) `name` level `from_depth` sees; None when none does."""
         if from_depth >= len(self.levels):
             return None
         return self.levels[from_depth].get(kind, {}).get(name)
+
+
+def visible(chain: Sequence[InstalledAddon]) -> Visible:
+    """`Visible` for `chain` (`ancestry`'s answer): the skills, agent profiles
+    and steering profiles each member's store ships, less what each level
+    removes. Reads each store through `fetch.open_store`, so a
+    `fetch.StoreMismatch` propagates; raises `TemplateLibraryError` for a file
+    that does not read."""
+    from kraft.addons import fetch
+    from kraft.templates import library as lib
+
+    stores = [fetch.open_store(author.root) for author in chain]
+    written = [
+        lib._read_stored(store, lib.LIBRARY_FILE, author.root / lib.LIBRARY_FILE, optional=True)
+        for author, store in zip(chain, stores, strict=True)
+    ]
+    return Visible.build(
+        chain,
+        [
+            {
+                "skills": lib._store_skills(store),
+                "profiles": lib._store_profiles(store, author),
+                "steering": lib._section(
+                    author.root / lib.LIBRARY_FILE, library, lib.Namespace.STEERING
+                ).keys(),
+            }
+            for author, store, library in zip(chain, stores, written, strict=True)
+        ],
+        [
+            removals(author.root / lib.LIBRARY_FILE, library)
+            for author, library in zip(chain, written, strict=True)
+        ],
+    )
+
+
+def inherited(kind: str, addon: InstalledAddon, addons: Sequence[InstalledAddon]) -> dict[str, str]:
+    """For each `kind` (`skills` or `profiles`) name `addon` sees at depth 0
+    that an ancestor defines, the defining ancestor's namespace. Empty for a
+    root add-on, one that is left out, and one whose ancestry or stores do not
+    read. A name `addon` defines itself, or removed, is not in it."""
+    if addon.left_out is not None or addon.parent is None:
+        return {}
+    try:
+        return _inherited(kind, addon, addons)
+    except _unreadable_tree():
+        return {}
+
+
+def _unreadable_tree() -> tuple[type[Exception], ...]:
+    """What reading a child's tree raises when it does not read: its ancestry
+    does not resolve, a store was edited, or a file does not parse."""
+    from kraft.addons import fetch
+
+    # library imports this module at module level
+    from kraft.templates.library import TemplateLibraryError
+
+    return (InheritanceError, fetch.StoreMismatch, TemplateLibraryError, OSError)
+
+
+def _inherited(
+    kind: str, addon: InstalledAddon, addons: Sequence[InstalledAddon]
+) -> dict[str, str]:
+    """`inherited` for a loaded child, raising what `_unreadable_tree` names."""
+    seen = visible(ancestry(addon, addons))
+    out: dict[str, str] = {}
+    for name in seen.names(kind):
+        owner = (seen.owner(kind, name, 0) or "").partition(":")[0]
+        if owner and owner != addon.namespace:
+            out[name] = owner
+    return out
+
+
+def skill_dirs(addons: Sequence[InstalledAddon]) -> dict[str, Path | None]:
+    """Where `kraft.skill` reads an add-on's skill: each namespace to its
+    store, or to None when its add-on is left out (a reference into it is
+    refused, never handed to the agent as another tool's skill). A loaded
+    namespace wins over a left-out one of the same name.
+
+    Each skill a loaded child inherits is also a key, `<child>:<skill>`, to
+    the store of the ancestor that defines it, so a reference from outside
+    the tree names it by the child's name. A skill the child ships itself, or
+    removed, has no key: it is looked for in the child's own store. A child
+    whose tree does not read maps to None, with no keys, so its skills are
+    refused as not loaded rather than looked for in its own store."""
+    dirs: dict[str, Path | None] = {}
+    for addon in addons:
+        if addon.left_out is None:
+            dirs[addon.namespace] = addon.root
+        else:
+            dirs.setdefault(addon.namespace, None)
+    for addon in addons:
+        if addon.left_out is not None or addon.parent is None:
+            continue
+        try:
+            owners = _inherited("skills", addon, addons)
+        except _unreadable_tree():
+            dirs[addon.namespace] = None
+            continue
+        for name, owner in owners.items():
+            # An ancestor is loaded (`ancestry` says so), so this is its store.
+            dirs[f"{addon.namespace}:{name}"] = dirs.get(owner)
+    return dirs
 
 
 def humanize(text: str, layers: Mapping[str, str]) -> str:

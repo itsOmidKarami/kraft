@@ -67,3 +67,9 @@ updates:
       interval: weekly
     labels:
       - release::none
+    # CodeQL refuses to run when its init and analyze steps differ in
+    # version, so one PR has to bump both.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"

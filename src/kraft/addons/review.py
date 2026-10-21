@@ -22,7 +22,7 @@ from pathlib import Path
 
 import yaml
 
-from kraft.addons import manifest
+from kraft.addons import fetch, inherit, manifest
 from kraft.addons.fetch import Extracted, write_scratch
 from kraft.addons.load import InstalledAddon
 from kraft.addons.update import LIMITS, as_installed
@@ -90,6 +90,28 @@ def render(review: Review) -> str:
     return escape("\n".join(lines))
 
 
+@dataclass(frozen=True)
+class Group:
+    """The reviews one answer covers: a tree's moves in tree order, a named
+    add-on's and those of the relatives its update takes alike, each a member
+    with its own review. `pulled_in` says what else came with them."""
+
+    reviews: tuple[Review, ...]
+    pulled_in: tuple[str, ...] = ()
+
+    @property
+    def title(self) -> str:
+        return escape(", ".join(r.addon_id for r in self.reviews))
+
+
+def render_group(group: Group) -> str:
+    """The group as the terminal and the console's dialog print it: the
+    `pulled_in` lines, then each member's review. A group of one with nothing
+    pulled in reads exactly as `render`."""
+    lines = [*group.pulled_in, *(render(r) for r in group.reviews)]
+    return escape("\n".join(lines))
+
+
 def _flatten(value: object, at: str, out: dict[str, object], lists: dict[str, list[str]]) -> None:
     """Facts go to `out`; the order of each id-keyed list, which a fact keyed
     by id cannot show, goes to `lists`."""
@@ -138,6 +160,8 @@ class _Facts:
     steering: dict[str, object]
     skills: dict[str, str]
     profiles: dict[str, object]
+    #: The add-on's own `remove:` entries that name nothing it inherits.
+    stale: frozenset[str] = frozenset()
 
 
 def _chain_facts(
@@ -179,6 +203,7 @@ def _facts(extracted: Extracted | None, ancestors: Sequence[InstalledAddon] = ()
     chains: dict[str, object] = {}
     lists: dict[str, list[str]] = {}
     order: dict[str, list[tuple[str, str]]] = {}
+    stale: frozenset[str] = frozenset()
     with tempfile.TemporaryDirectory() as tmp:
         root = write_scratch(Path(tmp), extracted)
         addon = _candidate(declared, name, root)
@@ -191,6 +216,7 @@ def _facts(extracted: Extracted | None, ancestors: Sequence[InstalledAddon] = ()
         if loaded is not None:
             own = [c for c in loaded.chain_ids if c.startswith(f"{name}:")]
             _chain_facts(loaded, own, chains, lists, order)
+            stale = frozenset(e for e in loaded.stale_removals if e.startswith(f"{name}: "))
     return _Facts(
         version=str(declared.get("version", "")),
         requires=declared.get("requires") if isinstance(declared.get("requires"), dict) else {},
@@ -209,7 +235,86 @@ def _facts(extracted: Extracted | None, ancestors: Sequence[InstalledAddon] = ()
             if rel.startswith("skills/")
         },
         profiles=_section(_yaml(extracted, "profiles.yaml"), "profiles"),
+        stale=stale,
     )
+
+
+#: What a `remove:` section names, as a review says it.
+_KINDS = {
+    "chains": "chain",
+    "tasks": "task",
+    "steps": "step",
+    "nodes": "node",
+    "steering": "steering profile",
+    "skills": "skill",
+    "profiles": "agent profile",
+}
+if tuple(_KINDS) != inherit.REMOVABLE:
+    raise RuntimeError("review._KINDS must name every section `remove:` may name, in order")
+
+
+def _declared(extracted: Extracted) -> dict[str, frozenset[str]]:
+    """The names `extracted`'s own files declare, for each removable section."""
+    library = _yaml(extracted, "library.yaml")
+    files = extracted.files
+    return {
+        "chains": frozenset(
+            rel.removeprefix("chains/").removesuffix(".yaml")
+            for rel in files
+            if rel.startswith("chains/") and rel.endswith(".yaml")
+        ),
+        **{
+            section: frozenset(_section(library, section))
+            for section in ("tasks", "steps", "nodes", "steering")
+        },
+        "skills": frozenset(
+            rel.split("/")[1] for rel in files if rel.startswith("skills/") and rel.count("/") > 1
+        ),
+        "profiles": frozenset(_section(_yaml(extracted, "profiles.yaml"), "profiles")),
+    }
+
+
+def _inherited(ancestors: Sequence[InstalledAddon]) -> dict[str, dict[str, str]]:
+    """For each section, the names the parent's merged library has, each with
+    the id of the ancestor that defines it: from the root down, a level drops
+    what it removes and then adds what it declares."""
+    if not ancestors:
+        return {}
+    declared: list[dict[str, frozenset[str]]] = []
+    removed: list[dict[str, tuple[str, ...]]] = []
+    for ancestor in ancestors:
+        try:
+            files = fetch.verify_store(ancestor.root)
+            level = (
+                _declared(files),
+                inherit.removals(ancestor.root / "library.yaml", _yaml(files, "library.yaml")),
+            )
+        except (fetch.AddonRefused, fetch.FetchError, TemplateLibraryError):
+            level = ({}, {})  # the store does not read; loading says why
+        declared.append(level[0])
+        removed.append(level[1])
+    seen = inherit.Visible.build(ancestors, declared, removed).levels[0]
+    ids = {a.namespace: a.id for a in ancestors}
+    return {
+        section: {name: ids[owner.partition(":")[0]] for name, owner in names.items()}
+        for section, names in seen.items()
+    }
+
+
+def _parent_lines(was: Mapping[str, str], now: Mapping[str, str]) -> list[str]:
+    """What a change of the `requires.addons` entry (parent id to range) says."""
+    if was == now:
+        return []
+    (old_id, old_range), (new_id, new_range) = (
+        next(iter(side.items()), (None, None)) for side in (was, now)
+    )
+    if old_id is None:
+        return [f"now builds on {new_id} {new_range}"]
+    if new_id is None:
+        return [f"no longer builds on {old_id}"]
+    if old_id == new_id:
+        return [f"parent range: {old_id} {old_range} -> {new_range}"]
+    return [f"parent changed: {old_id} {old_range} -> {new_id} {new_range}"]
 
 
 def _how(old: object, new: object) -> str:
@@ -221,9 +326,10 @@ def _how(old: object, new: object) -> str:
 
 
 def _chain_change(
-    path: str, old: object, new: object, was: _Facts, now: _Facts, name: str
+    path: str, old: object, new: object, was: _Facts, now: _Facts, names: Collection[str]
 ) -> tuple[str, str]:
-    """`(section, line)` for one changed fact of a resolved chain."""
+    """`(section, line)` for one changed fact of a resolved chain. `names`:
+    the namespaces under review, whose skills are their own."""
     where, _, last = path.rpartition(".")
     if ".auto_review" in path:
         return "reach", f"{where}: a gate's own agent review changed: {last} {_how(old, new)}"
@@ -277,7 +383,7 @@ def _chain_change(
         return "content", f"{where}: prompt {'new' if old is None else 'changed'}:\n{new or ''}"
     if last == "skill":
         qualifier = new.split(":", 1)[0] if isinstance(new, str) and ":" in new else None
-        if qualifier not in (None, name, "kraft"):
+        if qualifier not in (None, "kraft", *names):
             return "content", f"{where}: new plugin skill reference {new!r}, handed to the agent"
         return "content", f"{where}: skill {_how(old, new)}"
     if last in _INPUTS or last == "steering":
@@ -294,12 +400,14 @@ def _reordered(path: str, before: list[str], after: list[str]) -> tuple[str, str
     return section, f"{path}: order changed, {before} -> {after}"
 
 
-def _chain_diff(was: _Facts, now: _Facts, name: str, reach: list[str], content: list[str]) -> None:
+def _chain_diff(
+    was: _Facts, now: _Facts, names: Collection[str], reach: list[str], content: list[str]
+) -> None:
     """Every changed fact and every reordered list of the resolved chains."""
     for path in sorted(was.chains.keys() | now.chains.keys()):
         before, after = was.chains.get(path), now.chains.get(path)
         if before != after:
-            section, line = _chain_change(path, before, after, was, now, name)
+            section, line = _chain_change(path, before, after, was, now, names)
             (reach if section == "reach" else content).append(line)
     for path in sorted(was.lists.keys() & now.lists.keys()):
         common = set(was.lists[path]) & set(now.lists[path])
@@ -313,15 +421,17 @@ def _chain_diff(was: _Facts, now: _Facts, name: str, reach: list[str], content: 
 def local_changes(
     before: TemplateLibrary | None,
     after: TemplateLibrary,
-    namespace: str,
+    namespace: str | Collection[str],
     *,
     extra: Collection[str] = (),
 ) -> tuple[list[str], list[str]]:
     """`(reach, content)` for the instance's own chains: what each one that
-    resolves through the add-on under `namespace` would run differently once
-    `after` replaces `before`. A chain the add-on does not reach has no line.
-    `extra`: other chains to diff the same way, a repo library's
+    resolves through the add-on under `namespace` (or the add-ons of a tree,
+    under each of a collection) would run differently once `after` replaces
+    `before`. A chain the add-on does not reach has no line. `extra`: other
+    chains to diff the same way, a repo library's
     (`the-review-covers-repo-library-chains`)."""
+    names = (namespace,) if isinstance(namespace, str) else tuple(namespace)
     sides = []
     for loaded in (before, after):
         facts = _Facts("", {}, {}, {}, {}, {}, {}, {}, {})
@@ -335,7 +445,7 @@ def local_changes(
         sides.append(facts)
     reach: list[str] = []
     content: list[str] = []
-    _chain_diff(sides[0], sides[1], namespace, reach, content)
+    _chain_diff(sides[0], sides[1], names, reach, content)
     return reach, content
 
 
@@ -360,9 +470,20 @@ def review(
             reach.append(f"downgrade: {was.version} -> {now.version}")
         if "-" in now.version and "-" not in was.version:
             reach.append(f"moves onto a pre-release: {now.version}")
-        if was.requires != now.requires:
-            reach.append(f"requires changed: {was.requires} -> {now.requires}")
-    _chain_diff(was, now, name, reach, content)
+        own = [{k: v for k, v in f.requires.items() if k != "addons"} for f in (was, now)]
+        if own[0] != own[1]:
+            reach.append(f"requires changed: {own[0]} -> {own[1]}")
+        reach += _parent_lines(*(f.requires.get("addons") or {} for f in (was, now)))
+        before, after = _inherited(old_ancestors), _inherited(new_ancestors)
+        for section, names in _declared(new).items():
+            offered, offered_before = after.get(section, {}), before.get(section, {})
+            kind = _KINDS[section]
+            reach += [
+                f"its {kind} {declared} now overrides {offered[declared]}'s new {kind} {declared}"
+                for declared in sorted(names)
+                if declared in offered and declared not in offered_before
+            ]
+    _chain_diff(was, now, (name,), reach, content)
     for label, before_map, after_map in (
         ("component", was.components, now.components),
         ("steering", was.steering, now.steering),
@@ -383,6 +504,7 @@ def review(
                 (reach if rerouted else content).append(
                     f"{label} {key} {state}{detail if label != 'component' else ''}"
                 )
+    content += [f"warning: {entry}; it does nothing" for entry in sorted(now.stale - was.stale)]
     for key in sorted(was.skills.keys() | now.skills.keys()):
         before_text, after_text = was.skills.get(key, ""), now.skills.get(key, "")
         if before_text != after_text:
@@ -402,4 +524,26 @@ def review(
         new_version=now.version,
         reach=tuple(reach),
         content=tuple(content),
+    )
+
+
+_ONE_NAME = re.compile(r"^warning: [^\s:]+: ")
+
+
+def descendant_lines(
+    addon_id: str,
+    files: Extracted,
+    before: Sequence[InstalledAddon],
+    after: Sequence[InstalledAddon],
+) -> tuple[list[str], list[str]]:
+    """`(reach, content)` for an installed descendant `addon_id` whose own
+    files `files` do not move while its ancestors do, from `before` to `after`
+    (parent first): what its effective chains, the names it now shadows and
+    its stale `remove:` entries would say in its own review, each line naming
+    the descendant. They go in the review of the ancestor that moves."""
+    said = review(addon_id, files, files, old_ancestors=before, new_ancestors=after)
+    return (
+        [f"{addon_id}: {line}" for line in said.reach],
+        # A stale-remove warning already names the add-on after `warning: `.
+        [f"{addon_id}: {_ONE_NAME.sub('warning: ', line)}" for line in said.content],
     )

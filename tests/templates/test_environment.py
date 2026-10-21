@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 from pydantic import ValidationError
-from support.addons import edit_and_forge, edit_store, installed
+from support.addons import edit_and_forge, edit_store, example_tree, installed
 
 from kraft import harness
 from kraft.policy import InstancePolicy, InstancePolicyInput
@@ -305,3 +305,185 @@ def test_addon_profiles(tmp_path, local, tamper):
     assert table.agent_profiles["release:deep"].model == {"codex": "p"}
     for profile in local:
         assert table.agent_profiles[profile].fallback[0].profile == "release:deep"
+
+
+def _model(name: str) -> dict:
+    return {"model": {"codex": name}}
+
+
+#: A profile of the team's own (`team-payments:strong`) falling back to a
+#: profile of its parent, named the way a team author writes it.
+_STRONG_FALLS_BACK_TO_PARENTS_FAST = {
+    "profiles": {
+        "strong": {**_model("m"), "fallback": [{"profile": "platform-dept:fast"}]},
+    }
+}
+_STRONG_FALLS_BACK_TO_OWN_NAME = {
+    "profiles": {
+        "strong": {**_model("m"), "fallback": [{"profile": "team-payments:slow"}]},
+    }
+}
+_STRONG_INTO_SLOW = {"strong": {**_model("m"), "fallback": [{"profile": "team-payments:slow"}]}}
+_REMOVES_SLOW = {"library": {"remove": {"profiles": ["slow"]}}}
+
+
+@pytest.mark.parametrize(
+    ("tree", "local", "models", "falls_back", "absent", "refused"),
+    [
+        pytest.param(
+            {},
+            {},
+            {"team-payments:slow": {"codex": "company-model"}},
+            {"team-payments:slow": "company:fast"},
+            [],
+            None,
+            id="inherited",
+        ),
+        pytest.param(
+            {"dept": {"profiles": {"slow": _model("dept-model")}}},
+            {},
+            {
+                "team-payments:slow": {"codex": "dept-model"},
+                "team-payments:fast": {"codex": "fast-model"},
+            },
+            {},
+            [],
+            None,
+            id="nearest-owner",
+        ),
+        pytest.param(
+            {"team": {"profiles": {"slow": _model("team-model")}}},
+            {},
+            {"team-payments:slow": {"codex": "team-model"}},
+            {},
+            [],
+            None,
+            id="own-override",
+        ),
+        pytest.param(
+            {"team": _REMOVES_SLOW},
+            {},
+            {"company:slow": {"codex": "company-model"}},
+            {},
+            ["team-payments:slow"],
+            None,
+            id="removed",
+        ),
+        pytest.param(
+            {"team": {"profiles": {"fast": _model("team-fast")}}},
+            {},
+            {},
+            {"team-payments:slow": "company:fast"},
+            [],
+            None,
+            id="fallback-kept",
+        ),
+        pytest.param({}, _STRONG_INTO_SLOW, {}, {}, [], None, id="local-fallback-into-inherited"),
+        pytest.param(
+            {"team": _REMOVES_SLOW},
+            _STRONG_INTO_SLOW,
+            {},
+            {},
+            [],
+            r"profiles.strong.fallback\[0\]: profile 'team-payments:slow' is not defined",
+            id="local-fallback-into-removed",
+        ),
+        pytest.param(
+            {"alias": "plat", "dept": {"profiles": {"slow": _model("dept-model")}}},
+            {},
+            {"team-payments:slow": {"codex": "dept-model"}},
+            {},
+            ["platform-dept:slow"],
+            None,
+            id="alias-parent",
+        ),
+        pytest.param(
+            {"team": _STRONG_FALLS_BACK_TO_PARENTS_FAST},
+            {},
+            {},
+            {"team-payments:strong": "company:fast"},
+            [],
+            None,
+            id="child-fallback-names-parent",
+        ),
+        pytest.param(
+            {"team": _STRONG_FALLS_BACK_TO_OWN_NAME},
+            {},
+            {},
+            {"team-payments:strong": "company:slow"},
+            [],
+            None,
+            id="child-fallback-names-itself",
+        ),
+        pytest.param(
+            {"alias": "plat", "team": _STRONG_FALLS_BACK_TO_PARENTS_FAST},
+            {},
+            {},
+            {"team-payments:strong": "company:fast"},
+            ["platform-dept:fast"],
+            None,
+            id="child-fallback-names-aliased-parent",
+        ),
+        pytest.param(
+            {
+                "alias": "plat",
+                "dept": {"profiles": {"fast": _model("dept-fast")}},
+                "team": _STRONG_FALLS_BACK_TO_PARENTS_FAST,
+            },
+            {},
+            {},
+            {"team-payments:strong": "plat:fast"},
+            [],
+            None,
+            id="child-fallback-names-parents-own",
+        ),
+        pytest.param(
+            {
+                "alias": "team-payments",
+                "team_alias": "tp",
+                "dept": {"profiles": {"fast": _model("dept-fast")}},
+                "team": {
+                    "profiles": {
+                        "fast": _model("team-fast"),
+                        "strong": {**_model("m"), "fallback": [{"profile": "platform-dept:fast"}]},
+                    }
+                },
+            },
+            {},
+            {"tp:fast": {"codex": "team-fast"}},
+            {"tp:strong": "team-payments:fast"},
+            [],
+            None,
+            id="child-fallback-parent-aliased-as-childs-name",
+        ),
+    ],
+)
+def test_inherited_addon_profiles(tmp_path, tree, local, models, falls_back, absent, refused):
+    """A child add-on's agent profiles are its own and the ones it inherits
+    (the nearest ancestor's, or the root's), less those it removes, each under
+    the child's name and whole: an inherited profile's fallback keeps naming
+    the ancestor. The child's own `fallback:` naming its parent means the
+    ancestor that defines the profile, whatever the parent is installed as."""
+    addons = example_tree(tmp_path, **tree)
+
+    def build():
+        return te.HarnessProfileTable.from_mapping(
+            {"profiles": local},
+            tmp_path / "harnesses.yaml",
+            harnesses=harness.load(None).valid,
+            addons=addons,
+        )
+
+    if refused:
+        with pytest.raises(te.TemplateEnvironmentError, match=refused):
+            build()
+        return
+    table = build()
+    for id, model in models.items():
+        assert table.agent_profiles[id].model == model
+        assert table.agent_profiles[id].id == id
+    for id, profile in falls_back.items():
+        assert table.agent_profiles[id].fallback[0].profile == profile
+    for id in absent:
+        assert id not in table.agent_profiles
+    assert not [id for id in table.agent_profiles if "^" in id]

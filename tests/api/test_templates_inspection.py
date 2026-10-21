@@ -12,6 +12,8 @@ import yaml
 from support.api import _client
 from support.harness import fake_templates_dir
 
+from kraft.templates.library import TemplateLibrary, TemplateLibraryError
+
 #: A chain an unsaved candidate or library can carry: one subprocess task.
 SOLO = {
     "id": "solo",
@@ -147,8 +149,10 @@ def test_resolved_shows_a_saved_chain_expanded_and_not_materialized(client):
         "nodes",
         "documents",
         "provenance",
+        "addon",
+        "inherited_nodes",
     }
-    assert body["provenance"] is None
+    assert (body["provenance"], body["addon"], body["inherited_nodes"]) == (None, None, {})
     assert {"spec_approval", "plan_approval"} <= {n["id"] for n in body["chain"]["nodes"]}
 
 
@@ -202,8 +206,26 @@ def test_a_resolved_node_carries_its_icon(client):
     assert body.json()["chains"][0]["nodes"][0]["icon"] == "hammer"
 
 
-def test_resolved_of_an_unknown_chain_is_404(client):
-    assert client.get("/api/templates/chains/nope/resolved").status_code == 404
+@pytest.mark.parametrize(
+    ("chain", "broken", "status"),
+    [
+        pytest.param("nope", False, 404, id="unknown-chain"),
+        pytest.param("default", True, 422, id="saved-chain-that-no-longer-resolves"),
+    ],
+)
+def test_resolved_of_a_chain_that_is_not_served_is_refused(
+    client, monkeypatch, chain, broken, status
+):
+    if broken:
+
+        def refuse(self, id):
+            raise TemplateLibraryError(f"chain {id!r} does not resolve")
+
+        monkeypatch.setattr(TemplateLibrary, "resolve_chain", refuse)
+    response = client.get(f"/api/templates/chains/{chain}/resolved")
+    assert response.status_code == status
+    if broken:
+        assert response.json()["detail"] == "chain 'default' does not resolve"
 
 
 # ── POST /templates/resolve (resolve-api-supports-candidate-and-library-input) ──

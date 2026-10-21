@@ -57,19 +57,67 @@ def components(library: TemplateLibrary, issues: list[TemplateIssue]) -> list[di
                     "used_by": sorted(used_by.get(id, ())),
                     "used_by_paths": paths.get(id, []),
                     "issues": [i for i in issues if named.search(i.message)],
-                    "addon": addon_view(library, name),
+                    "addon": addon_view(library, id),
                 }
             )
     return listed
 
 
-def addon_view(library: TemplateLibrary, name: str) -> dict | None:
-    """`{id, version}` of the add-on a chain or component comes from; None for
-    the instance's own. What a screen badges and refuses to edit."""
+def addon_view(library: TemplateLibrary, name: str, *, marks: bool = True) -> dict | None:
+    """`{id, version, repo, inheritance}` of the add-on a chain or component
+    comes from; None for the instance's own. What a screen badges and refuses
+    to edit. `name` is a chain id or a component id (`tasks.release:base`),
+    which tells a chain and a component of one name apart; `inheritance` is
+    `inheritance_view`'s. `marks=False` leaves `inheritance` out, for an
+    entry that is neither (an agent profile)."""
     addon = library.addon_of(name)
     if addon is None:
         return None
-    return {"id": addon.id, "version": addon.version, "repo": addon.repo_id}
+    view = {"id": addon.id, "version": addon.version, "repo": addon.repo_id}
+    if marks:
+        view["inheritance"] = inheritance_view(library, name)
+    return view
+
+
+def inheritance_view(library: TemplateLibrary, name: str) -> dict | None:
+    """`TemplateLibrary.inheritance(name)` as the API shows it:
+    `{origin, parent: {id, namespace}, author: {id, version}}`, the parent
+    by the namespace this instance serves it under. None for an entry that
+    is not a child add-on's."""
+    mark = library.inheritance(name)
+    if mark is None:
+        return None
+    return {
+        "origin": mark.origin,
+        "parent": {"id": mark.parent.id, "namespace": mark.parent.namespace},
+        "author": {"id": mark.author.id, "version": mark.author.version},
+    }
+
+
+def node_inheritance(library: TemplateLibrary, chain_id: str) -> dict[str, dict]:
+    """Per node of a chain served under a child add-on, the component (a
+    task, step or node, or a steering profile a task selects) of that same
+    namespace it is built from that the child overrides or adds:
+    `{node: {origin, entry}}`, `overridden` before `added` and the first in
+    sorted order between equals. A node built only from inherited components
+    is absent, and a chain that is not a child add-on's gives `{}`."""
+    top = library.addon_of(chain_id)
+    if top is None or top.parent is None:
+        return {}
+    marked: dict[str, dict] = {}
+    for node, refs in library.references(chain_id).items():
+        for ref in sorted(refs):
+            entry = ref.partition(".")[2]
+            if entry.partition(":")[0] != top.namespace:
+                continue
+            mark = library.inheritance(ref)
+            if mark is None or mark.origin == "inherited":
+                continue
+            if node not in marked or (
+                mark.origin == "overridden" and marked[node]["origin"] == "added"
+            ):
+                marked[node] = {"origin": mark.origin, "entry": ref}
+    return marked
 
 
 def read_only_message(

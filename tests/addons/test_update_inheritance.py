@@ -15,7 +15,7 @@ from support.addons import (
 )
 
 from kraft.addons import manifest, update
-from kraft.addons.config import AddonEntry
+from kraft.addons.config import AddonEntry, AddonsLock
 
 PARENT = "company@corp"
 CHILD = "team@payments"
@@ -48,15 +48,16 @@ def _builds_on(spec, parent=PARENT, accepts="3.1"):
 
 
 def _run(home, addon_id, *, install, entry=True):
+    """`addon_id`'s result; an ancestor it pulls in has its own."""
     config_dir, addons_dir = home
-    (result,) = update.update(
+    results = update.update(
         [addon_id],
         accept=lambda review: True,
         entries={addon_id: entry} if install else None,
         config_dir=config_dir,
         addons_root=addons_dir,
     )
-    return result
+    return next(r for r in results if r.addon_id == addon_id)
 
 
 def _home(tmp_path, *, company=COMPANY, team=TEAM, collections=("corp", "payments"), corp=None):
@@ -176,13 +177,7 @@ def _written(home):
     ("setup", "outcome", "message"),
     [
         pytest.param(_child_on_parent, "applied", None, id="child-installs-on-installed-parent"),
-        pytest.param(
-            _child_alone,
-            "refused",
-            "its parent company@corp is not installed; install it first: "
-            "kraft admin addon install company@corp",
-            id="child-missing-parent",
-        ),
+        pytest.param(_child_alone, "applied", None, id="child-missing-parent"),
         pytest.param(
             _child_without_the_collection,
             "refused",
@@ -214,11 +209,8 @@ def _written(home):
         ),
         pytest.param(
             _parent_moves_out_of_range,
-            "refused",
-            (
-                "would leave team@payments outside its range 3.1",
-                "Disable team@payments first, then update it to a release that accepts 4.0.0",
-            ),
+            "held",
+            "company@corp 4.0.0 is outside team@payments's range 3.1 (needs 3.x)",
             id="parent-update-leaves-child-out-of-range",
         ),
         pytest.param(
@@ -266,6 +258,9 @@ def test_a_child_is_judged_with_its_ancestors(tmp_path, setup, outcome, message)
     told = [*result.problems, *([result.note] if result.note else [])]
     said = [why for why in told if all(part in why for part in parts or ())]
     assert parts is None or said, result.problems
+    if outcome == "applied" and install:
+        # A child installs with its parent, pulled in when it was missing.
+        assert PARENT in AddonsLock.load(home[0] / "addons.lock").addons
     if outcome == "refused":
         # Each reason once: a child left behind is not also said to drop.
         assert len(result.problems) == 1, result.problems
@@ -365,7 +360,7 @@ def test_a_childs_review_shows_its_chain_changes(tmp_path, setup):
 
     (result,) = update.update(
         [addon_id],
-        accept=lambda r: reviews.append(r) or True,
+        accept=lambda g: reviews.extend(g.reviews) or True,
         config_dir=home[0],
         addons_root=home[1],
     )

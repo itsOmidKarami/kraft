@@ -1951,7 +1951,7 @@ origin: src/kraft/templates/library.py §TemplateLibrary.lint_dir -- reads the i
 
 `GET /templates/chains/{id}/resolved` SHALL return the fully resolved configuration of
 a saved chain, before per-work-item materialization.
-enforced-by: tests/api/test_templates_inspection.py::test_resolved_shows_a_saved_chain_expanded_and_not_materialized, tests/api/test_templates_inspection.py::test_resolved_of_an_unknown_chain_is_404, tests/api/test_templates_inspection.py::test_with_no_library_loaded_the_library_reads_are_503
+enforced-by: tests/api/test_templates_inspection.py::test_resolved_shows_a_saved_chain_expanded_and_not_materialized, tests/api/test_templates_inspection.py::test_resolved_of_a_chain_that_is_not_served_is_refused[unknown-chain], tests/api/test_templates_inspection.py::test_with_no_library_loaded_the_library_reads_are_503
 
 ## REQ resolve-api-supports-candidate-and-library-input
 

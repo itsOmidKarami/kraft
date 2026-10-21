@@ -124,11 +124,11 @@ class Waiting:
 
 
 class ReviewAsked(Message):
-    """A review from `update`'s thread, for the console's dialog."""
+    """A group of reviews from `update`'s thread, for the console's dialog."""
 
-    def __init__(self, reviewed: review.Review, waiting: Waiting) -> None:
+    def __init__(self, group: review.Group, waiting: Waiting) -> None:
         super().__init__()
-        self.reviewed = reviewed
+        self.group = group
         self.waiting = waiting
 
 
@@ -304,7 +304,13 @@ class Addons(View):
         self.refresh_bindings()
         if not results:
             return
-        bad = {r.outcome for r in results} & {"refused", "failed", "unpublished"}
+        # Held by a range, a move waits (as a declined one does); held by its own
+        # chain break it would be refused, which the CLI's exit 2 says too.
+        bad = any(
+            r.outcome in ("refused", "failed", "unpublished")
+            or (r.outcome == "held" and r.kind == "breaks")
+            for r in results
+        )
         said = flow.render_results([flow.result_view(r) for r in results])
         self.app.notify(said, severity="error" if bad else "information", markup=False)
         if flow.applied(results):
@@ -316,22 +322,22 @@ class Addons(View):
                 self.app.notify(line, severity="warning", markup=False)
         self._read()
 
-    def _accept(self, reviewed: review.Review) -> bool:
+    def _accept(self, group: review.Group) -> bool:
         """`update`'s `accept`, called on its thread: the review goes to the
         console's dialog and the thread waits for the answer. Stored before
         it is posted, so a quit either refuses the post or answers it."""
         waiting = self.waiting = Waiting()
         # Thread-safe, and False once the view is closing: the console is quitting.
-        if not self.post_message(ReviewAsked(reviewed, waiting)):
+        if not self.post_message(ReviewAsked(group, waiting)):
             return False
         waiting.done.wait()
         return waiting.yes
 
     def on_review_asked(self, message: ReviewAsked) -> None:
-        reviewed = message.reviewed
-        lines = review.render(reviewed).splitlines()
+        group = message.group
+        lines = review.render_group(group).splitlines()
         # As the CLI asks it ("Apply X? [y/N]"); Back has the focus.
-        dialog = Confirm(f"Apply {reviewed.addon_id}?", lines, yes="Apply")
+        dialog = Confirm(f"Apply {group.title}?", lines, yes="Apply")
         self.app.push_screen(dialog, message.waiting.give)
 
     def on_unmount(self) -> None:

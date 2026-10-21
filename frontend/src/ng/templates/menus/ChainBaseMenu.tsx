@@ -2,6 +2,7 @@ import { useEffect, useState, type RefObject } from "react";
 import { Workflow } from "lucide-react";
 import * as api from "../../../api";
 import type { TemplateSummary } from "../../../types";
+import { pickerMark } from "../../library/types";
 import { Popover } from "../../ui/Popover";
 import { Empty } from "../../ui/Empty";
 import { PickList } from "./PickList";
@@ -18,7 +19,7 @@ export function ChainBaseMenu({ anchor, chain, parent, onPick, onClose }: { anch
   const below = new Set(list.find((c) => c.id === chain)?.extended_by ?? []);
   const items = list
     .filter((c) => c.id !== chain && c.id !== parent && !below.has(c.id) && !c.addon?.repo && !c.error)
-    .map((c) => ({ key: c.id, label: c.id, sub: `${c.nodes.length} nodes${c.extends ? ` · extends ${c.extends}` : ""}`, icon: <Workflow size={14} aria-hidden /> }));
+    .map((c) => ({ key: c.id, label: c.id, sub: `${c.nodes.length} nodes${c.extends ? ` · extends ${c.extends}` : ""}${pickerMark(c.addon)}`, icon: <Workflow size={14} aria-hidden /> }));
   return (
     <Popover anchor={anchor} open onClose={onClose} role="dialog" label="Change base">
       <div className="task-menu">

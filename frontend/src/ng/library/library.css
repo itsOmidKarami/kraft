@@ -75,8 +75,9 @@
 .lib-use-chain { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .lib-use-chain:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
 .lib-use-path { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); overflow-wrap: anywhere; }
-/* In the list the name already carries the namespace: the badge gives way first (and never takes over half the row), whole in its title. */
-.lib-row .addon-badge { flex: 0 1000 auto; min-width: 3ch; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+/* Beside a name that already carries the namespace (a list row, a switcher row, the header) the badge gives way first
+   and never takes over half the row; its title has the add-on. */
+.addon-badge { flex: 0 1000 auto; min-width: 3ch; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
 .lib-row > svg { flex: none; }
 
 /* A task on the canvas: its one glyph, centred in what the pane leaves. */
@@ -134,3 +135,28 @@
 .lib-landing-none { margin: 0; font-size: var(--fs-label); color: var(--text-muted); }
 /* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
 .lib-row { padding-block: calc(5px + var(--row-pad-add)); }
+
+/* A child add-on's "inherited from company" beside its badge. Where the row is tight it ends in an ellipsis; its
+   title holds the whole mark and its author. */
+.inheritance-mark { flex: 0 1 auto; min-width: 4ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); color: var(--text-muted); }
+.inheritance-mark.is-added { color: var(--ok); }
+.inheritance-mark.is-overridden { color: var(--warn); }
+/* In a list row the add-on badge gives way first, then the name (down to its 8ch), then the mark. Under 360px the
+   badge keeps its outline but shows only a package glyph, so a child add-on's row still reads as read-only, and the
+   mark moves to a second line under the name, so the name keeps the row. Its text stays for assistive tech and its title has the add-on. */
+.lib-rows { container-type: inline-size; }
+.lib-row .inheritance-mark { flex-shrink: 1; font-size: var(--fs-label); line-height: 14px; }
+.lib-row:has(> .inheritance-mark) > .lib-name { flex-shrink: 10; }
+.addon-badge-glyph { display: none; }
+@container (max-width: 360px) {
+  .lib-row > .addon-badge:has(+ .inheritance-mark) { flex: none; max-width: none; min-width: 0; padding: 1px 3px; position: relative; display: inline-flex; align-items: center; }
+  .lib-row > .addon-badge:has(+ .inheritance-mark) .addon-badge-glyph { display: block; }
+  .lib-row:has(> .inheritance-mark) { flex-wrap: wrap; row-gap: 0; }
+  .lib-row:has(> .inheritance-mark) > .lib-name { flex: 1 1 0; }
+  .lib-row:has(> .inheritance-mark)::after { content: ""; order: 1; flex: 1 1 100%; height: 0; }
+  .lib-row > .inheritance-mark { order: 2; flex: 1 1 0; padding-left: 22px; }
+  .lib-row:has(> .inheritance-mark) > .lib-used { order: 2; }
+  .lib-row > .addon-badge:has(+ .inheritance-mark) .addon-badge-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+/* In a picker's second line it is one more " · " fact, and wraps with it. */
+.inheritance-mark.is-inline { white-space: normal; }
