@@ -602,9 +602,12 @@ def _addon_profiles(
         if raw is None:
             return {}
         written = bounded_yaml(raw.decode(), [20_000])
+        # A re-pointed file is final: `qualify` would read an ancestor installed
+        # as the child's own name as the child's.
+        repointed = None
         if addon.parent is not None:
-            written = _name_the_defining_ancestor(written, addon, addons)
-        data = qualify(written, addon)
+            repointed = _name_the_defining_ancestor(written, addon, addons)
+        data = repointed if repointed is not None else qualify(written, addon)
     except fetch.StoreMismatch as exc:
         raise TemplateEnvironmentError(f"{path}: {exc}") from exc
     except (OSError, ValueError, yaml.YAMLError) as exc:
@@ -614,14 +617,15 @@ def _addon_profiles(
 
 def _name_the_defining_ancestor(
     written: object, addon: InstalledAddon, addons: Sequence[InstalledAddon]
-) -> object:
+) -> object | None:
     """`written`, a child's `profiles.yaml`, with each profile it names by its
     parent's name (`platform-dept:fast`) set to the namespace of the ancestor
     that defines it, as `TemplateLibrary` does for a `profile:` in a chain. A
-    child whose ancestry does not read is left as written: the library load
-    says why (the same errors `inherit.inherited` leaves to it). A file that
-    names no profile by its own or its parent's name has nothing to re-point and
-    is returned before any ancestor's store is read."""
+    child whose ancestry does not read gives None, and so does a file that names
+    no profile by its own or its parent's name (nothing to re-point, decided
+    before any ancestor's store is read): the caller qualifies `written` itself.
+    The library load says why an ancestry does not read (the same errors
+    `inherit.inherited` leaves to it)."""
     # Imported here: `kraft.config` imports this module.
     from kraft.addons import fetch, inherit
     from kraft.templates.library import TemplateLibraryError
@@ -629,10 +633,10 @@ def _name_the_defining_ancestor(
     try:
         chain = inherit.ancestry(addon, addons)
         if not _names_a_profile_of(written, {addon.name, chain[1].name}):
-            return written
+            return None
         seen = inherit.visible(chain)
     except (inherit.InheritanceError, fetch.StoreMismatch, TemplateLibraryError, OSError):
-        return written
+        return None
 
     def profile_owner(name: str, depth: int) -> str:
         return seen.owner("profiles", name, depth) or (

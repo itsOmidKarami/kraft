@@ -114,6 +114,12 @@ def _profile_by_parent_name(library, dept):
     assert _task(library, "team-payments:supers", "n").profile == "company:slow"
 
 
+def _profile_by_parent_name_aliased_as_childs_name(library, dept):
+    # The dept is installed as `team-payments`, the team's own name; the team,
+    # as `tp`. The team's `platform-dept:slow` still reads company's.
+    assert _task(library, "tp:supers", "n").profile == "company:slow"
+
+
 #: Every check over `TEAM`, which overrides `security_scan` itself.
 _ALL = [
     _inherited_as_is,
@@ -163,6 +169,11 @@ REMOVE_OUTSIDE = "`remove:` is for an add-on that builds on another"
         pytest.param({"team": WITH_SKILL}, [_skill_by_parent_name], id="skill-by-parent-name"),
         pytest.param({}, [_steering_by_parent_name], id="steering-by-parent-name"),
         pytest.param({}, [_profile_by_parent_name], id="profile-by-parent-name"),
+        pytest.param(
+            {"dept_alias": "team-payments", "team_alias": "tp"},
+            [_profile_by_parent_name_aliased_as_childs_name],
+            id="profile-by-parent-name-aliased-as-childs-name",
+        ),
     ],
 )
 def test_inherited_library(tmp_path, tree, checks):

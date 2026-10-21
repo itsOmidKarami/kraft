@@ -437,6 +437,25 @@ _REMOVES_SLOW = {"library": {"remove": {"profiles": ["slow"]}}}
             None,
             id="child-fallback-names-parents-own",
         ),
+        pytest.param(
+            {
+                "alias": "team-payments",
+                "team_alias": "tp",
+                "dept": {"profiles": {"fast": _model("dept-fast")}},
+                "team": {
+                    "profiles": {
+                        "fast": _model("team-fast"),
+                        "strong": {**_model("m"), "fallback": [{"profile": "platform-dept:fast"}]},
+                    }
+                },
+            },
+            {},
+            {"tp:fast": {"codex": "team-fast"}},
+            {"tp:strong": "team-payments:fast"},
+            [],
+            None,
+            id="child-fallback-parent-aliased-as-childs-name",
+        ),
     ],
 )
 def test_inherited_addon_profiles(tmp_path, tree, local, models, falls_back, absent, refused):
