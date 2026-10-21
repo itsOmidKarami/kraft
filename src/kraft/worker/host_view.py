@@ -69,7 +69,17 @@ def _within(path: Path, parent: Path) -> bool:
 
 
 def _protected(home: Path, kraft_home: Path) -> list[Path]:
-    return [kraft_home.resolve(), *((home / p).resolve() for p in _PROTECTED_IN_HOME)]
+    from kraft.paths import config_dir, default_run_dir
+
+    # The run and config directories as well: `KRAFT_RUN_DIR` and
+    # `KRAFT_CONFIG_DIR` may put either outside Kraft's home.
+    run_dir = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
+    return [
+        kraft_home.resolve(),
+        run_dir.resolve(),
+        config_dir().resolve(),
+        *((home / p).resolve() for p in _PROTECTED_IN_HOME),
+    ]
 
 
 def protected_refusal(path: Path, home: Path, kraft_home: Path) -> str | None:

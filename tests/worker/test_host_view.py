@@ -47,6 +47,8 @@ def _link(path: Path, target) -> Path:
         (".", True),
         ("home/.cargo/bin", False),
         ("home/.netrc", True),
+        ("moved-run/items", True),
+        ("moved-config", True),
     ],
     ids=[
         "home",
@@ -56,10 +58,14 @@ def _link(path: Path, target) -> Path:
         "holds-home",
         "inside-home",
         "credential-file",
+        "inside-a-run-dir-outside-kraft-home",
+        "a-config-dir-outside-kraft-home",
     ],
 )
-def test_protected_refusal(host, tmp_path, rel, refused):
+def test_protected_refusal(host, tmp_path, rel, refused, monkeypatch):
     home, kraft, _ = host
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "moved-run"))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path / "moved-config"))
     (tmp_path / "home" / ".cargo" / "bin").mkdir(parents=True)
     (tmp_path / "home" / ".netrc").write_text("x")
     got = host_view.protected_refusal((tmp_path / rel).resolve(), home, kraft)
