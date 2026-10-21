@@ -244,16 +244,22 @@ The skills run these. `kl.py state` also reports `sliced` once a run is sliced.
 `slices` gives each slice's status, what it comes after, its session and
 branch, and `cut_from`, the slice it was cut early from. `ready` lists those
 whose "comes after" slices are all merged. `early` lists those that come after
-exactly one slice, which is in review or ready to merge. `base_moved` lists the
-started slices cut early from a slice that has since gone back to work: each
-rebases onto that slice's new tip.
+exactly one slice, which is in review or ready to merge.
+
+`base_moved` lists the started slices cut early from a slice whose branch has
+since moved, and those cut early from them: each rebases onto the new tip of
+the slice its `cut_from` names.
 
 `slice-set` starts a waiting slice only from `ready` or `early`, and moves
 one never started no further than `running`. It records a slice merged only
 once every slice it comes after is merged, so a slice cut early from another's
-branch merges after that one. A slice that goes back from review to work flags
-each slice cut early from it in `base_moved`, until that slice records the fork
-of its rebase with `--fork`.
+branch merges after that one.
+
+A slice that goes back from review to work, or records a new `--fork`, flags
+each slice cut early from it in `base_moved`, and each cut early from those,
+until each records the fork of its rebase with `--fork`. `slice-set` refuses
+a `--fork` that is not 4 to 64 hex digits, a `--branch` that is not a good
+branch name (below), and a `--session` that is empty or holds whitespace.
 
 `close` and `approve` refuse to close a sliced run's `implementation` until
 every slice is done: merged, or in `main` mode merged or ready to merge. In
@@ -263,15 +269,22 @@ is merged. The refusal names the slices that are not.
 `import` refuses a directory with no `records.jsonl`, naming the path, and a
 chain id that `start` would not mint (`kl-` and 8 of `0-9a-f`), before it reads
 or writes a file. It refuses an export holding a record that is not its
-chain's epic, node, run or slice, naming each, and writes nothing. It ranks
-decisions as it ranks records, comparing stamps as times, so a held copy never
-takes back an answer given where the clock runs behind.
+chain's epic, node, run or slice under the id it was minted with, naming each,
+and a line it cannot read, naming the file and line, and writes nothing.
+
+`import` ranks decisions as it ranks records, comparing stamps as times, so a
+held copy never takes back an answer given where the clock runs behind.
 
 `approve --slices` also refuses a task listed twice in one slice, a slice
 named twice in one `after`, and a key that is not 1 to 40 lowercase letters,
-digits, `-` and `_`, starting with a letter or digit. A bad branch is one
-that is not a string or holds whitespace, a feature branch that is also the
-state branch, or any feature branch in `main` mode, which has none.
+digits, `-` and `_`, starting with a letter or digit. It refuses a key the
+plan or a slice does not take, naming it, so a misspelt `after` is not
+dropped.
+
+A bad branch is one that is not a string, holds whitespace, starts with `-`,
+or is one git refuses (`..`, a part starting with `.`, an ending of `/`, `.` or
+`.lock`, or any of `~^:?*[\`), a feature branch that is also the state branch,
+or any feature branch in `main` mode, which has none.
 
 ## What it does not do
 
