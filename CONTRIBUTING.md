@@ -372,6 +372,10 @@ itself:
 - Push the pictures to a separate `kraft/<branch>-screenshots` branch, not to the
   pull request's own branch, and link them in the pull request body.
 
+A screen that also appears in a README or docs screenshot (`.github/assets/`)
+is retaken with `just docs-screenshots` too; see the screen row under
+[User-facing docs](#user-facing-docs).
+
 In a cloud session, pushing that branch needs the user's approval in the session
 that does the pushing. Ask for it; do not assume it.
 
