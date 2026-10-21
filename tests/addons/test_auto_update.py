@@ -18,6 +18,7 @@ from support.harness import git
 
 from kraft.addons import fetch, load, review, update
 from kraft.addons.config import AddonEntry, AddonsLock
+from kraft.config import read_yaml
 
 ID = "release@acme"
 GATED = {"nodes": [*chain("base")["nodes"], {"id": "ok", "kind": "gate"}]}
@@ -576,6 +577,8 @@ PENDING = f"with {TEAM}: its ref change is pending; run kraft admin addon update
         "one-member-off",
         "child-needs-off-parent",
         "parent-needs-off-child",
+        # config refuses auto_update on a `path:` collection, so this row is
+        # effectively an "off member" case.
         "directory-member-changed",
         "person-hold-holds-tree",
         "held-through-an-off-member",
@@ -710,6 +713,10 @@ def test_auto_update_holds_for_a_descendant(tree_home, setup, outcome, says):
     assert result["outcome"] == outcome, result
     for fragment in says:
         assert fragment in result["message"], result
-    expected = lock if outcome == "held" else (config_dir / "addons.lock").read_text()
-    assert (config_dir / "addons.lock").read_text() == expected
-    assert (_versions(config_dir)[COMPANY] == "1.0.1") == (outcome == "held")
+    if setup is _team_widens_b_and_is_off:
+        entry = read_yaml(config_dir / "addons.yaml")["addons"][TEAM]
+        assert entry is True, entry  # enabled, with no auto_update: it is off
+        assert update.auto_update(config_dir, addons_dir).get(TEAM) is None
+    held = outcome == "held"
+    assert ((config_dir / "addons.lock").read_text() == lock) == held
+    assert _versions(config_dir)[COMPANY] == ("1.0.1" if held else "1.1.0")
