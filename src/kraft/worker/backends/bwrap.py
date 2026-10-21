@@ -105,7 +105,12 @@ def bwrap_argv(
     agent: str | None = None,
     mode: Literal["launch", "oneshot"] = "launch",
 ) -> list[str]:
-    cwd = Path(cwd).resolve()
+    raw_cwd, cwd = Path(cwd), Path(cwd).resolve()
+    # The worktree is bound at its resolved path, so the workdir is too.
+    rel = Path()
+    if workdir is not None:
+        base = raw_cwd if Path(workdir).is_relative_to(raw_cwd) else cwd
+        rel = Path(workdir).relative_to(base)
     operator_home = Path(os.environ.get("HOME") or Path.home())
     kh = kraft_home()
     if (bwrap := shutil.which("bwrap")) is None:
@@ -139,6 +144,10 @@ def bwrap_argv(
         *_BWRAP_FLAGS,
         *system_args(),
     ]
+    # Links first: bwrap makes a real directory of any ancestor it binds into, and a
+    # later --symlink on it dies.
+    for link, target in dict.fromkeys((*first.links, *resolved.links)):
+        argv += ["--symlink", str(target), str(link)]
     for root in (*interp_roots, Path(os_init.__file__)):
         argv += _bind(root)
     roots = list(dict.fromkeys((*first.roots, *resolved.roots, *exposed)))
@@ -148,8 +157,6 @@ def bwrap_argv(
     empty = _once(run_dirs.base / "os-sandbox" / "empty", b"", 0o444)
     for hit in dict.fromkeys(h for root in roots for h in host_view.credential_shadows(root)):
         argv += _bind(empty, hit)
-    for link, target in dict.fromkeys((*first.links, *resolved.links)):
-        argv += ["--symlink", str(target), str(link)]
     for ca_path in ca:
         argv += _bind(ca_path)
     for m in sorted(session, key=lambda m: len(m.dst.parts)):
@@ -164,7 +171,7 @@ def bwrap_argv(
     _pin(pins, _HARDENED_GIT_CONFIG)
     for name, value in {"HOME": str(sandbox_home), **pins, **env}.items():
         argv += ["--setenv", name, value]
-    argv += ["--chdir", str(workdir or cwd)]
+    argv += ["--chdir", str(cwd / rel)]
     argv += [*init, "init"]
     if sock_path is not None:
         argv += ["--sock", str(sock_path), "--port", str(RELAY_PORT)]
@@ -279,9 +286,9 @@ class OsBackend:
         if problem := await asyncio.to_thread(probe_host):
             return problem
         home, cwd, kh = Path(os.environ.get("HOME") or Path.home()), Path.cwd(), kraft_home()
-        search = (env or {}).get("PATH") or os.environ["PATH"]
-        # shortcut: a path-named executable (./gradlew, a worktree path) is checked at
-        # `wrap` only, which knows the worktree; upgrade if probe is given the checkout.
+        search = os.environ["PATH"]  # the daemon's, as `open_session` builds the session's
+        # shortcut: probe cannot see the worktree, so a path-named executable (./gradlew,
+        # a worktree path) is checked at `wrap` only; upgrade if probe is given the checkout.
         if "/" in executable:
             return None
         try:

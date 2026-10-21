@@ -159,9 +159,9 @@ def _row(kw, frags, absent=()):
         _row(
             lambda s: {"cmd": [str(s.link)]},
             lambda s: [
+                ("--symlink", str(s.cli), str(s.link)),
                 ("--ro-bind", str(s.real), str(s.real)),
                 ("--ro-bind", "ZERO", str(s.real / "credentials.toml")),
-                ("--symlink", str(s.cli), str(s.link)),
             ],
         ),
         _row(
@@ -481,7 +481,9 @@ def test_os_leaves_item_sync_to_docker(tmp_path, monkeypatch):
 )
 async def test_probe_resolves_only_a_bare_name(monkeypatch, executable, expect):
     monkeypatch.setattr(bwrap, "probe_host", lambda **kw: None)
-    problem = await bwrap.OsBackend().probe(SANDBOX, executable, {"PATH": "/usr/bin:/bin"})
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    # The session's own PATH is not consulted: the daemon's is.
+    problem = await bwrap.OsBackend().probe(SANDBOX, executable, {"PATH": "/nowhere"})
     assert (problem is None) if expect is None else (expect in problem)
 
 
@@ -498,3 +500,59 @@ def test_probe_host_is_cached_for_a_minute_unless_refreshed(monkeypatch):
     now[0] += bwrap._PROBE_TTL + 1
     bwrap.probe_host()
     assert len(runs) == 3
+
+
+def test_chdir_is_inside_the_bound_worktree(scene, tmp_path):
+    """The worktree is bound at its resolved path; a workdir reached through a
+    symlinked cwd must land there too."""
+    real = tmp_path / "real"
+    (real / "sub").mkdir(parents=True)
+    via = tmp_path / "via"
+    via.symlink_to(real)
+    for workdir, want in ((via, real), (via / "sub", real / "sub")):
+        argv = scene.build(cwd=via, workdir=workdir, session=mounts.session_mounts(via, None))
+        assert argv[argv.index("--chdir") + 1] == str(want)
+        assert _at(argv, ("--bind", str(real), str(real))) > 0
+
+
+def test_links_come_before_every_bind_under_them(scene, tmp_path, monkeypatch):
+    """bwrap makes a real directory of an ancestor it binds into, and a later
+    --symlink on it dies: so the os_init path and a root under a link both
+    follow the link."""
+    ancestor = tmp_path / "anc"
+    monkeypatch.setattr(bwrap.os_init, "__file__", str(ancestor / "os_init.py"))
+    monkeypatch.setattr(
+        host_view,
+        "resolve",
+        lambda *a, **kw: host_view.Resolved("x", (ancestor / "root",), ((ancestor, scene.real),)),
+    )
+    argv = scene.build(cmd=["x"])
+    link = _at(argv, ("--symlink", str(scene.real), str(ancestor)))
+    assert link > 0
+    under = [
+        i
+        for i, a in enumerate(argv)
+        if a in ("--ro-bind", "--bind") and Path(argv[i + 2]).is_relative_to(ancestor)
+    ]
+    assert len(under) >= 2 and all(link < i for i in under)
+
+
+def test_wrap_forwards_its_launch_arguments(scene, run_dirs, monkeypatch):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dirs.base))
+    sub = scene.wt / "sub"
+    sub.mkdir()
+    home, cid = scene.wt.parent / "h", scene.wt.parent / "cid"
+    argv = bwrap.OsBackend().wrap(
+        ["true"],
+        scene.wt,
+        {"kind": "os"},
+        None,
+        cidfile=cid,
+        passthrough=["MY_TOKEN"],
+        home=home,
+        workdir=sub,
+    )
+    assert argv[argv.index("--started") + 1] == str(cid)
+    assert "MY_TOKEN" in argv[argv.index("--keep") + 1].split(",")
+    assert _at(argv, ("--setenv", "HOME", str(home))) > 0
+    assert argv[argv.index("--chdir") + 1] == str(sub)
