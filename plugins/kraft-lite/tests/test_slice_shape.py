@@ -353,6 +353,8 @@ def test_child_start_uses_slice_layer(walk, kl_cli, default_chain, tmp_path):
 
     frozen = json.loads(kl._frozen_path(child, started["chain_id"]).read_text())
     assert frozen == kl_shape.child_chain(default_chain)
+    # Nothing in a child stops for a human: the controller answers.
+    assert {node["kind"] for node in frozen["nodes"]} == {"exec"}
     state = kl_cli(child, "state")
     assert (state["node"], state["sliced"], state["gate"]) == ("implementation", None, None)
     [implementer] = state["steps"][0]["tasks"]

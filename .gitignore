@@ -58,7 +58,7 @@ templates/notify.yaml
 .dev/
 src/kraft/_bundled/
 
-# Kraft Lite run state. The registry beside it is committed on purpose.
+# Kraft Lite run state. The bindings file beside it is committed on purpose.
 .kraft-lite/chain.json
 .kraft-lite/chains/
 .kraft-lite/chain.jsonl

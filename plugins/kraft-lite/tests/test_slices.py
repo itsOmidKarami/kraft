@@ -755,7 +755,17 @@ def test_slice_verbs_still_answer_after_the_chain_is_done(walk, kl_cli, tmp_path
         ["mark", "--on-failure-ran"],
         ["restart"],
     ],
-    ids=lambda verb: verb[0] if verb[-1] != "plan.json" else "approve_slices",
+    ids=[
+        "close",
+        "approve",
+        "gate",
+        "reject",
+        "attempt",
+        "approve_slices",
+        "produced",
+        "mark",
+        "restart",
+    ],
 )
 def test_a_finished_chain_still_refuses_the_verbs_that_need_an_open_node(
     walk, verb, kl_cli, tmp_path

@@ -28,8 +28,8 @@ V1_GATES = {
     for node in kl_chains.resolve_bundled(ref)["nodes"]
     if node["kind"] == "gate"
 } | {"chain_finalized"}
-#: The legacy chain the README still describes; no skill cites it.
-CHAIN = json.loads((PLUGIN / "chains" / "default.json").read_text())
+#: The chain the README counts nodes and gates of: the bundled library's `default`.
+CHAIN = kl_chains.resolve_bundled("default")
 EVERY_SKILL = sorted(path.parent.name for path in (PLUGIN / "skills").glob("*/SKILL.md"))
 HARNESS_REFERENCES = ["claude-code", "codex", "cursor"]
 
@@ -101,12 +101,17 @@ def test_the_readme_describes_the_chain_it_actually_ships():
         "thirteen": 13,
         "fourteen": 14,
         "fifteen": 15,
+        "sixteen": 16,
+        "seventeen": 17,
+        "eighteen": 18,
+        "nineteen": 19,
+        "twenty": 20,
     }
-    nodes = re.search(r"chain itself is `chains/default\.json`: (\w+) nodes", readme)
-    gates = re.search(r"with (\w+) gates", readme)
+    nodes = re.search(r"`default` chain:\s+(\w+)\s+nodes", readme)
+    gates = re.search(r"(\w+)\s+of\s+them\s+gates", readme)
     assert nodes and gates, "the README no longer states the counts this test guards"
     assert words[nodes.group(1)] == len(CHAIN["nodes"])
-    assert words[gates.group(1)] == len({node["gate_after"] for node in CHAIN["nodes"]} - {None})
+    assert words[gates.group(1)] == sum(node["kind"] == "gate" for node in CHAIN["nodes"])
 
 
 def test_the_skills_distinguish_unstarted_from_done(texts):
@@ -385,7 +390,7 @@ def _section(body: str, number: int) -> str:
 def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
     """A slice cut from another slice's branch carries that slice's commits until
     it merges. Rebasing it onto the target before then drops them, so its
-    `on.mr.rebase` does nothing, and a successful rebase makes it target-cut."""
+    `kraft.mr_rebase` does nothing, and a successful rebase makes it target-cut."""
     rebase = _section(texts["build-slice"], 5)
     for needle in (
         "`<run>/<slice key>/base` says when you rebase",
