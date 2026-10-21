@@ -359,6 +359,30 @@ heading. A highlighted pull request's line is under Highlights, and a major one
 is under Breaking changes as well. If your pull request is missing or listed by its title, fix the label
 or the section in the description and run the dry run again.
 
+### A pull request that changes a screen
+
+A pull request that changes a screen does three things beyond the change
+itself:
+
+- Run an impeccable polish pass on each changed screen.
+- Attach before and after screenshots of each changed screen, at 1280px and
+  390px wide, in light and dark. Take them from a seeded `just dev` instance
+  (`just dev-seed` fills it), the "before" from `main` and the "after" from your
+  branch.
+- Push the pictures to a separate `kraft/<branch>-shots` branch, not to the
+  pull request's own branch, and link them in the pull request body.
+
+In a cloud session, pushing that branch needs the user's approval in the session
+that does the pushing. Ask for it; do not assume it.
+
+`kraft/pr-686-screenshots` is the example. It holds two files at its root, no
+folders and no code: `before-skipped-task.png` and `after-skipped-task.png`,
+named for the state and the screen. Pull request 686's body links them in a
+Before and After table, by their full `raw.githubusercontent.com` URLs pinned to
+the branch's commit. That pull request shows one screen at one width and one
+theme; with the four combinations, put the width and the theme in each file name
+as well.
+
 ## Branch hygiene
 
 Two ways a branch you're reusing by hand can quietly cost you work:
