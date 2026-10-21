@@ -38,9 +38,10 @@ Copy this and tick it off; the walk starts when all four are ticked.
    run, so slices sharing a repo write the same files. Confirm with a `status`:
    parts joined, line count of each file, your plan tasks by their headings.
 3. Record the commit your branch was cut from, whether the feature branch or an
-   earlier slice's: `git rev-parse HEAD > <run>/<slice key>/fork` (make the folder;
-   it is yours alone, as worktree slices share the repo). Do it now,
-   before your first commit; the rebase in section 5 reads it.
+   earlier slice's, before your first commit; the rebase in section 5 reads it.
+   Make the folder (yours alone, as worktree slices share the repo), and write
+   only if absent, so a resumed session keeps the real one:
+   `[ -f <run>/<slice key>/fork ] || git rev-parse HEAD > <run>/<slice key>/fork`
 4. Run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" chains`. An unfinished slice chain
    here means you are resuming it: start no second one. Otherwise:
 

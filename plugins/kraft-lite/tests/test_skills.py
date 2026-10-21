@@ -279,6 +279,8 @@ def test_the_child_rebase_reads_the_commit_recorded_at_setup(texts):
     body = texts["build-slice"]
     assert "<slice key>/fork" in body.split("## 5.")[1].split("## 6.")[0]
     assert "<slice key>/fork" in body.split("## 1.")[1].split("## 2.")[0]
+    guard = "[ -f <run>/<slice key>/fork ] ||"
+    assert guard in body, "a resumed child must not overwrite its fork commit"
     assert "<common>" not in body, "the shared common dir would collide between worktree slices"
     assert "merge-base" not in body
     assert "--path-format=absolute" in body
