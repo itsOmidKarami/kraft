@@ -1118,6 +1118,14 @@ async def _run_task(
                 return "config_error"
         finally:
             log.close()  # the child holds its own dup'd fd
+    except _sandbox.SandboxRefused as exc:
+        # A refusal from `wrap` is a stop for a person, like `SandboxNotReady`
+        # above; the `finally` closes a route it opened.
+        log_path.write_text(f"kraft: {exc}\n")
+        await db.write(
+            lambda c: store.session_exited(c, session_id, "config_error", work_item_id=work_item_id)
+        )
+        return "config_error"
     finally:
         if network and not launched:
             await close_egress(backend, session_id, work_item_id=work_item_id)

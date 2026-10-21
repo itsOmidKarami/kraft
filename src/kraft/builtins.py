@@ -965,7 +965,7 @@ async def run_setup_command(
         except BaseException as exc:
             if network:
                 await _subprocess.close_egress(backend, setup_id, work_item_id=worktree.name)
-            if isinstance(exc, _sandbox.SandboxNotReady):
+            if isinstance(exc, (_sandbox.SandboxNotReady, _sandbox.SandboxRefused)):
                 raise RuntimeError(f"setup command for {worktree.name} cannot run: {exc}") from exc
             raise
         run = dict(

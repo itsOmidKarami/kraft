@@ -6,12 +6,9 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import shutil
 import socket
 import ssl
 import stat
-import tempfile
-from pathlib import Path
 
 import pytest
 from starlette.applications import Starlette
@@ -29,15 +26,6 @@ _DENY_ALL = egress.PhaseLists("runtime", (), ("**",))
 #: Ids minted before per-item ids: a work item's, and two sessions'.
 OLD = "8cbfe6e27c1044b3e445c0f0d726357d"
 OLD_A, OLD_B = "0123456789abcdef0123456789abcdef", "0123456789abcdef0123456789abcde2"
-
-
-@pytest.fixture
-def short_run():
-    """A run dir short enough for a socket path: pytest's own tmp_path on
-    macOS alone is past the 104 bytes a unix socket path may be."""
-    base = Path(tempfile.mkdtemp(prefix="kraft-sn-", dir="/tmp"))
-    yield RunDirs(base).ensure()
-    shutil.rmtree(base, ignore_errors=True)
 
 
 async def test_the_listeners_context_has_the_3_13_verify_flags_on_every_python(registry, short_run):

@@ -1614,7 +1614,10 @@ class DockerBackend:
             sentinels=sentinels,
         )
 
-    def oneshot(self, sandbox: dict, cwd: str | Path, home: str | Path) -> Oneshot:
+    def oneshot(
+        self, sandbox: dict, cwd: str | Path, home: str | Path, executables: Iterable[str] = ()
+    ) -> Oneshot:
+        # `executables` is for a host that must show them; an image has its own.
         try:
             return oneshot(sandbox, cwd, home)
         except SandboxRefused as exc:
