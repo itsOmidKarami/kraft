@@ -310,6 +310,15 @@ tasks:
       after you.
     skill: kraft:mr-metadata-repair
 
+  # The `on_merge_rejected` repair of the default chain's `merge`: the merge
+  # train or merge queue ran its own pipeline on the merge request merged
+  # into the target branch as it is now, and that pipeline failed.
+  repair_merge_queue_failure:
+    kind: agent
+    harness: claude
+    prompt: Fix what made the merge train or merge queue reject this merge request.
+    skill: kraft:merge-queue-repair
+
   strict_judge:
     kind: agent
     harness: claude
@@ -625,11 +634,22 @@ nodes:
       - id: await
         extends: await_external_approval
 
+  # A merge train or merge queue that drops the merge request (its own
+  # pipeline failed, or the target branch moved under it) sends the item back
+  # through the merge request's CI and a fresh `final_review`, after the repair
+  # fixed the code. A conflict Kraft's forced rebase already cleared needs no
+  # repair, only the rewind.
   - id: merge
     kind: exec
     tasks:
       - id: merge
         extends: merge_mr
+    on_merge_rejected:
+      restart_from: merge_request_feedback
+      repair:
+        tasks:
+          - id: repair
+            extends: repair_merge_queue_failure
 
   - id: post_merge_ci
     kind: exec

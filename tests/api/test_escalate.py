@@ -223,7 +223,11 @@ def _no_downstream_steer(client, repo):
 @pytest.mark.parametrize(
     ("node_id", "setup", "detail"),
     [
-        ("merge", _no_downstream_steer, "node 'merge' has no agent task downstream to steer"),
+        (
+            "post_merge_ci",
+            _no_downstream_steer,
+            "node 'post_merge_ci' has no agent task downstream to steer",
+        ),
     ],
     ids=["a-steer-nothing-downstream-reads"],
 )
@@ -232,8 +236,8 @@ def test_a_strangers_retry_refuses_before_it_kills_the_escalation_turn(
 ):
     """The refusal runs ahead of the kill: `_stop_live_sessions` SIGINTs the
     turn and that does not undo itself because the request then 409s, so a
-    human who gets the error must find the turn still running. `merge` is
-    the chain's last node and forge-only, so a steer there reaches nothing."""
+    human who gets the error must find the turn still running. `post_merge_ci`
+    is the chain's last node and forge-only, so a steer there reaches nothing."""
     terminated = []
     monkeypatch.setattr(
         "kraft.api.routes.lifecycle._terminate", lambda pid, **_: terminated.append(pid)

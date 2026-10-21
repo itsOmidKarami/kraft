@@ -5,11 +5,10 @@ rewinds to `restart_from` under its own cap, carrying a note of why."""
 
 import pytest
 from support.harness import IN_PLACE, commit_all, git, make_repo, v1_node, v1_task, write
-from support.item_walk import approve, walk_once
+from support.item_walk import approve, commits_a_fix, merge_drops, walk_once
 
-from kraft import events, inplace, store
+from kraft import inplace, store
 from kraft import policy as _policy
-from kraft.vocab import ForgeEvent
 
 _MERGE = v1_task("merge", kind="forge", target="mr.merge")
 _POLICY = {"restart_from": "feedback", "repair": {"tasks": [v1_task("repair")]}}
@@ -32,46 +31,6 @@ def _starts(it):
     ]
 
 
-def _drops(
-    it, script, cause="code", *, rebased=True, times=1, folder=None, moves_base=False, repo=None
-):
-    """`merge` answers `merge_rejected` `times` times, then `done`, recording
-    each drop as the forge's merge handler does, at the head it left in
-    `folder` -- and, `moves_base`, the `base_ref` its forced rebase persists.
-    `repo` is the dropped merge request's repository, the item's own unless
-    given. No `cause` records nothing."""
-    script.plan["merge"] = ["merge_rejected"] * times + ["done"]
-    dropped = [0]
-
-    async def effect(_row):
-        if dropped[0] == times or cause is None:
-            return
-        dropped[0] += 1
-        if moves_base:
-            await it.database.write(lambda c: store.set_base_ref(c, it.id, f"{dropped[0]:040d}"))
-        head = git(folder or it.worktree, "rev-parse", "HEAD")
-        await it.database.write(
-            lambda c: events.append(
-                c,
-                it.id,
-                ForgeEvent.MERGE_QUEUE_DROPPED,
-                {
-                    "node_id": "merge",
-                    "repo": str(repo or it.repo),
-                    "kind": "train",
-                    "cause": cause,
-                    "reason": "pipeline failed on the train",
-                    "url": "https://forge.example/p/1",
-                    "failed_jobs": ["unit", "lint"],
-                    "head_sha": head,
-                    "rebased": rebased,
-                },
-            )
-        )
-
-    script.effects["merge"] = effect
-
-
 async def _walk_through_review(it, policy=None):
     """Walk, approving `review` each time a rewind reopened it."""
     while (status := await walk_once(it, policy)) == "awaiting_gate":
@@ -79,21 +38,13 @@ async def _walk_through_review(it, policy=None):
     return status
 
 
-def _commits_a_fix(it, folder=None):
-    async def effect(_row):
-        write(folder or it.worktree, "fix.txt", "fixed\n")
-        commit_all(folder or it.worktree, "fix the train failure")
-
-    return effect
-
-
 async def test_a_code_drop_runs_the_repair_and_rewinds_with_gates_reopened(item_on, script):
     """The repair committed code no gate saw: the span's approved `review`
     reopens, and the restarted walk is told why it went back."""
     it = await item_on(_chain(on_merge_rejected=_POLICY))
     await approve(it, "review")
-    _drops(it, script)
-    script.effects["repair"] = _commits_a_fix(it)
+    merge_drops(it, script)
+    script.effects["repair"] = commits_a_fix(it)
 
     assert await walk_once(it) == "awaiting_gate"
     [restart] = it.events("merge_rejection_restart")
@@ -137,7 +88,7 @@ async def test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gate
     base that forced rebase moved is not a second, base-change restart."""
     it = await item_on(_chain(merge, on_merge_rejected=_POLICY, **fields))
     await approve(it, "review")
-    _drops(it, script, "conflict", moves_base=True)
+    merge_drops(it, script, "conflict", moves_base=True)
 
     assert await walk_once(it) == "awaiting_gate"
     assert [e["payload"] for e in it.events("gate_reopened")] == [
@@ -190,8 +141,8 @@ async def test_a_repair_that_commits_nothing_stops_for_a_human(
                 c, work_item_id=it.id, repo_path=str(lib), role="submodule", merge_rank=0
             )
         )
-        script.effects["repair"] = _commits_a_fix(it)
-    _drops(it, script, cause, rebased=rebased, folder=lib, repo=lib)
+        script.effects["repair"] = commits_a_fix(it)
+    merge_drops(it, script, cause, rebased=rebased, folder=lib, repo=lib)
 
     assert await walk_once(it) == "needs_human"
     assert script.calls == calls
@@ -224,8 +175,8 @@ async def test_a_members_repair_rewinds_and_leaves_the_roots_base_ref(item_on, s
             c, work_item_id=it.id, repo_path=str(lib), role="submodule", merge_rank=0
         )
     )
-    _drops(it, script, folder=lib, repo=lib)
-    script.effects["repair"] = _commits_a_fix(it, lib)
+    merge_drops(it, script, folder=lib, repo=lib)
+    script.effects["repair"] = commits_a_fix(it, lib)
     before = {}
 
     async def record(_row):
@@ -248,8 +199,8 @@ async def test_merge_rejection_rewinds_are_capped(item_on, script, cause, repair
     unseen."""
     it = await item_on(_chain(on_merge_rejected=_POLICY))
     await approve(it, "review")
-    _drops(it, script, cause, times=5)
-    script.effects["repair"] = _commits_a_fix(it)
+    merge_drops(it, script, cause, times=5)
+    script.effects["repair"] = commits_a_fix(it)
     policy = _policy.Policy(
         loops={"merge.on_merge_rejected": _policy.Cap(1, 604800)}, default=_policy.Cap(3, 3600)
     )
@@ -267,7 +218,7 @@ async def test_merge_rejection_rewinds_never_take_the_policy_default(item_on, sc
     waits for a person: an unset key gets three attempts over a week."""
     it = await item_on(_chain(on_merge_rejected=_POLICY))
     await approve(it, "review")
-    _drops(it, script, "conflict", times=2)
+    merge_drops(it, script, "conflict", times=2)
     policy = _policy.Policy(loops={}, default=_policy.Cap(1, 3600))
 
     assert await _walk_through_review(it, policy) == "completed"
@@ -279,7 +230,7 @@ async def test_a_drop_without_the_policy_stops_promptly(item_on, script):
     the item stops at once with it -- no wait, no repair, no rewind."""
     it = await item_on(_chain())
     await approve(it, "review")
-    _drops(it, script)
+    merge_drops(it, script)
 
     assert await walk_once(it) == "needs_human"
     assert script.calls == ["ci", "merge"]
@@ -328,7 +279,7 @@ async def test_the_repair_is_told_what_the_train_rejected(item_on, script, where
     it = await item_on(_chain(on_merge_rejected=_POLICY), target=IN_PLACE if in_place else None)
     folder = it.repo if in_place else it.worktree
     await approve(it, "review")
-    _drops(it, script, rebased=rebased, folder=folder)
+    merge_drops(it, script, rebased=rebased, folder=folder)
     upstream = {}
 
     async def land_upstream(_row):
@@ -338,7 +289,7 @@ async def test_the_repair_is_told_what_the_train_rejected(item_on, script, where
     async def repair(_row):
         if not rebased:
             git(folder, "rebase", upstream["sha"])
-        await _commits_a_fix(it, folder)(_row)
+        await commits_a_fix(it, folder)(_row)
 
     script.effects.update({"ci": land_upstream, "repair": repair})
 
@@ -366,7 +317,7 @@ async def test_a_fix_needed_in_a_landed_member_stops_with_its_question(item_on, 
     it = await item_on(_chain(on_merge_rejected=_POLICY))
     await approve(it, "review")
     await it.database.write(lambda c: _landed(c, it))
-    _drops(it, script)
+    merge_drops(it, script)
     script.plan["repair"] = ["needs_context"]
 
     async def asks(_row):
@@ -405,9 +356,9 @@ async def test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from(
     `review` reopens and the item stands at `feedback`, not at `merge`."""
     it = await item_on(_chain(on_merge_rejected=_POLICY))
     await approve(it, "review")
-    _drops(it, script)
+    merge_drops(it, script)
     script.plan["repair"] = [ending]
-    commit = _commits_a_fix(it)
+    commit = commits_a_fix(it)
 
     async def commits_then_ends(_row):
         await commit(_row)
@@ -442,8 +393,8 @@ async def test_a_rewind_whose_clock_ran_out_during_the_repair_holds_the_item(
 
     it = await item_on(_chain(on_merge_rejected=_POLICY))
     await approve(it, "review")
-    _drops(it, script, times=2)
-    commit = _commits_a_fix(it)
+    merge_drops(it, script, times=2)
+    commit = commits_a_fix(it)
     late = []
 
     async def repair(_row):
@@ -492,7 +443,7 @@ async def test_an_in_place_repair_is_not_sent_to_rebase_over_an_ignored_file(ite
     (it.repo / ".git/info/exclude").write_text("local.cfg\n")
     write(it.repo, "local.cfg", "the person's\n")
     await approve(it, "review")
-    _drops(it, script, rebased=False, folder=it.repo)
+    merge_drops(it, script, rebased=False, folder=it.repo)
 
     assert await walk_once(it) == "needs_human"
     assert it.row()["stop_kind"] == "checkout"

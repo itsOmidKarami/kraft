@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 from support.harness import entry_of
-from support.item_walk import approve
+from support.item_walk import approve, commits_a_fix, merge_drops, walk_once
 
 from kraft import executor, item_paths, store
 from kraft import policy as _policy
@@ -173,3 +173,52 @@ async def test_a_rebase_in_draft_merge_request_does_not_restart_merge_request_fe
     assert it.events("base_change_restart") == []
     assert gates.pending_gate(it.database, it.id) == "final_review"
     assert it.row()["base_ref"] == "1" * 40
+
+
+_GATES = (
+    "spec_approval",
+    "plan_approval",
+    "chain_revision_approval",
+    "local_review",
+    "final_review",
+)
+
+
+async def test_default_chain_rewinds_a_train_drop_through_final_review(
+    item_on, script, default_chain
+):
+    """The shipped `merge` declares `on_merge_rejected: {restart_from:
+    merge_request_feedback}`: a train that rejects the merge request for its
+    code runs the repair, and the repaired head goes back through the merge
+    request's own CI and a fresh `final_review` before it is queued again.
+    Only the approved gates in that span reopen: `chain_revision_approval` and
+    `local_review` lie before it and keep their approvals."""
+    it = await item_on(default_chain, "merge")
+    for gate in _GATES:
+        await approve(it, gate)
+    merge_drops(it, script)
+    script.effects["repair"] = commits_a_fix(it)
+
+    assert await walk_once(it) == "awaiting_gate"
+    assert gates.pending_gate(it.database, it.id) == "final_review"
+    assert [e["payload"] for e in it.events("gate_reopened")] == [
+        {"gate": "final_review", "reason": "merge_rejected"}
+    ]
+
+    await approve(it, "final_review")
+    assert await walk_once(it) == "completed"
+    [restart] = it.events("merge_rejection_restart")
+    assert restart["payload"]["restart_from"] == "merge_request_feedback"
+    starts = [
+        e["payload"]["node_id"] for e in it.events("node_started") if e["seq"] > restart["seq"]
+    ]
+    assert starts == [
+        "merge_request_feedback",
+        "work_item_summary",
+        "final_review",
+        "mark_ready",
+        "external_approval",
+        "merge",
+        "post_merge_ci",
+    ]
+    assert script.calls[:2] == ["merge", "repair"]

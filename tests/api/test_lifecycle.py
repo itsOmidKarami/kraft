@@ -100,20 +100,21 @@ def test_executor_crash_marks_needs_human(client, repo, monkeypatch):
 
 
 def test_retry_refuses_explicit_steer_on_a_node_with_no_agent_task(client, repo):
-    """Kraft-bz9b: `merge` is forge-kind with no fix_loop and is the chain's
-    last node, so nothing downstream of it ever calls `Steer.take()`.
+    """Kraft-bz9b: `post_merge_ci` is forge-kind with no handler and is the
+    chain's last node, so nothing downstream of it ever calls `Steer.take()`.
     `--steer` used to be accepted and echoed back as if it would reach the
     next launch, when it was silently dropped. (`open_mr`, this test's node
     before Kraft-cbr, no longer qualifies: `mr_checks` right after it now
-    carries `fix_loop`, so a steer given at `open_mr` could reach that.)"""
+    carries `fix_loop`, so a steer given at `open_mr` could reach that; nor
+    does `merge`, whose `on_merge_rejected` repair is an agent.)"""
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
-    _force_node(wid, "merge", "needs_human")
+    _force_node(wid, "post_merge_ci", "needs_human")
 
     r = client.post(f"/api/work-items/{wid}/retry", json={"steer": "commit the leftover file"})
 
     assert r.status_code == 409, r.text
-    assert "merge" in r.json()["detail"]
+    assert "post_merge_ci" in r.json()["detail"]
 
 
 def test_retry_without_explicit_steer_still_works_on_a_node_with_no_agent_task(client, repo):
