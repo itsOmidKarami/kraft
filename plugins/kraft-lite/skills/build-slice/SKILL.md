@@ -31,12 +31,15 @@ Copy this and tick it off; the walk starts when all four are ticked.
    that checkout's `chains/slice.json`, and read its skills as files.
 2. The spec and the plan arrive as messages marked `part i of n`, or as paths on
    the controller's machine. Join the parts in numeric order; ask the controller
-   for a missing one. Write `<common>/kraft-lite/spec.md` and `plan.md`, where
-   `<common>` is `$(git rev-parse --path-format=absolute --git-common-dir)`:
-   untracked, readable from any worktree. Confirm with a `status`: parts
-   joined, line count of each file, your plan tasks by their headings.
+   for a missing one. Write `<run>/spec.md` and `plan.md`, where `<run>` is
+   `$(git rev-parse --path-format=absolute --git-common-dir)/kraft-lite/<chain-id>`
+   and `<chain-id>` is the feature chain's, the first word of your session title.
+   Untracked, readable from any worktree, and the same for every slice of the
+   run, so slices sharing a repo write the same files. Confirm with a `status`:
+   parts joined, line count of each file, your plan tasks by their headings.
 3. Record the commit your branch was cut from, whether the feature branch or an
-   earlier slice's: `git rev-parse HEAD > <common>/kraft-lite/fork`. Do it now,
+   earlier slice's: `git rev-parse HEAD > <run>/<slice key>/fork` (make the folder;
+   it is yours alone, as worktree slices share the repo). Do it now,
    before your first commit; the rebase in section 5 reads it.
 4. Run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" chains`. An unfinished slice chain
    here means you are resuming it: start no second one. Otherwise:
@@ -88,8 +91,8 @@ Try in this order, and read answers in the same order each time you wake:
 2. On the same machine, one JSON line appended to
    `.kraft-lite/messages/<chain-id>/<slice key>.jsonl` under the controller's
    checkout path in your starting instructions: `{"at", "from": "child", "kind",
-   "body"}`. `<chain-id>` is the feature chain's, the first word of your session
-   title, not your own slice chain's `<id>`.
+   "body"}`. This `<chain-id>` is the feature chain's, never your own slice
+   chain's `<id>`.
 3. A comment on your own draft PR, opened into the feature branch at your first commit.
 
 `kind` is `question`, `status` or `done`; the controller answers with `answer`.
@@ -129,12 +132,12 @@ target is the feature branch, never the base branch):
 
 1. Commit uncommitted work, or stash it and pop it after the rebase.
 2. `git fetch origin`, then
-   `git rebase --onto origin/<feature branch> "$(cat <common>/kraft-lite/fork)"`.
+   `git rebase --onto origin/<feature branch> "$(cat <run>/<slice key>/fork)"`.
    That commit is where your branch was cut, so this works after an early start
    from a slice branch that was since force-pushed or deleted, and after a start
    from the feature branch. Once it succeeds, your branch is cut from the commit
    you rebased onto, so record it:
-   `git rev-parse origin/<feature branch> > <common>/kraft-lite/fork`.
+   `git rev-parse origin/<feature branch> > <run>/<slice key>/fork`.
 3. Re-run your scoped tests, then `git push --force-with-lease origin <your slice branch>`.
 4. Send a `status` with the new head and the test result.
 

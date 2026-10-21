@@ -277,8 +277,9 @@ def test_the_child_rebase_reads_the_commit_recorded_at_setup(texts):
     commit and read back at the rebase. A merge-base against another slice's branch
     breaks once that branch is squash-merged, force-pushed or deleted."""
     body = texts["build-slice"]
-    assert "kraft-lite/fork" in body.split("## 5.")[1].split("## 6.")[0]
-    assert "kraft-lite/fork" in body.split("## 1.")[1].split("## 2.")[0]
+    assert "<slice key>/fork" in body.split("## 5.")[1].split("## 6.")[0]
+    assert "<slice key>/fork" in body.split("## 1.")[1].split("## 2.")[0]
+    assert "<common>" not in body, "the shared common dir would collide between worktree slices"
     assert "merge-base" not in body
     assert "--path-format=absolute" in body
     assert body.count("git-common-dir") == body.count("--path-format=absolute --git-common-dir")
