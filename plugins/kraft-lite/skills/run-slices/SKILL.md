@@ -249,23 +249,28 @@ Red flags - stop and hold the question: you are about to type "I've authorized",
 
 ## 6. Reviewing and merging
 
-Starting a review: `KL slice-set --slice <key> --status in_review`, then start
-what `KL slices` lists, as section 3 says. Your review is the slice's PR
-review, on the strongest tier. Read CI at the head you review and the scoped
-test paths the PR body lists, and run no tests or checks yourself. What neither
-covers goes to the child as a finding.
+Starting a review: `KL slice-set --slice <key> --status in_review`. Your review
+is the slice's PR review, on the strongest tier. Read CI at the head you review
+and the scoped test paths the PR body lists, and run no tests or checks
+yourself. What neither covers goes to the child as a finding. Once your review
+has no findings or only small ones, start what `KL slices` lists, as section 3
+says.
 
 - Findings to fix: send them to the child, `KL slice-set --slice <key> --status running`,
   and review again when it reports the fix.
 - `feature` mode: merge into the feature branch only on green CI at the exact
-  head you reviewed (pin the head SHA); a head that moved, read the new commits.
-- `main` mode: report the verdict to the user, then
+  head you reviewed (pin the head SHA), and only once every slice it comes after
+  is merged; a head that moved, read the new commits.
+- `main` mode: report the verdict to the user, naming any slice it comes after
+  that the user must merge first, then
   `KL slice-set --slice <key> --status ready_to_merge`. The user merges it.
   Start what `KL slices` lists, as section 3 says, and export state.
 
 After a merge (yours, or in `main` mode the user's), in order:
 
-1. `KL slice-set --slice <key> --status merged`
+1. `KL slice-set --slice <key> --status merged`. It is refused while a slice it
+   comes after is unmerged: record that one first, or leave this one as it is
+   until it is merged.
 2. Tell each slice cut from this slice's branch, and each slice cut from the
    target, to rebase onto the target. Never one cut from another slice that is
    still unmerged: it rebases when that slice merges. The `Cut from:` line you
@@ -275,7 +280,8 @@ After a merge (yours, or in `main` mode the user's), in order:
 5. Export state.
 
 A call overturned later reopens the archived child, or starts a fresh one on the
-target. When every slice is done:
+target. When `KL slices` shows `done: true` on every slice (merged; in `main`
+mode, ready to merge or merged):
 
 1. Show the whole decisions log, `KL decisions`, while a call is cheap to overturn.
 2. `KL decisions --unreported --mark`, to mark it reported.
@@ -294,7 +300,7 @@ to it if not; never commit state on another branch), then:
 ```
 python3 "$CLAUDE_PLUGIN_ROOT/kl.py" export --to <state-checkout>/kraft-lite-state --chain-id <id>
 git -C <state-checkout> add kraft-lite-state
-git -C <state-checkout> commit -m "kraft-lite state"
+git -C <state-checkout> diff --cached --quiet || git -C <state-checkout> commit -m "kraft-lite state"
 git -C <state-checkout> push origin HEAD:<state-branch>
 ```
 
@@ -311,11 +317,11 @@ List the branches safe to delete (merged slices; the state branch once done)
 for the user to delete. In `feature` mode the feature PR is the chain's
 `open_mr`.
 
-## 10. No session tools at all
+## 10. No reference, or no session tools
 
-If the abilities are really missing after searching deferred tools, say so, and
-walk the slices here, one after another, in `ready` order, with the same review,
-merge and state steps.
+With no reference for this harness (above), or with the abilities really
+missing after searching deferred tools: say which, and walk the slices here,
+one after another, in `ready` order, with the same review, merge and state steps.
 
 ## 11. Models
 

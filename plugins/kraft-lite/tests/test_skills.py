@@ -487,10 +487,12 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         ("build-slice", 1, "`base` holds the word `target` or a slice key, never a branch name"),
         ("build-slice", 1, 'echo <the word after "Cut from:", as given> > <run>/<slice key>/base'),
         ("build-slice", 5, "git rebase --onto origin/<target branch>"),
+        ("run-slices", 6, "Starting a review: `KL slice-set --slice <key> --status in_review`."),
         (
             "run-slices",
             6,
-            "`KL slice-set --slice <key> --status in_review`, then start what `KL slices` lists",
+            "finding. Once your review has no findings or only small ones, start what "
+            "`KL slices` lists, as section 3 says.",
         ),
         (
             "run-slices",
@@ -524,9 +526,37 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         ("next", 1, "git worktree add -B <feature branch> <path> origin/<feature branch>"),
         ("next", 1, "runs from the controller's checkout"),
         ("next", 1, "never in the state branch's checkout"),
-        ("next", 1, "tell the slices to rebase and archive its child"),
+        (
+            "next",
+            1,
+            "tell each slice cut from its branch or from the target to rebase onto the "
+            "target, and archive its child",
+        ),
         ("next", 3, "At `chain_review`, invoke `kraft-lite:run-slices` instead"),
         ("next", 3, "export state after every `close`"),
+        ("next", 1, "Record a slice merged only once every slice it comes after is"),
+        ("run-slices", 6, "and only once every slice it comes after is merged"),
+        ("run-slices", 6, "naming any slice it comes after that the user must merge first"),
+        ("run-slices", 6, "It is refused while a slice it comes after is unmerged"),
+        (
+            "run-slices",
+            6,
+            "When `KL slices` shows `done: true` on every slice (merged; in `main` mode, "
+            "ready to merge or merged):",
+        ),
+        (
+            "run-slices",
+            7,
+            "git -C <state-checkout> diff --cached --quiet || "
+            'git -C <state-checkout> commit -m "kraft-lite state"',
+        ),
+        (
+            "run-slices",
+            10,
+            "No reference, or no session tools With no reference for this harness (above), "
+            "or with the abilities really missing after searching deferred tools: say which, "
+            "and walk the slices here",
+        ),
     ],
     ids=[
         "child-fork-never-head",
@@ -558,7 +588,8 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         "child-base-is-a-word",
         "child-base-as-given",
         "child-rebase-onto-target-branch",
-        "controller-review-starts-what-slices-lists",
+        "controller-review-starts-a-review",
+        "controller-review-then-starts-what-slices-lists",
         "controller-no-reference-takes-the-fallbacks",
         "status-early",
         "status-early-template",
@@ -583,6 +614,13 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         "next-archives-merged-child",
         "next-chain-review-to-run-slices",
         "next-exports-after-close",
+        "next-records-merges-after-what-they-come-after",
+        "controller-merges-after-what-it-comes-after",
+        "controller-main-mode-names-the-merge-order",
+        "controller-merge-refused-out-of-order",
+        "controller-done-is-what-slices-says",
+        "controller-state-commit-skips-a-no-op",
+        "controller-no-reference-walks-here",
     ],
 )
 def test_a_skill_carries_the_final_review_fixes(texts, name, section, needle):

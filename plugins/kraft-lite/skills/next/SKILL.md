@@ -42,9 +42,11 @@ You get `node`, `hooks`, `gate`, `attempt`, `cap`, `status`, `note` and `sliced`
   - `await_user_merges` - check the PR of each slice that `slices` does not show as
     `merged`. For each the user merged:
     `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" slice-set --slice <key> --status merged --chain-id <id>`,
-    tell the slices to rebase and archive its child, as `kraft-lite:run-slices`
-    says after a merge, then export state, as `kraft-lite:run-slices` describes under State branch.
-    Name the slices still waiting and stop. Once all are merged, `close`, then this
+    tell each slice cut from its branch or from the target to rebase onto the
+    target, and archive its child, as `kraft-lite:run-slices` says after a merge,
+    then export state, as `kraft-lite:run-slices` describes under State branch.
+    Record a slice merged only once every slice it comes after is: `slice-set`
+    refuses it before. Name the slices still waiting and stop. Once all are merged, `close`, then this
     skill again. Never open this node's gate: the user's merges are the answer.
   - `hooks` - step 2.
 
