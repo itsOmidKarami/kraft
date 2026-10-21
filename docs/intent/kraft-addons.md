@@ -488,8 +488,8 @@ origin: src/kraft/templates/catalogue.py §read_only_message
 
 ## REQ an-addon-copy-resolves-locally
 
-WHEN an add-on component or chain is copied into a local draft, the system SHALL carry its add-on-internal references qualified, and a child add-on's references to its parent's entries as the parent's own ids, so the copy resolves.
-enforced-by: tests/api/test_addon_content.py::test_copy_from_an_addon[chain], tests/api/test_addon_content.py::test_copy_from_an_addon[component], tests/api/test_addon_content.py::test_a_copy_from_a_child_addon_names_its_parent[child-chain], tests/api/test_addon_content.py::test_a_copy_from_a_child_addon_names_its_parent[child-component]
+WHEN an add-on component or chain is copied into a local draft, the system SHALL carry its add-on-internal references qualified, so the copy resolves; for a child add-on's entry, the copy SHALL run what the child serves, its overrides included: a chain that extends a hidden ancestor level is written out as its resolved nodes, a component or node that extends one is written merged onto the ancestor's entry, every other reference names the child's own entries, no hidden level's name is written, and the copy does not take later changes to the chain it was copied from.
+enforced-by: tests/api/test_addon_content.py::test_copy_from_an_addon[chain], tests/api/test_addon_content.py::test_copy_from_an_addon[component], tests/api/test_addon_content.py::test_a_copy_from_a_child_addon_runs_what_it_serves[child-chain], tests/api/test_addon_content.py::test_a_copy_from_a_child_addon_runs_what_it_serves[child-component], tests/api/test_addon_content.py::test_a_copy_from_a_child_addon_runs_what_it_serves[tree-chain], tests/api/test_addon_content.py::test_a_copy_from_a_child_addon_runs_what_it_serves[tree-chain-alias], tests/api/test_addon_content.py::test_a_copy_from_a_child_addon_runs_what_it_serves[tree-component], tests/api/test_addon_content.py::test_a_copy_from_a_child_addon_runs_what_it_serves[tree-component-two-levels], tests/api/test_addon_content.py::test_a_copy_from_a_child_addon_runs_what_it_serves[tree-component-own-route-wins], tests/api/test_addon_content.py::test_a_copy_from_a_child_addon_runs_what_it_serves[tree-chain-node-read-as-a-node], tests/api/test_addon_content.py::test_a_child_addons_copy_keeps_its_nodes_across_a_parent_update
 origin: src/kraft/drafts/ops.py §copy_component
 
 ## REQ installed-addons-are-recomputed-only-when-an-input-changes
@@ -584,7 +584,7 @@ origin: src/kraft/cli/addon.py §_own_problems
 
 ## REQ a-draft-names-an-inherited-entry-by-its-public-id
 
-WHERE a draft of a chain reads through a child add-on's inherited chains, the system SHALL write and show them under the ancestor's own id (detach, the per-field sources), never a hidden level's name.
+WHERE a draft of a chain reads through a child add-on's inherited chains, the system SHALL show them under the ancestor's own id (the per-field sources), and a detach SHALL write what it reaches through a hidden level merged in, as the child serves it, never a hidden level's name.
 enforced-by: tests/api/test_addon_content.py::test_a_local_chain_through_a_child_addon_detaches, tests/api/test_addon_content.py::test_a_drafts_sources_name_inherited_chains_publicly
 origin: src/kraft/drafts/extending.py §detach
 

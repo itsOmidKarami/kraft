@@ -178,6 +178,18 @@ class Namespace(StrEnum):
 #: composable component.
 _EXTENDABLE = (Namespace.TASKS, Namespace.STEPS, Namespace.NODES)
 
+#: The namespace of what an authored key holds, where its place says it:
+#: `TemplateLibrary.flattened` reads a nested `extends` in it.
+_PLACED = {
+    "nodes": Namespace.NODES,
+    "node": Namespace.NODES,
+    "steps": Namespace.STEPS,
+    "tasks": Namespace.TASKS,
+    JUDGE_SEGMENT: Namespace.TASKS,
+    "escalation": Namespace.TASKS,
+    AUTO_REVIEW_SEGMENT: Namespace.TASKS,
+}
+
 
 @dataclass(frozen=True)
 class ComponentSource:
@@ -785,6 +797,38 @@ class TemplateLibrary:
         """`data`, an entry as authored, with every name in a hidden layer
         written as `public_name` writes it: what a listing shows."""
         return inherit.public(data, self._layers) if self._layers else data
+
+    def flattened(self, data: object, namespace: Namespace | None = None) -> object:
+        """`data`, an entry as authored (`namespace`'s, else found by its
+        place), with every component that `extends` a hidden layer merged
+        onto that layer's entry, itself flattened, as `extends` merges it: what
+        a copy into the local library writes (`an-addon-copy-resolves-locally`).
+        Every other reference is kept, so one late-bound to a child add-on
+        names the child's own entry and the copy runs what the child serves.
+        Unchanged for a library with no child add-on."""
+        if not self._layers:
+            return data
+        if isinstance(data, list):
+            return [self.flattened(item, namespace) for item in data]
+        if not isinstance(data, Mapping):
+            return data
+        own = {key: self.flattened(value, _PLACED.get(key)) for key, value in data.items()}
+        name = own.get("extends")
+        if not (isinstance(name, str) and inherit.is_layer(name)):
+            return own
+        where = namespace or self.namespace_of(name)
+        parent = None if where is None else self.component(where, name)
+        if parent is None:
+            return own  # left as it is: the copy reports it as any broken extends
+        base = self.flattened(parent.data, where)
+        assert isinstance(base, Mapping)
+        child = {key: value for key, value in own.items() if key != "extends"}
+        if where is Namespace.TASKS:
+            displaced = displaced_route(child)
+            base = {key: value for key, value in base.items() if key not in displaced}
+        merged = _merge(base, child)
+        assert isinstance(merged, dict)
+        return merged
 
     def _humanize(self, text: str) -> str:
         return inherit.humanize(text, self._layers) if self._layers else text

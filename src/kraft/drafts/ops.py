@@ -19,6 +19,7 @@ from pydantic import TypeAdapter, ValidationError
 from yaml import YAMLError
 
 from kraft.addons import load as addons_load
+from kraft.addons.inherit import is_layer
 from kraft.drafts import authored, resolve, store
 from kraft.templates import catalogue, positions
 from kraft.templates.environment import Identifier
@@ -805,11 +806,22 @@ def new_chain(d: Draft, **source: str) -> None:
             # references already made `<namespace>:<name>`, so the copy resolves.
             if origin not in library.chain_ids:
                 raise OpError(f"there is no chain {origin!r} to copy")
-            # A child add-on's reference into a hidden ancestor level becomes
-            # that ancestor's own name, so the copy resolves. The copy then
-            # reads the ancestor's entry as the ancestor serves it, not as the
-            # child inherits it: the child's overrides no longer reach it.
-            shown = library.public(library.chain_data(origin))
+            # A child add-on's chain is copied as the child serves it: one
+            # that extends a hidden ancestor level is written out flattened,
+            # and what any of it reaches through a hidden level is merged in,
+            # so the copy runs the child's overrides and names no hidden level.
+            data = library.chain_data(origin)
+            if (parent := data.get("extends")) and is_layer(str(parent)):
+                from kraft.drafts import extending  # it builds on this module
+
+                try:
+                    shown = extending.flatten(library, origin, data, d.key)
+                except TemplateLibraryError as exc:
+                    raise OpError(
+                        f"{origin} does not resolve, so it can't be copied: {exc}"
+                    ) from None
+            else:
+                shown = library.flattened(data)
             copied = yaml.safe_dump(plain(shown), sort_keys=False)
             d._chain = authored.load(copied)
             authored.put(d._chain, "", "id", d.key)
@@ -1053,9 +1065,9 @@ def copy_component(d: Draft, ref: str, name: str) -> dict:
         body = None if found is None else found.model_dump(mode="json", exclude_unset=True)
     else:
         raw = library.component(Namespace(section), qualified)
-        # As for a chain copy: a hidden level's name becomes the ancestor's
-        # own, and the child's overrides no longer reach what it extends.
-        body = None if raw is None else plain(library.public(raw.data))
+        # As for a chain copy: what it extends through a hidden level is
+        # merged in, so the copy is the entry as the child serves it.
+        body = None if raw is None else plain(library.flattened(raw.data, Namespace(section)))
     if body is None:
         raise OpError(f"there is no add-on component {ref!r} to copy")
     if not isinstance(d.library.get(section), dict):

@@ -6,7 +6,7 @@ import json
 
 import pytest
 import yaml
-from support.addons import AGENT, chain, load_release, load_tree
+from support.addons import AGENT, COMPANY, TEAM, chain, load_release, load_tree
 
 from kraft.templates.models import MaterializedChain
 
@@ -144,37 +144,174 @@ def _load_team(client, tmp_path, parent_chain="ship", own_add=()):
     deps._reload_templates(st)
 
 
+def _release_and_team(client, tmp_path):
+    load_release(client, tmp_path)
+    _load_team(client, tmp_path)
+
+
+def _tree_dept_extends_company(client, tmp_path):
+    """The example tree with the dept's `security_scan` building on the
+    company's and selecting steering by a bare name: a team copy merges two
+    hidden levels, and the steering is the team's."""
+    scan = {"extends": "company:security_scan", "steering": ["house"]}
+    load_tree(client, tmp_path, dept={"library": {"tasks": {"security_scan": scan}}})
+
+
+def _tree_aliased_dept(client, tmp_path):
+    load_tree(client, tmp_path, aliases={"platform-dept": "dept"})
+
+
+def _tree_dept_scan_on_a_profile(client, tmp_path):
+    """The dept's `security_scan` picks a profile; the team's picks a model."""
+    scan = {**AGENT, "prompt": "dept scan", "profile": "company:slow"}
+    load_tree(client, tmp_path, dept={"library": {"tasks": {"security_scan": scan}}})
+
+
+def _tree_node_and_task_share_a_name(client, tmp_path):
+    """The company ships a node and a task both named `build`; the team's chain
+    `own` has a node on the dept's `build`, by the dept's name."""
+    library = COMPANY["library"]
+    company = {
+        **COMPANY,
+        "library": {
+            **library,
+            "tasks": {**library["tasks"], "build": {**AGENT, "prompt": "company build"}},
+            "nodes": {"build": {"kind": "exec", "tasks": [{"id": "b", "extends": "build"}]}},
+        },
+    }
+    own = {"nodes": [{"id": "n", "extends": "platform-dept:build"}]}
+    load_tree(client, tmp_path, company=company, team={**TEAM, "chains": {"own": own}})
+
+
+def _node(id, task, extends):
+    return {"id": id, "kind": "exec", "tasks": [{"id": task, "extends": extends}]}
+
+
+#: `team-payments:default` copied: the parent's nodes and the child's, each
+#: naming the child's own entries, so the team's `security_scan` runs.
+TEAM_DEFAULT = {
+    "id": "mine",
+    "nodes": [
+        _node("verification", "v", "team-payments:verify"),
+        _node("pci_review", "p", "team-payments:pci_review"),
+        _node("scan", "s", "team-payments:security_scan"),
+    ],
+}
+COPY_TEAM_DEFAULT = {"op": "new_chain", "from": "team-payments:default"}
+COPY_TEAM_SCAN = {
+    "op": "copy_component",
+    "ref": "tasks.team-payments:security_scan",
+    "name": "mine",
+}
+
+
+def _runs(client, chain_id):
+    """Each task of `chain_id`, resolved by the running server: what it runs."""
+    resolved = client.app.state.library.resolve_chain(chain_id)
+    return {
+        rt.path: rt.task.model_dump(mode="json", exclude_unset=True)
+        for node in resolved.nodes
+        for rt in node.tasks()
+    }
+
+
 @pytest.mark.parametrize(
-    "op, file, written",
+    "load, op, written",
     [
-        (
+        pytest.param(
+            _release_and_team,
             {"op": "new_chain", "from": "team:own"},
-            "chains/mine.yaml",
-            {"id": "mine", "extends": "release:ship"},
+            {"id": "mine", "nodes": [_node("n", "t", "team:base")]},
+            id="child-chain",
         ),
-        (
+        pytest.param(
+            _release_and_team,
             {"op": "copy_component", "ref": "tasks.team:scan", "name": "mine"},
-            "library.yaml",
-            {"extends": "release:base", "prompt": "team scan"},
+            {**AGENT, "skill": "release:notes", "prompt": "team scan"},
+            id="child-component",
+        ),
+        pytest.param(load_tree, COPY_TEAM_DEFAULT, TEAM_DEFAULT, id="tree-chain"),
+        pytest.param(_tree_aliased_dept, COPY_TEAM_DEFAULT, TEAM_DEFAULT, id="tree-chain-alias"),
+        pytest.param(
+            load_tree,
+            COPY_TEAM_SCAN,
+            {**AGENT, "prompt": "dept scan", "model": "pci-model"},
+            id="tree-component",
+        ),
+        pytest.param(
+            _tree_dept_extends_company,
+            COPY_TEAM_SCAN,
+            {
+                **AGENT,
+                "prompt": "company scan",
+                "steering": ["team-payments:house"],
+                "model": "pci-model",
+            },
+            id="tree-component-two-levels",
+        ),
+        pytest.param(
+            _tree_dept_scan_on_a_profile,
+            COPY_TEAM_SCAN,
+            {**AGENT, "prompt": "dept scan", "model": "pci-model"},
+            id="tree-component-own-route-wins",
+        ),
+        pytest.param(
+            _tree_node_and_task_share_a_name,
+            {"op": "new_chain", "from": "team-payments:own"},
+            {"id": "mine", "nodes": [_node("n", "b", "team-payments:build")]},
+            id="tree-chain-node-read-as-a-node",
         ),
     ],
-    ids=["child-chain", "child-component"],
 )
-def test_a_copy_from_a_child_addon_names_its_parent(loaded, tmp_path, op, file, written):
-    """A child's reference to its parent's entry comes along as the parent's
-    own id, never as the hidden level the child reads it through, so the copy
-    resolves (against the parent as the parent serves it)."""
-    _load_team(loaded, tmp_path)
-    kind, key = ("chains", "mine") if file.startswith("chains/") else ("library", "library")
-    answer = loaded.post(f"/api/drafts/{kind}/{key}/ops", json={"ops": [op]})
+def test_a_copy_from_a_child_addon_runs_what_it_serves(client, tmp_path, load, op, written):
+    """A child's copy is flattened: what it inherits through a hidden level
+    is written out merged, and every other reference names the child's own
+    entries, so the copy runs what the child serves, overrides included, and
+    never names a hidden level."""
+    load(client, tmp_path)
+    kind, key = ("chains", "mine") if op["op"] == "new_chain" else ("library", "library")
+    file = "chains/mine.yaml" if kind == "chains" else "library.yaml"
+    answer = client.post(f"/api/drafts/{kind}/{key}/ops", json={"ops": [op]})
     assert answer.status_code == 200, answer.text
-    text = loaded.get(f"/api/drafts/{kind}/{key}").json()["files"][file]
+    text = client.get(f"/api/drafts/{kind}/{key}").json()["files"][file]
     found = yaml.safe_load(text)
 
     assert (found if kind == "chains" else found["tasks"]["mine"]) == written
     assert "^" not in text
-    assert loaded.post(f"/api/drafts/{kind}/{key}/publish").status_code == 200
-    assert not loaded.get("/api/health").json()["invalid_templates"]
+    assert client.post(f"/api/drafts/{kind}/{key}/publish").status_code == 200
+    assert not client.get("/api/health").json()["invalid_templates"]
+    if kind == "chains":
+        assert _runs(client, "mine") == _runs(client, op["from"])
+    if op == COPY_TEAM_DEFAULT:
+        assert _runs(client, "mine")["scan.main.s"]["model"] == "pci-model"
+
+
+def test_a_child_addons_copy_keeps_its_nodes_across_a_parent_update(client, tmp_path):
+    """The copy is the operator's own chain: an update that adds a node to the
+    parent's chain does not reach it, and it still runs the child's override."""
+    from support.addons import publish, update_addons
+
+    from kraft.api import deps
+
+    collection = load_tree(client, tmp_path)
+    answer = client.post("/api/drafts/chains/mine/ops", json={"ops": [COPY_TEAM_DEFAULT]})
+    assert answer.status_code == 200, answer.text
+    assert client.post("/api/drafts/chains/mine/publish").status_code == 200
+    audit = _node("audit", "a", "hotfix")
+    chains = {
+        **COMPANY["chains"],
+        "default": {"nodes": [*COMPANY["chains"]["default"]["nodes"], audit]},
+    }
+    publish(collection, "company", version="1.1.0", chains=chains)
+    st = client.app.state
+    update_addons(st.templates_dir, st.run_dirs.addons, ["company@acme"])
+    deps._reload_templates(st)
+
+    assert "audit.main.a" in _runs(client, "team-payments:default")
+    runs = _runs(client, "mine")
+    assert not client.get("/api/health").json()["invalid_templates"]
+    assert list(runs) == ["verification.main.v", "pci_review.main.p", "scan.main.s"]
+    assert runs["scan.main.s"]["model"] == "pci-model"
 
 
 def test_a_local_chain_through_a_child_addon_detaches(client, tmp_path):
@@ -203,8 +340,9 @@ def test_a_local_chain_through_a_child_addon_detaches(client, tmp_path):
     written = yaml.safe_load(text)
     task = written["nodes"][0]["tasks"][0]
     assert task == {"id": "t", **AGENT, "skill": "release:notes", "prompt": "tuned"}
-    # The node the child added names its parent's task by the parent's id.
-    assert written["nodes"][1]["tasks"][0] == {"id": "x", "extends": "release:base"}
+    # The node the child added extends its parent's task: merged in, as the
+    # child serves it, never named through the hidden level.
+    assert written["nodes"][1]["tasks"][0] == {"id": "x", **AGENT, "skill": "release:notes"}
     assert "^" not in text
     assert client.post("/api/drafts/chains/mine/publish").status_code == 200
     assert not client.get("/api/health").json()["invalid_templates"]

@@ -410,11 +410,35 @@ def _authored_node(library, data: Mapping, id: str) -> dict:
     return next(n for n in data.get("nodes") or () if isinstance(n, Mapping) and n.get("id") == id)
 
 
+def flatten(library, id: str, raw: Mapping, key: str) -> dict:
+    """Chain `id` of `library` (authored as `raw`) written as a chain of its
+    own under id `key`: its resolved description, policy and nodes in order,
+    and no `extends` or edits. A node an override at any level names is
+    written resolved; every other one as the file that defines it writes it,
+    so it keeps its library `extends`, with what it reaches through a child
+    add-on's hidden level merged in (`TemplateLibrary.flattened`). Raises
+    `TemplateLibraryError` when the chain does not resolve."""
+    resolved = library.resolve_chain(id).chain.model_dump(mode="json", exclude_unset=True)
+    touched = _touched(library, raw)
+    flat: dict = {"id": key}
+    for field in ("description", "policy"):
+        if resolved.get(field) is not None:
+            flat[field] = resolved[field]
+    flat["nodes"] = [
+        copy.deepcopy(
+            n
+            if n["id"] in touched
+            else ops.plain(
+                library.flattened(_authored_node(library, raw, n["id"]), Namespace.NODES)
+            )
+        )
+        for n in resolved["nodes"]
+    ]
+    return authored.normalise(flat)
+
+
 def detach(d: Draft) -> dict:
-    """The chain written as one of its own, keeping its id: its resolved
-    description, policy and nodes in order, and no `extends` or edits. A node
-    an override at any level names is written resolved; every other one as
-    the file that defines it writes it, so it keeps its library `extends`."""
+    """The chain written as one of its own, keeping its id (`flatten`)."""
     parent = parent_of(d)
     library = d.resolving_library()
     if library is None:
@@ -422,24 +446,9 @@ def detach(d: Draft) -> dict:
     raw = authored.parse(authored.dump(d.chain))
     try:
         candidate, id = library.with_chain(d.st.templates_dir / d.name, {**raw, "id": d.key})
-        chain = candidate.resolve_chain(id).chain
+        d._chain = flatten(candidate, id, raw, d.key)
     except TemplateLibraryError as exc:
         raise OpError(f"{d.key} does not resolve, so it can't be detached: {exc}") from None
-    resolved = chain.model_dump(mode="json", exclude_unset=True)
-    touched = _touched(candidate, raw)
-    flat: dict = {"id": d.key}
-    for key in ("description", "policy"):
-        if resolved.get(key) is not None:
-            flat[key] = resolved[key]
-    flat["nodes"] = [
-        copy.deepcopy(
-            n
-            if n["id"] in touched
-            else ops.plain(candidate.public(_authored_node(candidate, raw, n["id"])))
-        )
-        for n in resolved["nodes"]
-    ]
-    d._chain = authored.normalise(flat)
     d.dirty.add(d.name)
     return {"detached_from": parent}
 

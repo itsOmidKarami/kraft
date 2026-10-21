@@ -513,10 +513,11 @@ def repo_library_child(
     )
 
 
-def load_tree(client, tmp_path: Path, **specs) -> None:
+def load_tree(client, tmp_path: Path, *, aliases: dict[str, str] | None = None, **specs) -> Path:
     """`tree_collection` of `COMPANY`, `DEPT` and `TEAM` (`specs` replaces one
     by `company`, `dept` or `team`) installed into a running test server,
-    parents first, and loaded."""
+    parents first, and loaded. `aliases` maps an add-on's name to the
+    namespace it is installed under. Returns the collection, for `publish`."""
     from kraft.api import deps
 
     st = client.app.state
@@ -524,8 +525,11 @@ def load_tree(client, tmp_path: Path, **specs) -> None:
         tmp_path, **{"company": COMPANY, "dept": DEPT, "team": TEAM, **specs}
     )
     for addon_id in TREE:
-        install(st.templates_dir, st.run_dirs.addons, collection, addon_id.split("@")[0])
+        name = addon_id.split("@")[0]
+        alias = (aliases or {}).get(name)
+        install(st.templates_dir, st.run_dirs.addons, collection, name, alias=alias)
     deps._reload_templates(st)
+    return collection
 
 
 def install_release(
