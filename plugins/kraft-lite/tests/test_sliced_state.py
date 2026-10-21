@@ -1,6 +1,7 @@
 """What a node means in a sliced run, which `state` reports as `sliced`; when the
-nodes that wait for the slices may close; and the standing rules in
-`.kraft-lite/slices.json` that set a run's mode."""
+nodes that wait for the slices may close; what a rewind, or a slice sent back to
+work, does to the slices; and the standing rules in `.kraft-lite/slices.json`
+that set a run's mode."""
 
 from __future__ import annotations
 
@@ -36,7 +37,8 @@ SLICED_TABLE = {
         for column, mode in enumerate(("feature", "main"))
         for node, actions in SLICED_TABLE.items()
     ]
-    + [pytest.param("feature", "spec", "hooks", id="feature-spec")],
+    # A rewind to a node before the slices were cut retires them.
+    + [pytest.param("feature", "spec", None, id="feature-spec")],
 )
 def test_state_says_what_each_node_means_in_a_sliced_run(
     walk, mode, node, action, kl_cli, tmp_path
@@ -48,7 +50,8 @@ def test_state_says_what_each_node_means_in_a_sliced_run(
     while kl_cli(tmp_path, "state")["node"] != node:
         kl_cli(tmp_path, "close")
 
-    assert kl_cli(tmp_path, "state")["sliced"] == {"mode": mode, "action": action}
+    sliced = {"mode": mode, "action": action} if action else None
+    assert kl_cli(tmp_path, "state")["sliced"] == sliced
 
 
 def test_an_unsliced_chain_reports_sliced_null(walk, kl_cli, tmp_path):
@@ -259,3 +262,168 @@ def test_the_plans_own_mode_beats_the_settings_mode(walk, content, kl_cli, tmp_p
     walk.slice(tmp_path, walk.plan(mode="feature"))
 
     assert kl_cli(tmp_path, "slices")["mode"] == "feature"
+
+
+def stored_slicing(cwd: Path) -> list[dict]:
+    """Every run and slice record in the store, retired ones too."""
+    records = kl.read_jsonl(cwd / ".kraft-lite" / "chain.jsonl")
+    return [
+        r
+        for r in records
+        if kl.label_value(r, kl.RUN_LABEL) or kl.label_value(r, kl.SLICE_OF_LABEL)
+    ]
+
+
+def to_human_review_gate(walk, kl_cli, cwd: Path, mode: str = "feature") -> None:
+    """A sliced run with every slice merged, at the gate after `human_review`."""
+    walk.slice(cwd, walk.plan(mode=mode, slices=ABC))
+    walk.merge_slices(cwd)
+    while kl_cli(cwd, "state")["node"] != "human_review":
+        kl_cli(cwd, "close")
+    kl_cli(cwd, "gate", "--name", "human_review_approval")
+
+
+@pytest.mark.parametrize("node", ["spec", "plan", "chain_review"])
+@pytest.mark.parametrize("mode", kl.MODES)
+def test_a_rewind_to_before_implementation_retires_the_slices(walk, node, mode, kl_cli, tmp_path):
+    """The plan or its slicing is being redone, so the slices cut from the old
+    one stand for nothing: they are retired, and the chain is sliced again at
+    the next `chain_finalized`."""
+    to_human_review_gate(walk, kl_cli, tmp_path, mode)
+    old = {r["id"] for r in stored_slicing(tmp_path)}
+
+    kl_cli(tmp_path, "reject", "--note", "redo", "--from-node", node)
+
+    assert kl_cli(tmp_path, "state")["sliced"] is None
+    view = kl_cli(tmp_path, "slices")
+    assert (view["mode"], view["slices"], view["ready"], view["early"]) == (None, [], [], [])
+    retired = stored_slicing(tmp_path)
+    assert {r["id"] for r in retired} == old
+    assert all(r["status"] == "closed" for r in retired)
+    assert all(kl.label_value(r, kl.RETIRED_LABEL) == node for r in retired)
+    # Sliced again, from a new proposal, at the next chain_finalized.
+    while kl_cli(tmp_path, "state")["node"] != "chain_review":
+        kl_cli(tmp_path, "gate", "--name", "again")
+        kl_cli(tmp_path, "approve")
+    kl_cli(tmp_path, "gate", "--name", "chain_finalized")
+    again = walk.plan(mode=mode, slices=[{"key": "z", "title": "Zeta", "tasks": [1]}])
+    kl_cli(tmp_path, "approve", "--slices", str(walk.write_plan(tmp_path, again)))
+    assert [e["key"] for e in kl_cli(tmp_path, "slices")["slices"]] == ["z"]
+    assert kl_cli(tmp_path, "state")["sliced"]["mode"] == mode
+
+
+@pytest.mark.parametrize(
+    "mode, reopen, node, refused",
+    [
+        # Every slice done: implementation would close at once, with nothing redone.
+        pytest.param("feature", [], "implementation", True, id="feature_all_merged"),
+        pytest.param("main", [], "implementation", True, id="main_all_merged"),
+        # A slice reopened first: implementation waits for it again.
+        pytest.param("feature", ["a"], "implementation", False, id="one_reopened"),
+        pytest.param("main", ["a", "c"], "implementation", False, id="main_two_reopened"),
+        # Past implementation, the slices stand as they are.
+        pytest.param("feature", [], "verify", False, id="past_implementation"),
+    ],
+)
+def test_a_rewind_to_implementation_waits_for_a_reopened_slice(
+    walk, mode, reopen, node, refused, kl_cli, tmp_path
+):
+    to_human_review_gate(walk, kl_cli, tmp_path, mode)
+    for key in reopen:
+        kl_cli(tmp_path, "slice-set", "--slice", key, "--status", "running")
+    before = (kl_cli(tmp_path, "state"), kl_cli(tmp_path, "slices"))
+
+    rewound = kl_cli(tmp_path, "reject", "--note", "redo", "--from-node", node, ok=not refused)
+
+    if refused:
+        assert (
+            "every slice is done, so implementation would close at once with nothing redone. "
+            "Reopen the slices to redo first (slice-set --slice KEY --status running), or "
+            "rewind further back to slice the chain again" in rewound.stderr
+        )
+        assert (kl_cli(tmp_path, "state"), kl_cli(tmp_path, "slices")) == before
+        return
+    assert rewound["node"] == node and rewound["sliced"]["mode"] == mode
+    assert kl_cli(tmp_path, "slices")["slices"] == before[1]["slices"]
+    if reopen:
+        closing = kl_cli(tmp_path, "close", ok=False)
+        assert "not done: " + ", ".join(f"{k} (running)" for k in reopen) in closing.stderr
+
+
+#: b cut early from a's branch while a is in review.
+CUT_B = [("a", "running"), ("a", "in_review"), ("b", "starting", "--fork", "f1")]
+
+
+@pytest.mark.parametrize(
+    "moves, cut_from, base_moved",
+    [
+        pytest.param(CUT_B, "a", [], id="cut_early"),
+        pytest.param([("a", "running"), ("a", "merged"), ("b", "running")], None, [], id="ready"),
+        # a's review found work: b's base is no longer a's tip.
+        pytest.param([*CUT_B, ("a", "running")], "a", ["b"], id="a_back_to_running"),
+        pytest.param([*CUT_B, ("a", "waiting")], "a", ["b"], id="a_back_to_waiting"),
+        pytest.param(
+            [*CUT_B, ("a", "ready_to_merge"), ("a", "starting")], "a", ["b"], id="a_from_ready"
+        ),
+        # Still flagged when a is back in review: b has not rebased yet.
+        pytest.param([*CUT_B, ("a", "running"), ("a", "in_review")], "a", ["b"], id="a_back"),
+        # A new fork is the rebase: onto a's new tip while a is unmerged...
+        pytest.param(
+            [*CUT_B, ("a", "running"), ("a", "in_review"), ("b", None, "--fork", "f2")],
+            "a",
+            [],
+            id="rebased_onto_a",
+        ),
+        # ... and onto the target once a is merged.
+        pytest.param(
+            [*CUT_B, ("a", "merged"), ("b", None, "--fork", "f3")], None, [], id="rebased_on_merge"
+        ),
+        # Only a started, unmerged slice has a branch left to rebase.
+        pytest.param([*CUT_B, ("a", "running"), ("b", "waiting")], "a", [], id="b_back_to_waiting"),
+        pytest.param(
+            [*CUT_B, ("a", "running"), ("a", "merged"), ("b", "merged")],
+            "a",
+            [],
+            id="b_merged_unrebased",
+        ),
+        # Started again, a slice is cut afresh: from a, or from the target.
+        pytest.param(
+            [*CUT_B, ("a", "running"), ("b", "waiting"), ("a", "in_review"), ("b", "starting")],
+            "a",
+            [],
+            id="b_cut_again_early",
+        ),
+        pytest.param(
+            [*CUT_B, ("b", "waiting"), ("a", "merged"), ("b", "running")],
+            None,
+            [],
+            id="b_cut_again_from_target",
+        ),
+        # a merged first: b rebases onto the target, which a reopened does not move.
+        pytest.param([*CUT_B, ("a", "merged"), ("a", "running")], "a", [], id="a_reopened"),
+        # Review to ready to merge is no new work.
+        pytest.param([*CUT_B, ("a", "ready_to_merge")], "a", [], id="a_ready_to_merge"),
+        # A slice not cut from a, or not started, has no base on a's branch.
+        pytest.param(
+            [("a", "running"), ("a", "in_review"), ("a", "running")], None, [], id="b_waiting"
+        ),
+        pytest.param(
+            [("a", "running"), ("a", "merged"), ("b", "running"), ("a", "running")],
+            None,
+            [],
+            id="a_reopened_after_b_cut_from_target",
+        ),
+    ],
+)
+def test_a_slice_sent_back_to_work_flags_the_slices_cut_early_from_it(
+    walk, moves, cut_from, base_moved, kl_cli, tmp_path
+):
+    walk.slice(tmp_path, walk.plan(slices=ABC))
+    for key, status, *flags in moves:
+        kl_cli(
+            tmp_path, "slice-set", "--slice", key, *(["--status", status] if status else []), *flags
+        )
+
+    view = kl_cli(tmp_path, "slices")
+    assert view["base_moved"] == base_moved
+    assert {e["key"]: e["cut_from"] for e in view["slices"]}["b"] == cut_from

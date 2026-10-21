@@ -73,6 +73,17 @@ RUN_LABEL = "kraft-slices-run:"
 MODE_LABEL = "kraft-slices-mode:"
 FEATURE_BRANCH_LABEL = "kraft-feature-branch:"
 STATE_BRANCH_LABEL = "kraft-state-branch:"
+#: On a run record and its slices once a rewind to a node before the slices were
+#: cut has retired them, valued with that node. They stay in the store, and in an
+#: export, so an import retires them where they are live; nothing else reads them.
+RETIRED_LABEL = "kraft-slices-retired:"
+#: The slice a slice was cut early from, by key, while its branch is based on that
+#: slice's branch. Cleared when it records a fork after that slice has merged:
+#: its base is then the target.
+CUT_FROM_LABEL = "kraft-cut-from:"
+#: On a slice cut early from one that went back to work since, valued with that
+#: slice's key: its base is no longer that branch's tip. Cleared by its next fork.
+BASE_MOVED_LABEL = "kraft-base-moved:"
 
 SLICE_STATUSES = ("waiting", "starting", "running", "in_review", "ready_to_merge", "merged")
 #: A slice in its final review: the one slice another comes after may be cut
@@ -191,8 +202,12 @@ def label_value(record: dict | None, prefix: str) -> str | None:
 
 def set_label(record: dict, prefix: str, value: str) -> dict:
     """Return a copy with exactly one label under `prefix`."""
-    labels = [x for x in record.get("labels", []) if not x.startswith(prefix)]
-    return dict(record, labels=[*labels, f"{prefix}{value}"])
+    return dict(record, labels=[*drop_label(record, prefix)["labels"], f"{prefix}{value}"])
+
+
+def drop_label(record: dict, prefix: str) -> dict:
+    """Return a copy with no label under `prefix`."""
+    return dict(record, labels=[x for x in record.get("labels", []) if not x.startswith(prefix)])
 
 
 def attempts(record: dict) -> int:
@@ -776,8 +791,19 @@ def materialize_slices(plan: dict, chain_id: str) -> list[dict]:
     return records
 
 
+def _slicing_of(record: dict, chain_id: str) -> bool:
+    """Whether `record` is a run or slice record of `chain_id`, retired or not."""
+    return chain_id in (label_value(record, RUN_LABEL), label_value(record, SLICE_OF_LABEL))
+
+
+def _live(record: dict) -> bool:
+    return label_value(record, RETIRED_LABEL) is None
+
+
 def run_record(records: list[dict], chain_id: str) -> dict | None:
-    return next((r for r in records if label_value(r, RUN_LABEL) == chain_id), None)
+    """The chain's run record; None for a chain never sliced, or whose slices a
+    rewind retired."""
+    return next((r for r in records if label_value(r, RUN_LABEL) == chain_id and _live(r)), None)
 
 
 def _run_mode(run: dict | None) -> str | None:
@@ -789,7 +815,7 @@ def _run_mode(run: dict | None) -> str | None:
 def slice_records(records: list[dict], chain_id: str) -> list[dict]:
     """The chain's slices in plan order. Sorted on the position label, because
     `bd export` returns records in no order worth relying on."""
-    mine = [r for r in records if label_value(r, SLICE_OF_LABEL) == chain_id]
+    mine = [r for r in records if label_value(r, SLICE_OF_LABEL) == chain_id and _live(r)]
     return sorted(mine, key=lambda r: int(label_value(r, SLICE_POS_LABEL) or 0))
 
 
@@ -842,6 +868,7 @@ def _slice_entry(record: dict, by_id: dict[str, dict], mode: str) -> dict:
         "session": label_value(record, SESSION_LABEL),
         "branch": label_value(record, BRANCH_LABEL),
         "fork": label_value(record, FORK_LABEL),
+        "cut_from": label_value(record, CUT_FROM_LABEL),
         "done": slice_done(record, mode),
     }
 
@@ -860,6 +887,14 @@ def slices_view(records: list[dict], chain_id: str | None) -> dict:
         "slices": [_slice_entry(r, by_id, _run_mode(run)) for r in slices],
         "ready": [label_value(r, SLICE_KEY_LABEL) for r in ready],
         "early": [label_value(r, SLICE_KEY_LABEL) for r in early],
+        # Cut early from a slice that went back to work since: each rebases onto
+        # that slice's new tip once it is in review again.
+        "base_moved": [
+            label_value(r, SLICE_KEY_LABEL)
+            for r in slices
+            if label_value(r, BASE_MOVED_LABEL)
+            and label_value(r, SLICE_STATUS_LABEL) not in ("waiting", "merged")
+        ],
     }
 
 
@@ -966,6 +1001,35 @@ def rewind(records: list[dict], from_node: str, note: str) -> list[dict]:
             reopened["description"] = f"{description}\n{NOTE_PREFIX}{note}"
         out.append(reopened)
     return out
+
+
+def rewind_slices(everything: list[dict], chain_id: str, tail: list[dict]) -> list[dict]:
+    """What a rewind that reopens `tail` writes to the run's slices, or a
+    `SystemExit`. Rewound to a node before the slices were cut, the plan or its
+    slicing is redone, so the run and its slices are retired: closed, and labelled
+    so that nothing reads them as the chain's. The chain is then sliced again at
+    the next `chain_finalized`. Rewound to the node that builds them, every slice
+    done would close it at once with nothing redone, so that is refused until a
+    slice is reopened. Rewound past it, the slices stand."""
+    run = run_record(everything, chain_id)
+    if run is None:
+        return []
+    mode = _run_mode(run)
+    nodes = [label_value(r, NODE_LABEL) for r in tail]
+    builds = next((n for n in nodes if SLICED_ACTIONS.get(n, {}).get(mode) == "run_slices"), None)
+    if builds is None:
+        return []
+    slices = slice_records(everything, chain_id)
+    if nodes[0] != builds:
+        retired = [dict(r, status="closed") for r in [run, *slices]]
+        return [set_label(r, RETIRED_LABEL, nodes[0]) for r in retired]
+    if all(slice_done(r, mode) for r in slices):
+        raise SystemExit(
+            f"kraft-lite: every slice is done, so {builds} would close at once with nothing "
+            "redone. Reopen the slices to redo first (slice-set --slice KEY --status running), "
+            "or rewind further back to slice the chain again"
+        )
+    return []
 
 
 def chain_summaries(records: list[dict]) -> list[dict]:
@@ -1387,6 +1451,37 @@ def _refuse_close_before_slices(everything: list[dict], chain_id: str, node_reco
         )
 
 
+def _cut(slices: list[dict], record: dict) -> dict:
+    """A waiting slice as it starts: cut from the target from `ready`, or from
+    the one slice it comes after from `early`, which `CUT_FROM_LABEL` records.
+    `_refuse_slice_move` has already said it is in one of them."""
+    record = drop_label(record, BASE_MOVED_LABEL)
+    ready, _ = _startable(slices)
+    if record["id"] in {r["id"] for r in ready}:
+        return drop_label(record, CUT_FROM_LABEL)
+    by_id = {r["id"]: r for r in slices}
+    [after] = [by_id[d] for d in dep_ids(record) if d in by_id]
+    return set_label(record, CUT_FROM_LABEL, label_value(after, SLICE_KEY_LABEL))
+
+
+def _rebased(slices: list[dict], record: dict) -> dict:
+    """A slice that records a new fork has rebased: onto the new tip of the slice
+    it was cut from, or once that slice is merged, onto the target."""
+    record = drop_label(record, BASE_MOVED_LABEL)
+    by_key = {label_value(r, SLICE_KEY_LABEL): r for r in slices}
+    parent = by_key.get(label_value(record, CUT_FROM_LABEL))
+    return drop_label(record, CUT_FROM_LABEL) if parent is None or _merged(parent) else record
+
+
+def _moved_base(others: list[dict], key: str) -> list[dict]:
+    """The slices cut early from `key`, flagged, as it goes back to work from its
+    review: each was cut from a tip its branch is about to move past. `slices`
+    lists only those started and unmerged."""
+    return [
+        set_label(r, BASE_MOVED_LABEL, key) for r in others if label_value(r, CUT_FROM_LABEL) == key
+    ]
+
+
 def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dict:
     """Move one slice: its status, the session running it, its branch, its fork
     point. `merged` closes the record too, so a store that shows only open work
@@ -1401,8 +1496,11 @@ def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dic
             f"kraft-lite: unknown slice status {args.status!r}. "
             f"Statuses: {', '.join(SLICE_STATUSES)}"
         )
+    was = label_value(record, SLICE_STATUS_LABEL)
     if args.status is not None:
         _refuse_slice_move(slices, record, args.status)
+        if was == "waiting" and args.status != "waiting":
+            record = _cut(slices, record)
         record = set_label(record, SLICE_STATUS_LABEL, args.status)
         record = dict(record, status="closed" if args.status == "merged" else "open")
     for prefix, value in (
@@ -1412,6 +1510,8 @@ def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dic
     ):
         if value is not None:
             record = set_label(record, prefix, value)
+    if args.fork is not None:
+        record = _rebased(slices, record)
     # A move that changes nothing is not written: every write counts toward
     # `kraft-seq:`, and `import` would rank a no-op over a real write elsewhere.
     # `set_label` moves a label to the end, so labels compare as a set.
@@ -1421,6 +1521,8 @@ def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dic
     writes = [] if same else [record]
     run = run_record(everything, chain_id)
     others = [r for r in slices if r["id"] != record["id"]]
+    if was in EARLY_FROM and args.status in ("waiting", "starting", "running"):
+        writes += _moved_base(others, args.slice)
     finished = all(_merged(r) for r in [*others, record])
     # Reopened too, when a call overturned at the wrap-up puts a slice back to work.
     if run is not None and run["status"] != ("closed" if finished else "open"):
@@ -1535,11 +1637,10 @@ def _export(root: Path, everything: list[dict], chain_id: str, to: Path) -> dict
     store holds them, its frozen template, and its decisions log. Nothing else
     is written, and nothing else in `to` is touched, because `to` is usually a
     checkout of that branch. Specs and plans travel by message, never here."""
-    run = run_record(everything, chain_id)
+    # Retired ones too: an import is what retires them in a checkout where they are live.
     records = [
         *chain_index(everything)[chain_id],
-        *([run] if run else []),
-        *slice_records(everything, chain_id),
+        *(r for r in everything if _slicing_of(r, chain_id)),
     ]
     frozen = _frozen_path(root, chain_id)
     template = to / "chains" / frozen.name
@@ -1632,8 +1733,7 @@ def _of_chain(record: dict, chain_id: str) -> bool:
     return (
         record["id"] == chain_id
         or record["id"].startswith(f"{chain_id}.")
-        or label_value(record, RUN_LABEL) == chain_id
-        or label_value(record, SLICE_OF_LABEL) == chain_id
+        or _slicing_of(record, chain_id)
     )
 
 
@@ -1855,7 +1955,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.verb == "gate":
         store.write([open_gate(dict(node_record, status="blocked"), args.name)])
     elif args.verb == "reject" and args.from_node:
-        store.write(rewind(records, args.from_node, args.note))
+        tail = rewind(records, args.from_node, args.note)
+        store.write([*tail, *rewind_slices(everything, resolved_id, tail)])
     elif args.verb == "reject":
         description = node_record.get("description", "")
         # Banked on the way out too: a gate that ends in a rejection held the human

@@ -433,6 +433,7 @@ def test_approve_with_slices_at_chain_finalized_creates_them(walk, kl_cli, tmp_p
         "session": None,
         "branch": None,
         "fork": None,
+        "cut_from": None,
         "done": False,
     }
     # The chain walks on exactly as it does without slices.
@@ -485,7 +486,7 @@ def test_slices_are_only_accepted_at_chain_finalized(walk, setup, message, kl_cl
     else:
         walk.slice(tmp_path, plan())
         if setup == "already_sliced":
-            kl_cli(tmp_path, "reject", "--note", "x", "--from-node", "chain_review")
+            # A gate of that name opened again, by hand, on the sliced run.
             kl_cli(tmp_path, "gate", "--name", "chain_finalized")
         elif setup == "sliced_and_other_gate":
             kl_cli(tmp_path, "gate", "--name", "something_else")

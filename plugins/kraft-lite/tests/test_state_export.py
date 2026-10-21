@@ -375,6 +375,25 @@ def test_export_into_a_checkout_replaces_only_its_own_files(walk, kl_cli, tmp_pa
     assert chain_id in {r["id"] for r in exported}
 
 
+def test_an_import_retires_slices_a_rewind_retired_elsewhere(walk, kl_cli, tmp_path):
+    """Retired records travel in the export, or a checkout that held the run
+    sliced would keep walking the old slices."""
+    here, there = dirs(tmp_path, "here", "there")
+    chain_id = walk.slice(here)
+    kl_cli(here, "export", "--to", str(tmp_path / "sliced"))
+    kl_cli(there, "import", "--from", str(tmp_path / "sliced"))
+    kl_cli(here, "reject", "--note", "replan", "--from-node", "plan")
+    kl_cli(here, "export", "--to", str(tmp_path / "retired"))
+
+    kl_cli(there, "import", "--from", str(tmp_path / "retired"))
+
+    assert views(kl_cli, there, chain_id) == views(kl_cli, here, chain_id)
+    assert kl_cli(there, "slices")["slices"] == [] and kl_cli(there, "state")["node"] == "plan"
+    # Closed, though no slice was merged: under bd an open record is open work.
+    retired = [r for r in stored(there) if kl.label_value(r, kl.RETIRED_LABEL) == "plan"]
+    assert len(retired) == 3 and {r["status"] for r in retired} == {"closed"}
+
+
 def test_import_works_with_two_unfinished_chains_present(walk, kl_cli, tmp_path):
     here, there = dirs(tmp_path, "here", "there")
     out = tmp_path / "state"

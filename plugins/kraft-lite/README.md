@@ -94,6 +94,16 @@ approval. A small plan is not sliced: the controller says so, and the chain
 continues as one. Slicing is accepted only at that gate. A rejection leaves no
 slice behind.
 
+Sending the chain back with `reject --from-node` keeps the slices only when the
+plan stands. A rewind to `chain_review` or earlier retires them: `slices` lists
+none, and the chain is sliced again, from a new proposal, at the next
+`chain_finalized`.
+
+A rewind to `implementation` is refused while every slice is done, because it
+would close again at once with nothing redone. Reopen the slices to redo first,
+with `slice-set --slice KEY --status running`. A rewind past `implementation`
+leaves the slices as they are.
+
 Slicing needs the default chain's node ids and its `chain_finalized` gate
 after `chain_review`, because what each node does in a sliced run is keyed to
 them. On a custom chain without them, `approve --slices` refuses and names what
@@ -223,7 +233,7 @@ The skills run these. `kl.py state` also reports `sliced` once a run is sliced.
 | Verb | What it does |
 |---|---|
 | `approve --slices FILE` | Approves `chain_finalized` and creates the slices from the proposal. A plan with a cycle, an unknown `after`, a duplicate key, an empty task list, a task in two slices or a bad branch is refused, and nothing is written. |
-| `slices` | Lists the slices with their status, what they come after, session and branch. `ready` lists those whose "comes after" slices are all merged. `early` lists those that come after exactly one slice, which is in review or ready to merge. |
+| `slices` | Lists the slices, and which may start or must rebase (below). |
 | `slice-set --slice KEY` | Sets `--status`, `--session`, `--branch` or `--fork`. Statuses: `waiting`, `starting`, `running`, `in_review`, `ready_to_merge`, `merged`. The last slice merged closes the run. A call that changes nothing writes nothing. |
 | `settings` | Prints the mode and the rights in effect. |
 | `decide` | Logs a decision, under a slice with `--slice KEY`, which must name one of the run's slices. With `--held`, holds the question for you. |
@@ -231,10 +241,19 @@ The skills run these. `kl.py state` also reports `sliced` once a run is sliced.
 | `decisions` | Lists the log. `--held` shows held questions, `--unreported` what is new or newly answered since the last report, and `--mark` marks those reported. |
 | `export --to DIR`, `import --from DIR` | Copy a run to the state branch's checkout, and back. An import never overwrites a newer local record or decision: it keeps the copy written more times, so a clock that runs behind cannot keep a stale one. |
 
+`slices` gives each slice's status, what it comes after, its session and
+branch, and `cut_from`, the slice it was cut early from. `ready` lists those
+whose "comes after" slices are all merged. `early` lists those that come after
+exactly one slice, which is in review or ready to merge. `base_moved` lists the
+started slices cut early from a slice that has since gone back to work: each
+rebases onto that slice's new tip.
+
 `slice-set` starts a waiting slice only from `ready` or `early`, and moves
 one never started no further than `running`. It records a slice merged only
 once every slice it comes after is merged, so a slice cut early from another's
-branch merges after that one.
+branch merges after that one. A slice that goes back from review to work flags
+each slice cut early from it in `base_moved`, until that slice records the fork
+of its rebase with `--fork`.
 
 `close` and `approve` refuse to close a sliced run's `implementation` until
 every slice is done: merged, or in `main` mode merged or ready to merge. In
