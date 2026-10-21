@@ -161,7 +161,12 @@ def test_merge_accepts_a_pushed_head_against_real_git(tmp_path, glab, elsewhere)
 
     asyncio.run(forge.GlabCli().merge(repo=repo, branch=BRANCH, mr=forge.MR(0, "")))
 
-    assert glab.argv("glab")[:2] == ["mr", "merge"]
+    # glab first asks the project whether it merges through a train (it does
+    # not: the stub's answer has no such field); the merge itself runs once.
+    assert [c for c in glab.calls("glab") if c.startswith("mr merge")] == [
+        f"mr merge {BRANCH} --yes"
+    ]
+    assert not any("merge_trains" in c for c in glab.calls("glab"))
 
 
 @pytest.mark.parametrize("recorded", [True, False], ids=["recorded", "pushed-before-the-record"])
