@@ -44,6 +44,8 @@ def scene(tmp_path, run_dirs, monkeypatch):
     sockdir = tmp_path / "chan"
     sockdir.mkdir()
     interp, _ = host_view.init_interpreter()
+    # `wrap` asks the host first; this one can run a sandbox (even as root, here).
+    monkeypatch.setattr(bwrap, "probe_host", lambda **kw: None)
 
     def build(**kw):
         args = {
@@ -415,12 +417,20 @@ def test_launch_failed(tmp_path, content, failed):
     assert bwrap.OsBackend().launch_failed(cid) is failed
 
 
-def test_wrap_without_a_channel_is_refused(scene, run_dirs, monkeypatch):
+@pytest.mark.parametrize(
+    ("problem", "kw", "match"),
+    [
+        (None, {"session_id": "s1", "work_item_id": "w1"}, "egress channel"),
+        # The setup command's path: no `probe` before its `wrap`.
+        ("kind: os does not run while Kraft runs as root", {}, "while Kraft runs as root"),
+    ],
+    ids=["no-channel", "host-cannot-run"],
+)
+def test_wrap_is_refused(scene, run_dirs, monkeypatch, problem, kw, match):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dirs.base))
-    with pytest.raises(SandboxRefused, match="egress channel"):
-        bwrap.OsBackend().wrap(
-            ["true"], scene.wt, SANDBOX, None, session_id="s1", work_item_id="w1"
-        )
+    monkeypatch.setattr(bwrap, "probe_host", lambda **k: problem)
+    with pytest.raises(SandboxRefused, match=match):
+        bwrap.OsBackend().wrap(["true"], scene.wt, SANDBOX, None, **kw)
 
 
 async def test_wrap_finds_socket_by_ids(scene, run_dirs, channels, monkeypatch):

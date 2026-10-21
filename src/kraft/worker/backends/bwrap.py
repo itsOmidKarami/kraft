@@ -333,6 +333,10 @@ class OsBackend:
     ) -> list[str]:
         if session_id is not None and work_item_id is None:
             raise TypeError("wrap: a session's sandbox is found by its work item too")
+        # Here too, not only in `probe`: the setup command is wrapped with no probe
+        # before it, and it must not run as root or fail with bwrap's raw stderr.
+        if problem := probe_host():
+            raise SandboxRefused(problem)
         sock_path = None
         if sandbox.get("network") and session_id is not None:
             if (registry := _channel.current()) is None:
