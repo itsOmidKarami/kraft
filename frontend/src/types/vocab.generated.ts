@@ -54,7 +54,7 @@ export const WORK_ITEM_TRAITS: Record<WorkItemStatus, { display: DisplayStatus |
 export const ITEM_ACTIONS = ["approve", "reject", "resume", "steer", "retry", "raise_budget", "reopen_mr", "unblock", "skip", "pause", "escalate", "complete", "cancel", "restore", "archive", "abandon"] as const;
 export type ItemAction = (typeof ITEM_ACTIONS)[number];
 
-export const SESSION_STATUSES = ["pending", "running", "done", "failed", "capped_out", "paused", "unknown", "done_with_concerns", "needs_context", "rate_limited", "config_error", "waiting", "conflict", "infra", "infra_stop"] as const;
+export const SESSION_STATUSES = ["pending", "running", "done", "failed", "capped_out", "paused", "unknown", "done_with_concerns", "needs_context", "rate_limited", "config_error", "waiting", "conflict", "infra", "infra_stop", "merge_rejected"] as const;
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
 
 export const LIVE_SESSION_STATUSES: readonly SessionStatus[] = ["pending", "running"];
@@ -87,6 +87,7 @@ export const SESSION_TRAITS: Record<SessionStatus, { live: boolean; unfinished: 
   "conflict": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: false, command_finished: false, unreadable_exit: false },
   "infra": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: false, command_finished: false, unreadable_exit: false },
   "infra_stop": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: false, command_finished: false, unreadable_exit: false },
+  "merge_rejected": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: false, command_finished: false, unreadable_exit: false },
 };
 
 export const REVIEW_OUTCOMES = ["approve", "request_changes", "comment"] as const;
@@ -107,7 +108,7 @@ export type DiffSide = (typeof DIFF_SIDES)[number];
 export const WORK_ITEM_EVENTS = ["work_item_created", "work_item_attachments", "work_item_resumed", "pause_requested", "work_item_queued", "work_item_dequeued", "work_item_storage_held", "work_item_blocked", "work_item_unblocked", "work_item_dependencies_dropped", "work_item_blocked_by_dependency", "paused_by_broken_base", "work_item_needs_human", "work_item_waiting", "work_item_rate_limited", "work_item_retried", "work_item_completed", "work_item_manually_completed", "work_item_cancelled", "work_item_abandoned", "work_item_archived", "work_item_restored", "work_item_title_edited", "work_item_description_edited", "plan_progress", "steer_context_set", "steer_undelivered"] as const;
 export type WorkItemEvent = (typeof WORK_ITEM_EVENTS)[number];
 
-export const CHAIN_EVENTS = ["chain_loaded", "worktree_prepared", "checkout_switched", "task_marked", "left_uncommitted", "node_started", "node_completed", "node_skipped", "scope_skipped", "node_recovery_started", "run_forked", "base_change_restart", "worktree_rebase_verified", "worktree_refresh_skipped", "read_only_violated", "fix_cycle_started", "fix_cycle_finished", "fix_cycle_refunded", "findings_measured", "test_scopes_selected", "judge_verdict", "sweep_failed", "sweep_left_out", "bead_not_filed", "beads_left_open"] as const;
+export const CHAIN_EVENTS = ["chain_loaded", "worktree_prepared", "checkout_switched", "task_marked", "left_uncommitted", "node_started", "node_completed", "node_skipped", "scope_skipped", "node_recovery_started", "run_forked", "base_change_restart", "merge_rejection_restart", "worktree_rebase_verified", "worktree_refresh_skipped", "read_only_violated", "fix_cycle_started", "fix_cycle_finished", "fix_cycle_refunded", "findings_measured", "test_scopes_selected", "judge_verdict", "sweep_failed", "sweep_left_out", "bead_not_filed", "beads_left_open"] as const;
 export type ChainEvent = (typeof CHAIN_EVENTS)[number];
 
 export const GATE_EVENTS = ["gate_requested", "gate_approved", "gate_rejected", "gate_reopened", "gate_auto_review_started", "gate_auto_review_skipped", "gate_auto_review_discarded", "chain_revision_shown", "chain_revision_unchanged", "chain_revised", "artifact_refused", "review_submitted", "thread_updated", "rewind_requested", "rewind_cancelled", "reply_agent_wrote", "reply_agent_skipped", "reply_agent_failed"] as const;
@@ -122,7 +123,7 @@ export type LimitEvent = (typeof LIMIT_EVENTS)[number];
 export const ESCALATION_EVENTS = ["escalation_message", "stuck_escalation_started", "stuck_escalation_finished", "work_item_auto_escalate_skipped", "work_item_auto_escalate_capped", "work_item_self_retry_requested", "work_item_self_retry_dropped"] as const;
 export type EscalationEvent = (typeof ESCALATION_EVENTS)[number];
 
-export const FORGE_EVENTS = ["mr_opened", "mr_closed", "mr_reopened", "mr_labels_set", "external_wait_started", "external_wait_observed", "external_wait_rebounded", "external_wait_ended", "ci_infra_exhausted", "ci_run_abandoned", "ci_not_configured", "automated_review_not_configured", "automated_review_errored"] as const;
+export const FORGE_EVENTS = ["mr_opened", "mr_closed", "mr_reopened", "mr_labels_set", "external_wait_started", "external_wait_observed", "external_wait_rebounded", "external_wait_ended", "ci_infra_exhausted", "ci_run_abandoned", "ci_not_configured", "automated_review_not_configured", "automated_review_errored", "merge_queue_dropped"] as const;
 export type ForgeEvent = (typeof FORGE_EVENTS)[number];
 
 export const SANDBOX_EVENTS = ["sandbox_egress_refused", "sandbox_oom_killed", "sandbox_branch_not_synced", "sandbox_kit_resolved"] as const;

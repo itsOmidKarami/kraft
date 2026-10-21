@@ -325,7 +325,7 @@ describe("sessionLook covers every session status", () => {
   it.each(SESSION_STATUSES)("%s has a look", (status) => {
     expect(sessionLook(s("verification.checks.lint", { status }), 0).state).toBeDefined();
   });
-  it.each(["conflict", "infra", "infra_stop"] as const)("draws %s as failed", (status) => {
+  it.each(["conflict", "infra", "infra_stop", "merge_rejected"] as const)("draws %s as failed", (status) => {
     expect(sessionLook(s("verification.checks.lint", { status }), 0).state).toBe("failed");
   });
   it("does not throw on a status a newer server sends", () => {

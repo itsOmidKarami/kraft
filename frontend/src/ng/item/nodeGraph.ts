@@ -99,7 +99,7 @@ const LOOK: Record<SessionStatus, (s: WorkerSession, now: number) => Look> = {
   waiting: () => ({ state: "amber", meta: "waiting" }),
   needs_context: () => ({ state: "current", meta: "needs you" }),
   failed: FAILED_LOOK, config_error: FAILED_LOOK, unknown: FAILED_LOOK,
-  conflict: FAILED_LOOK, infra: FAILED_LOOK, infra_stop: FAILED_LOOK,
+  conflict: FAILED_LOOK, infra: FAILED_LOOK, infra_stop: FAILED_LOOK, merge_rejected: FAILED_LOOK,
   capped_out: () => ({ state: "failed", attemptStopped: true }),
   done: DONE_LOOK, done_with_concerns: DONE_LOOK,
 };
