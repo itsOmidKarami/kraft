@@ -1,6 +1,7 @@
 """The os sandbox's launcher and init, run as scripts with a stand-in for bwrap."""
 
 import os
+import resource
 import signal
 import socket
 import subprocess
@@ -74,14 +75,19 @@ def wait_for(path, timeout=10):
         time.sleep(0.02)
 
 
-def test_launch_env_filtered(bwrap, filt):
+@pytest.mark.parametrize(
+    ("under_init", "want_fd"), [(False, True), (True, False)], ids=["launcher", "init-drops-fd"]
+)
+def test_launch_env_filtered(bwrap, filt, under_init, want_fd):
     code = (
         "raw = open('/proc/self/environ', 'rb').read().split(b'\\0')\n"
         "print(sorted(kv.split(b'=')[0].decode() for kv in raw if kv))"
     )
     env = {"FOO": "1", "BAR": "2", "SECRET": "x"}
-    r = run(launcher("launch", bwrap, filt, py(code), keep="FOO,MISSING"), env=env)
-    assert r.stdout.strip() == "['FOO', 'OS_INIT_STARTED_FD']"
+    inner = init_argv(*py(code)) if under_init else py(code)
+    out = run(launcher("launch", bwrap, filt, inner, keep="FOO,MISSING"), env=env).stdout
+    assert ("'FOO'" in out, "BAR" in out or "SECRET" in out) == (True, False)
+    assert ("OS_INIT_STARTED_FD" in out) is want_fd
 
 
 @pytest.mark.parametrize(
@@ -95,7 +101,6 @@ def test_launch_env_filtered(bwrap, filt):
 )
 def test_launch_started(bwrap, filt, tmp_path, inner, wrote):
     started = tmp_path / "started"
-    inner = [*inner[:0], *inner] if inner[0] != "true" else inner
     r = run(launcher("launch", bwrap, filt, inner, started=started))
     assert started.exists() is wrote
     if wrote:
@@ -121,35 +126,45 @@ def test_launch_outlives_signal(bwrap, filt, tmp_path, sig):
     assert p.wait(timeout=20) == 7
 
 
-def test_launch_copies_output(bwrap, filt, tmp_path):
-    log = tmp_path / "log"
-    code = (
-        "import os, sys\n"
-        "print('one', flush=True); print('two', file=sys.stderr, flush=True)\n"
-        "print(os.readlink('/proc/self/fd/1').startswith('pipe:'), flush=True)\n"
-        "try:\n    open('/proc/self/fd/1', 'a').write('X')\nexcept OSError: pass\n"
-    )
-    with log.open("wb") as f:
-        r = subprocess.run(launcher("launch", bwrap, filt, py(code)), stdout=f, env={}, timeout=30)
-    assert r.returncode == 0
-    assert log.read_text() == "one\ntwo\nTrue\nX"  # X went into the pipe, so it is only appended
+COPIES = (
+    "import os, sys\n"
+    "print('one', flush=True); print('two', file=sys.stderr, flush=True)\n"
+    "print(os.readlink('/proc/self/fd/1').startswith('pipe:'), flush=True)\n"
+    "try:\n    open('/proc/self/fd/1', 'a').write('X')\nexcept OSError: pass\n"
+)
+LOG_FAILS = (
+    "import pathlib; print('x' * 200000, flush=True); pathlib.Path(DONE).touch()\n"
+    "raise SystemExit(5)"
+)
+KILLED = "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
 
 
-def test_launch_log_write_fails(bwrap, filt, tmp_path):
-    done = tmp_path / "done"
-    code = (
-        f"import pathlib; print('x' * 200000, flush=True); pathlib.Path({str(done)!r}).touch()\n"
-        "raise SystemExit(5)"
-    )
-    r_fd, w_fd = os.pipe()
-    os.close(r_fd)
-    try:
-        r = subprocess.run(
-            launcher("launch", bwrap, filt, py(code)), stdout=w_fd, env={}, timeout=30
-        )
-    finally:
-        os.close(w_fd)
-    assert (r.returncode, done.exists()) == (5, True)
+@pytest.mark.parametrize(
+    ("code", "sink", "want_rc", "want"),
+    [
+        # X went into the pipe, so it is only appended
+        (COPIES, "file", 0, "one\ntwo\nTrue\nX"),
+        (LOG_FAILS, "closed-pipe", 5, True),
+        (KILLED, "file", 137, ""),
+    ],
+    ids=["copies", "log-write-fails", "bwrap-killed-by-signal"],
+)
+def test_launch_copies_output(bwrap, filt, tmp_path, code, sink, want_rc, want):
+    log, done = tmp_path / "log", tmp_path / "done"
+    argv = launcher("launch", bwrap, filt, py(code.replace("DONE", repr(str(done)))))
+    if sink == "file":
+        with log.open("wb") as f:
+            r = subprocess.run(argv, stdout=f, env={}, timeout=30)
+        got = log.read_text()
+    else:
+        r_fd, w_fd = os.pipe()
+        os.close(r_fd)
+        try:
+            r = subprocess.run(argv, stdout=w_fd, env={}, timeout=30)
+        finally:
+            os.close(w_fd)
+        got = done.exists()
+    assert (r.returncode, got) == (want_rc, want)
 
 
 def test_oneshot_passes_stdio_through(bwrap, filt):
@@ -193,24 +208,18 @@ def test_init_exit_codes(code, want, ignore_term):
     assert r.returncode == want
 
 
-def test_init_forwards_signal_to_detached_child(tmp_path):
-    ready = tmp_path / "ready"
-    code = (
-        f"import os, pathlib, time; os.setsid(); pathlib.Path({str(ready)!r}).touch()\n"
-        "time.sleep(30)"
-    )
-    p = subprocess.Popen(init_argv(*py(code)), env={})
-    wait_for(ready)
-    p.send_signal(signal.SIGTERM)
-    assert p.wait(timeout=20) == 143
-
-
-def test_init_does_not_forward_to_a_child_in_its_group(tmp_path):
-    # The group signal already reaches the child; a forwarded second one would
-    # cut short the cost write a pause exists to protect.
+@pytest.mark.parametrize(
+    ("detached", "group"),
+    [(True, False), (False, True)],
+    ids=["detached-child-forwarded", "same-group-child-not-doubled"],
+)
+def test_init_forwards_signal(tmp_path, detached, group):
+    # A detached child gets the signal forwarded; one in init's group already
+    # got it, and a second would cut short the cost write a pause protects.
     ready, count = tmp_path / "ready", tmp_path / "count"
     code = (
-        "import pathlib, signal, time\n"
+        "import os, pathlib, signal, time\n"
+        f"{'os.setsid()' if detached else ''}\n"
         "n = []\n"
         "signal.signal(signal.SIGINT, lambda *_: n.append(1))\n"
         f"pathlib.Path({str(ready)!r}).touch()\n"
@@ -219,41 +228,95 @@ def test_init_does_not_forward_to_a_child_in_its_group(tmp_path):
     )
     p = subprocess.Popen(init_argv(*py(code)), env={}, start_new_session=True)
     wait_for(ready)
-    os.killpg(p.pid, signal.SIGINT)
+    if group:
+        os.killpg(p.pid, signal.SIGINT)
+    else:
+        p.send_signal(signal.SIGINT)
     assert p.wait(timeout=20) == 0
     assert count.read_text() == "1"
 
 
-def test_init_reaps(tmp_path):
-    pidfile = tmp_path / "pid"
-    inner = f"echo $$ > {pidfile}; exit 0"
-    # The subshell exits at once, orphaning the grandchild onto the init (a subreaper).
-    script = f"(sh -c '{inner}' &); sleep 0.5; test ! -e /proc/$(cat {pidfile})"
+@pytest.mark.parametrize(
+    ("script", "limit"),
+    [
+        # The subshell exits at once, orphaning the grandchild onto the init (a subreaper).
+        ("(sh -c 'echo $$ > {pid}; exit 0' &); sleep 0.5; test ! -e /proc/$(cat {pid})", 20),
+        # Init ends with CMD; it does not wait out an orphan that is still running.
+        ("(setsid sleep 30 >/dev/null 2>&1 &); exit 0", 10),
+    ],
+    ids=["reaps-zombie", "exits-with-cmd-not-orphans"],
+)
+def test_init_reaps(tmp_path, script, limit):
     start = time.monotonic()
-    r = run(init_argv("/bin/sh", "-c", script))
+    r = run(init_argv("/bin/sh", "-c", script.format(pid=tmp_path / "pid")))
     assert r.returncode == 0, "the orphan stayed a zombie"
-    assert time.monotonic() - start < 20
+    assert time.monotonic() - start < limit
 
 
 @pytest.mark.parametrize(
-    "cmd",
-    [["/nonexistent/cmd"], [*PY, "-c", "raise SystemExit(127)"]],
-    ids=["missing", "exits-127"],
+    ("env", "code", "want"),
+    [
+        ({"TMPDIR": "/elsewhere"}, "import os; print(os.environ['TMPDIR'])", "/tmp"),
+        (
+            {"HOME": "HOMEDIR/made/here"},
+            "import os; print(os.path.isdir(os.environ['HOME']))",
+            "True",
+        ),
+    ],
+    ids=["tmpdir-is-tmp", "home-created"],
 )
-def test_init_not_found_hint(cmd):
+def test_init_environment(tmp_path, env, code, want):
+    env = {k: v.replace("HOMEDIR", str(tmp_path)) for k, v in env.items()}
+    assert run(init_argv(*py(code)), env=env).stdout.strip() == want
+
+
+@pytest.mark.parametrize(
+    ("cmd", "code", "last"),
+    [
+        (["/nonexistent/cmd"], 127, HINT),
+        ([*PY, "-c", "raise SystemExit(127)"], 127, HINT),
+        (["/etc/passwd"], 126, "kraft: /etc/passwd is not executable"),
+    ],
+    ids=["missing", "exits-127", "not-executable"],
+)
+def test_init_exec_failure(cmd, code, last):
     r = run(init_argv(*cmd))
-    assert (r.returncode, r.stderr.splitlines()[-1]) == (127, HINT)
+    assert (r.returncode, r.stderr.splitlines()[-1]) == (code, last)
 
 
-def _unix_server(path):
+def test_launch_refuses_unknown_arch(bwrap, filt):
+    # Run the launcher with platform.machine() faked, so no keyring join is possible.
+    driver = (
+        "import platform, runpy, sys\n"
+        "platform.machine = lambda: 'riscv64'\n"
+        f"runpy.run_path({str(OS_INIT)!r}, run_name='__main__')"
+    )
+    argv = launcher("launch", bwrap, filt, py("print('ran')"))
+    r = run([*PY, "-c", driver, *argv[4:]])
+    assert (r.returncode, r.stdout, r.stderr.strip()) == (
+        125,
+        "",
+        "kraft: no keyctl number for riscv64; refusing to start the sandbox",
+    )
+
+
+def _unix_server(path, conns=1):
     srv = socket.socket(socket.AF_UNIX)
     srv.bind(str(path))
-    srv.listen(1)
+    srv.listen(conns)
+
+    def handle(conn):
+        try:
+            conn.sendall(b"pong:" + conn.recv(16))
+        except OSError:
+            pass
+        finally:
+            conn.close()
 
     def serve():
-        conn, _ = srv.accept()
-        conn.sendall(b"pong:" + conn.recv(16))
-        conn.close()
+        for _ in range(conns):
+            conn, _ = srv.accept()
+            threading.Thread(target=handle, args=(conn,), daemon=True).start()
         srv.close()
 
     threading.Thread(target=serve, daemon=True).start()
@@ -291,6 +354,34 @@ def test_relay_reconnects_per_connection(tmp_path):
         assert _ask(port) == b"pong:ping"
         sock.unlink()  # the daemon restarted and re-created its socket
         _unix_server(sock)
+        assert _ask(port) == b"pong:ping"
+    finally:
+        os.killpg(p.pid, signal.SIGKILL)
+        p.wait()
+
+
+def test_relay_survives_descriptor_exhaustion(tmp_path):
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    sock = tmp_path / "s.sock"
+    _unix_server(sock, conns=100)
+
+    def small_limit():
+        resource.setrlimit(resource.RLIMIT_NOFILE, (40, 40))
+
+    p = subprocess.Popen(
+        init_argv(*py("import time; time.sleep(30)"), sock=sock, port=port),
+        env={},
+        start_new_session=True,
+        preexec_fn=small_limit,
+    )
+    try:
+        assert _ask(port) == b"pong:ping"
+        held = [socket.create_connection(("127.0.0.1", port)) for _ in range(30)]  # 60 > 40
+        time.sleep(0.5)  # the relay hits EMFILE accepting these
+        for c in held:
+            c.close()
         assert _ask(port) == b"pong:ping"
     finally:
         os.killpg(p.pid, signal.SIGKILL)

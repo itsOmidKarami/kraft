@@ -14,12 +14,14 @@ import ctypes
 import errno
 import os
 import platform
+import resource
 import select
 import signal
 import socket
 import subprocess
 import sys
 import threading
+import time
 
 HINT = (
     "kraft: a command was not found inside the os sandbox; "
@@ -49,8 +51,12 @@ def _exit_code(status):
 
 def _join_new_keyring():
     nr = KEYCTL_NR.get(platform.machine())
-    if nr is None:
-        return  # shortcut: no join on an unknown arch; add its number with its seccomp table
+    if nr is None:  # failing open would leave the command able to see the daemon's keys
+        print(
+            f"kraft: no keyctl number for {platform.machine()}; refusing to start the sandbox",
+            file=sys.stderr,
+        )
+        raise SystemExit(125)
     libc = ctypes.CDLL(None, use_errno=True)
     if libc.syscall(nr, KEYCTL_JOIN_SESSION_KEYRING, None) == -1:
         err = ctypes.get_errno()
@@ -140,17 +146,26 @@ def _pump(src, dst):
 
 
 def _relay_conn(conn, path):
+    up = None
     try:
         up = socket.socket(socket.AF_UNIX)
         up.connect(path)
+        t = threading.Thread(target=_pump, args=(up, conn), daemon=True)
+        t.start()
+        _pump(conn, up)
+        t.join()
     except OSError:
+        pass
+    finally:
         conn.close()
-        return
-    threading.Thread(target=_pump, args=(up, conn), daemon=True).start()
-    _pump(conn, up)
+        if up is not None:
+            up.close()
 
 
 def _start_relay(path, port):
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if soft != hard:  # each relayed connection holds two descriptors
+        resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
     srv = socket.socket()
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", port))
@@ -158,7 +173,11 @@ def _start_relay(path, port):
 
     def accept_loop():
         while True:
-            conn, _ = srv.accept()
+            try:
+                conn, _ = srv.accept()
+            except OSError:  # EMFILE and the like: wait for descriptors, never give up
+                time.sleep(0.05)
+                continue
             threading.Thread(target=_relay_conn, args=(conn, path), daemon=True).start()
 
     threading.Thread(target=accept_loop, daemon=True).start()
@@ -190,6 +209,9 @@ def _init(argv):
         signal.signal(sig, forward)
     try:
         child = subprocess.Popen(cmd)  # raises when the exec fails: no byte then
+    except PermissionError:
+        print(f"kraft: {cmd[0]} is not executable", file=sys.stderr)
+        return 126
     except OSError:
         print(HINT, file=sys.stderr)
         return 127

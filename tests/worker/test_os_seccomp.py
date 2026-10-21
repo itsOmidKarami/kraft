@@ -39,34 +39,18 @@ def run_bpf(program: bytes, nr: int, audit_arch: int) -> int:
 @pytest.mark.parametrize(
     ("arch", "name", "nr", "audit_arch", "expected"),
     [
-        ("x86_64", "keyctl", None, "x86_64", EPERM),
-        ("x86_64", "io_uring_setup", None, "x86_64", EPERM),
-        ("x86_64", "mount", None, "x86_64", EPERM),
+        *[(a, n, None, a, EPERM) for a, table in os_seccomp.DENY.items() for n in table],
         ("x86_64", None, 0, "x86_64", ALLOW),
         ("x86_64", "keyctl", None, "i386", ENOSYS),
         ("x86_64", None, X32 | 0, "x86_64", ENOSYS),
-        ("aarch64", "keyctl", None, "aarch64", EPERM),
     ],
-    ids=[
-        "keyctl-denied",
-        "io-uring-denied",
-        "mount-denied",
-        "read-allowed",
-        "foreign-arch",
-        "x32",
-        "aarch64-keyctl",
-    ],
+    ids=lambda v: v if isinstance(v, str) else None,
 )
 def test_filter_decides(arch, name, nr, audit_arch, expected):
+    program = os_seccomp.build(arch)
+    assert len(program) % 8 == 0
     nr = os_seccomp.DENY[arch][name] if name else nr
-    assert run_bpf(os_seccomp.build(arch), nr, AUDIT[audit_arch]) == expected
-
-
-def test_every_denied_call_is_denied():
-    for arch, table in os_seccomp.DENY.items():
-        program = os_seccomp.build(arch)
-        assert len(program) % 8 == 0
-        assert {run_bpf(program, nr, AUDIT[arch]) for nr in table.values()} == {EPERM}
+    assert run_bpf(program, nr, AUDIT[audit_arch]) == expected
 
 
 def test_unknown_arch_refused():
