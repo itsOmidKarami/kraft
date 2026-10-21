@@ -184,7 +184,7 @@ def retry_after_cap(
         clear_loop_counters(conn, work_item_id, node_id, key)
     # Item-wide, not node-scoped -- a human's `/retry` is the same explicit
     # "give this a fresh budget" for every node's base-change restarts
-    # (`walk._restart_for_base_change`) that it already is for every other
+    # (`walk._restart_span`) that it already is for every other
     # loop cap here. A restart span never clears these itself: that is what
     # bounds a base that keeps moving.
     if by_person:

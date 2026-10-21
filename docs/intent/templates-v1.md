@@ -1194,7 +1194,7 @@ enforced-by: tests/executor/test_stuck_escalation.py::test_a_failed_or_questioni
 
 An execution node MAY declare `on_base_changed.restart_from` to restart the
 chain at an earlier execution node when its work changes the worktree base.
-enforced-by: tests/executor/test_base_change.py::test_a_moved_base_restarts_the_declared_span_and_spends_no_attempt, tests/executor/test_base_change.py::test_a_base_moved_stop_skips_the_nodes_later_steps_until_the_restart[loopless], tests/executor/test_base_change.py::test_a_base_moved_stop_skips_the_nodes_later_steps_until_the_restart[fix-loop], tests/executor/test_base_change.py::test_no_movement_and_no_declaration_mean_no_restart, tests/executor/test_base_change.py::test_restarts_are_bounded_by_the_nodes_own_counter
+enforced-by: tests/executor/test_base_change.py::test_a_moved_base_restarts_the_declared_span_and_spends_no_attempt, tests/executor/test_base_change.py::test_a_base_moved_stop_skips_the_nodes_later_steps_until_the_restart[loopless], tests/executor/test_base_change.py::test_a_base_moved_stop_skips_the_nodes_later_steps_until_the_restart[fix-loop], tests/executor/test_base_change.py::test_no_movement_and_no_declaration_mean_no_restart, tests/executor/test_base_change.py::test_restarts_are_bounded_by_the_nodes_own_counter[its-own-key], tests/executor/test_base_change.py::test_restarts_are_bounded_by_the_nodes_own_counter[the-policy-default]
 
 ## REQ base-change-is-not-an-execution-failure
 

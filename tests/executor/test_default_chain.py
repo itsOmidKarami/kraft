@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 from support.harness import entry_of
+from support.item_walk import approve
 
 from kraft import executor, item_paths, store
 from kraft import policy as _policy
@@ -103,11 +104,6 @@ async def test_the_pre_draft_gate_shows_the_work_brief_the_node_before_it_wrote(
     assert gates.gate_artifact(run_dirs, it.row(), "local_review") == brief
 
 
-async def _approved(it, gate: str) -> None:
-    await it.database.write(lambda c: store.request_gate(c, it.id, gate, gate))
-    await it.database.write(lambda c: store.approve_gate(c, it.id, gate))
-
-
 def _moves_base_once(it):
     moved = []
 
@@ -133,7 +129,7 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
     resolve a conflict reopens it:
     test_base_change.py::test_a_resolved_conflict_reopens_the_approved_gates_in_its_span."""
     it = await item_on(default_chain, "merge_request_feedback")
-    await _approved(it, "local_review")
+    await approve(it, "local_review")
     script.effects = {"await_ci": _moves_base_once(it)}
 
     assert await _walk(it, default_chain, "merge_request_feedback") == "awaiting_gate"
@@ -169,7 +165,7 @@ async def test_a_rebase_in_draft_merge_request_does_not_restart_merge_request_fe
     then: nothing restarts, even though `merge_request_feedback` does declare
     `on_base_changed: {restart_from: verification}`."""
     it = await item_on(default_chain, "draft_merge_request")
-    await _approved(it, "local_review")
+    await approve(it, "local_review")
     script.effects = {"rebase": _moves_base_once(it)}
 
     assert await _walk(it, default_chain, "draft_merge_request") == "awaiting_gate"

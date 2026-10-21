@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
@@ -24,6 +25,9 @@ from kraft.executor.context import (
     CONFLICT,
     CONFLICT_RESOLVED,
     INFRA_STOP,
+    MERGE_REJECTED,
+    MERGE_REPAIRED,
+    MERGE_REWIND,
     RATE_LIMITED,
     READ_ONLY_VIOLATED,
     REPAIR_DOUBTED,
@@ -50,6 +54,7 @@ from kraft.vocab import (
     HOLDS_SLOT,
     ChainEvent,
     EscalationEvent,
+    ForgeEvent,
     GateEvent,
     SessionEvent,
     StopKind,
@@ -739,6 +744,37 @@ def _conflict_detail(db, work_item_id: str, node: ResolvedNode, conflicted, excs
     )
 
 
+async def _refuse_in_place_rebase(
+    db, run_dirs, work_item_id: str, node: ResolvedNode, row, worktree, new_base: str, base: str
+) -> str | None:
+    """The stop, if any, before a handler is sent to rebase onto `new_base` in
+    a person's own checkout.
+
+    The handler's own `git rebase` there skips the guard Kraft's rebase has:
+    refused before it is dispatched, after the take, so the item's branch's
+    ignore rules are the ones read. A refused take is the handler's to report,
+    from its own; a pause that landed meanwhile ends the walk paused, as a
+    task's take does."""
+    try:
+        await inplace.take(db, run_dirs, row, attachments=entry.attachments_of(row), walk=True)
+    except inplace.NotRunning:
+        return "paused"
+    except inplace.CheckoutRefused:
+        pass
+    try:
+        await asyncio.to_thread(
+            inplace.refuse_ignored,
+            Path(worktree),
+            f"refs/heads/{store.branch_for(row)}",
+            new_base,
+            base,
+        )
+    except inplace.CheckoutRefused as exc:
+        await inplace.stop_refused(db, work_item_id, node.id, exc)
+        return "needs_human"
+    return None
+
+
 async def _resolve_conflict(
     db,
     run_dirs,
@@ -778,28 +814,11 @@ async def _resolve_conflict(
         )
         return "needs_human"
     if store.is_in_place(row) and new_base is not None:
-        # The resolver's own `git rebase` in the person's checkout skips the
-        # guard Kraft's rebase has: refused before it is dispatched, after
-        # the take, so the item's branch's ignore rules are the ones read. A
-        # refused take is the handler's to report, from its own; a pause that
-        # landed meanwhile ends the walk paused, as a task's take does.
-        try:
-            await inplace.take(db, run_dirs, row, attachments=entry.attachments_of(row), walk=True)
-        except inplace.NotRunning:
-            return "paused"
-        except inplace.CheckoutRefused:
-            pass
-        try:
-            await asyncio.to_thread(
-                inplace.refuse_ignored,
-                Path(worktree),
-                f"refs/heads/{store.branch_for(row)}",
-                new_base,
-                base,
-            )
-        except inplace.CheckoutRefused as exc:
-            await inplace.stop_refused(db, work_item_id, node.id, exc)
-            return "needs_human"
+        refused = await _refuse_in_place_rebase(
+            db, run_dirs, work_item_id, node, row, worktree, new_base, base
+        )
+        if refused is not None:
+            return refused
     note = prompts.rebase_resolve_note(
         worktree,
         store.branch_for(row),
@@ -869,6 +888,150 @@ async def _resolve_conflict(
     await db.write(
         lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=kind, facts=facts)
     )
+    return "needs_human"
+
+
+#: `<node>.on_merge_rejected`'s bound when policy.yaml's `loops:` does not name
+#: it. Never the policy's `default`: its one-hour wall clock would run out
+#: while the reopened `final_review` waits for a person.
+MERGE_REJECTED_CAP = _policy.Cap(attempts=3, wall_clock_s=604800)
+
+#: How far back one page reads looking for a node's latest drop.
+_DROP_PAGE = 200
+
+
+def _latest_drop(c, work_item_id: str, node_id: str) -> dict | None:
+    """The newest `merge_queue_dropped` the forge's merge handler recorded for
+    `node_id`: why the train or queue rejected the merge request, and the head
+    Kraft's forced rebase left (`adapters.forge.run._merge_dropped`)."""
+    before = 2**63 - 1
+    while True:
+        page = events.read_before(c, before, work_item_id, limit=_DROP_PAGE)
+        for event in reversed(page):
+            if (
+                event["type"] == ForgeEvent.MERGE_QUEUE_DROPPED
+                and event["payload"].get("node_id") == node_id
+            ):
+                return event["payload"]
+        if len(page) < _DROP_PAGE:
+            return None
+        before = page[0]["seq"]
+
+
+async def _repair_merge_rejection(
+    db,
+    run_dirs,
+    work_item_id: str,
+    node: ResolvedNode,
+    row,
+    worktree,
+    failed: list[ResolvedTask],
+    *,
+    steer: Steer | None,
+    launch: LaunchContext | None,
+    budget: _policy.Budget,
+    round: int,
+    loop_severities: frozenset[str],
+) -> str:
+    """Answer a merge train's or queue's drop with the node's
+    `on_merge_rejected` repair, and say how `run_once` rewinds.
+
+    A conflict Kraft's own forced rebase already cleared changed nothing a
+    gate saw: `MERGE_REWIND`, with no agent. Anything else goes to the
+    repair, which must commit: a head the train already rejected would only be
+    rejected again, so a repair that changed nothing stops for a person, as
+    one that failed does. A repair that committed answers `MERGE_REPAIRED`,
+    which reopens the span's approved gates (Ruling 162)."""
+    drop = db.read(lambda c: _latest_drop(c, work_item_id, node.id))
+    if drop is None:
+        # The forge records the drop before it answers `merge_rejected`; with
+        # nothing to tell the repair, a person decides.
+        reason = f"node {node.id} reported merge_rejected but recorded no merge_queue_dropped"
+        await db.write(
+            lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=StopKind.FAILED)
+        )
+        return "needs_human"
+    if drop.get("cause") == "conflict" and drop.get("rebased"):
+        return MERGE_REWIND
+    # A conflict is a conflict stop, as `_resolve_conflict` names it; any other
+    # repair that did not take is a failed node repair's.
+    failed_kind = StopKind.CONFLICT if drop.get("cause") == "conflict" else StopKind.FAILED
+    why = drop.get("reason") or "no reason given"
+    old_base = dispatch._current_base_ref(db, work_item_id)
+    try:
+        base = await _builtins.base_branch(db, work_item_id, Path(row["repo"]))
+        new_base = await _builtins.upstream_head(Path(row["repo"]), base)
+    except _builtins.BaseBranchMissing as exc:
+        reason = f"the merge rejection in node {node.id} cannot be repaired: {exc}"
+        await db.write(
+            lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=StopKind.CONFIG)
+        )
+        return "needs_human"
+    in_place = store.is_in_place(row)
+    if in_place and not drop.get("rebased") and new_base is not None:
+        # Told to rebase first: the same guard the conflict resolver gets.
+        refused = await _refuse_in_place_rebase(
+            db, run_dirs, work_item_id, node, row, worktree, new_base, base
+        )
+        if refused is not None:
+            return refused
+    landed = [
+        r["path"]
+        for r in db.read(lambda c: store.repos_for(c, work_item_id))
+        if r["state"] == "merged"
+    ]
+    note = prompts.merge_rejected_note(
+        worktree, store.branch_for(row), base, drop, in_place=in_place, landed=landed
+    )
+    verdict, h_failed, _excs = await dispatch.run_recovery(
+        db,
+        run_dirs,
+        work_item_id,
+        node,
+        row,
+        worktree,
+        handler=node.on_merge_rejected,
+        scope="merge_rejected",
+        failed=failed,
+        note=note,
+        steer=steer,
+        launch=launch,
+        budget=budget,
+        measured_round=round,
+        round=round,
+        loop_severities=loop_severities,
+    )
+    stop = await _sentinel_stop(db, work_item_id, node, verdict, h_failed, budget)
+    if stop is not None:
+        return stop
+    if verdict == "ok":
+        head = _config.git_read(Path(worktree), "rev-parse", "HEAD", expected_failure=True)
+        if head is not None and head != drop.get("head_sha"):
+            moved = new_base is not None and (
+                _config.git_read(
+                    Path(worktree),
+                    "merge-base",
+                    "--is-ancestor",
+                    new_base,
+                    "HEAD",
+                    expected_failure=True,
+                )
+                is not None
+            )
+            if moved and new_base != old_base:
+                await db.write(lambda c: store.set_base_ref(c, work_item_id, new_base))
+            return MERGE_REPAIRED
+        reason = f"the merge-rejection repair in node {node.id} committed nothing: {why}"
+        kind = failed_kind
+    elif (question := dispatch.needs_context_question(db, work_item_id, node, round)) is not None:
+        # Asked, as the note invites when the fix belongs in a target that
+        # already landed: the question is the stop.
+        reason = f"needs_context: {question}"
+        kind = StopKind.QUESTION
+    else:
+        reason = f"the merge-rejection repair in node {node.id} could not fix it: {why}"
+        kind = failed_kind
+    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=kind))
     return "needs_human"
 
 
@@ -1099,6 +1262,21 @@ async def _walk_node_once(
                 loop_severities=loop_severities,
             )
             return resolved
+        if verdict == MERGE_REJECTED:
+            return await _repair_merge_rejection(
+                db,
+                run_dirs,
+                work_item_id,
+                node,
+                row,
+                worktree,
+                failed,
+                steer=steer,
+                launch=launch,
+                budget=budget,
+                round=0,
+                loop_severities=loop_severities,
+            )
         if verdict == "failed":
             question = dispatch.needs_context_question(db, work_item_id, node, round=0)
             recovered = False
@@ -1260,6 +1438,21 @@ async def _walk_node_once(
                 loop_severities=loop_severities,
             )
             return resolved
+        if verdict == MERGE_REJECTED:
+            return await _repair_merge_rejection(
+                db,
+                run_dirs,
+                work_item_id,
+                node,
+                row,
+                worktree,
+                failed,
+                steer=steer,
+                launch=launch,
+                budget=budget,
+                round=round,
+                loop_severities=loop_severities,
+            )
 
         if (
             verdict == "failed"
@@ -1790,7 +1983,21 @@ async def _report_if_undelivered(db, work_item_id: str, carried: Steer) -> None:
         )
 
 
-async def _restart_for_base_change(
+def _base_change_cap(key: str) -> Callable[[_policy.Policy | None], _policy.Cap]:
+    """`<node>.on_base_changed`'s bound: policy.yaml's `loops:`, else its
+    `default`."""
+    return lambda p: (
+        _policy.resolve_cap(p, key) if p is not None else _policy.Cap(attempts=3, wall_clock_s=3600)
+    )
+
+
+def _merge_rejected_cap(key: str) -> Callable[[_policy.Policy | None], _policy.Cap]:
+    """`<node>.on_merge_rejected`'s bound: policy.yaml's `loops:`, else
+    `MERGE_REJECTED_CAP` -- never the policy's `default`."""
+    return lambda p: p.loops.get(key, MERGE_REJECTED_CAP) if p is not None else MERGE_REJECTED_CAP
+
+
+async def _restart_span(
     db,
     work_item_id: str,
     nodes,
@@ -1798,11 +2005,18 @@ async def _restart_for_base_change(
     restart_from: str,
     policy: _policy.Policy | None,
     *,
+    key: str,
+    cap: Callable[[_policy.Policy | None], _policy.Cap],
+    event: ChainEvent,
     reopen_gates: bool,
+    reopen_reason: str,
 ) -> int | None:
     """Restart the chain at `restart_from` because node `index` moved the
-    worktree base (`base-change-restarts-a-declared-chain-span`), or stop for a
-    human once the node's restarts are spent.
+    worktree base (`base-change-restarts-a-declared-chain-span`) or had its
+    merge request rejected by a merge train or queue (`on_merge_rejected`), or
+    stop for a human once the node's restarts under `key` are spent. `cap`
+    resolves that counter's bound from the policy, `event` records the
+    restart, and `reopen_reason` is what a reopened gate says.
 
     A base change is not an execution failure
     (`base-change-is-not-an-execution-failure`): no recovery ran for it and no
@@ -1818,19 +2032,17 @@ async def _restart_for_base_change(
     with no textual conflict -- changes nothing a gate saw, so an approved gate
     in the span keeps its approval and the restarted walk passes over it. A
     resolved conflict changed code no gate saw: every approved gate in the span
-    reopens, and a human approves it again.
+    reopens, and a human approves it again. A merge-rejection repair's commit
+    is the same.
     """
     node = nodes[index]
-    key = f"{node.id}.on_base_changed"
-    cap = (
-        _policy.resolve_cap(policy, key)
-        if policy is not None
-        else _policy.Cap(attempts=3, wall_clock_s=3600)
+    bound = cap(policy)
+    count, started_at, bound = await db.write(
+        lambda c: store.bump_counter(c, work_item_id, key, bound)
     )
-    count, started_at, cap = await db.write(lambda c: store.bump_counter(c, work_item_id, key, cap))
-    if _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) == "breached":
+    if _policy.check(count=count, started_at=started_at, cap=bound, now=_now()) == "breached":
         reason = f"{key} exhausted after {count - 1} restart(s) from {restart_from!r}"
-        capped = {"cycles": count - 1, "attempts": cap.attempts}
+        capped = {"cycles": count - 1, "attempts": bound.attempts}
         await db.write(
             lambda c: store.mark_needs_human(
                 c, work_item_id, node.id, reason, capped, kind=StopKind.CAP
@@ -1847,7 +2059,7 @@ async def _restart_for_base_change(
                         c,
                         work_item_id,
                         GateEvent.REOPENED,
-                        {"gate": g, "reason": "conflict_resolved"},
+                        {"gate": g, "reason": reopen_reason},
                         node_id=g,
                     )
                 )
@@ -1861,7 +2073,7 @@ async def _restart_for_base_change(
         lambda c: events.append(
             c,
             work_item_id,
-            ChainEvent.BASE_CHANGE_RESTART,
+            event,
             {
                 "node_id": node.id,
                 "restart_from": restart_from,
@@ -1939,8 +2151,18 @@ async def _door_conflict(
     )
     if result != CONFLICT_RESOLVED:
         return result
-    target = await _restart_for_base_change(
-        db, work_item_id, nodes, index, declared.restart_from, policy, reopen_gates=True
+    target = await _restart_span(
+        db,
+        work_item_id,
+        nodes,
+        index,
+        declared.restart_from,
+        policy,
+        key=f"{node.id}.on_base_changed",
+        cap=_base_change_cap(f"{node.id}.on_base_changed"),
+        event=ChainEvent.BASE_CHANGE_RESTART,
+        reopen_gates=True,
+        reopen_reason="conflict_resolved",
     )
     return "needs_human" if target is None else target
 
@@ -2265,18 +2487,49 @@ async def run_once(
             return RATE_LIMITED
         if result == WAITING:
             return WAITING
+        if result in (MERGE_REWIND, MERGE_REPAIRED):
+            # Ahead of the base-change branch: Kraft's own forced rebase on the
+            # drop moved `base_ref` too, and on a node declaring both policies
+            # this restart, its own cap and its note are the ones that apply.
+            rejected = node.node.on_merge_rejected
+            key = f"{node.id}.on_merge_rejected"
+            target = await _restart_span(
+                db,
+                work_item_id,
+                nodes,
+                i,
+                rejected.restart_from,
+                policy,
+                key=key,
+                cap=_merge_rejected_cap(key),
+                event=ChainEvent.MERGE_REJECTION_RESTART,
+                reopen_gates=result == MERGE_REPAIRED,
+                reopen_reason="merge_rejected",
+            )
+            await _report_if_undelivered(db, work_item_id, carried)
+            if target is None:
+                return "needs_human"
+            drop = db.read(lambda c, n=node.id: _latest_drop(c, work_item_id, n)) or {}
+            carried = Steer(prompts.merge_rewind_note(drop, rejected.restart_from), source="seeded")
+            i = target
+            continue
         new_base = dispatch._current_base_ref(db, work_item_id) if base_change else None
         if base_change is not None and (
             result in (BASE_MOVED, CONFLICT_RESOLVED) or new_base != pre_base
         ):
-            target = await _restart_for_base_change(
+            key = f"{node.id}.on_base_changed"
+            target = await _restart_span(
                 db,
                 work_item_id,
                 nodes,
                 i,
                 base_change.restart_from,
                 policy,
+                key=key,
+                cap=_base_change_cap(key),
+                event=ChainEvent.BASE_CHANGE_RESTART,
                 reopen_gates=result == CONFLICT_RESOLVED,
+                reopen_reason="conflict_resolved",
             )
             if target is None:
                 await _report_if_undelivered(db, work_item_id, carried)
