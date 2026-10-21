@@ -283,6 +283,7 @@ describe("a node the chain ran again", () => {
     [{ pass: 2, reason: "fixed", gate: "local_review" }, "after a fix at approve local review"],
     [{ pass: 2, reason: "retry" }, "after a retry"],
     [{ pass: 3, reason: "base_change" }, "after a base change"],
+    [{ pass: 2, reason: "merge_rejected" }, "after the merge train or queue rejected it"],
     [{ pass: 2 }, "started over"],
   ] as const)("says what started a pass: %j → %s", (p, want) => {
     expect(passWhy(p)).toBe(want);
@@ -324,7 +325,7 @@ describe("sessionLook covers every session status", () => {
   it.each(SESSION_STATUSES)("%s has a look", (status) => {
     expect(sessionLook(s("verification.checks.lint", { status }), 0).state).toBeDefined();
   });
-  it.each(["conflict", "infra", "infra_stop"] as const)("draws %s as failed", (status) => {
+  it.each(["conflict", "infra", "infra_stop", "merge_rejected"] as const)("draws %s as failed", (status) => {
     expect(sessionLook(s("verification.checks.lint", { status }), 0).state).toBe("failed");
   });
   it("does not throw on a status a newer server sends", () => {

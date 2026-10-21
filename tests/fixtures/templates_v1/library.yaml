@@ -90,6 +90,16 @@ tasks:
       after you.
     skill: kraft:mr-metadata-repair
 
+  # The `on_merge_rejected` repair of the default chain's `merge`: the merge
+  # train or merge queue ran its own pipeline on the merge request merged
+  # into the target branch as it is now, and that pipeline failed.
+  repair_merge_queue_failure:
+    kind: agent
+    harness: claude
+    profile: strong
+    prompt: Fix what made the merge train or merge queue reject this merge request.
+    skill: kraft:merge-queue-repair
+
   strict_judge:
     kind: agent
     harness: claude

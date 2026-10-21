@@ -149,17 +149,39 @@ async def test_retry_after_cap_marks_seeded_on_the_event(database, kwargs, seede
     assert ev["payload"]["seeded"] is seeded
 
 
+_RETRY_KEYS = (
+    "verify.fix_loop",
+    "ci_infra:verify",
+    "verify.escalation",
+    "verify.on_base_changed",
+    "merge.on_base_changed",
+    "merge.on_merge_rejected",
+)
+
+
+async def test_a_persons_retry_gives_every_restart_counter_back(database):
+    """A person's retry is a fresh budget for the node's own loops and, item
+    wide, for every node's base-change and merge-rejection restarts; a gate's
+    reject loop is not its to reset."""
+    for key in (*_RETRY_KEYS, "review_reject_loop"):
+        await _bump(database, key)
+    await database.write(
+        lambda c: store.retry_after_cap(c, "w1", "verify", "verify.fix_loop", None, by_person=True)
+    )
+    assert [_counter(database, key) for key in _RETRY_KEYS] == [None] * len(_RETRY_KEYS)
+    assert _counter(database, "review_reject_loop")["count"] == 1
+
+
 async def test_a_retry_no_person_asked_for_clears_no_counter(database):
     """`only-a-person-resets-a-cap-counter` (Kraft-s7c04.22): the retry is
     still recorded, and every counter it would have cleared for a person
     stands."""
-    keys = ("verify.fix_loop", "ci_infra:verify", "verify.escalation", "verify.on_base_changed")
-    for key in keys:
+    for key in _RETRY_KEYS:
         await _bump(database, key)
     await database.write(
         lambda c: store.retry_after_cap(c, "w1", "verify", "verify.fix_loop", None, by_person=False)
     )
-    assert [_counter(database, key)["count"] for key in keys] == [1] * 4
+    assert [_counter(database, key)["count"] for key in _RETRY_KEYS] == [1] * len(_RETRY_KEYS)
     ev = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
     assert ev["type"] == "work_item_retried"
 

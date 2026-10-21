@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from kraft import findings as _findings
@@ -211,13 +212,13 @@ _REBASE_RESOLVE_PROMPT = (
 _RESOLVE_IN = {
     False: (
         " and the worktree is clean.",
-        "Re-run the rebase (`git rebase {new_base}`) and resolve the conflict "
+        "{run} the rebase (`git rebase {new_base}`) and resolve the conflict "
         "yourself, then finish it (`git rebase --continue`).",
     ),
     True: (
         ". This is a person's own checkout: it may hold their uncommitted "
         "edits, which you must neither commit nor discard.",
-        "Re-run the rebase with `git -c rebase.updateRefs=false rebase "
+        "{run} the rebase with `git -c rebase.updateRefs=false rebase "
         "--autostash {new_base}`: git sets their edits aside for the rebase and "
         "puts them back when it ends. That is the one exception to the rule "
         "against `git stash`; never stash, pop or drop anything yourself. "
@@ -257,13 +258,105 @@ def rebase_resolve_note(
     folder, rerun = _RESOLVE_IN[in_place]
     return _REBASE_RESOLVE_PROMPT.format(
         folder=folder,
-        rerun=rerun.format(new_base=new_base),
+        rerun=rerun.format(run="Re-run", new_base=new_base),
         branch=branch,
         old_base=old_base,
         new_base=new_base,
         conflict=conflict.strip(),
         diff=body,
         attachments=attachment_note(attachments, method_is_own=False),
+    )
+
+
+#: What the `on_merge_rejected` repair (`walk._repair_merge_rejection`) is
+#: dispatched with: the drop the forge recorded (`merge_queue_dropped`), so it
+#: does not have to rediscover why the train or queue rejected the merge
+#: request, and what happened to it (`_MERGE_REJECTED_WHAT`).
+_MERGE_REJECTED_PROMPT = (
+    "A merge train or merge queue rejected this merge request. Branch {branch} "
+    "{what}{folder}\n\n"
+    "Reason: {reason}\n"
+    "Pipeline: {url}\n"
+    "Failed jobs:\n{jobs}\n\n"
+    "{where}"
+    "{landed}"
+    "{rebase}"
+    "Fetch and inspect origin/{base}, reproduce the failure locally where you "
+    "can, and fix the code.\n"
+    "Commit your fix on this branch. Do not push and do not merge: Kraft does both.\n"
+)
+
+#: What happened to the merge request, by the drop's cause: a merge request
+#: that never reached the train never passed its own pipeline either.
+_MERGE_REJECTED_WHAT = {
+    "code": "passed its own pipeline, but failed once combined with {base} as it is now",
+    "not_added": (
+        "never reached the merge train or queue: its own pipeline failed after Kraft "
+        "asked for the merge, checked against {base}"
+    ),
+    "conflict": "no longer merges cleanly with {base} as it is now",
+}
+
+#: Where the repair works: the item's own worktree, or in place a person's
+#: checkout, worded as `_RESOLVE_IN` words it for the conflict resolver.
+_MERGE_REJECTED_IN = {
+    False: ".",
+    True: _RESOLVE_IN[True][0],
+}
+
+
+def merge_rejected_note(
+    branch: str,
+    base: str,
+    drop: Mapping,
+    *,
+    in_place: bool,
+    landed: Sequence[str] = (),
+    member: str | None = None,
+) -> str:
+    """What the merge-rejection repair is told: the drop's reason, the train's
+    or queue's URL and each failed job. A branch Kraft's own forced rebase did
+    not move is the repair's to rebase first. `landed` is a multi-repo item's
+    targets already merged: the repair cannot change those, and asks instead.
+    `member` is the workspace member checkout whose merge request was dropped,
+    when it is not the item's own repository; `base` is then that member's."""
+    jobs = "\n".join(f"- {job}" for job in drop.get("failed_jobs") or ()) or "- (none named)"
+    landed_text = (
+        "Already merged: "
+        + ", ".join(landed)
+        + ". These have already landed and cannot change here; if the fix belongs "
+        "in one of them, report needs_context.\n\n"
+        if landed
+        else ""
+    )
+    rebase = ""
+    if not drop.get("rebased"):
+        rerun = _RESOLVE_IN[in_place][1].format(run="Run", new_base=f"origin/{base}")
+        rebase = f"First rebase onto origin/{base} and resolve any conflict. {rerun}\n\n"
+    where = f"Its merge request is the one in {member}; fix it there.\n\n" if member else ""
+    return _MERGE_REJECTED_PROMPT.format(
+        where=where,
+        branch=branch,
+        base=base,
+        what=_MERGE_REJECTED_WHAT.get(drop.get("cause"), _MERGE_REJECTED_WHAT["code"]).format(
+            base=base
+        ),
+        folder=_MERGE_REJECTED_IN[in_place],
+        reason=drop.get("reason") or "no reason given",
+        url=drop.get("url") or "(none given)",
+        jobs=jobs,
+        landed=landed_text,
+        rebase=rebase,
+    )
+
+
+def merge_rewind_note(drop: Mapping, restart_from: str) -> str:
+    """The seeded steer the rewound span starts with: why it went back."""
+    return (
+        f"Rewound to {restart_from} because the merge train or queue rejected the "
+        f"merge request: {drop.get('reason') or 'no reason given'}"
+        + (f" ({drop['url']})" if drop.get("url") else "")
+        + (f". Failed jobs: {', '.join(drop['failed_jobs'])}." if drop.get("failed_jobs") else ".")
     )
 
 

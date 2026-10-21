@@ -44,6 +44,8 @@ _SLOT_IDS = {JUDGE_SEGMENT: "judge", "escalation": "escalate", AUTO_REVIEW_SEGME
 _HANDLERS = ("on_failure", "fix_loop", "on_conflict")
 #: What `remove` drops as a key of its container rather than a list entry.
 _SLOTS = ("fix_loop", JUDGE_SEGMENT, "escalation", AUTO_REVIEW_SEGMENT)
+#: The node policies' restart pointers: clearing one drops its whole policy.
+_RESTARTS = ("on_base_changed.restart_from", "on_merge_rejected.restart_from")
 #: What `reset_field` with no field keeps (the prototype's `resetAll`).
 _KEPT = ("id", "extends", "icon", "on_failure")
 
@@ -320,12 +322,16 @@ class Draft:
             written = _beside(self.library_raw, addon_components(self.st))
             parent = authored.inherited(written, Namespace.NODES, node["extends"])
             base_change = node.get("on_base_changed")
+            rejected = node.get("on_merge_rejected")
             containers = {
                 id: node,
                 _join(id, "on_failure"): node.get("on_failure"),
                 _join(id, "fix_loop"): node.get("fix_loop"),
                 _join(id, "on_base_changed", "on_conflict"): (
                     base_change.get("on_conflict") if isinstance(base_change, dict) else None
+                ),
+                _join(id, "on_merge_rejected", "repair"): (
+                    rejected.get("repair") if isinstance(rejected, dict) else None
                 ),
             }
             for path, mine in containers.items():
@@ -387,9 +393,9 @@ def _produces(node: Mapping) -> list:
     return [t.get("produces") for s in _dicts(node.get("steps")) for t in _dicts(s.get("tasks"))]
 
 
-def _restart_from(node: Mapping) -> object:
-    base_change = node.get("on_base_changed")
-    return base_change.get("restart_from") if isinstance(base_change, Mapping) else None
+def _restart_from(node: Mapping, policy: str = "on_base_changed") -> object:
+    declared = node.get(policy)
+    return declared.get("restart_from") if isinstance(declared, Mapping) else None
 
 
 def order_issues(nodes: list[Mapping]) -> list[str]:
@@ -409,8 +415,14 @@ def order_issues(nodes: list[Mapping]) -> list[str]:
                 and any(artifact in m for m in made)
             ):
                 out.append(f"{id} shows {artifact}, which no earlier node would produce")
-        elif (restart := _restart_from(n)) in index and index[restart] > i:
+            continue
+        if (restart := _restart_from(n)) in index and index[restart] > i:
             out.append(f"{id} restarts from {restart}, which would come after it")
+        if (restart := _restart_from(n, "on_merge_rejected")) in index and index[restart] >= i:
+            out.append(
+                f"{id} restarts from {restart} after a rejected merge, which would not come "
+                "before it"
+            )
     return out
 
 
@@ -421,8 +433,11 @@ def references(nodes: list[Mapping], id: str) -> list[dict]:
         if n.get("kind") == "gate":
             if n.get("reject_to") == id:
                 out.append({"path": n.get("id"), "field": "reject_to"})
-        elif _restart_from(n) == id and n.get("id") != id:
+            continue
+        if _restart_from(n) == id and n.get("id") != id:
             out.append({"path": n.get("id"), "field": "on_base_changed.restart_from"})
+        if _restart_from(n, "on_merge_rejected") == id:
+            out.append({"path": n.get("id"), "field": "on_merge_rejected.restart_from"})
     return out
 
 
@@ -442,8 +457,8 @@ def _addressed(path: str) -> str:
             kind, i = "task", i + 1  # its id follows
         elif kind == "node" and seg == AUTO_REVIEW_SEGMENT:
             kind = "task"
-        elif kind == "node" and seg == "on_base_changed":
-            kind, i = "shape", i + 1  # `on_conflict` follows
+        elif kind == "node" and seg in ("on_base_changed", "on_merge_rejected"):
+            kind, i = "shape", i + 1  # `on_conflict` or `repair` follows
         elif kind in ("node", "shape") and seg == JUDGE_SEGMENT:
             kind = "task"
         elif kind != "shape" and seg in ("on_failure", "fix_loop"):
@@ -488,6 +503,8 @@ def _components(data: Mapping, file: str) -> list[tuple[dict, Namespace, str]]:
             task(n[AUTO_REVIEW_SEGMENT], _join(path, AUTO_REVIEW_SEGMENT))
         if isinstance(base_change := n.get("on_base_changed"), dict):
             shape(base_change.get("on_conflict"), _join(path, "on_base_changed", "on_conflict"))
+        if isinstance(rejected := n.get("on_merge_rejected"), dict):
+            shape(rejected.get("repair"), _join(path, "on_merge_rejected", "repair"))
 
     if file == authored.CHAIN:
         for n in [*_dicts(data.get("nodes")), *authored.added_nodes(data)]:
@@ -881,8 +898,9 @@ def set_field(d: Draft, path: str, field: str, value: object) -> None:
     if field == "id":
         raise OpError("rename it with rename")
     target = d.at(path)
-    if field == "on_base_changed.restart_from" and value in (None, ""):
-        d.drop(path, "on_base_changed")
+    if field in _RESTARTS and value in (None, ""):
+        # Neither policy means anything without its restart.
+        d.drop(path, field.partition(PATH_SEPARATOR)[0])
         return
     if value in (None, "") or (field == "artifact_required" and value is False):
         _unset(target, field)

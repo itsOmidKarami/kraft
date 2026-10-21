@@ -539,6 +539,14 @@ BEFORE = [
     ("quick-task", "implementation.main.implement", "claude", "sonnet", "high", None),
 ]
 
+#: Agent tasks shipped since, which an rc home never got.
+SINCE = [
+    ("default", "merge.on_merge_rejected.repair.main.repair", "claude", "sonnet", "high", None),
+]
+
+#: What the shipped library launches: `BEFORE`, with `SINCE` in chain order.
+SHIPPED_LAUNCHES = [*BEFORE[:-1], *SINCE, BEFORE[-1]]
+
 
 def test_the_shipped_library_selects_profiles_and_launches_as_before(monkeypatch):
     library = yaml.safe_load((SHIPPED / "library.yaml").read_text())["tasks"]
@@ -548,11 +556,12 @@ def test_the_shipped_library_selects_profiles_and_launches_as_before(monkeypatch
         "repair_verification",
         "repair_mr_feedback",
         "repair_mr_checks",
+        "repair_merge_queue_failure",
         "strict_judge",
     }
     assert {t.get("profile") for t in library.values()} == {None, "strong"}
     assert not [n for n, t in library.items() if "model" in t or "effort" in t]
-    assert _launches(SHIPPED, monkeypatch) == BEFORE
+    assert _launches(SHIPPED, monkeypatch) == SHIPPED_LAUNCHES
 
 
 def test_an_rc_home_keeps_its_files_and_launches_as_before(monkeypatch):
@@ -575,7 +584,7 @@ def test_a_fresh_seed_gets_the_library_and_its_profiles_together(tmp_path, monke
     monkeypatch.setattr(admin, "BUNDLED", bundle)
     home = tmp_path / "home" / "templates"
     assert admin.seed_home(home)
-    assert _launches(home, monkeypatch) == BEFORE
+    assert _launches(home, monkeypatch) == SHIPPED_LAUNCHES
 
 
 def test_the_shipped_library_on_an_rc_harnesses_file_is_named_not_substituted(

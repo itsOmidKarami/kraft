@@ -220,6 +220,18 @@ def test_every_status_declares_the_tier_that_handles_it():
     assert set(context.SCOPE.values()) <= {"advance", "task", "node", "chain", "stop"}
 
 
+@pytest.mark.parametrize(
+    ("status", "tier"),
+    [
+        pytest.param("merge_rejected", "task", id="merge_rejected"),
+        pytest.param("merge_rewind", "chain", id="merge_rewind"),
+        pytest.param("merge_repaired", "chain", id="merge_repaired"),
+    ],
+)
+def test_merge_queue_statuses_are_handled_at_their_tier(status, tier):
+    assert context.SCOPE[status] == tier
+
+
 # -- a pending `needs_context` question --------------------------------------
 
 

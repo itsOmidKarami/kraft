@@ -189,10 +189,15 @@ def _authored(chain: dict, path: str) -> tuple[str, dict]:
     for segment in segments:
         if kind == "gate":  # `auto_review`, the one slot a gate has
             obj, kind = obj[segment], "task"
-        elif kind == "node" and segment in ("on_failure", "on_base_changed", "fix_loop"):
+        elif kind == "node" and segment in (
+            "on_failure",
+            "on_base_changed",
+            "on_merge_rejected",
+            "fix_loop",
+        ):
             obj = obj[segment]
-            if segment == "on_base_changed":
-                obj = obj[next(segments)]  # on_conflict
+            if segment in ("on_base_changed", "on_merge_rejected"):
+                obj = obj[next(segments)]  # on_conflict, repair
             elif segment == "fix_loop" and rest[-1] == "judge" and len(rest) == 2:
                 obj, kind = obj["judge"], "task"
                 break

@@ -7,13 +7,12 @@ import shlex
 import subprocess
 
 import pytest
-from support.harness import IN_PLACE, commit_all, entry_of, git, v1_node, write
+from support.harness import IN_PLACE, commit_all, git, v1_node, write
+from support.item_walk import NO_SETUP, approve, walk_once
 
 from kraft import executor, inplace, store
 from kraft import policy as _policy
 from kraft.executor.context import BASE_MOVED
-
-NO_SETUP = entry_of({"setup_command": ""})
 
 
 def _sub(task_id):
@@ -35,16 +34,6 @@ def _chain(**rebase_fields):
 
 
 RESTART = {"on_base_changed": {"restart_from": "verify"}}
-
-
-def _walk(it, policy=None):
-    return executor.run_once(
-        it.database,
-        it.run_dirs,
-        work_item_id=it.id,
-        policy=policy or _policy.Policy(loops={}, default=_policy.Cap(3, 3600)),
-        launch=executor.LaunchContext(repo_entry=NO_SETUP),
-    )
 
 
 def _moves_base(it, times=1):
@@ -75,7 +64,7 @@ async def test_a_moved_base_restarts_the_declared_span_and_spends_no_attempt(ite
     for key in ("verify.fix_loop", "rebase.fix_loop"):
         await it.database.write(lambda c, key=key: store.bump_counter(c, it.id, key, stale))
 
-    assert await _walk(it) == "completed"
+    assert await walk_once(it) == "completed"
     assert _starts(it) == ["verify", "rebase", "verify", "rebase", "publish"]
     assert script.calls == ["check", "sync", "open", "check", "sync", "open", "publish"]
     [restart] = it.events("base_change_restart")
@@ -107,7 +96,7 @@ async def test_a_base_moved_stop_skips_the_nodes_later_steps_until_the_restart(
     script.plan = {"sync": [BASE_MOVED, "done"]}
     script.effects = {"sync": _moves_base(it)}
 
-    assert await _walk(it) == "completed"
+    assert await walk_once(it) == "completed"
     assert script.calls == ["check", "sync", "check", "sync", "open", "publish"]
     assert not it.events("fix_cycle_started")
     # Restarted, not completed: `rebase` only completes on the pass that ran
@@ -124,12 +113,12 @@ async def test_no_movement_and_no_declaration_mean_no_restart(item_on, script):
     """Nothing moved: nothing restarts. Moved on a node that declares no
     `on_base_changed`: the walk goes on exactly as before."""
     it = await item_on(_chain(**RESTART))
-    assert await _walk(it) == "completed"
+    assert await walk_once(it) == "completed"
     assert _starts(it) == ["verify", "rebase", "publish"]
 
     undeclared = await item_on(_chain(), wid="w2")
     script.effects = {"sync": _moves_base(undeclared)}
-    assert await _walk(undeclared) == "completed"
+    assert await walk_once(undeclared) == "completed"
     assert _starts(undeclared) == ["verify", "rebase", "publish"]
     assert not undeclared.events("base_change_restart")
 
@@ -144,21 +133,31 @@ async def test_a_base_moved_stop_on_an_undeclared_node_completes_it_and_spends_n
     it = await item_on(_chain(**loop))
     script.plan = {"sync": [BASE_MOVED]}
 
-    assert await _walk(it) == "completed"
+    assert await walk_once(it) == "completed"
     assert script.calls == ["check", "sync", "publish"]
     assert not it.events("fix_cycle_started")
     assert it.database.read(lambda c: store.read_counter(c, it.id, "rebase.fix_loop")) is None
 
 
-async def test_restarts_are_bounded_by_the_nodes_own_counter(item_on, script):
+@pytest.mark.parametrize(
+    "policy",
+    [
+        _policy.Policy(
+            loops={"rebase.on_base_changed": _policy.Cap(1, 3600)}, default=_policy.Cap(3, 3600)
+        ),
+        # Unlike `on_merge_rejected`'s own cap, an unset key still resolves
+        # through the policy's default (`walk._restart_span`'s callers).
+        _policy.Policy(loops={}, default=_policy.Cap(1, 3600)),
+    ],
+    ids=["its-own-key", "the-policy-default"],
+)
+async def test_restarts_are_bounded_by_the_nodes_own_counter(item_on, script, policy):
     it = await item_on(_chain(**RESTART))
     script.effects = {"sync": _moves_base(it, times=5)}
-    policy = _policy.Policy(
-        loops={"rebase.on_base_changed": _policy.Cap(1, 3600)}, default=_policy.Cap(3, 3600)
-    )
 
-    assert await _walk(it, policy) == "needs_human"
+    assert await walk_once(it, policy) == "needs_human"
     assert len(it.events("base_change_restart")) == 1
+    assert not it.events("merge_rejection_restart")
     reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
     assert reason == "rebase.on_base_changed exhausted after 1 restart(s) from 'verify'"
     assert it.row()["stop_kind"] == "cap"
@@ -169,7 +168,7 @@ async def test_a_conflict_without_an_explicit_handler_is_an_ordinary_failure(ite
     it = await item_on(_chain(**RESTART))
     script.plan = {"sync": ["conflict"]}
 
-    assert await _walk(it) == "needs_human"
+    assert await walk_once(it) == "needs_human"
     reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
     assert reason.startswith("task failed in node rebase: sync [forge]")
     assert not it.events("node_recovery_started")
@@ -228,7 +227,7 @@ async def test_a_conflict_handler_that_rebases_restarts_the_declared_span(item_o
 
     script.effects = {"check": land_upstream, "resolve": rebase}
 
-    assert await _walk(it) == "completed"
+    assert await walk_once(it) == "completed"
     assert _starts(it) == ["verify", "rebase", "verify", "rebase", "publish"]
     assert it.row()["base_ref"] == upstream["sha"]
     [conflict] = it.events("node_recovery_started")
@@ -284,13 +283,13 @@ async def test_an_in_place_resolver_is_not_sent_to_overwrite_an_ignored_file(
             return await take(db, *args, **kwargs)
 
         monkeypatch.setattr(inplace, "take", paused_first)
-        assert await _walk(it) == "paused"
+        assert await walk_once(it) == "paused"
         assert (it.row()["status"], it.row()["stop_kind"]) == ("paused", None)
         assert not it.events("work_item_needs_human")
         assert (it.repo / "local.cfg").read_text() == "the person's\n"
         return
 
-    assert await _walk(it) == "needs_human"
+    assert await walk_once(it) == "needs_human"
 
     assert it.row()["stop_kind"] == "checkout"
     reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
@@ -319,7 +318,7 @@ async def test_a_conflict_handler_s_concerns_do_not_stop_its_resolved_rebase(ite
 
     script.effects = {"check": land_upstream, "resolve": rebase}
 
-    assert await _walk(it) == "completed"
+    assert await walk_once(it) == "completed"
     assert it.row()["base_ref"] == upstream["sha"]
 
 
@@ -370,7 +369,7 @@ async def test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human(
 
     script.effects = {"check": land_upstream, "resolve": record}
 
-    assert await _walk(it) == "needs_human"
+    assert await walk_once(it) == "needs_human"
     payload = it.events("work_item_needs_human")[-1]["payload"]
     assert payload["reason"].startswith(reason)
     assert not it.events("base_change_restart")
@@ -416,7 +415,7 @@ async def test_a_conflict_with_its_base_branch_gone_is_a_stop_naming_it(
     monkeypatch.setattr(_builtins, "upstream_head", gone)
     monkeypatch.setattr(_builtins, "ensure_worktree", _existing_worktree(it))
 
-    assert await _walk(it) == "needs_human"
+    assert await walk_once(it) == "needs_human"
     reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
     assert "cannot be resolved" in reason and "base branch" in reason
     assert not it.events("node_recovery_started"), "no handler ran against a missing base"
@@ -445,7 +444,7 @@ async def test_a_conflict_handler_is_judged_against_the_items_base_branch(
     monkeypatch.setattr(_builtins, "upstream_head", upstream_head)
     script.effects = {"resolve": record}
 
-    assert await _walk(it) == "needs_human"
+    assert await walk_once(it) == "needs_human"
     assert asked == ["release", "release"], "the fork point, then the handler's check"
 
 
@@ -467,18 +466,13 @@ def _gated(**rebase_fields):
     return [verify, v1_node("review", "gate"), rebase, publish]
 
 
-async def _approved_review(it):
-    await it.database.write(lambda c: store.request_gate(c, it.id, "review", "review"))
-    await it.database.write(lambda c: store.approve_gate(c, it.id, "review"))
-
-
 async def test_a_resolved_conflict_reopens_the_approved_gates_in_its_span(item_on, script):
     """Ruling 162: the `on_conflict` handler changed code no gate saw, so the
     restart reopens the approved `review` and the walk stops there again. A
     clean moved base keeps the approval
     (test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head)."""
     it = await item_on(_gated(**_with_handler()), "rebase")
-    await _approved_review(it)
+    await approve(it, "review")
     script.plan = {"sync": ["conflict", "done"]}
     upstream = {}
 
@@ -492,7 +486,9 @@ async def test_a_resolved_conflict_reopens_the_approved_gates_in_its_span(item_o
     script.effects = {"sync": land_upstream, "resolve": rebase}
 
     assert await _walk_from(it, "rebase") == "awaiting_gate"
-    assert [e["payload"]["gate"] for e in it.events("gate_reopened")] == ["review"]
+    assert [e["payload"] for e in it.events("gate_reopened")] == [
+        {"gate": "review", "reason": "conflict_resolved"}
+    ]
     assert it.row()["current_node_id"] == "review"
 
 
@@ -502,7 +498,7 @@ async def test_a_conflict_at_the_door_goes_to_the_nodes_handler(item_on, script,
     the node's `on_conflict` handler the way a task's conflict is inside the
     walk -- and, resolved, reopens the span's approved gates the same way."""
     it = await item_on(_gated(**_with_handler()), "rebase")
-    await _approved_review(it)
+    await approve(it, "review")
     await _prepared(it)
     sha = await _upstream_moves(it)
 
@@ -513,7 +509,9 @@ async def test_a_conflict_at_the_door_goes_to_the_nodes_handler(item_on, script,
 
     assert await _enter_with_conflict(it, door) == "awaiting_gate"
     assert script.calls[:2] == ["resolve", "check"]
-    assert [e["payload"]["gate"] for e in it.events("gate_reopened")] == ["review"]
+    assert [e["payload"] for e in it.events("gate_reopened")] == [
+        {"gate": "review", "reason": "conflict_resolved"}
+    ]
 
 
 async def test_a_conflict_at_the_door_with_no_handler_stops_for_a_human(item_on, script):

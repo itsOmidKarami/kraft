@@ -26,7 +26,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 55
+SCHEMA_VERSION = 56
 
 _SCHEMA_TEMPLATE = """
 CREATE TABLE work_items (
@@ -1303,6 +1303,62 @@ SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
                    ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown',
                     'done_with_concerns', 'needs_context', 'rate_limited', 'config_error',
                     'waiting', 'conflict', 'infra', 'infra_stop')),
+  attempt        INTEGER NOT NULL DEFAULT 1,
+  thread         INTEGER NOT NULL DEFAULT 1,
+  session_summary_ref TEXT,
+  created_at     TEXT NOT NULL,
+  started_at     TEXT,
+  round          INTEGER NOT NULL DEFAULT 0,
+  model          TEXT,
+  tokens_in      INTEGER,
+  tokens_out     INTEGER,
+  tokens_cache_write INTEGER,
+  tokens_cache_read  INTEGER,
+  cost_usd       REAL,
+  wall_ms        INTEGER,
+  exited_at      TEXT,
+  head_sha       TEXT,
+  command        TEXT,
+  harness        TEXT,
+  cost_estimated INTEGER NOT NULL DEFAULT 0,
+  sandbox        TEXT,
+  egress         TEXT,
+  repository     TEXT,
+  PRIMARY KEY (work_item_id, id)
+)""",
+        """INSERT INTO worker_sessions_new (rowid, id, work_item_id, node_id, hook_point, pid,
+  pid_start_time, log_path, result_path, status, attempt, thread, session_summary_ref,
+  created_at, started_at, round, model, tokens_in, tokens_out, tokens_cache_write,
+  tokens_cache_read, cost_usd, wall_ms, exited_at, head_sha, command, harness,
+  cost_estimated, sandbox, egress, repository)
+SELECT rowid, id, work_item_id, node_id, hook_point, pid, pid_start_time, log_path,
+       result_path, status, attempt, thread, session_summary_ref, created_at, started_at,
+       round, model, tokens_in, tokens_out, tokens_cache_write, tokens_cache_read, cost_usd,
+       wall_ms, exited_at, head_sha, command, harness, cost_estimated, sandbox, egress,
+       repository
+  FROM worker_sessions ORDER BY rowid""",
+        "DROP TABLE worker_sessions",
+        "ALTER TABLE worker_sessions_new RENAME TO worker_sessions",
+        "CREATE INDEX idx_worker_sessions_status ON worker_sessions(status)",
+        "CREATE INDEX idx_worker_sessions_id ON worker_sessions(id)",
+    ],
+    # `merge_rejected` joins the worker_sessions status CHECK: the forge's merge
+    # queue or train dropped an approved merge request. The same literal rebuild as
+    # 54; every row keeps its `rowid` and both indexes are recreated.
+    55: [
+        """CREATE TABLE worker_sessions_new (
+  id             TEXT NOT NULL,
+  work_item_id   TEXT NOT NULL REFERENCES work_items(id),
+  node_id        TEXT NOT NULL,
+  hook_point     TEXT NOT NULL,
+  pid            INTEGER,
+  pid_start_time REAL,
+  log_path       TEXT NOT NULL,
+  result_path    TEXT NOT NULL,
+  status         TEXT NOT NULL CHECK (status IN
+                   ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown',
+                    'done_with_concerns', 'needs_context', 'rate_limited', 'config_error',
+                    'waiting', 'conflict', 'infra', 'infra_stop', 'merge_rejected')),
   attempt        INTEGER NOT NULL DEFAULT 1,
   thread         INTEGER NOT NULL DEFAULT 1,
   session_summary_ref TEXT,

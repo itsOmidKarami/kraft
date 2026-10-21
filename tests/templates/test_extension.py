@@ -14,7 +14,11 @@ from kraft.config import write_yaml
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
 LIBRARY = {
-    "tasks": {"base": agent_task(), "other": agent_task(prompt="other")},
+    "tasks": {
+        "base": agent_task(),
+        "other": agent_task(prompt="other"),
+        "merger": {"kind": "forge", "target": "mr.merge"},
+    },
     "nodes": {"stage": {"kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}},
 }
 
@@ -287,26 +291,78 @@ def test_an_override_cannot_change_identity(tmp_path, overrides, why):
     assert why in refused(tmp_path, {"extends": "parent", "overrides": overrides}, parent=parent)
 
 
+#: `PARENT` with a merge node after `after` whose merge rejection restarts at
+#: `ship` too.
+MERGING = {
+    **PARENT,
+    "nodes": [
+        *PARENT["nodes"],
+        node(
+            "merge",
+            extends="merger",
+            on_merge_rejected={
+                "restart_from": "ship",
+                "repair": {"tasks": [{"id": "repair", "extends": "base"}]},
+            },
+        ),
+    ],
+}
+_RE_POINT_AFTER = {"after": {"on_base_changed": {"restart_from": "after"}}}
+
+
 @pytest.mark.parametrize(
-    ("child", "why"),
+    ("parent", "child", "why"),
     [
-        ({"remove": ["build"]}, "review's reject_to names 'build', which this chain removes"),
-        ({"remove": ["ship"]}, "after's restart_from names 'ship', which this chain removes"),
         (
+            PARENT,
+            {"remove": ["build"]},
+            "review's reject_to names 'build', which this chain removes",
+        ),
+        (
+            PARENT,
+            {"remove": ["ship"]},
+            "after's restart_from names 'ship', which this chain removes",
+        ),
+        (PARENT, {"remove": ["ship"], "overrides": _RE_POINT_AFTER}, None),
+        (
+            MERGING,
+            {"remove": ["ship"], "overrides": _RE_POINT_AFTER},
+            "merge's on_merge_rejected.restart_from names 'ship', which this chain removes",
+        ),
+        (
+            MERGING,
             {
                 "remove": ["ship"],
-                "overrides": {"after": {"on_base_changed": {"restart_from": "after"}}},
+                "overrides": {
+                    **_RE_POINT_AFTER,
+                    "merge": {"on_merge_rejected": {"restart_from": "build"}},
+                },
             },
             None,
         ),
     ],
-    ids=["reject_to", "restart_from", "re-pointed-by-override"],
+    ids=[
+        "reject_to",
+        "restart_from",
+        "re-pointed-by-override",
+        "merge-rejected-restart_from",
+        "merge-rejected-re-pointed-by-override",
+    ],
 )
-def test_a_removed_pointer_target_is_named(tmp_path, child, why):
+def test_a_removed_pointer_target_is_named(tmp_path, parent, child, why):
     if why is None:
-        assert "ship" not in ids(resolve(tmp_path, {"extends": "parent", **child}))
+        resolved = resolve(tmp_path, {"extends": "parent", **child}, parent=parent)
+        assert "ship" not in ids(resolved)
+        if parent is MERGING:
+            merging = resolved.nodes[-1]
+            # Before the final gate: a rewind from past it would see no gate.
+            assert merging.node.on_merge_rejected.restart_from == "build"
+            # Re-pointing keeps the repair the parent declared.
+            assert [t.path for s in merging.on_merge_rejected for t in s.tasks] == [
+                "merge.on_merge_rejected.repair.main.repair"
+            ]
     else:
-        assert why in refused(tmp_path, {"extends": "parent", **child})
+        assert why in refused(tmp_path, {"extends": "parent", **child}, parent=parent)
 
 
 @pytest.mark.parametrize("case", ["inline-parent-node", "library-node"])

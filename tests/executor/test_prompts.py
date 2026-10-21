@@ -320,3 +320,24 @@ async def test_answered_resolved_and_already_in_the_note_threads_are_left_out(da
     row = database.read(lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone())
 
     assert prompts.review_threads_note(WORKER, row, database, f"[{in_note}] a.py") == ""
+
+
+@pytest.mark.parametrize(
+    ("cause", "told", "not_told"),
+    [
+        ("code", "passed its own pipeline, but failed once combined with main", "never reached"),
+        ("not_added", "never reached the merge train or queue: its own pipeline failed", "passed"),
+        ("conflict", "no longer merges cleanly with main as it is now", "passed"),
+    ],
+    ids=["code", "not-added", "conflict"],
+)
+def test_the_merge_rejection_repair_is_told_what_happened_by_cause(cause, told, not_told):
+    """A merge request that never reached the train never passed its own
+    pipeline: the repair is not told that it did."""
+    drop = {"cause": cause, "reason": "r", "rebased": True}
+
+    note = prompts.merge_rejected_note("kraft/w1", "main", drop, in_place=False)
+
+    assert note.startswith("A merge train or merge queue rejected this merge request. Branch")
+    assert told in note
+    assert not_told not in note

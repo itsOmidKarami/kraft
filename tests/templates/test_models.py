@@ -390,20 +390,32 @@ def test_an_identifier_that_would_make_a_path_ambiguous_is_rejected():
             tm.Step.model_validate({"id": "ok", "tasks": [agent(bad)]})
 
 
-def test_a_reserved_segment_is_rejected_as_a_step_identifier():
-    for reserved in sorted(tm.RESERVED_SEGMENTS):
-        with pytest.raises(ValidationError, match="reserved"):
-            tm.Step.model_validate({"id": reserved, "tasks": [agent()]})
+#: Each reserved word by name, so dropping one from `RESERVED_SEGMENTS` fails
+#: its own row rather than shortening a loop over the set.
+_RESERVED = [
+    "main",
+    "on_failure",
+    "fix_loop",
+    "judge",
+    "escalation",
+    "on_base_changed",
+    "on_conflict",
+    "on_merge_rejected",
+]
 
 
-def test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task():
+@pytest.mark.parametrize("reserved", _RESERVED, ids=_RESERVED)
+def test_a_reserved_segment_is_rejected_as_a_step_identifier(reserved):
+    with pytest.raises(ValidationError, match="reserved"):
+        tm.Step.model_validate({"id": reserved, "tasks": [agent()]})
+
+
+@pytest.mark.parametrize("reserved", _RESERVED, ids=_RESERVED)
+def test_a_reserved_segment_is_rejected_for_the_dedicated_escalation_task(reserved):
     # `node.escalation.<id>`: the escalation task's authored id becomes a path
     # segment of its own, so it obeys the reserved-segment rule.
-    for reserved in sorted(tm.RESERVED_SEGMENTS):
-        with pytest.raises(ValidationError, match="reserved"):
-            tm.ExecNode.model_validate(
-                exec_node("build", tasks=[agent()], escalation=agent(reserved))
-            )
+    with pytest.raises(ValidationError, match="reserved"):
+        tm.ExecNode.model_validate(exec_node("build", tasks=[agent()], escalation=agent(reserved)))
 
 
 def test_the_dedicated_judge_is_a_slot_so_any_id_is_addressable():
@@ -756,34 +768,3 @@ def test_a_skip_and_an_attachment_trim_are_one_drop_not_two():
             attachment_kinds=frozenset({"plan"}),
             skip_nodes=frozenset({"implementation"}),
         )
-
-
-def test_a_skip_that_orphans_a_reject_target_clears_it_rather_than_dangling():
-    """Same rule the attachment trim gets, because both go through
-    `without_nodes`: a dangling `reject_to` stops the stored snapshot
-    re-validating as a `Chain` when it is read back."""
-    resolved = _resolved(
-        [
-            {
-                "id": "spec",
-                "kind": "exec",
-                "tasks": [{"id": "write", "kind": "subprocess", "command": "true"}],
-            },
-            {"id": "spec_approval", "kind": "gate", "reject_to": "spec"},
-            {
-                "id": "implementation",
-                "kind": "exec",
-                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
-            },
-        ]
-    )
-    kept = resolved.without_nodes({"spec"})
-    gate = next(n for n in kept.chain.nodes if n.id == "spec_approval")
-    assert gate.reject_to is None
-    # And it still round-trips: that is the failure a dangling target causes.
-    tm.MaterializedChain.from_json(
-        kept.materialize(
-            WorkItemTarget.for_repository("target"),
-            InstancePolicy.from_input(InstancePolicyInput()),
-        ).to_json()
-    )

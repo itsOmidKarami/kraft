@@ -73,6 +73,19 @@ CONFLICT_RESOLVED = "conflict_resolved"
 #: no agent turn on infrastructure a fix loop cannot fix.
 INFRA_STOP = "infra_stop"
 
+#: The forge's merge queue or train dropped the merge request after it was
+#: approved and queued (a rejection, not a red pipeline). A task failure like
+#: `CONFLICT`: repairable at the task tier.
+MERGE_REJECTED = "merge_rejected"
+
+#: The chain rewinds to re-run the span the rejected merge came from
+#: (`MERGE_REJECTION_RESTART`). A restart like `BASE_MOVED`, handled by the walk.
+MERGE_REWIND = "merge_rewind"
+
+#: A recovery handler repaired a rejected merge and the chain restarts the
+#: span. Like `CONFLICT_RESOLVED`, handled by the walk itself.
+MERGE_REPAIRED = "merge_repaired"
+
 #: A recovery handler finished `done_with_concerns` (Kraft-s7c04.56). For an
 #: ordinary task doubts are information for the next gate (`_ADVANCING`); for
 #: a repair they are a verdict on whether repair was possible at all, so the
@@ -115,12 +128,15 @@ SCOPE: dict[str, str] = {
     WAITING: "stop",  # handed back to the scheduler; re-entry resumes, it does not retry
     WAIT_TIMED_OUT: "stop",  # the wait ran out; a person decides, not a fix loop
     INFRA_STOP: "stop",  # forge's own fault; a fix loop cannot fix it
+    MERGE_REJECTED: "task",  # the queue dropped the merge; repairable like a conflict
     REPAIR_DOUBTED: "stop",  # a repair doubts itself; a person decides
     READ_ONLY_VIOLATED: "stop",  # a read_only scope wrote; a person looks
     CHECKOUT_REFUSED: "stop",  # the person's checkout; never forced, never retried
     TIME_CAPPED: "stop",  # a scope's time ran out; a person decides (Ruling 194)
     BASE_MOVED: "chain",  # the bounce, taken by run_once
     CONFLICT_RESOLVED: "chain",  # the same restart, reopening the span's gates
+    MERGE_REWIND: "chain",  # the walk rewinds to re-run the rejected span
+    MERGE_REPAIRED: "chain",  # a repaired rejection restarts the span
 }
 
 

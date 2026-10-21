@@ -462,6 +462,8 @@ def _layers(chain: Mapping, library: Mapping, path: str, parent=None) -> list[tu
             layers, holds = merged(layers, seg), "steps"
         elif seg == "on_base_changed":
             layers, holds = merged(merged(layers, seg), next(segs, "on_conflict")), "steps"
+        elif seg == "on_merge_rejected":
+            layers, holds = merged(merged(layers, seg), next(segs, "repair")), "steps"
         elif seg in (JUDGE_SEGMENT, "escalation", AUTO_REVIEW_SEGMENT):
             if seg == "escalation":
                 next(segs, None)  # the task's own id
@@ -581,8 +583,8 @@ def _sources(
             if name in unread and name not in model.model_fields_set:
                 continue
             value = dumped[name]
-            if name == "on_base_changed" and isinstance(value, dict):
-                value = {k: v for k, v in value.items() if k != "on_conflict"}
+            if name in _HANDLER_OF and isinstance(value, dict):
+                value = {k: v for k, v in value.items() if k != _HANDLER_OF[name]}
             source = _setter(layers, name) if name in model.model_fields_set else "default"
             fields[name] = {"value": value, "source": source}
         if "policy" in type(model).model_fields:
@@ -642,7 +644,14 @@ def _sources(
             task(n.escalation, join(n.id, "escalation", n.escalation.id))
         if n.on_base_changed is not None and n.on_base_changed.on_conflict is not None:
             handler(n.on_base_changed.on_conflict, join(n.id, "on_base_changed", "on_conflict"))
+        if n.on_merge_rejected is not None:
+            handler(n.on_merge_rejected.repair, join(n.id, "on_merge_rejected", "repair"))
     return out
+
+
+#: A node policy's own fields, each without the handler it holds, which is
+#: flattened under its own path: the policy key to that handler's key.
+_HANDLER_OF = {"on_base_changed": "on_conflict", "on_merge_rejected": "repair"}
 
 
 #: Keys that hold nested components, each flattened under its own path.
@@ -662,10 +671,9 @@ def _flat(chain: Mapping, *, library: bool = False) -> dict[str, dict]:
 
     def put(obj: Mapping, path: str) -> None:
         own = {k: v for k, v in obj.items() if k not in _NESTED}
-        if isinstance(own.get("on_base_changed"), Mapping):
-            own["on_base_changed"] = {
-                k: v for k, v in own["on_base_changed"].items() if k != "on_conflict"
-            }
+        for policy, held in _HANDLER_OF.items():
+            if isinstance(own.get(policy), Mapping):
+                own[policy] = {k: v for k, v in own[policy].items() if k != held}
         out[path] = own
 
     def named(obj: Mapping, prefix: str, index: int) -> str:
@@ -704,9 +712,9 @@ def _flat(chain: Mapping, *, library: bool = False) -> dict[str, dict]:
             child(n, key, path, shape)
         for key in ("escalation", AUTO_REVIEW_SEGMENT):
             child(n, key, path, task)
-        base_change = n.get("on_base_changed")
-        if isinstance(base_change, Mapping):
-            child(base_change, "on_conflict", join(path, "on_base_changed"), shape)
+        for policy, held in _HANDLER_OF.items():
+            if isinstance(n.get(policy), Mapping):
+                child(n[policy], held, join(path, policy), shape)
 
     if library:
         # `<section>.<name>`, each section in the file's order.

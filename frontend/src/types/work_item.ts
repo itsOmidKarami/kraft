@@ -421,7 +421,7 @@ export type { SessionStatus };
 export interface NodePass {
   pass: number;
   /** `fixed`: the gate's reviewer repaired the work itself, which the server records as a rejection. */
-  reason?: "reject" | "fixed" | "retry" | "base_change";
+  reason?: "reject" | "fixed" | "retry" | "base_change" | "merge_rejected";
   /** The gate whose rejection, or whose reviewer's fix, sent the chain back. */
   gate?: string;
 }

@@ -19,7 +19,11 @@
 # Check the spelling: a key under `loops:` that names no loop in any chain is
 # ignored without a warning. `merge_request_feedback.on_base_changed` counts
 # the restarts a rebase triggers while a merge request is open; `default:`
-# bounds it too.
+# bounds it too. `merge.on_merge_rejected` counts the times a merge train or
+# merge queue rejected the merge request and the chain went back to
+# `merge_request_feedback` to repair it; it is not bounded by `default:` but by
+# its own 3 attempts over a week (604800 s), since each one waits on a fresh
+# final review.
 #
 # Waiting on something outside Kraft (a pipeline, an automated review, an
 # approval, a merge landing) is not a loop and has no key here. Each wait's

@@ -24,6 +24,7 @@ class ForgeEvent(StrEnum):
     CI_NOT_CONFIGURED = "ci_not_configured"
     AUTOMATED_REVIEW_NOT_CONFIGURED = "automated_review_not_configured"
     AUTOMATED_REVIEW_ERRORED = "automated_review_errored"
+    MERGE_QUEUE_DROPPED = "merge_queue_dropped"
 
 
 _PLAIN = EventTraits()
@@ -44,6 +45,7 @@ FORGE_EVENT_TRAITS = total(
         ForgeEvent.CI_NOT_CONFIGURED: _PLAIN,
         ForgeEvent.AUTOMATED_REVIEW_NOT_CONFIGURED: _PLAIN,
         ForgeEvent.AUTOMATED_REVIEW_ERRORED: _PLAIN,
+        ForgeEvent.MERGE_QUEUE_DROPPED: _PLAIN,
     },
     name="FORGE_EVENT_TRAITS",
 )

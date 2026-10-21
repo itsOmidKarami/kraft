@@ -57,4 +57,5 @@ def test_the_check_order_is_the_declaration_order():
         "conflict",
         "infra",
         "infra_stop",
+        "merge_rejected",
     ]

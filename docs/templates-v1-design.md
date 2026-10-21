@@ -310,6 +310,16 @@ tasks:
       after you.
     skill: kraft:mr-metadata-repair
 
+  # The `on_merge_rejected` repair of the default chain's `merge`: the merge
+  # train or merge queue ran its own pipeline on the merge request merged
+  # into the target branch as it is now, and that pipeline failed.
+  repair_merge_queue_failure:
+    kind: agent
+    harness: claude
+    profile: strong
+    prompt: Fix what made the merge train or merge queue reject this merge request.
+    skill: kraft:merge-queue-repair
+
   strict_judge:
     kind: agent
     harness: claude
@@ -625,11 +635,22 @@ nodes:
       - id: await
         extends: await_external_approval
 
+  # A merge train or merge queue that drops the merge request (its own
+  # pipeline failed, or the target branch moved under it) sends the item back
+  # through the merge request's CI and a fresh `final_review`, after the repair
+  # fixed the code. A conflict Kraft's forced rebase already cleared needs no
+  # repair, only the rewind.
   - id: merge
     kind: exec
     tasks:
       - id: merge
         extends: merge_mr
+    on_merge_rejected:
+      restart_from: merge_request_feedback
+      repair:
+        tasks:
+          - id: repair
+            extends: repair_merge_queue_failure
 
   - id: post_merge_ci
     kind: exec
@@ -648,6 +669,22 @@ what was asked, what changed, what was verified and reviewed, what is
 unresolved, and that approving opens the draft merge request and starts CI.
 `merge_request_feedback` declares `on_base_changed.restart_from:
 verification`, so a rebase there re-tests and re-reviews the rebased head.
+`merge` declares `on_merge_rejected`: when a GitLab merge train or GitHub merge
+queue drops the merge request, the `repair_merge_queue_failure` task fixes the
+branch against the target as it now is, the approved gates between
+`merge_request_feedback` and `merge` (notably `final_review`) reopen, and the
+chain restarts at `merge_request_feedback`. The policy is a sibling of
+`on_base_changed` with the same `restart_from` rule, except that it must name
+an *earlier* execution node -- before the chain's first `chain_finalized`
+gate when that gate comes before the merge node, so a rewind always passes it
+-- and only a node holding an `mr.merge` task may declare it. A node that
+declares it may not also declare a `fix_loop` or a node-level `on_failure`:
+only the repair answers a drop, and a fix cycle's commit would be merged by the
+next measure unseen. Its rewinds count under `<node>.on_merge_rejected`, 3
+attempts over a week unless `loops:` overrides them, checked before the repair
+runs. Coming back to the merge node with the drop unanswered -- a resume, a
+rate-limit relaunch, a person's retry of that node -- runs the repair again;
+it never asks the forge to merge the head it rejected.
 
 The optional `local_review` gate is omitted by chains that should create a
 draft immediately after local verification. This example also includes an
@@ -670,11 +707,14 @@ addressing:
 - `merge_request_feedback.fix_loop.repair.repair`
 - `verification.fix_loop.main.repair`
 - `merge_request_feedback.fix_loop.judge`
+- `merge.on_merge_rejected.repair.main.repair`
 
 This makes every ordinary, recovery, and fix-loop step or task unambiguous in
 events, sessions, diagnostics, steering, and operator controls. `main`,
-`on_failure`, `fix_loop`, `judge`, `escalation`, `on_base_changed`, and
-`on_conflict` are reserved step identifiers.
+`on_failure`, `fix_loop`, `judge`, `escalation`, `on_base_changed`,
+`on_conflict`, and `on_merge_rejected` are reserved step identifiers. A node's
+merge-rejection repair resolves under `<node>.on_merge_rejected.repair`, as
+`merge.on_merge_rejected.repair.main.repair`.
 
 Because a canonical path is its container's path plus one local identifier,
 global uniqueness is not a global property to enforce -- it follows from

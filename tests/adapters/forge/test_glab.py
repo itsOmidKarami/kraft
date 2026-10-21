@@ -13,7 +13,9 @@ from kraft.adapters import forge
 
 from .nodes import FAIL
 from .outputs import (
+    GLAB_CI_GET_FAILED,
     GLAB_CI_SUCCESS,
+    GLAB_CI_TRACE,
     GLAB_MR_LIST_MERGED,
     GLAB_MR_VIEW,
     GLAB_MR_VIEW_CONFLICT,
@@ -38,15 +40,6 @@ GLAB_MR_VIEW_MERGED = (
     '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"}'
 )
 
-# `glab ci get -F json` for the pipeline in GLAB_CI_FAILED, trimmed to the
-# fields this code reads: the pipeline object carries its jobs inline, so one
-# call names every job (glab 1.117.0, 2026-09-09).
-GLAB_CI_GET_FAILED = (
-    '{"id":2826926700,"status":"failed","jobs":['
-    '{"id":16392037101,"name":"lint-and-test","status":"success"},'
-    '{"id":16392037104,"name":"release-impact","status":"failed"}]}'
-)
-
 # `glab ci get -F json` for a pipeline read by id -- the same shape `glab ci
 # list` returns per row.
 GLAB_CI_GET_PINNED_SUCCESS = (
@@ -54,16 +47,9 @@ GLAB_CI_GET_PINNED_SUCCESS = (
     '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/pipelines/2826926705"}'
 )
 
-# The tail of `glab ci trace release-impact`, the only place the reason for MR
-# !89's red pipeline was ever written down.
-GLAB_CI_TRACE = (
-    '$ python3 dev/next_tag.py "" "$CI_MERGE_REQUEST_LABELS" > /dev/null\n'
-    "no release:: label; expected one of ('major', 'minor', 'patch', 'none')\n"
-    "This MR needs one of: release::major, release::minor, release::patch, release::none\n"
-    "ERROR: Job failed: exit code 1\n"
-)
-
 NO_MR = forge.MR(0, "")
+#: A GitLab project that does not merge through a merge train.
+NO_TRAIN = '{"id":1}'
 
 
 def _pipeline(sha: str, ref: str = "kraft/abc") -> str:
@@ -663,12 +649,12 @@ async def test_push_names_the_work_item_branch_and_sets_no_upstream(cli, tmp_pat
 
 
 async def test_glab_merge_uses_the_number_when_one_is_known(cli, tmp_path):
-    cli.stub("glab", "")
+    cli.stub("glab", routes={"api projects/:id": NO_TRAIN}, default="")
     cli.stub("git", "0")
 
     await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(number=54, url=""))
 
-    assert cli.argv("glab")[:3] == ["mr", "merge", "54"]
+    assert cli.calls("glab")[-1].startswith("mr merge 54")
 
 
 async def test_merge_refuses_a_branch_ahead_of_its_remote(cli, tmp_path):
@@ -686,11 +672,11 @@ async def test_merge_refuses_a_branch_ahead_of_its_remote(cli, tmp_path):
 async def test_merge_proceeds_when_the_branch_is_pushed(cli, tmp_path):
     """Zero commits ahead is the ordinary path after the sync node pushes."""
     cli.stub("git", "0")
-    cli.stub("glab", "")
+    cli.stub("glab", routes={"api projects/:id": NO_TRAIN}, default="")
 
     await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=NO_MR)
 
-    assert cli.argv("glab")[:2] == ["mr", "merge"]
+    assert cli.calls("glab")[-1].startswith("mr merge")
 
 
 async def test_glab_set_labels_labels_the_mr_and_starts_a_new_pipeline(cli, tmp_path):

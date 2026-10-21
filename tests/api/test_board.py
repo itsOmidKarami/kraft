@@ -494,13 +494,17 @@ def test_needs_context_question_does_not_resurface_a_stale_answer(client, repo):
 
 def test_work_item_detail_reports_steerable_per_current_node(client, repo):
     """Kraft-bz9b: the detail screen drops its steer box on `steerable: false`
-    rather than offer text `retry` would 409 on. `merge`, not `open_mr`
-    (Kraft-cbr): `mr_checks` right after `open_mr` now carries `fix_loop`,
-    so a steer given there could reach it; `merge` is the chain's last node
-    and forge-kind with no fix_loop, so nothing downstream can ever steer."""
+    rather than offer text `retry` would 409 on. `post_merge_ci`, not
+    `open_mr` (Kraft-cbr): `mr_checks` right after `open_mr` now carries
+    `fix_loop`, so a steer given there could reach it, and `merge`'s
+    `on_merge_rejected` repair is an agent; `post_merge_ci` is the chain's last
+    node and forge-kind with no handler, so nothing downstream can ever steer."""
     wid = _post_default(client, repo)
 
     _force_node(wid, "merge", "needs_human")
+    assert client.get(f"/api/work-items/{wid}").json()["steerable"] is True
+
+    _force_node(wid, "post_merge_ci", "needs_human")
     assert client.get(f"/api/work-items/{wid}").json()["steerable"] is False
 
     _force_node(wid, "implementation", "needs_human")

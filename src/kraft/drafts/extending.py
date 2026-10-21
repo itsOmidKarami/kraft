@@ -196,7 +196,11 @@ def restore(d: Draft, node: str) -> None:
     # The parent's own node: item 1 refuses an override of a removed one.
     bare = d.expanded({"id": d.key, "extends": parent_of(d)}).get("nodes") or []
     mine = next((n for n in bare if n.get("id") == node), {})
-    pointers = (mine.get("reject_to"), ops._restart_from(mine))
+    pointers = (
+        mine.get("reject_to"),
+        ops._restart_from(mine),
+        ops._restart_from(mine, "on_merge_rejected"),
+    )
     if gone := [t for t in pointers if t != node and t in _removed(d)]:
         raise OpError(f"restore {gone[0]} first: {node} names it, and this chain removes it")
     d.chain["remove"].remove(node)
@@ -287,7 +291,11 @@ def _writable(d: Draft, path: str) -> None:
 
 
 def set_field(d: Draft, path: str, field: str, value: object) -> None:
-    if field in ("reject_to", "on_base_changed.restart_from") and value in _removed(d):
+    if field in (
+        "reject_to",
+        "on_base_changed.restart_from",
+        "on_merge_rejected.restart_from",
+    ) and value in _removed(d):
         raise OpError(
             f"{path}'s {field} would name {value}, which this chain removes; restore it first"
         )
@@ -515,14 +523,14 @@ def _pointers(node: Mapping, override: object) -> list[tuple[str, object]]:
     """`node`'s `reject_to` and `restart_from`, as this chain's override of
     it leaves them."""
     over = override if isinstance(override, Mapping) else {}
-    changed = over.get("on_base_changed")
-    restart = ops._restart_from(node)
-    if isinstance(changed, Mapping) and "restart_from" in changed:
-        restart = changed["restart_from"]
-    return [
-        ("reject_to", over.get("reject_to", node.get("reject_to"))),
-        ("on_base_changed.restart_from", restart),
-    ]
+    out = [("reject_to", over.get("reject_to", node.get("reject_to")))]
+    for policy in ("on_base_changed", "on_merge_rejected"):
+        changed = over.get(policy)
+        restart = ops._restart_from(node, policy)
+        if isinstance(changed, Mapping) and "restart_from" in changed:
+            restart = changed["restart_from"]
+        out.append((f"{policy}{PATH_SEPARATOR}restart_from", restart))
+    return out
 
 
 def chain_base_check(d: Draft, base: str) -> dict:

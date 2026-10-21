@@ -53,6 +53,16 @@ async def reconcile_current_node(
     )
     if stopped is not None and tuple(stopped) == ("needs_human", StopKind.CHECKOUT):
         return "needs_human"
+    # Ahead of every shape: a node that can remediate itself would otherwise
+    # be walked again, and walking a dropped merge asks the forge to merge.
+    row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    if (
+        worktree is not None
+        and await walk.hold_interrupted_repair(db, work_item_id, row, node, worktree) is not None
+    ):
+        return "needs_human"
     exec_node = node.node if isinstance(node.node, ExecNode) else None
     if (
         exec_node is None

@@ -314,14 +314,24 @@ def _refuse_removed_targets(
     that re-points a `reject_to` or `restart_from` is accepted."""
     for node, (origin, index) in zip(nodes, origins, strict=True):
         base = node.get("on_base_changed")
+        rejected = node.get("on_merge_rejected")
         pointers = (
-            ("reject_to", node.get("reject_to")),
-            ("restart_from", base.get("restart_from") if isinstance(base, Mapping) else None),
+            ("reject_to", ("reject_to",), node.get("reject_to")),
+            (
+                "restart_from",
+                ("restart_from",),
+                base.get("restart_from") if isinstance(base, Mapping) else None,
+            ),
+            (
+                "on_merge_rejected.restart_from",
+                ("on_merge_rejected", "restart_from"),
+                rejected.get("restart_from") if isinstance(rejected, Mapping) else None,
+            ),
         )
-        for key, target in pointers:
+        for key, field, target in pointers:
             if target in removed:
                 where = (
-                    ("add", index, "node", key)
+                    ("add", index, "node", *field)
                     if origin == "add"
                     else ("remove", removed.index(target))
                 )
