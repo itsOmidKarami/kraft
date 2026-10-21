@@ -19,7 +19,6 @@ from pydantic import TypeAdapter, ValidationError
 from yaml import YAMLError
 
 from kraft.addons import load as addons_load
-from kraft.addons.inherit import is_layer
 from kraft.drafts import authored, resolve, store
 from kraft.templates import catalogue, positions
 from kraft.templates.environment import Identifier
@@ -807,11 +806,13 @@ def new_chain(d: Draft, **source: str) -> None:
             if origin not in library.chain_ids:
                 raise OpError(f"there is no chain {origin!r} to copy")
             # A child add-on's chain is copied as the child serves it: one
-            # that extends a hidden ancestor level is written out flattened,
-            # and what any of it reaches through a hidden level is merged in,
-            # so the copy runs the child's overrides and names no hidden level.
+            # that extends another chain is written out flattened, and what
+            # any of it reaches through a hidden level is merged in, so the
+            # copy runs the child's overrides, names no hidden level and
+            # takes no later change to the chain it came from.
             data = library.chain_data(origin)
-            if (parent := data.get("extends")) and is_layer(str(parent)):
+            addon = library.addon_of(origin)
+            if data.get("extends") is not None and addon is not None and addon.parent:
                 from kraft.drafts import extending  # it builds on this module
 
                 try:

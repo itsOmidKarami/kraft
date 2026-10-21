@@ -398,16 +398,44 @@ def _touched(library, data: Mapping) -> set[str]:
     return ids
 
 
-def _authored_node(library, data: Mapping, id: str) -> dict:
+def _node_id(library, node: object) -> object:
+    """The id node `node` (as authored) resolves to: its own, else the one the
+    library node it `extends` gives, up that node's own parents."""
+    seen: set[str] = set()
+    while isinstance(node, Mapping):
+        if node.get("id") is not None:
+            return node["id"]
+        name = node.get("extends")
+        if not isinstance(name, str) or name in seen:
+            return None
+        seen.add(name)
+        parent = library.component(Namespace.NODES, name)
+        node = None if parent is None else parent.data
+    return None
+
+
+def _authored_node(library, data: Mapping, id: str) -> dict | None:
     """Node `id` as the file that defines it writes it: an `add` entry here, or
-    up the parents to the chain whose `nodes:` holds it."""
+    up the parents to the chain whose `nodes:` holds it. A node written
+    `{extends: <library node>}` is found by the id that node gives. None when
+    no file writes it so (an override's node, found resolved instead)."""
     for entry in data.get("add") or ():
-        if isinstance(entry, Mapping) and (entry.get("node") or {}).get("id") == id:
-            return entry["node"]
+        node = entry.get("node") if isinstance(entry, Mapping) else None
+        if isinstance(node, Mapping) and _node_id(library, node) == id:
+            return dict(node)
     parent = data.get("extends")
     if isinstance(parent, str):
+        if not library.has_chain(parent):
+            return None
         return _authored_node(library, library.chain_data(parent), id)
-    return next(n for n in data.get("nodes") or () if isinstance(n, Mapping) and n.get("id") == id)
+    return next(
+        (
+            dict(n)
+            for n in data.get("nodes") or ()
+            if isinstance(n, Mapping) and _node_id(library, n) == id
+        ),
+        None,
+    )
 
 
 def flatten(library, id: str, raw: Mapping, key: str) -> dict:
@@ -416,24 +444,24 @@ def flatten(library, id: str, raw: Mapping, key: str) -> dict:
     and no `extends` or edits. A node an override at any level names is
     written resolved; every other one as the file that defines it writes it,
     so it keeps its library `extends`, with what it reaches through a child
-    add-on's hidden level merged in (`TemplateLibrary.flattened`). Raises
-    `TemplateLibraryError` when the chain does not resolve."""
+    add-on's hidden level merged in (`TemplateLibrary.flattened`); one no
+    file writes is written resolved too. Raises `TemplateLibraryError` when
+    the chain does not resolve."""
     resolved = library.resolve_chain(id).chain.model_dump(mode="json", exclude_unset=True)
     touched = _touched(library, raw)
     flat: dict = {"id": key}
     for field in ("description", "policy"):
         if resolved.get(field) is not None:
             flat[field] = resolved[field]
-    flat["nodes"] = [
-        copy.deepcopy(
-            n
-            if n["id"] in touched
-            else ops.plain(
-                library.flattened(_authored_node(library, raw, n["id"]), Namespace.NODES)
+    nodes = []
+    for n in resolved["nodes"]:
+        written = None if n["id"] in touched else _authored_node(library, raw, n["id"])
+        nodes.append(
+            copy.deepcopy(
+                n if written is None else ops.plain(library.flattened(written, Namespace.NODES))
             )
         )
-        for n in resolved["nodes"]
-    ]
+    flat["nodes"] = nodes
     return authored.normalise(flat)
 
 

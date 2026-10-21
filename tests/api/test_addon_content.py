@@ -6,8 +6,18 @@ import json
 
 import pytest
 import yaml
-from support.addons import AGENT, COMPANY, TEAM, chain, load_release, load_tree
+from support.addons import (
+    AGENT,
+    COMPANY,
+    TEAM,
+    chain,
+    load_release,
+    load_tree,
+    publish,
+    update_addons,
+)
 
+from kraft.api import deps
 from kraft.templates.models import MaterializedChain
 
 READ_ONLY = "comes from add-on release@acme; extend it or copy it to your library"
@@ -129,8 +139,6 @@ def _load_team(client, tmp_path, parent_chain="ship", own_add=()):
     name, which the library holds as a hidden level."""
     from support.addons import install, make_collection
 
-    from kraft.api import deps
-
     st = client.app.state
     requires = {"kraft": "2", "harnesses": ["codex"], "addons": {"release@acme": "1"}}
     own = {"extends": f"release:{parent_chain}", **({"add": own_add} if own_add else {})}
@@ -183,6 +191,59 @@ def _tree_node_and_task_share_a_name(client, tmp_path):
     load_tree(client, tmp_path, company=company, team={**TEAM, "chains": {"own": own}})
 
 
+def _tree_layer_extends_its_own(client, tmp_path):
+    """The dept's `security_scan` extends its own `base_scan`, which picks a
+    model and effort, and switches to a profile; the team's sets `effort`
+    alone, so the profile goes and nothing brings the model back."""
+    base_scan = {**AGENT, "model": "m-base", "effort": "high"}
+    scan = {"extends": "base_scan", "profile": "company:slow"}
+    dept = {"library": {"tasks": {"base_scan": base_scan, "security_scan": scan}}}
+    team_scan = {"extends": "platform-dept:security_scan", "effort": "low"}
+    load_tree(client, tmp_path, dept=dept, team=_team_tasks(security_scan=team_scan))
+
+
+def _tree_layer_drops_a_policy(client, tmp_path):
+    """The dept's `security_scan` sets its `base_scan`'s policy to null; the
+    team's sets one of its own, which is all it keeps."""
+    base_scan = {**AGENT, "policy": {"time_cap_minutes": 5}}
+    scan = {"extends": "base_scan", "policy": None}
+    dept = {"library": {"tasks": {"base_scan": base_scan, "security_scan": scan}}}
+    team_scan = {"extends": "platform-dept:security_scan", "policy": {"total_time_cap_minutes": 9}}
+    load_tree(client, tmp_path, dept=dept, team=_team_tasks(security_scan=team_scan))
+
+
+def _tree_node_id_from_the_library(client, tmp_path):
+    """The company's chain `default` ends in a node written `{extends: bn}`,
+    whose id the library node `bn` gives."""
+    library = COMPANY["library"]
+    built = {"id": "built", "kind": "exec", "tasks": [{"id": "b", "extends": "hotfix"}]}
+    default = COMPANY["chains"]["default"]
+    company = {
+        **COMPANY,
+        "library": {**library, "nodes": {"bn": built}},
+        "chains": {
+            **COMPANY["chains"],
+            "default": {"nodes": [*default["nodes"], {"extends": "bn"}]},
+        },
+    }
+    load_tree(client, tmp_path, company=company)
+
+
+def _tree_sibling_chain(client, tmp_path):
+    """The team's chain `sibling` extends its own `default`, a public chain."""
+    load_tree(
+        client,
+        tmp_path,
+        team={**TEAM, "chains": {**TEAM["chains"], "sibling": {"extends": "default"}}},
+    )
+
+
+def _team_tasks(**tasks):
+    """`TEAM` with `tasks` added to its library, or in place of its own."""
+    library = TEAM["library"]
+    return {**TEAM, "library": {**library, "tasks": {**library["tasks"], **tasks}}}
+
+
 def _node(id, task, extends):
     return {"id": id, "kind": "exec", "tasks": [{"id": task, "extends": extends}]}
 
@@ -205,14 +266,23 @@ COPY_TEAM_SCAN = {
 }
 
 
-def _runs(client, chain_id):
-    """Each task of `chain_id`, resolved by the running server: what it runs."""
-    resolved = client.app.state.library.resolve_chain(chain_id)
+def _runs(client, chain_id, library=None):
+    """Each task of `chain_id`, resolved by the running server (or `library`):
+    what it runs."""
+    resolved = (library or client.app.state.library).resolve_chain(chain_id)
     return {
         rt.path: rt.task.model_dump(mode="json", exclude_unset=True)
         for node in resolved.nodes
         for rt in node.tasks()
     }
+
+
+def _task_runs(client, name):
+    """What task `name` runs as a local chain's task extending it."""
+    st = client.app.state
+    probe = {"id": "probe", "nodes": [_node("n", "t", name)]}
+    library, id = st.library.with_chain(st.templates_dir / "chains" / "probe.yaml", probe)
+    return _runs(client, id, library)["n.main.t"]
 
 
 @pytest.mark.parametrize(
@@ -261,6 +331,30 @@ def _runs(client, chain_id):
             {"id": "mine", "nodes": [_node("n", "b", "team-payments:build")]},
             id="tree-chain-node-read-as-a-node",
         ),
+        pytest.param(
+            _tree_layer_extends_its_own,
+            COPY_TEAM_SCAN,
+            {**AGENT, "effort": "low"},
+            id="tree-component-layer-extends-its-own",
+        ),
+        pytest.param(
+            _tree_layer_drops_a_policy,
+            COPY_TEAM_SCAN,
+            {**AGENT, "policy": {"total_time_cap_minutes": 9}},
+            id="tree-component-layer-drops-a-policy",
+        ),
+        pytest.param(
+            _tree_node_id_from_the_library,
+            COPY_TEAM_DEFAULT,
+            {**TEAM_DEFAULT, "nodes": [*TEAM_DEFAULT["nodes"], {"extends": "team-payments:bn"}]},
+            id="tree-chain-node-id-from-the-library",
+        ),
+        pytest.param(
+            _tree_sibling_chain,
+            {"op": "new_chain", "from": "team-payments:sibling"},
+            TEAM_DEFAULT,
+            id="tree-chain-extends-a-sibling",
+        ),
     ],
 )
 def test_a_copy_from_a_child_addon_runs_what_it_serves(client, tmp_path, load, op, written):
@@ -282,6 +376,8 @@ def test_a_copy_from_a_child_addon_runs_what_it_serves(client, tmp_path, load, o
     assert not client.get("/api/health").json()["invalid_templates"]
     if kind == "chains":
         assert _runs(client, "mine") == _runs(client, op["from"])
+    else:
+        assert _task_runs(client, "mine") == _task_runs(client, op["ref"].split(".", 1)[1])
     if op == COPY_TEAM_DEFAULT:
         assert _runs(client, "mine")["scan.main.s"]["model"] == "pci-model"
 
@@ -289,10 +385,6 @@ def test_a_copy_from_a_child_addon_runs_what_it_serves(client, tmp_path, load, o
 def test_a_child_addons_copy_keeps_its_nodes_across_a_parent_update(client, tmp_path):
     """The copy is the operator's own chain: an update that adds a node to the
     parent's chain does not reach it, and it still runs the child's override."""
-    from support.addons import publish, update_addons
-
-    from kraft.api import deps
-
     collection = load_tree(client, tmp_path)
     answer = client.post("/api/drafts/chains/mine/ops", json={"ops": [COPY_TEAM_DEFAULT]})
     assert answer.status_code == 200, answer.text
@@ -314,12 +406,64 @@ def test_a_child_addons_copy_keeps_its_nodes_across_a_parent_update(client, tmp_
     assert runs["scan.main.s"]["model"] == "pci-model"
 
 
+#: A team whose entries reach what the dept does not ship: a task and a chain
+#: task extending a missing task, a node extending a task, and a chain on that
+#: chain.
+BROKEN_TEAM = {
+    **_team_tasks(broken={"extends": "platform-dept:nothing"}),
+    "chains": {
+        "uses": {"nodes": [_node("n", "t", "platform-dept:nothing")]},
+        "on_uses": {"extends": "uses"},
+    },
+}
+BROKEN_TEAM["library"] = {
+    **BROKEN_TEAM["library"],
+    "nodes": {"wrong_kind": {"extends": "platform-dept:hotfix"}},
+}
+
+
+@pytest.mark.parametrize(
+    "op, says",
+    [
+        pytest.param(
+            {"op": "copy_component", "ref": "tasks.team-payments:broken", "name": "mine"},
+            "platform-dept:nothing",
+            id="component",
+        ),
+        pytest.param(
+            {"op": "copy_component", "ref": "nodes.team-payments:wrong_kind", "name": "mine"},
+            "platform-dept:hotfix",
+            id="component-of-another-namespace",
+        ),
+        pytest.param(
+            {"op": "new_chain", "from": "team-payments:uses"},
+            "platform-dept:nothing",
+            id="chain-task",
+        ),
+        pytest.param(
+            {"op": "new_chain", "from": "team-payments:on_uses"},
+            "team-payments:on_uses does not resolve, so it can't be copied",
+            id="chain-on-a-chain",
+        ),
+    ],
+)
+def test_a_broken_copy_from_a_child_addon_names_no_hidden_level(client, tmp_path, op, says):
+    """A child's entry that reaches a missing ancestor entry is copied, or
+    refused, naming it as the ancestor's own, never a hidden level, and never
+    with a 500."""
+    load_tree(client, tmp_path, team=BROKEN_TEAM)
+    kind, key = ("chains", "mine") if op["op"] == "new_chain" else ("library", "library")
+    answer = client.post(f"/api/drafts/{kind}/{key}/ops", json={"ops": [op]})
+
+    assert answer.status_code < 500, answer.text
+    assert says in answer.text
+    assert "^" not in answer.text
+
+
 def test_a_local_chain_through_a_child_addon_detaches(client, tmp_path):
     """A local chain on `team:own`, which extends `release:tuned` through a
     hidden level: its draft opens, and detaching it writes the node the
     hidden level overrides as resolved."""
-    from kraft.api import deps
-
     tuned = {"extends": "ship", "overrides": {"n.main.t": {"prompt": "tuned"}}}
     load_release(client, tmp_path, chains={"ship": chain("base"), "tuned": tuned})
     extra = {
@@ -351,8 +495,6 @@ def test_a_local_chain_through_a_child_addon_detaches(client, tmp_path):
 def test_a_drafts_sources_name_inherited_chains_publicly(client, tmp_path):
     """The draft view says which chain a field comes from; one reached through
     a child add-on's hidden level reads as the ancestor's own id."""
-    from kraft.api import deps
-
     tuned = {"extends": "ship", "overrides": {"n.main.t": {"prompt": "tuned"}}}
     load_release(client, tmp_path, chains={"ship": chain("base"), "tuned": tuned})
     _load_team(client, tmp_path, parent_chain="tuned")
@@ -369,8 +511,6 @@ def test_a_drafts_sources_name_inherited_chains_publicly(client, tmp_path):
 @pytest.fixture
 def repo_library(client, tmp_path):
     from support.addons import accept_repo_library, repo_with_library
-
-    from kraft.api import deps
 
     st = client.app.state
     accept_repo_library(st.templates_dir, st.run_dirs.addons, repo_with_library(tmp_path), "app")

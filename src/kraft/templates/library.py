@@ -805,6 +805,10 @@ class TemplateLibrary:
         a copy into the local library writes (`an-addon-copy-resolves-locally`).
         Every other reference is kept, so one late-bound to a child add-on
         names the child's own entry and the copy runs what the child serves.
+        A component that reaches a hidden layer is merged onto its whole
+        `extends` line, in the resolver's order (`_Resolution._merge_chain`),
+        so the copy runs exactly what it does. An `extends` that names nothing
+        stays, written by its public name: no hidden level's name is returned.
         Unchanged for a library with no child add-on."""
         if not self._layers:
             return data
@@ -812,16 +816,31 @@ class TemplateLibrary:
             return [self.flattened(item, namespace) for item in data]
         if not isinstance(data, Mapping):
             return data
-        own = {key: self.flattened(value, _PLACED.get(key)) for key, value in data.items()}
+        own = self._flattened_inside(data)
         name = own.get("extends")
         if not (isinstance(name, str) and inherit.is_layer(name)):
             return own
+        return self._merged_line(own, namespace, seen=())
+
+    def _flattened_inside(self, data: Mapping[str, object]) -> dict[str, object]:
+        """`data` with what each of its keys holds `flattened`."""
+        return {key: self.flattened(value, _PLACED.get(key)) for key, value in data.items()}
+
+    def _merged_line(
+        self, own: Mapping[str, object], namespace: Namespace | None, *, seen: tuple[str, ...]
+    ) -> dict[str, object]:
+        """`own` merged onto its `extends` parent, itself merged onto its own,
+        down to the root, as `_Resolution._merge_chain` merges them: a parent
+        that is missing, of no namespace or in a cycle stays its `extends`,
+        by its public name."""
+        name = own.get("extends")
+        if not isinstance(name, str):
+            return dict(own)
         where = namespace or self.namespace_of(name)
-        parent = None if where is None else self.component(where, name)
+        parent = None if where is None or name in seen else self.component(where, name)
         if parent is None:
-            return own  # left as it is: the copy reports it as any broken extends
-        base = self.flattened(parent.data, where)
-        assert isinstance(base, Mapping)
+            return {**own, "extends": self.public_name(name)}
+        base = self._merged_line(self._flattened_inside(parent.data), where, seen=(*seen, name))
         child = {key: value for key, value in own.items() if key != "extends"}
         if where is Namespace.TASKS:
             displaced = displaced_route(child)
