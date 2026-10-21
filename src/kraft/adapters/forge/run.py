@@ -17,10 +17,12 @@ from kraft.adapters.forge.gh import GhCli
 from kraft.adapters.forge.glab import GlabCli
 from kraft.adapters.forge.models import (
     MR,
+    CIStatus,
     FailedJob,
     FakeForge,
     Forge,
     ForgeError,
+    QueueRead,
 )
 from kraft.automated_review import AutomatedReview
 from kraft.templates.environment import RootPointerPolicy
@@ -199,6 +201,133 @@ async def _rebase_conflict_away(
         moved.append(repo)
     await forge.push(repo=repo, branch=branch)
     return f"rebased {branch} onto {new_head} and re-pushed\n", "done"
+
+
+async def _infra_budget_spent(db, work_item_id: str, node_id: str, reason: str) -> bool:
+    """Spend one infra retry on `ci_infra:<node_id>`; True once the cap is
+    breached, with `CI_INFRA_EXHAUSTED` recorded (the caller then returns
+    `infra_stop`). Shared by `ci_poll`, `merge_watch` and a merge train or
+    queue that dropped the merge request on its own runners: one counter per
+    node, so each spends its own budget.
+
+    `infra_stop` is a plain literal at every caller, matching
+    `executor.context.INFRA_STOP` without importing that package here --
+    `kraft.executor` imports `kraft.adapters.forge` (through `dispatch.py`),
+    so the reverse import would cycle. `walk.py`'s node loop already turns it
+    into `stops.stop_for_infra` -> `needs_human` for any node."""
+    # Local imports: the policy and store helpers the counter needs.
+    from kraft import policy as _policy
+    from kraft.store import _now as _now
+
+    count, started_at, cap = await db.write(
+        lambda c: store.bump_counter(
+            c,
+            work_item_id,
+            f"ci_infra:{node_id}",
+            _policy.Cap(attempts=ci._INFRA_RETRY_CAP, wall_clock_s=ci._INFRA_WALL_CLOCK_S),
+        )
+    )
+    if _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) != "breached":
+        return False
+    await db.write(
+        lambda c: events.append(
+            c,
+            work_item_id,
+            ForgeEvent.CI_INFRA_EXHAUSTED,
+            {"node_id": node_id, "reason": reason},
+        )
+    )
+    return True
+
+
+async def _merge_dropped(
+    db,
+    forge: Forge,
+    *,
+    repo: Path,
+    orig_repo: Path,
+    branch: str,
+    base: str,
+    work_item_id: str,
+    node_id: str,
+    hook_point: str,
+    queue: QueueRead,
+    moved: list[Path] | None,
+    run_dirs,
+) -> tuple[str, str, list[dict] | None]:
+    """The forge took the merge request off its merge train or queue after
+    Kraft asked for it to merge: classify why, and say what `merge` reports.
+
+    - Its own runners broke (`ci.is_infra_red`): ask it to queue the same
+      head again on the `ci_infra:<node_id>` budget, `infra_stop` once spent.
+      Asking again does not break Kraft-l98h6: the forge holds nothing now.
+    - Taken off by a person, or for a reason this cannot read: `failed`.
+      Kraft never fights a person who took it off.
+    - Red code, a conflict with the target, or never added at all: rebased
+      onto the target first (a train fails against the target as it is now),
+      then `merge_rejected` with one finding per failed job, for the node's
+      merge-rejection recovery.
+
+    Every drop is recorded as `merge_queue_dropped`, `cause` already
+    classified (`infra` decided here, never by a backend)."""
+    which = "queue" if queue.kind == "queue" else "train"
+    cause = queue.cause or "other"
+    if cause == "code" and queue.failure is not None and ci.is_infra_red(queue.failure):
+        cause = "infra"
+    rebased = False
+    log = f"dropped from the merge {which}: {queue.reason or 'no reason given'}\n"
+    if cause in ("code", "conflict", "not_added"):
+        rebase_log, rebase_status = await _rebase_conflict_away(
+            db,
+            forge,
+            repo=repo,
+            orig_repo=orig_repo,
+            branch=branch,
+            base=base,
+            work_item_id=work_item_id,
+            moved=moved,
+            run_dirs=run_dirs,
+        )
+        log += rebase_log
+        rebased = rebase_status == "done"
+    head_sha = await git._head_sha(repo, branch)
+    failed_jobs = queue.failure.failed_jobs if queue.failure is not None else ()
+    await db.write(
+        lambda c: events.append(
+            c,
+            work_item_id,
+            ForgeEvent.MERGE_QUEUE_DROPPED,
+            {
+                "node_id": node_id,
+                "repo": str(orig_repo),
+                "kind": queue.kind,
+                "cause": cause,
+                "reason": queue.reason,
+                "url": queue.url,
+                "failed_jobs": [j.name for j in failed_jobs],
+                "head_sha": head_sha,
+                "rebased": rebased,
+            },
+        )
+    )
+    if cause == "infra":
+        if await _infra_budget_spent(db, work_item_id, node_id, log):
+            return log, "infra_stop", None
+        await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""))
+        log += f"the {which}'s own runners failed; asked the forge to queue the same head again\n"
+        return log, "merge_pending", None
+    if cause == "other":
+        return (
+            f"dropped from the merge {which}: {queue.reason}; Kraft does not re-queue a merge "
+            "request that was taken off by hand or for a reason it cannot read\n",
+            "failed",
+            None,
+        )
+    if failed_jobs:
+        findings = _job_findings(queue.failure, "\n".join(queue.failure.jobs), hook_point)
+    else:
+        findings = [{"severity": "important", "message": queue.reason, "source_plugin": hook_point}]
+    return log, "merge_rejected", findings
 
 
 async def _skip_ci(db, work_item_id: str, node_id: str, hook_point: str, orig_repo: Path):
@@ -401,35 +530,7 @@ async def _run_one(
                 # once`'s docstring for why the retry budget is a persisted
                 # counter, bumped once per `ci_poll` entry, rather than a loop
                 # inside this one call.
-                from kraft import policy as _policy
-                from kraft.store import _now as _now
-
-                count, started_at, cap = await db.write(
-                    lambda c: store.bump_counter(
-                        c,
-                        work_item_id,
-                        f"ci_infra:{node_id}",
-                        _policy.Cap(
-                            attempts=ci._INFRA_RETRY_CAP, wall_clock_s=ci._INFRA_WALL_CLOCK_S
-                        ),
-                    )
-                )
-                if (
-                    _policy.check(count=count, started_at=started_at, cap=cap, now=_now())
-                    == "breached"
-                ):
-                    await db.write(
-                        lambda c, log=log: events.append(
-                            c,
-                            work_item_id,
-                            ForgeEvent.CI_INFRA_EXHAUSTED,
-                            {"node_id": node_id, "reason": log},
-                        )
-                    )
-                    # A plain literal, matching `executor.context.INFRA_STOP`
-                    # ("infra_stop") without importing that package here --
-                    # `kraft.executor` imports `kraft.adapters.forge` (through
-                    # `dispatch.py`), so the reverse import would cycle.
+                if await _infra_budget_spent(db, work_item_id, node_id, log):
                     status = "infra_stop"
                 else:
                     log, status = await ci.retry_infra_once(
@@ -466,16 +567,7 @@ async def _run_one(
                     log += "waiting for the rebased head's pipeline\n"
                     status = "waiting"
             if status == "failed" and ci_status.failed_jobs:
-                findings = [
-                    {
-                        "severity": "important",
-                        "message": _job_finding_message(ci_status.jobs, j),
-                        "file": _trace_file(log),
-                        "line": _trace_line(log),
-                        "source_plugin": hook_point,
-                    }
-                    for j in ci_status.failed_jobs
-                ]
+                findings = _job_findings(ci_status, log, hook_point)
         case "automated_review":
             # One read. Which reviewer, which webhook or check, is the
             # backend's (`automated-review-implementation-is-not-template-
@@ -661,7 +753,37 @@ async def _run_one(
                 # This wait already asked for the merge; it is only reading
                 # whether it has landed. Asking again would merge twice on a
                 # forge that queues merges.
-                log = f"!{existing.number} is still open; waiting for the merge to land\n"
+                #
+                # Unless the forge let go of it: asked, still open, and no
+                # longer held for merging is what both forges show once a
+                # merge train or queue drops a merge request. Only then is the
+                # train or queue read for why -- the cheap signal first.
+                queue = (
+                    None
+                    if existing.merge_queued
+                    else await forge.merge_queue(repo=repo, branch=branch, base=base)
+                )
+                if queue is not None and queue.state == "dropped":
+                    return await _merge_dropped(
+                        db,
+                        forge,
+                        repo=repo,
+                        orig_repo=orig_repo,
+                        branch=branch,
+                        base=base,
+                        work_item_id=work_item_id,
+                        node_id=node_id,
+                        hook_point=hook_point,
+                        queue=queue,
+                        moved=moved,
+                        run_dirs=run_dirs,
+                    )
+                where = (
+                    f" (merge {queue.kind}: {queue.state})"
+                    if queue is not None and queue.kind != "none"
+                    else ""
+                )
+                log = f"!{existing.number} is still open; waiting for the merge to land{where}\n"
                 status = "merge_pending"
             else:
                 # The same push ci_poll makes, for the same reason: a
@@ -763,11 +885,6 @@ async def _run_one(
         case "merge_watch":
             if not ci_checks:
                 return await _skip_ci(db, work_item_id, node_id, hook_point, orig_repo)
-            # Local imports, same as `ci_poll`'s own "infra" branch a few
-            # cases up -- the infra counter below needs them.
-            from kraft import policy as _policy
-            from kraft.store import _now as _now
-
             # `base`: the item's base branch, what its merge landed on.
             head_sha = await _builtins.upstream_head(orig_repo, base)
             if head_sha is None:
@@ -829,28 +946,7 @@ async def _run_one(
                     # `retry_jobs` again forever against a persistently broken
                     # runner. `node_id` already namespaces this from `mr_checks`'
                     # own counter row, so this needs no new policy.yaml entry.
-                    count, started_at, cap = await db.write(
-                        lambda c: store.bump_counter(
-                            c,
-                            work_item_id,
-                            f"ci_infra:{node_id}",
-                            _policy.Cap(
-                                attempts=ci._INFRA_RETRY_CAP, wall_clock_s=ci._INFRA_WALL_CLOCK_S
-                            ),
-                        )
-                    )
-                    if (
-                        _policy.check(count=count, started_at=started_at, cap=cap, now=_now())
-                        == "breached"
-                    ):
-                        await db.write(
-                            lambda c, log=log: events.append(
-                                c,
-                                work_item_id,
-                                ForgeEvent.CI_INFRA_EXHAUSTED,
-                                {"node_id": node_id, "reason": log},
-                            )
-                        )
+                    if await _infra_budget_spent(db, work_item_id, node_id, log):
                         # `walk.py`'s node loop already turns this into
                         # `stops.stop_for_infra` -> `needs_human` for any node
                         # (`walk.py:245,340,394`) -- no new plumbing needed here.
@@ -989,6 +1085,22 @@ def _job_finding_message(jobs: tuple[str, ...], job: FailedJob) -> str:
     if block:
         return "\n".join(block)
     return f"job {job.name} failed" + (f": {job.failure_reason}" if job.failure_reason else "")
+
+
+def _job_findings(failure: CIStatus, trace: str, hook_point: str) -> list[dict]:
+    """One finding per failed job, for the fix loop the measuring task feeds
+    (Kraft-cbr §3): `ci_poll`'s red pipeline and a merge train's or queue's
+    alike. `trace` is the text a file and line are read from."""
+    return [
+        {
+            "severity": "important",
+            "message": _job_finding_message(failure.jobs, j),
+            "file": _trace_file(trace),
+            "line": _trace_line(trace),
+            "source_plugin": hook_point,
+        }
+        for j in failure.failed_jobs
+    ]
 
 
 _TRACE_LOC = re.compile(r"([^\s:]+\.\w+):(\d+)")
@@ -1306,10 +1418,17 @@ async def run_task(
                     # this triggers below re-enters `merge` from scratch once
                     # verify has re-run, and `_run_one`'s own "already
                     # merged" check is what makes that re-entry idempotent.
+                    # "merge_rejected" maps to `None` too: the forge dropped
+                    # it from its train or queue, and the merge request stays
+                    # open for the node's merge-rejection recovery.
                     "merge": (
                         "merged"
                         if one_status == "done"
-                        else ("failed" if one_status not in ("rebased", *_PENDING) else None)
+                        else (
+                            "failed"
+                            if one_status not in ("rebased", "merge_rejected", *_PENDING)
+                            else None
+                        )
                     ),
                 }.get(handler)
                 if new_state:
