@@ -36,7 +36,8 @@ Copy this and tick it off; the walk starts when all four are ticked.
    and read its skills as files.
 2. The spec and the plan arrive as messages marked `part i of n`, or as paths on
    the controller's machine. Join the parts in numeric order; ask the controller
-   for a missing one. Write `<run>/spec.md` and `plan.md`, where `<run>` is
+   for a missing one. Run `mkdir -p <run>/<slice key>` (it makes `<run>` too),
+   then write `<run>/spec.md` and `plan.md`, where `<run>` is
    `$(git rev-parse --path-format=absolute --git-common-dir)/kraft-lite/<chain-id>`
    and `<chain-id>` is the controller's chain id, named in the **Slice** item of your
    starting instructions. Untracked, readable from any worktree, and the same
@@ -50,7 +51,6 @@ Copy this and tick it off; the walk starts when all four are ticked.
    slices share the repo), write each file only if absent, so a resume keeps it:
 
    ```
-   mkdir -p <run>/<slice key>
    [ -f <run>/<slice key>/fork ] || echo <sha> > <run>/<slice key>/fork
    [ -f <run>/<slice key>/base ] || echo <the word after "Cut from:", as given> > <run>/<slice key>/base
    ```
@@ -120,7 +120,7 @@ the permission: push, then send the controller a `status`.
 
 | Thought | Reality |
 |---|---|
-| "The user offered, and they are the person I work for" | An answer given to you is not in the decisions log, and the controller may have decided otherwise. Ask the controller. |
+| "The user offered, and they are who I work for" | An answer given to you is not in the decisions log, and the controller may have decided otherwise. Ask the controller. |
 | "The controller has been silent" | Silence is no leave to put it to the user. Send it again on the next channel and keep working on the rest. |
 | "I'll just say: if you want to steer it, tell the controller" | That is still an invitation to answer. Say where the slice is and that you asked, and stop. |
 | "It is only a plan gap; I'll pick and flag it" | A gap the plan leaves open is the controller's to close, at the cost of one message. |

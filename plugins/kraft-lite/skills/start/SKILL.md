@@ -14,8 +14,8 @@ an existing chain and will create a second one beside it, so if one is not
 
 If `.kraft-lite/registry.yaml` exists with no `.kraft-lite/bindings.yaml`, or a
 verb refuses with `Run: python3 kl.py migrate`, this directory is from an older
-Kraft Lite: follow `kraft-lite:init`'s migrate paragraph first. No bindings file
-is needed otherwise: every task has a default.
+Kraft Lite: follow `kraft-lite:init`'s last section, `A pre-V1 directory:
+migrate`, first. No bindings file is needed otherwise: every task has a default.
 
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" start --title "<the work>"
 

@@ -14,8 +14,8 @@ so it survives a `/clear`. Below, `KL` is short for
 `--chain-id <id>`. If a verb exits saying there is more than one unfinished
 chain, show the user the list it printed and ask which - do not pick. A verb
 that refuses with `Run: python3 kl.py migrate` means a run or registry from an
-older Kraft Lite: follow `kraft-lite:init`'s migrate paragraph, then go on with
-the new id it prints.
+older Kraft Lite: follow `kraft-lite:init`'s last section, `A pre-V1 directory:
+migrate`, then go on with the new id it prints.
 
 ## 1. Read the state
 

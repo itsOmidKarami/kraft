@@ -46,7 +46,7 @@ def test_the_v1_skills_spell_artifact_as_state_does(texts, name):
 @pytest.mark.parametrize(
     "other, term",
     [
-        pytest.param(r"\bhuman\b(?!_)", "the user", id="user"),
+        pytest.param(r"\bhuman\b(?!_)|\bthe person\b", "the user", id="user"),
         pytest.param(r"feature chain", "the controller's chain", id="controllers-chain"),
         pytest.param(r"slice chain", "child chain", id="child-chain"),
         pytest.param(r"merge request", "PR, or the MR node", id="pr"),
@@ -104,12 +104,14 @@ def test_init_writes_bindings_from_detect_and_the_ignores(texts):
 
 def test_the_start_skill_needs_no_bindings(texts):
     """Every task has a default, so a repo with no bindings file starts; only a
-    pre-V1 registry or run stands in the way, and init's migrate paragraph, the
-    one place that says what `migrate` prints and how it refuses, moves it."""
-    body = texts["start"]
+    pre-V1 registry or run stands in the way, and init's last section, the one
+    place that says what `migrate` prints and how it refuses, moves it. Last, so
+    a new repo's setup does not read pre-V1 material first."""
+    body = " ".join(texts["start"].split())
     assert body.count("kraft-lite:init") == 1
-    assert "follow `kraft-lite:init`'s migrate paragraph" in body
-    assert "migrate paragraph" in texts["init"]
+    assert "follow `kraft-lite:init`'s last section, `A pre-V1 directory: migrate`" in body
+    headings = re.findall(r"^## (.*)$", texts["init"], re.M)
+    assert headings[-1] == "A pre-V1 directory: migrate"
 
 
 def test_the_next_skill_says_when_a_bound_skill_is_missing(texts):
@@ -168,7 +170,7 @@ def _section(body: str, number: int) -> str:
         pytest.param(
             "start",
             0,
-            "follow `kraft-lite:init`'s migrate paragraph first",
+            "follow `kraft-lite:init`'s last section, `A pre-V1 directory: migrate`, first",
             id="start-migrate-follows-init",
         ),
         pytest.param(
@@ -189,8 +191,47 @@ def _section(body: str, number: int) -> str:
         pytest.param(
             "status",
             0,
-            "Render it as `kraft-lite:next` section 5 shapes it.",
+            "Render it as the table in `kraft-lite:next`'s section 5 (read it, in "
+            "`../next/SKILL.md` beside this skill; do not invoke `next` from here).",
             id="status-summary-as-next-shapes-it",
+        ),
+        pytest.param(
+            "status",
+            0,
+            "There is no token count or cost: Lite never sees them, so estimate none.",
+            id="status-no-cost-to-estimate",
+        ),
+        pytest.param(
+            "gate",
+            1,
+            "and `--spec`/`--plan` set to the spec and plan the earlier gates approved, so the "
+            "new chain starts at the chain revision",
+            id="gate-restart-keeps-the-approved-spec-and-plan",
+        ),
+        pytest.param(
+            "gate",
+            1,
+            "For a `repo:` chain, put the copy in `.kraft/chains/` with a new `id`, so its "
+            "`extends` still resolve, and pass `--chain repo:<new id>`.",
+            id="gate-restart-repo-chain-stays-in-the-repo-library",
+        ),
+        pytest.param(
+            "init",
+            0,
+            "which closes the run's open records, labelled `kraft-abandoned`, and keeps them",
+            id="init-migrate-abandon",
+        ),
+        pytest.param(
+            "init",
+            0,
+            "Delete `bindings.yaml.mine` once merged.",
+            id="init-migrate-deletes-the-moved-aside-copy",
+        ),
+        pytest.param(
+            "init",
+            0,
+            "With both files present and no verb refusing",
+            id="init-migrate-both-files-no-verb-refusing",
         ),
         pytest.param(
             "init",
@@ -219,7 +260,8 @@ def _section(body: str, number: int) -> str:
         pytest.param(
             "build-slice",
             1,
-            "mkdir -p <run>/<slice key> [ -f <run>/<slice key>/fork ]",
+            "Run `mkdir -p <run>/<slice key>` (it makes `<run>` too), then write "
+            "`<run>/spec.md` and `plan.md`",
             id="child-run-folder-made-first",
         ),
         pytest.param(
@@ -237,7 +279,7 @@ def _section(body: str, number: int) -> str:
     ],
 )
 def test_a_skill_carries_the_final_fix_wave(texts, name, section, needle):
-    """The final review's fixes, by skill and section; 0 is the whole skill."""
+    """The final review's fixes and round two's, by skill and section; 0 is the whole skill."""
     assert needle in _section(texts[name], section), f"{name} section {section} lacks {needle!r}"
 
 

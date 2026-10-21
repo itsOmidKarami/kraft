@@ -64,9 +64,11 @@ For a chain that has finished - or when the user asks what a run has cost so far
 
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" summary --chain-id <id>
 
-Render it as `kraft-lite:next` section 5 shapes it. `duration_seconds` is null
-until the chain is done: report the nodes walked so far and say the total lands
-at the end.
+Render it as the table in `kraft-lite:next`'s section 5 (read it, in
+`../next/SKILL.md` beside this skill; do not invoke `next` from here). There is
+no token count or cost: Lite never sees them, so estimate none. `duration_seconds`
+is null until the chain is done: report the nodes walked so far and say the
+total lands at the end.
 
 Advance, close, approve, answer or start nothing from here, not even a slice in
 `ready` or `early`: that is what `kraft-lite:next`, `kraft-lite:gate` and

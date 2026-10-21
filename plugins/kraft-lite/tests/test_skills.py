@@ -621,13 +621,15 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         (
             "next",
             0,
-            "follow `kraft-lite:init`'s migrate paragraph, then go on with the new id it prints",
+            "follow `kraft-lite:init`'s last section, `A pre-V1 directory: migrate`, then go on "
+            "with the new id it prints",
         ),
         (
             "gate",
             1,
-            "copy the chain's source file - its `path` in `KL chains --available`, for the "
-            "`id` the frozen `.kraft-lite/chains/<chain-id>.json` names - to a new `.yaml` file",
+            "find the chain's source file from the frozen `.kraft-lite/chains/<chain-id>.json`: "
+            "its `source` when that is a file path; otherwise the `path` that "
+            '`python3 "$CLAUDE_PLUGIN_ROOT/kl.py" chains --available` lists for its `id`',
         ),
         (
             "init",
@@ -637,8 +639,8 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         (
             "init",
             0,
-            "finish that run on the previous Kraft Lite version, or start again - and let them "
-            "choose",
+            "finish that run on the previous Kraft Lite version, or "
+            '`python3 "$CLAUDE_PLUGIN_ROOT/kl.py" migrate --abandon <chain-id>`',
         ),
         (
             "next",

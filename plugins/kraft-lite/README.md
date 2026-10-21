@@ -240,8 +240,12 @@ node before it, and every node after that, carrying your note. `reject
 A gate on a `chain_revision` artifact is the one case Lite cannot finish: it
 cannot apply a change set to a running chain. If the proposal changes
 anything, Lite says so and offers two ways on: approve without the change, or
-stop and start again on an edited copy of the chain's file, whose path
-`kl.py chains --available` lists.
+stop and start again on an edited copy of the chain's file.
+
+That file is the frozen chain's `source` when it is a path, else the one `kl.py chains --available`
+lists for its id; a `repo:` chain's copy goes in `.kraft/chains/` under a new
+id. The new run passes the approved spec and plan with `--spec` and `--plan`,
+so it starts at the chain revision.
 
 ### What `state` reports
 

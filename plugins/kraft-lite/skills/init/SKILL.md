@@ -8,27 +8,8 @@ description: "Writes `.kraft-lite/bindings.yaml`, which binds a Kraft Lite chain
 If `$CLAUDE_PLUGIN_ROOT` is unset, `kl.py` is two directories above this file;
 it needs `python3` 3.10 or newer, and without one, tell the user and stop.
 
-**The migrate paragraph.** A directory is an older Kraft Lite's when it has
-`.kraft-lite/registry.yaml` and no `.kraft-lite/bindings.yaml`, or when a verb
-refuses with `Run: python3 kl.py migrate`. Write no bindings by hand: run
-`python3 "$CLAUDE_PLUGIN_ROOT/kl.py" migrate`. It prints `bindings` - what it
-wrote to `bindings.yaml` from the registry, with `dropped`, the hooks no V1 task
-replaces; `{}` when there was no registry, so no file was written - and
-`chains`, each unfinished run's old id (`from`) and new one (`to`), which every
-later verb takes. Report each, say a written `bindings.yaml` is to be committed
-and the registry is now `registry.yaml.migrated`, then go to the last paragraph.
-It refuses, and moves nothing, in two cases:
-
-- A sliced run, or one on another legacy chain: tell the user the two ways on it
-  names - finish that run on the previous Kraft Lite version, or start again -
-  and let them choose.
-- `bindings.yaml` and `registry.yaml` both present: move `bindings.yaml` aside
-  (`.kraft-lite/bindings.yaml.mine`), run `migrate`, then show the user a diff of
-  the two files and merge them by hand, their own entries kept unless they say
-  otherwise.
-
-With both files present and no run refused, `bindings.yaml` is what the walk
-reads: leave the registry alone and carry on below.
+A pre-V1 `.kraft-lite/registry.yaml` with no `.kraft-lite/bindings.yaml`, or a
+verb saying `Run: python3 kl.py migrate`: see the last section first.
 
 Every binding is optional. A task with none runs on its default: an agent task's
 own skill or prompt, and an instruction for each builtin and forge task. The file
@@ -73,7 +54,7 @@ Write `.kraft-lite/bindings.yaml` from `proposed` plus the user's choices:
 
 If `.kraft-lite/bindings.yaml` already exists, build the new one, show the user
 a diff against it, and ask; do not overwrite one they have edited. Where it holds
-a different command than detect printed, the person's edit wins: leave it, let
+a different command than detect printed, the user's edit wins: leave it, let
 the diff show the difference, and let the user choose. `start` refuses a file it
 cannot use and names the entry, but catching a gap now is cheaper.
 
@@ -82,3 +63,43 @@ to add `.kraft-lite/decisions/`, `.kraft-lite/messages/` and `.kraft-lite/propos
 to `.gitignore`: a sliced run writes its decisions log, messages and proposals
 there, and they are not for the repo. After a migrate, `.kraft-lite/registry.yaml.migrated`
 goes there too, or is deleted. `bindings.yaml` stays committed.
+
+## A pre-V1 directory: migrate
+
+A directory is an older Kraft Lite's when it has `.kraft-lite/registry.yaml` and
+no `.kraft-lite/bindings.yaml`, or when a verb refuses with
+`Run: python3 kl.py migrate`. Write no bindings by hand: run
+`python3 "$CLAUDE_PLUGIN_ROOT/kl.py" migrate`. It prints `bindings` - what it
+wrote to `bindings.yaml` from the registry, with `dropped`, the hooks no V1 task
+replaces; `{}` when there was no registry, so no file was written - and
+`chains`, each unfinished run's old id (`from`) and new one (`to`), which every
+later verb takes. Report each, say a written `bindings.yaml` is to be committed
+and the registry is now `registry.yaml.migrated`, then go straight to the
+setup's last paragraph above, the one starting `Then print the path`. A run that finished before V1 needs no
+migrate: `state` says `done`, and only its `summary` needs the previous Kraft Lite.
+
+It refuses, and moves nothing, in these cases; any other refusal names its own
+way on: follow it.
+
+- A run it cannot move (sliced, a slice's child, on another legacy chain, with
+  nodes the old default lacks, or with its chain record missing): tell the user
+  the two ways on it names - finish that run on the previous Kraft Lite version,
+  or `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" migrate --abandon <chain-id>`, which
+  closes the run's open records, labelled `kraft-abandoned`, and keeps them -
+  and run nothing until they choose. Then run `migrate` again. `--abandon`
+  refuses an id that is not an unfinished pre-V1 run.
+- Registry hooks no V1 task replaces: take each out of the registry, run
+  `migrate`, then bind it in `bindings.yaml` by hand, under the task the user
+  says it serves.
+- A registry Lite cannot read (named with its file and line), one that is not a
+  mapping of hooks, or an entry that would make a bindings file Lite refuses,
+  such as a `skill` with no `prompt`: correct it in the registry, run `migrate`
+  again.
+- `bindings.yaml` and `registry.yaml` both present: move `bindings.yaml` aside
+  (`.kraft-lite/bindings.yaml.mine`), run `migrate`, then show the user a diff of
+  the two files and merge them by hand, their own entries kept unless they say
+  otherwise. Delete `bindings.yaml.mine` once merged.
+- `the bindings did not read back as written`: a fault in Lite; report it.
+
+With both files present and no verb refusing, `bindings.yaml` is what the walk
+reads: leave the registry alone and carry on with the setup above.

@@ -70,8 +70,7 @@
   },
   {
     "skills": [
-      "kraft-lite:status",
-      "kraft-lite:next"
+      "kraft-lite:status"
     ],
     "query": "[user] /kraft-lite:status - how long did the ledger export take in the end, and what did it cost?",
     "setup": "A Claude Code session in the repo acme/ledger, `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. `chains` prints [{\"chain_id\": \"kl-7f3a91c2\", \"title\": \"Ledger export\", \"status\": \"done\", \"node\": null}]. `state --chain-id kl-7f3a91c2` prints status done. `summary --chain-id kl-7f3a91c2` prints {\"chain_id\": \"kl-7f3a91c2\", \"title\": \"Ledger export\", \"status\": \"done\", \"duration_seconds\": 9120, \"nodes\": [{\"node\": \"spec_approval\", \"status\": \"closed\", \"seconds\": 1810, \"attempts\": 0, \"cap\": null, \"gate\": \"spec_approval\", \"blocked_seconds\": 1800, \"rejections\": []}, {\"node\": \"implementation\", \"status\": \"closed\", \"seconds\": 4300, \"attempts\": 0, \"cap\": null, \"gate\": null, \"blocked_seconds\": null, \"rejections\": []}, {\"node\": \"verification\", \"status\": \"closed\", \"seconds\": 900, \"attempts\": 1, \"cap\": 2, \"gate\": null, \"blocked_seconds\": null, \"rejections\": []}, {\"node\": \"final_review\", \"status\": \"closed\", \"seconds\": 2110, \"attempts\": 0, \"cap\": null, \"gate\": \"final_review\", \"blocked_seconds\": 2100, \"rejections\": [\"Rename the CLI flag\"]}], \"totals\": {\"nodes\": 4, \"duration_seconds\": 9120, \"blocked_seconds\": 3900, \"attempts\": 1, \"gates\": 2, \"rejections\": 1}}.",
@@ -80,6 +79,18 @@
       "Says how much of the 9120 s was waiting on the user at gates (3900 s) as against working",
       "Says there is no token or dollar cost to report (Lite never sees it) and estimates none",
       "Runs nothing that changes state"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:status"
+    ],
+    "query": "[user] /kraft-lite:status - what has the ledger export cost so far?",
+    "setup": "A Claude Code session in the repo acme/ledger, `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. `chains` prints [{\"chain_id\": \"kl-7f3a91c2\", \"title\": \"Ledger export\", \"status\": \"open\", \"node\": \"implementation\"}]. `state --chain-id kl-7f3a91c2` prints node implementation, kind exec, status open, unsliced. `summary --chain-id kl-7f3a91c2` prints {\"chain_id\": \"kl-7f3a91c2\", \"title\": \"Ledger export\", \"status\": \"open\", \"duration_seconds\": null, \"nodes\": [{\"node\": \"spec\", \"status\": \"closed\", \"seconds\": 1300, \"attempts\": 0, \"cap\": null, \"gate\": null, \"blocked_seconds\": null, \"rejections\": []}, {\"node\": \"spec_approval\", \"status\": \"closed\", \"seconds\": 1810, \"attempts\": 0, \"cap\": null, \"gate\": \"spec_approval\", \"blocked_seconds\": 1800, \"rejections\": []}, {\"node\": \"plan\", \"status\": \"closed\", \"seconds\": 1500, \"attempts\": 0, \"cap\": null, \"gate\": null, \"blocked_seconds\": null, \"rejections\": []}, {\"node\": \"implementation\", \"status\": \"open\", \"seconds\": null, \"attempts\": 1, \"cap\": null, \"gate\": null, \"blocked_seconds\": null, \"rejections\": []}], \"totals\": {\"nodes\": 4, \"duration_seconds\": null, \"blocked_seconds\": 1800, \"attempts\": 1, \"gates\": 1, \"rejections\": 0}}.",
+    "expected_behavior": [
+      "Runs `summary --chain-id kl-7f3a91c2` and reports the time and attempts of the nodes walked so far, and that the total duration lands when the chain is done",
+      "Says there is no token or dollar cost to report (Lite never sees it) and gives no estimate of one, in tokens, dollars or otherwise",
+      "Does not invoke kraft-lite:next and runs nothing that changes state"
     ]
   }
 ]

@@ -22,7 +22,7 @@ Then show the user what the gate is about: `gate.message`, and the file at
 `gate.artifact_path`, the newest file of kind `gate.artifact` the run produced
 (when it is null, find the file and say so); at the slice gate
 (`gate.slice_gate` true), the slicing proposal beside it, if there is one. A gate
-answered without the artifact in front of the person has stopped meaning anything.
+answered without the artifact in front of the user has stopped meaning anything.
 
 A good presentation names the artifact, says where it lives, and asks the gate's
 one question: "`plan_approval`: the plan is `docs/plan.md` (read it, or I can
@@ -35,12 +35,17 @@ an earlier "just do it", is not an answer.
 When `gate.artifact` is `chain_revision` and the file proposes any change, say
 Kraft Lite cannot apply it: the chain froze at `start`. Offer two ways on, and
 record nothing until they choose: approve without the change, so the chain goes
-on as frozen; or stop and start again on an edited copy. For that, copy the
-chain's source file - its `path` in `KL chains --available`, for the `id` the
-frozen `.kraft-lite/chains/<chain-id>.json` names - to a new `.yaml` file, make
-the change there, and invoke `kraft-lite:start` with `--chain <that file>`. The
-old chain then stays unfinished in `chains`, and the user decides what to do
-with it.
+on as frozen; or stop and start again on an edited copy. For that, find the
+chain's source file from the frozen `.kraft-lite/chains/<chain-id>.json`: its
+`source` when that is a file path; otherwise the `path` that
+`python3 "$CLAUDE_PLUGIN_ROOT/kl.py" chains --available` lists for its `id`.
+Copy it to a new `.yaml` file and make the change there. For a `repo:` chain,
+put the copy in `.kraft/chains/` with a new `id`, so its `extends` still
+resolve, and pass `--chain repo:<new id>`. Invoke `kraft-lite:start` with
+`--chain <that file>`, and `--spec`/`--plan` set to the spec and plan the
+earlier gates approved, so the new chain starts at the chain revision rather
+than writing and approving them again. The old chain then stays unfinished in
+`chains`, and the user decides what to do with it.
 
 ## 2. Record the answer
 
