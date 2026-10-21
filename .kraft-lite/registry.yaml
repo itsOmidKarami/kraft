@@ -125,7 +125,9 @@ on.slice.implementation.start:
     Implement the slice's tasks with one subagent per task, each working test
     first. After each task run a spec-compliance review and then a code-quality
     review, with a capped fix round. Run independent tasks in parallel, each in
-    its own isolated worktree. Set a model explicitly on every subagent.
+    its own isolated worktree. Set a model explicitly on every subagent. Stop
+    after the last task's review: no final whole-branch review and no finishing
+    or merge step, since on.review.local.run and open_mr are those.
   # also found: (none)
 
 on.slice.test.run:
@@ -134,3 +136,4 @@ on.slice.test.run:
     Run only the test paths this slice's tasks touch, and the repo's fast checks,
     as your slice instructions list them. Never the full suite; CI runs it. List
     the paths in the PR body.
+  # also found: (none)

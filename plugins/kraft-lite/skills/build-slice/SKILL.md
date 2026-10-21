@@ -11,6 +11,10 @@ instructions). You walk `chains/slice.json` (`implementation`, `verify`,
 `open_mr`, `mr_checks`) with `kraft-lite:next`. The controller keeps the run's
 state and decisions log; you write only your own chain.
 
+Your **target** is the branch your PR goes into, as the **Branches and PRs**
+item of your starting instructions names it: the feature branch, or in `main`
+mode the base branch.
+
 `$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
 is two directories above this file - use that path instead of an empty one.
 `python3` 3.10 or newer runs every command; if not, tell the controller and stop.
@@ -22,8 +26,8 @@ Copy this and tick it off; the walk starts when all four are ticked.
 ```
 - [ ] Kraft Lite found: its skills installed, or kl.py reachable by path.
 - [ ] Spec and plan joined, written outside git, confirmed to the controller.
-- [ ] Starting commit recorded in the fork file, before any commit of your own.
-- [ ] Slice chain started, its id noted.
+- [ ] Fork and base files written, before any commit of your own.
+- [ ] Slice chain started or resumed, its id in the chain file.
 ```
 
 1. If `kraft-lite:next` is not installed, install the plugin through the harness;
@@ -33,26 +37,51 @@ Copy this and tick it off; the walk starts when all four are ticked.
    the controller's machine. Join the parts in numeric order; ask the controller
    for a missing one. Write `<run>/spec.md` and `plan.md`, where `<run>` is
    `$(git rev-parse --path-format=absolute --git-common-dir)/kraft-lite/<chain-id>`
-   and `<chain-id>` is the feature chain's, the first word of your session title.
-   Untracked, readable from any worktree, and the same for every slice of the
-   run, so slices sharing a repo write the same files. Confirm with a `status`:
-   parts joined, line count of each file, your plan tasks by their headings.
-3. Record the commit your branch was cut from, whether the feature branch or an
-   earlier slice's, before your first commit; the rebase in section 5 reads it.
-   Make the folder (yours alone, as worktree slices share the repo), and write
-   only if absent, so a resumed session keeps the real one:
-   `[ -f <run>/<slice key>/fork ] || git rev-parse HEAD > <run>/<slice key>/fork`
-4. Run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" chains`. An unfinished slice chain
-   here means you are resuming it: start no second one. Otherwise:
+   and `<chain-id>` is the feature chain's, named in the **Slice** item of your
+   starting instructions. Untracked, readable from any worktree, and the same
+   for every slice of the run, so slices sharing a repo write the same files.
+   Confirm with a `status`: parts joined, line count of each file, your plan
+   tasks by their headings.
+3. Record where your branch was cut, for section 5. The **Slice** item's line
+   `Cut from: <target | slice key> at <sha>` gives both. Make the folder
+   `<run>/<slice key>/` (yours alone, as worktree slices share the repo) and
+   write each file only if absent, so a resumed session keeps the real ones:
+
+   ```
+   [ -f <run>/<slice key>/fork ] || echo <sha> > <run>/<slice key>/fork
+   [ -f <run>/<slice key>/base ] || echo <target or the slice key> > <run>/<slice key>/base
+   ```
+
+   With no `Cut from:` line and no commits of your own on the branch, write
+   `target` and `git rev-parse HEAD`. With commits of your own, never `HEAD`:
+   ask the controller for the line.
+4. Your slice chain's id lives in `<run>/<slice key>/chain`, never in the
+   `chains` list, which shows every chain in a shared store, siblings included.
+   If the file holds an id, resume that chain. If it is absent:
 
    ```
    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" start --chain "$CLAUDE_PLUGIN_ROOT/chains/slice.json" --title "<slice title>"
+   echo <id> > <run>/<slice key>/chain
    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>
    ```
 
    `state` must show node `implementation`, `open`; if not, the directory or id
    is wrong, so start no other chain.
 5. Invoke `kraft-lite:next`. Every `kl.py` verb takes `--chain-id <id>`.
+
+### A fresh container
+
+`<run>/<slice key>/` is missing while your branch on the remote already has
+commits of your own: the container was replaced, and the chain state and the
+documents went with it. The pushed commits are the work done.
+
+1. Send the controller a `status`: fresh container, your pushed head and PR.
+   Ask it for the spec and the plan again.
+2. Run setup. `fork` and `base` come from the latest `Cut from:` line in this
+   conversation (your starting instructions', or your last rebase `status`),
+   never from `HEAD`.
+3. At the new chain's `implementation`, build only the plan tasks your pushed
+   commits do not hold. Never redo, reset or force-push away pushed work.
 
 ## 2. The controller takes the user's place
 
@@ -88,13 +117,14 @@ any question.
 
 Try in this order, and read answers in the same order each time you wake:
 
-1. A session message to the controller.
+1. A session message to the controller (locally, addressed by the name your
+   starting instructions give).
 2. On the same machine, one JSON line appended to
    `.kraft-lite/messages/<chain-id>/<slice key>.jsonl` under the controller's
    checkout path in your starting instructions: `{"at", "from": "child", "kind",
    "body"}`. This `<chain-id>` is the feature chain's, never your own slice
    chain's `<id>`.
-3. A comment on your own draft PR, opened into the feature branch at your first commit.
+3. A comment on your own draft PR, opened into the target at your first commit.
 
 `kind` is `question`, `status` or `done`; the controller answers with `answer`.
 Every message has these parts, in this order:
@@ -125,29 +155,45 @@ Checks: <name: state, ...>
 Next: <wake-up time, or "none armed; continue on the controller's check-in">
 ```
 
-## 5. Rebasing onto the feature branch
+## 5. Rebasing onto the target
 
-An earlier slice's own commits never reach the feature branch, which squashes.
-When the controller says an earlier slice merged, or `on.mr.rebase` runs (its
-target is the feature branch, never the base branch):
+The target squash-merges, so an earlier slice's own commits never reach it.
+`<run>/<slice key>/base` says when you rebase:
+
+| `base` holds | Rebase when | When `on.mr.rebase` runs |
+|---|---|---|
+| `target` | `on.mr.rebase` runs, or the controller says to | rebase |
+| a slice key | the controller says that slice merged | nothing to do: that slice's commits are on your branch and not yet on the target, so a rebase would drop them |
+
+To rebase:
 
 1. Commit uncommitted work, or stash it and pop it after the rebase.
-2. `git fetch origin`, then
-   `git rebase --onto origin/<feature branch> "$(cat <run>/<slice key>/fork)"`.
-   That commit is where your branch was cut, so this works after an early start
-   from a slice branch that was since force-pushed or deleted, and after a start
-   from the feature branch. Once it succeeds, your branch is cut from the commit
-   you rebased onto, so record it:
-   `git rev-parse origin/<feature branch> > <run>/<slice key>/fork`.
-3. Re-run your scoped tests, then `git push --force-with-lease origin <your slice branch>`.
-4. Send a `status` with the new head and the test result.
+2. `git fetch origin`, then check the fork. If either check fails, run no
+   rebase: send the controller a `question` with both shas, and keep working.
+   - `git merge-base --is-ancestor "$(cat <run>/<slice key>/fork)" HEAD` succeeds.
+   - The fork is not `HEAD` itself while your branch has commits of your own.
+3. `git rebase --onto origin/<target> "$(cat <run>/<slice key>/fork)"`. That
+   commit is where your branch was cut, so this works after a start from a
+   slice branch that was since force-pushed or deleted. Once it succeeds, your
+   branch is cut from the target, so record that:
+   `git rev-parse origin/<target> > <run>/<slice key>/fork` and
+   `echo target > <run>/<slice key>/base`.
+4. Re-run your scoped tests, then `git push --force-with-lease origin <your slice branch>`.
+5. Send a `status` with the new head, the test result, and the line
+   `Cut from: target at <the new fork>`.
 
 ## 6. Pushes, tests and review
 
-Push only your own slice branch, and open the PR into the feature branch. Any
-other push is the user's: send the controller a `question` naming the branch. It
+Push only your own slice branch, and open the PR into the target. Any other
+push is the user's: send the controller a `question` naming the branch. It
 tells the user to type `You may push to <branch>.` here; push only after those
 words appear in this session. The controller's word is not them.
+
+`on.slice.implementation.start` ends after the last task's own reviews, whatever
+it is bound to: no final whole-branch review and no finishing, merge or PR step
+inside it, and no question to the user about one. `on.review.local.run` is the
+slice's one whole-branch review, and `open_mr` opens the PR. When the bound
+skill offers either, close `implementation` instead.
 
 For `on.slice.test.run`, run scoped tests with explicit paths, never the full
 suite; the PR body lists them and says the full suite runs on CI. Skip

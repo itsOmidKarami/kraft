@@ -259,11 +259,22 @@ def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
         ".kraft-lite/messages/<chain-id>/",
         "<chain-id> <key>: <slice title>",
         "part i of n",
-        "rebase --onto origin/<feature",
+        "rebase --onto origin/<target>",
         "You may push to <branch>.",
         "For the user: configuration",
+        "Cut from: <target | slice key> at <sha>",
+        "--path-format=absolute --git-common-dir)/kraft-lite/<chain-id>",
     ],
-    ids=["message-path", "session-title", "part-marker", "rebase-command", "push-words", "config"],
+    ids=[
+        "message-path",
+        "session-title",
+        "part-marker",
+        "rebase-command",
+        "push-words",
+        "config",
+        "cut-from-line",
+        "child-folder",
+    ],
 )
 def test_the_child_and_controller_skills_name_the_same_thing(texts, needle):
     """What one skill sends the other must be spelled the same in both, or a child
@@ -282,7 +293,7 @@ def test_the_child_rebase_reads_the_commit_recorded_at_setup(texts):
     guard = "[ -f <run>/<slice key>/fork ] ||"
     assert guard in body, "a resumed child must not overwrite its fork commit"
     assert "<common>" not in body, "the shared common dir would collide between worktree slices"
-    assert "merge-base" not in body
+    assert "merge-base" not in body.replace("merge-base --is-ancestor", ""), "only as a check"
     assert "--path-format=absolute" in body
     assert body.count("git-common-dir") == body.count("--path-format=absolute --git-common-dir")
 
@@ -390,3 +401,83 @@ def test_init_binds_both_slice_hooks_and_the_ignores(texts):
         assert needle in body, needle
     # the slice test hook is never the whole-suite subprocess
     assert re.search(r"on\.slice\.test\.run:\n\s+kind: prompt", body)
+
+
+def _section(body: str, number: int) -> str:
+    """One numbered `## N.` section of a skill, whitespace flattened."""
+    return " ".join(body.split(f"## {number}.")[1].split("\n## ")[0].split())
+
+
+def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
+    """A slice cut from another slice's branch carries that slice's commits until
+    it merges. Rebasing it onto the target before then drops them, so its
+    `on.mr.rebase` does nothing, and a successful rebase makes it target-cut."""
+    rebase = _section(texts["build-slice"], 5)
+    for needle in (
+        "`<run>/<slice key>/base` says when you rebase",
+        "| a slice key | the controller says that slice merged | nothing to do",
+        "echo target > <run>/<slice key>/base",
+        "Cut from: target at <the new fork>",
+    ):
+        assert needle in rebase, needle
+    # the fork is checked before it is used
+    assert rebase.index("merge-base --is-ancestor") < rebase.index("git rebase --onto")
+    assert "The fork is not `HEAD` itself while your branch has commits of your own" in rebase
+
+
+@pytest.mark.parametrize(
+    "name, section, needle",
+    [
+        ("build-slice", 1, "never `HEAD`: ask the controller for the line"),
+        ("build-slice", 1, "### A fresh container"),
+        ("build-slice", 1, "never from `HEAD`"),
+        ("build-slice", 1, "Never redo, reset or force-push away pushed work"),
+        ("build-slice", 1, "lives in `<run>/<slice key>/chain`, never in the `chains` list"),
+        ("build-slice", 1, "named in the **Slice** item of your starting instructions"),
+        ("build-slice", 6, "no final whole-branch review and no finishing, merge or PR step"),
+        ("run-slices", 3, "--status starting --branch <slice-branch> --fork <sha>"),
+        ("run-slices", 3, "the feature chain's id, then key"),
+        ("run-slices", 3, "locally its name too"),
+        ("run-slices", 3, "### In `main` mode"),
+        ("run-slices", 3, "Implementation stops after the last task's reviews"),
+        ("run-slices", 4, "and every `waiting` one in `ready`, find its session"),
+        ("run-slices", 5, "A check-in is armed while any slice is not merged"),
+        ("run-slices", 5, "`kraft-lite:run-slices check-in, chain <id>: read state first.`"),
+        ("run-slices", 5, "`KL slice-set --slice <key> --fork <sha>`"),
+        ("run-slices", 6, "Never one cut from another slice that is still unmerged"),
+        ("run-slices", 6, "--status running`, and review again"),
+        ("run-slices", 6, "never in the state branch's checkout"),
+        ("run-slices", 2, "A missing ability is never a block"),
+        ("run-slices", 1, "delete any `.kraft-lite/proposals/<chain-id>.json`"),
+    ],
+    ids=[
+        "child-fork-never-head",
+        "child-fresh-container",
+        "child-fresh-container-fork",
+        "child-keeps-pushed-work",
+        "child-chain-file",
+        "child-chain-id-from-instructions",
+        "child-no-second-whole-branch-review",
+        "controller-records-fork-at-start",
+        "controller-names-the-chain-id",
+        "controller-local-name",
+        "controller-main-mode",
+        "controller-method-stops-implementation",
+        "controller-resume-matches-ready",
+        "controller-check-in-while-unmerged",
+        "controller-check-in-message",
+        "controller-records-rebased-fork",
+        "controller-rebase-only-cut-from-merged",
+        "controller-failed-review",
+        "controller-feature-worktree",
+        "controller-missing-ability",
+        "controller-deletes-unused-proposal",
+    ],
+)
+def test_a_skill_carries_the_final_review_fixes(texts, name, section, needle):
+    assert needle in _section(texts[name], section), f"{name} section {section} lacks {needle!r}"
+
+
+def test_the_run_slices_skill_names_every_verb_without_a_chain_id(texts):
+    flat = " ".join(texts["run-slices"].split())
+    assert "except `settings`, `import`, `chains`, `detect` and `start`" in flat

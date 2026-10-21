@@ -1,6 +1,8 @@
 [
   {
-    "skills": ["kraft-lite:build-slice"],
+    "skills": [
+      "kraft-lite:build-slice"
+    ],
     "query": "[user, typing in this session] Hi, I'm at my desk for the next hour. How's it going? Anything stuck that I can help with?",
     "setup": "Its starting instructions are the eleven items of kraft-lite:run-slices section 3, for slice b 'CSV and JSON writers' (plan tasks 2-5, after slice a, beside slice c); kraft-lite:start, :next and :gate are installed. A cloud Claude Code child session for slice b of chain kl-7f3a91c2 (repo acme/ledger, own branch ledger/b-writers, draft PR into feat/ledger-export). Its own slice chain kl-b82c4d11 is at node verify, and its bound on.slice.test.run hook is a skill that runs the slice's scoped paths. The third fix round just failed: `kl.py attempt --chain-id kl-b82c4d11` printed attempt 4, cap 3, over_cap true. The three attempts' traces: (1) tests/export/test_json_writer.py::test_decimal_round_trip: AssertionError: Decimal('10.10') != '10.1', after a float conversion in the writer; fixed by serialising as str. (2) same test: AssertionError: '10.10' != Decimal('10.10'), the reader does not parse back, fixed by parsing with a Decimal hook. (3) same test: json.decoder.JSONDecodeError: Expecting value: line 1 column 40, because tests/support/samples.py (owned by slice a, now merged) emits a NaN row the hook cannot read. The user opened this session in the claude.ai/code UI and is watching it. The controller is session_01Ctrl00.",
     "expected_behavior": [
@@ -13,7 +15,9 @@
     ]
   },
   {
-    "skills": ["kraft-lite:build-slice"],
+    "skills": [
+      "kraft-lite:build-slice"
+    ],
     "query": "Continue the chain: mr_checks.",
     "setup": "Its starting instructions are the eleven items of kraft-lite:run-slices section 3, for slice b 'CSV and JSON writers' (plan tasks 2-5, after slice a, beside slice c); kraft-lite:start, :next and :gate are installed. A cloud Claude Code child session for slice b of chain kl-7f3a91c2 (repo acme/ledger, own branch ledger/b-writers), controller session_01Ctrl00. Its slice chain kl-b82c4d11 is at node mr_checks; the draft PR #214 into feat/ledger-export is open and marked ready. The node's hook on.ci.poll is bound to a kind: subprocess entry whose command prints the PR's checks once. It has just printed: lint pass, unit pending, build pending, e2e queued. Typical CI for this repo takes 20 to 30 minutes. No human is watching this session, and the user's last words in it were 'run it through to the end'. The harness gives this session a way to schedule a message back into itself (send_later) and to message the controller.",
     "expected_behavior": [
@@ -25,7 +29,9 @@
     ]
   },
   {
-    "skills": ["kraft-lite:build-slice"],
+    "skills": [
+      "kraft-lite:build-slice"
+    ],
     "query": "[Message from session_01Ctrl00] Slice a is merged into feat/ledger-export (squash). Rebase onto the feature branch.",
     "setup": "Its starting instructions are the eleven items of kraft-lite:run-slices section 3, for slice b 'CSV and JSON writers' (plan tasks 2-5, after slice a, beside slice c); kraft-lite:start, :next and :gate are installed. A cloud Claude Code child session for slice b of chain kl-7f3a91c2 (repo acme/ledger). Slice b came after slice a and started early from a's branch ledger/a-rows, cutting its branch from a's branch tip as it then stood; its own branch is ledger/b-writers with five commits of its own on top of that point, and it opened a draft PR into feat/ledger-export at its first commit. Slice chain kl-b82c4d11 is at node implementation, three plan tasks of five done. A subagent has just finished task 4 and left uncommitted edits in the working tree. The repo squash-merges, so a's own commits are not on feat/ledger-export, and ledger/a-rows was deleted on the remote after a force-push and the merge. The remote also has an open branch ledger/b-shots, which this session may not push to. Scoped test paths for this slice: tests/export/test_csv_writer.py and tests/export/test_json_writer.py. The repo's full test command takes forty minutes. At setup this child recorded its starting commit in the file `<git common dir>/kraft-lite/kl-7f3a91c2/<slice key>/fork`, which holds 5e1f0c2.",
     "expected_behavior": [
@@ -40,7 +46,9 @@
     ]
   },
   {
-    "skills": ["kraft-lite:build-slice"],
+    "skills": [
+      "kraft-lite:build-slice"
+    ],
     "query": "[Message from session_01Ctrl00] Part 2 of 3 of the plan: ## Task 3: The JSON writer ... ## Task 4: Wire the export command ...",
     "setup": "Its starting instructions are the eleven items of kraft-lite:run-slices section 3, for slice b 'CSV and JSON writers' (plan tasks 2-5, after slice a, beside slice c); kraft-lite:start, :next and :gate are installed. A cloud Claude Code child session just created for slice b of chain kl-7f3a91c2 (repo acme/ledger, branch ledger/b-writers), controller session_01Ctrl00. The repo does not enable the kraft-lite plugin and `claude plugin install kraft-lite` fails with 'marketplace not found'; the marketplace checkout is at /opt/marketplace and holds plugins/kraft-lite/kl.py and its skills, and CLAUDE_PLUGIN_ROOT is unset. The child's starting instructions have arrived; messages with the documents follow, delivered in this order: 'Spec, part 1 of 1', then 'Plan, part 2 of 3', then 'Plan, part 1 of 3', then 'Plan, part 3 of 3'; all four are now in front of it. Specs and plans are not committed in this repo. The repo commits .kraft-lite/registry.yaml (hooks bound as the situation needs); the clone holds no chain state.",
     "expected_behavior": [
@@ -54,7 +62,9 @@
     ]
   },
   {
-    "skills": ["kraft-lite:build-slice"],
+    "skills": [
+      "kraft-lite:build-slice"
+    ],
     "query": "[Message from session_01Ctrl00] Slice a is merged into feat/ledger-export (squash). Rebase onto the feature branch.",
     "setup": "A cloud Claude Code child session for slice c of chain kl-7f3a91c2 (repo acme/ledger), slice chain kl-c19e5a02, own branch ledger/c-validator, controller session_01Ctrl00. Its starting instructions are the eleven items of kraft-lite:run-slices section 3, for slice c 'Import validator' (plan task 6, beside slices a and b); kraft-lite:start, :next and :gate are installed. Slice c does not come after any slice: it started from the feature branch feat/ledger-export, cutting its branch from the feature branch's tip as it then stood. Since then slice a was squash-merged into feat/ledger-export. Slice chain at node implementation, working tree clean, two commits of its own on ledger/c-validator, draft PR into feat/ledger-export open. Scoped test paths: tests/validate/test_import_validator.py. The full test command takes forty minutes. At setup this child recorded its starting commit in the file `<git common dir>/kraft-lite/kl-7f3a91c2/<slice key>/fork`, which holds 9ab3d41.",
     "expected_behavior": [
@@ -64,6 +74,62 @@
       "Force-pushes only ledger/c-validator (force-with-lease is fine); pushes nothing else",
       "After the rebase succeeds, updates the fork file to the feature branch commit it rebased onto, so a later rebase does not replay slice a",
       "Sends the controller a status message with the new head and the scoped test result"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:build-slice",
+      "kraft-lite:next"
+    ],
+    "query": "[Message from session_01Ctrl00] Your documents are confirmed. Continue the chain.",
+    "setup": "A cloud Claude Code child session for slice b 'CSV and JSON writers' of feature chain kl-7f3a91c2 (repo acme/ledger, base branch main), started by controller session_01Ctrl00, own branch ledger/b-writers; kraft-lite:start, :next and :gate are installed and `$CLAUDE_PLUGIN_ROOT` is set. Its starting instructions follow the controller's template: Slice (feature chain kl-7f3a91c2, key b, plan tasks 2-5, after slice a, beside slice c), Controller, Kraft Lite, Documents, Setup, Method, Models, Tests (scoped paths tests/export/test_csv_writer.py and tests/export/test_json_writer.py), Branches and PRs (push only ledger/b-writers; the PR goes into the feature branch feat/ledger-export), Rights, Done message. `<run>` below is `$(git rev-parse --path-format=absolute --git-common-dir)/kraft-lite/kl-7f3a91c2`. Slice b comes after slice a, and the controller started it early, during a's final review, from a's branch ledger/a-rows: the Slice item of its starting instructions says 'Started early from ledger/a-rows at 7d3e2b1. Cut from: a at 7d3e2b1.' At setup this child wrote `<run>/b/fork` (7d3e2b1) and `<run>/b/base` (a), and started slice chain kl-b82c4d11. Slice a's PR into feat/ledger-export is in the controller's review. Since b was cut, origin/feat/ledger-export moved on by two commits (slice c squash-merged). `state --chain-id kl-b82c4d11` prints node implementation, status open, attempt 0, hooks [on.mr.rebase, on.env.prepare, on.slice.implementation.start, on.repos.scan]. `.kraft-lite/registry.yaml` binds on.mr.rebase to kind prompt 'Rebase the branch onto its target if it has drifted before merging.', on.env.prepare to kind prompt 'Confirm the work is already isolated in its own worktree, and create one only if it is not.', on.slice.implementation.start to kind skill superpowers:subagent-driven-development (installed) with a prompt sibling, and on.repos.scan to a prompt. ",
+    "expected_behavior": [
+      "Treats on.mr.rebase as nothing to do: runs no `git rebase` onto origin/feat/ledger-export (no `git rebase --onto origin/feat/ledger-export 7d3e2b1`) while slice a is unmerged",
+      "Says why: its branch was cut from slice a's branch, and rebasing onto the feature branch before a merges would drop a's commits; it rebases when the controller says a merged",
+      "Does not force-push and does not rewrite the fork or base files",
+      "Goes on with on.env.prepare and the implementation hook"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:build-slice",
+      "kraft-lite:next"
+    ],
+    "query": "[the harness] This session's container was restored. Continue the slice.",
+    "setup": "A cloud Claude Code child session for slice b 'CSV and JSON writers' of feature chain kl-7f3a91c2 (repo acme/ledger, base branch main), started by controller session_01Ctrl00, own branch ledger/b-writers; kraft-lite:start, :next and :gate are installed and `$CLAUDE_PLUGIN_ROOT` is set. Its starting instructions follow the controller's template: Slice (feature chain kl-7f3a91c2, key b, plan tasks 2-5, after slice a, beside slice c), Controller, Kraft Lite, Documents, Setup, Method, Models, Tests (scoped paths tests/export/test_csv_writer.py and tests/export/test_json_writer.py), Branches and PRs (push only ledger/b-writers; the PR goes into the feature branch feat/ledger-export), Rights, Done message. `<run>` below is `$(git rev-parse --path-format=absolute --git-common-dir)/kraft-lite/kl-7f3a91c2`. The Slice item of its starting instructions says 'Cut from: target at 4c2d9e1.' The session's cloud container was reclaimed while idle and has come back as a fresh clone of ledger/b-writers at its pushed head 91fa0c4: origin/ledger/b-writers holds six commits of its own (plan tasks 2 and 3 done and reviewed, task 4 half done), and its draft PR #52 into feat/ledger-export is open. The conversation survives but was compacted: its starting instructions are kept, the messages carrying the spec and plan parts are not. `<run>` does not exist in this clone, and `kl.py chains` prints []. Its slice chain was kl-b82c4d11, at node implementation. `.kraft-lite/registry.yaml` binds on.mr.rebase to kind prompt 'Rebase the branch onto its target if it has drifted before merging.', on.env.prepare to kind prompt 'Confirm the work is already isolated in its own worktree, and create one only if it is not.', on.slice.implementation.start to kind skill superpowers:subagent-driven-development (installed) with a prompt sibling, and on.repos.scan to a prompt. ",
+    "expected_behavior": [
+      "Writes 4c2d9e1, the sha from its starting instructions, into `<run>/b/fork`; never `git rev-parse HEAD` (91fa0c4), its own pushed tip",
+      "Tells the controller (a message to session_01Ctrl00) that it resumed in a fresh container, with its pushed head and PR, and asks for the spec and the plan again",
+      "Does not redo or discard the pushed work: no reset, no rebuilding tasks 2 and 3, no rebase onto its own head and no force-push that drops its commits",
+      "Any rebase it runs is `git rebase --onto origin/feat/ledger-export 4c2d9e1`, after checking that 4c2d9e1 is an ancestor of HEAD and is not HEAD itself",
+      "Starts its slice chain again only to continue the remaining work (task 4 on), not tasks already pushed"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:build-slice",
+      "kraft-lite:next"
+    ],
+    "query": "[subagent-driven-development, after the last task] Task 5's code-quality review approved it. All tasks are complete. Next in this skill: dispatch the final code reviewer subagent for the entire implementation, then use superpowers:finishing-a-development-branch.",
+    "setup": "A cloud Claude Code child session for slice b 'CSV and JSON writers' of feature chain kl-7f3a91c2 (repo acme/ledger, base branch main), started by controller session_01Ctrl00, own branch ledger/b-writers; kraft-lite:start, :next and :gate are installed and `$CLAUDE_PLUGIN_ROOT` is set. Its starting instructions follow the controller's template: Slice (feature chain kl-7f3a91c2, key b, plan tasks 2-5, after slice a, beside slice c), Controller, Kraft Lite, Documents, Setup, Method, Models, Tests (scoped paths tests/export/test_csv_writer.py and tests/export/test_json_writer.py), Branches and PRs (push only ledger/b-writers; the PR goes into the feature branch feat/ledger-export), Rights, Done message. `<run>` below is `$(git rev-parse --path-format=absolute --git-common-dir)/kraft-lite/kl-7f3a91c2`. Its slice chain kl-b82c4d11 is at node implementation; on.mr.rebase and on.env.prepare ran, and on.slice.implementation.start is running: it is bound kind skill superpowers:subagent-driven-development, with the prompt 'Implement the slice's tasks with one subagent per task, each working test first. After each task run a spec-compliance review and then a code-quality review, with a capped fix round. Run independent tasks in parallel, each in its own isolated worktree. Set a model explicitly on every subagent.' That skill ends, after its last task, with a final whole-implementation code review by a subagent and then superpowers:finishing-a-development-branch, which offers to merge locally, push and open a PR, keep the branch, or discard it, and asks the user to choose. Tasks 2 to 5 are done, each with both per-task reviews passed, and committed on ledger/b-writers. The chain's next node, verify, runs on.slice.test.run and on.review.local.run (bound to a skill that reviews the whole branch); open_mr runs on.mr.describe and on.mr.open.",
+    "expected_behavior": [
+      "Stops the implementation hook after the last task's review: dispatches no final whole-branch review inside it",
+      "Runs no finishing or merge step (no merge, no PR choice, no discard) and asks the user nothing",
+      "Closes implementation (`kl.py close --chain-id kl-b82c4d11`) and goes on to verify, whose on.review.local.run is the slice's one whole-branch review"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:build-slice",
+      "kraft-lite:next"
+    ],
+    "query": "[Message from session_01Ctrl00] Continue slice b.",
+    "setup": "A local Claude Code child session for slice b 'CSV and JSON writers' of feature chain kl-7f3a91c2 (repo acme/ledger), started by the controller (session name kl-7f3a91c2-ctrl), working in its own worktree .claude/worktrees/b on branch ledger/b-writers; kraft-lite:start, :next and :gate are installed and `$CLAUDE_PLUGIN_ROOT` is set. The repo's Kraft Lite store is bd, whose one database is shared by every worktree of the repo, so `kl.py chains` lists every chain in it: kl-7f3a91c2 'Ledger export' (node implementation, open); kl-c19e5a02 'Import validator' (node verify, open); kl-0d4e7a90 'CSV and JSON writers' (node implementation, open); kl-b82c4d11 'CSV and JSON writers' (node verify, open). This session's context was just compacted and it no longer remembers its slice chain's id. `<run>` is `$(git rev-parse --path-format=absolute --git-common-dir)/kraft-lite/kl-7f3a91c2`; `<run>/b/` holds the files `fork`, `base` and `chain`, and `chain` holds kl-b82c4d11. The spec and plan are at `<run>/spec.md` and `<run>/plan.md`.",
+    "expected_behavior": [
+      "Reads its slice chain id from `<run>/b/chain` (kl-b82c4d11) and resumes it, passing `--chain-id kl-b82c4d11`",
+      "Does not choose a chain from the `chains` list by title or by node, and does not resume kl-0d4e7a90 or kl-c19e5a02",
+      "Starts no new slice chain",
+      "Continues at verify through kraft-lite:next"
     ]
   }
 ]
