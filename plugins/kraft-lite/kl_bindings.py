@@ -104,7 +104,7 @@ SLICE_DEFAULTS: dict[str, dict] = {
                 "review, with a capped fix round. Run independent tasks in parallel, each in "
                 "its own isolated worktree. Set a model explicitly on every subagent. Stop "
                 "after the last task's review: no final whole-branch review and no finishing "
-                "or merge step, since on.review.local.run and open_mr are those."
+                "or merge step, since the child chain's code review task and its MR node are those."
             ),
         },
     },

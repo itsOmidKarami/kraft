@@ -43,8 +43,13 @@ def test_the_slice_skills_name_nothing_of_the_legacy_chains(texts, name, legacy)
         ),
         (
             "run-slices",
-            "at another gate node before the first build node, draw the proposal there all the "
-            "same",
+            "Read `KL slices` first: its `shape` names this chain's `slice_gate`, or says why it "
+            "is `unsliceable`.",
+        ),
+        (
+            "run-slices",
+            "At any other node: tell the user slicing comes at `shape.slice_gate`, and draw "
+            "nothing now. In both, go on with `kraft-lite:next`",
         ),
         (
             "run-slices",
@@ -59,7 +64,7 @@ def test_the_slice_skills_name_nothing_of_the_legacy_chains(texts, name, legacy)
         ),
         (
             "build-slice",
-            "git show origin/<state branch>:kraft-lite-state/chain.json > <run>/chain.json python3 "
+            "git show FETCH_HEAD:kraft-lite-state/chain.json > <run>/chain.json python3 "
             '"$CLAUDE_PLUGIN_ROOT/kl.py" start --slice-of <run>/chain.json --title "<slice title>"',
         ),
         ("build-slice", "never start with `--chain` instead"),
@@ -75,7 +80,8 @@ def test_the_slice_skills_name_nothing_of_the_legacy_chains(texts, name, legacy)
     ],
     ids=[
         "controller-slices-at-the-slice-gate",
-        "controller-proposal-at-any-gate-before-the-build",
+        "controller-reads-the-shape-first",
+        "controller-draws-only-at-the-slice-gate",
         "controller-names-the-state-branch-to-start-from",
         "controller-refuses-a-pre-v1-export",
         "child-starts-from-the-exported-chain",

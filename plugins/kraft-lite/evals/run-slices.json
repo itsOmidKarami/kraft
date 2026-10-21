@@ -218,12 +218,13 @@
       "kraft-lite:run-slices",
       "kraft-lite:gate"
     ],
-    "query": "Carry on.",
-    "setup": "The cloud controller session session_01Ctrl00 for chain kl-7f3a91c2 'Ledger export' in repo acme/ledger (base branch main), on its own branch claude/ledger-export-x1, which is the run's state branch and its checkout. `$CLAUDE_PLUGIN_ROOT` is set and the kraft-lite skills are installed; the claude-code-remote tools are loaded. The chain was started with `--chain lean`, the repo's own chain in `.kraft/chains/lean.yaml`: spec, spec_approval, plan, plan_approval, implementation, verification, work_item_summary, final_review. No node of it opens a merge request. The plan has a `## Slices` section with three slices, and the user asked you to slice it at plan_approval. You wrote `.kraft-lite/proposals/kl-7f3a91c2.json`, ran `kl.py gate --chain-id kl-7f3a91c2`, and kraft-lite:gate presented the plan and the proposal; the user approved. Then `python3 \"$CLAUDE_PLUGIN_ROOT/kl.py\" approve --slices .kraft-lite/proposals/kl-7f3a91c2.json --chain-id kl-7f3a91c2` exited 1 printing `kraft-lite: chain 'lean' cannot be sliced: no node opens a merge request (forge mr.open_draft)`. `state` still prints node plan_approval, kind gate, status blocked, gate.slice_gate false, sliced null.",
+    "query": "This plan is big. Slice it across sessions.",
+    "setup": "The cloud controller session session_01Ctrl00 for chain kl-7f3a91c2 'Ledger export' in repo acme/ledger (base branch main), on its own branch claude/ledger-export-x1, which is the run's state branch and its checkout. `$CLAUDE_PLUGIN_ROOT` is set and the kraft-lite skills are installed; the claude-code-remote tools are loaded. The chain was started with `--chain lean`, the repo's own chain in `.kraft/chains/lean.yaml`: spec, spec_approval, plan, plan_approval, implementation, verification, work_item_summary, final_review. `state --chain-id kl-7f3a91c2` prints node plan_approval, kind gate, status open, sliced null, gate {message: 'Approve the plan', artifact: plan, artifact_path: docs/plans/ledger-export.md, reject_to: plan, chain_finalized: false, slice_gate: false}. The plan has a `## Slices` section with three slices. No proposal file exists. (If run, `kl.py slices --chain-id kl-7f3a91c2` prints mode null, slices [], and shape {\"unsliceable\": \"chain 'lean' cannot be sliced: no node opens a merge request (forge mr.open_draft)\"}.)",
     "expected_behavior": [
-      "Tells the user the chain cannot be sliced, naming what the refusal names: no node of 'lean' opens a merge request (forge mr.open_draft)",
-      "Does not edit the frozen chain, the chain file or kl.py, writes no slice or run record by hand, and does not run `approve --slices` again",
-      "Walks the chain unsliced: a plain `kl.py approve --chain-id kl-7f3a91c2` at plan_approval, recorded only once the user agrees to go on unsliced (asking them is fine), and deletes the proposal file",
+      "Reads `kl.py slices` (its `shape`) before drawing anything",
+      "Tells the user the chain cannot be sliced, naming the reason `shape` gives: no node of 'lean' opens a merge request (forge mr.open_draft)",
+      "Draws no proposal: writes no .kraft-lite/proposals/kl-7f3a91c2.json and runs no `approve --slices`",
+      "Lets the chain go on unsliced through the gate's own question: `kl.py gate --chain-id kl-7f3a91c2` (no `--name`) and kraft-lite:gate, recording nothing for the user; does not edit the chain file or kl.py",
       "Starts no child session"
     ]
   },
@@ -237,7 +238,7 @@
       "Records a back in review with `kl.py slice-set --slice a --status in_review` and reviews PR #51 again at head 9c1e7f0",
       "Tells b's child (session_01Bbb) to rebase onto a's new tip, origin/ledger/a-rows at 9c1e7f0, now or once a is back in review: not onto the feature branch, because a is not merged",
       "Says it records the fork b reports after that rebase with `kl.py slice-set --slice b --fork <sha>`",
-      "Does not merge a or record it merged, and does not start c",
+      "Does not merge a or record it merged before its review at 9c1e7f0 finds it clean on green CI, and does not start c",
       "Exports state after its writes"
     ]
   },
@@ -279,6 +280,19 @@
       "Tells the user the run was exported by an older Kraft Lite and must be finished on the previous Kraft Lite version, and offers no other way on that writes state",
       "Does not run `kl.py start`, `migrate` or `approve --slices`, writes no chain.json and edits no export by hand",
       "Creates no child session and sends no message telling a child to stop or restart"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:run-slices"
+    ],
+    "query": "This will be a big one. Slice it across sessions.",
+    "setup": "The cloud controller session session_01Ctrl00 for chain kl-7f3a91c2 'Ledger export' in repo acme/ledger (base branch main), on its own branch claude/ledger-export-x1, which is the run's state branch and its checkout. `$CLAUDE_PLUGIN_ROOT` is set and the kraft-lite skills are installed; the claude-code-remote tools are loaded. The chain runs on the default chain. `state --chain-id kl-7f3a91c2` prints node spec_approval, kind gate, status open, sliced null, gate {message: 'Approve the spec', artifact: spec, artifact_path: docs/specs/ledger-export.md, reject_to: spec, chain_finalized: false, slice_gate: false}. No plan exists yet. (If run, `kl.py slices --chain-id kl-7f3a91c2` prints mode null, slices [], and shape {\"slice_gate\": \"chain_revision_approval\", \"first_build\": \"implementation\", \"mr_node\": \"draft_merge_request\"}.)",
+    "expected_behavior": [
+      "Reads `kl.py slices` (its `shape`) and tells the user slicing is decided at chain_revision_approval, the chain's slice gate, after the plan",
+      "Draws no proposal now: writes no .kraft-lite/proposals/kl-7f3a91c2.json and runs no `approve --slices`",
+      "Leaves spec_approval to its own question: `kraft-lite:gate` (after `kl.py gate` if it is not blocked yet), recording nothing on the user's behalf",
+      "Starts no child session"
     ]
   }
 ]

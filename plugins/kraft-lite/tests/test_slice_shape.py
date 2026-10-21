@@ -288,6 +288,43 @@ def test_a_plan_gate_chain_slices_at_its_plan_gate(walk, kl_cli, tmp_path):
     assert kl_cli(tmp_path, "close")["sliced"]["action"] == "scoped_verify"
 
 
+@pytest.mark.parametrize(
+    "case, shape",
+    [
+        pytest.param(
+            "default",
+            {
+                "slice_gate": "chain_revision_approval",
+                "first_build": "implementation",
+                "mr_node": "draft_merge_request",
+            },
+            id="default",
+        ),
+        pytest.param(
+            "quick-task",
+            {
+                "unsliceable": "chain 'quick-task' cannot be sliced: "
+                "no gate before the first build node"
+            },
+            id="quick_task",
+        ),
+        pytest.param("child", {"unsliceable": "a child chain is never sliced"}, id="child"),
+    ],
+)
+def test_slices_reports_where_the_chain_slices(walk, case, shape, kl_cli, tmp_path):
+    """Read before a proposal is drawn: where the run's frozen chain slices, or
+    why it cannot, without a write that `approve --slices` would make."""
+    if case == "child":
+        _, out, _ = exported(walk, kl_cli, tmp_path)
+        tmp_path = tmp_path / "child"
+        tmp_path.mkdir()
+        kl_cli(tmp_path, "start", "--slice-of", str(out / "chain.json"), "--title", "Slice a")
+    else:
+        kl_cli(tmp_path, "start", "--title", "t", "--chain", case)
+
+    assert kl_cli(tmp_path, "slices")["shape"] == shape
+
+
 def installed_skill(root: Path, plugin: str, skill: str) -> None:
     """`plugin:skill` installed in `root`'s `.claude/skills`."""
     base = root / ".claude" / "skills" / plugin

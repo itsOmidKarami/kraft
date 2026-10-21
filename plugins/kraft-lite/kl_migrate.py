@@ -110,6 +110,24 @@ def _bundled_default(section: str, key: str) -> dict | None:
     ].get(key)
 
 
+#: Defaults a #1005 registry may hold word for word that the bundled ones have
+#: since reworded: such a binding is a default too, and dropped as one.
+LEGACY_DEFAULTS: dict[tuple[str, str], dict] = {
+    ("slice.tasks", "implementer"): {
+        "kind": "skill",
+        "skill": "superpowers:subagent-driven-development",
+        "prompt": (
+            "Implement the slice's tasks with one subagent per task, each working test "
+            "first. After each task run a spec-compliance review and then a code-quality "
+            "review, with a capped fix round. Run independent tasks in parallel, each in "
+            "its own isolated worktree. Set a model explicitly on every subagent. Stop "
+            "after the last task's review: no final whole-branch review and no finishing "
+            "or merge step, since on.review.local.run and open_mr are those."
+        ),
+    },
+}
+
+
 def _is_default(entry: dict, default: dict | None) -> bool:
     """Whether a binding says what the bundled default for its key already says:
     the same kind and fields, prompts compared with their whitespace folded."""
@@ -144,7 +162,8 @@ def convert_registry(registry: object) -> tuple[dict, list[str]]:
         if not isinstance(entry, Mapping):
             raise _refuse(f".kraft-lite/{REGISTRY}: {hook}: expected a mapping with a kind")
         section, key = target
-        if _is_default(dict(entry), _bundled_default(section, key)):
+        defaults = (_bundled_default(section, key), LEGACY_DEFAULTS.get((section, key)))
+        if any(_is_default(dict(entry), default) for default in defaults):
             dropped.append(hook)
             continue
         layer = bindings

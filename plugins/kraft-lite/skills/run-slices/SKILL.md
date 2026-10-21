@@ -6,10 +6,10 @@ description: "Controls a sliced Kraft Lite run as its controller, with one child
 # Running slices as the controller
 
 You are the **controller**. Each **slice** is one or more plan tasks, built by a
-**child** session that walks the **child chain** `kl.py` derives from this
-run's frozen chain: the first build node through the MR node's feedback,
-without gates (on the default chain `implementation`, `verification`,
-`describe_merge_request`, `draft_merge_request`, `merge_request_feedback`).
+**child** session that walks the **child chain** (the nodes `kl.py` gives a
+child from this run's frozen chain; on the default chain `implementation`,
+`verification`, `describe_merge_request`, `draft_merge_request`,
+`merge_request_feedback`).
 Children report to you; you answer them, review and merge their work into the
 **feature branch**, and keep the run's truth in `.kraft-lite/`, copied to the
 **state branch** after every change. Your conversation is not state: after a
@@ -35,12 +35,11 @@ wakes this session, so they invoke `kraft-lite:run-slices` to continue it.
 At the **slice gate**, the last gate before the first build node, which `state`
 marks `gate.slice_gate` true (`chain_revision_approval` on the default chain,
 `plan_approval` on one that builds right after its plan gate). `kraft-lite:next`
-invokes this skill there while `sliced` is null. Asked at an exec node, go on
-with `kraft-lite:next`; at another gate node before the first build node, draw
-the proposal there all the same. `approve --slices` is accepted only at the
-slice gate: anywhere else, or on a chain without one, it refuses and names the
-slice gate or what the chain lacks, and `kraft-lite:gate` asks the user whether
-to approve unsliced.
+invokes this skill there while `sliced` is null. Read `KL slices` first: its
+`shape` names this chain's `slice_gate`, or says why it is `unsliceable`.
+Unsliceable: tell the user its reason and draw nothing. At any other node: tell
+the user slicing comes at `shape.slice_gate`, and draw nothing now. In both, go
+on with `kraft-lite:next`, so each gate gets `kraft-lite:gate`'s own question.
 
 A plan with no `## Slices` section and few enough tasks for one session's
 context is not sliced: say so, delete any `.kraft-lite/proposals/<chain-id>.json`
@@ -203,7 +202,7 @@ Before any other write and before starting anything:
 ## 5. Following up
 
 A check-in is armed while any slice is not merged; in `main` mode, until the
-`await_user_merges` nodes close. Its message, word for word:
+nodes `sliced.action` marks `await_user_merges` close. Its message, word for word:
 `kraft-lite:run-slices check-in, chain <id>: read state first.` Every check-in:
 
 ```

@@ -536,9 +536,9 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         (
             "run-slices",
             1,
-            "`approve --slices` is accepted only at the slice gate: anywhere else, or on a chain "
-            "without one, it refuses and names the slice gate or what the chain lacks, and "
-            "`kraft-lite:gate` asks the user whether to approve unsliced.",
+            "Unsliceable: tell the user its reason and draw nothing. At any other node: tell the "
+            "user slicing comes at `shape.slice_gate`, and draw nothing now. In both, go on with "
+            "`kraft-lite:next`, so each gate gets `kraft-lite:gate`'s own question.",
         ),
         ("run-slices", 1, "A rewind to the slice gate or earlier retires the slices"),
         (

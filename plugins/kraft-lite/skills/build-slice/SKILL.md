@@ -67,14 +67,14 @@ Copy this and tick it off; the walk starts when all four are ticked.
 
    ```
    git fetch origin <state branch>
-   git show origin/<state branch>:kraft-lite-state/chain.json > <run>/chain.json
+   git show FETCH_HEAD:kraft-lite-state/chain.json > <run>/chain.json
    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" start --slice-of <run>/chain.json --title "<slice title>"
    echo <id> > <run>/<slice key>/chain
    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>
    ```
 
-   `state` must show the first build node (`implementation` on the default
-   chain), `open`; if not, the directory or id is wrong, so start no other
+   `state` must show the child chain's first node (`implementation` on the
+   default chain), `open`; if not, the directory or id is wrong, so start no other
    chain. A refused `start` goes to the controller as a `question` with the
    refusal in full; never start with `--chain` instead.
 5. Invoke `kraft-lite:next`. Pass your child chain's `--chain-id <id>` to every

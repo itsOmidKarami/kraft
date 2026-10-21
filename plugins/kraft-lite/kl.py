@@ -991,6 +991,25 @@ def _shape(chain: dict | None) -> kl_shape.SliceShape | None:
         return None
 
 
+def shape_view(chain: dict | None, epic: dict | None) -> dict | None:
+    """Where the run's frozen chain slices, as `slices` reports it: read before
+    a proposal is drawn, so the controller learns why a chain cannot be sliced
+    without the write `approve --slices` would make. None with no chain."""
+    if chain is None:
+        return None
+    if epic is not None and label_value(epic, SLICE_LAYER_LABEL) is not None:
+        return {"unsliceable": "a child chain is never sliced"}
+    try:
+        shape = kl_shape.slice_shape(chain)
+    except kl_chains.ChainError as error:
+        return {"unsliceable": error.detail}
+    return {
+        "slice_gate": shape.slice_gate,
+        "first_build": shape.first_build,
+        "mr_node": shape.mr_node,
+    }
+
+
 def slices_for_gate(
     records: list[dict], node_record: dict, chain_id: str, path: Path, root: Path, chain: dict
 ) -> list[dict]:
@@ -2337,7 +2356,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.verb == "slices":
-        print(json.dumps(slices_view(everything, resolved_id), indent=2))
+        view = dict(slices_view(everything, resolved_id), shape=shape_view(chain, epic))
+        print(json.dumps(view, indent=2))
         return 0
 
     if args.verb == "slice-set":

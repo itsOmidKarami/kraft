@@ -369,6 +369,27 @@ def test_registry_becomes_bindings(kl_cli, tmp_path):
     assert task["prompt"].startswith("Agree requirements")
 
 
+SLICE_IMPLEMENTER = kl_bindings.SLICE_DEFAULTS["tasks"]["implementer"]
+
+
+@pytest.mark.parametrize(
+    "entry, kept",
+    [
+        # #1005's default, before the bundled one was reworded in V1 terms.
+        pytest.param(
+            kl_migrate.LEGACY_DEFAULTS[("slice.tasks", "implementer")], False, id="legacy_default"
+        ),
+        pytest.param(SLICE_IMPLEMENTER, False, id="current_default"),
+        pytest.param(dict(SLICE_IMPLEMENTER, prompt="Build it my way."), True, id="edited"),
+    ],
+)
+def test_a_slice_implementer_binding_is_dropped_only_as_a_default(entry, kept):
+    bindings, dropped = kl_migrate.convert_registry({"on.slice.implementation.start": entry})
+
+    assert bindings == ({"slice": {"tasks": {"implementer": entry}}} if kept else {})
+    assert dropped == ([] if kept else ["on.slice.implementation.start"])
+
+
 def test_legacy_tables_name_real_targets():
     bundled = kl_chains.resolve_bundled()
     assert [n for ids in kl_migrate.LEGACY_NODES.values() for n in ids] == [
