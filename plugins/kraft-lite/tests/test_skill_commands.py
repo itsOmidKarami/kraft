@@ -1,6 +1,7 @@
-"""The V1 skills against kl.py itself: every command they give parses, and they
-name what `state` names. The skills are the executor, so a command its parser
-refuses is one the agent runs into an error, or improvises around."""
+"""The skills against kl.py itself: every command they or the run-slices
+references give parses, and they name what `state` names. The skills are the
+executor, so a command its parser refuses is one the agent runs into an error,
+or improvises around."""
 
 from __future__ import annotations
 
@@ -16,8 +17,16 @@ sys.path.insert(0, str(PLUGIN))
 
 import kl  # noqa: E402
 
-#: The skills that walk Kraft's V1 chains (the slice skills follow in their own rewrite).
-V1_SKILLS = ["init", "start", "next", "gate", "status"]
+#: Every skill: each walks Kraft's V1 chains.
+V1_SKILLS = ["init", "start", "next", "gate", "status", "run-slices", "build-slice"]
+#: Every file a skill's commands live in: the skills, and run-slices' harness references.
+COMMAND_FILES = {
+    **{name: PLUGIN / "skills" / name / "SKILL.md" for name in V1_SKILLS},
+    **{
+        f"references/{harness}": PLUGIN / "skills" / "run-slices" / "references" / f"{harness}.md"
+        for harness in ("claude-code", "codex", "cursor")
+    },
+}
 
 
 @pytest.mark.parametrize("name", V1_SKILLS)
@@ -41,14 +50,15 @@ def _kl_commands(text: str) -> list[str]:
     return spelled + short
 
 
-@pytest.mark.parametrize("name", V1_SKILLS)
-def test_every_command_a_v1_skill_gives_parses(texts, name, capsys):
+@pytest.mark.parametrize("name", list(COMMAND_FILES))
+def test_every_command_a_v1_skill_gives_parses(name, capsys):
     """A command kl.py's own parser refuses is one the agent runs into an error,
     or improvises around. Placeholders become a dummy value, and a verb that
-    reads one chain gets the `--chain-id` the skills say every `KL` command carries."""
+    reads one chain gets the `--chain-id` the skills say every `KL` command carries.
+    A reference names harness tools and may give no kl.py command; a skill gives some."""
     parser = kl.build_parser()
-    commands = _kl_commands(texts[name])
-    assert commands, f"{name} gives no kl.py command"
+    commands = _kl_commands(COMMAND_FILES[name].read_text())
+    assert commands or name not in V1_SKILLS, f"{name} gives no kl.py command"
     for command in commands:
         args = shlex.split(re.sub(r"<[^>]+>", "x", command))
         if "chain" in kl.VERBS.get(args[0], ()) and "--chain-id" not in args:

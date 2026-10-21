@@ -20,11 +20,6 @@ import kl_chains  # noqa: E402
 import kl_shape  # noqa: E402
 
 SKILLS = ["init", "start", "next", "gate", "status", "run-slices", "build-slice"]
-#: The skills that walk Kraft's V1 chains. The slice skills still name the legacy
-#: chains' hooks and gates until their own rewrite, so the legacy checks below
-#: cover only them.
-V1_SKILLS = ["init", "start", "next", "gate", "status"]
-SLICE_SKILLS = ["run-slices", "build-slice"]
 #: Every gate node the bundled library's chains have, and `chain_finalized`, the
 #: gate field a skill reads by name.
 V1_GATES = {
@@ -33,13 +28,8 @@ V1_GATES = {
     for node in kl_chains.resolve_bundled(ref)["nodes"]
     if node["kind"] == "gate"
 } | {"chain_finalized"}
+#: The legacy chain the README still describes; no skill cites it.
 CHAIN = json.loads((PLUGIN / "chains" / "default.json").read_text())
-SLICE_CHAIN = json.loads((PLUGIN / "chains" / "slice.json").read_text())
-# A skill may cite what either shipped chain has: the controller walks the
-# feature chain, and a child walks the slice chain.
-NODES = [node for chain in (CHAIN, SLICE_CHAIN) for node in chain["nodes"]]
-HOOKS = {hook for node in NODES for hook in node["tasks"]}
-GATES = {node["gate_after"] for node in NODES} - {None}
 EVERY_SKILL = sorted(path.parent.name for path in (PLUGIN / "skills").glob("*/SKILL.md"))
 HARNESS_REFERENCES = ["claude-code", "codex", "cursor"]
 
@@ -59,16 +49,10 @@ def test_the_manifest_namespaces_the_skills():
     assert manifest["skills"] == ["./skills"]
 
 
-def test_no_skill_cites_a_hook_the_chain_does_not_have(texts):
-    cited = {h for name in SLICE_SKILLS for h in re.findall(r"`(on\.[\w.]+)`", texts[name])}
-    assert cited <= HOOKS, f"unknown hooks: {sorted(cited - HOOKS)}"
-
-
 @pytest.mark.parametrize("name", SKILLS)
 def test_no_skill_invents_a_gate(texts, name):
     cited = set(re.findall(r"`(\w*(?:approval|finalized))`", texts[name]))
-    known = V1_GATES if name in V1_SKILLS else GATES
-    assert cited <= known, f"unknown gates: {sorted(cited - known)}"
+    assert cited <= V1_GATES, f"unknown gates: {sorted(cited - V1_GATES)}"
 
 
 def test_the_next_skill_dispatches_every_binding_kind(texts):
@@ -122,7 +106,7 @@ def test_the_readme_describes_the_chain_it_actually_ships():
     gates = re.search(r"with (\w+) gates", readme)
     assert nodes and gates, "the README no longer states the counts this test guards"
     assert words[nodes.group(1)] == len(CHAIN["nodes"])
-    assert words[gates.group(1)] == len(GATES)
+    assert words[gates.group(1)] == len({node["gate_after"] for node in CHAIN["nodes"]} - {None})
 
 
 def test_the_skills_distinguish_unstarted_from_done(texts):
@@ -228,7 +212,7 @@ def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
     the controller, which keeps the decisions log. A skill that tells it to ask the
     user lets answers bypass the log."""
     body = texts["build-slice"]
-    for needle in ("controller", "slice.json", "rebase --onto"):
+    for needle in ("controller", "start --slice-of", "rebase --onto"):
         assert needle in body, needle
     for banned in ("ask the human", "ask the user"):
         assert banned not in body.lower(), banned
@@ -246,6 +230,10 @@ def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
         "Cut from: <slice key> at <sha>",
         "--path-format=absolute --git-common-dir)/kraft-lite/<chain-id>",
         "new tip",
+        "kraft-lite-state/chain.json",
+        "`mr.automated_review` is skipped in a child",
+        "`kraft.verify_changed_test_scopes`",
+        "`kraft.mr_rebase`",
     ],
     ids=[
         "message-path",
@@ -257,6 +245,10 @@ def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
         "cut-from-slice",
         "child-folder",
         "new-tip",
+        "exported-chain",
+        "automated-review-skipped",
+        "scoped-test-task",
+        "rebase-task",
     ],
 )
 def test_the_child_and_controller_skills_name_the_same_thing(texts, needle):
@@ -429,7 +421,7 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         ("run-slices", 5, "`KL slice-set --slice <key> --fork <sha>`"),
         ("run-slices", 6, "Never one cut from another slice that is still unmerged"),
         ("run-slices", 6, "--status running`, and review again"),
-        ("run-slices", 6, "through `kraft-lite:next`, which says where its hooks run"),
+        ("run-slices", 6, "through `kraft-lite:next`, which says where its tasks run"),
         ("run-slices", 2, "A missing ability is never a block"),
         ("run-slices", 1, "delete any `.kraft-lite/proposals/<chain-id>.json`"),
         (
@@ -457,7 +449,7 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         (
             "build-slice",
             5,
-            "| `target` | `on.mr.rebase` runs, or the controller says to | "
+            "| `target` | `kraft.mr_rebase` runs, or the controller says to | "
             "`origin/<target branch>` |",
         ),
         ("run-slices", 6, "Starting a review: `KL slice-set --slice <key> --status in_review`."),
@@ -480,10 +472,15 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         ("run-slices", 3, "write `none; continue on the controller's check-in` in its place"),
         ("run-slices", 5, "- [ ] Report (section 8). - [ ] Re-arm the check-in"),
         ("run-slices", 4, "then run one check-in (section 5): it reports and re-arms"),
-        ("run-slices", 1, "invoke `kraft-lite:gate`, which records it"),
+        (
+            "run-slices",
+            1,
+            "`KL gate`, then invoke `kraft-lite:gate`. It presents the gate's own artifact with "
+            "the proposal beside it, and records the user's answer",
+        ),
         ("run-slices", 6, "run no tests or checks yourself"),
         ("build-slice", 4, "the scheduling tool your **Controller** item names"),
-        ("build-slice", 1, "Pass your slice chain's `--chain-id <id>` to every verb but `start`"),
+        ("build-slice", 1, "Pass your child chain's `--chain-id <id>` to every verb but `start`"),
         (
             "build-slice",
             2,
@@ -539,10 +536,11 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         (
             "run-slices",
             1,
-            "On a chain without them, `approve --slices` refuses and names what is missing: "
-            "draw no proposal; say so, and approve the gate `state.gate` names, unsliced.",
+            "`approve --slices` is accepted only at the slice gate: anywhere else, or on a chain "
+            "without one, it refuses and names the slice gate or what the chain lacks, and "
+            "`kraft-lite:gate` asks the user whether to approve unsliced.",
         ),
-        ("run-slices", 1, "A rewind to `chain_review` or earlier retires the slices"),
+        ("run-slices", 1, "A rewind to the slice gate or earlier retires the slices"),
         (
             "run-slices",
             6,
