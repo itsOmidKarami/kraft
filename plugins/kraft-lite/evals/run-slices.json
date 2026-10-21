@@ -198,5 +198,18 @@
       "Its instructions never tell the child to ask the user, or anyone, to invoke `kraft-lite:next` or any other skill",
       "Tells the user plainly that nothing will wake the controller, and to invoke `kraft-lite:run-slices` (not `kraft-lite:next`) to continue the run"
     ]
+  },
+  {
+    "skills": [
+      "kraft-lite:run-slices"
+    ],
+    "query": "The slicing is approved. Set the run up and start it.",
+    "setup": "A local Amp CLI controller session (Amp, the coding agent) in repo acme/ledger, checked out at /home/dev/ledger (base branch main), for Kraft Lite chain kl-7f3a91c2 'Ledger export', sliced in feature mode: feature branch feat/ledger-export, pushed to origin at 4c2d9e1; the state branch feat/ledger-export-state is in its own worktree, and the user approved pushing both. `kl.py slices` lists a 'Row model' (task 1), b 'Writers' (tasks 2-4, after a) and c 'Importer' (task 5); ready [a, c], early []. The working setup line `uv sync` and the scoped test command `uv run pytest <paths>` have been run once here. Default rights. The user has said 'go'. The skill's references folder holds claude-code.md, codex.md and cursor.md, and nothing for Amp. This session has a shell, file tools and a subagent tool; the `amp` CLI is on PATH and `amp --help` lists a `threads` command.",
+    "expected_behavior": [
+      "Does not refuse or pause the run for want of a harness reference, and does not ask the user to supply one",
+      "Treats starting, messaging, archiving and checking in on sessions as unconfirmed for Amp, and invents no `amp` command or flag to start or message a child session",
+      "Applies the fallbacks: walks the slices in this session one after another in `ready` order, starting with a, with the same review, merge and state steps (`kl.py slice-set` for each slice it starts, then export state)",
+      "Says that nothing will wake this session for a check-in, so the user invokes `kraft-lite:run-slices` to continue the run"
+    ]
   }
 ]

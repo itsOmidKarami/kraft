@@ -492,6 +492,13 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
             6,
             "`KL slice-set --slice <key> --status in_review`, then start what `KL slices` lists",
         ),
+        (
+            "run-slices",
+            0,
+            "A harness with no reference here runs on every ability's fallback, whatever its "
+            "own help shows: walk the slices here (section 10), and tell the user nothing wakes "
+            "this session, so they invoke `kraft-lite:run-slices` to continue it.",
+        ),
         ("status", 0, "one in `early` may start now from the branch of the one slice it comes"),
         ("status", 0, "| can start early from <key> |"),
         ("status", 0, "not even a slice in `ready` or `early`"),
@@ -552,6 +559,7 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         "child-base-as-given",
         "child-rebase-onto-target-branch",
         "controller-review-starts-what-slices-lists",
+        "controller-no-reference-takes-the-fallbacks",
         "status-early",
         "status-early-template",
         "status-starts-nothing",

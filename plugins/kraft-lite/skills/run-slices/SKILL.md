@@ -23,6 +23,9 @@ even where it is not written: pass it to every verb except `settings`, `import`,
 The tools for each ability are in your harness's reference; read it before
 section 2: [Claude Code](references/claude-code.md),
 [Codex](references/codex.md), [Cursor](references/cursor.md).
+A harness with no reference here runs on every ability's fallback, whatever its
+own help shows: walk the slices here (section 10), and tell the user nothing
+wakes this session, so they invoke `kraft-lite:run-slices` to continue it.
 
 ## 1. When to slice
 
