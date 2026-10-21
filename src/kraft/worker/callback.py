@@ -36,8 +36,8 @@ def scope_for_channel(session: EgressSession) -> SessionScope:
 
 def address(kind: str) -> str:
     """Where a worker run by backend `kind` reaches the worker API: for
-    docker (and later kit), host `kraft` through its egress proxy."""
-    if kind in ("docker", "kit"):
+    docker, kit and os, host `kraft` through its egress proxy."""
+    if kind in ("docker", "kit", "os"):
         return "http://kraft"
     # A remote worker's is its worker daemon's loopback forwarder, not built.
     raise ValueError(f"no worker API address for a {kind!r} worker")
