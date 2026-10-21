@@ -9,6 +9,7 @@ level: `policy` calls it from a validator, and the backends import `policy`.
 
 from __future__ import annotations
 
+import functools
 import os
 import shutil
 import subprocess
@@ -78,15 +79,31 @@ def protected_refusal(path: Path, home: Path, kraft_home: Path) -> str | None:
     return None
 
 
-def _follow(path: Path) -> tuple[list[tuple[Path, Path]], Path]:
-    """The symlink hops from `path` to the file it names, and that file."""
-    hops: list[tuple[Path, Path]] = []
-    cur = path
-    while cur.is_symlink() and len(hops) < 40:
-        target = Path(os.path.normpath(cur.parent.resolve() / os.readlink(cur)))
-        hops.append((cur, target))
-        cur = target
-    return hops, cur.resolve()
+def _expand(path: Path) -> tuple[list[tuple[Path, Path]], Path]:
+    """Every symlink on the way to `path`, directories included, as
+    `(link, target)` in the order met, and the real file it names."""
+    links: list[tuple[Path, Path]] = []
+    real = Path("/")
+    pending = list(reversed(path.parts[1:]))
+    while pending:
+        name = pending.pop()
+        if name in ("", "."):
+            continue
+        if name == "..":
+            real = real.parent
+            continue
+        nxt = real / name
+        if not nxt.is_symlink():
+            real = nxt
+            continue
+        if len(links) >= 40:
+            raise NotFound(f"too many symlinks resolving {path}")
+        target = Path(os.readlink(nxt))
+        links.append((nxt, Path(os.path.normpath(real / target))))
+        if target.is_absolute():
+            real = Path("/")
+        pending.extend(reversed(target.parts[1:] if target.is_absolute() else target.parts))
+    return links, real
 
 
 def _root_of(final: Path, home: Path, kraft_home: Path) -> Path | None:
@@ -97,7 +114,7 @@ def _root_of(final: Path, home: Path, kraft_home: Path) -> Path | None:
     root = final.parent
     if root.name == "bin":
         up = root.parent
-        if up not in (Path("/"), home, home / ".local") and not protected_refusal(
+        if up not in (Path("/"), home, (home / ".local").resolve()) and not protected_refusal(
             up, home, kraft_home
         ):
             root = up
@@ -108,7 +125,7 @@ def _root_of(final: Path, home: Path, kraft_home: Path) -> Path | None:
 
 def _interpreter(final: Path, search_path: str) -> Path | None:
     """The file named by a `#!` line, one level: `env X` is looked up on
-    `search_path`."""
+    `search_path`. NotFound when it does not exist."""
     try:
         with final.open("rb") as f:
             head = f.readline(512)
@@ -120,11 +137,15 @@ def _interpreter(final: Path, search_path: str) -> Path | None:
     if not words:
         return None
     if Path(words[0]).name == "env":
-        words = [w for w in words[1:] if not w.startswith("-")][:1]
+        words = [w for w in words[1:] if not w.startswith("-") and "=" not in w][:1]
         if not words:
             return None
         found = shutil.which(words[0], path=search_path)
-        return Path(found) if found else None
+        if found is None:
+            raise NotFound(f"{final} needs {words[0]!r}, which is not on PATH; add it with expose")
+        return Path(found)
+    if not Path(words[0]).exists():
+        raise NotFound(f"{final} needs {words[0]}, which does not exist")
     return Path(words[0])
 
 
@@ -135,9 +156,14 @@ def resolve(
     checkout: Path,
     home: Path,
     kraft_home: Path,
+    visible: Iterable[Path] = (),
 ) -> Resolved:
     """The mounts that let `executable` run in the sandbox as named. A path
-    with a `/` is looked up from `workdir`, anything else on `search_path`."""
+    with a `/` is looked up from `workdir`, anything else on `search_path`.
+
+    An executable inside the checkout is the repo's own, so it adds no root
+    and its `#!` is not followed; its symlinks may lead only into what the
+    sandbox shows anyway (the system, the checkout, `visible`)."""
     if "/" in executable:
         path = Path(os.path.abspath(workdir / executable))
     else:
@@ -148,26 +174,31 @@ def resolve(
     if not path.exists():
         raise NotFound(f"{executable!r} not found; add its directory with expose")
     checkout, home = checkout.resolve(), home.resolve()
+    shown = [checkout, *_SYSTEM, *(v.resolve() for v in visible)]
     roots: list[Path] = []
     hops: list[tuple[Path, Path]] = []
-    cur: Path | None = path
-    while cur is not None:
-        cur_hops, final = _follow(cur)
-        hops += cur_hops
-        root = None if _within(final, checkout) else _root_of(final, home, kraft_home)
-        if root is not None and root not in roots:
-            roots.append(root)
-        # The command's `#!` interpreter is followed once, not the interpreter's own.
-        # A script in the checkout is the repo's own: its `#!` line must not
-        # choose what the operator's home shows.
-        follows = cur is path and root is not None
-        cur = _interpreter(final, search_path) if follows else None
+    cur_hops, final = _expand(path)
+    hops += cur_hops
+    if _within(Path(os.path.abspath(path)), checkout):
+        if not any(_within(final, d) for d in shown):
+            raise Refused(
+                f"{executable} leads to {final}, outside the sandbox's view; "
+                "add its directory to the sandbox's expose list"
+            )
+    else:
+        targets = [final]
+        if interp := _interpreter(final, search_path):
+            more, interp_final = _expand(interp)
+            hops += more
+            targets.append(interp_final)
+        for target in targets:
+            root = None if _within(target, checkout) else _root_of(target, home, kraft_home)
+            if root is not None and root not in roots:
+                roots.append(root)
     links = tuple(
         (link, target)
         for link, target in hops
-        if not any(_within(link, r) for r in roots)
-        and not _within(link, checkout)
-        and not any(_within(link, s) for s in _SYSTEM)
+        if not any(_within(link, d) for d in (*roots, *shown))
     )
     return Resolved(executable, tuple(roots), links)
 
@@ -198,6 +229,7 @@ def credential_shadows(tree: Path) -> list[Path]:
     return sorted(hits)
 
 
+@functools.cache
 def init_interpreter() -> tuple[Path, tuple[Path, ...]]:
     """The python that runs `os_init.py`, and the roots to mount for it: the
     system's when it is under `/usr` and 3.10+, else Kraft's own."""
@@ -212,7 +244,7 @@ def init_interpreter() -> tuple[Path, tuple[Path, ...]]:
         probe = [str(SYSTEM_PYTHON), "-c", "import sys; sys.exit(sys.version_info < (3, 10))"]
         if subprocess.run(probe, capture_output=True).returncode == 0:
             return SYSTEM_PYTHON, ()
-    prefix = Path(sys.base_prefix)
+    prefix = Path(sys.base_prefix).resolve()
     if why := protected_refusal(prefix, home, kh):
         raise Refused(f"Kraft's python prefix cannot be shown to the sandbox: {why}")
     return Path(os.path.realpath(sys.executable)), (prefix,)
@@ -234,14 +266,16 @@ def ca_names() -> tuple[str, ...]:
 
 
 def ca_mounts(environ: Mapping[str, str], home: Path, kraft_home: Path) -> list[Path]:
-    """The files and directories the daemon's CA variables name, resolved,
-    skipping any that is missing or protected."""
+    """The files and directories the daemon's CA variables name, absolute but
+    as written (bwrap follows a source symlink, so the path the variable
+    names exists inside), skipping any that is missing or whose resolved
+    path is protected."""
     out: list[Path] = []
     for name in ca_names():
         value = environ.get(name)
         if not value or not Path(value).exists():
             continue
-        p = Path(value).resolve()
+        p = Path(os.path.abspath(value))
         if protected_refusal(p, home, kraft_home) is None and p not in out:
             out.append(p)
     return out

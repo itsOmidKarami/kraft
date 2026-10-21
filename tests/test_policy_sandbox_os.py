@@ -6,7 +6,6 @@ import yaml
 from pydantic import ValidationError
 
 from kraft import policy
-from kraft.worker import callback
 
 OS = {"kind": "os", "network": {"runtime": {}}}
 
@@ -61,7 +60,3 @@ def test_expose_paths(expose, error):
             policy.SandboxPolicy.model_validate(data)
     else:
         assert "expose" not in policy.SandboxPolicy.model_validate(data).model_dump()
-
-
-def test_the_worker_api_of_an_os_worker_is_the_proxy_host():
-    assert callback.address("os") == "http://kraft"

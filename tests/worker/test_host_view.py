@@ -66,56 +66,111 @@ def test_protected_refusal(host, tmp_path, rel, refused):
     assert (got is not None) is refused
 
 
-def _resolve(host, tmp_path, executable, path_dirs=(), workdir=None):
-    home, kraft, checkout = host
-    search = ":".join([*map(str, path_dirs), SYSTEM_PATH])
-    return host_view.resolve(executable, search, workdir or checkout, checkout, home, kraft)
-
-
 def _at(base: dict[str, Path], text: str) -> Path:
     """`~/x` in the fake home, `./x` in the checkout."""
     return base[text[0]] / text[2:]
 
 
+def _build(host, files):
+    home, _, checkout = host
+    base = {"~": home, ".": checkout}
+    for rel, what in files:
+        path = _at(base, rel)
+        if what and what.startswith("L:"):
+            _link(path, _at(base, what[2:]))
+        else:
+            _file(path, (what or "").replace("#!~", f"#!{home}"))
+    return base
+
+
+def _run(host, base, executable, path_dirs=(), visible=()):
+    home, kraft, checkout = host
+    search = ":".join([*(str(_at(base, d + "/x").parent) for d in path_dirs), SYSTEM_PATH])
+    return host_view.resolve(
+        executable, search, checkout, checkout, home, kraft, [_at(base, v) for v in visible]
+    )
+
+
 @pytest.mark.parametrize(
-    ("files", "executable", "path_dirs", "roots", "links", "argv0"),
+    ("files", "executable", "path_dirs", "visible", "roots", "links", "argv0"),
     [
-        (
+        pytest.param(
             [
                 ("~/.local/share/claude/versions/2.0.0", None),
                 ("~/.local/bin/claude", "L:~/.local/share/claude/versions/2.0.0"),
             ],
             "claude",
             ["~/.local/bin"],
+            [],
             ["~/.local/share/claude/versions"],
             [("~/.local/bin/claude", "~/.local/share/claude/versions/2.0.0")],
             "claude",
+            id="native-claude",
         ),
-        (
+        pytest.param(
             [
                 ("~/.local/lib/rustup/rustup", None),
                 ("~/.cargo/bin/cargo", "L:~/.local/lib/rustup/rustup"),
             ],
             "cargo",
             ["~/.cargo/bin"],
+            [],
             ["~/.local/lib/rustup"],
             [("~/.cargo/bin/cargo", "~/.local/lib/rustup/rustup")],
             "cargo",
+            id="rustup-proxy",
         ),
-        ([("./gradlew", "#!/bin/sh\n")], "./gradlew", [], [], [], "./gradlew"),
-        (
+        pytest.param(
+            [("./gradlew", "#!/bin/sh\n")],
+            "./gradlew",
+            [],
+            [],
+            [],
+            [],
+            "./gradlew",
+            id="in-checkout",
+        ),
+        pytest.param(
             [
                 ("~/.local/share/uv/python/cpython-3.12/bin/python3.12", None),
                 ("./.venv/bin/python", "L:~/.local/share/uv/python/cpython-3.12/bin/python3.12"),
             ],
             ".venv/bin/python",
             [],
-            ["~/.local/share/uv/python/cpython-3.12"],
+            ["~/.local/share/uv/python"],
+            [],
             [],
             ".venv/bin/python",
+            id="venv-python",
         ),
-        ([("~/.local/bin/uv", None)], "uv", ["~/.local/bin"], ["~/.local/bin"], [], "uv"),
-        (
+        pytest.param(
+            [
+                ("~/.local/share/uv/python/cpython-3.12.13/bin/python3.12", None),
+                (
+                    "~/.local/share/uv/python/cpython-3.12",
+                    "L:~/.local/share/uv/python/cpython-3.12.13",
+                ),
+                ("./.venv/bin/python", "L:~/.local/share/uv/python/cpython-3.12/bin/python3.12"),
+            ],
+            ".venv/bin/python",
+            [],
+            ["~/.local/share/uv/python/cpython-3.12.13"],
+            [],
+            [("~/.local/share/uv/python/cpython-3.12", "~/.local/share/uv/python/cpython-3.12.13")],
+            ".venv/bin/python",
+            id="venv-uv-minor-link",
+        ),
+        pytest.param(
+            [("~/.local/bin/uv", None)],
+            "uv",
+            ["~/.local/bin"],
+            [],
+            ["~/.local/bin"],
+            [],
+            "uv",
+            id="plain-file-local-bin",
+        ),
+        pytest.param(
             [
                 (
                     "~/.nvm/node/lib/node_modules/@openai/codex/bin/codex.js",
@@ -129,66 +184,103 @@ def _at(base: dict[str, Path], text: str) -> Path:
             ],
             "codex",
             ["~/.nvm/node/bin"],
+            [],
             ["~/.nvm/node/lib/node_modules/@openai/codex", "~/.nvm/node"],
             None,
             "codex",
+            id="node-cli",
         ),
-        ([("~/.cargo/bin/x", None)], "x", ["~/.cargo/bin"], ["~/.cargo"], [], "x"),
-        ([], "sh", [], [], [], "sh"),
-        (
+        pytest.param(
+            [("~/.cargo/bin/x", None)],
+            "x",
+            ["~/.cargo/bin"],
+            [],
+            ["~/.cargo"],
+            [],
+            "x",
+            id="cargo-install",
+        ),
+        pytest.param([], "sh", [], [], [], [], "sh", id="system"),
+        pytest.param(
             [("./run.sh", "#!~/.mozilla/ff/x\n")],
             "./run.sh",
             [],
             [],
             [],
+            [],
             "./run.sh",
+            id="checkout-script-shebang",
+        ),
+        pytest.param(
+            [("~/realbin/tool", None), ("~/pbin", "L:~/realbin")],
+            "tool",
+            ["~/pbin"],
+            [],
+            ["~/realbin"],
+            [("~/pbin", "~/realbin")],
+            "tool",
+            id="path-dir-link",
+        ),
+        pytest.param(
+            [
+                ("~/Documents/secret/bin/tool", None),
+                ("./.venv/bin/tool", "L:~/Documents/secret/bin/tool"),
+            ],
+            ".venv/bin/tool",
+            [],
+            ["~/.cargo"],
+            Refused,
+            None,
+            ".venv/bin/tool",
+            id="checkout-link-outside-refused",
+        ),
+        pytest.param(
+            [("~/tc/bin/tool", None), ("./.venv/bin/tool", "L:~/tc/bin/tool")],
+            ".venv/bin/tool",
+            [],
+            ["~/tc"],
+            [],
+            [],
+            ".venv/bin/tool",
+            id="checkout-link-into-expose-ok",
+        ),
+        pytest.param(
+            [("~/claude", None)], "claude", ["~"], [], Refused, None, "claude", id="at-home"
+        ),
+        pytest.param(
+            [("~/.kraft/run/tool", None), ("~/.local/bin/sneaky", "L:~/.kraft/run/tool")],
+            "sneaky",
+            ["~/.local/bin"],
+            [],
+            Refused,
+            None,
+            "sneaky",
+            id="via-kraft-home",
+        ),
+        pytest.param([], "no-such-tool-anywhere", [], [], NotFound, None, "x", id="missing"),
+        pytest.param(
+            [("~/tc/bin/tool", "#!/no/such/interp\n")],
+            "tool",
+            ["~/tc/bin"],
+            [],
+            NotFound,
+            None,
+            "tool",
+            id="shebang-interpreter-missing",
         ),
     ],
-    ids=[
-        "native-claude",
-        "rustup-proxy",
-        "in-checkout",
-        "venv-python",
-        "plain-file-local-bin",
-        "node-cli",
-        "cargo-install",
-        "system",
-        "checkout-script-shebang",
-    ],
 )
-def test_install_roots(host, files, executable, path_dirs, roots, links, argv0):
-    home, kraft, checkout = host
-    base = {"~": home, ".": checkout}
-    for rel, what in files:
-        path = _at(base, rel)
-        if what and what.startswith("L:"):
-            _link(path, _at(base, what[2:]))
-        else:
-            _file(path, (what or "").replace("#!~", f"#!{home}"))
-    got = host_view.resolve(
-        executable,
-        ":".join([*(str(_at(base, d + "/x").parent) for d in path_dirs), SYSTEM_PATH]),
-        checkout,
-        checkout,
-        home,
-        kraft,
-    )
+def test_install_roots(host, files, executable, path_dirs, visible, roots, links, argv0):
+    base = _build(host, files)
+    if isinstance(roots, type):
+        with pytest.raises(roots):
+            _run(host, base, executable, path_dirs, visible)
+        return
+    got = _run(host, base, executable, path_dirs, visible)
     assert got.argv0 == argv0
     assert set(got.roots) == {_at(base, r) for r in roots}
     if links is not None:
         assert got.links == tuple((_at(base, a), _at(base, b)) for a, b in links)
-
-
-def test_install_roots_refused_and_missing(host, tmp_path):
-    home, kraft, _ = host
-    _file(home / "claude")
-    with pytest.raises(Refused):
-        _resolve(host, tmp_path, "claude", [home])
-    _link(home / ".local/bin/sneaky", _file(kraft / "run/tool"))
-    with pytest.raises(Refused):
-        _resolve(host, tmp_path, "sneaky", [home / ".local/bin"])
-    with pytest.raises(NotFound):
-        _resolve(host, tmp_path, "no-such-tool-anywhere")
 
 
 @pytest.mark.parametrize(
@@ -216,8 +308,17 @@ def test_expose_roots(host, entry, error):
         assert host_view.expose_roots([entry], home, kraft) == [home / ".cargo/bin"]
 
 
+@pytest.fixture
+def fresh_interpreter():
+    host_view.init_interpreter.cache_clear()
+    yield
+    host_view.init_interpreter.cache_clear()
+
+
 @pytest.mark.parametrize("system", [True, False], ids=["system-python", "kraft-python"])
-def test_init_interpreter(monkeypatch, tmp_path, system):
+def test_init_interpreter(fresh_interpreter, monkeypatch, tmp_path, system):
+    if system and host_view.init_interpreter()[0] != host_view.SYSTEM_PYTHON:
+        pytest.skip("no /usr/bin/python3 of 3.10 or later on this host")
     if not system:
         monkeypatch.setattr(host_view, "SYSTEM_PYTHON", tmp_path / "absent")
     exe, roots = host_view.init_interpreter()
@@ -225,18 +326,25 @@ def test_init_interpreter(monkeypatch, tmp_path, system):
         assert (exe, roots) == (host_view.SYSTEM_PYTHON, ())
     else:
         assert exe == Path(os.path.realpath(sys.executable))
-        assert roots == (Path(sys.base_prefix),)
+        assert roots == (Path(sys.base_prefix).resolve(),)
 
 
 @pytest.mark.parametrize(
     ("where", "kept"),
-    [("ca.pem", True), ("cadir", True), ("missing.pem", False), (".ssh/ca.pem", False)],
-    ids=["file", "dir", "missing-skipped", "protected-skipped"],
+    [
+        ("ca.pem", True),
+        ("cadir", True),
+        ("missing.pem", False),
+        (".ssh/ca.pem", False),
+        ("link.pem", True),
+    ],
+    ids=["file", "dir", "missing-skipped", "protected-skipped", "symlink-as-written"],
 )
 def test_ca_mounts(host, where, kept):
     home, kraft, _ = host
     (home / "ca.pem").write_text("x")
     (home / "cadir").mkdir()
     (home / ".ssh/ca.pem").write_text("x")
+    (home / "link.pem").symlink_to(home / "ca.pem")
     got = host_view.ca_mounts({"SSL_CERT_FILE": str(home / where)}, home, kraft)
-    assert got == ([(home / where).resolve()] if kept else [])
+    assert got == ([home / where] if kept else [])

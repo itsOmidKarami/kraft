@@ -1256,6 +1256,14 @@ class SandboxPolicy(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _os_needs_network(self) -> SandboxPolicy:
+        if self.kind == "os" and self.network is None:
+            raise ValueError(
+                "kind: os needs 'network': without it nothing keeps the worker from Kraft's API"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _credentials_are_reachable(self) -> SandboxPolicy:
         """credential@1's rule (spec §6): a repository's own
         credential goes only to a host this policy itself names, in a phase
@@ -1338,10 +1346,6 @@ class SandboxPolicy(BaseModel):
             refused = [k for k in _OS_REFUSES if data.get(k) not in (None, False)]
             if refused:
                 raise ValueError(f"kind: os takes no {', '.join(map(repr, refused))}")
-            if not data.get("network"):
-                raise ValueError(
-                    "kind: os needs 'network': without it nothing keeps the worker from Kraft's API"
-                )
             return data
         if local := [k for k in ("runtime", "kit", "expose") if data.get(k) is not None]:
             raise ValueError(f"kind: docker takes no {', '.join(map(repr, local))}")

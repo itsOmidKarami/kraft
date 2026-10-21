@@ -25,14 +25,14 @@ The keys depend on `kind`. A key a `kind` refuses stops `repos.yaml` from loadin
 
 | Key | Type | Applies to | Meaning |
 |---|---|---|---|
-| `kind` | `docker`, `kit` or `os` | All, required. | `docker` runs `image` under the keys below. `kit` runs a [Kit](/reference/configuration/sandbox/kits) as the whole sandbox. `os` runs the host's own agent CLI under the operating system's process sandbox, with no image. _Added in next_ |
-| `image` | string | `docker`, required. `kit` refuses it. | The image the worker runs in. See [The image](#the-image). |
-| `runtime` | `docker` | `kit`, required. `docker` refuses it. | The runtime that runs the Kit. |
-| `kit` | string, pinned by digest | `kit`, required. `docker` refuses it. | The Kit image, `<name>[:<tag>]@sha256:<64 hex>`. See [Kits](/reference/configuration/sandbox/kits). |
-| `resources` | mapping | `docker`, optional. `kit` refuses it. | CPU, memory and process limits. See [Resource limits](/reference/configuration/sandbox/resource-limits). |
-| `network` | mapping | `docker`, optional. `kit` refuses it. | The hosts a task may reach. Set it or `unrestricted_network`: a launch into a sandbox with neither is refused. See [Network policy](/reference/configuration/sandbox/network-policy). |
-| `unrestricted_network` | boolean | `docker`, optional, default `false`. `kit` refuses it, and so does `network` beside it. | `true` lets a launch run with no `network`: the worker's network is not restricted and gates are not enforced. See [Network policy](/reference/configuration/sandbox/network-policy#without-a-network-policy). |
-| `credentials` | list of mappings | `docker`, optional, and it needs `network`. `kit` refuses it. | Secrets the container never holds. See [Credentials](/reference/configuration/sandbox/credentials). |
+| `kind` | `docker`, `kit` or `os` | All, required. | `docker` runs `image` under the keys below. `kit` runs a [Kit](/reference/configuration/sandbox/kits) as the whole sandbox. `os` runs the host's own agent CLI under the operating system's process sandbox, with no image. |
+| `image` | string | `docker`, required. `kit` and `os` refuse it. | The image the worker runs in. See [The image](#the-image). |
+| `runtime` | `docker` | `kit`, required. `docker` and `os` refuse it. | The runtime that runs the Kit. |
+| `kit` | string, pinned by digest | `kit`, required. `docker` and `os` refuse it. | The Kit image, `<name>[:<tag>]@sha256:<64 hex>`. See [Kits](/reference/configuration/sandbox/kits). |
+| `resources` | mapping | `docker`, optional. `kit` and `os` refuse it. | CPU, memory and process limits. See [Resource limits](/reference/configuration/sandbox/resource-limits). |
+| `network` | mapping | `docker`, optional. `kit` refuses it. `os` requires it. | The hosts a task may reach. Set it or `unrestricted_network`: a launch into a sandbox with neither is refused. See [Network policy](/reference/configuration/sandbox/network-policy). |
+| `unrestricted_network` | boolean | `docker`, optional, default `false`. `kit` and `os` refuse it, and so does `network` beside it. | `true` lets a launch run with no `network`: the worker's network is not restricted and gates are not enforced. See [Network policy](/reference/configuration/sandbox/network-policy#without-a-network-policy). |
+| `credentials` | list of mappings | `docker`, optional, and it needs `network`. `kit` and `os` refuse it. | Secrets the container never holds. See [Credentials](/reference/configuration/sandbox/credentials). |
 | `expose` | list of paths | `os`, optional. `docker` and `kit` refuse it. | Host paths the sandbox may read, for a toolchain outside `/usr`. Each is absolute or starts `~/`. A path exposes every file under it, secrets included, so give the narrowest (`~/.cargo/bin`, not `~/.cargo`). _Added in next_ |
 
 Set the key in `repos.yaml` or in `policy.sandbox`, not both. It is part of the repository policy layer: once it is set, no chain, node or task can turn it off or change it, limits and network policy included, and `sandbox: false` on a repo cannot turn off one a layer set.
