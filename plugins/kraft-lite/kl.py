@@ -802,6 +802,10 @@ def slice_done(record: dict, mode: str) -> bool:
     return label_value(record, SLICE_STATUS_LABEL) in done
 
 
+def _merged(record: dict) -> bool:
+    return label_value(record, SLICE_STATUS_LABEL) == "merged"
+
+
 def _startable(slices: list[dict]) -> tuple[list[dict], list[dict]]:
     """`ready` and `early`, of one chain's slices in plan order, both still waiting.
 
@@ -816,10 +820,10 @@ def _startable(slices: list[dict]) -> tuple[list[dict], list[dict]]:
     for record in slices:
         if label_value(record, SLICE_STATUS_LABEL) != "waiting":
             continue
-        after = [label_value(by_id[d], SLICE_STATUS_LABEL) for d in dep_ids(record) if d in by_id]
-        if all(status == "merged" for status in after):
+        after = [by_id[d] for d in dep_ids(record) if d in by_id]
+        if all(_merged(r) for r in after):
             ready.append(record)
-        elif len(after) == 1 and after[0] in EARLY_FROM:
+        elif len(after) == 1 and label_value(after[0], SLICE_STATUS_LABEL) in EARLY_FROM:
             early.append(record)
     return ready, early
 
@@ -1320,10 +1324,6 @@ def _named(records: list[dict]) -> str:
     )
 
 
-def _merged(record: dict) -> bool:
-    return label_value(record, SLICE_STATUS_LABEL) == "merged"
-
-
 def _refuse_slice_move(slices: list[dict], record: dict, status: str) -> None:
     """A `SystemExit` for a move a slice cannot make. A waiting slice starts only
     from `ready` or `early`, and what was never started cannot be reviewed or
@@ -1421,7 +1421,7 @@ def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dic
     writes = [] if same else [record]
     run = run_record(everything, chain_id)
     others = [r for r in slices if r["id"] != record["id"]]
-    finished = all(label_value(r, SLICE_STATUS_LABEL) == "merged" for r in [*others, record])
+    finished = all(_merged(r) for r in [*others, record])
     # Reopened too, when a call overturned at the wrap-up puts a slice back to work.
     if run is not None and run["status"] != ("closed" if finished else "open"):
         writes.append(dict(run, status="closed" if finished else "open"))
@@ -1559,39 +1559,49 @@ def _export(root: Path, everything: list[dict], chain_id: str, to: Path) -> dict
     }
 
 
-def _rank(seq: int, *stamps: str | None, answered: bool = False, reported: bool = False) -> tuple:
-    """How `import` ranks two copies of one record, or of one decision: the
-    higher wins. First the count of the copy's writes, which no clock can skew;
-    on a tie, an answer over a held question (decisions only), so a held copy
-    never takes back the user's answer; then each stamp in turn, read as a time
-    (`_when`), because as text `10:00:00Z` sorts after `10:00:00.5Z`; then a
-    reported copy over an unreported one (decisions only)."""
-    return (seq, answered, *map(_when, stamps), reported)
+def _record_rank(record: dict) -> tuple:
+    """How `import` ranks two copies of one record: the higher wins. First the
+    count of the copy's writes, which no clock can skew; then `kraft-at:`, then
+    `updated_at`, each read as a time (`_when`), because as text `10:00:00Z`
+    sorts after `10:00:00.5Z`."""
+    return (_seq(record), _when(label_value(record, AT_LABEL)), _when(record.get("updated_at")))
+
+
+def _decision_rank(entry: dict) -> tuple:
+    """How `import` ranks two copies of one decision: the higher wins. First the
+    count of the copy's writes; on a tie, an answer over a held question, so a
+    held copy never takes back the user's answer; then `answered_at or at`, read
+    as a time, which is all an entry from before the count has; then a reported
+    copy over an unreported one."""
+    return (
+        _decision_seq(entry),
+        not entry.get("held"),
+        _when(entry.get("answered_at") or entry.get("at")),
+        bool(entry.get("reported")),
+    )
 
 
 def _import_records(local: list[dict], exported: list[dict]) -> tuple[list[dict], int]:
     """Which exported records to write, and how many local ones win instead.
 
     A record is written only where the local copy is missing or ranks lower
-    (`_rank`). A record without `kraft-seq:` counts as 0. Two machines that each
-    wrote once since the last import tie on it, and then `kraft-at:` decides,
-    where no stamp is oldest. Two writes inside one second tie on that too, so
+    (`_record_rank`). A record without `kraft-seq:` counts as 0. Two machines
+    that each wrote once since the last import tie on it, and then `kraft-at:`
+    decides, where no stamp is oldest. Two writes inside one second tie on that too, so
     `updated_at` breaks the tie: every write moves it strictly forward
     (`_bump_updated`), and `kraft-at:` is not moved, because the summary times the
     run by it. A tie on all three keeps the local copy. The epic is written only
     where it is missing: it is never written after `start`, and its stamp is the
     run's start time.
     """
-
-    def rank(record: dict) -> tuple:
-        return _rank(_seq(record), label_value(record, AT_LABEL), record.get("updated_at"))
-
     held = {r["id"]: r for r in local}
     write: list[dict] = []
     kept = 0
     for record in exported:
         mine = held.get(record["id"])
-        if mine is None or (label_value(record, CHAIN_LABEL) is None and rank(mine) < rank(record)):
+        if mine is None or (
+            label_value(record, CHAIN_LABEL) is None and _record_rank(mine) < _record_rank(record)
+        ):
             write.append(record)
         else:
             kept += 1
@@ -1605,20 +1615,14 @@ def _decision_seq(entry: dict) -> int:
 
 def _merge_decisions(local: list[dict], exported: list[dict]) -> tuple[list[dict], int]:
     """Which exported decisions to append, and how many local ones win instead:
-    those missing locally, or ranking higher (`_rank`) than the local copy. The
-    stamp is `answered_at or at`, which is all an entry from before the count
-    has. A tie on everything keeps the local copy."""
-
-    def rank(entry: dict) -> tuple:
-        return _rank(
-            _decision_seq(entry),
-            entry.get("answered_at") or entry.get("at"),
-            answered=not entry.get("held"),
-            reported=bool(entry.get("reported")),
-        )
-
+    those missing locally, or ranking higher (`_decision_rank`) than the local
+    copy. A tie on everything keeps the local copy."""
     held = {e["id"]: e for e in local}
-    write = [e for e in exported if e["id"] not in held or rank(e) > rank(held[e["id"]])]
+    write = [
+        e
+        for e in exported
+        if e["id"] not in held or _decision_rank(e) > _decision_rank(held[e["id"]])
+    ]
     return write, len(exported) - len(write)
 
 
