@@ -252,16 +252,35 @@ def needed(
         need |= more
 
 
-def trees(ids: Iterable[str], parents: Mapping[str, str | None]) -> list[tuple[str, ...]]:
+def trees(
+    ids: Iterable[str], parents: Mapping[str, str | None], *more: Mapping[str, str | None]
+) -> list[tuple[str, ...]]:
     """`ids` grouped by the root each reaches through `parents`, which may
-    hold add-ons not among `ids`, followed at most `MAX_DEPTH` steps. Groups
-    come in the order they first appear in `ids`; within one, by depth, then
-    id. An id that meets a cycle forms a group of its own."""
-    groups: dict[object, list[tuple[int, str]]] = {}
+    hold add-ons not among `ids`, followed at most `MAX_DEPTH` steps. With
+    `more` maps (the locked parents that move, say), the roots an id reaches
+    through any of them are one group: a child that changes parent joins its
+    old parent's tree. Groups come in the order they first appear in `ids`;
+    within one, by depth through `parents`, then id. An id that meets a
+    cycle forms a group of its own, unless another map joins it to one, and
+    then sorts at depth 0 within it."""
+    joined: dict[object, object] = {}
+
+    def find(root: object) -> object:
+        while (up := joined.setdefault(root, root)) != root:
+            root = up
+        return root
+
+    roots: dict[str, tuple[object, int]] = {}
     for addon_id in dict.fromkeys(ids):
-        line = path(addon_id, parents)
-        root: object = line[-1] if line is not None else (addon_id,)
-        groups.setdefault(root, []).append((len(line or ()), addon_id))
+        lines = [path(addon_id, m) for m in (parents, *more)]
+        reached = [line[-1] if line is not None else (addon_id,) for line in lines]
+        for root in reached[1:]:
+            if (a := find(root)) != (b := find(reached[0])):
+                joined[a] = b
+        roots[addon_id] = (reached[0], len(lines[0] or ()))
+    groups: dict[object, list[tuple[int, str]]] = {}
+    for addon_id, (root, depth) in roots.items():
+        groups.setdefault(find(root), []).append((depth, addon_id))
     return [tuple(i for _, i in sorted(members)) for members in groups.values()]
 
 
