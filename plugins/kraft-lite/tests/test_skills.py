@@ -577,7 +577,8 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
             6,
             "`KL slices` then lists in `base_moved` each slice cut early from it, and each cut "
             "early from those: once it is back in review, tell each to rebase onto the new tip "
-            "of the slice its `cut_from` names, one after another down the line",
+            "of the slice its `cut_from` names, naming that slice's branch, one after another "
+            "down the line",
         ),
         ("run-slices", 6, "A recorded fork flags the slices cut from that one."),
         ("run-slices", 5, "A non-empty `base_moved`: the rebase in section 6."),

@@ -927,8 +927,9 @@ def slices_view(records: list[dict], chain_id: str | None) -> dict:
         "slices": [_slice_entry(r, by_id, _run_mode(run)) for r in slices],
         "ready": [label_value(r, SLICE_KEY_LABEL) for r in ready],
         "early": [label_value(r, SLICE_KEY_LABEL) for r in early],
-        # Cut early from a slice that went back to work since: each rebases onto
-        # that slice's new tip once it is in review again.
+        # Cut early from a slice whose branch moved since (it went back to work,
+        # or recorded a new fork), directly or through another such slice: each
+        # rebases onto that slice's new tip once it is in review again.
         "base_moved": [
             label_value(r, SLICE_KEY_LABEL)
             for r in slices

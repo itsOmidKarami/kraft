@@ -268,7 +268,8 @@ says.
   and review again when it reports the fix. `KL slices` then lists in
   `base_moved` each slice cut early from it, and each cut early from those:
   once it is back in review, tell each to rebase onto the new tip of the slice
-  its `cut_from` names, one after another down the line, and record the fork
+  its `cut_from` names, naming that slice's branch, one after another down the
+  line, and record the fork
   each reports (section 5). A recorded fork flags the slices cut from that one.
 - `feature` mode: merge into the feature branch only on green CI at the exact
   head you reviewed (pin the head SHA), and only once every slice it comes after
