@@ -4,7 +4,6 @@ which node runs next, so they are the part that must not be prose."""
 from __future__ import annotations
 
 import datetime as dt
-import json
 import sys
 from pathlib import Path
 
@@ -17,8 +16,8 @@ import kl  # noqa: E402
 
 
 @pytest.fixture
-def chain():
-    return json.loads((PLUGIN / "chains" / "default.json").read_text())
+def chain(default_chain):
+    return default_chain
 
 
 #: Minute 0 of `stamp(minute)`, the stamps the walked records carry.
@@ -87,7 +86,7 @@ def test_walk_order_is_the_chain_not_the_stores_order(chain):
     for r in shuffled:
         if r["id"] in ("kl-abc123", "kl-abc123.spec"):
             r["status"] = "closed"
-    assert kl.label_value(kl.current(shuffled), kl.NODE_LABEL) == "plan"
+    assert kl.label_value(kl.current(shuffled), kl.NODE_LABEL) == "spec_approval"
 
 
 def test_every_node_record_carries_its_node_id(chain):
@@ -102,7 +101,7 @@ def test_current_is_the_first_node_whose_dependencies_are_closed(chain):
     assert kl.label_value(kl.current(records), kl.NODE_LABEL) == "spec"
 
     records[1]["status"] = "closed"
-    assert kl.label_value(kl.current(records), kl.NODE_LABEL) == "plan"
+    assert kl.label_value(kl.current(records), kl.NODE_LABEL) == "spec_approval"
 
 
 def test_current_returns_a_blocked_node_rather_than_skipping_it(chain):
@@ -148,18 +147,33 @@ def test_read_jsonl_of_a_missing_file_is_empty(tmp_path):
     assert kl.read_jsonl(tmp_path / "nope.jsonl") == []
 
 
-def test_the_shipped_helper_imports_nothing_beyond_the_stdlib():
-    """The plugin lands in repos that never installed Kraft or anything else."""
+#: The modules the plugin ships, each free to import the others.
+SHIPPED = ("kl", "kl_bindings", "kl_chains", "kl_yaml")
+
+
+@pytest.mark.parametrize("module", SHIPPED)
+def test_the_shipped_helper_imports_nothing_beyond_the_stdlib(module):
+    """The plugin lands in repos that never installed Kraft or anything else.
+    An import under `try` that `except ImportError` catches is optional
+    (`kl_yaml` uses PyYAML when it is there)."""
     import ast
 
-    tree = ast.parse((PLUGIN / "kl.py").read_text())
+    tree = ast.parse((PLUGIN / f"{module}.py").read_text())
+    optional = {
+        id(inner)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Try)
+        and any(isinstance(h.type, ast.Name) and h.type.id == "ImportError" for h in node.handlers)
+        for statement in node.body
+        for inner in ast.walk(statement)
+    }
     imported = set()
-    for node in ast.walk(tree):
+    for node in (n for n in ast.walk(tree) if id(n) not in optional):
         if isinstance(node, ast.Import):
             imported |= {alias.name.split(".")[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             imported.add(node.module.split(".")[0])
-    extra = imported - set(sys.stdlib_module_names)
+    extra = imported - set(sys.stdlib_module_names) - set(SHIPPED)
     assert not extra, f"non-stdlib import: {extra}"
 
 
@@ -218,12 +232,13 @@ def test_summary_carries_attempts_caps_gates_and_rejections(chain):
 
     out = kl.summary(records, chain)
     node = out["nodes"][loop_at]
-    assert (node["attempts"], node["cap"]) == (2, chain["loops"]["verify_fix_loop"]["attempts"])
+    loop = chain["nodes"][loop_at]["fix_loop"]
+    assert (node["attempts"], node["cap"]) == (2, loop["max_attempts"])
     assert out["nodes"][0]["rejected"] == "wrong scope"
-    assert out["nodes"][0]["gate"] == chain["nodes"][0]["gate_after"]
+    assert (out["nodes"][0]["gate"], out["nodes"][1]["gate"]) == (None, "spec_approval")
     assert out["totals"]["attempts"] == 2
     assert out["totals"]["rejections"] == 1
-    assert out["totals"]["gates"] == sum(1 for n in chain["nodes"] if n.get("gate_after"))
+    assert out["totals"]["gates"] == sum(1 for n in chain["nodes"] if n["kind"] == "gate")
 
 
 def test_summary_reports_a_chain_still_running(chain):
@@ -272,11 +287,11 @@ def test_summary_counts_gates_answered_not_gates_declared(chain):
     """The template's gate count is known before the run starts, so reporting it
     as the run's cost says nothing - and says it as though work had been done."""
     count = len(chain["nodes"])
-    statuses = ["closed", "closed"] + ["open"] * (count - 1)
+    statuses = ["closed"] * 3 + ["open"] * (count - 2)
     records = walked(chain, [stamp(m) for m in range(count + 1)], statuses)
 
     out = kl.summary(records, chain)
-    assert out["totals"]["gates"] == 1, "only spec has been closed through its gate"
+    assert out["totals"]["gates"] == 1, "only spec_approval has been answered"
 
 
 def test_summary_counts_every_rejection_of_a_node_not_every_node_rejected(chain):
@@ -419,3 +434,24 @@ def test_two_nodes_closed_in_the_same_second_are_not_billed_the_whole_run(chain)
     # if ties were merely allowed to match without being ordered
     assert seconds[1] == 0, out["nodes"]
     assert seconds[2] == 60, out["nodes"]
+
+
+@pytest.mark.parametrize(
+    ("epic_at", "node_at", "expected"),
+    [
+        pytest.param(5, 1, "attached.md", id="attachment_newer"),
+        pytest.param(1, 5, "produced.md", id="produced_newer"),
+        # Inside one second, the record later in the walk.
+        pytest.param(1, 1, "produced.md", id="tie_goes_to_the_later_node"),
+    ],
+)
+def test_a_gate_presents_the_newest_file_of_its_kind(chain, epic_at, node_at, expected):
+    epic, spec, *rest = kl.materialize(chain, "t", "kl-abc123")
+    epic = kl.set_label(epic, f"{kl.ARTIFACT_LABEL}spec=", "attached.md")
+    spec = kl.set_label(spec, f"{kl.ARTIFACT_LABEL}spec=", "produced.md")
+    epic, spec = (
+        kl.set_label(r, kl.AT_LABEL, stamp(m)) for r, m in ((epic, epic_at), (spec, node_at))
+    )
+
+    assert kl._artifact([spec, epic, *rest], "spec") == expected
+    assert kl._artifact([spec, epic, *rest], "plan") is None

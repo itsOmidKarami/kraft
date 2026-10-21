@@ -82,9 +82,10 @@ def test_a_chain_walks_through_a_real_bd_database(bd_repo):
 
     state = kl(bd_repo, "state")
     assert state["node"] == "spec", "bd export order is arbitrary; the walk must not depend on it"
-    assert state["hooks"] == ["on.mr.rebase", "on.spec.requested"]
+    assert state["kind"] == "exec" and state["steps"], "the node's steps, dispatched"
 
-    kl(bd_repo, "gate", "--name", "spec_approval")
+    kl(bd_repo, "close")
+    kl(bd_repo, "gate")
     assert kl(bd_repo, "state")["status"] == "blocked"
     kl(bd_repo, "approve")
     assert kl(bd_repo, "state")["node"] == "plan"

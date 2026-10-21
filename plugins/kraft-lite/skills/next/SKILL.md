@@ -49,7 +49,7 @@ You get `node`, `hooks`, `gate`, `attempt`, `cap`, `status`, `note` and `sliced`
     refuses it before. Name the slices still waiting and stop. Once all are
     merged, `close`, then this skill again. Never open this node's gate: the
     user's merges are the answer.
-  - `hooks` - step 2.
+  - `run` - step 2.
 
 In a sliced `feature` run, every hook from `verify` on runs in a worktree of the
 feature branch, never in the state branch's checkout: `on.mr.rebase` rebases, and

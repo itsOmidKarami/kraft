@@ -16,6 +16,17 @@ sys.path.insert(0, str(PLUGIN))
 
 import kl  # noqa: E402
 
+#: A two-node V1 chain: `env_setup`, then `verify` with a fix loop capped at 2.
+QUICK = """\
+id: quick-task
+nodes:
+  - {id: env_setup, kind: exec, tasks: [{id: prepare, kind: agent, prompt: Prepare.}]}
+  - id: verify
+    kind: exec
+    tasks: [{id: test, kind: agent, prompt: Test.}]
+    fix_loop: {max_attempts: 2, tasks: [{id: fix, kind: agent, prompt: Fix.}]}
+"""
+
 
 def test_backend_is_jsonl_without_a_beads_directory(tmp_path, monkeypatch):
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
@@ -83,9 +94,8 @@ def test_start_then_state_reports_the_first_node(tmp_path, monkeypatch, capsys):
 
     kl.main(["state"])
     state = json.loads(capsys.readouterr().out)
-    assert state["node"] == "spec"
-    assert state["hooks"] == ["on.mr.rebase", "on.spec.requested"]
-    assert state["gate"] == "spec_approval"
+    assert (state["node"], state["kind"], state["gate"]) == ("spec", "exec", None)
+    assert [t["path"] for step in state["steps"] for t in step["tasks"]] == ["spec.main.author"]
     assert state["status"] == "open"
     assert state["backend"] == "jsonl"
 
@@ -94,13 +104,14 @@ def test_close_advances_and_gate_blocks(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
     monkeypatch.chdir(tmp_path)
     kl.main(["start", "--title", "t"])
-    kl.main(["gate", "--name", "spec_approval"])
+    kl.main(["close"])
+    kl.main(["gate"])
     capsys.readouterr()
 
     kl.main(["state"])
     state = json.loads(capsys.readouterr().out)
     assert state["status"] == "blocked"
-    assert state["node"] == "spec"
+    assert state["node"] == "spec_approval"
 
     kl.main(["approve"])
     capsys.readouterr()
@@ -108,20 +119,18 @@ def test_close_advances_and_gate_blocks(tmp_path, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["node"] == "plan"
 
 
-def test_attempt_increments_and_reports_the_cap(tmp_path, monkeypatch, capsys):
+def test_attempt_increments_and_reports_the_cap(tmp_path, monkeypatch, capsys, walk_in_process):
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
-    monkeypatch.chdir(tmp_path)
-    kl.main(["start", "--title", "t"])
-    for node in ("spec", "plan", "chain_review", "implementation"):
-        kl.main(["approve"] if node in {"spec", "plan", "chain_review"} else ["close"])
+    walk_in_process.start(tmp_path)
+    walk_in_process.to(tmp_path, "verification")
     capsys.readouterr()
 
     kl.main(["state"])
     state = json.loads(capsys.readouterr().out)
-    assert state["node"] == "verify"
-    assert state["cap"] == 3
+    assert state["node"] == "verification"
+    assert state["cap"] == 2
 
-    for expected in (1, 2, 3):
+    for expected in (1, 2):
         kl.main(["attempt"])
         assert json.loads(capsys.readouterr().out)["attempt"] == expected
 
@@ -133,7 +142,8 @@ def test_reject_reopens_the_node_and_keeps_the_note(tmp_path, monkeypatch, capsy
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
     monkeypatch.chdir(tmp_path)
     kl.main(["start", "--title", "t"])
-    kl.main(["gate", "--name", "spec_approval"])
+    kl.main(["close"])
+    kl.main(["gate"])
     kl.main(["reject", "--note", "scope is wrong"])
     capsys.readouterr()
 
@@ -166,14 +176,16 @@ def test_an_unstarted_chain_is_not_reported_as_done(tmp_path, monkeypatch, capsy
     assert state["chain_id"] is None
 
 
-def test_a_finished_chain_is_still_reported_as_done(tmp_path, monkeypatch, capsys):
+def to_done(walk, cwd: Path) -> None:
+    """Every node passed, gates approved, as `Walk.advance` passes one."""
+    while walk.run(cwd, "state")["status"] != "done":
+        walk.advance(cwd)
+
+
+def test_a_finished_chain_is_still_reported_as_done(tmp_path, monkeypatch, capsys, walk_in_process):
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
-    monkeypatch.chdir(tmp_path)
-    kl.main(["start", "--title", "t"])
-    chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
-    for node in chain["nodes"]:
-        kl.main(["gate", "--name", node["gate_after"]]) if node["gate_after"] else None
-        kl.main(["approve"] if node["gate_after"] else ["close"])
+    walk_in_process.start(tmp_path)
+    to_done(walk_in_process, tmp_path)
     capsys.readouterr()
 
     kl.main(["state"])
@@ -185,36 +197,15 @@ def test_a_custom_chain_survives_the_verbs_that_follow_start(tmp_path, monkeypat
     chain rather than falling back to the default."""
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
     monkeypatch.chdir(tmp_path)
-    custom = tmp_path / "quick.json"
-    custom.write_text(
-        json.dumps(
-            {
-                "id": "quick-task",
-                "nodes": [
-                    {
-                        "id": "env_setup",
-                        "tasks": ["on.env.prepare"],
-                        "gate_after": None,
-                        "fix_loop": None,
-                    },
-                    {
-                        "id": "verify",
-                        "tasks": ["on.test.run"],
-                        "gate_after": None,
-                        "fix_loop": "verify_fix_loop",
-                    },
-                ],
-                "loops": {"verify_fix_loop": {"attempts": 2}},
-            }
-        )
-    )
+    custom = tmp_path / "quick.yaml"
+    custom.write_text(QUICK)
     kl.main(["start", "--title", "t", "--chain", str(custom)])
     capsys.readouterr()
 
     kl.main(["state"])
     state = json.loads(capsys.readouterr().out)
     assert state["node"] == "env_setup"
-    assert state["hooks"] == ["on.env.prepare"]
+    assert [t["path"] for t in state["steps"][0]["tasks"]] == ["env_setup.main.prepare"]
 
     kl.main(["close"])
     capsys.readouterr()
@@ -299,17 +290,12 @@ def test_write_stamps_updated_at_even_when_the_record_has_none():
     assert json.loads(fake_run.payload.strip())["updated_at"].endswith("Z")
 
 
-def test_a_second_start_becomes_the_live_chain(tmp_path, monkeypatch, capsys):
+def test_a_second_start_becomes_the_live_chain(tmp_path, monkeypatch, capsys, walk_in_process):
     """A repo accumulates one epic per start. Walking the first one found means
     the second chain is invisible and every verb exits 'no open node'."""
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
-    monkeypatch.chdir(tmp_path)
-    kl.main(["start", "--title", "first"])
-    chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
-    for node in chain["nodes"]:
-        if node["gate_after"]:
-            kl.main(["gate", "--name", node["gate_after"]])
-        kl.main(["approve"] if node["gate_after"] else ["close"])
+    walk_in_process.start(tmp_path)
+    to_done(walk_in_process, tmp_path)
     capsys.readouterr()
     kl.main(["state"])
     assert json.loads(capsys.readouterr().out)["status"] == "done"
@@ -332,7 +318,7 @@ def test_a_node_missing_from_the_chain_fails_rather_than_reporting_no_hooks(
     kl.main(["start", "--title", "t"])
     chain_id = json.loads(capsys.readouterr().out)["chain_id"]
     (tmp_path / kl.STATE_DIR / "chains" / f"{chain_id}.json").write_text(
-        json.dumps({"id": "other", "nodes": [], "loops": {}})
+        json.dumps({"format": "v1", "id": "other", "source": "elsewhere", "nodes": []})
     )
     with pytest.raises(SystemExit) as caught:
         kl.main(["state"])
@@ -411,7 +397,8 @@ def test_every_stateful_verb_accepts_a_chain_id(tmp_path, monkeypatch, capsys):
     """A gate answered on the wrong chain is the failure this whole change is
     about, so the id has to reach the writing verbs, not only `state`."""
     first, second = _two_unfinished(tmp_path, monkeypatch, capsys)
-    kl.main(["gate", "--name", "spec_approval", "--chain-id", first])
+    kl.main(["close", "--chain-id", first])
+    kl.main(["gate", "--chain-id", first])
     capsys.readouterr()
     kl.main(["state", "--chain-id", first])
     assert json.loads(capsys.readouterr().out)["status"] == "blocked"
@@ -434,7 +421,7 @@ def test_every_stateful_verb_accepts_a_chain_id(tmp_path, monkeypatch, capsys):
     kl.main(["close", "--chain-id", second])
     capsys.readouterr()
     kl.main(["state", "--chain-id", second])
-    assert json.loads(capsys.readouterr().out)["node"] == "plan"
+    assert json.loads(capsys.readouterr().out)["node"] == "spec_approval"
 
 
 def test_two_chains_keep_their_own_templates(tmp_path, monkeypatch, capsys):
@@ -442,73 +429,17 @@ def test_two_chains_keep_their_own_templates(tmp_path, monkeypatch, capsys):
     template, and the first chain's next then died on 'not in this chain'."""
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
     monkeypatch.chdir(tmp_path)
-    custom = tmp_path / "quick.json"
-    custom.write_text(
-        json.dumps(
-            {
-                "id": "quick-task",
-                "nodes": [
-                    {
-                        "id": "verify",
-                        "tasks": ["on.test.run"],
-                        "gate_after": None,
-                        "fix_loop": "verify_fix_loop",
-                    }
-                ],
-                "loops": {"verify_fix_loop": {"attempts": 2}},
-            }
-        )
-    )
+    custom = tmp_path / "quick.yaml"
+    custom.write_text(QUICK)
     kl.main(["start", "--title", "custom", "--chain", str(custom)])
     custom_id = json.loads(capsys.readouterr().out)["chain_id"]
     kl.main(["start", "--title", "stock"])
     stock_id = json.loads(capsys.readouterr().out)["chain_id"]
 
     kl.main(["state", "--chain-id", custom_id])
-    assert json.loads(capsys.readouterr().out)["node"] == "verify"
+    assert json.loads(capsys.readouterr().out)["node"] == "env_setup"
     kl.main(["state", "--chain-id", stock_id])
     assert json.loads(capsys.readouterr().out)["node"] == "spec"
-
-
-def test_a_legacy_frozen_chain_still_resolves(tmp_path, monkeypatch, capsys):
-    """Chains started before per-chain templates must keep walking across the
-    upgrade rather than dying on a missing file.
-
-    The legacy template has to differ from the packaged default, or falling
-    through to the default satisfies the assertion and pins nothing. The node id
-    must be one the default does not have: `verify` looks distinctive but the
-    default chain has a `verify` node too, so the fallthrough still resolves.
-    """
-    monkeypatch.setattr(kl.shutil, "which", lambda name: None)
-    monkeypatch.chdir(tmp_path)
-    custom = tmp_path / "quick.json"
-    custom.write_text(
-        json.dumps(
-            {
-                "id": "quick-task",
-                "nodes": [
-                    {
-                        "id": "smoke",
-                        "tasks": ["on.test.run"],
-                        "gate_after": None,
-                        "fix_loop": None,
-                    }
-                ],
-                "loops": {},
-            }
-        )
-    )
-    kl.main(["start", "--title", "t", "--chain", str(custom)])
-    chain_id = json.loads(capsys.readouterr().out)["chain_id"]
-
-    per_chain = tmp_path / kl.STATE_DIR / "chains" / f"{chain_id}.json"
-    legacy = tmp_path / kl.STATE_DIR / "chain.json"
-    legacy.write_text(per_chain.read_text())
-    per_chain.unlink()
-
-    kl.main(["state"])
-    node = json.loads(capsys.readouterr().out)["node"]
-    assert node == "smoke", "the legacy template, not the packaged default"
 
 
 def test_an_unknown_chain_id_errors_even_in_an_empty_directory(tmp_path, monkeypatch, capsys):
@@ -555,7 +486,8 @@ def test_chains_lists_every_chain_with_its_title_and_node(tmp_path, monkeypatch,
     ambiguity error only fires when two are unfinished. Without a verb there is
     no way to enumerate them at all."""
     first, second = _two_unfinished(tmp_path, monkeypatch, capsys)
-    kl.main(["gate", "--name", "spec_approval", "--chain-id", first])
+    kl.main(["close", "--chain-id", first])
+    kl.main(["gate", "--chain-id", first])
     capsys.readouterr()
 
     kl.main(["chains"])
@@ -564,7 +496,7 @@ def test_chains_lists_every_chain_with_its_title_and_node(tmp_path, monkeypatch,
     assert set(by_id) == {first, second}
     assert by_id[first]["title"] == "first"
     assert by_id[first]["status"] == "blocked"
-    assert by_id[first]["node"] == "spec"
+    assert by_id[first]["node"] == "spec_approval"
     assert by_id[second]["status"] == "open"
 
 
@@ -575,16 +507,10 @@ def test_chains_is_empty_in_a_fresh_directory(tmp_path, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out) == []
 
 
-def test_a_finished_chain_is_listed_as_done(tmp_path, monkeypatch, capsys):
+def test_a_finished_chain_is_listed_as_done(tmp_path, monkeypatch, capsys, walk_in_process):
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
-    monkeypatch.chdir(tmp_path)
-    kl.main(["start", "--title", "only"])
-    chain_id = json.loads(capsys.readouterr().out)["chain_id"]
-    chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
-    for node in chain["nodes"]:
-        if node["gate_after"]:
-            kl.main(["gate", "--name", node["gate_after"]])
-        kl.main(["approve"] if node["gate_after"] else ["close"])
+    chain_id = walk_in_process.start(tmp_path)
+    to_done(walk_in_process, tmp_path)
     capsys.readouterr()
 
     kl.main(["chains"])
@@ -622,82 +548,78 @@ def test_the_newest_chain_is_the_one_most_recently_updated(older_at, newer_at):
     assert picked[0]["id"] == "kl-newer", "newest by timestamp, not by position"
 
 
-def _walk_to(tmp_path, monkeypatch, capsys, stop_after):
-    """Start a default chain and walk it until `stop_after` has been closed."""
+@pytest.fixture
+def at_final_review(tmp_path, monkeypatch, capsys, walk_in_process):
+    """A default chain walked to `final_review`, blocked there."""
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
-    monkeypatch.chdir(tmp_path)
-    kl.main(["start", "--title", "t"])
-    chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
-    for node in chain["nodes"]:
-        if node["gate_after"]:
-            kl.main(["gate", "--name", node["gate_after"]])
-        kl.main(["approve"] if node["gate_after"] else ["close"])
-        if node["id"] == stop_after:
-            break
+    walk_in_process.start(tmp_path)
+    walk_in_process.to(tmp_path, "final_review")
+    kl.main(["gate"])
     capsys.readouterr()
 
 
-def test_a_rejection_can_send_the_chain_back_to_an_earlier_node(tmp_path, monkeypatch, capsys):
+def test_a_rejection_can_send_the_chain_back_to_an_earlier_node(at_final_review, capsys):
     """The last gate rejects the code, but the node being gated only presents it.
     Without a rewind the chain re-presents the same work and the gate is
     approve-or-stall."""
-    _walk_to(tmp_path, monkeypatch, capsys, "mr_checks")
-    kl.main(["gate", "--name", "human_review_approval"])
-    capsys.readouterr()
-
-    kl.main(["reject", "--note", "the fix is wrong", "--from-node", "implementation"])
+    kl.main(["reject", "--note", "the fix is wrong", "--from-node", "verification"])
     capsys.readouterr()
     kl.main(["state"])
     state = json.loads(capsys.readouterr().out)
-    assert state["node"] == "implementation", "the walk resumes where the work is"
+    assert state["node"] == "verification", "the walk resumes where the work is"
     assert state["status"] == "open"
     assert "the fix is wrong" in state["note"]
 
 
-def test_a_rewind_reopens_every_node_after_the_named_one(tmp_path, monkeypatch, capsys):
+def test_a_rewind_reopens_every_node_after_the_named_one(
+    at_final_review, capsys, walk_in_process, tmp_path
+):
     """Reopening implementation alone would run it and jump straight back to
-    human_review, because verify and mr_checks are still closed - so the new code
-    would never be verified."""
-    _walk_to(tmp_path, monkeypatch, capsys, "mr_checks")
-    kl.main(["gate", "--name", "human_review_approval"])
+    final_review, because verification and the MR nodes are still closed - so
+    the new code would never be verified."""
     kl.main(["reject", "--note", "again", "--from-node", "implementation"])
     capsys.readouterr()
 
-    for expected in (
+    walked = []
+    while (state := walk_in_process.run(tmp_path, "state"))["node"] != "final_review":
+        walked.append(state["node"])
+        walk_in_process.advance(tmp_path)
+    assert walked == [
         "implementation",
-        "verify",
-        "open_mr",
-        "mr_checks",
-    ):
-        kl.main(["state"])
-        assert json.loads(capsys.readouterr().out)["node"] == expected
-        kl.main(["close"])
-        capsys.readouterr()
-    kl.main(["state"])
-    assert json.loads(capsys.readouterr().out)["node"] == "human_review"
+        "verification",
+        "work_brief",
+        "local_review",
+        "describe_merge_request",
+        "draft_merge_request",
+        "merge_request_feedback",
+        "work_item_summary",
+    ]
 
 
-def test_a_rewind_clears_the_gate_and_attempt_labels(tmp_path, monkeypatch, capsys):
+def test_a_rewind_clears_the_gate_and_attempt_labels(
+    tmp_path, monkeypatch, capsys, walk_in_process
+):
     """A reopened node still carrying its old gate label reports `blocked`, and a
     spent attempt count would shrink the fix loop on the retry."""
-    _walk_to(tmp_path, monkeypatch, capsys, "implementation")
+    monkeypatch.setattr(kl.shutil, "which", lambda name: None)
+    walk_in_process.start(tmp_path)
+    walk_in_process.to(tmp_path, "verification")
     kl.main(["attempt"])
     kl.main(["attempt"])
     capsys.readouterr()
     kl.main(["state"])
     assert json.loads(capsys.readouterr().out)["attempt"] == 2
 
-    kl.main(["reject", "--note", "start over", "--from-node", "verify"])
+    kl.main(["reject", "--note", "start over", "--from-node", "verification"])
     capsys.readouterr()
     kl.main(["state"])
     state = json.loads(capsys.readouterr().out)
-    assert state["node"] == "verify"
+    assert state["node"] == "verification"
     assert state["status"] == "open", "not blocked by a stale gate label"
     assert state["attempt"] == 0, "the fix loop gets its full budget back"
 
 
-def test_a_rewind_to_an_unknown_node_names_the_nodes_this_chain_has(tmp_path, monkeypatch, capsys):
-    _walk_to(tmp_path, monkeypatch, capsys, "plan")
+def test_a_rewind_to_an_unknown_node_names_the_nodes_this_chain_has(at_final_review):
     with pytest.raises(SystemExit) as caught:
         kl.main(["reject", "--note", "n", "--from-node", "nosuch"])
     message = str(caught.value)

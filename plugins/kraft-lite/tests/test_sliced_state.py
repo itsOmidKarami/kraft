@@ -20,13 +20,14 @@ import kl  # noqa: E402
 #: the test fails when the code drifts from the spec rather than following it.
 SLICED_TABLE = {
     "implementation": ("run_slices", "run_slices"),
-    "verify": ("scoped_verify", "skip"),
-    "open_mr": ("hooks", "skip"),
-    "mr_checks": ("hooks", "skip"),
-    "human_review": ("hooks", "await_user_merges"),
-    "merge": ("hooks", "await_user_merges"),
+    "verification": ("scoped_verify", "skip"),
+    "describe_merge_request": ("run", "skip"),
+    "draft_merge_request": ("run", "skip"),
+    "merge_request_feedback": ("run", "skip"),
+    "final_review": ("run", "await_user_merges"),
+    "merge": ("run", "await_user_merges"),
     # Main mode has no single merge to watch: each slice merged on its own.
-    "post_merge_watch": ("hooks", "skip"),
+    "post_merge_ci": ("run", "skip"),
 }
 
 
@@ -56,7 +57,7 @@ def test_state_says_what_each_node_means_in_a_sliced_run(
 
 def test_an_unsliced_chain_reports_sliced_null(walk, kl_cli, tmp_path):
     assert kl_cli(tmp_path, "state")["sliced"] is None
-    walk.to_chain_review(tmp_path)
+    walk.to_chain_revision(tmp_path)
     assert kl_cli(tmp_path, "state")["sliced"] is None
 
 
@@ -67,7 +68,7 @@ def test_a_finished_or_unstarted_chain_still_reports_sliced(walk, kl_cli, tmp_pa
     while kl_cli(tmp_path, "state")["status"] != "done":
         kl_cli(tmp_path, "close")
 
-    assert kl_cli(tmp_path, "state")["sliced"] == {"mode": "main", "action": "hooks"}
+    assert kl_cli(tmp_path, "state")["sliced"] == {"mode": "main", "action": "run"}
 
 
 #: Three slices, b after a, so a test can hold one back while the others finish.
@@ -108,26 +109,24 @@ ABC = [
         pytest.param("feature", "spec", None, id="another_node"),
     ],
 )
-# `approve` closes the node as `close` does, at a gate opened on it by hand.
+# `approve` closes the node as `close` does.
 @pytest.mark.parametrize("verb", ["close", "approve"])
 def test_implementation_closes_only_once_every_slice_is_done(
     walk, mode, moves, not_done, verb, kl_cli, tmp_path
 ):
     def finish():
-        if verb == "approve":
-            kl_cli(tmp_path, "gate", "--name", "by_hand")
         return kl_cli(tmp_path, verb, ok=not_done is None)
 
     walk.slice(tmp_path, walk.plan(mode=mode, slices=ABC))
     if moves == "spec":
         kl_cli(tmp_path, "reject", "--note", "again", "--from-node", "spec")
-        assert finish()["node"] == "plan"
+        assert finish()["node"] == "spec_approval"
         return
     for key, status in moves:
         kl_cli(tmp_path, "slice-set", "--slice", key, "--status", status)
 
     if not_done is None:
-        assert finish()["node"] == "verify"
+        assert finish()["node"] == "verification"
         return
     refused = finish()
     assert f"not done: {not_done}" in refused.stderr and "Traceback" not in refused.stderr
@@ -149,12 +148,12 @@ ALL_READY = [
 @pytest.mark.parametrize(
     "node, verb, unmerged",
     [
-        pytest.param("human_review", "close", "abc", id="human_review_none_merged"),
-        pytest.param("human_review", "close", "bc", id="human_review_two_unmerged"),
-        pytest.param("human_review", "approve", "c", id="human_review_approve"),
+        pytest.param("final_review", "close", "abc", id="final_review_none_merged"),
+        pytest.param("final_review", "close", "bc", id="final_review_two_unmerged"),
+        pytest.param("final_review", "approve", "c", id="final_review_approve"),
         pytest.param("merge", "close", "c", id="merge"),
         pytest.param("merge", "approve", "c", id="merge_approve"),
-        pytest.param("human_review", "close", "", id="human_review_all_merged"),
+        pytest.param("final_review", "close", "", id="final_review_all_merged"),
         pytest.param("merge", "approve", "", id="merge_all_merged"),
     ],
 )
@@ -177,8 +176,8 @@ def test_main_modes_await_nodes_close_only_once_the_user_merged_every_slice(
         kl_cli(tmp_path, "close")
     for key in "abc":
         move(key, "ready_to_merge" if key in unmerged else "merged")
-    if verb == "approve":
-        kl_cli(tmp_path, "gate", "--name", "by_hand")
+    if verb == "approve" and node == "final_review":
+        kl_cli(tmp_path, "gate")
 
     if not unmerged:
         assert kl_cli(tmp_path, verb)["node"] != node
@@ -240,8 +239,9 @@ def test_bad_settings_are_refused(content, named, kl_cli, tmp_path):
 @pytest.mark.parametrize("mode", kl.MODES)
 def test_a_slicing_plan_without_a_mode_takes_the_settings_mode(walk, mode, kl_cli, tmp_path):
     settings_file(tmp_path, {"mode": mode})
-    walk.to_chain_review(tmp_path)
-    kl_cli(tmp_path, "gate", "--name", "chain_finalized")
+    walk.start(tmp_path)
+    walk.to(tmp_path, "chain_revision_approval")
+    kl_cli(tmp_path, "gate")
     unnamed = walk.plan(feature_branch=None) if mode == "main" else walk.plan()
     kl_cli(tmp_path, "approve", "--slices", str(walk.write_plan(tmp_path, unnamed)))
 
@@ -274,22 +274,22 @@ def stored_slicing(cwd: Path) -> list[dict]:
     ]
 
 
-def to_human_review_gate(walk, kl_cli, cwd: Path, mode: str = "feature") -> None:
-    """A sliced run with every slice merged, at the gate after `human_review`."""
+def to_final_review_gate(walk, kl_cli, cwd: Path, mode: str = "feature") -> None:
+    """A sliced run with every slice merged, blocked at `final_review`."""
     walk.slice(cwd, walk.plan(mode=mode, slices=ABC))
     walk.merge_slices(cwd)
-    while kl_cli(cwd, "state")["node"] != "human_review":
+    while kl_cli(cwd, "state")["node"] != "final_review":
         kl_cli(cwd, "close")
-    kl_cli(cwd, "gate", "--name", "human_review_approval")
+    kl_cli(cwd, "gate")
 
 
-@pytest.mark.parametrize("node", ["spec", "plan", "chain_review"])
+@pytest.mark.parametrize("node", ["spec", "plan", "chain_revision"])
 @pytest.mark.parametrize("mode", kl.MODES)
 def test_a_rewind_to_before_implementation_retires_the_slices(walk, node, mode, kl_cli, tmp_path):
     """The plan or its slicing is being redone, so the slices cut from the old
     one stand for nothing: they are retired, and the chain is sliced again at
-    the next `chain_finalized`."""
-    to_human_review_gate(walk, kl_cli, tmp_path, mode)
+    the next `chain_revision_approval`."""
+    to_final_review_gate(walk, kl_cli, tmp_path, mode)
     old = {r["id"] for r in stored_slicing(tmp_path)}
 
     kl_cli(tmp_path, "reject", "--note", "redo", "--from-node", node)
@@ -301,11 +301,9 @@ def test_a_rewind_to_before_implementation_retires_the_slices(walk, node, mode, 
     assert {r["id"] for r in retired} == old
     assert all(r["status"] == "closed" for r in retired)
     assert all(kl.label_value(r, kl.RETIRED_LABEL) == node for r in retired)
-    # Sliced again, from a new proposal, at the next chain_finalized.
-    while kl_cli(tmp_path, "state")["node"] != "chain_review":
-        kl_cli(tmp_path, "gate", "--name", "again")
-        kl_cli(tmp_path, "approve")
-    kl_cli(tmp_path, "gate", "--name", "chain_finalized")
+    # Sliced again, from a new proposal, at the next chain_revision_approval.
+    walk.to(tmp_path, "chain_revision_approval")
+    kl_cli(tmp_path, "gate")
     again = walk.plan(mode=mode, slices=[{"key": "z", "title": "Zeta", "tasks": [1]}])
     kl_cli(tmp_path, "approve", "--slices", str(walk.write_plan(tmp_path, again)))
     assert [e["key"] for e in kl_cli(tmp_path, "slices")["slices"]] == ["z"]
@@ -322,13 +320,13 @@ def test_a_rewind_to_before_implementation_retires_the_slices(walk, node, mode, 
         pytest.param("feature", ["a"], "implementation", False, id="one_reopened"),
         pytest.param("main", ["a", "c"], "implementation", False, id="main_two_reopened"),
         # Past implementation, the slices stand as they are.
-        pytest.param("feature", [], "verify", False, id="past_implementation"),
+        pytest.param("feature", [], "verification", False, id="past_implementation"),
     ],
 )
 def test_a_rewind_to_implementation_waits_for_a_reopened_slice(
     walk, mode, reopen, node, refused, kl_cli, tmp_path
 ):
-    to_human_review_gate(walk, kl_cli, tmp_path, mode)
+    to_final_review_gate(walk, kl_cli, tmp_path, mode)
     for key in reopen:
         kl_cli(tmp_path, "slice-set", "--slice", key, "--status", "running")
     before = (kl_cli(tmp_path, "state"), kl_cli(tmp_path, "slices"))

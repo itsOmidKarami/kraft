@@ -187,30 +187,6 @@ def test_a_skill_says_the_registry_can_be_edited_mid_run(texts):
     assert "registry.yaml" in body
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        "on.merge:\n  kind: skill\n  skill: x:y\n",
-        # the Kraft-l5z case: this passed validation and died at dispatch, six nodes in
-        "on.ci.poll:\non.merge:\n  kind: skill\n",
-        "on.ci.poll:\n# TODO: pick a client\non.merge:\n  kind: skill\n",
-        "on.ci.poll:\n  # TODO: pick a client\non.merge:\n  kind: skill\n",
-        "on.merge:\n  kind: skill\non.ci.poll:\n",
-        "on.merge:\n\n  kind: skill\n",
-    ],
-    ids=[
-        "a-key-with-a-body",
-        "a-key-with-no-body-is-not",
-        "a-comment-only-body-is-not",
-        "an-indented-comment-only-body-is-not",
-        "a-trailing-key-with-no-body-is-not",
-        "blank-lines-before-the-body-do-not-unbind",
-    ],
-)
-def test_only_a_key_with_a_body_is_bound(text):
-    assert kl._bound_hooks(text) == {"on.merge"}
-
-
 def test_kl_parses_on_the_oldest_supported_python():
     """kl.py ships into repos with whatever python3 they have, and the plugin's
     own CI matrix pins the floor at 3.10. The Kraft monorepo requires >=3.12, so
@@ -367,7 +343,7 @@ def test_the_next_skill_hands_each_sliced_action_to_its_owner(texts):
     assert "then export state, as `kraft-lite:run-slices` describes under State branch" in flat
     assert "`sliced`." in flat.split("You get")[1].split("- `status: unstarted`")[0]
     assert "a quick check of the seams between slices before the feature PR" in flat
-    # a done sliced chain reports action `hooks`: status is read before the action
+    # a done sliced chain reports action `run`: status is read before the action
     assert body.index("`status: done`") < body.index("`sliced.action`")
 
 

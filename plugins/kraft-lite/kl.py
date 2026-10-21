@@ -14,12 +14,16 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import uuid
 from pathlib import Path
+
+import kl_bindings
+import kl_chains
 
 #: bd stores a dependency as an object, not an id string. The fallback file uses
 #: the same shape on purpose: the promise that `bd import .kraft-lite/chain.jsonl`
@@ -52,6 +56,19 @@ AT_LABEL = "kraft-at:"
 #: last can be the one whose clock runs behind, as when a controller moves from a
 #: laptop to the cloud. A record from before this label counts as 0.
 SEQ_LABEL = "kraft-seq:"
+#: What a node, or the epic for an attachment, produced: `kraft-artifact:<kind>=<path>`,
+#: one label per kind. A gate presents the newest record's file of its kind.
+ARTIFACT_LABEL = "kraft-artifact:"
+#: What an artifact kind may be: it sits in a label before the `=`.
+ARTIFACT_KIND = re.compile(r"[A-Za-z0-9_.-]+")
+#: Set once the node's `on_failure` ran in this round; a rewind clears it.
+ON_FAILURE_RAN_LABEL = "kraft-on-failure-ran"
+#: How many times `restart` has sent the walk back from this node because its
+#: base moved. Never cleared: the cap is the node's, over the whole run.
+RESTARTS_LABEL = "kraft-restarts:"
+RESTART_CAP = 3
+#: A fix loop's cap when neither the loop nor anything else names one, as Kraft's.
+DEFAULT_CAP = 3
 
 #: A feature split into slices is more records in the same store, none of them
 #: part of the feature chain. Their ids hold no `.`, which is what keeps them out
@@ -115,18 +132,22 @@ SLICE_ID = re.compile(r"ks-[0-9a-f]{8}")
 
 #: What a node of the feature chain means once the run is sliced, by mode. The
 #: chain's own node list is untouched; `state` reports the action beside it so
-#: the `next` skill knows whether to run the node's hooks or do something else.
-#: A node absent from the table runs its hooks in both modes.
+#: the `next` skill knows whether to run the node's tasks or do something else.
+#: A node absent from the table runs its tasks in both modes. Keyed to the V1
+#: `default` chain's node ids until the shape rules replace it.
 SLICED_ACTIONS: dict[str, dict[str, str]] = {
     "implementation": {"feature": "run_slices", "main": "run_slices"},
-    "verify": {"feature": "scoped_verify", "main": "skip"},
-    "open_mr": {"feature": "hooks", "main": "skip"},
-    "mr_checks": {"feature": "hooks", "main": "skip"},
-    "human_review": {"feature": "hooks", "main": "await_user_merges"},
-    "merge": {"feature": "hooks", "main": "await_user_merges"},
+    "verification": {"feature": "scoped_verify", "main": "skip"},
+    "describe_merge_request": {"feature": "run", "main": "skip"},
+    "draft_merge_request": {"feature": "run", "main": "skip"},
+    "merge_request_feedback": {"feature": "run", "main": "skip"},
+    "final_review": {"feature": "run", "main": "await_user_merges"},
+    "merge": {"feature": "run", "main": "await_user_merges"},
     # Main mode has no one merge to watch: each slice merged into main on its own.
-    "post_merge_watch": {"feature": "hooks", "main": "skip"},
+    "post_merge_ci": {"feature": "run", "main": "skip"},
 }
+#: The gate a chain is sliced at: the plan is settled, the build not begun.
+SLICE_GATE = "chain_revision_approval"
 
 #: Who decides what, unless `.kraft-lite/slices.json` says otherwise.
 DEFAULT_SETTINGS = {
@@ -177,8 +198,20 @@ def _checked(chain_id: str) -> str:
     return chain_id
 
 
+def _tasks(container: dict) -> list[dict]:
+    """Every task in an exec node's own steps, or a handler's, in order."""
+    return [task for step in container["steps"] for task in step["tasks"]]
+
+
+def _describe(node: dict) -> str:
+    if node["kind"] == "gate":
+        return f"gate: {node['message']}"
+    return "tasks: " + ", ".join(task["path"] for task in _tasks(node))
+
+
 def materialize(chain: dict, title: str, chain_id: str) -> list[dict]:
-    """The epic, then one record per node, linked so each waits on the last."""
+    """The epic, then one record per node, gate nodes included, linked so each
+    waits on the last."""
     epic = {
         "_type": "issue",
         "id": chain_id,
@@ -198,7 +231,7 @@ def materialize(chain: dict, title: str, chain_id: str) -> list[dict]:
                 "id": node_id,
                 "title": node["id"],
                 "status": "open",
-                "description": "hooks: " + ", ".join(node["tasks"]),
+                "description": _describe(node),
                 "labels": [f"{NODE_LABEL}{node['id']}"],
                 "dependencies": [_dep(node_id, previous)],
             }
@@ -592,35 +625,42 @@ def settings(root: Path) -> dict:
     return merged
 
 
-DEFAULT_CHAIN = Path(__file__).parent / "chains" / "default.json"
-
-
 def _frozen_path(root: Path, chain_id: str) -> Path:
     return root / STATE_DIR / "chains" / f"{_checked(chain_id)}.json"
 
 
-def _chain(root: Path, path: Path | None, chain_id: str | None = None) -> dict:
-    """The chain this run walks.
+#: What a frozen chain carries once it is Kraft's V1 shape, resolved at `start`.
+FORMAT = "v1"
+
+
+def _chain(root: Path, chain_id: str | None) -> dict | None:
+    """The chain this run walks, as `start` resolved and froze it; None when no
+    chain was started here.
 
     `start` freezes its chain and every later verb reads that copy. Re-reading the
-    template each time would mean a `--chain` given at start is forgotten by the
-    next verb — and worse, that editing a template retargets a run already in
+    library each time would mean a `--chain` given at start is forgotten by the
+    next verb — and worse, that editing a library retargets a run already in
     flight. One file per chain id is what lets two runs in one directory hold
-    different templates; a single file meant the second `start` silently
-    retargeted the first run.
+    different chains. A chain frozen before V1, per chain or in the single
+    `chain.json` that came before that, is refused until `migrate` moves it.
     """
-    if path is not None:
-        return json.loads(path.read_text())
-    if chain_id is not None:
-        per_chain = _frozen_path(root, chain_id)
-        if per_chain.is_file():
-            return json.loads(per_chain.read_text())
-    # Chains frozen before templates were per-chain. Remove at the next breaking
-    # release; until then it is what keeps a run in flight walking across upgrade.
-    legacy = root / STATE_DIR / "chain.json"
-    if legacy.is_file():
-        return json.loads(legacy.read_text())
-    return json.loads(DEFAULT_CHAIN.read_text())
+    if chain_id is None:
+        return None
+    path = _frozen_path(root, chain_id)
+    if not path.is_file():
+        path = root / STATE_DIR / "chain.json"
+    if not path.is_file():
+        raise SystemExit(
+            f"kraft-lite: {_frozen_path(root, chain_id).relative_to(root)} is missing: it is "
+            "the chain this run started with — restore it, or start a new chain."
+        )
+    chain = json.loads(path.read_text())
+    if not isinstance(chain, dict) or chain.get("format") != FORMAT:
+        raise SystemExit(
+            f"kraft-lite: chain {chain_id} was started on the pre-V1 format. "
+            "Run: python3 kl.py migrate"
+        )
+    return chain
 
 
 def _freeze_chain(root: Path, chain: dict, chain_id: str) -> None:
@@ -939,11 +979,11 @@ def slices_view(records: list[dict], chain_id: str | None) -> dict:
     }
 
 
-def _refuse_unsliceable(chain: dict, node_record: dict) -> None:
+def _refuse_unsliceable(chain: dict) -> None:
     """A `SystemExit` for a chain that slicing would walk wrong. What a node means
-    in a sliced run is keyed to the default chain's node ids (`SLICED_ACTIONS`)
-    and to its `chain_finalized` gate: a chain without them would run its slices
-    with no guard on closing the nodes that wait for them."""
+    in a sliced run is keyed to the default chain's node ids (`SLICED_ACTIONS`):
+    a chain without them would run its slices with no guard on closing the nodes
+    that wait for them."""
     ids = [n["id"] for n in chain["nodes"]]
     missing = [n for n in SLICED_ACTIONS if n not in ids]
     if missing:
@@ -951,30 +991,20 @@ def _refuse_unsliceable(chain: dict, node_record: dict) -> None:
             f"kraft-lite: slicing needs the default chain's nodes; this run's chain "
             f"{chain.get('id')!r} has no {', '.join(missing)}"
         )
-    node = label_value(node_record, NODE_LABEL)
-    gate = next((n.get("gate_after") for n in chain["nodes"] if n["id"] == node), None)
-    if gate != "chain_finalized":
-        raise SystemExit(
-            f"kraft-lite: slicing needs {node}'s gate to be chain_finalized, as in the "
-            f"default chain; this run's chain {chain.get('id')!r} gates it with {gate!r}"
-        )
 
 
 def slices_for_gate(
     records: list[dict], node_record: dict, chain_id: str, path: Path, root: Path, chain: dict
 ) -> list[dict]:
     """The records `approve --slices` writes with the approval, or a `SystemExit`.
-    Slicing happens once, at the gate that finalizes the chain: anywhere else a
-    plan has nothing settled to be split from, and a second time it would
-    replace work already handed to children."""
+    Slicing happens once, at `SLICE_GATE`, once the plan and the chain's revision
+    are settled: anywhere else a plan has nothing settled to be split from, and a
+    second time it would replace work already handed to children."""
     if run_record(records, chain_id) is not None:
         raise SystemExit("kraft-lite: this chain is already sliced")
-    if (
-        node_record["status"] != "blocked"
-        or label_value(node_record, GATE_LABEL) != "chain_finalized"
-    ):
-        raise SystemExit("kraft-lite: --slices is only accepted at chain_finalized")
-    _refuse_unsliceable(chain, node_record)
+    if node_record["status"] != "blocked" or label_value(node_record, GATE_LABEL) != SLICE_GATE:
+        raise SystemExit(f"kraft-lite: --slices is only accepted at {SLICE_GATE}")
+    _refuse_unsliceable(chain)
     try:
         plan = json.loads(path.read_text())
     except (OSError, ValueError) as error:
@@ -1005,8 +1035,16 @@ def _by_age(by_chain: dict[str, list[dict]]) -> list[str]:
     return sorted(by_chain, key=stamp)
 
 
-def rewind(records: list[dict], from_node: str, note: str) -> list[dict]:
-    """Reopen `from_node` and every node after it, carrying the reason.
+def rewind(
+    records: list[dict],
+    from_node: str,
+    note: str,
+    *,
+    through: str | None = None,
+    prefix: str = NOTE_PREFIX,
+) -> list[dict]:
+    """Reopen `from_node` and every node after it (up to `through`, when given),
+    carrying the reason as a `prefix` line on the first.
 
     Reopening only the named node is not enough: `current` returns the first open
     node whose dependencies are closed, so with the later nodes still closed the
@@ -1021,20 +1059,21 @@ def rewind(records: list[dict], from_node: str, note: str) -> list[dict]:
         raise SystemExit(
             f"kraft-lite: no node {from_node!r} in this chain. Its nodes are:\n  " + ", ".join(ids)
         )
+    end = ids.index(through) + 1 if through in ids else len(walk)
     out = []
-    for offset, record in enumerate(walk[ids.index(from_node) :]):
+    for offset, record in enumerate(walk[ids.index(from_node) : end]):
         # Banked before the stamp that opens it is stripped below. `--from-node` is
         # how the last gate sends work back, so the wait it interrupts is usually
         # the longest one in the run - dropping it here loses exactly that.
         record = bank_wait(record)
         # `WAITED_LABEL` is not dropped on purpose: those hours were spent,
         # whatever the redo goes on to cost.
-        for prefix in (GATE_LABEL, ATTEMPT_LABEL, BLOCKED_LABEL):
-            record = drop_label(record, prefix)
+        for label in (GATE_LABEL, ATTEMPT_LABEL, BLOCKED_LABEL, ON_FAILURE_RAN_LABEL):
+            record = drop_label(record, label)
         reopened = dict(record, status="open")
         if offset == 0:
             description = record.get("description", "")
-            reopened["description"] = f"{description}\n{NOTE_PREFIX}{note}"
+            reopened["description"] = f"{description}\n{prefix}{note}"
         out.append(reopened)
     return out
 
@@ -1044,7 +1083,7 @@ def rewind_slices(everything: list[dict], chain_id: str, tail: list[dict]) -> li
     `SystemExit`. Rewound to a node before the slices were cut, the plan or its
     slicing is redone, so the run and its slices are retired: closed, and labelled
     so that nothing reads them as the chain's. The chain is then sliced again at
-    the next `chain_finalized`. Rewound to the node that builds them, every slice
+    the next `SLICE_GATE`. Rewound to the node that builds them, every slice
     done would close it at once with nothing redone, so that is refused until a
     slice is reopened. Rewound past it, the slices stand."""
     run = run_record(everything, chain_id)
@@ -1167,7 +1206,6 @@ def summary(records: list[dict], chain: dict) -> dict:
     for record in walk:
         node_id = label_value(record, NODE_LABEL)
         definition = definitions.get(node_id, {})
-        loop = definition.get("fix_loop")
         # Lines, not occurrences: `--note "Rejected: by CI"` is one rejection whose
         # reason happens to quote another.
         rejections = [
@@ -1196,8 +1234,9 @@ def summary(records: list[dict], chain: dict) -> dict:
                 if closed and _at(record)
                 else None,
                 "attempts": spent(record),
-                "cap": chain["loops"].get(loop, {}).get("attempts") if loop else None,
-                "gate": definition.get("gate_after"),
+                "cap": _cap(definition),
+                # The gate node's own id: a gate is a node of its own in V1.
+                "gate": node_id if definition.get("kind") == "gate" else None,
                 # Of that time, the part the human held. A node that never reached
                 # a gate reports null rather than zero: it did not wait, as against
                 # waiting for no time.
@@ -1291,118 +1330,168 @@ def _sliced(everything: list[dict], epic: dict | None, node_id: str | None) -> d
     if run is None:
         return None
     mode = _run_mode(run)
-    return {"mode": mode, "action": SLICED_ACTIONS.get(node_id, {}).get(mode, "hooks")}
+    return {"mode": mode, "action": SLICED_ACTIONS.get(node_id, {}).get(mode, "run")}
 
 
-def _state(root: Path, chain: dict, everything: list[dict], chain_id: str | None = None) -> dict:
-    records = _ours(everything, chain_id)
-    node_record = current(records)
-    epic = next((r for r in records if label_value(r, CHAIN_LABEL)), None)
-    if node_record is None:
-        # "done" and "never started" are different answers. Reporting both as
-        # done tells the `next` skill a chain that does not exist has finished.
-        return {
-            "chain_id": epic["id"] if epic else None,
-            "node": None,
-            "hooks": [],
-            "gate": None,
-            "attempt": 0,
-            "cap": None,
-            "status": "done" if epic else "unstarted",
-            "note": "",
-            "backend": backend(root),
-            "sliced": _sliced(everything, epic, None),
-        }
-    node_id = label_value(node_record, NODE_LABEL)
+def _cap(definition: dict) -> int | None:
+    """A node's fix-loop cap: the loop's `max_attempts`, else Kraft's default;
+    None for a node with no fix loop."""
+    loop = definition.get("fix_loop")
+    return (loop.get("max_attempts") or DEFAULT_CAP) if loop else None
+
+
+def _definition(root: Path, chain: dict, chain_id: str | None, node_id: str | None) -> dict:
+    """The frozen chain's node `node_id`, or a `SystemExit` naming the file."""
     definition = next((n for n in chain["nodes"] if n["id"] == node_id), None)
     if definition is None:
-        # Reporting `hooks: []` here is worse than failing: the `next` skill's
-        # contract is "no hooks, so close and move on", and the chain walks to
+        # Reporting no tasks here is worse than failing: the `next` skill's
+        # contract is "no tasks, so close and move on", and the chain walks to
         # `done` having run nothing at all.
         raise SystemExit(
             f"kraft-lite: node {node_id!r} is not in this chain. "
-            f"{_frozen_path(root, epic['id']).relative_to(root) if epic else 'the frozen chain'}"
+            f"{_frozen_path(root, chain_id).relative_to(root) if chain_id else 'the frozen chain'}"
             " is the chain this run started with — restore it, or start a new chain."
         )
-    loop = definition.get("fix_loop")
-    note = node_record.get("description", "")
-    return {
-        "chain_id": epic["id"] if epic else None,
-        "node": node_id,
-        "hooks": definition.get("tasks", []),
-        "gate": definition.get("gate_after"),
-        "attempt": attempts(node_record),
-        "cap": chain["loops"].get(loop, {}).get("attempts") if loop else None,
-        "status": node_record["status"],
-        "note": note[note.find(NOTE_PREFIX) :] if NOTE_PREFIX in note else "",
-        "backend": backend(root),
-        "sliced": _sliced(everything, epic, node_id),
-    }
+    return definition
 
 
-#: A registry hook is an unquoted key at column zero. Everything under it — `kind`,
-#: `skill`, `prompt` — is indented, and comments start with `#`. That is enough
-#: structure to find the hooks with a scan, which is what keeps this file free of
-#: the YAML dependency it would otherwise need for one check.
-HOOK_KEY = re.compile(r"^([a-z][a-z0-9_.]*):", re.MULTILINE)
+def _dispatcher(root: Path):
+    """How `state` turns a frozen task into the one instruction the walk
+    follows: this repo's bindings over the defaults, with the skills installed
+    in this harness. Read per call, so a binding edited mid-run counts from the
+    next `state`."""
+    bindings = kl_bindings.read_bindings(root)
+    installed = set(_installed_skills(root))
+
+    def dispatch(task: dict) -> dict:
+        return kl_bindings.dispatch(task, bindings, installed.__contains__)
+
+    return dispatch
 
 
-def _bound_hooks(text: str) -> set[str]:
-    """Keys that are actually bound, not merely present.
-
-    A regex cannot express "followed by an indented line, but not by another
-    column-zero key" without a lookahead nobody wants to read at 3am, so this
-    walks the lines instead. Structural only: `kind: banana` is bound as far as
-    this is concerned, and fails at dispatch with a message that says so.
-    """
-    bound: set[str] = set()
-    pending: str | None = None
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        match = HOOK_KEY.match(line)
-        if match:
-            # A key immediately following another leaves the first unbound.
-            pending = match.group(1)
-        elif pending and line[:1] in " \t":
-            bound.add(pending)
-            pending = None
-    return bound
-
-
-def registry_hooks(root: Path) -> set[str] | None:
-    """The hooks bound in this repo's registry, or None when there is no registry."""
-    path = root / STATE_DIR / "registry.yaml"
-    if not path.is_file():
+def _dispatched(container: dict | None, dispatch) -> list[dict] | None:
+    """A node's, or a handler's, steps with every task dispatched."""
+    if container is None:
         return None
-    return _bound_hooks(path.read_text())
+    return [
+        {"id": step["id"], "tasks": [dispatch(task) for task in step["tasks"]]}
+        for step in container["steps"]
+    ]
 
 
-def validate_hooks(root: Path, chain: dict) -> None:
-    """A hook with no binding is otherwise found mid-walk, after the earlier nodes
-    have already run and spent the human's attention.
+def _artifact(records: list[dict], kind: str | None) -> str | None:
+    """The newest file of `kind` any record of the run holds: the one a gate on
+    that kind presents. A rewind leaves older ones in place, so newest wins,
+    with walk order breaking a tie inside one second."""
+    if kind is None:
+        return None
+    prefix = f"{ARTIFACT_LABEL}{kind}="
+    holding = [
+        (_when(_at(record)), position, label_value(record, prefix))
+        for position, record in enumerate(ordered(records))
+        if label_value(record, prefix) is not None
+    ]
+    return max(holding)[2] if holding else None
 
-    A missing registry only warns: the `start` skill already refuses to run without
-    one, so erroring here would duplicate that guard at the price of a fixture in
-    every test that starts a chain.
-    """
-    bound = registry_hooks(root)
-    if bound is None:
-        print(
-            f"kraft-lite: no {STATE_DIR}/registry.yaml — starting without checking "
-            "the chain's hooks. Run the init skill to write one.",
-            file=sys.stderr,
-        )
-        return
-    wanted = {task for node in chain["nodes"] for task in node["tasks"]}
-    missing = sorted(wanted - bound)
-    if missing:
-        raise SystemExit(
-            "kraft-lite: this chain names hooks with no registry binding: "
-            + ", ".join(missing)
-            + f"\nAdd them to {STATE_DIR}/registry.yaml, or re-run the init skill."
-        )
+
+#: Every key `state` reports, so an unstarted chain, a finished one and a gate
+#: node hand a caller the same shape.
+STATE_KEYS = (
+    "chain_id",
+    "node",
+    "kind",
+    "status",
+    "attempt",
+    "cap",
+    "note",
+    "backend",
+    "sliced",
+    "steps",
+    "on_failure",
+    "on_failure_ran",
+    "fix_loop",
+    "on_base_changed",
+    "gate",
+)
+#: The lines `state` reports as the node's note: why it was sent back.
+RESTART_PREFIX = "Base changed: "
+
+
+def _note(description: str) -> str:
+    """Every rejection or restart line, from the first one on."""
+    lines = description.splitlines()
+    first = next(
+        (i for i, line in enumerate(lines) if line.startswith((NOTE_PREFIX, RESTART_PREFIX))),
+        None,
+    )
+    return "\n".join(lines[first:]) if first is not None else ""
+
+
+def _state(
+    root: Path, chain: dict | None, everything: list[dict], chain_id: str | None = None
+) -> dict:
+    records = _ours(everything, chain_id)
+    node_record = current(records)
+    epic = next((r for r in records if label_value(r, CHAIN_LABEL)), None)
+    state = dict.fromkeys(STATE_KEYS)
+    state.update(
+        chain_id=epic["id"] if epic else None,
+        backend=backend(root),
+        steps=[],
+        on_failure_ran=False,
+        attempt=0,
+        note="",
+    )
+    if node_record is None:
+        # "done" and "never started" are different answers. Reporting both as
+        # done tells the `next` skill a chain that does not exist has finished.
+        state.update(status="done" if epic else "unstarted", sliced=_sliced(everything, epic, None))
+        return state
+    node_id = label_value(node_record, NODE_LABEL)
+    definition = _definition(root, chain, state["chain_id"], node_id)
+    state.update(
+        node=node_id,
+        kind=definition["kind"],
+        status=node_record["status"],
+        attempt=attempts(node_record),
+        note=_note(node_record.get("description", "")),
+        sliced=_sliced(everything, epic, node_id),
+    )
+    if definition["kind"] == "gate":
+        state["gate"] = {
+            "message": definition["message"],
+            "artifact": definition["artifact"],
+            "artifact_path": _artifact(records, definition["artifact"]),
+            "reject_to": definition["reject_to"],
+            "chain_finalized": definition["chain_finalized"],
+            # Task 7 marks the slice gate from the chain's shape.
+            "slice_gate": False,
+        }
+        return state
+    dispatch = _dispatcher(root)
+    loop, base = definition["fix_loop"], definition["on_base_changed"]
+    state.update(
+        cap=_cap(definition),
+        steps=_dispatched(definition, dispatch),
+        on_failure={"steps": _dispatched(definition["on_failure"], dispatch)}
+        if definition["on_failure"]
+        else None,
+        on_failure_ran=label_value(node_record, ON_FAILURE_RAN_LABEL) is not None,
+        fix_loop={
+            "steps": _dispatched(loop, dispatch),
+            "judge": dispatch(loop["judge"]) if loop["judge"] else None,
+        }
+        if loop
+        else None,
+        on_base_changed={
+            "restart_from": base["restart_from"],
+            "restarts": int(label_value(node_record, RESTARTS_LABEL) or 0),
+            "cap": RESTART_CAP,
+        }
+        if base
+        else None,
+    )
+    return state
 
 
 def _slice_by_key(everything: list[dict], chain_id: str | None, key: str) -> dict:
@@ -1462,7 +1551,7 @@ def _refuse_slice_move(slices: list[dict], record: dict, status: str) -> None:
 def _refuse_close_before_slices(everything: list[dict], chain_id: str, node_record: dict) -> None:
     """A `SystemExit` for closing a sliced run's node before the slices it waits
     on, by `close` or by `approve`. `run_slices` waits for every slice done for the
-    run's mode: closing it moves the walk to `verify`, which checks seams between
+    run's mode: closing it moves the walk to `verification`, which checks seams between
     slices that are not all there yet. `await_user_merges` waits for every slice
     merged: the user's merges are all it waits on, and closing it first finishes
     the run before any of them."""
@@ -1712,7 +1801,7 @@ def _export(root: Path, everything: list[dict], chain_id: str, to: Path) -> dict
     if frozen.is_file():
         shutil.copyfile(frozen, template)
     else:
-        template.write_text(json.dumps(_chain(root, None, chain_id), indent=2) + "\n")
+        template.write_text(json.dumps(_chain(root, chain_id), indent=2) + "\n")
     (to / EXPORT_RECORDS).write_text(_jsonl(records))
     decisions = read_jsonl(_decisions_path(root, chain_id))
     (to / EXPORT_DECISIONS).write_text(_jsonl(decisions))
@@ -1858,10 +1947,92 @@ def _import(root: Path, store, source: Path) -> dict:
     }
 
 
+#: What `start --spec P --plan P` takes, as Kraft's intake does: each drops the
+#: nodes that would produce or approve its kind (`kl_chains.trim`).
+ATTACHMENT_KINDS = ("spec", "plan")
+
+
+def _artifact_path(root: Path, path: Path) -> str:
+    """`path` as a label records it: relative to the repo root when inside it,
+    so a verb run from a subdirectory, or an import elsewhere, reads the same
+    file; absolute otherwise."""
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(root))
+    except ValueError:
+        return str(resolved)
+
+
+def _start_chain(root: Path, chain: str | None, attached: dict[str, Path]) -> dict:
+    """The chain `start` freezes: `chain` resolved as a library id or, ending in
+    `.yaml`/`.yml` or holding a `/`, as a chain file; then trimmed for the
+    attached kinds. Every task is dispatched once before anything is written, so
+    a bindings file Lite cannot use, or a task it has no instruction for, stops
+    `start` rather than the walk at that node."""
+    for kind, path in attached.items():
+        if not path.is_file():
+            raise SystemExit(f"kraft-lite: --{kind} {path}: no such file")
+    if chain is not None and (chain.endswith((".yaml", ".yml")) or "/" in chain):
+        resolved = kl_chains.resolve(root, os.environ, path=Path(chain))
+    else:
+        resolved = kl_chains.resolve(root, os.environ, ref=chain)
+    resolved = kl_chains.trim(resolved, set(attached))
+    dispatch = _dispatcher(root)
+    for node in (n for n in resolved["nodes"] if n["kind"] == "exec"):
+        loop = node["fix_loop"]
+        tasks = [t for c in (node, node["on_failure"], loop) if c for t in _tasks(c)]
+        for task in [*tasks, *([loop["judge"]] if loop and loop["judge"] else [])]:
+            dispatch(task)
+    return resolved
+
+
+def _exec_before(chain: dict, node_id: str) -> str:
+    """The nearest exec node before `node_id`: where a gate with no `reject_to`
+    sends its rejection."""
+    ids = [n["id"] for n in chain["nodes"]]
+    earlier = [n for n in chain["nodes"][: ids.index(node_id)] if n["kind"] == "exec"]
+    if not earlier:
+        raise SystemExit(
+            f"kraft-lite: {node_id} has no exec node before it to send work back to. "
+            "Pass --from-node, or approve it"
+        )
+    return earlier[-1]["id"]
+
+
+def _restart(
+    everything: list[dict], records: list[dict], chain_id: str, node_record: dict, definition: dict
+) -> list[dict]:
+    """What `restart` writes: the walk sent back to `on_base_changed.restart_from`
+    through this node, their attempts reset, this node's restarts counted. The
+    node did not fail - a step moved its base - so the note is no rejection."""
+    node_id = definition["id"]
+    base = definition.get("on_base_changed")
+    if not base:
+        raise SystemExit(f"kraft-lite: {node_id} has no on_base_changed to restart from")
+    restarts = int(label_value(node_record, RESTARTS_LABEL) or 0)
+    if restarts >= RESTART_CAP:
+        raise SystemExit(
+            f"kraft-lite: {node_id} is over its restart cap: it restarted {restarts} times "
+            f"(cap {RESTART_CAP}). Stop and ask the human, as over_cap"
+        )
+    target = base["restart_from"]
+    tail = rewind(
+        records, target, f"restarted from {target}", through=node_id, prefix=RESTART_PREFIX
+    )
+    tail = [
+        set_label(r, RESTARTS_LABEL, str(restarts + 1))
+        if label_value(r, NODE_LABEL) == node_id
+        else r
+        for r in tail
+    ]
+    return [*tail, *rewind_slices(everything, chain_id, tail)]
+
+
 #: What each verb needs before it runs, declared once for `main`:
 #: - `chain`: it reads or writes one chain's state, so it takes `--chain-id` and
-#:   resolves that chain through `_ours`. `start` mints its own id, and `detect`,
-#:   `chains`, `settings` and `import` (whose export names its chain) take none.
+#:   resolves that chain through `_ours`, refusing a run frozen before V1.
+#:   `start` mints its own id, and `detect`, `chains`, `settings` and `import`
+#:   (whose export names its chain) take none.
 #: - `open_node`: it acts on the chain's open node, so a finished chain refuses
 #:   it. The rest answer after the walk, because wrap-up and status need them.
 #: - `log`: it reads or writes the decisions log or the export, so it needs a
@@ -1885,6 +2056,9 @@ VERBS: dict[str, frozenset[str]] = {
     "attempt": frozenset({"chain", "open_node"}),
     "gate": frozenset({"chain", "open_node"}),
     "reject": frozenset({"chain", "open_node"}),
+    "produced": frozenset({"chain", "open_node"}),
+    "mark": frozenset({"chain", "open_node"}),
+    "restart": frozenset({"chain", "open_node"}),
 }
 
 
@@ -1894,13 +2068,18 @@ def main(argv: list[str] | None = None) -> int:
 
     start = sub.add_parser("start")
     start.add_argument("--title", required=True)
-    start.add_argument("--chain", type=Path, default=None)
+    # A chain id from the libraries (`default`, `repo:ship`), or a chain file.
+    start.add_argument("--chain", default=None)
+    for kind in ATTACHMENT_KINDS:
+        start.add_argument(f"--{kind}", type=Path, default=None)
     detect_parser = sub.add_parser("detect")
     detect_parser.add_argument("--chain", type=Path, default=None)
-    sub.add_parser("chains")
+    sub.add_parser("chains").add_argument("--available", action="store_true")
     sub.add_parser("settings")
-    gate = sub.add_parser("gate")
-    gate.add_argument("--name", required=True)
+    produced = sub.add_parser("produced")
+    produced.add_argument("--kind", required=True)
+    produced.add_argument("--path", required=True)
+    sub.add_parser("mark").add_argument("--on-failure-ran", action="store_true", required=True)
     reject = sub.add_parser("reject")
     reject.add_argument("--note", required=True)
     # The last gate rejects work that an earlier node produced: its own hook only
@@ -1945,7 +2124,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.verb == "chains":
-        print(json.dumps(chain_summaries(store_for(root).load()), indent=2))
+        if args.available:
+            print(json.dumps(kl_chains.available(root, os.environ), indent=2))
+        else:
+            print(json.dumps(chain_summaries(store_for(root).load()), indent=2))
         return 0
 
     if args.verb == "settings":
@@ -1960,17 +2142,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.verb == "start":
         new_id = new_chain_id()
-        # Not `_chain`: its legacy rung exists to keep runs already in flight
-        # walking, and nothing deletes `chain.json`. Reading it here would make
-        # every future `start` in an upgraded directory run that old template
-        # instead of the packaged default.
-        chain = json.loads((args.chain or DEFAULT_CHAIN).read_text())
-        validate_hooks(root, chain)
+        attached = {k: getattr(args, k) for k in ATTACHMENT_KINDS if getattr(args, k)}
+        chain = _start_chain(root, args.chain, attached)
         _freeze_chain(root, chain, new_id)
         records = materialize(chain, args.title, new_id)
         # The epic is a container, not a step: close it now so the walk starts at
         # the first real node.
         records[0]["status"] = "closed"
+        for kind, path in attached.items():
+            records[0] = set_label(
+                records[0], f"{ARTIFACT_LABEL}{kind}=", _artifact_path(root, path)
+            )
         store.write(records)
         print(json.dumps({"chain_id": new_id, "backend": backend(root)}))
         return 0
@@ -1981,10 +2163,15 @@ def main(argv: list[str] | None = None) -> int:
     # A verb run without the flag still has to read the template of the chain it
     # actually resolved, not the directory's last one.
     resolved_id = epic["id"] if epic else None
-    chain = _chain(root, None, resolved_id)
+    chain = _chain(root, resolved_id)
     node_record = current(records)
     if node_record is None and "open_node" in VERBS[args.verb]:
         raise SystemExit("kraft-lite: no open node — the chain is finished or was never started")
+    node_id = label_value(node_record, NODE_LABEL)
+    # Only for a verb that acts on the node: `summary` or `export` of a run whose
+    # frozen chain lost a node still answers.
+    if "open_node" in VERBS[args.verb]:
+        definition = _definition(root, chain, resolved_id, node_id)
 
     if "log" in VERBS[args.verb]:
         if resolved_id is None:
@@ -2023,10 +2210,30 @@ def main(argv: list[str] | None = None) -> int:
         _refuse_close_before_slices(everything, resolved_id, node_record)
         store.write([bank_wait(dict(node_record, status="closed"))])
     elif args.verb == "gate":
-        store.write([open_gate(dict(node_record, status="blocked"), args.name)])
-    elif args.verb == "reject" and args.from_node:
-        tail = rewind(records, args.from_node, args.note)
+        if definition["kind"] != "gate":
+            raise SystemExit(
+                f"kraft-lite: {node_id} is an exec node, not a gate node: "
+                "run its tasks and close it"
+            )
+        store.write([open_gate(dict(node_record, status="blocked"), node_id)])
+    elif args.verb == "reject" and (args.from_node or definition["kind"] == "gate"):
+        target = args.from_node or definition["reject_to"] or _exec_before(chain, node_id)
+        tail = rewind(records, target, args.note)
         store.write([*tail, *rewind_slices(everything, resolved_id, tail)])
+    elif args.verb == "restart":
+        store.write(_restart(everything, records, resolved_id, node_record, definition))
+    elif args.verb == "produced":
+        if not ARTIFACT_KIND.fullmatch(args.kind):
+            raise SystemExit(
+                f"kraft-lite: --kind must be an artifact kind (letters, digits, _ . -), "
+                f"not {args.kind!r}"
+            )
+        prefix = f"{ARTIFACT_LABEL}{args.kind}="
+        store.write([set_label(node_record, prefix, _artifact_path(root, Path(args.path)))])
+    elif args.verb == "mark":
+        if not definition.get("on_failure"):
+            raise SystemExit(f"kraft-lite: {node_id} has no on_failure to have run")
+        store.write([set_label(node_record, ON_FAILURE_RAN_LABEL, "")])
     elif args.verb == "reject":
         description = node_record.get("description", "")
         # Banked on the way out too: a gate that ends in a rejection held the human
@@ -2235,8 +2442,13 @@ def _installed_skills(root: Path) -> list[str]:
     return sorted(names)
 
 
+#: The pre-V1 chain `detect` still reads its hook names from, until it is keyed
+#: by V1 task names, refs and targets. Nothing else in this file reads it.
+LEGACY_CHAIN = Path(__file__).parent / "chains" / "default.json"
+
+
 def detect(root: Path, chain_path: Path | None = None) -> dict:
-    chain = json.loads((chain_path or DEFAULT_CHAIN).read_text())
+    chain = json.loads((chain_path or LEGACY_CHAIN).read_text())
     # dict.fromkeys, not set: init writes the registry in this order, and a
     # registry whose keys follow the chain reads like the run it configures.
     hooks = dict.fromkeys(task for node in chain["nodes"] for task in node["tasks"])
