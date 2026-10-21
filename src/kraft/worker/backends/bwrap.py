@@ -142,6 +142,10 @@ def bwrap_argv(
         "--",
         os.path.abspath(bwrap),
         *_BWRAP_FLAGS,
+        # A oneshot's client may hold the operator's terminal: off it, so nothing
+        # inside can type into it. A session keeps its group, which pause signals;
+        # seccomp denies the typing ioctls there.
+        *(("--new-session",) if mode == "oneshot" else ()),
         *system_args(),
     ]
     # Links first: bwrap makes a real directory of any ancestor it binds into, and a

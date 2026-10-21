@@ -129,6 +129,11 @@ def _row(kw, frags, absent=()):
             lambda s: [("--started", str(s.wt.parent / "cid"))],
         ),
         _row(
+            lambda s: {"mode": "oneshot"},
+            lambda s: [("--", s.bwrap), ("--new-session",), ("--ro-bind", "/usr", "/usr")],
+        ),
+        _row(lambda s: {}, lambda s: [("--", s.bwrap)], lambda s: [("--new-session",)]),
+        _row(
             lambda s: {"sock_path": s.sockdir / "s.sock", "home": s.wt.parent / "h"},
             lambda s: [
                 ("--ro-bind", str(shim.HOST_DIR), "/opt/kraft/bin"),
@@ -181,6 +186,8 @@ def _row(kw, frags, absent=()):
         "bwrap-absolute",
         "launcher-prefix",
         "oneshot-no-started",
+        "oneshot-new-session",
+        "launch-keeps-its-session",
         "socket-dir-ro",
         "default-home",
         "session-sorted-by-depth",

@@ -889,6 +889,9 @@ async def _cli_version(exe: list[str], name: str, cwd: str | Path, runner=None) 
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            # Off the terminal a foreground `kraft` holds: nothing a sandbox
+            # runs may type into it (TIOCSTI).
+            start_new_session=True,
         )
         try:
             out, _ = await asyncio.wait_for(proc.communicate(), 60)

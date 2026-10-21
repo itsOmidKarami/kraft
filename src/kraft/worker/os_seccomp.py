@@ -2,7 +2,8 @@
 
 bwrap reads it from a file descriptor (`--seccomp N`). It allows only the host's
 native architecture, answers ENOSYS to any other (a foreign ABI would bypass the
-table by its own syscall numbers), and answers EPERM to the denied calls.
+table by its own syscall numbers), and answers EPERM to the denied calls and
+to the `ioctl` requests that type into a terminal.
 """
 
 from __future__ import annotations
@@ -31,12 +32,20 @@ DENY: dict[str, dict[str, int]] = {
     },
 }  # fmt: skip
 
+#: `ioctl`, allowed but for the requests that push input into a terminal
+#: (CVE-2017-5226): TIOCSTI fakes typed input, TIOCLINUX can paste the selection.
+IOCTL = {"x86_64": 16, "aarch64": 29}
+DENIED_IOCTLS = {"TIOCSTI": 0x5412, "TIOCLINUX": 0x541C}
+
 _AUDIT_ARCH = {"x86_64": 0xC000003E, "aarch64": 0xC00000B7}
 _X32_BIT = 0x40000000
 _RET_ERRNO = 0x00050000
 _RET_ALLOW = 0x7FFF0000
 _LD_ARCH = (0x20, 0, 0, 4)  # BPF_LD|W|ABS of seccomp_data.arch
 _LD_NR = (0x20, 0, 0, 0)  # ... of seccomp_data.nr
+# ... of the low word of seccomp_data.args[1], both arches being little-endian: the
+# kernel reads an ioctl's request as an unsigned int, so the high word is ignored.
+_LD_ARG1_LO = (0x20, 0, 0, 24)
 
 
 def machine() -> str:
@@ -53,6 +62,13 @@ def build(arch: str) -> bytes:
     if arch == "x86_64":
         prog += [(0x35, 0, 1, _X32_BIT), (0x06, 0, 0, enosys)]  # JGE: x32 numbers
     nrs = sorted(DENY[arch].values())
+    cmds = sorted(DENIED_IOCTLS.values())
+    # JEQ ioctl: into its request checks, else past them (the checks and their ALLOW).
+    prog += [(0x15, 0, len(cmds) + 2, IOCTL[arch]), _LD_ARG1_LO]
+    for i, cmd in enumerate(cmds):
+        # A hit jumps over the other requests, the ALLOW, the denied numbers and theirs.
+        prog.append((0x15, len(cmds) - i + len(nrs) + 1, 0, cmd))
+    prog.append((0x06, 0, 0, _RET_ALLOW))
     for i, nr in enumerate(nrs):
         prog.append((0x15, len(nrs) - i, 0, nr))  # JEQ: hit jumps to the EPERM return
     prog += [(0x06, 0, 0, _RET_ALLOW), (0x06, 0, 0, eperm)]
