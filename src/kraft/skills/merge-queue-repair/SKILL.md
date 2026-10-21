@@ -5,11 +5,13 @@ description: "Repairs what made a merge train (GitLab) or merge queue (GitHub) r
 
 # Repairing a merge train or merge queue rejection
 
-The merge request passed its own pipeline, was approved and was queued. The
-merge train or merge queue then ran its own pipeline on it, merged into the
-target branch as it is now (and on GitLab, after the merge requests ahead of
-it in the train), and that pipeline failed. Why, which pipeline and which jobs
-are already in the prompt above.
+The merge request was approved and queued. Usually it had passed its own
+pipeline, and the merge train or merge queue then ran its own pipeline on it,
+merged into the target branch as it is now (and on GitLab, after the merge
+requests ahead of it in the train), and that pipeline failed. The prompt above
+says when it was otherwise: the merge request never reached the train because
+its own pipeline failed while it waited, or it no longer merges cleanly with
+the target. Why, which pipeline and which jobs are already in the prompt.
 
 So the failure comes from one or both of:
 

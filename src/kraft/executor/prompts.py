@@ -271,12 +271,10 @@ def rebase_resolve_note(
 #: What the `on_merge_rejected` repair (`walk._repair_merge_rejection`) is
 #: dispatched with: the drop the forge recorded (`merge_queue_dropped`), so it
 #: does not have to rediscover why the train or queue rejected the merge
-#: request. The merge request passed its own pipeline; this failure is against
-#: the target as it is now.
+#: request, and what happened to it (`_MERGE_REJECTED_WHAT`).
 _MERGE_REJECTED_PROMPT = (
     "A merge train or merge queue rejected this merge request. Branch {branch} "
-    "passed its own pipeline, but failed once combined with {base} as it is "
-    "now{folder}\n\n"
+    "{what}{folder}\n\n"
     "Reason: {reason}\n"
     "Pipeline: {url}\n"
     "Failed jobs:\n{jobs}\n\n"
@@ -287,6 +285,17 @@ _MERGE_REJECTED_PROMPT = (
     "can, and fix the code.\n"
     "Commit your fix on this branch. Do not push and do not merge: Kraft does both.\n"
 )
+
+#: What happened to the merge request, by the drop's cause: a merge request
+#: that never reached the train never passed its own pipeline either.
+_MERGE_REJECTED_WHAT = {
+    "code": "passed its own pipeline, but failed once combined with {base} as it is now",
+    "not_added": (
+        "never reached the merge train or queue: its own pipeline failed after Kraft "
+        "asked for the merge, checked against {base}"
+    ),
+    "conflict": "no longer merges cleanly with {base} as it is now",
+}
 
 #: Where the repair works: the item's own worktree, or in place a person's
 #: checkout, worded as `_RESOLVE_IN` words it for the conflict resolver.
@@ -329,6 +338,9 @@ def merge_rejected_note(
         where=where,
         branch=branch,
         base=base,
+        what=_MERGE_REJECTED_WHAT.get(drop.get("cause"), _MERGE_REJECTED_WHAT["code"]).format(
+            base=base
+        ),
         folder=_MERGE_REJECTED_IN[in_place],
         reason=drop.get("reason") or "no reason given",
         url=drop.get("url") or "(none given)",
