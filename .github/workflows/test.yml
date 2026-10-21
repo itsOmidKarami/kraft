@@ -338,8 +338,8 @@ jobs:
     # The e2e tier (Ruling 153): tests that run a real external CLI to check
     # its contract -- today bd's argv, subcommands and --json shape, and the
     # bead behaviour Kraft relies on. A failure fails the `test` check (see
-    # test-gate). KRAFT_E2E_REQUIRE=bd,docker,podman makes a missing bd,
-    # docker or podman an error instead of a green job that skipped
+    # test-gate). KRAFT_E2E_REQUIRE=bd,docker,podman,bwrap makes a missing bd,
+    # docker, podman or bwrap an error instead of a green job that skipped
     # everything; the runner's own docker daemon and its rootless podman run
     # the sandbox's ref-store test against a real container each. The paid
     # claude test skips, and -rs prints why.
@@ -366,10 +366,14 @@ jobs:
           git config --global user.email ci@kraft.invalid
           git config --global user.name "Kraft CI"
           bd version
+      - name: install bubblewrap
+        # The os sandbox's tests run bwrap as the runner's own user. Ubuntu 24.04
+        # blocks unprivileged user namespaces for it without an AppArmor profile.
+        run: sudo apt-get install -y bubblewrap && sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: uv sync --frozen
       - run: uv run pytest -m e2e -n logical --durations=25 -rs --junitxml=e2e-junit.xml
         env:
-          KRAFT_E2E_REQUIRE: bd,docker,podman
+          KRAFT_E2E_REQUIRE: bd,docker,podman,bwrap
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
