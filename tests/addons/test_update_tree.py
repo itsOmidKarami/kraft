@@ -26,12 +26,13 @@ TREE = {
 
 
 def _update(home, ids=None, *, accept=True, entries=None, **kw):
-    """`update` on `home`: results by id, and every group `accept` was asked."""
+    """`update` on `home`: results by id, and every group `accept` (an answer,
+    or a function of the group) was asked."""
     groups = []
 
     def answer(group):
         groups.append(group)
-        return accept
+        return accept(group) if callable(accept) else accept
 
     results = update.update(
         ids, accept=answer, entries=entries, config_dir=home[0], addons_root=home[1], **kw

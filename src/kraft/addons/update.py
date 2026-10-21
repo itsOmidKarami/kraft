@@ -1425,12 +1425,14 @@ def update(
     that the named moves, and the moves they need, do not is `held` with
     `kind="breaks"`. The moves are settled as a set
     (`inherit.settle`): one a range drops is `held` (`refused` for an
-    install). `accept` is asked once per tree that has something to take,
-    with a `Group` of its members' reviews, and the tree applies or is
-    declined whole. `entries` are new or changed `addons.yaml` entries (an
-    install, an alias), held in memory and written only for an add-on that
-    was accepted. An install's ancestors that are not installed are pulled
-    in with it, each with a default entry, and said after `ids` like a
+    install). `accept` is asked once per tree that has something to take
+    (a child that changes parent joins its old tree and its new one), with
+    a `Group` of its members' reviews, and the tree applies or is declined
+    whole; the moves left are settled again after each. `entries` are new
+    or changed `addons.yaml` entries (an install, an alias), held in memory
+    and written only for an add-on that was accepted. An install's
+    ancestors that are not installed are pulled in with it, each with a
+    default entry, and said after `ids` like a
     relative, its refusals too; each applies only with a child that builds
     on it. `re_install` takes the commit the ref resolves to now even at an
     unchanged version, and takes no relative (not a descendant's waiting
@@ -1605,14 +1607,20 @@ def update(
         gone = {i: r for i, r in results.items() if i not in lock.addons}
         builders = {**pulled, **needs}
         results |= _unasked(_choose(moves, ctx, builders, gone), joined)
-        # 4. Trees: one review and one answer each.
-        parents = {p.id: p.parent for p in loaded if p.repo_id is None}
-        parents |= {i: m.candidate.parent for i, m in moves.items()}
+        # 4. Trees: one review and one answer each. A child that changes
+        # parent joins its old tree and its new one: the set rule kept its
+        # move and theirs together, so they apply or are declined together.
+        locked_parents = {p.id: p.parent for p in loaded if p.repo_id is None}
+        parents = locked_parents | {i: m.candidate.parent for i, m in moves.items()}
+        #: Each loading add-on's side as the trees decided so far leave it.
         sides = {
             a.id: inherit.Side(a.version, a.parent, a.parent_range)
             for a in loaded
             if a.repo_id is None and a.left_out is None
         }
+
+        def side(m: _Move) -> inherit.Side:
+            return inherit.Side(m.found.version, m.candidate.parent, m.candidate.parent_range)
 
         def judged(members: Sequence[_Move]) -> _Judged:
             """The instance with `members` applied, and what they break in it,
@@ -1632,7 +1640,19 @@ def update(
                 said = [why.replace(str(m.candidate.root), m.addon_id) for why in said]
             return _Judged(would_load, after, libraries, said)
 
-        for tree in inherit.trees(moves, parents):
+        grouped = inherit.trees(moves, parents, locked_parents)
+        for index, tree in enumerate(grouped):
+            # Settled again over the moves not decided yet, at the sides the
+            # trees before left: none applies over a range partner that was
+            # declined or refused there.
+            waiting = {i: side(moves[i]) for later in grouped[index:] for i in later}
+            dropped = inherit.settle(sides, waiting)
+            for addon_id in [i for i in tree if i in dropped]:
+                outcome = "held" if moves[addon_id].locked is not None else "refused"
+                results[addon_id] = Result(addon_id, outcome, problems=(dropped[addon_id],))
+            tree = tuple(i for i in tree if i not in dropped)
+            if not tree:
+                continue
             members = [moves[i] for i in tree]
             would_load, after, libraries, broken = judged(members)
             if broken and joined.keys() & set(tree):
@@ -1641,12 +1661,7 @@ def update(
                 need = inherit.needed(
                     [i for i in tree if i not in joined],
                     sides,
-                    {
-                        m.addon_id: inherit.Side(
-                            m.found.version, m.candidate.parent, m.candidate.parent_range
-                        )
-                        for m in members
-                    },
+                    {m.addon_id: side(m) for m in members},
                 )
                 again = judged([m for m in members if m.addon_id in need])
                 if not again.broken:
@@ -1748,6 +1763,7 @@ def update(
             for m, reviewed in zip(members, reviews, strict=True):
                 results[m.addon_id] = Result(m.addon_id, "applied", review=reviewed)
                 accepted.append(m)
+                sides[m.addon_id] = side(m)
 
     if accepted:
         try:

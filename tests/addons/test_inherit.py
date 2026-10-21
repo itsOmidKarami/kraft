@@ -580,8 +580,22 @@ _PARENTS = {_C: None, _D: _C, _T: _D, "tools@acme": None, "a@corp": _C, "b@corp"
         pytest.param(
             ["l0@acme", "l9@acme"], _CHAIN, [("l0@acme",), ("l9@acme",)], id="chain-too-deep"
         ),
+        pytest.param(
+            ["tools@acme", _C, "a@corp"],
+            ({**_PARENTS, "a@corp": "tools@acme"}, _PARENTS),
+            [(_C, "tools@acme", "a@corp")],
+            id="reparented-joins-both-trees",
+        ),
+        pytest.param(
+            ["x@corp", "a@corp", "b@corp", "y@corp"],
+            ({"a@corp": "s@corp", "b@corp": "t@corp"}, {"a@corp": "r@corp", "b@corp": "s@corp"}),
+            [("x@corp",), ("a@corp", "b@corp"), ("y@corp",)],
+            id="joined-through-a-shared-root",
+        ),
     ],
 )
 def test_trees(ids, parents, expected):
-    """Ids grouped by the root they reach, through add-ons not among them too."""
-    assert inherit.trees(ids, parents) == expected
+    """Ids grouped by the root they reach, through add-ons not among them too;
+    with several maps (a tuple), by the roots they reach through any."""
+    maps = parents if isinstance(parents, tuple) else (parents,)
+    assert inherit.trees(ids, *maps) == expected
