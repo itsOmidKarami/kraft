@@ -28,9 +28,14 @@ So the failure comes from one or both of:
 If the prompt tells you to rebase this branch first, do that before anything
 else: the rest of this method assumes the branch already sits on the target.
 
-Read the failed jobs the prompt names, then their logs, from the pipeline or
-run the prompt links to (its id is the number at the end of that link) with
-the forge's own read-only CLI, or its web page:
+Read the failed jobs the prompt names, then their logs, with the forge's own
+read-only CLI or its web page. When the prompt links to a pipeline
+(`.../pipelines/<id>`) or a run (`.../actions/runs/<id>`), that number is the
+id below. When it links only to the merge request, there is no failed
+pipeline to hand: find the train pipeline in `glab mr view <iid> -F json`
+(its `head_pipeline`, whose `ref` ends in `/train`), or the merge group's run
+in `gh run list --event merge_group` (a `gh-readonly-queue/<base>/pr-<n>-`
+branch).
 
 - GitLab: `glab ci get --pipeline-id <id> -F json` lists the train
   pipeline's jobs, and `glab ci trace <job> --pipeline-id <id>` prints one

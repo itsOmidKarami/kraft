@@ -255,6 +255,17 @@ def _queue(url: str = _PR_URL, **fields) -> forge.QueueRead:
             "failed",
             id="removed-by-hand-even-naming-failed-checks",
         ),
+        pytest.param(
+            _queue_routes(_graphql(removal="REMOVED_BY_USER: FAILED_CHECKS"), [_RED]),
+            _queue(
+                state="dropped",
+                cause="other",
+                reason="REMOVED_BY_USER: FAILED_CHECKS",
+                url=_RUN_URL,
+            ),
+            "failed",
+            id="removed-by-hand-in-enum-words",
+        ),
         # A reason that names neither checks nor a conflict is GitHub's word
         # that something else took it out: the run is evidence only when the
         # reason names the checks or says nothing.
@@ -292,6 +303,21 @@ def _queue(url: str = _PR_URL, **fields) -> forge.QueueRead:
             "failed",
             id="removal-with-no-reason-and-a-failed-run",
         ),
+        # A person dequeued it while GitHub rebuilt the group: the rebuild is
+        # cancelled, and the failed run before it is no verdict on them.
+        pytest.param(
+            _queue_routes(
+                _graphql(reasonless_removal=True),
+                [_merge_group_run(conclusion="cancelled", id=556, created_at=_REBUILT_AT), _RED],
+            ),
+            _queue(
+                state="dropped",
+                cause="other",
+                reason="removed from the merge queue; GitHub gave no reason",
+            ),
+            None,
+            id="removal-with-no-reason-after-a-cancelled-rebuild",
+        ),
         # Checks GitHub Actions does not run (an external CI, a required
         # status): no merge-group run to read, so GitHub's own words naming
         # the failed checks are the finding.
@@ -307,6 +333,8 @@ def _queue(url: str = _PR_URL, **fields) -> forge.QueueRead:
                 ("The merge commit failed CI", "ci-failed"),
                 ("Timed out waiting for status checks", "timed-out"),
                 ("CHECK TIMEOUT", "timeout"),
+                ("FAILED_CHECKS", "enum-failed-checks"),
+                ("CHECKS_TIMED_OUT", "enum-checks-timed-out"),
             ]
         ),
         *(
@@ -361,9 +389,11 @@ def _run_for(branch: str, conclusion: str = "failure", id: int = 900) -> dict:
             555,
             id="not-another-base",
         ),
+        # A rebuild cancelled (a person took it out) or still running is no
+        # verdict, and never a reason to blame the failed run before it.
         pytest.param(
-            [_run_for(_QUEUE_BRANCH, "cancelled", id=700), _run_for(_QUEUE_BRANCH, id=555)],
-            555,
+            [_merge_group_run(conclusion="cancelled", id=700, created_at=_REBUILT_AT), _RED],
+            None,
             id="not-a-cancelled-run",
         ),
         pytest.param([_run_for(_QUEUE_BRANCH, "success", id=700)], None, id="not-a-green-run"),
@@ -374,7 +404,7 @@ def _run_for(branch: str, conclusion: str = "failure", id: int = 900) -> dict:
         ),
         pytest.param(
             [_merge_group_run(conclusion="", id=700, created_at=_REBUILT_AT), _RED],
-            555,
+            None,
             id="not-a-run-still-running",
         ),
         pytest.param([_run_for(_QUEUE_BRANCH, "timed_out", id=555)], 555, id="a-timed-out-run"),

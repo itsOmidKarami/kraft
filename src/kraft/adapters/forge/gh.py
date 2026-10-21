@@ -70,21 +70,29 @@ _NO_REASON_GIVEN = "removed from the merge queue; GitHub gave no reason"
 #: Only a phrase that says the checks or CI failed or timed out: a bare "ci",
 #: "check" or "fail" is in "Removed by ci-bot" or "to check something" too, and
 #: reading those as a red build would re-queue what a person took out.
+#: Words part on a space, `_` or `-`, and a word ends at anything but a letter
+#: or digit, so an enum-style token (`FAILED_CHECKS`) reads as the phrase does.
 _CHECKS_FAILED = re.compile(
-    r"\b(?:"
-    r"(?:status\s+)?checks?\s+(?:(?:have|has)\s+)?(?:failed|timed\s+out)"
-    r"|(?:failed|failing)\s+(?:(?:required\s+)?status\s+)?checks?"
-    r"|checks?\s+time-?outs?"
-    r"|ci\s+(?:(?:has|have)\s+)?(?:failed|failure|timed\s+out)"
-    r"|failed\s+ci|ci\s+failures?"
-    r"|timed\s+out\s+waiting\s+for\s+(?:(?:required\s+)?status\s+)?checks?"
-    r")\b",
+    (
+        r"(?<![a-z0-9])(?:"
+        r"(?:status_)?checks?_(?:(?:have|has)_)?(?:failed|timed_out)"
+        r"|(?:failed|failing)_(?:(?:required_)?status_)?checks?"
+        # `\x5f` is `_` itself: "timeout", "time-out" and "time_out" alike.
+        r"|checks?_time[\s\x5f-]?outs?"
+        r"|ci_(?:(?:has|have)_)?(?:failed|failure|timed_out)"
+        r"|failed_ci|ci_failures?"
+        r"|timed_out_waiting_for_(?:(?:required_)?status_)?checks?"
+        r")(?![a-z0-9])"
+    ).replace("_", r"[\s_-]+"),
     re.IGNORECASE,
 )
 #: A removal reason that names a person, or a removal by hand: theirs to
-#: decide, whatever the merge group's runs say.
+#: decide, whatever the merge group's runs say. Words part as above.
 _REMOVED_BY_HAND = re.compile(
-    r"\b(?:removed\s+by|dequeued\s+by|manual(?:ly)?|by\s+hand)\b", re.IGNORECASE
+    r"(?<![a-z0-9])(?:removed_by|dequeued_by|manual(?:ly)?|by_hand)(?![a-z0-9])".replace(
+        "_", r"[\s_-]+"
+    ),
+    re.IGNORECASE,
 )
 #: The branch GitHub builds a queued pull request's merge group on.
 _QUEUE_BRANCH = "gh-readonly-queue/{base}/pr-{number}-"
@@ -619,14 +627,15 @@ class GhCli(mr_ops.CliWaits):
     async def _merge_group_failure(
         self, repo: Path, base: str, number: int, *, since: str
     ) -> CIStatus | None:
-        """The newest settled `merge_group` run for pull request `number` made
-        at or after `since` (the latest enqueue; "" when unknown), read as a
-        red `CIStatus` when it failed, else None. An earlier entry's failed run
-        is not this entry's: blaming it would send a repair at code already
-        fixed. Nor is a failed run GitHub rebuilt since -- the group failed for
-        a pull request ahead, and the rebuild went green -- so only the newest
-        run is a verdict, whatever its conclusion. A cancelled run is no
-        verdict (`_GH_RED`), nor is one still running.
+        """The newest `merge_group` run for pull request `number` made at or
+        after `since` (the latest enqueue; "" when unknown), read as a red
+        `CIStatus` when it failed, else None. An earlier entry's failed run is
+        not this entry's: blaming it would send a repair at code already
+        fixed. Nor is a failed run GitHub rebuilt since -- the group failed
+        for a pull request ahead, and the rebuild went green, is still
+        running, or was cancelled when a person took the pull request out --
+        so only the newest run is a verdict, whatever its status: a running
+        or cancelled one is none (`_GH_RED`), never a reason to look past it.
 
         `gh run list` is repo-wide, so it reads a hundred runs, not a few.
 
@@ -652,18 +661,17 @@ class GhCli(mr_ops.CliWaits):
         if not isinstance(rows, list):
             return None
         prefix = _QUEUE_BRANCH.format(base=base, number=number)
-        settled = [
+        entry_runs = [
             r
             for r in rows
             if isinstance(r, dict)
             and str(r.get("headBranch") or "").startswith(prefix)
-            and str(r.get("conclusion") or "").upper() not in ("", "CANCELLED")
             and str(r.get("createdAt") or "") >= since
         ]
-        if not settled:
+        if not entry_runs:
             return None
         # Newest first as `gh` lists them; `max` keeps the first of a tie.
-        run = max(settled, key=lambda r: str(r.get("createdAt") or ""))
+        run = max(entry_runs, key=lambda r: str(r.get("createdAt") or ""))
         conclusion = str(run.get("conclusion") or "").lower()
         if conclusion.upper() not in _GH_RED:
             return None
