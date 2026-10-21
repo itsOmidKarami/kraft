@@ -527,6 +527,9 @@ def review(
     )
 
 
+_ONE_NAME = re.compile(r"^warning: [^\s:]+: ")
+
+
 def descendant_lines(
     addon_id: str,
     files: Extracted,
@@ -541,5 +544,6 @@ def descendant_lines(
     said = review(addon_id, files, files, old_ancestors=before, new_ancestors=after)
     return (
         [f"{addon_id}: {line}" for line in said.reach],
-        [f"{addon_id}: {line}" for line in said.content],
+        # A stale-remove warning already names the add-on after `warning: `.
+        [f"{addon_id}: {_ONE_NAME.sub('warning: ', line)}" for line in said.content],
     )

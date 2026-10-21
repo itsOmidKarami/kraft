@@ -814,10 +814,7 @@ def _cmd_update(ns: argparse.Namespace) -> None:
     )
     if ns.check:
         raise SystemExit(max((_check_code(r) for r in results), default=0))
-    # A relative held by a chain break exits 2 here too: its own release would
-    # be refused, even though what the update applied went in.
-    if any(r.outcome == "held" and r.kind == "breaks" for r in results):
-        raise SystemExit(2)
+    # The graded codes are `--check`'s; here anything not applied or current is 1.
     if {r.outcome for r in results} & {"failed", "refused", "declined", "held"}:
         raise SystemExit(1)
 
@@ -1040,7 +1037,7 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
         "update",
         _cmd_update,
         "update installed add-ons, one review per tree; exit 1 when one is refused, declined, held "
-        "or failed, 2 when a relative is held because it breaks a chain",
+        "or failed",
     )
     update_p.add_argument("addons", metavar="ADDON@COLLECTION", nargs="*")
     answer = update_p.add_mutually_exclusive_group()
