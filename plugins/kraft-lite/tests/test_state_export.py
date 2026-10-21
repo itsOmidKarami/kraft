@@ -110,8 +110,8 @@ def test_import_writes_a_record_only_over_an_older_local_copy(local, exported, w
     assert (write, kept) == (([exported], 0) if written else ([], 1))
 
 
-def decision(at, answered_at=None, held=False):
-    return {"id": "kd-1", "at": at, "held": held, "answered_at": answered_at}
+def decision(at, answered_at=None, held=False, reported=False):
+    return {"id": "kd-1", "at": at, "held": held, "answered_at": answered_at, "reported": reported}
 
 
 @pytest.mark.parametrize(
@@ -123,6 +123,17 @@ def decision(at, answered_at=None, held=False):
         pytest.param(decision(T0, held=True), decision(T0, T0), True, id="tie_export_answered"),
         pytest.param(decision(T0, T0), decision(T0, held=True), False, id="tie_local_answered"),
         pytest.param(decision(T0, held=True), decision(T0, held=True), False, id="tie_both_held"),
+        # A report made in the other checkout is not made again here.
+        pytest.param(
+            decision(T0, T0), decision(T0, T0, reported=True), True, id="tie_export_reported"
+        ),
+        pytest.param(
+            decision(T0, T0, reported=True), decision(T0, T0), False, id="tie_local_reported"
+        ),
+        # An answer after the report is news, and beats the reported held copy.
+        pytest.param(
+            decision(T0, held=True, reported=True), decision(T0, T0), True, id="answer_beats_report"
+        ),
     ],
 )
 def test_import_keeps_the_later_decision_and_an_answer_wins_a_tie(local, exported, taken):
@@ -248,6 +259,7 @@ def test_import_refuses_an_export_that_names_no_single_chain(problem, kl_cli, tm
     assert not (there / ".kraft-lite").exists()
 
 
+@pytest.mark.parametrize("backend", ["jsonl", "bd"])
 @pytest.mark.parametrize(
     "local, written",
     [
@@ -257,12 +269,28 @@ def test_import_refuses_an_export_that_names_no_single_chain(problem, kl_cli, tm
         pytest.param(T1, "2026-10-20T11:00:01Z", id="local_row_ahead"),
     ],
 )
-def test_bd_write_raw_beats_the_local_row_and_keeps_kraft_at(local, written, fake_bd):
+def test_write_raw_beats_the_local_row_and_keeps_kraft_at(
+    backend, local, written, fake_bd, tmp_path
+):
+    """Past bd's guard in both stores: `bd import .kraft-lite/chain.jsonl` is the
+    documented migration, and it keeps the earlier line of an id whose later line
+    is not newer, while `kl.py` reads the later one."""
     exported = dict(record("ks-1", T0), updated_at=T0)
-    if local:
-        fake_bd.stored["ks-1"] = dict(record("ks-1"), updated_at=local)
+    rows = [dict(record("ks-1"), updated_at=local)] if local else []
+    calls = []
 
-    kl.BdStore(run=fake_bd).write_raw([exported])
+    def bd(cmd, **kwargs):
+        calls.append(cmd[1])
+        return fake_bd(cmd, **kwargs)
 
-    [payload] = [json.loads(line) for line in fake_bd.imports[-1].splitlines()]
+    path = tmp_path / "chain.jsonl"
+    store = kl.BdStore(run=bd) if backend == "bd" else kl.JsonlStore(path)
+    store.write_raw([exported], rows)
+
+    if backend == "bd":
+        # The rows `import` already loaded are the ones it beats: no second export.
+        assert calls == ["import"]
+        [payload] = [json.loads(line) for line in fake_bd.imports[-1].splitlines()]
+    else:
+        [payload] = kl.read_jsonl(path)
     assert payload == dict(exported, updated_at=written)

@@ -400,6 +400,29 @@ def test_slice_set_moves_a_slice_and_merged_closes_it(walk, kl_cli, tmp_path):
     assert stored()[reopened["id"]]["status"] == "open"
 
 
+@pytest.mark.parametrize("mode", kl.MODES)
+def test_the_run_record_closes_when_every_slice_is_merged(walk, mode, kl_cli, tmp_path):
+    """Under bd an open record is open work, and a finished run is not."""
+    chain_id = walk.slice(tmp_path, plan(mode=mode))
+
+    def run_status():
+        stored = kl.read_jsonl(tmp_path / ".kraft-lite" / "chain.jsonl")
+        return kl.run_record(stored, chain_id)["status"]
+
+    for key in ("a", "b"):
+        kl_cli(tmp_path, "slice-set", "--slice", key, "--status", "merged")
+    assert run_status() == "open", "a slice is still unmerged"
+    kl_cli(tmp_path, "slice-set", "--slice", "c", "--status", "ready_to_merge")
+    assert run_status() == "open", "ready to merge is not merged, in main mode too"
+
+    kl_cli(tmp_path, "slice-set", "--slice", "c", "--status", "merged")
+    assert run_status() == "closed"
+
+    # A call overturned at the wrap-up puts a slice back to work, and the run with it.
+    kl_cli(tmp_path, "slice-set", "--slice", "a", "--status", "running")
+    assert run_status() == "open"
+
+
 @pytest.mark.parametrize(
     "flags, named",
     [
@@ -573,8 +596,16 @@ def test_a_slicing_plan_without_a_mode_takes_the_settings_mode(walk, mode, kl_cl
     assert kl_cli(tmp_path, "state")["sliced"]["mode"] == mode
 
 
-def test_the_plans_own_mode_beats_the_settings_mode(walk, kl_cli, tmp_path):
-    settings_file(tmp_path, {"mode": "main"})
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param({"mode": "main"}, id="settings_say_main"),
+        # Not read at all: a plan that names its mode needs nothing from the file.
+        pytest.param("{nope", id="settings_unreadable"),
+    ],
+)
+def test_the_plans_own_mode_beats_the_settings_mode(walk, content, kl_cli, tmp_path):
+    settings_file(tmp_path, content)
     walk.slice(tmp_path, plan(mode="feature"))
 
     assert kl_cli(tmp_path, "slices")["mode"] == "feature"

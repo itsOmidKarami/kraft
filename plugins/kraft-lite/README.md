@@ -207,11 +207,11 @@ The skills run these. `kl.py state` also reports `sliced` once a run is sliced.
 |---|---|
 | `approve --slices FILE` | Approves `chain_finalized` and creates the slices from the proposal. A cycle, an unknown `after`, a duplicate key, an empty task list or a task in two slices is refused, and nothing is written. |
 | `slices` | Lists the slices with their status, what they come after, session and branch, and which are `ready` to start. |
-| `slice-set --slice KEY` | Sets `--status`, `--session`, `--branch` or `--fork`. Statuses: `waiting`, `starting`, `running`, `in_review`, `ready_to_merge`, `merged`. |
+| `slice-set --slice KEY` | Sets `--status`, `--session`, `--branch` or `--fork`. Statuses: `waiting`, `starting`, `running`, `in_review`, `ready_to_merge`, `merged`. The last slice merged closes the run. |
 | `settings` | Prints the mode and the rights in effect. |
 | `decide` | Logs a decision. With `--held`, holds the question for you. |
-| `answer --decision ID --answer TEXT` | Records your answer to a held question. |
-| `decisions` | Lists the log. `--held` shows held questions, `--unreported` what is new since the last report, and `--mark` moves that cursor. |
+| `answer --decision ID --answer TEXT` | Records your answer to a held question. A decision that is not held is refused. |
+| `decisions` | Lists the log. `--held` shows held questions, `--unreported` what is new or newly answered since the last report, and `--mark` marks those reported. |
 | `export --to DIR`, `import --from DIR` | Copy a run to the state branch's checkout, and back. An import never overwrites a newer local record. |
 
 ## What it does not do

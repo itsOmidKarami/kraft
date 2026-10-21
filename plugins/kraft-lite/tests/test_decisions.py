@@ -49,6 +49,7 @@ def test_a_decision_is_recorded_with_who_answered(walk, kl_cli, tmp_path):
         "held": False,
         "answered_by": "controller",
         "answered_at": entry["at"],
+        "reported": False,
     }
     assert kl_cli(tmp_path, "decisions") == [entry]
     path = kl._decisions_path(tmp_path, chain_id)
@@ -101,14 +102,12 @@ def test_decide_requires_an_answer_unless_held(flags, named, walk, kl_cli, tmp_p
 
 
 def test_decisions_filters_held_and_unreported_and_mark_moves_the_cursor(walk, kl_cli, tmp_path):
-    chain_id = walk.slice(tmp_path)
+    walk.slice(tmp_path)
     store = tmp_path / ".kraft-lite" / "chain.jsonl"
+    written = store.read_text()
 
     def decide(*extra):
         return kl_cli(tmp_path, "decide", "--question", "q", "--why", "w", *extra)
-
-    def cursor():
-        return kl.label_value(kl.run_record(kl.read_jsonl(store), chain_id), kl.REPORTED_LABEL)
 
     first = decide("--answer", "one")
     held = decide("--held")
@@ -116,26 +115,75 @@ def test_decisions_filters_held_and_unreported_and_mark_moves_the_cursor(walk, k
     assert ids(kl_cli(tmp_path, "decisions")) == [first["id"], held["id"]]
     assert ids(kl_cli(tmp_path, "decisions", "--held")) == [held["id"]]
     assert ids(kl_cli(tmp_path, "decisions", "--unreported")) == [first["id"], held["id"]]
-    assert cursor() is None, "--unreported alone moves nothing"
+    assert ids(kl_cli(tmp_path, "decisions", "--unreported")) == [first["id"], held["id"]], (
+        "--unreported alone moves nothing"
+    )
 
     reported = kl_cli(tmp_path, "decisions", "--unreported", "--mark")
     assert ids(reported) == [first["id"], held["id"]]
-    assert cursor() == held["id"]
     assert kl_cli(tmp_path, "decisions", "--unreported") == []
+    assert ids(kl_cli(tmp_path, "decisions", "--held")) == [held["id"]], "still held, reported"
 
     third = decide("--answer", "three")
-    # Answering keeps the entry's place in write order: it was reported already.
-    kl_cli(tmp_path, "answer", "--decision", held["id"], "--answer", "two")
-    assert ids(kl_cli(tmp_path, "decisions")) == [first["id"], held["id"], third["id"]]
     assert ids(kl_cli(tmp_path, "decisions", "--unreported", "--mark")) == [third["id"]]
     assert kl_cli(tmp_path, "decisions", "--unreported", "--mark") == []
-    assert cursor() == third["id"], "an empty report leaves the cursor where it was"
+    assert ids(kl_cli(tmp_path, "decisions")) == [first["id"], held["id"], third["id"]]
 
-    # The cursor lives on the run record; the epic is never written after `start`.
-    epic_writes = [
-        line for line in store.read_text().splitlines() if json.loads(line)["id"] == chain_id
-    ]
-    assert len(epic_writes) == 1
+    # What was reported is kept in the decisions log, so no record in the store is
+    # written for it: not the run record, and never the epic.
+    assert store.read_text() == written
+
+
+@pytest.mark.parametrize(
+    "where",
+    [
+        pytest.param("here", id="answer_after_report"),
+        # Answered in another checkout of the run and imported: the answer reaches
+        # this log after the report that showed the question held.
+        pytest.param("import", id="import_behind_cursor"),
+    ],
+)
+def test_an_answer_to_a_reported_question_is_unreported_again(where, walk, kl_cli, tmp_path):
+    here, there = tmp_path / "here", tmp_path / "there"
+    here.mkdir(), there.mkdir()
+    walk.slice(here)
+    held = kl_cli(here, "decide", "--question", "q1", "--why", "w", "--held")
+    later = kl_cli(here, "decide", "--question", "q2", "--why", "w", "--answer", "b")
+    if where == "import":
+        kl_cli(here, "export", "--to", str(tmp_path / "old"))
+        kl_cli(there, "import", "--from", str(tmp_path / "old"))
+    assert ids(kl_cli(here, "decisions", "--unreported", "--mark")) == [held["id"], later["id"]]
+
+    if where == "here":
+        kl_cli(here, "answer", "--decision", held["id"], "--answer", "yes")
+    else:
+        kl_cli(there, "answer", "--decision", held["id"], "--answer", "yes")
+        kl_cli(there, "export", "--to", str(tmp_path / "new"))
+        kl_cli(here, "import", "--from", str(tmp_path / "new"))
+
+    [entry] = kl_cli(here, "decisions", "--unreported")
+    assert (entry["id"], entry["answer"], entry["answered_by"]) == (held["id"], "yes", "user")
+
+
+@pytest.mark.parametrize(
+    "answered_by",
+    [
+        pytest.param("controller", id="a_controller_decision"),
+        pytest.param("user", id="an_earlier_user_answer"),
+    ],
+)
+def test_answer_refuses_a_decision_that_is_not_held(answered_by, walk, kl_cli, tmp_path):
+    walk.slice(tmp_path)
+    if answered_by == "controller":
+        entry = kl_cli(tmp_path, "decide", "--question", "q", "--why", "w", "--answer", "mine")
+    else:
+        held = kl_cli(tmp_path, "decide", "--question", "q", "--why", "w", "--held")
+        entry = kl_cli(tmp_path, "answer", "--decision", held["id"], "--answer", "theirs")
+
+    refused = kl_cli(tmp_path, "answer", "--decision", entry["id"], "--answer", "x", ok=False)
+
+    assert "not held" in refused.stderr and "Traceback" not in refused.stderr
+    assert kl_cli(tmp_path, "decisions") == [entry]
 
 
 @pytest.mark.parametrize(
@@ -153,15 +201,13 @@ def test_decisions_filters_held_and_unreported_and_mark_moves_the_cursor(walk, k
     ],
 )
 def test_mark_needs_unreported_and_a_sliced_run(sliced, flags, named, walk, kl_cli, tmp_path):
-    chain_id = (walk.slice if sliced else walk.start)(tmp_path)
+    (walk.slice if sliced else walk.start)(tmp_path)
     kl_cli(tmp_path, "decide", "--question", "q", "--why", "w", "--answer", "a")
     kl_cli(tmp_path, "decide", "--question", "q", "--why", "w", "--held")
 
     refused = kl_cli(tmp_path, "decisions", *flags, ok=False)
 
     assert named in refused.stderr and "Traceback" not in refused.stderr
-    run = kl.run_record(kl.read_jsonl(tmp_path / ".kraft-lite" / "chain.jsonl"), chain_id)
-    assert kl.label_value(run, kl.REPORTED_LABEL) is None
     assert len(kl_cli(tmp_path, "decisions", "--unreported")) == 2
 
 
@@ -182,12 +228,9 @@ def test_decisions_never_reach_the_issue_store(walk_in_process, fake_bd, monkeyp
     assert kl.read_jsonl(kl._decisions_path(tmp_path, chain_id))
     assert any(chain_id in payload for payload in fake_bd.imports), "the chain itself is in bd"
     sent = [json.loads(line) for payload in fake_bd.imports for line in payload.splitlines()]
-    # The report cursor is a pointer to a decision, and is allowed; the decision is not.
-    pointers = [x for r in sent for x in r["labels"] if x.startswith(kl.REPORTED_LABEL)]
-    assert pointers == [f"{kl.REPORTED_LABEL}{marked[-1]['id']}"]
+    # Not a decision, and not which ones were reported: that is kept in the log.
     for record in sent:
-        rest = dict(record, labels=[x for x in record["labels"] if x not in pointers])
-        assert "kd-" not in json.dumps(rest)
+        assert "kd-" not in json.dumps(record)
         assert not [t for t in texts if t in json.dumps(record)]
 
 

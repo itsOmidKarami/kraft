@@ -68,8 +68,6 @@ RUN_LABEL = "kraft-slices-run:"
 MODE_LABEL = "kraft-slices-mode:"
 FEATURE_BRANCH_LABEL = "kraft-feature-branch:"
 STATE_BRANCH_LABEL = "kraft-state-branch:"
-#: The last decision id reported to the user, so a report is not repeated.
-REPORTED_LABEL = "kraft-reported:"
 
 SLICE_STATUSES = ("waiting", "starting", "running", "in_review", "ready_to_merge", "merged")
 MODES = ("feature", "main")
@@ -310,10 +308,12 @@ class JsonlStore:
         # row on a tie — importing a chain two gates in rewinds it to `open`.
         append_jsonl(self.path, _prepare(records))
 
-    def write_raw(self, records: list[dict]) -> None:
-        """Records exactly as given, for `import`: their stamps are the truth
-        about when the run that exported them wrote them."""
-        append_jsonl(self.path, records)
+    def write_raw(self, records: list[dict], local: list[dict]) -> None:
+        """Records as exported, for `import`, without `_prepare`: `kraft-at:` is
+        the truth about when the run that exported them wrote them. Only
+        `updated_at` moves, past the line already here (see `_past_local`), or
+        `bd import` of this file would keep that older line."""
+        append_jsonl(self.path, _past_local(records, local))
 
 
 #: How bd writes timestamps, and the granularity it compares them at.
@@ -341,30 +341,38 @@ def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)  # noqa: UP017
 
 
-def _one_second_after(stamp: str | None) -> str | None:
+def _past(stamp: str | None, previous: str | None) -> str | None:
+    """`stamp`, or one second after `previous` when that is later.
+
+    `bd import` is an upsert guarded by `updated_at`, and it is documented to
+    keep every local column on a *tie*. Its granularity is one second, so a
+    write is silently dropped unless its stamp is strictly past the row bd
+    holds. `BD_TIME` sorts as a string; a `previous` in no `BD_TIME` shape is
+    no floor at all.
+    """
     try:
-        return (dt.datetime.strptime(stamp, BD_TIME) + dt.timedelta(seconds=1)).strftime(BD_TIME)
+        floor = dt.datetime.strptime(previous, BD_TIME) + dt.timedelta(seconds=1)
     except (TypeError, ValueError):
-        return None
+        return stamp
+    return max(stamp or "", floor.strftime(BD_TIME))
 
 
 def _bump_updated(record: dict) -> dict:
-    """Stamp `updated_at` strictly newer than the row bd already holds.
+    """Stamp `updated_at` strictly newer than the record's own, and so than the
+    row bd holds for it: two writes inside one second, which is every
+    gate-then-approve, would otherwise lose the second."""
+    return dict(record, updated_at=_past(_now().strftime(BD_TIME), record.get("updated_at")))
 
-    `bd import` is an upsert guarded by `updated_at`, and it is documented to
-    keep every local column on a *tie*. Its granularity is one second, so two
-    writes inside the same second — which is every gate-then-approve — are
-    silently dropped unless the timestamp moves.
-    """
-    now = _now()
-    previous = record.get("updated_at")
-    if previous:
-        try:
-            was = dt.datetime.strptime(previous, BD_TIME)
-            now = max(now, was + dt.timedelta(seconds=1))
-        except ValueError:
-            pass
-    return dict(record, updated_at=now.strftime(BD_TIME))
+
+def _past_local(records: list[dict], local: list[dict]) -> list[dict]:
+    """Records `import` has already decided win, each moved past the local row
+    it replaces, which is the one bd's guard compares it with."""
+    held = {r["id"]: r.get("updated_at") for r in local}
+    out = []
+    for record in records:
+        stamp = _past(record.get("updated_at"), held.get(record["id"]))
+        out.append(dict(record, updated_at=stamp) if stamp else record)
+    return out
 
 
 class BdStore:
@@ -388,20 +396,15 @@ class BdStore:
         payload = "".join(json.dumps(r) + "\n" for r in _prepare(records))
         self._bd(["import", "-"], stdin=payload)
 
-    def write_raw(self, records: list[dict]) -> None:
+    def write_raw(self, records: list[dict], local: list[dict]) -> None:
         """Records as exported, for `import`, past bd's guard without `_prepare`.
 
         `kraft-at:` is left alone, so the summary still times the run that wrote
         them. `updated_at` cannot be: `import` has already decided these records
-        win, and bd keeps the local row on a tie or a newer guard, so each one is
-        moved past the row bd holds when it is not past it already.
+        win, and bd keeps the local row on a tie or a newer guard. `local` is
+        what `import` loaded, so the store is not exported a second time.
         """
-        held = {r["id"]: r.get("updated_at") for r in self.load()}
-        out = []
-        for record in records:
-            stamps = [record.get("updated_at"), _one_second_after(held.get(record["id"]))]
-            stamps = [x for x in stamps if x]
-            out.append(dict(record, updated_at=max(stamps)) if stamps else record)
+        out = _past_local(records, local)
         self._bd(["import", "-"], stdin="".join(json.dumps(r) + "\n" for r in out))
 
 
@@ -739,7 +742,11 @@ def slices_for_gate(
         raise SystemExit(f"kraft-lite: cannot read the slice plan {path}: {error}") from error
     if not isinstance(plan, dict):
         raise SystemExit(f"kraft-lite: the slice plan {path} is not a JSON object")
-    return materialize_slices(plan, chain_id, mode_default=settings(root)["mode"])
+    # Read only when the plan names no mode: a slices.json that cannot be read
+    # has nothing to say to a plan that already decided.
+    return materialize_slices(
+        plan, chain_id, mode_default=plan.get("mode") or settings(root)["mode"]
+    )
 
 
 def _by_age(by_chain: dict[str, list[dict]]) -> list[str]:
@@ -1141,7 +1148,9 @@ def validate_hooks(root: Path, chain: dict) -> None:
 def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dict:
     """Move one slice: its status, the session running it, its branch, its fork
     point. `merged` closes the record too, so a store that shows only open work
-    stops showing it."""
+    stops showing it, and the run record closes with the last slice to merge.
+    Main mode's slices reach `merged` too, as the `next` skill records the
+    user's merges, so this is the one place a finished run is seen in both."""
     slices = slice_records(everything, chain_id) if chain_id else []
     by_key = {label_value(r, SLICE_KEY_LABEL): r for r in slices}
     if args.slice not in by_key:
@@ -1165,8 +1174,15 @@ def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dic
     ):
         if value is not None:
             record = set_label(record, prefix, value)
-    store.write([record])
-    mode = label_value(run_record(everything, chain_id), MODE_LABEL) or "feature"
+    writes = [record]
+    run = run_record(everything, chain_id)
+    others = [r for r in slices if r["id"] != record["id"]]
+    finished = all(label_value(r, SLICE_STATUS_LABEL) == "merged" for r in [*others, record])
+    # Reopened too, when a call overturned at the wrap-up puts a slice back to work.
+    if run is not None and run["status"] != ("closed" if finished else "open"):
+        writes.append(dict(run, status="closed" if finished else "open"))
+    store.write(writes)
+    mode = label_value(run, MODE_LABEL) or "feature"
     by_id = {r["id"]: r for r in slices}
     return _slice_entry(record, by_id, mode)
 
@@ -1193,6 +1209,10 @@ def _decide(root: Path, chain_id: str, args) -> dict:
         "held": args.held,
         "answered_by": None if args.held else "controller",
         "answered_at": None if args.held else at,
+        # Kept on the entry, not as a position in the log: `read_jsonl` keeps an
+        # entry where it was first written, so an answer, or an import, that
+        # rewrites one already reported would land behind a position.
+        "reported": False,
     }
     append_jsonl(_decisions_path(root, chain_id), [entry])
     return entry
@@ -1206,44 +1226,51 @@ def _answer(root: Path, chain_id: str, args) -> dict:
             f"kraft-lite: no decision {args.decision!r} in this chain. Decisions: "
             + (", ".join(entries) or "(none)")
         )
+    if not entries[args.decision]["held"]:
+        # Answering it again would put the user's name on the controller's call,
+        # or overwrite what the user already said.
+        raise SystemExit(
+            f"kraft-lite: decision {args.decision} is not held: "
+            f"{entries[args.decision]['answered_by']} answered it. `answer` is for a held question"
+        )
     entry = dict(
         entries[args.decision],
         answer=args.answer,
         held=False,
         answered_by="user",
         answered_at=_now().strftime(BD_TIME),
+        # A new answer is news, whether or not the question was reported held.
+        reported=False,
     )
     append_jsonl(path, [entry])
     return entry
 
 
-def _decisions(root: Path, store, everything: list[dict], chain_id: str, args) -> list[dict]:
-    """The log in write order. `--unreported` is what follows the run record's
-    cursor, so a status report never repeats itself; `--mark` moves the cursor
-    to the last entry it returned."""
+def _decisions(root: Path, everything: list[dict], chain_id: str, args) -> list[dict]:
+    """The log in write order. `--unreported` is every entry whose latest write
+    has not been reported, so a status report never repeats itself; `--mark`
+    marks what it returned reported, in the log."""
     if args.mark and not args.unreported:
-        raise SystemExit("kraft-lite: --mark moves the --unreported cursor; pass --unreported too")
+        raise SystemExit(
+            "kraft-lite: --mark marks what --unreported returns; pass --unreported too"
+        )
     if args.mark and args.held:
-        # The cursor is one position in the whole log. Placed after a held-only
-        # list, it would pass over every unheld entry the report left out.
+        # A report shows the whole unreported window, held questions and
+        # decisions alike; marking a held-only list would mark a report never made.
         raise SystemExit(
             "kraft-lite: --mark marks the whole unreported window, so run it without --held"
         )
     run = run_record(everything, chain_id)
     if args.mark and run is None:
-        raise SystemExit("kraft-lite: this chain is not sliced, so it has no report cursor to mark")
-    entries = read_jsonl(_decisions_path(root, chain_id))
+        raise SystemExit("kraft-lite: this chain is not sliced, so it has no status report to mark")
+    path = _decisions_path(root, chain_id)
+    entries = read_jsonl(path)
     if args.unreported:
-        seen = [e["id"] for e in entries]
-        cursor = label_value(run, REPORTED_LABEL)
-        # A cursor naming nothing here reports everything: repeating a report
-        # is cheaper than losing one.
-        if cursor in seen:
-            entries = entries[seen.index(cursor) + 1 :]
+        entries = [e for e in entries if not e.get("reported")]
     if args.held:
         entries = [e for e in entries if e["held"]]
     if args.mark and entries:
-        store.write([set_label(run, REPORTED_LABEL, entries[-1]["id"])])
+        append_jsonl(path, [dict(e, reported=True) for e in entries])
     return entries
 
 
@@ -1306,10 +1333,16 @@ def _import_records(local: list[dict], exported: list[dict]) -> tuple[list[dict]
 def _merge_decisions(local: list[dict], exported: list[dict]) -> tuple[list[dict], int]:
     """Which exported decisions to append, and how many local ones win instead.
     The later of `answered_at or at` wins; on a tie, an answer beats a held
-    question, so a held copy never takes back the user's answer."""
+    question, so a held copy never takes back the user's answer, and then a
+    reported copy beats an unreported one. That is the order an entry's own
+    writes come in, so the copy further along always wins."""
 
-    def rank(entry: dict) -> tuple[str, bool]:
-        return (entry.get("answered_at") or entry.get("at") or "", not entry.get("held"))
+    def rank(entry: dict) -> tuple[str, bool, bool]:
+        return (
+            entry.get("answered_at") or entry.get("at") or "",
+            not entry.get("held"),
+            bool(entry.get("reported")),
+        )
 
     held = {e["id"]: e for e in local}
     write = [e for e in exported if e["id"] not in held or rank(e) > rank(held[e["id"]])]
@@ -1338,9 +1371,10 @@ def _import(root: Path, store, source: Path) -> dict:
     if not frozen.is_file():
         frozen.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(template, frozen)
-    write, kept = _import_records(store.load(), exported)
+    local = store.load()
+    write, kept = _import_records(local, exported)
     if write:
-        store.write_raw(write)
+        store.write_raw(write, local)
     path = _decisions_path(root, chain_id)
     decided, kept_decisions = _merge_decisions(
         read_jsonl(path), read_jsonl(source / EXPORT_DECISIONS)
@@ -1486,7 +1520,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.verb == "answer":
             out = _answer(root, resolved_id, args)
         elif args.verb == "decisions":
-            out = _decisions(root, store, everything, resolved_id, args)
+            out = _decisions(root, everything, resolved_id, args)
         else:
             out = _export(root, everything, resolved_id, args.to)
         print(json.dumps(out, indent=2))
