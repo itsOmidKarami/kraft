@@ -62,6 +62,9 @@ src/kraft/_bundled/
 .kraft-lite/chain.json
 .kraft-lite/chains/
 .kraft-lite/chain.jsonl
+.kraft-lite/decisions/
+.kraft-lite/messages/
+.kraft-lite/proposals/
 
 # Kraft's own artifacts -- specs, plans, chain reviews, review briefs, session
 # summaries. Since MR113 these are ingested straight into Kraft's index

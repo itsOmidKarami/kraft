@@ -117,3 +117,20 @@ on.merge.watch:
   kind: prompt
   prompt: Watch the merge until it lands or fails, then report which.
   # also found: (none)
+
+on.slice.implementation.start:
+  kind: skill
+  skill: superpowers:subagent-driven-development
+  prompt: >-
+    Implement the slice's tasks with one subagent per task, each working test
+    first. After each task run a spec-compliance review and then a code-quality
+    review, with a capped fix round. Run independent tasks in parallel, each in
+    its own isolated worktree. Set a model explicitly on every subagent.
+  # also found: (none)
+
+on.slice.test.run:
+  kind: prompt
+  prompt: >-
+    Run only the test paths this slice's tasks touch, and the repo's fast checks,
+    as your slice instructions list them. Never the full suite; CI runs it. List
+    the paths in the PR body.

@@ -28,15 +28,27 @@ sys.path.insert(0, str(PLUGIN))
 import kl  # noqa: E402
 
 DEFAULT_CHAIN = PLUGIN / "chains" / "default.json"
+SLICE_CHAIN = PLUGIN / "chains" / "slice.json"
+
+
+@pytest.fixture(
+    scope="module",
+    params=[(DEFAULT_CHAIN, "default"), (SLICE_CHAIN, "slice")],
+    ids=["default", "slice"],
+)
+def chain_and_id(request) -> tuple[dict, str]:
+    path, expected_id = request.param
+    return json.loads(path.read_text()), expected_id
 
 
 @pytest.fixture(scope="module")
-def chain() -> dict:
-    return json.loads(DEFAULT_CHAIN.read_text())
+def chain(chain_and_id) -> dict:
+    return chain_and_id[0]
 
 
-def test_default_chain_parses_with_an_id_and_nodes(chain):
-    assert chain["id"] == "default"
+def test_chain_parses_with_its_id_and_nodes(chain_and_id):
+    chain, expected_id = chain_and_id
+    assert chain["id"] == expected_id
     assert isinstance(chain["nodes"], list)
     assert chain["nodes"]
 
@@ -73,3 +85,11 @@ def test_every_task_has_a_curated_hook_keyword_entry(chain):
     not one this file curated on purpose. See `_hook_keywords`'s docstring."""
     tasks = {t for n in chain["nodes"] for t in n["tasks"]}
     assert tasks <= kl.HOOK_KEYWORDS.keys()
+
+
+def test_the_slice_chain_has_no_gates_and_no_mr_review():
+    """A slice runs unattended inside a child: nothing stops for a human, and the
+    controller's review is the slice's MR review, so `on.review.mr.run` is absent."""
+    slice_chain = json.loads(SLICE_CHAIN.read_text())
+    assert all(n["gate_after"] is None for n in slice_chain["nodes"])
+    assert "on.review.mr.run" not in {t for n in slice_chain["nodes"] for t in n["tasks"]}

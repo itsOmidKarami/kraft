@@ -1551,6 +1551,10 @@ HOOK_KEYWORDS = {
     # forge adapter's own job, not something an installed skill serves.
     "on.repos.scan": (),
     "on.test.run": (),
+    # A slice's implementation runs as subagents, one per task.
+    "on.slice.implementation.start": ("subagent-driven", "subagent"),
+    # No candidates: which tests to run comes from the slice's own instructions.
+    "on.slice.test.run": (),
     "on.review.local.run": ("review",),
     # No candidates: rebasing onto the repo's current HEAD is the forge
     # adapter's own job, not something an installed skill serves.

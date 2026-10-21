@@ -78,9 +78,11 @@ def test_every_hook_in_the_chain_gets_a_key_even_with_nothing_installed(tmp_path
     assert all(candidates == [] for candidates in found.values())
 
 
-def test_hook_keywords_covers_exactly_the_chains_hooks():
-    chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
-    hooks = {hook for node in chain["nodes"] for hook in node["tasks"]}
+def test_hook_keywords_covers_exactly_the_shipped_chains_hooks():
+    hooks = set()
+    for name in ("default", "slice"):
+        chain = json.loads((PLUGIN / "chains" / f"{name}.json").read_text())
+        hooks |= {hook for node in chain["nodes"] for hook in node["tasks"]}
     assert set(kl.HOOK_KEYWORDS) == hooks
 
 
@@ -190,7 +192,8 @@ def test_a_hook_of_only_structural_words_reports_no_candidates(tmp_path, monkeyp
 
 def test_the_packaged_chain_still_reports_its_seventeen_hooks(tmp_path):
     got = kl.detect(tmp_path)
-    assert set(got["skills"]) == set(kl.HOOK_KEYWORDS)
+    chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
+    assert set(got["skills"]) == {hook for node in chain["nodes"] for hook in node["tasks"]}
     assert len(got["skills"]) == 17
 
 
