@@ -228,6 +228,7 @@ def _probe() -> str | None:
     text = helped.stdout + helped.stderr
     if lacking := [f for f in _NEEDED_FLAGS if f not in text]:
         return f"this bubblewrap lacks {', '.join(lacking)}: install a newer bubblewrap"
+    # shortcut: the trial omits --seccomp, so a filter the kernel rejects shows up at launch.
     trial = _run([os.path.abspath(bwrap), *_BWRAP_FLAGS, *system_args(), "true"])
     if not isinstance(trial, str) and trial.returncode == 0:
         return None
@@ -241,6 +242,8 @@ def _probe() -> str | None:
 def probe_host(*, refresh: bool = False) -> str | None:
     """Why `kind: os` cannot run on this machine, with its fix, or None.
     Cached for a minute."""
+    # shortcut: no lock, so concurrent cold callers may each probe; upgrade if the
+    # trial run ever gets slow enough to matter.
     global _probed
     if refresh or _probed is None or time.monotonic() - _probed[0] > _PROBE_TTL:
         _probed = (time.monotonic(), _probe())
@@ -277,6 +280,10 @@ class OsBackend:
             return problem
         home, cwd, kh = Path(os.environ.get("HOME") or Path.home()), Path.cwd(), kraft_home()
         search = (env or {}).get("PATH") or os.environ["PATH"]
+        # shortcut: a path-named executable (./gradlew, a worktree path) is checked at
+        # `wrap` only, which knows the worktree; upgrade if probe is given the checkout.
+        if "/" in executable:
+            return None
         try:
             exposed = host_view.expose_roots(sandbox.get("expose") or (), home, kh)
             host_view.resolve(executable, search, cwd, cwd, home, kh, visible=exposed)

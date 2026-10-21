@@ -5,16 +5,14 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 import stat
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from kraft.paths import RunDirs, kraft_home
-from kraft.worker import channel, host_view, mounts, refstore, shim
+from kraft.worker import host_view, mounts, refstore, shim
 from kraft.worker.backends import bwrap
 from kraft.worker.backends.docker import _ONESHOT_SH, ONESHOT_HOME_RO
 from kraft.worker.sandbox import FORWARDED_ENV, SandboxNotReady, SandboxRefused
@@ -284,6 +282,11 @@ _FLAGS = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _fresh_probe(monkeypatch):
+    monkeypatch.setattr(bwrap, "_probed", None)
+
+
 @pytest.fixture
 def host(tmp_path, monkeypatch):
     """A Linux, non-root host whose `PATH` holds only a fake `bwrap` (its
@@ -322,7 +325,8 @@ def host(tmp_path, monkeypatch):
         ),
         (lambda h, mp: mp.setattr(bwrap.os_seccomp, "machine", lambda: "riscv64"), "not riscv64"),
         (lambda h, mp: (h.bindir / "bwrap").unlink(), "bubblewrap is not installed"),
-        (lambda h, mp: (h.bindir / "curl").unlink(), "curl"),
+        (lambda h, mp: (h.bindir / "sh").unlink(), "sh is not installed"),
+        (lambda h, mp: (h.bindir / "curl").unlink(), "curl is not installed"),
         (lambda h, mp: h.fake(flags=("--die-with-parent",)), "--size, --disable-userns"),
         (
             lambda h, mp: (h.fake(rc=1), h.sysctls.update({"user/max_user_namespaces": "0"})),
@@ -356,6 +360,7 @@ def host(tmp_path, monkeypatch):
         "root",
         "arch",
         "no-bwrap",
+        "no-sh",
         "no-curl",
         "missing-flag",
         "max-userns-0",
@@ -396,21 +401,21 @@ def test_launch_failed(tmp_path, content, failed):
     assert bwrap.OsBackend().launch_failed(cid) is failed
 
 
-def test_wrap_finds_socket_by_ids(scene, run_dirs, monkeypatch):
+def test_wrap_without_a_channel_is_refused(scene, run_dirs, monkeypatch):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dirs.base))
-    base = Path(tempfile.mkdtemp(prefix="kraft-sn-", dir="/tmp"))
-    registry = channel.ChannelRegistry(RunDirs(base).ensure(), None)
-    kw = {"session_id": "s1", "work_item_id": "w1", "cwd": scene.wt}
-    try:
-        with pytest.raises(SandboxRefused, match="egress channel"):
-            bwrap.OsBackend().wrap(["true"], sandbox=SANDBOX, results=None, **kw)
-        channel.install(registry)
-        argv = bwrap.OsBackend().wrap(["true"], sandbox=SANDBOX, results=None, **kw)
-        sock = registry.socket_path("s1", work_item_id="w1")
-        assert _at(argv, ("--sock", str(sock), "--port", "3128")) > 0
-    finally:
-        channel.install(None)
-        shutil.rmtree(base, ignore_errors=True)
+    with pytest.raises(SandboxRefused, match="egress channel"):
+        bwrap.OsBackend().wrap(
+            ["true"], scene.wt, SANDBOX, None, session_id="s1", work_item_id="w1"
+        )
+
+
+async def test_wrap_finds_socket_by_ids(scene, run_dirs, channels, monkeypatch):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dirs.base))
+    argv = bwrap.OsBackend().wrap(
+        ["true"], scene.wt, SANDBOX, None, session_id="s1", work_item_id="w1"
+    )
+    sock = channels.socket_path("s1", work_item_id="w1")
+    assert _at(argv, ("--sock", str(sock), "--port", "3128")) > 0
 
 
 def test_oneshot_argv(scene, run_dirs, tmp_path, monkeypatch):
@@ -457,3 +462,39 @@ def test_os_leaves_item_sync_to_docker(tmp_path, monkeypatch):
     monkeypatch.setattr(refstore, "sync_item", lambda *a: called.append(a) or ["twice"])
     assert bwrap.OsBackend().code_out_item(tmp_path, "w1") == []
     assert called == []
+
+
+@pytest.mark.parametrize(
+    ("executable", "expect"),
+    [
+        ("nosuchcmd-anywhere", "not found"),
+        ("sh", None),
+        ("./gradlew", None),
+        ("/home/x/.kraft/run/items/w1/worktree/tool", None),
+    ],
+    ids=[
+        "bare-name-not-found",
+        "bare-name-found",
+        "checkout-relative-not-probed",
+        "worktree-path-not-probed",
+    ],
+)
+async def test_probe_resolves_only_a_bare_name(monkeypatch, executable, expect):
+    monkeypatch.setattr(bwrap, "probe_host", lambda **kw: None)
+    problem = await bwrap.OsBackend().probe(SANDBOX, executable, {"PATH": "/usr/bin:/bin"})
+    assert (problem is None) if expect is None else (expect in problem)
+
+
+def test_probe_host_is_cached_for_a_minute_unless_refreshed(monkeypatch):
+    runs, now = [], [1000.0]
+    monkeypatch.setattr(bwrap, "_probe", lambda: runs.append(1))
+    monkeypatch.setattr(bwrap.time, "monotonic", lambda: now[0])
+    bwrap.probe_host()
+    now[0] += 1
+    bwrap.probe_host()
+    assert len(runs) == 1
+    bwrap.probe_host(refresh=True)
+    assert len(runs) == 2
+    now[0] += bwrap._PROBE_TTL + 1
+    bwrap.probe_host()
+    assert len(runs) == 3

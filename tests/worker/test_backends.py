@@ -4,7 +4,6 @@ import os
 import shutil
 import socket
 import subprocess
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,7 +16,6 @@ from kraft import events, ids, store
 from kraft.adapters import subprocess as sp
 from kraft.config import ConfigError
 from kraft.executor.context import LaunchContext
-from kraft.paths import RunDirs
 from kraft.worker import backends, ca, channel, reattach
 from kraft.worker.backends import docker as docker_backend
 from kraft.worker.sandbox import Checkout, SandboxNotReady
@@ -298,19 +296,6 @@ async def test_a_session_whose_backend_is_not_ready_stops_before_it_launches(
 # --- network: the session's egress route -------------------------------------------------
 
 _POLICED = {"kind": "remote", "network": {"runtime": {"allow": ["a.io"], "deny": ["b.io"]}}}
-
-
-@pytest.fixture
-async def channels(database):
-    """A channel registry installed as the daemon's, on a run dir short
-    enough for a unix socket path."""
-    base = Path(tempfile.mkdtemp(prefix="kraft-sn-", dir="/tmp"))
-    registry = channel.ChannelRegistry(RunDirs(base).ensure(), database)
-    channel.install(registry)
-    yield registry
-    await registry.close_all()
-    channel.install(None)
-    shutil.rmtree(base, ignore_errors=True)
 
 
 @pytest.mark.parametrize("transport", ["unix", "tls"])
