@@ -313,43 +313,74 @@ async def test_back_on_merge_after_an_unfinished_repair_the_repair_runs_again(
     assert (_STEER in script.steers["repair"][1].take()) is steered
 
 
+def _final_review_then_a_gate():
+    """feedback -> review (the final gate) -> extra (a gate an agent could
+    answer) -> merge: the last gate ahead of `merge` is not the final one."""
+    nodes = merge_chain(on_merge_rejected=MERGE_POLICY)
+    nodes[1]["chain_finalized"] = True
+    nodes.insert(2, v1_node("extra", "gate"))
+    return nodes
+
+
+async def _past_gates(it, status):
+    """`status`, approving each gate the walk stops at (`gate_cleared` reads
+    the newest gate event, so one gate at a time) until it stops elsewhere."""
+    while status == "awaiting_gate":
+        await approve(it, it.row()["current_node_id"])
+        status = await walk_once(it)
+    return status
+
+
 @pytest.mark.parametrize(
-    ("at", "calls"),
-    [("review", ["merge"]), ("feedback", ["ci", "merge"])],
-    ids=["from-the-gate", "from-an-earlier-node"],
+    ("chain", "at", "calls"),
+    [
+        (merge_chain(on_merge_rejected=MERGE_POLICY), "review", ["merge"]),
+        (merge_chain(on_merge_rejected=MERGE_POLICY), "feedback", ["ci", "merge"]),
+        (_final_review_then_a_gate(), "review", ["merge"]),
+    ],
+    ids=["from-the-gate", "from-an-earlier-node", "from-the-final-gate"],
 )
-async def test_a_retry_back_through_the_gate_answers_the_drop(item_on, script, at, calls):
+async def test_a_retry_back_through_the_gate_answers_the_drop(item_on, script, chain, at, calls):
     """A person who retries the item from the gate, or from before it, has
-    the head seen again: back on `merge`, it is queued, not repaired again."""
-    it = await item_on(merge_chain(on_merge_rejected=MERGE_POLICY))
-    await approve(it, "review")
+    the head seen again: back on `merge`, it is queued, not repaired again.
+    With a final gate, that is the gate that answers, whatever follows it."""
+    it = await item_on(chain)
     merge_drops(it, script)
     records_merge_sessions(it, script)
-    assert await walk_once(it) == "needs_human"
+    assert await _past_gates(it, await walk_once(it)) == "needs_human"
 
     assert await _retry_where_it_stands(it, at=at) == "awaiting_gate"
-    await approve(it, "review")
-    assert await walk_once(it) == "completed"
+    assert await _past_gates(it, "awaiting_gate") == "completed"
     assert script.calls == ["ci", "merge", "repair", *calls]
 
 
-async def test_a_retry_past_the_gate_does_not_answer_the_drop(item_on, script):
+@pytest.mark.parametrize(
+    ("chain", "at", "calls"),
+    [
+        (
+            [
+                v1_node("feedback", tasks=[v1_task("ci")]),
+                v1_node("review", "gate"),
+                v1_node("post", tasks=[v1_task("lint")]),
+                v1_node("merge", tasks=[MERGE_TASK], on_merge_rejected=MERGE_POLICY),
+            ],
+            "post",
+            ["ci", "lint", "merge", "repair", "lint", "repair"],
+        ),
+        (_final_review_then_a_gate(), "extra", ["ci", "merge", "repair", "repair"]),
+    ],
+    ids=["after-the-last-gate", "behind-a-later-gate"],
+)
+async def test_a_retry_past_the_gate_does_not_answer_the_drop(item_on, script, chain, at, calls):
     """A node between the last gate and `merge` is not a way back past a
     person: retried from there -- by a person or an escalation agent -- the
     walk reaches `merge` with the rejected head no gate saw again, so the
-    repair answers it, never the forge."""
-    it = await item_on(
-        [
-            v1_node("feedback", tasks=[v1_task("ci")]),
-            v1_node("review", "gate"),
-            v1_node("post", tasks=[v1_task("lint")]),
-            v1_node("merge", tasks=[MERGE_TASK], on_merge_rejected=MERGE_POLICY),
-        ]
-    )
-    await approve(it, "review")
+    repair answers it, never the forge. The final gate is the one that
+    counts: a later gate does not stand in for it."""
+    it = await item_on(chain)
     merge_drops(it, script)
     records_merge_sessions(it, script)
-    assert await walk_once(it) == "needs_human"
+    assert await _past_gates(it, await walk_once(it)) == "needs_human"
 
-    assert await _retry_where_it_stands(it, at="post") == "needs_human"
-    assert script.calls == ["ci", "lint", "merge", "repair", "lint", "repair"]
+    assert await _past_gates(it, await _retry_where_it_stands(it, at=at)) == "needs_human"
+    assert script.calls == calls

@@ -902,14 +902,18 @@ _DROP_PAGE = 200
 
 def _answering_nodes(nodes, node_id: str) -> frozenset[str]:
     """The nodes whose entry answers a drop of `node_id`: those at or before
-    the last gate ahead of it, the gate included -- a walk through them comes
-    back to the merge past that gate, which shows a person the head again.
-    Never the dropped node itself, nor a node between that gate and it: a
-    retry there, or a failed start that entered the node, would reach the
-    forge with the rejected head no gate saw. With no gate ahead of it, every
-    earlier node."""
+    the chain's first `chain_finalized` gate ahead of it (the person's final
+    review), or, with none, the last gate ahead of it, the gate included -- a
+    walk through them comes back to the merge past that gate, which shows a
+    person the head again. Never the dropped node itself, nor a node between
+    that gate and it: a retry there, or a failed start that entered the node,
+    would reach the forge with the rejected head no person saw, even past a
+    later gate an agent answers. With no gate ahead of it, every earlier
+    node."""
     at = next(i for i, n in enumerate(nodes) if n.id == node_id)
-    gate = max((i for i in range(at) if isinstance(nodes[i].node, GateNode)), default=at - 1)
+    gates = [i for i in range(at) if isinstance(nodes[i].node, GateNode)]
+    final = next((i for i in gates if nodes[i].node.chain_finalized), None)
+    gate = final if final is not None else max(gates, default=at - 1)
     return frozenset(n.id for n in nodes[: gate + 1])
 
 
