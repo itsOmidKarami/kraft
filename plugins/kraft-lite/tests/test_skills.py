@@ -17,7 +17,7 @@ sys.path.insert(0, str(PLUGIN))
 
 import kl  # noqa: E402
 
-SKILLS = ["init", "start", "next", "gate", "status", "run-slices"]
+SKILLS = ["init", "start", "next", "gate", "status", "run-slices", "build-slice"]
 CHAIN = json.loads((PLUGIN / "chains" / "default.json").read_text())
 SLICE_CHAIN = json.loads((PLUGIN / "chains" / "slice.json").read_text())
 # A skill may cite what either shipped chain has: the controller walks the
@@ -234,12 +234,22 @@ def test_core_skills_name_no_harness_tool(name):
     assert not found, f"{name} names harness tools: {sorted(set(found))}"
 
 
-@pytest.mark.parametrize("name", ["run-slices"])
+@pytest.mark.parametrize("name", ["run-slices", "build-slice"])
 def test_the_slice_skills_name_no_repo_rule_and_no_superpowers_skill(texts, name):
     """The slice skills ship into any repo. A repo's rules come from its own
     CLAUDE.md and CONTRIBUTING.md, and installed skills through the registry."""
     for banned in ("superpowers:", "kraft/", "screenshot", "just test", "just lint"):
         assert banned not in texts[name], f"{name} says {banned!r}"
+
+
+def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
+    """A child has no human of its own: wherever the walk would stop for one it asks
+    the controller, which keeps the decisions log. A skill that tells it to ask the
+    user lets answers bypass the log."""
+    body = texts["build-slice"]
+    for needle in ("controller", "slice.json", "rebase --onto"):
+        assert needle in body, needle
+    assert "ask the human" not in body.lower()
 
 
 def test_the_run_slices_skill_cites_every_verb_it_needs(texts):
