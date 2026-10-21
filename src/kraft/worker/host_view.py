@@ -148,7 +148,10 @@ def _interpreter(final: Path, search_path: str) -> Path | None:
             return None
         found = shutil.which(words[0], path=search_path)
         if found is None:
-            raise NotFound(f"{final} needs {words[0]!r}, which is not on PATH; add it with expose")
+            raise NotFound(
+                f"{final} needs {words[0]!r}, which is not on the Kraft server's PATH; "
+                "add its directory to the PATH the server starts with"
+            )
         return Path(found)
     if not Path(words[0]).exists():
         raise NotFound(f"{final} needs {words[0]}, which does not exist")
@@ -176,10 +179,15 @@ def resolve(
     else:
         found = shutil.which(executable, path=search_path)
         if found is None:
-            raise NotFound(f"{executable!r} not found on PATH; add its directory with expose")
+            # `search_path` is the shim's directory, then the daemon's PATH:
+            # `expose` mounts a path but never joins it.
+            raise NotFound(
+                f"{executable!r} not found on the Kraft server's PATH; add its directory "
+                "to the PATH the server starts with (expose does not add to PATH)"
+            )
         path = Path(os.path.abspath(found))
     if not path.exists():
-        raise NotFound(f"{executable!r} not found; add its directory with expose")
+        raise NotFound(f"{executable!r} not found: {path} does not exist")
     checkout, home = checkout.resolve(), home.resolve()
     shown = [checkout, *_SYSTEM, *(v.resolve() for v in visible)]
     roots: list[Path] = []

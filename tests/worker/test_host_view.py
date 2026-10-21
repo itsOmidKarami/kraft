@@ -268,6 +268,7 @@ def _run(host, base, executable, path_dirs=(), visible=()):
             id="via-kraft-home",
         ),
         pytest.param([], "no-such-tool-anywhere", [], [], NotFound, None, "x", id="missing"),
+        pytest.param([], "./gradlew", [], [], NotFound, None, "x", id="path-named-missing"),
         pytest.param(
             [("~/tc/bin/tool", "#!/no/such/interp\n")],
             "tool",
@@ -313,8 +314,11 @@ def _run(host, base, executable, path_dirs=(), visible=()):
 def test_install_roots(host, files, executable, path_dirs, visible, roots, links, argv0):
     base = _build(host, files)
     if isinstance(roots, type):
-        with pytest.raises(roots):
+        with pytest.raises(roots) as raised:
             _run(host, base, executable, path_dirs, visible)
+        # A miss on PATH is fixed on the server's PATH: `expose` never joins it.
+        why = str(raised.value)
+        assert roots is not NotFound or "server's PATH" in why or "does not exist" in why
         return
     got = _run(host, base, executable, path_dirs, visible)
     assert got.argv0 == argv0

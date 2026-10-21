@@ -498,7 +498,7 @@ def test_os_leaves_item_sync_to_docker(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("executable", "expect"),
     [
-        ("nosuchcmd-anywhere", "not found"),
+        ("nosuchcmd-anywhere", "not found on the Kraft server's PATH"),
         ("sh", None),
         ("./gradlew", None),
         ("/home/x/.kraft/run/items/w1/worktree/tool", None),
