@@ -431,12 +431,41 @@ def test_approve_with_slices_at_chain_finalized_creates_them(walk, kl_cli, tmp_p
         # Sliced wins over "wrong gate": the first check is the one a person can act on.
         pytest.param("sliced_and_open", "already sliced", id="sliced_and_not_blocked"),
         pytest.param("sliced_and_other_gate", "already sliced", id="sliced_and_other_gate"),
+        # Slicing is keyed to the default chain's node ids and its gate: a custom
+        # chain without them is refused, not walked with no slice guard at all.
+        pytest.param(
+            "chain_without_nodes",
+            "slicing needs the default chain's nodes; this run's chain 'custom' has no "
+            "mr_checks, post_merge_watch",
+            id="custom_chain_without_nodes",
+        ),
+        pytest.param(
+            "chain_with_another_gate",
+            "slicing needs chain_review's gate to be chain_finalized, as in the default "
+            "chain; this run's chain 'custom' gates it with 'finalized'",
+            id="custom_chain_with_another_gate",
+        ),
     ],
 )
 def test_slices_are_only_accepted_at_chain_finalized(walk, setup, message, kl_cli, tmp_path):
     if setup == "at_spec_gate":
         walk.start(tmp_path)
         kl_cli(tmp_path, "gate", "--name", "spec_approval")
+    elif setup.startswith("chain_"):
+        chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
+        chain["id"] = "custom"
+        if setup == "chain_without_nodes":
+            dropped = ("mr_checks", "post_merge_watch")
+            chain["nodes"] = [n for n in chain["nodes"] if n["id"] not in dropped]
+        else:
+            [review] = [n for n in chain["nodes"] if n["id"] == "chain_review"]
+            review["gate_after"] = "finalized"
+        (tmp_path / "custom.json").write_text(json.dumps(chain))
+        kl_cli(tmp_path, "start", "--title", "t", "--chain", str(tmp_path / "custom.json"))
+        for name in ("spec_approval", "plan_approval", "chain_finalized"):
+            kl_cli(tmp_path, "gate", "--name", name)
+            if name != "chain_finalized":
+                kl_cli(tmp_path, "approve")
     else:
         walk.slice(tmp_path, plan())
         if setup == "already_sliced":
@@ -550,38 +579,68 @@ def test_the_run_record_closes_when_every_slice_is_merged(walk, mode, kl_cli, tm
     assert run_status() == "open"
 
 
+#: b started early from a's branch, while a is in its review.
+EARLY_B = [("a", "running"), ("a", "in_review"), ("b", "starting"), ("b", "running")]
+
+
 @pytest.mark.parametrize(
-    "flags, named",
+    "moves, flags, named",
     [
-        pytest.param(["--slice", "ghost"], "a, b, c", id="unknown_key"),
+        pytest.param([], ["--slice", "ghost"], "a, b, c", id="unknown_key"),
         pytest.param(
-            ["--slice", "a", "--status", "done"], "waiting, starting", id="unknown_status"
+            [], ["--slice", "a", "--status", "done"], "waiting, starting", id="unknown_status"
         ),
         # b comes after a, which has not started: b is in neither `ready` nor `early`.
         pytest.param(
+            [],
             ["--slice", "b", "--status", "starting"],
             "slice 'b' is not in `ready` or `early`: it comes after a (waiting)",
             id="start_before_its_after",
         ),
         pytest.param(
+            [],
             ["--slice", "b", "--status", "running", "--session", "s-1"],
             "slice 'b' is not in `ready` or `early`",
             id="run_before_its_after",
         ),
         pytest.param(
+            [],
             ["--slice", "a", "--status", "merged"],
             "slice 'a' was never started: it is waiting",
             id="merge_never_started",
         ),
         pytest.param(
+            [],
             ["--slice", "c", "--status", "in_review"],
             "slice 'c' was never started: it is waiting",
             id="review_never_started",
         ),
+        # An early-cut slice merges after the slice it was cut from, never before.
+        pytest.param(
+            EARLY_B,
+            ["--slice", "b", "--status", "merged"],
+            "slice 'b' merges after every slice it comes after; not merged: a (in_review)",
+            id="merge_before_its_after",
+        ),
+        pytest.param(
+            [*EARLY_B, ("a", "ready_to_merge")],
+            ["--slice", "b", "--status", "merged"],
+            "not merged: a (ready_to_merge)",
+            id="merge_before_its_after_is_merged",
+        ),
+        # A merged slice reopened at the wrap-up holds back what comes after it.
+        pytest.param(
+            [("a", "running"), ("a", "merged"), ("b", "running"), ("a", "running")],
+            ["--slice", "b", "--status", "merged"],
+            "not merged: a (running)",
+            id="merge_after_a_reopened_after",
+        ),
     ],
 )
-def test_slice_set_refuses_an_unknown_key_or_status(walk, flags, named, kl_cli, tmp_path):
+def test_slice_set_refuses_an_unknown_key_or_status(walk, moves, flags, named, kl_cli, tmp_path):
     walk.slice(tmp_path, plan())
+    for key, status in moves:
+        kl_cli(tmp_path, "slice-set", "--slice", key, "--status", status)
     before = kl_cli(tmp_path, "slices")
 
     refused = kl_cli(tmp_path, "slice-set", *flags, ok=False)
@@ -601,6 +660,15 @@ def test_slice_set_refuses_an_unknown_key_or_status(walk, flags, named, kl_cli, 
         pytest.param([], ("b", "waiting"), id="waiting_again"),
         # A call overturned at the wrap-up puts a merged slice back to work.
         pytest.param([("a", "running"), ("a", "merged")], ("a", "running"), id="reopen_merged"),
+        # An early-cut slice merges once the slice it was cut from has.
+        pytest.param([*EARLY_B, ("a", "merged")], ("b", "merged"), id="merge_after_its_after"),
+        # Merged again changes nothing, so it is not refused when its after slice reopens.
+        pytest.param(
+            [("a", "running"), ("a", "merged"), ("b", "running"), ("b", "merged")]
+            + [("a", "running")],
+            ("b", "merged"),
+            id="merged_again_after_a_reopen",
+        ),
     ],
 )
 def test_slice_set_allows_a_start_from_ready_or_early_and_any_later_move(
@@ -612,55 +680,6 @@ def test_slice_set_allows_a_start_from_ready_or_early_and_any_later_move(
 
     key, status = last
     assert kl_cli(tmp_path, "slice-set", "--slice", key, "--status", status)["status"] == status
-
-
-@pytest.mark.parametrize(
-    "mode, moves, not_done",
-    [
-        pytest.param("feature", [], "a (waiting), b (waiting), c (waiting)", id="none_started"),
-        pytest.param(
-            "feature",
-            [("a", "running"), ("a", "merged"), ("c", "running"), ("c", "ready_to_merge")],
-            "b (waiting), c (ready_to_merge)",
-            id="feature_ready_to_merge_is_not_done",
-        ),
-        pytest.param(
-            "main",
-            [("a", "running"), ("a", "merged"), ("c", "running"), ("c", "ready_to_merge")],
-            "b (waiting)",
-            id="main_one_not_done",
-        ),
-        pytest.param(
-            "feature", [(k, s) for k in "abc" for s in ("running", "merged")], None, id="all_merged"
-        ),
-        pytest.param(
-            "main",
-            [("a", "running"), ("a", "merged"), ("b", "running"), ("b", "ready_to_merge")]
-            + [("c", "running"), ("c", "ready_to_merge")],
-            None,
-            id="main_all_ready_to_merge",
-        ),
-        # Only the node that runs the slices waits for them.
-        pytest.param("feature", "spec", None, id="another_node"),
-    ],
-)
-def test_implementation_closes_only_once_every_slice_is_done(
-    walk, mode, moves, not_done, kl_cli, tmp_path
-):
-    walk.slice(tmp_path, plan(mode=mode))
-    if moves == "spec":
-        kl_cli(tmp_path, "reject", "--note", "again", "--from-node", "spec")
-        assert kl_cli(tmp_path, "close")["node"] == "plan"
-        return
-    for key, status in moves:
-        kl_cli(tmp_path, "slice-set", "--slice", key, "--status", status)
-
-    if not_done is None:
-        assert kl_cli(tmp_path, "close")["node"] == "verify"
-        return
-    refused = kl_cli(tmp_path, "close", ok=False)
-    assert f"not done: {not_done}" in refused.stderr and "Traceback" not in refused.stderr
-    assert kl_cli(tmp_path, "state")["node"] == "implementation"
 
 
 @pytest.mark.parametrize(

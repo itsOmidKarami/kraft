@@ -596,6 +596,16 @@ def chain_index(records: list[dict]) -> dict[str, list[dict]]:
     return by_chain
 
 
+def _first_repeat(items: list):
+    """The first item met a second time, or None when each is there once."""
+    seen = set()
+    for item in items:
+        if item in seen:
+            return item
+        seen.add(item)
+    return None
+
+
 def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
     """The plan's slices if the whole graph is sound, else a `SystemExit` naming
     the first problem. Checked before any record is built: a half-made graph in
@@ -659,7 +669,7 @@ def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
             raise SystemExit(
                 f"kraft-lite: slice {position} ({key!r}) tasks must be a list of task numbers"
             )
-        twice = next((t for i, t in enumerate(tasks) if t in tasks[:i]), None)
+        twice = _first_repeat(tasks)
         if twice is not None:
             raise SystemExit(f"kraft-lite: slice {position} ({key!r}) lists task {twice} twice")
         for task in tasks:
@@ -675,7 +685,7 @@ def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
             )
         # Read back as two links, a slice after one slice would count as after two,
         # and lose its early start.
-        twice = next((a for i, a in enumerate(after) if a in after[:i]), None)
+        twice = _first_repeat(after)
         if twice is not None:
             raise SystemExit(f"kraft-lite: slice {position} ({key!r}) comes after {twice!r} twice")
     for spec in slices:
@@ -835,8 +845,29 @@ def slices_view(records: list[dict], chain_id: str | None) -> dict:
     }
 
 
+def _refuse_unsliceable(chain: dict, node_record: dict) -> None:
+    """A `SystemExit` for a chain that slicing would walk wrong. What a node means
+    in a sliced run is keyed to the default chain's node ids (`SLICED_ACTIONS`)
+    and to its `chain_finalized` gate: a chain without them would run its slices
+    with no guard on closing the nodes that wait for them."""
+    ids = [n["id"] for n in chain["nodes"]]
+    missing = [n for n in SLICED_ACTIONS if n not in ids]
+    if missing:
+        raise SystemExit(
+            f"kraft-lite: slicing needs the default chain's nodes; this run's chain "
+            f"{chain.get('id')!r} has no {', '.join(missing)}"
+        )
+    node = label_value(node_record, NODE_LABEL)
+    gate = next((n.get("gate_after") for n in chain["nodes"] if n["id"] == node), None)
+    if gate != "chain_finalized":
+        raise SystemExit(
+            f"kraft-lite: slicing needs {node}'s gate to be chain_finalized, as in the "
+            f"default chain; this run's chain {chain.get('id')!r} gates it with {gate!r}"
+        )
+
+
 def slices_for_gate(
-    records: list[dict], node_record: dict, chain_id: str, path: Path, root: Path
+    records: list[dict], node_record: dict, chain_id: str, path: Path, root: Path, chain: dict
 ) -> list[dict]:
     """The records `approve --slices` writes with the approval, or a `SystemExit`.
     Slicing happens once, at the gate that finalizes the chain: anywhere else a
@@ -849,6 +880,7 @@ def slices_for_gate(
         or label_value(node_record, GATE_LABEL) != "chain_finalized"
     ):
         raise SystemExit("kraft-lite: --slices is only accepted at chain_finalized")
+    _refuse_unsliceable(chain, node_record)
     try:
         plan = json.loads(path.read_text())
     except (OSError, ValueError) as error:
@@ -1267,14 +1299,36 @@ def _slice_by_key(everything: list[dict], chain_id: str | None, key: str) -> dic
     return by_key[key]
 
 
+def _named(records: list[dict]) -> str:
+    """Slices as a refusal names them: `a (waiting), b (in_review)`."""
+    return ", ".join(
+        f"{label_value(r, SLICE_KEY_LABEL)} ({label_value(r, SLICE_STATUS_LABEL)})" for r in records
+    )
+
+
+def _merged(record: dict) -> bool:
+    return label_value(record, SLICE_STATUS_LABEL) == "merged"
+
+
 def _refuse_slice_move(slices: list[dict], record: dict, status: str) -> None:
-    """A `SystemExit` for a move a waiting slice cannot make. It starts only from
-    `ready` or `early`, and what was never started cannot be reviewed or merged.
-    Every other move is allowed, the same status again included: a started slice
-    has left `ready`, and a call overturned at the wrap-up reopens a merged one."""
-    if label_value(record, SLICE_STATUS_LABEL) != "waiting" or status == "waiting":
-        return
+    """A `SystemExit` for a move a slice cannot make. A waiting slice starts only
+    from `ready` or `early`, and what was never started cannot be reviewed or
+    merged. A slice merges only after every slice it comes after: one cut early
+    from another's branch holds that slice's work, unmerged. Every other move is
+    allowed, the same status again included: a started slice has left `ready`, and
+    a call overturned at the wrap-up reopens a merged one."""
+    current = label_value(record, SLICE_STATUS_LABEL)
     key = label_value(record, SLICE_KEY_LABEL)
+    by_id = {r["id"]: r for r in slices}
+    if status == "merged" and current not in ("merged", "waiting"):
+        left = [by_id[d] for d in dep_ids(record) if d in by_id and not _merged(by_id[d])]
+        if left:
+            raise SystemExit(
+                f"kraft-lite: slice {key!r} merges after every slice it comes after; "
+                f"not merged: {_named(left)}"
+            )
+    if current != "waiting" or status == "waiting":
+        return
     if status not in ("starting", "running"):
         raise SystemExit(
             f"kraft-lite: slice {key!r} was never started: it is waiting, so it cannot be "
@@ -1283,12 +1337,7 @@ def _refuse_slice_move(slices: list[dict], record: dict, status: str) -> None:
     ready, early = _startable(slices)
     if record["id"] in {r["id"] for r in [*ready, *early]}:
         return
-    by_id = {r["id"]: r for r in slices}
-    after = ", ".join(
-        f"{label_value(by_id[d], SLICE_KEY_LABEL)} ({label_value(by_id[d], SLICE_STATUS_LABEL)})"
-        for d in dep_ids(record)
-        if d in by_id
-    )
+    after = _named([by_id[d] for d in dep_ids(record) if d in by_id])
     raise SystemExit(
         f"kraft-lite: slice {key!r} is not in `ready` or `early`: it comes after {after}. "
         "It starts once all of those are merged, or early from the one slice it comes "
@@ -1297,25 +1346,30 @@ def _refuse_slice_move(slices: list[dict], record: dict, status: str) -> None:
 
 
 def _refuse_close_before_slices(everything: list[dict], chain_id: str, node_record: dict) -> None:
-    """A `SystemExit` for closing a sliced run's `run_slices` node while a slice
-    is not done for the run's mode. Closing it moves the walk to `verify`, which
-    checks seams between slices that are not all there yet."""
+    """A `SystemExit` for closing a sliced run's node before the slices it waits
+    on, by `close` or by `approve`. `run_slices` waits for every slice done for the
+    run's mode: closing it moves the walk to `verify`, which checks seams between
+    slices that are not all there yet. `await_user_merges` waits for every slice
+    merged: the user's merges are all it waits on, and closing it first finishes
+    the run before any of them."""
     run = run_record(everything, chain_id)
     if run is None:
         return
     mode = _run_mode(run)
-    if SLICED_ACTIONS.get(label_value(node_record, NODE_LABEL), {}).get(mode) != "run_slices":
+    node = label_value(node_record, NODE_LABEL)
+    action = SLICED_ACTIONS.get(node, {}).get(mode)
+    slices = slice_records(everything, chain_id)
+    if action == "run_slices":
+        left = [r for r in slices if not slice_done(r, mode)]
+        done, short = ("merged or ready to merge" if mode == "main" else "merged"), "not done"
+    elif action == "await_user_merges":
+        left = [r for r in slices if not _merged(r)]
+        done, short = "merged", "not merged"
+    else:
         return
-    left = [r for r in slice_records(everything, chain_id) if not slice_done(r, mode)]
     if left:
-        named = ", ".join(
-            f"{label_value(r, SLICE_KEY_LABEL)} ({label_value(r, SLICE_STATUS_LABEL)})"
-            for r in left
-        )
-        done = "merged or ready to merge" if mode == "main" else "merged"
         raise SystemExit(
-            f"kraft-lite: {label_value(node_record, NODE_LABEL)} closes once every slice is "
-            f"{done}; not done: {named}"
+            f"kraft-lite: {node} closes once every slice is {done}; {short}: {_named(left)}"
         )
 
 
@@ -1488,13 +1542,22 @@ def _export(root: Path, everything: list[dict], chain_id: str, to: Path) -> dict
     }
 
 
+def _rank(seq: int, *stamps: str | None, answered: bool = False, reported: bool = False) -> tuple:
+    """How `import` ranks two copies of one record, or of one decision: the
+    higher wins. First the count of the copy's writes, which no clock can skew;
+    on a tie, an answer over a held question (decisions only), so a held copy
+    never takes back the user's answer; then each stamp in turn, read as a time
+    (`_when`), because as text `10:00:00Z` sorts after `10:00:00.5Z`; then a
+    reported copy over an unreported one (decisions only)."""
+    return (seq, answered, *map(_when, stamps), reported)
+
+
 def _import_records(local: list[dict], exported: list[dict]) -> tuple[list[dict], int]:
     """Which exported records to write, and how many local ones win instead.
 
-    A record is written only where the local copy is missing or was last written
-    earlier. Earlier is first by `kraft-seq:`, the count of the record's writes,
-    which no clock can skew; a record without one counts as 0. Two machines that
-    each wrote once since the last import tie there, and then `kraft-at:` decides,
+    A record is written only where the local copy is missing or ranks lower
+    (`_rank`). A record without `kraft-seq:` counts as 0. Two machines that each
+    wrote once since the last import tie on it, and then `kraft-at:` decides,
     where no stamp is oldest. Two writes inside one second tie on that too, so
     `updated_at` breaks the tie: every write moves it strictly forward
     (`_bump_updated`), and `kraft-at:` is not moved, because the summary times the
@@ -1503,17 +1566,15 @@ def _import_records(local: list[dict], exported: list[dict]) -> tuple[list[dict]
     run's start time.
     """
 
-    def written(record: dict) -> tuple[int, dt.datetime, dt.datetime]:
-        return (_seq(record), _when(label_value(record, AT_LABEL)), _when(record.get("updated_at")))
+    def rank(record: dict) -> tuple:
+        return _rank(_seq(record), label_value(record, AT_LABEL), record.get("updated_at"))
 
     held = {r["id"]: r for r in local}
     write: list[dict] = []
     kept = 0
     for record in exported:
         mine = held.get(record["id"])
-        if mine is None or (
-            label_value(record, CHAIN_LABEL) is None and written(mine) < written(record)
-        ):
+        if mine is None or (label_value(record, CHAIN_LABEL) is None and rank(mine) < rank(record)):
             write.append(record)
         else:
             kept += 1
@@ -1526,21 +1587,17 @@ def _decision_seq(entry: dict) -> int:
 
 
 def _merge_decisions(local: list[dict], exported: list[dict]) -> tuple[list[dict], int]:
-    """Which exported decisions to append, and how many local ones win instead.
+    """Which exported decisions to append, and how many local ones win instead:
+    those missing locally, or ranking higher (`_rank`) than the local copy. The
+    stamp is `answered_at or at`, which is all an entry from before the count
+    has. A tie on everything keeps the local copy."""
 
-    The copy written more times wins, as `_import_records` ranks records, so a
-    clock that runs behind cannot make the later write the older one. On a tie,
-    as when each checkout wrote once since the last import, an answer beats a
-    held question, so a held copy never takes back the user's answer; then the
-    later of `answered_at or at`, which is all an entry from before the count
-    has; then a reported copy beats an unreported one."""
-
-    def rank(entry: dict) -> tuple[int, bool, str, bool]:
-        return (
+    def rank(entry: dict) -> tuple:
+        return _rank(
             _decision_seq(entry),
-            not entry.get("held"),
-            entry.get("answered_at") or entry.get("at") or "",
-            bool(entry.get("reported")),
+            entry.get("answered_at") or entry.get("at"),
+            answered=not entry.get("held"),
+            reported=bool(entry.get("reported")),
         )
 
     held = {e["id"]: e for e in local}
@@ -1750,11 +1807,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.verb == "approve" and args.slices is not None:
-        made = slices_for_gate(everything, node_record, resolved_id, args.slices, root)
+        made = slices_for_gate(everything, node_record, resolved_id, args.slices, root, chain)
         store.write([bank_wait(dict(node_record, status="closed")), *made])
     elif args.verb in ("close", "approve"):
-        if args.verb == "close":
-            _refuse_close_before_slices(everything, resolved_id, node_record)
+        _refuse_close_before_slices(everything, resolved_id, node_record)
         store.write([bank_wait(dict(node_record, status="closed"))])
     elif args.verb == "gate":
         store.write([open_gate(dict(node_record, status="blocked"), args.name)])

@@ -270,6 +270,19 @@ def decision(at, answered_at=None, held=False, reported=False, seq=None):
         ),
         # An entry from before the count counts as 0.
         pytest.param(decision(T1, T1), decision(T0, T0, seq=1), True, id="local_unsequenced"),
+        # Stamps compare as times, not as text, as records' do.
+        pytest.param(
+            decision(T0, T0, seq=2),
+            decision(T0, "2026-10-20T10:00:00.5Z", seq=2),
+            True,
+            id="same_seq_export_answered_half_a_second_later",
+        ),
+        pytest.param(
+            decision(T0, "2026-10-20T10:45:00Z", seq=2),
+            decision(T0, "2026-10-20T12:30:00+02:00", seq=2),
+            False,
+            id="same_seq_export_answered_earlier_in_another_zone",
+        ),
     ],
 )
 def test_import_keeps_the_later_decision_and_an_answer_wins_a_tie(local, exported, taken):

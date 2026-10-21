@@ -94,6 +94,11 @@ approval. A small plan is not sliced: the controller says so, and the chain
 continues as one. Slicing is accepted only at that gate. A rejection leaves no
 slice behind.
 
+Slicing needs the default chain's node ids and its `chain_finalized` gate
+after `chain_review`, because what each node does in a sliced run is keyed to
+them. On a custom chain without them, `approve --slices` refuses and names what
+is missing.
+
 ### Controller and children
 
 The controller starts a child for each slice whose "comes after" slices are
@@ -227,16 +232,20 @@ The skills run these. `kl.py state` also reports `sliced` once a run is sliced.
 | `export --to DIR`, `import --from DIR` | Copy a run to the state branch's checkout, and back. An import never overwrites a newer local record or decision: it keeps the copy written more times, so a clock that runs behind cannot keep a stale one. |
 
 `slice-set` starts a waiting slice only from `ready` or `early`, and moves
-one never started no further than `running`.
+one never started no further than `running`. It records a slice merged only
+once every slice it comes after is merged, so a slice cut early from another's
+branch merges after that one.
 
-`close` refuses to close a sliced run's `implementation` until every slice is
-done: merged, or in `main` mode merged or ready to merge. The refusal names the
-slices that are not.
+`close` and `approve` refuse to close a sliced run's `implementation` until
+every slice is done: merged, or in `main` mode merged or ready to merge. In
+`main` mode they refuse to close `human_review` and `merge` until every slice
+is merged. The refusal names the slices that are not.
 
 `import` refuses a directory with no `records.jsonl`, naming the path, and a
 chain id that `start` would not mint (`kl-` and 8 of `0-9a-f`), before it reads
-or writes a file. It ranks decisions as it ranks records, so a held copy never
-takes back an answer given where the clock runs behind.
+or writes a file. It ranks decisions as it ranks records, comparing stamps as
+times, so a held copy never takes back an answer given where the clock runs
+behind.
 
 `approve --slices` also refuses a task listed twice in one slice, a slice
 named twice in one `after`, and a key that is not 1 to 40 lowercase letters,
