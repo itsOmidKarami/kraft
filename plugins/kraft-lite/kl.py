@@ -435,13 +435,20 @@ def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
     if not slices:
         raise SystemExit("kraft-lite: the slice plan has no slices")
     keys: set[str] = set()
-    for spec in slices:
+    for position, spec in enumerate(slices, 1):
+        # `approve --slices` feeds this a person's JSON, so a slice missing a
+        # field is refused by position rather than left to a KeyError traceback.
+        if not isinstance(spec, dict):
+            raise SystemExit(f"kraft-lite: slice {position} is not an object")
+        for field in ("key", "title"):
+            if not spec.get(field):
+                raise SystemExit(f"kraft-lite: slice {position} has no {field}")
         key = spec["key"]
         if key in keys:
             raise SystemExit(f"kraft-lite: duplicate slice key {key!r}")
         keys.add(key)
         if not spec.get("tasks"):
-            raise SystemExit(f"kraft-lite: slice {key!r} has no tasks")
+            raise SystemExit(f"kraft-lite: slice {position} ({key!r}) has no tasks")
     for spec in slices:
         for after in spec.get("after", []):
             if after not in keys:
@@ -547,6 +554,66 @@ def ready_slices(records: list[dict], chain_id: str) -> list[dict]:
         if label_value(r, SLICE_STATUS_LABEL) == "waiting"
         and all(slice_done(by_id[d], mode) for d in dep_ids(r) if d in by_id)
     ]
+
+
+def _slice_entry(record: dict, by_id: dict[str, dict], mode: str) -> dict:
+    """One slice as the `slices` and `slice-set` verbs print it. `after` is
+    keys, not ids: ids are an implementation detail the controller never types."""
+    tasks = label_value(record, TASKS_LABEL) or ""
+    return {
+        "id": record["id"],
+        "key": label_value(record, SLICE_KEY_LABEL),
+        "title": record["title"],
+        "tasks": [int(t) for t in tasks.split(",") if t],
+        "after": [label_value(by_id[d], SLICE_KEY_LABEL) for d in dep_ids(record) if d in by_id],
+        "status": label_value(record, SLICE_STATUS_LABEL),
+        "session": label_value(record, SESSION_LABEL),
+        "branch": label_value(record, BRANCH_LABEL),
+        "fork": label_value(record, FORK_LABEL),
+        "done": slice_done(record, mode),
+    }
+
+
+def slices_view(records: list[dict], chain_id: str | None) -> dict:
+    """The run and its slices, for the whole store: a chain that was never
+    sliced reports an empty run rather than an error."""
+    run = run_record(records, chain_id) if chain_id else None
+    mode = label_value(run, MODE_LABEL)
+    slices = slice_records(records, chain_id) if chain_id else []
+    by_id = {r["id"]: r for r in slices}
+    return {
+        "mode": mode,
+        "feature_branch": label_value(run, FEATURE_BRANCH_LABEL),
+        "state_branch": label_value(run, STATE_BRANCH_LABEL),
+        "slices": [_slice_entry(r, by_id, mode or "feature") for r in slices],
+        "ready": [label_value(r, SLICE_KEY_LABEL) for r in ready_slices(records, chain_id)]
+        if run
+        else [],
+    }
+
+
+def slices_for_gate(
+    records: list[dict], node_record: dict, chain_id: str, path: Path
+) -> list[dict]:
+    """The records `approve --slices` writes with the approval, or a `SystemExit`.
+    Slicing happens once, at the gate that finalizes the chain: anywhere else a
+    plan has nothing settled to be split from, and a second time it would
+    replace work already handed to children."""
+    if run_record(records, chain_id) is not None:
+        raise SystemExit("kraft-lite: this chain is already sliced")
+    if (
+        node_record["status"] != "blocked"
+        or label_value(node_record, GATE_LABEL) != "chain_finalized"
+    ):
+        raise SystemExit("kraft-lite: --slices is only accepted at chain_finalized")
+    try:
+        plan = json.loads(path.read_text())
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"kraft-lite: cannot read the slice plan {path}: {error}") from error
+    if not isinstance(plan, dict):
+        raise SystemExit(f"kraft-lite: the slice plan {path} is not a JSON object")
+    # Task 3 swaps the settings mode in for this default.
+    return materialize_slices(plan, chain_id, mode_default="feature")
 
 
 def _by_age(by_chain: dict[str, list[dict]]) -> list[str]:
@@ -931,6 +998,39 @@ def validate_hooks(root: Path, chain: dict) -> None:
         )
 
 
+def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dict:
+    """Move one slice: its status, the session running it, its branch, its fork
+    point. `merged` closes the record too, so a store that shows only open work
+    stops showing it."""
+    slices = slice_records(everything, chain_id) if chain_id else []
+    by_key = {label_value(r, SLICE_KEY_LABEL): r for r in slices}
+    if args.slice not in by_key:
+        raise SystemExit(
+            f"kraft-lite: no slice {args.slice!r} in this chain. Slices: "
+            + (", ".join(by_key) or "(none)")
+        )
+    if args.status is not None and args.status not in SLICE_STATUSES:
+        raise SystemExit(
+            f"kraft-lite: unknown slice status {args.status!r}. "
+            f"Statuses: {', '.join(SLICE_STATUSES)}"
+        )
+    record = by_key[args.slice]
+    if args.status is not None:
+        record = set_label(record, SLICE_STATUS_LABEL, args.status)
+        record = dict(record, status="closed" if args.status == "merged" else "open")
+    for prefix, value in (
+        (SESSION_LABEL, args.session),
+        (BRANCH_LABEL, args.branch),
+        (FORK_LABEL, args.fork),
+    ):
+        if value is not None:
+            record = set_label(record, prefix, value)
+    store.write([record])
+    mode = label_value(run_record(everything, chain_id), MODE_LABEL) or "feature"
+    by_id = {r["id"]: r for r in slices}
+    return _slice_entry(record, by_id, mode)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="kl")
     sub = parser.add_subparsers(dest="verb", required=True)
@@ -950,9 +1050,27 @@ def main(argv: list[str] | None = None) -> int:
     reject.add_argument("--from-node", default=None)
     for name in ("state", "summary", "close", "approve", "attempt"):
         sub.add_parser(name)
+    sub.choices["approve"].add_argument("--slices", type=Path, default=None)
+    sub.add_parser("slices")
+    slice_set = sub.add_parser("slice-set")
+    slice_set.add_argument("--slice", required=True)
+    slice_set.add_argument("--status", default=None)
+    slice_set.add_argument("--session", default=None)
+    slice_set.add_argument("--branch", default=None)
+    slice_set.add_argument("--fork", default=None)
     # Every verb that reads or writes chain state can be told which chain. `start`
     # mints its own id and `detect` touches no state, so neither takes one.
-    for name in ("state", "summary", "close", "approve", "attempt", "gate", "reject"):
+    for name in (
+        "state",
+        "summary",
+        "close",
+        "approve",
+        "attempt",
+        "gate",
+        "reject",
+        "slices",
+        "slice-set",
+    ):
         sub.choices[name].add_argument("--chain-id", default=None)
 
     args = parser.parse_args(argv)
@@ -986,14 +1104,17 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"chain_id": new_id, "backend": backend(root)}))
         return 0
 
-    records = _ours(store.load(), chain_id)
+    everything = store.load()
+    records = _ours(everything, chain_id)
     epic = next((r for r in records if label_value(r, CHAIN_LABEL)), None)
     # A verb run without the flag still has to read the template of the chain it
     # actually resolved, not the directory's last one.
     resolved_id = epic["id"] if epic else None
     chain = _chain(root, None, resolved_id)
     node_record = current(records)
-    if node_record is None and args.verb not in ("state", "summary"):
+    # Wrap-up and status read after the walk is over, so these are not refused
+    # for want of an open node.
+    if node_record is None and args.verb not in ("state", "summary", "slices", "slice-set"):
         raise SystemExit("kraft-lite: no open node — the chain is finished or was never started")
 
     if args.verb == "state":
@@ -1004,7 +1125,18 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(summary(records, chain), indent=2))
         return 0
 
-    if args.verb in ("close", "approve"):
+    if args.verb == "slices":
+        print(json.dumps(slices_view(everything, resolved_id), indent=2))
+        return 0
+
+    if args.verb == "slice-set":
+        print(json.dumps(_slice_set(store, everything, resolved_id, args), indent=2))
+        return 0
+
+    if args.verb == "approve" and args.slices is not None:
+        made = slices_for_gate(everything, node_record, resolved_id, args.slices)
+        store.write([bank_wait(dict(node_record, status="closed")), *made])
+    elif args.verb in ("close", "approve"):
         store.write([bank_wait(dict(node_record, status="closed"))])
     elif args.verb == "gate":
         store.write([open_gate(dict(node_record, status="blocked"), args.name)])

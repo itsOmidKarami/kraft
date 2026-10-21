@@ -104,6 +104,18 @@ def test_after_becomes_a_bd_shaped_blocks_dependency():
         pytest.param(
             plan(slices=[{"key": "a", "title": "A", "tasks": []}]), "'a'", id="empty_tasks"
         ),
+        pytest.param(
+            plan(slices=[{"key": "a", "title": "A", "tasks": [1]}, {"title": "B", "tasks": [2]}]),
+            "slice 2 has no key",
+            id="missing_key",
+        ),
+        pytest.param(
+            plan(slices=[{"key": "a", "tasks": [1]}]), "slice 1 has no title", id="missing_title"
+        ),
+        pytest.param(
+            plan(slices=[{"key": "a", "title": "A"}]), "slice 1 ('a') has no tasks", id="no_tasks"
+        ),
+        pytest.param(plan(slices=[]), "no slices", id="no_slices"),
         pytest.param(plan(mode="sideways"), "sideways", id="unknown_mode"),
         pytest.param(
             plan(feature_branch=None), "feature_branch", id="feature_mode_without_feature_branch"
@@ -212,3 +224,197 @@ def test_slice_records_are_invisible_to_the_chain_machinery(backend, tmp_path):
     assert kl.summary(kl._ours(everything, CHAIN_ID), chain) == kl.summary(
         kl._ours(chain_only, CHAIN_ID), chain
     )
+
+
+# --- the verbs, through the real CLI ---------------------------------------------
+
+
+def write_plan(cwd, **over):
+    path = cwd / "plan.json"
+    path.write_text(json.dumps(plan(**over)))
+    return path
+
+
+def start_chain(kl_cli, cwd):
+    return kl_cli(cwd, "start", "--title", "A feature")["chain_id"]
+
+
+def to_chain_review(kl_cli, cwd):
+    """A chain whose spec and plan gates are approved, so the next node is
+    `chain_review`. Returns the chain id."""
+    chain_id = start_chain(kl_cli, cwd)
+    for name in ("spec_approval", "plan_approval"):
+        kl_cli(cwd, "gate", "--name", name)
+        kl_cli(cwd, "approve")
+    assert kl_cli(cwd, "state")["node"] == "chain_review"
+    return chain_id
+
+
+def slice_the_chain(kl_cli, cwd):
+    chain_id = to_chain_review(kl_cli, cwd)
+    kl_cli(cwd, "gate", "--name", "chain_finalized")
+    kl_cli(cwd, "approve", "--slices", str(write_plan(cwd)))
+    return chain_id
+
+
+def keys(entries):
+    return [e["key"] for e in entries]
+
+
+def test_approve_with_slices_at_chain_finalized_creates_them(kl_cli, tmp_path):
+    to_chain_review(kl_cli, tmp_path)
+    kl_cli(tmp_path, "gate", "--name", "chain_finalized")
+    state = kl_cli(tmp_path, "approve", "--slices", str(write_plan(tmp_path)))
+
+    assert state["node"] == "implementation" and state["status"] == "open"
+    out = kl_cli(tmp_path, "slices")
+    assert out["mode"] == "feature"
+    assert out["feature_branch"] == "feature/x" and out["state_branch"] == "kraft-lite/state"
+    assert keys(out["slices"]) == ["a", "b", "c"]
+    assert out["ready"] == ["a", "c"]
+    beta = out["slices"][1]
+    assert beta | {"id": None} == {
+        "id": None,
+        "key": "b",
+        "title": "Beta",
+        "tasks": [3],
+        "after": ["a"],
+        "status": "waiting",
+        "session": None,
+        "branch": None,
+        "fork": None,
+        "done": False,
+    }
+    # The chain walks on exactly as it does without slices.
+    assert kl_cli(tmp_path, "chains")[0]["status"] != "done"
+
+
+@pytest.mark.parametrize(
+    "already_sliced, message",
+    [
+        pytest.param(False, "only accepted at chain_finalized", id="at_spec_gate"),
+        pytest.param(True, "already sliced", id="already_sliced"),
+    ],
+)
+def test_slices_are_only_accepted_at_chain_finalized(already_sliced, message, kl_cli, tmp_path):
+    if already_sliced:
+        slice_the_chain(kl_cli, tmp_path)
+        kl_cli(tmp_path, "reject", "--note", "x", "--from-node", "chain_review")
+        kl_cli(tmp_path, "gate", "--name", "chain_finalized")
+    else:
+        start_chain(kl_cli, tmp_path)
+        kl_cli(tmp_path, "gate", "--name", "spec_approval")
+    before = (kl_cli(tmp_path, "slices"), kl_cli(tmp_path, "state"))
+
+    refused = kl_cli(tmp_path, "approve", "--slices", str(write_plan(tmp_path)), ok=False)
+
+    assert message in refused.stderr
+    assert (kl_cli(tmp_path, "slices"), kl_cli(tmp_path, "state")) == before
+
+
+def test_a_rejected_slicing_leaves_nothing_behind(kl_cli, tmp_path):
+    to_chain_review(kl_cli, tmp_path)
+    kl_cli(tmp_path, "gate", "--name", "chain_finalized")
+    kl_cli(tmp_path, "reject", "--note", "regroup")
+
+    out = kl_cli(tmp_path, "slices")
+    assert out["mode"] is None and out["slices"] == []
+
+
+@pytest.mark.parametrize(
+    "write, named",
+    [
+        pytest.param(lambda p: None, "cannot read", id="no_such_file"),
+        pytest.param(lambda p: p.write_text("{nope"), "cannot read", id="not_json"),
+        pytest.param(lambda p: p.write_text("[]"), "not a JSON object", id="not_an_object"),
+        pytest.param(
+            lambda p: p.write_text(json.dumps(plan(slices=[{"key": "a", "tasks": [1]}]))),
+            "slice 1 has no title",
+            id="broken_graph",
+        ),
+    ],
+)
+def test_a_broken_plan_file_is_refused_and_the_gate_stays_shut(write, named, kl_cli, tmp_path):
+    to_chain_review(kl_cli, tmp_path)
+    kl_cli(tmp_path, "gate", "--name", "chain_finalized")
+    path = tmp_path / "plan.json"
+    write(path)
+
+    refused = kl_cli(tmp_path, "approve", "--slices", str(path), ok=False)
+
+    assert named in refused.stderr and "Traceback" not in refused.stderr
+    assert kl_cli(tmp_path, "state")["status"] == "blocked"
+    assert kl_cli(tmp_path, "slices")["slices"] == []
+
+
+def test_slice_set_moves_a_slice_and_merged_closes_it(kl_cli, tmp_path):
+    slice_the_chain(kl_cli, tmp_path)
+    stored = lambda: {  # noqa: E731
+        r["id"]: r for r in kl.read_jsonl(tmp_path / ".kraft-lite" / "chain.jsonl")
+    }
+
+    moved = kl_cli(
+        tmp_path,
+        "slice-set",
+        "--slice",
+        "a",
+        "--status",
+        "running",
+        "--session",
+        "sess-1",
+        "--branch",
+        "feature/x-a",
+        "--fork",
+        "abc123",
+    )
+    assert moved["key"] == "a" and moved["status"] == "running" and moved["done"] is False
+    assert (moved["session"], moved["branch"], moved["fork"]) == ("sess-1", "feature/x-a", "abc123")
+    assert stored()[moved["id"]]["status"] == "open"
+    assert kl_cli(tmp_path, "slices")["ready"] == ["c"]
+
+    merged = kl_cli(tmp_path, "slice-set", "--slice", "a", "--status", "merged")
+    assert merged["done"] is True and merged["session"] == "sess-1"  # unset flags keep what was set
+    assert stored()[merged["id"]]["status"] == "closed"
+    assert kl_cli(tmp_path, "slices")["ready"] == ["b", "c"]
+
+    reopened = kl_cli(tmp_path, "slice-set", "--slice", "a", "--status", "in_review")
+    assert stored()[reopened["id"]]["status"] == "open"
+
+
+@pytest.mark.parametrize(
+    "flags, named",
+    [
+        pytest.param(["--slice", "ghost"], "a, b, c", id="unknown_key"),
+        pytest.param(
+            ["--slice", "a", "--status", "done"], "waiting, starting", id="unknown_status"
+        ),
+    ],
+)
+def test_slice_set_refuses_an_unknown_key_or_status(flags, named, kl_cli, tmp_path):
+    slice_the_chain(kl_cli, tmp_path)
+    before = kl_cli(tmp_path, "slices")
+
+    refused = kl_cli(tmp_path, "slice-set", *flags, ok=False)
+
+    assert named in refused.stderr
+    assert kl_cli(tmp_path, "slices") == before
+
+
+def test_slice_verbs_still_answer_after_the_chain_is_done(kl_cli, tmp_path):
+    slice_the_chain(kl_cli, tmp_path)
+    while kl_cli(tmp_path, "state")["status"] != "done":
+        kl_cli(tmp_path, "close")
+    kl_cli(tmp_path, "close", ok=False)  # the walk really is over
+
+    assert keys(kl_cli(tmp_path, "slices")["slices"]) == ["a", "b", "c"]
+    assert kl_cli(tmp_path, "slice-set", "--slice", "a", "--status", "merged")["done"] is True
+
+
+@pytest.mark.parametrize("verb", [["slices"], ["slice-set", "--slice", "a"]])
+def test_slice_verbs_refuse_to_guess_between_two_unfinished_chains(verb, kl_cli, tmp_path):
+    start_chain(kl_cli, tmp_path)
+    start_chain(kl_cli, tmp_path)
+
+    refused = kl_cli(tmp_path, *verb, ok=False)
+
+    assert "more than one unfinished chain" in refused.stderr
