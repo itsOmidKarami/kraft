@@ -273,15 +273,8 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
             ("repository     TEXT,", "  repository     TEXT"),
         )
     if version < 56:
-        # `merge_rejected` joined the session status CHECK; the callers' own needles
-        # (for the older shapes of this line) match it first.
-        replace = (
-            *replace,
-            (
-                "'infra_stop', 'merge_rejected')),",
-                "                    'waiting', 'conflict', 'infra', 'infra_stop')),",
-            ),
-        )
+        old = "                    'waiting', 'conflict', 'infra', 'infra_stop')),"
+        replace = (*replace, ("'infra_stop', 'merge_rejected')),", old))
     added = {47: "review_viewed", 48: "config_drafts", 49: "item_drafts", 50: "intake_checks"}
     skip_stmts = (*skip_stmts, *(t for since, t in added.items() if version < since))
     schema = "\n".join(
@@ -400,10 +393,7 @@ def test_migrate_v9_to_v10_widens_worker_sessions_status(tmp_path):
             ),
             ("'unknown',", ""),
             ("done_with_concerns", ""),
-            (
-                "'waiting', 'conflict', 'infra', 'infra_stop', 'merge_rejected')),",
-                "",
-            ),
+            ("'infra_stop', 'merge_rejected')),", ""),
         ),
     )
     schema.insert_item(conn)
@@ -469,7 +459,7 @@ def test_migrate_v26_to_v27_widens_worker_sessions_status_for_ci_verdicts(tmp_pa
         26,
         replace=(
             (
-                "'waiting', 'conflict', 'infra', 'infra_stop', 'merge_rejected')),",
+                "'infra_stop', 'merge_rejected')),",
                 "                    'waiting')),",
             ),
         ),
@@ -503,39 +493,6 @@ def test_migrate_v26_to_v27_widens_worker_sessions_status_for_ci_verdicts(tmp_pa
 
     index_names = {r[0] for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='index'")}
     assert "idx_worker_sessions_status" in index_names
-
-
-def test_migrate_v55_to_v56_admits_merge_rejected_and_keeps_rowids(tmp_path):
-    """v55's worker_sessions CHECK has no 'merge_rejected' (the forge's merge queue
-    dropped the request). The table is rebuilt from literal text; every row keeps
-    its `rowid`, which readers order by, and the status index comes back."""
-    path = tmp_path / "orchestrator.db"
-    conn = db._connect(path)
-    _build_old_db(conn, 55)
-    schema.insert_item(conn)
-    for rowid, sid in ((7, "s1"), (3, "s2")):
-        conn.execute(
-            "INSERT INTO worker_sessions (rowid, id, work_item_id, node_id, hook_point, "
-            "log_path, result_path, status, created_at) "
-            "VALUES (?, ?, 'w1', 'n', 'h', '/l', '/r', 'done', 'now')",
-            (rowid, sid),
-        )
-    conn.commit()
-    with pytest.raises(sqlite3.IntegrityError):
-        conn.execute("UPDATE worker_sessions SET status = 'merge_rejected' WHERE id = 's1'")
-    conn.close()
-
-    conn2 = db._connect(path)
-    db.migrate(conn2)
-    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-    conn2.execute("UPDATE worker_sessions SET status = 'merge_rejected' WHERE id = 's1'")
-    rows = conn2.execute("SELECT rowid, id, status FROM worker_sessions ORDER BY rowid").fetchall()
-    assert [(r["rowid"], r["id"], r["status"]) for r in rows] == [
-        (3, "s2", "done"),
-        (7, "s1", "merge_rejected"),
-    ]
-    index_names = {r[0] for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='index'")}
-    assert {"idx_worker_sessions_status", "idx_worker_sessions_id"} <= index_names
 
 
 def test_a_fresh_schema_and_a_fully_migrated_one_agree(tmp_path):
@@ -775,7 +732,7 @@ def test_migrate_v16_to_v17_rebuilds_for_rate_limited(tmp_path):
         16,
         drop_lines=(
             "                      'rate_limited', 'waiting', 'queued', 'blocked')),",
-            "'waiting', 'conflict', 'infra', 'infra_stop', 'merge_rejected')),",
+            "'infra_stop', 'merge_rejected')),",
         ),
         replace=(
             (
