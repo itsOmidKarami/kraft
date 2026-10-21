@@ -96,7 +96,8 @@ FORGE_DEFAULTS: dict[str, dict] = {
 SLICE_DEFAULTS: dict[str, dict] = {
     "tasks": {
         "implementer": {
-            "kind": "prompt",
+            "kind": "skill",
+            "skill": "superpowers:subagent-driven-development",
             "prompt": (
                 "Implement the slice's tasks with one subagent per task, each working test "
                 "first. After each task run a spec-compliance review and then a code-quality "
@@ -126,7 +127,6 @@ SLICE_DEFAULTS: dict[str, dict] = {
 }
 
 SKILL_MISSING = " (skill missing)"
-SKIPPED = "skipped by a binding"
 
 
 class BindingError(SystemExit):
@@ -215,8 +215,8 @@ def _entry(entry: object, where: str, refuse: Callable[[str, str], BindingError]
             raise refuse(
                 f"{where}.command", "a subprocess binding needs a command: a list of arguments"
             )
-    elif "why" in entry and not isinstance(entry["why"], str):
-        raise refuse(f"{where}.why", "why must be text")
+    else:
+        need("why")
 
 
 # -- dispatch ---------------------------------------------------------------
@@ -249,7 +249,7 @@ def dispatch(
         "skill": skill if kind == "skill" else None,
         "prompt": prompt if kind in ("skill", "prompt") else None,
         "command": list(entry["command"]) if kind == "subprocess" else None,
-        "why": (entry.get("why") or SKIPPED) if kind == "skip" else None,
+        "why": entry["why"] if kind == "skip" else None,
         "produces": task.get("produces"),
         "hints": {key: task.get(key) for key in ("profile", "model", "effort")},
         "source": source,

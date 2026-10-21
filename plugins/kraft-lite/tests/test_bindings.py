@@ -216,11 +216,39 @@ def skill(name: str, text: str = "fallback") -> dict:
             lambda name: True,
             True,
             {
-                "kind": "prompt",
+                "kind": "skill",
+                "skill": "superpowers:subagent-driven-development",
                 "prompt": kl_bindings.SLICE_DEFAULTS["tasks"]["implementer"]["prompt"],
                 "source": "slice-default:tasks.implementer",
             },
             id="slice_layer_default_implementer",
+        ),
+        pytest.param(
+            task(components=["implementer"]),
+            {},
+            lambda name: False,
+            True,
+            {
+                "kind": "prompt",
+                "skill": None,
+                "prompt": kl_bindings.SLICE_DEFAULTS["tasks"]["implementer"]["prompt"],
+                "source": "slice-default:tasks.implementer (skill missing)",
+            },
+            id="slice_layer_default_implementer_skill_missing",
+        ),
+        pytest.param(
+            task(kind="builtin", ref="kraft.verify_changed_test_scopes"),
+            {},
+            lambda name: True,
+            True,
+            {
+                "kind": "prompt",
+                "prompt": kl_bindings.SLICE_DEFAULTS["builtins"][
+                    "kraft.verify_changed_test_scopes"
+                ]["prompt"],
+                "source": "slice-default:builtins.kraft.verify_changed_test_scopes",
+            },
+            id="slice_layer_default_scoped_tests",
         ),
         pytest.param(
             task(components=["implementer"]),
@@ -316,6 +344,11 @@ def test_bindings_file_is_read(tmp_path):
             "forge:\n  mr.ci:\n    kind: subprocess\n",
             ["forge.mr.ci", "command"],
             id="subprocess_without_command",
+        ),
+        pytest.param(
+            "tasks:\n  reviewer:\n    kind: skip\n",
+            ["tasks.reviewer", "why"],
+            id="skip_without_why",
         ),
         pytest.param(
             "tasks:\n  spec_author:\n    kind: skill\n    skill: a:b\n",
