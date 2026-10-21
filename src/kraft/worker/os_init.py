@@ -113,8 +113,11 @@ def _copy(out_r, st_r, started_file):
             elif fd == st_r:
                 watch.remove(fd)
                 if started_file:
-                    with open(started_file, "w") as f:
-                        f.write("started\n")
+                    try:
+                        with open(started_file, "w") as f:
+                            f.write("started\n")
+                    except OSError:
+                        pass  # no record: the caller reads that as a launch that failed
             elif not broken:
                 try:
                     _write_all(1, data)

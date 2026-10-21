@@ -77,9 +77,6 @@ def test_unknown_arch_refused():
 @pytest.mark.e2e("bwrap")
 def test_filter_under_bwrap(tmp_path):
     arch = os_seccomp.machine()
-    fd = os.open(tmp_path / "filter.bpf", os.O_RDWR | os.O_CREAT)
-    os.write(fd, os_seccomp.build(arch))
-    os.lseek(fd, 0, os.SEEK_SET)
     nrs = (os_seccomp.DENY[arch]["keyctl"], os_seccomp.DENY[arch]["io_uring_setup"])
     probe = (
         "import ctypes\n"
@@ -88,19 +85,24 @@ def test_filter_under_bwrap(tmp_path):
         "    libc.syscall(nr, 0, 0, 0)\n"
         "    print(ctypes.get_errno())\n"
     )
-    argv = [
-        "bwrap", "--unshare-all", "--unshare-user", "--disable-userns", "--cap-drop", "ALL",
-        "--seccomp", "3", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-    ]  # fmt: skip
-    py = subprocess.run(
-        [*argv, sys.executable, "-I", "-c", probe],
-        pass_fds=[fd],
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
+
+    def bwrap(*cmd):
+        # A fresh descriptor per run: runs sharing one would share its file offset.
+        fd = os.open(tmp_path / "filter.bpf", os.O_RDWR | os.O_CREAT)
+        try:
+            os.write(fd, os_seccomp.build(arch))
+            os.lseek(fd, 0, os.SEEK_SET)
+            argv = [
+                "bwrap", "--unshare-all", "--unshare-user", "--disable-userns", "--cap-drop", "ALL",
+                "--seccomp", str(fd), "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+            ]  # fmt: skip
+            return subprocess.run(
+                [*argv, *cmd], pass_fds=[fd], capture_output=True, text=True, timeout=60
+            )
+        finally:
+            os.close(fd)
+
+    py = bwrap(sys.executable, "-I", "-c", probe)
     assert py.stdout.split() == [str(errno.EPERM)] * 2, py.stderr
-    git = subprocess.run(
-        [*argv, "git", "--version"], pass_fds=[fd], capture_output=True, text=True, timeout=60
-    )
+    git = bwrap("git", "--version")
     assert git.returncode == 0 and git.stdout.startswith("git version"), git.stderr

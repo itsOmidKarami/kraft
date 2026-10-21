@@ -369,7 +369,7 @@ jobs:
       - name: install bubblewrap
         # The os sandbox's tests run bwrap as the runner's own user. Ubuntu 24.04
         # blocks unprivileged user namespaces for it without an AppArmor profile.
-        run: sudo apt-get install -y bubblewrap && sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap && sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: uv sync --frozen
       - run: uv run pytest -m e2e -n logical --durations=25 -rs --junitxml=e2e-junit.xml
         env:

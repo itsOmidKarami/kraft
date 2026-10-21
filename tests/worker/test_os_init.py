@@ -205,6 +205,25 @@ def test_init_forwards_signal_to_detached_child(tmp_path):
     assert p.wait(timeout=20) == 143
 
 
+def test_init_does_not_forward_to_a_child_in_its_group(tmp_path):
+    # The group signal already reaches the child; a forwarded second one would
+    # cut short the cost write a pause exists to protect.
+    ready, count = tmp_path / "ready", tmp_path / "count"
+    code = (
+        "import pathlib, signal, time\n"
+        "n = []\n"
+        "signal.signal(signal.SIGINT, lambda *_: n.append(1))\n"
+        f"pathlib.Path({str(ready)!r}).touch()\n"
+        "time.sleep(1.5)\n"
+        f"pathlib.Path({str(count)!r}).write_text(str(len(n)))"
+    )
+    p = subprocess.Popen(init_argv(*py(code)), env={}, start_new_session=True)
+    wait_for(ready)
+    os.killpg(p.pid, signal.SIGINT)
+    assert p.wait(timeout=20) == 0
+    assert count.read_text() == "1"
+
+
 def test_init_reaps(tmp_path):
     pidfile = tmp_path / "pid"
     inner = f"echo $$ > {pidfile}; exit 0"
