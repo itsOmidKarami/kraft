@@ -17,7 +17,10 @@ Run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" detect` from the repo root. It prints t
 test command (`test_command`) and CI status command (`ci_command`) it found and,
 for each hook, every installed skill that plausibly serves it. For a chain other
 than the packaged default, add `--chain <path-to-chain.json>` so the hooks listed
-are that chain's.
+are that chain's. Run it a second time with
+`--chain "$CLAUDE_PLUGIN_ROOT/chains/slice.json"`: the registry binds that chain's
+two extra hooks too, `on.slice.implementation.start` and `on.slice.test.run`, which
+a child walking a slice needs.
 
 Write `.kraft-lite/registry.yaml` from that output. Fill every hook in. For each
 one, add a comment listing the other candidates detect returned, so the human can
@@ -52,6 +55,12 @@ Rules for filling it in:
   When an existing registry already holds a different `test_command` or `ci_command`
   than detect printed, the person's edit wins: leave it, let the diff show the
   difference, and let the human choose.
+- `on.slice.test.run` is always `kind: prompt`, even when `test_command` was found: a
+  child runs only its own slice's tests, and CI runs the full suite.
+
+      on.slice.test.run:
+        kind: prompt
+        prompt: Run only the tests for this slice's files, by explicit path, never the whole suite. List the paths in the PR body.
 
 Every `skill` entry gets a `prompt` sibling. A renamed or uninstalled skill then
 degrades to an instruction instead of stopping the chain.
@@ -60,4 +69,7 @@ Verify before you finish: every hook `detect` listed has a key at column zero in
 the file with an indented body under it. `kraft-lite:start` refuses a chain whose
 hooks lack a binding, so a gap surfaces there, but catching it now is cheaper.
 
-Then print the path and say it is meant to be edited and committed.
+Then print the path and say it is meant to be edited and committed. Tell the human
+to add `.kraft-lite/decisions/`, `.kraft-lite/messages/` and `.kraft-lite/proposals/`
+to `.gitignore`: a sliced run writes its decisions log, messages and proposals
+there, and they are not for the repo. `registry.yaml` stays committed.

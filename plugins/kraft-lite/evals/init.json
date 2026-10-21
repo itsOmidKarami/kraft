@@ -1,0 +1,27 @@
+[
+  {
+    "skills": [
+      "kraft-lite:init"
+    ],
+    "query": "[user] Set up Kraft Lite in this repo. Show me what you'd write to the registry.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger (a Python project with a justfile whose `test` recipe runs pytest; GitHub, gh installed), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed, superpowers and engineering plugins installed. There is no .kraft-lite/registry.yaml yet and no .gitignore entry for .kraft-lite. `python3 \"$CLAUDE_PLUGIN_ROOT/kl.py\" detect` with no --chain prints test_command [just, test], ci_command [gh, pr, checks] and, for the default chain's hooks: on.mr.rebase none; on.spec.requested superpowers:brainstorming; on.plan.requested superpowers:writing-plans; on.chain.review_ready none; on.env.prepare superpowers:using-git-worktrees; on.implementation.start superpowers:subagent-driven-development; on.repos.scan none; on.test.run none; on.review.local.run engineering:code-review, superpowers:requesting-code-review; on.mr.describe none; on.mr.open superpowers:finishing-a-development-branch; on.ci.poll none; on.review.mr.run engineering:code-review; on.human_review.requested none; on.mr.sync none; on.merge none; on.merge.watch none. With `--chain \"$CLAUDE_PLUGIN_ROOT/chains/slice.json\"` it prints the same test_command and ci_command and, for the slice chain's hooks: on.mr.rebase none; on.env.prepare superpowers:using-git-worktrees; on.slice.implementation.start superpowers:subagent-driven-development; on.repos.scan none; on.slice.test.run none; on.review.local.run engineering:code-review, superpowers:requesting-code-review; on.mr.describe none; on.mr.open superpowers:finishing-a-development-branch; on.ci.poll none. The human has already answered any question about ambiguous hooks: take the first candidate listed.",
+    "expected_behavior": [
+      "Runs detect with `--chain \"$CLAUDE_PLUGIN_ROOT/chains/slice.json\"` as well as plain detect, so the slice chain's hooks are seen",
+      "Writes registry entries for on.slice.implementation.start (the skill detect found, with a prompt sibling) and on.slice.test.run",
+      "Writes on.slice.test.run as kind: prompt, an instruction to run only the slice's own tests by explicit path, and not as the subprocess [just, test] even though test_command was found",
+      "Still binds on.test.run as kind: subprocess with command [just, test]"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:init"
+    ],
+    "query": "[user] Set up Kraft Lite in this repo, then tell me what else I need to do by hand.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger (a Python project with a justfile whose `test` recipe runs pytest; GitHub, gh installed), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed, superpowers and engineering plugins installed. There is no .kraft-lite/registry.yaml yet and no .gitignore entry for .kraft-lite. `python3 \"$CLAUDE_PLUGIN_ROOT/kl.py\" detect` with no --chain prints test_command [just, test], ci_command [gh, pr, checks] and, for the default chain's hooks: on.mr.rebase none; on.spec.requested superpowers:brainstorming; on.plan.requested superpowers:writing-plans; on.chain.review_ready none; on.env.prepare superpowers:using-git-worktrees; on.implementation.start superpowers:subagent-driven-development; on.repos.scan none; on.test.run none; on.review.local.run engineering:code-review, superpowers:requesting-code-review; on.mr.describe none; on.mr.open superpowers:finishing-a-development-branch; on.ci.poll none; on.review.mr.run engineering:code-review; on.human_review.requested none; on.mr.sync none; on.merge none; on.merge.watch none. With `--chain \"$CLAUDE_PLUGIN_ROOT/chains/slice.json\"` it prints the same test_command and ci_command and, for the slice chain's hooks: on.mr.rebase none; on.env.prepare superpowers:using-git-worktrees; on.slice.implementation.start superpowers:subagent-driven-development; on.repos.scan none; on.slice.test.run none; on.review.local.run engineering:code-review, superpowers:requesting-code-review; on.mr.describe none; on.mr.open superpowers:finishing-a-development-branch; on.ci.poll none. The human has already answered any question about ambiguous hooks: take the first candidate listed.",
+    "expected_behavior": [
+      "Tells the human to add `.kraft-lite/decisions/`, `.kraft-lite/messages/` and `.kraft-lite/proposals/` to .gitignore",
+      "Does not suggest ignoring the whole `.kraft-lite/` directory, which would hide registry.yaml, and which is meant to be committed",
+      "Still says registry.yaml is meant to be edited and committed"
+    ]
+  }
+]

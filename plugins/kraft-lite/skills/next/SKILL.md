@@ -26,6 +26,21 @@ You get `node`, `hooks`, `gate`, `attempt`, `cap`, `status` and `note`.
 - `status: done` - the chain is finished. Report the summary (below) and stop.
 - `status: blocked` - a gate is waiting. Invoke `kraft-lite:gate`. Do not proceed.
 - `note` non-empty - the node was rejected. That note leads this attempt.
+- `sliced` not null, `status` neither `done` nor `blocked` - `sliced.action` says
+  what this node is:
+  - `run_slices` - invoke `kraft-lite:run-slices`, which closes this node when every
+    slice is done. Stop.
+  - `scoped_verify` - step 2, with the test hook run on the files
+    `git diff --name-only <base branch>...<feature branch>` lists, not the whole
+    suite: the children tested their slices, and CI runs the full suite.
+  - `skip` - `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" close --chain-id <id>` with no hooks
+    run, then this skill again.
+  - `await_user_merges` - check the PR of each slice that `slices` does not show as
+    `merged`. For each the user merged:
+    `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" slice-set --slice <key> --status merged --chain-id <id>`.
+    Name the slices still waiting and stop. Once all are merged, `close`, then this
+    skill again. Never open this node's gate: the user's merges are the answer.
+  - `hooks` - step 2.
 
 ## 2. Run the node's hooks, in order
 

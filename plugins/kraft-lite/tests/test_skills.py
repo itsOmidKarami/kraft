@@ -327,3 +327,58 @@ def test_the_run_slices_skill_spells_the_helper_in_copyable_blocks(texts):
     lines = [line for block in blocks for line in block.splitlines()]
     assert any('"$CLAUDE_PLUGIN_ROOT/kl.py"' in line for line in lines)
     assert not [line for line in lines if re.match(r"\s*KL\b", line)]
+
+
+SLICED_ACTION_NAMES = sorted({a for modes in kl.SLICED_ACTIONS.values() for a in modes.values()})
+
+
+@pytest.mark.parametrize("action", SLICED_ACTION_NAMES)
+def test_the_next_skill_acts_on_every_sliced_action(texts, action):
+    """`state.sliced.action` says what a node means in a sliced run. An action the
+    skill does not name is one it dispatches as plain hooks: an implementation node
+    run inline instead of by the slices, a main-mode node opening a gate the user's
+    merges already answered."""
+    assert f"- `{action}` -" in texts["next"], f"next does not act on sliced.action {action!r}"
+
+
+def test_the_next_skill_hands_each_sliced_action_to_its_owner(texts):
+    body = texts["next"]
+    assert "kraft-lite:run-slices" in body
+    assert "slice-set" in body and "--status merged" in body
+    assert "git diff --name-only" in body, "the scoped verify has to name what it scopes to"
+    assert "Never open" in body, "await_user_merges must forbid opening the gate"
+    # a done sliced chain reports action `hooks`: status is read before the action
+    assert body.index("`status: done`") < body.index("`sliced.action`")
+
+
+def test_the_status_skill_reports_slices_and_held_questions(texts):
+    body = texts["status"]
+    for verb in ('kl.py" slices', "decisions --held", "decisions --unreported --mark"):
+        assert verb in body, verb
+    assert "`ready`" in body
+    # held questions lead the report, and `--mark` is refused together with `--held`
+    assert body.index("held questions first") < body.index("`ready`") < body.index("last report")
+    assert "--held --unreported" not in body and "--unreported --held" not in body
+    assert "two commands" in body or "separate" in body
+
+
+def test_the_gate_skill_records_slices_at_chain_finalized(texts):
+    body = texts["gate"]
+    assert "approve --slices .kraft-lite/proposals/<chain-id>.json" in body
+    assert "chain_finalized" in body
+    assert "`sliced`" in body, "an already sliced chain must take a plain approve"
+    assert "reject" in body.split("chain_finalized")[1], "a reject at this gate is covered"
+
+
+def test_init_binds_both_slice_hooks_and_the_ignores(texts):
+    body = texts["init"]
+    for needle in (
+        "chains/slice.json",
+        "on.slice.implementation.start",
+        ".kraft-lite/decisions/",
+        ".kraft-lite/messages/",
+        ".kraft-lite/proposals/",
+    ):
+        assert needle in body, needle
+    # the slice test hook is never the whole-suite subprocess
+    assert re.search(r"on\.slice\.test\.run:\n\s+kind: prompt", body)

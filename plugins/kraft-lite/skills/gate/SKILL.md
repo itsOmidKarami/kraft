@@ -14,8 +14,8 @@ the node's `status` is `blocked`; otherwise stop and invoke `kraft-lite:next`, b
 `approve` closes whatever node is current, hooks unrun.
 
 Then show the human what the gate is actually about - the spec, the plan, the diff,
-the findings. A gate answered without the artefact in front of the person is a gate
-that has stopped meaning anything.
+the findings, the slicing proposal. A gate answered without the artefact in front of
+the person is a gate that has stopped meaning anything.
 
 A good presentation names the artefact, says where it lives, and puts the one question
 the gate asks, for example: "`plan_approval`: the plan is `docs/plan.md` (read it, or I
@@ -29,6 +29,17 @@ an earlier "just do it", is not an answer.
 
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" approve --chain-id <id>
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" reject --note "<their reason>" --chain-id <id>
+
+At `chain_finalized`, when `state` shows `sliced` null and
+`.kraft-lite/proposals/<chain-id>.json` exists, the approval carries the slices:
+
+    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" approve --slices .kraft-lite/proposals/<chain-id>.json --chain-id <id>
+
+A plain `approve` there leaves the chain unsliced for good, since slicing is only
+accepted at this gate. A reject needs nothing extra: it leaves no slices behind, and
+the proposal is redrawn when the node reopens. When `sliced` is not null the chain
+was sliced before and rewound past this gate; it cannot be sliced again, so
+`--slices` is refused, so use a plain `approve`.
 
 A plain reject reopens the node being gated. That is right for a gate on the node
 that made the artefact - a rejected spec re-runs the spec node. It is wrong for a

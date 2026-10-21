@@ -1,0 +1,90 @@
+[
+  {
+    "skills": [
+      "kraft-lite:next"
+    ],
+    "query": "[user] Continue the ledger export chain.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. The chain was sliced at chain_finalized: slice a 'Row model' (task 1), slice b 'Writers' (tasks 2-4, after a), slice c 'Importer' (task 5). Mode is feature; no child has started. `.kraft-lite/registry.yaml` binds: on.mr.rebase to a prompt; on.env.prepare to skill superpowers:using-git-worktrees; on.implementation.start to skill superpowers:subagent-driven-development; on.repos.scan to a prompt; on.test.run to kind subprocess, command [just, test]; on.review.local.run to skill engineering:code-review; on.mr.describe to a prompt; on.mr.open to skill superpowers:finishing-a-development-branch; on.ci.poll to kind subprocess, command [gh, pr, checks]; on.human_review.requested to a prompt; on.mr.sync and on.merge to prompts. All of those skills are installed. `python3 \"$CLAUDE_PLUGIN_ROOT/kl.py\" state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"implementation\", \"hooks\": [\"on.mr.rebase\", \"on.env.prepare\", \"on.implementation.start\", \"on.repos.scan\"], \"gate\": null, \"attempt\": 0, \"cap\": null, \"status\": \"open\", \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"feature\", \"action\": \"run_slices\"}}",
+    "expected_behavior": [
+      "Invokes kraft-lite:run-slices because state.sliced.action is run_slices",
+      "Dispatches none of the node's own hooks: does not invoke superpowers:subagent-driven-development or superpowers:using-git-worktrees and does not follow the on.repos.scan or on.mr.rebase prompts itself",
+      "Does not run `close` on the implementation node itself; leaves that to the run-slices skill, which closes it when every slice is done",
+      "Does not open a gate"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:next"
+    ],
+    "query": "[user] Carry on with the chain.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. All three slices (a, b, c) are merged into the feature branch feat/ledger-export, which changed src/ledger/rows.py, src/ledger/export/csv.py, src/ledger/export/json.py, tests/export/test_csv.py and tests/export/test_json.py against main. Mode is feature. `.kraft-lite/registry.yaml` binds: on.mr.rebase to a prompt; on.env.prepare to skill superpowers:using-git-worktrees; on.implementation.start to skill superpowers:subagent-driven-development; on.repos.scan to a prompt; on.test.run to kind subprocess, command [just, test]; on.review.local.run to skill engineering:code-review; on.mr.describe to a prompt; on.mr.open to skill superpowers:finishing-a-development-branch; on.ci.poll to kind subprocess, command [gh, pr, checks]; on.human_review.requested to a prompt; on.mr.sync and on.merge to prompts. All of those skills are installed. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"verify\", \"hooks\": [\"on.mr.rebase\", \"on.env.prepare\", \"on.test.run\", \"on.review.local.run\"], \"gate\": null, \"attempt\": 0, \"cap\": 3, \"status\": \"open\", \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"feature\", \"action\": \"scoped_verify\"}}",
+    "expected_behavior": [
+      "Dispatches the node's bound hooks in order (on.mr.rebase, on.env.prepare, on.test.run, on.review.local.run), as for any node",
+      "Runs the test hook on what the feature branch changed (for example the paths from `git diff --name-only main...feat/ledger-export`), not as the bare `just test` whole-suite command",
+      "Says the full suite runs on CI"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:next"
+    ],
+    "query": "[user] Next step please.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. The run is sliced in main mode: each slice's PR goes to main and the user merges them. All three slice PRs are already open against main. `.kraft-lite/registry.yaml` binds: on.mr.rebase to a prompt; on.env.prepare to skill superpowers:using-git-worktrees; on.implementation.start to skill superpowers:subagent-driven-development; on.repos.scan to a prompt; on.test.run to kind subprocess, command [just, test]; on.review.local.run to skill engineering:code-review; on.mr.describe to a prompt; on.mr.open to skill superpowers:finishing-a-development-branch; on.ci.poll to kind subprocess, command [gh, pr, checks]; on.human_review.requested to a prompt; on.mr.sync and on.merge to prompts. All of those skills are installed. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"open_mr\", \"hooks\": [\"on.mr.rebase\", \"on.mr.describe\", \"on.mr.open\"], \"gate\": null, \"attempt\": 0, \"cap\": null, \"status\": \"open\", \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"main\", \"action\": \"skip\"}}",
+    "expected_behavior": [
+      "Runs `close --chain-id kl-7f3a91c2` on open_mr without dispatching any of its hooks",
+      "Does not run on.mr.rebase, on.mr.describe, or on.mr.open, and does not open a second PR to main",
+      "Runs kraft-lite:next again for the following node, or says it will"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:next"
+    ],
+    "query": "[user] Where do we go from here? Keep the chain moving.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. The run is sliced in main mode: each slice's PR goes to main and the user merges them. `.kraft-lite/registry.yaml` binds: on.mr.rebase to a prompt; on.env.prepare to skill superpowers:using-git-worktrees; on.implementation.start to skill superpowers:subagent-driven-development; on.repos.scan to a prompt; on.test.run to kind subprocess, command [just, test]; on.review.local.run to skill engineering:code-review; on.mr.describe to a prompt; on.mr.open to skill superpowers:finishing-a-development-branch; on.ci.poll to kind subprocess, command [gh, pr, checks]; on.human_review.requested to a prompt; on.mr.sync and on.merge to prompts. All of those skills are installed. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"human_review\", \"hooks\": [\"on.human_review.requested\"], \"gate\": null, \"attempt\": 0, \"cap\": null, \"status\": \"open\", \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"main\", \"action\": \"await_user_merges\"}}. `slices --chain-id kl-7f3a91c2` prints three slices, each with status ready_to_merge and a branch: a on ledger/a-rows, b on ledger/b-writers, c on ledger/c-importer; `gh pr view <branch> --json state` shows a's PR MERGED, b's PR OPEN, c's PR MERGED. The slice records still say ready_to_merge.",
+    "expected_behavior": [
+      "Checks each slice's PR rather than assuming (for example `gh pr view <branch> --json state` for each of the three)",
+      "Records the merges with `slice-set --slice a --status merged --chain-id kl-7f3a91c2` and the same for c, and not for b",
+      "Reports that slice b's PR is still waiting for the user to merge it",
+      "Does not run `gate --name human_review_approval`, does not run `approve`, and does not run `close` while b is unmerged",
+      "Does not dispatch on.human_review.requested or ask the user to approve a gate: the user's merges are the answer"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:next"
+    ],
+    "query": "[user] I merged the last one. Go on.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. The run is sliced in main mode: each slice's PR goes to main and the user merges them. `.kraft-lite/registry.yaml` binds: on.mr.rebase to a prompt; on.env.prepare to skill superpowers:using-git-worktrees; on.implementation.start to skill superpowers:subagent-driven-development; on.repos.scan to a prompt; on.test.run to kind subprocess, command [just, test]; on.review.local.run to skill engineering:code-review; on.mr.describe to a prompt; on.mr.open to skill superpowers:finishing-a-development-branch; on.ci.poll to kind subprocess, command [gh, pr, checks]; on.human_review.requested to a prompt; on.mr.sync and on.merge to prompts. All of those skills are installed. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"human_review\", \"hooks\": [\"on.human_review.requested\"], \"gate\": null, \"attempt\": 0, \"cap\": null, \"status\": \"open\", \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"main\", \"action\": \"await_user_merges\"}}. `slices --chain-id kl-7f3a91c2` prints three slices: a already merged in the records; b and c with status ready_to_merge, on branches ledger/b-writers and ledger/c-importer. `gh pr view <branch> --json state` shows both b's and c's PRs MERGED.",
+    "expected_behavior": [
+      "Checks the PRs of the slices not yet recorded as merged and records each with `slice-set --slice <key> --status merged --chain-id kl-7f3a91c2`",
+      "Then runs `close --chain-id kl-7f3a91c2` for the node, since every slice is merged",
+      "Does not run `gate --name human_review_approval` or ask the user to approve; their merges were the answer",
+      "Runs kraft-lite:next again for the following node, or says it will"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:next"
+    ],
+    "query": "[user] Is the ledger export finished? Wrap it up.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. The chain was sliced and every node, gate and slice is closed. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": null, \"hooks\": [], \"gate\": null, \"attempt\": 0, \"cap\": null, \"status\": \"done\", \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"feature\", \"action\": \"hooks\"}}. `summary --chain-id kl-7f3a91c2` prints ten nodes with times, one gate answered at chain_finalized, attempts 2, duration_seconds 5400, blocked_seconds 1800.",
+    "expected_behavior": [
+      "Treats status done as final: runs `summary --chain-id kl-7f3a91c2` and reports it, then stops",
+      "Dispatches no hooks, does not invoke kraft-lite:run-slices, and starts no further node"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:next",
+      "kraft-lite:build-slice"
+    ],
+    "query": "[the harness, on the child's own wake-up] Checks may have finished; continue the slice.",
+    "setup": "A cloud Claude Code child session for slice b of chain kl-7f3a91c2 (repo acme/ledger, branch ledger/b-writers, draft PR #52 into feat/ledger-export), started by controller session_01Ctrl00 and walking its own slice chain kl-b82c4d11 with kraft-lite:build-slice and kraft-lite:next. The harness has no background or wake-up primitive. `state --chain-id kl-b82c4d11` prints a state at node mr_checks, hooks [on.ci.poll], status open, sliced null. The registry binds on.ci.poll to the subprocess [gh, pr, checks]. Running it prints: `build pending`, `lint pass`, `tests pending`.",
+    "expected_behavior": [
+      "Runs the on.ci.poll check once and does not loop or wait on it",
+      "Reports the pending CI to the controller (session_01Ctrl00) as a status message, in the build-slice template",
+      "Ends its turn without asking the human to invoke any skill again"
+    ]
+  }
+]

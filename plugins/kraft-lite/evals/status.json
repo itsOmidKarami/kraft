@@ -1,0 +1,30 @@
+[
+  {
+    "skills": [
+      "kraft-lite:status"
+    ],
+    "query": "[user] /kraft-lite:status - where are we on the ledger export?",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. The user typed /kraft-lite:status; its text is loaded. `chains` prints this one chain, status open, node implementation. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"implementation\", \"hooks\": [\"on.mr.rebase\", \"on.env.prepare\", \"on.implementation.start\", \"on.repos.scan\"], \"gate\": null, \"attempt\": 0, \"cap\": null, \"status\": \"open\", \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"feature\", \"action\": \"run_slices\"}}. `slices --chain-id kl-7f3a91c2` prints: {\"mode\": \"feature\", \"feature_branch\": \"feat/ledger-export\", \"state_branch\": \"claude/ledger-x1\", \"slices\": [{\"key\": \"a\", \"title\": \"Row model\", \"tasks\": [1], \"after\": [], \"status\": \"merged\", \"session\": \"session_01Aa\", \"branch\": \"ledger/a-rows\", \"fork\": null, \"done\": true}, {\"key\": \"b\", \"title\": \"Writers\", \"tasks\": [2, 3, 4], \"after\": [\"a\"], \"status\": \"running\", \"session\": \"session_01Bb\", \"branch\": \"ledger/b-writers\", \"fork\": null, \"done\": false}, {\"key\": \"c\", \"title\": \"Importer\", \"tasks\": [5], \"after\": [\"b\"], \"status\": \"waiting\", \"session\": null, \"branch\": null, \"fork\": null, \"done\": false}, {\"key\": \"d\", \"title\": \"Docs page\", \"tasks\": [6], \"after\": [\"a\"], \"status\": \"waiting\", \"session\": null, \"branch\": null, \"fork\": null, \"done\": false}], \"ready\": [\"d\"]}. `decisions --held` and `decisions --unreported` both print [].",
+    "expected_behavior": [
+      "Runs `slices --chain-id kl-7f3a91c2` and reports every slice: a merged, b running (session_01Bb), c waiting on b, d ready to start",
+      "Says what each waiting slice waits on, and which slices are ready",
+      "Reports the node (implementation) and that the chain is running, and where the state lives (jsonl)",
+      "Invents no held question or decision, since both lists are empty",
+      "Stays read-only: starts no child for the ready slice d and does not run slice-set or close"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:status"
+    ],
+    "query": "[user] /kraft-lite:status - anything for me to do?",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite feature chain kl-7f3a91c2, titled 'Ledger export', is the only chain in the directory. The user typed /kraft-lite:status; its text is loaded. `chains` prints this one chain, status open, node implementation. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"implementation\", \"hooks\": [\"on.mr.rebase\", \"on.env.prepare\", \"on.implementation.start\", \"on.repos.scan\"], \"gate\": null, \"attempt\": 0, \"cap\": null, \"status\": \"open\", \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": {\"mode\": \"feature\", \"action\": \"run_slices\"}}. `slices --chain-id kl-7f3a91c2` prints: {\"mode\": \"feature\", \"feature_branch\": \"feat/ledger-export\", \"state_branch\": \"claude/ledger-x1\", \"slices\": [{\"key\": \"a\", \"title\": \"Row model\", \"tasks\": [1], \"after\": [], \"status\": \"merged\", \"session\": \"session_01Aa\", \"branch\": \"ledger/a-rows\", \"fork\": null, \"done\": true}, {\"key\": \"b\", \"title\": \"Writers\", \"tasks\": [2, 3, 4], \"after\": [\"a\"], \"status\": \"running\", \"session\": \"session_01Bb\", \"branch\": \"ledger/b-writers\", \"fork\": null, \"done\": false}, {\"key\": \"c\", \"title\": \"Importer\", \"tasks\": [5], \"after\": [], \"status\": \"running\", \"session\": \"session_01Cc\", \"branch\": \"ledger/c-importer\", \"fork\": null, \"done\": false}], \"ready\": []}. `decisions --held --chain-id kl-7f3a91c2` prints: [{\"id\": \"kd-e1589328\", \"at\": \"2026-10-21T02:38:19Z\", \"slice\": \"b\", \"question\": \"May b push to feat/ledger-export-b2?\", \"answer\": null, \"why\": \"user-only: push outside the child's own branch\", \"held\": true, \"answered_by\": null, \"answered_at\": null}]. `decisions --unreported --chain-id kl-7f3a91c2` (what has not been reported yet; held questions are included in it) prints: [{\"id\": \"kd-e1589328\", \"at\": \"2026-10-21T02:38:19Z\", \"slice\": \"b\", \"question\": \"May b push to feat/ledger-export-b2?\", \"answer\": null, \"why\": \"user-only: push outside the child's own branch\", \"held\": true, \"answered_by\": null, \"answered_at\": null}, {\"id\": \"kd-4b9526af\", \"at\": \"2026-10-21T02:40:02Z\", \"slice\": \"a\", \"question\": \"Decimal places in the CSV?\", \"answer\": \"Two, fixed\", \"why\": \"plan task 2 leaves it open; cheap to overturn\", \"held\": false, \"answered_by\": \"controller\", \"answered_at\": \"2026-10-21T02:40:02Z\"}, {\"id\": \"kd-7c1d0a55\", \"at\": \"2026-10-21T02:51:30Z\", \"slice\": \"c\", \"question\": \"Reject rows with an unknown currency?\", \"answer\": \"Skip them and count them in the summary\", \"why\": \"the plan's task 5 does not say; reversible\", \"held\": false, \"answered_by\": \"controller\", \"answered_at\": \"2026-10-21T02:51:30Z\"}]. No report has been made before.",
+    "expected_behavior": [
+      "Puts the held question first, before the slices, with its reason and what the user must do to answer it",
+      "Lists the decisions made since the last report (the decimal places and the unknown-currency calls) with their answers and reasons, and does not list the held question twice",
+      "Runs `decisions --held` and `decisions --unreported --mark` as two separate commands, since `--mark` is refused together with `--held`",
+      "Reports every slice with its status",
+      "Does not answer the held question or run `answer`, and does not approve anything"
+    ]
+  }
+]

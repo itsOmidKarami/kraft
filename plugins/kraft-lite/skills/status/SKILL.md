@@ -27,6 +27,19 @@ gate, attempts spent against the cap if there is one, and which backend holds th
 state. `status: unstarted` means no chain exists here yet - say that, rather than
 that nothing is running.
 
+If `state` shows `sliced` not null, also run these. `--mark` is refused together
+with `--held`, so they are separate commands:
+
+    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" slices --chain-id <id>
+    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" decisions --held --chain-id <id>
+    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" decisions --unreported --mark --chain-id <id>
+
+Report held questions first, each with why it is held: they wait on the user, and
+stay at the top until answered. Then each slice with its status, what it comes
+`after` and so waits on, and whether it is in `ready`. Then the decisions since the
+last report, each with its answer and why. A held question is also in the
+`--unreported` list: report it once, under held.
+
 An illustration, not a template: "`Add export` is at `plan`, blocked at
 `plan_approval`, no fix loop so no cap, state in `jsonl`. It needs your answer
 before anything runs."
@@ -42,5 +55,7 @@ walked so far and say the total lands at the end, rather than calling an
 unfinished run instant. It has no token or cost figures: Lite runs inside your
 session and cannot see them.
 
-Read-only. Do not advance, close, or approve anything from here - that is what
-`kraft-lite:next` and `kraft-lite:gate` are for.
+Read-only, except that `--mark` moves the report cursor past what you just
+reported. Do not advance, close, approve or answer anything from here, and start no
+slice that is `ready` - that is what `kraft-lite:next`, `kraft-lite:gate` and
+`kraft-lite:run-slices` are for.
