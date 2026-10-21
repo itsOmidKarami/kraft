@@ -302,6 +302,17 @@ def test_a_second_start_becomes_the_live_chain(tmp_path, monkeypatch, capsys, wa
     assert state["status"] == "open"
 
 
+#: A sound gate node of another chain: the run's own node is not in it.
+OTHER_NODE = {
+    "id": "elsewhere",
+    "kind": "gate",
+    "message": "Approve.",
+    "artifact": None,
+    "reject_to": None,
+    "chain_finalized": False,
+}
+
+
 def test_a_node_missing_from_the_chain_fails_rather_than_reporting_no_hooks(
     tmp_path, monkeypatch, capsys
 ):
@@ -312,7 +323,7 @@ def test_a_node_missing_from_the_chain_fails_rather_than_reporting_no_hooks(
     kl.main(["start", "--title", "t"])
     chain_id = json.loads(capsys.readouterr().out)["chain_id"]
     (tmp_path / kl.STATE_DIR / "chains" / f"{chain_id}.json").write_text(
-        json.dumps({"format": "v1", "id": "other", "source": "elsewhere", "nodes": []})
+        json.dumps({"format": "v1", "id": "other", "source": "elsewhere", "nodes": [OTHER_NODE]})
     )
     with pytest.raises(SystemExit) as caught:
         kl.main(["state"])

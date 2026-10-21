@@ -155,7 +155,49 @@ REFUSALS: dict[str, tuple[str, int, str]] = {
     "block_scalar_leading_spaces_line": ("a: |\n    \n  one\n", 2, "indent"),
     "timestamp": ("a: 2024-01-02\n", 1, "timestamp"),
     "sexagesimal": ("a: 1:30\n", 1, "sexagesimal"),
+    # `safe_load` reads these as a mapping: `?` in a flow collection is a key.
+    "question_in_flow": ("a: [? b]\n", 1, "cannot start with '?'"),
+    "question_plain_in_flow": ("a: [?x]\n", 1, "cannot start with '?'"),
 }
+
+#: Refusals where `safe_load` raises too, which tests/plugins checks: a plain
+#: scalar starting with an indicator, and a tab anywhere but in a quoted or
+#: block scalar's text or a comment.
+SAFE_LOAD_REFUSES: dict[str, tuple[str, int, str]] = {
+    "question_value": ("a: ? b\n", 1, "cannot start with '?'"),
+    "question_alone": ("a: ?\n", 1, "cannot start with '?'"),
+    "percent_value": ("a: %x\n", 1, "cannot start with '%'"),
+    "comma_value": ("a: ,x\n", 1, "cannot start with ','"),
+    "bracket_value": ("a: ]x\n", 1, "cannot start with ']'"),
+    "brace_value": ("a: }x\n", 1, "cannot start with '}'"),
+    "percent_key": ("%x: 1\n", 1, "cannot start with '%'"),
+    "comma_item": ("- ,x\n", 1, "cannot start with ','"),
+    "percent_in_flow": ("a: [x, %]\n", 1, "cannot start with '%'"),
+    "question_in_flow_mapping_value": ("a: {k: ?}\n", 1, "cannot start with '?'"),
+    "dash_in_flow": ("a: [- x]\n", 1, "cannot start with '- '"),
+    "tab_after_colon": ("a:\tb\n", 1, "tab"),
+    "tab_in_plain": ("a: b\tc\n", 1, "tab"),
+    "tab_after_plain": ("a: b\t\n", 1, "tab"),
+    "tab_before_comment": ("a: x\t#c\n", 1, "tab"),
+    "tab_after_quoted": ("a: 'x'\t\n", 1, "tab"),
+    "tab_in_key": ("a\t: 1\n", 1, "tab"),
+    "tab_in_sequence_item": ("- b\tc\n", 1, "tab"),
+    "tab_on_blank_line": ("a: 1\n\t\nb: 2\n", 2, "tab"),
+    "tab_in_flow": ("a: [a,\tb]\n", 1, "tab"),
+    "tab_in_flow_continuation": ("a: [a,\n  \tb]\n", 2, "tab"),
+    "tab_after_flow": ("a: [x]\t\n", 1, "tab"),
+    "tab_after_block_header": ("a: |\t\n  x\n", 1, "tab"),
+    "tab_after_dash": ("- \tb\n", 1, "tab"),
+    "tab_after_quoted_key": ("'a':\tb\n", 1, "tab"),
+    "tab_after_document_marker": ("---\t\na: 1\n", 1, "tab"),
+    "block_header_comment_without_space": ("a: |#x\n  y\n", 1, "block scalar"),
+    "hash_in_flow": ("a: [#x]\n", 1, "cannot start with '#'"),
+    "colon_in_flow": ("a: [:x]\n", 1, "cannot start with ':'"),
+    "question_inside_flow_plain": ("a: [x?y]\n", 1, "`?`"),
+    "flow_key_colon_on_next_line": ("a: {b\n  : c}\n", 1, "key's line"),
+    "flow_mapping_key_not_scalar": ("a: {[b]: c}\n", 1, "must be a scalar"),
+}
+REFUSALS.update(SAFE_LOAD_REFUSES)
 
 
 @pytest.mark.parametrize("text, line, want", REFUSALS.values(), ids=list(REFUSALS))

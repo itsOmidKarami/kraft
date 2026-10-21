@@ -4,7 +4,8 @@ Stdlib only, like `kl.py`. Two things move: the hook registry
 (`.kraft-lite/registry.yaml`) becomes `.kraft-lite/bindings.yaml`, and each
 unfinished run frozen on the legacy `default` chain moves onto the bundled V1
 `default`. A run that is sliced, or frozen on any other legacy chain, is
-refused: finish it on the previous Kraft Lite version, or start again.
+refused: finish it on the previous Kraft Lite version, or abandon it with
+`migrate --abandon <chain-id>`, which closes its records and keeps them.
 
 `migrate(host, root, store)` takes `host`, the `kl` module that is running, for
 the record helpers and label names; `kl` imports this module, so this one
@@ -13,8 +14,8 @@ cannot import it back. What it relies on in `kl` (rename one and this breaks):
   `NODE_LABEL`, `SPENT_LABEL`, `STATE_DIR`, `WAITED_LABEL`, `CHAIN_ID`;
 - record helpers: `bank_wait`, `chain_index`, `label_value`, `run_record`,
   `set_label`, `slice_records`, `new_chain_id`;
-- private helpers: `_freeze_chain`, `_frozen_file`, `_note`, `_read_json`,
-  `_start_records`.
+- private helpers: `_checked`, `_freeze_chain`, `_frozen_file`, `_note`,
+  `_of_chain`, `_read_json`, `_start_records`.
 """
 
 from __future__ import annotations
@@ -43,8 +44,13 @@ LEGACY_GATES = {
     "chain_review": "chain_finalized",
     "human_review": "human_review_approval",
 }
+#: Written on every record `migrate --abandon` closes: the run was given up, not finished.
+ABANDONED_LABEL = "kraft-abandoned"
 #: What a refused legacy run is told.
-FINISH_OR_RESTART = "finish it on the previous Kraft Lite version, or start again"
+FINISH_OR_ABANDON = (
+    "finish it on the previous Kraft Lite version, or abandon it: "
+    "python3 kl.py migrate --abandon <chain-id>"
+)
 
 #: Each legacy hook -> the (section, key) of `bindings.yaml` that serves the same
 #: task now; `slice.tasks` and `slice.builtins` are the `slice:` layer's sections.
@@ -101,11 +107,11 @@ def _norm(text: object) -> str:
     return " ".join(str(text).split())
 
 
-def _bundled_default(section: str, key: str) -> dict | None:
+def _bundled_default(library: kl_chains.Library, section: str, key: str) -> dict | None:
     """The entry the walk uses when `bindings.yaml` has none for `key`, as a
-    binding; None when the bundled library has none."""
+    binding; None when the bundled `library` has none."""
     if section == "tasks":
-        prompt = kl_chains.bundled_library().components["tasks"].get(key, {}).get("prompt")
+        prompt = library.components["tasks"].get(key, {}).get("prompt")
         return {"kind": "prompt", "prompt": prompt} if prompt else None
     if section.startswith("slice."):
         return kl_bindings.SLICE_DEFAULTS.get(section[len("slice.") :], {}).get(key)
@@ -140,10 +146,14 @@ def _is_default(entry: dict, default: dict | None) -> bool:
     return all(_norm(entry[key]) == _norm(default[key]) for key in default)
 
 
-def convert_registry(registry: object) -> tuple[dict, list[str]]:
+def convert_registry(
+    registry: object, library: kl_chains.Library | None = None
+) -> tuple[dict, list[str]]:
     """The bindings a legacy registry becomes, and the hooks left out of them: those
     V1 has no task for, and those whose binding is the bundled default's own, of any kind.
-    A hook that is not in `LEGACY_HOOKS` is a `SystemExit` naming it."""
+    `library` is the bundled library, when the caller loaded it already. A hook
+    that is not in `LEGACY_HOOKS` is a `SystemExit` naming it."""
+    library = library or kl_chains.bundled_library()
     if registry is None:
         return {}, []
     if not isinstance(registry, Mapping):
@@ -166,7 +176,7 @@ def convert_registry(registry: object) -> tuple[dict, list[str]]:
         if not isinstance(entry, Mapping):
             raise _refuse(f".kraft-lite/{REGISTRY}: {hook}: expected a mapping with a kind")
         section, key = target
-        defaults = (_bundled_default(section, key), LEGACY_DEFAULTS.get((section, key)))
+        defaults = (_bundled_default(library, section, key), LEGACY_DEFAULTS.get((section, key)))
         if any(_is_default(dict(entry), default) for default in defaults):
             dropped.append(hook)
             continue
@@ -362,6 +372,8 @@ def migrate(host, root: Path, store) -> dict:
     so a run interrupted halfway is finished by running it again."""
     state = root / host.STATE_DIR
     registry = state / REGISTRY
+    # Read once: the registry's defaults and the chain each legacy run moves onto.
+    bundled = kl_chains.bundled_library()
     bindings_path = root / kl_bindings.BINDINGS
     bindings: dict = {}
     dropped: list[str] = []
@@ -369,7 +381,7 @@ def migrate(host, root: Path, store) -> dict:
     written_already = False
     if registry.is_file():
         try:
-            bindings, dropped = convert_registry(kl_yaml.read(registry))
+            bindings, dropped = convert_registry(kl_yaml.read(registry), bundled)
             text = _checked(bindings)
         except SystemExit:
             if not bindings_path.is_file():
@@ -388,14 +400,15 @@ def migrate(host, root: Path, store) -> dict:
     legacy, refused = _legacy_runs(host, root, everything)
     if refused:
         raise _refuse(
-            "migrate moves only unsliced runs of the legacy default chain; "
-            f"{FINISH_OR_RESTART}: " + "; ".join(refused) + ". Nothing was migrated"
+            "migrate moves only unsliced runs of the legacy default chain, and cannot move "
+            + "; ".join(refused)
+            + f". Nothing was migrated. For each, {FINISH_OR_ABANDON}"
         )
 
     written: list[dict] = []
     moved = []
     if legacy:
-        chain = kl_chains.resolve_bundled()
+        chain = kl_chains.resolve_bundled(library=bundled)
         for run in legacy:
             epic = next(r for r in run["records"] if r["id"] == run["id"])
             new_id, records = _carry(host, run, epic.get("title", ""), chain)
@@ -428,3 +441,26 @@ def migrate(host, root: Path, store) -> dict:
             "repo library; the legacy run is closed, labelled " + MIGRATED_LABEL + "<new id>."
         )
     return result
+
+
+def abandon(host, root: Path, store, chain_id: str) -> dict:
+    """`migrate --abandon <chain-id>`: close every open record of an unfinished
+    run frozen before V1, each labelled `ABANDONED_LABEL`, so a run `migrate`
+    cannot move stops blocking it. Nothing is deleted: the records and the
+    frozen chain stay, and a later `migrate` passes the run as finished."""
+    chain_id = host._checked(chain_id)
+    still_open = [
+        r for r in store.load() if host._of_chain(r, chain_id) and r["status"] != "closed"
+    ]
+    frozen = _frozen(host, root, chain_id)
+    if not still_open or frozen is None or frozen.get("format") == host.FORMAT:
+        raise _refuse(
+            f"{chain_id} is not an unfinished run frozen before V1: "
+            "--abandon closes only such a run"
+        )
+    closed = [
+        host.set_label(host.bank_wait(dict(r, status="closed")), ABANDONED_LABEL, "")
+        for r in still_open
+    ]
+    store.write(closed)
+    return {"abandoned": chain_id, "closed": sorted(r["id"] for r in closed)}

@@ -192,11 +192,6 @@ def _checked(chain_id: str) -> str:
     return chain_id
 
 
-def _tasks(container: dict) -> list[dict]:
-    """Every task in an exec node's own steps, or a handler's, in order."""
-    return [task for step in container["steps"] for task in step["tasks"]]
-
-
 def _dispatched_tasks(chain: dict) -> list[dict]:
     """Every task the walk dispatches, in chain order: each exec node's own steps,
     its failure handler's, its fix loop's, then the loop's judge."""
@@ -204,7 +199,7 @@ def _dispatched_tasks(chain: dict) -> list[dict]:
     for node in (n for n in chain["nodes"] if n["kind"] == "exec"):
         loop = node["fix_loop"]
         for container in (node, node["on_failure"], loop):
-            found += _tasks(container) if container else []
+            found += kl_shape.node_tasks(container) if container else []
         if loop and loop["judge"]:
             found.append(loop["judge"])
     return found
@@ -213,7 +208,7 @@ def _dispatched_tasks(chain: dict) -> list[dict]:
 def _describe(node: dict) -> str:
     if node["kind"] == "gate":
         return f"gate: {node['message']}"
-    return "tasks: " + ", ".join(task["path"] for task in _tasks(node))
+    return "tasks: " + ", ".join(task["path"] for task in kl_shape.node_tasks(node))
 
 
 def materialize(chain: dict, title: str, chain_id: str) -> list[dict]:
@@ -640,16 +635,18 @@ def _frozen_path(root: Path, chain_id: str) -> Path:
 FORMAT = "v1"
 
 
-def _chain(root: Path, chain_id: str | None) -> dict | None:
+def _chain(root: Path, chain_id: str | None, finished: bool = False) -> dict | None:
     """The chain this run walks, as `start` resolved and froze it; None when no
-    chain was started here.
+    chain was started here, or when a `finished` run was frozen before V1: it
+    has nothing left to walk, so it blocks nothing.
 
     `start` freezes its chain and every later verb reads that copy. Re-reading the
     library each time would mean a `--chain` given at start is forgotten by the
     next verb — and worse, that editing a library retargets a run already in
     flight. One file per chain id is what lets two runs in one directory hold
-    different chains. A chain frozen before V1, per chain or in the single
-    `chain.json` that came before that, is refused until `migrate` moves it.
+    different chains. An unfinished run frozen before V1, per chain or in the
+    single `chain.json` that came before that, is refused until `migrate` moves
+    it. A V1 chain is checked by `_chain_flaw`, as an imported one is.
     """
     if chain_id is None:
         return None
@@ -661,7 +658,12 @@ def _chain(root: Path, chain_id: str | None) -> dict | None:
         )
     chain = _read_json(path, "the chain")
     if not isinstance(chain, dict) or chain.get("format") != FORMAT:
+        if finished:
+            return None
         raise _pre_v1(chain_id)
+    flaw = _chain_flaw(chain)
+    if flaw:
+        raise SystemExit(f"kraft-lite: {path} is not a usable V1 chain: {flaw}")
     return chain
 
 
@@ -1967,10 +1969,7 @@ def _exported_chain(path: Path, written: str, missing: str) -> dict:
     that is not V1."""
     if not path.is_file():
         raise SystemExit(f"kraft-lite: {missing}")
-    try:
-        chain = json.loads(path.read_text())
-    except (OSError, ValueError) as error:
-        raise SystemExit(f"kraft-lite: cannot read the chain {path}: {error}") from error
+    chain = _read_json(path, "the chain")
     if not isinstance(chain, dict) or chain.get("format") != FORMAT:
         raise SystemExit(f"kraft-lite: {written} by an older Kraft Lite: not a V1 chain")
     flaw = _chain_flaw(chain)
@@ -1979,24 +1978,90 @@ def _exported_chain(path: Path, written: str, missing: str) -> dict:
     return chain
 
 
+#: The keys the walk reads from every frozen node of each kind, present even
+#: when None (`kl_chains._freeze` writes each one).
+NODE_KEYS = {
+    "exec": ("steps", "fix_loop", "on_failure", "on_base_changed"),
+    "gate": ("message", "artifact", "reject_to", "chain_finalized"),
+}
+
+
+def _steps_flaw(container: object, where: str) -> str | None:
+    """What a node's, or a handler's, steps lack of what the walk reads: a list
+    of steps, each with an id and a list of tasks, each task a mapping with
+    its `path` and `kind`; None when nothing."""
+    steps = container.get("steps") if isinstance(container, dict) else None
+    if not (
+        isinstance(steps, list)
+        and all(
+            isinstance(s, dict)
+            and isinstance(s.get("id"), str)
+            and isinstance(s.get("tasks"), list)
+            for s in steps
+        )
+    ):
+        return f"{where} has no steps"
+    for task in (task for step in steps for task in step["tasks"]):
+        flaw = _task_flaw(task, where)
+        if flaw:
+            return flaw
+    return None
+
+
+def _task_flaw(task: object, where: str) -> str | None:
+    if not isinstance(task, dict) or not isinstance(task.get("path"), str):
+        return f"{where} has a task with no path"
+    if not isinstance(task.get("kind"), str):
+        return f"task {task['path']!r} has no kind"
+    return None
+
+
 def _chain_flaw(chain: dict) -> str | None:
-    """What a chain that says it is V1 lacks of what the walk reads from every
-    node (an id, a kind, and for an exec node its steps), or None. A file from
-    outside this process - an export, a hand-edited copy - is checked here so a
-    missing key is a refusal, not a `KeyError` in the middle of a verb."""
+    """What a chain that says it is V1 lacks of the frozen shape the walk reads,
+    or None: for every node an id and a kind; for a gate its `message`,
+    `artifact`, `reject_to` and `chain_finalized`; for an exec node its steps,
+    `fix_loop`, `on_failure` and `on_base_changed`, each handler's steps, the
+    judge, and every task's `path` and `kind`. A file from outside this process
+    - an export, a hand-edited copy - is checked here, by `import`,
+    `start --slice-of` and every verb reading a run's frozen chain, so a missing
+    key is a refusal, not a `KeyError` in the middle of a verb."""
     nodes = chain.get("nodes")
     if not isinstance(nodes, list) or not nodes:
         return "it has no list of nodes"
     for number, node in enumerate(nodes, 1):
         if not isinstance(node, dict) or not isinstance(node.get("id"), str):
             return f"node {number} has no id"
-        if node.get("kind") not in ("exec", "gate"):
-            return f"node {node['id']!r} has no kind (exec or gate)"
-        if node["kind"] == "exec" and not (
-            isinstance(node.get("steps"), list)
-            and all(isinstance(s, dict) and isinstance(s.get("tasks"), list) for s in node["steps"])
+        id, kind = node["id"], node.get("kind")
+        if kind not in NODE_KEYS:
+            return f"node {id!r} has no kind (exec or gate)"
+        where = f"{kind} node {id!r}"
+        if kind == "exec":
+            flaw = _steps_flaw(node, where)
+            if flaw:
+                return flaw
+        missing = [key for key in NODE_KEYS[kind] if key not in node]
+        if missing:
+            return f"{where} has no {', '.join(missing)}"
+        if kind == "gate":
+            continue
+        for key in ("on_failure", "fix_loop"):
+            if node[key] is not None:
+                flaw = _steps_flaw(node[key], f"{where}'s {key}")
+                if flaw:
+                    return flaw
+        loop = node["fix_loop"]
+        if loop is not None:
+            if "judge" not in loop or "max_attempts" not in loop:
+                return f"{where}'s fix_loop has no judge or max_attempts"
+            if loop["judge"] is not None:
+                flaw = _task_flaw(loop["judge"], f"{where}'s fix_loop")
+                if flaw:
+                    return flaw
+        base = node["on_base_changed"]
+        if base is not None and not (
+            isinstance(base, dict) and isinstance(base.get("restart_from"), str)
         ):
-            return f"exec node {node['id']!r} has no steps"
+            return f"{where}'s on_base_changed has no restart_from"
     return None
 
 
@@ -2288,6 +2353,8 @@ def build_parser() -> argparse.ArgumentParser:
     decisions.add_argument("--unreported", action="store_true")
     decisions.add_argument("--mark", action="store_true")
     sub.add_parser("export").add_argument("--to", type=Path, required=True)
+    # A pre-V1 run migrate cannot move: closed, its records kept, so migrate can go on.
+    sub.add_parser("migrate").add_argument("--abandon", default=None, metavar="CHAIN_ID")
     sub.add_parser("import").add_argument("--from", dest="source", type=Path, required=True)
     # The verbs with no arguments of their own.
     for name in VERBS:
@@ -2334,7 +2401,12 @@ def main(argv: list[str] | None = None) -> int:
 
     # Before `_ours`: a legacy run is what it moves, and `_chain` refuses one.
     if args.verb == "migrate":
-        print(json.dumps(kl_migrate.migrate(sys.modules[__name__], root, store), indent=2))
+        host = sys.modules[__name__]
+        if args.abandon is not None:
+            out = kl_migrate.abandon(host, root, store, args.abandon)
+        else:
+            out = kl_migrate.migrate(host, root, store)
+        print(json.dumps(out, indent=2))
         return 0
 
     if args.verb == "start":
@@ -2372,10 +2444,17 @@ def main(argv: list[str] | None = None) -> int:
     # A verb run without the flag still has to read the template of the chain it
     # actually resolved, not the directory's last one.
     resolved_id = epic["id"] if epic else None
-    chain = _chain(root, resolved_id)
+    finished = bool(records) and all(r["status"] == "closed" for r in records)
+    chain = _chain(root, resolved_id, finished)
     node_record = current(records)
     if node_record is None and "open_node" in VERBS[args.verb]:
         raise SystemExit("kraft-lite: no open node — the chain is finished or was never started")
+    if chain is None and resolved_id is not None and args.verb != "state":
+        # Finished before V1: `state` answers `done`, the rest read a chain it lacks.
+        raise SystemExit(
+            f"kraft-lite: chain {resolved_id} finished on the pre-V1 format; its {args.verb} "
+            "needs the previous Kraft Lite"
+        )
     node_id = label_value(node_record, NODE_LABEL)
     # Only for a verb that acts on the node: `summary` or `export` of a run whose
     # frozen chain lost a node still answers.

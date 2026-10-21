@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import kl_shape
 import kl_yaml
 
 BUNDLED = Path(__file__).parent / "config"
@@ -128,22 +129,31 @@ def _load(name: str, path: Path) -> Library:
     return Library(name, path, components, steering, chains, files)
 
 
+def config_dir(env: Mapping[str, str]) -> Path:
+    """The user library's directory, as Kraft's `paths.config_dir` picks it: a
+    set `KRAFT_CONFIG_DIR` (else the 1.x `KRAFT_TEMPLATES_DIR`), else
+    `$KRAFT_HOME/config`, else `~/.kraft/config`. The first one set is the
+    one, holding a `library.yaml` or not: Kraft never falls through to the next."""
+    named = env.get("KRAFT_CONFIG_DIR") or env.get("KRAFT_TEMPLATES_DIR")
+    if named:
+        return Path(named).expanduser()
+    home = env.get("KRAFT_HOME")
+    return (Path(home).expanduser() if home else Path.home() / ".kraft") / "config"
+
+
 def libraries(root: Path, env: Mapping[str, str]) -> tuple[Library | None, Library]:
     """The repo library in `root/.kraft` (None without one) and the instance's
-    library: the first configured directory holding `library.yaml`, else the
-    bundled copy of Kraft's packaged one. A user library replaces the packaged
-    one wholesale, as in Kraft."""
+    library: the user library in `config_dir(env)` when it holds a
+    `library.yaml`, else the bundled copy of Kraft's packaged one, which is what
+    Kraft seeds an empty one from. A user library replaces the packaged one
+    wholesale, as in Kraft."""
     repo_dir = Path(root) / ".kraft"
     has_repo = (repo_dir / "library.yaml").is_file() or (repo_dir / "chains").is_dir()
     repo = _load("repo", repo_dir) if has_repo else None
-    candidates = [env.get("KRAFT_CONFIG_DIR"), env.get("KRAFT_TEMPLATES_DIR")]
-    if env.get("KRAFT_HOME"):
-        candidates.append(str(Path(env["KRAFT_HOME"]) / "config"))
-    candidates.append(str(Path.home() / ".kraft" / "config"))
-    for candidate in candidates:
-        if candidate and (Path(candidate) / "library.yaml").is_file():
-            return repo, _load("user", Path(candidate))
-    return repo, _load("bundled", BUNDLED)
+    user = config_dir(env)
+    if (user / "library.yaml").is_file():
+        return repo, _load("user", user)
+    return repo, bundled_library()
 
 
 def available(root: Path, env: Mapping[str, str]) -> list[dict]:
@@ -159,8 +169,9 @@ def available(root: Path, env: Mapping[str, str]) -> list[dict]:
     return found
 
 
-def default_chain_ref(root: Path, env: Mapping[str, str]) -> str:
-    repo, _ = libraries(root, env)
+def default_chain_ref(repo: Library | None) -> str:
+    """The chain a run starts on without `--chain`: the repo library's
+    `default` when it has one, else the instance's."""
     return f"{REPO}default" if repo is not None and "default" in repo.chains else "default"
 
 
@@ -177,7 +188,7 @@ def resolve(
         # Not one of the library's chains, so `extends: <its own id>` is the library's.
         expanded = _Resolver(instance, path, None).chain(data)
         return _freeze(instance, str(id), str(path), expanded)
-    ref = ref or default_chain_ref(root, env)
+    ref = ref or default_chain_ref(repo)
     if ref.startswith(REPO):
         library, id = repo, ref[len(REPO) :]
         if library is None:
@@ -197,10 +208,11 @@ def bundled_library() -> Library:
     return _load("bundled", BUNDLED)
 
 
-def resolve_bundled(ref: str = "default") -> dict:
-    """The chain `ref` from the bundled library alone, in Lite's frozen shape:
-    what `migrate` moves a run onto."""
-    library = bundled_library()
+def resolve_bundled(ref: str = "default", library: Library | None = None) -> dict:
+    """The chain `ref` from the bundled library alone (`library`, when the
+    caller loaded it already), in Lite's frozen shape: what `migrate` moves a
+    run onto."""
+    library = library or bundled_library()
     expanded = _Resolver(library, library.files[ref], ref).chain(library.chains[ref])
     return _freeze(library, ref, library.name, expanded)
 
@@ -570,6 +582,16 @@ class _Validator:
                     raise self.fail(f"{id}.{key}", "must be a mapping")
             if kind == "exec":
                 self.shape(node, id)
+                # Kraft refuses it at load: trim could not drop the node cleanly.
+                groups = node.get("steps") or [{"tasks": node["tasks"]}]
+                produces = {task.get("produces") for step in groups for task in step["tasks"]}
+                if len(produces) > 1:
+                    raise self.fail(
+                        id,
+                        f"node {id!r} does not agree on what it produces "
+                        f"{sorted(k or '(none)' for k in produces)}; a node either wholly "
+                        "produces one kind or declares none",
+                    )
                 policy = node.get("policy")
                 if policy is not None:
                     if not isinstance(policy, dict):
@@ -764,7 +786,7 @@ def _covered_by(node: dict) -> str | None:
     node's own steps produces (`kraft.templates.models.ResolvedNode.covered_by`)."""
     if node["kind"] == "gate":
         return None if node["chain_finalized"] else node["artifact"]
-    produces = {task["produces"] for step in node["steps"] for task in step["tasks"]}
+    produces = {task["produces"] for task in kl_shape.node_tasks(node)}
     return produces.pop() if len(produces) == 1 else None
 
 

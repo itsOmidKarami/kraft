@@ -12,9 +12,13 @@ indent indicators; flow sequences and mappings, nested and over several lines;
 comments; one optional leading `---`. Plain scalars resolve as PyYAML's
 YAML 1.1 core does (`30s` stays a string, `yes` and `on` are booleans).
 
-Refused: anchors, aliases, tags, more than one document, tabs as indentation,
-complex keys (`? a`), multi-line quoted scalars, and plain scalars that
-`safe_load` would turn into a timestamp or a base-60 number (quote them).
+Refused: anchors, aliases, tags, more than one document, complex keys
+(`? a`), multi-line quoted scalars, plain scalars that `safe_load` would turn
+into a timestamp or a base-60 number (quote them), and, where `safe_load`
+raises too: a tab anywhere but inside a quoted scalar, a block scalar's text
+or a comment; and a plain scalar starting with an indicator (`%`, `,`, `]`,
+`}`, `?` before a space; in a flow collection also `:`, `#` and `- `, and a
+`?` anywhere in it).
 """
 
 from __future__ import annotations
@@ -131,9 +135,12 @@ _ESCAPES = {
 }
 _HEX_ESCAPES = {"x": 2, "u": 4, "U": 8}
 
-_BLOCK_HEADER = re.compile(r"([|>])(?:([1-9])([-+]?)|([-+]?)([1-9]?))\s*(?:#.*)?$")
+_BLOCK_HEADER = re.compile(r"([|>])(?:([1-9])([-+]?)|([-+]?)([1-9]?))(?: *| +#.*)$")
 _COMMENT = re.compile(r"\s+#")
 _FLOW_STOP = ",[]{}"
+#: What a plain scalar cannot start with, in any context: `safe_load` raises.
+_NOT_PLAIN_START = "%,]}"
+_TAB = "a tab is only allowed inside a quoted or block scalar's text or a comment"
 
 
 class _Reader:
@@ -185,6 +192,8 @@ class _Reader:
                 continue
             head = line[:3]
             if head in ("---", "...") and (len(line) == 3 or line[3] in " \t"):
+                if "\t" in line.split("#", 1)[0]:
+                    raise self.fail(_TAB, n)
                 if head == "---" and not seen_content and not line[3:].strip():
                     seen_content = True  # the one leading marker
                     self.lines[n] = ""
@@ -199,11 +208,16 @@ class _Reader:
         while self.i < len(self.lines):
             line = self.lines[self.i]
             stripped = line.lstrip(" ")
-            if not stripped.strip() or stripped.startswith("#"):
+            if stripped.startswith("#"):
                 self.i += 1
                 continue
-            if stripped.startswith("\t"):
+            if stripped.startswith("\t") and stripped.strip():
                 raise self.fail("tabs are not allowed in indentation", self.i)
+            if not stripped.strip():
+                if "\t" in stripped:
+                    raise self.fail(_TAB, self.i)
+                self.i += 1
+                continue
             return self.i, len(line) - len(stripped)
         return None
 
@@ -244,6 +258,8 @@ class _Reader:
             inner = col + 1
             while inner < len(self.lines[line]) and self.lines[line][inner] == " ":
                 inner += 1
+            if self.lines[line][inner : inner + 1] == "\t":
+                raise self.fail(_TAB, line)
             if self.blank_from(line, inner):
                 items.append(self.nested(indent))
             else:
@@ -317,10 +333,14 @@ class _Reader:
                 after += 1
                 while after < len(text) and text[after] == " ":
                     after += 1
+                if text[after : after + 1] == "\t":
+                    raise self.fail(_TAB, line)
                 return key, after
             return None
         if first in "[{|>&*!":
             return None
+        if first in _NOT_PLAIN_START:
+            raise self.fail(f"a plain scalar cannot start with {first!r}; quote it", line)
         cut = _COMMENT.search(text, col)
         limit = cut.start() if cut else len(text)
         pos = col
@@ -331,12 +351,16 @@ class _Reader:
             if pos + 1 == limit or text[pos + 1] in " \t":
                 break
             pos += 1
-        raw = text[col:pos].rstrip()
+        raw = text[col:pos].rstrip(" ")
         if not raw:
             return None
+        if "\t" in raw:
+            raise self.fail(_TAB, line)
         after = pos + 1
         while after < len(text) and text[after] == " ":
             after += 1
+        if text[after : after + 1] == "\t":
+            raise self.fail(_TAB, line)
         return self.resolve(raw, line), after
 
     # -- values on a line --------------------------------------------------
@@ -360,10 +384,13 @@ class _Reader:
             self.expect_end(line, end - self.starts[line])
             self.take(line)
             return value
-        if first in "@`":
+        if first in "@`" + _NOT_PLAIN_START or text[col : col + 2] in ("?", "? "):
             raise self.fail(f"a plain scalar cannot start with {first!r}; quote it", line)
         cut = _COMMENT.search(text, col)
-        plain = text[col : cut.start() if cut else len(text)].strip()
+        raw = text[col : cut.start() if cut else len(text)]
+        if "\t" in raw or (cut and "\t" in cut.group()):
+            raise self.fail(_TAB, line)
+        plain = raw.strip()
         if plain.endswith(":") or ": " in plain or ":\t" in plain:
             raise self.fail("a mapping value cannot itself start a mapping on the same line", line)
         if plain.startswith("- ") or plain == "-":
@@ -373,7 +400,9 @@ class _Reader:
 
     def expect_end(self, line: int, col: int) -> None:
         tail = self.lines[line][col:]
-        if tail.strip() and not (tail[0] in " \t" and tail.strip().startswith("#")):
+        if "\t" in tail.split("#", 1)[0]:
+            raise self.fail(_TAB, line)
+        if tail.strip() and not (tail[0] == " " and tail.strip().startswith("#")):
             raise self.fail(f"unexpected text after the value: {tail.strip()!r}", line)
 
     def resolve(self, text: str, line: int) -> object:
@@ -477,6 +506,8 @@ class _Reader:
 
     def block_scalar(self, line: int, col: int, parent: int) -> str:
         header = _BLOCK_HEADER.match(self.lines[line], col)
+        if header is None and "\t" in self.lines[line][col:].split("#", 1)[0]:
+            raise self.fail(_TAB, line)
         if header is None:
             raise self.fail(
                 "bad block scalar header (expected `|`, `>`, with `-`/`+` or a digit)", line
@@ -577,9 +608,11 @@ class _Reader:
         text = self.text
         while p < len(text):
             ch = text[p]
-            if ch in " \t\n":
+            if ch == "\t":
+                raise self.fail_at(_TAB, p)
+            if ch in " \n":
                 p += 1
-            elif ch == "#" and (p == 0 or text[p - 1] in " \t\n"):
+            elif ch == "#" and (p == 0 or text[p - 1] in " \n"):
                 while p < len(text) and text[p] != "\n":
                     p += 1
             else:
@@ -604,9 +637,14 @@ class _Reader:
             if text[p] == ",":
                 raise self.fail_at(f"an empty entry in a {what}", p)
             node, p = self.flow_node(p)
+            if opener == "{" and isinstance(node, (dict, list)):
+                raise self.fail_at("a flow mapping key must be a scalar", start)
             if opener == "{":
-                p = self.skip(p)
+                key_end, p = p, self.skip(p)
                 value: object = None
+                if p < len(text) and text[p] == ":" and "\n" in text[key_end:p]:
+                    # `safe_load` keeps a key and its `:` on one line.
+                    raise self.fail_at("a flow mapping's `:` must be on its key's line", key_end)
                 if p < len(text) and text[p] == ":":
                     p = self.skip(p + 1)
                     if p < len(text) and text[p] not in ",}":
@@ -636,8 +674,12 @@ class _Reader:
             raise self.fail_at("aliases (`*name`) are not supported", p)
         if ch == "!":
             raise self.fail_at("tags (`!tag`) are not supported", p)
-        if ch in "@`|>":
+        # In a flow collection `?` and `:` are indicators wherever they start a
+        # scalar, and `#` starts a comment there for `safe_load`.
+        if ch in "@`|>%?:#":
             raise self.fail_at(f"a plain scalar cannot start with {ch!r}; quote it", p)
+        if ch == "-" and text[p + 1 : p + 2] in (" ", "\n"):
+            raise self.fail_at("a plain scalar cannot start with '- ' in a flow collection", p)
         end = p
         while end < len(text) and text[end] != "\n":
             ch = text[end]
@@ -645,9 +687,14 @@ class _Reader:
                 break
             if ch == ":" and (end + 1 == len(text) or text[end + 1] in " \t\n" + _FLOW_STOP):
                 break
-            if ch == "#" and text[end - 1] in " \t":
+            if ch == "#" and text[end - 1] == " ":
                 break
             end += 1
+        if "\t" in text[p:end]:
+            raise self.fail_at(_TAB, p)
+        if "?" in text[p:end]:
+            # `safe_load` ends a plain scalar at `?` in a flow collection.
+            raise self.fail_at("a `?` inside a flow collection's plain scalar; quote it", p)
         plain = text[p:end].strip()
         if not plain:
             raise self.fail_at("an empty entry in a flow collection", p)

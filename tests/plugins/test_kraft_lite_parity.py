@@ -39,22 +39,25 @@ def kl_modules():
         sys.modules.pop("kl_chains", None)
 
 
-def _plugin_corpus() -> dict[str, tuple[str, object]]:
-    """`CORPUS` from the plugin's own YAML tests. Both test trees are packages
-    named `tests`, so it is loaded by path under a name of its own."""
+def _plugin_yaml_tests():
+    """The plugin's own YAML tests, for their `CORPUS` and `SAFE_LOAD_REFUSES`.
+    Both test trees are packages named `tests`, so it is loaded by path under a
+    name of its own."""
     sys.path.insert(0, str(PLUGIN))
     try:
         path = PLUGIN / "tests" / "test_yaml.py"
         spec = importlib.util.spec_from_file_location("kraft_lite_plugin_test_yaml", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        return module.CORPUS
+        return module
     finally:
         sys.path.remove(str(PLUGIN))
         sys.modules.pop("kl_yaml", None)
 
 
-CORPUS = _plugin_corpus()
+_PLUGIN_YAML_TESTS = _plugin_yaml_tests()
+CORPUS = _PLUGIN_YAML_TESTS.CORPUS
+SAFE_LOAD_REFUSES = _PLUGIN_YAML_TESTS.SAFE_LOAD_REFUSES
 # Tracked files only: a local, gitignored one (`access.yaml`, `notify.yaml`)
 # holds secrets a mismatch would print, and is not Kraft's to ship.
 CONFIG_FILES = sorted(
@@ -98,6 +101,17 @@ def test_the_subset_reader_matches_safe_load_on_the_corpus(kl_modules, name):
     text, _ = CORPUS[name]
 
     assert kl_yaml.load(text) == yaml.safe_load(text)
+
+
+@pytest.mark.parametrize("name", sorted(SAFE_LOAD_REFUSES))
+def test_the_subset_reader_refuses_where_safe_load_raises(kl_modules, name):
+    kl_yaml, _ = kl_modules
+    text, _, _ = SAFE_LOAD_REFUSES[name]
+
+    with pytest.raises(yaml.YAMLError):
+        yaml.safe_load(text)
+    with pytest.raises(kl_yaml.YamlError):
+        kl_yaml.load(text)
 
 
 @pytest.mark.parametrize(

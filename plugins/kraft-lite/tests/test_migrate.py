@@ -609,10 +609,17 @@ def test_sliced_or_custom_legacy_refused(legacy, named, kl_cli, tmp_path):
 
     refused = kl_cli(tmp_path, "migrate", ok=False)
 
-    assert "finish it on the previous Kraft Lite version, or start again" in refused.stderr
+    assert ABANDON in refused.stderr and "start again" not in refused.stderr
     assert named in refused.stderr and "Traceback" not in refused.stderr
     assert "kl-bbbbbbbb" not in refused.stderr
     assert snapshot(tmp_path) == before
+
+
+#: What a refused run is told it can do instead of finishing it.
+ABANDON = (
+    "finish it on the previous Kraft Lite version, or abandon it: "
+    "python3 kl.py migrate --abandon <chain-id>"
+)
 
 
 def test_other_verbs_refuse_a_legacy_run_until_it_is_migrated(kl_cli, tmp_path):

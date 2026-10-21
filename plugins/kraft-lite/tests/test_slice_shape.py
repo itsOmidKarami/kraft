@@ -51,17 +51,25 @@ CHAIN_FILES = {
           - {id: impl, kind: exec, tasks: [{id: t, kind: agent, prompt: Build.}]}
           - {id: open_mr, kind: exec, tasks: [{id: t, kind: forge, target: mr.open_draft}]}
         """,
-    # Producing its description, the MR node is no build node.
+    # Before the plan, the MR node is no build node.
     "mr_before_build": """\
         nodes:
+          - {id: spec, kind: exec, tasks: [{id: t, kind: agent, prompt: S., produces: spec}]}
+          - {id: spec_approval, kind: gate, artifact: spec}
+          - {id: open_mr, kind: exec, tasks: [{id: open, kind: forge, target: mr.open_draft}]}
           - {id: plan, kind: exec, tasks: [{id: t, kind: agent, prompt: P., produces: plan}]}
-          - id: open_mr
-            kind: exec
-            tasks:
-              - {id: describe, kind: agent, prompt: D., produces: mr_meta}
-              - {id: open, kind: forge, target: mr.open_draft}
           - {id: plan_approval, kind: gate, artifact: plan}
           - {id: impl, kind: exec, tasks: [{id: t, kind: agent, prompt: Build.}]}
+        """,
+    # A check before the plan is no build node: the plan is not settled yet.
+    "check_node_before_plan": """\
+        extends: default
+        add:
+          - after: spec_approval
+            node:
+              id: lint
+              kind: exec
+              tasks: [{id: lint, kind: subprocess, command: just lint}]
         """,
     "no_build": """\
         nodes:
@@ -119,6 +127,11 @@ def chain_of(default_chain, tmp_path):
             "plan_gate_only",
             ("plan_approval", "impl", "open_mr", ("impl", "verify", "open_mr")),
             id="plan_gate_only",
+        ),
+        pytest.param(
+            "check_node_before_plan",
+            ("chain_revision_approval", "implementation", "draft_merge_request", DEFAULT_CHILD),
+            id="check_node_before_plan",
         ),
         # By position and declaration, never by name.
         pytest.param(
@@ -426,6 +439,13 @@ def test_a_child_binds_its_first_build_node_by_shape(kl_cli, path, source, tmp_p
     assert repair["source"] == "default:agent"
 
 
+def broken_default(path: Path, node: str, edit) -> None:
+    """The bundled default, frozen, with `edit` applied to its node `node`, at `path`."""
+    chain = kl_chains.resolve(path.parent, {}, "default")
+    edit(next(n for n in chain["nodes"] if n["id"] == node))
+    path.write_text(json.dumps(chain))
+
+
 @pytest.mark.parametrize(
     "write, args, named",
     [
@@ -466,6 +486,27 @@ def test_a_child_binds_its_first_build_node_by_shape(kl_cli, path, source, tmp_p
             [],
             "is not a usable V1 chain: exec node 'a' has no steps",
             id="v1_exec_without_steps",
+        ),
+        # The whole frozen shape the walk reads, not only ids, kinds and steps.
+        pytest.param(
+            lambda p: broken_default(p, "verification", lambda n: n.pop("fix_loop")),
+            [],
+            "is not a usable V1 chain: exec node 'verification' has no fix_loop",
+            id="v1_exec_without_fix_loop",
+        ),
+        pytest.param(
+            lambda p: broken_default(p, "plan_approval", lambda n: n.pop("message")),
+            [],
+            "is not a usable V1 chain: gate node 'plan_approval' has no message",
+            id="v1_gate_without_message",
+        ),
+        pytest.param(
+            lambda p: broken_default(
+                p, "implementation", lambda n: n["steps"][0]["tasks"][0].pop("path")
+            ),
+            [],
+            "is not a usable V1 chain: exec node 'implementation' has a task with no path",
+            id="v1_task_without_path",
         ),
         pytest.param(
             lambda p: None,

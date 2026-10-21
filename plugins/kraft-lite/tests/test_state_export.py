@@ -461,6 +461,17 @@ BAD_CHAINS = {
         "id": "x",
         "nodes": [{"id": "a", "kind": "exec"}],
     },
+    # Every key the walk reads is checked, not only the ids and kinds.
+    "chain_exec_without_fix_loop": {
+        "format": "v1",
+        "id": "x",
+        "nodes": [{"id": "a", "kind": "exec", "steps": [], "on_failure": None}],
+    },
+    "chain_gate_without_message": {
+        "format": "v1",
+        "id": "x",
+        "nodes": [{"id": "g", "kind": "gate", "artifact": None, "reject_to": None}],
+    },
 }
 
 
@@ -513,6 +524,12 @@ def stray_record(problem: str) -> dict:
                 "chain_without_nodes": "is not a usable V1 chain: it has no list of nodes",
                 "chain_node_without_kind": "is not a usable V1 chain: node 'a' has no kind",
                 "chain_exec_without_steps": "is not a usable V1 chain: exec node 'a' has no steps",
+                "chain_exec_without_fix_loop": (
+                    "is not a usable V1 chain: exec node 'a' has no fix_loop"
+                ),
+                "chain_gate_without_message": (
+                    "is not a usable V1 chain: gate node 'g' has no message"
+                ),
                 "corrupt_local_chain": "cannot read the chain {there}/.kraft-lite/chains/kl-a",
             }.items()
         ],

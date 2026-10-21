@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from kl_chains import ChainError, restart_target
+# A module, not its names: `kl_chains` imports this one for `node_tasks`.
+import kl_chains
 
 #: What a node means to a sliced controller (`state.sliced.action`).
 ACTIONS = ("run_slices", "scoped_verify", "run", "skip", "await_user_merges")
@@ -24,7 +25,8 @@ MERGE = "mr.merge"
 class SliceShape:
     #: The last gate before the first build node: the plan is settled there.
     slice_gate: str
-    #: The first exec node none of whose tasks produces anything: the build.
+    #: The first exec node none of whose tasks produces anything, after the
+    #: last node producing the plan when one does: the build.
     first_build: str
     #: The first node with a forge task opening the merge request.
     mr_node: str
@@ -32,18 +34,23 @@ class SliceShape:
     child_nodes: tuple[str, ...]
 
 
-def _tasks(node: dict) -> list[dict]:
-    """An exec node's own tasks, every step's; its `on_failure`, fix loop and
+#: What a plan node produces: the build comes after the last one.
+PLAN = "plan"
+
+
+def node_tasks(container: dict) -> list[dict]:
+    """A frozen exec node's own tasks, every step's, or a handler's (its
+    `on_failure` or fix loop), in order. A node's `on_failure`, fix loop and
     judge are recovery, not what the node is for. A gate has none."""
-    return [task for step in node.get("steps") or () for task in step["tasks"]]
+    return [task for step in container.get("steps") or () for task in step["tasks"]]
 
 
 def _forge(node: dict, target: str) -> bool:
-    return any(t["kind"] == "forge" and t.get("target") == target for t in _tasks(node))
+    return any(t["kind"] == "forge" and t.get("target") == target for t in node_tasks(node))
 
 
 def _produces(node: dict) -> set[str]:
-    return {t["produces"] for t in _tasks(node) if t.get("produces")}
+    return {t["produces"] for t in node_tasks(node) if t.get("produces")}
 
 
 def slice_shape(chain: dict) -> SliceShape:
@@ -56,10 +63,21 @@ def slice_shape(chain: dict) -> SliceShape:
     would produce for one is the controller's to present."""
     nodes = chain["nodes"]
 
-    def refuse(why: str) -> ChainError:
-        return ChainError(f"chain {chain['id']!r} cannot be sliced: {why}")
+    def refuse(why: str) -> kl_chains.ChainError:
+        return kl_chains.ChainError(f"chain {chain['id']!r} cannot be sliced: {why}")
 
-    build = next((i for i, n in enumerate(nodes) if n["kind"] == "exec" and not _produces(n)), None)
+    # A check before the plan (a lint node after the spec's approval) builds
+    # nothing: the build comes after the last node producing the plan.
+    plans = [i for i, n in enumerate(nodes) if PLAN in _produces(n)]
+    after = plans[-1] + 1 if plans else 0
+    build = next(
+        (
+            i
+            for i in range(after, len(nodes))
+            if nodes[i]["kind"] == "exec" and not _produces(nodes[i])
+        ),
+        None,
+    )
     if build is None:
         raise refuse("no build node (an exec node whose tasks produce nothing)")
     gates = [i for i in range(build) if nodes[i]["kind"] == "gate"]
@@ -124,7 +142,9 @@ def child_chain(chain: dict) -> dict:
     nodes = [
         dict(
             node,
-            on_base_changed={"restart_from": restart_target(chain, kept, base["restart_from"])},
+            on_base_changed={
+                "restart_from": kl_chains.restart_target(chain, kept, base["restart_from"])
+            },
         )
         if (base := node.get("on_base_changed"))
         else node

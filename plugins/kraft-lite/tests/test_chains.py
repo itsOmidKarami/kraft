@@ -95,6 +95,20 @@ BASE = {
         pytest.param(("kraft_home", "home"), "kraft_home", "user", id="kraft_home_beats_home"),
         pytest.param(("home",), "home", "user", id="home_config"),
         pytest.param(("bare_config",), None, "bundled", id="config_dir_without_library_is_skipped"),
+        # A set directory is the user library, as Kraft's `paths.config_dir`: one
+        # without library.yaml is what Kraft seeds from the packaged files.
+        pytest.param(
+            ("bare_config", "home"),
+            None,
+            "bundled",
+            id="config_dir_without_library_uses_bundled_not_home",
+        ),
+        pytest.param(
+            ("bare_kraft_home", "home"),
+            None,
+            "bundled",
+            id="kraft_home_without_library_uses_bundled_not_home",
+        ),
         pytest.param((), None, "bundled", id="bundled_when_none"),
         pytest.param(("config",), "config", "user", id="user_library_replaces_bundled"),
     ],
@@ -108,16 +122,24 @@ def test_lookup(tmp_path, home, layout, instance, source):
         "bare_config": tmp_path / "config",
         "templates": tmp_path / "templates",
         "kraft_home": tmp_path / "kraft-home" / "config",
+        "bare_kraft_home": tmp_path / "kraft-home" / "config",
         "home": home / ".kraft" / "config",
     }
+    # Each variable is set only when the layout has its place.
+    names = {
+        "KRAFT_CONFIG_DIR": ("config", "bare_config"),
+        "KRAFT_TEMPLATES_DIR": ("templates",),
+        "KRAFT_HOME": ("kraft_home", "bare_kraft_home"),
+    }
     env = {
-        "KRAFT_CONFIG_DIR": str(places["config"]),
-        "KRAFT_TEMPLATES_DIR": str(places["templates"]),
-        "KRAFT_HOME": str(tmp_path / "kraft-home"),
+        name: str(places[place].parent if name == "KRAFT_HOME" else places[place])
+        for name, owners in names.items()
+        for place in owners
+        if place in layout
     }
     for place in layout:
-        if place == "bare_config":
-            places[place].mkdir()  # set, but holding no library.yaml
+        if place.startswith("bare_"):
+            places[place].mkdir(parents=True)  # set, but holding no library.yaml
         else:
             write_library(places[place], LIBRARY, {f"{place}-chain": ONE_NODE})
 
@@ -151,7 +173,8 @@ def test_default_ref(tmp_path, home, repo_chains, expected):
     if repo_chains is not None:
         write_library(tmp_path / ".kraft", "", repo_chains)
 
-    assert kl_chains.default_chain_ref(tmp_path, {}) == expected
+    repo, _ = kl_chains.libraries(tmp_path, {})
+    assert kl_chains.default_chain_ref(repo) == expected
 
 
 #: The bundled `default` chain's nodes, in order.
@@ -523,6 +546,26 @@ def _task_chain(task: str) -> str:
             {"c": _task_chain("{id: t, kind: subprocess, command: '  '}")},
             "a.main.t: a subprocess task needs its 'command'",
             id="subprocess_command_blank",
+        ),
+        # Kraft refuses a node whose own tasks disagree: trim could not drop it cleanly.
+        pytest.param(
+            {
+                "c": _task_chain(
+                    "{id: s, extends: worker, produces: spec}, {id: t, extends: worker}"
+                )
+            },
+            r"a: node 'a' does not agree on what it produces \['\(none\)', 'spec'\]",
+            id="produces_some_and_none",
+        ),
+        pytest.param(
+            {
+                "c": _task_chain(
+                    "{id: s, extends: worker, produces: spec}, "
+                    "{id: p, extends: worker, produces: plan}"
+                )
+            },
+            r"a: node 'a' does not agree on what it produces \['plan', 'spec'\]",
+            id="produces_two_kinds",
         ),
     ],
 )

@@ -318,6 +318,38 @@ def test_legacy_frozen_chain_is_refused(kl_cli, tmp_path, where, verb):
 
 
 @pytest.mark.parametrize(
+    ("node", "edit", "named"),
+    [
+        pytest.param(
+            "verification", lambda n: n.pop("fix_loop"), "exec node 'verification' has no fix_loop"
+        ),
+        pytest.param(
+            "plan_approval", lambda n: n.pop("message"), "gate node 'plan_approval' has no message"
+        ),
+        pytest.param(
+            "spec",
+            lambda n: n["steps"][0]["tasks"][0].pop("path"),
+            "exec node 'spec' has a task with no path",
+        ),
+    ],
+    ids=["exec_without_fix_loop", "gate_without_message", "task_without_path"],
+)
+def test_a_frozen_chain_lacking_what_the_walk_reads_is_refused(kl_cli, tmp_path, node, edit, named):
+    """A hand-edited frozen chain is checked as an imported one is: a refusal
+    naming the gap, not a `KeyError` in the middle of a verb."""
+    chain_id = kl_cli(tmp_path, "start", "--title", "t")["chain_id"]
+    frozen = kl._frozen_path(tmp_path, chain_id)
+    chain = json.loads(frozen.read_text())
+    edit(next(n for n in chain["nodes"] if n["id"] == node))
+    frozen.write_text(json.dumps(chain))
+
+    refused = kl_cli(tmp_path, "state", ok=False)
+
+    assert f"{frozen} is not a usable V1 chain: {named}" in refused.stderr
+    assert "Traceback" not in refused.stderr
+
+
+@pytest.mark.parametrize(
     "files",
     [
         pytest.param({}, id="nothing"),
