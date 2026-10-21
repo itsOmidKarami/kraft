@@ -77,7 +77,12 @@ class Remote:
             raise SandboxRefused(self.refuse)
         self.wrapped_with.append(kw.get("ca_bundle"))
         self.wrapped_env.append(env)
-        self.calls.append("wrap")
+        # Off the event loop: a backend's wrap may walk the trees it mounts.
+        try:
+            asyncio.get_running_loop()
+            self.calls.append("wrap on the event loop")
+        except RuntimeError:
+            self.calls.append("wrap")
         sent = self.outbox / f"{ids.qualified(work_item_id, session_id)}.json"
         return ["env", f"KRAFT_RESULT_PATH={sent}", *cmd]
 

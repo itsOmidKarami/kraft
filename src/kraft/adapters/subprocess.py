@@ -1009,7 +1009,9 @@ async def _run_task(
             # session folder holds what the host writes and trusts. `db.write`
             # so this session's own row is seen.
             results = await db.write(lambda c: store.result_files(c, run_dirs, work_item_id))
-            cmd = backend.wrap(
+            # Off the loop: `kind: os` walks the mounted trees for credential files.
+            cmd = await asyncio.to_thread(
+                backend.wrap,
                 cmd,
                 root,
                 sandbox,

@@ -944,7 +944,9 @@ async def run_setup_command(
                 if network
                 else {}
             )
-            argv = backend.wrap(
+            # Off the loop: `kind: os` walks the mounted trees for credential files.
+            argv = await asyncio.to_thread(
+                backend.wrap,
                 ["sh", "-c", cmd],
                 worktree,
                 sandbox,
