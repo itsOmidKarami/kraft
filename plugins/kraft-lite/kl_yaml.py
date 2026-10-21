@@ -345,6 +345,10 @@ class _Reader:
             raise self.fail(f"unexpected text after the value: {tail.strip()!r}", line)
 
     def resolve(self, text: str, line: int) -> object:
+        if text == "<<":
+            raise self.fail("merge keys (`<<`) are not supported; quote it to keep it text", line)
+        if text == "=":
+            raise self.fail("the plain scalar `=` is not supported; quote it", line)
         if text in _NULLS:
             return None
         if text in _BOOLS:
@@ -452,11 +456,17 @@ class _Reader:
         indent = floor + int(digit) - 1 if digit else None
 
         body: list[str] = []
+        leading: list[int] = []  # the lengths of blank lines seen before the indent is known
         n = line + 1
         while n < len(self.lines):
             raw = self.lines[n]
             if not raw.strip(" "):
-                body.append("")
+                if indent is not None and len(raw) > indent:
+                    body.append(raw[indent:])  # spaces past the indent are content
+                else:
+                    body.append("")
+                    if indent is None:
+                        leading.append(len(raw))
                 n += 1
                 continue
             lead = len(raw) - len(raw.lstrip(" "))
@@ -464,6 +474,13 @@ class _Reader:
                 if lead < floor:
                     break
                 indent = lead
+                for k, length in enumerate(leading):
+                    if length > indent:
+                        raise self.fail(
+                            "bad indentation: a blank line inside a block scalar is "
+                            "indented past its first line",
+                            line + 1 + k,
+                        )
             if lead < indent:
                 break
             body.append(raw[indent:])
@@ -475,12 +492,14 @@ class _Reader:
         while body and body[-1] == "":
             body.pop()
             trailing += 1
-        if n >= len(self.lines) and not self.eof_newline:
-            trailing = max(trailing - 1, 0) if trailing else 0
+        # The file's last line has no break after it, so it adds none.
+        unterminated = n >= len(self.lines) and not self.eof_newline
+        at_eof_without_break = unterminated and trailing == 0
+        if unterminated and trailing:
+            trailing -= 1
         if not body:
             return "\n" * trailing if chomp == "+" else ""
         text = self.literal(body) if style == "|" else self.folded(body)
-        at_eof_without_break = n >= len(self.lines) and not self.eof_newline and trailing == 0
         if chomp == "+":
             return text + ("" if at_eof_without_break else "\n") + "\n" * trailing
         if chomp == "-" or at_eof_without_break:

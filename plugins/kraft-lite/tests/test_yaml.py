@@ -34,6 +34,11 @@ CORPUS: dict[str, tuple[str, object]] = {
         "a: |\n  one\n\n\nb: 1\n",
         {"a": "one\n", "b": 1},
     ),
+    "literal_whitespace_line_is_content": (
+        "a: |\n  one\n    \n  two\nb: 1\n",
+        {"a": "one\n  \ntwo\n", "b": 1},
+    ),
+    "literal_whitespace_line_last_and_stripped": ("a: |-\n  one\n    \n", {"a": "one\n  "}),
     "literal_strip": ("a: |-\n  one\n  two\n", {"a": "one\ntwo"}),
     "literal_keep": ("a: |+\n  one\n\nb: 1\n", {"a": "one\n\n", "b": 1}),
     "literal_more_indented_lines": (
@@ -47,6 +52,7 @@ CORPUS: dict[str, tuple[str, object]] = {
         "instructions: >-\n  Never signal a process\n  you did not start.\n  Ask first.\nnext: 1\n",
         {"instructions": "Never signal a process you did not start. Ask first.", "next": 1},
     ),
+    "folded_whitespace_line_is_content": ("a: >\n  one\n    \n  two\n", {"a": "one\n  \ntwo\n"}),
     "folded_more_indented_keeps_breaks": (
         "a: >\n  one\n    two\n  three\n",
         {"a": "one\n  two\nthree\n"},
@@ -141,6 +147,12 @@ REFUSALS: dict[str, tuple[str, int, str]] = {
     "nested_inline_mapping": ("a: b: c\n", 1, "mapping"),
     "unknown_escape": ('a: "\\q"\n', 1, "escape"),
     "bad_block_header": ("a: |x\n  y\n", 1, "block scalar"),
+    "merge_key_flow": ("a: 1\n<<: {b: 2}\n", 2, "merge key"),
+    "merge_key_block": ("<<:\n  b: 2\n", 1, "merge key"),
+    "merge_key_sequence": ("- x: 1\n  <<: [{b: 2}]\n", 2, "merge key"),
+    "merge_key_in_flow_mapping": ("a: {<<: {b: 2}}\n", 1, "merge key"),
+    "value_tag_scalar": ("a: =\n", 1, "`=`"),
+    "block_scalar_leading_spaces_line": ("a: |\n    \n  one\n", 2, "indent"),
     "timestamp": ("a: 2024-01-02\n", 1, "timestamp"),
     "sexagesimal": ("a: 1:30\n", 1, "sexagesimal"),
 }
