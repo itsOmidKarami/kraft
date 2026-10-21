@@ -113,3 +113,4 @@ Pull it before filing work, or the first launch pulls it inside the task's time 
 - [Kits](/reference/configuration/sandbox/kits): a sandbox that an image's own descriptor declares.
 - [sandbox.yaml](/reference/configuration/sandbox/sandbox-yaml): the host-wide file for the container CLI, SELinux, an extra CA and the proxy.
 - [Git in a sandbox](/reference/configuration/sandbox/git-in-a-sandbox): the copy of the repository's refs, a workspace's members, and what Kraft's own git does in the worktree.
+- [The OS sandbox](/reference/configuration/sandbox/os-sandbox): `kind: os`, which runs the host's own agent CLI under the operating system's process sandbox, with no image.
