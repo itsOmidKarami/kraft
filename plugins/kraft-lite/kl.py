@@ -74,6 +74,33 @@ REPORTED_LABEL = "kraft-reported:"
 SLICE_STATUSES = ("waiting", "starting", "running", "in_review", "ready_to_merge", "merged")
 MODES = ("feature", "main")
 
+#: What a node of the feature chain means once the run is sliced, by mode. The
+#: chain's own node list is untouched; `state` reports the action beside it so
+#: the `next` skill knows whether to run the node's hooks or do something else.
+#: A node absent from the table runs its hooks in both modes.
+SLICED_ACTIONS: dict[str, dict[str, str]] = {
+    "implementation": {"feature": "run_slices", "main": "run_slices"},
+    "verify": {"feature": "scoped_verify", "main": "skip"},
+    "open_mr": {"feature": "hooks", "main": "skip"},
+    "mr_checks": {"feature": "hooks", "main": "skip"},
+    "human_review": {"feature": "hooks", "main": "await_user_merges"},
+    "merge": {"feature": "hooks", "main": "await_user_merges"},
+    "post_merge_watch": {"feature": "hooks", "main": "hooks"},
+}
+
+#: Who decides what, unless `.kraft-lite/slices.json` says otherwise.
+DEFAULT_SETTINGS = {
+    "mode": "feature",
+    "rights": {
+        "plan_question": "controller",
+        "slice_review": "controller",
+        "merge_slice": "controller",
+        "merge_main": "user",
+        "push_outside_branch": "user",
+    },
+}
+RIGHT_HOLDERS = ("controller", "user")
+
 
 def dep_ids(record: dict) -> list[str]:
     """The ids a record waits on. bd accepts `depends_on_id` or `to`."""
@@ -372,6 +399,53 @@ def store_for(root: Path):
     return JsonlStore(root / STATE_DIR / "chain.jsonl")
 
 
+def settings(root: Path) -> dict:
+    """The standing rules: `.kraft-lite/slices.json` over `DEFAULT_SETTINGS`.
+
+    Top-level keys replace; `rights` merges key by key, so a file that changes
+    one right leaves the others at their defaults. Anything the file says that
+    is not understood is refused, naming it: a mistyped right that silently
+    changed nothing would leave a decision with the wrong party."""
+    path = root / STATE_DIR / "slices.json"
+    merged = {**DEFAULT_SETTINGS, "rights": dict(DEFAULT_SETTINGS["rights"])}
+    if not path.exists():
+        return merged
+    try:
+        given = json.loads(path.read_text())
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"kraft-lite: cannot read {path}: {error}") from error
+    if not isinstance(given, dict):
+        raise SystemExit(f"kraft-lite: {path} is not a JSON object")
+    for key, value in given.items():
+        if key not in DEFAULT_SETTINGS:
+            raise SystemExit(
+                f"kraft-lite: unknown setting {key!r} in {path}. "
+                f"Settings: {', '.join(DEFAULT_SETTINGS)}"
+            )
+        if key == "mode":
+            if value not in MODES:
+                raise SystemExit(
+                    f"kraft-lite: unknown mode {value!r} in {path}. Modes: {', '.join(MODES)}"
+                )
+            merged["mode"] = value
+            continue
+        if not isinstance(value, dict):
+            raise SystemExit(f"kraft-lite: {path}: rights is not a JSON object")
+        for right, holder in value.items():
+            if right not in DEFAULT_SETTINGS["rights"]:
+                raise SystemExit(
+                    f"kraft-lite: unknown right {right!r} in {path}. "
+                    f"Rights: {', '.join(DEFAULT_SETTINGS['rights'])}"
+                )
+            if holder not in RIGHT_HOLDERS:
+                raise SystemExit(
+                    f"kraft-lite: right {right!r} in {path} must be one of "
+                    f"{', '.join(RIGHT_HOLDERS)}, not {holder!r}"
+                )
+            merged["rights"][right] = holder
+    return merged
+
+
 DEFAULT_CHAIN = Path(__file__).parent / "chains" / "default.json"
 
 
@@ -610,7 +684,7 @@ def slices_view(records: list[dict], chain_id: str | None) -> dict:
 
 
 def slices_for_gate(
-    records: list[dict], node_record: dict, chain_id: str, path: Path
+    records: list[dict], node_record: dict, chain_id: str, path: Path, root: Path
 ) -> list[dict]:
     """The records `approve --slices` writes with the approval, or a `SystemExit`.
     Slicing happens once, at the gate that finalizes the chain: anywhere else a
@@ -629,8 +703,7 @@ def slices_for_gate(
         raise SystemExit(f"kraft-lite: cannot read the slice plan {path}: {error}") from error
     if not isinstance(plan, dict):
         raise SystemExit(f"kraft-lite: the slice plan {path} is not a JSON object")
-    # Task 3 swaps the settings mode in for this default.
-    return materialize_slices(plan, chain_id, mode_default="feature")
+    return materialize_slices(plan, chain_id, mode_default=settings(root)["mode"])
 
 
 def _by_age(by_chain: dict[str, list[dict]]) -> list[str]:
@@ -906,8 +979,20 @@ def _ours(records: list[dict], chain_id: str | None = None) -> list[dict]:
     return by_chain[(live or _by_age(by_chain))[-1]]
 
 
+def _sliced(everything: list[dict], epic: dict | None, node_id: str | None) -> dict | None:
+    """`null` for a chain that was never sliced, else the run's mode and what
+    the current node means in it. Read from the whole store: `_ours` returns only
+    the epic and its nodes, and the run record is neither."""
+    run = run_record(everything, epic["id"]) if epic else None
+    if run is None:
+        return None
+    mode = label_value(run, MODE_LABEL) or "feature"
+    return {"mode": mode, "action": SLICED_ACTIONS.get(node_id, {}).get(mode, "hooks")}
+
+
 def _state(root: Path, chain: dict, chain_id: str | None = None) -> dict:
-    records = _ours(store_for(root).load(), chain_id)
+    everything = store_for(root).load()
+    records = _ours(everything, chain_id)
     node_record = current(records)
     epic = next((r for r in records if label_value(r, CHAIN_LABEL)), None)
     if node_record is None:
@@ -923,6 +1008,7 @@ def _state(root: Path, chain: dict, chain_id: str | None = None) -> dict:
             "status": "done" if epic else "unstarted",
             "note": "",
             "backend": backend(root),
+            "sliced": _sliced(everything, epic, None),
         }
     node_id = label_value(node_record, NODE_LABEL)
     definition = next((n for n in chain["nodes"] if n["id"] == node_id), None)
@@ -947,6 +1033,7 @@ def _state(root: Path, chain: dict, chain_id: str | None = None) -> dict:
         "status": node_record["status"],
         "note": note[note.find(NOTE_PREFIX) :] if NOTE_PREFIX in note else "",
         "backend": backend(root),
+        "sliced": _sliced(everything, epic, node_id),
     }
 
 
@@ -1058,6 +1145,7 @@ def main(argv: list[str] | None = None) -> int:
     detect_parser = sub.add_parser("detect")
     detect_parser.add_argument("--chain", type=Path, default=None)
     sub.add_parser("chains")
+    sub.add_parser("settings")
     gate = sub.add_parser("gate")
     gate.add_argument("--name", required=True)
     reject = sub.add_parser("reject")
@@ -1100,6 +1188,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.verb == "chains":
         print(json.dumps(chain_summaries(store_for(root).load()), indent=2))
+        return 0
+
+    if args.verb == "settings":
+        print(json.dumps(settings(root), indent=2))
         return 0
 
     store = store_for(root)
@@ -1151,7 +1243,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.verb == "approve" and args.slices is not None:
-        made = slices_for_gate(everything, node_record, resolved_id, args.slices)
+        made = slices_for_gate(everything, node_record, resolved_id, args.slices, root)
         store.write([bank_wait(dict(node_record, status="closed")), *made])
     elif args.verb in ("close", "approve"):
         store.write([bank_wait(dict(node_record, status="closed"))])
