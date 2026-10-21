@@ -29,6 +29,16 @@
           }
         ]
       }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/kraft-worker-plugins.sh"
+          }
+        ]
+      }
     ]
   },
   "enabledPlugins": {

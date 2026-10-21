@@ -62,14 +62,25 @@ or merge a finished branch, and a worker does neither. So is ponytail, which
 puts a session into its own coding mode where a worker follows Kraft's
 instructions. For Claude Code, `.claude/hooks/kraft-worker-plugins.sh` refuses
 every superpowers and ponytail skill in a session with `$KRAFT_WORK_ITEM_ID` set
-and tells the session so. Both plugins also run hooks the worker hook cannot
-stop; to silence them, add `PONYTAIL_DEFAULT_MODE: "off"` and
-`TECHDOCS_SHORT_FORM_GATE: "off"` to `env:` in this repo's `repos.yaml` entry
-(techdocs-authoring's otherwise turns back a worker's first commit once, with a
-checklist for its message). For the other
-agents, a setup Kraft runs copies only impeccable into the worktree. An
-in-place item runs in your own checkout, so other agents there still see the
-superpowers copies you installed.
+and tells the session and its subagents so.
+
+The worker hook cannot stop another plugin's own hooks. ponytail's still brief
+each worker in its mode, and techdocs-authoring's turns back a worker's first
+commit once, with a checklist for its message. Both plugins read an off switch
+from the environment, so add them to `env:` in this repo's `repos.yaml` entry:
+
+```yaml
+env:
+  PONYTAIL_DEFAULT_MODE: "off"
+  TECHDOCS_SHORT_FORM_GATE: "off"
+```
+
+ponytail keeps its mode in one file per checkout, so an in-place item still
+shares it with your own sessions there.
+
+For the other agents, a setup Kraft runs copies only impeccable into the
+worktree. An in-place item runs in your own checkout, so other agents there
+still see the superpowers copies you installed.
 
 Cloud agents start from a fresh clone, so give them the same step. Copilot's
 coding agent already runs `just setup` (`.github/workflows/copilot-setup-steps.yml`).

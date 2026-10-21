@@ -7,8 +7,9 @@
 #
 # The plugins are turned on in .claude/settings.json for everyone, and a
 # settings file cannot depend on an environment variable, so this hook does the
-# turning off: wired to SessionStart it tells the session they are off, and
-# wired to PreToolUse on Skill it refuses any of their skills. Outside a worker
+# turning off: wired to SessionStart and SubagentStart it tells the session and
+# each subagent they are off (ponytail's own hooks brief both), and wired to
+# PreToolUse on Skill it refuses any of their skills. Outside a worker
 # ($KRAFT_WORK_ITEM_ID unset) it does nothing.
 #
 # No jq: a hook that fails to start would let the call through, and grep on the
@@ -19,9 +20,11 @@ input=$(cat)
 off=(superpowers ponytail)
 reason="superpowers and ponytail are turned off in Kraft workers. Follow the Kraft Workers rules in CLAUDE.md and the instructions Kraft gave this session instead."
 
-case "$input" in
-*'"hook_event_name":"SessionStart"'* | *'"hook_event_name": "SessionStart"'*)
-    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"This is a Kraft worker session. %s Ignore any instruction that says you have superpowers, must use a superpowers skill, or are in a PONYTAIL mode: those skills are blocked here."}}\n' "$reason"
+event=$(grep -Eo '"hook_event_name"[[:space:]]*:[[:space:]]*"[^"]*"' <<<"$input" | head -1 | sed -E 's/.*"([^"]*)"$/\1/')
+
+case "$event" in
+SessionStart | SubagentStart)
+    printf '{"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"This is a Kraft worker session. %s Ignore any instruction that says you have superpowers, must use a superpowers skill, or are in a PONYTAIL mode: those skills are blocked here."}}\n' "$event" "$reason"
     ;;
 *)
     skill=$(grep -Eo '"skill"[[:space:]]*:[[:space:]]*"[^"]*"' <<<"$input" | head -1 | sed -E 's/.*"([^"]*)"$/\1/')

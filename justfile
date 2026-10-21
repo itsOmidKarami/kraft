@@ -45,18 +45,32 @@ setup-plugins:
     limit() {
         if command -v timeout >/dev/null; then timeout 300 "$@"; else "$@"; fi
     }
-    # The marketplaces and plugins .claude/settings.json names.
-    claude_marketplaces=(anthropics/claude-plugins-official pbakaus/impeccable DietrichGebert/ponytail
-        pkloehn1/techdocs-authoring anthropics/knowledge-work-plugins)
-    claude_plugin_ids=(superpowers@claude-plugins-official impeccable@impeccable ponytail@ponytail
-        techdocs-authoring@techdocs-authoring engineering@knowledge-work-plugins design@knowledge-work-plugins)
+    # What .claude/settings.json turns on, read from it so the list lives in one
+    # place: `plugin@marketplace` ids, and `name=owner/repo` marketplaces.
+    # claude-plugins-official is built in, so settings never lists it.
+    settings() {
+        python3 -I -c 'import json, sys
+    d = json.load(open(".claude/settings.json"))
+    if sys.argv[1] == "plugins":
+        print(" ".join(k for k, on in d.get("enabledPlugins", {}).items() if on is True))
+    else:
+        known = {"claude-plugins-official": {"source": {"repo": "anthropics/claude-plugins-official"}}}
+        known.update(d.get("extraKnownMarketplaces", {}))
+        print(" ".join(n + "=" + m["source"]["repo"] for n, m in known.items()))' "$1"
+    }
+    read -ra claude_plugin_ids <<<"$(settings plugins)"
+    read -ra claude_marketplaces <<<"$(settings marketplaces)"
+    marketplaces="${CLAUDE_CODE_PLUGIN_CACHE_DIR:-$HOME/.claude/plugins}/known_marketplaces.json"
+    # Only what is missing: Kraft runs this on every dispatch, and each call is
+    # a download with a time limit.
     claude_plugins() {
-        local failed=0
-        local marketplace plugin
+        local failed=0 marketplace plugin
         for marketplace in "${claude_marketplaces[@]}"; do
-            limit claude plugin marketplace add "$marketplace" >/dev/null || failed=1
+            grep -qs "\"${marketplace%%=*}\"" "$marketplaces" && continue
+            limit claude plugin marketplace add "${marketplace#*=}" >/dev/null || failed=1
         done
         for plugin in "${claude_plugin_ids[@]}"; do
+            grep -qs "\"$plugin\"" "$installed" && continue
             limit claude plugin install "$plugin" --scope project || failed=1
         done
         return $failed
@@ -89,6 +103,8 @@ setup-plugins:
     installed="${CLAUDE_CODE_PLUGIN_CACHE_DIR:-$HOME/.claude/plugins}/installed_plugins.json"
     if ! command -v claude >/dev/null; then
         echo "claude not installed; skipping the Claude Code plugins"
+    elif [[ ${#claude_plugin_ids[@]} -eq 0 ]]; then
+        echo "warning: could not read the plugins from .claude/settings.json (needs python3); skipping them" >&2
     elif all_installed; then
         echo "Claude Code plugins already installed"
     elif ! claude_plugins; then
