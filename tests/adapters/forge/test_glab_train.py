@@ -230,17 +230,19 @@ def _car(status: str) -> dict:
             None,
             id="never-added",
         ),
+        # GitLab has not written its system note yet: no reason, which the
+        # merge node reads as "look again next poll", never as a person's.
         pytest.param(
             _dropped(None),
             forge.QueueRead(
                 kind="train",
                 state="dropped",
                 cause="other",
-                reason="dropped from the merge train; GitLab gave no reason",
+                reason="",
                 url=_TRAIN_PIPELINE["web_url"],
             ),
             "failed",
-            id="no-note",
+            id="no-note-yet",
         ),
     ],
 )
@@ -340,11 +342,63 @@ async def test_merge_on_a_train_project_posts_to_the_train_with_the_reviewed_sha
     assert not any(c.startswith("mr merge") for c in cli.calls("glab")), "went round the train"
 
 
-async def test_merge_off_a_train_project_still_runs_glab_mr_merge(cli, tmp_path):
+@pytest.mark.parametrize(
+    "project",
+    [
+        pytest.param('{"id":1}', id="fields-absent"),
+        pytest.param('{"merge_trains_enabled":false,"merge_pipelines_enabled":true}', id="off"),
+        pytest.param(NOT_FOUND, id="404"),
+        pytest.param(FailWith("glab: 403 Forbidden"), id="403"),
+    ],
+)
+async def test_merge_off_a_train_project_still_runs_glab_mr_merge(cli, tmp_path, project):
+    """The project read says plainly there is no train -- or that this token
+    may not see one: `glab mr merge`, as before trains were read."""
     cli.stub("git", "0")
-    cli.stub("glab", routes={"api projects/:id": '{"id":1}'}, default="")
+    cli.stub("glab", routes={"api projects/:id": project}, default="")
 
     await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, ""))
 
     assert cli.calls("glab")[-1] == "mr merge 7 --yes"
     assert not any("merge_trains" in c for c in cli.calls("glab"))
+
+
+_UNREAD_PROJECT = [
+    pytest.param(FailWith("glab: 500 Internal Server Error"), id="500"),
+    pytest.param(FailWith("glab: dial tcp: connection refused"), id="network"),
+    pytest.param("timeout", id="timeout"),
+    pytest.param("not json", id="unparseable"),
+    pytest.param("[]", id="not-the-project"),
+]
+
+
+@pytest.mark.parametrize("project", _UNREAD_PROJECT)
+@pytest.mark.parametrize("call", ["merge", "merge_queue"])
+async def test_a_project_read_that_failed_is_not_read_as_no_train(
+    cli, tmp_path, monkeypatch, call, project
+):
+    """A transient failure reading `projects/:id` says nothing about a train.
+    Read as none, `merge` would fall back to `glab mr merge`, which before
+    GitLab 19.1 can merge round the train: it raises, as a failed `glab mr
+    merge` does. `merge_queue` raises too, which the merge node reads as
+    "keep waiting"."""
+    cli.stub("git", "0")
+    cli.stub("glab", routes={"api projects/:id": FAIL if project == "timeout" else project})
+    if project == "timeout":
+        real = forge.git.run_git
+
+        async def slow_project(repo, args, **kw):
+            if args[-1] == "projects/:id":
+                raise forge.ForgeError(f"{' '.join(args)} timed out after 120s")
+            return await real(repo, args, **kw)
+
+        monkeypatch.setattr(forge.git, "run_git", slow_project)
+    cli_ = forge.GlabCli()
+
+    with pytest.raises(forge.ForgeError):
+        if call == "merge":
+            await cli_.merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, ""))
+        else:
+            await cli_.merge_queue(repo=tmp_path, branch="kraft/abc", base="main")
+
+    assert not any(c.startswith("mr merge") for c in cli.calls("glab")), "went round the train"

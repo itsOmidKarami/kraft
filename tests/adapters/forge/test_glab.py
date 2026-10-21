@@ -48,6 +48,8 @@ GLAB_CI_GET_PINNED_SUCCESS = (
 )
 
 NO_MR = forge.MR(0, "")
+#: A GitLab project that does not merge through a merge train.
+NO_TRAIN = '{"id":1}'
 
 
 def _pipeline(sha: str, ref: str = "kraft/abc") -> str:
@@ -647,7 +649,7 @@ async def test_push_names_the_work_item_branch_and_sets_no_upstream(cli, tmp_pat
 
 
 async def test_glab_merge_uses_the_number_when_one_is_known(cli, tmp_path):
-    cli.stub("glab", "")
+    cli.stub("glab", routes={"api projects/:id": NO_TRAIN}, default="")
     cli.stub("git", "0")
 
     await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(number=54, url=""))
@@ -670,7 +672,7 @@ async def test_merge_refuses_a_branch_ahead_of_its_remote(cli, tmp_path):
 async def test_merge_proceeds_when_the_branch_is_pushed(cli, tmp_path):
     """Zero commits ahead is the ordinary path after the sync node pushes."""
     cli.stub("git", "0")
-    cli.stub("glab", "")
+    cli.stub("glab", routes={"api projects/:id": NO_TRAIN}, default="")
 
     await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=NO_MR)
 

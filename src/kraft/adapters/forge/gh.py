@@ -62,6 +62,12 @@ _GH_QUEUE_STATES: dict[str, QueueState] = {
     "MERGEABLE": "merging",
 }
 _NO_REASON = "dropped from the merge queue; GitHub gave no reason"
+#: A removal reason that names failed or timed-out checks or CI: the code's to
+#: repair even with no `merge_group` run to read (CI outside GitHub Actions).
+#: Whole words only, so "circumstantial" or "statuses" says nothing.
+_CHECKS_FAILED = re.compile(
+    r"\b(?:checks?|ci|fail(?:s|ed|ure|ing)?|timed\s+out|time-?outs?)\b", re.IGNORECASE
+)
 #: The branch GitHub builds a queued pull request's merge group on.
 _QUEUE_BRANCH = "gh-readonly-queue/{base}/pr-{number}-"
 _QUEUE_QUERY = """
@@ -562,16 +568,20 @@ class GhCli(mr_ops.CliWaits):
         removal = _newest_node(pull.get("removals"))
         # A removal older than the latest enqueue belongs to an earlier entry:
         # it says nothing about why this one is gone (ISO times sort as text).
+        # No reason at all is no removal event for this entry yet -- or a
+        # pull request about to show merged -- which `run._merge_dropped`
+        # reads again next poll rather than as a person's removal.
         reason = ""
         if str(removal.get("createdAt") or "") >= enqueued_at:
             reason = str(removal.get("reason") or "").strip()
-        reason = reason or _NO_REASON
         failure = await self._merge_group_failure(repo, base, mr.number, since=enqueued_at)
         cause: DropCause = "other"
         if "conflict" in reason.lower():
             cause = "conflict"
-        elif failure is not None and failure.state == "failed":
+        elif (failure is not None and failure.state == "failed") or _CHECKS_FAILED.search(reason):
             cause = "code"
+        if cause != "other":
+            reason = reason or _NO_REASON
         return QueueRead(
             kind="queue",
             state="dropped",

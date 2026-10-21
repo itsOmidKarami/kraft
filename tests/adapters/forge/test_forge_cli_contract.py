@@ -208,7 +208,8 @@ async def test_merge_resolves_from_the_branch_when_no_number_is_known(be, cli, t
     """`run_task` never threads the MR number between nodes -- it passes 0 and
     the CLI resolves the item's branch. `mr merge 0` would target a merge
     request that does not exist."""
-    cli.stub(be.name, "")
+    # A GitLab project with no merge train; gh asks no such thing.
+    cli.stub(be.name, routes={"api projects/:id": '{"id":1}'}, default="")
     cli.stub("git", "0")  # zero commits ahead of origin
 
     await be.cls().merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(number=0, url=""))

@@ -261,8 +261,15 @@ async def _merge_dropped(
     - Its own runners broke (`ci.is_infra_red`): ask it to queue the same
       head again on the `ci_infra:<node_id>` budget, `infra_stop` once spent.
       Asking again does not break Kraft-l98h6: the forge holds nothing now.
-    - Taken off by a person, or for a reason this cannot read: `failed`.
-      Kraft never fights a person who took it off.
+    - Taken off by a person, or for a reason this cannot read:
+      `merge_rejected` with no finding, never re-queued and never rebased.
+      Kraft never fights a person who took it off; the walk stops for one
+      (`walk._unrepaired_drop`), no recovery answering it.
+    - Gone for a reason the forge has not written yet (cause `other`, no
+      reason): `merge_pending`, nothing recorded, read again at the next
+      observation -- GitLab writes its system note, and GitHub its removal
+      event or the pull request's merge, a moment after the entry goes. The
+      merge wait's own timeout bounds it.
     - Red code, a conflict with the target, or never added at all: rebased
       onto the target first (a train fails against the target as it is now),
       then `merge_rejected` with one finding per failed job, for the node's
@@ -274,6 +281,13 @@ async def _merge_dropped(
     cause = queue.cause or "other"
     if cause == "code" and queue.failure is not None and ci.is_infra_red(queue.failure):
         cause = "infra"
+    if cause == "other" and not queue.reason:
+        return (
+            f"gone from the merge {which}, but the forge has recorded no reason for it yet; "
+            "reading it again at the next poll\n",
+            "merge_pending",
+            None,
+        )
     reason = queue.reason or "no reason given"
     log = f"dropped from the merge {which}: {reason}\n"
     before = await git._head_sha(repo, branch)
@@ -324,7 +338,7 @@ async def _merge_dropped(
         return (
             f"dropped from the merge {which}: {reason}; Kraft does not re-queue a merge "
             "request that was taken off by hand or for a reason it cannot read\n",
-            "failed",
+            "merge_rejected",
             None,
         )
     if failed_jobs:

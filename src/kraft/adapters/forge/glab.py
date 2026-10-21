@@ -93,7 +93,6 @@ _TRAIN_CAR_STATES: dict[str, QueueState] = {
 #: request leaves a train without merging.
 _REMOVED_NOTE = "removed this merge request from the merge train"
 _ABORTED_NOTE = "aborted automatic add to merge train because "
-_NO_REASON = "dropped from the merge train; GitLab gave no reason"
 
 
 class GlabCli(mr_ops.CliWaits):
@@ -654,9 +653,10 @@ class GlabCli(mr_ops.CliWaits):
 
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
         """Ask GitLab to merge. On a merge train project the merge request is
-        added to the train; if `projects/:id` cannot be read, Kraft falls back
-        to `glab mr merge` (an outage must not block a merge), which on GitLab
-        before 19.1 could skip a train."""
+        added to the train. `glab mr merge` -- which on GitLab before 19.1 can
+        merge round a train -- runs only when `projects/:id` says plainly there
+        is none (`_train_enabled`); a read that failed raises, as a failed
+        `glab mr merge` does."""
         await git._assert_pushed(repo, branch)
         if await self._train_enabled(repo):
             await self._add_to_train(repo, branch, mr)
@@ -696,16 +696,22 @@ class GlabCli(mr_ops.CliWaits):
     async def _train_enabled(self, repo: Path) -> bool:
         """Whether the project merges through a merge train: both
         `merge_trains_enabled` and `merge_pipelines_enabled` are true. A field
-        that is missing (GitLab Free/CE), a refused or failed call, or a body
-        that is not the project object all read as no train: a train endpoint
-        that is not there is never a reason to stop an item."""
+        that is missing (GitLab Free/CE) or false, or a call GitLab refused
+        (403) or does not have (404), is no train: a train endpoint that is not
+        there is never a reason to stop an item. Anything else -- a 5xx, a dead
+        network, a timeout, a body that is not the project object -- says
+        nothing about a train and raises: read as none, `merge` would fall back
+        to `glab mr merge` and could merge round the train."""
         try:
             project = await self._json(repo, ["api", "projects/:id"], "glab api project")
-        except ForgeError:
-            return False
+        except ForgeError as exc:
+            if _http_status(exc) in (403, 404):
+                return False
+            raise
+        if not isinstance(project, dict):
+            raise ForgeError(f"glab api project answered without the project: {project!r:.200}")
         return (
-            isinstance(project, dict)
-            and project.get("merge_trains_enabled") is True
+            project.get("merge_trains_enabled") is True
             and project.get("merge_pipelines_enabled") is True
         )
 
@@ -759,7 +765,10 @@ class GlabCli(mr_ops.CliWaits):
             failure = await self._read_pipeline(repo, head_pipeline, str(head_pipeline["sha"]))
         note = await self._removal_note(repo, iid)
         cause: DropCause = "other"
-        reason = _NO_REASON
+        # No note is no reason yet: GitLab writes it a moment after the car
+        # goes, and `run._merge_dropped` reads again next poll rather than
+        # reading it as a person's removal.
+        reason = ""
         if note.startswith(_ABORTED_NOTE):
             cause, reason = "not_added", note[len(_ABORTED_NOTE) :]
         elif note.startswith(_REMOVED_NOTE + " because "):

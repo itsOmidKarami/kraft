@@ -43,8 +43,11 @@ INFRA = _dropped(
 )
 CONFLICT = _dropped("conflict", "merge conflict with main")
 NOT_ADDED = _dropped("not_added", "aborted automatic add to merge train")
-#: Taken off with nothing said, as a person's cancel note reads.
-BY_HAND = _dropped("other", "")
+#: Taken off by a person, as GitLab's cancel note reads.
+BY_HAND = _dropped("other", "removed this merge request from the merge train")
+#: Gone from the train with no note or event saying why yet: the forge may
+#: not have written it, or the merge request is about to show merged.
+NOT_YET = _dropped("other", "")
 
 
 class _Unanswered(forge.FakeForge):
@@ -199,13 +202,25 @@ def _train(*drops: forge.QueueRead, **kw) -> forge.FakeForge:
             id="infra-cap-spent",
         ),
         # Taken off by a person, or for a reason Kraft cannot read: never
-        # re-queued, never rebased.
+        # re-queued, never rebased; handed back as a rejection no recovery
+        # answers, for the walk to stop on.
         pytest.param(
             lambda: _train(BY_HAND),
-            *(None, False, ["waiting", "failed"], ["other"], 1, 1),
-            "dropped from the merge train: no reason given; Kraft does not re-queue",
+            *(None, False, ["waiting", "merge_rejected"], ["other"], 1, 1),
+            "dropped from the merge train: removed this merge request from the merge train; "
+            "Kraft does not re-queue",
             None,
             id="removed-by-person",
+        ),
+        # Gone, and nothing on the forge says why yet: read again at the next
+        # observation, recording nothing, rather than stopping for good on a
+        # removal note the forge has not written.
+        pytest.param(
+            lambda: _train(NOT_YET),
+            *(None, False, ["waiting", "waiting", "waiting"], [], 1, 1),
+            "the forge has recorded no reason for it yet; reading it again at the next poll\n",
+            None,
+            id="no-reason-recorded-yet",
         ),
         # It never reached the train: the merge request's own pipeline failed
         # after Kraft asked. Rebased, then repaired, as code red is.

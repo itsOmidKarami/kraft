@@ -513,15 +513,13 @@ def _queue(url: str = _PR_URL, **fields) -> forge.QueueRead:
             None,
             id="dropped-by-person",
         ),
+        # No removal event yet (or the pull request is about to show
+        # merged): no reason, which the merge node reads again next poll.
         pytest.param(
             _queue_routes(_graphql()),
-            _queue(
-                state="dropped",
-                cause="other",
-                reason="dropped from the merge queue; GitHub gave no reason",
-            ),
+            _queue(state="dropped", cause="other", reason=""),
             None,
-            id="dropped-no-reason",
+            id="dropped-no-removal-event-yet",
         ),
         # Drop 1 was a red merge group (run 555, 09:30). Kraft repaired and
         # queued again at 11:00; this entry was taken out by a person. Run 555
@@ -550,11 +548,7 @@ def _queue(url: str = _PR_URL, **fields) -> forge.QueueRead:
                 ),
                 [_merge_group_run()],
             ),
-            _queue(
-                state="dropped",
-                cause="other",
-                reason="dropped from the merge queue; GitHub gave no reason",
-            ),
+            _queue(state="dropped", cause="other", reason=""),
             None,
             id="stale-removal-from-an-earlier-drop",
         ),
@@ -575,6 +569,36 @@ def _queue(url: str = _PR_URL, **fields) -> forge.QueueRead:
             ),
             "failed",
             id="the-failed-run-of-the-latest-entry",
+        ),
+        # Checks GitHub Actions does not run (an external CI, a required
+        # status): no merge-group run to read, so GitHub's own words naming
+        # the failed checks are the finding.
+        *(
+            pytest.param(
+                _queue_routes(_graphql(removal=reason)),
+                _queue(state="dropped", cause="code", reason=reason),
+                None,
+                id=f"no-actions-run-{id}",
+            )
+            for reason, id in [
+                ("Required status checks failed", "checks-failed"),
+                ("The merge commit failed CI", "ci-failed"),
+                ("Timed out waiting for status checks", "timed-out"),
+                ("CHECK TIMEOUT", "timeout"),
+            ]
+        ),
+        *(
+            pytest.param(
+                _queue_routes(_graphql(removal=reason)),
+                _queue(state="dropped", cause="other", reason=reason),
+                None,
+                id=f"not-a-checks-reason-{id}",
+            )
+            for reason, id in [
+                ("Removed by omid from the merge queue", "by-hand"),
+                ("Dequeued: the decision was circumstantial", "words-containing-ci"),
+                ("Statuses of the team changed", "statuses-of-something-else"),
+            ]
         ),
     ],
 )
@@ -630,7 +654,8 @@ async def test_merge_queue_blames_the_failed_merge_group_run_of_this_pull_reques
 
     assert got.state == "dropped"
     if run_id is None:
-        assert (got.failure, got.cause, got.url) == (None, "other", _PR_URL)
+        # No run to blame, so GitHub's reason naming the failed checks is all.
+        assert (got.failure, got.cause, got.url) == (None, "code", _PR_URL)
     else:
         assert got.failure is not None and got.failure.url.endswith(f"/runs/{run_id}")
         assert got.cause == "code"
