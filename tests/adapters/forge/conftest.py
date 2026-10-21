@@ -12,7 +12,7 @@ from support.harness import own_files
 from kraft import events
 from kraft.adapters import forge
 
-from .nodes import FAIL, back_half
+from .nodes import FAIL, FailWith, back_half
 
 
 class Cli:
@@ -32,11 +32,14 @@ class Cli:
         """Install `name`. Without `routes` every call prints `stdout` and exits
         `rc`. With `routes` (`{"mr view": stdout, "ci get": FAIL}`, keyed on
         the first two arguments) the answer depends on the subcommand, and an
-        unrouted call prints `default` (`FAIL`: exit 1)."""
+        unrouted call prints `default` (`FAIL`: exit 1; a `FailWith` exits 1
+        saying its text)."""
 
         def answer(out):
             if out is FAIL:
                 return "echo 'stub: failed' >&2; exit 1"
+            if isinstance(out, FailWith):
+                return f"echo '{out}' >&2; exit 1"
             return f"cat <<'STUBEOF'\n{out}\nSTUBEOF\n  exit {rc}"
 
         if routes is None:

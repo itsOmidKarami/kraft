@@ -10,6 +10,14 @@ from support.harness import v1_resolved
 FAIL = None
 
 
+class FailWith(str):
+    """A route value meaning "this subcommand exits 1 saying this on stderr"."""
+
+
+#: What `glab api` says of an endpoint with nothing at it.
+NOT_FOUND = FailWith("glab: 404 Not Found")
+
+
 def forge_node(node_id: str, target: str, **task) -> dict:
     """A one-task V1 exec node running forge `target`."""
     return {

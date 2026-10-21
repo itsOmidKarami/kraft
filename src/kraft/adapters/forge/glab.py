@@ -11,9 +11,12 @@ from kraft.adapters.forge.models import (
     MR,
     CIState,
     CIStatus,
+    DropCause,
     FailedJob,
     ForgeError,
     MRRef,
+    QueueRead,
+    QueueState,
     ReviewResult,
 )
 
@@ -68,6 +71,28 @@ _UNREADABLE_JOBS = (FailedJob("(unreadable)", "failed", None),)
 #: commit, never the head, so the head it tested is the commit's second parent
 #: (`_answered_for`).
 _MERGE_REF = "refs/merge-requests/{iid}/merge"
+
+#: Where a merge train builds its pipeline: the merge request's head merged
+#: into the target and everything ahead of it on the train. A drop for a failed
+#: train pipeline leaves it as the merge request's `head_pipeline`.
+_TRAIN_REF = "refs/merge-requests/{iid}/train"
+
+#: A merge train car's `status` (GitLab `MergeTrains::Car`), as `QueueRead`
+#: states. An unrecognised status is a car that still exists, so still queued.
+_TRAIN_CAR_STATES: dict[str, QueueState] = {
+    "idle": "queued",
+    "stale": "queued",
+    "fresh": "queued",
+    "merging": "merging",
+    "merged": "merged",
+    "skip_merged": "merged",
+}
+
+#: The three system notes `SystemNotes::MergeTrainService` writes when a merge
+#: request leaves a train without merging.
+_REMOVED_NOTE = "removed this merge request from the merge train"
+_ABORTED_NOTE = "aborted automatic add to merge train because "
+_NO_REASON = "dropped from the merge train; GitLab gave no reason"
 
 
 class GlabCli(mr_ops.CliWaits):
@@ -628,11 +653,150 @@ class GlabCli(mr_ops.CliWaits):
 
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
         await git._assert_pushed(repo, branch)
+        if await self._train_enabled(repo):
+            await self._add_to_train(repo, branch, mr)
+            return
         # number 0 is "not known": `run_task` does not thread the MR between
         # nodes, so the branch names it. Passing a literal 0 would target a
         # merge request that does not exist.
         target = mr_ops.target(mr.number, branch)
         await git.run_git(repo, ["glab", "mr", "merge", *target, "--yes"])
+
+    async def _add_to_train(self, repo: Path, branch: str, mr: MR) -> None:
+        """Queue the merge request on the train explicitly. Before GitLab 19.1
+        the merge endpoint could merge directly and bypass the train; this call
+        cannot skip it, and `sha` makes GitLab refuse a head nobody reviewed."""
+        iid = mr.number
+        if iid <= 0:
+            _, view = await self._merge_view(repo, branch)
+            iid = int(view.get("iid") or 0)
+        sha = await git._head_sha(repo, branch)
+        if iid <= 0 or not sha:
+            raise ForgeError(f"cannot queue {branch} on the merge train: no merge request or head")
+        await git.run_git(
+            repo,
+            [
+                "glab",
+                "api",
+                "-X",
+                "POST",
+                f"projects/:id/merge_trains/merge_requests/{iid}",
+                "-f",
+                "auto_merge=true",
+                "-f",
+                f"sha={sha}",
+            ],
+        )
+
+    async def _train_enabled(self, repo: Path) -> bool:
+        """Whether the project merges through a merge train: both
+        `merge_trains_enabled` and `merge_pipelines_enabled` are true. A field
+        that is missing (GitLab Free/CE), a refused or failed call, or a body
+        that is not the project object all read as no train: a train endpoint
+        that is not there is never a reason to stop an item."""
+        try:
+            project = await self._json(repo, ["api", "projects/:id"], "glab api project")
+        except ForgeError:
+            return False
+        return (
+            isinstance(project, dict)
+            and project.get("merge_trains_enabled") is True
+            and project.get("merge_pipelines_enabled") is True
+        )
+
+    async def merge_queue(self, *, repo: Path, branch: str, base: str) -> QueueRead:
+        """Where this branch's merge request stands on the project's merge
+        train. `base` is unused: GitLab trains are per project, not per branch."""
+        if not await self._train_enabled(repo):
+            return QueueRead()
+        detail, view = await self._merge_view(repo, branch)
+        if detail == "merged":
+            return QueueRead(kind="train", state="merged", url=str(view.get("web_url") or ""))
+        iid = view.get("iid")
+        if not iid:
+            return QueueRead(kind="train")
+        try:
+            car = await self._json(
+                repo, ["api", f"projects/:id/merge_trains/merge_requests/{iid}"], "glab api car"
+            )
+        except ForgeError as exc:
+            if "403" in str(exc):
+                return QueueRead()
+            if "404" not in str(exc):
+                raise
+            # GitLab destroys a car when it drops the merge request.
+            if str(view.get("state")) not in ("opened", "locked"):
+                return QueueRead(kind="train", url=str(view.get("web_url") or ""))
+            return await self._dropped(repo, view, str(iid))
+        if not isinstance(car, dict):
+            return QueueRead(kind="train", url=str(view.get("web_url") or ""))
+        state = _TRAIN_CAR_STATES.get(str(car.get("status")), "queued")
+        pipeline = car.get("pipeline")
+        url = str(
+            (pipeline.get("web_url") if isinstance(pipeline, dict) else "")
+            or view.get("web_url")
+            or ""
+        )
+        return QueueRead(kind="train", state=state, url=url)
+
+    async def _dropped(self, repo: Path, view: dict, iid: str) -> QueueRead:
+        """A merge request GitLab took off the train: why, in GitLab's words,
+        and the train pipeline that failed when there is one. The train
+        pipeline stays the merge request's `head_pipeline`."""
+        failure = None
+        head_pipeline = view.get("head_pipeline")
+        if (
+            isinstance(head_pipeline, dict)
+            and head_pipeline.get("ref") == _TRAIN_REF.format(iid=iid)
+            and head_pipeline.get("sha")
+        ):
+            failure = await self._read_pipeline(repo, head_pipeline, str(head_pipeline["sha"]))
+        note = await self._removal_note(repo, iid)
+        cause: DropCause = "other"
+        reason = _NO_REASON
+        if note.startswith(_ABORTED_NOTE):
+            cause, reason = "not_added", note[len(_ABORTED_NOTE) :]
+        elif note.startswith(_REMOVED_NOTE + " because "):
+            reason = note[len(_REMOVED_NOTE + " because ") :]
+            if "conflict" in reason.lower():
+                cause = "conflict"
+            elif failure is not None and failure.state == "failed":
+                cause = "code"
+        elif note.rstrip(".") == _REMOVED_NOTE:
+            reason = _REMOVED_NOTE
+        url = (failure.url if failure is not None else "") or str(view.get("web_url") or "")
+        return QueueRead(
+            kind="train",
+            state="dropped",
+            cause=cause,
+            reason=reason,
+            failure=failure,
+            url=url,
+        )
+
+    async def _removal_note(self, repo: Path, iid: str) -> str:
+        """The newest system note that says the merge request left the train,
+        else "". A note that cannot be read is no note: the drop itself was
+        already established."""
+        try:
+            notes = await self._json(
+                repo,
+                [
+                    "api",
+                    f"projects/:id/merge_requests/{iid}/notes"
+                    "?sort=desc&order_by=created_at&per_page=20",
+                ],
+                "glab api notes",
+            )
+        except ForgeError:
+            return ""
+        for note in notes if isinstance(notes, list) else []:
+            if not isinstance(note, dict) or not note.get("system"):
+                continue
+            body = str(note.get("body") or "").strip()
+            if body.startswith((_ABORTED_NOTE, _REMOVED_NOTE)):
+                return body
+        return ""
 
     async def close_mr(self, *, repo: Path, mr: MRRef) -> None:
         await git.run_git(repo, ["glab", "mr", "close", str(mr.number)])

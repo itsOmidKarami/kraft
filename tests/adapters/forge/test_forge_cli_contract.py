@@ -5,6 +5,8 @@ Behaviour only one CLI has stays in test_glab.py / test_gh.py."""
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -210,8 +212,8 @@ async def test_merge_resolves_from_the_branch_when_no_number_is_known(be, cli, t
 
     await be.cls().merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(number=0, url=""))
 
-    (call,) = cli.calls(be.name)
-    assert call.startswith(be.merge_verb)
+    # glab also asks the project whether it merges through a train first.
+    (call,) = [c for c in cli.calls(be.name) if c.startswith(be.merge_verb)]
     assert " 0 " not in f" {call} "
 
 
@@ -263,3 +265,27 @@ async def test_ci_status_names_the_block_reason(cli, tmp_path, backend, view, re
     status = await backend.cls().ci_status(repo=tmp_path, mr=forge.MR(0, ""), branch="kraft/abc")
 
     assert (status.state, status.block_reason, status.mergeable) == ("success", reason, mergeable)
+
+
+@pytest.mark.e2e("glab")
+def test_glab_train_payload_shapes():
+    """The merge-train payloads `GlabCli.merge_queue` reads, from a real GitLab:
+    the project's `merge_trains_enabled`, and a car's `status`, `pipeline.ref`
+    and `merge_request.iid`. Needs a checkout of a project on a merge train
+    (`KRAFT_E2E_GLAB_REPO`) and the iid of a merge request on its train
+    (`KRAFT_E2E_GLAB_TRAIN_MR`), and skips without them."""
+    repo, iid = os.environ.get("KRAFT_E2E_GLAB_REPO"), os.environ.get("KRAFT_E2E_GLAB_TRAIN_MR")
+    if not (repo and iid):
+        pytest.skip("e2e: set KRAFT_E2E_GLAB_REPO and KRAFT_E2E_GLAB_TRAIN_MR (a train project)")
+
+    def api(path: str) -> dict:
+        done = subprocess.run(
+            ["glab", "api", path], cwd=repo, capture_output=True, text=True, check=True
+        )
+        return json.loads(done.stdout)
+
+    assert "merge_trains_enabled" in api("projects/:id")
+    car = api(f"projects/:id/merge_trains/merge_requests/{iid}")
+    assert car["status"]
+    assert car["pipeline"]["ref"]
+    assert car["merge_request"]["iid"] == int(iid)
