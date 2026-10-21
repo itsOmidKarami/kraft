@@ -428,6 +428,22 @@ STRAYS = {
     "another_chains_slice": "ks-bbbbbbbb",
     "another_chains_run": "ksr-bbbbbbbb",
     "an_issue_of_no_chain": "bd-12",
+    # Labelled as this chain's, under an id no slice or run record is minted with.
+    "a_slice_label_on_an_issue": "bd-13",
+    "a_run_label_on_a_slice_id": "ks-aaaaaaaa",
+    "a_slice_label_on_a_long_id": "ks-aaaaaaaa0",
+}
+
+#: An export file with a line `import` cannot read, by the file and what it holds.
+MALFORMED = {
+    "a_line_not_json": ("records.jsonl", "{not json"),
+    "a_record_without_an_id": ("records.jsonl", '{"title": "x"}'),
+    "a_seq_not_a_number": (
+        "records.jsonl",
+        json.dumps({"id": "kl-aaaaaaaa.plan", "labels": ["kraft-seq:x"], "status": "open"}),
+    ),
+    "a_decision_without_an_id": ("decisions.jsonl", '{"question": "q"}'),
+    "a_decision_seq_not_a_number": ("decisions.jsonl", '{"id": "kd-1", "seq": "x"}'),
 }
 
 
@@ -435,6 +451,9 @@ def stray_record(problem: str) -> dict:
     labels = {
         "another_chains_slice": [f"{kl.SLICE_OF_LABEL}kl-bbbbbbbb"],
         "another_chains_run": [f"{kl.RUN_LABEL}kl-bbbbbbbb"],
+        "a_slice_label_on_an_issue": [f"{kl.SLICE_OF_LABEL}kl-aaaaaaaa"],
+        "a_run_label_on_a_slice_id": [f"{kl.RUN_LABEL}kl-aaaaaaaa"],
+        "a_slice_label_on_a_long_id": [f"{kl.SLICE_OF_LABEL}kl-aaaaaaaa"],
     }
     return {
         "_type": "issue",
@@ -465,6 +484,11 @@ def stray_record(problem: str) -> dict:
             )
             for problem, stray in STRAYS.items()
         ],
+        # Read from elsewhere, so a line it cannot read is named, not a traceback.
+        *[
+            pytest.param(problem, "{out}/" + name + " line 1", id=problem)
+            for problem, (name, _) in MALFORMED.items()
+        ],
         # The id names files under `.kraft-lite/`, so only the shape `start` mints
         # is taken: anything else is refused before a file is read or written.
         *[
@@ -484,7 +508,7 @@ def test_import_refuses_an_export_that_names_no_single_chain(problem, named, kl_
     epics = {
         "two_epics": ["kl-aaaaaaaa", "kl-bbbbbbbb"],
         "no_template": ["kl-aaaaaaaa"],
-        **dict.fromkeys(STRAYS, ["kl-aaaaaaaa"]),
+        **dict.fromkeys([*STRAYS, *MALFORMED], ["kl-aaaaaaaa"]),
     }
     for chain_id in epics.get(problem, [BAD_CHAIN_IDS.get(problem)]):
         if chain_id is None:
@@ -498,6 +522,11 @@ def test_import_refuses_an_export_that_names_no_single_chain(problem, named, kl_
             template.write_text(json.dumps(chain))
     if problem in STRAYS:
         kl.append_jsonl(out / "records.jsonl", [stray_record(problem)])
+    if problem in MALFORMED:
+        name, line = MALFORMED[problem]
+        # First in its file, so the line named is line 1.
+        bad = out / name
+        bad.write_text(line + "\n" + (bad.read_text() if bad.exists() else ""))
     before = files_under(tmp_path)
 
     refused = kl_cli(there, "import", "--from", str(out), ok=False)

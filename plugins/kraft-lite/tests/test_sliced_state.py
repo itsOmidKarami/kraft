@@ -351,7 +351,19 @@ def test_a_rewind_to_implementation_waits_for_a_reopened_slice(
 
 
 #: b cut early from a's branch while a is in review.
-CUT_B = [("a", "running"), ("a", "in_review"), ("b", "starting", "--fork", "f1")]
+CUT_B = [
+    ("a", "running", "--fork", "a0a0"),
+    ("a", "in_review"),
+    ("b", "starting", "--fork", "f1f1"),
+]
+#: And c cut early from b's branch, while b is in review.
+CUT_C = [*CUT_B, ("b", "running"), ("b", "in_review"), ("c", "starting", "--fork", "c1c1")]
+#: a, then b after a, then c after b: a line each slice can be cut early down.
+A_B_C = [
+    {"key": "a", "title": "Alpha", "tasks": [1, 2]},
+    {"key": "b", "title": "Beta", "tasks": [3], "after": ["a"]},
+    {"key": "c", "title": "Gamma", "tasks": [4, 5], "after": ["b"]},
+]
 
 
 @pytest.mark.parametrize(
@@ -369,14 +381,17 @@ CUT_B = [("a", "running"), ("a", "in_review"), ("b", "starting", "--fork", "f1")
         pytest.param([*CUT_B, ("a", "running"), ("a", "in_review")], "a", ["b"], id="a_back"),
         # A new fork is the rebase: onto a's new tip while a is unmerged...
         pytest.param(
-            [*CUT_B, ("a", "running"), ("a", "in_review"), ("b", None, "--fork", "f2")],
+            [*CUT_B, ("a", "running"), ("a", "in_review"), ("b", None, "--fork", "f2f2")],
             "a",
             [],
             id="rebased_onto_a",
         ),
         # ... and onto the target once a is merged.
         pytest.param(
-            [*CUT_B, ("a", "merged"), ("b", None, "--fork", "f3")], None, [], id="rebased_on_merge"
+            [*CUT_B, ("a", "merged"), ("b", None, "--fork", "f3f3")],
+            None,
+            [],
+            id="rebased_on_merge",
         ),
         # Only a started, unmerged slice has a branch left to rebase.
         pytest.param([*CUT_B, ("a", "running"), ("b", "waiting")], "a", [], id="b_back_to_waiting"),
@@ -413,12 +428,21 @@ CUT_B = [("a", "running"), ("a", "in_review"), ("b", "starting", "--fork", "f1")
             [],
             id="a_reopened_after_b_cut_from_target",
         ),
+        # c was cut from b, which was cut from a: when a moves, b rebases, so c does too.
+        pytest.param([*CUT_C, ("a", "running")], "a", ["b", "c"], id="a_back_cascades_to_c"),
+        # A new fork moves a branch as surely as going back to work does.
+        pytest.param([*CUT_B, ("a", None, "--fork", "a1a1")], "a", ["b"], id="a_rebased_in_review"),
+        pytest.param(
+            [*CUT_C, ("a", None, "--fork", "a1a1")], "a", ["b", "c"], id="a_rebased_cascades"
+        ),
+        pytest.param([*CUT_C, ("b", None, "--fork", "f2f2")], "a", ["c"], id="b_rebased_flags_c"),
+        pytest.param([*CUT_B, ("a", None, "--fork", "a0a0")], "a", [], id="a_same_fork_again"),
     ],
 )
 def test_a_slice_sent_back_to_work_flags_the_slices_cut_early_from_it(
     walk, moves, cut_from, base_moved, kl_cli, tmp_path
 ):
-    walk.slice(tmp_path, walk.plan(slices=ABC))
+    walk.slice(tmp_path, walk.plan(slices=A_B_C))
     for key, status, *flags in moves:
         kl_cli(
             tmp_path, "slice-set", "--slice", key, *(["--status", status] if status else []), *flags

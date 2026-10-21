@@ -230,22 +230,39 @@ def test_after_becomes_a_bd_shaped_blocks_dependency():
             "state_branch",
             id="no_state_branch",
         ),
-        # A branch name is a label value and an argument to git: one string, no spaces.
+        # A branch name is a label value and an argument to git: one string git takes.
         *[
             pytest.param(
                 plan(**{field: value}),
-                f"the slice plan's {field} must be a branch name, a string with no "
-                f"whitespace, not {value!r}",
+                f"the slice plan's {field} must be a branch name git takes",
                 id=f"{field}_{name}",
             )
             for field in ("state_branch", "feature_branch")
-            for name, value in (
-                ("not_a_string", 7),
-                ("a_list", ["x"]),
-                ("with_a_space", "kraft lite/x"),
-                ("with_a_newline", "kraft-lite/x\n"),
-            )
+            for name, value in {
+                "not_a_string": 7,
+                "a_list": ["x"],
+                "with_a_space": "kraft lite/x",
+                "with_a_newline": "kraft-lite/x\n",
+                "leading_dash": "-x",
+                "double_dot": "a..b",
+                "leading_dot": ".x",
+                "trailing_slash": "x/",
+                "dot_lock": "x.lock",
+                "a_tilde": "x~1",
+                "a_colon": "x:y",
+            }.items()
         ],
+        # A typo drops what it names: `afer` would leave b free to start first.
+        pytest.param(
+            plan(feture_branch="feature/y", sate="x"),
+            "the slice plan has unknown keys: feture_branch, sate",
+            id="unknown_plan_keys",
+        ),
+        pytest.param(
+            plan(slices=[{"key": "a", "title": "A", "tasks": [1], "afer": ["b"]}]),
+            "slice 1 ('a') has unknown keys: afer",
+            id="unknown_slice_key",
+        ),
     ],
 )
 def test_a_broken_slice_plan_is_refused(bad, named):
@@ -652,6 +669,20 @@ EARLY_B = [("a", "running"), ("a", "in_review"), ("b", "starting"), ("b", "runni
             "not merged: a (running)",
             id="merge_after_a_reopened_after",
         ),
+        # An empty or made-up fork would count as a rebase and clear the flags.
+        *[
+            pytest.param([], ["--slice", "a", f"--{flag}={value}"], named, id=f"{flag}_{name}")
+            for flag, name, value, named in (
+                ("fork", "empty", "", "--fork must be a commit id, 4 to 64 hex digits, not ''"),
+                ("fork", "not_hex", "main", "4 to 64 hex digits, not 'main'"),
+                ("fork", "too_short", "abc", "4 to 64 hex digits, not 'abc'"),
+                ("branch", "empty", "", "--branch must be a branch name git takes"),
+                ("branch", "leading_dash", "-x", "a branch name git takes"),
+                ("branch", "a_space", "x y", "a branch name git takes"),
+                ("session", "empty", "", "--session must be a session id, with no whitespace"),
+                ("session", "a_space", "s 1", "with no whitespace, not 's 1'"),
+            )
+        ],
     ],
 )
 def test_slice_set_refuses_an_unknown_key_or_status(walk, moves, flags, named, kl_cli, tmp_path):
@@ -703,7 +734,7 @@ def test_slice_set_allows_a_start_from_ready_or_early_and_any_later_move(
     "flags",
     [
         pytest.param(["--status", "running"], id="same_status"),
-        pytest.param(["--session", "s-1", "--branch", "x-a", "--fork", "f1"], id="same_fields"),
+        pytest.param(["--session", "s-1", "--branch", "x-a", "--fork", "f1f1"], id="same_fields"),
         pytest.param([], id="no_flags"),
     ],
 )
@@ -712,7 +743,7 @@ def test_slice_set_that_changes_nothing_writes_nothing(walk, flags, kl_cli, tmp_
     no-op counted as a write would beat a real one made in another checkout."""
     walk.slice(tmp_path, plan())
     set_a = ("slice-set", "--slice", "a", "--status", "running", "--session", "s-1")
-    kl_cli(tmp_path, *set_a, "--branch", "x-a", "--fork", "f1")
+    kl_cli(tmp_path, *set_a, "--branch", "x-a", "--fork", "f1f1")
     store = tmp_path / ".kraft-lite" / "chain.jsonl"
     written = store.read_text()
 

@@ -93,9 +93,25 @@ MODES = ("feature", "main")
 #: A slice key becomes a label value, a directory, a file name and part of a
 #: session title, so it holds nothing any of those would read differently.
 SLICE_KEY = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
-#: What a plan's branch has to be. Git refuses more than this, and says so; what
-#: is checked here is what a label and a command line would read differently.
-BRANCH = re.compile(r"\S+")
+#: What a branch name has to be: a label value and an argument to git, so no
+#: whitespace, and nothing git would read as an option (a leading `-`) or refuse
+#: as a branch (`git check-ref-format --branch`): no `..`, `//` or `@{`, no part
+#: starting with `.`, no ending in `/`, `.` or `.lock`, none of `~^:?*[\`.
+BRANCH = re.compile(
+    r"(?![-/.])(?!.*(?:\.\.|//|@\{|/\.))(?!.*(?:/|\.|\.lock)\Z)[^\s~^:?*\[\\\x00-\x1f\x7f]+"
+)
+#: A fork point as git prints a commit: abbreviated to 4 hex digits at the least,
+#: and up to a SHA-256 commit's 64.
+FORK = re.compile(r"[0-9a-fA-F]{4,64}")
+#: A session id, as a harness prints one: one word.
+SESSION = re.compile(r"\S+")
+#: What a slice plan holds, and what each of its slices holds. Anything else is
+#: refused: a misspelt `after` would silently drop the dependency it names.
+PLAN_KEYS = ("mode", "feature_branch", "state_branch", "slices")
+SLICE_SPEC_KEYS = ("key", "title", "tasks", "after")
+#: The ids `materialize_slices` mints for a run record and for a slice.
+RUN_ID = re.compile(r"ksr-[0-9a-f]{8}")
+SLICE_ID = re.compile(r"ks-[0-9a-f]{8}")
 
 #: What a node of the feature chain means once the run is sliced, by mode. The
 #: chain's own node list is untouched; `state` reports the action beside it so
@@ -237,8 +253,7 @@ def bank_wait(record: dict) -> dict:
     if started is None:
         return record
     total = waited(record) + max(0, _seconds(started, _now().strftime(BD_TIME)) or 0)
-    record = set_label(record, WAITED_LABEL, str(total))
-    return dict(record, labels=[x for x in record["labels"] if not x.startswith(BLOCKED_LABEL)])
+    return drop_label(set_label(record, WAITED_LABEL, str(total)), BLOCKED_LABEL)
 
 
 def open_gate(record: dict, name: str) -> dict:
@@ -302,18 +317,27 @@ def current(records: list[dict]) -> dict | None:
     return None
 
 
-def read_jsonl(path: Path) -> list[dict]:
-    """Last write per id wins; first-seen order is preserved."""
+def read_jsonl(path: Path, check=None) -> list[dict]:
+    """Last write per id wins; first-seen order is preserved. A line that is not
+    an object with a string id, or that `check` cannot read, is a `SystemExit`
+    naming the file and the line, not a traceback."""
     try:
         lines = path.read_text().splitlines()
     except FileNotFoundError:
         return []
     merged: dict[str, dict] = {}
-    for line in lines:
+    for number, line in enumerate(lines, 1):
         line = line.strip()
         if not line:
             continue
-        record = json.loads(line)
+        try:
+            record = json.loads(line)
+            if not isinstance(record, dict) or not isinstance(record.get("id"), str):
+                raise ValueError("not an object with a string id")
+            if check is not None:
+                check(record)
+        except (ValueError, TypeError, AttributeError) as error:
+            raise SystemExit(f"kraft-lite: {path} line {number} cannot be read: {error}") from None
         merged[record["id"]] = record
     return list(merged.values())
 
@@ -627,12 +651,27 @@ def _first_repeat(items: list):
     return None
 
 
+#: How a refusal says what a branch name must be.
+_NOT_A_BRANCH = (
+    "must be a branch name git takes: a string with no whitespace, no leading '-', "
+    "no '..', and none of ~^:?*[\\"
+)
+
+
+def _unknown_keys(spec: dict, known: tuple[str, ...]) -> str:
+    """The keys of `spec` not in `known`, sorted and joined; empty when none."""
+    return ", ".join(sorted(str(k) for k in spec if k not in known))
+
+
 def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
     """The plan's slices if the whole graph is sound, else a `SystemExit` naming
     the first problem. Checked before any record is built: a half-made graph in
     the store is worse than none."""
     if mode not in MODES:
         raise SystemExit(f"kraft-lite: unknown slices mode {mode!r}. Modes: {', '.join(MODES)}")
+    unknown = _unknown_keys(plan, PLAN_KEYS)
+    if unknown:
+        raise SystemExit(f"kraft-lite: the slice plan has unknown keys: {unknown}")
     if not plan.get("state_branch"):
         raise SystemExit("kraft-lite: the slice plan has no state_branch")
     if mode == "feature" and not plan.get("feature_branch"):
@@ -641,10 +680,7 @@ def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
         # Both become a label value and an argument to git.
         value = plan.get(field)
         if value and not (isinstance(value, str) and BRANCH.fullmatch(value)):
-            raise SystemExit(
-                f"kraft-lite: the slice plan's {field} must be a branch name, a string "
-                f"with no whitespace, not {value!r}"
-            )
+            raise SystemExit(f"kraft-lite: the slice plan's {field} {_NOT_A_BRANCH}, not {value!r}")
     if mode == "main" and plan.get("feature_branch"):
         # Refused, not dropped: a plan that names one expects slices to merge into it.
         raise SystemExit(
@@ -669,6 +705,10 @@ def _refuse_slice_plan(plan: dict, mode: str) -> list[dict]:
         # field is refused by position rather than left to a KeyError traceback.
         if not isinstance(spec, dict):
             raise SystemExit(f"kraft-lite: slice {position} is not an object")
+        unknown = _unknown_keys(spec, SLICE_SPEC_KEYS)
+        if unknown:
+            named = f" ({spec['key']!r})" if isinstance(spec.get("key"), str) else ""
+            raise SystemExit(f"kraft-lite: slice {position}{named} has unknown keys: {unknown}")
         for field in ("key", "title"):
             if not spec.get(field):
                 raise SystemExit(f"kraft-lite: slice {position} has no {field}")
@@ -986,16 +1026,11 @@ def rewind(records: list[dict], from_node: str, note: str) -> list[dict]:
         # how the last gate sends work back, so the wait it interrupts is usually
         # the longest one in the run - dropping it here loses exactly that.
         record = bank_wait(record)
-        labels = [
-            x
-            for x in record.get("labels", [])
-            # `WAITED_LABEL` is not in this list on purpose: those hours were
-            # spent, whatever the redo goes on to cost.
-            if not x.startswith(GATE_LABEL)
-            and not x.startswith(ATTEMPT_LABEL)
-            and not x.startswith(BLOCKED_LABEL)
-        ]
-        reopened = dict(record, status="open", labels=labels)
+        # `WAITED_LABEL` is not dropped on purpose: those hours were spent,
+        # whatever the redo goes on to cost.
+        for prefix in (GATE_LABEL, ATTEMPT_LABEL, BLOCKED_LABEL):
+            record = drop_label(record, prefix)
+        reopened = dict(record, status="open")
         if offset == 0:
             description = record.get("description", "")
             reopened["description"] = f"{description}\n{NOTE_PREFIX}{note}"
@@ -1474,12 +1509,36 @@ def _rebased(slices: list[dict], record: dict) -> dict:
 
 
 def _moved_base(others: list[dict], key: str) -> list[dict]:
-    """The slices cut early from `key`, flagged, as it goes back to work from its
-    review: each was cut from a tip its branch is about to move past. `slices`
-    lists only those started and unmerged."""
-    return [
-        set_label(r, BASE_MOVED_LABEL, key) for r in others if label_value(r, CUT_FROM_LABEL) == key
-    ]
+    """The slices cut early from `key`, flagged, as its branch moves: back to
+    work from its review, or rebased. Each was cut from a tip its branch moves
+    past, and so, in turn, is each slice cut early from one of those: it rebases
+    too. Each is flagged with the slice it was cut from. `slices` lists only
+    those started and unmerged."""
+    flagged: list[dict] = []
+    moved = [key]
+    while moved:
+        cut = [r for r in others if label_value(r, CUT_FROM_LABEL) == moved[0]]
+        cut = [r for r in cut if r["id"] not in {f["id"] for f in flagged}]
+        flagged += [set_label(r, BASE_MOVED_LABEL, moved[0]) for r in cut]
+        moved = [*moved[1:], *(label_value(r, SLICE_KEY_LABEL) for r in cut)]
+    return flagged
+
+
+def _refuse_slice_fields(args) -> None:
+    """A `SystemExit` for a session, branch or fork `slice-set` cannot record.
+    Each becomes a label value, and the branch and fork arguments to git. A new
+    fork is read as a rebase, so one that names no commit would clear the flags
+    a real rebase clears."""
+    if args.session is not None and not SESSION.fullmatch(args.session):
+        raise SystemExit(
+            f"kraft-lite: --session must be a session id, with no whitespace, not {args.session!r}"
+        )
+    if args.branch is not None and not BRANCH.fullmatch(args.branch):
+        raise SystemExit(f"kraft-lite: --branch {_NOT_A_BRANCH}, not {args.branch!r}")
+    if args.fork is not None and not FORK.fullmatch(args.fork):
+        raise SystemExit(
+            f"kraft-lite: --fork must be a commit id, 4 to 64 hex digits, not {args.fork!r}"
+        )
 
 
 def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dict:
@@ -1496,6 +1555,7 @@ def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dic
             f"kraft-lite: unknown slice status {args.status!r}. "
             f"Statuses: {', '.join(SLICE_STATUSES)}"
         )
+    _refuse_slice_fields(args)
     was = label_value(record, SLICE_STATUS_LABEL)
     if args.status is not None:
         _refuse_slice_move(slices, record, args.status)
@@ -1521,7 +1581,10 @@ def _slice_set(store, everything: list[dict], chain_id: str | None, args) -> dic
     writes = [] if same else [record]
     run = run_record(everything, chain_id)
     others = [r for r in slices if r["id"] != record["id"]]
-    if was in EARLY_FROM and args.status in ("waiting", "starting", "running"):
+    # Its branch moves: back to work from its review, or onto a new fork.
+    if (was in EARLY_FROM and args.status in ("waiting", "starting", "running")) or (
+        args.fork is not None and args.fork != label_value(before, FORK_LABEL)
+    ):
         writes += _moved_base(others, args.slice)
     finished = all(_merged(r) for r in [*others, record])
     # Reopened too, when a call overturned at the wrap-up puts a slice back to work.
@@ -1729,11 +1792,17 @@ def _merge_decisions(local: list[dict], exported: list[dict]) -> tuple[list[dict
 
 def _of_chain(record: dict, chain_id: str) -> bool:
     """Whether `record` is one an export of `chain_id` carries: its epic, a
-    node, its run record or a slice."""
-    return (
-        record["id"] == chain_id
-        or record["id"].startswith(f"{chain_id}.")
-        or _slicing_of(record, chain_id)
+    node, its run record or a slice, each under the id it is minted with. A
+    label alone is not enough: under another id, the record would land on one
+    of the directory's own."""
+    record_id = record["id"]
+    if record_id == chain_id or (
+        record_id.startswith(f"{chain_id}.") and len(record_id) > len(chain_id) + 1
+    ):
+        return True
+    return bool(
+        (label_value(record, RUN_LABEL) == chain_id and RUN_ID.fullmatch(record_id))
+        or (label_value(record, SLICE_OF_LABEL) == chain_id and SLICE_ID.fullmatch(record_id))
     )
 
 
@@ -1747,7 +1816,9 @@ def _import(root: Path, store, source: Path) -> dict:
     # Refused here, not read as empty: a mistyped path is not an export of nothing.
     if not (source / EXPORT_RECORDS).is_file():
         raise SystemExit(f"kraft-lite: no export at {source}: {source / EXPORT_RECORDS} is missing")
-    exported = read_jsonl(source / EXPORT_RECORDS)
+    # Read whole, and checked as `import` will rank them, before anything is written.
+    exported = read_jsonl(source / EXPORT_RECORDS, _record_rank)
+    exported_decisions = read_jsonl(source / EXPORT_DECISIONS, _decision_rank)
     epics = [r["id"] for r in exported if label_value(r, CHAIN_LABEL)]
     if len(epics) != 1:
         raise SystemExit(
@@ -1776,9 +1847,7 @@ def _import(root: Path, store, source: Path) -> dict:
     if write:
         store.write_raw(write, local)
     path = _decisions_path(root, chain_id)
-    decided, kept_decisions = _merge_decisions(
-        read_jsonl(path), read_jsonl(source / EXPORT_DECISIONS)
-    )
+    decided, kept_decisions = _merge_decisions(read_jsonl(path), exported_decisions)
     if decided:
         append_jsonl(path, decided)
     return {
