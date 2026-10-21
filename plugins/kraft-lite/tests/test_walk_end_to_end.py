@@ -73,6 +73,9 @@ def test_state_reports_a_gate_node(walk, kl_cli, tmp_path):
     refused = kl_cli(tmp_path, "gate", ok=False)
     assert "spec is an exec node, not a gate node" in refused.stderr
     kl_cli(tmp_path, "close")
+    # Approve closes a gate; `close` does not.
+    refused = kl_cli(tmp_path, "close", ok=False)
+    assert "kraft-lite: spec_approval is a gate: approve or reject it" in refused.stderr
 
     state = kl_cli(tmp_path, "state")
 
@@ -204,7 +207,15 @@ def test_restart_from(walk, kl_cli, tmp_path):
     assert kl_cli(tmp_path, "summary")["totals"]["rejections"] == 0, "a restart is no rejection"
 
 
-def test_on_failure_ran_label_survives_state_and_clears_on_rewind(walk, kl_cli, tmp_path):
+@pytest.mark.parametrize(
+    "rewind",
+    [
+        pytest.param(["--from-node", "verification"], id="rewind"),
+        # Reopened with a note, the node starts a new round too.
+        pytest.param([], id="plain_reject"),
+    ],
+)
+def test_on_failure_ran_label_survives_state_and_clears_on_rewind(walk, kl_cli, tmp_path, rewind):
     walk.start(tmp_path)
     walk.to(tmp_path, "verification")
     assert "has no on_failure" in kl_cli(tmp_path, "mark", "--on-failure-ran", ok=False).stderr
@@ -215,7 +226,7 @@ def test_on_failure_ran_label_survives_state_and_clears_on_rewind(walk, kl_cli, 
 
     assert kl_cli(tmp_path, "state")["on_failure_ran"] is True
     assert kl_cli(tmp_path, "state")["on_failure_ran"] is True
-    kl_cli(tmp_path, "reject", "--note", "again", "--from-node", "verification")
+    kl_cli(tmp_path, "reject", "--note", "again", *rewind)
     walk.to(tmp_path, "merge_request_feedback")
     assert kl_cli(tmp_path, "state")["on_failure_ran"] is False
 
@@ -238,33 +249,74 @@ def test_chains_available_lists_every_library(kl_cli, tmp_path):
     assert found == {"repo:mine": "repo", "default": "bundled", "quick-task": "bundled"}
 
 
-@pytest.mark.parametrize("where", ["per_chain", "pre_per_chain_file"])
-@pytest.mark.parametrize("verb", [["state"], ["close"], ["summary"], ["export", "--to", "out"]])
+#: What a run or a registry from before V1 is refused with, by where it lies.
+LEGACY = {
+    "per_chain": "kraft-lite: chain {chain_id} was started on the pre-V1 format. "
+    "Run: python3 kl.py migrate",
+    "registry": "kraft-lite: .kraft-lite/registry.yaml is the pre-V1 hook registry. "
+    "Run: python3 kl.py migrate",
+}
+LEGACY["pre_per_chain_file"] = LEGACY["per_chain"]
+RUN_VERBS = [["state"], ["close"], ["summary"], ["export", "--to", "out"]]
+
+
+@pytest.mark.parametrize(
+    ("where", "verb"),
+    [
+        *(
+            pytest.param(where, verb, id=f"{where}-{verb[0]}")
+            for where in ("per_chain", "pre_per_chain_file", "registry")
+            for verb in RUN_VERBS
+        ),
+        *(
+            pytest.param("registry", verb, id=f"registry-{verb[0]}")
+            for verb in (["start", "--title", "again"], ["approve"], ["settings"])
+        ),
+    ],
+)
 def test_legacy_frozen_chain_is_refused(kl_cli, tmp_path, where, verb):
     chain_id = kl_cli(tmp_path, "start", "--title", "t")["chain_id"]
     frozen = kl._frozen_path(tmp_path, chain_id)
     legacy = {"id": "default", "nodes": [{"id": "spec", "tasks": [], "gate_after": None}]}
-    frozen.write_text(json.dumps(legacy))
+    if where == "registry":
+        (tmp_path / ".kraft-lite" / "registry.yaml").write_text("on.test.run:\n  kind: prompt\n")
+    else:
+        frozen.write_text(json.dumps(legacy))
     if where == "pre_per_chain_file":
         frozen.rename(tmp_path / kl.STATE_DIR / "chain.json")
 
     refused = kl_cli(tmp_path, *verb, ok=False)
 
-    assert (
-        f"kraft-lite: chain {chain_id} was started on the pre-V1 format. "
-        "Run: python3 kl.py migrate" in refused.stderr
-    )
+    assert LEGACY[where].format(chain_id=chain_id) in refused.stderr
     assert kl_cli(tmp_path, "chains")[0]["chain_id"] == chain_id
+    # `init` reads what `detect` finds, registry or not.
+    assert "test_command" in kl_cli(tmp_path, "detect")
 
 
-@pytest.mark.parametrize("registry", [False, True], ids=["nothing", "legacy_registry"])
-def test_start_without_bindings_runs(kl_cli, tmp_path, registry):
-    if registry:
-        (tmp_path / ".kraft-lite").mkdir()
-        (tmp_path / ".kraft-lite" / "registry.yaml").write_text("on.test.run:\n  kind: prompt\n")
+@pytest.mark.parametrize(
+    "files",
+    [
+        pytest.param({}, id="nothing"),
+        # The registry is refused until `migrate` writes the bindings from it.
+        pytest.param({"registry.yaml": "on.test.run:\n  kind: prompt\n"}, id="legacy_registry"),
+        pytest.param(
+            {"registry.yaml": "on.test.run:\n  kind: prompt\n", "bindings.yaml": "tasks: {}\n"},
+            id="registry_beside_bindings",
+        ),
+    ],
+)
+def test_start_without_bindings_runs(kl_cli, tmp_path, files):
+    (tmp_path / ".kraft-lite").mkdir()
+    for name, text in files.items():
+        (tmp_path / ".kraft-lite" / name).write_text(text)
+    refused = files.keys() == {"registry.yaml"}
 
-    started = kl_cli(tmp_path, "start", "--title", "t")
+    started = kl_cli(tmp_path, "start", "--title", "t", ok=not refused)
 
+    if refused:
+        assert LEGACY["registry"] in started.stderr
+        assert not (tmp_path / kl.STATE_DIR / "chain.jsonl").exists()
+        return
     assert started["backend"] == "jsonl"
     assert kl_cli(tmp_path, "state")["node"] == "spec"
 
@@ -280,13 +332,12 @@ def test_start_refuses_a_bindings_file_it_cannot_use(kl_cli, tmp_path):
     assert not (tmp_path / kl.STATE_DIR / "chain.jsonl").exists()
 
 
-def test_a_finished_chain_still_summarizes(kl_cli, default_chain, tmp_path):
+def test_a_finished_chain_still_summarizes(walk, kl_cli, default_chain, tmp_path):
     """`state` is the only other verb allowed to run once the walk is over, and
     the summary is worth nothing if it is refused at exactly the moment it is
     wanted."""
     kl_cli(tmp_path, "start", "--title", "Add a flag")
-    for _ in default_chain["nodes"]:
-        kl_cli(tmp_path, "close")
+    walk.finish(tmp_path)
 
     out = kl_cli(tmp_path, "summary")
     assert out["status"] == "done"
@@ -356,8 +407,7 @@ def test_no_node_waits_longer_than_it_took(walk, kl_cli, tmp_path):
     wait with the wall clock made a sub-second run report eight seconds of
     waiting, on nodes that reported taking none."""
     walk.start(tmp_path)
-    while kl_cli(tmp_path, "state")["status"] != "done":
-        walk.advance(tmp_path)
+    walk.finish(tmp_path)
 
     out = kl_cli(tmp_path, "summary")
     for node in out["nodes"]:

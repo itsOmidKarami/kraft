@@ -740,8 +740,7 @@ def test_slice_set_that_changes_nothing_writes_nothing(walk, flags, kl_cli, tmp_
 def test_slice_verbs_still_answer_after_the_chain_is_done(walk, kl_cli, tmp_path):
     walk.slice(tmp_path, plan())
     walk.merge_slices(tmp_path)
-    while kl_cli(tmp_path, "state")["status"] != "done":
-        kl_cli(tmp_path, "close")
+    walk.finish(tmp_path)
 
     assert keys(kl_cli(tmp_path, "slices")["slices"]) == ["a", "b", "c"]
     kl_cli(tmp_path, "slice-set", "--slice", "a", "--status", "running")
@@ -768,8 +767,7 @@ def test_a_finished_chain_still_refuses_the_verbs_that_need_an_open_node(
 ):
     walk.slice(tmp_path, plan())
     walk.merge_slices(tmp_path)
-    while kl_cli(tmp_path, "state")["status"] != "done":
-        kl_cli(tmp_path, "close")
+    walk.finish(tmp_path)
 
     refused = kl_cli(tmp_path, *verb, ok=False)
 

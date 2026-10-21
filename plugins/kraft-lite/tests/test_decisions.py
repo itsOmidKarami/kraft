@@ -278,8 +278,7 @@ def test_decision_verbs_still_answer_after_the_chain_is_done(walk, kl_cli, tmp_p
     walk.slice(tmp_path)
     held = kl_cli(tmp_path, "decide", "--question", "q", "--why", "w", "--held")
     walk.merge_slices(tmp_path)
-    while kl_cli(tmp_path, "state")["status"] != "done":
-        kl_cli(tmp_path, "close")
+    walk.finish(tmp_path)
 
     assert kl_cli(tmp_path, "answer", "--decision", held["id"], "--answer", "a")["held"] is False
     late = kl_cli(tmp_path, "decide", "--question", "q2", "--why", "w", "--answer", "b")

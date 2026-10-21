@@ -48,8 +48,7 @@ def test_state_says_what_each_node_means_in_a_sliced_run(
     if node == "spec":
         kl_cli(tmp_path, "reject", "--note", "again", "--from-node", "spec")
     walk.merge_slices(tmp_path)
-    while kl_cli(tmp_path, "state")["node"] != node:
-        kl_cli(tmp_path, "close")
+    walk.to(tmp_path, node)
 
     sliced = {"mode": mode, "action": action} if action else None
     assert kl_cli(tmp_path, "state")["sliced"] == sliced
@@ -65,8 +64,7 @@ def test_a_finished_or_unstarted_chain_still_reports_sliced(walk, kl_cli, tmp_pa
     assert kl_cli(tmp_path, "state")["status"] == "unstarted"
     walk.slice(tmp_path, walk.plan(mode="main"))
     walk.merge_slices(tmp_path)
-    while kl_cli(tmp_path, "state")["status"] != "done":
-        kl_cli(tmp_path, "close")
+    walk.finish(tmp_path)
 
     assert kl_cli(tmp_path, "state")["sliced"] == {"mode": "main", "action": "run"}
 
@@ -148,12 +146,13 @@ ALL_READY = [
 @pytest.mark.parametrize(
     "node, verb, unmerged",
     [
-        pytest.param("final_review", "close", "abc", id="final_review_none_merged"),
-        pytest.param("final_review", "close", "bc", id="final_review_two_unmerged"),
+        # A gate node is approved, never closed.
+        pytest.param("final_review", "approve", "abc", id="final_review_none_merged"),
+        pytest.param("final_review", "approve", "bc", id="final_review_two_unmerged"),
         pytest.param("final_review", "approve", "c", id="final_review_approve"),
         pytest.param("merge", "close", "c", id="merge"),
         pytest.param("merge", "approve", "c", id="merge_approve"),
-        pytest.param("final_review", "close", "", id="final_review_all_merged"),
+        pytest.param("final_review", "approve", "", id="final_review_all_merged"),
         pytest.param("merge", "approve", "", id="merge_all_merged"),
     ],
 )
@@ -172,8 +171,7 @@ def test_main_modes_await_nodes_close_only_once_the_user_merged_every_slice(
     if node == "merge":
         for key in "abc":
             move(key, "merged")
-    while kl_cli(tmp_path, "state")["node"] != node:
-        kl_cli(tmp_path, "close")
+    walk.to(tmp_path, node)
     for key in "abc":
         move(key, "ready_to_merge" if key in unmerged else "merged")
     if verb == "approve" and node == "final_review":
@@ -278,8 +276,7 @@ def to_final_review_gate(walk, kl_cli, cwd: Path, mode: str = "feature") -> None
     """A sliced run with every slice merged, blocked at `final_review`."""
     walk.slice(cwd, walk.plan(mode=mode, slices=ABC))
     walk.merge_slices(cwd)
-    while kl_cli(cwd, "state")["node"] != "final_review":
-        kl_cli(cwd, "close")
+    walk.to(cwd, "final_review")
     kl_cli(cwd, "gate")
 
 

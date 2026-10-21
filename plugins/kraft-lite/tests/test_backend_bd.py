@@ -176,16 +176,10 @@ def test_an_unstarted_chain_is_not_reported_as_done(tmp_path, monkeypatch, capsy
     assert state["chain_id"] is None
 
 
-def to_done(walk, cwd: Path) -> None:
-    """Every node passed, gates approved, as `Walk.advance` passes one."""
-    while walk.run(cwd, "state")["status"] != "done":
-        walk.advance(cwd)
-
-
 def test_a_finished_chain_is_still_reported_as_done(tmp_path, monkeypatch, capsys, walk_in_process):
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
     walk_in_process.start(tmp_path)
-    to_done(walk_in_process, tmp_path)
+    walk_in_process.finish(tmp_path)
     capsys.readouterr()
 
     kl.main(["state"])
@@ -295,7 +289,7 @@ def test_a_second_start_becomes_the_live_chain(tmp_path, monkeypatch, capsys, wa
     the second chain is invisible and every verb exits 'no open node'."""
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
     walk_in_process.start(tmp_path)
-    to_done(walk_in_process, tmp_path)
+    walk_in_process.finish(tmp_path)
     capsys.readouterr()
     kl.main(["state"])
     assert json.loads(capsys.readouterr().out)["status"] == "done"
@@ -510,7 +504,7 @@ def test_chains_is_empty_in_a_fresh_directory(tmp_path, monkeypatch, capsys):
 def test_a_finished_chain_is_listed_as_done(tmp_path, monkeypatch, capsys, walk_in_process):
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
     chain_id = walk_in_process.start(tmp_path)
-    to_done(walk_in_process, tmp_path)
+    walk_in_process.finish(tmp_path)
     capsys.readouterr()
 
     kl.main(["chains"])

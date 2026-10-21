@@ -143,6 +143,11 @@ class Walk:
             assert state["status"] != "done", f"the chain finished without reaching {node}"
             self.advance(cwd)
 
+    def finish(self, cwd: Path) -> None:
+        """Walked on to `done`."""
+        while self.run(cwd, "state")["status"] != "done":
+            self.advance(cwd)
+
     def to_chain_revision(self, cwd: Path) -> str:
         """A chain whose spec and plan gates are approved, so the next node is
         `chain_revision`. Returns the chain id."""

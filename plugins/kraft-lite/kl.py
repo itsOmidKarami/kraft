@@ -2028,6 +2028,17 @@ def _restart(
     return [*tail, *rewind_slices(everything, chain_id, tail)]
 
 
+#: The verbs that answer beside a pre-V1 registry no bindings file replaced yet:
+#: listing chains, and what `init` reads to write the bindings.
+BEFORE_MIGRATE = frozenset({"chains", "detect"})
+
+
+def _legacy_registry(root: Path) -> bool:
+    """A `registry.yaml` from before V1 with no `bindings.yaml` written from it."""
+    state = root / STATE_DIR
+    return (state / "registry.yaml").is_file() and not (root / kl_bindings.BINDINGS).is_file()
+
+
 #: What each verb needs before it runs, declared once for `main`:
 #: - `chain`: it reads or writes one chain's state, so it takes `--chain-id` and
 #:   resolves that chain through `_ours`, refusing a run frozen before V1.
@@ -2119,6 +2130,12 @@ def main(argv: list[str] | None = None) -> int:
     root = repo_root()
     chain_id = getattr(args, "chain_id", None)
 
+    if args.verb not in BEFORE_MIGRATE and _legacy_registry(root):
+        raise SystemExit(
+            f"kraft-lite: {STATE_DIR}/registry.yaml is the pre-V1 hook registry. "
+            "Run: python3 kl.py migrate"
+        )
+
     if args.verb == "detect":
         print(json.dumps(detect(root, args.chain), indent=2))
         return 0
@@ -2207,6 +2224,8 @@ def main(argv: list[str] | None = None) -> int:
         made = slices_for_gate(everything, node_record, resolved_id, args.slices, root, chain)
         store.write([bank_wait(dict(node_record, status="closed")), *made])
     elif args.verb in ("close", "approve"):
+        if args.verb == "close" and definition["kind"] == "gate":
+            raise SystemExit(f"kraft-lite: {node_id} is a gate: approve or reject it")
         _refuse_close_before_slices(everything, resolved_id, node_record)
         store.write([bank_wait(dict(node_record, status="closed"))])
     elif args.verb == "gate":
@@ -2237,18 +2256,12 @@ def main(argv: list[str] | None = None) -> int:
     elif args.verb == "reject":
         description = node_record.get("description", "")
         # Banked on the way out too: a gate that ends in a rejection held the human
-        # exactly as long as one that ends in an approval.
-        store.write(
-            [
-                bank_wait(
-                    dict(
-                        node_record,
-                        status="open",
-                        description=f"{description}\n{NOTE_PREFIX}{args.note}",
-                    )
-                )
-            ]
+        # exactly as long as one that ends in an approval. A rejection starts a new
+        # round, so the node's `on_failure` may run again.
+        reopened = dict(
+            node_record, status="open", description=f"{description}\n{NOTE_PREFIX}{args.note}"
         )
+        store.write([bank_wait(drop_label(reopened, ON_FAILURE_RAN_LABEL))])
     elif args.verb == "attempt":
         charged = spend_attempt(node_record)
         count = attempts(charged)
