@@ -42,6 +42,23 @@ def test_the_v1_skills_spell_artifact_as_state_does(texts, name):
     assert "artefact" not in texts[name]
 
 
+@pytest.mark.parametrize("name", V1_SKILLS)
+@pytest.mark.parametrize(
+    "other, term",
+    [
+        pytest.param(r"\bhuman\b(?!_)", "the user", id="user"),
+        pytest.param(r"feature chain", "the controller's chain", id="controllers-chain"),
+        pytest.param(r"slice chain", "child chain", id="child-chain"),
+        pytest.param(r"merge request", "PR, or the MR node", id="pr"),
+        pytest.param(r"fix round|fourth round|every round's", "attempt", id="attempt"),
+    ],
+)
+def test_the_v1_skills_use_one_term_per_concept(texts, name, other, term):
+    """The seven skills hand work to each other: a person one skill calls the
+    human and another the user is two people to an agent reading both."""
+    assert not re.search(other, texts[name]), f"{name}: say {term!r}"
+
+
 def _kl_commands(text: str) -> list[str]:
     """Every `kl.py` command a skill gives: after the helper's path, to the end
     of the line or the code span, and every `KL <verb> ...` code span."""
@@ -87,13 +104,172 @@ def test_init_writes_bindings_from_detect_and_the_ignores(texts):
 
 def test_the_start_skill_needs_no_bindings(texts):
     """Every task has a default, so a repo with no bindings file starts; only a
-    pre-V1 registry stands in the way, and `migrate` is what moves it."""
+    pre-V1 registry or run stands in the way, and init's migrate paragraph, the
+    one place that says what `migrate` prints and how it refuses, moves it."""
     body = texts["start"]
-    assert "kraft-lite:init" not in body
-    assert 'kl.py" migrate' in body
+    assert body.count("kraft-lite:init") == 1
+    assert "follow `kraft-lite:init`'s migrate paragraph" in body
+    assert "migrate paragraph" in texts["init"]
 
 
 def test_the_next_skill_says_when_a_bound_skill_is_missing(texts):
     """`state` falls a bound skill that is not installed back to its prompt and
     marks the source; the human should hear that the skill did not run."""
     assert "(skill missing)" in texts["next"]
+
+
+def _section(body: str, number: int) -> str:
+    """One numbered `## N.` section of a skill, whitespace flattened; 0 is the whole skill."""
+    if not number:
+        return " ".join(body.split())
+    return " ".join(body.split(f"## {number}.")[1].split("\n## ")[0].split())
+
+
+@pytest.mark.parametrize(
+    "name, section, needle",
+    [
+        pytest.param(
+            "next",
+            1,
+            "So a file a task writes there is recorded by its absolute path in the worktree.",
+            id="next-produced-in-the-feature-worktree",
+        ),
+        pytest.param(
+            "next",
+            2,
+            "`<file>` being the absolute path where the task wrote it",
+            id="next-produced-takes-an-absolute-path",
+        ),
+        pytest.param(
+            "next",
+            2,
+            "It refuses past `on_base_changed.cap` restarts: with `restarts` already at `cap`, "
+            "stop and ask the user instead",
+            id="next-restart-cap-from-state",
+        ),
+        pytest.param(
+            "next",
+            1,
+            "`git diff --name-only origin/<base branch>...HEAD` lists there",
+            id="next-scoped-verify-diffs-against-origin",
+        ),
+        pytest.param(
+            "next",
+            1,
+            "a `prompt` task runs on their test paths",
+            id="next-scoped-verify-prompt-task",
+        ),
+        pytest.param(
+            "next",
+            3,
+            "spend no attempt and no `on_failure`",
+            id="next-unrepairable-error-spends-no-on-failure",
+        ),
+        pytest.param(
+            "start",
+            0,
+            "follow `kraft-lite:init`'s migrate paragraph first",
+            id="start-migrate-follows-init",
+        ),
+        pytest.param(
+            "start", 0, "a chain file path (`.yaml`, or with a `/`)", id="start-chain-file-path"
+        ),
+        pytest.param(
+            "start",
+            0,
+            "and the chain it froze with where that came from",
+            id="start-reports-the-chain-it-froze",
+        ),
+        pytest.param(
+            "status",
+            0,
+            "whether it is `open` (running) or `blocked`",
+            id="status-node-status-words",
+        ),
+        pytest.param(
+            "status",
+            0,
+            "Render it as `kraft-lite:next` section 5 shapes it.",
+            id="status-summary-as-next-shapes-it",
+        ),
+        pytest.param(
+            "init",
+            0,
+            "`{}` when there was no registry, so no file was written",
+            id="init-migrate-without-a-registry",
+        ),
+        pytest.param(
+            "init",
+            0,
+            "move `bindings.yaml` aside (`.kraft-lite/bindings.yaml.mine`), run `migrate`",
+            id="init-migrate-with-both-files",
+        ),
+        pytest.param(
+            "init",
+            0,
+            "It is required - `start` refuses the file without it",
+            id="init-prompt-is-required",
+        ),
+        pytest.param(
+            "init",
+            0,
+            "`.kraft-lite/registry.yaml.migrated` goes there too, or is deleted",
+            id="init-ignores-the-migrated-registry",
+        ),
+        pytest.param(
+            "build-slice",
+            1,
+            "mkdir -p <run>/<slice key> [ -f <run>/<slice key>/fork ]",
+            id="child-run-folder-made-first",
+        ),
+        pytest.param(
+            "build-slice",
+            3,
+            "Run no further repair, no further `attempt`, no `close`",
+            id="child-over-cap-no-further-repair",
+        ),
+        pytest.param(
+            "build-slice",
+            3,
+            "never your child chain's",
+            id="child-messages-name-the-controllers-chain",
+        ),
+    ],
+)
+def test_a_skill_carries_the_final_fix_wave(texts, name, section, needle):
+    """The final review's fixes, by skill and section; 0 is the whole skill."""
+    assert needle in _section(texts[name], section), f"{name} section {section} lacks {needle!r}"
+
+
+def test_the_next_skill_stops_on_an_unrepairable_error_before_on_failure(texts):
+    """Kraft spends no repair on a builtin or forge task that failed with an
+    error no repair changes (its `test_a_reviewer_error_stops_for_a_human_and_spends_no_repair`):
+    the stop comes before `on_failure`, which would otherwise run once first."""
+    failing = _section(texts["next"], 3)
+    assert failing.index("Every failure is a task with `task_kind` `builtin` or `forge`") < (
+        failing.index("The node failed, `on_failure` is set")
+    )
+
+
+@pytest.mark.parametrize("name", V1_SKILLS)
+def test_every_skill_says_where_the_helper_is_before_its_first_command(texts, name):
+    """Read top to bottom, the fallback for an unset plugin root comes before
+    the first command that needs it."""
+    body = texts[name].split("---", 2)[2]
+    assert body.index("is unset") < body.index('kl.py"')
+
+
+@pytest.mark.parametrize("name", ["next", "gate", "status"])
+def test_a_walking_skills_description_says_what_then_when(texts, name):
+    """One clause on what the skill does, then the triggers: a description that
+    summarises the process is a shortcut the agent follows instead of the skill."""
+    description = re.search(r'^description: "(.*)"$', texts[name], re.M).group(1)
+    what, _, when = description.partition(" Use when ")
+    assert when, description
+    assert what.count(".") == 1 and ":" not in what and "(" not in what, what
+
+
+def test_only_the_status_skill_triggers_on_what_a_run_took(texts):
+    for name in V1_SKILLS:
+        description = re.search(r'^description: "(.*)"$', texts[name], re.M).group(1)
+        assert ("how long" in description) is (name == "status"), name

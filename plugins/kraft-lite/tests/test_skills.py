@@ -236,7 +236,6 @@ def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
         "--path-format=absolute --git-common-dir)/kraft-lite/<chain-id>",
         "new tip",
         "kraft-lite-state/chain.json",
-        "`mr.automated_review` is skipped in a child",
         "`kraft.verify_changed_test_scopes`",
         "`kraft.mr_rebase`",
     ],
@@ -251,7 +250,6 @@ def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
         "child-folder",
         "new-tip",
         "exported-chain",
-        "automated-review-skipped",
         "scoped-test-task",
         "rebase-task",
     ],
@@ -416,10 +414,10 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         ("build-slice", 1, "named in the **Slice** item of your starting instructions"),
         ("build-slice", 6, "no final whole-branch review and no finishing, merge or PR step"),
         ("run-slices", 3, "--status starting --branch <slice-branch> --fork <sha>"),
-        ("run-slices", 3, "the feature chain's id, then key"),
+        ("run-slices", 3, "the controller's chain id, then key"),
         ("run-slices", 3, "locally its name too"),
         ("run-slices", 3, "### In `main` mode"),
-        ("run-slices", 3, "Implementation stops after the last task's reviews"),
+        ("run-slices", 3, "dispatches for its first build node under the slice layer"),
         ("run-slices", 4, "and every `waiting` one in `ready` or `early`, find its session"),
         ("run-slices", 5, "A check-in is armed while any slice is not merged"),
         ("run-slices", 5, "`kraft-lite:run-slices check-in, chain <id>: read state first.`"),
@@ -471,7 +469,7 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
             "own help shows: walk the slices here (section 10), and tell the user nothing wakes "
             "this session, so they invoke `kraft-lite:run-slices` to continue it.",
         ),
-        ("status", 0, "one in `early` may start now from the branch of the one slice it comes"),
+        ("status", 0, "once the controller's review of that slice found nothing or only small"),
         ("status", 0, "| can start early from <key> |"),
         ("status", 0, "not even a slice in `ready` or `early`"),
         ("run-slices", 3, "write `none; continue on the controller's check-in` in its place"),
@@ -575,13 +573,13 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         (
             "gate",
             2,
-            "If it refuses, tell the human what it said and ask whether to approve unsliced.",
+            "If it refuses, tell the user what it said and ask whether to approve unsliced.",
         ),
         (
             "gate",
             2,
             "The slice gate or earlier: the plan or its slicing is redone, so the rewind "
-            "retires every slice. Archive their children.",
+            "retires every slice. Archive their children as `kraft-lite:run-slices` says.",
         ),
         (
             "gate",
@@ -623,18 +621,18 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         (
             "next",
             0,
-            "run `migrate` as `kraft-lite:start` says, then go on with the new id it prints",
+            "follow `kraft-lite:init`'s migrate paragraph, then go on with the new id it prints",
         ),
         (
             "gate",
             1,
-            "invoke `kraft-lite:start` with `--chain <edited file>` to start again on an edited "
-            "copy of the chain. The old chain then stays unfinished in `chains`",
+            "copy the chain's source file - its `path` in `KL chains --available`, for the "
+            "`id` the frozen `.kraft-lite/chains/<chain-id>.json` names - to a new `.yaml` file",
         ),
         (
             "init",
             0,
-            "If `.kraft-lite/registry.yaml` exists and `.kraft-lite/bindings.yaml` does not",
+            "it has `.kraft-lite/registry.yaml` and no `.kraft-lite/bindings.yaml`, or when",
         ),
         (
             "init",
@@ -795,4 +793,4 @@ def test_the_status_skill_hands_back_to_run_slices(texts):
 
 def test_the_run_slices_skill_names_every_verb_without_a_chain_id(texts):
     flat = " ".join(texts["run-slices"].split())
-    assert "except `settings`, `import`, `chains`, `detect` and `start`" in flat
+    assert "except `settings`, `import`, `chains`, `detect`, `migrate` and `start`" in flat

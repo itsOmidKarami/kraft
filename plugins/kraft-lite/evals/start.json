@@ -14,14 +14,64 @@
   },
   {
     "skills": [
-      "kraft-lite:start"
+      "kraft-lite:start",
+      "kraft-lite:init"
     ],
     "query": "[user] Kick off a new chain for 'Retry failed imports'.",
     "setup": "A Claude Code session at the root of the repo acme/ledger (GitHub, gh installed), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. The repo has `.kraft-lite/registry.yaml` from an older Kraft Lite and no `.kraft-lite/bindings.yaml`. `chains` prints [] (no unfinished chain). Every verb but `chains`, `detect` and `migrate` exits 1 with `kraft-lite: .kraft-lite/registry.yaml is the pre-V1 hook registry. Run: python3 kl.py migrate`. `migrate` would print {\"bindings\": {\"builtins\": {\"kraft.verify_changed_test_scopes\": {\"kind\": \"subprocess\", \"command\": [\"just\", \"test\"]}}, \"dropped\": []}, \"chains\": []}.",
     "expected_behavior": [
-      "Runs `migrate` before `start` (it is what the registry needs, not kraft-lite:init and not deleting the registry)",
-      "Tells the human migrate wrote .kraft-lite/bindings.yaml from the registry, to be committed",
+      "Runs `migrate` before `start`, as kraft-lite:init's migrate paragraph says (not init's detect-and-write flow, and not deleting the registry)",
+      "Tells the user migrate wrote .kraft-lite/bindings.yaml from the registry, to be committed",
       "Then runs `start --title \"Retry failed imports\"` and invokes kraft-lite:next"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:start"
+    ],
+    "query": "[user] Start a new Kraft Lite chain for 'Retry failed imports'.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger, `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed; `.kraft-lite/bindings.yaml` exists. `chains` prints [{\"chain_id\": \"kl-7f3a91c2\", \"title\": \"Ledger export\", \"status\": \"open\", \"node\": \"verification\"}].",
+    "expected_behavior": [
+      "Runs `chains` before `start`",
+      "Tells the user the unfinished chain kl-7f3a91c2 'Ledger export' (at verification) exists and asks whether they mean to continue it with kraft-lite:next or start the new one beside it",
+      "Runs no `start` until the user answers"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:start"
+    ],
+    "query": "[user] Start Kraft Lite on 'Retry failed imports'. I already have the plan: docs/plans/retry-imports.md.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger, `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed; `.kraft-lite/bindings.yaml` exists. `chains` prints []. `docs/plans/retry-imports.md` exists. `start` will print {\"chain_id\": \"kl-3c4d5e6f\", \"backend\": \"jsonl\", \"chain\": \"default\", \"source\": \"bundled\"}.",
+    "expected_behavior": [
+      "Runs `start --title \"Retry failed imports\" --plan docs/plans/retry-imports.md`, so the plan node and its approval gate are skipped",
+      "Tells the user the chain id kl-3c4d5e6f, that it runs the default chain from the bundled library, and that state is in jsonl under .kraft-lite/",
+      "Confirms with `state --chain-id kl-3c4d5e6f`, then invokes kraft-lite:next"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:start"
+    ],
+    "query": "[user] Kick off 'Hotfix ledger rounding' on my own chain, the file is ~/chains/hotfix.yaml.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger, `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed; `.kraft-lite/bindings.yaml` exists. `chains` prints []. /home/user/chains/hotfix.yaml is a chain file that extends quick-task. `start` will print {\"chain_id\": \"kl-5e6f7a8b\", \"backend\": \"jsonl\", \"chain\": \"hotfix\", \"source\": \"/home/user/chains/hotfix.yaml\"}.",
+    "expected_behavior": [
+      "Runs `start --title \"Hotfix ledger rounding\" --chain ~/chains/hotfix.yaml` (or the absolute path), passing the file's path, not a library id such as `hotfix`",
+      "Tells the user the chain id kl-5e6f7a8b and that it froze the chain hotfix from /home/user/chains/hotfix.yaml, so later edits to that file do not change this run",
+      "Confirms with `state --chain-id kl-5e6f7a8b`, then invokes kraft-lite:next"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:start",
+      "kraft-lite:init"
+    ],
+    "query": "[user] Kick off a new chain for 'Retry failed imports'.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger, `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. There is no `.kraft-lite/registry.yaml` and no `.kraft-lite/bindings.yaml`. `chains` prints [{\"chain_id\": \"kl-1d2e3f40\", \"title\": \"Audit log\", \"status\": \"open\", \"node\": \"verify\"}]. `start` exits 1 with `kraft-lite: chain kl-1d2e3f40 was started on the pre-V1 format. Run: python3 kl.py migrate`. `migrate` would print {\"bindings\": {}, \"chains\": [{\"from\": \"kl-1d2e3f40\", \"to\": \"kl-9a8b7c6d\"}], \"note\": \"Each run now walks Kraft's bundled V1 default chain, not the default of a user or repo library; the legacy run is closed, labelled kraft-migrated-to:<new id>.\"}.",
+    "expected_behavior": [
+      "Runs `migrate`, as kraft-lite:init's migrate paragraph says, not by deleting or hand-editing state",
+      "Reports that no bindings file was written (there was no registry; none is needed) and that 'Audit log' continues as kl-9a8b7c6d; does not say it wrote bindings.yaml",
+      "Asks whether to continue Audit log (kl-9a8b7c6d, unfinished) with kraft-lite:next or start 'Retry failed imports' beside it, and starts nothing until the user answers"
     ]
   }
 ]

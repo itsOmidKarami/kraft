@@ -5,23 +5,21 @@ description: "Controls a sliced Kraft Lite run as its controller, with one child
 
 # Running slices as the controller
 
+If `$CLAUDE_PLUGIN_ROOT` is unset, `kl.py` is two directories above this file;
+it needs `python3` 3.10 or newer, and without one, tell the user and stop.
+
 You are the **controller**. Each **slice** is one or more plan tasks, built by a
 **child** session that walks the **child chain** (the nodes `kl.py` gives a
-child from this run's frozen chain; on the default chain `implementation`,
-`verification`, `describe_merge_request`, `draft_merge_request`,
-`merge_request_feedback`).
+child from this run's frozen chain, as `kraft-lite:build-slice` lists them).
 Children report to you; you answer them, review and merge their work into the
 **feature branch**, and keep the run's truth in `.kraft-lite/`, copied to the
 **state branch** after every change. Your conversation is not state: after a
 compaction or a restart, read `state`, `slices` and `decisions` again.
 
-`$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
-is two directories above this file - use that path instead of an empty one.
-`python3` 3.10 or newer runs every command; if it is missing or older, tell the
-user and stop. In prose and checklists below, `KL` is short for
+In prose and checklists below, `KL` is short for
 `python3 "$CLAUDE_PLUGIN_ROOT/kl.py"`, and a `KL` command carries `--chain-id <id>`
 even where it is not written: pass it to every verb except `settings`, `import`,
-`chains`, `detect` and `start`. Type each command in full.
+`chains`, `detect`, `migrate` and `start`. Type each command in full.
 
 The tools for each ability are in your harness's reference; read it before
 section 2: [Claude Code](references/claude-code.md),
@@ -124,7 +122,7 @@ so the new child writes its own `fork`, `base` and `chain` files.
 
 The starting instructions, in this order:
 
-1. **Slice:** the feature chain's id, then key, title, its plan tasks, what it
+1. **Slice:** the controller's chain id, then key, title, its plan tasks, what it
    comes after, which slices run beside it, what it owns or must take from an
    owner's branch, and its line with the `--fork` sha: `Cut from: target at <sha>`
    when cut from the target's tip, `Cut from: <slice key> at <sha>` when cut
@@ -139,7 +137,7 @@ The starting instructions, in this order:
    `none; continue on the controller's check-in` in its place. The channels
    in the order to try them: a session message; on the same machine
    `.kraft-lite/messages/<chain-id>/<key>.jsonl` under this checkout's absolute
-   path (the feature chain's id; one JSON per line: `at`, `from`, `kind`:
+   path (the controller's chain id; one JSON per line: `at`, `from`, `kind`:
    question|answer|status|done, `body`); else comments on its own draft PR into
    its target, opened at its first commit.
 3. **Kraft Lite:** invoke `kraft-lite:build-slice`; if the plugin is missing,
@@ -149,14 +147,11 @@ The starting instructions, in this order:
 4. **Documents:** the spec and plan arrive next in parts marked `part i of n` (or
    as paths on the same machine); join them, write them down, and confirm.
 5. **Setup:** the working setup line from section 2.
-6. **Method:** one subagent per task, TDD, a spec-compliance review and a
-   code-quality review per task, a capped fix round, parallel tasks in isolated
-   worktrees. Implementation stops after the last task's reviews; the child
-   chain's `code_review` task is the one whole-branch review, and
-   `mr.automated_review` is skipped in a child: your PR review is that review.
+6. **Method:** what the child's `state` dispatches for its first build node
+   under the slice layer; add no method of your own.
 7. **Models:** the policy in section 11, with the model set on every subagent.
-8. **Tests:** `kraft.verify_changed_test_scopes` runs scoped tests only, with
-   explicit paths; the full suite runs on CI. The PR body lists the paths run.
+8. **Tests:** the scoped test paths for its plan tasks, which its
+   `kraft.verify_changed_test_scopes` task runs under the slice layer.
 9. **Branches and PRs:** push only its own slice branch; its target, named:
    the feature branch, or in `main` mode the base branch. Its PR goes into the
    target, and so does its `kraft.mr_rebase`. It rebases, and force-pushes its

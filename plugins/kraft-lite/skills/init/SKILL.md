@@ -1,25 +1,34 @@
 ---
 name: init
-description: "Writes `.kraft-lite/bindings.yaml`, which binds a Kraft Lite chain's tasks to installed skills, instructions, or the repo's own test and CI commands where the defaults do not fit. Use when setting up Kraft Lite in a repo, when its bindings are stale, or when the repo still has a pre-V1 `.kraft-lite/registry.yaml`."
+description: "Writes `.kraft-lite/bindings.yaml`, which binds a Kraft Lite chain's tasks to installed skills, instructions, or the repo's own test and CI commands where the defaults do not fit. Use when setting up Kraft Lite in a repo, when its bindings are stale, or when the repo still has a pre-V1 `.kraft-lite/registry.yaml` or a run a Kraft Lite verb says to `migrate`."
 ---
 
 # Setting up Kraft Lite in this repo
 
-`$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
-is two directories above this file - use that path instead of an empty one.
-Every command here runs on `python3` 3.10 or newer; if it is missing or older, tell the
-human and stop, because Lite has no other runner.
+If `$CLAUDE_PLUGIN_ROOT` is unset, `kl.py` is two directories above this file;
+it needs `python3` 3.10 or newer, and without one, tell the user and stop.
 
-If `.kraft-lite/registry.yaml` exists and `.kraft-lite/bindings.yaml` does not,
-the directory is an older Kraft Lite's: do not write bindings by hand. Run
-`python3 "$CLAUDE_PLUGIN_ROOT/kl.py" migrate`, which writes `bindings.yaml` from
-the registry, renames it `registry.yaml.migrated`, and moves each unfinished run
-to a new id. Report what it wrote, what it dropped and each run's new id, then go
-to the last paragraph. If it refuses a run (a sliced one, or one on another
-legacy chain), nothing was migrated: tell the human the two ways on it names -
-finish that run on the previous Kraft Lite version, or start again - and let them
-choose. With both files present, `bindings.yaml` is what the walk reads: leave
-the registry alone and carry on below.
+**The migrate paragraph.** A directory is an older Kraft Lite's when it has
+`.kraft-lite/registry.yaml` and no `.kraft-lite/bindings.yaml`, or when a verb
+refuses with `Run: python3 kl.py migrate`. Write no bindings by hand: run
+`python3 "$CLAUDE_PLUGIN_ROOT/kl.py" migrate`. It prints `bindings` - what it
+wrote to `bindings.yaml` from the registry, with `dropped`, the hooks no V1 task
+replaces; `{}` when there was no registry, so no file was written - and
+`chains`, each unfinished run's old id (`from`) and new one (`to`), which every
+later verb takes. Report each, say a written `bindings.yaml` is to be committed
+and the registry is now `registry.yaml.migrated`, then go to the last paragraph.
+It refuses, and moves nothing, in two cases:
+
+- A sliced run, or one on another legacy chain: tell the user the two ways on it
+  names - finish that run on the previous Kraft Lite version, or start again -
+  and let them choose.
+- `bindings.yaml` and `registry.yaml` both present: move `bindings.yaml` aside
+  (`.kraft-lite/bindings.yaml.mine`), run `migrate`, then show the user a diff of
+  the two files and merge them by hand, their own entries kept unless they say
+  otherwise.
+
+With both files present and no run refused, `bindings.yaml` is what the walk
+reads: leave the registry alone and carry on below.
 
 Every binding is optional. A task with none runs on its default: an agent task's
 own skill or prompt, and an instruction for each builtin and forge task. The file
@@ -34,10 +43,10 @@ plausibly serve it) and `proposed`: the bindings that need no question - an agen
 task with exactly one candidate, the test command for
 `kraft.verify_changed_test_scopes`, the CI command for `mr.ci`.
 
-Write `.kraft-lite/bindings.yaml` from `proposed` plus the human's choices:
+Write `.kraft-lite/bindings.yaml` from `proposed` plus the user's choices:
 
 - An agent task with two or more candidates, and a builtin or forge task with
-  any, is the human's call: a skill bound there replaces the default. Ask once, in
+  any, is the user's call: a skill bound there replaces the default. Ask once, in
   one message listing them all with their candidates - not one question per
   task - and write nothing for them until they answer.
 - A task with no candidate gets no entry.
@@ -45,8 +54,8 @@ Write `.kraft-lite/bindings.yaml` from `proposed` plus the human's choices:
   reads as finished until the node fails. A `null` `test_command` or `ci_command`
   leaves that task on its default.
 - Every `skill` entry gets a `prompt` sibling (the one `proposed` gives, or one
-  line on the task's job), so a renamed or uninstalled skill degrades to an
-  instruction instead of stopping the chain.
+  line on the task's job). It is required - `start` refuses the file without it -
+  and it is what runs when the skill is missing.
 
       tasks:
         spec_author:
@@ -62,13 +71,14 @@ Write `.kraft-lite/bindings.yaml` from `proposed` plus the human's choices:
           kind: subprocess
           command: [gh, pr, checks]
 
-If `.kraft-lite/bindings.yaml` already exists, build the new one, show the human
+If `.kraft-lite/bindings.yaml` already exists, build the new one, show the user
 a diff against it, and ask; do not overwrite one they have edited. Where it holds
 a different command than detect printed, the person's edit wins: leave it, let
-the diff show the difference, and let the human choose. `start` refuses a file it
+the diff show the difference, and let the user choose. `start` refuses a file it
 cannot use and names the entry, but catching a gap now is cheaper.
 
-Then print the path and say it is meant to be edited and committed. Tell the human
+Then print the path and say it is meant to be edited and committed. Tell the user
 to add `.kraft-lite/decisions/`, `.kraft-lite/messages/` and `.kraft-lite/proposals/`
 to `.gitignore`: a sliced run writes its decisions log, messages and proposals
-there, and they are not for the repo. `bindings.yaml` stays committed.
+there, and they are not for the repo. After a migrate, `.kraft-lite/registry.yaml.migrated`
+goes there too, or is deleted. `bindings.yaml` stays committed.

@@ -6,9 +6,9 @@
     "query": "[user] Set up Kraft Lite in this repo.",
     "setup": "A Claude Code session at the root of the repo acme/ledger (a Python project with a justfile whose `test` recipe runs pytest; origin on GitHub, gh installed), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed, superpowers and engineering plugins installed. There is no .kraft-lite/ directory yet and no .gitignore entry for it. `python3 \"$CLAUDE_PLUGIN_ROOT/kl.py\" detect` prints: {\"test_command\": [\"just\", \"test\"], \"ci_command\": [\"gh\", \"pr\", \"checks\"], \"chain\": \"default\", \"candidates\": {\"tasks\": {\"spec_author\": [\"superpowers:brainstorming\"], \"plan_author\": [\"superpowers:executing-plans\", \"superpowers:writing-plans\"], \"revise_chain\": [], \"implementer\": [\"superpowers:test-driven-development\"], \"code_review\": [\"engineering:code-review\", \"superpowers:receiving-code-review\", \"superpowers:requesting-code-review\"], \"repair_verification\": [], \"strict_judge\": [], \"write_work_brief\": [], \"describe_mr\": [], \"repair_mr_checks\": [], \"repair_mr_feedback\": [], \"write_summary\": []}, \"builtins\": {\"kraft.verify_changed_test_scopes\": [], \"kraft.mr_rebase\": []}, \"forge\": {\"mr.open_draft\": [\"superpowers:finishing-a-development-branch\"], \"mr.ci\": [], \"mr.automated_review\": [], \"mr.sync\": [], \"mr.mark_ready\": [], \"mr.external_approval\": [], \"mr.merge\": [\"superpowers:finishing-a-development-branch\"], \"mr.post_merge_ci\": []}}, \"proposed\": {\"tasks\": {\"spec_author\": {\"kind\": \"skill\", \"skill\": \"superpowers:brainstorming\", \"prompt\": \"Produce the work item's specification.\"}, \"implementer\": {\"kind\": \"skill\", \"skill\": \"superpowers:test-driven-development\", \"prompt\": \"Implement the approved plan.\"}}, \"builtins\": {\"kraft.verify_changed_test_scopes\": {\"kind\": \"subprocess\", \"command\": [\"just\", \"test\"]}}, \"forge\": {\"mr.ci\": {\"kind\": \"subprocess\", \"command\": [\"gh\", \"pr\", \"checks\"]}}}}",
     "expected_behavior": [
-      "Runs detect once, for the chain it will run; never a second time over a slice chain file",
-      "Asks the human one message covering every choice: plan_author (two candidates) and code_review (three), and also mr.open_draft and mr.merge, the forge targets with a candidate skill, whose binding replaces the forge default; nothing is written for those until they answer",
-      "Writes `.kraft-lite/bindings.yaml` with sections tasks/builtins/forge holding the `proposed` entries (spec_author, implementer, builtins kraft.verify_changed_test_scopes as [just, test], forge mr.ci as [gh, pr, checks]) plus the human's answers, each skill entry with a `prompt` sibling",
+      "Runs detect once, for the chain it will run; never a second time over a child chain file",
+      "Asks the user one message covering every choice: plan_author (two candidates) and code_review (three), and also mr.open_draft and mr.merge, the forge targets with a candidate skill, whose binding replaces the forge default; nothing is written for those until they answer",
+      "Writes `.kraft-lite/bindings.yaml` with sections tasks/builtins/forge holding the `proposed` entries (spec_author, implementer, builtins kraft.verify_changed_test_scopes as [just, test], forge mr.ci as [gh, pr, checks]) plus the user's answers, each skill entry with a `prompt` sibling",
       "Writes no entry for a task with no candidate (its default applies), no `on.*` hook keys, and no registry.yaml"
     ]
   },
@@ -17,9 +17,9 @@
       "kraft-lite:init"
     ],
     "query": "[user] Set up Kraft Lite in this repo, then tell me what else I need to do by hand.",
-    "setup": "A Claude Code session at the root of the repo acme/ledger (a Python project with a justfile whose `test` recipe runs pytest; origin on GitHub, gh installed), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed, superpowers and engineering plugins installed. There is no .kraft-lite/ directory yet and no .gitignore entry for it. `python3 \"$CLAUDE_PLUGIN_ROOT/kl.py\" detect` prints: {\"test_command\": [\"just\", \"test\"], \"ci_command\": [\"gh\", \"pr\", \"checks\"], \"chain\": \"default\", \"candidates\": {\"tasks\": {\"spec_author\": [\"superpowers:brainstorming\"], \"plan_author\": [\"superpowers:executing-plans\", \"superpowers:writing-plans\"], \"revise_chain\": [], \"implementer\": [\"superpowers:test-driven-development\"], \"code_review\": [\"engineering:code-review\", \"superpowers:receiving-code-review\", \"superpowers:requesting-code-review\"], \"repair_verification\": [], \"strict_judge\": [], \"write_work_brief\": [], \"describe_mr\": [], \"repair_mr_checks\": [], \"repair_mr_feedback\": [], \"write_summary\": []}, \"builtins\": {\"kraft.verify_changed_test_scopes\": [], \"kraft.mr_rebase\": []}, \"forge\": {\"mr.open_draft\": [\"superpowers:finishing-a-development-branch\"], \"mr.ci\": [], \"mr.automated_review\": [], \"mr.sync\": [], \"mr.mark_ready\": [], \"mr.external_approval\": [], \"mr.merge\": [\"superpowers:finishing-a-development-branch\"], \"mr.post_merge_ci\": []}}, \"proposed\": {\"tasks\": {\"spec_author\": {\"kind\": \"skill\", \"skill\": \"superpowers:brainstorming\", \"prompt\": \"Produce the work item's specification.\"}, \"implementer\": {\"kind\": \"skill\", \"skill\": \"superpowers:test-driven-development\", \"prompt\": \"Implement the approved plan.\"}}, \"builtins\": {\"kraft.verify_changed_test_scopes\": {\"kind\": \"subprocess\", \"command\": [\"just\", \"test\"]}}, \"forge\": {\"mr.ci\": {\"kind\": \"subprocess\", \"command\": [\"gh\", \"pr\", \"checks\"]}}}}. The human has already answered any question about candidates: take the first candidate listed for a task, and keep the forge defaults.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger (a Python project with a justfile whose `test` recipe runs pytest; origin on GitHub, gh installed), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed, superpowers and engineering plugins installed. There is no .kraft-lite/ directory yet and no .gitignore entry for it. `python3 \"$CLAUDE_PLUGIN_ROOT/kl.py\" detect` prints: {\"test_command\": [\"just\", \"test\"], \"ci_command\": [\"gh\", \"pr\", \"checks\"], \"chain\": \"default\", \"candidates\": {\"tasks\": {\"spec_author\": [\"superpowers:brainstorming\"], \"plan_author\": [\"superpowers:executing-plans\", \"superpowers:writing-plans\"], \"revise_chain\": [], \"implementer\": [\"superpowers:test-driven-development\"], \"code_review\": [\"engineering:code-review\", \"superpowers:receiving-code-review\", \"superpowers:requesting-code-review\"], \"repair_verification\": [], \"strict_judge\": [], \"write_work_brief\": [], \"describe_mr\": [], \"repair_mr_checks\": [], \"repair_mr_feedback\": [], \"write_summary\": []}, \"builtins\": {\"kraft.verify_changed_test_scopes\": [], \"kraft.mr_rebase\": []}, \"forge\": {\"mr.open_draft\": [\"superpowers:finishing-a-development-branch\"], \"mr.ci\": [], \"mr.automated_review\": [], \"mr.sync\": [], \"mr.mark_ready\": [], \"mr.external_approval\": [], \"mr.merge\": [\"superpowers:finishing-a-development-branch\"], \"mr.post_merge_ci\": []}}, \"proposed\": {\"tasks\": {\"spec_author\": {\"kind\": \"skill\", \"skill\": \"superpowers:brainstorming\", \"prompt\": \"Produce the work item's specification.\"}, \"implementer\": {\"kind\": \"skill\", \"skill\": \"superpowers:test-driven-development\", \"prompt\": \"Implement the approved plan.\"}}, \"builtins\": {\"kraft.verify_changed_test_scopes\": {\"kind\": \"subprocess\", \"command\": [\"just\", \"test\"]}}, \"forge\": {\"mr.ci\": {\"kind\": \"subprocess\", \"command\": [\"gh\", \"pr\", \"checks\"]}}}}. The user has already answered any question about candidates: take the first candidate listed for a task, and keep the forge defaults.",
     "expected_behavior": [
-      "Tells the human to add `.kraft-lite/decisions/`, `.kraft-lite/messages/` and `.kraft-lite/proposals/` to .gitignore",
+      "Tells the user to add `.kraft-lite/decisions/`, `.kraft-lite/messages/` and `.kraft-lite/proposals/` to .gitignore",
       "Does not suggest ignoring the whole `.kraft-lite/` directory, which would hide bindings.yaml, and which is meant to be committed",
       "Says bindings.yaml is meant to be edited and committed"
     ]
@@ -45,7 +45,7 @@
     "setup": "A Claude Code session at the root of the repo acme/ledger (a Python project with a justfile whose `test` recipe runs pytest; origin on GitHub, gh installed), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed, superpowers and engineering plugins installed. The repo has a committed `.kraft-lite/registry.yaml` from an older Kraft Lite and no `.kraft-lite/bindings.yaml`. `migrate` exits 1 with `kraft-lite: migrate moves only unsliced runs of the legacy default chain; finish it on the previous Kraft Lite version, or start again: kl-1d2e3f40 (sliced). Nothing was migrated`.",
     "expected_behavior": [
       "Runs `migrate` first, because registry.yaml exists and bindings.yaml does not",
-      "Reports the refusal and the two ways on it names: finish kl-1d2e3f40 on the previous Kraft Lite version, or start again; asks the human which",
+      "Reports the refusal and the two ways on it names: finish kl-1d2e3f40 on the previous Kraft Lite version, or start again; asks the user which",
       "Writes no bindings.yaml by hand and does not delete, rename or edit registry.yaml"
     ]
   },
@@ -58,7 +58,56 @@
     "expected_behavior": [
       "Does not run `migrate`: with bindings.yaml present the registry is not what the walk reads",
       "Runs detect and builds the new bindings from `proposed` plus the existing file's choices, then shows a diff against the existing bindings.yaml and asks before replacing it",
-      "Keeps the hand-written code_review binding unless the human chooses otherwise"
+      "Keeps the hand-written code_review binding unless the user chooses otherwise"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:init"
+    ],
+    "query": "[user] Set up Kraft Lite for our hotfix chain, repo:hotfix - that's the one we run here.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger (a Python project with a justfile whose `test` recipe runs pytest; origin on GitHub, gh installed), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed, superpowers installed. There is no .kraft-lite/ directory yet. The repo library has .kraft/chains/hotfix.yaml (id hotfix). `detect --chain repo:hotfix` prints: {\"test_command\": [\"just\", \"test\"], \"ci_command\": [\"gh\", \"pr\", \"checks\"], \"chain\": \"repo:hotfix\", \"candidates\": {\"tasks\": {\"spec_author\": [\"superpowers:brainstorming\"], \"plan_author\": [], \"implementer\": [\"superpowers:test-driven-development\"], \"code_review\": []}, \"builtins\": {\"kraft.verify_changed_test_scopes\": [], \"kraft.mr_rebase\": []}, \"forge\": {\"mr.open_draft\": [], \"mr.ci\": [], \"mr.merge\": []}}, \"proposed\": {\"tasks\": {\"spec_author\": {\"kind\": \"skill\", \"skill\": \"superpowers:brainstorming\", \"prompt\": \"Produce the work item's specification.\"}, \"implementer\": {\"kind\": \"skill\", \"skill\": \"superpowers:test-driven-development\", \"prompt\": \"Implement the approved plan.\"}}, \"builtins\": {\"kraft.verify_changed_test_scopes\": {\"kind\": \"subprocess\", \"command\": [\"just\", \"test\"]}}, \"forge\": {\"mr.ci\": {\"kind\": \"subprocess\", \"command\": [\"gh\", \"pr\", \"checks\"]}}}}. A plain `detect` reads the default chain instead.",
+    "expected_behavior": [
+      "Runs `detect --chain repo:hotfix`, not a plain `detect` over the default chain",
+      "Writes .kraft-lite/bindings.yaml from `proposed` (spec_author and implementer with their prompts, [just, test], [gh, pr, checks])",
+      "Says the file is meant to be edited and committed, and gives the .gitignore lines"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:init"
+    ],
+    "query": "[user] Set up Kraft Lite in this repo.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger (a Python project with no test runner configured; origin on a self-hosted Gitea with no CLI), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed, superpowers installed. There is no .kraft-lite/ directory yet. `detect` prints: {\"test_command\": null, \"ci_command\": null, \"chain\": \"default\", \"candidates\": {\"tasks\": {\"spec_author\": [\"superpowers:brainstorming\"], \"plan_author\": [], \"implementer\": [\"superpowers:test-driven-development\"], \"code_review\": []}, \"builtins\": {\"kraft.verify_changed_test_scopes\": [], \"kraft.mr_rebase\": []}, \"forge\": {\"mr.open_draft\": [], \"mr.ci\": [], \"mr.merge\": []}}, \"proposed\": {\"tasks\": {\"spec_author\": {\"kind\": \"skill\", \"skill\": \"superpowers:brainstorming\", \"prompt\": \"Produce the work item's specification.\"}, \"implementer\": {\"kind\": \"skill\", \"skill\": \"superpowers:test-driven-development\", \"prompt\": \"Implement the approved plan.\"}}}}.",
+    "expected_behavior": [
+      "Writes bindings.yaml with only the `proposed` agent entries (spec_author, implementer), each with its prompt",
+      "Writes no binding for builtins.kraft.verify_changed_test_scopes or forge.mr.ci: with test_command and ci_command null those tasks stay on their defaults",
+      "Invents no command (no pytest, no just test, no CI CLI) and says the two tasks run on their default instructions"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:init"
+    ],
+    "query": "[user] Set up Kraft Lite here; the Audit log chain from last month still needs finishing.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger (origin on GitHub, gh installed), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. The repo has both `.kraft-lite/bindings.yaml` (hand-written; binds tasks.code_review to skill engineering:code-review) and an old `.kraft-lite/registry.yaml` binding on.test.run to [just, test]. One chain, kl-1d2e3f40 'Audit log', is unfinished at node verify on the old format: `state --chain-id kl-1d2e3f40` exits 1 with `kraft-lite: chain kl-1d2e3f40 was started on the pre-V1 format. Run: python3 kl.py migrate`. `migrate` exits 1 with `kraft-lite: .kraft-lite/bindings.yaml and .kraft-lite/registry.yaml both exist: migrate would overwrite the bindings. Move .kraft-lite/bindings.yaml aside, run migrate, and merge the two by hand`.",
+    "expected_behavior": [
+      "Moves the hand-written bindings.yaml aside (for example to .kraft-lite/bindings.yaml.mine), then runs `migrate`",
+      "Merges the two by hand with the user: the moved-aside file's code_review binding and what migrate wrote, shown as a diff, keeping the hand-written choices unless the user says otherwise",
+      "Reports that 'Audit log' continues under the new id migrate prints",
+      "Does not delete registry.yaml or the hand-written bindings, and does not just carry on ignoring the refused run"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:init"
+    ],
+    "query": "[user] Set up Kraft Lite here, then tell me what else I need to do by hand.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger (origin on GitHub, gh installed), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. The repo has a committed `.kraft-lite/registry.yaml` binding on.test.run to [just, test], no `.kraft-lite/bindings.yaml`, no unfinished chain, and no .gitignore entry for .kraft-lite/. `migrate` would print {\"bindings\": {\"builtins\": {\"kraft.verify_changed_test_scopes\": {\"kind\": \"subprocess\", \"command\": [\"just\", \"test\"]}}, \"dropped\": [\"on.mr.sync\"]}, \"chains\": []}.",
+    "expected_behavior": [
+      "Runs `migrate` rather than writing bindings by hand",
+      "Reports it wrote .kraft-lite/bindings.yaml, renamed the registry registry.yaml.migrated, dropped on.mr.sync, and moved no runs",
+      "Says bindings.yaml is to be committed, and tells the user to add .kraft-lite/decisions/, .kraft-lite/messages/, .kraft-lite/proposals/ and .kraft-lite/registry.yaml.migrated to .gitignore (or delete the migrated registry)"
     ]
   }
 ]

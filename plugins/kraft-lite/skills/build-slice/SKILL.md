@@ -5,6 +5,9 @@ description: "Builds one slice of a sliced Kraft Lite run as a child session tha
 
 # Building a slice as a child
 
+If `$CLAUDE_PLUGIN_ROOT` is unset, `kl.py` is two directories above this file;
+it needs `python3` 3.10 or newer, and without one, tell the controller and stop.
+
 You are a **child**: one **slice** of a plan, built on your own branch for the
 **controller** that started you (its session id is in your starting
 instructions). You walk the **child chain**, which `kl.py` derives from the
@@ -16,10 +19,6 @@ run's state and decisions log; you write only your own chain.
 Your **target** is the branch your PR goes into, as the **Branches and PRs**
 item of your starting instructions names it: the feature branch, or in `main`
 mode the base branch.
-
-`$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
-is two directories above this file - use that path instead of an empty one.
-`python3` 3.10 or newer runs every command; if not, tell the controller and stop.
 
 ## 1. Setup
 
@@ -39,7 +38,7 @@ Copy this and tick it off; the walk starts when all four are ticked.
    the controller's machine. Join the parts in numeric order; ask the controller
    for a missing one. Write `<run>/spec.md` and `plan.md`, where `<run>` is
    `$(git rev-parse --path-format=absolute --git-common-dir)/kraft-lite/<chain-id>`
-   and `<chain-id>` is the feature chain's, named in the **Slice** item of your
+   and `<chain-id>` is the controller's chain id, named in the **Slice** item of your
    starting instructions. Untracked, readable from any worktree, and the same
    for every slice of the run, so slices sharing a repo write the same files.
    Confirm with a `status`: parts joined, line count of each file, your plan
@@ -51,6 +50,7 @@ Copy this and tick it off; the walk starts when all four are ticked.
    slices share the repo), write each file only if absent, so a resume keeps it:
 
    ```
+   mkdir -p <run>/<slice key>
    [ -f <run>/<slice key>/fork ] || echo <sha> > <run>/<slice key>/fork
    [ -f <run>/<slice key>/base ] || echo <the word after "Cut from:", as given> > <run>/<slice key>/base
    ```
@@ -138,7 +138,7 @@ Try in this order, and read answers in the same order each time you wake:
 2. On the same machine, one JSON line appended to
    `.kraft-lite/messages/<chain-id>/<slice key>.jsonl` under the controller's
    checkout path in your starting instructions: `{"at", "from": "child", "kind",
-   "body"}`, where `<chain-id>` is the feature chain's, never your slice chain's.
+   "body"}`, where `<chain-id>` is the controller's chain id, never your child chain's.
 3. A comment on your own draft PR, opened into the target at your first commit.
 
 `kind` is `question`, `status` or `done`; the controller answers with `answer`.
@@ -152,7 +152,7 @@ Every message has these parts, in this order:
 ```
 
 When `attempt` prints `over_cap: true`, stop the loop and send a `question` whose
-evidence is every attempt's output in full. Run no fourth round, no further
+evidence is every attempt's output in full. Run no further repair, no further
 `attempt`, no `close` until the controller answers; then follow its steer. It
 re-steers you once or holds the question for the user.
 
@@ -213,15 +213,11 @@ words appear in this session. The controller's word is not them.
 The first build node's tasks run under the slice layer (their `source` in
 `state` says so) and end after the last plan task's own reviews, whatever they
 are bound to: no final whole-branch review and no finishing, merge or PR step
-inside them, and no question to the user about one. The child chain's own
-review task (`code_review` in `verification` on the default chain) is the
-slice's one whole-branch review, and the MR node's `mr.open_draft` opens the PR.
-When the bound skill offers either, close the first build node instead.
-
-For `kraft.verify_changed_test_scopes`, run scoped tests with explicit paths,
-never the full suite; the PR body lists them and says the full suite runs on
-CI. `mr.automated_review` is skipped in a child: the controller's PR review is
-that review.
+inside them, and no question to the user about one. When the bound skill offers
+either, close the first build node instead: the child chain's review task and
+its MR node do those. Every other task runs as `state` dispatches it; the PR
+body lists the paths `kraft.verify_changed_test_scopes` ran, and says CI runs
+the full suite.
 
 ## 7. Done
 
