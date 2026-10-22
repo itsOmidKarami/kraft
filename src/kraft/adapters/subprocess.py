@@ -59,6 +59,10 @@ _flush_sleep = asyncio.sleep
 #: How much of one job's command a reason quotes.
 _JOB_NAME_MAX = 200
 
+#: Minutes an agent session may leave its log unwritten before it is killed, set
+#: from `policy.agent_idle_minutes`; 0 is off.
+IDLE_MINUTES = 30
+
 
 async def fail_abandoned_jobs(
     db, session_id: str, log_path: Path, status: str, reader, *, work_item_id: str

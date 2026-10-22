@@ -251,6 +251,7 @@ async def lifespan(app: FastAPI):
     apply_mod.record(app.state)
     if policy_obj:
         forge_git.CLI_TIMEOUT_S = policy_obj.forge_cli_timeout_s
+        _subprocess.IDLE_MINUTES = policy_obj.agent_idle_minutes
     app.state.access = access
     # What the server is really listening on. __main__ reads access.yaml for this,
     # so they normally agree — until someone saves a new bind and has not restarted.

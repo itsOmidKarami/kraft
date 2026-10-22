@@ -25,6 +25,7 @@ from fastapi import FastAPI, HTTPException
 from kraft import builtins as builtins_mod
 from kraft import config as config_mod
 from kraft import executor, ids, storage, store
+from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git as forge_git
 from kraft.addons import load as addons_load
 from kraft.config import RepoEntry
@@ -431,6 +432,7 @@ def apply_policy(st, policy: Policy, instance: InstancePolicy) -> None:
     the file validated."""
     st.policy, st.instance_policy, st.invalid_policy = policy, instance, []
     forge_git.CLI_TIMEOUT_S = policy.forge_cli_timeout_s
+    _subprocess.IDLE_MINUTES = policy.agent_idle_minutes
 
 
 def reload_policy(st) -> str | None:

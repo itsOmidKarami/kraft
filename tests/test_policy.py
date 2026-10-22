@@ -79,6 +79,8 @@ _BASE = "default: { attempts: 1, wall_clock_s: 1 }\n"
         pytest.param(_BASE + "auto_escalate_delay_s: -1\n", id="auto-escalate-delay-negative"),
         pytest.param(_BASE + "auto_escalate_delay_s: soon\n", id="auto-escalate-delay-not-int"),
         pytest.param(_BASE + "forge_cli_timeout_s: 0\n", id="forge-cli-timeout-zero"),
+        pytest.param(_BASE + "agent_idle_minutes: -1\n", id="agent-idle-negative"),
+        pytest.param(_BASE + 'agent_idle_minutes: "30"\n', id="agent-idle-not-int"),
         pytest.param(_BASE + "forge_poll_s: 29\n", id="forge-poll-below-30"),
         pytest.param(_BASE + "forge_poll_s: soon\n", id="forge-poll-not-int"),
     ],
@@ -316,6 +318,9 @@ def test_cron_due_matches_star_and_lists():
             "forge_cli_timeout_s: 30\n", "forge_cli_timeout_s", 30.0, id="forge-cli-timeout"
         ),
         pytest.param("", "forge_cli_timeout_s", 120.0, id="forge-cli-timeout-default"),
+        pytest.param("agent_idle_minutes: 10\n", "agent_idle_minutes", 10, id="agent-idle-set"),
+        pytest.param("agent_idle_minutes: 0\n", "agent_idle_minutes", 0, id="agent-idle-off"),
+        pytest.param("", "agent_idle_minutes", 30, id="agent-idle-default"),
         pytest.param("forge_poll_s: 60\n", "forge_poll_s", 60, id="forge-poll"),
         pytest.param("", "forge_poll_s", 300, id="forge-poll-default"),
         pytest.param("", "triggers", [], id="triggers-default"),
@@ -326,6 +331,20 @@ def test_load_policy_reads_scalar(tmp_path, tail, attr, expected):
     d = tmp_path / "policy.yaml"
     d.write_text(_BASE + tail)
     assert getattr(policy.load_policy(d), attr) == expected
+
+
+def test_apply_policy_sets_the_idle_limit(tmp_path, monkeypatch):
+    """A reload that changes `agent_idle_minutes` reaches later launches."""
+    from types import SimpleNamespace
+
+    from kraft.adapters import subprocess as _subprocess
+    from kraft.api import deps
+
+    d = tmp_path / "policy.yaml"
+    d.write_text(_BASE + "agent_idle_minutes: 7\n")
+    monkeypatch.setattr(_subprocess, "IDLE_MINUTES", 30)
+    deps.apply_policy(SimpleNamespace(), *deps.read_policy(tmp_path))
+    assert _subprocess.IDLE_MINUTES == 7
 
 
 def test_a_cap_rejects_a_zero_attempt_count():
