@@ -416,14 +416,12 @@ def _validate_direct(store: RefStore, shadow: Path) -> str | None:
 
 def _clear_worker_files(store: RefStore, *, keep_lock: bool = True) -> None:
     """Remove what the worker may plant at the paths it can write: a `.lock`
-    (the branch's, or `packed-refs.lock`, which a commit takes to delete a
-    pseudo-ref) that is not a regular file and a branch reflog that is not one
-    (the host would append through them, and the profile would follow them). A
-    regular `.lock` goes only when `keep_lock` is False: a co-task may hold it."""
+    that is not a regular file and a branch reflog that is not one (the host
+    would append through them, and the profile would follow them). A regular
+    `.lock` goes only when `keep_lock` is False: a co-task may hold it."""
     ref = store.common / "refs" / "heads" / store.branch
     reflog = store.common / "logs" / "refs" / "heads" / store.branch
-    locks = (ref.with_name(ref.name + ".lock"), store.common / "packed-refs.lock")
-    for path, keep_file in [*((lock, keep_lock) for lock in locks), (reflog, True)]:
+    for path, keep_file in ((ref.with_name(ref.name + ".lock"), keep_lock), (reflog, True)):
         try:
             if os.path.lexists(path) and not (keep_file and stat.S_ISREG(path.lstat().st_mode)):
                 _remove(path)
@@ -491,7 +489,11 @@ def check_direct_item(base: Path, work_item_id: str) -> list[str]:
             continue
         common = Path(data["common"])
         store = RefStore(common, common, Path(data["worktree_gitdir"]), data["branch"])
-        if common.is_dir() and (problem := check_direct(base, store)):
+        # A branch the host deleted (abandon) is not the worker's to have back.
+        gone = not os.path.lexists(common / "refs" / "heads" / store.branch) and (
+            read_branch(common, store.branch) is None
+        )
+        if common.is_dir() and not gone and (problem := check_direct(base, store)):
             problems.append(problem)
     return problems
 
@@ -598,6 +600,8 @@ def sync_item(base: Path, work_item_id: str) -> list[str]:
         shadow = meta_path.with_suffix("")
         data = _read_meta(shadow)
         if data.get("work_item_id") != work_item_id or not data.get("branch"):
+            continue
+        if data.get("direct"):  # its own check, `check_direct_item`
             continue
         store = RefStore(
             shadow, Path(data["common"]), Path(data["worktree_gitdir"]), data["branch"]

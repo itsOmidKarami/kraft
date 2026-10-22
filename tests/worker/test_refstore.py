@@ -362,8 +362,6 @@ _NOT_FILE = "something that is not a regular file"
         pytest.param("stale-lock", "{start}", None, "{start}", True, id="stale-lock"),
         pytest.param("no-branch", "junk", None, "junk", False, id="no-branch"),
         pytest.param("lock-dir", "not an oid", "'not an oid'", "{start}", False, id="lock-dir"),
-        pytest.param("packed-lock-dir", None, None, "{start}", False, id="packed-lock-dir"),
-        pytest.param("packed-lock-file", None, None, "{start}", False, id="packed-lock-file"),
         pytest.param(
             "lock-symlink", "not an oid", "'not an oid'", "{start}", False, id="lock-symlink"
         ),
@@ -394,11 +392,6 @@ def test_check_direct(repo, direct, tmp_path, kind, text, left, final, lock_stay
         lock.write_text("")
     if kind == "lock-dir":
         (lock / "x").mkdir(parents=True)
-    packed_lock = store.common / "packed-refs.lock"
-    if kind == "packed-lock-dir":
-        (packed_lock / "x").mkdir(parents=True)
-    if kind == "packed-lock-file":
-        packed_lock.write_text("")
     if kind == "lock-symlink":
         lock.symlink_to(outside / "victim")
     if kind == "ref-symlink":
@@ -423,8 +416,6 @@ def test_check_direct(repo, direct, tmp_path, kind, text, left, final, lock_stay
     got = refstore.check_direct(base, store)
 
     assert os.path.lexists(lock) == lock_stays
-    # A regular one may be a co-task's commit in flight, as the branch's is.
-    assert os.path.lexists(packed_lock) == (kind == "packed-lock-file")
     assert not (outside / "victim").exists()
     if kind.startswith("reflog"):
         assert not os.path.lexists(reflog)
@@ -458,8 +449,8 @@ def test_a_branch_the_host_packed_since_is_not_put_back(repo, direct):
 
 @pytest.mark.parametrize(
     ("item", "gone", "problems"),
-    [("w1", False, 1), ("w2", False, 0), ("w1", True, 0)],
-    ids=["its-item", "another-item", "repository-gone"],
+    [("w1", False, 1), ("w2", False, 0), ("w1", True, 0), ("w1", "branch", 0)],
+    ids=["its-item", "another-item", "repository-gone", "branch-deleted-by-the-host"],
 )
 def test_check_direct_item(direct, worktree, item, gone, problems):
     """A restart leaves no `run_task` to call `check_direct`: the item's own
@@ -468,12 +459,27 @@ def test_check_direct_item(direct, worktree, item, gone, problems):
     refstore.prepare_direct(base, worktree, BRANCH, work_item_id="w1")
     start = ref.read_text().strip()
     ref.write_text("ref: refs/heads/main\n")
-    if gone:
+    if gone == "branch":
+        ref.unlink()  # abandon deleted it: the recorded value must not bring it back
+    elif gone:
         shutil.rmtree(store.common)
 
     assert len(refstore.check_direct_item(base, item)) == problems
+    assert ref.exists() != (gone in (True, "branch"))
     if not gone:
         assert ref.read_text().strip() == (start if problems else "ref: refs/heads/main")
+
+
+def test_sync_item_leaves_a_direct_store_alone(direct):
+    """An item that ran under both kinds: a leftover private store beside a direct sidecar."""
+    base, store, ref = direct
+    leftover = refstore.shadow_dir(base, store.worktree_gitdir)
+    (leftover / "refs" / "heads" / BRANCH).parent.mkdir(parents=True)
+    (leftover / "refs" / "heads" / BRANCH).write_text(git(store.common, "rev-parse", "main") + "\n")
+    meta = refstore._meta_path(refstore.shadow_dir(base, store.worktree_gitdir))
+    meta.write_text(json.dumps({**json.loads(meta.read_text()), "work_item_id": "w1"}))
+
+    assert refstore.sync_item(base, "w1") == []
 
 
 def test_check_direct_item_leaves_a_private_store_alone(repo, worktree, prepare, tmp_path):

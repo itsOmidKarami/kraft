@@ -40,6 +40,5 @@ def test_a_direct_store_mounts_the_real_gitdir_with_only_its_branchs_files_writa
         (heads, False),
         (heads.with_name("fix-x.lock"), False),
         (common / "logs" / "refs" / "heads" / "kraft" / "fix-x", False),
-        (common / "packed-refs.lock", False),  # a commit takes it to delete a pseudo-ref
     }
     assert all(m.src == m.dst for m in ms)

@@ -318,7 +318,7 @@ async def end_session(files: SessionFiles, name: str) -> bool:
             asyncio.to_thread(os_init.sweep, str(files.marker), str(files.control)), SWEEP_SECONDS
         )
     except (OSError, TimeoutError) as exc:
-        logger.warning("session %s: its processes could not be swept: %s", name, exc)
+        logger.warning("session %s: its processes could not be swept: %s", name, exc or "timed out")
         return False
     if left:
         logger.warning("session %s: processes survived the sweep, pids %s", name, left)

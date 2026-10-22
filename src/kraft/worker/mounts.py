@@ -238,9 +238,6 @@ def _linked_mounts(
                 heads,
                 heads.with_name(heads.name + ".lock"),
                 common / "logs" / "refs" / "heads" / refstore.branch,
-                # A commit takes it to delete a pseudo-ref that is not there, and prints
-                # an error if it cannot; `packed-refs` itself stays read-only.
-                common / "packed-refs.lock",
             )
         ]
     return mounts

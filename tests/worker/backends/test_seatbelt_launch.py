@@ -440,11 +440,9 @@ def test_a_wrapped_command_runs_and_leaves_nothing_behind(tmp_path, run_dirs, mo
 
 
 @pytest.mark.e2e("sandbox-exec")
-def test_a_wrapped_commit_lands_on_the_item_branch_and_prints_no_error(
-    repo, tmp_path, run_dirs, monkeypatch
-):
-    """Apple Git takes `packed-refs.lock` at the end of every commit, to delete a
-    pseudo-ref that is not there, and prints an error if it cannot."""
+def test_a_wrapped_commit_lands_on_the_item_branch(repo, tmp_path, run_dirs, monkeypatch):
+    """Apple Git ends a commit by deleting pseudo-refs that are not there, which takes
+    `packed-refs.lock`; it prints an error that it cannot, and the commit lands."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dirs.base))
     wt = tmp_path / "item-wt"
     git(repo, "worktree", "add", "-q", "-b", BRANCH, str(wt))
@@ -462,38 +460,6 @@ def test_a_wrapped_commit_lands_on_the_item_branch_and_prints_no_error(
     done = _launch_for_real(argv, wt)
 
     assert done.returncode == 0, done.stderr
-    assert "error" not in done.stdout + done.stderr
     assert backend.code_out(refs, "s1") == []
     assert git(repo, "log", "-1", "--format=%s", BRANCH) == "x"
     assert git(repo, "rev-parse", "main") == main
-
-
-@pytest.mark.e2e("sandbox-exec")
-def test_the_packed_refs_lock_is_no_way_to_write_packed_refs(repo, tmp_path, run_dirs, monkeypatch):
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dirs.base))
-    git(repo, "pack-refs", "--all")
-    packed = repo / ".git" / "packed-refs"
-    before = packed.read_text()
-    wt = tmp_path / "item-wt"
-    git(repo, "worktree", "add", "-q", "-b", BRANCH, str(wt))
-    backend = bwrap.OsBackend()
-    refs = backend.code_in(run_dirs.base, wt, BRANCH, work_item_id="w1", session_id="s1")
-    # The lock itself can be made; neither a rename nor a write reaches the file.
-    script = (
-        'cd "$1" && echo evil > packed-refs.lock && ! mv packed-refs.lock packed-refs'
-        " && ! echo evil >> packed-refs"
-    )
-    argv = backend.wrap(
-        ["/bin/sh", "-c", script, "sh", str(repo / ".git")],
-        wt,
-        {"kind": "os"},
-        None,
-        session_id="s1",
-        work_item_id="w1",
-        refs=refs,
-    )
-
-    done = _launch_for_real(argv, wt)
-
-    assert done.returncode == 0, done.stderr
-    assert packed.read_text() == before
