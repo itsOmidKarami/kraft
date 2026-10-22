@@ -54,13 +54,15 @@ Every run, dry or real, goes the same way. `gh workflow run` returns before the
 run exists, so the newest run straight after a dispatch is often the previous one.
 
 1. Note the newest `release.yml` run's id: `gh run list --workflow release.yml -L 1 --json databaseId`
-   / `list_workflow_runs`, resource `release.yml`, perPage 1.
+   / `list_workflow_runs` with `resource_id: release.yml`, `perPage: 1`.
 2. Dispatch, always with `sha`, so the release is the commit that passed CI even
    if someone merges in the meantime:
    `gh workflow run release.yml --ref main -f dry_run=<true|false> -f pre=<rc|none> -f sha=<sha>`
    / `actions_run_trigger` with `method: run_workflow`, `workflow_id: release.yml`,
    `ref: main`, `inputs: {dry_run: <true|false>, pre: "<rc|none>", sha: "<sha>"}`.
-3. Poll until a `workflow_dispatch` run with a larger id appears, then wait until
+3. Poll until a `workflow_dispatch` run with a larger id appears, created after
+   your dispatch by your account (another dispatch in the same minute would
+   otherwise pass for yours), then wait until
    it is `completed` (`gh run watch <id>` in the background / `list_workflow_jobs`
    on the run id, whose job `status` and `conclusion` say when it is done).
 4. Read its job log (`gh run view <id> --log` / `get_job_logs` with the job's
@@ -96,7 +98,7 @@ Is there something to release, and is main's tip safe to release from?
 
 Record the tip sha. Every later run is pinned to it.
 
-There is no local test sweep. That `test` run covers lint, the docs checks,
+Do not rerun the tests locally. That `test` run covers lint, the docs checks,
 intent pins, the backend suite, the frontend and the demo smoke, and the workflow
 will not release a sha without it. What CI cannot see is the published wheel,
 which Phase 3 installs.
@@ -128,11 +130,12 @@ Test what users will install: the wheel from PyPI, in a clean venv on Python
    - `kraft admin templates lint`: no errors
    - the web UI's `<title>Kraft`
 2. **Exercise the headline feature by hand** on the installed rc. The script
-   stopped its server; start it again from the work dir `W` it printed:
+   stopped its server; start it again in bash, with the same isolation:
    ```bash
-   unset KRAFT_RUN_DIR KRAFT_CONFIG_DIR KRAFT_TEMPLATES_DIR KRAFT_SKILLS_DIR KRAFT_HOST
-   export KRAFT_HOME=$W/home KRAFT_PORT=8799; K=$W/venv/bin/kraft
-   $K admin start --port 8799 > $W/server2.log 2>&1 &   # $K admin stop when done
+   W=<the work dir it printed>; P=8799   # or the port you gave it
+   for v in $(compgen -e | grep '^KRAFT_'); do unset "$v"; done
+   export KRAFT_HOME=$W/home KRAFT_PORT=$P; K=$W/venv/bin/kraft
+   $K admin start --port $P > $W/server2.log 2>&1 &   # $K admin stop when done
    ```
    Use `$K` for every command. Feed it inputs that should pass and one that
    should fail, and check that the CLI tells them apart. For v2.2.0 (chains extending chains) that was: a
@@ -226,8 +229,8 @@ The release is done when the stamp PR has merged.
    fails, read that check's log and report it. A patch release that ships an
    `_Added in next_` note does not fail it: the stamp step warns and adds a line
    to the PR (`RELEASING.md`, "Docs Added in notes").
-2. **Report**, outcome first: the version, where it is published, what the sweeps
-   checked, anything that warned, and the release link.
+2. **Report**, outcome first: the version, where it is published, what the rc
+   and stable smoke runs checked, anything that warned, and the release link.
 3. **Offer an announcement.** Build it from `CHANGELOG.md` on main, grouped by
    theme rather than by version, with the install lines
    (`uv tool install kraft-sdlc`, `brew tap itsOmidKarami/kraft && brew install kraft`,

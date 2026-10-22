@@ -16,11 +16,10 @@ uv venv -q --python 3.12 "$W/venv" || exit 1
 VIRTUAL_ENV="$W/venv" uv pip install -q --no-cache "kraft-sdlc[vector]==$V" || exit 1
 K="$W/venv/bin/kraft"
 echo "version: $("$K" --version)"
-# Its own home and port. These override KRAFT_HOME, and a worker or dev shell
-# sets them: left in, the server would run on, and `admin stop` would kill, a
-# real instance.
-unset KRAFT_RUN_DIR KRAFT_CONFIG_DIR KRAFT_TEMPLATES_DIR KRAFT_SKILLS_DIR KRAFT_HOST \
-      KRAFT_DAEMON_PID KRAFT_DAEMON_PORT
+# Its own home and port, and no other KRAFT_* var: a worker or dev shell sets
+# ones that override KRAFT_HOME (the run dir, so `admin stop` would kill a real
+# instance) or point at real repos, beads and work items.
+for v in $(compgen -e | grep '^KRAFT_'); do unset "$v"; done
 export KRAFT_HOME="$W/home" KRAFT_PORT="$PORT"
 "$K" admin start --port "$PORT" > "$W/server.log" 2>&1 &
 trap '"$K" admin stop >/dev/null 2>&1' EXIT
