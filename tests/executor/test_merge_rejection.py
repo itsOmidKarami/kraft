@@ -333,6 +333,42 @@ async def test_a_drop_on_a_re_measure_stops_promptly_for_a_person(item_on, scrip
     assert not gates.stuck_stop(stops)
 
 
+@pytest.mark.parametrize(
+    ("effect", "status", "calls"),
+    [
+        (None, "completed", ["ci", "merge", "wait", "merge"]),
+        (commits_a_fix, "needs_human", ["ci", "merge", "wait"]),
+    ],
+    ids=["merges-in-place", "a-commit-is-caught-and-held"],
+)
+async def test_a_read_only_on_failure_on_a_merge_node_retries_the_merge_in_place(
+    item_on, script, effect, status, calls
+):
+    """A merge that failed for another reason than a drop goes to the node's
+    read_only `on_failure`, and the merge is asked again in place: the head is
+    the one `review` approved. A handler that commits all the same is stopped
+    by the read_only check, and the item held at `restart_from` with `review`
+    reopened, so no retry merges its commit unseen."""
+    read_only = {"tasks": [v1_task("wait")], "read_only": True}
+    it = await item_on(merge_chain(on_merge_rejected=MERGE_POLICY, on_failure=read_only))
+    await approve(it, "review")
+    script.plan["merge"] = ["failed", "done"]
+    if effect is not None:
+        script.effects["wait"] = effect(it)
+
+    assert await walk_once(it) == status
+    assert script.calls == calls
+    reopened = [e["payload"] for e in it.events("gate_reopened")]
+    if effect is None:
+        assert reopened == []
+        return
+    assert it.events("work_item_needs_human")[-1]["payload"]["reason"] == (
+        "merge.on_failure.main is read_only, but it changed the worktree: fix.txt"
+    )
+    assert reopened == [{"gate": "review", "reason": "read_only_violated"}]
+    assert it.row()["current_node_id"] == "feedback"
+
+
 async def _upstream_moves(it) -> str:
     """A commit lands on the repo the worktree was cut from; its sha."""
     write(it.repo, "upstream.txt", "landed upstream\n")

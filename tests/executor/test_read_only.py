@@ -198,6 +198,41 @@ async def test_a_recovery_writes_outside_the_check_and_the_retry_it_leads_to_ins
     assert _reason(it) == "build.check is read_only, but it changed the worktree: again.txt"
 
 
+@pytest.mark.parametrize(
+    ("handler", "scope"),
+    [
+        ({"tasks": [_sub("wait")], "read_only": True}, "build.check.t.on_failure.main"),
+        (
+            {"steps": [{"id": "hold", "read_only": True, "tasks": [_sub("wait")]}]},
+            "build.check.t.on_failure.hold",
+        ),
+    ],
+    ids=["the-plan-says-so", "its-step-says-so"],
+)
+async def test_a_read_only_recovery_is_checked_like_any_read_only_step(
+    item_on, monkeypatch, handler, scope
+):
+    """A read_only `on_failure` -- one that may answer a merge node's failure
+    -- is held to it around its own tasks: its write stops the item, naming
+    it, before the task it answered runs again."""
+    task = {**_sub("t"), "on_failure": handler}
+    it = await item_on([v1_node(steps=[{"id": "check", "tasks": [task]}])])
+    launched: list[str] = []
+
+    async def run_task(*_a, cwd, **kw):
+        launched.append(kw["hook_point"])
+        if len(launched) == 1:
+            return "failed"
+        write(Path(cwd), "calc.py", "edited\n")
+        return "done"
+
+    monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
+
+    assert await _walk(it) == "needs_human"
+    assert launched == ["build.check.t", f"{scope}.wait"]
+    assert _reason(it) == f"{scope} is read_only, but it changed the worktree: calc.py"
+
+
 async def test_a_step_that_is_not_read_only_is_not_checked(item_on, monkeypatch):
     it = await item_on([v1_node(steps=[{"id": "check", "tasks": [_sub("t")]}])])
     _launches(monkeypatch, lambda cwd: write(cwd, "new.txt", "x\n"))
@@ -286,13 +321,29 @@ def test_a_node_with_a_fix_loop_cannot_be_read_only():
         )
 
 
-@pytest.mark.parametrize("handler", ["on_failure", "fix_loop"])
-def test_a_recovery_or_fix_loop_step_cannot_be_read_only(handler):
-    shape = {"steps": [{"id": "repair", "read_only": True, "tasks": [_sub("fix")]}]}
+_WRITES = {"steps": [{"id": "repair", "read_only": True, "tasks": [_sub("fix")]}]}
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"fix_loop": _WRITES},
+        {"on_base_changed": {"restart_from": "build", "on_conflict": _WRITES}},
+        {"on_merge_rejected": {"restart_from": "early", "repair": _WRITES}},
+        {
+            "on_merge_rejected": {
+                "restart_from": "early",
+                "repair": {"tasks": [_sub("fix")], "read_only": True},
+            }
+        },
+    ],
+    ids=["fix_loop", "on-conflict", "merge-rejection-repair", "a-read-only-repair-plan"],
+)
+def test_a_recovery_or_fix_loop_step_cannot_be_read_only(fields):
+    """A fix loop, a conflict handler and a merge-rejection repair exist to
+    write; only an `on_failure` plan may promise not to."""
     with pytest.raises(ValidationError, match="cannot be read_only: it writes by design"):
-        tm.ExecNode.model_validate(
-            v1_node(steps=[{"id": "s", "tasks": [_sub("t")]}], **{handler: shape})
-        )
+        tm.ExecNode.model_validate(v1_node(steps=[{"id": "s", "tasks": [_sub("t")]}], **fields))
 
 
 def test_git_failing_the_same_way_twice_still_counts_as_a_change(tmp_path):

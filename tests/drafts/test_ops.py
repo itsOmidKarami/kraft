@@ -151,6 +151,35 @@ async def test_add_handler_refuses_a_merge_rejection_with_nowhere_to_restart(st,
     assert why in refused(st, ("add_handler", {"path": path, "kind": "on_merge_rejected"}))
 
 
+@pytest.mark.parametrize(
+    ("path", "at"),
+    [("merge", ("on_failure",)), ("merge.main.merge", ("tasks", 0, "on_failure"))],
+    ids=["the-node-s", "its-merge-task-s"],
+)
+async def test_add_handler_starts_an_on_failure_beside_a_merge_rejection_read_only(st, path, at):
+    """A handler on a node with `on_merge_rejected` re-runs the merge in place,
+    so `Chain` takes only one that cannot commit: the plan arrives read_only,
+    written on the plan since its `tasks` shorthand has no step of its own.
+    Its Config row says so; the repair, which writes by design, has none."""
+    fill = (
+        "add_task",
+        {"container": f"{path}.on_failure", "step": "main", "extends": "await_mr_ci"},
+    )
+    r = apply(st, ("add_handler", {"path": path, "kind": "on_failure"}), fill)
+    assert r.problems == []
+    written = authored.parse(r.text)
+    handler = next(n for n in written["nodes"] if n["id"] == "merge")
+    for key in at:
+        handler = handler[key]
+    assert handler == {
+        "tasks": [{"id": "await_mr_ci", "extends": "await_mr_ci"}],
+        "read_only": True,
+    }
+    sources = r.result["sources"]
+    assert sources[f"{path}.on_failure"]["read_only"] == {"value": True, "source": "chain"}
+    assert "read_only" not in sources.get("merge.on_merge_rejected.repair", {})
+
+
 async def test_remove_handler_drops_a_merge_rejection_whole_and_only_a_merge_keeps_its_row(st):
     """Its repair is required, so removing it takes the restart too; the
     node still merges, so its Config row stays, unset; a node that does not

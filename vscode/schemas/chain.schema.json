@@ -947,6 +947,11 @@
       "additionalProperties": false,
       "description": "An `on_failure` handler. No gates and no fix loop by omission; no nested\nhandler by `_refuse_nested_handlers` (`recovery-plan-supports-task-groups-\nor-steps`).",
       "properties": {
+        "read_only": {
+          "default": false,
+          "title": "Read Only",
+          "type": "boolean"
+        },
         "steps": {
           "anyOf": [
             {

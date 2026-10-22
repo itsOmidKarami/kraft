@@ -687,6 +687,9 @@ class ExecutionShape(BaseModel):
                 )
             ]
         )
+        # A read_only recovery plan checks each of its steps, the `main` one a
+        # `tasks` shorthand became included.
+        every = self._steps_read_only()
         resolved = []
         for step in steps:
             path = f"{prefix}{PATH_SEPARATOR}{step.id}"
@@ -711,7 +714,7 @@ class ExecutionShape(BaseModel):
                     on_failure=_handler_steps(step.on_failure, path, step_scopes),
                     scopes=step_scopes,
                     own=step.policy,
-                    read_only=step.read_only,
+                    read_only=step.read_only or every,
                 )
             )
         return tuple(resolved)
@@ -721,6 +724,13 @@ class ExecutionShape(BaseModel):
         yield from self.tasks or ()
         for step in self.steps or ():
             yield from step.tasks
+
+    def _steps_read_only(self) -> bool:
+        """Whether every step this shape resolves to is read_only by the
+        shape's own say. Only a recovery plan can say so (`RecoveryPlan`): an
+        execution node's `read_only` is checked around its steps together
+        (`dispatch.measure_node`), not step by step."""
+        return False
 
 
 #: The policy overrides enclosing one scope, broadest first: a node's own, then
@@ -754,11 +764,22 @@ def _refuse_nested_handlers(where: str, shape: ExecutionShape | None) -> None:
     for step in shape.steps or ():
         if step.on_failure is not None:
             raise ValueError(f"{where}: step {step.id!r} cannot declare its own on_failure")
-        if step.read_only:
-            raise ValueError(f"{where}: step {step.id!r} cannot be read_only: it writes by design")
     for task in shape.own_tasks():
         if task.on_failure is not None:
             raise ValueError(f"{where}: task {task.id!r} cannot declare its own on_failure")
+
+
+def _refuse_read_only(where: str, shape: ExecutionShape | None) -> None:
+    """A fix loop, a conflict handler and a merge-rejection repair write by
+    design, so neither they nor a step of theirs may be read_only. An
+    `on_failure` plan may: one that only waits, retries or comments."""
+    if shape is None:
+        return
+    if isinstance(shape, RecoveryPlan) and shape.read_only:
+        raise ValueError(f"{where} cannot be read_only: it writes by design")
+    for step in shape.steps or ():
+        if step.read_only:
+            raise ValueError(f"{where}: step {step.id!r} cannot be read_only: it writes by design")
 
 
 def _refuse_handler_on(where: str, task: TaskBase | None) -> None:
@@ -771,10 +792,24 @@ class RecoveryPlan(ExecutionShape):
     handler by `_refuse_nested_handlers` (`recovery-plan-supports-task-groups-
     or-steps`)."""
 
+    #: Every step of the plan must leave the worktree as it found it, each
+    #: checked around its own tasks (`executor.read_only`). The one way a
+    #: `tasks` shorthand plan says so, its `main` step having no entry of its
+    #: own; a `steps` plan may say it here or on each step.
+    read_only: StrictBool = False
+
     @model_validator(mode="after")
     def _no_nested_handler(self) -> Self:
         _refuse_nested_handlers("a recovery plan", self)
         return self
+
+    def _steps_read_only(self) -> bool:
+        return self.read_only
+
+    def every_step_read_only(self) -> bool:
+        """Whether nothing this plan runs may change the worktree: the plan
+        says read_only, or every one of its steps does."""
+        return self.read_only or (bool(self.steps) and all(s.read_only for s in self.steps))
 
 
 class BaseChangePolicy(BaseModel):
@@ -795,6 +830,11 @@ class BaseChangePolicy(BaseModel):
     restart_from: Identifier
     on_conflict: RecoveryPlan | None = None
 
+    @model_validator(mode="after")
+    def _conflict_handler_writes(self) -> Self:
+        _refuse_read_only("on_conflict", self.on_conflict)
+        return self
+
 
 class MergeRejectionPolicy(BaseModel):
     """`on_merge_rejected`: what an execution node does when the forge drops
@@ -813,6 +853,11 @@ class MergeRejectionPolicy(BaseModel):
     restart_from: Identifier
     repair: RecoveryPlan
 
+    @model_validator(mode="after")
+    def _repair_writes(self) -> Self:
+        _refuse_read_only("on_merge_rejected.repair", self.repair)
+        return self
+
 
 class FixLoop(ExecutionShape):
     model_config = _CONFIG
@@ -828,6 +873,7 @@ class FixLoop(ExecutionShape):
     @model_validator(mode="after")
     def _no_nested_handler(self) -> Self:
         _refuse_nested_handlers("a fix loop", self)
+        _refuse_read_only("a fix loop", self)
         _refuse_handler_on("a fix loop's judge", self.judge)
         if self.judge is not None and self.judge.icon is not None:
             raise ValueError("a fix loop's judge has a fixed icon")
@@ -1031,32 +1077,37 @@ class Chain(BaseModel):
                         f"an execution node before the final gate {self.nodes[final].id!r} "
                         f"in {where}"
                     )
-                # A drop is answered by the repair alone: a fix cycle or a node
-                # repair would commit code the next measure merges unseen.
-                for other in ("fix_loop", "on_failure"):
-                    if getattr(node, other) is not None:
-                        raise ValueError(
-                            f"node {node.id!r}: on_merge_rejected cannot share a node with "
-                            f"{other} in {where}"
-                        )
+                # A drop is answered by the repair alone: a fix cycle commits
+                # code the next measure merges unseen.
+                if node.fix_loop is not None:
+                    raise ValueError(
+                        f"node {node.id!r}: on_merge_rejected cannot share a node with "
+                        f"fix_loop in {where}"
+                    )
                 if not node.merges():
                     raise ValueError(
                         f"node {node.id!r}: on_merge_rejected needs an mr.merge task in the "
                         "same node"
                     )
-                # The same hazard one level down: a step's or a task's handler
-                # re-runs the merge on the commit it made (`dispatch._recover`).
-                # The repair block itself needs no check: a recovery plan
-                # cannot declare a handler of its own (`_refuse_nested_handlers`).
+                # A handler -- the node's, a step's or a task's -- re-runs the
+                # merge in place once it finishes (`walk.recover_node`,
+                # `dispatch._recover`), so it may only be one that cannot
+                # commit: read_only, which `executor.read_only` checks step by
+                # step as it runs. The repair block needs no check: a recovery
+                # plan cannot declare a handler of its own
+                # (`_refuse_nested_handlers`).
                 owners = [
-                    *((f"step {step.id!r}", step) for step in node.steps or ()),
-                    *((f"task {task.id!r}", task) for task in node.own_tasks()),
+                    ("", node),
+                    *((f" on step {step.id!r}", step) for step in node.steps or ()),
+                    *((f" on task {task.id!r}", task) for task in node.own_tasks()),
                 ]
                 for owner, holder in owners:
-                    if holder.on_failure is not None:
+                    plan = holder.on_failure
+                    if plan is not None and not plan.every_step_read_only():
                         raise ValueError(
-                            f"node {node.id!r}: on_merge_rejected cannot share a node with an "
-                            f"on_failure on {owner} in {where}"
+                            f"node {node.id!r}: on_failure{owner} must be read_only on a node "
+                            "with on_merge_rejected: a commit there would merge without "
+                            f"final_review; set read_only: true on that on_failure in {where}"
                         )
         return self
 

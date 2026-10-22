@@ -675,6 +675,19 @@ def _handler_at(path: str, kind: str) -> tuple[str, str]:
     return path, kind
 
 
+def _beside_merge_rejection(d: Draft, path: str) -> bool:
+    """Whether `path` is in a node that has, or inherits, `on_merge_rejected`:
+    where an `on_failure` must be read_only (`Chain`'s rule)."""
+    head, _, rest = path.partition(PATH_SEPARATOR)
+    node = (
+        f"{head}{PATH_SEPARATOR}{rest.partition(PATH_SEPARATOR)[0]}"
+        if d.file == authored.LIBRARY
+        else head
+    )
+    found = d.inherited(node)
+    return isinstance(found, Mapping) and isinstance(found.get("on_merge_rejected"), Mapping)
+
+
 def _merge_restart(d: Draft, id: str) -> str:
     """Where a new `on_merge_rejected` on node `id` restarts: the one it
     inherits, else the last execution node it may name (`Chain`'s rule, by
@@ -706,7 +719,10 @@ def _merge_restart(d: Draft, id: str) -> str:
 
 def add_handler(d: Draft, path: str, kind: str) -> dict:
     where, key = _handler_at(path, kind)
-    shape = {"steps": [{"id": MAIN_STEP, "tasks": []}]}
+    shape: dict = {"steps": [{"id": MAIN_STEP, "tasks": []}]}
+    if kind == "on_failure" and _beside_merge_rejection(d, path):
+        # Its handler re-runs the merge in place, so it may not commit.
+        shape["read_only"] = True
     if kind == "on_merge_rejected":
         # The repair is required, so the policy arrives whole, restart and all.
         d.put(path, "on_merge_rejected", {"restart_from": _merge_restart(d, path), key: shape})

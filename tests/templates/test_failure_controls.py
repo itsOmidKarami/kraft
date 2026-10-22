@@ -234,6 +234,14 @@ def _finalized(restart_from: str, shape: dict | None = None, **merge_fields) -> 
     }
 
 
+def _step(id: str, **kw) -> dict:
+    return {"id": id, "tasks": [sub(id)], **kw}
+
+
+def _read_only_step(id: str) -> dict:
+    return _step(id, read_only=True)
+
+
 @pytest.mark.parametrize(
     ("chain", "why"),
     [
@@ -248,20 +256,26 @@ def _finalized(restart_from: str, shape: dict | None = None, **merge_fields) -> 
         ),
         (
             _finalized("early", on_failure=plan(sub("fix"))),
-            "node 'merge': on_merge_rejected cannot share a node with on_failure in c",
+            "node 'merge': on_failure must be read_only on a node with on_merge_rejected: a "
+            "commit there would merge without final_review; set read_only: true on that "
+            "on_failure in c",
         ),
         (
             _finalized(
                 "early",
                 {"steps": [{"id": "land", "tasks": [merge()], "on_failure": plan(sub("fix"))}]},
             ),
-            "node 'merge': on_merge_rejected cannot share a node with an on_failure on "
-            "step 'land' in c",
+            "node 'merge': on_failure on step 'land' must be read_only on a node with "
+            "on_merge_rejected",
         ),
         (
             _finalized("early", {"tasks": [sub("prep", on_failure=plan(sub("fix"))), merge()]}),
-            "node 'merge': on_merge_rejected cannot share a node with an on_failure on "
-            "task 'prep' in c",
+            "node 'merge': on_failure on task 'prep' must be read_only on a node with "
+            "on_merge_rejected",
+        ),
+        (
+            _finalized("early", on_failure={"steps": [_read_only_step("wait"), _step("fix")]}),
+            "node 'merge': on_failure must be read_only on a node with on_merge_rejected",
         ),
     ],
     ids=[
@@ -270,13 +284,14 @@ def _finalized(restart_from: str, shape: dict | None = None, **merge_fields) -> 
         "with-node-on-failure",
         "with-step-on-failure",
         "with-task-on-failure",
+        "with-one-step-of-on-failure-writing",
     ],
 )
 def test_a_merge_rejection_rewind_must_pass_the_final_gate_and_only_the_repair_answers(chain, why):
     """A rewind that starts past the final gate would merge the repair's
-    commit with no person seeing it, and a fix cycle or a repair on the merge
-    node -- its own, a step's or a task's -- would commit code its next
-    measure merges unseen."""
+    commit with no person seeing it, and a fix cycle, or a handler on the
+    merge node -- its own, a step's or a task's -- that may write, would
+    commit code its next measure merges unseen."""
     with pytest.raises(ValidationError) as refused:
         tm.Chain.model_validate(chain)
     assert why in str(refused.value)
@@ -285,6 +300,54 @@ def test_a_merge_rejection_rewind_must_pass_the_final_gate_and_only_the_repair_a
 def test_a_merge_rejection_rewind_from_before_the_final_gate_is_accepted():
     chain = tm.Chain.model_validate(_finalized("early"))
     assert chain.nodes[3].on_merge_rejected.restart_from == "early"
+
+
+@pytest.mark.parametrize(
+    ("shape", "fields", "checked"),
+    [
+        ({"tasks": [merge()]}, {"on_failure": {**plan(sub("wait")), "read_only": True}}, "main"),
+        (
+            {"tasks": [merge()]},
+            {"on_failure": {"steps": [_read_only_step("wait"), _read_only_step("ask")]}},
+            "wait",
+        ),
+        (
+            {
+                "steps": [
+                    {
+                        "id": "land",
+                        "tasks": [merge()],
+                        "on_failure": {**plan(sub("wait")), "read_only": True},
+                    }
+                ]
+            },
+            {},
+            "main",
+        ),
+        (
+            {"tasks": [{**merge(), "on_failure": {**plan(sub("wait")), "read_only": True}}]},
+            {},
+            "main",
+        ),
+    ],
+    ids=["node", "every-step", "step", "task"],
+)
+def test_a_read_only_on_failure_may_share_a_node_with_on_merge_rejected(shape, fields, checked):
+    """A handler that cannot commit -- it waits, retries or comments -- may
+    answer a merge that failed for any other reason than a drop: the merge it
+    re-runs in place is of the head a person approved. Its steps resolve
+    read_only, which is what the run checks (`executor.read_only`); a `tasks`
+    plan says so on the plan, since its one step has no entry of its own."""
+    chain = tm.Chain.model_validate(_finalized("early", shape, **fields))
+    [node] = [n for n in tm.ResolvedChain.from_chain(chain).nodes if n.id == "merge"]
+    handlers = [
+        node.on_failure,
+        *(s.on_failure for s in node.steps),
+        *(t.on_failure for t in node.tasks()),
+    ]
+    [plan_steps] = [h for h in handlers if h]
+    assert [s.read_only for s in plan_steps] == [True] * len(plan_steps)
+    assert plan_steps[0].id == checked
 
 
 @pytest.mark.parametrize(

@@ -89,7 +89,7 @@ An exec node declares `tasks` or `steps`, never both.
 |---|---|---|---|
 | `tasks` | list | one of `tasks` and `steps` is required, unless `extends` supplies it | Shorthand for one step named `main`. Its tasks are dispatched together, and the node is measured once all have settled. |
 | `steps` | list | see `tasks` | Steps that run in order. A later step is not dispatched if an earlier one fails, and it sees what the earlier one left behind. |
-| `on_failure` | mapping | none | A recovery pass: tasks or steps that run once after the node failed, before it is measured again. A task or step may carry its own `on_failure`; the nearest one to the failure wins. |
+| `on_failure` | mapping | none | A recovery pass: tasks or steps that run once after the node failed, before it is measured again. A task or step may carry its own `on_failure`; the nearest one to the failure wins. It may be [read_only](#read_only). |
 | `fix_loop` | mapping | none | Repair tasks or steps, an optional `judge` task, and an optional `max_attempts`. It re-runs until the node passes. See [Fix loop and judge](/reference/chain-nodes/fix-loop). |
 | `escalation` | mapping | none | An agent task dispatched when the node is [stuck](/concepts/vocabulary#stuck) after recovery and the fix loop, before you are asked. |
 | `on_base_changed` | mapping | none | What to re-run when a rebase moves the base. See [on_base_changed](#on_base_changed). |
@@ -174,10 +174,42 @@ onto the train.
 | `restart_from` | string | required | Names an exec node strictly before this one, never a gate or this node itself. When a `chain_finalized` gate comes before this node, it must name a node before that gate, so every rewind passes it. |
 | `repair` | mapping | required | The tasks or steps that fix the branch, written like an `on_failure` plan. The shipped `repair_merge_queue_failure` runs the `kraft:merge-queue-repair` skill on the `strong` [agent profile](/reference/harnesses/agent-profiles). |
 
-A node with `on_merge_rejected` cannot also declare a `fix_loop`, a node-level
-`on_failure`, or an `on_failure` on any of its own steps or tasks, including
-one a library component brings in: only the repair answers a drop, because a
-handler's commit would be merged by the next measure unseen.
+A node with `on_merge_rejected` cannot also declare a `fix_loop`: only the
+repair answers a drop, because a fix cycle's commit would be merged by the next
+measure unseen.
+
+It may declare an `on_failure`, on the node or on one of its own steps or
+tasks, for a merge that fails for another reason than a drop, but only a
+[read_only](#read_only) one. Such a handler can wait, retry, comment or ask for
+approval again. Kraft then asks the forge to merge again in place, the head
+`final_review` approved.
+
+A handler that may commit is refused at load, including one a library
+component brings in. Mark the plan itself for a `tasks` plan; a `steps` plan
+marks the plan or every step:
+
+```yaml
+- id: merge
+  kind: exec
+  tasks:
+    - id: merge
+      extends: merge_mr
+  on_failure:
+    read_only: true
+    tasks:
+      - id: wait
+        extends: await_external_approval
+  on_merge_rejected:
+    restart_from: merge_request_feedback
+    repair:
+      tasks:
+        - id: repair
+          extends: repair_merge_queue_failure
+```
+
+If a read_only handler changes the worktree all the same, the item stops with
+`read_only_violated`, held at `restart_from` with the span's gates reopened, so
+no retry merges the change unseen.
 
 Without `on_merge_rejected`, a drop stops the item at once, with the forge's
 reason in the stop, even when the drop comes on the re-measure after the
@@ -363,8 +395,9 @@ policy: {total_time_cap_minutes: 90}
 
 ## read_only
 
-`read_only` goes on a step or an exec node, never on a task. A task that sets it
-is refused at load.
+`read_only` goes on a step, an exec node or an `on_failure` plan, never on a
+task. A task that sets it is refused at load. On a plan, it makes every step of
+the plan read_only, the one a `tasks` plan becomes included.
 
 - **What is checked.** Before a read_only step's first task launches, Kraft
   records each repository of the checkout (the root and every workspace member):
@@ -376,9 +409,11 @@ is refused at load.
 - **What happens.** The item stops and waits for you, with a `read_only_violated`
   event and a stop reason naming the changed files. It is not a task failure, so
   no recovery, fix loop, or attempt is spent on it.
-- **Exclusions.** The check does not run during a recovery or a fix loop. It runs
-  again when a recovery retries the step's tasks. A step inside an `on_failure` or
-  a `fix_loop` refuses `read_only`.
+- **Exclusions.** A read_only step's check does not cover a recovery or a fix
+  loop. It runs again when a recovery retries the step's tasks. An `on_failure`
+  plan, or a step in it, may be read_only, and is then checked around its own
+  tasks. A `fix_loop`, an `on_conflict` and an `on_merge_rejected` repair write
+  by design, and refuse `read_only`.
 - **Sandboxed items.** In a [sandboxed](/concepts/vocabulary#sandbox) item, if the worktree gains a repository
   Kraft did not create, Kraft runs no host git there and reports that repository
   as the change.

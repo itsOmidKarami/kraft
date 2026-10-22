@@ -678,10 +678,14 @@ chain restarts at `merge_request_feedback`. The policy is a sibling of
 an *earlier* execution node -- before the chain's first `chain_finalized`
 gate when that gate comes before the merge node, so a rewind always passes it
 -- and only a node holding an `mr.merge` task may declare it. A node that
-declares it may not also declare a `fix_loop` or an `on_failure` -- on the
-node, on any of its steps, or on any of its tasks: only the repair answers a
-drop, and a fix cycle's or a handler's commit would be merged by the next
-measure unseen. Its rewinds count under `<node>.on_merge_rejected`, 3
+declares it may not also declare a `fix_loop`: only the repair answers a drop,
+and a fix cycle's commit would be merged by the next measure unseen. An
+`on_failure` -- on the node, on any of its steps, or on any of its tasks --
+must be `read_only` (`on_failure: {read_only: true, tasks: [...]}`, or every
+step of a `steps` plan): it answers a merge that failed for another reason,
+and the merge re-runs in place, so it may wait, retry or comment but never
+commit. A read_only violation there holds the item at `restart_from` with the
+gates reopened. Its rewinds count under `<node>.on_merge_rejected`, 3
 attempts over a week unless `loops:` overrides them, checked before the repair
 runs. Coming back to the merge node with the drop unanswered -- a resume, a
 rate-limit relaunch, a person's retry of that node -- runs the repair again;

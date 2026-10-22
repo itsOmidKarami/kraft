@@ -547,6 +547,17 @@ async def _sentinel_stop(
     if verdict == TIME_CAPPED:
         return await stops.stop_for_time_cap(db, work_item_id, node)
     if verdict == READ_ONLY_VIOLATED:
+        if _rejects_merges(node):
+            # The write is a commit on the branch the merge pushes (the
+            # straggler sweep's, or the agent's own): held at `restart_from`
+            # before the stop, as after a repair's, or a retry here would
+            # merge it unseen.
+            row = db.read(
+                lambda c: c.execute(
+                    "SELECT * FROM work_items WHERE id = ?", (work_item_id,)
+                ).fetchone()
+            )
+            await hold_merge_node(db, work_item_id, row, node, "read_only_violated")
         return await _read_only.stop(db, work_item_id, node.id)
     if verdict == BUDGET:
         return await stops.stop_for_budget(db, work_item_id, node, budget)
@@ -1024,20 +1035,42 @@ def _dropped_member(db, work_item_id: str, drop: dict) -> Path | None:
     )
 
 
-async def _hold_at_restart(db, work_item_id: str, nodes, index: int, restart_from: str) -> None:
+async def _hold_at_restart(
+    db, work_item_id: str, nodes, index: int, restart_from: str, reason: str = "merge_rejected"
+) -> None:
     """A stop after the merge-rejection repair changed the head: reopen the
     approved gates between `restart_from` and node `index`, and stand the item
     at `restart_from`, so whatever walks it next -- a resume, a poller, a
     retry's default target -- goes back through them. Left where it stood,
-    the next entry into the merge node would merge code no gate saw."""
+    the next entry into the merge node would merge code no gate saw. `reason`
+    is what a reopened gate says."""
     target = next(j for j, n in enumerate(nodes) if n.id == restart_from)
-    await _reopen_gates(db, work_item_id, nodes, range(target, index), "merge_rejected")
+    await _reopen_gates(db, work_item_id, nodes, range(target, index), reason)
     # The span will run again from scratch, as after a rewind: a fresh fix-loop
     # budget for it (Kraft-s7c04.25). No seeded note, unlike a rewind: the only
     # place a stop keeps one is `pending_steer_context`, which every later door
     # reads as a person's steer and which may already hold a person's own.
     await _clear_span_counters(db, work_item_id, nodes[target : index + 1])
     await db.write(lambda c: store.stand_at(c, work_item_id, restart_from))
+
+
+def _rejects_merges(node: ResolvedNode) -> bool:
+    """Whether `node` declares `on_merge_rejected`: a merge node whose next
+    measure merges whatever its branch holds, and which names where a change
+    no gate saw must go back to (`restart_from`)."""
+    return isinstance(node.node, ExecNode) and node.node.on_merge_rejected is not None
+
+
+async def hold_merge_node(
+    db, work_item_id: str, row, node: ResolvedNode, reason: str = "merge_rejected"
+) -> str:
+    """`_hold_at_restart` for merge node `node` of `row`'s chain, at its
+    `on_merge_rejected.restart_from`, which it returns."""
+    nodes = chain_of(row).chain.nodes
+    index = next(j for j, n in enumerate(nodes) if n.id == node.id)
+    restart_from = node.node.on_merge_rejected.restart_from
+    await _hold_at_restart(db, work_item_id, nodes, index, restart_from, reason)
+    return restart_from
 
 
 def _unrepaired_drop(node: ResolvedNode, drop: dict) -> str | None:
@@ -1196,9 +1229,7 @@ async def _repair_merge_rejection(
         # Held before the stop is written: a crash between the two leaves the
         # item active at `restart_from`, never stopped on this node with the
         # repair's commit unseen.
-        nodes = chain_of(row).chain.nodes
-        index = next(j for j, n in enumerate(nodes) if n.id == node.id)
-        await _hold_at_restart(db, work_item_id, nodes, index, restart_from)
+        await hold_merge_node(db, work_item_id, row, node)
     stop = await _sentinel_stop(db, work_item_id, node, verdict, h_failed, budget)
     if stop is None and repaired:
         moved = (
@@ -1268,11 +1299,7 @@ async def hold_interrupted_repair(
         member = _dropped_member(db, work_item_id, drop)
         head = _branch_tip(member or Path(worktree), row)
         if repair_started or head is None or head != drop.get("head_sha"):
-            nodes = chain_of(row).chain.nodes
-            index = next(j for j, n in enumerate(nodes) if n.id == node.id)
-            await _hold_at_restart(
-                db, work_item_id, nodes, index, node.node.on_merge_rejected.restart_from
-            )
+            await hold_merge_node(db, work_item_id, row, node)
     kind = StopKind.CONFLICT if drop.get("cause") == "conflict" else StopKind.FAILED
     await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=kind))
     return "needs_human"
