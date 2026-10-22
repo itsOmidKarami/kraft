@@ -140,8 +140,10 @@ def test_dev_is_read_by_name_never_whole():
         assert f'(allow file-read* (literal "/dev/{name}"))' in text
     # Rendered resolved: a symlink on Linux, the directory itself on a Mac.
     assert f'(allow file-read* (subpath "{os.path.realpath("/dev/fd")}"))' in text
-    # And the one file outside `/dev` the `git` shim through Xcode.app needs.
+    # And what the `git` shim through Xcode.app needs outside `/dev`.
     assert '(allow file-read* (subpath "/Library/Preferences/com.apple.dt.Xcode.plist"))' in text
+    framework = "/Library/Apple/System/Library/PrivateFrameworks/MobileDevice.framework"
+    assert f'(allow file-read* (subpath "{framework}"))' in text
 
 
 @pytest.mark.e2e("sandbox-exec")

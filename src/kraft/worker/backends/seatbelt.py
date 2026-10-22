@@ -40,6 +40,9 @@ SYSTEM_READS = (
     # to run ("You have not agreed to the Xcode license") unless it reads this: the licence
     # version the machine agreed to, no operator data.
     "/Library/Preferences/com.apple.dt.Xcode.plist",
+    # ...and whose plug-in scan, until Xcode's first launch has run, loads MobileDevice:
+    # `/System/Library/PrivateFrameworks/MobileDevice.framework` is a link to this.
+    "/Library/Apple/System/Library/PrivateFrameworks/MobileDevice.framework",
 )
 #: By name, never `/dev` whole: it holds the operator's other terminals, and
 #: reading one is their keystrokes.
