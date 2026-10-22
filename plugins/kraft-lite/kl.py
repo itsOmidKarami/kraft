@@ -570,9 +570,14 @@ class BdStore:
         # A row bd kept instead (a tie, or an older copy) still takes our labels:
         # take back the ones it did not hold. A row it wrote keeps only ours.
         kept = {*report.get("tie_kept_local_ids", ()), *report.get("stale_skipped_ids", ())}
-        before = {r["id"]: r.get("labels") or [] for r in held}
-        for record in records:
-            held_labels, ours = before.get(record["id"], []), record.get("labels") or []
+        before = {r["id"]: r for r in held}
+        # A kept row another writer moved after `held` was read is not the one we
+        # loaded: what we "added" may be theirs too, so it is left whole.
+        now = {r["id"]: r.get("updated_at") for r in self.load()} if kept else {}
+        moved = {i for i in kept if now.get(i) != (before.get(i) or {}).get("updated_at")}
+        for record in (r for r in records if r["id"] not in moved):
+            held_labels = (before.get(record["id"]) or {}).get("labels") or []
+            ours = record.get("labels") or []
             if record["id"] in kept:
                 stale = [x for x in ours if x not in held_labels]
             else:

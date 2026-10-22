@@ -176,36 +176,47 @@ def test_a_write_replaces_the_labels_bd_held(bd_repo, monkeypatch):
         assert [x for x in labels if x.startswith(prefix)] == [prefix + want], prefix
 
 
-def test_a_row_bd_kept_keeps_its_labels(bd_repo, monkeypatch):
-    """Two writers inside one second from one copy, the second also changing
-    another field: bd keeps the first row on the tie but still merges the
-    second's labels in, and those must come back out."""
+@pytest.mark.parametrize("race", ["tie", "older-copy", "a-third-writer-landed"])
+def test_a_row_bd_kept_keeps_its_labels(bd_repo, monkeypatch, race):
+    """bd keeps the stored row on a same-second tie with another writer that
+    also changed a field (`tie`), or over an older copy (`older-copy`), but
+    still merges the incoming labels in: those come back out. When a third
+    writer moved the row after this one loaded it, nothing is taken back, or
+    that writer's labels would go too."""
     monkeypatch.chdir(bd_repo)
     monkeypatch.setattr(lite, "_now", lambda: lite.dt.datetime(2026, 10, 22, 6, 0, 0))
     store = lite.BdStore()
-    store.write(
-        [
-            {
-                "_type": "issue",
-                "id": "kl-tie1",
-                "title": "a slice",
-                "issue_type": "task",
-                "status": "open",
-                "labels": [f"{lite.SLICE_STATUS_LABEL}waiting"],
-                "updated_at": "2026-10-22T05:59:00Z",
-            }
-        ]
-    )
-    stale = next(r for r in store.load() if r["id"] == "kl-tie1")
-    store.write([lite.set_label(stale, lite.SLICE_STATUS_LABEL, "running")])
-    loser = dict(lite.set_label(stale, lite.SLICE_STATUS_LABEL, "in_review"), status="in_progress")
+    first = {
+        "_type": "issue",
+        "id": "kl-tie1",
+        "title": "a slice",
+        "issue_type": "task",
+        "status": "open",
+        "labels": [f"{lite.SLICE_STATUS_LABEL}waiting"],
+        "updated_at": "2026-10-22T06:00:09Z" if race == "older-copy" else "2026-10-22T05:59:00Z",
+    }
+    store.write([first])
+    loaded = store.load()
+    stale = next(r for r in loaded if r["id"] == "kl-tie1")
+    winner = lite.set_label(stale, "kraft-session:", "B")
+    store.write([lite.set_label(winner, lite.SLICE_STATUS_LABEL, "running")])
+    loser = dict(first if race == "older-copy" else stale, status="in_progress")
+    # The third writer's case: both move the slice to `running`, so to this
+    # writer's stale copy that label, the stamp and the counter look like its own.
+    lost_status = "running" if race == "a-third-writer-landed" else "in_review"
+    loser = lite.set_label(loser, lite.SLICE_STATUS_LABEL, lost_status)
+    if race == "a-third-writer-landed":
+        reads = iter([loaded])  # this writer's own read came before the winner's write
+        real = store.load
+        monkeypatch.setattr(store, "load", lambda: next(reads, None) or real())
     store.write([loser])
 
-    row = next(r for r in store.load() if r["id"] == "kl-tie1")
-    assert row["status"] == "open", "bd kept the first writer's row"
-    assert [x for x in row["labels"] if x.startswith(lite.SLICE_STATUS_LABEL)] == [
-        f"{lite.SLICE_STATUS_LABEL}running"
-    ]
+    row = next(r for r in lite.BdStore().load() if r["id"] == "kl-tie1")
+    assert row["status"] == "open", "bd kept the winner's row"
+    assert "kraft-session:B" in row["labels"]
+    status = [x for x in row["labels"] if x.startswith(lite.SLICE_STATUS_LABEL)]
+    assert status == [f"{lite.SLICE_STATUS_LABEL}running"]
+    assert [x for x in row["labels"] if x.startswith(lite.SEQ_LABEL)], "the write counter stays"
 
 
 def test_an_import_replaces_the_labels_too(bd_repo, monkeypatch):
