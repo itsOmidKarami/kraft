@@ -1,6 +1,8 @@
+import json
 import os
 import shutil
 import threading
+from dataclasses import replace
 
 import pytest
 from support.harness import git
@@ -223,10 +225,16 @@ def test_a_store_a_setup_command_built_is_rebuilt_for_the_first_session(
     assert not (store.shadow / "refs" / "heads" / "scratch").exists()
 
 
-def test_a_reftable_repository_is_refused(repo, prepare):
+@pytest.mark.parametrize("entry", ["prepare", "prepare_direct"])
+def test_a_reftable_repository_is_refused(repo, worktree, tmp_path, entry):
+    git(repo, "config", "core.repositoryformatversion", "1")  # else git ignores the extension
     git(repo, "config", "extensions.refStorage", "reftable")
+    call = {
+        "prepare": lambda: refstore.prepare(tmp_path / "run", worktree, BRANCH, session_id="s1"),
+        "prepare_direct": lambda: refstore.prepare_direct(tmp_path / "run", worktree, BRANCH),
+    }[entry]
     with pytest.raises(RuntimeError, match="reftable"):
-        prepare()
+        call()
 
 
 def test_a_plain_repository_needs_no_ref_store(repo, tmp_path):
@@ -323,3 +331,208 @@ def test_a_mount_point_is_never_made_through_what_a_worker_left_in_the_store(tmp
 def test_a_member_kraft_did_not_check_out_is_never_mounted(repo, worktree, tmp_path):
     with pytest.raises(RuntimeError, match="repos/pkg"):
         refstore.prepare_stores(tmp_path / "run", worktree, BRANCH, members={"repos/pkg": None})
+
+
+@pytest.fixture
+def direct(worktree, tmp_path):
+    """The direct store of the worktree's item branch: `(run base, store, its ref file)`."""
+    base = tmp_path / "run"
+    (store,) = refstore.prepare_direct(base, worktree, BRANCH)
+    return base, store, store.common / "refs" / "heads" / BRANCH
+
+
+_NOT_FILE = "something that is not a regular file"
+
+
+@pytest.mark.parametrize(
+    ("kind", "text", "left", "final", "lock_stays"),
+    [
+        pytest.param("commit", "{work}", None, "{work}", False, id="commit"),
+        pytest.param(
+            "symref",
+            "ref: refs/heads/main",
+            "'ref: refs/heads/main'",
+            "{start}",
+            False,
+            id="symref",
+        ),
+        pytest.param("tree", "{tree}", "'{tree}'", "{start}", False, id="tree"),
+        pytest.param("garbage", "not an oid", "'not an oid'", "{start}", False, id="garbage"),
+        pytest.param("revname", "main", "'main'", "{start}", False, id="revname"),
+        pytest.param("stale-lock", "{start}", None, "{start}", True, id="stale-lock"),
+        pytest.param("no-branch", "junk", None, "junk", False, id="no-branch"),
+        pytest.param("lock-dir", "not an oid", "'not an oid'", "{start}", False, id="lock-dir"),
+        pytest.param(
+            "lock-symlink", "not an oid", "'not an oid'", "{start}", False, id="lock-symlink"
+        ),
+        pytest.param("ref-symlink", None, _NOT_FILE, "{start}", False, id="ref-symlink"),
+        pytest.param("ref-dir", None, _NOT_FILE, "{start}", False, id="ref-dir"),
+        pytest.param("ref-deleted", None, _NOT_FILE, "{start}", False, id="ref-deleted"),
+        pytest.param("reflog-symlink", None, None, "{start}", False, id="reflog-symlink"),
+        pytest.param("reflog-dir", None, None, "{start}", False, id="reflog-dir"),
+        pytest.param(
+            "no-recorded-value", "not an oid", "'not an oid'", None, False, id="no-recorded-value"
+        ),
+    ],
+)
+def test_check_direct(repo, direct, tmp_path, kind, text, left, final, lock_stays):
+    base, store, ref = direct
+    main = git(repo, "rev-parse", "main")
+    start = ref.read_text().strip()
+    work = _commit_object(repo, main, "work")
+    tree = git(repo, "rev-parse", f"{main}^{{tree}}")
+    fmt = dict(work=work, tree=tree, start=start)
+    lock = ref.with_name(ref.name + ".lock")
+    reflog = store.common / "logs" / "refs" / "heads" / BRANCH
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    if text:
+        ref.write_text(text.format(**fmt) + "\n")
+    if kind == "stale-lock":
+        lock.write_text("")
+    if kind == "lock-dir":
+        (lock / "x").mkdir(parents=True)
+    if kind == "lock-symlink":
+        lock.symlink_to(outside / "victim")
+    if kind == "ref-symlink":
+        ref.unlink()
+        ref.symlink_to(outside / "victim")
+    if kind == "ref-dir":
+        ref.unlink()
+        (ref / "x").mkdir(parents=True)
+    if kind == "ref-deleted":
+        ref.unlink()
+    if kind == "reflog-symlink":
+        reflog.unlink(missing_ok=True)
+        reflog.symlink_to(outside / "victim")
+    if kind == "reflog-dir":
+        reflog.unlink(missing_ok=True)
+        reflog.mkdir()
+    if kind == "no-recorded-value":
+        refstore._meta_path(refstore.shadow_dir(base, store.worktree_gitdir)).unlink()
+    if kind == "no-branch":
+        store = replace(store, branch=None)
+
+    got = refstore.check_direct(base, store)
+
+    assert os.path.lexists(lock) == lock_stays
+    assert not (outside / "victim").exists()
+    if kind.startswith("reflog"):
+        assert not os.path.lexists(reflog)
+    fix = "removed it" if final is None else f"restored {start}"
+    want = f"the worker left refs/heads/{BRANCH} as {(left or '').format(**fmt)}; {fix}"
+    assert got == (want if left else None)
+    if final is None:
+        assert not os.path.lexists(ref)
+    else:
+        assert ref.is_file() and not ref.is_symlink()
+        assert ref.read_text().strip() == final.format(**fmt)
+    if kind == "commit":
+        # The accepted value is the one a later bad write is put back to.
+        ref.write_text("not an oid\n")
+        assert "restored " + work in refstore.check_direct(base, store)
+
+
+@pytest.mark.parametrize(
+    ("call", "live", "survives"),
+    [("prepare_direct", ["s1"], True), ("prepare_direct", [], False), ("check_direct", [], True)],
+    ids=["prepare-with-a-live-co-task", "prepare-with-none-live", "check-never-removes-it"],
+)
+def test_a_regular_lock_is_a_co_tasks_to_keep(direct, worktree, call, live, survives):
+    """Co-tasks of one worktree run concurrently: a lock may be one's ref update
+    in flight. Only a launch with no other live session may clear it."""
+    base, store, ref = direct
+    lock = ref.with_name(ref.name + ".lock")
+    lock.write_text("")
+    if call == "prepare_direct":
+        refstore.prepare_direct(base, worktree, BRANCH, live=live)
+    else:
+        refstore.check_direct(base, store)
+    assert os.path.lexists(lock) == survives
+
+
+@pytest.mark.parametrize("kind", ["loose", "packed-only", "slash-branch"])
+def test_prepare_direct(repo, worktree, tmp_path, kind):
+    base = tmp_path / "run"
+    branch = "kraft/fix-x" if kind == "slash-branch" else BRANCH
+    if branch != BRANCH:
+        git(repo, "worktree", "add", "-q", "-b", branch, str(tmp_path / "wt2"))
+        worktree = tmp_path / "wt2"
+    common = repo / ".git"
+    ref = common / "refs" / "heads" / branch
+    if kind == "packed-only":
+        git(repo, "pack-refs", "--all", "--prune")
+        assert not ref.exists()
+    want = git(repo, "rev-parse", branch)
+    logs = common / "logs" / "refs" / "heads" / branch
+    if kind == "slash-branch":
+        shutil.rmtree(logs.parent)  # git made it with the branch; Kraft must be able to
+
+    (store,) = refstore.prepare_direct(base, worktree, branch)
+
+    assert store.direct and store.shadow == store.common == common and store.checkout is None
+    assert ref.read_text().strip() == want
+    assert logs.parent.is_dir()
+    sidecar = refstore._meta_path(refstore.shadow_dir(base, store.worktree_gitdir))
+    assert json.loads(sidecar.read_text()) == {"branch": branch, "value": want}
+    assert [p for p in (base / "sandbox-git").iterdir() if p.is_dir()] == []
+
+
+def test_prepare_direct_puts_back_what_the_last_session_left(direct, worktree):
+    """A session that ended without `check_direct` (a daemon restart) left a
+    symref to main; the next prepare must not record it as the branch's value."""
+    base, store, ref = direct
+    start = ref.read_text().strip()
+    ref.write_text("ref: refs/heads/main\n")
+
+    refstore.prepare_direct(base, worktree, BRANCH)
+
+    assert ref.read_text().strip() == start
+    sidecar = refstore._meta_path(refstore.shadow_dir(base, store.worktree_gitdir))
+    assert json.loads(sidecar.read_text())["value"] == start
+
+
+def test_prepare_direct_removes_planted_links_the_last_session_left(direct, worktree, tmp_path):
+    """The lock and the reflog are writable by the worker; a link left there would
+    be followed by the next launch, so a restart removes them like `check_direct`."""
+    base, store, ref = direct
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    lock = ref.with_name(ref.name + ".lock")
+    reflog = store.common / "logs" / "refs" / "heads" / BRANCH
+    lock.symlink_to(outside / "victim")
+    reflog.unlink(missing_ok=True)
+    reflog.symlink_to(outside / "victim")
+
+    refstore.prepare_direct(base, worktree, BRANCH)
+
+    assert not os.path.lexists(lock) and not os.path.lexists(reflog)
+    assert not (outside / "victim").exists()
+
+
+@pytest.mark.parametrize("call", ["sync", "sync_all", "prepare"])
+def test_a_direct_store_is_never_synced_or_rebuilt(direct, call):
+    """Its shadow is the real common gitdir: sync and rebuild rmtree it."""
+    base, store, _ = direct
+    run = {
+        "sync": lambda: refstore.sync(store),
+        "sync_all": lambda: refstore.sync_all([store]),
+        "prepare": lambda: refstore._prepare(base, store),
+    }[call]
+    with pytest.raises(ValueError, match="direct"):
+        run()
+    assert (store.common / "objects").is_dir()
+
+
+def test_prepare_direct_needs_a_linked_worktree(repo, tmp_path):
+    assert refstore.prepare_direct(tmp_path / "run", repo, BRANCH) == []
+
+
+def test_prepare_direct_gives_a_member_its_own_store(tmp_path):
+    ws = member_checkout(tmp_path, BRANCH)
+    root, member = refstore.prepare_direct(
+        tmp_path / "run", ws.wt, BRANCH, members=ws.checkout.members
+    )
+    assert (root.checkout, member.checkout) == (None, ws.wt / "repos" / "pkg")
+    assert member.shadow == member.common == ws.checkout.members["repos/pkg"][0]
+    assert (member.common / "refs" / "heads" / BRANCH).is_file()
