@@ -82,7 +82,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const [s, dispatch] = usePaneSelection(true);
   usePane(s.open);
   const [refused, setRefused] = useState<string | null>(null);
-  const [bottomTab, setBottomTab] = useState<BottomTab>("on_failure");
+  const [bottomTab, setBottomTab] = useState<BottomTab | null>(null);
   const [bottomOpen, setBottomOpen] = useState(false);
   // Review & publish is a mode of the chain canvas (Decisions §9 Publish).
   const [review, setReview] = useState(false);
@@ -122,12 +122,13 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   }, [draft.error]);
 
   // The bottom pane opens collapsed on each node entry, unless the person came
-  // to open something that lives in it (Decisions §9 Bottom pane).
+  // to open something that lives in it (Decisions §9 Bottom pane), on that
+  // thing's tab, else on the node's first (On merge rejected on a merge node).
   const selPathNow = pathOf(s.sel as TSel);
   useEffect(() => {
     const h = handlerOf(selPathNow);
     setBottomOpen(!!h);
-    if (h) setBottomTab(h);
+    setBottomTab(h);
     // Only on entering a node view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.node]);

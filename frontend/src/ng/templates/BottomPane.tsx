@@ -8,11 +8,11 @@ import { Button } from "../ui/Button";
 import type { ConfigDraft } from "./draft/useConfigDraft";
 import type { Op } from "./draft/types";
 import type { Scope } from "./draft/types";
-import { authoredAt, changeAt, normalise, problemsAt, takesMergeRejection, valueAt, type NodeA, type Step, type Task } from "./draft/view";
+import { authoredAt, authoredNodes, changeAt, kindOf, normalise, problemsAt, takesMergeRejection, valueAt, type NodeA, type Step, type Task } from "./draft/view";
 import { TaskMenu, type TaskChoice } from "./menus/TaskMenu";
 import { nextStepId, uniq } from "./NodeView";
 import { ReadOnly } from "./addon";
-import { problemWord } from "./problems";
+import { problemText, problemWord } from "./problems";
 import { autoEscalates } from "./escalateWords";
 import { tip } from "../ui/Tooltip";
 
@@ -37,13 +37,34 @@ export function handlerOf(path: string): BottomTab | null {
   return null;
 }
 
+/** What a node's bar offers beyond the usual: `conflict`, "on base change" is set; `merges`, it merges its merge
+ *  request or declares `on_merge_rejected`; `fixLoop`, it has a fix loop. */
+export type TabsOf = { conflict?: boolean; merges?: boolean; fixLoop?: boolean };
+
 /** Decisions §9 Bottom pane: a main step or task shows only On failure; else
- *  all three, plus On conflict when "on base change" is set, and On merge
- *  rejected on a node that merges its merge request or declares the policy. */
-export function tabsFor(selPath: string, node: string, hasConflict: boolean, takesRejection = false): BottomTab[] {
+ *  all three, plus On conflict when "on base change" is set. A merge node's bar
+ *  leads with On merge rejected and has no Fix loop, since a fix would merge
+ *  unreviewed: one it already has still shows, to be removed. The first tab is
+ *  the one a node opens on. */
+export function tabsFor(selPath: string, node: string, { conflict = false, merges = false, fixLoop = false }: TabsOf = {}): BottomTab[] {
   const inMain = selPath.startsWith(`${node}.`) && !handlerOf(selPath);
   if (inMain) return ["on_failure"];
-  return ["on_failure", "fix_loop", "escalation", ...(hasConflict ? (["on_conflict"] as BottomTab[]) : []), ...(takesRejection ? (["on_merge_rejected"] as BottomTab[]) : [])];
+  const tail: BottomTab[] = conflict ? ["on_conflict"] : [];
+  if (merges) return ["on_merge_rejected", "on_failure", ...(fixLoop ? (["fix_loop"] as BottomTab[]) : []), "escalation", ...tail];
+  return ["on_failure", "fix_loop", "escalation", ...tail];
+}
+
+/** Why a merge node's own on_failure may only read: anything it committed would merge without final review. */
+export const READ_ONLY_RECOVERY = "Read-only here: it can retry, wait or ask, not change code. A change would merge without final review.";
+
+/** What happens after a merge rejection's repair, in words: the item restarts from `restart` and passes again the
+ *  gates between it and `node`, rather than retrying the merge where it stands. */
+export function rewindLine(nodes: { id: string; gate: boolean }[], node: string, restart: unknown): string {
+  if (typeof restart !== "string") return "After the repair, the item restarts from an earlier node instead of retrying the merge in place.";
+  const from = nodes.findIndex((n) => n.id === restart), to = nodes.findIndex((n) => n.id === node);
+  const gates = from >= 0 && to > from ? nodes.slice(from + 1, to).filter((n) => n.gate).map((n) => n.id) : [];
+  const again = gates.length ? ` and goes through ${gates.length > 1 ? `${gates.slice(0, -1).join(", ")} and ${gates.at(-1)}` : gates[0]} again` : "";
+  return `After the repair, the item restarts from ${restart}${again}, instead of retrying the merge in place.`;
 }
 
 function load(): number | null {
@@ -73,7 +94,8 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
   node: string;
   draft: ConfigDraft;
   selPath: string;
-  tab: BottomTab;
+  /** The tab picked; null for the node's first (On merge rejected on a merge node, else On failure). */
+  tab: BottomTab | null;
   open: boolean;
   canvasH: number;
   /** Px the side pane takes on the right. */
@@ -92,8 +114,12 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
   const conflict = (n?.on_base_changed as Record<string, unknown> | null | undefined) ?? null;
   const rejected = (n?.on_merge_rejected as Record<string, unknown> | null | undefined) ?? null;
   // A library node has no chain order to restart in, so it offers the tab only for the policy it declares.
-  const tabs = tabsFor(selPath, node, !!conflict, scope.area === "library" ? !!rejected : takesMergeRejection(n));
-  const shown = tabs.includes(tab) ? tab : tabs[0];
+  const merges = scope.area === "library" ? !!rejected : takesMergeRejection(n);
+  const tabs = tabsFor(selPath, node, { conflict: !!conflict, merges, fixLoop: !!n?.fix_loop });
+  // No tab picked yet (a node just entered): the bar's first.
+  const shown = tab && tabs.includes(tab) ? tab : tabs[0];
+  // With a merge rejection declared, any on_failure here may only read (the server refuses one that writes).
+  const readOnlyRecovery = !!rejected;
   const [raw, setRaw] = useState<number | null>(load);
   const height = open ? clampBottom(raw ?? Math.round(Math.min(300, Math.max(170, (canvasH - 150) * 0.42))), canvasH) : BOTTOM.BAR;
   const [level, setLevel] = useState<"task" | "step" | "node" | null>(null);
@@ -168,19 +194,30 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
     const sid = step ?? nextStepId(ids);
     const taken = handler?.steps.find((s) => s.id === sid)?.tasks.map((t) => t.id) ?? [];
     const id = uniq("kind" in c ? c.kind : c.extends.split(":").pop()!, taken);
-    return [...(step ? [] : [{ op: "add_step", container, at: at ?? ids.length, id: sid }]), { op: "add_task", container, step: sid, id, ...c }];
+    // A new step of a read-only recovery is read only too, as the one add_handler made.
+    const readOnlyStep: Op[] = shown === "on_failure" && readOnlyRecovery ? [{ op: "set_field", path: `${container}.${sid}`, field: "read_only", value: true }] : [];
+    return [...(step ? [] : [{ op: "add_step", container, at: at ?? ids.length, id: sid }, ...readOnlyStep]), { op: "add_task", container, step: sid, id, ...c }];
   };
+
+  const rewind = rewindLine(authoredNodes(r, scope).map((x) => ({ id: x.id, gate: kindOf(r, x) === "gate" })), node, rejected?.restart_from);
+  // The line over a handler drawn: what a merge rejection's repair leads to, or why this recovery may only read. A
+  // problem the server puts on the handler or one of its steps (one that writes, here) has no task to mark, so it
+  // takes the line, in the server's words.
+  const own = handler ? [container, ...handler.steps.map((s) => `${container}.${s.id}`)].flatMap((p) => problemsAt(r, p)) : [];
+  const note = !handler ? null
+    : own.length ? { text: problemText(own[0]), bad: true }
+      : shown === "on_merge_rejected" ? { text: rewind, bad: false }
+        : shown === "on_failure" && readOnlyRecovery ? { text: READ_ONLY_RECOVERY, bad: false } : null;
 
   const empty = (() => {
     const delay = autoEscalates(r.policy_values?.auto_escalate_delay_s ?? 0);
     const restart = typeof conflict?.restart_from === "string" ? conflict.restart_from : "…";
-    // Adding a repair adds its restart too: until then the server has not picked one.
-    const rewind = typeof rejected?.restart_from === "string" ? `restarts from ${rejected.restart_from}` : "restarts from an earlier node";
     switch (shown) {
-      case "on_failure": return { a: `No handler for ${owner.label}. `, link: "Add a recovery plan", b: " that runs once when it fails.", note: "Without one, the failure goes straight to the fix loop.", go: (el: HTMLElement) => void addHandler("on_failure", owner.path, el) };
+      // A merge node with the policy has no fix loop for the failure to go to.
+      case "on_failure": return { a: `No handler for ${owner.label}. `, link: "Add a recovery plan", b: " that runs once when it fails.", note: readOnlyRecovery ? READ_ONLY_RECOVERY : "Without one, the failure goes straight to the fix loop.", go: (el: HTMLElement) => void addHandler("on_failure", owner.path, el) };
       case "fix_loop": return { a: "No fix loop. ", link: "Add a fix loop", b: " that repairs and re-measures this node.", note: "Without one, a failed measurement stops the node for you.", go: (el: HTMLElement) => void addHandler("fix_loop", node, el) };
       case "escalation": return { a: "No escalation task. ", link: "Add one", b: " to run when this node is stuck.", note: `Without one, Kraft auto-escalates ${delay} (policy).`, go: (el: HTMLElement) => openMenu(el, "Add an escalation task", (c) => [{ op: "add_task", slot: "escalation", node, ...c }], true) };
-      case "on_merge_rejected": return { a: "No repair. ", link: "Add one", b: " to fix the branch when a merge train or queue drops the merge request.", note: `Without one, the drop stops the item for you. After the repair, the item ${rewind}.`, go: (el: HTMLElement) => void addHandler("on_merge_rejected", node, el) };
+      case "on_merge_rejected": return { a: "No repair. ", link: "Add one", b: " to fix the branch when a merge train or queue drops the merge request.", note: `Without one, the drop stops the item for you. ${rewind}`, go: (el: HTMLElement) => void addHandler("on_merge_rejected", node, el) };
       default: return { a: "No conflict handler. ", link: "Add one", b: " to resolve a rebase conflict.", note: `Without one, a rebase conflict is an ordinary task failure. Success restarts from ${restart}.`, go: (el: HTMLElement) => void addHandler("on_conflict", node, el) };
     }
   })();
@@ -251,6 +288,8 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
             </div>
           )}
           <div className="bp-canvas">
+            {/* Over the canvas's lower left, as the judge sits over its upper left: the handler keeps its height. */}
+            {note && <p className={`bp-note${note.bad ? " is-bad" : ""}`}>{note.text}</p>}
             {shown === "escalation" ? (
               esc ? (
                 <NodeGraph name="escalation" steps={[{ id: "escalation", label: " ", tasks: [{ ...item(escPath, esc), icon: typeof esc.icon === "string" ? esc.icon : "siren", state: "esc" }] }]} selected={selIn(escPath) ? { step: "escalation", task: esc.id } : undefined} onSelect={() => onPick(escPath)} onOpen={() => onOpen(escPath)} onExpand={() => onOpen(escPath)} />

@@ -8,6 +8,7 @@ import { Shell } from "../shell/Shell";
 import { ChainsPage } from "./ChainsPage";
 import * as d from "./draft/draftApi";
 import { DEFAULT_VIEW } from "./draft/fixture.default";
+import { mergeView } from "./draft/fixture.merge";
 import type { DraftView, Result } from "./draft/types";
 import { nextStepId, uniq } from "./NodeView";
 import { resetLibrary } from "./useLibrary";
@@ -159,5 +160,16 @@ describe("Chains page: the node view", () => {
     await userEvent.click(await screen.findByRole("button", { name: "1 PROBLEM" }));
     expect(await screen.findByRole("button", { name: "Collapse the bottom pane" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("tab", { name: "Fix loop" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("a merge node opens its bottom pane on On merge rejected, whatever tab the last node was on", async () => {
+    vi.mocked(d.getDraft).mockImplementation(() => ok({ ...mergeView(), draft: true }));
+    mount("/templates/chains/default/nodes/verification");
+    await screen.findByRole("group", { name: "verification" });
+    await userEvent.click(screen.getByRole("tab", { name: "On failure" }));
+    await userEvent.click(screen.getByRole("button", { name: "Back to the chain" }));
+    await userEvent.dblClick(await screen.findByRole("button", { name: /^merge, node/ }));
+    await screen.findByRole("group", { name: "merge" });
+    expect(within(screen.getByRole("tablist", { name: "Failure handling" })).getByRole("tab", { selected: true })).toHaveTextContent("On merge rejected");
   });
 });

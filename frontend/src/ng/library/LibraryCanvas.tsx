@@ -40,7 +40,8 @@ export function LibraryCanvas({ draft, row, uses, path, reserve, height, onPick,
   const r = draft.view!.result;
   const scope = draft.scope;
   const readOnly = useContext(ReadOnly);
-  const [tab, setTab] = useState<BottomTab>("on_failure");
+  // Null: the node's first tab (On merge rejected on a merge node). The page keys this canvas by component.
+  const [tab, setTab] = useState<BottomTab | null>(null);
   const [bottom, setBottom] = useState(false);
   // The bottom pane opens when what is picked lives in it (Decisions §9 Bottom pane).
   const handler = handlerOf(path);
