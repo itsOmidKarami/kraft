@@ -3,6 +3,7 @@ and what it refuses. Text only; the real sandbox-exec is proven by the e2e tier.
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import os
 import pty
@@ -437,7 +438,12 @@ def test_tiocsti_cannot_type_into_a_controlling_terminal(tmp_path, sandboxed):
     )
     try:
         said = proc.stdout.readline()
-        typed = os.read(slave, 1) if select.select([slave], [], [], 1)[0] else b""
+        try:
+            typed = os.read(slave, 1) if select.select([slave], [], [], 1)[0] else b""
+        except OSError as exc:  # EIO: a refused run exited, which hung the terminal up
+            if exc.errno != errno.EIO:
+                raise
+            typed = b""
     finally:
         proc.kill()
         proc.wait()
