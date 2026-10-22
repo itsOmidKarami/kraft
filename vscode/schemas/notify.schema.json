@@ -98,6 +98,7 @@
           "sandbox_egress_refused",
           "sandbox_kit_resolved",
           "sandbox_oom_killed",
+          "sandbox_session_outlived",
           "scope_budget_reached",
           "scope_skipped",
           "session_reattached",
