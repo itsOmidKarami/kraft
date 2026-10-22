@@ -93,8 +93,8 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams: chainSeams
     for (const s of seams) if (s.at === nodes.length) out.push(seamKey(s.at));
     return out;
   }, [nodes, seams]);
-  // Tab enters on the selected node, else the current one the camera opened on.
   const single = useSingleClick();
+  // Tab enters on the selected node, else the current one the camera opened on.
   const roving = useRoving(selected && nodeKey(selected), cur ? nodeKey(cur.node.id) : stops[0]);
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Escape") {

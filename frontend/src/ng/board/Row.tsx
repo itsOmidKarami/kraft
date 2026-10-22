@@ -3,10 +3,10 @@ import { ago, repoName, shortId } from "../../format";
 import type { WorkItem } from "../../types";
 import { NodeGlyph } from "../graph/NodeGlyph";
 import { breakPaths } from "../ui/breakable";
+import { useSingleClick } from "../ui/singleClick";
 import { CUE_ICON } from "./cue";
 import { chainOf, groupOf } from "./model";
 import { actionVariant, admittedRowAction, glyphOf, reasonTail, stopCueOf, ticksOf, type RowAction } from "./rowText";
-import { useSingleClick } from "../ui/singleClick";
 import { IN_YOUR_CHECKOUT } from "./sharedWords";
 import { Ticks } from "./Ticks";
 
