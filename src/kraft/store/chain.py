@@ -136,8 +136,7 @@ def replace_sandbox(
     now, the intake one and its run fork's, and record `sandbox_reread` with
     both sandboxes (Kraft-ajzx7). Everything else in them is as it was."""
     conn.execute(
-        "UPDATE work_items SET materialized_chain = ?, run_chain = ?, updated_at = ? "
-        "WHERE id = ?",
+        "UPDATE work_items SET materialized_chain = ?, run_chain = ?, updated_at = ? WHERE id = ?",
         (materialized_chain, run_chain, _now(), work_item_id),
     )
     events.append(conn, work_item_id, SandboxEvent.REREAD, {"old": old, "new": new})
