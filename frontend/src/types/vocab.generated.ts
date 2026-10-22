@@ -126,7 +126,7 @@ export type EscalationEvent = (typeof ESCALATION_EVENTS)[number];
 export const FORGE_EVENTS = ["mr_opened", "mr_closed", "mr_reopened", "mr_labels_set", "external_wait_started", "external_wait_observed", "external_wait_rebounded", "external_wait_ended", "ci_infra_exhausted", "ci_run_abandoned", "ci_not_configured", "automated_review_not_configured", "automated_review_errored", "merge_queue_dropped", "reviewed_head_repinned", "merge_refused_unreviewed", "merge_landed_unreviewed"] as const;
 export type ForgeEvent = (typeof FORGE_EVENTS)[number];
 
-export const SANDBOX_EVENTS = ["sandbox_egress_refused", "sandbox_oom_killed", "sandbox_branch_not_synced", "sandbox_kit_resolved", "sandbox_session_outlived"] as const;
+export const SANDBOX_EVENTS = ["sandbox_egress_refused", "sandbox_oom_killed", "sandbox_branch_not_synced", "sandbox_kit_resolved", "sandbox_session_outlived", "sandbox_reread"] as const;
 export type SandboxEvent = (typeof SANDBOX_EVENTS)[number];
 
 export const SETTINGS_EVENTS = ["chain_template_changed", "attachments_changed", "agent_overrides_changed", "node_overrides_changed", "policy_override_changed", "notification_failed"] as const;

@@ -227,15 +227,19 @@ _EDITED = {**_SANDBOX, "image": "kraft/worker:2"}
 
 
 @pytest.fixture
-def stopped(client, repo, monkeypatch):
-    """An item filed sandboxed, stopped at `verification`, whose retry
-    walks nothing: the walk is not what these tests are about."""
+def no_walk(monkeypatch):
+    """A retry that walks nothing: the walk is not what these tests are about."""
     from kraft import executor
 
-    async def no_walk(*_args, **_kwargs):
+    async def walk(*_args, **_kwargs):
         return "completed"
 
-    monkeypatch.setattr(executor, "retry", no_walk)
+    monkeypatch.setattr(executor, "retry", walk)
+
+
+@pytest.fixture
+def stopped(client, repo, no_walk):
+    """An item filed sandboxed, stopped at `verification`."""
     _connect(client.app.state.templates_dir, repo, sandbox=_SANDBOX)
     wid = _file(client, repo, chain_template="default").json()["id"]
     _force_node(wid, "verification", "needs_human")
@@ -335,3 +339,29 @@ def test_a_refused_sandbox_reread_changes_nothing(
     assert _snapshot(client, stopped) == before
     assert _rereads(client, stopped) == []
     assert client.get(f"/api/work-items/{stopped}").json()["status"] == "needs_human"
+
+
+def test_a_workspace_retry_rereads_each_members_sandbox(client, tmp_path, no_walk):
+    """A workspace item's members are re-read too, each into its own frozen
+    policy, and the assembled checkout's with them."""
+    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+    client.post("/api/repos", json={"path": str(root), "enabled": False})
+    repos_yaml = client.app.state.templates_dir / "repos.yaml"
+
+    def member_sandbox(sandbox):
+        doc = yaml.safe_load(repos_yaml.read_text())
+        next(e for e in doc["repos"] if e.get("id") == "a")["sandbox"] = sandbox
+        repos_yaml.write_text(yaml.safe_dump(doc))
+
+    member_sandbox(_SANDBOX)
+    wid = _file(client, root, workspace="ws", members=["a"]).json()["id"]
+    _force_node(wid, "verification", "needs_human")
+    member_sandbox(_EDITED)
+
+    r = client.post(f"/api/work-items/{wid}/retry", json=_FLAG)
+
+    assert r.status_code == 200, r.text
+    snapshot = _snapshot(client, wid)
+    assert snapshot["repository_policies"]["a"]["sandbox"] == _EDITED
+    assert snapshot["policy"]["sandbox"] == _EDITED
+    assert _rereads(client, wid) == [{"old": _SANDBOX, "new": _EDITED}]
