@@ -263,7 +263,8 @@ async def restart(app) -> None:
         if task is not None:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-        if st.intake["enabled"]:
+        # Not on probation after an update: `end_probation` starts it.
+        if st.intake["enabled"] and not getattr(st, "probation", False):
             st.intake_task = asyncio.ensure_future(poller(app))
 
 

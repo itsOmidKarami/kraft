@@ -40,6 +40,18 @@ async def post_apply_restart(request: Request):
     return {"restarting": True}
 
 
+@api_router.post("/update/confirm")
+async def post_update_confirm(request: Request):
+    """The restart helper's word that this server came up as the process an
+    update expected: it ends probation, and the walks and pollers it held back
+    start. 409 when no update waits to be confirmed."""
+    from kraft.api import startup
+
+    if not await startup.end_probation(request.app):
+        raise HTTPException(409, "no update is waiting to be confirmed")
+    return {"confirmed": True}
+
+
 async def _update_state(channel: str | None, *, force: bool) -> dict:
     channel = channel or update.channel_of(update.installed())
     if channel not in update.CHANNELS:

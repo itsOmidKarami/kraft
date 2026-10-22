@@ -109,3 +109,95 @@ def left_running(tmp_path, repo):
 def test_start_up_stops_an_in_place_agent_a_stopped_server_left(left_running, client):
     """Nothing else ends it, and it writes in the checkout with the lease free."""
     assert left_running.wait(timeout=5) is not None
+
+
+@pytest.fixture
+def on_probation(tmp_path, monkeypatch):
+    """A record an update left: it was installed and the restart began, and no
+    helper confirmed the server that came up. Placed before the server starts,
+    so the fixture has to come before `client` in a test's arguments."""
+    from types import SimpleNamespace
+
+    from kraft import when_free
+    from kraft.api import deps, startup
+    from kraft.worker import reattach
+
+    run_dirs = RunDirs(tmp_path / "run").ensure()
+    when_free.write_rollback(run_dirs, old_pid=1, from_version="2.2.0", target=None)
+    started, spawned = [], []
+    real = startup.start_background
+    monkeypatch.setattr(startup, "start_background", lambda app: started.append(1) or real(app))
+
+    async def resumes_one(*_a, **_k):
+        return reattach.ReattachSummary(resumed_work_items=["w1"]), {}
+
+    monkeypatch.setattr(reattach, "reattach", resumes_one)
+    monkeypatch.setattr(
+        deps, "spawn", lambda app, wid, coro: spawned.append(wid) or deps.discard(coro)
+    )
+    monkeypatch.setattr(when_free, "PROBATION_S", 3600)
+    return SimpleNamespace(run_dirs=run_dirs, started=started, spawned=spawned)
+
+
+def _wait_for(check, seconds=5.0):
+    import time
+
+    deadline = time.monotonic() + seconds
+    while not check():
+        assert time.monotonic() < deadline, "timed out"
+        time.sleep(0.02)
+
+
+def test_leftover_record(on_probation, monkeypatch, client):
+    """A server that starts on a record nobody confirmed answers, and starts no
+    walk or poller until `PROBATION_S` passes with it up; then it goes on and
+    the record is gone."""
+    from kraft import when_free
+    from kraft.api import startup
+
+    st = client.app.state
+    assert st.probation is True
+    assert client.get("/api/health").status_code == 200
+    assert [getattr(st, name) for name in startup.BACKGROUND_TASKS] == [None] * len(
+        startup.BACKGROUND_TASKS
+    )
+    assert on_probation.spawned == [] and on_probation.started == []
+    assert when_free.read_rollback(on_probation.run_dirs) is not None
+
+
+@pytest.fixture
+def short_probation(monkeypatch):
+    from kraft import when_free
+
+    monkeypatch.setattr(when_free, "PROBATION_S", 0.2)
+
+
+def test_probation_ends_by_itself(on_probation, short_probation, client):
+    from kraft import when_free
+
+    _wait_for(lambda: when_free.read_rollback(on_probation.run_dirs) is None)
+    st = client.app.state
+    assert st.probation is False
+    assert on_probation.started == [1] and on_probation.spawned == ["w1"]
+    assert st.queue_task is not None
+    assert when_free.outcome(st)["status"] == "applied"
+
+
+def test_confirm_ends_it(on_probation, client):
+    from kraft import when_free
+
+    r = client.post("/api/update/confirm")
+
+    assert (r.status_code, r.json()) == (200, {"confirmed": True})
+    st = client.app.state
+    assert st.probation is False and st.queue_task is not None
+    assert on_probation.started == [1] and on_probation.spawned == ["w1"]
+    assert when_free.read_rollback(on_probation.run_dirs) is None
+    assert when_free.outcome(st)["from"] == "2.2.0"
+    assert client.post("/api/update/confirm").status_code == 409
+
+
+def test_shutdown_during_probation_is_clean(on_probation, client):
+    """Nothing was started, so shutdown cancels only what exists; leaving the
+    client raises if it does not."""
+    assert client.app.state.probation is True

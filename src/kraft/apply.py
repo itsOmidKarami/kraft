@@ -199,14 +199,30 @@ def managed() -> bool:
     return False
 
 
-def spawn_restart(st) -> None:
+def spawn_restart(st, *, confirm: bool = False) -> None:
     """A detached `kraft admin restart`: this process cannot restart itself
-    inside the request that asked."""
+    inside the request that asked.
+
+    `confirm` runs the helper an update hands off to (`restart --confirm`): it
+    must outlive the restart of this server, confirm the new one and, if it
+    does not come up, put the old one back. Under systemd the unit's default
+    `KillMode=control-group` kills everything in the service's cgroup, a
+    helper started in a new session included, so on Linux as a service it is
+    started outside the cgroup with `systemd-run --user`, carrying the
+    instance's environment. launchd leaves a new session alone."""
     from kraft.cli import admin
 
+    if not confirm:
+        argv = [admin._kraft_executable(), "admin", "restart"]
+    else:
+        # The interpreter that has the new code, not whatever `kraft` PATH finds.
+        argv = [sys.executable, "-P", "-m", "kraft", "admin", "restart", "--confirm"]
+        if sys.platform.startswith("linux") and admin.restart_kind(st.run_dirs.base) == "service":
+            env = [f"--setenv={k}={v}" for k, v in admin._instance_env().items()]
+            argv = ["systemd-run", "--user", "--collect", "--quiet", *env, *argv]
     with (st.run_dirs.logs / "server.log").open("ab") as log:
         subprocess.Popen(
-            [admin._kraft_executable(), "admin", "restart"],
+            argv,
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=log,

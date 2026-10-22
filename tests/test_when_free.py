@@ -291,3 +291,49 @@ async def test_the_claim_is_taken_only_by_a_free_kraft(item_on, database, run_di
 
     when_free.release_claim()
     when_free.refuse_if_claimed()
+
+
+def test_the_rollback_record_is_written_in_two_phases(run_dirs):
+    assert when_free.read_rollback(run_dirs) is None
+    when_free.write_rollback(run_dirs, old_pid=7, from_version="2.2.0", requirement=None)
+    when_free.write_rollback(run_dirs, config_snapshot="/x", db_snapshots={})
+
+    assert when_free.read_rollback(run_dirs) == {
+        "old_pid": 7,
+        "from_version": "2.2.0",
+        "requirement": None,
+        "config_snapshot": "/x",
+        "db_snapshots": {},
+    }
+    when_free.clear_rollback(run_dirs)
+    assert when_free.read_rollback(run_dirs) is None
+
+
+def test_a_snapshot_restores_config_and_databases_and_drops_a_stale_wal(tmp_path, run_dirs):
+    import sqlite3
+
+    config = tmp_path / "config"
+    (config / "chains").mkdir(parents=True)
+    (config / "access.yaml").write_text("port: 8765\n")
+    (config / "chains" / "default.yaml").write_text("id: default\n")
+    with sqlite3.connect(run_dirs.db) as c:
+        c.execute("CREATE TABLE t (v TEXT)")
+        c.execute("INSERT INTO t VALUES ('before')")
+    record = when_free.snapshot(run_dirs, config)
+
+    (config / "access.yaml").write_text("port: 1\n")
+    (config / "chains" / "default.yaml").unlink()
+    (config / "new.yaml").write_text("x: 1\n")
+    with sqlite3.connect(run_dirs.db) as c:
+        c.execute("UPDATE t SET v = 'after'")
+    wal = run_dirs.db.parent / f"{run_dirs.db.name}-wal"
+    wal.write_text("stale")
+
+    when_free.restore_snapshot(run_dirs, record)
+
+    assert (config / "access.yaml").read_text() == "port: 8765\n"
+    assert (config / "chains" / "default.yaml").read_text() == "id: default\n"
+    assert not (config / "new.yaml").exists()
+    assert not wal.exists()
+    with sqlite3.connect(run_dirs.db) as c:
+        assert c.execute("SELECT v FROM t").fetchone()[0] == "before"

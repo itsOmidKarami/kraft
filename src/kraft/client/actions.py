@@ -776,6 +776,12 @@ async def submit_review(
     )
 
 
+async def confirm_update() -> dict:
+    """The restart helper telling a new server on probation that it came up as
+    the process the update expected, so it may start its pollers."""
+    return await transport._act("/update/confirm")
+
+
 async def reload_templates() -> dict:
     """Reread the template library from disk into the running server, no
     restart."""

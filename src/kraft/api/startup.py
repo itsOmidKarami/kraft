@@ -22,6 +22,7 @@ from kraft import (
     start_queue,
     storage,
     waits,
+    when_free,
 )
 from kraft import auth as auth_mod
 from kraft import builtins as _builtins
@@ -48,6 +49,131 @@ from kraft.ws import Broadcaster
 logger = logging.getLogger(__name__)
 
 DEFAULT_FRONTEND_DIST = BUNDLED / "web"
+
+
+#: The pollers and loops `start_background` assigns to `app.state`, in the order
+#: shutdown cancels them (`lifespan`); None while not started.
+BACKGROUND_TASKS = (
+    "intake_task",
+    "rate_limit_task",
+    "trigger_task",
+    "wait_task",
+    "queue_task",
+    "caps_task",
+    "auto_escalate_delay_task",
+    "archive_task",
+    "storage_task",
+    "mr_poller_task",
+    "apply_task",
+    "addon_update_task",
+)
+
+
+def start_background(app: FastAPI) -> None:
+    """Start every poller and loop. At startup, or once an update's probation
+    ends: until then the server only answers."""
+    # Off by default costs nothing at all: no task, no timer, no tick. On
+    # `app.state` as well as in a local because that is the only way a test can
+    # tell "no poller was created" from "a poller was created and did nothing" —
+    # deleting the condition would otherwise leave every test green while a
+    # disabled instance grew a live timer.
+    intake_task = (
+        asyncio.ensure_future(intake_mod.poller(app)) if app.state.intake["enabled"] else None
+    )
+    app.state.intake_task = intake_task
+    # Always on, unlike auto-intake: waiting out a rate limit is not optional
+    # behaviour an operator enables, it is what this feature promises.
+    app.state.rate_limit_task = asyncio.ensure_future(rate_limit_retry.poller(app))
+    # Always on, for the same reason the rate-limit poller is: a work item
+    # parked on an external wait has to be woken by something, and that
+    # something cannot be the coroutine that used to sit in the wait
+    # (Kraft-ru98). One scheduler for every wait kind.
+    app.state.wait_task = asyncio.ensure_future(waits.poller(app))
+    # Always on, like the wait scheduler: a queued item was promised a start
+    # when a slot frees, and nothing else looks.
+    app.state.queue_task = asyncio.ensure_future(start_queue.poller(app))
+    # Always on: a parked item's total time cap and a gate's own timeout run
+    # out while nothing of the item runs, so no launch is there to see it.
+    app.state.caps_task = asyncio.ensure_future(caps.poller(app))
+    # Always on, for the same reason rate-limit/waits are: an item sitting
+    # past its own auto_escalate_delay_s has to be re-checked by something,
+    # and that something cannot be the coroutine that made the original
+    # inline call and already returned (Kraft-vyk8).
+    app.state.auto_escalate_delay_task = asyncio.ensure_future(auto_escalate_delay.poller(app))
+    # Always on, for the same reason the rate-limit poller and wait scheduler are:
+    # an item aged past policy.archive_after_days has to be archived by
+    # something, and an operator who forgets to check the board is exactly
+    # who auto-archive exists for (UI v2 · 03).
+    app.state.archive_task = asyncio.ensure_future(archive.poller(app))
+    # Always on, like the archive poller: with `storage.worktrees.limit` set,
+    # something has to notice the disk filling while nobody watches. Without
+    # the key a tick returns before it measures.
+    app.state.storage_task = asyncio.ensure_future(storage.poller(app))
+    # Always on, like the pollers above: nothing else watches for a merge
+    # request closed on the forge outside Kraft, so an item parked at an MR
+    # node has to be re-checked by something. Its own `forge_poll_s` cadence,
+    # not the others' 10-30s: unlike them this calls `gh`/`glab` once per
+    # item per tick.
+    app.state.mr_poller_task = asyncio.ensure_future(mr_poller.poller(app))
+    # Always, not only for boot-time triggers: each tick reads st.policy, so a
+    # trigger added by PUT /policy or `kraft admin reload` fires without a
+    # restart (Kraft-ygnw6). A tick with no triggers files nothing.
+    app.state.trigger_task = asyncio.ensure_future(triggers_mod.poller(app))
+    app.state.apply_task = asyncio.ensure_future(apply_mod.watcher(app))
+    # After the library is loaded from the lock: a start never waits on the network.
+    deps.in_background(app, deps.auto_update_addons)
+    app.state.addon_update_task = asyncio.ensure_future(deps.auto_update_daily(app))
+
+
+async def _probation_timer(app: FastAPI) -> None:
+    """The helper that would confirm this server may be gone: being up and
+    healthy for `PROBATION_S` is enough to go on, and no other process is
+    left to roll back."""
+    await asyncio.sleep(when_free.PROBATION_S)
+    await end_probation(app)
+
+
+async def end_probation(app: FastAPI) -> bool:
+    """The new server has shown it can run: start the walks and pollers it held
+    back, say the update was applied and drop the record. False when it was not
+    on probation. The snapshot stays `KEEP_SNAPSHOT_S` more, then goes."""
+    st = app.state
+    if not st.probation:
+        return False
+    st.probation = False
+    run_dirs = st.run_dirs
+    record = when_free.read_rollback(run_dirs) or {}
+    st.resume_walks()
+    start_background(app)
+    when_free.record_outcome(
+        st,
+        status="applied",
+        key=None,
+        detail=f"restarted on {st.version}",
+        from_version=record.get("from_version"),
+        to_version=st.version,
+    )
+    when_free.clear_rollback(run_dirs)
+    snapshot = record.get("config_snapshot")
+    if snapshot:
+        keep_for = when_free.KEEP_SNAPSHOT_S
+        folder = str(Path(snapshot).parent)
+
+        async def drop() -> None:
+            await asyncio.sleep(keep_for)
+            await asyncio.to_thread(when_free.delete_snapshots, run_dirs)
+
+        st.snapshot_task = asyncio.ensure_future(drop())
+        when_free.delete_snapshots(run_dirs, keep=folder)
+    return True
+
+
+async def _cancel(task: asyncio.Future | None) -> None:
+    """Cancel a task that may never have been started (an update on probation
+    starts none of them) and wait for it to end."""
+    if task is not None:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 @asynccontextmanager
@@ -214,30 +340,42 @@ async def lifespan(app: FastAPI):
     for name, task in adopted.items():
         app.state.tasks[name] = task
         task.add_done_callback(lambda _t, name=name: app.state.tasks.pop(name, None))
-    for wid in summary.resumed_work_items:
-        repo_row = database.read(
-            lambda c, wid=wid: c.execute(
-                "SELECT repo FROM work_items WHERE id = ?", (wid,)
-            ).fetchone()
-        )
-        deps.spawn(
-            app,
-            wid,
-            deps.guard(
-                database,
+
+    def resume_walks() -> None:
+        for wid in summary.resumed_work_items:
+            repo_row = database.read(
+                lambda c, wid=wid: c.execute(
+                    "SELECT repo FROM work_items WHERE id = ?", (wid,)
+                ).fetchone()
+            )
+            deps.spawn(
+                app,
                 wid,
-                executor.resume(
+                deps.guard(
                     database,
-                    run_dirs,
-                    work_item_id=wid,
-                    adopted=adopted,
-                    bd_cwd=deps.bd_cwd(),
-                    policy=policy_obj,
-                    launch=deps.launch(app.state, repo_row["repo"]) if repo_row else None,
-                    on_approve=deps._on_approve(app.state),
+                    wid,
+                    executor.resume(
+                        database,
+                        run_dirs,
+                        work_item_id=wid,
+                        adopted=adopted,
+                        bd_cwd=deps.bd_cwd(),
+                        policy=policy_obj,
+                        launch=deps.launch(app.state, repo_row["repo"]) if repo_row else None,
+                        on_approve=deps._on_approve(app.state),
+                    ),
                 ),
-            ),
-        )
+            )
+
+    # An update that has not yet proved the new server leaves this one on
+    # probation: it answers `/health` and serves the UI, and starts no walk,
+    # poller or loop until the restart helper confirms it, or `PROBATION_S`
+    # passes with the server up (`end_probation`). A record left by an attempt
+    # nobody confirmed (the loop or the helper died mid-way) reads the same.
+    app.state.probation = when_free.read_rollback(run_dirs) is not None
+    app.state.resume_walks = resume_walks
+    if not app.state.probation:
+        resume_walks()
 
     app.state.db = database
     app.state.run_dirs = run_dirs
@@ -296,51 +434,8 @@ async def lifespan(app: FastAPI):
     database.set_on_commit(lambda: (broadcaster.notify(), indexer.notify(), notifier.notify()))
     app.state.broadcaster = broadcaster
     app.state.notifier = notifier
-    # Off by default costs nothing at all: no task, no timer, no tick. On
-    # `app.state` as well as in a local because that is the only way a test can
-    # tell "no poller was created" from "a poller was created and did nothing" —
-    # deleting the condition would otherwise leave every test green while a
-    # disabled instance grew a live timer.
-    intake_task = (
-        asyncio.ensure_future(intake_mod.poller(app)) if app.state.intake["enabled"] else None
-    )
-    app.state.intake_task = intake_task
-    # Always on, unlike auto-intake: waiting out a rate limit is not optional
-    # behaviour an operator enables, it is what this feature promises.
-    app.state.rate_limit_task = asyncio.ensure_future(rate_limit_retry.poller(app))
-    # Always on, for the same reason the rate-limit poller is: a work item
-    # parked on an external wait has to be woken by something, and that
-    # something cannot be the coroutine that used to sit in the wait
-    # (Kraft-ru98). One scheduler for every wait kind.
-    app.state.wait_task = asyncio.ensure_future(waits.poller(app))
-    # Always on, like the wait scheduler: a queued item was promised a start
-    # when a slot frees, and nothing else looks.
-    app.state.queue_task = asyncio.ensure_future(start_queue.poller(app))
-    # Always on: a parked item's total time cap and a gate's own timeout run
-    # out while nothing of the item runs, so no launch is there to see it.
-    app.state.caps_task = asyncio.ensure_future(caps.poller(app))
-    # Always on, for the same reason rate-limit/waits are: an item sitting
-    # past its own auto_escalate_delay_s has to be re-checked by something,
-    # and that something cannot be the coroutine that made the original
-    # inline call and already returned (Kraft-vyk8).
-    app.state.auto_escalate_delay_task = asyncio.ensure_future(auto_escalate_delay.poller(app))
-    # Always on, for the same reason the rate-limit poller and wait scheduler are:
-    # an item aged past policy.archive_after_days has to be archived by
-    # something, and an operator who forgets to check the board is exactly
-    # who auto-archive exists for (UI v2 · 03).
-    app.state.archive_task = asyncio.ensure_future(archive.poller(app))
-    # Always on, like the archive poller: with `storage.worktrees.limit` set,
-    # something has to notice the disk filling while nobody watches. Without
-    # the key a tick returns before it measures.
-    app.state.storage_task = asyncio.ensure_future(storage.poller(app))
-    # Always on, like the pollers above: nothing else watches for a merge
-    # request closed on the forge outside Kraft, so an item parked at an MR
-    # node has to be re-checked by something. Its own `forge_poll_s` cadence,
-    # not the others' 10-30s: unlike them this calls `gh`/`glab` once per
-    # item per tick.
     app.state.mr_poll_errors = {}
-    app.state.mr_poller_task = asyncio.ensure_future(mr_poller.poller(app))
-    # PUT /intake swaps this task, and the swap has to await the cancellation of
+    # PUT /intake swaps the intake task, and the swap has to await the cancellation of
     # the old one. Without the lock two overlapping saves both read the same old
     # task, both start a poller, and only the last assignment is reachable --
     # the other ticks on, uncancellable, past shutdown.
@@ -348,19 +443,22 @@ async def lifespan(app: FastAPI):
     # A draft publish writes its files and reloads under this (`routes.drafts`).
     app.state.draft_publish_lock = asyncio.Lock()
     app.state.trigger_last_fired = {}
-    # Always, not only for boot-time triggers: each tick reads st.policy, so a
-    # trigger added by PUT /policy or `kraft admin reload` fires without a
-    # restart (Kraft-ygnw6). A tick with no triggers files nothing.
-    app.state.trigger_task = asyncio.ensure_future(triggers_mod.poller(app))
-    app.state.apply_task = asyncio.ensure_future(apply_mod.watcher(app))
     # Every background add-on task (`deps.in_background`), so shutdown reaches all.
     app.state.addon_tasks = set()
     # Set at shutdown: the worker threads of those tasks stop between add-ons.
     app.state.addon_cancel = threading.Event()
     app.state.addon_threads = set()
-    # After the library is loaded from the lock: a start never waits on the network.
-    deps.in_background(app, deps.auto_update_addons)
-    app.state.addon_update_task = asyncio.ensure_future(deps.auto_update_daily(app))
+    # None until `start_background` runs: not at all while an update is on probation.
+    for name in BACKGROUND_TASKS:
+        setattr(app.state, name, None)
+    app.state.probation_task = None
+    app.state.snapshot_task = None
+    if app.state.probation:
+        app.state.probation_task = asyncio.ensure_future(_probation_timer(app))
+    else:
+        start_background(app)
+        # Leftovers of an attempt that was confirmed or never made.
+        when_free.delete_snapshots(run_dirs, older_than_s=when_free.KEEP_SNAPSHOT_S)
     try:
         yield
     finally:
@@ -375,36 +473,29 @@ async def lifespan(app: FastAPI):
         # operator toggles the poller, and cancelling the one lifespan happened
         # to start would leave the live one running past shutdown.
         live_intake_task = app.state.intake_task
-        if live_intake_task is not None:
-            live_intake_task.cancel()
-            await asyncio.gather(live_intake_task, return_exceptions=True)
-        app.state.rate_limit_task.cancel()
-        await asyncio.gather(app.state.rate_limit_task, return_exceptions=True)
-        app.state.trigger_task.cancel()
-        await asyncio.gather(app.state.trigger_task, return_exceptions=True)
-        app.state.wait_task.cancel()
-        await asyncio.gather(app.state.wait_task, return_exceptions=True)
-        app.state.queue_task.cancel()
-        await asyncio.gather(app.state.queue_task, return_exceptions=True)
-        app.state.caps_task.cancel()
-        await asyncio.gather(app.state.caps_task, return_exceptions=True)
-        app.state.auto_escalate_delay_task.cancel()
-        await asyncio.gather(app.state.auto_escalate_delay_task, return_exceptions=True)
-        app.state.archive_task.cancel()
-        await asyncio.gather(app.state.archive_task, return_exceptions=True)
+        for task in (
+            live_intake_task,
+            app.state.probation_task,
+            app.state.snapshot_task,
+            app.state.rate_limit_task,
+            app.state.trigger_task,
+            app.state.wait_task,
+            app.state.queue_task,
+            app.state.caps_task,
+            app.state.auto_escalate_delay_task,
+            app.state.archive_task,
+        ):
+            await _cancel(task)
         storage.stop(app.state)
-        if app.state.storage_kick is not None:
-            app.state.storage_kick.cancel()
-            await asyncio.gather(app.state.storage_kick, return_exceptions=True)
-        app.state.storage_task.cancel()
-        await asyncio.gather(app.state.storage_task, return_exceptions=True)
-        app.state.mr_poller_task.cancel()
-        await asyncio.gather(app.state.mr_poller_task, return_exceptions=True)
-        app.state.apply_task.cancel()
-        # The daily task first: it is what starts the next add-on task.
-        app.state.addon_update_task.cancel()
-        await asyncio.gather(app.state.addon_update_task, return_exceptions=True)
-        await asyncio.gather(app.state.apply_task, return_exceptions=True)
+        await _cancel(app.state.storage_kick)
+        for task in (
+            app.state.storage_task,
+            app.state.mr_poller_task,
+            # The daily task first: it is what starts the next add-on task.
+            app.state.addon_update_task,
+            app.state.apply_task,
+        ):
+            await _cancel(task)
         await deps.stop_addon_work(app.state)
         # Before the walks are cancelled: a setup command runs in a thread
         # no cancel reaches, and would outlive this server.

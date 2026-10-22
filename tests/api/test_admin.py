@@ -168,6 +168,11 @@ def test_a_server_the_installed_service_started_restarts_with_a_202(
     assert ran == [client.app.state]
 
 
+def test_confirming_with_no_update_waiting_is_a_409(client):
+    r = client.post("/api/update/confirm")
+    assert (r.status_code, r.json()["detail"]) == (409, "no update is waiting to be confirmed")
+
+
 def test_the_apply_chips_restart_lifts_a_failed_update(client, monkeypatch, tmp_path):
     """A person asking again tries what failed afresh (`when_free.clear_failure`)."""
     from kraft import when_free

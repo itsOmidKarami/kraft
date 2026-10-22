@@ -356,3 +356,136 @@ def pending(st, now: datetime | None = None) -> Pending:
     if not is_free(st.db):
         out.blocked.append(_waiting_for(st.db))
     return out
+
+
+# ── the attempt in flight: rollback record, snapshot ─────────────────────────
+
+#: How long the restart helper waits for the new server to answer as a new
+#: process (and, for a release, as the version installed) before it puts the
+#: old one back.
+CONFIRM_S = 120
+
+#: How long a new server on probation waits for a helper's confirmation before
+#: it ends probation itself. Being up and healthy is enough to go on: with the
+#: helper gone, no other process is left to roll back.
+PROBATION_S = 300
+
+#: How long a snapshot is kept once the new server has left probation.
+KEEP_SNAPSHOT_S = 3600
+
+ROLLBACK_FILE = "update-rollback.json"
+SNAPSHOT_PREFIX = "update-snapshot-"
+
+
+def write_rollback(run_dirs, **fields) -> dict:
+    """Merge `fields` into the rollback record and return it.
+
+    Written in two phases, so a crash anywhere after the first leaves a record
+    the next start can act on. Phase 1, before an install: `old_pid`,
+    `from_version`, `requirement` (uv's receipt entry for the running version,
+    None for a dev install or a settings restart), `target` (the release's
+    version, or None), `restart_kind` and `key`. Phase 2, at the snapshot:
+    `config_snapshot` and `db_snapshots`."""
+    record = read_rollback(run_dirs) or {}
+    record.update(fields)
+    path = run_dirs.base / ROLLBACK_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(record, indent=2))
+        os.replace(name, path)
+    except BaseException:
+        Path(name).unlink(missing_ok=True)
+        raise
+    return record
+
+
+def read_rollback(run_dirs) -> dict | None:
+    try:
+        record = json.loads((run_dirs.base / ROLLBACK_FILE).read_text())
+    except (OSError, ValueError):
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def clear_rollback(run_dirs) -> None:
+    (run_dirs.base / ROLLBACK_FILE).unlink(missing_ok=True)
+
+
+def snapshot(run_dirs, config_dir: Path) -> dict:
+    """Copy the configuration directory, and back up every run database with
+    SQLite's online backup (the server is still writing them), into a folder
+    of its own under the run dir. Returns phase 2's fields."""
+    import shutil
+    import sqlite3
+    import time
+
+    root = run_dirs.base / f"{SNAPSHOT_PREFIX}{time.strftime('%Y%m%d-%H%M%S')}"
+    config_copy = root / "config"
+    shutil.copytree(config_dir, config_copy, symlinks=True)
+    snapshots = {}
+    (root / "db").mkdir(parents=True, exist_ok=True)
+    for source in sorted(run_dirs.base.glob("*.db")):
+        target = root / "db" / source.name
+        src = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+        try:
+            dst = sqlite3.connect(target)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+        finally:
+            src.close()
+        snapshots[source.name] = str(target)
+    return {
+        "config_dir": str(config_dir),
+        "config_snapshot": str(config_copy),
+        "db_snapshots": snapshots,
+    }
+
+
+def restore_snapshot(run_dirs, record: dict) -> None:
+    """Put back what `snapshot` copied: the configuration directory's contents
+    (the directory itself may be a link), and each database after the
+    `-wal` and `-shm` beside it are deleted -- a stale write-ahead log applied
+    to a restored file corrupts it."""
+    import shutil
+
+    config_dir, copy = record.get("config_dir"), record.get("config_snapshot")
+    if config_dir and copy and Path(copy).is_dir():
+        target = Path(config_dir)
+        target.mkdir(parents=True, exist_ok=True)
+        for child in target.iterdir():
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+        for child in Path(copy).iterdir():
+            if child.is_dir() and not child.is_symlink():
+                shutil.copytree(child, target / child.name, symlinks=True)
+            else:
+                shutil.copy2(child, target / child.name, follow_symlinks=False)
+    for name, saved in (record.get("db_snapshots") or {}).items():
+        live = run_dirs.base / name
+        for suffix in ("-wal", "-shm"):
+            Path(f"{live}{suffix}").unlink(missing_ok=True)
+        if Path(saved).is_file():
+            shutil.copy2(saved, live)
+
+
+def delete_snapshots(run_dirs, *, keep: str | None = None, older_than_s: float = 0.0) -> None:
+    """Remove snapshot folders, except `keep` and any younger than
+    `older_than_s`."""
+    import shutil
+    import time
+
+    for folder in run_dirs.base.glob(f"{SNAPSHOT_PREFIX}*"):
+        if str(folder) == keep:
+            continue
+        try:
+            if time.time() - folder.stat().st_mtime < older_than_s:
+                continue
+        except OSError:
+            continue
+        shutil.rmtree(folder, ignore_errors=True)

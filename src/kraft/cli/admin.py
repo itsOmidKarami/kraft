@@ -1373,6 +1373,142 @@ def _service_installed() -> bool:
     return False
 
 
+def _stop_service() -> None:
+    """Stop the service and keep its manager from starting it again."""
+    if sys.platform == "darwin":
+        subprocess.run(["launchctl", "unload", "-w", str(_launchd_plist_path())], check=False)
+    else:
+        subprocess.run(["systemctl", "--user", "stop", _SYSTEMD_UNIT], check=False)
+
+
+def _start_service() -> None:
+    if sys.platform == "darwin":
+        subprocess.run(["launchctl", "load", "-w", str(_launchd_plist_path())], check=True)
+    else:
+        subprocess.run(["systemctl", "--user", "start", _SYSTEMD_UNIT], check=True)
+
+
+def _wait_for_new_server(old_pid: int | None, target: str | None, seconds: float) -> bool:
+    """Whether the server answers `/health` as a new process (a version string
+    alone cannot tell a settings or dev restart, which has the same one before
+    and after) and, for a release, as the version installed."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            health = asyncio.run(client.health())
+        except Exception:  # noqa: BLE001 -- not up yet
+            health = None
+        if (
+            health is not None
+            and health.get("pid") != old_pid
+            and (not target or health.get("version") == target)
+        ):
+            return True
+        time.sleep(1)
+    return False
+
+
+def _restart_by_kind(ns: argparse.Namespace, kind: str) -> None:
+    if kind == "service":
+        _restart_service()
+    else:
+        _cmd_stop(ns, warn=False)
+        _start_detached()
+
+
+def _restart_confirm(ns: argparse.Namespace) -> None:
+    """The helper an update hands the restart to (`when_free`, step 4). It asks
+    nothing: `_cmd_restart` prompts and refuses with no server, and `_restart`
+    decides by whether a unit is installed, where this must restart the server
+    that is running. It reads the rollback record, restarts the server, waits
+    for a new process, and confirms it; or puts back what the update changed.
+    """
+    from types import SimpleNamespace
+
+    from kraft import when_free
+
+    run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()))
+    record = when_free.read_rollback(run_dirs)
+    if record is None:
+        print("kraft: no update is waiting to be confirmed", file=sys.stderr)
+        raise SystemExit(1)
+    kind = record.get("restart_kind") or restart_kind(run_dirs.base)
+    state = SimpleNamespace(run_dirs=run_dirs)
+    try:
+        _restart_by_kind(ns, kind)
+        came_up = _wait_for_new_server(
+            record.get("old_pid"), record.get("target"), when_free.CONFIRM_S
+        )
+        why = f"the new server did not answer as a new process within {when_free.CONFIRM_S}s"
+    except (SystemExit, Exception) as exc:  # noqa: BLE001 -- anything here means it is not up
+        came_up, why = False, f"restarting failed: {getattr(exc, 'code', None) or exc}"
+    if came_up:
+        for _ in range(5):
+            try:
+                asyncio.run(client.confirm_update())
+                return
+            except Exception:  # noqa: BLE001
+                time.sleep(1)
+        # The new server ends its own probation after `PROBATION_S`.
+        print("kraft: could not confirm the new server; it will go on by itself", file=sys.stderr)
+        return
+
+    outcome = _roll_back(ns, run_dirs, record, kind)
+    when_free.clear_rollback(run_dirs)
+    when_free.record_outcome(
+        state,
+        status="failed",
+        key=record.get("key"),
+        detail=f"{why}; {outcome}",
+        from_version=record.get("from_version"),
+        to_version=record.get("target"),
+    )
+    print(f"kraft: update failed: {why}; {outcome}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def _roll_back(ns: argparse.Namespace, run_dirs: RunDirs, record: dict, kind: str) -> str:
+    """Stop whatever started, put back what the update changed, and start
+    again. Returns what became of it, in a sentence."""
+    from kraft import update, when_free
+
+    try:
+        if kind == "service":
+            _stop_service()
+        else:
+            _cmd_stop(ns, warn=False)
+    except SystemExit:
+        pass
+    what = record.get("kind")
+    requirement = record.get("requirement")
+    if what == "release" and requirement:
+        command = [
+            "uv", "tool", "install", "--force", "--python", update._python(),
+            update.install_argument(requirement),
+        ]  # fmt: skip
+        if subprocess.run(command, check=False).returncode != 0:
+            return "the previous version could not be reinstalled; Kraft is down"
+    # A settings restart changed no database; a release and a dev install may
+    # have had one migrated by the new server.
+    snapshot = dict(record)
+    if what == "settings":
+        snapshot["db_snapshots"] = {}
+    when_free.restore_snapshot(run_dirs, snapshot)
+    try:
+        if kind == "service":
+            _start_service()
+        else:
+            _start_detached()
+    except (SystemExit, Exception) as exc:  # noqa: BLE001
+        reason = getattr(exc, "code", None) or exc
+        if what == "dev":
+            return f"the old server could not start on what is installed ({reason}); Kraft is down"
+        return f"the previous version could not start ({reason}); Kraft is down"
+    if what == "dev":
+        return "configuration and databases put back; the installed build was left as it is"
+    return "the previous version is back"
+
+
 def _restart_service() -> None:
     """Through the service manager, not SIGTERM+start -- a unit's own
     `restart` verb is what keeps it a *managed* restart (systemd resets its
@@ -1398,6 +1534,9 @@ def _cmd_restart(ns: argparse.Namespace) -> None:
     someone's terminal can't be handed back to that terminal from here, so
     this only stops it and says so -- restarting it is that terminal's job.
     """
+    if getattr(ns, "confirm", False):
+        _restart_confirm(ns)
+        return
     _confirm_running_agents(ns, "restarting", ask=True)
     _refuse_restart_with_no_server()
     _restart(ns)
@@ -1771,6 +1910,8 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
         ),
     )
     restart.add_argument("-y", "--yes", action="store_true", help="do not ask about running agents")
+    # The helper an update when Kraft is free hands the restart to; not for typing.
+    restart.add_argument("--confirm", action="store_true", help=argparse.SUPPRESS)
     restart.set_defaults(func=_cmd_restart)
 
     install_service = subs.add_parser(
