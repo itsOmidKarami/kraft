@@ -9,10 +9,9 @@ from pathlib import Path
 
 import pytest
 
-PLUGIN = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PLUGIN))
+import kl
 
-import kl  # noqa: E402
+PLUGIN = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture

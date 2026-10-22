@@ -6,15 +6,11 @@ that set a run's mode."""
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-PLUGIN = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PLUGIN))
-
-import kl  # noqa: E402
+import kl
 
 #: The spec's table, typed out again rather than worked out by `kl_shape.sliced_action`,
 #: so the test fails when the code drifts from the spec rather than following it.

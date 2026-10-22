@@ -17,10 +17,9 @@ from pathlib import Path
 
 import pytest
 
-PLUGIN = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PLUGIN))
+import kl as lite  # `kl` below is the CLI helper
 
-import kl as lite  # noqa: E402  (`kl` below is the CLI helper)
+PLUGIN = Path(__file__).resolve().parents[1]
 
 # e2e("bd"): the main suite runs this in CI's e2e-cli job, not the unit job.
 # The skipif stays for lite-floor, which runs this directory without

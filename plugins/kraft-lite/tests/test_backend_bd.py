@@ -6,15 +6,10 @@ from __future__ import annotations
 import datetime as dt
 import json
 import subprocess
-import sys
-from pathlib import Path
 
 import pytest
 
-PLUGIN = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PLUGIN))
-
-import kl  # noqa: E402
+import kl
 
 #: A two-node V1 chain: `env_setup`, then `verify` with a fix loop capped at 2.
 QUICK = """\

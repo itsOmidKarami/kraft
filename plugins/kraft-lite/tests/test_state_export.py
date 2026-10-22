@@ -5,15 +5,10 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import sys
-from pathlib import Path
 
 import pytest
 
-PLUGIN = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PLUGIN))
-
-import kl  # noqa: E402
+import kl
 
 T0, T1 = "2026-10-20T10:00:00Z", "2026-10-20T11:00:00Z"
 
@@ -452,35 +447,9 @@ MALFORMED = {
 }
 
 
-#: A chain.json that says V1 and lacks what the walk reads, by the problem.
-BAD_CHAINS = {
-    "chain_without_nodes": {"format": "v1", "id": "x"},
-    "chain_node_without_kind": {"format": "v1", "id": "x", "nodes": [{"id": "a", "steps": []}]},
-    "chain_exec_without_steps": {
-        "format": "v1",
-        "id": "x",
-        "nodes": [{"id": "a", "kind": "exec"}],
-    },
-    # Every key the walk reads is checked, not only the ids and kinds.
-    "chain_exec_without_fix_loop": {
-        "format": "v1",
-        "id": "x",
-        "nodes": [{"id": "a", "kind": "exec", "steps": [], "on_failure": None}],
-    },
-    "chain_gate_without_message": {
-        "format": "v1",
-        "id": "x",
-        "nodes": [{"id": "g", "kind": "gate", "artifact": None, "reject_to": None}],
-    },
-}
-
-
-#: A chain.json that is the default but for one top-level string it lacks.
-LACKING = {"chain_without_id": "id", "chain_without_source": "source"}
-
-
-def lacking(chain: dict, problem: str) -> dict:
-    return {k: v for k, v in chain.items() if k != LACKING.get(problem)}
+#: A chain.json that says V1 and lacks what the walk reads: one flaw, for the
+#: wiring. The catalog of flaws is `test_chain_flaw.py`.
+NO_NODES = {"format": "v1", "id": "x"}
 
 
 def stray_record(problem: str) -> dict:
@@ -526,23 +495,16 @@ def stray_record(problem: str) -> dict:
         ],
         # A chain.json that says V1 but lacks what the walk reads, and a local
         # frozen chain that cannot be compared with it.
-        *[
-            pytest.param(problem, named, id=problem)
-            for problem, named in {
-                "chain_without_nodes": "is not a usable V1 chain: it has no list of nodes",
-                "chain_node_without_kind": "is not a usable V1 chain: node 'a' has no kind",
-                "chain_exec_without_steps": "is not a usable V1 chain: exec node 'a' has no steps",
-                "chain_exec_without_fix_loop": (
-                    "is not a usable V1 chain: exec node 'a' has no fix_loop"
-                ),
-                "chain_gate_without_message": (
-                    "is not a usable V1 chain: gate node 'g' has no message"
-                ),
-                "chain_without_id": "is not a usable V1 chain: it has no id",
-                "chain_without_source": "is not a usable V1 chain: it has no source",
-                "corrupt_local_chain": "cannot read the chain {there}/.kraft-lite/chains/kl-a",
-            }.items()
-        ],
+        pytest.param(
+            "chain_without_nodes",
+            "is not a usable V1 chain: it has no list of nodes",
+            id="chain_without_nodes",
+        ),
+        pytest.param(
+            "corrupt_local_chain",
+            "cannot read the chain {there}/.kraft-lite/chains/kl-a",
+            id="corrupt_local_chain",
+        ),
         # Read from elsewhere, so a line it cannot read is named, not a traceback.
         *[
             pytest.param(problem, "{out}/" + name + " line 1", id=problem)
@@ -570,7 +532,7 @@ def test_import_refuses_an_export_that_names_no_single_chain(
         "two_epics": ["kl-aaaaaaaa", "kl-bbbbbbbb"],
         "no_template": ["kl-aaaaaaaa"],
         **dict.fromkeys(
-            [*STRAYS, *MALFORMED, *BAD_CHAINS, *LACKING, "corrupt_local_chain"], ["kl-aaaaaaaa"]
+            [*STRAYS, *MALFORMED, "chain_without_nodes", "corrupt_local_chain"], ["kl-aaaaaaaa"]
         ),
     }
     for chain_id in epics.get(problem, [BAD_CHAIN_IDS.get(problem)]):
@@ -579,7 +541,7 @@ def test_import_refuses_an_export_that_names_no_single_chain(
         kl.append_jsonl(out / "records.jsonl", kl.materialize(chain, "t", chain_id))
         if problem != "no_template":
             (out / "chain.json").write_text(
-                json.dumps(BAD_CHAINS.get(problem, lacking(chain, problem)))
+                json.dumps(NO_NODES if problem == "chain_without_nodes" else chain)
             )
     if problem in STRAYS:
         kl.append_jsonl(out / "records.jsonl", [stray_record(problem)])

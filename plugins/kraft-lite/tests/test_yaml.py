@@ -210,11 +210,6 @@ def test_subset_refuses(text, line, want):
     assert want in message
 
 
-def test_refusal_names_its_source():
-    with pytest.raises(kl_yaml.YamlError, match=r"chains/x\.yaml:2"):
-        kl_yaml.load("a: 1\nb: *x\n", source="chains/x.yaml")
-
-
 def test_yaml_error_is_a_clean_exit():
     assert issubclass(kl_yaml.YamlError, SystemExit)
 

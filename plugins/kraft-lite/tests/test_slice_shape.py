@@ -7,18 +7,14 @@ from __future__ import annotations
 
 import copy
 import json
-import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 
-PLUGIN = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PLUGIN))
-
-import kl  # noqa: E402
-import kl_chains  # noqa: E402
-import kl_shape  # noqa: E402
+import kl
+import kl_chains
+import kl_shape
 
 #: The default's child chain: the steps a slice builds, checks and opens a PR for.
 DEFAULT_CHILD = (
@@ -219,6 +215,9 @@ DEFAULT_ACTIONS = {
 
 def test_the_action_table_covers_the_default(default_chain):
     assert list(DEFAULT_ACTIONS) == [n["id"] for n in default_chain["nodes"]]
+    # `ACTIONS` is what the skills are held to name: one the default never uses,
+    # or one it uses that is missing, would leave a node's meaning unchecked.
+    assert {a for actions in DEFAULT_ACTIONS.values() for a in actions} == set(kl_shape.ACTIONS)
 
 
 @pytest.mark.parametrize(
@@ -232,7 +231,6 @@ def test_the_action_table_covers_the_default(default_chain):
 def test_sliced_action(default_chain, mode, node, action):
     shape = kl_shape.slice_shape(default_chain)
     assert kl_shape.sliced_action(default_chain, shape, node, mode) == action
-    assert action in kl_shape.ACTIONS
 
 
 def restarting_from(chain: dict, node: str, target: str, key: str = "on_base_changed") -> dict:
@@ -468,13 +466,6 @@ def test_a_child_binds_its_first_build_node_by_shape(kl_cli, path, source, tmp_p
     assert repair["source"] == "default:agent"
 
 
-def broken_default(path: Path, node: str, edit) -> None:
-    """The bundled default, frozen, with `edit` applied to its node `node`, at `path`."""
-    chain = kl_chains.resolve(path.parent, {}, "default")
-    edit(next(n for n in chain["nodes"] if n["id"] == node))
-    path.write_text(json.dumps(chain))
-
-
 @pytest.mark.parametrize(
     "write, args, named",
     [
@@ -492,89 +483,6 @@ def broken_default(path: Path, node: str, edit) -> None:
             "is not a usable V1 chain: it has no list of nodes",
             id="v1_without_nodes",
         ),
-        pytest.param(
-            lambda p: p.write_text(
-                json.dumps({"format": "v1", "id": "x", "nodes": [{"id": "a", "steps": []}]})
-            ),
-            [],
-            "is not a usable V1 chain: node 'a' has no kind (exec or gate)",
-            id="v1_node_without_kind",
-        ),
-        pytest.param(
-            lambda p: p.write_text(
-                json.dumps({"format": "v1", "id": "x", "nodes": [{"kind": "gate"}]})
-            ),
-            [],
-            "is not a usable V1 chain: node 1 has no id",
-            id="v1_node_without_id",
-        ),
-        pytest.param(
-            lambda p: p.write_text(
-                json.dumps({"format": "v1", "id": "x", "nodes": [{"id": "a", "kind": "exec"}]})
-            ),
-            [],
-            "is not a usable V1 chain: exec node 'a' has no steps",
-            id="v1_exec_without_steps",
-        ),
-        # The whole frozen shape the walk reads, not only ids, kinds and steps.
-        pytest.param(
-            lambda p: broken_default(p, "verification", lambda n: n.pop("fix_loop")),
-            [],
-            "is not a usable V1 chain: exec node 'verification' has no fix_loop",
-            id="v1_exec_without_fix_loop",
-        ),
-        pytest.param(
-            lambda p: broken_default(p, "merge", lambda n: n.pop("on_merge_rejected")),
-            [],
-            "is not a usable V1 chain: exec node 'merge' has no on_merge_rejected",
-            id="v1_exec_without_on_merge_rejected",
-        ),
-        pytest.param(
-            lambda p: broken_default(p, "merge", lambda n: n["on_merge_rejected"].pop("repair")),
-            [],
-            "is not a usable V1 chain: exec node 'merge''s on_merge_rejected.repair has no steps",
-            id="v1_on_merge_rejected_without_repair",
-        ),
-        pytest.param(
-            lambda p: broken_default(
-                p, "merge", lambda n: n["on_merge_rejected"].pop("restart_from")
-            ),
-            [],
-            "is not a usable V1 chain: exec node 'merge''s on_merge_rejected has no restart_from",
-            id="v1_on_merge_rejected_without_restart_from",
-        ),
-        pytest.param(
-            lambda p: broken_default(p, "plan_approval", lambda n: n.pop("message")),
-            [],
-            "is not a usable V1 chain: gate node 'plan_approval' has no message",
-            id="v1_gate_without_message",
-        ),
-        pytest.param(
-            lambda p: broken_default(
-                p, "implementation", lambda n: n["steps"][0]["tasks"][0].pop("path")
-            ),
-            [],
-            "is not a usable V1 chain: exec node 'implementation' has a task with no path",
-            id="v1_task_without_path",
-        ),
-        # `start` answers with the chain's id and source, and the child is named from its id.
-        *[
-            pytest.param(
-                lambda p, key=key: p.write_text(
-                    json.dumps(
-                        {
-                            k: v
-                            for k, v in kl_chains.resolve(p.parent, {}, "default").items()
-                            if k != key
-                        }
-                    )
-                ),
-                [],
-                f"is not a usable V1 chain: it has no {key}",
-                id=f"v1_chain_without_{key}",
-            )
-            for key in ("id", "source")
-        ],
         pytest.param(
             lambda p: None,
             ["--chain", "default"],

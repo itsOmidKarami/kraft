@@ -7,18 +7,37 @@ from __future__ import annotations
 
 import re
 import shlex
-import sys
 from pathlib import Path
 
 import pytest
 
-PLUGIN = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PLUGIN))
+import kl
 
-import kl  # noqa: E402
+from .test_skill_wording import section
+
+PLUGIN = Path(__file__).resolve().parents[1]
 
 #: Every skill: each walks Kraft's V1 chains.
 V1_SKILLS = ["init", "start", "next", "gate", "status", "run-slices", "build-slice"]
+#: The two that slice a chain and run its slices.
+SLICE_SKILLS = ["run-slices", "build-slice"]
+#: What no skill names: a hook, and the legacy chains' own nodes, gate verb and files.
+LEGACY = [
+    r"`on\.[\w.]+`",
+    *map(
+        re.escape,
+        [
+            "slice.json",
+            "chain_review",
+            "gate --name",
+            "`mr_checks`",
+            "`open_mr`",
+            "`verify`",
+            "`human_review`",
+            "post_merge_watch",
+        ],
+    ),
+]
 #: Every file a skill's commands live in: the skills, and every file in run-slices'
 #: `references/` (the harness guides and discover.md).
 COMMAND_FILES = {
@@ -31,22 +50,21 @@ COMMAND_FILES = {
 
 
 @pytest.mark.parametrize("name", V1_SKILLS)
-def test_the_v1_skills_cite_no_hook(texts, name):
-    """V1 chains have tasks, not hooks: a hook name sends the walk looking for a
-    registry entry that no longer exists."""
-    assert not re.findall(r"`on\.[\w.]+`", texts[name])
-
-
-@pytest.mark.parametrize("name", V1_SKILLS)
-def test_the_v1_skills_spell_artifact_as_state_does(texts, name):
-    """One term per concept: `state` says `gate.artifact`."""
-    assert "artefact" not in texts[name]
+def test_the_v1_skills_name_nothing_of_the_legacy_chains(texts, name):
+    """V1 chains have tasks, not hooks, and no legacy node, gate verb or file: one
+    names a registry entry or a step no V1 chain has, and the walk goes looking for
+    it. `registry` is the slice skills' alone, since init and start tell the user
+    how to migrate one."""
+    terms = LEGACY + ([re.escape("registry")] if name in SLICE_SKILLS else [])
+    found = [term for term in terms if re.search(term, texts[name])]
+    assert not found, f"{name} names {found}"
 
 
 @pytest.mark.parametrize("name", V1_SKILLS)
 @pytest.mark.parametrize(
     "other, term",
     [
+        pytest.param(r"artefact", "artifact", id="artifact"),
         pytest.param(r"\bhuman\b(?!_)|\bthe person\b", "the user", id="user"),
         pytest.param(r"feature chain", "the controller's chain", id="controllers-chain"),
         pytest.param(r"slice chain", "child chain", id="child-chain"),
@@ -110,234 +128,20 @@ def test_the_start_skill_needs_no_bindings(texts):
     a new repo's setup does not read pre-V1 material first."""
     body = " ".join(texts["start"].split())
     assert body.count("kraft-lite:init") == 1
-    assert "follow `kraft-lite:init`'s last section, `A pre-V1 directory: migrate`" in body
+    assert "follow `kraft-lite:init`'s last section, `A pre-V1 directory: migrate`, first" in body
     headings = re.findall(r"^## (.*)$", texts["init"], re.M)
     assert headings[-1] == "A pre-V1 directory: migrate"
-
-
-def test_the_next_skill_says_when_a_bound_skill_is_missing(texts):
-    """`state` falls a bound skill that is not installed back to its prompt and
-    marks the source; the human should hear that the skill did not run."""
-    assert "(skill missing)" in texts["next"]
-
-
-def _section(body: str, number: int) -> str:
-    """One numbered `## N.` section of a skill, whitespace flattened; 0 is the whole skill."""
-    if not number:
-        return " ".join(body.split())
-    return " ".join(body.split(f"## {number}.")[1].split("\n## ")[0].split())
-
-
-@pytest.mark.parametrize(
-    "name, section, needle",
-    [
-        pytest.param(
-            "next",
-            1,
-            "So a file a task writes there is recorded by its absolute path in the worktree.",
-            id="next-produced-in-the-feature-worktree",
-        ),
-        pytest.param(
-            "next",
-            2,
-            "`<file>` being the absolute path where the task wrote it",
-            id="next-produced-takes-an-absolute-path",
-        ),
-        pytest.param(
-            "next",
-            2,
-            "It refuses past `on_base_changed.cap` restarts: with `restarts` already at `cap`, "
-            "stop and ask the user instead",
-            id="next-restart-cap-from-state",
-        ),
-        pytest.param(
-            "next",
-            2,
-            "The merge task can report that the forge's merge train or merge queue dropped "
-            "the PR instead of merging it",
-            id="next-merge-rejected-is-reported-by-the-merge-task",
-        ),
-        pytest.param(
-            "next",
-            2,
-            "No step failed, so spend no `attempt` and skip section 3. First, before any repair "
-            "runs or anything is pushed: with `on_merge_rejected` null, or `rejections` already "
-            "at its `cap`, stop and tell the user why the PR was dropped, as for `over_cap`.",
-            id="next-merge-rejection-cap-before-the-repair",
-        ),
-        pytest.param(
-            "next",
-            2,
-            "Stop the same way when the forge gave no reason a repair can act on: the PR was "
-            "taken off by hand, or for a reason it does not say.",
-            id="next-merge-rejected-without-a-reason-stops",
-        ),
-        pytest.param(
-            "next",
-            2,
-            "Otherwise run `on_merge_rejected.repair.steps` as above, with the drop's reason and "
-            "each failed job as their input. If they committed nothing, stop and tell the user: "
-            "the forge would drop the same head again. Else push what they committed to the "
-            "PR's branch, then `KL restart --merge-rejected`: it reopens the walk from "
-            "`on_merge_rejected.restart_from` through this node, gates included, so the PR's "
-            "checks and the final gate are answered again before the merge runs.",
-            id="next-merge-rejected-repairs-then-restarts",
-        ),
-        pytest.param(
-            "next",
-            1,
-            "`git diff --name-only origin/<base branch>...HEAD` lists there",
-            id="next-scoped-verify-diffs-against-origin",
-        ),
-        pytest.param(
-            "next",
-            1,
-            "a `prompt` task runs on their test paths",
-            id="next-scoped-verify-prompt-task",
-        ),
-        pytest.param(
-            "next",
-            3,
-            "spend no attempt and no `on_failure`",
-            id="next-unrepairable-error-spends-no-on-failure",
-        ),
-        pytest.param(
-            "start",
-            0,
-            "follow `kraft-lite:init`'s last section, `A pre-V1 directory: migrate`, first",
-            id="start-migrate-follows-init",
-        ),
-        pytest.param(
-            "start", 0, "a chain file path (`.yaml`, or with a `/`)", id="start-chain-file-path"
-        ),
-        pytest.param(
-            "start",
-            0,
-            "and the chain it froze with where that came from",
-            id="start-reports-the-chain-it-froze",
-        ),
-        pytest.param(
-            "status",
-            0,
-            "whether it is `open` (running) or `blocked`",
-            id="status-node-status-words",
-        ),
-        pytest.param(
-            "status",
-            0,
-            "Render it as the table in `kraft-lite:next`'s section 5 (read it, in "
-            "`../next/SKILL.md` beside this skill; do not invoke `next` from here).",
-            id="status-summary-as-next-shapes-it",
-        ),
-        pytest.param(
-            "status",
-            0,
-            "There is no token count or cost: Lite never sees them, so estimate none.",
-            id="status-no-cost-to-estimate",
-        ),
-        pytest.param(
-            "gate",
-            1,
-            "and `--spec`/`--plan` set to the spec and plan the earlier gates approved, so the "
-            "new chain starts at the chain revision",
-            id="gate-restart-keeps-the-approved-spec-and-plan",
-        ),
-        pytest.param(
-            "gate",
-            1,
-            "For a `repo:` chain, put the copy in `.kraft/chains/` with a new `id`, so its "
-            "`extends` still resolve, and pass `--chain repo:<new id>`.",
-            id="gate-restart-repo-chain-stays-in-the-repo-library",
-        ),
-        pytest.param(
-            "gate",
-            1,
-            "`--chain <that file>` (or `repo:<new id>`), and `--spec`/`--plan`",
-            id="gate-restart-names-both-chain-forms",
-        ),
-        pytest.param(
-            "init",
-            0,
-            "its `summary`, `export` and other reports need the previous Kraft Lite, and "
-            "`kl.py` refuses every chain verb but `state` for it",
-            id="init-finished-legacy-run-only-state",
-        ),
-        pytest.param(
-            "init",
-            0,
-            "which closes the run's open records, labelled `kraft-abandoned`, and keeps them",
-            id="init-migrate-abandon",
-        ),
-        pytest.param(
-            "init",
-            0,
-            "Delete `bindings.yaml.mine` once merged.",
-            id="init-migrate-deletes-the-moved-aside-copy",
-        ),
-        pytest.param(
-            "init",
-            0,
-            "With both files present and no verb refusing",
-            id="init-migrate-both-files-no-verb-refusing",
-        ),
-        pytest.param(
-            "init",
-            0,
-            "`{}` when there was no registry, so no file was written",
-            id="init-migrate-without-a-registry",
-        ),
-        pytest.param(
-            "init",
-            0,
-            "move `bindings.yaml` aside (`.kraft-lite/bindings.yaml.mine`), run `migrate`",
-            id="init-migrate-with-both-files",
-        ),
-        pytest.param(
-            "init",
-            0,
-            "It is required - `start` refuses the file without it",
-            id="init-prompt-is-required",
-        ),
-        pytest.param(
-            "init",
-            0,
-            "`.kraft-lite/registry.yaml.migrated` goes there too, or is deleted",
-            id="init-ignores-the-migrated-registry",
-        ),
-        pytest.param(
-            "build-slice",
-            1,
-            "Run `mkdir -p <run>/<slice key>` (it makes `<run>` too), then write "
-            "`<run>/spec.md` and `plan.md`",
-            id="child-run-folder-made-first",
-        ),
-        pytest.param(
-            "build-slice",
-            3,
-            "Run no further repair, no further `attempt`, no `close`",
-            id="child-over-cap-no-further-repair",
-        ),
-        pytest.param(
-            "build-slice",
-            3,
-            "never your child chain's",
-            id="child-messages-name-the-controllers-chain",
-        ),
-    ],
-)
-def test_a_skill_carries_the_final_fix_wave(texts, name, section, needle):
-    """The final review's fixes and round two's, by skill and section; 0 is the whole skill."""
-    assert needle in _section(texts[name], section), f"{name} section {section} lacks {needle!r}"
 
 
 def test_the_next_skill_stops_on_an_unrepairable_error_before_on_failure(texts):
     """Kraft spends no repair on a builtin or forge task that failed with an
     error no repair changes (its `test_a_reviewer_error_stops_for_a_human_and_spends_no_repair`):
     the stop comes before `on_failure`, which would otherwise run once first."""
-    failing = _section(texts["next"], 3)
-    assert failing.index("Every failure is a task with `task_kind` `builtin` or `forge`") < (
-        failing.index("The node failed, `on_failure` is set")
-    )
+    failing = section(texts["next"], 3)
+    assert failing.index(
+        "Every failure is a task with `task_kind` `builtin` or `forge` that ended in an error "
+        "no repair can change"
+    ) < (failing.index("The node failed, `on_failure` is set"))
 
 
 @pytest.mark.parametrize("name", V1_SKILLS)
