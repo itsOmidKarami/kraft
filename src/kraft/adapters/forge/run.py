@@ -1675,12 +1675,24 @@ async def _point_at_merged_members(
         rel = str(sub_path.relative_to(root_repo))
         await git.run_git(root_repo, ["git", "add", "--", rel])
         bumped.append(rel)
-    staged = await git.run_git(root_repo, ["git", "diff", "--cached", "--name-only"])
+    # The pointers alone: whatever else is staged in the root is no part of
+    # Kraft's own commit, which is repinned and may go straight onto the base.
+    if not bumped:
+        return []
+    staged = await git.run_git(root_repo, ["git", "diff", "--cached", "--name-only", "--", *bumped])
     if not staged.strip():
         return []
     before = reviewed_head.branch_tip(root_repo, branch)
     await git.run_git(
-        root_repo, ["git", "commit", "-m", f"chore: bump submodule pointers for {work_item_id}"]
+        root_repo,
+        [
+            "git",
+            "commit",
+            "-m",
+            f"chore: bump submodule pointers for {work_item_id}",
+            "--",
+            *bumped,
+        ],
     )
     # Kraft's own commit, naming only what its members' merges landed: the
     # root the final review approved stays the approved one (`repin`).

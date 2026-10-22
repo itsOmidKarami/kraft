@@ -179,13 +179,16 @@ class _OvertakenForge(_LandingForge):
             git(origin, "commit", "-q", "--allow-empty", "-m", "landed after the item's merge")
 
 
+@pytest.mark.parametrize("staged", [False, True], ids=["clean-index", "an-unrelated-file-staged"])
 async def test_the_pointer_bump_moves_only_merged_members_and_to_what_merged(
-    database, run_dirs, tmp_path, monkeypatch
+    database, run_dirs, tmp_path, monkeypatch, staged
 ):
     """Kraft-n60oh: the root pointer moves only for a member whose merge
     request merged in this item, and to the revision that merge landed --
     never to whatever its origin's tip has become, which the item never
-    built. A selected member the item never changed keeps its pointer."""
+    built. A selected member the item never changed keeps its pointer. Its
+    commit names the pointers alone: anything else staged in the root stays
+    out of the commit Kraft repins and pushes."""
     row, worktree, origin = await _publishable(
         database, run_dirs, tmp_path, pointer="bump", second=True, untouched=("pkg2",)
     )
@@ -194,12 +197,21 @@ async def test_the_pointer_bump_moves_only_merged_members_and_to_what_merged(
     merged = git(worktree / "repos" / "pkg", "rev-parse", "HEAD")
     fake = _OvertakenForge()
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
+    if staged:
+        (worktree / "unseen.txt").write_text("nobody reviewed this\n")
+        git(worktree, "add", "unseen.txt")
+        head = git(worktree, "rev-parse", "HEAD")
+        bump = forge.run._point_at_merged_members
+        # No member merged yet: no pointer to bump, so no commit at all.
+        assert await bump(fake, database, worktree, store.branch_for(row), row["id"]) == []
+        assert git(worktree, "rev-parse", "HEAD") == head
 
     assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
 
     assert git(tmp_path / "pkg", "rev-parse", "main") != merged, "someone landed after it"
     assert git(origin, "rev-parse", "main:repos/pkg") == merged
     assert git(origin, "rev-parse", "main:repos/pkg2") == untouched
+    assert "unseen.txt" not in git(origin, "ls-tree", "--name-only", "main").split()
 
 
 async def test_a_workspace_items_base_branch_is_its_roots_and_members_keep_their_own(
