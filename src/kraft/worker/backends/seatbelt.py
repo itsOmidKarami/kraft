@@ -7,13 +7,28 @@ of `render_profile` is the policy: broad allows first, then the carve-outs
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
-from collections.abc import Sequence
+import platform
+import shutil
+import tempfile
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import Literal, NamedTuple
 
-from kraft.worker import host_view
+from kraft.paths import RunDirs
+from kraft.worker import host_view, os_init, shim
+from kraft.worker.backends import bwrap
+from kraft.worker.ca import write_whole
 from kraft.worker.mounts import Mount
-from kraft.worker.sandbox import SandboxRefused
+from kraft.worker.sandbox import _HARDENED_GIT_CONFIG, SandboxRefused, _pin
+
+logger = logging.getLogger(__name__)
+
+SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+#: Longest `end_session` waits for a sweep; the sweep itself stops after ten kill rounds.
+SWEEP_SECONDS = 30
 
 #: Readable besides `host_view.system_dirs()`; none holds operator data.
 SYSTEM_READS = ("/private/etc", "/private/var/db/timezone", "/private/var/db/dyld", "/dev/fd")
@@ -146,3 +161,168 @@ def render_profile(
             '(allow network-outbound (remote ip (string-append "localhost:" (param "RELAY_PORT"))))'
         )
     return "\n".join(out) + "\n"
+
+
+class SessionFiles(NamedTuple):
+    """What a launch makes on the host, named by its key (`ids.qualified` of a
+    session; `setup-` or `oneshot-` and a uuid for one that has none)."""
+
+    tmpdir: Path
+    marker: Path
+    control: Path
+    profile: Path
+
+
+def session_files(run_base: Path, key: str) -> SessionFiles:
+    # Resolved: the profile and `sandbox_check` both match the real path.
+    base = Path(os.path.realpath(run_base)) / "os-sandbox"
+    markers = base / "markers"
+    return SessionFiles(
+        base / "tmp" / key, markers / key, markers / "control", base / "profiles" / f"{key}.sb"
+    )
+
+
+def seatbelt_argv(
+    cmd: list[str],
+    cwd: str | Path,
+    sandbox: Mapping,
+    session: list[Mount],
+    *,
+    env: Mapping[str, str],
+    passthrough: Iterable[str],
+    home: Path | None,
+    workdir: Path | None,
+    sock_path: Path | None,
+    started: Path | None,
+    search_path: str,
+    run_dirs: RunDirs,
+    key: str,
+    agent: str | None = None,
+    mode: Literal["launch", "oneshot"] = "launch",
+) -> list[str]:
+    """The whole launch of `cmd` on macOS, as `bwrap.bwrap_argv` builds it on
+    Linux: the launcher (`os_init.py launch`, on the host, which is also the
+    relay), `sandbox-exec` with a profile written for this launch, and the init
+    that runs the command inside. Nothing secret is on it: a secret crosses by
+    name (`--keep`), through the launcher's environment."""
+    shown = bwrap.show_host(
+        cmd,
+        cwd,
+        sandbox,
+        passthrough=passthrough,
+        workdir=workdir,
+        search_path=search_path,
+        agent=agent,
+    )
+    files = session_files(run_dirs.base, key)
+    roots = shown.roots
+    mounts = [*session, *([Mount(home, home, False)] if home is not None else [])]
+    text = render_profile(
+        mounts=mounts,
+        read_roots=[*shown.interp_roots, Path(os_init.__file__), *roots, *shown.ca, shim.HOST_DIR],
+        # A symlink hop's own path: the real paths exist here, so nothing is recreated.
+        read_literals=list(
+            dict.fromkeys(link for link, _ in (*shown.first.links, *shown.resolved.links))
+        ),
+        denied_reads=list(
+            dict.fromkeys(h for root in roots for h in host_view.credential_shadows(root))
+        ),
+        tmpdir=files.tmpdir,
+        marker=files.marker,
+        relay=sock_path is not None,
+    )
+    for d in (files.profile.parent.parent, files.profile.parent):
+        d.mkdir(parents=True, exist_ok=True, mode=0o700)
+        d.chmod(0o700)
+    write_whole(files.profile, text.encode(), 0o600)
+    pins: dict[str, str] = {}
+    _pin(pins, _HARDENED_GIT_CONFIG)
+    literals = {"HOME": str(home or files.tmpdir / "home"), **pins, **env}
+    init = [str(shown.interp), "-I", "-S", os_init.__file__]
+    return [
+        *init,
+        mode,
+        *("--keep", ",".join(shown.keep)),
+        *(a for name, value in literals.items() for a in ("--setenv", f"{name}={value}")),
+        # os_init refuses a oneshot that records a start.
+        *(("--started", str(started)) if started and mode == "launch" else ()),
+        *("--marker", str(files.marker), "--control", str(files.control)),
+        *("--tmpdir", str(files.tmpdir)),
+        *(("--relay-sock", str(sock_path)) if sock_path is not None else ()),
+        "--",
+        SANDBOX_EXEC,
+        *("-f", str(files.profile)),
+        *init,
+        "init",
+        *("--chdir", str(shown.chdir)),
+        "--",
+        *cmd,
+    ]
+
+
+def probe_darwin() -> str | None:
+    """Why `kind: os` cannot run on this Mac, with its fix, or None."""
+    if (machine := platform.machine()) not in ("arm64", "x86_64"):
+        return f"kind: os supports arm64 and x86_64 Macs, not {machine}"
+    if os.geteuid() == 0:
+        return "kind: os does not run while Kraft runs as root"
+    if not os.access(SANDBOX_EXEC, os.X_OK):
+        return f"{SANDBOX_EXEC} is missing (it ships with macOS): use kind: docker on this Mac"
+    if problem := bwrap.missing_tools():
+        return problem
+    # The real profile builder's output for an empty session: catches a profile
+    # that does not parse as well as a Kraft that is sandboxed itself.
+    with tempfile.TemporaryDirectory(prefix="kraft-probe-") as tmp:
+        root = Path(os.path.realpath(tmp))
+        profile = root / "probe.sb"
+        profile.write_text(
+            render_profile(
+                mounts=[],
+                read_roots=[],
+                read_literals=[],
+                denied_reads=[],
+                tmpdir=root / "tmp",
+                marker=root / "marker",
+                relay=True,
+            )
+        )
+        trial = bwrap._run(
+            [SANDBOX_EXEC, "-f", str(profile), "-D", "RELAY_PORT=1", "/usr/bin/true"]
+        )
+    if not isinstance(trial, str) and trial.returncode == 0:
+        return None
+    # 65 is also how a profile that fails to parse exits; only this text means nesting.
+    if (
+        not isinstance(trial, str)
+        and trial.returncode == 65
+        and "Operation not permitted" in trial.stderr
+    ):
+        return (
+            "Kraft is itself running inside a sandbox, so it cannot start one: "
+            "run the Kraft server outside it"
+        )
+    err = trial if isinstance(trial, str) else trial.stderr.strip() or f"exit {trial.returncode}"
+    return f"sandbox-exec cannot start a sandbox here: {err}"
+
+
+async def end_session(files: SessionFiles, name: str) -> bool:
+    """End every process a session left (`os_init.sweep`, in a thread, bounded),
+    then remove its temporary directory and profile. False when processes
+    remain or the sweep failed: the marker stays, so a later sweep still finds
+    them, and so does the temporary directory. `name` is for the log."""
+    if not files.marker.exists() and not files.tmpdir.exists():
+        files.profile.unlink(missing_ok=True)
+        return True
+    try:
+        left = await asyncio.wait_for(
+            asyncio.to_thread(os_init.sweep, str(files.marker), str(files.control)), SWEEP_SECONDS
+        )
+    except (OSError, TimeoutError) as exc:
+        logger.warning("session %s: its processes could not be swept: %s", name, exc)
+        return False
+    if left:
+        logger.warning("session %s: processes survived the sweep, pids %s", name, left)
+        return False
+    shutil.rmtree(files.tmpdir, ignore_errors=True)
+    files.profile.unlink(missing_ok=True)
+    return True

@@ -9,6 +9,8 @@ command is missing runs the call (codex treats an unrunnable hook as allow).
 
 from __future__ import annotations
 
+import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 #: The installed directory holding the shim, and nothing else.
@@ -16,3 +18,11 @@ HOST_DIR = Path(__file__).parent / "bin"
 #: Where every sandbox sees that directory, first on its PATH. Fixed, never
 #: derived from a host path (spec, "Staying cloud-ready" rule 5).
 CONTAINER_DIR = "/opt/kraft/bin"
+
+
+def sandbox_dir(sandbox: Mapping | None) -> str:
+    """Where `sandbox` shows the shim: macOS has no mount namespace to put it at
+    `CONTAINER_DIR`, so a `kind: os` sandbox there reads it where it is."""
+    if sys.platform == "darwin" and sandbox is not None and sandbox.get("kind") == "os":
+        return str(HOST_DIR)
+    return CONTAINER_DIR

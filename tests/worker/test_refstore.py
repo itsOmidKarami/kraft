@@ -362,6 +362,8 @@ _NOT_FILE = "something that is not a regular file"
         pytest.param("stale-lock", "{start}", None, "{start}", True, id="stale-lock"),
         pytest.param("no-branch", "junk", None, "junk", False, id="no-branch"),
         pytest.param("lock-dir", "not an oid", "'not an oid'", "{start}", False, id="lock-dir"),
+        pytest.param("packed-lock-dir", None, None, "{start}", False, id="packed-lock-dir"),
+        pytest.param("packed-lock-file", None, None, "{start}", False, id="packed-lock-file"),
         pytest.param(
             "lock-symlink", "not an oid", "'not an oid'", "{start}", False, id="lock-symlink"
         ),
@@ -392,6 +394,11 @@ def test_check_direct(repo, direct, tmp_path, kind, text, left, final, lock_stay
         lock.write_text("")
     if kind == "lock-dir":
         (lock / "x").mkdir(parents=True)
+    packed_lock = store.common / "packed-refs.lock"
+    if kind == "packed-lock-dir":
+        (packed_lock / "x").mkdir(parents=True)
+    if kind == "packed-lock-file":
+        packed_lock.write_text("")
     if kind == "lock-symlink":
         lock.symlink_to(outside / "victim")
     if kind == "ref-symlink":
@@ -416,6 +423,8 @@ def test_check_direct(repo, direct, tmp_path, kind, text, left, final, lock_stay
     got = refstore.check_direct(base, store)
 
     assert os.path.lexists(lock) == lock_stays
+    # A regular one may be a co-task's commit in flight, as the branch's is.
+    assert os.path.lexists(packed_lock) == (kind == "packed-lock-file")
     assert not (outside / "victim").exists()
     if kind.startswith("reflog"):
         assert not os.path.lexists(reflog)
@@ -431,6 +440,51 @@ def test_check_direct(repo, direct, tmp_path, kind, text, left, final, lock_stay
         # The accepted value is the one a later bad write is put back to.
         ref.write_text("not an oid\n")
         assert "restored " + work in refstore.check_direct(base, store)
+
+
+def test_a_branch_the_host_packed_since_is_not_put_back(repo, direct):
+    """`pack-refs` (or `gc`) on the host after a session removes the loose file; the
+    branch is then in `packed-refs`, at whatever the host moved it to."""
+    base, store, ref = direct
+    moved = _commit_object(repo, git(repo, "rev-parse", "main"), "rebased")
+    git(repo, "update-ref", f"refs/heads/{BRANCH}", moved)
+    git(repo, "pack-refs", "--all", "--prune")
+    assert not ref.exists()
+
+    assert refstore.check_direct(base, store) is None
+    assert git(repo, "rev-parse", BRANCH) == moved
+    assert not ref.exists()
+
+
+@pytest.mark.parametrize(
+    ("item", "gone", "problems"),
+    [("w1", False, 1), ("w2", False, 0), ("w1", True, 0)],
+    ids=["its-item", "another-item", "repository-gone"],
+)
+def test_check_direct_item(direct, worktree, item, gone, problems):
+    """A restart leaves no `run_task` to call `check_direct`: the item's own
+    stores are found by their sidecars."""
+    base, store, ref = direct
+    refstore.prepare_direct(base, worktree, BRANCH, work_item_id="w1")
+    start = ref.read_text().strip()
+    ref.write_text("ref: refs/heads/main\n")
+    if gone:
+        shutil.rmtree(store.common)
+
+    assert len(refstore.check_direct_item(base, item)) == problems
+    if not gone:
+        assert ref.read_text().strip() == (start if problems else "ref: refs/heads/main")
+
+
+def test_check_direct_item_leaves_a_private_store_alone(repo, worktree, prepare, tmp_path):
+    """A store `prepare` built has no recorded value to put back: checked as a direct
+    one, its branch would be removed."""
+    prepare(work_item_id="w1")
+    ref = repo / ".git" / "refs" / "heads" / BRANCH
+    ref.write_text("junk\n")
+
+    assert refstore.check_direct_item(tmp_path / "run", "w1") == []
+    assert ref.read_text() == "junk\n"
 
 
 @pytest.mark.parametrize(
@@ -468,13 +522,20 @@ def test_prepare_direct(repo, worktree, tmp_path, kind):
     if kind == "slash-branch":
         shutil.rmtree(logs.parent)  # git made it with the branch; Kraft must be able to
 
-    (store,) = refstore.prepare_direct(base, worktree, branch)
+    (store,) = refstore.prepare_direct(base, worktree, branch, work_item_id="w1")
 
     assert store.direct and store.shadow == store.common == common and store.checkout is None
     assert ref.read_text().strip() == want
     assert logs.parent.is_dir()
     sidecar = refstore._meta_path(refstore.shadow_dir(base, store.worktree_gitdir))
-    assert json.loads(sidecar.read_text()) == {"branch": branch, "value": want}
+    assert json.loads(sidecar.read_text()) == {
+        "branch": branch,
+        "value": want,
+        "direct": True,
+        "work_item_id": "w1",
+        "common": str(common),
+        "worktree_gitdir": str(store.worktree_gitdir),
+    }
     assert [p for p in (base / "sandbox-git").iterdir() if p.is_dir()] == []
 
 

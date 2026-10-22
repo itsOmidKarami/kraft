@@ -20,6 +20,19 @@ from kraft.worker.sandbox import FORWARDED_ENV, SandboxNotReady, SandboxRefused
 SANDBOX = {"kind": "os", "network": {"runtime": {"allow": ["a.io"]}}}
 
 
+@pytest.fixture(autouse=True)
+def _on_linux(monkeypatch):
+    """These pin bubblewrap's argv; the macOS half is `test_seatbelt_launch.py`'s. The
+    backend picks by `sys.platform`, and a Mac runs this file too. The host view caches
+    by platform, so it is recomputed either side."""
+    for cached in (host_view.system_dirs, host_view.init_interpreter):
+        cached.cache_clear()
+    monkeypatch.setattr(bwrap.sys, "platform", "linux")
+    yield
+    for cached in (host_view.system_dirs, host_view.init_interpreter):
+        cached.cache_clear()
+
+
 @pytest.fixture
 def scene(tmp_path, run_dirs, monkeypatch):
     """A checkout, a fake `bwrap` first on PATH, a CLI reached through a
@@ -339,7 +352,7 @@ def host(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("setup", "expect"),
     [
-        (lambda h, mp: mp.setattr(bwrap.sys, "platform", "darwin"), "Linux only"),
+        (lambda h, mp: mp.setattr(bwrap.sys, "platform", "win32"), "Linux and macOS only"),
         (
             lambda h, mp: mp.setattr(os, "geteuid", lambda: 0),
             "does not run while Kraft runs as root",
