@@ -30,9 +30,9 @@ _PROTECTED_IN_HOME = (
     ".claude",
     ".codex",
     ".local/share/keyrings",
+    "Library/Keychains",
+    "Library/Cookies",
 )
-#: The system directories every sandbox mounts, so a file in one adds no root.
-_SYSTEM = tuple(Path(p) for p in ("/usr", "/bin", "/sbin", "/lib", "/lib64"))
 SYSTEM_PYTHON = Path("/usr/bin/python3")
 #: `credentials` is cargo's legacy name for `credentials.toml`, still read.
 CREDENTIAL_FILES = (
@@ -66,6 +66,54 @@ class Resolved:
 
 def _within(path: Path, parent: Path) -> bool:
     return path == parent or path.is_relative_to(parent)
+
+
+@functools.cache
+def system_dirs() -> tuple[Path, ...]:
+    """The system directories every sandbox mounts, so a file in one adds no root."""
+    if sys.platform != "darwin":
+        return tuple(Path(p) for p in ("/usr", "/bin", "/sbin", "/lib", "/lib64"))
+    dirs = [
+        Path(p) for p in ("/usr", "/bin", "/sbin", "/System", "/Library/Developer/CommandLineTools")
+    ]
+    try:
+        out = subprocess.run(["xcode-select", "-p"], capture_output=True, text=True, timeout=5)
+        picked = out.stdout.strip() if out.returncode == 0 else ""
+        selected = Path(picked).resolve() if picked else None
+    except (OSError, subprocess.SubprocessError):
+        selected = None
+    # `xcode-select -p` inside Xcode.app is `Xcode.app/Contents/Developer`, and the `/usr/bin/git`
+    # shim runs `xcodebuild`, which loads frameworks from `Contents/SharedFrameworks`: show the
+    # app's `Contents`, which holds no operator data, not only `Developer`.
+    if (
+        selected
+        and selected.name == "Developer"
+        and selected.parent.name == "Contents"
+        and selected.parent.parent.suffix == ".app"
+    ):
+        selected = selected.parent
+    if selected:
+        from kraft.paths import kraft_home
+
+        # `xcode-select -p` follows DEVELOPER_DIR, which the operator's shell may point anywhere:
+        # checked on what is shown, after the widening.
+        home = Path(os.environ.get("HOME") or Path.home())
+        if protected_refusal(selected, home, kraft_home()):
+            selected = None
+    if selected and not any(_within(selected, d) for d in dirs):
+        dirs.append(selected)
+    return tuple(dirs)
+
+
+def system_excluded() -> tuple[Path, ...]:
+    """Inside `system_dirs()` yet not system: `/usr/local` holds operator data."""
+    return (Path("/usr/local"),) if sys.platform == "darwin" else ()
+
+
+def _is_system(path: Path) -> bool:
+    return any(_within(path, d) for d in system_dirs()) and not any(
+        _within(path, x) for x in system_excluded()
+    )
 
 
 def _protected(home: Path, kraft_home: Path) -> list[Path]:
@@ -127,7 +175,7 @@ def _expand(path: Path) -> tuple[list[tuple[Path, Path]], Path]:
 def _root_of(final: Path, home: Path, kraft_home: Path) -> Path | None:
     """The directory to mount for a file: its own, or when that is a `bin/`
     the install prefix above it (a Node prefix, a versioned install)."""
-    if any(_within(final, s) for s in _SYSTEM):
+    if _is_system(final):
         return None
     root = final.parent
     if root.name == "bin":
@@ -199,7 +247,7 @@ def resolve(
     if not path.exists():
         raise NotFound(f"{executable!r} not found: {path} does not exist")
     checkout, home = checkout.resolve(), home.resolve()
-    shown = [checkout, *_SYSTEM, *(v.resolve() for v in visible)]
+    shown = [checkout, *(v.resolve() for v in visible)]
     roots: list[Path] = []
     hops: list[tuple[Path, Path]] = []
     cur_hops, final = _expand(path)
@@ -208,7 +256,7 @@ def resolve(
     # through a symlinked directory.
     named = Path(os.path.realpath(path.parent)) / path.name
     if _within(named, checkout):
-        if not any(_within(final, d) for d in shown):
+        if not (_is_system(final) or any(_within(final, d) for d in shown)):
             raise Refused(
                 f"{executable} leads to {final}, outside the sandbox's view; "
                 "add its directory to the sandbox's expose list"
@@ -222,14 +270,14 @@ def resolve(
         for target in targets:
             # Already shown (an `expose` path, say): no wider root, so exposing
             # `~/.cargo/bin` never mounts `~/.cargo` for a cargo in it.
-            shown_already = any(_within(target, d) for d in shown)
+            shown_already = _is_system(target) or any(_within(target, d) for d in shown)
             root = None if shown_already else _root_of(target, home, kraft_home)
             if root is not None and root not in roots:
                 roots.append(root)
     links = tuple(
         (link, target)
         for link, target in hops
-        if not any(_within(link, d) for d in (*roots, *shown))
+        if not (_is_system(link) or any(_within(link, d) for d in (*roots, *shown)))
     )
     return Resolved(executable, tuple(roots), links)
 
@@ -271,7 +319,12 @@ def init_interpreter() -> tuple[Path, tuple[Path, ...]]:
     for p in _protected(home, kh):
         if any(_within(p, d) for d in (Path("/usr"), Path("/etc"))):
             raise Refused(f"{p} is under /usr or /etc, which every os sandbox mounts")
-    if SYSTEM_PYTHON.exists() and _within(SYSTEM_PYTHON.resolve(), Path("/usr")):
+    # On a Mac /usr/bin/python3 is an xcrun shim to 3.9, never the init's python.
+    if (
+        sys.platform != "darwin"
+        and SYSTEM_PYTHON.exists()
+        and _within(SYSTEM_PYTHON.resolve(), Path("/usr"))
+    ):
         probe = [str(SYSTEM_PYTHON), "-c", "import sys; sys.exit(sys.version_info < (3, 10))"]
         if subprocess.run(probe, capture_output=True).returncode == 0:
             return SYSTEM_PYTHON, ()

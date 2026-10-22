@@ -118,8 +118,9 @@ FAIL_CLOSED_ENV = "KRAFT_PERMISSION_FAIL_CLOSED"
 
 def hook_argv(harness_id: str, sandbox: dict | None = None) -> list[str]:
     """The hook's command. In a sandbox under `network:`, the `kraft` shim at
-    its fixed container path, answered by the daemon through the session's
-    channel: never the host's interpreter, which the container has not got.
+    the path that sandbox shows it at (`shim.sandbox_dir`), answered by the
+    daemon through the session's channel: never the host's interpreter, which
+    the container has not got.
 
     On the host, `-I`: the CLI runs the hook from the worktree, which the
     worker writes, and plain `-m` puts that directory first on `sys.path`. An
@@ -129,7 +130,7 @@ def hook_argv(harness_id: str, sandbox: dict | None = None) -> list[str]:
     env (a repo's `env:` may set it, relative to the worktree); `-I` ignores
     every `PYTHON*` variable and the user site as well."""
     if sandbox and sandbox.get("network"):
-        return [f"{_shim.CONTAINER_DIR}/kraft", "admin", "permission-hook", harness_id]
+        return [f"{_shim.sandbox_dir(sandbox)}/kraft", "admin", "permission-hook", harness_id]
     return [sys.executable, "-I", "-m", "kraft", "admin", "permission-hook", harness_id]
 
 

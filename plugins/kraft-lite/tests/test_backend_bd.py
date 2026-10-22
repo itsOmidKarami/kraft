@@ -231,7 +231,8 @@ def test_write_stamps_a_strictly_newer_updated_at(monkeypatch, stored, expected)
     seen = []
 
     def fake_run(cmd, **kwargs):
-        seen.append(kwargs.get("input"))
+        if cmd[1] == "import":  # a write first exports, for the labels the store holds
+            seen.append(kwargs.get("input"))
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     store = kl.BdStore(run=fake_run)

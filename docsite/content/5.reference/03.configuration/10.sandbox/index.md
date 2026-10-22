@@ -37,6 +37,8 @@ The keys depend on `kind`. A key a `kind` refuses stops `repos.yaml` from loadin
 
 Set the key in `repos.yaml` or in `policy.sandbox`, not both. It is part of the repository policy layer: once it is set, no chain, node or task can turn it off or change it, limits and network policy included, and `sandbox: false` on a repo cannot turn off one a layer set.
 
+An item keeps the sandbox it was filed with. A later change to the key, `expose`, `network`, `resources` and `kit` included, reaches only items filed after it; `kraft item retry` relaunches the item in the sandbox it was filed with. A sandbox set on a repo whose items were filed with none does reach them, at their next launch.
+
 ## In-place items are never sandboxed
 _Added in 2.1_
 

@@ -17,6 +17,7 @@ from support.harness import git
 from support.session_leader import SESSION_LEADER_ONLY
 
 from kraft.adapters import hook_install as hi
+from kraft.worker import shim
 
 ARGV = ["/py", "-m", "kraft", "admin", "permission-hook", "cursor"]
 
@@ -45,6 +46,26 @@ def test_needs_a_hook_only_when_there_is_policy_to_enforce():
 def test_hook_argv_never_carries_fail_closed():
     # Fail-closed is per session (env), so every launch writes the same entry.
     assert hi.hook_argv("cursor")[-3:] == ["admin", "permission-hook", "cursor"]
+
+
+@pytest.mark.parametrize(
+    ("platform", "sandbox", "shim_dir"),
+    [
+        ("linux", {"kind": "os", "network": {"a": 1}}, shim.CONTAINER_DIR),
+        ("darwin", {"kind": "os", "network": {"a": 1}}, str(shim.HOST_DIR)),
+        ("darwin", {"kind": "docker", "network": {"a": 1}}, shim.CONTAINER_DIR),
+    ],
+    ids=["os-linux", "os-darwin", "docker-on-a-mac"],
+)
+def test_hook_argv_names_the_shim_where_the_sandbox_shows_it(
+    monkeypatch, platform, sandbox, shim_dir
+):
+    """macOS has no mount namespace to put the shim at the fixed container path."""
+    monkeypatch.setattr(sys, "platform", platform)
+    assert hi.hook_argv("cursor", sandbox) == [
+        f"{shim_dir}/kraft",
+        *("admin", "permission-hook", "cursor"),
+    ]
 
 
 def test_installed_once_and_never_seen_by_git(tmp_path):

@@ -18,6 +18,9 @@ from pathlib import Path
 import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PLUGIN))
+
+import kl as lite  # noqa: E402  (`kl` below is the CLI helper)
 
 # e2e("bd"): the main suite runs this in CI's e2e-cli job, not the unit job.
 # The skipif stays for lite-floor, which runs this directory without
@@ -132,3 +135,113 @@ def test_the_jsonl_fallback_file_is_importable_by_bd(tmp_path, bd_repo):
         ["bd", "import", str(fallback)], cwd=bd_repo, capture_output=True, text=True
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_a_write_replaces_the_labels_bd_held(bd_repo, monkeypatch):
+    """`bd import` merges a record's labels into the row it updates, so a label
+    the record dropped stays unless the store removes it: a slice read as
+    `in_review` forever after it merged (Kraft-lpkgd). A label holding a comma
+    or a quote is removed whole, never split."""
+    monkeypatch.chdir(bd_repo)
+    store = lite.BdStore()
+    store.write(
+        [
+            {
+                "_type": "issue",
+                "id": "kl-lbl1",
+                "title": "a slice",
+                "issue_type": "task",
+                "status": "open",
+                "labels": [
+                    f"{lite.SLICE_STATUS_LABEL}waiting",
+                    f"{lite.TASKS_LABEL}1,2",
+                    'kraft-note:a"b',
+                ],
+            }
+        ]
+    )
+    for status, tasks, note in (("running", "1,2", 'a"b'), ("merged", "1,2,3", 'c"d')):
+        record = next(r for r in store.load() if r["id"] == "kl-lbl1")  # two writes in a second
+        record = lite.set_label(record, lite.SLICE_STATUS_LABEL, status)
+        record = lite.set_label(record, lite.TASKS_LABEL, tasks)
+        store.write([lite.set_label(record, "kraft-note:", note)])
+
+    labels = next(r for r in store.load() if r["id"] == "kl-lbl1")["labels"]
+    for prefix, want in (
+        (lite.SLICE_STATUS_LABEL, "merged"),
+        (lite.SEQ_LABEL, "3"),
+        (lite.TASKS_LABEL, "1,2,3"),
+        ("kraft-note:", 'c"d'),
+    ):
+        assert [x for x in labels if x.startswith(prefix)] == [prefix + want], prefix
+
+
+@pytest.mark.parametrize("race", ["tie", "older-copy", "a-third-writer-landed"])
+def test_a_row_bd_kept_keeps_its_labels(bd_repo, monkeypatch, race):
+    """bd keeps the stored row on a same-second tie with another writer that
+    also changed a field (`tie`), or over an older copy (`older-copy`), but
+    still merges the incoming labels in: those come back out. When a third
+    writer moved the row after this one loaded it, nothing is taken back, or
+    that writer's labels would go too."""
+    monkeypatch.chdir(bd_repo)
+    monkeypatch.setattr(lite, "_now", lambda: lite.dt.datetime(2026, 10, 22, 6, 0, 0))
+    store = lite.BdStore()
+    first = {
+        "_type": "issue",
+        "id": "kl-tie1",
+        "title": "a slice",
+        "issue_type": "task",
+        "status": "open",
+        "labels": [f"{lite.SLICE_STATUS_LABEL}waiting"],
+        "updated_at": "2026-10-22T06:00:09Z" if race == "older-copy" else "2026-10-22T05:59:00Z",
+    }
+    store.write([first])
+    loaded = store.load()
+    stale = next(r for r in loaded if r["id"] == "kl-tie1")
+    winner = lite.set_label(stale, "kraft-session:", "B")
+    store.write([lite.set_label(winner, lite.SLICE_STATUS_LABEL, "running")])
+    loser = dict(first if race == "older-copy" else stale, status="in_progress")
+    # The third writer's case: both move the slice to `running`, so to this
+    # writer's stale copy that label, the stamp and the counter look like its own.
+    lost_status = "running" if race == "a-third-writer-landed" else "in_review"
+    loser = lite.set_label(loser, lite.SLICE_STATUS_LABEL, lost_status)
+    if race == "a-third-writer-landed":
+        reads = iter([loaded])  # this writer's own read came before the winner's write
+        real = store.load
+        monkeypatch.setattr(store, "load", lambda: next(reads, None) or real())
+    store.write([loser])
+
+    row = next(r for r in lite.BdStore().load() if r["id"] == "kl-tie1")
+    assert row["status"] == "open", "bd kept the winner's row"
+    assert "kraft-session:B" in row["labels"]
+    status = [x for x in row["labels"] if x.startswith(lite.SLICE_STATUS_LABEL)]
+    assert status == [f"{lite.SLICE_STATUS_LABEL}running"]
+    assert [x for x in row["labels"] if x.startswith(lite.SEQ_LABEL)], "the write counter stays"
+
+
+def test_an_import_replaces_the_labels_too(bd_repo, monkeypatch):
+    """`kl import` writes another machine's records through `write_raw`."""
+    monkeypatch.chdir(bd_repo)
+    store = lite.BdStore()
+    store.write(
+        [
+            {
+                "_type": "issue",
+                "id": "kl-imp1",
+                "title": "a slice",
+                "issue_type": "task",
+                "status": "open",
+                "labels": [f"{lite.SLICE_STATUS_LABEL}in_review"],
+            }
+        ]
+    )
+    local = store.load()
+    theirs = lite.set_label(
+        next(r for r in local if r["id"] == "kl-imp1"), lite.SLICE_STATUS_LABEL, "merged"
+    )
+    store.write_raw([theirs], local)
+
+    labels = next(r for r in store.load() if r["id"] == "kl-imp1")["labels"]
+    assert [x for x in labels if x.startswith(lite.SLICE_STATUS_LABEL)] == [
+        f"{lite.SLICE_STATUS_LABEL}merged"
+    ]

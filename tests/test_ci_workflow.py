@@ -110,11 +110,15 @@ def test_a_python_file_moved_into_a_skipped_tree_is_still_a_python_change(tmp_pa
 
 _NEEDS = _JOBS["test-gate"]["needs"]
 _DOCS_ONLY = dict.fromkeys(
-    ("test", "e2e-cli", "frontend", "vscode", "e2e", "ui-contract"), "skipped"
+    ("test", "e2e-cli", "e2e-macos", "frontend", "vscode", "e2e", "ui-contract"), "skipped"
 )
 #: What skips, and passes, by the kind of change: (code, python, the skips).
 _PYTHON_CHANGE = ("true", "true", {"docs-tests": "skipped"})
-_NO_PYTHON = ("true", "false", {"docs-tests": "skipped", "e2e-cli": "skipped"})
+_NO_PYTHON = (
+    "true",
+    "false",
+    {"docs-tests": "skipped", "e2e-cli": "skipped", "e2e-macos": "skipped"},
+)
 
 
 @pytest.mark.parametrize(

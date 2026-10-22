@@ -552,7 +552,44 @@ class BdStore:
         return [json.loads(line) for line in out.splitlines() if line.strip()]
 
     def write(self, records: list[dict]) -> None:
-        self._bd(["import", "-"], stdin=_jsonl(_prepare(records)))
+        self._import(_prepare(records), self.load())
+
+    def _import(self, records: list[dict], held: list[dict]) -> None:
+        """`import` the records, then drop each label the store held for one
+        that the record no longer has: `import` merges labels into the row it
+        updates, so `set_label` alone would leave the old value beside the new
+        (Kraft-lpkgd). For a row bd kept instead (`tie_kept_local_ids`,
+        `stale_skipped_ids`), the labels this import added are taken back, so
+        the other writer's row stays as it was. `--remove-label` leaves
+        `updated_at` alone."""
+        result = self._bd(["import", "--json", "-"], stdin=_jsonl(records))
+        try:
+            report = json.loads(result.stdout)
+        except (TypeError, ValueError):
+            return  # no report: leave every label, as a plain import did
+        # A row bd kept instead (a tie, or an older copy) still takes our labels:
+        # take back the ones it did not hold. A row it wrote keeps only ours.
+        kept = {*report.get("tie_kept_local_ids", ()), *report.get("stale_skipped_ids", ())}
+        before = {r["id"]: r for r in held}
+        # A kept row another writer moved after `held` was read is not the one we
+        # loaded: what we "added" may be theirs too, so it is left whole.
+        # shortcut: a writer landing between this export and the `update` below can still
+        # lose a label it shares with ours; bd has no transaction for labels to close it.
+        now = {r["id"]: r.get("updated_at") for r in self.load()} if kept else {}
+        moved = {i for i in kept if now.get(i) != (before.get(i) or {}).get("updated_at")}
+        for record in (r for r in records if r["id"] not in moved):
+            held_labels = (before.get(record["id"]) or {}).get("labels") or []
+            ours = record.get("labels") or []
+            if record["id"] in kept:
+                stale = [x for x in ours if x not in held_labels]
+            else:
+                stale = [x for x in held_labels if x not in ours]
+            if stale:
+                # Each value is read as CSV: quoted, a label's own comma or quote survives.
+                quoted = ['"' + x.replace('"', '""') + '"' for x in stale]
+                self._bd(
+                    ["update", record["id"], *(a for q in quoted for a in ("--remove-label", q))]
+                )
 
     def write_raw(self, records: list[dict], local: list[dict]) -> None:
         """Records as exported, for `import`, past bd's guard without `_prepare`.
@@ -562,8 +599,7 @@ class BdStore:
         win, and bd keeps the local row on a tie or a newer guard. `local` is
         what `import` loaded, so the store is not exported a second time.
         """
-        out = _past_local(records, local)
-        self._bd(["import", "-"], stdin=_jsonl(out))
+        self._import(_past_local(records, local), local)
 
 
 def repo_root(start: Path | None = None) -> Path:
