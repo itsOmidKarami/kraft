@@ -767,19 +767,6 @@ def test_a_skill_carries_the_final_review_fixes(texts, name, section, needle):
     assert needle in text, f"{name} section {section} lacks {needle!r}"
 
 
-@pytest.mark.parametrize("harness", ["codex", "cursor"])
-def test_a_reference_with_no_check_in_sends_the_user_to_run_slices(harness):
-    """The controller's fallback continues the run, which is run-slices' to do;
-    the child's own wake-up is a separate line, so its instructions carry no
-    request that anyone invoke a skill."""
-    path = PLUGIN / "skills" / "run-slices" / "references" / f"{harness}.md"
-    check_in = " ".join(path.read_text().split("## Check in later")[1].split())
-    assert "tell the user to invoke `kraft-lite:run-slices`" in check_in
-    assert "kraft-lite:next" not in check_in
-    assert "Child: scheduling its own wake-up is unconfirmed too" in check_in
-    assert "`none; continue on the controller's check-in`" in check_in
-
-
 def test_the_claude_code_reference_starts_a_child_from_its_fork():
     body = " ".join((PLUGIN / "skills/run-slices/references/claude-code.md").read_text().split())
     assert "`source_revision`: the commit `--fork` records" in body

@@ -7,9 +7,9 @@ mode, conversations, schedule). Where an ability is marked unconfirmed, look for
 it as discover.md says, then use the fallback named, never a guessed command.
 
 Skills are not namespaced here: `kraft-lite:<name>` in the skills means the skill
-`<name>`, so a child's instructions say `build-slice` and pass this paragraph
-on, and the user invokes `run-slices`. There is no plugin-root variable: `kl.py`
-is two directories above the skill file.
+`<name>`, so a child's instructions say `build-slice`, and the user invokes
+`run-slices`. There is no plugin-root variable: `kl.py` is two directories above
+the skill file. Copy this paragraph into each child's starting instructions.
 
 ## Start a child
 
@@ -23,6 +23,10 @@ is two directories above the skill file.
   `result`: read that field when it finishes. `agy models` lists the model
   slugs. The log's first line, the `init` event, carries the child's
   `conversation_id`, its session id from then on.
+- A headless `agy` whose output is not a terminal has hung, printing nothing
+  (google-antigravity/antigravity-cli#318, closed without a fixed version;
+  1.2.14 ran fine under Kraft). At each check-in, check the child's log is
+  still growing.
 - It needs a cached sign-in from one interactive `agy` run, or
   `"modelProvider": "gemini"` in its settings with `GEMINI_API_KEY`.
 - Cloud: none documented; start the child locally.
@@ -56,7 +60,7 @@ fallback, which is to list it for the user.
 `/schedule` sets a timer that wakes this same conversation, through the agent's
 built-in `schedule` tool; a restart loses it. Calling that tool without the user
 typing `/schedule`, and scheduling in a `-p` session: unconfirmed. Call the tool
-if this session lists it; if it is missing or refused, use the fallback. Say
+if this session lists it. If it is missing or refused, use the fallback: say
 plainly that nothing will wake this session, and tell the user to invoke
 `run-slices` to continue the run.
 

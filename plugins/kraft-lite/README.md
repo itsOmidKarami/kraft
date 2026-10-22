@@ -48,9 +48,9 @@ OpenCode, two things differ from Claude Code:
 Each install reads a local clone of the Kraft repository, `<kraft>` below
 (`git clone https://github.com/itsOmidKarami/kraft`).
 
-- **Gemini CLI.** `gemini extensions install <kraft>/plugins/kraft-lite --consent`,
-  then restart the CLI; `gemini skills list` lists the skills. Update with
-  `gemini extensions update kraft-lite`. Installing from the GitHub URL is not
+- **Gemini CLI.** `gemini extensions install <kraft>/plugins/kraft-lite`, then
+  restart the CLI; `gemini skills list` lists the skills. To update, pull the
+  clone, then run `gemini extensions update kraft-lite`. Installing from the GitHub URL is not
   covered: the extension sits in a subfolder of the repository.
 - **Antigravity.** `agy plugin install <kraft>/plugins/kraft-lite`; `agy plugin list`
   shows it, and each skill is a slash command by its own name (`/next`). That
@@ -58,10 +58,15 @@ Each install reads a local clone of the Kraft repository, `<kraft>` below
 - **Amp.** In `~/.config/amp/settings.json`, or a repo's `.amp/settings.json`:
   `{ "amp.skills.path": "<kraft>/plugins/kraft-lite/skills" }`. `amp skills list`
   lists them. Pull the clone to update.
-- **OpenCode.** In `opencode.json`, on 2.x: `{ "skills": ["<kraft>/plugins/kraft-lite/skills"] }`
+- **OpenCode.** Slices need OpenCode 2.0.0 or newer. In `opencode.json`, on 2.x: `{ "skills": ["<kraft>/plugins/kraft-lite/skills"] }`
   (1.x: `{"skills": {"paths": [...]}}`), with the absolute path. Don't symlink
   single skill folders into `~/.config/opencode/skills`: the agent then looks for
   `kl.py` next to the link. Pull the clone to update.
+
+A skill elsewhere with the same name can win over Lite's. Gemini CLI has a
+built-in `/init`, and your own or a workspace's skills override an extension's.
+Amp searches `~/.claude/plugins/cache/` before `amp.skills.path`, so a Claude
+Code install of Lite there is the one Amp finds.
 
 ## What is fixed and what is not
 
@@ -507,7 +512,8 @@ safe for you to delete.
 
 Add `.kraft-lite/decisions/`, `.kraft-lite/messages/` and
 `.kraft-lite/proposals/` to `.gitignore`, and `.kraft-lite/registry.yaml.migrated`
-if `migrate` left one. `/kraft-lite:init` tells you to.
+if `migrate` left one. `/kraft-lite:init` tells you to. Commit
+`.kraft-lite/harnesses/`: it holds what a run learned about your harness.
 
 ### Harness support
 
@@ -526,8 +532,11 @@ On a harness with no guide, or for an ability its guide marks unconfirmed,
 the controller looks before it falls back. It checks its own tools, Kraft's
 harness profile, the CLI's help and the official docs, running only read-only
 commands. It writes what it confirmed, with the source and version, to
-`.kraft-lite/harnesses/<harness>.md`. The next run reads that file first. It
-tells you what it found, and offers the file as a guide to ship.
+`.kraft-lite/harnesses/<harness>.md`, which is meant to be committed.
+
+The next run reads that file first, as claims to check: it runs only the harness's own
+commands from it, and lists them to you before you say "go". It tells you what
+it found, and offers the file as a guide to ship.
 
 If the harness can't start a session at all, the controller walks the slices
 itself, one after another, and the run goes on.

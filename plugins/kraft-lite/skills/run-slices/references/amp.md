@@ -7,13 +7,16 @@ threads, automations). Where an ability is marked unconfirmed, look for it as
 discover.md says, then use the fallback named, never a guessed command.
 
 Skills are not namespaced here: `kraft-lite:<name>` in the skills means the skill
-`<name>`, so a child's instructions say `build-slice` and pass this paragraph
-on, and the user invokes `run-slices`. There is no plugin-root variable: `kl.py`
-is two directories above the skill file.
+`<name>`, so a child's instructions say `build-slice`, and the user invokes
+`run-slices`. There is no plugin-root variable: `kl.py` is two directories above
+the skill file. Copy this paragraph into each child's starting instructions.
 
 Amp has no model flag. `-m` picks a mode (`low`, `medium`, `high`, `ultra`),
 which sets model, effort and tools together: `-m medium` is the middle tier.
-Every command needs `AMP_API_KEY` (an `sgamp_` access token) in the environment.
+A child needs a signed-in `amp` or `AMP_API_KEY` (an `sgamp_` access token) in
+its environment. With neither, a headless run does not fail at once: it prints
+a device-login prompt and waits about five minutes before it exits 1, so check
+the log's first lines.
 
 ## Start a child
 
@@ -26,8 +29,10 @@ Every command needs `AMP_API_KEY` (an `sgamp_` access token) in the environment.
   continued; `--no-archive-after-execute` keeps it open. The thread id
   (`T-...`) is the `session_id` on the log's first `system`/`init` line.
 - Cloud (orb):
-  `amp -ox "<starting instructions>" --project <owner/repo> --mode medium --title "<chain-id> <key>: <slice title>"`
-  starts a thread on Amp's servers, prints its URL and exits. Choosing the orb's
+  `amp --no-archive-after-execute -ox "<starting instructions>" --project <owner/repo> --mode medium --title "<chain-id> <key>: <slice title>"`
+  starts a thread on Amp's servers, prints its URL and exits. `-ox` archives the
+  thread when its turn ends, and an archived thread refuses `threads continue`;
+  whether the flag keeps an orb thread open is unconfirmed. Choosing the orb's
   branch: unconfirmed; use the fallback, which is to name the branch in the
   instructions and have the child confirm it in its first message.
 - Tags: unconfirmed; put the chain id and slice key in the instructions' first
@@ -39,7 +44,10 @@ Every command needs `AMP_API_KEY` (an `sgamp_` access token) in the environment.
   from the child's worktree, runs the message as a new turn on its thread. Send
   it once the child's last run has exited; while it runs: unconfirmed, use the
   fallback, the messages file on the same machine.
-- Orb: `amp threads continue <thread-id> -ox "<message>"`.
+- Orb: `amp threads continue <thread-id> -ox "<message>"` is documented, but
+  the orb thread may have been archived at its turn's end (above), and an
+  archived thread refuses it: unconfirmed; use the fallback, comments on the
+  child's draft PR.
 
 ## Be messaged
 

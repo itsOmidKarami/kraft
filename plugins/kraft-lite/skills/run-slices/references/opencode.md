@@ -8,9 +8,9 @@ look for it as discover.md says, then use the fallback named, never a guessed
 command.
 
 Skills are not namespaced here: `kraft-lite:<name>` in the skills means the skill
-`<name>`, so a child's instructions say `build-slice` and pass this paragraph
-on, and the user invokes `run-slices`. There is no plugin-root variable: `kl.py`
-is two directories above the skill file.
+`<name>`, so a child's instructions say `build-slice`, and the user invokes
+`run-slices`. There is no plugin-root variable: `kl.py` is two directories above
+the skill file. Copy this paragraph into each child's starting instructions.
 
 Use OpenCode 2.0.0 or newer (npm's `opencode-ai` is still 1.x). It has no cloud
 agent: every child is local.

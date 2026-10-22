@@ -7,9 +7,9 @@ ability is marked unconfirmed, look for it as discover.md says, then use the
 fallback named, never a guessed command.
 
 Skills are not namespaced here: `kraft-lite:<name>` in the skills means the skill
-`<name>`, so a child's instructions say `build-slice` and pass this paragraph
-on, and the user invokes `run-slices`. There is no plugin-root variable: `kl.py`
-is two directories above the skill file.
+`<name>`, so a child's instructions say `build-slice`, and the user invokes
+`run-slices`. There is no plugin-root variable: `kl.py` is two directories above
+the skill file. Copy this paragraph into each child's starting instructions.
 
 Gemini CLI has no session tools and no cloud agent: every child is local, and
 every ability below is a command run through the shell tool.
@@ -18,13 +18,16 @@ every ability below is a command run through the shell tool.
 
 - First the worktree, on the slice branch:
   `git worktree add -b <slice-branch> <path> <fork sha>`. The CLI has no
-  directory flag and runs where it starts; its `--worktree` is experimental and
-  does not name the branch.
+  directory flag and runs where it starts. Its `--worktree` is experimental, and
+  naming its branch with it is unconfirmed.
 - Then, from inside it, in the background, its output to a log file:
   `gemini --skip-trust -m <model> --approval-mode yolo -o stream-json -p "<starting instructions>" > <log> 2>&1 &`.
   `--skip-trust`: a headless run refuses a folder it does not trust, and every
   worktree is a new one. `yolo`: `auto_edit` still asks before a shell command,
   and a headless child has nobody to answer. `-m` takes a `gemini-...` model.
+- Activating a skill shows a consent prompt; whether `-p` with `yolo` answers it
+  is unconfirmed. Check the child's log for a skill activation left pending or
+  denied, and if you find one, tell the user.
 - It needs `GEMINI_API_KEY` (or Gemini Code Assist) in the environment.
 - Session id: unconfirmed; record the worktree path as the session id. Sessions
   are kept per folder, so the worktree identifies its child.
@@ -36,7 +39,8 @@ every ability below is a command run through the shell tool.
 Unconfirmed. `--resume` takes `latest` or an index, not a session id, and the
 docs do not show it with `-p`. Use the fallback: on the same machine, the
 messages file `.kraft-lite/messages/<chain-id>/<key>.jsonl`, which the child
-reads each time it wakes; otherwise a comment on its draft PR. A child whose run
+reads at its own channel checks (nothing wakes it); otherwise a comment on its
+draft PR. A child whose run
 has ended has exited: to continue it, start a fresh child on its branch
 (section 4).
 

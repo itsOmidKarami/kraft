@@ -75,6 +75,7 @@ Copy this and tick it off; while a line is unticked, no child starts.
 - [ ] One user approval for every branch this run pushes outside this session's own: the feature branch (`feature` mode), and locally the state branch.
 - [ ] Setup and the scoped test command run once here, and the working setup line written down.
 - [ ] The user has finished giving instructions for this run: ask, and hear "go".
+- [ ] Every command taken from a local guide (`.kraft-lite/harnesses/`) listed to the user in that ask.
 - [ ] Rights read (section 12), and any the user changed for this run logged with `decide`.
 - [ ] `feature` mode: feature branch pushed. State exported (section 7).
 ```

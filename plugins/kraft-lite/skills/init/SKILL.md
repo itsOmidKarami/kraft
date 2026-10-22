@@ -62,7 +62,8 @@ Then print the path and say it is meant to be edited and committed. Tell the use
 to add `.kraft-lite/decisions/`, `.kraft-lite/messages/` and `.kraft-lite/proposals/`
 to `.gitignore`: a sliced run writes its decisions log, messages and proposals
 there, and they are not for the repo. After a migrate, `.kraft-lite/registry.yaml.migrated`
-goes there too, or is deleted. `bindings.yaml` stays committed.
+goes there too, or is deleted. `bindings.yaml` stays committed, and so does
+`.kraft-lite/harnesses/`, what a sliced run learned about a harness's tools.
 
 ## A pre-V1 directory: migrate
 
