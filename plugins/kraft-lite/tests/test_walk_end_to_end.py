@@ -75,6 +75,9 @@ def test_state_reports_a_gate_node(walk, kl_cli, tmp_path):
     kl_cli(tmp_path, "produced", "--kind", "spec", "--path", "docs/spec.md")
     refused = kl_cli(tmp_path, "gate", ok=False)
     assert "spec is an exec node, not a gate node" in refused.stderr
+    # `approve` answers a gate; on an exec node it would close it with nothing run.
+    refused = kl_cli(tmp_path, "approve", ok=False)
+    assert "spec is an exec node, not a gate node: run its tasks and close it" in refused.stderr
     kl_cli(tmp_path, "close")
     # Approve closes a gate; `close` does not.
     refused = kl_cli(tmp_path, "close", ok=False)

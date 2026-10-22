@@ -28,11 +28,12 @@ migrate`, first. No bindings file is needed otherwise: every task has a default.
 
 It prints the chain id, which backend holds the state, and the chain it froze
 with where that came from, for example
-`{"chain_id": "<id>", "backend": "jsonl", "chain": "default", "source": "bundled"}`:
+`{"chain_id": "<id>", "backend": "jsonl", "chain": "default", "source": "bundled", "unused_bindings": []}`:
 `bd`, or `jsonl` for a file under `.kraft-lite/`; `bundled`, `user`, `repo` (the
 repo's own `.kraft/`, as it stands in the working tree) or the file's path. Say
 all of it, so the user knows where their state lives, which chain is theirs and
-what it runs. Carry that id: every later verb takes `--chain-id <id>`, and a
+what it runs, and any `unused_bindings`: `bindings.yaml` keys no task of this
+chain reads, often a typo. Carry that id: every later verb takes `--chain-id <id>`, and a
 directory holding two unfinished chains refuses to guess between them.
 
 Confirm the chain exists: `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>`

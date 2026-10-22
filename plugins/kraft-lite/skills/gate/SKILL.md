@@ -15,8 +15,8 @@ short for `python3 "$CLAUDE_PLUGIN_ROOT/kl.py"`; every `KL` command carries
 ## 1. Check, then present
 
 Run `KL state`. Only proceed if `kind` is `gate` and `status` is `blocked`;
-otherwise stop and invoke `kraft-lite:next`, because `approve` closes whatever
-node is current, its tasks unrun.
+otherwise stop and invoke `kraft-lite:next`, because `approve` answers a gate
+whether or not the user has seen it.
 
 Then show the user what the gate is about: `gate.message`, and the file at
 `gate.artifact_path`, the newest file of kind `gate.artifact` the run produced

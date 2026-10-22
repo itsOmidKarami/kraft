@@ -2237,19 +2237,24 @@ def _resolve_chain(root: Path, chain: str | Path | None) -> dict:
     return kl_chains.resolve(root, os.environ, ref=ref)
 
 
-def _start_chain(root: Path, chain: str | None, attached: dict[str, Path]) -> dict:
+def _start_chain(
+    root: Path, chain: str | None, attached: dict[str, Path]
+) -> tuple[dict, list[str]]:
     """The chain `start` freezes: `chain` resolved by `_resolve_chain`; then
     trimmed for the attached kinds. Every task is dispatched once before anything is written, so
     a bindings file Lite cannot use, or a task it has no instruction for, stops
-    `start` rather than the walk at that node."""
+    `start` rather than the walk at that node. Returned with the bindings
+    `tasks` keys that match no task of the chain, checked before the trim: a
+    binding for a node the attachments skip is not a typo."""
     for kind, path in attached.items():
         if not path.is_file():
             raise SystemExit(f"kraft-lite: --{kind} {path}: no such file")
-    resolved = kl_chains.trim(_resolve_chain(root, chain), set(attached))
+    full = _resolve_chain(root, chain)
+    resolved = kl_chains.trim(full, set(attached))
     dispatch = _dispatcher(root)
     for task in _dispatched_tasks(resolved):
         dispatch(task)
-    return resolved
+    return resolved, kl_bindings.unused(kl_bindings.read_bindings(root), _dispatched_tasks(full))
 
 
 def _start_records(chain: dict, title: str, chain_id: str) -> list[dict]:
@@ -2505,8 +2510,11 @@ def main(argv: list[str] | None = None) -> int:
         _refuse_beside_a_legacy_run(root, store.load())
         new_id = new_chain_id()
         attached = {k: getattr(args, k) for k in ATTACHMENT_KINDS if getattr(args, k)}
+        # A child's slice is part of the chain the controller started, which
+        # already reported its unused bindings.
+        unused: list[str] = []
         if args.slice_of is None:
-            chain = _start_chain(root, args.chain, attached)
+            chain, unused = _start_chain(root, args.chain, attached)
         else:
             chain = _start_slice(root, args.slice_of, args.chain, attached)
         records = _start_records(chain, args.title, new_id)
@@ -2525,6 +2533,7 @@ def main(argv: list[str] | None = None) -> int:
                     "backend": backend(root),
                     "chain": chain["id"],
                     "source": chain["source"],
+                    "unused_bindings": unused,
                 }
             )
         )
@@ -2590,6 +2599,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.verb in ("close", "approve"):
         if args.verb == "close" and definition["kind"] == "gate":
             raise SystemExit(f"kraft-lite: {node_id} is a gate: approve or reject it")
+        if args.verb == "approve" and definition["kind"] != "gate":
+            raise SystemExit(
+                f"kraft-lite: {node_id} is an exec node, not a gate node: "
+                "run its tasks and close it"
+            )
         _refuse_close_before_slices(everything, resolved_id, node_record, chain)
         store.write([bank_wait(dict(node_record, status="closed"))])
     elif args.verb == "gate":

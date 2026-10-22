@@ -514,6 +514,14 @@ def _rejecting(rejected: str, before: str = "", tasks: str = MERGE_TASK, extra: 
             id="on_conflict",
         ),
         pytest.param(
+            {
+                "c": "nodes:\n  - {id: a, kind: exec, tasks: [{id: t, extends: worker}], "
+                "on_base_changed: {restart_form: a}}\n"
+            },
+            r"a.on_base_changed.restart_form: unknown key; known: \[.restart_from.",
+            id="base_changed_unknown_key",
+        ),
+        pytest.param(
             {"c": _looped("judge: {extends: worker}")},
             "a.fix_loop.judge: must be a task with an id",
             id="judge_without_id",
@@ -651,6 +659,11 @@ def _rejecting(rejected: str, before: str = "", tasks: str = MERGE_TASK, extra: 
             id="merge_rejected_without_repair",
         ),
         pytest.param(
+            {"c": _rejecting(f"restart_from: a, {REPAIR}, max_attempts: 2")},
+            r"m.on_merge_rejected.max_attempts: unknown key; known: \['restart_from', 'repair'\]",
+            id="merge_rejected_unknown_key",
+        ),
+        pytest.param(
             {
                 "r": _rejecting(
                     f"restart_from: b, {REPAIR}",
@@ -704,16 +717,30 @@ def test_repo_library_names_its_own(tmp_path, home, written, components):
         kl_chains.resolve(tmp_path, {}, "repo:bad")
 
 
-def test_resolve_path_argument(tmp_path, home):
-    """A chain file outside any library resolves its `extends` against the
-    instance library, here the bundled one."""
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    file = elsewhere / "mine.yaml"
-    file.write_text("extends: quick-task\nremove: [verify]\n")
+@pytest.mark.parametrize(
+    ("folder", "edit", "nodes", "components"),
+    [
+        pytest.param(
+            "elsewhere", "remove: [verify]\n", ["implementation"], ["implementer"], id="outside"
+        ),
+        # A copy of a repo chain, kept beside it: its `extends` is the repo's.
+        pytest.param(".kraft/chains", "", ["a"], ["own"], id="in_the_repo_library"),
+    ],
+)
+def test_resolve_path_argument(tmp_path, home, folder, edit, nodes, components):
+    """A chain file resolves its `extends` against the library it sits in: the
+    repo's for a file under `.kraft/`, else the instance's, here the bundled one.
+    The repo has a `quick-task` of its own, so the two cannot agree by accident."""
+    repo_lib = "tasks:\n  own: {kind: agent, prompt: Mine.}\n"
+    write_library(
+        tmp_path / ".kraft", repo_lib, {"quick-task": _task_chain("{id: t, extends: own}")}
+    )
+    file = tmp_path / folder / "mine.yaml"
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(f"extends: quick-task\n{edit}")
 
     chain = kl_chains.resolve(tmp_path, {}, path=file)
 
     assert (chain["id"], chain["source"]) == ("mine", str(file))
-    assert [node["id"] for node in chain["nodes"]] == ["implementation"]
-    assert _first_task(chain)["components"] == ["implementer"]
+    assert [node["id"] for node in chain["nodes"]] == nodes
+    assert _first_task(chain)["components"] == components
