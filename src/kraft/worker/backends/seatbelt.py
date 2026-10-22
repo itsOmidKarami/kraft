@@ -173,10 +173,14 @@ class SessionFiles(NamedTuple):
     profile: Path
 
 
-def session_files(run_base: Path, key: str) -> SessionFiles:
+def markers_dir(run_base: Path) -> Path:
     # Resolved: the profile and `sandbox_check` both match the real path.
-    base = Path(os.path.realpath(run_base)) / "os-sandbox"
-    markers = base / "markers"
+    return Path(os.path.realpath(run_base)) / "os-sandbox" / "markers"
+
+
+def session_files(run_base: Path, key: str) -> SessionFiles:
+    markers = markers_dir(run_base)
+    base = markers.parent
     return SessionFiles(
         base / "tmp" / key, markers / key, markers / "control", base / "profiles" / f"{key}.sb"
     )

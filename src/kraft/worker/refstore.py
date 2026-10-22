@@ -481,7 +481,7 @@ def check_direct(base: Path, store: RefStore) -> str | None:
 def check_direct_item(base: Path, work_item_id: str) -> list[str]:
     """`check_direct` for every direct store a session of `work_item_id` used,
     for a session that ended without `run_task` there to check it: one adopted,
-    or found dead, after a restart. Why each branch was put back."""
+    or found dead, after a restart. Why each branch was put back, or is gone."""
     problems = []
     for meta_path in sorted((base / "sandbox-git").glob("*.json")):
         data = _read_meta(meta_path.with_suffix(""))
@@ -489,11 +489,13 @@ def check_direct_item(base: Path, work_item_id: str) -> list[str]:
             continue
         common = Path(data["common"])
         store = RefStore(common, common, Path(data["worktree_gitdir"]), data["branch"])
-        # A branch the host deleted (abandon) is not the worker's to have back.
-        gone = not os.path.lexists(common / "refs" / "heads" / store.branch) and (
+        # Deleted, by the host (abandon) or by the worker: either way the recorded value is
+        # not to bring it back, and a person is told.
+        if not os.path.lexists(common / "refs" / "heads" / store.branch) and (
             read_branch(common, store.branch) is None
-        )
-        if common.is_dir() and not gone and (problem := check_direct(base, store)):
+        ):
+            problems.append(f"refs/heads/{store.branch} is gone; not restored")
+        elif problem := check_direct(base, store):
             problems.append(problem)
     return problems
 

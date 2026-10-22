@@ -124,13 +124,15 @@ def _launch(argv):
     ],
 )
 def test_the_launcher_is_told(mac, kw, check):
-    opts, rest = _launch(mac.build(**kw(mac)))
+    opts, _ = _launch(mac.build(**kw(mac)))
     assert check(mac, opts)
-    f = mac.files()
-    # What the launcher runs: sandbox-exec on this launch's profile, then the init.
+
+
+def test_the_launcher_runs_sandbox_exec_on_the_profile_then_the_init(mac):
+    _, rest = _launch(mac.build())
     assert rest == [
         seatbelt.SANDBOX_EXEC,
-        *("-f", str(f.profile)),
+        *("-f", str(mac.files().profile)),
         *(mac.interp, "-I", "-S", os_init.__file__, "init"),
         *("--chdir", str(mac.wt.resolve()), "--", "true"),
     ]
@@ -177,13 +179,18 @@ def test_no_secret_on_argv(mac, monkeypatch):
     [
         ({"session_id": "s1", "work_item_id": "w1"}, "w1-s1"),
         ({"session_id": "a" * 32, "work_item_id": "w1"}, "a{32}"),
-        ({}, "setup-[0-9a-f]{32}"),
     ],
-    ids=["session", "legacy-session", "no-session"],
+    ids=["session", "legacy-session"],
 )
 def test_wrap_names_its_files_by_session(mac, kw, name):
     argv = bwrap.OsBackend().wrap(["true"], mac.wt, {"kind": "os"}, None, **kw)
     assert re.fullmatch(name, Path(_launch(argv)[0]["--marker"]).name)
+
+
+def test_wrap_on_a_mac_needs_a_session(mac):
+    """Nothing else would find its marker again, so it could not be swept."""
+    with pytest.raises(TypeError, match="found, and swept, by its session"):
+        bwrap.OsBackend().wrap(["true"], mac.wt, {"kind": "os"}, None)
 
 
 async def test_open_session_on_a_mac_sets_only_the_path(mac):
@@ -231,19 +238,19 @@ def _made(mac, key):
 async def test_oneshot_shows_its_home_at_its_own_path_and_closes_clean(mac, sweeps):
     shot = bwrap.OsBackend().oneshot(SANDBOX, mac.wt, mac.home, executables=(str(mac.cli),))
     opts, rest = _launch(shot.argv())
-    f = mac.files(shot.key)
-    assert shot.key.startswith("oneshot-") and opts["--marker"] == str(f.marker)
+    f = shot.files
+    assert f.marker.name.startswith("oneshot-") and opts["--marker"] == str(f.marker)
     assert rest[-4:] == ["sh", "-c", _ONESHOT_SH, str(mac.home)]
     assert "--started" not in opts and "--relay-sock" not in opts
     assert f"HOME={f.tmpdir / 'home'}" in opts["--setenv"]
     text = f.profile.read_text()
     assert f'(deny file-write* (subpath "{mac.home.resolve()}"))' in text
     assert f'(allow file-read* (subpath "{mac.real.resolve()}"))' in text
-    _made(mac, shot.key)
+    _made(mac, f.marker.name)
 
     await shot.close()
 
-    assert sweeps.asked == [shot.key] and not f.tmpdir.exists() and not f.profile.exists()
+    assert sweeps.asked == [f.marker.name] and not f.tmpdir.exists() and not f.profile.exists()
 
 
 @pytest.mark.parametrize(
@@ -307,7 +314,7 @@ def item(mac, repo, tmp_path, run_dirs):
         return backend.code_in(run_dirs.base, wt, BRANCH, work_item_id="w1", session_id="s1", **kw)
 
     ref = repo / ".git" / "refs" / "heads" / BRANCH
-    return SimpleNamespace(wt=wt, backend=backend, code_in=code_in, ref=ref)
+    return SimpleNamespace(wt=wt, backend=backend, code_in=code_in, ref=ref, mac=mac)
 
 
 def test_code_in_gives_direct_stores_and_keeps_a_live_co_tasks_lock(item):
@@ -334,6 +341,24 @@ def test_a_branch_aimed_at_main_is_put_back_before_anything_reads_it(item, run_d
 
     assert len(problems) == 1 and "restored" in problems[0]
     assert item.ref.read_text() == start
+
+
+@pytest.mark.parametrize(
+    ("marker", "problems"),
+    [(None, 0), ("w1-s1", 1), ("w1-s2", 0), ("w1-xs1", 0), ("a" * 32, 0)],
+    ids=["swept", "survivors", "another-session", "id-as-a-suffix", "another-legacy-session"],
+)
+def test_code_out_tells_of_a_session_the_sweep_could_not_end(item, marker, problems):
+    """`run_task` goes on to `code_out` after `close`; a marker still there means
+    processes of the session are alive, and nothing else would say so."""
+    refs = item.code_in()
+    if marker:
+        _made(item.mac, marker)
+
+    got = item.backend.code_out(refs, "s1")
+
+    assert len(got) == problems
+    assert all("outlived" in p and "w1-s1" in p for p in got)
 
 
 # --- probe ----------------------------------------------------------------------------------------

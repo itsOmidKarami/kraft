@@ -356,14 +356,13 @@ class OsOneshot:
 
     prefix: list[str]
     files: SessionFiles | None = None
-    key: str = ""
 
     def argv(self) -> list[str]:
         return list(self.prefix)
 
     async def close(self) -> None:
         if self.files is not None:
-            await _seatbelt().end_session(self.files, self.key)
+            await _seatbelt().end_session(self.files, self.files.marker.name)
 
 
 class OsBackend:
@@ -436,6 +435,8 @@ class OsBackend:
     ) -> list[str]:
         if session_id is not None and work_item_id is None:
             raise TypeError("wrap: a session's sandbox is found by its work item too")
+        if sys.platform == "darwin" and session_id is None:
+            raise TypeError("wrap: a sandbox on macOS is found, and swept, by its session")
         # Here too, not only in `probe`: the setup command is wrapped with no probe
         # before it, and it must not run as root or fail with bwrap's raw stderr.
         if problem := probe_host():
@@ -471,12 +472,7 @@ class OsBackend:
             run_dirs=_run_dirs(),
         )
         if sys.platform == "darwin":
-            # A launch with no session id has nothing to find it by again: a minted key.
-            key = (
-                ids.qualified(work_item_id, session_id)
-                if session_id is not None
-                else f"setup-{uuid.uuid4().hex}"
-            )
+            key = ids.qualified(work_item_id, session_id)
             return _seatbelt().seatbelt_argv(cmd, cwd, sandbox, mounts, key=key, **launch)
         return bwrap_argv(cmd, cwd, sandbox, mounts, **launch)
 
@@ -512,7 +508,7 @@ class OsBackend:
                     ["sh", "-c", _ONESHOT_SH, str(home)], cwd, sandbox, mounts, key=key, **launch
                 )
                 files = _seatbelt().session_files(launch["run_dirs"].base, key)
-                return OsOneshot(prefix, files, key)
+                return OsOneshot(prefix, files)
             prefix = bwrap_argv(
                 ["sh", "-c", _ONESHOT_SH, ONESHOT_HOME_RO], cwd, sandbox, mounts, **launch
             )
@@ -532,7 +528,21 @@ class OsBackend:
     def code_out(self, refs: Sequence[RefStore], session_id: str) -> list[str]:
         if sys.platform == "darwin":
             base = _run_dirs().base
-            return [problem for store in refs if (problem := _refstore.check_direct(base, store))]
+            problems = [p for store in refs if (p := _refstore.check_direct(base, store))]
+            # `close` swept first; a marker left is a sweep that could not end the session.
+            markers = _seatbelt().markers_dir(base)
+            left = [
+                m
+                for m in markers.glob(f"*{session_id}")
+                if m.name == session_id or m.name.endswith(f"-{session_id}")
+            ]
+            return [
+                *problems,
+                *(
+                    f"processes of session {m.name} outlived it (marker {m} still exists)"
+                    for m in left
+                ),
+            ]
         return _refstore.sync_all(refs, session_id)
 
     def code_out_item(self, run_base: Path, work_item_id: str) -> list[str]:
@@ -570,7 +580,7 @@ class OsBackend:
             return []
         kept = {ids.qualified(item, session) for item, session in keep_sessions}
         run_base = _run_dirs().base
-        markers = _seatbelt().session_files(run_base, "").control.parent
+        markers = _seatbelt().markers_dir(run_base)
         swept = []
         for marker in sorted(markers.iterdir()) if markers.is_dir() else ():
             name = marker.name

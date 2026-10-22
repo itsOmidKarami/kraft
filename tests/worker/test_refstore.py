@@ -449,8 +449,8 @@ def test_a_branch_the_host_packed_since_is_not_put_back(repo, direct):
 
 @pytest.mark.parametrize(
     ("item", "gone", "problems"),
-    [("w1", False, 1), ("w2", False, 0), ("w1", True, 0), ("w1", "branch", 0)],
-    ids=["its-item", "another-item", "repository-gone", "branch-deleted-by-the-host"],
+    [("w1", False, 1), ("w2", False, 0), ("w1", True, 1)],
+    ids=["its-item", "another-item", "branch-gone"],
 )
 def test_check_direct_item(direct, worktree, item, gone, problems):
     """A restart leaves no `run_task` to call `check_direct`: the item's own
@@ -459,14 +459,17 @@ def test_check_direct_item(direct, worktree, item, gone, problems):
     refstore.prepare_direct(base, worktree, BRANCH, work_item_id="w1")
     start = ref.read_text().strip()
     ref.write_text("ref: refs/heads/main\n")
-    if gone == "branch":
-        ref.unlink()  # abandon deleted it: the recorded value must not bring it back
-    elif gone:
-        shutil.rmtree(store.common)
+    if gone:
+        ref.unlink()  # the host (abandon) or the worker deleted it
 
-    assert len(refstore.check_direct_item(base, item)) == problems
-    assert ref.exists() != (gone in (True, "branch"))
-    if not gone:
+    got = refstore.check_direct_item(base, item)
+
+    assert len(got) == problems
+    # Never brought back by the recorded value, and a person is told.
+    assert ref.exists() != gone
+    if gone:
+        assert got == [f"refs/heads/{BRANCH} is gone; not restored"]
+    else:
         assert ref.read_text().strip() == (start if problems else "ref: refs/heads/main")
 
 
