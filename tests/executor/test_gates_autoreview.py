@@ -26,9 +26,11 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from support import worktree as wtree
 from support.addons import drop_store, install_release, pinned_chain
 from support.harness import (
+    commit_all,
     entry_of,
     fake_harness_home,
     git,
@@ -478,17 +480,27 @@ async def test_review_gates_stops_config_when_on_approve_refuses(item_on, monkey
     assert (it.status(), it.row()["stop_kind"]) == ("needs_human", "config")
 
 
-async def test_an_agents_approval_of_the_final_gate_pins_the_head(item_on, repo, monkeypatch):
-    """A final gate an agent reviews and approves passes the head as it stands,
-    as a person's approval does: what the merge may push (`kraft.reviewed_head`)."""
+@pytest.mark.parametrize("commits", [False, True], ids=["unmoved", "the-reviewer-commits"])
+async def test_an_agents_approval_of_the_final_gate_pins_the_head(
+    item_on, repo, monkeypatch, commits
+):
+    """A final gate an agent reviews and approves passes the head it read, as
+    a person's approval does: what the merge may push (`kraft.reviewed_head`).
+    A head that moved while it worked -- its own commit -- is not what it
+    read, so the approval goes to a person instead of pinning it."""
     nodes = _reviewed()
     nodes[1]["chain_finalized"] = True
     it = await item_on(nodes, auto_gate=True)
     await wtree.ensure(it.database, it.run_dirs, repo)
     head = git(it.worktree, "rev-parse", f"refs/heads/{store.branch_for(it.row())}")
-    monkeypatch.setattr(
-        gates_module.gate_review, "review", lambda *a, **kw: _resolved(("approve", None))
-    )
+
+    async def _reviewer(*_a, **_kw):
+        if commits:
+            (it.worktree / "reviewer.txt").write_text("the reviewer's own edit\n")
+            commit_all(it.worktree, "the reviewer's own edit")
+        return "approve", None
+
+    monkeypatch.setattr(gates_module.gate_review, "review", _reviewer)
 
     async def _on_approve(row, gate, **_kw):
         return it.chain.chain.nodes, None
@@ -496,6 +508,12 @@ async def test_an_agents_approval_of_the_final_gate_pins_the_head(item_on, repo,
     await _requested(it)
     await _review(it, on_approve=_on_approve)
 
+    if commits:
+        assert it.events("gate_approved") == []
+        [skipped] = it.events("gate_auto_review_skipped")
+        assert skipped["payload"]["reason"] == "undecided"
+        assert "branch moved" in skipped["payload"]["note"]
+        return
     [approved] = it.events("gate_approved")
     assert approved["payload"] == {
         "gate": "spec_approval",

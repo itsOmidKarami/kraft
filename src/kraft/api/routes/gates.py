@@ -308,9 +308,22 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
     # restart leaves the row, not the task), and that agent is still writing
     # in the worktree the approved walk is about to launch into. A no-op
     # returning [] when nothing is running, which is most of the time.
-    await _stop_live_sessions(st, wid)
+    stopped = await _stop_live_sessions(st, wid)
     if deps.task_is_live(request.app, wid):
         await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
+    if stopped and gate == reviewed_head.final_gate(row):
+        # The final gate pins the branch as it stands (`kraft.reviewed_head`),
+        # and the agent just stopped (a reviewer, a reply) may have committed
+        # to it after the person last looked. Nothing records the head before
+        # it started, so the approval is refused rather than pin that work:
+        # the item is paused, nothing is live now, and the next approval of
+        # what the person sees pins exactly that.
+        raise HTTPException(
+            409,
+            f"an agent was still at work on this item at gate {gate!r}; it is stopped "
+            "and the item paused, but the branch may have changed since you looked: "
+            "look at it again, then approve",
+        )
 
     try:
         nodes, reason = await apply_approval(

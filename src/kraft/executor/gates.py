@@ -462,6 +462,11 @@ async def review_gates(
         # artifact edited, or shown to a person, between this line and the
         # approval below is exactly the race `seen` exists to catch.
         seen = _chain_revision_seen(run_dirs, row, gate, node, launch)
+        # The head the reviewer reads, for the final gate (`kraft.reviewed_head`):
+        # what its approval pins, never a head that moved while it worked. It
+        # may commit, so a tip read after its verdict could be its own work.
+        folder = inplace.item_folder(run_dirs, row)
+        read_tips = reviewed_head.pin_for(db, row, gate, folder)
         try:
             verdict, note = await gate_review.review(
                 db,
@@ -512,6 +517,15 @@ async def review_gates(
         if verdict == "approve" and db.read(lambda c: store.open_must_fix(c, work_item_id)):
             # A person's must-fix outranks an agent's approval (review flow §3).
             verdict = "undecided"
+        if (
+            verdict == "approve"
+            and read_tips is not None
+            and not reviewed_head.unchanged(read_tips, reviewed_head.pin_for(db, row, gate, folder))
+        ):
+            # Its own commit, or anyone's: an approval must not pin code the
+            # review did not read, and no agent approves its own edit.
+            verdict = "undecided"
+            why = "the branch moved while the agent reviewed the final gate: a person looks again"
 
         if verdict == "undecided":
             # Marks this `gate_requested` as reviewed so `_gate_already_reviewed`
@@ -571,9 +585,9 @@ async def review_gates(
                     )
                     return "needs_human"
                 # What a final gate's approval lets merge (`kraft.reviewed_head`).
-                tips = reviewed_head.pin_for(db, row, gate, inplace.item_folder(run_dirs, row))
+                # The tips it read, unmoved since (above).
                 approval = await db.write(
-                    lambda c, gate=gate, tips=tips: store.approve_gate(
+                    lambda c, gate=gate, tips=read_tips: store.approve_gate(
                         c, work_item_id, gate, by="agent", tips=tips
                     )
                 )
