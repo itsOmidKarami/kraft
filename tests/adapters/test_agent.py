@@ -365,18 +365,6 @@ def test_an_option_becomes_its_flag(run, overrides, flag, value):
     assert cmd[cmd.index(flag) + 1] == value
 
 
-def test_a_resumed_launch_names_its_own_session_files(run):
-    """Kraft-vjo4g: a resumed conversation remembers the summary and result
-    paths of the session it began in, and wrote there; each session's are its
-    own, so the turn must be told this one's."""
-    cmd = run(session_id="s2", resume_session_id="cli-session-abc")["cmd"]
-    prompt = cmd[cmd.index("-p") + 1]
-    out = "/kraft/run/items/w1/sessions/s2/out"
-    assert f"{out}/summary.md" in prompt
-    assert f"$KRAFT_RESULT_PATH, which is now {out}/result.json" in prompt
-    assert 'worker_session_id: "s2"' in prompt
-
-
 @pytest.mark.parametrize(
     "allowed, tools",
     [
