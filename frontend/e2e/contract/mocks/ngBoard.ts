@@ -21,7 +21,9 @@ const LONG_R = (name: string) => `/Volumes/Work/clients/acme-corporation/monorep
  *  names a budget stop's scope; `work_item` is the item's own cap, the one `/budget/raise` takes. */
 function spendCapped(i: any, b: ItemBundle) {
   const reason = "Spend cap reached · $5.00 of $5.00";
-  i.stop = { ...i.stop, kind: "budget", reason, facts: {}, scope: "work_item" };
+  // A budget stop names its scope, not the cap stop's `limit`.
+  const { limit: _limit, raisable: _raisable, ...stop } = i.stop;
+  i.stop = { ...stop, kind: "budget", reason, facts: {}, scope: "work_item" };
   const last = [...b.events].reverse().find((e) => e.type === "work_item_needs_human")!;
   last.payload = { node_id: last.payload.node_id, reason, kind: "budget", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } };
   // Its sessions' costs scaled to the $5 it spent, and its usage read off them again.
