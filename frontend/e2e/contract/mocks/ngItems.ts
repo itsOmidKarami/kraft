@@ -132,7 +132,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
     node_overrides: long ? { verification: { attempts: 4 } } : {}, node_overrides_count: long ? 1 : 0,
     agent_overrides: null,
     budget_cap: { cap_usd: 5, source: long ? "item" : "policy", spent_usd: 2.41, daily: { spent_usd: 18.2, cap_usd: 50 } },
-    worktree_path: `/Users/dev/.kraft/run/worktrees/${id}`, head_sha: hex(seed + 77).slice(0, 40),
+    worktree_path: `/Users/dev/.kraft/run/worktrees/${id}`, head_sha: hex(seed + 77).slice(0, 40), review_head: null,
     repos: [], attachments: [], mr_ref: null, progress: null, rate_limit: null,
     escalation_threads: [], concerns: [], deferred_findings: [],
     display_status: "running", stop: null,
@@ -275,6 +275,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
       item.attempts = [{ n: 1, sha: "4d1e2f3", base_sha: "1a2b3c4", at: t(3) }, { n: 2, sha: "9c8d7e6", base_sha: "1a2b3c4", at: t(1.1) }];
       item.last_review_sha = "4d1e2f3";
       item.head_sha = "9c8d7e6";
+      item.review_head = "9c8d7e6";
       item.fix_target = { gate: "final_review", node: "implementation", then: ["verification", "work_brief", "local_review", "merge_request", "mr_checks", "summary"], round: { n: 2, max: 3 } };
       item.gate_artifact = ".engineering/reviews/kraft-cb59-review.md";
       item.mr_ref = { number: 142, url: "https://github.com/acme/kraft-plugins/pull/142" };
