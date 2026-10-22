@@ -24,6 +24,7 @@ from kraft.executor.context import (
     CONFIG_ERROR,
     CONFLICT,
     CONFLICT_RESOLVED,
+    ESCALATION_COMMITTED,
     INFRA_STOP,
     MERGE_REJECTED,
     MERGE_REPAIRED,
@@ -661,6 +662,12 @@ async def _escalate_stuck(
     (`failed-or-questioning-stuck-escalation-needs-human`). Bounded by
     `policy.auto_escalate_stuck_cap` per node, counted until a `/retry` or a
     base-change restart clears it.
+
+    On a merge node (`on_merge_rejected`) a commit is never rerun in place,
+    which would merge it unseen: a successful escalation that moved the
+    branch answers `ESCALATION_COMMITTED`, which `run_once` rewinds like a
+    repaired drop, and any other ending holds the item at `restart_from`
+    before its stop.
     """
     task = node.escalation
     if task is None:
@@ -682,6 +689,8 @@ async def _escalate_stuck(
             {"node_id": node.id, "task": task.path, "reason": stuck.reason, "attempt": used + 1},
         )
     )
+    watched = _rejects_merges(node) and worktree is not None
+    tips = _branch_tips(db, work_item_id, row, worktree) if watched else None
     status = await dispatch.dispatch_node(
         db,
         run_dirs,
@@ -702,8 +711,14 @@ async def _escalate_stuck(
             {"node_id": node.id, "task": task.path, "status": status},
         )
     )
+    committed = watched and _branch_tips(db, work_item_id, row, worktree) != tips
+    if committed and status not in _ADVANCING:
+        # Held before any stop below is written, as after a repair's commit.
+        await hold_merge_node(db, work_item_id, row, node, "escalation_committed")
     if status == "paused":
         return "paused"
+    if committed and status in _ADVANCING:
+        return ESCALATION_COMMITTED
     if status in _ADVANCING:
         # A retried node is a fresh pass: the loop that got stuck must not
         # re-breach on the attempt count that stuck it. Only that counter --
@@ -1073,6 +1088,63 @@ async def hold_merge_node(
     return restart_from
 
 
+def merge_node_of(row) -> ResolvedNode | None:
+    """The node `row` stands on, when it declares `on_merge_rejected`."""
+    try:
+        nodes = chain_of(row).chain.nodes
+    except LookupError:
+        return None
+    node = next((n for n in nodes if n.id == row["current_node_id"]), None)
+    return node if node is not None and _rejects_merges(node) else None
+
+
+def merge_node_tips(db, work_item_id: str, row, worktree) -> dict | None:
+    """Before an escalation turn (`escalate.dispatch`) on an item standing on
+    a merge node that declares `on_merge_rejected`: that node's id and the
+    branch tips a later merge would push, for `hold_after_escalation` to
+    compare once the turn is over. None on any other node."""
+    node = merge_node_of(row)
+    if node is None:
+        return None
+    return {"node_id": node.id, "tips": _branch_tips(db, work_item_id, row, worktree)}
+
+
+async def hold_after_escalation(db, run_dirs, work_item_id: str, evts) -> str | None:
+    """After an escalation turn in `evts` -- Kraft's automatic one or a
+    person's -- that ran on a merge node (`merge_node_tips`, carried on its
+    `escalation_message`): when the branch tips moved, the
+    `on_merge_rejected.restart_from` its retry must start at, never the merge
+    node, which would merge the turn's commit unseen. An item still standing
+    on that node is held there first (`_hold_at_restart`), so a person's
+    retry later starts there too. None when no such turn moved anything."""
+    seen = next(
+        (
+            e["payload"]["merge_node"]
+            for e in evts
+            if e["type"] == EscalationEvent.ESCALATION_MESSAGE and e["payload"].get("merge_node")
+        ),
+        None,
+    )
+    if seen is None:
+        return None
+    row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    try:
+        nodes = chain_of(row).chain.nodes
+    except LookupError:
+        return None
+    node = next((n for n in nodes if n.id == seen["node_id"]), None)
+    if node is None or not _rejects_merges(node):
+        return None
+    worktree = inplace.item_folder(run_dirs, row)
+    if _branch_tips(db, work_item_id, row, worktree) == seen["tips"]:
+        return None
+    if row["current_node_id"] == node.id:
+        await hold_merge_node(db, work_item_id, row, node, "escalation_committed")
+    return node.node.on_merge_rejected.restart_from
+
+
 def _unrepaired_drop(node: ResolvedNode, drop: dict) -> str | None:
     """Why nothing may repair `drop`, as the stop says it, or None when the
     node's `on_merge_rejected` repair answers it. A drop with no policy, or
@@ -1404,7 +1476,8 @@ async def walk_node(
 ) -> str:
     """One entry into an execution node: measure it, recover, fix, and, when
     none of those can advance it, escalate -- a successful escalation reruns
-    the node from its first step, as a fresh entry.
+    the node from its first step, as a fresh entry (on a merge node only when
+    it committed nothing: `ESCALATION_COMMITTED` goes back to `run_once`).
 
     `preserve` is a task retry's completed siblings (`RunFork.preserved`),
     kept on the entry measurement only."""
@@ -2407,13 +2480,16 @@ async def _restart_span(
     restart_event: ChainEvent,
     reopen_gates: bool,
     reopen_reason: str,
+    cause: str | None = None,
 ) -> int | None:
     """Restart the chain at `restart_from` because node `index` moved the
     worktree base (`base-change-restarts-a-declared-chain-span`) or had its
     merge request rejected by a merge train or queue (`on_merge_rejected`), or
     stop for a human once the node's restarts under `key` are spent. `cap`
     resolves that counter's bound from the policy, `restart_event` records the
-    restart, and `reopen_reason` is what a reopened gate says.
+    restart -- with `cause` when it is not the event's own (a merge node's
+    escalation that committed) -- and `reopen_reason` is what a reopened gate
+    says.
 
     A base change is not an execution failure
     (`base-change-is-not-an-execution-failure`): no recovery ran for it and no
@@ -2472,6 +2548,7 @@ async def _restart_span(
                 "restart_from": restart_from,
                 "nodes": [n.id for n in span],
                 "restart": count,
+                **({"cause": cause} if cause else {}),
             },
         )
     )
@@ -2880,20 +2957,23 @@ async def run_once(
             return RATE_LIMITED
         if result == WAITING:
             return WAITING
-        if result in (MERGE_REWIND, MERGE_REPAIRED):
+        if result in (MERGE_REWIND, MERGE_REPAIRED, ESCALATION_COMMITTED):
             # Ahead of the base-change branch: Kraft's own forced rebase on the
             # drop moved `base_ref` too, and on a node declaring both policies
             # this restart, its own cap and its note are the ones that apply.
+            # A merge node's escalation that committed rewinds the same way,
+            # under the same cap: its change too must pass the final gate.
             rejected = node.node.on_merge_rejected
             key = _merge_rejected_key(node)
-            if result == MERGE_REPAIRED and _span_breach(
-                db, work_item_id, key, _merge_rejected_cap(key), policy
-            ):
-                # The cap was read before the repair ran; only its wall clock
-                # can have run out since. Its commit is still unseen: held
-                # before the cap stop below is written, so a crash between
-                # the two never leaves the item stopped on this node.
-                await _hold_at_restart(db, work_item_id, nodes, i, rejected.restart_from)
+            committed = result != MERGE_REWIND
+            escalated = result == ESCALATION_COMMITTED
+            why = "escalation_committed" if escalated else "merge_rejected"
+            if committed and _span_breach(db, work_item_id, key, _merge_rejected_cap(key), policy):
+                # The cap was read before the repair ran (an escalation's not
+                # at all). Its commit is still unseen: held before the cap stop
+                # below is written, so a crash between the two never leaves
+                # the item stopped on this node.
+                await _hold_at_restart(db, work_item_id, nodes, i, rejected.restart_from, why)
             target = await _restart_span(
                 db,
                 work_item_id,
@@ -2907,16 +2987,21 @@ async def run_once(
                 # Both: a clean rebase too, since the rewound span's own fix
                 # loops can commit before any gate sees the head again.
                 reopen_gates=True,
-                reopen_reason="merge_rejected",
+                reopen_reason=why,
+                cause="escalation" if escalated else None,
             )
             await _report_if_undelivered(db, work_item_id, carried)
             if target is None:
-                if result == MERGE_REPAIRED:
+                if committed:
                     # Again, for a clock that ran out between the two reads.
-                    await _hold_at_restart(db, work_item_id, nodes, i, rejected.restart_from)
+                    await _hold_at_restart(db, work_item_id, nodes, i, rejected.restart_from, why)
                 return "needs_human"
-            drop = db.read(lambda c, n=node.id: _latest_drop(c, work_item_id, n)) or {}
-            carried = Steer(prompts.merge_rewind_note(drop, rejected.restart_from), source="seeded")
+            if escalated:
+                note = prompts.escalation_rewind_note(node.id, rejected.restart_from)
+            else:
+                drop = db.read(lambda c, n=node.id: _latest_drop(c, work_item_id, n)) or {}
+                note = prompts.merge_rewind_note(drop, rejected.restart_from)
+            carried = Steer(note, source="seeded")
             i = target
             continue
         new_base = dispatch._current_base_ref(db, work_item_id) if base_change else None

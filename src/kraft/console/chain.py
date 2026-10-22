@@ -142,6 +142,7 @@ def _why(p: dict, nodes: list[dict], note: str | None) -> str:
         "retry": "after a retry",
         "base_change": "after a base change",
         "merge_rejected": "after the merge train or queue rejected it",
+        "escalation": "after an escalation committed a change",
     }
     text = said.get(p.get("reason"), "started over" if p["pass"] > 1 else "")
     return f"{text}: {note}" if text and note else text

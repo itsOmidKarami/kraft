@@ -91,7 +91,7 @@ An exec node declares `tasks` or `steps`, never both.
 | `steps` | list | see `tasks` | Steps that run in order. A later step is not dispatched if an earlier one fails, and it sees what the earlier one left behind. |
 | `on_failure` | mapping | none | A recovery pass: tasks or steps that run once after the node failed, before it is measured again. A task or step may carry its own `on_failure`; the nearest one to the failure wins. It may be [read_only](#read_only). |
 | `fix_loop` | mapping | none | Repair tasks or steps, an optional `judge` task, and an optional `max_attempts`. It re-runs until the node passes. See [Fix loop and judge](/reference/chain-nodes/fix-loop). |
-| `escalation` | mapping | none | An agent task dispatched when the node is [stuck](/concepts/vocabulary#stuck) after recovery and the fix loop, before you are asked. |
+| `escalation` | mapping | none | An agent task dispatched when the node is [stuck](/concepts/vocabulary#stuck) after recovery and the fix loop, before you are asked. On a node with `on_merge_rejected`, see [on_merge_rejected](#on_merge_rejected). |
 | `on_base_changed` | mapping | none | What to re-run when a rebase moves the base. See [on_base_changed](#on_base_changed). |
 | `on_merge_rejected` | mapping | none | What to repair and re-run when a merge train or merge queue drops the merge request. Only on a node with an `mr.merge` task. See [on_merge_rejected](#on_merge_rejected). _Added in next_ |
 | `read_only` | boolean | `false` | `true` makes Kraft verify that the node's steps leave the [worktree](/concepts/vocabulary#worktree) as they found it. Refused on a node with a `fix_loop`. See [read_only](#read_only). |
@@ -212,6 +212,17 @@ marks the plan or every step:
 If a read_only handler changes the worktree all the same, the item stops with
 `read_only_violated`, held at `restart_from` with the span's gates reopened, so
 no retry merges the change unseen.
+
+**Escalation.** A commit made while the item is stopped on this node is never
+merged in place, whether its `escalation` task made it or an escalation agent
+did, Kraft's automatic one or one you sent. Kraft holds the item at
+`restart_from` with the span's gates reopened, the way it does after a
+repair's commit.
+
+A successful `escalation` task that committed rewinds the chain there, under
+the same cap, instead of re-running the node; one that changed nothing re-runs
+it. An escalation agent's own `kraft item retry` restarts at `restart_from`,
+whatever node it named.
 
 An `on_base_changed` on this node, or on any node with an `mr.merge` task after
 the `chain_finalized` gate, must restart before that gate: a conflict

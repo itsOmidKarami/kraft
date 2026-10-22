@@ -360,6 +360,16 @@ def merge_rewind_note(drop: Mapping, restart_from: str) -> str:
     )
 
 
+def escalation_rewind_note(node_id: str, restart_from: str) -> str:
+    """The same, for a stuck escalation that committed on merge node
+    `node_id` (`ESCALATION_COMMITTED`)."""
+    return (
+        f"Rewound to {restart_from} because the escalation of node {node_id}, which "
+        "merges the merge request, committed a change: it goes back through the "
+        "final review before it can merge."
+    )
+
+
 #: The same note, over a document this node has already written. A bare steer
 #: made a rejected plan cost a full re-plan: nothing in the dispatch said the
 #: file existed or that the human objected to one paragraph of it (Kraft-bol).

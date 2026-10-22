@@ -1211,6 +1211,9 @@ async def resume_after_escalation(
     from kraft.templates.forks import ChainPath, PathError, override_from_record
 
     new_evts = db.read(lambda c: events.read_after(c, cursor, work_item_id))
+    # A turn on a merge node that committed is never merged in place: the
+    # item is held at the node's `restart_from`, before anything else here.
+    held_at = await walk.hold_after_escalation(db, run_dirs, work_item_id, new_evts)
     request_evt = next(
         (e for e in new_evts if e["type"] == EscalationEvent.WORK_ITEM_SELF_RETRY_REQUESTED), None
     )
@@ -1218,6 +1221,12 @@ async def resume_after_escalation(
         return status_of(db, work_item_id)
     payload = request_evt["payload"]
     node_id, steer = payload["node_id"], payload["steer"]
+    path, carried = payload.get("path"), payload.get("override")
+    if held_at is not None and not payload.get("restart"):
+        # Whatever it named -- the merge node, most likely -- the agent's own
+        # retry starts where its commit goes back through the final review,
+        # with no override meant for another path.
+        node_id, path, carried = held_at, None, None
     # Absent on an event written before this field existed, or on a
     # hand-built test payload -- default False rather than KeyError either way.
     seeded = payload.get("seeded", False)
@@ -1351,7 +1360,7 @@ async def resume_after_escalation(
         target = None
         if not payload.get("restart"):
             try:
-                target = ChainPath.parse(walk.chain_of(row), payload.get("path") or node_id)
+                target = ChainPath.parse(walk.chain_of(row), path or node_id)
             except PathError:
                 target = None
                 logger.warning(
@@ -1360,7 +1369,6 @@ async def resume_after_escalation(
                     node_id,
                 )
         if target is not None or payload.get("restart"):
-            carried = payload.get("override")
             return await retry(
                 db,
                 run_dirs,

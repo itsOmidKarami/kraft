@@ -256,17 +256,28 @@ def test_each_node_counts_its_own_passes():
 
 
 @pytest.mark.parametrize(
-    ("restart", "reason"),
-    [("base_change_restart", "base_change"), ("merge_rejection_restart", "merge_rejected")],
+    ("restart", "cause", "reason"),
+    [
+        ("base_change_restart", None, "base_change"),
+        ("merge_rejection_restart", None, "merge_rejected"),
+        ("merge_rejection_restart", "escalation", "escalation"),
+    ],
+    ids=[
+        "base_change_restart-base_change",
+        "merge_rejection_restart-merge_rejected",
+        "a-merge-node-s-escalation-that-committed",
+    ],
 )
-async def test_an_items_span_restart_starts_a_pass_from_its_event_log(database, restart, reason):
-    """`session_passes` reads the restart off the item's own events."""
+async def test_an_items_span_restart_starts_a_pass_from_its_event_log(
+    database, restart, cause, reason
+):
+    """`session_passes` reads the restart off the item's own events, and why:
+    a merge-rejection rewind a merge node's escalation caused says so."""
     await mk_item(database)
+    payload = {"nodes": ["impl", "verify"], **({"cause": cause} if cause else {})}
     for sid, before in (("s1", True), ("s2", False)):
         if not before:
-            await database.write(
-                lambda c: events.append(c, "w1", restart, {"nodes": ["impl", "verify"]})
-            )
+            await database.write(lambda c: events.append(c, "w1", restart, payload))
         await database.write(
             lambda c, sid=sid: store.create_session(
                 c,

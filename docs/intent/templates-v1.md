@@ -2180,6 +2180,19 @@ repair's commit unseen.
 enforced-by: tests/executor/test_merge_rejection.py::test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from[question-after-commit], tests/executor/test_merge_rejection.py::test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from[failed-after-commit], tests/executor/test_merge_rejection.py::test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from[paused-after-commit], tests/executor/test_merge_rejection.py::test_a_stop_after_the_repair_committed_holds_the_item_at_restart_from[budget], tests/executor/test_merge_rejection.py::test_a_rewind_whose_clock_ran_out_during_the_repair_holds_the_item
 origin: src/kraft/executor/walk.py §_hold_at_restart
 
+## REQ an-escalation-on-a-merge-node-never-merges-its-commit-in-place
+
+IF an escalation that ran while the item stood on a node declaring
+`on_merge_rejected` -- the node's own `escalation` task, or an escalation turn,
+Kraft's automatic one or a person's -- moved the item's branch, THEN the system
+SHALL NOT run that node again in place: it SHALL rewind to `restart_from` under
+the node's merge-rejection cap after a successful `escalation` task, SHALL
+otherwise hold the item at `restart_from` with the span's approved gates
+reopened, and SHALL start the turn's own self-retry at `restart_from` whatever
+it named.
+enforced-by: tests/executor/test_merge_rejection.py::test_a_merge_node_s_escalation_never_merges_its_commit_in_place[commits-and-rewinds], tests/executor/test_merge_rejection.py::test_a_merge_node_s_escalation_never_merges_its_commit_in_place[commits-and-fails], tests/executor/test_merge_rejection.py::test_a_merge_node_s_escalation_never_merges_its_commit_in_place[changes-nothing], tests/executor/test_escalation.py::test_an_escalation_that_commits_on_a_merge_node_sends_it_back_through_review[commits-and-retries], tests/executor/test_escalation.py::test_an_escalation_that_commits_on_a_merge_node_sends_it_back_through_review[commits-and-stops], tests/executor/test_escalation.py::test_an_escalation_that_commits_on_a_merge_node_sends_it_back_through_review[changes-nothing], tests/test_escalate.py::test_a_turn_on_a_merge_node_records_its_tips_and_is_told_a_commit_goes_back[a-merge-node], tests/test_escalate.py::test_a_turn_on_a_merge_node_records_its_tips_and_is_told_a_commit_goes_back[any-other-node], tests/store/test_passes.py::test_an_items_span_restart_starts_a_pass_from_its_event_log[a-merge-node-s-escalation-that-committed]
+origin: src/kraft/executor/walk.py §hold_after_escalation -- the default chain's `merge` auto-escalates at once on a merge that fails for another reason than a drop, and the turn's commit, retried in place, was pushed and merged with no person seeing it.
+
 ## REQ a-merge-nodes-read-only-on-failure-retries-the-merge-in-place
 
 WHEN a merge node's merge fails for another reason than a drop and its

@@ -369,6 +369,48 @@ async def test_a_read_only_on_failure_on_a_merge_node_retries_the_merge_in_place
     assert it.row()["current_node_id"] == "feedback"
 
 
+@pytest.mark.parametrize(
+    ("commits", "ends", "status", "calls"),
+    [
+        (True, "done", "awaiting_gate", ["ci", "merge", "esc", "ci"]),
+        (True, "failed", "needs_human", ["ci", "merge", "esc"]),
+        (False, "done", "completed", ["ci", "merge", "esc", "merge"]),
+    ],
+    ids=["commits-and-rewinds", "commits-and-fails", "changes-nothing"],
+)
+async def test_a_merge_node_s_escalation_never_merges_its_commit_in_place(
+    item_on, script, commits, ends, status, calls
+):
+    """The merge failed for another reason than a drop and the node's
+    `escalation` answered it. Rerunning the node would push and merge what it
+    committed with no person seeing it: a clean finish that committed rewinds
+    to `restart_from` instead, under the merge rejection's cap, with `review`
+    reopened; one that committed and then failed is held there. Told so up
+    front, not promised a rerun. With nothing committed the merge reruns."""
+    escalation = v1_task("esc", kind="subprocess", command="true")
+    it = await item_on(merge_chain(on_merge_rejected=MERGE_POLICY, escalation=escalation))
+    await approve(it, "review")
+    script.plan.update({"merge": ["failed", "done"], "esc": [ends]})
+    if commits:
+        script.effects["esc"] = commits_a_fix(it)
+
+    assert await walk_once(it) == status
+    assert script.calls == calls
+    assert "the chain goes back to node feedback" in script.instructions["esc"][0]
+    reopened = [e["payload"] for e in it.events("gate_reopened")]
+    if not commits:
+        assert reopened == []
+        return
+    assert reopened == [{"gate": "review", "reason": "escalation_committed"}]
+    assert it.row()["current_node_id"] == ("review" if ends == "done" else "feedback")
+    if ends == "done":
+        [restart] = it.events("merge_rejection_restart")
+        assert restart["payload"]["cause"] == "escalation"
+        assert it.events("steer_undelivered")[-1]["payload"]["steer"].startswith(
+            "Rewound to feedback because the escalation of node merge"
+        )
+
+
 async def _upstream_moves(it) -> str:
     """A commit lands on the repo the worktree was cut from; its sha."""
     write(it.repo, "upstream.txt", "landed upstream\n")

@@ -110,6 +110,27 @@ def _action_line(status: str, sandbox: dict | None) -> str:
     return _NEEDS_HUMAN_ACTION if _callback.reachable(sandbox) else _NEEDS_HUMAN_ACTION_NO_CHANNEL
 
 
+#: After `{action_line}` on a turn whose item stands on a merge node that
+#: declares `on_merge_rejected`: what `walk.hold_after_escalation` does with a
+#: commit, so the agent is not promised the merge it would otherwise expect.
+_MERGE_NODE = (
+    "Node {node_id} merges the merge request, so nothing you commit is merged "
+    "in place: if you commit, Kraft sends the work item back to node "
+    "{restart_from} and through its final review, where a person sees your "
+    "change before it can merge, and `kraft item retry` restarts there "
+    "whatever you name.\n"
+)
+
+
+def _merge_line(row) -> str:
+    node = _walk().merge_node_of(row)
+    if node is None:
+        return ""
+    return _MERGE_NODE.format(
+        node_id=node.id, restart_from=node.node.on_merge_rejected.restart_from
+    )
+
+
 _STATE = (
     "{opening}"
     "Status: {status}\n"
@@ -119,6 +140,7 @@ _STATE = (
     "{description_line}"
     "\n"
     "{action_line}"
+    "{merge_line}"
     "{hands_off}"
     "{push_line}"
     "\n"
@@ -348,15 +370,34 @@ async def _refused(db, run_dirs, *, session_id: str, row, log: str) -> str:
     )
 
 
+def _walk():
+    # Local: `kraft.executor.walk` imports `gates`, which imports this module.
+    from kraft.executor import walk
+
+    return walk
+
+
 #: What an escalation thread's runtime is: fixed for the life of a thread.
 _RUNTIME = ("command", "harness", "model", "effort", "permission_mode")
 
 
 async def _record_message(
-    db, work_item_id, session_id, message, auto, thread, turn, runtime, *, node_id=None
+    db,
+    work_item_id,
+    session_id,
+    message,
+    auto,
+    thread,
+    turn,
+    runtime,
+    *,
+    node_id=None,
+    merge_node: dict | None = None,
 ):
     """The turn's `escalation_message`, before it launches -- a refused launch
-    included, so every turn counts toward the auto-escalation bound."""
+    included, so every turn counts toward the auto-escalation bound. A turn
+    on a merge node carries the node and its branch tips (`merge_node`), which
+    `walk.hold_after_escalation` compares once the turn is over."""
     payload = {
         "session_id": session_id,
         "message": message,
@@ -366,6 +407,8 @@ async def _record_message(
     }
     if runtime is not None:
         payload["runtime"] = runtime
+    if merge_node is not None:
+        payload["merge_node"] = merge_node
     await db.write(
         lambda c: events.append(
             c, work_item_id, EscalationEvent.ESCALATION_MESSAGE, payload, node_id=node_id
@@ -532,6 +575,7 @@ async def dispatch(
         judge_line=_judge_line(db, work_item_id, row["current_node_id"], evts=evts),
         description_line=_description_line(row),
         action_line=_action_line(row["status"], sandbox),
+        merge_line=_merge_line(row),
         hands_off=_HANDS_OFF.format(work_item_id=work_item_id),
         push_line=_PUSH.format(branch=store.branch_for(row)),
         message=message,
@@ -632,6 +676,8 @@ async def dispatch(
             turn,
             runtime,
             node_id=row["current_node_id"],
+            # Read once the session holds the checkout, before the agent runs.
+            merge_node=_walk().merge_node_tips(db, work_item_id, row, worktree),
         )
 
     try:

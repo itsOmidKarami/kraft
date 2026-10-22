@@ -260,22 +260,38 @@ def previous_attempt_note(previous_fix, *, run_dirs) -> str:
 #: What a node's declared stuck escalation is told, after its own prompt
 #: (`stuck-escalation-is-an-exec-node-control`). The last paragraph is the
 #: contract `walk._escalate_stuck` acts on: a clean finish retries the node from
-#: its first step, and anything else leaves the item for a human.
+#: its first step -- on a merge node, unless it committed, which rewinds the
+#: chain instead -- and anything else leaves the item for a human.
 _STUCK_ESCALATION = (
     "{prompt}\n\n"
     "Node {node_id} of this work item is stuck: its recovery and its fix loop "
     "could not advance it. Why it stopped:\n\n{reason}\n\n"
-    "Resolve what is blocking it if you can, and commit what you change. When "
-    "you finish cleanly, Kraft reruns node {node_id} from its first step. If you "
-    "cannot resolve it, report `failed`; if a person has to decide something, "
-    "report `needs_context` and ask in `question`. Either way the work item "
-    "then waits for a human.\n"
+    "Resolve what is blocking it if you can, and commit what you change. {rerun}"
+    "If you cannot resolve it, report `failed`; if a person has to decide "
+    "something, report `needs_context` and ask in `question`. Either way the "
+    "work item then waits for a human.\n"
+)
+_RERUNS = "When you finish cleanly, Kraft reruns node {node_id} from its first step. "
+#: A merge node's (`on_merge_rejected`): a commit is never merged in place
+#: (`walk._escalate_stuck`).
+_REWINDS = (
+    "Node {node_id} merges the merge request, so Kraft never merges a change of "
+    "yours in place: when you finish cleanly having committed, the chain goes "
+    "back to node {restart_from}, and a person's final review sees your change "
+    "before it can merge. When you finish cleanly with nothing committed, Kraft "
+    "reruns node {node_id} from its first step. "
 )
 
 
 def stuck_escalation_instruction(task: ResolvedTask, node, reason: str) -> str:
     prompt = getattr(task.task, "prompt", "")
-    return _STUCK_ESCALATION.format(prompt=prompt, node_id=node.id, reason=reason)
+    rejected = getattr(node.node, "on_merge_rejected", None)
+    rerun = (
+        _REWINDS.format(node_id=node.id, restart_from=rejected.restart_from)
+        if rejected is not None
+        else _RERUNS.format(node_id=node.id)
+    )
+    return _STUCK_ESCALATION.format(prompt=prompt, node_id=node.id, reason=reason, rerun=rerun)
 
 
 def named_with_kind(task: ResolvedTask) -> str:

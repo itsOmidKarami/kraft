@@ -42,7 +42,7 @@ def escalation_profile(tmp_path, monkeypatch):
     return templates
 
 
-async def _seed_needs_human(database, rd, wid: str, chain=None) -> None:
+async def _seed_needs_human(database, rd, wid: str, chain=None, node="implementation") -> None:
     await database.write(
         lambda c: store.create_work_item(
             c,
@@ -56,10 +56,10 @@ async def _seed_needs_human(database, rd, wid: str, chain=None) -> None:
             materialized_chain=(chain or _CHAIN).to_json(),
         )
     )
-    await database.write(lambda c: store.enter_node(c, wid, "implementation"))
+    await database.write(lambda c: store.enter_node(c, wid, node))
     await database.write(
         lambda c: store.mark_needs_human(
-            c, wid, "implementation", "task failed in node implementation", kind="failed"
+            c, wid, node, "task failed in node implementation", kind="failed"
         )
     )
 
@@ -455,6 +455,61 @@ async def test_dispatch_auto_tags_the_event(monkeypatch, database, run_dirs):
     evs = database.read(lambda c: events_mod.read_after(c, 0, wid))
     msg_events = [e for e in evs if e["type"] == "escalation_message"]
     assert msg_events[0]["payload"]["auto"] is True
+
+
+#: `implementation`, then `merge`, which merges and declares `on_merge_rejected`.
+_MERGING = v1_chain(
+    [
+        _NODE,
+        {
+            "id": "merge",
+            "kind": "exec",
+            "tasks": [{"id": "merge", "kind": "forge", "target": "mr.merge"}],
+            "on_merge_rejected": {
+                "restart_from": "implementation",
+                "repair": {"tasks": [_NODE["tasks"][0]]},
+            },
+        },
+    ],
+    repo="/r",
+)
+
+
+@pytest.mark.parametrize(
+    ("chain", "node"),
+    [(_MERGING, "merge"), (_CHAIN, "implementation")],
+    ids=["a-merge-node", "any-other-node"],
+)
+async def test_a_turn_on_a_merge_node_records_its_tips_and_is_told_a_commit_goes_back(
+    monkeypatch, database, run_dirs, chain, node
+):
+    """What `walk.hold_after_escalation` compares once the turn is over -- the
+    branch tips before the agent ran -- rides the turn's `escalation_message`,
+    and the agent is told a commit is not merged in place."""
+    seen = {}
+
+    async def fake_run_agent_task(db, run_dirs, *, session_id, task_instruction, **kw):
+        seen["task_instruction"] = task_instruction
+        await kw["on_session"]()
+        kw["files"].log.parent.mkdir(parents=True, exist_ok=True)
+        kw["files"].log.write_text("")
+        return "done"
+
+    monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
+    await _seed_needs_human(database, run_dirs, "w1", chain, node)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
+    await escalate.dispatch(database, run_dirs, work_item_id="w1", message="m", launch=launch)
+
+    from kraft import events as events_mod
+
+    evs = database.read(lambda c: events_mod.read_after(c, 0, "w1"))
+    [message] = [e["payload"] for e in evs if e["type"] == "escalation_message"]
+    merging = node == "merge"
+    recorded = message.get("merge_node")
+    worktree = str(run_dirs.worktrees / "w1")
+    assert recorded == ({"node_id": "merge", "tips": {worktree: None}} if merging else None)
+    told = "Kraft sends the work item back to node implementation"
+    assert (told in seen["task_instruction"]) is merging
 
 
 def test_dispatch_forwards_the_repo_s_resolved_sandbox(tmp_path, monkeypatch):

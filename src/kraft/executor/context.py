@@ -86,6 +86,12 @@ MERGE_REWIND = "merge_rewind"
 #: span. Like `CONFLICT_RESOLVED`, handled by the walk itself.
 MERGE_REPAIRED = "merge_repaired"
 
+#: A merge node's stuck escalation finished having committed: never rerun in
+#: place, which would merge its change unseen. The chain rewinds to
+#: `on_merge_rejected.restart_from` as after `MERGE_REPAIRED`, handled by the
+#: walk itself.
+ESCALATION_COMMITTED = "escalation_committed"
+
 #: A recovery handler finished `done_with_concerns` (Kraft-s7c04.56). For an
 #: ordinary task doubts are information for the next gate (`_ADVANCING`); for
 #: a repair they are a verdict on whether repair was possible at all, so the
@@ -137,6 +143,7 @@ SCOPE: dict[str, str] = {
     CONFLICT_RESOLVED: "chain",  # the same restart, reopening the span's gates
     MERGE_REWIND: "chain",  # the walk rewinds to re-run the rejected span
     MERGE_REPAIRED: "chain",  # a repaired rejection restarts the span
+    ESCALATION_COMMITTED: "chain",  # a merge node's escalation committed: the same rewind
 }
 
 

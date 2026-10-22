@@ -44,9 +44,11 @@ def _started_by(event: dict, node: str, order: Sequence[str]) -> dict | None:
         target = (payload.get("path") or "").split(".")[0] or None
         inside = target == node and payload.get("scope") in ("step", "task")
         return {"reason": "retry"} if before(target) and not inside else None
-    reason = (
-        "merge_rejected" if event["type"] == ChainEvent.MERGE_REJECTION_RESTART else "base_change"
-    )
+    if event["type"] == ChainEvent.MERGE_REJECTION_RESTART:
+        # A merge node's escalation that committed rewinds the same way.
+        reason = "escalation" if payload.get("cause") == "escalation" else "merge_rejected"
+    else:
+        reason = "base_change"
     return {"reason": reason} if node in payload.get("nodes", [node]) else None
 
 

@@ -5,10 +5,19 @@ that agent may leave behind."""
 import json
 
 import pytest
+from support.item_walk import (
+    MERGE_POLICY,
+    NO_SETUP,
+    approve,
+    commits_a_fix,
+    merge_chain,
+    walk_once,
+)
 
 from kraft import events, executor, inplace, store
 from kraft import policy as _policy
 from kraft.executor import gates as gates_module
+from kraft.executor import walk
 from kraft.templates.environment import WorkItemTarget
 
 _CHAIN = """
@@ -581,3 +590,48 @@ async def test_an_auto_escalation_refused_its_checkout_waits_or_is_skipped(
         ([], ["follow_up"]) if then == "queued" else ([{"reason": "checkout"}], [])
     )
     assert not it.events("work_item_retried")
+
+
+@pytest.mark.parametrize(
+    ("commits", "retries", "start"),
+    [(True, True, 0), (True, False, None), (False, True, 2)],
+    ids=["commits-and-retries", "commits-and-stops", "changes-nothing"],
+)
+async def test_an_escalation_that_commits_on_a_merge_node_sends_it_back_through_review(
+    item_on, script, monkeypatch, no_rebase_no_walk, commits, retries, start
+):
+    """The merge failed for another reason than a drop and Kraft's automatic
+    escalation took the stop. Its commit is never merged in place: the item is
+    held at `restart_from` with `review` reopened, and the agent's own retry
+    of `merge` starts there instead. With nothing committed it retries
+    `merge` as asked."""
+    it = await item_on(merge_chain(on_merge_rejected=MERGE_POLICY))
+    await approve(it, "review")
+    script.plan["merge"] = ["failed"]
+    assert await walk_once(it) == "needs_human"
+
+    async def turn(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
+        # What `escalate.dispatch` records before the agent runs, then the agent.
+        seen = walk.merge_node_tips(database, work_item_id, it.row(), it.worktree)
+        message = {"auto": auto, "merge_node": seen}
+        await database.write(
+            lambda c: events.append(c, work_item_id, "escalation_message", message)
+        )
+        if commits:
+            await commits_a_fix(it)(it.row())
+        if retries:
+            asked = _self_retry_event(node_id="merge", path="merge")
+            await database.write(
+                lambda c: events.append(c, work_item_id, "work_item_self_retry_requested", asked)
+            )
+        return "done"
+
+    monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", turn)
+
+    await _escalate(it, launch=executor.LaunchContext(repo_entry=NO_SETUP))
+
+    assert [w["start_index"] for w in no_rebase_no_walk] == ([start] if retries else [])
+    reopened = [e["payload"] for e in it.events("gate_reopened")]
+    assert reopened == ([{"gate": "review", "reason": "escalation_committed"}] if commits else [])
+    if commits and not retries:
+        assert (it.status(), it.row()["current_node_id"]) == ("needs_human", "feedback")
