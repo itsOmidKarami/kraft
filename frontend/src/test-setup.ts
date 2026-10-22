@@ -1,6 +1,14 @@
-import { afterEach } from "vitest";
+import type { MouseEvent } from "react";
+import { afterEach, vi } from "vitest";
 import { iconOnlyProblem } from "./ng/ui/iconOnly";
 import "@testing-library/jest-dom/vitest";
+
+// A click on what a double-click opens waits out a second press (ui/singleClick). Tests of what a click selects take
+// it at once; the ones that pin the wait itself `vi.unmock` this.
+vi.mock("./ng/ui/singleClick", async (real) => ({
+  ...(await real<typeof import("./ng/ui/singleClick")>()),
+  useSingleClick: () => (e: MouseEvent, act: () => void) => void (e.detail < 2 && act()),
+}));
 
 // jsdom has no matchMedia. Default every test to desktop width; tests that
 // need phone width stub this themselves via vi.stubGlobal, which overrides

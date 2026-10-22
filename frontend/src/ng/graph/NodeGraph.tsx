@@ -12,6 +12,7 @@ import { useRoving } from "./useRoving";
 import { ZoomControls } from "./ZoomControls";
 import "./graph.css";
 import { hint, tip } from "../ui/Tooltip";
+import { useSingleClick } from "../ui/singleClick";
 import { SEAM } from "./layout";
 
 /** A step, or a task in it, or one of an open task's scopes (its `key`). The escalation task's step is
@@ -125,6 +126,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
   const camera = useCamera({ canvas: "node", world: { W: settledW, H: settledH }, opening: "fit", reserve, clearBottom: 56 });
   const selKey = selected && (selected.scope && selected.task ? chipKey(selected.step, selected.task, selected.scope) : selected.task ? taskKey(selected.step, selected.task) : labelKey(selected.step));
   const firstStep = steps[0];
+  const single = useSingleClick();
   const roving = useRoving(selKey, firstStep && (firstStep.tasks[0] ? taskKey(firstStep.id, firstStep.tasks[0].id) : labelKey(firstStep.id)));
 
   // An open task's box hides behind its frame, and the frame goes again: the focus follows each, not left on what left.
@@ -259,7 +261,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
         className={`graph-node is-task${sel || t.state === "current" ? " is-bold" : ""}${t.state === "todo" ? " is-todo" : ""}${t.state === "esc" || t.state === "amber" ? " is-warn" : ""}${t.pending ? " is-pending" : ""}${away ? " is-away" : ""}${extra}`}
         style={{ left: x - G.COL / 2, top: y - G.BOX / 2, width: G.COL }}
         onFocus={() => { roving.go(key); if (!quiet.current) camera.reveal({ x0: x - G.COL / 2, x1: x + G.COL / 2, y0: y - G.BOX / 2, y1: y + G.BOX / 2 + 36 }); }}
-        onClick={() => onSelect?.(s)}
+        onClick={(e) => single(e, () => onSelect?.(s), !!onExpand)}
         onDoubleClick={() => onExpand?.(s)}
       >
         <NodeGlyph {...t} size="md" sel={sel} />
@@ -314,7 +316,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
               className={`step-label${sel ? " is-sel" : ""}${st.mark ? ` mark-${st.mark}` : ""}`}
               style={{ left: cx - G.COL / 2, top: labelY, width: G.COL }}
               onFocus={() => { roving.go(key); camera.reveal({ x0: cx - G.COL / 2, x1: cx + G.COL / 2, y0: labelY, y1: labelY + 20 }); }}
-              onClick={() => onSelect?.({ step: st.id })}
+              onClick={(e) => single(e, () => onSelect?.({ step: st.id }), !!onExpand)}
               onDoubleClick={() => onExpand?.({ step: st.id })}
             >
               {st.label ?? st.id}
@@ -367,7 +369,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
               className={`graph-node is-task${sel || look.state === "current" ? " is-bold" : ""}${look.state === "todo" ? " is-todo" : ""}${look.state === "amber" ? " is-warn" : ""}${look.faded ? " is-faded" : ""}`}
               style={{ left: x - G.COL / 2, top: y - G.BOX / 2, width: G.COL }}
               onFocus={() => { roving.go(key); if (!quiet.current) camera.reveal({ x0: x - G.COL / 2, x1: x + G.COL / 2, y0: y - G.BOX / 2, y1: y + G.BOX / 2 + 36 }); }}
-              onClick={() => pickLoop(col.step!)}
+              onClick={(e) => single(e, () => pickLoop(col.step!), !!onExpand)}
               onDoubleClick={() => onExpand?.({ step: "fix_loop", task: col.step })}
             >
               <NodeGlyph icon="layers" state={look.state} running={look.running} paused={look.paused} size="md" sel={selStep === col.step} />

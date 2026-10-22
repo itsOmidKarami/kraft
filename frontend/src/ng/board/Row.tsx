@@ -6,6 +6,7 @@ import { breakPaths } from "../ui/breakable";
 import { CUE_ICON } from "./cue";
 import { chainOf, groupOf } from "./model";
 import { actionVariant, admittedRowAction, glyphOf, reasonTail, stopCueOf, ticksOf, type RowAction } from "./rowText";
+import { useSingleClick } from "../ui/singleClick";
 import { IN_YOUR_CHECKOUT } from "./sharedWords";
 import { Ticks } from "./Ticks";
 
@@ -50,7 +51,8 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
   // A row's action is named by what it does ("Review") and described by its item:
   // five alike in a row read the same to a screen reader without it (R8b-11).
   const titleId = `board-title-${item.id}`;
-  const click = (e: MouseEvent) => (e.metaKey || e.ctrlKey ? onOpen(item.id) : onSelect(item.id));
+  const single = useSingleClick();
+  const click = (e: MouseEvent) => (e.metaKey || e.ctrlKey ? onOpen(item.id) : single(e, () => onSelect(item.id)));
   const key = (e: KeyboardEvent) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();

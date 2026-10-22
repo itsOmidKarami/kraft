@@ -1,11 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import { useStore } from "../../store";
 import { Shell } from "../shell/Shell";
-import { ChainsPage, DOUBLE_CLICK_MS } from "./ChainsPage";
+import { ChainsPage } from "./ChainsPage";
 import * as d from "./draft/draftApi";
 import { DEFAULT_VIEW } from "./draft/fixture.default";
 import type { DraftView } from "./draft/types";
@@ -53,15 +53,11 @@ beforeEach(() => {
 
 describe("rename", () => {
   const pane = () => screen.getByRole("complementary", { name: "spec pane" });
-  // A click on the selected node renames only once a double-click can no longer
-  // follow it; the fake clock plays that wait out instead of sleeping through it.
+  // The canvas holds a click until a double-click is ruled out (ui/singleClick, pinned there); here it lands at once.
   let user: ReturnType<typeof userEvent.setup>;
   beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    user = userEvent.setup();
   });
-  afterEach(() => vi.useRealTimers());
-  const pause = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
 
   it("a click on the pane's title renames in place, naming the references Enter updates", async () => {
     const post = vi.spyOn(d, "postOps").mockImplementation(() => opsAnswer({ updated: [{}, {}] }));
@@ -102,9 +98,7 @@ describe("rename", () => {
     const g = await canvas();
     const spec = within(g).getByRole("button", { name: "spec, node" });
     await user.click(spec);
-    await pause(DOUBLE_CLICK_MS + 50);
     await user.click(spec);
-    await pause(DOUBLE_CLICK_MS);
     expect(await within(pane()).findByRole("textbox", { name: "Rename node" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -118,11 +112,9 @@ describe("rename", () => {
     const spec = within(g).getByRole("button", { name: "spec, node" });
     if (selected) {
       await user.click(spec);
-      await pause(DOUBLE_CLICK_MS + 50);
     }
     await user.dblClick(spec);
     await waitFor(() => expect(where).toBe("/templates/chains/default/nodes/spec"));
-    await pause(DOUBLE_CLICK_MS + 50);
     expect(screen.queryByRole("textbox", { name: "Rename node" })).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -161,10 +153,8 @@ describe("rename", () => {
     const g = await canvas();
     const spec = within(g).getByRole("button", { name: "spec, node" });
     await user.click(spec);
-    await pause(DOUBLE_CLICK_MS + 50);
     await user.click(spec);
     await user.click(within(g).getByRole("button", { name: "implementation, node" }));
-    await pause(DOUBLE_CLICK_MS + 50);
     expect(screen.getByRole("complementary", { name: "implementation pane" })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /^Rename/ })).toBeNull();
     // Nor when the node is picked again.
@@ -179,14 +169,11 @@ describe("rename", () => {
     const g = await canvas();
     const spec = within(g).getByRole("button", { name: "spec, node" });
     await user.click(spec);
-    await pause(DOUBLE_CLICK_MS + 50);
     await user.click(spec);
-    await pause(DOUBLE_CLICK_MS);
     await user.type(await within(pane()).findByRole("textbox", { name: "Rename node" }), "{Escape}");
     expect(within(pane()).queryByRole("textbox", { name: "Rename node" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Review & publish" }));
     await user.click(screen.getByRole("button", { name: "Review & publish" }));
-    await pause(50);
     expect(pane()).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Rename node" })).toBeNull();
   });
@@ -197,10 +184,8 @@ describe("rename", () => {
     const g = await canvas();
     const spec = within(g).getByRole("button", { name: "spec, node" });
     await user.click(spec);
-    await pause(DOUBLE_CLICK_MS + 50);
     await user.click(spec);
     await user.click(screen.getByRole("button", { name: "Review & publish" }));
-    await pause(DOUBLE_CLICK_MS + 50);
     await user.click(screen.getByRole("button", { name: "Review & publish" }));
     expect(pane()).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Rename node" })).toBeNull();
@@ -214,7 +199,6 @@ describe("rename", () => {
     await user.click(screen.getByRole("button", { name: "Collapse pane" }));
     await user.click(spec);
     expect(pane()).toBeInTheDocument();
-    await pause(DOUBLE_CLICK_MS + 50);
     expect(screen.queryByRole("textbox", { name: "Rename node" })).toBeNull();
   });
 

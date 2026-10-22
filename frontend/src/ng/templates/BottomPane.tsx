@@ -16,6 +16,7 @@ import { ReadOnly } from "./addon";
 import { problemText, problemWord } from "./problems";
 import { autoEscalates } from "./escalateWords";
 import { tip } from "../ui/Tooltip";
+import { useSingleClick } from "../ui/singleClick";
 
 export type BottomTab = "on_failure" | "fix_loop" | "escalation" | "on_conflict" | "on_merge_rejected";
 const LABEL: Record<BottomTab, string> = { on_failure: "On failure", fix_loop: "Fix loop", escalation: "Escalation", on_conflict: "On conflict", on_merge_rejected: "On merge rejected" };
@@ -126,6 +127,7 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
   // With a merge rejection declared, any on_failure here may only read (the server refuses one that writes):
   // add_handler starts it read_only, on the plan, which covers every step it has or gets.
   const readOnlyRecovery = !!rejected;
+  const single = useSingleClick();
   const [raw, setRaw] = useState<number | null>(load);
   const height = open ? clampBottom(raw ?? Math.round(Math.min(300, Math.max(170, (canvasH - 150) * 0.42))), canvasH) : BOTTOM.BAR;
   const [level, setLevel] = useState<"task" | "step" | "node" | null>(null);
@@ -315,7 +317,7 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
                 {shown === "fix_loop" && (
                   <div className="bp-judge">
                     {judge ? (
-                      <button type="button" className={`bp-judge-btn${selIn(judgePath) ? " is-sel" : ""}`} onClick={() => onPick(judgePath)} onDoubleClick={() => onOpen(judgePath)}>judge · from attempt 2</button>
+                      <button type="button" className={`bp-judge-btn${selIn(judgePath) ? " is-sel" : ""}`} onClick={(e) => single(e, () => onPick(judgePath))} onDoubleClick={() => onOpen(judgePath)}>judge · from attempt 2</button>
                     ) : readOnly ? null : (
                       <button type="button" className="bp-judge-btn is-slot" onClick={(e) => openMenu(e.currentTarget, "Add a judge", (c) => [{ op: "add_task", slot: "judge", node, ...c }], true)}>+ add a judge</button>
                     )}

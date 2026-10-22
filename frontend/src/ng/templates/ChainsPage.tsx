@@ -46,10 +46,6 @@ export function useBox() {
   return [setEl, box.w, box.h] as const;
 }
 
-/** How long a click waits to be sure it isn't the first of a double-click (the
- *  common system default; a slower pair still ends the rename it began). */
-export const DOUBLE_CLICK_MS = 500;
-
 export const chainUrl = (chain: string) => `/templates/chains/${encodeURIComponent(chain)}`;
 export const nodeUrl = (chain: string, node: string) => `${chainUrl(chain)}/nodes/${encodeURIComponent(node)}`;
 
@@ -98,13 +94,9 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   // The nodes an open remove card lists, marked red on the canvas (Decisions §9 Remove).
   const [marked, setMarked] = useState<string[]>([]);
   const [strip, setStrip] = useState<{ ok: boolean; text: string } | null>(null);
-  // A click on the selected node's name renames it once no second click makes it a double-click.
   // The path whose title the pane edits in place, held here so a remount (after
   // Review & publish) starts without it.
   const [renaming, setRenaming] = useState<string | null>(null);
-  const renameTimer = useRef<number | undefined>(undefined);
-  const stopRenameTimer = () => window.clearTimeout(renameTimer.current);
-  useEffect(() => stopRenameTimer, []);
   // The chain's YAML is a second view of the same draft (Decisions §9 YAML).
   const [surface, setSurface] = useState<"canvas" | "yaml">("canvas");
   const taskPaths = r.resolved?.task_paths;
@@ -163,8 +155,6 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   }, []);
 
   const focusNode = useCallback((id: string, sel?: TSel) => {
-    // A double-click opens the node view: the click before it renames nothing.
-    stopRenameTimer();
     setRenaming(null);
     dispatch({ type: "focus", node: id, sel });
     navigate(nodeUrl(chain, id));
@@ -196,7 +186,6 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     api.getLibrary().then((l) => setLibText(l.text)).catch(() => setLibText(null));
   }, [chain]);
   const startReview = () => {
-    stopRenameTimer();
     setRenaming(null);
     if (s.level === "node") {
       dispatch({ type: "back" });
@@ -241,7 +230,6 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const neverPublished = view.base[chainFile(chain)] === null;
 
   const onEscape = () => {
-    stopRenameTimer();
     if (review) return endReview();
     if (!s.open && s.level === "node") {
       dispatch({ type: "back" });
@@ -369,20 +357,14 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             onSelect={(id) => {
               if (review) return setHighlight(id);
               // A click on the selected node's name while its pane is open renames it in the pane
-              // (Decisions §9 Rename), unless a second click makes it a double-click, which opens it.
-              stopRenameTimer();
-              if (sel.kind === "node" && sel.node === id && s.open) {
-                // Only if the node is still what the pane shows when it fires.
-                renameTimer.current = window.setTimeout(() => latest.current.selPath === id && setRenaming(id), DOUBLE_CLICK_MS);
-                return;
-              }
+              // (Decisions §9 Rename). The canvas holds the click until a double-click, which opens it, is ruled out.
+              if (sel.kind === "node" && sel.node === id && s.open) return setRenaming(id);
               dispatch({ type: "pick", sel: selOf(id) });
             }}
             onOpen={(id) => (review ? setHighlight(id) : dispatch({ type: "expand", sel: selOf(id) }))}
             onFocusNode={(id) => !review && focusNode(id)}
             onEscape={onEscape}
             onBackground={() => {
-              stopRenameTimer();
               if (review) setHighlight(undefined);
               else dispatch({ type: "background" });
             }}
