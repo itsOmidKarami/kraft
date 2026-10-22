@@ -202,27 +202,63 @@ def test_fix_loop_cap(walk, kl_cli, tmp_path, chain, node, cap):
     assert over == [False] * cap + [True]
 
 
-def test_restart_from(walk, kl_cli, tmp_path):
+@pytest.mark.parametrize(
+    ("flags", "key", "node", "target", "gate", "repair", "note", "count", "cap"),
+    [
+        pytest.param(
+            [],
+            "on_base_changed",
+            "merge_request_feedback",
+            "verification",
+            "local_review",
+            [],
+            "Base changed: restarted from verification",
+            "restarts",
+            "is over its restart cap: it restarted 3 times (cap 3)",
+            id="base_changed",
+        ),
+        # The merge train or queue dropped the PR: after the repair, the head goes
+        # back through the PR's checks and the final gate before it is offered again.
+        pytest.param(
+            ["--merge-rejected"],
+            "on_merge_rejected",
+            "merge",
+            "merge_request_feedback",
+            "final_review",
+            ["merge.on_merge_rejected.repair.main.repair"],
+            "Merge rejected: restarted from merge_request_feedback",
+            "rejections",
+            "is over its merge-rejection cap: its merge was rejected 3 times (cap 3)",
+            id="merge_rejected",
+        ),
+    ],
+)
+def test_restart_from(
+    walk, kl_cli, tmp_path, flags, key, node, target, gate, repair, note, count, cap
+):
     walk.start(tmp_path)
-    assert "spec has no on_base_changed" in kl_cli(tmp_path, "restart", ok=False).stderr
-    walk.to(tmp_path, "merge_request_feedback")
+    refused = kl_cli(tmp_path, "restart", *flags, ok=False)
+    assert f"spec has no {key} to restart from" in refused.stderr
+    walk.to(tmp_path, node)
     kl_cli(tmp_path, "attempt")
-    for restarts in (1, 2, 3):
-        state = kl_cli(tmp_path, "restart")
+    policy = kl_cli(tmp_path, "state")[key]
+    steps = (policy.get("repair") or {"steps": []})["steps"]
+    assert [t["path"] for s in steps for t in s["tasks"]] == repair
+    for times in (1, 2, 3):
+        state = kl_cli(tmp_path, "restart", *flags)
 
-        assert (state["node"], state["attempt"]) == ("verification", 0)
-        assert state["note"].endswith("Base changed: restarted from verification")
-        walk.to(tmp_path, "merge_request_feedback")
+        assert (state["node"], state["attempt"]) == (target, 0)
+        assert state["note"].endswith(note)
+        [reopened] = [r for r in stored(tmp_path).values() if r["id"].endswith(f".{gate}")]
+        assert reopened["status"] == "open", "a gate in the span is answered again"
+        walk.to(tmp_path, node)
         state = kl_cli(tmp_path, "state")
         assert state["attempt"] == 0
-        assert state["on_base_changed"] == {
-            "restart_from": "verification",
-            "restarts": restarts,
-            "cap": 3,
-        }
+        assert state[key] == {**policy, count: times}
 
-    refused = kl_cli(tmp_path, "restart", ok=False)
-    assert "merge_request_feedback is over its restart cap" in refused.stderr
+    assert policy["cap"] == 3
+    refused = kl_cli(tmp_path, "restart", *flags, ok=False)
+    assert f"kraft-lite: {node} {cap}. Stop and ask the human, as over_cap" in refused.stderr
     assert kl_cli(tmp_path, "summary")["totals"]["rejections"] == 0, "a restart is no rejection"
 
 

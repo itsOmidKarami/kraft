@@ -313,6 +313,14 @@ def skill(name: str, text: str = "fallback") -> dict:
             id="slice_layer_first_build_repair_is_not_the_implementer",
         ),
         pytest.param(
+            task(path="build.on_merge_rejected.repair.main.repair", components=["fixer"]),
+            {},
+            lambda name: True,
+            "build",
+            {"kind": "prompt", "source": "default:agent"},
+            id="slice_layer_first_build_merge_rejection_repair_is_not_the_implementer",
+        ),
+        pytest.param(
             task(path="build.main.check", kind="builtin", ref="kraft.mr_rebase"),
             {},
             lambda name: True,

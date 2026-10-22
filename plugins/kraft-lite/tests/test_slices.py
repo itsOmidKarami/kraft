@@ -754,6 +754,7 @@ def test_slice_verbs_still_answer_after_the_chain_is_done(walk, kl_cli, tmp_path
         pytest.param(["produced", "--kind", "spec", "--path", "x"], id="produced"),
         pytest.param(["mark", "--on-failure-ran"], id="mark"),
         pytest.param(["restart"], id="restart"),
+        pytest.param(["restart", "--merge-rejected"], id="restart_merge_rejected"),
     ],
 )
 def test_a_finished_chain_still_refuses_the_verbs_that_need_an_open_node(

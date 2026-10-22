@@ -229,6 +229,13 @@ has not failed. If the node has `on_base_changed`, `kl.py restart` reopens
 the walk at its `restart_from` node and every node through this one, with
 their attempts reset. A node restarts at most three times.
 
+The merge task can report that the forge's merge train or merge queue
+dropped the PR. If the node has `on_merge_rejected`, as the bundled default's
+`merge` does, its repair steps run, then `kl.py restart --merge-rejected`
+reopens the walk at its `restart_from` node through this one, so the PR's
+checks and the final gate are answered again. A node is sent back this way
+at most three times; without `on_merge_rejected`, a drop stops for you.
+
 ### Gates
 
 A gate is a node of its own, with a `message`, an `artifact`, and where a
@@ -252,7 +259,8 @@ so it starts at the chain revision.
 `kl.py state` is all a session needs to carry on, so a cleared context loses
 nothing. It reports `node`, `kind` (`exec` or `gate`), `status`, `note`,
 `attempt`, `cap`, `backend`, `sliced`, and for an exec node its `steps`,
-`on_failure`, `on_failure_ran`, `fix_loop` and `on_base_changed`. For a gate
+`on_failure`, `on_failure_ran`, `fix_loop`, `on_base_changed` and
+`on_merge_rejected`. For a gate
 it reports `gate`: the `message`, the `artifact` and its `artifact_path`, the
 `reject_to` node, and whether it is the `chain_finalized` or the slice gate.
 

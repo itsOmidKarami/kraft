@@ -213,6 +213,15 @@ def test_resolve_bundled_default(tmp_path, home):
     assert verification["fix_loop"]["judge"]["components"] == ["strict_judge"]
     assert verification["fix_loop"]["judge"]["path"] == "verification.fix_loop.judge"
     assert nodes["merge_request_feedback"]["on_base_changed"] == {"restart_from": "verification"}
+    rejected = nodes["merge"]["on_merge_rejected"]
+    assert rejected["restart_from"] == "merge_request_feedback"
+    [[repair]] = [step["tasks"] for step in rejected["repair"]["steps"]]
+    assert (repair["path"], repair["components"]) == (
+        "merge.on_merge_rejected.repair.main.repair",
+        ["repair_merge_queue_failure"],
+    )
+    rejecting = [n["id"] for n in chain["nodes"] if n.get("on_merge_rejected")]
+    assert rejecting == ["merge"]
     assert nodes["final_review"]["chain_finalized"] is True
     implement = nodes["implementation"]["steps"][0]["tasks"][0]
     assert implement["components"] == ["implementer"]
@@ -397,6 +406,22 @@ def _task_chain(task: str) -> str:
     return f"nodes:\n  - {{id: a, kind: exec, tasks: [{task}]}}\n"
 
 
+#: The node `_rejecting` adds last: one merge task, and what it does on a drop.
+MERGE_NODE = "{id: m, kind: exec, tasks: [%s], %s}"
+MERGE_TASK = "{id: merge, kind: forge, target: mr.merge}"
+REPAIR = "repair: {tasks: [{id: fix, extends: worker}]}"
+
+
+def _rejecting(rejected: str, before: str = "", tasks: str = MERGE_TASK, extra: str = "") -> str:
+    """A chain of exec node `a`, then the nodes in `before`, then a merge node `m`
+    whose `on_merge_rejected` holds `rejected` (and `extra` beside it)."""
+    node = MERGE_NODE % (tasks, f"on_merge_rejected: {{{rejected}}}{extra}")
+    return (
+        "nodes:\n  - {id: a, kind: exec, tasks: [{id: t, extends: worker}]}\n"
+        f"{before}  - {node}\n"
+    )
+
+
 @pytest.mark.parametrize(
     ("chains", "match"),
     [
@@ -569,6 +594,72 @@ def _task_chain(task: str) -> str:
             r"a node either wholly produces one kind or declares none",
             id="produces_two_kinds",
         ),
+        # Kraft's `Chain`: a merge rejection rewinds strictly backward, through the
+        # final gate when the merge comes after it, from the node that merges.
+        pytest.param(
+            {"c": _rejecting(f"restart_from: m, {REPAIR}")},
+            "m: on_merge_rejected.restart_from 'm' must name an earlier execution node",
+            id="merge_rejected_restart_from_itself",
+        ),
+        pytest.param(
+            {"c": _rejecting(f"restart_from: g, {REPAIR}", "  - {id: g, kind: gate}\n")},
+            "m: on_merge_rejected.restart_from 'g' must name an earlier execution node",
+            id="merge_rejected_restart_from_a_gate",
+        ),
+        pytest.param(
+            {
+                "c": _rejecting(
+                    f"restart_from: b, {REPAIR}",
+                    "  - {id: g, kind: gate, chain_finalized: true}\n"
+                    "  - {id: b, kind: exec, tasks: [{id: t, extends: worker}]}\n",
+                )
+            },
+            "m: on_merge_rejected.restart_from 'b' must name an execution node before the "
+            "final gate 'g'",
+            id="merge_rejected_restart_from_past_the_final_gate",
+        ),
+        pytest.param(
+            {"c": _rejecting(f"restart_from: a, {REPAIR}", tasks="{id: t, extends: worker}")},
+            "m: on_merge_rejected needs an mr.merge task in the same node",
+            id="merge_rejected_without_mr_merge",
+        ),
+        # A merge in the repair is not the merge the forge rejects.
+        pytest.param(
+            {
+                "c": _rejecting(
+                    f"restart_from: a, repair: {{tasks: [{MERGE_TASK}]}}",
+                    tasks="{id: t, extends: worker}",
+                )
+            },
+            "m: on_merge_rejected needs an mr.merge task in the same node",
+            id="merge_rejected_merge_only_in_its_repair",
+        ),
+        pytest.param(
+            {
+                "c": _rejecting(
+                    f"restart_from: a, {REPAIR}",
+                    extra=", fix_loop: {tasks: [{id: fix, extends: worker}]}",
+                )
+            },
+            "m: on_merge_rejected cannot share a node with fix_loop",
+            id="merge_rejected_beside_a_fix_loop",
+        ),
+        pytest.param(
+            {"c": _rejecting("restart_from: a")},
+            "m.on_merge_rejected.repair: must be a mapping",
+            id="merge_rejected_without_repair",
+        ),
+        pytest.param(
+            {
+                "r": _rejecting(
+                    f"restart_from: b, {REPAIR}",
+                    "  - {id: b, kind: exec, tasks: [{id: t, extends: worker}]}\n",
+                ),
+                "c": "extends: r\nremove: [b]\n",
+            },
+            "m: its on_merge_rejected.restart_from names 'b', which this chain removes",
+            id="merge_rejected_restart_from_removed",
+        ),
     ],
 )
 def test_chain_extension_refusals(tmp_path, home, chains, match):
@@ -625,114 +716,3 @@ def test_resolve_path_argument(tmp_path, home):
     assert (chain["id"], chain["source"]) == ("mine", str(file))
     assert [node["id"] for node in chain["nodes"]] == ["implementation"]
     assert _first_task(chain)["components"] == ["implementer"]
-
-
-#: A chain whose gate on the plan sends a rejection back to the spec's author.
-CROSSED = """\
-    nodes:
-      - id: author
-        kind: exec
-        tasks:
-          - {id: write, extends: worker, produces: spec}
-      - id: planner
-        kind: exec
-        tasks:
-          - {id: write, extends: worker, produces: plan}
-      - id: check
-        kind: gate
-        artifact: plan
-        reject_to: author
-      - id: build
-        kind: exec
-        tasks:
-          - {id: work, extends: worker}
-    """
-
-
-#: A chain whose last node restarts, on a base change, from the plan's author.
-RESTARTING = """\
-    nodes:
-      - id: author
-        kind: exec
-        tasks:
-          - {id: write, extends: worker, produces: spec}
-      - id: planner
-        kind: exec
-        tasks:
-          - {id: write, extends: worker, produces: plan}
-      - id: build
-        kind: exec
-        tasks:
-          - {id: work, extends: worker}
-      - id: ship
-        kind: exec
-        tasks:
-          - {id: work, extends: worker}
-        on_base_changed: {restart_from: planner}
-    """
-
-
-def _drop(*dropped: str) -> list[str]:
-    return [n for n in DEFAULT_IDS if n not in dropped]
-
-
-@pytest.mark.parametrize(
-    ("chain", "kinds", "kept"),
-    [
-        pytest.param("default", set(), DEFAULT_IDS, id="nothing_attached"),
-        pytest.param("default", {"spec"}, _drop("spec", "spec_approval"), id="spec"),
-        pytest.param(
-            "default",
-            {"spec", "plan"},
-            _drop("spec", "spec_approval", "plan", "plan_approval"),
-            id="spec_and_plan",
-        ),
-        # A `chain_finalized` gate is never dropped, whatever its artifact says.
-        pytest.param("default", {"review_brief"}, _drop("work_item_summary"), id="final_gate_kept"),
-        # The gate survives; its `reject_to` named a dropped node, so the target goes.
-        pytest.param(
-            "crossed", {"spec"}, ["planner", "check->None", "build"], id="reject_to_cleared"
-        ),
-        pytest.param("crossed", {"plan"}, ["author", "build"], id="node_and_gate"),
-        # A `restart_from` naming a dropped node moves to the nearest kept exec
-        # node before it, else the first kept one, as a child chain's does.
-        pytest.param(
-            "restarting",
-            {"plan"},
-            ["author", "build", "ship~author"],
-            id="restart_from_redirected_to_an_earlier_node",
-        ),
-        pytest.param(
-            "restarting",
-            {"spec", "plan"},
-            ["build", "ship~build"],
-            id="restart_from_redirected_to_the_first_node",
-        ),
-        pytest.param("restarting", {"spec"}, ["planner", "build", "ship~planner"], id="kept"),
-    ],
-)
-def test_trim(tmp_path, home, chain, kinds, kept):
-    lib = write_library(tmp_path / "lib", LIBRARY, {"crossed": CROSSED, "restarting": RESTARTING})
-    env = {} if chain == "default" else {"KRAFT_CONFIG_DIR": str(lib)}
-    resolved = kl_chains.resolve(tmp_path, env, chain)
-
-    trimmed = kl_chains.trim(resolved, kinds)
-
-    def show(n: dict) -> str:
-        if n["kind"] == "gate" and chain == "crossed":
-            return f"{n['id']}->{n['reject_to']}"
-        if chain == "restarting" and n["on_base_changed"]:
-            return f"{n['id']}~{n['on_base_changed']['restart_from']}"
-        return n["id"]
-
-    shown = [show(n) for n in trimmed["nodes"]]
-    assert shown == kept
-    assert dict(trimmed, nodes=None) == dict(resolved, nodes=None)
-
-
-def test_trim_refuses_to_empty_a_chain():
-    gate = {"id": "g", "kind": "gate", "artifact": "spec", "reject_to": None}
-    chain = {"format": "v1", "id": "c", "source": "s", "nodes": [dict(gate, chain_finalized=False)]}
-
-    with pytest.raises(kl_chains.ChainError, match="would leave chain 'c' with no nodes"):
-        kl_chains.trim(chain, {"spec"})

@@ -442,9 +442,16 @@ class _Resolver:
                 out.append(new)
                 origins.append(("add", j))
         for node in out:
-            base = node.get("on_base_changed")
-            restart = base.get("restart_from") if isinstance(base, dict) else None
-            for key, target in (("reject_to", node.get("reject_to")), ("restart_from", restart)):
+            base, rejected = node.get("on_base_changed"), node.get("on_merge_rejected")
+            pointers = (
+                ("reject_to", node.get("reject_to")),
+                ("restart_from", base.get("restart_from") if isinstance(base, dict) else None),
+                (
+                    "on_merge_rejected.restart_from",
+                    rejected.get("restart_from") if isinstance(rejected, dict) else None,
+                ),
+            )
+            for key, target in pointers:
                 if target in removed:
                     raise self.fail(
                         node["id"], f"its {key} names {target!r}, which this chain removes"
@@ -505,6 +512,13 @@ class _Resolver:
                 base["on_conflict"], where, (*loc, "on_base_changed", "on_conflict")
             )
             node["on_base_changed"] = {**base, "on_conflict": conflict}
+        rejected = node.get("on_merge_rejected")
+        if isinstance(rejected, dict) and isinstance(rejected.get("repair"), dict):
+            where = f"{path}.on_merge_rejected.repair"
+            repair = self._container(
+                rejected["repair"], where, (*loc, "on_merge_rejected", "repair")
+            )
+            node["on_merge_rejected"] = {**rejected, "repair": repair}
         return node
 
     def _container(self, raw: dict, path: str, loc: tuple, step: bool = False) -> dict:
@@ -570,6 +584,11 @@ class _Validator:
 
     def chain(self, nodes: list) -> None:
         seen: dict[str, str] = {}
+        # The first final gate: a merge-rejection rewind must pass it again.
+        final = next(
+            (n.get("id") for n in nodes if n.get("kind") == "gate" and n.get("chain_finalized")),
+            None,
+        )
         for node in nodes:
             id = node.get("id")
             if not isinstance(id, str):
@@ -577,7 +596,7 @@ class _Validator:
             if id in seen:
                 raise self.fail(id, "duplicate node id")
             kind = node.get("kind")
-            for key in ("on_failure", "fix_loop", "on_base_changed"):
+            for key in ("on_failure", "fix_loop", "on_base_changed", "on_merge_rejected"):
                 if node.get(key) is not None and not isinstance(node[key], dict):
                     raise self.fail(f"{id}.{key}", "must be a mapping")
             if kind == "exec":
@@ -617,6 +636,8 @@ class _Validator:
                             f"on_base_changed.restart_from {target!r} must name this or an "
                             "earlier execution node",
                         )
+                if node.get("on_merge_rejected") is not None:
+                    self.rejected(node, seen, final)
             elif kind == "gate":
                 if isinstance(node.get("auto_review"), dict):
                     self.task(node["auto_review"], f"{id}.auto_review")
@@ -626,6 +647,43 @@ class _Validator:
             else:
                 raise self.fail(id, f"kind must be 'exec' or 'gate', not {kind!r}")
             seen[id] = kind
+
+    def rejected(self, node: dict, seen: dict[str, str], final: str | None) -> None:
+        """`on_merge_rejected`, as Kraft's `Chain` checks it: a repair, then a
+        rewind to a strictly earlier exec node, before the final gate when the
+        merge comes after it, from a node of its own whose tasks merge."""
+        id, rejected = node["id"], node["on_merge_rejected"]
+        repair = rejected.get("repair")
+        if not isinstance(repair, dict):
+            raise self.fail(f"{id}.on_merge_rejected.repair", "must be a mapping")
+        self.shape(repair, f"{id}.on_merge_rejected.repair")
+        target = rejected.get("restart_from")
+        if seen.get(target) != "exec":
+            raise self.fail(
+                id,
+                f"on_merge_rejected.restart_from {target!r} must name an earlier execution node",
+            )
+        # Past the final gate, the rewind would merge the repair's commit unseen.
+        order = list(seen)
+        if final in seen and order.index(target) > order.index(final):
+            raise self.fail(
+                id,
+                f"on_merge_rejected.restart_from {target!r} must name an execution node "
+                f"before the final gate {final!r}",
+            )
+        # A drop is answered by the repair alone: a fix cycle or a node repair
+        # would commit code the next merge lands unseen.
+        for other in ("fix_loop", "on_failure"):
+            if node.get(other) is not None:
+                raise self.fail(id, f"on_merge_rejected cannot share a node with {other}")
+        # The node's own tasks: a merge in its repair is not the merge rejected.
+        groups = node.get("steps") or [{"tasks": node["tasks"]}]
+        if not any(
+            task.get("kind") == "forge" and task.get("target") == kl_shape.MERGE
+            for step in groups
+            for task in step["tasks"]
+        ):
+            raise self.fail(id, "on_merge_rejected needs an mr.merge task in the same node")
 
     def loop(self, loop: dict, path: str) -> None:
         """A fix loop's judge is a task with an id, and its cap a count: the
@@ -751,10 +809,11 @@ def _freeze(library: Library, chain_id: str, source: str, expanded: dict) -> dic
                 }
             )
             continue
-        failure, loop, base = (
+        failure, loop, base, rejected = (
             node.get("on_failure"),
             node.get("fix_loop"),
             node.get("on_base_changed"),
+            node.get("on_merge_rejected"),
         )
         # Of the node's policy, only what caps its fix loop: Lite enforces no other.
         cap = (node.get("policy") or {}).get("max_attempts")
@@ -775,6 +834,14 @@ def _freeze(library: Library, chain_id: str, source: str, expanded: dict) -> dic
                 if loop
                 else None,
                 "on_base_changed": {"restart_from": base["restart_from"]} if base else None,
+                "on_merge_rejected": {
+                    "restart_from": rejected["restart_from"],
+                    "repair": {
+                        "steps": steps(rejected["repair"], f"{id}.on_merge_rejected.repair")
+                    },
+                }
+                if rejected
+                else None,
             }
         )
     return {"format": "v1", "id": chain_id, "source": source, "nodes": nodes}
@@ -802,12 +869,43 @@ def restart_target(chain: dict, kept: list[dict], target: str) -> str:
     return before[-1] if before else kept_exec[0]
 
 
+def rejection_target(chain: dict, kept: list[dict], target: str) -> str | None:
+    """Where a kept node's `on_merge_rejected.restart_from` points once `chain`
+    is cut down to `kept`: `target` when it is kept, else the nearest kept exec
+    node before it, else None, and the policy goes, as Kraft's
+    `ResolvedChain.without_nodes` has it. Never later than `target`, so never
+    the merge node itself nor past the final gate."""
+    ids = [node["id"] for node in chain["nodes"]]
+    before = [
+        node["id"]
+        for node in kept
+        if node["kind"] == "exec" and ids.index(node["id"]) <= ids.index(target)
+    ]
+    return before[-1] if before else None
+
+
+def repointed(chain: dict, kept: list[dict], node: dict) -> dict:
+    """A kept exec node of `chain` cut down to `kept`, its `on_base_changed`
+    moved by `restart_target` and its `on_merge_rejected` by
+    `rejection_target`; a gate as it is."""
+    if node["kind"] != "exec":
+        return node
+    base, rejected = node.get("on_base_changed"), node.get("on_merge_rejected")
+    if base:
+        target = restart_target(chain, kept, base["restart_from"])
+        node = dict(node, on_base_changed={"restart_from": target})
+    if rejected:
+        target = rejection_target(chain, kept, rejected["restart_from"])
+        node = dict(node, on_merge_rejected=dict(rejected, restart_from=target) if target else None)
+    return node
+
+
 def trim(chain: dict, kinds: set[str]) -> dict:
     """`chain` without the nodes an attachment of each kind in `kinds` makes
     redundant, as Kraft's `ResolvedChain.trim_for_attachments`: a surviving
     gate whose `reject_to` named a dropped node loses the target, and falls
     back as a gate that declared none. A surviving `restart_from` naming a
-    dropped node moves by `restart_target`."""
+    dropped node moves by `repointed`."""
     dropped = {node["id"] for node in chain["nodes"] if _covered_by(node) in kinds}
     if not dropped:
         return chain
@@ -820,10 +918,6 @@ def trim(chain: dict, kinds: set[str]) -> dict:
     def cut(node: dict) -> dict:
         if node["kind"] == "gate":
             return dict(node, reject_to=None) if node["reject_to"] in dropped else node
-        base = node.get("on_base_changed")
-        if base and base["restart_from"] in dropped:
-            target = restart_target(chain, kept, base["restart_from"])
-            return dict(node, on_base_changed={"restart_from": target})
-        return node
+        return repointed(chain, kept, node)
 
     return dict(chain, nodes=[cut(node) for node in kept])

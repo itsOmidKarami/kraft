@@ -75,6 +75,11 @@ ON_FAILURE_RAN_LABEL = "kraft-on-failure-ran"
 #: base moved. Never cleared: the cap is the node's, over the whole run.
 RESTARTS_LABEL = "kraft-restarts:"
 RESTART_CAP = 3
+#: How many times `restart --merge-rejected` has sent the walk back from this
+#: node because the forge's merge train or queue dropped its PR. Never cleared,
+#: as `RESTARTS_LABEL`; the cap is Kraft's default for `<node>.on_merge_rejected`.
+MERGE_REJECTIONS_LABEL = "kraft-merge-rejections:"
+MERGE_REJECTION_CAP = 3
 #: A fix loop's cap when neither the loop nor anything else names one, as Kraft's.
 DEFAULT_CAP = 3
 
@@ -194,7 +199,8 @@ def _checked(chain_id: str) -> str:
 
 def _dispatched_tasks(chain: dict) -> list[dict]:
     """Every task the walk dispatches, in chain order: each exec node's own steps,
-    its failure handler's, its fix loop's, then the loop's judge."""
+    its failure handler's, its fix loop's, the loop's judge, then its
+    merge-rejection repair's."""
     found = []
     for node in (n for n in chain["nodes"] if n["kind"] == "exec"):
         loop = node["fix_loop"]
@@ -202,6 +208,8 @@ def _dispatched_tasks(chain: dict) -> list[dict]:
             found += kl_shape.node_tasks(container) if container else []
         if loop and loop["judge"]:
             found.append(loop["judge"])
+        if node["on_merge_rejected"]:
+            found += kl_shape.node_tasks(node["on_merge_rejected"]["repair"])
     return found
 
 
@@ -1476,17 +1484,23 @@ STATE_KEYS = (
     "on_failure_ran",
     "fix_loop",
     "on_base_changed",
+    "on_merge_rejected",
     "gate",
 )
 #: The lines `state` reports as the node's note: why it was sent back.
 RESTART_PREFIX = "Base changed: "
+MERGE_REJECTED_PREFIX = "Merge rejected: "
 
 
 def _note(description: str) -> str:
     """Every rejection or restart line, from the first one on."""
     lines = description.splitlines()
     first = next(
-        (i for i, line in enumerate(lines) if line.startswith((NOTE_PREFIX, RESTART_PREFIX))),
+        (
+            i
+            for i, line in enumerate(lines)
+            if line.startswith((NOTE_PREFIX, RESTART_PREFIX, MERGE_REJECTED_PREFIX))
+        ),
         None,
     )
     return "\n".join(lines[first:]) if first is not None else ""
@@ -1537,6 +1551,7 @@ def _state(
     sliced = label_value(epic, SLICE_LAYER_LABEL) is not None
     dispatch = _dispatcher(root, _first_build(chain) if sliced else None)
     loop, base = definition["fix_loop"], definition["on_base_changed"]
+    rejected = definition["on_merge_rejected"]
     state.update(
         cap=_cap(definition),
         steps=_dispatched(definition, dispatch),
@@ -1556,6 +1571,14 @@ def _state(
             "cap": RESTART_CAP,
         }
         if base
+        else None,
+        on_merge_rejected={
+            "restart_from": rejected["restart_from"],
+            "repair": {"steps": _dispatched(rejected["repair"], dispatch)},
+            "rejections": int(label_value(node_record, MERGE_REJECTIONS_LABEL) or 0),
+            "cap": MERGE_REJECTION_CAP,
+        }
+        if rejected
         else None,
     )
     return state
@@ -1981,7 +2004,7 @@ def _exported_chain(path: Path, written: str, missing: str) -> dict:
 #: The keys the walk reads from every frozen node of each kind, present even
 #: when None (`kl_chains._freeze` writes each one).
 NODE_KEYS = {
-    "exec": ("steps", "fix_loop", "on_failure", "on_base_changed"),
+    "exec": ("steps", "fix_loop", "on_failure", "on_base_changed", "on_merge_rejected"),
     "gate": ("message", "artifact", "reject_to", "chain_finalized"),
 }
 
@@ -2020,8 +2043,8 @@ def _chain_flaw(chain: dict) -> str | None:
     """What a chain that says it is V1 lacks of the frozen shape the walk reads,
     or None: the chain's own `id` and `source`; for every node an id and a
     kind; for a gate its `message`, `artifact`, `reject_to` and
-    `chain_finalized`; for an exec node its steps,
-    `fix_loop`, `on_failure` and `on_base_changed`, each handler's steps, the
+    `chain_finalized`; for an exec node its steps, `fix_loop`, `on_failure`,
+    `on_base_changed` and `on_merge_rejected`, each handler's steps, the
     judge, and every task's `path` and `kind`. A file from outside this process
     - an export, a hand-edited copy - is checked here, by `import`,
     `start --slice-of` and every verb reading a run's frozen chain, so a missing
@@ -2063,6 +2086,13 @@ def _chain_flaw(chain: dict) -> str | None:
             isinstance(base, dict) and isinstance(base.get("restart_from"), str)
         ):
             return f"{where}'s on_base_changed has no restart_from"
+        rejected = node["on_merge_rejected"]
+        if rejected is not None:
+            if not (isinstance(rejected, dict) and isinstance(rejected.get("restart_from"), str)):
+                return f"{where}'s on_merge_rejected has no restart_from"
+            flaw = _steps_flaw(rejected.get("repair"), f"{where}'s on_merge_rejected.repair")
+            if flaw:
+                return flaw
     # Read by `start`, which names the chain and its source in its answer, and
     # by the child chain a slice walks.
     for key in ("id", "source"):
@@ -2225,28 +2255,38 @@ def _restart(
     node_record: dict,
     definition: dict,
     chain: dict,
+    merge_rejected: bool = False,
 ) -> list[dict]:
     """What `restart` writes: the walk sent back to `on_base_changed.restart_from`
-    through this node, their attempts reset, this node's restarts counted. The
-    node did not fail - a step moved its base - so the note is no rejection."""
+    (`on_merge_rejected.restart_from` with `merge_rejected`) through this node,
+    their attempts reset and every gate between reopened, this node's restarts
+    (merge rejections) counted. The node did not fail - a step moved its base,
+    or the forge dropped its PR after the repair ran - so the note is no
+    rejection."""
     node_id = definition["id"]
-    base = definition.get("on_base_changed")
-    if not base:
-        raise SystemExit(f"kraft-lite: {node_id} has no on_base_changed to restart from")
-    restarts = int(label_value(node_record, RESTARTS_LABEL) or 0)
-    if restarts >= RESTART_CAP:
-        raise SystemExit(
-            f"kraft-lite: {node_id} is over its restart cap: it restarted {restarts} times "
-            f"(cap {RESTART_CAP}). Stop and ask the human, as over_cap"
-        )
-    target = base["restart_from"]
-    tail = rewind(
-        records, target, f"restarted from {target}", through=node_id, prefix=RESTART_PREFIX
+    key, label, cap, prefix = (
+        ("on_merge_rejected", MERGE_REJECTIONS_LABEL, MERGE_REJECTION_CAP, MERGE_REJECTED_PREFIX)
+        if merge_rejected
+        else ("on_base_changed", RESTARTS_LABEL, RESTART_CAP, RESTART_PREFIX)
     )
+    policy = definition.get(key)
+    if not policy:
+        raise SystemExit(f"kraft-lite: {node_id} has no {key} to restart from")
+    count = int(label_value(node_record, label) or 0)
+    if count >= cap:
+        over = (
+            f"merge-rejection cap: its merge was rejected {count} times"
+            if merge_rejected
+            else f"restart cap: it restarted {count} times"
+        )
+        raise SystemExit(
+            f"kraft-lite: {node_id} is over its {over} (cap {cap}). "
+            "Stop and ask the human, as over_cap"
+        )
+    target = policy["restart_from"]
+    tail = rewind(records, target, f"restarted from {target}", through=node_id, prefix=prefix)
     tail = [
-        set_label(r, RESTARTS_LABEL, str(restarts + 1))
-        if label_value(r, NODE_LABEL) == node_id
-        else r
+        set_label(r, label, str(count + 1)) if label_value(r, NODE_LABEL) == node_id else r
         for r in tail
     ]
     return [*tail, *rewind_slices(everything, chain_id, tail, chain)]
@@ -2334,6 +2374,9 @@ def build_parser() -> argparse.ArgumentParser:
     produced.add_argument("--kind", required=True)
     produced.add_argument("--path", required=True)
     sub.add_parser("mark").add_argument("--on-failure-ran", action="store_true", required=True)
+    # The forge's merge train or queue dropped the PR: `on_merge_rejected`, not
+    # `on_base_changed`.
+    sub.add_parser("restart").add_argument("--merge-rejected", action="store_true")
     reject = sub.add_parser("reject")
     reject.add_argument("--note", required=True)
     # The last gate rejects work that an earlier node produced: its own hook only
@@ -2518,7 +2561,17 @@ def main(argv: list[str] | None = None) -> int:
         tail = rewind(records, target, args.note)
         store.write([*tail, *rewind_slices(everything, resolved_id, tail, chain)])
     elif args.verb == "restart":
-        store.write(_restart(everything, records, resolved_id, node_record, definition, chain))
+        store.write(
+            _restart(
+                everything,
+                records,
+                resolved_id,
+                node_record,
+                definition,
+                chain,
+                args.merge_rejected,
+            )
+        )
     elif args.verb == "produced":
         if not ARTIFACT_KIND.fullmatch(args.kind):
             raise SystemExit(
@@ -2574,6 +2627,7 @@ TASK_KEYWORDS: dict[str, tuple[str, ...]] = {
     "repair_verification": (),
     "repair_mr_feedback": (),
     "repair_mr_checks": (),
+    "repair_merge_queue_failure": (),
     "strict_judge": (),
     "write_work_brief": ("brief",),
     "write_summary": ("summary",),

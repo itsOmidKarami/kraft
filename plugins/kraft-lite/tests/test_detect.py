@@ -104,7 +104,8 @@ def test_every_task_in_the_chain_gets_a_key_even_with_nothing_installed(tmp_path
 
 
 def _chain_tasks(node):
-    handlers = (node, node["on_failure"], node["fix_loop"])
+    rejected = node["on_merge_rejected"]
+    handlers = (node, node["on_failure"], node["fix_loop"], rejected and rejected["repair"])
     judge = [node["fix_loop"]["judge"]] if node["fix_loop"] and node["fix_loop"]["judge"] else []
     return [t for c in handlers if c for s in c["steps"] for t in s["tasks"]] + judge
 
@@ -181,8 +182,9 @@ def test_a_task_of_only_structural_words_reports_no_candidates(tmp_path, monkeyp
 def test_the_packaged_chain_still_reports_its_tasks(tmp_path):
     got = kl.detect(tmp_path)
     assert got["chain"] == "default"
+    # 13 agent tasks: the merge-rejection repair is one.
     assert [len(got["candidates"][section]) for section in ("tasks", "builtins", "forge")] == [
-        12,
+        13,
         2,
         8,
     ]

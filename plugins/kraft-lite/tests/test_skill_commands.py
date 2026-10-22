@@ -151,6 +151,31 @@ def _section(body: str, number: int) -> str:
         ),
         pytest.param(
             "next",
+            2,
+            "The merge task can report that the forge's merge train or merge queue dropped "
+            "the PR instead of merging it",
+            id="next-merge-rejected-is-reported-by-the-merge-task",
+        ),
+        pytest.param(
+            "next",
+            2,
+            "No step failed, so spend no `attempt` and skip section 3. If `on_merge_rejected` is "
+            "set, run `on_merge_rejected.repair.steps` as above, with the drop's reason and each "
+            "failed job as their input, and push what they change to the PR's branch. Then "
+            "`KL restart --merge-rejected`: it reopens the walk from "
+            "`on_merge_rejected.restart_from` through this node, gates included, so the PR's "
+            "checks and the final gate are answered again before the merge runs.",
+            id="next-merge-rejected-repairs-then-restarts",
+        ),
+        pytest.param(
+            "next",
+            2,
+            "With `on_merge_rejected` null, or `rejections` already at its `cap`, stop and tell "
+            "the user why the PR was dropped, as for `over_cap`.",
+            id="next-merge-rejection-cap-from-state",
+        ),
+        pytest.param(
+            "next",
             1,
             "`git diff --name-only origin/<base branch>...HEAD` lists there",
             id="next-scoped-verify-diffs-against-origin",

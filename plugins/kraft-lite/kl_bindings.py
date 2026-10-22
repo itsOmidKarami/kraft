@@ -131,7 +131,7 @@ SLICE_DEFAULTS: dict[str, dict] = {
 
 IMPLEMENTER = "implementer"
 #: The containers under a node that hold recovery, not the node's own work.
-HANDLERS = ("on_failure", "fix_loop", "escalation")
+HANDLERS = ("on_failure", "fix_loop", "escalation", "on_merge_rejected")
 
 SKILL_MISSING = " (skill missing)"
 

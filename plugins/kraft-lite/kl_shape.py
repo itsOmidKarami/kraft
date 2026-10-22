@@ -138,22 +138,14 @@ def sliced_action(chain: dict, shape: SliceShape, node_id: str, mode: str) -> st
 
 def child_chain(chain: dict) -> dict:
     """The chain a child walks for one slice: `chain`'s child nodes, frozen
-    as the controller froze them. A kept node's `on_base_changed.restart_from`
-    naming a node the child lacks is redirected to the nearest kept exec node
-    before that one, else the child's first node (`kl_chains.restart_target`).
-    `first_build` names the first build node, whose agent tasks the slice
-    layer binds to the slice implementer whatever component they extend."""
+    as the controller froze them. A kept node's `restart_from` naming a node
+    the child lacks is redirected to the nearest kept exec node before that
+    one; with none, an `on_base_changed` goes to the child's first node and an
+    `on_merge_rejected` is dropped (`kl_chains.repointed`). The default's merge
+    is never in its child chain: it comes after the final gate, where the
+    child ends. `first_build` names the first build node, whose agent tasks the
+    slice layer binds to the slice implementer whatever component they extend."""
     shape = slice_shape(chain)
     kept = [n for n in chain["nodes"] if n["id"] in shape.child_nodes]
-    nodes = [
-        dict(
-            node,
-            on_base_changed={
-                "restart_from": kl_chains.restart_target(chain, kept, base["restart_from"])
-            },
-        )
-        if (base := node.get("on_base_changed"))
-        else node
-        for node in kept
-    ]
+    nodes = [kl_chains.repointed(chain, kept, node) for node in kept]
     return dict(chain, id=f"{chain['id']}/slice", first_build=shape.first_build, nodes=nodes)

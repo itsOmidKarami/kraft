@@ -22,8 +22,8 @@ migrate`, then go on with the new id it prints.
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>
 
 You get `node`, `kind` (`exec` or `gate`), `status`, `note`, `attempt`, `cap`,
-`steps`, `on_failure`, `on_failure_ran`, `fix_loop`, `on_base_changed`, `gate`
-and `sliced`.
+`steps`, `on_failure`, `on_failure_ran`, `fix_loop`, `on_base_changed`,
+`on_merge_rejected`, `gate` and `sliced`.
 
 - `status: unstarted` - there is no chain here. Invoke `kraft-lite:start`, or say
   so if you were not asked to start one. Do not report this as finished.
@@ -97,6 +97,18 @@ branch's base (a rebase or sync that did work) has not failed. If
 walk from `on_base_changed.restart_from` through this node. Then this skill
 again. It refuses past `on_base_changed.cap` restarts: with `restarts` already
 at `cap`, stop and ask the user instead, as for `over_cap`.
+
+The merge task can report that the forge's merge train or merge queue dropped
+the PR instead of merging it: the pipeline it ran on the PR merged into the
+target failed, or the target moved under it. No step failed, so spend no
+`attempt` and skip section 3. If `on_merge_rejected` is set, run
+`on_merge_rejected.repair.steps` as above, with the drop's reason and each
+failed job as their input, and push what they change to the PR's branch. Then
+`KL restart --merge-rejected`: it reopens the walk from
+`on_merge_rejected.restart_from` through this node, gates included, so the PR's
+checks and the final gate are answered again before the merge runs. Then this
+skill again. With `on_merge_rejected` null, or `rejections` already at its
+`cap`, stop and tell the user why the PR was dropped, as for `over_cap`.
 
 Every step passed: `KL close`, then this skill again. In a sliced run (`sliced`
 not null), export state after every `close`, as `kraft-lite:run-slices`

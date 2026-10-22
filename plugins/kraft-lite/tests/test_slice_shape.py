@@ -102,8 +102,10 @@ def renamed(chain: dict) -> dict:
         node["id"] = names[node["id"]]
         if node["kind"] == "gate" and node["reject_to"]:
             node["reject_to"] = names[node["reject_to"]]
-        elif node["kind"] == "exec" and node["on_base_changed"]:
-            node["on_base_changed"]["restart_from"] = names[node["on_base_changed"]["restart_from"]]
+        elif node["kind"] == "exec":
+            for key in ("on_base_changed", "on_merge_rejected"):
+                if node[key]:
+                    node[key]["restart_from"] = names[node[key]["restart_from"]]
     return out
 
 
@@ -233,35 +235,48 @@ def test_sliced_action(default_chain, mode, node, action):
     assert action in kl_shape.ACTIONS
 
 
-def restarting_from(chain: dict, node: str, target: str) -> dict:
+def restarting_from(chain: dict, node: str, target: str, key: str = "on_base_changed") -> dict:
     out = copy.deepcopy(chain)
     [found] = [n for n in out["nodes"] if n["id"] == node]
-    found["on_base_changed"] = {"restart_from": target}
+    found[key] = dict(found[key] or {}, restart_from=target)
+    if key == "on_merge_rejected":
+        found[key].setdefault("repair", {"steps": []})
     return out
 
 
 @pytest.mark.parametrize(
-    "target, redirected",
+    "key, target, redirected",
     [
         # Kept: left as it is.
-        pytest.param("verification", "verification", id="kept"),
+        pytest.param("on_base_changed", "verification", "verification", id="kept"),
         # Dropped (it produces the local_review gate's artifact): the nearest
         # kept exec node before it.
-        pytest.param("work_brief", "verification", id="dropped_node"),
+        pytest.param("on_base_changed", "work_brief", "verification", id="dropped_node"),
         # Before the child's span: no kept node before it, so the child's first.
-        pytest.param("plan", "implementation", id="outside_span"),
+        pytest.param("on_base_changed", "plan", "implementation", id="outside_span"),
+        # The default's merge is never in a child chain (it comes after the
+        # final gate, where the child ends), so these rows stand a merge
+        # rejection on the child's last node: it moves only earlier, and with
+        # nothing kept before its target the policy goes, as in `trim`.
+        pytest.param("on_merge_rejected", "verification", "verification", id="merge_rejected_kept"),
+        pytest.param(
+            "on_merge_rejected", "work_brief", "verification", id="merge_rejected_dropped_node"
+        ),
+        pytest.param("on_merge_rejected", "plan", None, id="merge_rejected_outside_span"),
     ],
 )
-def test_child_chain_redirects_restart_from(default_chain, target, redirected):
-    chain = restarting_from(default_chain, "merge_request_feedback", target)
+def test_child_chain_redirects_restart_from(default_chain, key, target, redirected):
+    chain = restarting_from(default_chain, "merge_request_feedback", target, key)
 
     child = kl_shape.child_chain(chain)
 
     assert (child["format"], child["id"]) == ("v1", "default/slice")
     assert child["first_build"] == "implementation"
     assert tuple(n["id"] for n in child["nodes"]) == DEFAULT_CHILD
+    assert "merge" not in DEFAULT_CHILD
     feedback = child["nodes"][-1]
-    assert feedback["on_base_changed"] == {"restart_from": redirected}
+    policy = feedback[key]
+    assert (policy and policy["restart_from"]) == redirected
     # Every other node is the controller's, as it froze it.
     by_id = {n["id"]: n for n in chain["nodes"]}
     assert all(n == by_id[n["id"]] for n in child["nodes"][:-1])
@@ -507,6 +522,26 @@ def broken_default(path: Path, node: str, edit) -> None:
             [],
             "is not a usable V1 chain: exec node 'verification' has no fix_loop",
             id="v1_exec_without_fix_loop",
+        ),
+        pytest.param(
+            lambda p: broken_default(p, "merge", lambda n: n.pop("on_merge_rejected")),
+            [],
+            "is not a usable V1 chain: exec node 'merge' has no on_merge_rejected",
+            id="v1_exec_without_on_merge_rejected",
+        ),
+        pytest.param(
+            lambda p: broken_default(p, "merge", lambda n: n["on_merge_rejected"].pop("repair")),
+            [],
+            "is not a usable V1 chain: exec node 'merge''s on_merge_rejected.repair has no steps",
+            id="v1_on_merge_rejected_without_repair",
+        ),
+        pytest.param(
+            lambda p: broken_default(
+                p, "merge", lambda n: n["on_merge_rejected"].pop("restart_from")
+            ),
+            [],
+            "is not a usable V1 chain: exec node 'merge''s on_merge_rejected has no restart_from",
+            id="v1_on_merge_rejected_without_restart_from",
         ),
         pytest.param(
             lambda p: broken_default(p, "plan_approval", lambda n: n.pop("message")),

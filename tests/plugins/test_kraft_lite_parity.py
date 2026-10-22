@@ -150,6 +150,7 @@ EXTENDING = {
           implementation.main.implement: {prompt: Build it.}
           verification.fix_loop.judge: {prompt: Be strict.}
           merge_request_feedback.on_failure.repair: {tasks: [{id: fix, extends: repair_mr_checks}]}
+          merge.on_merge_rejected.repair.main.repair: {prompt: Fix the queue's failure.}
         add:
           - after: work_brief
             node: {id: lint, kind: exec, tasks: [{id: run, extends: verify_changed_scopes}]}
@@ -198,6 +199,7 @@ def _project_kraft(resolved) -> list:
             continue
         loop = n.node.fix_loop
         base = n.node.on_base_changed
+        rejected = n.node.on_merge_rejected
         policy = n.node.policy
         out.append(
             (
@@ -210,6 +212,7 @@ def _project_kraft(resolved) -> list:
                 if loop
                 else None,
                 base.restart_from if base else None,
+                (rejected.restart_from, steps(n.on_merge_rejected)) if rejected else None,
             )
         )
     return out
@@ -232,7 +235,7 @@ def _project_lite(chain: dict) -> list:
         if n["kind"] == "gate":
             out.append((n["id"], "gate", n["artifact"], n["reject_to"], n["chain_finalized"]))
             continue
-        loop, base = n["fix_loop"], n["on_base_changed"]
+        loop, base, rejected = n["fix_loop"], n["on_base_changed"], n["on_merge_rejected"]
         out.append(
             (
                 n["id"],
@@ -248,6 +251,9 @@ def _project_lite(chain: dict) -> list:
                 if loop
                 else None,
                 base["restart_from"] if base else None,
+                (rejected["restart_from"], steps(rejected["repair"]["steps"]))
+                if rejected
+                else None,
             )
         )
     return out
