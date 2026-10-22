@@ -1,6 +1,7 @@
 import type { PaneKind } from "../templates/panes/describe";
 import type { Authored, Result } from "../templates/draft/types";
 import { authoredAt } from "../templates/draft/view";
+import { POLICIES } from "../templates/fields";
 import { parseRef, type Section } from "./types";
 
 export type LibKind = PaneKind | "steering";
@@ -16,10 +17,11 @@ export interface LibDescription {
   inside: string;
 }
 
-const CONTAINERS = new Set(["on_failure", "fix_loop", "escalation", "on_base_changed", "on_conflict"]);
+const CONTAINERS = new Set(["on_failure", "fix_loop", "escalation"]);
 
-/** Whether what lies inside a node (`review.code_review`, `fix_loop.main.repair`) is a task: it sits in a step, below any handler. */
-export const isTaskInside = (rest: string[]) => (CONTAINERS.has(rest[0]) ? rest.slice(1) : rest).length >= 2;
+/** Whether what lies inside a node (`review.code_review`, `fix_loop.main.repair`) is a task: it sits in a step, below
+ *  any handler. A node policy's handler is two segments (`on_merge_rejected.repair`), any other one. */
+export const isTaskInside = (rest: string[]) => (POLICIES.has(rest[0]) ? rest.slice(2) : CONTAINERS.has(rest[0]) ? rest.slice(1) : rest).length >= 2;
 
 /** What a library path names (`tasks.implementer`, `nodes.verification.review.code_review`, `steering.x`), for its pane. */
 export function libDescribe(r: Result, path: string): LibDescription | null {

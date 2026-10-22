@@ -5,7 +5,7 @@ import type { Sel } from "../graph/usePaneSelection";
  *  reducer floors and compares it as it does any `Sel`. */
 export type TSel = Sel & { path: string };
 
-const CONTAINERS = new Set(["on_failure", "fix_loop", "escalation", "on_base_changed"]);
+const CONTAINERS = new Set(["on_failure", "fix_loop", "escalation", "on_base_changed", "on_merge_rejected"]);
 
 /** A task: listed by the resolved chain, or `node.step.task` under a plain
  *  step (a new task a draft that does not resolve has no list for). */

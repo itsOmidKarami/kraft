@@ -1,7 +1,7 @@
 import type { Authored } from "../templates/draft/types";
 
 /** The handler and slot segments a canonical path passes through: what lives in one is not moved (R47). */
-const HANDLER = new Set(["on_failure", "fix_loop", "escalation", "judge", "auto_review", "on_base_changed", "on_conflict"]);
+const HANDLER = new Set(["on_failure", "fix_loop", "escalation", "judge", "auto_review", "on_base_changed", "on_conflict", "on_merge_rejected"]);
 
 export type Movable = { section: "nodes" | "tasks"; word: "exec node" | "task" };
 

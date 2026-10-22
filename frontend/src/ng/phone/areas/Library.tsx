@@ -5,7 +5,7 @@ import { listRows } from "../../library/rows";
 import { detailOf, request } from "../../http";
 import { useConfigDraft } from "../../templates/draft/useConfigDraft";
 import { authoredAt, normalise, type NodeA } from "../../templates/draft/view";
-import { fieldMeta, ROUTE_LABEL, routeOf } from "../../templates/fields";
+import { fieldMeta, POLICIES, ROUTE_LABEL, routeOf } from "../../templates/fields";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, type RowSpec } from "./kit";
 import { TabStrip } from "../ui/Rows";
@@ -32,7 +32,7 @@ export function ownRows(own: Record<string, unknown> | null): { field: string; v
     for (const [k, v] of Object.entries(o)) {
       if (!prefix && NOT_SETTINGS.has(k)) continue;
       const field = `${prefix}${k}`;
-      if (isMap(v) && k !== "on_base_changed") walk(v, `${field}.`);
+      if (isMap(v) && !POLICIES.has(k)) walk(v, `${field}.`);
       else rows.push({ field, value: v });
     }
   };

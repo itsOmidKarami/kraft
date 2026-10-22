@@ -24,20 +24,25 @@ export function describe(r: Result, scope: Scope, path: string): { kind: PaneKin
 }
 
 const WORD: Record<string, string> = { on_failure: "on failure", fix_loop: "fix loop", escalation: "escalation", on_conflict: "on conflict", auto_review: "auto review" };
+/** A node policy's handler, crumbed by what it answers; a step or task called `repair` elsewhere keeps its id. */
+const POLICY_WORD: Record<string, [string, string]> = { on_base_changed: ["on_conflict", "on conflict"], on_merge_rejected: ["repair", "on merge rejected"] };
 
 /** The pane's crumb (Decisions §9 Pane crumb): the parent path, each segment a
- *  link to its level. `on_base_changed` is not a level; a lone `main` step is
- *  not shown. A word segment ("on failure") selects its owner. */
+ *  link to its level. A node policy (`on_base_changed`, `on_merge_rejected`) is
+ *  not a level; a lone `main` step is not shown. A word segment ("on failure")
+ *  selects its owner. */
 export function crumbPath(path: string, loneMain: (prefix: string) => boolean): { label: string; path: string }[] {
   const segs = path.split(".");
   const out: { label: string; path: string }[] = [];
   for (let i = 0; i < segs.length - 1; i++) {
     const seg = segs[i];
     const prefix = segs.slice(0, i + 1).join(".");
-    if (seg === "on_base_changed") continue;
+    if (POLICY_WORD[seg]) continue;
     if (seg === "main" && loneMain(segs.slice(0, i).join("."))) continue;
-    const owner = WORD[seg] ? segs.slice(0, seg === "on_conflict" ? i - 1 : i).join(".") : prefix;
-    out.push({ label: WORD[seg] ?? seg, path: seg === "fix_loop" ? prefix : owner });
+    const policy = POLICY_WORD[segs[i - 1]];
+    const word = policy?.[0] === seg ? policy[1] : WORD[seg];
+    const owner = word ? segs.slice(0, policy ? i - 1 : i).join(".") : prefix;
+    out.push({ label: word ?? seg, path: seg === "fix_loop" ? prefix : owner });
   }
   return out;
 }

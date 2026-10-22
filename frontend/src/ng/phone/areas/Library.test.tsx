@@ -191,7 +191,7 @@ describe("Library component (L.2)", () => {
 
 describe("ownRows is the desktop's", () => {
   it("returns the same fields and values for a nested definition", () => {
-    const def = { kind: "agent", extends: "x", profile: "strong", policy: { time_cap_minutes: 120, wait: { a: 1 } }, on_base_changed: { restart_from: "plan" }, instructions: "i", tags: ["a"] };
+    const def = { kind: "agent", extends: "x", profile: "strong", policy: { time_cap_minutes: 120, wait: { a: 1 } }, on_base_changed: { restart_from: "plan" }, on_merge_rejected: { restart_from: "plan", repair: { tasks: [] } }, instructions: "i", tags: ["a"] };
     expect(ownRows(def)).toEqual(desktopOwnRows(def));
     expect(ownRows(null)).toEqual(desktopOwnRows(null));
   });

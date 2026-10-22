@@ -3,7 +3,7 @@ import { useProviders } from "../../harnesses/useProviders";
 import type { ConfigDraft } from "../../templates/draft/useConfigDraft";
 import { rowChanged, sourceWord } from "../../templates/draft/view";
 import { choicesFor, modelsFor, NOUN, optionsFor } from "../../templates/fieldChoices";
-import { fieldMeta, parse, RECOVERY_NOTE, show } from "../../templates/fields";
+import { editedValue, editOps, fieldMeta, parse, RECOVERY_NOTE, show } from "../../templates/fields";
 import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
 import { useLibrary } from "../../templates/useLibrary";
 import type { Edit, RowSpec } from "./kit";
@@ -23,8 +23,9 @@ export function useSettingRows(draft: ConfigDraft, edit: (e: Edit) => void, read
     const at = { r, scope: draft.scope, path };
     const harness = String(r.sources[path]?.harness?.value ?? "claude");
     const harnesses = typeof opts === "string" ? null : opts.harnesses;
-    const send = async (field: string, value: unknown) => {
-      const a = await draft.ops([{ op: "set_field", path, field, value } as never], { quiet: true });
+    /** `field` is the row's; `current`, its value now, says whether a merge rejection is added first. */
+    const send = async (field: string, value: unknown, current?: unknown) => {
+      const a = await draft.ops(editOps(path, field, value, current), { quiet: true });
       return a.status === 200 ? null : detailOf(a.body);
     };
     const build = (x: SettingRow): RowSpec => {
@@ -37,12 +38,11 @@ export function useSettingRows(draft: ConfigDraft, edit: (e: Edit) => void, read
       if (readOnly || x.locked) return base;
       if (meta.elsewhere) return { ...base, sub: meta.elsewhere };
       if (meta.kind === "bool") return { ...base, value: undefined, sw: !!x.value, onSwitch: (on) => void send(x.field, on) };
-      // `on_base_changed` is edited by its one key (the server writes the mapping).
-      const field = x.field === "on_base_changed" ? "on_base_changed.restart_from" : x.field;
-      const current = x.field === "on_base_changed" ? (x.value as { restart_from?: string } | null)?.restart_from : x.value;
+      // A node policy is edited by its one key; a merge rejection is added whole the first time (`editOps`).
+      const current = editedValue(x.field, x.value);
       const list = optionsFor(meta, at, opts);
       if (list?.length)
-        return { ...base, onEdit: () => edit({ kind: "choice", title: label, options: [{ value: "", label: "not set" }, ...list.map((value) => ({ value, label: value }))], value: typeof current === "string" ? current : "", set: (v) => send(field, v || null) }) };
+        return { ...base, onEdit: () => edit({ kind: "choice", title: label, options: [{ value: "", label: "not set" }, ...list.map((value) => ({ value, label: value }))], value: typeof current === "string" ? current : "", set: (v) => send(x.field, v || null, x.value) }) };
       const choices = choicesFor(meta, at, harnesses, library);
       const closed = !!choices?.length;
       const suggested = meta.suggest === "model" ? modelsFor(providers, harnesses, harness) : [];
@@ -56,7 +56,7 @@ export function useSettingRows(draft: ConfigDraft, edit: (e: Edit) => void, read
           set: (t) => {
             if (t.trim() === start.trim()) return Promise.resolve(null);
             const p = parse(t, meta.kind);
-            return "error" in p ? Promise.resolve(p.error) : send(field, p.value);
+            return "error" in p ? Promise.resolve(p.error) : send(x.field, p.value, x.value);
           },
         }),
       };

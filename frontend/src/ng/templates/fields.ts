@@ -1,11 +1,13 @@
 import { entryText, type Entry } from "./panes/Fallback";
+import type { Op } from "./draft/types";
 
 /** How the Config tab edits each field (W10 brief Decided 11). Rows and values
  *  come from the server's `sources`; this says only the label and the editor.
  *  Labels are the Templates prototype's (`kraft-templates-model.js` FIELDS). */
 export type FieldKind = "bool" | "enum" | "int" | "minutes" | "number" | "duration" | "list" | "long" | "text";
-/** `restart`: this and the earlier exec nodes, for `on_base_changed.restart_from` (Decisions §9 Node settings). */
-export type FieldMeta = { label: string; kind: FieldKind; options?: string[] | "harness" | "effort" | "profile" | "restart"; choices?: ChoiceSource; suggest?: "model"; elsewhere?: string };
+/** `restart`: this and the earlier exec nodes, for `on_base_changed.restart_from` (Decisions §9 Node settings);
+ *  `rejectRestart`: the earlier exec nodes, before the final gate when it comes first, for `on_merge_rejected.restart_from`. */
+export type FieldMeta = { label: string; kind: FieldKind; options?: string[] | "harness" | "effort" | "profile" | "restart" | "rejectRestart"; choices?: ChoiceSource; suggest?: "model"; elsewhere?: string };
 /** Where a typed field's closed set comes from: the draft's `choices` (`ref`,
  *  `target`, `inputs`, `grants`), the library's steering profiles, the
  *  harnesses, the documents a gate can ask about, or the nodes before it. */
@@ -38,6 +40,7 @@ const META: Record<string, FieldMeta> = {
   chain_finalized: { label: "final review", kind: "bool" },
   max_attempts: { label: "attempts", kind: "int" },
   on_base_changed: { label: "on base change", kind: "enum", options: "restart" },
+  on_merge_rejected: { label: "on merge rejected", kind: "enum", options: "rejectRestart" },
   "wait.polling.initial_interval": { label: "check every", kind: "duration" },
   "wait.polling.max_interval": { label: "backs off to", kind: "duration" },
   "policy.time_cap_minutes": { label: "running cap", kind: "minutes" },
@@ -51,6 +54,19 @@ const META: Record<string, FieldMeta> = {
   "policy.deny_tools": { label: "denied tools", kind: "list" },
   "policy.grants": { label: "grants", kind: "list", choices: "grants" },
 };
+
+/** A node policy: its row's value is the mapping without its handler, and the row edits its one key. */
+export const POLICIES: ReadonlySet<string> = new Set(["on_base_changed", "on_merge_rejected"]);
+/** The field a row's edit sets: a policy's `restart_from` (the server writes the mapping), else the row's own. */
+export const editedField = (field: string) => (POLICIES.has(field) ? `${field}.restart_from` : field);
+/** A row's value as its editor starts from: a policy's `restart_from`, else the value. */
+export const editedValue = (field: string, value: unknown) => (POLICIES.has(field) ? (value as { restart_from?: unknown } | null)?.restart_from : value);
+/** The ops a row's edit sends. A merge rejection's repair is required, so a restart picked on a node without
+ *  the policy adds it whole first (`add_handler`), its repair empty, then sets the restart picked. */
+export function editOps(path: string, field: string, value: unknown, current: unknown): Op[] {
+  const set: Op = { op: "set_field", path, field: editedField(field), value };
+  return field === "on_merge_rejected" && current == null && value != null ? [{ op: "add_handler", path, kind: "on_merge_rejected" }, set] : [set];
+}
 
 /** An unlisted field edits as text under its own name (`policy.sandbox` → "sandbox"). */
 /** How an agent task picks its model: a named profile, or a model and effort of its own. The profile wins, and neither set reads as the profile's default. */

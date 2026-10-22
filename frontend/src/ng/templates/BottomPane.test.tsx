@@ -3,14 +3,17 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigDraft } from "./draft/useConfigDraft";
 import { DEFAULT_VIEW } from "./draft/fixture.default";
+import { mergeView } from "./draft/fixture.merge";
+import type { DraftView } from "./draft/types";
 import { resolvedNode } from "./draft/view";
 import { BOTTOM, BottomPane, clampBottom, handlerOf, tabsFor, type BottomTab } from "./BottomPane";
 
-function mount(node: string, o: { sel?: string; tab?: BottomTab; open?: boolean } = {}) {
+function mount(node: string, o: { sel?: string; tab?: BottomTab; open?: boolean; view?: DraftView } = {}) {
+  const view = o.view ?? DEFAULT_VIEW;
   const draft = {
-    view: DEFAULT_VIEW,
+    view,
     ops: vi.fn(() => Promise.resolve({ status: 200, body: { ops: [] } })),
-    resolvedNode: (id: string) => resolvedNode(DEFAULT_VIEW.result, id),
+    resolvedNode: (id: string) => resolvedNode(view.result, id),
   } as unknown as ConfigDraft;
   const cb = { onTab: vi.fn(), onToggle: vi.fn(), onPick: vi.fn(), onOpen: vi.fn(), onLeave: vi.fn() };
   render(<BottomPane scope={{ area: "chains", key: "default" }} node={node} draft={draft} selPath={o.sel ?? node} tab={o.tab ?? "on_failure"} open={o.open ?? true} canvasH={600} right={380} {...cb} />);
@@ -25,14 +28,24 @@ describe("bottom pane", () => {
     expect(tabsFor("verification.review.code_review", "verification", false)).toEqual(["on_failure"]);
     expect(tabsFor("verification", "verification", false)).toEqual(["on_failure", "fix_loop", "escalation"]);
     expect(tabsFor("verification.fix_loop", "verification", true)).toEqual(["on_failure", "fix_loop", "escalation", "on_conflict"]);
+    expect(tabsFor("merge", "merge", false, true)).toEqual(["on_failure", "fix_loop", "escalation", "on_merge_rejected"]);
     mount("merge_request_feedback");
     expect(tabs()).toEqual(["On failure", "Fix loop", "Escalation", "On conflict"]);
+  });
+
+  it.each([
+    { id: "a node that merges", policy: false },
+    { id: "a node that declares the policy", policy: true },
+  ])("adds On merge rejected on $id", ({ policy }) => {
+    mount("merge", { view: mergeView({ policy }) });
+    expect(tabs()).toEqual(["On failure", "Fix loop", "Escalation", "On merge rejected"]);
   });
 
   it("names the handler a path sits in", () => {
     expect(handlerOf("verification.fix_loop.judge")).toBe("fix_loop");
     expect(handlerOf("merge_request_feedback.on_failure.repair.repair_feedback")).toBe("on_failure");
     expect(handlerOf("x.on_base_changed.on_conflict.main.t")).toBe("on_conflict");
+    expect(handlerOf("merge.on_merge_rejected.repair.main.repair")).toBe("on_merge_rejected");
     expect(handlerOf("verification.review.code_review")).toBeNull();
   });
 
@@ -79,6 +92,23 @@ describe("bottom pane", () => {
     expect(within(menu).queryByRole("menuitem", { name: "Blank forge task" })).toBeNull();
     await userEvent.click(within(menu).getByRole("menuitem", { name: "Blank agent task" }));
     expect(draft.ops).toHaveBeenCalledWith([{ op: "add_task", slot: "escalation", node: "verification", kind: "agent" }]);
+  });
+
+  it("a merge rejection's empty state adds the whole policy, then the task menu fills its repair", async () => {
+    const { draft } = mount("merge", { tab: "on_merge_rejected", view: mergeView({ policy: false }) });
+    expect(screen.getByText("Without one, the drop stops the item for you. After the repair, the item restarts from an earlier node.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Add one" }));
+    expect(draft.ops).toHaveBeenCalledWith([{ op: "add_handler", path: "merge", kind: "on_merge_rejected" }]);
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Blank agent task" }));
+    expect(draft.ops).toHaveBeenLastCalledWith([{ op: "add_task", container: "merge.on_merge_rejected.repair", step: "main", id: "agent", kind: "agent" }]);
+  });
+
+  it("draws a merge rejection's repair and removes the policy with it", async () => {
+    const { draft, onLeave } = mount("merge", { tab: "on_merge_rejected", view: mergeView() });
+    expect(within(screen.getByRole("group", { name: "On merge rejected" })).getByRole("button", { name: "repair, agent task" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Remove repair" }));
+    expect(draft.ops).toHaveBeenCalledWith([{ op: "remove_handler", path: "merge", kind: "on_merge_rejected" }]);
+    await vi.waitFor(() => expect(onLeave).toHaveBeenCalled());
   });
 
   it("removes the fix loop with remove_handler and goes back to the node", async () => {

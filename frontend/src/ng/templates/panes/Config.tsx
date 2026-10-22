@@ -3,7 +3,7 @@ import { Pencil, RotateCcw } from "lucide-react";
 import { IconButton } from "../../ui/IconButton";
 import { Switch } from "../../ui/Switch";
 import { authoredAt, chainCapGroups, expandedRows, extendsOf, isAdded, rowChanged, settingRows, sourceWord } from "../draft/view";
-import { fieldMeta, parse, RECOVERY_NOTE, show, type FieldMeta } from "../fields";
+import { editedField, editedValue, editOps, fieldMeta, parse, RECOVERY_NOTE, show, type FieldMeta } from "../fields";
 import { Fold, Head, Note } from "./controls";
 import type { PaneKind } from "./describe";
 import type { PaneCtx } from "./Overview";
@@ -90,8 +90,6 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
   const readOnly = useContext(ReadOnly);
   const label = meta.label;
   const changed = rowChanged(ctx.r, ctx.path, row.field, row.source);
-  // `on_base_changed` is edited by its one key (the server writes the mapping).
-  const target = row.field === "on_base_changed" ? "on_base_changed.restart_from" : row.field;
   const save = (text: string) => {
     if (editing === null) return;
     // Nothing typed: no op, so no undo step and no override of an equal value.
@@ -100,10 +98,13 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
     if ("error" in p) return setErr(`${label}: ${p.error}`);
     setEditing(null);
     setErr(null);
-    ctx.draft.field(ctx.path, target, p.value);
+    // A node policy is edited by its one key; a merge rejection is added whole the first time.
+    const ops = editOps(ctx.path, row.field, p.value, row.value);
+    if (ops.length > 1) return void ctx.draft.ops(ops);
+    ctx.draft.field(ctx.path, editedField(row.field), p.value);
   };
   const start = () => {
-    const v = row.field === "on_base_changed" ? (row.value as { restart_from?: string } | null)?.restart_from : row.value;
+    const v = editedValue(row.field, row.value);
     setEditing(Array.isArray(v) ? v.join(", ") : v == null ? "" : String(v));
   };
   return (

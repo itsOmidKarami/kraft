@@ -112,10 +112,18 @@ const NOT_ROWS = new Set(["id", "kind", "icon"]);
 export const sourceRows = (r: Result, path: string) =>
   Object.entries(r.sources[path] ?? {}).filter(([f]) => !NOT_ROWS.has(f)).map(([field, s]) => ({ field, value: s.value, source: s.source, recovery: s.recovery }));
 
-/** A node's Config rows, a read-only one carrying why it is locked: a node with a fix loop cannot be read only (the prototype's lock). */
+/** Whether a node can have its merge rejected: it declares `on_merge_rejected`, or one of its own tasks merges
+ *  its merge request (`target: mr.merge`, the server's `ExecNode.merges`). Read off a resolved node: one as
+ *  written has no `target` where its task `extends` a library one. */
+export const takesMergeRejection = (n: Authored | null | undefined): boolean =>
+  !!n && (n.on_merge_rejected != null || (normalise(n)?.steps ?? []).some((s) => s.tasks.some((t) => t.target === "mr.merge")));
+
+/** A node's Config rows, a read-only one carrying why it is locked: a node with a fix loop cannot be read only (the prototype's lock).
+ *  "on merge rejected" only where a merge can be rejected. */
 export function settingRows(r: Result, path: string) {
-  const rows: (ReturnType<typeof sourceRows>[number] & { locked?: string })[] = sourceRows(r, path);
-  if (resolvedAt(r, path)?.fix_loop) rows.forEach((x) => { if (x.field === "read_only") x.locked = "A node with a fix loop cannot be read only"; });
+  const node = resolvedAt(r, path);
+  const rows: (ReturnType<typeof sourceRows>[number] & { locked?: string })[] = sourceRows(r, path).filter((x) => x.field !== "on_merge_rejected" || takesMergeRejection(node));
+  if (node?.fix_loop) rows.forEach((x) => { if (x.field === "read_only") x.locked = "A node with a fix loop cannot be read only"; });
   return rows;
 }
 
@@ -160,17 +168,19 @@ export const counts = (r: Result) => ({ changes: r.changes.length, problems: r.p
 export const sourceWord = (source: string) =>
   source === "chain" ? "this chain" : source.startsWith("chain:") ? source.slice("chain:".length) : source.startsWith("library:") ? "library" : source;
 
-/** Named containers inside a node (W9's canonical segments). */
-const SLOTS = new Set(["on_failure", "fix_loop", "escalation", "on_base_changed", "on_conflict", "auto_review", "judge"]);
+/** Named containers inside a node (W9's canonical segments). `repair` is one only right after
+ *  `on_merge_rejected`: elsewhere it is a common step or task id (`fix_loop.main.repair`). */
+const SLOTS = new Set(["on_failure", "fix_loop", "escalation", "on_base_changed", "on_conflict", "on_merge_rejected", "auto_review", "judge"]);
+const isSlot = (seg: string, prev: string | undefined) => SLOTS.has(seg) || (seg === "repair" && prev === "on_merge_rejected");
 
 /** The component at a canonical path in a node tree (authored or resolved),
  *  walking steps, tasks and the named containers; null when it isn't there. */
 export function walk(nodes: NodeA[], path: string): Authored | null {
   const [id, ...rest] = path.split(".");
   let at: Authored | null = nodes.find((n) => n.id === id) ?? null;
-  for (const seg of rest) {
+  for (const [i, seg] of rest.entries()) {
     if (!at) return null;
-    if (SLOTS.has(seg) && at[seg] !== undefined) {
+    if (isSlot(seg, rest[i - 1]) && at[seg] !== undefined) {
       at = (at[seg] as Authored | null) ?? null;
       continue;
     }

@@ -18,7 +18,7 @@ describe("movable", () => {
   });
 
   it("does not offer what lives in a handler or slot", () => {
-    for (const p of ["verification.fix_loop.main.repair", "verification.on_failure.main.cleanup", "verification.escalation.escalate", "gate.auto_review", "verification.on_base_changed.on_conflict.main.rebase", "verification.fix_loop.judge"])
+    for (const p of ["verification.fix_loop.main.repair", "verification.on_failure.main.cleanup", "verification.escalation.escalate", "gate.auto_review", "verification.on_base_changed.on_conflict.main.rebase", "merge.on_merge_rejected.repair.main.fix", "verification.fix_loop.judge"])
       expect(movable(p, task, "task")).toBeNull();
   });
 

@@ -2,6 +2,7 @@ import { Head } from "../templates/panes/controls";
 import { ConfigRow, type Row } from "../templates/panes/Config";
 import type { PaneCtx } from "../templates/panes/Overview";
 import { authoredAt } from "../templates/draft/view";
+import { POLICIES } from "../templates/fields";
 import type { LibKind } from "./describe";
 
 /** What a component writes in structure, not as a setting: the Overview and the canvas show these. */
@@ -16,7 +17,7 @@ export function ownRows(own: Record<string, unknown> | null): Row[] {
     for (const [k, v] of Object.entries(o)) {
       if (!prefix && NOT_SETTINGS.has(k)) continue;
       const field = `${prefix}${k}`;
-      if (isMap(v) && k !== "on_base_changed") walk(v, `${field}.`);
+      if (isMap(v) && !POLICIES.has(k)) walk(v, `${field}.`);
       else rows.push({ field, value: v });
     }
   };

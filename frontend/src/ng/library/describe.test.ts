@@ -20,6 +20,11 @@ describe("libDescribe", () => {
     expect(kind("nodes.verification.fix_loop.main.repair")).toBe("task");
     expect(kind("nodes.verification.on_failure")).toBe("step");
     expect(kind("nodes.verification.on_failure.main")).toBe("step");
+    expect(kind("nodes.merge.on_merge_rejected.repair")).toBe("step");
+    expect(kind("nodes.merge.on_merge_rejected.repair.main")).toBe("step");
+    expect(kind("nodes.merge.on_merge_rejected.repair.main.fix")).toBe("task");
+    expect(kind("nodes.verification.on_base_changed.on_conflict.main")).toBe("step");
+    expect(kind("nodes.verification.on_base_changed.on_conflict.main.rebase")).toBe("task");
     expect(kind("nodes.verification.escalation.escalate")).toBe("esc");
     expect(kind("nodes.approval.auto_review")).toBe("review");
     expect(kind("steering.project-standards")).toBe("steering");
@@ -40,11 +45,13 @@ describe("libDescribe", () => {
 
 describe("ownRows", () => {
   it("lists what a component writes as settings, a mapping key by key, never its structure", () => {
-    expect(ownRows({ id: "x", kind: "agent", extends: "y", icon: "bot", prompt: "p", steps: [], policy: { max_attempts: 2, token_budget: 5 }, on_base_changed: { restart_from: "spec" }, wait: { polling: { initial_interval: "30s" } } }).map((x) => [x.field, x.value])).toEqual([
+    const rejected = { restart_from: "build", repair: { tasks: [{ id: "fix", extends: "implementer" }] } };
+    expect(ownRows({ id: "x", kind: "agent", extends: "y", icon: "bot", prompt: "p", steps: [], policy: { max_attempts: 2, token_budget: 5 }, on_base_changed: { restart_from: "spec" }, on_merge_rejected: rejected, wait: { polling: { initial_interval: "30s" } } }).map((x) => [x.field, x.value])).toEqual([
       ["prompt", "p"],
       ["policy.max_attempts", 2],
       ["policy.token_budget", 5],
       ["on_base_changed", { restart_from: "spec" }],
+      ["on_merge_rejected", rejected],
       ["wait.polling.initial_interval", "30s"],
     ]);
     expect(ownRows(null)).toEqual([]);

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ConfigDraft } from "../draft/useConfigDraft";
 import type { Result, Scope } from "../draft/types";
-import { authoredAt, authoredNodes, extendsOf, kindOf, normalise, resolvedAt, valueAt, type NodeA, type Step, type Task } from "../draft/view";
+import { authoredAt, authoredNodes, extendsOf, kindOf, normalise, resolvedAt, takesMergeRejection, valueAt, type NodeA, type Step, type Task } from "../draft/view";
 import { Head, Kv, Note, PauseText, SelectRow, type Option } from "./controls";
 import { FallbackRows } from "./Fallback";
 import type { PaneKind } from "./describe";
@@ -128,6 +128,8 @@ function NodeOverview({ ctx }: { ctx: PaneCtx }) {
   const fixSteps = normalise(fix)?.steps ?? [];
   const esc = node?.escalation as Task | null | undefined;
   const onFailure = node?.on_failure as NodeA | null | undefined;
+  const rejected = node?.on_merge_rejected as { restart_from?: string; repair?: NodeA } | null | undefined;
+  const repairs = (normalise(rejected?.repair)?.steps ?? []).flatMap((s) => s.tasks).length;
   const delay = autoEscalates(r.policy_values?.auto_escalate_delay_s ?? 0);
   const lone = steps.length === 1 && steps[0].id === "main";
   return (
@@ -147,6 +149,7 @@ function NodeOverview({ ctx }: { ctx: PaneCtx }) {
       <Kv k="fix loop" v={fix ? `${plural(fixSteps.length, "repair step")}${fix.judge ? " · judge" : ""}` : "none"} muted={!fix} onClick={() => ctx.goTo(fix ? `${path}.fix_loop` : path)} />
       <Kv k="escalation" v={esc ? str(esc.id) : `none · auto-escalates ${delay}`} mono={!!esc} muted={!esc} onClick={esc ? () => ctx.goTo(`${path}.escalation.${str(esc.id)}`) : undefined} />
       <Kv k="on failure" v={onFailure ? "node handler" : "none"} muted={!onFailure} />
+      {takesMergeRejection(node) && <Kv k="on merge rejected" v={rejected ? `restart from ${rejected.restart_from} · ${plural(repairs, "repair task")}` : "none"} mono={!!rejected} muted={!rejected} />}
     </>
   );
 }

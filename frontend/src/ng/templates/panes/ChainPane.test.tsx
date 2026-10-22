@@ -5,6 +5,7 @@ import * as api from "../../../api";
 import type { ConfigDraft } from "../draft/useConfigDraft";
 import { DEFAULT_VIEW } from "../draft/fixture.default";
 import { EXT, EXTENDING_VIEW } from "../draft/fixture.extending";
+import { mergeView } from "../draft/fixture.merge";
 import { INHERITED, INHERITED_NOTE } from "../../ui/reasons";
 import type { DraftView, Result } from "../draft/types";
 import { resolvedNode } from "../draft/view";
@@ -122,6 +123,42 @@ describe("Config tab", () => {
     expect(draft.field).toHaveBeenCalledWith("verification", "on_base_changed.restart_from", "implementation");
   });
 
+  it("edits on merge rejected as restart_from, among the exec nodes before the final gate it follows", async () => {
+    const { draft } = mount("merge", {}, mergeView());
+    await configTab();
+    expect(rowOf("on merge rejected")).toHaveTextContent("restart from merge_request_feedback");
+    await userEvent.click(within(rowOf("on merge rejected")).getByRole("button", { name: "Edit on merge rejected" }));
+    const select = within(rowOf("on merge rejected")).getByRole("combobox");
+    expect([...select.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["not set", "spec", "implementation", "verification", "merge_request_feedback"]);
+    await userEvent.selectOptions(select, "verification");
+    expect(draft.field).toHaveBeenCalledWith("merge", "on_merge_rejected.restart_from", "verification");
+    expect(draft.ops).not.toHaveBeenCalled();
+  });
+
+  it("adds a merge rejection whole, its repair empty, when its restart is first picked", async () => {
+    const { draft } = mount("merge", {}, mergeView({ policy: false }));
+    await configTab();
+    await showDefaults();
+    await userEvent.click(within(rowOf("on merge rejected")).getByRole("button", { name: "Edit on merge rejected" }));
+    await userEvent.selectOptions(within(rowOf("on merge rejected")).getByRole("combobox"), "spec");
+    expect(draft.ops).toHaveBeenCalledWith([
+      { op: "add_handler", path: "merge", kind: "on_merge_rejected" },
+      { op: "set_field", path: "merge", field: "on_merge_rejected.restart_from", value: "spec" },
+    ]);
+    expect(draft.field).not.toHaveBeenCalled();
+  });
+
+  it("lists on merge rejected only on a node that merges or declares it", async () => {
+    const view = mergeView();
+    const sources = structuredClone(view.result.sources);
+    sources.verification.on_merge_rejected = { value: null, source: "default" };
+    mount("verification", { sources }, view);
+    await configTab();
+    await showDefaults();
+    expect(rowLabels()).toContain("on base change");
+    expect(rowLabels()).not.toContain("on merge rejected");
+  });
+
   it("shows a yes/no field as a switch that sets it with one click", async () => {
     const { draft } = mount("verification");
     await configTab();
@@ -179,6 +216,14 @@ describe("Overview tab", () => {
     expect(screen.getByText("Nothing is needed to approve.")).toBeInTheDocument();
   });
 
+  it.each([
+    { id: "its restart and repair", policy: true, line: "restart from merge_request_feedback · 1 repair task" },
+    { id: "none yet", policy: false, line: "none" },
+  ])("handles a merge rejection on a node that merges: $id", ({ policy, line }) => {
+    mount("merge", {}, mergeView({ policy }));
+    expect(screen.getByText("on merge rejected", { selector: ".pkv-k" }).closest(".pkv")).toHaveTextContent(line);
+  });
+
   it("offers only earlier exec nodes to reject to; gates are disabled", async () => {
     mount("local_review");
     const menu = await editing("reject to");
@@ -227,6 +272,14 @@ describe("pane head", () => {
     expect(goTo).toHaveBeenLastCalledWith("merge_request_feedback");
     await userEvent.click(crumbs.getByRole("button", { name: "repair" }));
     expect(goTo).toHaveBeenLastCalledWith("merge_request_feedback.on_failure.repair");
+  });
+
+  it("crumbs a merge rejection's repair task by the policy it answers", async () => {
+    const { goTo } = mount("merge.on_merge_rejected.repair.main.repair", {}, mergeView());
+    const crumbs = within(screen.getByRole("navigation", { name: "Pane path" }));
+    expect(crumbs.getAllByRole("button").map((b) => b.textContent)).toEqual(["default", "merge", "on merge rejected"]);
+    await userEvent.click(crumbs.getByRole("button", { name: "on merge rejected" }));
+    expect(goTo).toHaveBeenLastCalledWith("merge");
   });
 
   it("hides a lone main step in the crumb and leads with the problem row", () => {

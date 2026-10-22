@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_VIEW } from "./fixture.default";
 import type { Result, Scope } from "./types";
 import { EXT, EXTENDING_VIEW } from "./fixture.extending";
+import { mergeView } from "./fixture.merge";
 import { addedNodes, authoredAt, authoredNodes, changeAt, counts, extendsOf, kindOf, normalise, problemsAt, resolvedAt, resolvedNode, originOf, sourceRows, sourceWord, valueAt } from "./view";
 
 const R = DEFAULT_VIEW.result;
@@ -100,13 +101,16 @@ describe("an extending chain", () => {
 });
 
 describe("walk", () => {
-  it("finds a component by canonical path: shorthand main steps, steps, the fix loop and its judge", () => {
+  it("finds a component by canonical path: shorthand main steps, steps, the fix loop and its judge, a merge rejection's repair", () => {
     const r = DEFAULT_VIEW.result;
     expect(authoredAt(r, CHAIN, "spec.main.author")).toEqual({ id: "author", extends: "spec_author" });
     expect(resolvedAt(r, "verification.review.code_review")?.kind).toBe("agent");
     expect(resolvedAt(r, "verification.fix_loop.judge")?.id).toBe("judge");
     expect(resolvedAt(r, "verification.fix_loop.main.repair")?.profile).toBe("strong");
     expect(resolvedAt(r, "verification.nope")).toBeNull();
+    const merging = mergeView().result;
+    expect(authoredAt(merging, CHAIN, "merge.on_merge_rejected.repair.main.repair")).toEqual({ id: "repair", extends: "repair_merge_queue_failure" });
+    expect(resolvedAt(merging, "merge.on_merge_rejected.repair.main.repair")?.kind).toBe("agent");
     expect(authoredAt(r, CHAIN, "")?.id).toBe("default");
   });
 
