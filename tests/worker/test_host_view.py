@@ -409,35 +409,47 @@ def test_system_dirs_per_platform(monkeypatch, platform, has, excluded):
 
 
 @pytest.mark.parametrize(
-    "answer",
-    ["", "\n", "{dir}\n", "{home}\n"],
-    ids=["empty", "blank", "selected", "developer-dir-is-home"],
+    ("answer", "shown", "run_dir"),
+    [
+        ("", None, "run"),
+        ("\n", None, "run"),
+        ("{tmp}/dev", "{tmp}/dev", "run"),
+        ("{tmp}/home", None, "run"),
+        ("{tmp}/X.app/Contents/Developer", "{tmp}/X.app/Contents", "run"),
+        ("{tmp}/X.app/Other/Developer", "{tmp}/X.app/Other/Developer", "run"),
+        ("{tmp}/X.app/Contents/Developer", None, "X.app/Contents/run"),
+    ],
+    ids=[
+        "empty",
+        "blank",
+        "selected",
+        "developer-dir-is-home",
+        "xcode-app-shows-all-of-contents",
+        "not-contents-is-not-widened",
+        "a-protected-path-under-contents-is-not-shown",
+    ],
 )
 def test_system_dirs_adds_the_selected_developer_dir_only_when_named(
-    fake_darwin, monkeypatch, tmp_path, answer
+    fake_darwin, monkeypatch, tmp_path, answer, shown, run_dir
 ):
     """An empty `xcode-select -p` answer is no directory, not the cwd; one that
-    is the home (DEVELOPER_DIR=$HOME) is not a system directory."""
-    cwd, dev, home = (tmp_path / n for n in ("cwd", "dev", "home"))
-    for d in (cwd, dev, home):
-        d.mkdir()
+    is the home (DEVELOPER_DIR=$HOME) is not a system directory. Inside Xcode.app
+    `git` is a shim into `xcodebuild`, which loads frameworks from beside
+    `Developer`, so all of `Contents` is shown, unless it holds a protected path."""
+    cwd, home = tmp_path / "cwd", tmp_path / "home"
+    for d in (cwd, home, tmp_path / "dev", tmp_path / "X.app/Contents/Developer"):
+        d.mkdir(parents=True)
+    (tmp_path / "X.app/Other/Developer").mkdir(parents=True)
+    (tmp_path / run_dir).mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / run_dir))
     monkeypatch.chdir(cwd)
-    done = subprocess.CompletedProcess([], 0, answer.format(dir=dev, home=home), "")
+    out = answer.format(tmp=tmp_path)
+    done = subprocess.CompletedProcess([], 0, out + "\n", "")
     monkeypatch.setattr(host_view.subprocess, "run", lambda *a, **k: done)
     dirs = host_view.system_dirs()
-    assert (dev.resolve() in dirs) == (answer == "{dir}\n")
-    assert home.resolve() not in dirs
-    assert cwd.resolve() not in dirs
-
-
-def test_system_dirs_shows_all_of_a_selected_xcode_app(fake_darwin, monkeypatch, tmp_path):
-    """`git` is a shim into `xcodebuild`, which loads frameworks from beside `Developer`."""
-    app = tmp_path / "Xcode.app" / "Contents"
-    (app / "Developer").mkdir(parents=True)
-    done = subprocess.CompletedProcess([], 0, f"{app / 'Developer'}\n", "")
-    monkeypatch.setattr(host_view.subprocess, "run", lambda *a, **k: done)
-    assert app.resolve() in host_view.system_dirs()
+    added = [d for d in dirs if d.is_relative_to(tmp_path.resolve())]
+    assert added == ([Path(shown.format(tmp=tmp_path)).resolve()] if shown else [])
 
 
 @pytest.fixture

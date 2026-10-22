@@ -260,15 +260,21 @@ run operator-home cat {d.home}/.ssh/kraft-sentinel
 run firmlink-home cat {firmlink}
 run usr-local ls /usr/local
 run keychain security find-generic-password -a acct -s kraft-e2e -w {out.keychain}
+# `open` fails with (allow mach-lookup) alone too: the import-time `_NEVER` assert in
+# seatbelt.py is what guards LaunchServices' names; this pins that nothing starts.
 run launchservices /usr/bin/open -g -j -a Calculator
 run pasteboard pbpaste
 # Not through `run`: fd 1 here is the pipe the launcher copies to the log.
 $PY -I -S log.py; echo $? > r.log-untouchable.rc; : > r.log-untouchable.out
 run dev-tty $PY -I -S devtty.py {out.tty}
+# No terminal here (fds are files): the ioctl on a real controlling terminal is
+# test_tiocsti_cannot_type_into_a_controlling_terminal in test_seatbelt.py.
 run tiocsti $PY -I -S tiocsti.py
 run signal-launcher $PY -I -S signal.py
 run unix-socket $PY -I -S sockets.py {out.sock_b} {out.sock}
 run pool $PY -I -S pool.py
+# launchctl, crontab and at are refused by Seatbelt itself, even under (allow default):
+# these pin that, not a rule of Kraft's profile.
 run launchctl launchctl submit -l {out.label} -- /usr/bin/touch {out.touched}
 run crontab crontab crontab.new
 run at sh -c "echo ': kraft-e2e-{out.mark}' | at now + 1 hour"
@@ -377,7 +383,9 @@ def test_os_worker_is_fenced(daemon, tmp_path):
     )
     # Outside, the pasteboard answers; where it does not (a runner with no GUI session)
     # its failing inside proves nothing, and the check cannot fail.
-    held["pasteboard"] = rc.get("pasteboard", 0) != 0 or _out("pbpaste")[0] != 0
+    held["pasteboard"] = rc.get("pasteboard") not in (None, 126, 127) and (
+        rc["pasteboard"] != 0 or _out("pbpaste")[0] != 0
+    )
     held["launchservices"] &= not calculator
     held["log-untouchable"] = rc.get("log-untouchable") == 0 and all(
         marker in log for marker in ("LOG-MARKER-BEFORE", "LOG-MARKER-AFTER")
