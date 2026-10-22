@@ -214,9 +214,10 @@ def test_a_backward_restart_target_is_accepted(policy, target):
     assert getattr(chain.nodes[2], policy).restart_from == target
 
 
-def _finalized(restart_from: str, **merge_fields) -> dict:
+def _finalized(restart_from: str, shape: dict | None = None, **merge_fields) -> dict:
     """early -> final (the final gate) -> ready -> merge, which restarts at
-    `restart_from` and declares `merge_fields` besides."""
+    `restart_from`, runs `shape` (`tasks` or `steps`; just a merge by default)
+    and declares `merge_fields` besides."""
     return {
         "id": "c",
         "nodes": [
@@ -225,7 +226,7 @@ def _finalized(restart_from: str, **merge_fields) -> dict:
             exec_node("ready", tasks=[sub()]),
             exec_node(
                 "merge",
-                tasks=[merge()],
+                **(shape or {"tasks": [merge()]}),
                 on_merge_rejected={"restart_from": restart_from, "repair": plan(sub("repair"))},
                 **merge_fields,
             ),
@@ -249,13 +250,33 @@ def _finalized(restart_from: str, **merge_fields) -> dict:
             _finalized("early", on_failure=plan(sub("fix"))),
             "node 'merge': on_merge_rejected cannot share a node with on_failure in c",
         ),
+        (
+            _finalized(
+                "early",
+                {"steps": [{"id": "land", "tasks": [merge()], "on_failure": plan(sub("fix"))}]},
+            ),
+            "node 'merge': on_merge_rejected cannot share a node with an on_failure on "
+            "step 'land' in c",
+        ),
+        (
+            _finalized("early", {"tasks": [sub("prep", on_failure=plan(sub("fix"))), merge()]}),
+            "node 'merge': on_merge_rejected cannot share a node with an on_failure on "
+            "task 'prep' in c",
+        ),
     ],
-    ids=["restart-after-the-final-gate", "with-a-fix-loop", "with-node-on-failure"],
+    ids=[
+        "restart-after-the-final-gate",
+        "with-a-fix-loop",
+        "with-node-on-failure",
+        "with-step-on-failure",
+        "with-task-on-failure",
+    ],
 )
 def test_a_merge_rejection_rewind_must_pass_the_final_gate_and_only_the_repair_answers(chain, why):
     """A rewind that starts past the final gate would merge the repair's
-    commit with no person seeing it, and a fix cycle or a node repair on the
-    merge node would commit code its next measure merges unseen."""
+    commit with no person seeing it, and a fix cycle or a repair on the merge
+    node -- its own, a step's or a task's -- would commit code its next
+    measure merges unseen."""
     with pytest.raises(ValidationError) as refused:
         tm.Chain.model_validate(chain)
     assert why in str(refused.value)

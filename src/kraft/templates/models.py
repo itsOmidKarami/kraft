@@ -1033,6 +1033,20 @@ class Chain(BaseModel):
                         f"node {node.id!r}: on_merge_rejected needs an mr.merge task in the "
                         "same node"
                     )
+                # The same hazard one level down: a step's or a task's handler
+                # re-runs the merge on the commit it made (`dispatch._recover`).
+                # The repair block itself needs no check: a recovery plan
+                # cannot declare a handler of its own (`_refuse_nested_handlers`).
+                owners = [
+                    *((f"step {step.id!r}", step) for step in node.steps or ()),
+                    *((f"task {task.id!r}", task) for task in node.own_tasks()),
+                ]
+                for owner, holder in owners:
+                    if holder.on_failure is not None:
+                        raise ValueError(
+                            f"node {node.id!r}: on_merge_rejected cannot share a node with an "
+                            f"on_failure on {owner} in {where}"
+                        )
         return self
 
     @model_validator(mode="after")

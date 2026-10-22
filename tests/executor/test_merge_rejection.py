@@ -82,23 +82,18 @@ async def test_a_code_drop_runs_the_repair_and_rewinds_with_gates_reopened(item_
 
 
 @pytest.mark.parametrize(
-    ("merge", "fields"),
-    [
-        (MERGE_TASK, {}),
-        ({**MERGE_TASK, "on_failure": {"tasks": [v1_task("task_repair")]}}, {}),
-        (MERGE_TASK, {"on_base_changed": {"restart_from": "feedback"}}),
-    ],
-    ids=["plain", "the-task-declares-on-failure", "the-node-declares-on-base-changed"],
+    "fields",
+    [{}, {"on_base_changed": {"restart_from": "feedback"}}],
+    ids=["plain", "the-node-declares-on-base-changed"],
 )
 async def test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates(
-    item_on, script, merge, fields
+    item_on, script, fields
 ):
     """Kraft's forced rebase cleared the conflict, so no repair runs; the span's
     approved `review` still reopens, because the rewound span's own fix loops
-    can commit before any gate sees the head again. The drop is
-    `on_merge_rejected`'s alone: no task recovery spends itself on it, and the
-    base that forced rebase moved is not a second, base-change restart."""
-    it = await item_on(merge_chain(merge, on_merge_rejected=MERGE_POLICY, **fields))
+    can commit before any gate sees the head again. The base that forced
+    rebase moved is not a second, base-change restart."""
+    it = await item_on(merge_chain(on_merge_rejected=MERGE_POLICY, **fields))
     await approve(it, "review")
     merge_drops(it, script, "conflict", moves_base=True)
 

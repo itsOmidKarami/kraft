@@ -174,9 +174,10 @@ onto the train.
 | `restart_from` | string | required | Names an exec node strictly before this one, never a gate or this node itself. When a `chain_finalized` gate comes before this node, it must name a node before that gate, so every rewind passes it. |
 | `repair` | mapping | required | The tasks or steps that fix the branch, written like an `on_failure` plan. The shipped `repair_merge_queue_failure` runs the `kraft:merge-queue-repair` skill on the `strong` [agent profile](/reference/harnesses/agent-profiles). |
 
-A node with `on_merge_rejected` cannot also declare a `fix_loop` or a
-node-level `on_failure`: only the repair answers a drop. A task's own
-`on_failure` is allowed.
+A node with `on_merge_rejected` cannot also declare a `fix_loop`, a node-level
+`on_failure`, or an `on_failure` on any of its own steps or tasks, including
+one a library component brings in: only the repair answers a drop, because a
+handler's commit would be merged by the next measure unseen.
 
 Without `on_merge_rejected`, a drop stops the item at once, with the forge's
 reason in the stop, even when the drop comes on the re-measure after the
