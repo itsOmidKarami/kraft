@@ -260,6 +260,26 @@ describe("after the visitor", () => {
     ]);
   });
 
+  it("a rewind refused and cancelled leaves an approval standing: the walk passes the gate", async () => {
+    const { S, ticks, call } = started();
+    const id = board(S, RUNNING);
+    const b = S.bundles[id];
+    ticks(2, id);
+    await call("POST", `/work-items/${id}/gates/local_review/approve`);
+    ticks(1, id);
+    // What a refused request_changes writes (`review._request_changes_now`), then the walk back on work_brief by a door
+    // the mock has none of (the server's base-change restart): only the cancel stops this rewind asking the gate again.
+    const seq = Math.max(...b.events.map((e) => e.seq));
+    b.events.push(
+      { ...b.events.at(-1)!, seq: seq + 1, type: "rewind_requested", node_id: "work_brief", payload: { review_id: "r9", target: "work_brief", note: "redo" } },
+      { ...b.events.at(-1)!, seq: seq + 2, type: "rewind_cancelled", node_id: null, payload: { review_id: "r9" } },
+    );
+    Object.assign(b.item, { current_node_id: "work_brief" });
+    const evs = ticks(2, id);
+    expect(evs).toContainEqual(["node_started", { node_id: "merge_request" }]);
+    expect(types(evs)).not.toContain("gate_requested");
+  });
+
   it("a resume after a node skip passes the skipped node", async () => {
     const { S, ticks, call } = started();
     const id = board(S, RUNNING);

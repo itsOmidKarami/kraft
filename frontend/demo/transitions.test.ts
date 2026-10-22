@@ -4,7 +4,7 @@ import { mockServer, type Answer } from "../e2e/contract/mocks/mockApi";
 import { ngDryRun } from "../e2e/contract/mocks/ngBoard";
 import { NG_NOW } from "../e2e/contract/mocks/ngItems";
 import { recent } from "../src/ng/item/events";
-import { displayStatus, escalationThreads, RESUME_PROMPT, transitions, type Ev, type Transitions } from "../e2e/contract/mocks/transitions";
+import { displayStatus, escalationThreads, pendingRewind, RESUME_PROMPT, transitions, type Ev, type Transitions } from "../e2e/contract/mocks/transitions";
 
 /** The mock's item transitions (transitions.ts): what each door changes, the events it appends, the words it refuses in. */
 
@@ -381,6 +381,17 @@ describe("the review doors", () => {
     const added = S.bundles[id].events.slice(had);
     expect([S.bundles[id].item.status, S.bundles[id].item.current_node_id, added.map((e) => e.type)]).toEqual([status, at, types]);
     expect([added[0].payload, added[0].node_id]).toEqual([{ review_id: "r2", target: node, note: "redo the cache" }, node]);
+  });
+
+  it("each rewind has its own review id, so cancelling one leaves a later one pending", () => {
+    const { S, T } = fresh();
+    const id = S.ng.paused;
+    T.requestChanges(id, "spec", "first");
+    T.requestChanges(id, "implementation", "second");
+    const ids = S.bundles[id].events.filter((e) => e.type === "rewind_requested").map((e) => e.payload.review_id);
+    expect(ids).toEqual(["r2", "r3"]);
+    T.append(id, "rewind_cancelled", { review_id: "r2" });
+    expect(pendingRewind(S.bundles[id])).toMatchObject({ target: "implementation", review_id: "r3" });
   });
 
   it("a comment publishes the drafts, the gate staying open", async () => {

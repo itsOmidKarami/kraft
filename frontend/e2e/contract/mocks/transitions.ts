@@ -133,6 +133,10 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
   let forks = 0;
   let mrs = 0;
   let indexed = 0;
+  /** Reviews submitted: the sample's comments are review `r1`'s, so the first one here is `r2`. */
+  let reviews = 1;
+  /** A new review's id (`r2`, `r3`…): each submitted review, and the rewind its request_changes writes, has its own. */
+  const nextReview = () => `r${++reviews}`;
   const blank = template();
 
   /** Append an event with the next seq. `node_id` defaults as `events.append` defaults it: the payload's own `node_id` or `node`. */
@@ -229,6 +233,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     now,
     /** The newest event seq, as GET /work-items' `cursor` answers it. */
     cursor: () => seq,
+    nextReview,
     append,
     /** What the review doors refuse before anything (`review.submit_review`): an unknown or ended item, and at
      *  `gate`, a gate the chain does not have or one not pending. */
@@ -485,21 +490,21 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     /** A `request_changes` review with no gate pending (`review._request_changes_now`): a rewind to `target`, then a
      *  stopped item retries there, a running one at that node reruns it, anything else waits for it: the next
      *  resume or retry starts where the rewind points. */
-    requestChanges(id: string, target: string, note: string): Result {
+    requestChanges(id: string, target: string, note: string, review_id = nextReview()): Result {
       const x = find(id, true);
       if (refused(x)) return x;
       const { it } = x;
       const at = nodeIds(it).indexOf(target);
       if (at < 0 || at > nodeIds(it).indexOf(it.current_node_id)) return no(400, `cannot request changes at ${py(target)}: not at or before the current node`);
       const action = it.status === "needs_human" ? "retried" : WORK_ITEM_TRAITS[it.status as WorkItemStatus]?.running && target === it.current_node_id ? "rerun" : "queued";
-      append(id, "rewind_requested", { review_id: "r2", target, note }, target);
+      append(id, "rewind_requested", { review_id, target, note }, target);
       const r = action === "retried" ? t.retry(id) : action === "rerun" ? (t.pause(id), t.resume(id)) : ok({});
       if (r.status !== 200) {
         // As `_request_changes_now` does: a refused action leaves no rewind pending.
-        append(id, "rewind_cancelled", { review_id: "r2" });
+        append(id, "rewind_cancelled", { review_id });
         return r;
       }
-      return ok({ action, target });
+      return ok({ action, target, review_id });
     },
     /** PATCH /work-items/{id}: a title or a description, each with its own event. Other fields are answered, not kept. */
     patch(id: string, body: Record<string, any>): Result {

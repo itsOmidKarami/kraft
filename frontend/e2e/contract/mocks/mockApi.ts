@@ -470,21 +470,23 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       const { outcome, summary, node } = req.json() ?? {};
       const gate: string | null = m[2] ? decodeURIComponent(m[2]) : it.pending_gate ?? null;
       if (!gate && outcome === "approve") return json({ detail: "nothing to approve: no gate is pending" }, 409);
+      // This review's id: its drafts, its review_submitted and, with no gate, its rewind carry it.
+      const review_id = T.nextReview();
       const publish = () => {
-        for (const t of threadsOf(wid)) { t.draft = false; for (const c of t.comments) if (c.draft) Object.assign(c, { draft: false, review_id: "r2" }); }
-        T.append(wid, "review_submitted", { review_id: "r2", gate, outcome }, gate);
+        for (const t of threadsOf(wid)) { t.draft = false; for (const c of t.comments) if (c.draft) Object.assign(c, { draft: false, review_id }); }
+        T.append(wid, "review_submitted", { review_id, gate, outcome }, gate);
       };
-      if (outcome === "comment") { publish(); return json({ review_id: "r2", outcome, gate, reply_agent: !!gate }); }
+      if (outcome === "comment") { publish(); return json({ review_id, outcome, gate, reply_agent: !!gate }); }
       if (gate) {
         const r = outcome === "approve" ? T.approve(wid, gate) : T.reject(wid, gate, summary || "Changes requested.", node);
         if (r.status === 200) publish();
         return send(r);
       }
       const target = node ?? it.fix_target?.node ?? fixTargetFor(null).node;
-      const r = T.requestChanges(wid, target, summary || "Changes requested.");
+      const r = T.requestChanges(wid, target, summary || "Changes requested.", review_id);
       if (r.status !== 200) return send(r);
       publish();
-      return json({ review_id: "r2", outcome, gate: null, target, target_reason: "current node", action: r.body.action });
+      return json({ review_id, outcome, gate: null, target, target_reason: "current node", action: r.body.action });
     }
     if ((m = p.match(/^\/comments\/([^/]+)$/))) {
       const c = findComment(m[1]);
