@@ -116,6 +116,24 @@ def test_launchd_plist_content(tmp_path, monkeypatch):
     assert plistlib.loads(path.read_bytes())["ExitTimeOut"] >= _stop_budget()
 
 
+@pytest.mark.parametrize("kind", ["launchd", "systemd"])
+def test_service_carries_the_update_check_switch(tmp_path, monkeypatch, kind):
+    """A service never saw `KRAFT_NO_UPDATE_CHECK`, so a shell that turned the
+    check off still had an unattended server checking, and auto-updating."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setenv("KRAFT_NO_UPDATE_CHECK", "1")
+    if kind == "launchd":
+        path = cli.admin._write_launchd_plist("/usr/local/bin/kraft")
+        assert (
+            plistlib.loads(path.read_bytes())["EnvironmentVariables"]["KRAFT_NO_UPDATE_CHECK"]
+            == "1"
+        )
+    else:
+        path = cli.admin._write_systemd_unit("/usr/local/bin/kraft")
+        assert 'Environment="KRAFT_NO_UPDATE_CHECK=1"' in path.read_text()
+
+
 def _stop_budget() -> float:
     from kraft import builtins
 

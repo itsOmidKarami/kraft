@@ -20,6 +20,7 @@ import traceback
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
+from typing import Literal, NoReturn
 
 import httpx
 import uvicorn
@@ -67,6 +68,9 @@ _INSTANCE_ENV_VARS = (
     "KRAFT_SKILLS_DIR",
     "KRAFT_HOST",
     "KRAFT_PORT",
+    # Stops Kraft checking for a release on its own, and with it auto-update.
+    # A service never saw it before.
+    "KRAFT_NO_UPDATE_CHECK",
 )
 
 
@@ -1435,6 +1439,30 @@ def _restart(ns: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def restart_kind(run_dir: Path | None = None) -> Literal["service", "detached", "attached"]:
+    """How the server running now can be restarted, for a restart nobody is
+    at a terminal for (`when_free`). Decided in this order:
+
+    - `service`: this process is the one launchd or systemd started
+      (`apply.managed`). Its mode file reads `attached`, since a service runs
+      `start` without `KRAFT_DETACHED`, so the file cannot decide this.
+    - `detached`: otherwise, the mode file says so.
+    - `attached`: anything else, which only its own terminal can bring back.
+
+    Not `_restart`'s test, which takes the service path whenever a unit is
+    *installed*: restarting the unit while a hand-started server holds the
+    pid would fail and leave the old one up.
+    """
+    from kraft import apply
+
+    if apply.managed():
+        return "service"
+    mode = RunDirs(run_dir or _pid_path().parent).mode
+    if mode.is_file() and mode.read_text().strip() == "detached":
+        return "detached"
+    return "attached"
+
+
 def _render_health(payload: dict) -> str:
     return render.health_block(payload)
 
@@ -1584,25 +1612,87 @@ def _confirm_dropped_addons(version: str, assume_yes: bool) -> None:
         raise SystemExit("kraft admin update: nothing installed. Pass -y to install anyway.")
 
 
-def _cmd_update(ns: argparse.Namespace) -> None:
-    from kraft import update
+def _config_precheck(*, interactive: bool, assume_yes: bool) -> str | None:
+    """The configuration first: a pre-V1 home is what a legacy install's first
+    V1 binary finds, and that binary is the one running this. Interactive, a
+    pre-V1 home is replaced once the operator says yes; unattended, it is a
+    reason."""
     from kraft.templates.library import is_pre_v1
 
-    # The configuration first: a pre-V1 home is what a legacy install's first V1
-    # binary finds, and that binary is the one running this.
     templates_dir = config_dir()
     finish_interrupted_update(templates_dir)
-    if is_pre_v1(templates_dir):
-        _accept_major_update(templates_dir, ns.yes)
+    if not is_pre_v1(templates_dir):
+        return None
+    if interactive:
+        _accept_major_update(templates_dir, assume_yes)
+        return None
+    return (
+        f"{templates_dir} holds a Kraft 0.x configuration, which only `kraft admin update` replaces"
+    )
+
+
+def _channel_precheck(channel: str) -> str | None:
+    from kraft import update
+
+    if channel != "stable" and update._is_homebrew_install():
+        return (
+            "the Homebrew formula only tracks stable releases; "
+            f"install --channel {channel} with `uv tool` instead."
+        )
+    return None
+
+
+def update_prechecks(
+    release, *, interactive: bool, assume_yes: bool = False, channel: str = "stable"
+) -> str | None:
+    """What `kraft admin update` checks before it installs `release`.
+
+    Interactive, it asks where a check needs an answer, exactly as the command
+    does, and exits on a no. Unattended (`when_free`), it asks nothing: it
+    returns why it would have asked, and None when `release` may be installed
+    with nobody there.
+    """
+    from kraft import update
+    from kraft.addons import load as addons_load
+
+    if why := _config_precheck(interactive=interactive, assume_yes=assume_yes):
+        return why
+    if why := _channel_precheck(channel):
+        if interactive:
+            _exit(why)
+        return why
+    version = release.tag.removeprefix("v")
+    if interactive:
+        _confirm_dropped_addons(version, assume_yes)
+        return None
+    if dropped := addons_load.left_out_by(version):
+        return (
+            f"kraft {version} would stop loading {', '.join(dropped)}; "
+            "`kraft admin update` asks before installing it"
+        )
+    if update._stale_kraft_tool(subprocess.run):
+        return (
+            "uv still has a `kraft` tool from before the rename; "
+            "`kraft admin update` says what to run"
+        )
+    return None
+
+
+def _exit(why: str) -> NoReturn:
+    raise SystemExit(f"kraft admin update: {why}")
+
+
+def _cmd_update(ns: argparse.Namespace) -> None:
+    from kraft import update
+
+    if why := _config_precheck(interactive=True, assume_yes=ns.yes):
+        _exit(why)
 
     # An install follows its own channel unless told otherwise: a release
     # candidate compared with the stable feed would be told v1.4.0 is the newest.
     channel = ns.channel or update.channel_of(update.installed())
-    if channel != "stable" and update._is_homebrew_install():
-        raise SystemExit(
-            "kraft admin update: the Homebrew formula only tracks stable releases; "
-            f"install --channel {channel} with `uv tool` instead."
-        )
+    if why := _channel_precheck(channel):
+        _exit(why)
     release = update.latest(force=True, channel=channel)
     if release is None:
         print(
@@ -1623,7 +1713,7 @@ def _cmd_update(ns: argparse.Namespace) -> None:
         # Before installing, so answering no leaves nothing half done.
         _confirm_running_agents(ns, "restarting", ask=True, declined="nothing installed or stopped")
     print(f"kraft {here} -> {release.tag}")
-    _confirm_dropped_addons(release.tag.removeprefix("v"), ns.yes)
+    update_prechecks(release, interactive=True, assume_yes=ns.yes, channel=channel)
     code = update.perform(release)
     if code != 0:
         raise SystemExit(code)

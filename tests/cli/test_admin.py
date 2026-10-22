@@ -798,3 +798,29 @@ def test_reload_exits_1_on_a_chain_that_does_not_resolve(app, capsys):
     assert caught.value.code == 1
     out = capsys.readouterr().out
     assert "invalid: chain broken" in out and "no_such_node" in out
+
+
+@pytest.mark.parametrize(
+    ("managed", "mode", "unit_installed", "kind"),
+    [
+        pytest.param(True, "attached", True, "service", id="launchd-service"),
+        pytest.param(False, "detached", False, "detached", id="detached"),
+        pytest.param(False, "detached", True, "detached", id="unit-installed-but-hand-started"),
+        pytest.param(False, "attached", True, "attached", id="terminal"),
+        pytest.param(False, None, False, "attached", id="no-mode-file"),
+    ],
+)
+def test_restart_kind(tmp_path, monkeypatch, managed, mode, unit_installed, kind):
+    """A service's mode file reads `attached`, so it cannot decide the service
+    case; and a unit that is merely installed does not make a hand-started
+    server a service."""
+    from kraft import apply
+
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    run_dirs = RunDirs(tmp_path / "run")
+    run_dirs.base.mkdir(parents=True, exist_ok=True)
+    if mode:
+        run_dirs.mode.write_text(mode)
+    monkeypatch.setattr(apply, "managed", lambda: managed)
+    monkeypatch.setattr(cli.admin, "_service_installed", lambda: unit_installed)
+    assert cli.admin.restart_kind() == kind

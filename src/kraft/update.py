@@ -120,8 +120,9 @@ def _fetch(url: str, timeout: float):
     return json.loads(_request(url, timeout))
 
 
-def _parse(payload, channel: str = "stable") -> Release | None:
-    """The newest published release in `channel` that actually has a wheel attached.
+def _parse_majors(payload, channel: str = "stable") -> dict[int, Release]:
+    """The newest published release in `channel` of each major version that
+    actually has a wheel attached.
 
     Three things disqualify an entry, and the feed is walked rather than
     indexed at [0] because any of them can be newest: a draft (visible only to
@@ -131,8 +132,8 @@ def _parse(payload, channel: str = "stable") -> Release | None:
     highest version wins, not the most recently published.
     """
     if not isinstance(payload, list):
-        return None
-    best: tuple[tuple[int, ...], Release] | None = None
+        return {}
+    best: dict[int, tuple[tuple[int, ...], Release]] = {}
     for entry in payload:
         if not isinstance(entry, dict) or entry.get("draft"):
             continue
@@ -149,9 +150,19 @@ def _parse(payload, channel: str = "stable") -> Release | None:
             ),
             None,
         )
-        if wheel and (best is None or rank > best[0]):
-            best = (rank, Release(tag=tag, wheel_url=wheel))
-    return best[1] if best else None
+        if wheel and (rank[0] not in best or rank > best[rank[0]][0]):
+            best[rank[0]] = (rank, Release(tag=tag, wheel_url=wheel))
+    return {major: release for major, (_, release) in best.items()}
+
+
+def _newest(majors: dict[int, Release]) -> Release | None:
+    """The release of the highest major: each major's own newest is already in."""
+    return majors[max(majors)] if majors else None
+
+
+def _parse(payload, channel: str = "stable") -> Release | None:
+    """The newest published release in `channel` (see `_parse_majors`)."""
+    return _newest(_parse_majors(payload, channel))
 
 
 def _load() -> dict | None:
@@ -173,6 +184,23 @@ def _read_cache(now: float, channel: str) -> Release | None:
             return None
         return Release(tag=blob["tag"], wheel_url=blob["wheel_url"])
     except (ValueError, KeyError, TypeError):
+        return None
+
+
+def _read_majors(now: float, channel: str) -> dict[int, Release] | None:
+    """The cached newest release of each major, or None when the cache is a
+    miss -- a file from before Kraft kept them included."""
+    blob = _load()
+    try:
+        if blob is None or "majors" not in blob:
+            return None
+        if blob.get("channel", "stable") != channel or now - float(blob["checked_at"]) >= CACHE_TTL:
+            return None
+        return {
+            int(major): Release(tag=r["tag"], wheel_url=r["wheel_url"])
+            for major, r in blob["majors"].items()
+        }
+    except (ValueError, KeyError, TypeError, AttributeError):
         return None
 
 
@@ -221,13 +249,18 @@ def _write_failure(now: float, channel: str) -> None:
     _store(blob)
 
 
-def _write_cache(release: Release, now: float, channel: str) -> None:
+def _write_cache(majors: dict[int, Release], now: float, channel: str) -> None:
+    release = _newest(majors)
+    assert release is not None
     _store(
         {
             "tag": release.tag,
             "wheel_url": release.wheel_url,
             "channel": channel,
             "checked_at": now,
+            "majors": {
+                str(major): {"tag": r.tag, "wheel_url": r.wheel_url} for major, r in majors.items()
+            },
         }
     )
 
@@ -259,10 +292,16 @@ def latest(
             return cached
         if cache_only or _recently_failed(now, channel):
             return None
+    return _newest(_fetch_majors(now, channel) or {})
+
+
+def _fetch_majors(now: float, channel: str) -> dict[int, Release] | None:
+    """Ask the feed and remember the answer: the cache on a release, a failure
+    mark on none."""
     try:
         # The most a page holds: GitHub's default 30 is one long pre-release
         # cycle, which would push the newest final off it.
-        release = _parse(_fetch(f"{RELEASES_URL}?per_page=100", TIMEOUT), channel)
+        majors = _parse_majors(_fetch(f"{RELEASES_URL}?per_page=100", TIMEOUT), channel)
     except Exception:  # noqa: BLE001
         # Deliberately bare: httpx raises a dozen types, json another, and a
         # version check is never worth turning a working command into a
@@ -270,11 +309,25 @@ def latest(
         # distinction that "no update known" does not already cover.
         _write_failure(now, channel)
         return None
-    if release is None:
+    if not majors:
         _write_failure(now, channel)
-    else:
-        _write_cache(release, now, channel)
-    return release
+        return None
+    _write_cache(majors, now, channel)
+    return majors
+
+
+def latest_in_major(major: int, *, channel: str = "stable", force: bool = False) -> Release | None:
+    """The newest installable release in `channel` whose major version is
+    `major`, or None. `latest` is the newest overall, so once 3.0.0 is out it
+    never offers a 2.x install the 2.9.1 patch; this does."""
+    now = time.time()
+    if not force:
+        cached = _read_majors(now, channel)
+        if cached is not None:
+            return cached.get(major)
+        if _recently_failed(now, channel):
+            return None
+    return (_fetch_majors(now, channel) or {}).get(major)
 
 
 def _parts(raw: str) -> tuple[int, ...]:
@@ -459,6 +512,53 @@ def installed_extras() -> list[str]:
     if importlib.util.find_spec("fastembed") is not None:
         found.add("vector")
     return sorted(found)
+
+
+def installed_requirement() -> dict | None:
+    """The `kraft-sdlc` entry of uv's receipt as uv recorded it -- a version
+    (`specifier`), a wheel `url`, or a `directory` -- or None when this is not
+    a uv tool. The exact thing to put back to undo an update."""
+    for entry in _receipt().get("requirements") or []:
+        if isinstance(entry, dict) and entry.get("name") == PACKAGE:
+            return entry
+    return None
+
+
+def is_dev_install(entry: dict | None = None) -> bool:
+    """True when this Kraft was installed from a checkout, not from a release.
+
+    `just install` runs `uv tool install --from . kraft-sdlc`, which leaves a
+    receipt like a release install's, so `install_kind` says `uv` for both;
+    what tells them apart is what the receipt's requirement names. A
+    `directory`, an `editable` path or a `file://` URL is a checkout. An
+    `https` wheel URL is still a release: `perform`'s PyPI-lag fallback and
+    install.sh record one. `entry` is that requirement; None reads this
+    install's own, and an editable (`source`) install is a checkout whatever
+    the receipt says.
+    """
+    if entry is None:
+        if install_kind() == "source":
+            return True
+        entry = installed_requirement()
+        if entry is None:
+            return False
+    url = str(entry.get("url") or "")
+    return bool(
+        entry.get("directory") or entry.get("editable") or entry.get("path")
+    ) or url.startswith("file://")
+
+
+def install_argument(entry: dict) -> str:
+    """What `uv tool install` takes to put `entry` (an `installed_requirement`)
+    back: `kraft-sdlc[extras]==X`, `kraft-sdlc[extras] @ <url>`, or a
+    checkout's directory. Run it on `_python()`, as `_install_command` does."""
+    if where := entry.get("directory") or entry.get("editable") or entry.get("path"):
+        return str(where)
+    extras = [str(extra) for extra in entry.get("extras") or []]
+    named = f"{PACKAGE}[{','.join(extras)}]" if extras else PACKAGE
+    if url := entry.get("url"):
+        return f"{named} @ {url}"
+    return f"{named}{entry.get('specifier') or ''}"
 
 
 def _python() -> str:

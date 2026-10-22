@@ -254,3 +254,53 @@ def test_a_major_update_lists_the_addons_it_would_drop(
     assert (refused is not None) == (not installs)
     if refused:
         assert "nothing installed" in refused
+
+
+@pytest.mark.parametrize("why", ["dropped-addon", "pre-v1"])
+def test_unattended_precheck_refuses_where_the_command_would_ask(
+    monkeypatch, tmp_path, capsys, why
+):
+    """With nobody to ask, `update_prechecks` hands back the reason instead of
+    prompting, and asks nothing."""
+    from support.addons import AGENT, chain, home, install, make_collection
+
+    config_dir = home(tmp_path)
+    if why == "pre-v1":
+        config_dir, _ = _pre_v1_home(tmp_path)
+        (config_dir / "registry.yaml").write_text("hooks: []\n")
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    if why == "dropped-addon":
+        addon = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
+        collection = make_collection(tmp_path, {"release": addon})
+        install(config_dir, tmp_path / "run" / "addons", collection, "release")
+    monkeypatch.setattr(update, "_is_homebrew_install", lambda: False)
+    monkeypatch.setattr(update, "_stale_kraft_tool", lambda _run: False)
+    monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("asked"))
+
+    reason = cli.admin.update_prechecks(update.Release("v3.0.0", "u"), interactive=False)
+
+    assert reason is not None
+    assert ("release@acme" in reason) if why == "dropped-addon" else ("0.x" in reason)
+    assert capsys.readouterr().err == ""
+
+
+def test_unattended_precheck_passes_a_plain_update(monkeypatch, tmp_path):
+    from support.addons import home
+
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(home(tmp_path)))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(update, "_is_homebrew_install", lambda: False)
+    monkeypatch.setattr(update, "_stale_kraft_tool", lambda _run: False)
+    assert cli.admin.update_prechecks(update.Release("v2.9.0", "u"), interactive=False) is None
+
+
+def test_unattended_precheck_refuses_a_stale_kraft_tool(monkeypatch, tmp_path):
+    from support.addons import home
+
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(home(tmp_path)))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(update, "_is_homebrew_install", lambda: False)
+    monkeypatch.setattr(update, "_stale_kraft_tool", lambda _run: True)
+    reason = cli.admin.update_prechecks(update.Release("v2.9.0", "u"), interactive=False)
+    assert reason is not None and "before the rename" in reason
