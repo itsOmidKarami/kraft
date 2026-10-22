@@ -599,7 +599,11 @@ def test_launch_darwin_env(launcher, tmp_path):
         "A": "b=c",
         "HTTPS_PROXY": None,
     }
-    assert seen["env"]["TMPDIR"] == str(session_files(tmp_path)[2])
+    assert (
+        seen["env"]["TMPDIR"]
+        == seen["env"]["CLAUDE_CODE_TMPDIR"]
+        == str(session_files(tmp_path)[2])
+    )
     assert "OS_INIT_STARTED_FD" in seen["env"]
     assert "-D" not in seen["argv"]  # no relay without --relay-sock
 

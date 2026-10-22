@@ -190,7 +190,8 @@ def _prepare_darwin(opts, env, cmd):
     for path in (opts["--marker"], opts["--control"]):
         _touch(path)
     os.makedirs(opts["--tmpdir"], mode=0o700, exist_ok=True)
-    env["TMPDIR"] = opts["--tmpdir"]
+    # Claude Code opens /tmp/claude-<uid> by name unless CLAUDE_CODE_TMPDIR says otherwise.
+    env["TMPDIR"] = env["CLAUDE_CODE_TMPDIR"] = opts["--tmpdir"]
     if "--relay-sock" not in opts:
         return cmd
     listener = _listen(0)  # the kernel picks: the profile cannot say "the port I bound"
