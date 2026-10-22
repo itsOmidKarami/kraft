@@ -340,6 +340,7 @@ def prepare_direct(
     *,
     members: Mapping[str, tuple[Path, Path] | None] | None = None,
     live: Iterable[str] = (),
+    work_item_id: str | None = None,
 ) -> list[RefStore]:
     """The direct stores of a launch with no mount namespace to hide a private
     one in: one per repository (the worktree's own, then each member's), whose
@@ -350,7 +351,8 @@ def prepare_direct(
     records the value in a sidecar beside `sandbox-git/` that no worker
     writes: `check_direct` puts it back. It creates the loose ref and the
     reflog's directories under the common gitdir, but no store under
-    `sandbox-git/` beyond the sidecar.
+    `sandbox-git/` beyond the sidecar. The sidecar also names the repository
+    and `work_item_id`, so `check_direct_item` can find it after a restart.
 
     `live`: the sessions still running in this worktree, as for `prepare`. A
     regular `.lock` is cleared only when none is: it may be a co-task's ref
@@ -372,7 +374,7 @@ def prepare_direct(
     for store in stores:
         _refuse_reftable(store.common)
         if branch is not None:
-            _record_direct(base, store, keep_lock)
+            _record_direct(base, store, keep_lock, work_item_id)
     return stores
 
 
@@ -392,6 +394,9 @@ def _validate_direct(store: RefStore, shadow: Path) -> str | None:
     ref = store.common / "refs" / "heads" / store.branch
     text = _sandbox.read_regular(ref, store.common)
     value = text.strip() if text is not None else None
+    if not os.path.lexists(ref):
+        # The host may have packed it since (`pack-refs`, `gc`): not the worker's doing.
+        value = read_branch(store.common, store.branch)
     meta = _read_meta(shadow)
     if value and _OID.fullmatch(value) and _is_commit(store.common, value):
         _write_meta(shadow, {**meta, "value": value})
@@ -424,7 +429,7 @@ def _clear_worker_files(store: RefStore, *, keep_lock: bool = True) -> None:
             logger.warning("could not remove %s: %s", path, exc)
 
 
-def _record_direct(base: Path, store: RefStore, keep_lock: bool) -> None:
+def _record_direct(base: Path, store: RefStore, keep_lock: bool, work_item_id: str | None) -> None:
     common, branch = store.common, store.branch
     shadow = shadow_dir(base, store.worktree_gitdir)
     ref = common / "refs" / "heads" / branch
@@ -443,7 +448,17 @@ def _record_direct(base: Path, store: RefStore, keep_lock: bool) -> None:
             tmp = ref.with_name(ref.name + ".kraft-tmp")
             tmp.write_text(value + "\n")
             os.replace(tmp, ref)
-        _write_meta(shadow, {"branch": branch, "value": value})
+        _write_meta(
+            shadow,
+            {
+                "branch": branch,
+                "value": value,
+                "direct": True,
+                "work_item_id": work_item_id,
+                "common": str(common),
+                "worktree_gitdir": str(store.worktree_gitdir),
+            },
+        )
 
 
 def check_direct(base: Path, store: RefStore) -> str | None:
@@ -461,6 +476,28 @@ def check_direct(base: Path, store: RefStore) -> str | None:
         problem = _validate_direct(store, shadow)
         _clear_worker_files(store)  # after the ref is restored: one stuck path never skips it
         return problem
+
+
+def check_direct_item(base: Path, work_item_id: str) -> list[str]:
+    """`check_direct` for every direct store a session of `work_item_id` used,
+    for a session that ended without `run_task` there to check it: one adopted,
+    or found dead, after a restart. Why each branch was put back, or is gone."""
+    problems = []
+    for meta_path in sorted((base / "sandbox-git").glob("*.json")):
+        data = _read_meta(meta_path.with_suffix(""))
+        if data.get("work_item_id") != work_item_id or not data.get("direct"):
+            continue
+        common = Path(data["common"])
+        store = RefStore(common, common, Path(data["worktree_gitdir"]), data["branch"])
+        # Deleted, by the host (abandon) or by the worker: either way the recorded value is
+        # not to bring it back, and a person is told.
+        if not os.path.lexists(common / "refs" / "heads" / store.branch) and (
+            read_branch(common, store.branch) is None
+        ):
+            problems.append(f"refs/heads/{store.branch} is gone; not restored")
+        elif problem := check_direct(base, store):
+            problems.append(problem)
+    return problems
 
 
 def _mount_point(shadow: Path, point: Path) -> None:
@@ -565,6 +602,8 @@ def sync_item(base: Path, work_item_id: str) -> list[str]:
         shadow = meta_path.with_suffix("")
         data = _read_meta(shadow)
         if data.get("work_item_id") != work_item_id or not data.get("branch"):
+            continue
+        if data.get("direct"):  # its own check, `check_direct_item`
             continue
         store = RefStore(
             shadow, Path(data["common"]), Path(data["worktree_gitdir"]), data["branch"]

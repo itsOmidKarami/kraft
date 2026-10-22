@@ -11,16 +11,18 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import platform
 import shutil
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from kraft import item_paths
+from kraft import ids, item_paths
 from kraft.paths import RunDirs, kraft_home
 from kraft.worker import channel as _channel
 from kraft.worker import host_view, os_init, os_seccomp, shim
@@ -37,6 +39,9 @@ from kraft.worker.sandbox import (
     SandboxRefused,
     _pin,
 )
+
+if TYPE_CHECKING:
+    from kraft.worker.backends.seatbelt import SessionFiles
 
 TMP_BYTES = 2147483648
 SHM_BYTES = 268435456
@@ -88,6 +93,62 @@ def _bind(src: Path | str, dst: Path | str | None = None, *, ro: bool = True) ->
     return ["--ro-bind" if ro else "--bind", str(src), str(dst or src)]
 
 
+@dataclass(frozen=True)
+class Shown:
+    """What a `kind: os` sandbox shows of the host to run one command, on either
+    OS: where the command starts, the init's interpreter, the agent CLI and the
+    command resolved, `expose:` and the CA files, and the variables that cross."""
+
+    chdir: Path
+    interp: Path
+    interp_roots: tuple[Path, ...]
+    first: host_view.Resolved
+    resolved: host_view.Resolved
+    exposed: list[Path]
+    ca: list[Path]
+    keep: tuple[str, ...]
+
+    @property
+    def roots(self) -> list[Path]:
+        return list(dict.fromkeys((*self.first.roots, *self.resolved.roots, *self.exposed)))
+
+
+def show_host(
+    cmd: list[str],
+    cwd: str | Path,
+    sandbox: Mapping,
+    *,
+    passthrough: Iterable[str],
+    workdir: Path | None,
+    search_path: str,
+    agent: str | None,
+) -> Shown:
+    raw_cwd, cwd = Path(cwd), Path(cwd).resolve()
+    # The worktree is shown at its resolved path, so the workdir is too.
+    rel = Path()
+    if workdir is not None:
+        base = raw_cwd if Path(workdir).is_relative_to(raw_cwd) else cwd
+        rel = Path(workdir).relative_to(base)
+    operator_home = Path(os.environ.get("HOME") or Path.home())
+    kh = kraft_home()
+    try:
+        interp, interp_roots = host_view.init_interpreter()
+        exposed = host_view.expose_roots(sandbox.get("expose") or (), operator_home, kh)
+        where = (workdir or cwd, cwd, operator_home, kh)
+        # The agent CLI first: what it shows is visible to the command too.
+        first = (
+            host_view.resolve(agent, search_path, *where, visible=exposed)
+            if agent
+            else host_view.Resolved(cmd[0], (), ())
+        )
+        resolved = host_view.resolve(cmd[0], search_path, *where, visible=(*first.roots, *exposed))
+        ca = host_view.ca_mounts(os.environ, operator_home, kh)
+    except (host_view.Refused, host_view.NotFound) as exc:
+        raise SandboxRefused(str(exc)) from exc
+    keep = dict.fromkeys((*passthrough, *FORWARDED_ENV, *_BASELINE_NAMES, *host_view.ca_names()))
+    return Shown(cwd / rel, interp, interp_roots, first, resolved, exposed, ca, tuple(keep))
+
+
 def bwrap_argv(
     cmd: list[str],
     cwd: str | Path,
@@ -105,37 +166,22 @@ def bwrap_argv(
     agent: str | None = None,
     mode: Literal["launch", "oneshot"] = "launch",
 ) -> list[str]:
-    raw_cwd, cwd = Path(cwd), Path(cwd).resolve()
-    # The worktree is bound at its resolved path, so the workdir is too.
-    rel = Path()
-    if workdir is not None:
-        base = raw_cwd if Path(workdir).is_relative_to(raw_cwd) else cwd
-        rel = Path(workdir).relative_to(base)
-    operator_home = Path(os.environ.get("HOME") or Path.home())
-    kh = kraft_home()
     if (bwrap := shutil.which("bwrap")) is None:
         raise SandboxRefused("bubblewrap is not installed (apt install bubblewrap)")
-    try:
-        interp, interp_roots = host_view.init_interpreter()
-        exposed = host_view.expose_roots(sandbox.get("expose") or (), operator_home, kh)
-        where = (workdir or cwd, cwd, operator_home, kh)
-        # The agent CLI first: what it shows is visible to the command too.
-        first = (
-            host_view.resolve(agent, search_path, *where, visible=exposed)
-            if agent
-            else host_view.Resolved(cmd[0], (), ())
-        )
-        resolved = host_view.resolve(cmd[0], search_path, *where, visible=(*first.roots, *exposed))
-        ca = host_view.ca_mounts(os.environ, operator_home, kh)
-    except (host_view.Refused, host_view.NotFound) as exc:
-        raise SandboxRefused(str(exc)) from exc
-
-    keep = dict.fromkeys((*passthrough, *FORWARDED_ENV, *_BASELINE_NAMES, *host_view.ca_names()))
-    init = [str(interp), "-I", "-S", os_init.__file__]
+    shown = show_host(
+        cmd,
+        cwd,
+        sandbox,
+        passthrough=passthrough,
+        workdir=workdir,
+        search_path=search_path,
+        agent=agent,
+    )
+    init = [str(shown.interp), "-I", "-S", os_init.__file__]
     argv = [
         *init,
         mode,
-        *("--keep", ",".join(keep)),
+        *("--keep", ",".join(shown.keep)),
         *("--seccomp-file", str(seccomp_file(run_dirs))),
         # os_init refuses a oneshot that records a start.
         *(("--started", str(started)) if started and mode == "launch" else ()),
@@ -150,18 +196,18 @@ def bwrap_argv(
     ]
     # Links first: bwrap makes a real directory of any ancestor it binds into, and a
     # later --symlink on it dies.
-    for link, target in dict.fromkeys((*first.links, *resolved.links)):
+    for link, target in dict.fromkeys((*shown.first.links, *shown.resolved.links)):
         argv += ["--symlink", str(target), str(link)]
-    for root in (*interp_roots, Path(os_init.__file__)):
+    for root in (*shown.interp_roots, Path(os_init.__file__)):
         argv += _bind(root)
-    roots = list(dict.fromkeys((*first.roots, *resolved.roots, *exposed)))
+    roots = shown.roots
     for root in roots:
         argv += _bind(root)
     # Not /dev/null: bwrap mounts binds nodev, so it would read as permission denied.
     empty = _once(run_dirs.base / "os-sandbox" / "empty", b"", 0o444)
     for hit in dict.fromkeys(h for root in roots for h in host_view.credential_shadows(root)):
         argv += _bind(empty, hit)
-    for ca_path in ca:
+    for ca_path in shown.ca:
         argv += _bind(ca_path)
     for m in sorted(session, key=lambda m: len(m.dst.parts)):
         argv += _bind(m.src, m.dst, ro=m.ro)
@@ -175,7 +221,7 @@ def bwrap_argv(
     _pin(pins, _HARDENED_GIT_CONFIG)
     for name, value in {"HOME": str(sandbox_home), **pins, **env}.items():
         argv += ["--setenv", name, value]
-    argv += ["--chdir", str(cwd / rel)]
+    argv += ["--chdir", str(shown.chdir)]
     argv += [*init, "init"]
     if sock_path is not None:
         argv += ["--sock", str(sock_path), "--port", str(RELAY_PORT)]
@@ -245,20 +291,36 @@ def _trial(bwrap: str, arch: str) -> subprocess.CompletedProcess[str] | str:
             os.close(w)
 
 
+def missing_tools() -> str | None:
+    """Why the `kraft` shim cannot run on this host, or None."""
+    if missing := [n for n in ("sh", "curl") if shutil.which(n) is None]:
+        verb = "are" if len(missing) > 1 else "is"
+        return (
+            f"{' and '.join(missing)} {verb} not installed on this host (the `kraft` shim needs it)"
+        )
+    return None
+
+
+def _seatbelt():
+    """The macOS half, imported on use: it imports this module's helpers."""
+    from kraft.worker.backends import seatbelt
+
+    return seatbelt
+
+
 def _probe() -> str | None:
+    if sys.platform == "darwin":
+        return _seatbelt().probe_darwin()
     if sys.platform != "linux":
-        return "kind: os runs on Linux only in this release"
+        return "kind: os runs on Linux and macOS only in this release"
     if os.geteuid() == 0:
         return "kind: os does not run while Kraft runs as root"
     if (arch := os_seccomp.machine()) not in ("x86_64", "aarch64"):
         return f"kind: os supports x86_64 and aarch64, not {arch}"
     if (bwrap := shutil.which("bwrap")) is None:
         return "bubblewrap is not installed (apt install bubblewrap)"
-    if missing := [n for n in ("sh", "curl") if shutil.which(n) is None]:
-        verb = "are" if len(missing) > 1 else "is"
-        return (
-            f"{' and '.join(missing)} {verb} not installed on this host (the `kraft` shim needs it)"
-        )
+    if problem := missing_tools():
+        return problem
     helped = _run([bwrap, "--help"])
     if isinstance(helped, str):
         return f"bwrap --help failed: {helped}"
@@ -288,20 +350,23 @@ def probe_host(*, refresh: bool = False) -> str | None:
 
 @dataclass
 class OsOneshot:
-    """`worker.backends.docker.Oneshot` for bwrap: nothing outlives a client,
-    since `--die-with-parent` ends the sandbox with it."""
+    """`worker.backends.docker.Oneshot` for `kind: os`. Under bwrap nothing
+    outlives a client, since `--die-with-parent` ends the sandbox with it; on
+    macOS `close` sweeps what a client killed on a timeout left (`files`)."""
 
     prefix: list[str]
+    files: SessionFiles | None = None
 
     def argv(self) -> list[str]:
         return list(self.prefix)
 
     async def close(self) -> None:
-        pass
+        if self.files is not None:
+            await _seatbelt().end_session(self.files, self.files.marker.name)
 
 
 class OsBackend:
-    """`kraft.worker.backends.SandboxBackend` over bubblewrap (Linux)."""
+    """`kraft.worker.backends.SandboxBackend` over bubblewrap (Linux) or Seatbelt (macOS)."""
 
     kind = "os"
 
@@ -333,6 +398,17 @@ class OsBackend:
         return None
 
     def code_in(self, run_base: Path, cwd: Path, branch: str | None, **kw) -> Sequence[RefStore]:
+        if sys.platform == "darwin":
+            # No mount namespace to hide a private ref store in: the worker writes its own
+            # branch in place, and `code_out` checks it. `live` keeps a co-task's lock.
+            return _refstore.prepare_direct(
+                run_base,
+                cwd,
+                branch,
+                members=kw.get("members"),
+                live=kw.get("live", ()),
+                work_item_id=kw.get("work_item_id"),
+            )
         return _refstore.prepare_stores(run_base, cwd, branch, **kw)
 
     def wrap(
@@ -359,6 +435,8 @@ class OsBackend:
     ) -> list[str]:
         if session_id is not None and work_item_id is None:
             raise TypeError("wrap: a session's sandbox is found by its work item too")
+        if sys.platform == "darwin" and session_id is None:
+            raise TypeError("wrap: a sandbox on macOS is found, and swept, by its session")
         # Here too, not only in `probe`: the setup command is wrapped with no probe
         # before it, and it must not run as root or fail with bwrap's raw stderr.
         if problem := probe_host():
@@ -372,21 +450,18 @@ class OsBackend:
                 )
             sock_path = registry.socket_path(session_id, work_item_id=work_item_id)
         env = dict(env or {})
+        mounts = _mounts.session_mounts(
+            Path(cwd),
+            results,
+            result_path=result_path,
+            rw_files=rw_files,
+            rw_dirs=rw_dirs,
+            refstores=refs,
+            ro_paths=ro_paths,
+        )
         # shortcut: wrap is not told the harness's CLI, so no agent= and only cmd[0]'s
         # roots are shown; pass it when wrap learns the executable.
-        return bwrap_argv(
-            cmd,
-            cwd,
-            sandbox,
-            _mounts.session_mounts(
-                Path(cwd),
-                results,
-                result_path=result_path,
-                rw_files=rw_files,
-                rw_dirs=rw_dirs,
-                refstores=refs,
-                ro_paths=ro_paths,
-            ),
+        launch = dict(
             env=env,
             passthrough=passthrough,
             home=Path(home) if home is not None else None,
@@ -396,34 +471,46 @@ class OsBackend:
             search_path=env.get("PATH") or os.environ.get("PATH", os.defpath),
             run_dirs=_run_dirs(),
         )
+        if sys.platform == "darwin":
+            key = ids.qualified(work_item_id, session_id)
+            return _seatbelt().seatbelt_argv(cmd, cwd, sandbox, mounts, key=key, **launch)
+        return bwrap_argv(cmd, cwd, sandbox, mounts, **launch)
 
     def oneshot(
         self, sandbox: dict, cwd: str | Path, home: str | Path, executables: Iterable[str] = ()
     ) -> OsOneshot:
         if problem := probe_host():
             raise SandboxNotReady(problem)
+        darwin = sys.platform == "darwin"
         cwd, home = Path(cwd).resolve(), Path(home)
         mounts = [Mount(cwd, cwd, True)]
         if home.is_dir():
-            mounts.append(Mount(home, Path(ONESHOT_HOME_RO), True))
+            # Seatbelt cannot show a path at another one.
+            mounts.append(Mount(home, home if darwin else Path(ONESHOT_HOME_RO), True))
         search = os.environ.get("PATH", os.defpath)
+        launch = dict(
+            env={"PATH": f"{shim.sandbox_dir(sandbox)}:{search}"},
+            passthrough=(),
+            home=None,  # HOME is then a fresh directory: /tmp/home on bwrap's tmpfs
+            workdir=None,
+            sock_path=None,
+            started=None,
+            search_path=search,
+            run_dirs=_run_dirs(),
+            # shortcut: one agent CLI is resolved, the first; callers pass one.
+            agent=next(iter(executables), None),
+            mode="oneshot",
+        )
         try:
+            if darwin:
+                key = f"oneshot-{uuid.uuid4().hex}"
+                prefix = _seatbelt().seatbelt_argv(
+                    ["sh", "-c", _ONESHOT_SH, str(home)], cwd, sandbox, mounts, key=key, **launch
+                )
+                files = _seatbelt().session_files(launch["run_dirs"].base, key)
+                return OsOneshot(prefix, files)
             prefix = bwrap_argv(
-                ["sh", "-c", _ONESHOT_SH, ONESHOT_HOME_RO],
-                cwd,
-                sandbox,
-                mounts,
-                env={"PATH": f"{shim.CONTAINER_DIR}:{search}"},
-                passthrough=(),
-                home=None,  # HOME is then /tmp/home, on the tmpfs
-                workdir=None,
-                sock_path=None,
-                started=None,
-                search_path=search,
-                run_dirs=_run_dirs(),
-                # shortcut: one agent CLI is resolved, the first; callers pass one.
-                agent=next(iter(executables), None),
-                mode="oneshot",
+                ["sh", "-c", _ONESHOT_SH, ONESHOT_HOME_RO], cwd, sandbox, mounts, **launch
             )
         except SandboxRefused as exc:
             raise SandboxNotReady(str(exc)) from exc
@@ -439,9 +526,28 @@ class OsBackend:
             return True
 
     def code_out(self, refs: Sequence[RefStore], session_id: str) -> list[str]:
+        if sys.platform == "darwin":
+            base = _run_dirs().base
+            problems = [p for store in refs if (p := _refstore.check_direct(base, store))]
+            # `close` swept first; a marker left is a sweep that could not end the session.
+            markers = _seatbelt().markers_dir(base)
+            left = [
+                m
+                for m in markers.glob(f"*{session_id}")
+                if m.name == session_id or m.name.endswith(f"-{session_id}")
+            ]
+            return [
+                *problems,
+                *(
+                    f"processes of session {m.name} outlived it (marker {m} still exists)"
+                    for m in left
+                ),
+            ]
         return _refstore.sync_all(refs, session_id)
 
     def code_out_item(self, run_base: Path, work_item_id: str) -> list[str]:
+        if sys.platform == "darwin":
+            return _refstore.check_direct_item(run_base, work_item_id)
         return []  # Docker's already runs for every backend's sessions
 
     async def collect(self, session_id: str, result_path: Path, *, work_item_id: str) -> None:
@@ -451,7 +557,10 @@ class OsBackend:
         return None
 
     async def close(self, session_id: str, *, work_item_id: str) -> None:
-        pass
+        if sys.platform != "darwin":
+            return  # --die-with-parent and the pid namespace ended everything
+        key = ids.qualified(work_item_id, session_id)
+        await _seatbelt().end_session(_seatbelt().session_files(_run_dirs().base, key), key)
 
     async def egress_transport(self) -> str:
         return "unix"
@@ -459,16 +568,28 @@ class OsBackend:
     async def open_session(
         self, session_id: str, sandbox: dict, sock_path: Path | None, *, work_item_id: str
     ) -> dict:
-        return {
-            **RELAY_PROXY_ENV,
-            "PATH": f"{shim.CONTAINER_DIR}:{os.environ.get('PATH', os.defpath)}",
-        }
+        path = {"PATH": f"{shim.sandbox_dir(sandbox)}:{os.environ.get('PATH', os.defpath)}"}
+        # On macOS the launcher mints the relay's port and token and sets the proxy names.
+        return path if sys.platform == "darwin" else {**RELAY_PROXY_ENV, **path}
 
     async def close_session(self, session_id: str, *, work_item_id: str) -> None:
         pass
 
     async def sweep(self, keep_sessions: Iterable[tuple[str, str]]) -> list[str]:
-        return []
+        if sys.platform != "darwin":
+            return []
+        kept = {ids.qualified(item, session) for item, session in keep_sessions}
+        run_base = _run_dirs().base
+        markers = _seatbelt().markers_dir(run_base)
+        swept = []
+        for marker in sorted(markers.iterdir()) if markers.is_dir() else ():
+            name = marker.name
+            # `control` is no session's. A leftover `setup-` or `oneshot-` one is an orphan
+            # too: its own launcher removes it on a clean exit.
+            if name != "control" and name not in kept:
+                if await _seatbelt().end_session(_seatbelt().session_files(run_base, name), name):
+                    swept.append(name)
+        return swept
 
     def release(self, run_dirs, worktree: Path, work_item_id: str) -> None:
         pass  # Docker's already runs for every backend's sessions
@@ -476,6 +597,8 @@ class OsBackend:
     async def health(self, sandbox: dict, *, refresh: bool = True) -> tuple[bool, str]:
         if problem := await asyncio.to_thread(probe_host, refresh=refresh):
             return False, problem
+        if sys.platform == "darwin":
+            return True, f"Seatbelt (sandbox-exec), macOS {platform.mac_ver()[0]}"
         out = await asyncio.to_thread(_run, [shutil.which("bwrap") or "bwrap", "--version"])
         version = "" if isinstance(out, str) else out.stdout.strip().removeprefix("bubblewrap ")
         return True, f"bubblewrap {version}".rstrip()
