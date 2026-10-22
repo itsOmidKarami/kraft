@@ -80,11 +80,24 @@
       "kraft-lite:next"
     ],
     "query": "[user] Start a chain for 'Export to Parquet'.",
-    "setup": "A Claude Code session at the root of the repo acme/ledger, `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. `.kraft-lite/bindings.yaml` exists, committed by a teammate. `chains` prints []. `start --title \"Export to Parquet\"` prints {\"chain_id\": \"kl-5c6d7e80\", \"backend\": \"jsonl\", \"chain\": \"default\", \"source\": \"bundled\", \"unused_bindings\": [\"tasks.implementr\"]}. `state --chain-id kl-5c6d7e80` reports node spec, kind exec, status open. The default chain has a task component named `implementer`.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger, `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. `.kraft-lite/bindings.yaml` exists, committed by a teammate. `chains` prints []. `start --title \"Export to Parquet\"` prints {\"chain_id\": \"kl-5c6d7e80\", \"backend\": \"jsonl\", \"chain\": \"default\", \"source\": \"bundled\", \"unused_bindings\": [\"tasks.implementr\"]}. `state --chain-id kl-5c6d7e80` reports node spec, kind exec, status open.",
     "expected_behavior": [
       "Says the chain id kl-5c6d7e80, that state is in a jsonl file under .kraft-lite/, and that it runs the bundled default chain",
-      "Tells the user that the binding `tasks.implementr` in .kraft-lite/bindings.yaml matches no task of this chain, so this run will not use it, and that it is likely a typo for `implementer` (or a binding meant for another chain)",
+      "Tells the user that the binding `tasks.implementr` in .kraft-lite/bindings.yaml matches no task of this chain, so this run does not use it (a typo, or a binding meant for another chain)",
       "Does not edit bindings.yaml itself and does not stop or restart the chain over it; goes on to kraft-lite:next"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:start",
+      "kraft-lite:next"
+    ],
+    "query": "[user] Start a chain for 'Archive old invoices'.",
+    "setup": "A Claude Code session at the root of the repo acme/ledger, `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. `.kraft-lite/bindings.yaml` exists, committed by a teammate. `chains` prints []. `start --title \"Archive old invoices\"` prints {\"chain_id\": \"kl-6e7f8091\", \"backend\": \"jsonl\", \"chain\": \"default\", \"source\": \"bundled\", \"unused_bindings\": []}. `state --chain-id kl-6e7f8091` reports node spec, kind exec, status open.",
+    "expected_behavior": [
+      "Says the chain id kl-6e7f8091, that state is in a jsonl file under .kraft-lite/, and that it runs the bundled default chain",
+      "Raises no concern about bindings.yaml: the list of unused bindings is empty",
+      "Goes on to kraft-lite:next"
     ]
   }
 ]

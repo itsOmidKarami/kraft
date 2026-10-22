@@ -191,11 +191,15 @@ def resolve(
         path = Path(path)
         data = _mapping(path, kl_yaml.read(path), "a chain file")
         id = data.get("id") or path.stem
-        # A file in the repo's own `.kraft/` is a repo chain, so its `extends`
-        # names the repo library's chains, as `repo:<id>` would resolve them.
         library = instance
+        # A file in the repo's own `.kraft/` is the repo's: its `extends` names
+        # the repo library's chains, and one of the library's own chain files
+        # is that chain, as `repo:<id>` resolves it.
         if repo is not None and path.resolve().is_relative_to(repo.path.resolve()):
-            library = repo
+            library, id = repo, REPO + str(id)
+            own = {file.resolve(): name for name, file in repo.files.items()}
+            if path.resolve() in own:
+                return resolve(root, env, ref=REPO + own[path.resolve()])
         # Not one of the library's chains, so `extends: <its own id>` is the library's.
         expanded = _Resolver(library, path, None).chain(data)
         return _freeze(library, str(id), str(path), expanded)

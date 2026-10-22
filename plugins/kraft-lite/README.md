@@ -93,8 +93,10 @@ and expands `extends` the way Kraft does: library components first, then a
 chain that extends another chain. A chain comes from one of four places:
 
 1. **`--chain PATH`.** A chain file, told by its `.yaml` or `.yml` ending or a
-   `/` in the name. Its `extends` resolve against the repo library when the
-   file sits under `.kraft/`, else against your library, else the bundled one.
+   `/` in the name. Under the repo library's `.kraft/` folder, its `extends`
+   resolve against the repo library, and a file in `.kraft/chains/` is that
+   repo chain, as `repo:<id>`. Elsewhere they resolve against your library,
+   else the bundled one.
 2. **The repo library.** The `.kraft/` folder at the repo root, addressed as
    `repo:<id>`, for example `repo:ship`. Lite has no repo id of its own, so
    `repo:` stands for this repo. Inside that library a bare name means its
@@ -215,8 +217,9 @@ and names the entry. The file is read again on every dispatch.
 
 A `tasks` key that names no task of the chain, by path or component, does not
 stop `start`, since it may be meant for another chain. `start` lists it under
-`unused_bindings` instead: a misspelled key there would otherwise leave its
-task on the default without a word.
+`unused_bindings` instead, as `tasks.<key>`, or `slice.tasks.<key>` for a
+`slice:` key that names no task a slice runs. A misspelled key would
+otherwise leave its task on the default without a word.
 
 ## What Lite reads past, and what it refuses
 
@@ -280,8 +283,8 @@ at most three times; without `on_merge_rejected`, a drop stops for you.
 ### Gates
 
 A gate is a node of its own, with a `message`, an `artifact`, and where a
-rejection goes. You `approve` it or `reject` it; `close` is refused, as
-`approve` is on an exec node. A
+rejection goes. You `approve` it or `reject` it. `close` is refused on a gate,
+and `approve` on an exec node. A
 rejection reopens the node the gate's `reject_to` names, else the nearest exec
 node before it, and every node after that, carrying your note. `reject
 --from-node` lands the rejection on another node.
@@ -588,10 +591,11 @@ until each records the fork of its rebase with `--fork`. `slice-set` refuses
 a `--fork` that is not 4 to 64 hex digits, a `--branch` that is not a good
 branch name (below), and a `--session` that is empty or holds whitespace.
 
-`close` and `approve` refuse to close a sliced run's first build node until
-every slice is done: merged, or in `main` mode merged or ready to merge. In
-`main` mode they refuse to close a node that waits for your merges until every
-slice is merged. The refusal names the slices that are not.
+`close` refuses to close a sliced run's first build node until every slice is
+done: merged, or in `main` mode merged or ready to merge. In `main` mode,
+`close` on an exec node and `approve` on a gate refuse to close a node that
+waits for your merges until every slice is merged. The refusal names the
+slices that are not.
 
 `import` refuses a directory with no `records.jsonl`, naming the path, and a
 chain id that `start` would not mint (`kl-` and 8 of `0-9a-f`), before it reads

@@ -1465,13 +1465,15 @@ def _definition(root: Path, chain: dict, chain_id: str | None, node_id: str | No
     return definition
 
 
-def _dispatcher(root: Path, first_build: str | None = None):
+def _dispatcher(root: Path, first_build: str | None = None, bindings: dict | None = None):
     """How `state` turns a frozen task into the one instruction the walk
-    follows: this repo's bindings over the defaults, with the skills installed
-    in this harness, and for a child walking a slice (`first_build`, its
-    chain's first build node) the slice layer over both. Read per call, so a
-    binding edited mid-run counts from the next `state`."""
-    bindings = kl_bindings.read_bindings(root)
+    follows: this repo's bindings (`bindings`, else read from `root`) over the
+    defaults, with the skills installed in this harness, and for a child
+    walking a slice (`first_build`, its chain's first build node) the slice
+    layer over both. Read per call, so a binding edited mid-run counts from
+    the next `state`."""
+    if bindings is None:
+        bindings = kl_bindings.read_bindings(root)
     installed = set(_installed_skills(root))
 
     def dispatch(task: dict) -> dict:
@@ -1685,8 +1687,9 @@ def _refuse_close_before_slices(
     everything: list[dict], chain_id: str, node_record: dict, chain: dict
 ) -> None:
     """A `SystemExit` for closing a sliced run's node before the slices it waits
-    on, by `close` or by `approve`. `run_slices` waits for every slice done for the
-    run's mode: closing it moves the walk on to what checks seams between
+    on: an exec node by `close`, a gate by `approve`. `run_slices` waits for
+    every slice done for the run's mode: closing it moves the walk on to what
+    checks seams between
     slices that are not all there yet. `await_user_merges` waits for every slice
     merged: the user's merges are all it waits on, and closing it first finishes
     the run before any of them."""
@@ -2251,10 +2254,15 @@ def _start_chain(
             raise SystemExit(f"kraft-lite: --{kind} {path}: no such file")
     full = _resolve_chain(root, chain)
     resolved = kl_chains.trim(full, set(attached))
-    dispatch = _dispatcher(root)
+    bindings = kl_bindings.read_bindings(root)
+    dispatch = _dispatcher(root, bindings=bindings)
     for task in _dispatched_tasks(resolved):
         dispatch(task)
-    return resolved, kl_bindings.unused(kl_bindings.read_bindings(root), _dispatched_tasks(full))
+    try:
+        slice_tasks = _dispatched_tasks(kl_shape.child_chain(full))
+    except kl_chains.ChainError:
+        slice_tasks = []  # A chain that cannot be sliced reads no `slice:` binding.
+    return resolved, kl_bindings.unused(bindings, _dispatched_tasks(full), slice_tasks)
 
 
 def _start_records(chain: dict, title: str, chain_id: str) -> list[dict]:
@@ -2281,6 +2289,15 @@ def _start_slice(root: Path, path: Path, chain: str | None, attached: dict) -> d
     for task in _dispatched_tasks(child):
         dispatch(task)
     return child
+
+
+def _refuse_unless_gate(definition: dict, node_id: str) -> None:
+    """`gate` and `approve` are a gate node's: on an exec node they would
+    block or close it with its tasks unrun."""
+    if definition["kind"] != "gate":
+        raise SystemExit(
+            f"kraft-lite: {node_id} is an exec node, not a gate node: run its tasks and close it"
+        )
 
 
 def _exec_before(chain: dict, node_id: str) -> str:
@@ -2599,19 +2616,12 @@ def main(argv: list[str] | None = None) -> int:
     elif args.verb in ("close", "approve"):
         if args.verb == "close" and definition["kind"] == "gate":
             raise SystemExit(f"kraft-lite: {node_id} is a gate: approve or reject it")
-        if args.verb == "approve" and definition["kind"] != "gate":
-            raise SystemExit(
-                f"kraft-lite: {node_id} is an exec node, not a gate node: "
-                "run its tasks and close it"
-            )
+        if args.verb == "approve":
+            _refuse_unless_gate(definition, node_id)
         _refuse_close_before_slices(everything, resolved_id, node_record, chain)
         store.write([bank_wait(dict(node_record, status="closed"))])
     elif args.verb == "gate":
-        if definition["kind"] != "gate":
-            raise SystemExit(
-                f"kraft-lite: {node_id} is an exec node, not a gate node: "
-                "run its tasks and close it"
-            )
+        _refuse_unless_gate(definition, node_id)
         store.write([open_gate(dict(node_record, status="blocked"), node_id)])
     elif args.verb == "reject" and (args.from_node or definition["kind"] == "gate"):
         target = args.from_node or definition["reject_to"] or _exec_before(chain, node_id)

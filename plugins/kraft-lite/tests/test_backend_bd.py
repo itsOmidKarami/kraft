@@ -102,8 +102,9 @@ def test_start_then_state_reports_the_first_node(tmp_path, monkeypatch, capsys):
 
 def test_start_reports_the_bindings_no_task_of_its_chain_reads(tmp_path, monkeypatch, capsys):
     """A `tasks` key naming no task path or component is a typo or another
-    chain's: reported, not refused. Checked before `--spec` trims: the spec
-    author's binding is for a node this run skips, not a typo."""
+    chain's: reported, not refused; a `slice:` key, likewise against the
+    slice's tasks. Checked before `--spec` trims: the spec author's binding is
+    for a node this run skips, not a typo."""
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".kraft-lite").mkdir()
@@ -113,12 +114,18 @@ def test_start_reports_the_bindings_no_task_of_its_chain_reads(tmp_path, monkeyp
         f"tasks:\n  spec_author: {bound}\n  implementr: {bound}\n"
         f"  verification.tests.test_changed_scopes: {bound}\n"
         f"slice:\n  tasks:\n    implementer: {bound}\n    reveiwer: {bound}\n"
+        f"    spec_author: {bound}\n"
     )
 
     kl.main(["start", "--title", "t", "--spec", "spec.md"])
 
     started = json.loads(capsys.readouterr().out)
-    assert started["unused_bindings"] == ["tasks.implementr", "slice.tasks.reveiwer"]
+    # No slice writes the spec: a `slice:` key is checked against the slice's tasks.
+    assert started["unused_bindings"] == [
+        "tasks.implementr",
+        "slice.tasks.reveiwer",
+        "slice.tasks.spec_author",
+    ]
 
 
 def test_close_advances_and_gate_blocks(tmp_path, monkeypatch, capsys):

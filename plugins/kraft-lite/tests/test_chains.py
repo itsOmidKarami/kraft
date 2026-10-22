@@ -718,16 +718,23 @@ def test_repo_library_names_its_own(tmp_path, home, written, components):
 
 
 @pytest.mark.parametrize(
-    ("folder", "edit", "nodes", "components"),
+    ("folder", "edit", "nodes", "components", "id_and_source"),
     [
         pytest.param(
-            "elsewhere", "remove: [verify]\n", ["implementation"], ["implementer"], id="outside"
+            "elsewhere",
+            "remove: [verify]\n",
+            ["implementation"],
+            ["implementer"],
+            ("mine", "{file}"),
+            id="outside",
         ),
-        # A copy of a repo chain, kept beside it: its `extends` is the repo's.
-        pytest.param(".kraft/chains", "", ["a"], ["own"], id="in_the_repo_library"),
+        # A draft beside the repo library: its `extends` is the repo's.
+        pytest.param(".kraft/drafts", "", ["a"], ["own"], ("repo:mine", "{file}"), id="in_kraft"),
+        # One of the repo library's own chains: that chain, as `repo:mine`.
+        pytest.param(".kraft/chains", "", ["a"], ["own"], ("repo:mine", "repo"), id="repo_chain"),
     ],
 )
-def test_resolve_path_argument(tmp_path, home, folder, edit, nodes, components):
+def test_resolve_path_argument(tmp_path, home, folder, edit, nodes, components, id_and_source):
     """A chain file resolves its `extends` against the library it sits in: the
     repo's for a file under `.kraft/`, else the instance's, here the bundled one.
     The repo has a `quick-task` of its own, so the two cannot agree by accident."""
@@ -741,6 +748,7 @@ def test_resolve_path_argument(tmp_path, home, folder, edit, nodes, components):
 
     chain = kl_chains.resolve(tmp_path, {}, path=file)
 
-    assert (chain["id"], chain["source"]) == ("mine", str(file))
+    id, source = id_and_source
+    assert (chain["id"], chain["source"]) == (id, source.format(file=file))
     assert [node["id"] for node in chain["nodes"]] == nodes
     assert _first_task(chain)["components"] == components
