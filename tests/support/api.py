@@ -197,6 +197,14 @@ def _approve_gate(client, wid, gate, timeout=30):
     raise AssertionError(f"{gate} still 409 after {timeout}s: {r.text if r else '(no attempt)'}")
 
 
+def _approve_review(client, wid, gate="chain_review"):
+    """A review's `approve` at `gate`, naming the head the final review shows (`review_head`)."""
+    shown = client.get(f"/api/work-items/{wid}").json()["review_head"]
+    return client.post(
+        f"/api/work-items/{wid}/gates/{gate}/review", json={"outcome": "approve", "head": shown}
+    )
+
+
 #: The shipped `default` chain reaches its `chain_finalized` gate only after the
 #: draft merge request's automated-review wait, which has no handler until Task
 #: 9. This is the shortest V1 chain that reaches one for real: the summary

@@ -58,12 +58,12 @@ kraft view list [--all] [--status=paused]   # the board, scoped to the cwd's rep
 kraft view show [ID]                        # ID defaults to the worktree you are in
 kraft item create "title" [--description "..."] [--spec P] [--plan P] [--no-auto-gate] [--after ID] [--autostart] [--in-place|--worktree]  # files it paused unless --autostart; auto-gate is on unless --no-auto-gate; --in-place runs it in the repo's own checkout
 kraft item set-attachments [ID] [--spec P] [--plan P] [--drop KIND]  # revise a not-yet-started item's documents
-kraft item approve [ID] / kraft item reject [ID] --note "why"
+kraft item approve [ID] [--head H] / kraft item reject [ID] --note "why"  # --head: the final review's, from `kraft view show`
 kraft item pause [ID] / kraft item resume [ID] --steer "..."
 kraft item unblock [ID] [--dependency ID]   # drop what a blocked or paused item still comes after
 kraft item retry [ID] [--steer "..."]       # the only door back onto a stopped item
 kraft item raise-budget [ID] --usd N|none   # raise the dollar cap that stopped it (its own or its policy's), and retry
-kraft item skip [ID] [--note "..."]         # advance past the current node or gate without running it
+kraft item skip [ID] [--head H] [--note "..."]  # advance past the current node or gate without running it
 kraft item escalate [ID] --message "..."    # ask an agent to help with a needs_human stop
 kraft item complete [ID] --reason "..." / kraft item cancel [ID] --reason "..."
 kraft item abandon [ID] --reason "..." --yes  # drop an item, deleting its worktree and branch; the reason is kept and closes its bead
@@ -80,7 +80,7 @@ kraft view compare [ID] [--from T] [--to T] [--nodes a,b] [--stat|--name-only] [
 kraft item comment [ID] --body "..." [--file P --lines A-B [--side old|new] [--start-side old|new]] [--label must-fix|question|nit] [--suggest "..."]
 kraft item comment --reply THREAD --body "..."
 kraft item resolve THREAD / kraft item reopen THREAD
-kraft item review [ID] comment|approve|request-changes [--summary "..."] [--node N]
+kraft item review [ID] comment|approve|request-changes [--summary "..."] [--node N] [--head H]
 kraft view search "query"
 kraft view logs [ID] [-f] [-n N]            # a worker session's log; --json is NDJSON
 kraft view storage                          # worktree disk use against the quota and limit, item by item

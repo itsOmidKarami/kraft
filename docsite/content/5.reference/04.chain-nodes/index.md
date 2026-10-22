@@ -124,6 +124,14 @@ workspace member not merged yet. Skipping that gate records the tips it passes
 the same way. They are on the `gate_approved` (or `node_skipped`) event, as
 `tips`.
 
+The approval names the head you were shown. The item page serves it as
+`review_head` (`kraft view show` prints it as `head`), and `kraft item approve
+--head`, `kraft item skip --head` and `kraft item review ... approve --head`
+send it back. Without it the approval is refused with a `409`, and so is one
+whose head is no longer the branch's: look again.
+
+The web UI sends the head of the diff it showed.
+
 Right before an `mr.merge` task asks the forge to merge, or to queue the merge
 request again after a merge train's own runners failed, it reads the tip it
 would push. When that is not the approved one, it merges nothing and pushes
@@ -137,6 +145,20 @@ nothing, records `merge_refused_unreviewed`, and the item stops for you:
 A retry from there walks back through the final review, which sees the new
 code. This holds whatever changed the branch: an agent, an escalation, a
 commit of yours, or anything else.
+
+The merge call names the head too (`gh pr merge --match-head-commit`, `glab mr
+merge --sha`), so the forge itself refuses any other head, however long after
+the call it would have merged. A commit that reaches the merge request on the
+forge is held the same way, with `merge_refused_unreviewed`.
+
+If the commit landed before Kraft pushed, or the forge refuses the head, Kraft
+fetches it into the item's branch when that is a fast-forward and the worktree
+is clean (never for an in-place item). The reopened final review then shows it.
+
+A merge still open when Kraft finds the forge's head moved is cancelled first.
+One that has already landed cannot be undone: the item stops for you with
+`merge_landed_unreviewed`, and `kraft item complete` or `kraft item skip` on the
+merge node ends the stop.
 
 Kraft's own changes to the approved head carry the approval over, recorded as
 `reviewed_head_repinned`: a rebase onto the base branch that needs no conflict
