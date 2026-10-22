@@ -368,6 +368,7 @@
    "params": {},
    "shape": {
     "active_count": "_",
+    "agent_idle_minutes": "_",
     "archive": {
      "after_days": "_"
     },

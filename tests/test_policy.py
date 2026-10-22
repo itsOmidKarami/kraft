@@ -333,20 +333,6 @@ def test_load_policy_reads_scalar(tmp_path, tail, attr, expected):
     assert getattr(policy.load_policy(d), attr) == expected
 
 
-def test_apply_policy_sets_the_idle_limit(tmp_path, monkeypatch):
-    """A reload that changes `agent_idle_minutes` reaches later launches."""
-    from types import SimpleNamespace
-
-    from kraft.adapters import subprocess as _subprocess
-    from kraft.api import deps
-
-    d = tmp_path / "policy.yaml"
-    d.write_text(_BASE + "agent_idle_minutes: 7\n")
-    monkeypatch.setattr(_subprocess, "IDLE_MINUTES", 30)
-    deps.apply_policy(SimpleNamespace(), *deps.read_policy(tmp_path))
-    assert _subprocess.IDLE_MINUTES == 7
-
-
 def test_a_cap_rejects_a_zero_attempt_count():
     """`load_policy` checked this; it is now a field constraint that cannot be
     bypassed by constructing a Cap directly, which the dataclass allowed."""

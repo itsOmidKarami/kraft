@@ -457,6 +457,12 @@
   "additionalProperties": false,
   "description": "Static policy.yaml schema; runtime conversion remains in ``load_policy``.\n\n`extra=\"forbid\"`: a misspelled section (`maximum:` for `maxima:`) is refused\nby name rather than loading cleanly and bounding nothing (Kraft-sz4dh).",
   "properties": {
+    "agent_idle_minutes": {
+      "default": 30,
+      "minimum": 0,
+      "title": "Agent Idle Minutes",
+      "type": "integer"
+    },
     "archive": {
       "anyOf": [
         {
