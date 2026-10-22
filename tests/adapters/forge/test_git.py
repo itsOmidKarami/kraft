@@ -256,9 +256,10 @@ def test_push_refuses_to_overwrite_someone_elses_commits(tmp_path, case):
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "--amend", "-m", "rewritten")
 
-    with pytest.raises(forge.ForgeError, match="Kraft did not push"):
+    with pytest.raises(forge.ForeignCommits, match="Kraft did not push") as refused:
         asyncio.run(forge.push(repo, BRANCH))
 
+    assert refused.value.remote == theirs, "the typed refusal names the forge's tip"
     assert git(tmp_path / "origin.git", "rev-parse", BRANCH) == theirs
 
 

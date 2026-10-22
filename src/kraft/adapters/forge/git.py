@@ -13,7 +13,7 @@ import subprocess
 from collections.abc import Collection, Mapping
 from pathlib import Path
 
-from kraft.adapters.forge.models import ForgeError
+from kraft.adapters.forge.models import ForeignCommits, ForgeError
 from kraft.config import KRAFT_ROOTS, base_ignore_args, git_read
 from kraft.worker import sandbox
 
@@ -636,11 +636,12 @@ async def push(repo: Path, branch: str) -> None:
         and git_read(repo, "rev-list", "-n1", remote, f"^{head}", expected_failure=True) != ""
         and not _was_local_tip(repo, branch, remote)
     ):
-        raise ForgeError(
+        raise ForeignCommits(
             f"origin/{branch} is at {remote[:12]}, which Kraft did not push and this "
             "worktree does not have -- likely a person's commits on the merge request. "
             f"Kraft will not overwrite them: pull them into the item's worktree (git pull "
-            f"--rebase origin {branch}), then retry"
+            f"--rebase origin {branch}), then retry",
+            remote=remote,
         )
     if not remote and ours:
         # Merged, or deleted with its merge request: recreating it would

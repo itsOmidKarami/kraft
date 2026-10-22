@@ -1088,18 +1088,37 @@ async def hold_merge_node(
     return restart_from
 
 
-def _unreviewed_reason(node_id: str, refusal: dict, member: bool, final: str, target) -> str:
-    """The stop a refused merge (`merge_refused_unreviewed`) leaves."""
+def _unreviewed_reason(
+    node_id: str, refusal: dict, member: bool, final: str, target, branch: str = ""
+) -> str:
+    """The stop a refused merge (`merge_refused_unreviewed`) leaves: the local
+    branch was not the head the final review approved, or (`source: "forge"`)
+    the forge holds a head Kraft did not push."""
     where = f" in {Path(refusal['repo']).name}" if member else ""
     current = refusal.get("current")
     reviewed = refusal.get("reviewed")
+    back = f"back through {final}" + (f" from {target}" if target and target != final else "")
+    if refusal.get("source") == "forge":
+        if refusal.get("fast_forwarded"):
+            return (
+                f"node {node_id} did not merge: a commit was pushed to the merge request{where} "
+                "after the review; it is now on the item's branch for you to review; "
+                f"a retry takes it {back}"
+            )
+        at = f" (it is at {current[:12]})" if current else ""
+        return (
+            f"node {node_id} did not merge: the forge holds commits{where} that Kraft did not "
+            f"push and the item's branch does not have{at}, after the review. Kraft will not "
+            f"overwrite them: pull them into the item's worktree (git pull --rebase origin "
+            f"{branch or 'the item branch'}) or drop them from the merge request; "
+            f"a retry takes it {back}"
+        )
     now = f"is at {current[:12]}" if current else "has a tip git could not read"
     approved = (
         f"not at {reviewed[:12]}, the head {final} approved"
         if reviewed
         else f"and {final} approved no head for it"
     )
-    back = f"back through {final}" + (f" from {target}" if target and target != final else "")
     return (
         f"node {node_id} did not merge: the branch{where} {now}, {approved}; "
         f"a retry takes it {back}"
@@ -1154,6 +1173,7 @@ async def _stop_unreviewed(db, work_item_id: str, node: ResolvedNode) -> str:
         member,
         nodes[final].id if final is not None else "the final review",
         target,
+        store.branch_for(row),
     )
     await db.write(
         lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=StopKind.FAILED)

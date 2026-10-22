@@ -6,7 +6,8 @@ Walked through the executor against a `FakeForge`; git is real."""
 from __future__ import annotations
 
 import pytest
-from support.harness import commit_all, entry_of, write
+from support.addons import with_origin
+from support.harness import commit_all, entry_of, git, write
 
 from kraft import builtins as _builtins
 from kraft import executor, reviewed_head, store
@@ -132,10 +133,19 @@ async def test_the_merge_pushes_only_the_head_the_final_review_approved(
         assert refused == [] and reopened == []
         repinned = [e["payload"] for e in it.events("reviewed_head_repinned")]
         assert [p["cause"] for p in repinned] == (["rebase"] if after.endswith("rebase") else [])
+        # The forge is told which head it may merge: the branch's tip, pinned or not.
+        tip = reviewed_head.branch_tip(it.worktree, store.branch_for(it.row()))
+        assert fake.merge_heads == [tip]
         return
     assert fake.merged == [] and len(fake.pushed) == pushed, "the unseen head went nowhere"
     assert refused == [
-        {"node_id": "merge", "repo": str(it.worktree), "reviewed": reviewed, "current": unseen}
+        {
+            "node_id": "merge",
+            "repo": str(it.worktree),
+            "reviewed": reviewed,
+            "current": unseen,
+            "source": "local",
+        }
     ]
     assert reopened == [{"gate": "final", "reason": "unreviewed_change"}]
     assert (it.status(), it.row()["current_node_id"]) == ("needs_human", stands_at)
@@ -145,3 +155,113 @@ async def test_the_merge_pushes_only_the_head_the_final_review_approved(
         f"node merge did not merge: the branch is at {unseen[:12]}, not at {reviewed[:12]}, "
         f"the head final approved; a retry takes it {back}"
     )
+
+
+def _forge_gains_a_commit(it, *, rewrites: bool = False) -> str:
+    """Give the item's checkout an `origin` holding the branch, then a commit
+    only the forge has: a bot's autofix pushed to the merge request. `rewrites`
+    force-pushes it over the reviewed commit instead, a head that is no
+    fast-forward of the branch. Returns the forge's new tip."""
+    branch = store.branch_for(it.row())
+    bare = with_origin(it.worktree)
+    git(it.worktree, "push", "-q", "origin", branch)
+    scratch = it.worktree.parent / "forge-side"
+    git(it.worktree.parent, "clone", "-q", bare.as_uri(), str(scratch))
+    git(scratch, "checkout", "-q", branch)
+    if rewrites:
+        git(scratch, "reset", "-q", "--hard", "HEAD~1")
+    write(scratch, "autofix.txt", "a bot's suggestion, committed on the forge\n")
+    commit_all(scratch, "autofix")
+    git(scratch, "push", "-q", "--force", "origin", f"HEAD:refs/heads/{branch}")
+    return git(scratch, "rev-parse", "HEAD")
+
+
+@pytest.mark.parametrize(
+    ("refused_by", "rewrites", "setup", "fast_forwards", "said"),
+    [
+        ("merge", False, None, True, "it is now on the item's branch for you to review"),
+        ("push", False, None, True, "it is now on the item's branch for you to review"),
+        ("merge", True, None, False, "pull them into the item's worktree"),
+        ("merge", False, "head-off-the-branch", False, "pull them into the item's worktree"),
+        ("merge", False, "in-place", False, "pull them into the item's worktree"),
+    ],
+    ids=[
+        "the-forge-refuses-the-moved-head-so-it-is-brought-home-and-held",
+        "a-forge-commit-before-the-push-holds-instead-of-failing",
+        "a-force-pushed-forge-head-is-held-by-hand",
+        "head-off-the-branch-is-not-fast-forwarded",
+        "an-in-place-item-is-held-by-hand",
+    ],
+)
+async def test_a_commit_that_reaches_the_forge_after_the_final_review_goes_back_for_review(
+    walk,
+    item_on,
+    database,
+    run_dirs,
+    repo,
+    monkeypatch,
+    refused_by,
+    rewrites,
+    setup,
+    fast_forwards,
+    said,
+):
+    """A commit pushed to the merge request after the approval -- before the
+    merge's push (`ForeignCommits`) or between that push and the merge (the
+    forge's own refusal of the head Kraft named, `HeadMoved`) -- is never
+    merged nor overwritten. The item is held where the final review comes
+    round again, naming the commit, and the commit is brought onto the item's
+    branch for that review when it is a fast-forward, the checkout is on the
+    branch and it is not the person's own (in place); otherwise the stop tells
+    the person to pull or drop it by hand and the branch is left alone."""
+    it = await item_on(_chain(False))
+    await _builtins.ensure_worktree(
+        database, run_dirs, repo=str(repo), work_item_id=it.id, repo_entry=NO_SETUP
+    )
+    write(it.worktree, "feature.txt", "the item's change\n")
+    reviewed = commit_all(it.worktree, "the item's change")
+    fake = forge.FakeForge(ci_states=["success"])
+    assert await walk(fake, it) == "awaiting_gate"
+    tips = reviewed_head.pin_for(database, it.row(), "final", it.worktree)
+    await database.write(lambda c: store.request_gate(c, it.id, "final", "final"))
+    await database.write(lambda c: store.approve_gate(c, it.id, "final", tips=tips))
+    forged = _forge_gains_a_commit(it, rewrites=rewrites)
+    if refused_by == "merge":
+        fake.forge_head = forged
+    else:
+        fake.push_refused = forged
+    if setup == "head-off-the-branch":
+        git(it.worktree, "checkout", "-q", "--detach")
+    if setup == "in-place":
+        monkeypatch.setattr(forge.run.inplace, "is_in_place", lambda row: True)
+    pushed = list(fake.pushed)
+
+    assert await walk(fake, it) == "needs_human"
+
+    branch = store.branch_for(it.row())
+    # The push refused for the forge's commit pushed nothing; a merge refused for it came after a push.
+    assert fake.merged == [] and fake.pushed == pushed + ([branch] if refused_by == "merge" else [])
+    assert [e["payload"] for e in it.events("merge_refused_unreviewed")] == [
+        {
+            "node_id": "merge",
+            "repo": str(it.worktree),
+            "reviewed": reviewed,
+            "current": forged,
+            "source": "forge",
+            "fast_forwarded": fast_forwards,
+        }
+    ]
+    assert reviewed_head.branch_tip(it.worktree, branch) == (forged if fast_forwards else reviewed)
+    if setup == "head-off-the-branch":
+        assert git(it.worktree, "rev-parse", "HEAD") == reviewed, "a detached HEAD was not moved"
+    assert [e["payload"] for e in it.events("gate_reopened")] == [
+        {"gate": "final", "reason": "unreviewed_change"}
+    ]
+    assert (it.status(), it.row()["current_node_id"], it.row()["stop_kind"]) == (
+        "needs_human",
+        "final",
+        "failed",
+    )
+    assert said in it.events("work_item_needs_human")[-1]["payload"]["reason"]
+    pin = database.read(lambda c: reviewed_head.pinned(c, it.id))
+    assert list(pin.values()) == [reviewed], "the pin does not move: the commit is unreviewed"

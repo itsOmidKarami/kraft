@@ -324,5 +324,11 @@ async def test_an_infra_drop_never_queues_a_head_the_final_review_did_not_see_ag
     assert [s["status"] for s in run_forge.sessions()] == ["failed"]
     assert fake.merge_calls == [1], "asked once, for the approved head"
     assert run_forge.events("merge_refused_unreviewed") == [
-        {"node_id": "mr_checks", "repo": str(repo), "reviewed": reviewed, "current": unseen}
+        {
+            "node_id": "mr_checks",
+            "repo": str(repo),
+            "reviewed": reviewed,
+            "current": unseen,
+            "source": "local",
+        }
     ]

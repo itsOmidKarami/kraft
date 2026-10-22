@@ -169,6 +169,65 @@ def unreviewed(db, work_item_id: str, checkout, branch: str) -> dict | None:
     return {"repo": str(checkout), "reviewed": reviewed, "current": current}
 
 
+def reviewed_tip(db, work_item_id: str, checkout) -> str | None:
+    """The tip the final review approved for `checkout`, None when nothing is
+    pinned or the pin holds no tip for it."""
+    pin = db.read(lambda c: pinned(c, work_item_id))
+    key = _entry(pin, checkout) if pin is not None else None
+    return pin[key] if key is not None else None
+
+
+async def bring_home(checkout, branch: str, *, in_place: bool) -> bool:
+    """Bring the commits the forge holds for `branch` into `checkout`'s own
+    branch, so the final review that comes round again shows them. True when it
+    moved the branch.
+
+    The forge's tip is fetched into `FETCH_HEAD` only (`--refmap=` keeps the
+    shared `refs/remotes/origin/<branch>` alone, which `git.push` does not trust
+    -- Kraft-m7ppj), and the branch is fast-forwarded only when all hold:
+    `FETCH_HEAD` is a fast-forward of it, the checkout's HEAD is that branch (an
+    agent may have left it elsewhere), and no tracked file is modified. Then
+    `merge --ff-only` moves the working tree with the ref. Otherwise -- a
+    force-push, local commits the forge lacks, a checkout in use -- nothing is
+    touched and False says so. An in-place checkout is the person's own, and is
+    never touched, nor even fetched into."""
+    if in_place:
+        return False
+    from kraft.adapters.forge import git  # imports this module through `run`
+    from kraft.adapters.forge.models import ForgeError
+    from kraft.worker import sandbox
+
+    checkout, ref = Path(checkout), f"refs/heads/{branch}"
+    try:
+        await git.run_git(
+            checkout,
+            ["git", "fetch", "--refmap=", "origin", branch],
+            env=sandbox.unhardened_git_env(),
+        )
+    except ForgeError:
+        return False
+    fetched = _config.git_read(
+        checkout, "rev-parse", "--verify", "FETCH_HEAD", expected_failure=True
+    )
+    before = branch_tip(checkout, branch)
+    if (
+        not fetched
+        or fetched == before
+        or _config.git_read(
+            checkout, "merge-base", "--is-ancestor", ref, fetched, expected_failure=True
+        )
+        != ""
+        or _config.git_read(checkout, "symbolic-ref", "-q", "HEAD", expected_failure=True) != ref
+        or _config.git_read(checkout, "status", "--porcelain", "--untracked-files=no") != ""
+    ):
+        return False
+    try:
+        await git.run_git(checkout, ["git", "merge", "--ff-only", fetched])
+    except ForgeError:
+        return False
+    return branch_tip(checkout, branch) == fetched
+
+
 async def repin(
     db,
     work_item_id: str,
