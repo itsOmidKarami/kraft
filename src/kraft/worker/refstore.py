@@ -400,6 +400,20 @@ def _validate_direct(store: RefStore, shadow: Path) -> str | None:
     return f"the worker left refs/heads/{store.branch} as {what}; removed it"
 
 
+def _clear_worker_files(store: RefStore) -> None:
+    """Remove what the worker may plant at the paths it can write: a leftover
+    `.lock` and a branch reflog that is not a regular file (the host would
+    append through it, and the profile would follow it)."""
+    ref = store.common / "refs" / "heads" / store.branch
+    reflog = store.common / "logs" / "refs" / "heads" / store.branch
+    for path, keep_file in ((ref.with_name(ref.name + ".lock"), False), (reflog, True)):
+        try:
+            if os.path.lexists(path) and not (keep_file and stat.S_ISREG(path.lstat().st_mode)):
+                _remove(path)
+        except OSError as exc:
+            logger.warning("could not remove %s: %s", path, exc)
+
+
 def _record_direct(base: Path, store: RefStore) -> None:
     common, branch = store.common, store.branch
     shadow = shadow_dir(base, store.worktree_gitdir)
@@ -409,6 +423,7 @@ def _record_direct(base: Path, store: RefStore) -> None:
             # A session that ended without `check_direct` (a restart) may have left
             # a symref to main: never record that as the branch's value.
             _validate_direct(store, shadow)
+        _clear_worker_files(store)
         value = _real_branch(common, branch)
         ref.parent.mkdir(parents=True, exist_ok=True)
         (common / "logs" / "refs" / "heads" / branch).parent.mkdir(parents=True, exist_ok=True)
@@ -430,19 +445,10 @@ def check_direct(base: Path, store: RefStore) -> str | None:
     reflog that is not a regular file, which host git would append through."""
     if store.branch is None:
         return None
-    ref = store.common / "refs" / "heads" / store.branch
-    reflog = store.common / "logs" / "refs" / "heads" / store.branch
     shadow = shadow_dir(base, store.worktree_gitdir)
     with _locked(shadow):
         problem = _validate_direct(store, shadow)
-        # The ref is restored first: one path that cannot be removed never skips it.
-        lock = ref.with_name(ref.name + ".lock")
-        for path, keep_file in ((lock, False), (reflog, True)):
-            try:
-                if os.path.lexists(path) and not (keep_file and stat.S_ISREG(path.lstat().st_mode)):
-                    _remove(path)
-            except OSError as exc:
-                logger.warning("could not remove %s: %s", path, exc)
+        _clear_worker_files(store)  # after the ref is restored: one stuck path never skips it
         return problem
 
 

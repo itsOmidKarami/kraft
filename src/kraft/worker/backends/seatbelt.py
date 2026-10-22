@@ -63,8 +63,16 @@ def render_profile(
     for m in mounts:
         if m.src != m.dst:
             raise SandboxRefused(f"kind: os on macOS cannot show {m.src} at {m.dst}")
+        # A link the worker can re-point (a lock, a reflog) must not choose what it may write.
+        if not m.ro and os.path.islink(m.dst):
+            raise SandboxRefused(
+                f"kind: os on macOS will not give write access to {m.dst}: it is a symlink"
+            )
     sub = lambda p: f"(subpath {quote(_real(Path(p)))})"  # noqa: E731
     lit = lambda p: f"(literal {quote(_real(Path(p)))})"  # noqa: E731
+    # `(allow file-write* (subpath D))` also lets D itself be renamed away (rename
+    # is an unlink of the source), dropping the read-only carve-outs inside it.
+    pin = lambda p: f"(deny file-write-unlink {lit(p)})"  # noqa: E731
     out = [
         "(version 1)",
         "(deny default)",
@@ -99,9 +107,12 @@ def render_profile(
             out += [f"(allow file-read* {where})", f"(deny file-write* {where})"]
         else:
             out.append(f"(allow file-read* file-write* {where})")
+            if dst.is_dir():
+                out.append(pin(dst))
     out += [f"(allow file-write* {lit(p)})" for p in DEV_WRITES]
     out += [
         f"(allow file-read* file-write* {sub(tmpdir)})",
+        pin(tmpdir),
         f"(allow network-bind network-inbound network-outbound (local unix-socket {sub(tmpdir)}))",
         f"(allow network-outbound (remote unix-socket {sub(tmpdir)}))",
         f"(allow file-read-data {lit(marker)})",

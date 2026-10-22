@@ -57,6 +57,8 @@ def test_render_order(tmp_path):
     rw = text.index(f'(allow file-read* file-write* (subpath "{w.resolve()}"))')
     ro = text.index(f'(deny file-write* (literal "{w.resolve()}/.git"))')
     assert rw < ro  # the shallower mount first, whatever order they came in
+    pin = f'(deny file-write-unlink (literal "{w.resolve()}"))'
+    assert rw < text.index(pin) < ro
     assert text.index("(deny default)") < min(
         text.index(m)
         for m in ("(allow process-exec*", "(allow file-read-metadata", "(allow file-read*")
@@ -169,6 +171,62 @@ def test_odd_path_matches_only_itself(tmp_path):
     assert (odd / "f").read_text() == "x\n"
     assert write(sibling / "f") != 0
     assert not (sibling / "f").exists()
+
+
+def test_render_pins_the_tmpdir_and_refuses_a_symlinked_rw_mount(tmp_path):
+    real = tmp_path.resolve() / "real"
+    real.mkdir()
+    (tmp_path / "lnk").symlink_to(real)
+    tmp = tmp_path.resolve() / "t"
+    tmp.mkdir()
+    text = profile(tmpdir=tmp)
+    allow = text.index(f'(allow file-read* file-write* (subpath "{tmp}"))')
+    assert allow < text.index(f'(deny file-write-unlink (literal "{tmp}"))')
+    with pytest.raises(SandboxRefused, match="is a symlink"):
+        profile(mounts=[Mount(tmp_path / "lnk", tmp_path / "lnk", False)])
+    # read-only mounts keep resolving
+    profile(mounts=[Mount(tmp_path / "lnk", tmp_path / "lnk", True)])
+
+
+@pytest.mark.e2e("sandbox-exec")
+def test_a_read_write_directory_cannot_be_renamed_away(tmp_path):
+    root = tmp_path.resolve()
+    outer = root / "outer"  # writable, so only the pin stops `d` being renamed
+    d = outer / "d"
+    d.mkdir(parents=True)
+    (d / "keep").write_text("k")
+    tmp = outer / "t"
+    tmp.mkdir()
+    prof = root / "p.sb"
+    prof.write_text(
+        profile(
+            mounts=[
+                Mount(outer, outer, False),
+                Mount(d, d, False),
+                Mount(d / "keep", d / "keep", True),
+            ],
+            tmpdir=tmp,
+            marker=root / "m",
+        )
+    )
+
+    def sh(script: str, *args: Path):
+        return subprocess.run(
+            ["sandbox-exec", "-f", str(prof), "/bin/sh", "-c", script, "sh", *map(str, args)],
+            capture_output=True,
+            text=True,
+            cwd="/",
+        ).returncode
+
+    assert sh('mv "$1" "$2"', d, outer / "d2") != 0
+    assert d.is_dir() and not (outer / "d2").exists()
+    assert sh('mv "$1" "$2"', tmp, outer / "t2") != 0
+    assert tmp.is_dir()
+    assert sh('echo x > "$1/f" && mv "$1/f" "$1/g"', d) == 0
+    assert (d / "g").read_text() == "x\n"
+    assert sh('echo x > "$1/keep"', d) != 0
+    assert sh('mv "$1/keep" "$1/other"', d) != 0
+    assert (d / "keep").read_text() == "k"
 
 
 @pytest.mark.e2e("sandbox-exec")

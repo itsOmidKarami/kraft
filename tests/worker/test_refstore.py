@@ -484,6 +484,24 @@ def test_prepare_direct_puts_back_what_the_last_session_left(direct, worktree):
     assert json.loads(sidecar.read_text())["value"] == start
 
 
+def test_prepare_direct_removes_planted_links_the_last_session_left(direct, worktree, tmp_path):
+    """The lock and the reflog are writable by the worker; a link left there would
+    be followed by the next launch, so a restart removes them like `check_direct`."""
+    base, store, ref = direct
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    lock = ref.with_name(ref.name + ".lock")
+    reflog = store.common / "logs" / "refs" / "heads" / BRANCH
+    lock.symlink_to(outside / "victim")
+    reflog.unlink(missing_ok=True)
+    reflog.symlink_to(outside / "victim")
+
+    refstore.prepare_direct(base, worktree, BRANCH)
+
+    assert not os.path.lexists(lock) and not os.path.lexists(reflog)
+    assert not (outside / "victim").exists()
+
+
 @pytest.mark.parametrize("call", ["sync", "sync_all", "prepare"])
 def test_a_direct_store_is_never_synced_or_rebuilt(direct, call):
     """Its shadow is the real common gitdir: sync and rebuild rmtree it."""
