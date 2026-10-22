@@ -477,6 +477,7 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
                 "work_item_id": "w1",
                 "path": None,
                 "restart": False,
+                "sandbox_from_config": False,
             },
         ),
         (
@@ -487,12 +488,19 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
                 "work_item_id": "w1",
                 "path": "verification.review.code_review",
                 "restart": False,
+                "sandbox_from_config": False,
             },
         ),
         (
             ["item", "retry", "w1", "--restart"],
             "retry",
-            {"steer": None, "work_item_id": "w1", "path": None, "restart": True},
+            {
+                "steer": None,
+                "work_item_id": "w1",
+                "path": None,
+                "restart": True,
+                "sandbox_from_config": False,
+            },
         ),
         (
             ["item", "raise-budget", "w1", "--usd", "25"],
