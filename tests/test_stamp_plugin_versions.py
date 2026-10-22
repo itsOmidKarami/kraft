@@ -76,9 +76,21 @@ def test_every_shipped_plugin_manifest_is_stamped_and_they_agree():
     MANIFESTS keeps the version it was committed with forever, and that agent's
     plugin list shows a release that never shipped."""
     shipped = set(stamp_mod._ROOT.glob("plugins/*/.*-plugin/plugin.json"))
+    shipped |= set(stamp_mod._ROOT.glob("plugins/*/gemini-extension.json"))
+    assert any(p.name == "gemini-extension.json" for p in shipped)
     assert shipped <= set(stamp_mod.MANIFESTS), shipped - set(stamp_mod.MANIFESTS)
     versions = {p: json.loads(p.read_text())["version"] for p in stamp_mod.MANIFESTS}
     assert len(set(versions.values())) == 1, versions
+
+
+def test_a_manifest_whose_schema_has_no_version_is_left_unstamped():
+    """Antigravity reads `plugins/<name>/plugin.json`, whose schema lists no
+    `version` and refuses any key it does not list: stamped, it stops installing."""
+    unversioned = list(stamp_mod._ROOT.glob("plugins/*/plugin.json"))
+    assert unversioned
+    for path in unversioned:
+        assert path not in stamp_mod.MANIFESTS
+        assert "version" not in json.loads(path.read_text())
 
 
 def test_the_vscode_extension_is_stamped_and_keeps_its_own_shape(tmp_path):

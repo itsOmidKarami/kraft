@@ -1,0 +1,30 @@
+# chains/quick-task.yaml
+#
+# The smallest shipped chain: an agent implements the work item, then the
+# tests for the changed code run. No review, no merge request, no gate.
+#
+# **No `kind: gate` node, ever.** This is the one shipped chain that runs to
+# completion unattended, which makes it the chain to reach for when checking
+# that an install works at all. Kraft's own end-to-end test
+# (`frontend/e2e/chain.spec.ts`) relies on that, and
+# `tests/templates/test_materialization.py` checks no gate was added. Want a
+# review or an approval? Copy this file under a new id, or use `default`.
+#
+# There is no environment-setup node: Kraft prepares the worktree's runtime
+# itself before the first node runs. `verify` uses the plain
+# `verify_changed_scopes` task rather than the library's `verification` node,
+# which adds a code review and a fix loop this chain leaves out on purpose.
+id: quick-task
+
+nodes:
+  - id: implementation
+    kind: exec
+    tasks:
+      - id: implement
+        extends: implementer
+
+  - id: verify
+    kind: exec
+    tasks:
+      - id: test_changed_scopes
+        extends: verify_changed_scopes

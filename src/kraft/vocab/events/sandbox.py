@@ -15,6 +15,7 @@ class SandboxEvent(StrEnum):
     OOM_KILLED = "sandbox_oom_killed"
     BRANCH_NOT_SYNCED = "sandbox_branch_not_synced"
     KIT_RESOLVED = "sandbox_kit_resolved"
+    SESSION_OUTLIVED = "sandbox_session_outlived"
 
 
 _PLAIN = EventTraits()
@@ -26,6 +27,7 @@ SANDBOX_EVENT_TRAITS = total(
         SandboxEvent.OOM_KILLED: _PLAIN,
         SandboxEvent.BRANCH_NOT_SYNCED: _PLAIN,
         SandboxEvent.KIT_RESOLVED: _PLAIN,
+        SandboxEvent.SESSION_OUTLIVED: _PLAIN,
     },
     name="SANDBOX_EVENT_TRAITS",
 )

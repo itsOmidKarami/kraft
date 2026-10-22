@@ -48,9 +48,9 @@ SECTIONS = {
 
 def test_the_families_are_the_nine_in_docs_order_and_hold_every_type():
     assert FAMILIES == tuple(SECTIONS)
-    assert [len(f) for f in FAMILIES] == [27, 26, 18, 9, 9, 7, 14, 4, 6]
+    assert [len(f) for f in FAMILIES] == [27, 26, 18, 9, 9, 7, 14, 5, 6]
     assert EVENT_TYPES == tuple(m for f in FAMILIES for m in f)
-    assert len(BY_VALUE) == len(EVENT_TYPES) == 120
+    assert len(BY_VALUE) == len(EVENT_TYPES) == 121
     assert list(EVENT_TRAITS) == list(EVENT_TYPES)
 
 
@@ -131,11 +131,13 @@ def test_the_docs_page_lists_exactly_each_familys_types(family):
 
 #: `end_work_item` appends the two types it unpacked from `MANUAL_ENDS`,
 #: which holds members; `_restart_span` appends the `ChainEvent` its caller
-#: names (`restart_event: ChainEvent`).
+#: names (`restart_event: ChainEvent`); `ChannelRegistry.record` appends the
+#: `SandboxEvent` its caller names.
 _UNPACKED = {
     ("store/work_items.py", "audit"),
     ("store/work_items.py", "ordinary"),
     ("executor/walk.py", "restart_event"),
+    ("worker/channel.py", "type"),
 }
 
 

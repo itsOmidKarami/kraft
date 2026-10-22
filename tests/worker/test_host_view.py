@@ -2,6 +2,7 @@
 roots an executable needs, `expose:`, and the CA files that cross."""
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -49,6 +50,8 @@ def _link(path: Path, target) -> Path:
         ("home/.netrc", True),
         ("moved-run/items", True),
         ("moved-config", True),
+        ("home/Library/Keychains", True),
+        ("home/Library/Cookies", True),
     ],
     ids=[
         "home",
@@ -60,6 +63,8 @@ def _link(path: Path, target) -> Path:
         "credential-file",
         "inside-a-run-dir-outside-kraft-home",
         "a-config-dir-outside-kraft-home",
+        "keychains",
+        "cookies",
     ],
 )
 def test_protected_refusal(host, tmp_path, rel, refused, monkeypatch):
@@ -364,6 +369,90 @@ def test_expose_roots(host, entry, error):
 
 
 @pytest.fixture
+def fake_darwin(monkeypatch):
+    """`sys.platform` as a Mac, with `system_dirs()` recomputed either side."""
+    host_view.system_dirs.cache_clear()
+    monkeypatch.setattr(sys, "platform", "darwin")
+    yield
+    monkeypatch.undo()
+    host_view.system_dirs.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("under_usr_local", "roots"),
+    [(True, 1), (False, 0)],
+    ids=["usr-local-gets-a-root", "usr-bin-gets-none"],
+)
+def test_darwin_system_excludes_usr_local(host, tmp_path, monkeypatch, under_usr_local, roots):
+    usr = tmp_path / "usr"
+    monkeypatch.setattr(host_view, "system_dirs", lambda: (usr,))
+    monkeypatch.setattr(host_view, "system_excluded", lambda: (usr / "local",))
+    tool = _file(usr / ("local/bin" if under_usr_local else "bin") / "tool")
+    home, kraft, checkout = host
+    got = host_view.resolve(str(tool), SYSTEM_PATH, checkout, checkout, home, kraft)
+    assert len(got.roots) == roots
+
+
+@pytest.mark.parametrize(
+    ("platform", "has", "excluded"),
+    [("darwin", "/System", ("/usr/local",)), ("linux", "/lib64", ())],
+)
+def test_system_dirs_per_platform(monkeypatch, platform, has, excluded):
+    host_view.system_dirs.cache_clear()
+    monkeypatch.setattr(sys, "platform", platform)
+    try:
+        assert Path(has) in host_view.system_dirs()
+        assert host_view.system_excluded() == tuple(Path(e) for e in excluded)
+    finally:
+        monkeypatch.undo()
+        host_view.system_dirs.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("answer", "shown", "run_dir"),
+    [
+        ("", None, "run"),
+        ("\n", None, "run"),
+        ("{tmp}/dev", "{tmp}/dev", "run"),
+        ("{tmp}/home", None, "run"),
+        ("{tmp}/X.app/Contents/Developer", "{tmp}/X.app/Contents", "run"),
+        ("{tmp}/X.app/Other/Developer", "{tmp}/X.app/Other/Developer", "run"),
+        ("{tmp}/X.app/Contents/Developer", None, "X.app/Contents/run"),
+    ],
+    ids=[
+        "empty",
+        "blank",
+        "selected",
+        "developer-dir-is-home",
+        "xcode-app-shows-all-of-contents",
+        "not-contents-is-not-widened",
+        "a-protected-path-under-contents-is-not-shown",
+    ],
+)
+def test_system_dirs_adds_the_selected_developer_dir_only_when_named(
+    fake_darwin, monkeypatch, tmp_path, answer, shown, run_dir
+):
+    """An empty `xcode-select -p` answer is no directory, not the cwd; one that
+    is the home (DEVELOPER_DIR=$HOME) is not a system directory. Inside Xcode.app
+    `git` is a shim into `xcodebuild`, which loads frameworks from beside
+    `Developer`, so all of `Contents` is shown, unless it holds a protected path."""
+    cwd, home = tmp_path / "cwd", tmp_path / "home"
+    for d in (cwd, home, tmp_path / "dev", tmp_path / "X.app/Contents/Developer"):
+        d.mkdir(parents=True)
+    (tmp_path / "X.app/Other/Developer").mkdir(parents=True)
+    (tmp_path / run_dir).mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / run_dir))
+    monkeypatch.chdir(cwd)
+    out = answer.format(tmp=tmp_path)
+    done = subprocess.CompletedProcess([], 0, out + "\n", "")
+    monkeypatch.setattr(host_view.subprocess, "run", lambda *a, **k: done)
+    dirs = host_view.system_dirs()
+    added = [d for d in dirs if d.is_relative_to(tmp_path.resolve())]
+    assert added == ([Path(shown.format(tmp=tmp_path)).resolve()] if shown else [])
+
+
+@pytest.fixture
 def fresh_interpreter():
     host_view.init_interpreter.cache_clear()
     yield
@@ -382,6 +471,17 @@ def test_init_interpreter(fresh_interpreter, monkeypatch, tmp_path, system):
     else:
         assert exe == Path(os.path.realpath(sys.executable))
         assert roots == (Path(sys.base_prefix).resolve(),)
+
+
+def test_init_interpreter_darwin_skips_xcrun_shim(fresh_interpreter, fake_darwin, monkeypatch):
+    # /usr/bin/python3 on a Mac is an xcrun shim to 3.9: never the init's python.
+    if not host_view.SYSTEM_PYTHON.exists():
+        pytest.skip("no /usr/bin/python3 on this host")
+    ok = subprocess.CompletedProcess([], 0)
+    monkeypatch.setattr(host_view.subprocess, "run", lambda *a, **k: ok)
+    exe, roots = host_view.init_interpreter()
+    assert exe == Path(os.path.realpath(sys.executable))
+    assert roots == (Path(sys.base_prefix).resolve(),)
 
 
 @pytest.mark.parametrize(

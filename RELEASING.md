@@ -215,9 +215,11 @@ published and a rerun at a later commit is safe.
 
 Each plugin carries its own `version` field in `.claude-plugin/plugin.json`
 (shown in `/plugin list`) and in `.cursor-plugin/plugin.json`, for
-`plugins/kraft` and `plugins/kraft-lite`. You never edit these by
-hand and pull requests never touch them: `release.yml` stamps all five (those
-four and the extension's `vscode/package.json`) with
+`plugins/kraft` and `plugins/kraft-lite`, and Kraft Lite also in
+`gemini-extension.json` (its Antigravity `plugin.json` has no version). You
+never edit these by hand and pull requests never touch them: `release.yml`
+stamps every one (those five, the extension's `vscode/package.json` and its
+lockfile) with
 `dev/stamp_plugin_versions.py` right after it tags a release, writes the
 release notes into `CHANGELOG.md` and `vscode/CHANGELOG.md`, then opens and
 auto-merges a `release::none` pull request with all of them. Doing this on a

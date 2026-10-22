@@ -1,46 +1,49 @@
 ---
 name: run-slices
-description: "Controls a sliced Kraft Lite run as its controller, with one child session building each slice of the plan. Use when a Kraft Lite `state` reports `sliced.action: run_slices`, when a large plan at `chain_review` should be split across sessions, or when resuming or checking in on a sliced run."
+description: "Controls a sliced Kraft Lite run as its controller, with one child session building each slice of the plan. Use when `kraft-lite:next` reaches a Kraft Lite chain's slice gate (`state.gate.slice_gate` true, `sliced` null), when `state` reports `sliced.action: run_slices`, when a large plan should be split across sessions, or when resuming or checking in on a sliced run."
 ---
 
 # Running slices as the controller
 
-You are the **controller**. Each **slice** is one or more plan tasks, built by a
-**child** session that walks `chains/slice.json`. Children report to you; you
-answer them, review and merge their work into the **feature branch**, and keep
-the run's truth in `.kraft-lite/`, copied to the **state branch** after every
-change. Your conversation is not state: after a compaction or a restart, read
-`state`, `slices` and `decisions` again.
+If `$CLAUDE_PLUGIN_ROOT` is unset, `kl.py` is two directories above this file;
+it needs `python3` 3.10 or newer, and without one, tell the user and stop.
 
-`$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
-is two directories above this file - use that path instead of an empty one.
-`python3` 3.10 or newer runs every command; if it is missing or older, tell the
-user and stop. In prose and checklists below, `KL` is short for
+You are the **controller**. Each **slice** is one or more plan tasks, built by a
+**child** session that walks the **child chain** (the nodes `kl.py` gives a
+child from this run's frozen chain, as `kraft-lite:build-slice` lists them).
+Children report to you; you answer them, review and merge their work into the
+**feature branch**, and keep the run's truth in `.kraft-lite/`, copied to the
+**state branch** after every change. Your conversation is not state: after a
+compaction or a restart, read `state`, `slices` and `decisions` again.
+
+In prose and checklists below, `KL` is short for
 `python3 "$CLAUDE_PLUGIN_ROOT/kl.py"`, and a `KL` command carries `--chain-id <id>`
 even where it is not written: pass it to every verb except `settings`, `import`,
-`chains`, `detect` and `start`. Type each command in full.
+`chains`, `detect`, `migrate` and `start`. Type each command in full.
 
-The tools for each ability are in your harness's reference; read it before
-section 2: [Claude Code](references/claude-code.md),
-[Codex](references/codex.md), [Cursor](references/cursor.md).
-A harness with no reference here runs on every ability's fallback, whatever its
-own help shows: walk the slices here (section 10), and tell the user nothing
-wakes this session, so they invoke `kraft-lite:run-slices` to continue it.
+The tools for each ability are in your harness's guide; read it before
+section 2: [Claude Code](references/claude-code.md), [Codex](references/codex.md),
+[Cursor](references/cursor.md), [Gemini CLI](references/gemini.md),
+[Antigravity](references/antigravity.md), [Amp](references/amp.md),
+[OpenCode](references/opencode.md). With no guide for this harness, or an
+ability its guide marks unconfirmed, follow [discover.md](references/discover.md)
+before any fallback.
 
 ## 1. When to slice
 
-Slicing needs the default chain's `chain_finalized` gate after `chain_review`,
-and its nodes `implementation`, `verify`, `open_mr`, `mr_checks`,
-`human_review`, `merge` and `post_merge_watch`: check the frozen chain,
-`.kraft-lite/chains/<chain-id>.json`. On a chain without them, `approve --slices`
-refuses and names what is missing: draw no proposal; say so, and approve the
-gate `state.gate` names, unsliced.
+At the **slice gate**, the last gate before the first build node, which `state`
+marks `gate.slice_gate` true (`chain_revision_approval` on the default chain,
+`plan_approval` on one that builds right after its plan gate). `kraft-lite:next`
+invokes this skill there while `sliced` is null. Read `KL slices` first: its
+`shape` names this chain's `slice_gate`, or says why it is `unsliceable`.
+Unsliceable: tell the user its reason and draw nothing. At any other node: tell
+the user slicing comes at `shape.slice_gate`, and draw nothing now. In both, go
+on with `kraft-lite:next`, so each gate gets `kraft-lite:gate`'s own question.
 
-At `chain_review`, after its bound `on.chain.review_ready` hook. A plan with no
-`## Slices` section and few enough tasks for one session's context is not
-sliced: say so, delete any `.kraft-lite/proposals/<chain-id>.json` left by an
-earlier round, then `KL gate --name chain_finalized` and invoke
-`kraft-lite:gate`; the chain continues as one.
+A plan with no `## Slices` section and few enough tasks for one session's
+context is not sliced: say so, delete any `.kraft-lite/proposals/<chain-id>.json`
+left by an earlier round, then `KL gate` and invoke `kraft-lite:gate`; the
+chain continues as one.
 
 1. Read the plan's `## Slices` section (bullets like `- **Slice 2: <title>.**
    Tasks 3–5. Comes after slice 1.`). With none, propose a grouping.
@@ -56,12 +59,11 @@ earlier round, then `KL gate --name chain_finalized` and invoke
    state branch.
 4. Write it to `.kraft-lite/proposals/<chain-id>.json`:
    `{"mode", "feature_branch", "state_branch", "slices": [{"key", "title", "tasks": [N], "after": [key]}]}`.
-5. `KL gate --name chain_finalized`, then present the proposal as that gate's
-   artefact and end your turn. The user's answer is the approval.
-6. On the user's answer, invoke `kraft-lite:gate`, which records it: an
+5. `KL gate`, then invoke `kraft-lite:gate`. It presents the gate's own
+   artifact with the proposal beside it, and records the user's answer: an
    approval as `approve --slices .kraft-lite/proposals/<chain-id>.json`, a
    rejection by deleting the proposal. No slice records exist before the
-   approval. A rewind to `chain_review` or earlier retires the slices
+   approval. A rewind to the slice gate or earlier retires the slices
    (`kraft-lite:gate`): `slices` lists none, and this section runs again.
 
 ## 2. Before the first child
@@ -69,10 +71,11 @@ earlier round, then `KL gate --name chain_finalized` and invoke
 Copy this and tick it off; while a line is unticked, no child starts.
 
 ```
-- [ ] Abilities confirmed from the harness reference, or its fallback named: start, message, be messaged, archive, check in later. Deferred tools searched before calling one missing. A missing ability is never a block.
+- [ ] Abilities confirmed from the guide, a local guide, or discover.md, or its fallback named: start, message, be messaged, archive, check in later. Each one with no guide, or that its guide leaves unconfirmed, looked for as discover.md says before its fallback. A missing ability is never a block.
 - [ ] One user approval for every branch this run pushes outside this session's own: the feature branch (`feature` mode), and locally the state branch.
 - [ ] Setup and the scoped test command run once here, and the working setup line written down.
 - [ ] The user has finished giving instructions for this run: ask, and hear "go".
+- [ ] Every command taken from a local guide (`.kraft-lite/harnesses/`) listed to the user in that ask.
 - [ ] Rights read (section 12), and any the user changed for this run logged with `decide`.
 - [ ] `feature` mode: feature branch pushed. State exported (section 7).
 ```
@@ -101,7 +104,7 @@ For each key you start:
 2. Start the session from that commit, where the user said children run for
    this run (locally or in the cloud), else where this session runs. Its own
    branch is the slice branch; its title is `<chain-id> <key>: <slice title>`;
-   it is tagged with the chain id where the reference confirms tags; it has
+   it is tagged with the chain id where the guide confirms tags; it has
    **an explicit model** (middle tier).
 3. `KL slice-set --slice <key> --status running --session <id> --branch <slice-branch>`.
    Started from `early`, also
@@ -121,21 +124,22 @@ so the new child writes its own `fork`, `base` and `chain` files.
 
 The starting instructions, in this order:
 
-1. **Slice:** the feature chain's id, then key, title, its plan tasks, what it
+1. **Slice:** the controller's chain id, then key, title, its plan tasks, what it
    comes after, which slices run beside it, what it owns or must take from an
    owner's branch, and its line with the `--fork` sha: `Cut from: target at <sha>`
    when cut from the target's tip, `Cut from: <slice key> at <sha>` when cut
    from that slice's branch, where `target` is the word itself, never a branch
-   name.
+   name. Then the state branch: its `kraft-lite-state/chain.json` is what the
+   child starts its child chain from.
 2. **Controller:** this session's id, and locally its name too (a local session
    message is addressed by name). The child's own tools, copied from your
-   reference's "Be messaged" and "Check in later": the one that messages you,
+   guide's "Be messaged" and "Check in later": the one that messages you,
    and the one that schedules a message back into its own session. Where the
-   reference marks the child's wake-up unconfirmed, write
+   guide marks the child's wake-up unconfirmed, write
    `none; continue on the controller's check-in` in its place. The channels
    in the order to try them: a session message; on the same machine
    `.kraft-lite/messages/<chain-id>/<key>.jsonl` under this checkout's absolute
-   path (the feature chain's id; one JSON per line: `at`, `from`, `kind`:
+   path (the controller's chain id; one JSON per line: `at`, `from`, `kind`:
    question|answer|status|done, `body`); else comments on its own draft PR into
    its target, opened at its first commit.
 3. **Kraft Lite:** invoke `kraft-lite:build-slice`; if the plugin is missing,
@@ -145,19 +149,16 @@ The starting instructions, in this order:
 4. **Documents:** the spec and plan arrive next in parts marked `part i of n` (or
    as paths on the same machine); join them, write them down, and confirm.
 5. **Setup:** the working setup line from section 2.
-6. **Method:** one subagent per task, TDD, a spec-compliance review and a
-   code-quality review per task, a capped fix round, parallel tasks in isolated
-   worktrees. Implementation stops after the last task's reviews: its one
-   whole-branch review is its `on.review.local.run`. It skips
-   `on.review.mr.run`: your PR review is that review.
+6. **Method:** what the child's `state` dispatches for its first build node
+   under the slice layer; add no method of your own.
 7. **Models:** the policy in section 11, with the model set on every subagent.
-8. **Tests:** scoped tests only, explicit paths, for `on.slice.test.run`; the full
-   suite runs on CI. The PR body lists the paths run.
+8. **Tests:** the scoped test paths for its plan tasks, which its
+   `kraft.verify_changed_test_scopes` task runs under the slice layer.
 9. **Branches and PRs:** push only its own slice branch; its target, named:
    the feature branch, or in `main` mode the base branch. Its PR goes into the
-   target, and so does `on.mr.rebase`. It rebases, and force-pushes its own
-   branch, as `kraft-lite:build-slice` says. The repo's rules, quoted from its
-   `CLAUDE.md` and `CONTRIBUTING.md`.
+   target, and so does its `kraft.mr_rebase`. It rebases, and force-pushes its
+   own branch, as `kraft-lite:build-slice` says. The repo's rules, quoted from
+   its `CLAUDE.md` and `CONTRIBUTING.md`.
 10. **Rights:** what it may decide alone, and that every other question comes to
     the controller, never the user; keep working on whatever does not depend on
     a pending answer.
@@ -177,9 +178,11 @@ Before any other write and before starting anything:
 
 1. Fetch the state branch, `KL import --from <state-checkout>/kraft-lite-state`,
    then `KL chains` for the chain id. An empty `chains` before the import is a
-   missing import: never `start` a new chain.
+   missing import: never `start` a new chain. An import refused as exported by
+   an older Kraft Lite is a run from before V1 chains: tell the user it must be
+   finished on the previous Kraft Lite version, and write nothing.
 2. `KL slices`. For every `starting` or `running` slice, and every `waiting`
-   one in `ready` or `early`, find its session, in the ways the reference
+   one in `ready` or `early`, find its session, in the ways the guide
    confirms: the recorded session id; a session whose title or name carries
    `<chain-id>` and `<key>`; the chain-id tag; and its slice branch on the remote
    (`git ls-remote origin <slice-branch>`) as evidence a child ran.
@@ -195,14 +198,14 @@ Before any other write and before starting anything:
 
 ## 5. Following up
 
-A check-in is armed while any slice is not merged; in `main` mode, while
-`implementation`, `human_review` or `merge` is open. Its message, word for word:
+A check-in is armed while any slice is not merged; in `main` mode, until the
+nodes `sliced.action` marks `await_user_merges` close. Its message, word for word:
 `kraft-lite:run-slices check-in, chain <id>: read state first.` Every check-in:
 
 ```
-- [ ] `KL state` and `KL slices`. Past `implementation`: invoke `kraft-lite:next`, which records the user's merges, and skip to the last line. A non-empty `base_moved`: the rebase in section 6.
+- [ ] `KL state` and `KL slices`. Past the first build node: invoke `kraft-lite:next`, which records the user's merges, and skip to the last line. A non-empty `base_moved`: the rebase in section 6.
 - [ ] Read messages, then `.kraft-lite/messages/<chain-id>/`, then each slice PR's comments.
-- [ ] Per running child: its status summary (fields in the reference), and `git fetch` + `git log` of its branch. Never its full transcript.
+- [ ] Per running child: its status summary (fields in the guide), and `git fetch` + `git log` of its branch. Never its full transcript.
 - [ ] A child shown as blocked: find out on what (often its own subagents) before telling the user anything.
 - [ ] `main` mode: each `ready_to_merge` slice's PR. One the user merged takes the steps after a merge (section 6).
 - [ ] Answer every question (below). Export state.
@@ -220,9 +223,10 @@ Answering a question:
   and tell the child to keep working on everything else.
 - A user-only decision: see below.
 - A fix loop over its cap arrives with its traces: re-steer the child once, and
-  log it with `decide`, or hold it for the user. A child's hook bound to
-  `kind: agent` or `kind: builtin`, or with no registry entry, is configuration:
-  its question opens `For the user: configuration`, and it goes to the user.
+  log it with `decide`, or hold it for the user. A binding in
+  `.kraft-lite/bindings.yaml` that a child's `start` or `state` refuses is
+  configuration: its question opens `For the user: configuration`, and it goes
+  to the user.
 - A child reports a rebase with a new `Cut from:` line:
   `KL slice-set --slice <key> --fork <sha>`, then export state.
 
@@ -299,9 +303,8 @@ mode, ready to merge or merged):
 
 1. Show the whole decisions log, `KL decisions`, while a call is cheap to overturn.
 2. `KL decisions --unreported --mark`, to mark it reported.
-3. `KL close`, and export state. The rest of the feature chain then runs per
-   `state.sliced.action`, through `kraft-lite:next`, which says where its hooks
-   run.
+3. `KL close`, and export state. The rest of the chain then runs per
+   `state.sliced.action`, through `kraft-lite:next`, which says where its tasks run.
 
 ## 7. State branch
 
@@ -328,14 +331,14 @@ marks what it reports, and gives the report its shape.
 ## 9. Wrap-up
 
 List the branches safe to delete (merged slices; the state branch once done)
-for the user to delete. In `feature` mode the feature PR is the chain's
-`open_mr`.
+for the user to delete. In `feature` mode, the MR node opens the feature PR.
 
-## 10. No reference, or no session tools
+## 10. No guide, or no session tools
 
-With no reference for this harness (above), or with the abilities really
-missing after searching deferred tools: say which, and walk the slices here,
-one after another, in `ready` order, with the same review, merge and state steps.
+With no guide for this harness, or an ability its guide marks unconfirmed,
+follow [discover.md](references/discover.md) first. With no way to start a child
+even then: say so, and walk the slices here, one after another, in `ready`
+order, with the same review, merge and state steps.
 
 ## 11. Models
 

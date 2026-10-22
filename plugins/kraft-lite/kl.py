@@ -14,12 +14,24 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import uuid
 from pathlib import Path
+
+# The sibling modules sit beside this file. Python puts the script's directory
+# on `sys.path` only without `PYTHONSAFEPATH` (3.11+), so say it here.
+_HERE = str(Path(__file__).resolve().parent)
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+import kl_bindings  # noqa: E402
+import kl_chains  # noqa: E402
+import kl_migrate  # noqa: E402
+import kl_shape  # noqa: E402
 
 #: bd stores a dependency as an object, not an id string. The fallback file uses
 #: the same shape on purpose: the promise that `bd import .kraft-lite/chain.jsonl`
@@ -52,6 +64,24 @@ AT_LABEL = "kraft-at:"
 #: last can be the one whose clock runs behind, as when a controller moves from a
 #: laptop to the cloud. A record from before this label counts as 0.
 SEQ_LABEL = "kraft-seq:"
+#: What a node, or the epic for an attachment, produced: `kraft-artifact:<kind>=<path>`,
+#: one label per kind. A gate presents the newest record's file of its kind.
+ARTIFACT_LABEL = "kraft-artifact:"
+#: What an artifact kind may be: it sits in a label before the `=`.
+ARTIFACT_KIND = re.compile(r"[A-Za-z0-9_.-]+")
+#: Set once the node's `on_failure` ran in this round; a rewind clears it.
+ON_FAILURE_RAN_LABEL = "kraft-on-failure-ran"
+#: How many times `restart` has sent the walk back from this node because its
+#: base moved. Never cleared: the cap is the node's, over the whole run.
+RESTARTS_LABEL = "kraft-restarts:"
+RESTART_CAP = 3
+#: How many times `restart --merge-rejected` has sent the walk back from this
+#: node because the forge's merge train or queue dropped its PR. Never cleared,
+#: as `RESTARTS_LABEL`; the cap is Kraft's default for `<node>.on_merge_rejected`.
+MERGE_REJECTIONS_LABEL = "kraft-merge-rejections:"
+MERGE_REJECTION_CAP = 3
+#: A fix loop's cap when neither the loop nor anything else names one, as Kraft's.
+DEFAULT_CAP = 3
 
 #: A feature split into slices is more records in the same store, none of them
 #: part of the feature chain. Their ids hold no `.`, which is what keeps them out
@@ -113,20 +143,10 @@ SLICE_SPEC_KEYS = ("key", "title", "tasks", "after")
 RUN_ID = re.compile(r"ksr-[0-9a-f]{8}")
 SLICE_ID = re.compile(r"ks-[0-9a-f]{8}")
 
-#: What a node of the feature chain means once the run is sliced, by mode. The
-#: chain's own node list is untouched; `state` reports the action beside it so
-#: the `next` skill knows whether to run the node's hooks or do something else.
-#: A node absent from the table runs its hooks in both modes.
-SLICED_ACTIONS: dict[str, dict[str, str]] = {
-    "implementation": {"feature": "run_slices", "main": "run_slices"},
-    "verify": {"feature": "scoped_verify", "main": "skip"},
-    "open_mr": {"feature": "hooks", "main": "skip"},
-    "mr_checks": {"feature": "hooks", "main": "skip"},
-    "human_review": {"feature": "hooks", "main": "await_user_merges"},
-    "merge": {"feature": "hooks", "main": "await_user_merges"},
-    # Main mode has no one merge to watch: each slice merged into main on its own.
-    "post_merge_watch": {"feature": "hooks", "main": "skip"},
-}
+#: On a child's epic: it walks a slice of a controller's chain (`start
+#: --slice-of`), so `state` dispatches its tasks with the slice bindings layer,
+#: and it is never sliced itself.
+SLICE_LAYER_LABEL = "kraft-slice-layer"
 
 #: Who decides what, unless `.kraft-lite/slices.json` says otherwise.
 DEFAULT_SETTINGS = {
@@ -177,8 +197,31 @@ def _checked(chain_id: str) -> str:
     return chain_id
 
 
+def _dispatched_tasks(chain: dict) -> list[dict]:
+    """Every task the walk dispatches, in chain order: each exec node's own steps,
+    its failure handler's, its fix loop's, the loop's judge, then its
+    merge-rejection repair's."""
+    found = []
+    for node in (n for n in chain["nodes"] if n["kind"] == "exec"):
+        loop = node["fix_loop"]
+        for container in (node, node["on_failure"], loop):
+            found += kl_shape.node_tasks(container) if container else []
+        if loop and loop["judge"]:
+            found.append(loop["judge"])
+        if node["on_merge_rejected"]:
+            found += kl_shape.node_tasks(node["on_merge_rejected"]["repair"])
+    return found
+
+
+def _describe(node: dict) -> str:
+    if node["kind"] == "gate":
+        return f"gate: {node['message']}"
+    return "tasks: " + ", ".join(task["path"] for task in kl_shape.node_tasks(node))
+
+
 def materialize(chain: dict, title: str, chain_id: str) -> list[dict]:
-    """The epic, then one record per node, linked so each waits on the last."""
+    """The epic, then one record per node, gate nodes included, linked so each
+    waits on the last."""
     epic = {
         "_type": "issue",
         "id": chain_id,
@@ -198,7 +241,7 @@ def materialize(chain: dict, title: str, chain_id: str) -> list[dict]:
                 "id": node_id,
                 "title": node["id"],
                 "status": "open",
-                "description": "hooks: " + ", ".join(node["tasks"]),
+                "description": _describe(node),
                 "labels": [f"{NODE_LABEL}{node['id']}"],
                 "dependencies": [_dep(node_id, previous)],
             }
@@ -509,7 +552,44 @@ class BdStore:
         return [json.loads(line) for line in out.splitlines() if line.strip()]
 
     def write(self, records: list[dict]) -> None:
-        self._bd(["import", "-"], stdin=_jsonl(_prepare(records)))
+        self._import(_prepare(records), self.load())
+
+    def _import(self, records: list[dict], held: list[dict]) -> None:
+        """`import` the records, then drop each label the store held for one
+        that the record no longer has: `import` merges labels into the row it
+        updates, so `set_label` alone would leave the old value beside the new
+        (Kraft-lpkgd). For a row bd kept instead (`tie_kept_local_ids`,
+        `stale_skipped_ids`), the labels this import added are taken back, so
+        the other writer's row stays as it was. `--remove-label` leaves
+        `updated_at` alone."""
+        result = self._bd(["import", "--json", "-"], stdin=_jsonl(records))
+        try:
+            report = json.loads(result.stdout)
+        except (TypeError, ValueError):
+            return  # no report: leave every label, as a plain import did
+        # A row bd kept instead (a tie, or an older copy) still takes our labels:
+        # take back the ones it did not hold. A row it wrote keeps only ours.
+        kept = {*report.get("tie_kept_local_ids", ()), *report.get("stale_skipped_ids", ())}
+        before = {r["id"]: r for r in held}
+        # A kept row another writer moved after `held` was read is not the one we
+        # loaded: what we "added" may be theirs too, so it is left whole.
+        # shortcut: a writer landing between this export and the `update` below can still
+        # lose a label it shares with ours; bd has no transaction for labels to close it.
+        now = {r["id"]: r.get("updated_at") for r in self.load()} if kept else {}
+        moved = {i for i in kept if now.get(i) != (before.get(i) or {}).get("updated_at")}
+        for record in (r for r in records if r["id"] not in moved):
+            held_labels = (before.get(record["id"]) or {}).get("labels") or []
+            ours = record.get("labels") or []
+            if record["id"] in kept:
+                stale = [x for x in ours if x not in held_labels]
+            else:
+                stale = [x for x in held_labels if x not in ours]
+            if stale:
+                # Each value is read as CSV: quoted, a label's own comma or quote survives.
+                quoted = ['"' + x.replace('"', '""') + '"' for x in stale]
+                self._bd(
+                    ["update", record["id"], *(a for q in quoted for a in ("--remove-label", q))]
+                )
 
     def write_raw(self, records: list[dict], local: list[dict]) -> None:
         """Records as exported, for `import`, past bd's guard without `_prepare`.
@@ -519,8 +599,7 @@ class BdStore:
         win, and bd keeps the local row on a tie or a newer guard. `local` is
         what `import` loaded, so the store is not exported a second time.
         """
-        out = _past_local(records, local)
-        self._bd(["import", "-"], stdin=_jsonl(out))
+        self._import(_past_local(records, local), local)
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -592,35 +671,59 @@ def settings(root: Path) -> dict:
     return merged
 
 
-DEFAULT_CHAIN = Path(__file__).parent / "chains" / "default.json"
-
-
 def _frozen_path(root: Path, chain_id: str) -> Path:
     return root / STATE_DIR / "chains" / f"{_checked(chain_id)}.json"
 
 
-def _chain(root: Path, path: Path | None, chain_id: str | None = None) -> dict:
-    """The chain this run walks.
+#: What a frozen chain carries once it is Kraft's V1 shape, resolved at `start`.
+FORMAT = "v1"
+
+
+def _chain(root: Path, chain_id: str | None, finished: bool = False) -> dict | None:
+    """The chain this run walks, as `start` resolved and froze it; None when no
+    chain was started here, or when a `finished` run was frozen before V1: it
+    has nothing left to walk, so it blocks nothing.
 
     `start` freezes its chain and every later verb reads that copy. Re-reading the
-    template each time would mean a `--chain` given at start is forgotten by the
-    next verb — and worse, that editing a template retargets a run already in
+    library each time would mean a `--chain` given at start is forgotten by the
+    next verb — and worse, that editing a library retargets a run already in
     flight. One file per chain id is what lets two runs in one directory hold
-    different templates; a single file meant the second `start` silently
-    retargeted the first run.
+    different chains. An unfinished run frozen before V1, per chain or in the
+    single `chain.json` that came before that, is refused until `migrate` moves
+    it. A V1 chain is checked by `_chain_flaw`, as an imported one is.
     """
-    if path is not None:
-        return json.loads(path.read_text())
-    if chain_id is not None:
-        per_chain = _frozen_path(root, chain_id)
-        if per_chain.is_file():
-            return json.loads(per_chain.read_text())
-    # Chains frozen before templates were per-chain. Remove at the next breaking
-    # release; until then it is what keeps a run in flight walking across upgrade.
-    legacy = root / STATE_DIR / "chain.json"
-    if legacy.is_file():
-        return json.loads(legacy.read_text())
-    return json.loads(DEFAULT_CHAIN.read_text())
+    if chain_id is None:
+        return None
+    path = _frozen_file(root, chain_id)
+    if path is None:
+        raise SystemExit(
+            f"kraft-lite: {_frozen_path(root, chain_id).relative_to(root)} is missing: it is "
+            "the chain this run started with — restore it, or start a new chain."
+        )
+    chain = _read_json(path, "the chain")
+    if not isinstance(chain, dict) or chain.get("format") != FORMAT:
+        if finished:
+            return None
+        raise _pre_v1(chain_id)
+    flaw = _chain_flaw(chain)
+    if flaw:
+        raise SystemExit(f"kraft-lite: {path} is not a usable V1 chain: {flaw}")
+    return chain
+
+
+def _frozen_file(root: Path, chain_id: str) -> Path | None:
+    """The file a run's chain is frozen in: its own, else the single
+    `chain.json` from before one file per chain; None when there is neither."""
+    path = _frozen_path(root, chain_id)
+    if not path.is_file():
+        path = root / STATE_DIR / "chain.json"
+    return path if path.is_file() else None
+
+
+def _pre_v1(chain_id: str) -> SystemExit:
+    return SystemExit(
+        f"kraft-lite: chain {chain_id} was started on the pre-V1 format. Run: python3 kl.py migrate"
+    )
 
 
 def _freeze_chain(root: Path, chain: dict, chain_id: str) -> None:
@@ -860,7 +963,7 @@ def slice_records(records: list[dict], chain_id: str) -> list[dict]:
 
 
 def slice_done(record: dict, mode: str) -> bool:
-    """Whether this slice counts as done for closing `implementation`. In `main`
+    """Whether this slice counts as done for closing the first build node. In `main`
     mode a slice ready to merge is enough: the user merges it, and the run does
     not wait on that. What may start after it is `_startable`'s to say, and it
     waits for the merge in both modes."""
@@ -939,42 +1042,55 @@ def slices_view(records: list[dict], chain_id: str | None) -> dict:
     }
 
 
-def _refuse_unsliceable(chain: dict, node_record: dict) -> None:
-    """A `SystemExit` for a chain that slicing would walk wrong. What a node means
-    in a sliced run is keyed to the default chain's node ids (`SLICED_ACTIONS`)
-    and to its `chain_finalized` gate: a chain without them would run its slices
-    with no guard on closing the nodes that wait for them."""
-    ids = [n["id"] for n in chain["nodes"]]
-    missing = [n for n in SLICED_ACTIONS if n not in ids]
-    if missing:
-        raise SystemExit(
-            f"kraft-lite: slicing needs the default chain's nodes; this run's chain "
-            f"{chain.get('id')!r} has no {', '.join(missing)}"
-        )
-    node = label_value(node_record, NODE_LABEL)
-    gate = next((n.get("gate_after") for n in chain["nodes"] if n["id"] == node), None)
-    if gate != "chain_finalized":
-        raise SystemExit(
-            f"kraft-lite: slicing needs {node}'s gate to be chain_finalized, as in the "
-            f"default chain; this run's chain {chain.get('id')!r} gates it with {gate!r}"
-        )
+def _shape(chain: dict | None) -> kl_shape.SliceShape | None:
+    """Where `chain` slices, or None for a chain without the shape: walked
+    unsliced, with no slice gate."""
+    if chain is None:
+        return None
+    try:
+        return kl_shape.slice_shape(chain)
+    except kl_chains.ChainError:
+        return None
+
+
+def shape_view(chain: dict | None, epic: dict | None) -> dict | None:
+    """Where the run's frozen chain slices, as `slices` reports it: read before
+    a proposal is drawn, so the controller learns why a chain cannot be sliced
+    without the write `approve --slices` would make. None with no chain."""
+    if chain is None:
+        return None
+    if epic is not None and label_value(epic, SLICE_LAYER_LABEL) is not None:
+        return {"unsliceable": "a child chain is never sliced"}
+    try:
+        shape = kl_shape.slice_shape(chain)
+    except kl_chains.ChainError as error:
+        return {"unsliceable": error.detail}
+    return {
+        "slice_gate": shape.slice_gate,
+        "first_build": shape.first_build,
+        "mr_node": shape.mr_node,
+    }
 
 
 def slices_for_gate(
     records: list[dict], node_record: dict, chain_id: str, path: Path, root: Path, chain: dict
 ) -> list[dict]:
     """The records `approve --slices` writes with the approval, or a `SystemExit`.
-    Slicing happens once, at the gate that finalizes the chain: anywhere else a
-    plan has nothing settled to be split from, and a second time it would
-    replace work already handed to children."""
+    Slicing happens once, at the chain's slice gate (`kl_shape.slice_shape`),
+    once the plan is settled: anywhere else a plan has nothing settled to be
+    split from, and a second time it would replace work already handed to
+    children. A child walks a slice already, and a chain without the shape is
+    refused naming what it lacks."""
+    epic = next(r for r in records if r["id"] == chain_id)
+    if label_value(epic, SLICE_LAYER_LABEL) is not None:
+        raise SystemExit(
+            "kraft-lite: this run walks a slice: a slice's child chain is never sliced"
+        )
     if run_record(records, chain_id) is not None:
         raise SystemExit("kraft-lite: this chain is already sliced")
-    if (
-        node_record["status"] != "blocked"
-        or label_value(node_record, GATE_LABEL) != "chain_finalized"
-    ):
-        raise SystemExit("kraft-lite: --slices is only accepted at chain_finalized")
-    _refuse_unsliceable(chain, node_record)
+    gate = kl_shape.slice_shape(chain).slice_gate
+    if node_record["status"] != "blocked" or label_value(node_record, GATE_LABEL) != gate:
+        raise SystemExit(f"kraft-lite: --slices is only accepted at {gate}")
     try:
         plan = json.loads(path.read_text())
     except (OSError, ValueError) as error:
@@ -1005,8 +1121,16 @@ def _by_age(by_chain: dict[str, list[dict]]) -> list[str]:
     return sorted(by_chain, key=stamp)
 
 
-def rewind(records: list[dict], from_node: str, note: str) -> list[dict]:
-    """Reopen `from_node` and every node after it, carrying the reason.
+def rewind(
+    records: list[dict],
+    from_node: str,
+    note: str,
+    *,
+    through: str | None = None,
+    prefix: str = NOTE_PREFIX,
+) -> list[dict]:
+    """Reopen `from_node` and every node after it (up to `through`, when given),
+    carrying the reason as a `prefix` line on the first.
 
     Reopening only the named node is not enough: `current` returns the first open
     node whose dependencies are closed, so with the later nodes still closed the
@@ -1021,49 +1145,53 @@ def rewind(records: list[dict], from_node: str, note: str) -> list[dict]:
         raise SystemExit(
             f"kraft-lite: no node {from_node!r} in this chain. Its nodes are:\n  " + ", ".join(ids)
         )
+    end = ids.index(through) + 1 if through in ids else len(walk)
     out = []
-    for offset, record in enumerate(walk[ids.index(from_node) :]):
+    for offset, record in enumerate(walk[ids.index(from_node) : end]):
         # Banked before the stamp that opens it is stripped below. `--from-node` is
         # how the last gate sends work back, so the wait it interrupts is usually
         # the longest one in the run - dropping it here loses exactly that.
         record = bank_wait(record)
         # `WAITED_LABEL` is not dropped on purpose: those hours were spent,
         # whatever the redo goes on to cost.
-        for prefix in (GATE_LABEL, ATTEMPT_LABEL, BLOCKED_LABEL):
-            record = drop_label(record, prefix)
+        for label in (GATE_LABEL, ATTEMPT_LABEL, BLOCKED_LABEL, ON_FAILURE_RAN_LABEL):
+            record = drop_label(record, label)
         reopened = dict(record, status="open")
         if offset == 0:
             description = record.get("description", "")
-            reopened["description"] = f"{description}\n{NOTE_PREFIX}{note}"
+            reopened["description"] = f"{description}\n{prefix}{note}"
         out.append(reopened)
     return out
 
 
-def rewind_slices(everything: list[dict], chain_id: str, tail: list[dict]) -> list[dict]:
+def rewind_slices(
+    everything: list[dict], chain_id: str, tail: list[dict], chain: dict
+) -> list[dict]:
     """What a rewind that reopens `tail` writes to the run's slices, or a
-    `SystemExit`. Rewound to a node before the slices were cut, the plan or its
-    slicing is redone, so the run and its slices are retired: closed, and labelled
-    so that nothing reads them as the chain's. The chain is then sliced again at
-    the next `chain_finalized`. Rewound to the node that builds them, every slice
-    done would close it at once with nothing redone, so that is refused until a
-    slice is reopened. Rewound past it, the slices stand."""
+    `SystemExit`. Rewound to the slice gate or before it, the plan or its
+    slicing is redone, so the run and its slices are retired: closed, and
+    labelled so that nothing reads them as the chain's. The chain is then sliced
+    again at the slice gate. Rewound to the first build node, or to a node
+    between the slice gate and it, every slice done would close the build at
+    once with nothing redone, so that is refused until a slice is reopened.
+    Rewound past it, the slices stand."""
     run = run_record(everything, chain_id)
-    if run is None:
+    shape = _shape(chain)
+    if run is None or shape is None:
         return []
     mode = _run_mode(run)
     nodes = [label_value(r, NODE_LABEL) for r in tail]
-    builds = next((n for n in nodes if SLICED_ACTIONS.get(n, {}).get(mode) == "run_slices"), None)
-    if builds is None:
-        return []
-    slices = slice_records(everything, chain_id)
-    if nodes[0] != builds:
+    if shape.slice_gate in nodes:
+        slices = slice_records(everything, chain_id)
         retired = [dict(r, status="closed") for r in [run, *slices]]
         return [set_label(r, RETIRED_LABEL, nodes[0]) for r in retired]
-    if all(slice_done(r, mode) for r in slices):
+    if shape.first_build in nodes and all(
+        slice_done(r, mode) for r in slice_records(everything, chain_id)
+    ):
         raise SystemExit(
-            f"kraft-lite: every slice is done, so {builds} would close at once with nothing "
-            "redone. Reopen the slices to redo first (slice-set --slice KEY --status running), "
-            "or rewind further back to slice the chain again"
+            f"kraft-lite: every slice is done, so {shape.first_build} would close at once with "
+            "nothing redone. Reopen the slices to redo first (slice-set --slice KEY --status "
+            "running), or rewind further back to slice the chain again"
         )
     return []
 
@@ -1167,7 +1295,6 @@ def summary(records: list[dict], chain: dict) -> dict:
     for record in walk:
         node_id = label_value(record, NODE_LABEL)
         definition = definitions.get(node_id, {})
-        loop = definition.get("fix_loop")
         # Lines, not occurrences: `--note "Rejected: by CI"` is one rejection whose
         # reason happens to quote another.
         rejections = [
@@ -1196,8 +1323,9 @@ def summary(records: list[dict], chain: dict) -> dict:
                 if closed and _at(record)
                 else None,
                 "attempts": spent(record),
-                "cap": chain["loops"].get(loop, {}).get("attempts") if loop else None,
-                "gate": definition.get("gate_after"),
+                "cap": _cap(definition),
+                # The gate node's own id: a gate is a node of its own in V1.
+                "gate": node_id if definition.get("kind") == "gate" else None,
                 # Of that time, the part the human held. A node that never reached
                 # a gate reports null rather than zero: it did not wait, as against
                 # waiting for no time.
@@ -1283,7 +1411,18 @@ def _ours(records: list[dict], chain_id: str | None = None) -> list[dict]:
     return by_chain[(live or _by_age(by_chain))[-1]]
 
 
-def _sliced(everything: list[dict], epic: dict | None, node_id: str | None) -> dict | None:
+def _action(chain: dict | None, node_id: str | None, mode: str) -> str:
+    """What `node_id` means in a run sliced in `mode` (`kl_shape.sliced_action`);
+    `run` once the walk is done, or for a chain that lost its shape."""
+    shape = _shape(chain)
+    if shape is None or node_id is None:
+        return "run"
+    return kl_shape.sliced_action(chain, shape, node_id, mode)
+
+
+def _sliced(
+    everything: list[dict], epic: dict | None, node_id: str | None, chain: dict | None
+) -> dict | None:
     """`null` for a chain that was never sliced, else the run's mode and what
     the current node means in it. Read from the whole store: `_ours` returns only
     the epic and its nodes, and the run record is neither."""
@@ -1291,118 +1430,194 @@ def _sliced(everything: list[dict], epic: dict | None, node_id: str | None) -> d
     if run is None:
         return None
     mode = _run_mode(run)
-    return {"mode": mode, "action": SLICED_ACTIONS.get(node_id, {}).get(mode, "hooks")}
+    return {"mode": mode, "action": _action(chain, node_id, mode)}
 
 
-def _state(root: Path, chain: dict, everything: list[dict], chain_id: str | None = None) -> dict:
-    records = _ours(everything, chain_id)
-    node_record = current(records)
-    epic = next((r for r in records if label_value(r, CHAIN_LABEL)), None)
-    if node_record is None:
-        # "done" and "never started" are different answers. Reporting both as
-        # done tells the `next` skill a chain that does not exist has finished.
-        return {
-            "chain_id": epic["id"] if epic else None,
-            "node": None,
-            "hooks": [],
-            "gate": None,
-            "attempt": 0,
-            "cap": None,
-            "status": "done" if epic else "unstarted",
-            "note": "",
-            "backend": backend(root),
-            "sliced": _sliced(everything, epic, None),
-        }
-    node_id = label_value(node_record, NODE_LABEL)
+def _cap(definition: dict) -> int | None:
+    """A node's fix-loop cap: the loop's `max_attempts`, else the node
+    policy's, else Kraft's default; None for a node with no fix loop."""
+    loop = definition.get("fix_loop")
+    if not loop:
+        return None
+    policy = definition.get("policy") or {}
+    return loop.get("max_attempts") or policy.get("max_attempts") or DEFAULT_CAP
+
+
+def _definition(root: Path, chain: dict, chain_id: str | None, node_id: str | None) -> dict:
+    """The frozen chain's node `node_id`, or a `SystemExit` naming the file."""
     definition = next((n for n in chain["nodes"] if n["id"] == node_id), None)
     if definition is None:
-        # Reporting `hooks: []` here is worse than failing: the `next` skill's
-        # contract is "no hooks, so close and move on", and the chain walks to
+        # Reporting no tasks here is worse than failing: the `next` skill's
+        # contract is "no tasks, so close and move on", and the chain walks to
         # `done` having run nothing at all.
         raise SystemExit(
             f"kraft-lite: node {node_id!r} is not in this chain. "
-            f"{_frozen_path(root, epic['id']).relative_to(root) if epic else 'the frozen chain'}"
+            f"{_frozen_path(root, chain_id).relative_to(root) if chain_id else 'the frozen chain'}"
             " is the chain this run started with — restore it, or start a new chain."
         )
-    loop = definition.get("fix_loop")
-    note = node_record.get("description", "")
-    return {
-        "chain_id": epic["id"] if epic else None,
-        "node": node_id,
-        "hooks": definition.get("tasks", []),
-        "gate": definition.get("gate_after"),
-        "attempt": attempts(node_record),
-        "cap": chain["loops"].get(loop, {}).get("attempts") if loop else None,
-        "status": node_record["status"],
-        "note": note[note.find(NOTE_PREFIX) :] if NOTE_PREFIX in note else "",
-        "backend": backend(root),
-        "sliced": _sliced(everything, epic, node_id),
-    }
+    return definition
 
 
-#: A registry hook is an unquoted key at column zero. Everything under it — `kind`,
-#: `skill`, `prompt` — is indented, and comments start with `#`. That is enough
-#: structure to find the hooks with a scan, which is what keeps this file free of
-#: the YAML dependency it would otherwise need for one check.
-HOOK_KEY = re.compile(r"^([a-z][a-z0-9_.]*):", re.MULTILINE)
+def _dispatcher(root: Path, first_build: str | None = None):
+    """How `state` turns a frozen task into the one instruction the walk
+    follows: this repo's bindings over the defaults, with the skills installed
+    in this harness, and for a child walking a slice (`first_build`, its
+    chain's first build node) the slice layer over both. Read per call, so a
+    binding edited mid-run counts from the next `state`."""
+    bindings = kl_bindings.read_bindings(root)
+    installed = set(_installed_skills(root))
+
+    def dispatch(task: dict) -> dict:
+        return kl_bindings.dispatch(task, bindings, installed.__contains__, first_build=first_build)
+
+    return dispatch
 
 
-def _bound_hooks(text: str) -> set[str]:
-    """Keys that are actually bound, not merely present.
-
-    A regex cannot express "followed by an indented line, but not by another
-    column-zero key" without a lookahead nobody wants to read at 3am, so this
-    walks the lines instead. Structural only: `kind: banana` is bound as far as
-    this is concerned, and fails at dispatch with a message that says so.
-    """
-    bound: set[str] = set()
-    pending: str | None = None
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        match = HOOK_KEY.match(line)
-        if match:
-            # A key immediately following another leaves the first unbound.
-            pending = match.group(1)
-        elif pending and line[:1] in " \t":
-            bound.add(pending)
-            pending = None
-    return bound
+def _first_build(chain: dict) -> str:
+    """A child chain's first build node, as `kl_shape.child_chain` recorded it."""
+    return chain.get("first_build") or chain["nodes"][0]["id"]
 
 
-def registry_hooks(root: Path) -> set[str] | None:
-    """The hooks bound in this repo's registry, or None when there is no registry."""
-    path = root / STATE_DIR / "registry.yaml"
-    if not path.is_file():
+def _dispatched(container: dict | None, dispatch) -> list[dict] | None:
+    """A node's, or a handler's, steps with every task dispatched."""
+    if container is None:
         return None
-    return _bound_hooks(path.read_text())
+    return [
+        {"id": step["id"], "tasks": [dispatch(task) for task in step["tasks"]]}
+        for step in container["steps"]
+    ]
 
 
-def validate_hooks(root: Path, chain: dict) -> None:
-    """A hook with no binding is otherwise found mid-walk, after the earlier nodes
-    have already run and spent the human's attention.
+def _artifact(records: list[dict], kind: str | None) -> str | None:
+    """The newest file of `kind` any record of the run holds: the one a gate on
+    that kind presents. A rewind leaves older ones in place, so newest wins,
+    with walk order breaking a tie inside one second."""
+    if kind is None:
+        return None
+    prefix = f"{ARTIFACT_LABEL}{kind}="
+    holding = [
+        (_when(_at(record)), position, label_value(record, prefix))
+        for position, record in enumerate(ordered(records))
+        if label_value(record, prefix) is not None
+    ]
+    return max(holding)[2] if holding else None
 
-    A missing registry only warns: the `start` skill already refuses to run without
-    one, so erroring here would duplicate that guard at the price of a fixture in
-    every test that starts a chain.
-    """
-    bound = registry_hooks(root)
-    if bound is None:
-        print(
-            f"kraft-lite: no {STATE_DIR}/registry.yaml — starting without checking "
-            "the chain's hooks. Run the init skill to write one.",
-            file=sys.stderr,
+
+#: Every key `state` reports, so an unstarted chain, a finished one and a gate
+#: node hand a caller the same shape.
+STATE_KEYS = (
+    "chain_id",
+    "node",
+    "kind",
+    "status",
+    "attempt",
+    "cap",
+    "note",
+    "backend",
+    "sliced",
+    "steps",
+    "on_failure",
+    "on_failure_ran",
+    "fix_loop",
+    "on_base_changed",
+    "on_merge_rejected",
+    "gate",
+)
+#: The lines `state` reports as the node's note: why it was sent back.
+RESTART_PREFIX = "Base changed: "
+MERGE_REJECTED_PREFIX = "Merge rejected: "
+
+
+def _note(description: str) -> str:
+    """Every rejection or restart line, from the first one on."""
+    lines = description.splitlines()
+    first = next(
+        (
+            i
+            for i, line in enumerate(lines)
+            if line.startswith((NOTE_PREFIX, RESTART_PREFIX, MERGE_REJECTED_PREFIX))
+        ),
+        None,
+    )
+    return "\n".join(lines[first:]) if first is not None else ""
+
+
+def _state(
+    root: Path, chain: dict | None, everything: list[dict], chain_id: str | None = None
+) -> dict:
+    records = _ours(everything, chain_id)
+    node_record = current(records)
+    epic = next((r for r in records if label_value(r, CHAIN_LABEL)), None)
+    state = dict.fromkeys(STATE_KEYS)
+    state.update(
+        chain_id=epic["id"] if epic else None,
+        backend=backend(root),
+        steps=[],
+        on_failure_ran=False,
+        attempt=0,
+        note="",
+    )
+    if node_record is None:
+        # "done" and "never started" are different answers. Reporting both as
+        # done tells the `next` skill a chain that does not exist has finished.
+        state.update(
+            status="done" if epic else "unstarted", sliced=_sliced(everything, epic, None, chain)
         )
-        return
-    wanted = {task for node in chain["nodes"] for task in node["tasks"]}
-    missing = sorted(wanted - bound)
-    if missing:
-        raise SystemExit(
-            "kraft-lite: this chain names hooks with no registry binding: "
-            + ", ".join(missing)
-            + f"\nAdd them to {STATE_DIR}/registry.yaml, or re-run the init skill."
-        )
+        return state
+    node_id = label_value(node_record, NODE_LABEL)
+    definition = _definition(root, chain, state["chain_id"], node_id)
+    state.update(
+        node=node_id,
+        kind=definition["kind"],
+        status=node_record["status"],
+        attempt=attempts(node_record),
+        note=_note(node_record.get("description", "")),
+        sliced=_sliced(everything, epic, node_id, chain),
+    )
+    if definition["kind"] == "gate":
+        state["gate"] = {
+            "message": definition["message"],
+            "artifact": definition["artifact"],
+            "artifact_path": _artifact(records, definition["artifact"]),
+            "reject_to": definition["reject_to"],
+            "chain_finalized": definition["chain_finalized"],
+            "slice_gate": node_id == getattr(_shape(chain), "slice_gate", None),
+        }
+        return state
+    sliced = label_value(epic, SLICE_LAYER_LABEL) is not None
+    dispatch = _dispatcher(root, _first_build(chain) if sliced else None)
+    loop, base = definition["fix_loop"], definition["on_base_changed"]
+    rejected = definition["on_merge_rejected"]
+    state.update(
+        cap=_cap(definition),
+        steps=_dispatched(definition, dispatch),
+        on_failure={"steps": _dispatched(definition["on_failure"], dispatch)}
+        if definition["on_failure"]
+        else None,
+        on_failure_ran=label_value(node_record, ON_FAILURE_RAN_LABEL) is not None,
+        fix_loop={
+            "steps": _dispatched(loop, dispatch),
+            "judge": dispatch(loop["judge"]) if loop["judge"] else None,
+        }
+        if loop
+        else None,
+        on_base_changed={
+            "restart_from": base["restart_from"],
+            "restarts": int(label_value(node_record, RESTARTS_LABEL) or 0),
+            "cap": RESTART_CAP,
+        }
+        if base
+        else None,
+        on_merge_rejected={
+            "restart_from": rejected["restart_from"],
+            "repair": {"steps": _dispatched(rejected["repair"], dispatch)},
+            "rejections": int(label_value(node_record, MERGE_REJECTIONS_LABEL) or 0),
+            "cap": MERGE_REJECTION_CAP,
+        }
+        if rejected
+        else None,
+    )
+    return state
 
 
 def _slice_by_key(everything: list[dict], chain_id: str | None, key: str) -> dict:
@@ -1459,10 +1674,12 @@ def _refuse_slice_move(slices: list[dict], record: dict, status: str) -> None:
     )
 
 
-def _refuse_close_before_slices(everything: list[dict], chain_id: str, node_record: dict) -> None:
+def _refuse_close_before_slices(
+    everything: list[dict], chain_id: str, node_record: dict, chain: dict
+) -> None:
     """A `SystemExit` for closing a sliced run's node before the slices it waits
     on, by `close` or by `approve`. `run_slices` waits for every slice done for the
-    run's mode: closing it moves the walk to `verify`, which checks seams between
+    run's mode: closing it moves the walk on to what checks seams between
     slices that are not all there yet. `await_user_merges` waits for every slice
     merged: the user's merges are all it waits on, and closing it first finishes
     the run before any of them."""
@@ -1471,7 +1688,7 @@ def _refuse_close_before_slices(everything: list[dict], chain_id: str, node_reco
         return
     mode = _run_mode(run)
     node = label_value(node_record, NODE_LABEL)
-    action = SLICED_ACTIONS.get(node, {}).get(mode)
+    action = _action(chain, node, mode)
     slices = slice_records(everything, chain_id)
     if action == "run_slices":
         left = [r for r in slices if not slice_done(r, mode)]
@@ -1694,11 +1911,14 @@ def _decisions(root: Path, everything: list[dict], chain_id: str, args) -> list[
 
 EXPORT_RECORDS = "records.jsonl"
 EXPORT_DECISIONS = "decisions.jsonl"
+#: The run's frozen chain, beside its records: what an import resumes it on,
+#: and what a child starts from (`start --slice-of`).
+EXPORT_CHAIN = "chain.json"
 
 
 def _export(root: Path, everything: list[dict], chain_id: str, to: Path) -> dict:
     """The run's state as three files for the state branch: its records as the
-    store holds them, its frozen template, and its decisions log. Nothing else
+    store holds them, its frozen chain, and its decisions log. Nothing else
     is written, and nothing else in `to` is touched, because `to` is usually a
     checkout of that branch. Specs and plans travel by message, never here."""
     # Retired ones too: an import is what retires them in a checkout where they are live.
@@ -1706,13 +1926,8 @@ def _export(root: Path, everything: list[dict], chain_id: str, to: Path) -> dict
         *chain_index(everything)[chain_id],
         *(r for r in everything if _slicing_of(r, chain_id)),
     ]
-    frozen = _frozen_path(root, chain_id)
-    template = to / "chains" / frozen.name
-    template.parent.mkdir(parents=True, exist_ok=True)
-    if frozen.is_file():
-        shutil.copyfile(frozen, template)
-    else:
-        template.write_text(json.dumps(_chain(root, None, chain_id), indent=2) + "\n")
+    to.mkdir(parents=True, exist_ok=True)
+    (to / EXPORT_CHAIN).write_text(json.dumps(_chain(root, chain_id), indent=2) + "\n")
     (to / EXPORT_RECORDS).write_text(_jsonl(records))
     decisions = read_jsonl(_decisions_path(root, chain_id))
     (to / EXPORT_DECISIONS).write_text(_jsonl(decisions))
@@ -1807,6 +2022,129 @@ def _of_chain(record: dict, chain_id: str) -> bool:
     )
 
 
+def _exported_chain(path: Path, written: str, missing: str) -> dict:
+    """The V1 frozen chain at `path`, or a `SystemExit`: `missing` when there is
+    no file, and the older-Kraft-Lite refusal, which `written` opens, for one
+    that is not V1."""
+    if not path.is_file():
+        raise SystemExit(f"kraft-lite: {missing}")
+    chain = _read_json(path, "the chain")
+    if not isinstance(chain, dict) or chain.get("format") != FORMAT:
+        raise SystemExit(f"kraft-lite: {written} by an older Kraft Lite: not a V1 chain")
+    flaw = _chain_flaw(chain)
+    if flaw:
+        raise SystemExit(f"kraft-lite: {path} is not a usable V1 chain: {flaw}")
+    return chain
+
+
+#: The keys the walk reads from every frozen node of each kind, present even
+#: when None (`kl_chains._freeze` writes each one).
+NODE_KEYS = {
+    "exec": ("steps", "fix_loop", "on_failure", "on_base_changed", "on_merge_rejected"),
+    "gate": ("message", "artifact", "reject_to", "chain_finalized"),
+}
+
+
+def _steps_flaw(container: object, where: str) -> str | None:
+    """What a node's, or a handler's, steps lack of what the walk reads: a list
+    of steps, each with an id and a list of tasks, each task a mapping with
+    its `path` and `kind`; None when nothing."""
+    steps = container.get("steps") if isinstance(container, dict) else None
+    if not (
+        isinstance(steps, list)
+        and all(
+            isinstance(s, dict)
+            and isinstance(s.get("id"), str)
+            and isinstance(s.get("tasks"), list)
+            for s in steps
+        )
+    ):
+        return f"{where} has no steps"
+    for task in (task for step in steps for task in step["tasks"]):
+        flaw = _task_flaw(task, where)
+        if flaw:
+            return flaw
+    return None
+
+
+def _task_flaw(task: object, where: str) -> str | None:
+    if not isinstance(task, dict) or not isinstance(task.get("path"), str):
+        return f"{where} has a task with no path"
+    if not isinstance(task.get("kind"), str):
+        return f"task {task['path']!r} has no kind"
+    return None
+
+
+def _chain_flaw(chain: dict) -> str | None:
+    """What a chain that says it is V1 lacks of the frozen shape the walk reads,
+    or None: the chain's own `id` and `source`; for every node an id and a
+    kind; for a gate its `message`, `artifact`, `reject_to` and
+    `chain_finalized`; for an exec node its steps, `fix_loop`, `on_failure`,
+    `on_base_changed` and `on_merge_rejected`, each handler's steps, the
+    judge, and every task's `path` and `kind`. A file from outside this process
+    - an export, a hand-edited copy - is checked here, by `import`,
+    `start --slice-of` and every verb reading a run's frozen chain, so a missing
+    key is a refusal, not a `KeyError` in the middle of a verb."""
+    nodes = chain.get("nodes")
+    if not isinstance(nodes, list) or not nodes:
+        return "it has no list of nodes"
+    for number, node in enumerate(nodes, 1):
+        if not isinstance(node, dict) or not isinstance(node.get("id"), str):
+            return f"node {number} has no id"
+        id, kind = node["id"], node.get("kind")
+        if kind not in NODE_KEYS:
+            return f"node {id!r} has no kind (exec or gate)"
+        where = f"{kind} node {id!r}"
+        if kind == "exec":
+            flaw = _steps_flaw(node, where)
+            if flaw:
+                return flaw
+        missing = [key for key in NODE_KEYS[kind] if key not in node]
+        if missing:
+            return f"{where} has no {', '.join(missing)}"
+        if kind == "gate":
+            continue
+        for key in ("on_failure", "fix_loop"):
+            if node[key] is not None:
+                flaw = _steps_flaw(node[key], f"{where}'s {key}")
+                if flaw:
+                    return flaw
+        loop = node["fix_loop"]
+        if loop is not None:
+            if "judge" not in loop or "max_attempts" not in loop:
+                return f"{where}'s fix_loop has no judge or max_attempts"
+            if loop["judge"] is not None:
+                flaw = _task_flaw(loop["judge"], f"{where}'s fix_loop")
+                if flaw:
+                    return flaw
+        base = node["on_base_changed"]
+        if base is not None and not (
+            isinstance(base, dict) and isinstance(base.get("restart_from"), str)
+        ):
+            return f"{where}'s on_base_changed has no restart_from"
+        rejected = node["on_merge_rejected"]
+        if rejected is not None:
+            if not (isinstance(rejected, dict) and isinstance(rejected.get("restart_from"), str)):
+                return f"{where}'s on_merge_rejected has no restart_from"
+            flaw = _steps_flaw(rejected.get("repair"), f"{where}'s on_merge_rejected.repair")
+            if flaw:
+                return flaw
+    # Read by `start`, which names the chain and its source in its answer, and
+    # by the child chain a slice walks.
+    for key in ("id", "source"):
+        if not isinstance(chain.get(key), str):
+            return f"it has no {key}"
+    return None
+
+
+def _read_json(path: Path, what: str) -> object:
+    """The JSON in `path`, or a `SystemExit` saying it cannot be read."""
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"kraft-lite: cannot read {what} {path}: {error}") from error
+
+
 def _import(root: Path, store, source: Path) -> dict:
     """Resume, or catch up, from an export. Dispatched before `_ours`: the
     export names its own chain, and the directory may hold others.
@@ -1837,12 +2175,20 @@ def _import(root: Path, store, source: Path) -> dict:
             f"kraft-lite: {source / EXPORT_RECORDS} holds records that are not chain "
             f"{chain_id}'s: {', '.join(strays)}"
         )
-    template = source / "chains" / frozen.name
-    if not template.is_file():
-        raise SystemExit(f"kraft-lite: the export has no frozen template {template}")
+    chain = _exported_chain(
+        source / EXPORT_CHAIN,
+        f"{source} was exported",
+        f"{source} was exported by an older Kraft Lite: no {EXPORT_CHAIN}",
+    )
+    # A run's chain never changes after `start`: an export carrying another is
+    # not this run's to resume, and the frozen copy here is never replaced.
+    if frozen.is_file() and _read_json(frozen, "the chain") != chain:
+        raise SystemExit(
+            f"kraft-lite: {source / EXPORT_CHAIN} is not the chain {chain_id} started with, "
+            f"which is {frozen}. A run's chain never changes after start"
+        )
     if not frozen.is_file():
-        frozen.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(template, frozen)
+        _freeze_chain(root, chain, chain_id)
     local = store.load()
     write, kept = _import_records(local, exported)
     if write:
@@ -1858,10 +2204,159 @@ def _import(root: Path, store, source: Path) -> dict:
     }
 
 
+#: What `start --spec P --plan P` takes, as Kraft's intake does: each drops the
+#: nodes that would produce or approve its kind (`kl_chains.trim`).
+ATTACHMENT_KINDS = ("spec", "plan")
+
+
+def _artifact_path(root: Path, path: Path) -> str:
+    """`path` as a label records it: relative to the repo root when inside it,
+    so a verb run from a subdirectory, or an import elsewhere, reads the same
+    file; absolute otherwise."""
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(root))
+    except ValueError:
+        return str(resolved)
+
+
+def _resolve_chain(root: Path, chain: str | Path | None) -> dict:
+    """`chain` resolved as a library id or, ending in `.yaml`/`.yml` or holding a
+    `/`, as a chain file; the default chain when it is None. The rule `start` and
+    `detect` share for their `--chain`."""
+    ref = None if chain is None else str(chain)
+    if ref is not None and (ref.endswith((".yaml", ".yml")) or "/" in ref):
+        return kl_chains.resolve(root, os.environ, path=Path(ref))
+    return kl_chains.resolve(root, os.environ, ref=ref)
+
+
+def _start_chain(root: Path, chain: str | None, attached: dict[str, Path]) -> dict:
+    """The chain `start` freezes: `chain` resolved by `_resolve_chain`; then
+    trimmed for the attached kinds. Every task is dispatched once before anything is written, so
+    a bindings file Lite cannot use, or a task it has no instruction for, stops
+    `start` rather than the walk at that node."""
+    for kind, path in attached.items():
+        if not path.is_file():
+            raise SystemExit(f"kraft-lite: --{kind} {path}: no such file")
+    resolved = kl_chains.trim(_resolve_chain(root, chain), set(attached))
+    dispatch = _dispatcher(root)
+    for task in _dispatched_tasks(resolved):
+        dispatch(task)
+    return resolved
+
+
+def _start_records(chain: dict, title: str, chain_id: str) -> list[dict]:
+    """A new run's records: `materialize`, with the epic closed. The epic is a
+    container, not a step, so the walk starts at the first real node."""
+    records = materialize(chain, title, chain_id)
+    records[0]["status"] = "closed"
+    return records
+
+
+def _start_slice(root: Path, path: Path, chain: str | None, attached: dict) -> dict:
+    """The chain a child freezes for its slice: the child chain of the
+    controller's frozen chain at `path` (its export's `chain.json`), never
+    resolved from templates, so the child walks exactly what the controller
+    froze. Every task is dispatched with the slice layer before anything is
+    written, as `_start_chain` does."""
+    if chain is not None or attached:
+        raise SystemExit("kraft-lite: --slice-of takes no --chain, --spec or --plan")
+    parent = _exported_chain(
+        path, f"{path} was written", f"cannot read the chain {path}: no such file"
+    )
+    child = kl_shape.child_chain(parent)
+    dispatch = _dispatcher(root, _first_build(child))
+    for task in _dispatched_tasks(child):
+        dispatch(task)
+    return child
+
+
+def _exec_before(chain: dict, node_id: str) -> str:
+    """The nearest exec node before `node_id`: where a gate with no `reject_to`
+    sends its rejection."""
+    ids = [n["id"] for n in chain["nodes"]]
+    earlier = [n for n in chain["nodes"][: ids.index(node_id)] if n["kind"] == "exec"]
+    if not earlier:
+        raise SystemExit(
+            f"kraft-lite: {node_id} has no exec node before it to send work back to. "
+            "Pass --from-node, or approve it"
+        )
+    return earlier[-1]["id"]
+
+
+def _restart(
+    everything: list[dict],
+    records: list[dict],
+    chain_id: str,
+    node_record: dict,
+    definition: dict,
+    chain: dict,
+    merge_rejected: bool = False,
+) -> list[dict]:
+    """What `restart` writes: the walk sent back to `on_base_changed.restart_from`
+    (`on_merge_rejected.restart_from` with `merge_rejected`) through this node,
+    their attempts reset and every gate between reopened, this node's restarts
+    (merge rejections) counted. The node did not fail - a step moved its base,
+    or the forge dropped its PR after the repair ran - so the note is no
+    rejection."""
+    node_id = definition["id"]
+    key, label, cap, prefix = (
+        ("on_merge_rejected", MERGE_REJECTIONS_LABEL, MERGE_REJECTION_CAP, MERGE_REJECTED_PREFIX)
+        if merge_rejected
+        else ("on_base_changed", RESTARTS_LABEL, RESTART_CAP, RESTART_PREFIX)
+    )
+    policy = definition.get(key)
+    if not policy:
+        raise SystemExit(f"kraft-lite: {node_id} has no {key} to restart from")
+    count = int(label_value(node_record, label) or 0)
+    if count >= cap:
+        over = (
+            f"merge-rejection cap: its merge was rejected {count} times"
+            if merge_rejected
+            else f"restart cap: it restarted {count} times"
+        )
+        raise SystemExit(
+            f"kraft-lite: {node_id} is over its {over} (cap {cap}). "
+            "Stop and ask the human, as over_cap"
+        )
+    target = policy["restart_from"]
+    tail = rewind(records, target, f"restarted from {target}", through=node_id, prefix=prefix)
+    tail = [
+        set_label(r, label, str(count + 1)) if label_value(r, NODE_LABEL) == node_id else r
+        for r in tail
+    ]
+    return [*tail, *rewind_slices(everything, chain_id, tail, chain)]
+
+
+#: The verbs that answer beside a pre-V1 registry no bindings file replaced yet:
+#: listing chains, what `init` reads to write the bindings, and `migrate` itself.
+BEFORE_MIGRATE = frozenset({"chains", "detect", "migrate"})
+
+
+def _legacy_registry(root: Path) -> bool:
+    """A `registry.yaml` from before V1 with no `bindings.yaml` written from it."""
+    state = root / STATE_DIR
+    return (state / "registry.yaml").is_file() and not (root / kl_bindings.BINDINGS).is_file()
+
+
+def _refuse_beside_a_legacy_run(root: Path, everything: list[dict]) -> None:
+    """`start` beside an unfinished run frozen before V1 is refused, registry or
+    none, as every verb but `migrate`, `chains` and `detect` refuses a legacy
+    run: a second unfinished chain would only end in "pass --chain-id"."""
+    for chain_id, records in chain_index(everything).items():
+        if all(r["status"] == "closed" for r in records) or not CHAIN_ID.fullmatch(chain_id):
+            continue
+        path = _frozen_file(root, chain_id)
+        frozen = _read_json(path, "the chain") if path else None
+        if path and (not isinstance(frozen, dict) or frozen.get("format") != FORMAT):
+            raise _pre_v1(chain_id)
+
+
 #: What each verb needs before it runs, declared once for `main`:
 #: - `chain`: it reads or writes one chain's state, so it takes `--chain-id` and
-#:   resolves that chain through `_ours`. `start` mints its own id, and `detect`,
-#:   `chains`, `settings` and `import` (whose export names its chain) take none.
+#:   resolves that chain through `_ours`, refusing a run frozen before V1.
+#:   `start` mints its own id, and `detect`, `chains`, `settings` and `import`
+#:   (whose export names its chain) take none.
 #: - `open_node`: it acts on the chain's open node, so a finished chain refuses
 #:   it. The rest answer after the walk, because wrap-up and status need them.
 #: - `log`: it reads or writes the decisions log or the export, so it needs a
@@ -1872,6 +2367,7 @@ VERBS: dict[str, frozenset[str]] = {
     "chains": frozenset(),
     "settings": frozenset(),
     "import": frozenset(),
+    "migrate": frozenset(),
     "state": frozenset({"chain"}),
     "summary": frozenset({"chain"}),
     "slices": frozenset({"chain"}),
@@ -1885,22 +2381,38 @@ VERBS: dict[str, frozenset[str]] = {
     "attempt": frozenset({"chain", "open_node"}),
     "gate": frozenset({"chain", "open_node"}),
     "reject": frozenset({"chain", "open_node"}),
+    "produced": frozenset({"chain", "open_node"}),
+    "mark": frozenset({"chain", "open_node"}),
+    "restart": frozenset({"chain", "open_node"}),
 }
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """Every verb and its flags; `--chain-id` on the verbs whose `VERBS` entry
+    reads one chain."""
     parser = argparse.ArgumentParser(prog="kl")
     sub = parser.add_subparsers(dest="verb", required=True)
 
     start = sub.add_parser("start")
     start.add_argument("--title", required=True)
-    start.add_argument("--chain", type=Path, default=None)
+    # A chain id from the libraries (`default`, `repo:ship`), or a chain file.
+    start.add_argument("--chain", default=None)
+    for kind in ATTACHMENT_KINDS:
+        start.add_argument(f"--{kind}", type=Path, default=None)
+    # A child's start: the controller's exported chain, which it slices from.
+    start.add_argument("--slice-of", type=Path, default=None)
     detect_parser = sub.add_parser("detect")
-    detect_parser.add_argument("--chain", type=Path, default=None)
-    sub.add_parser("chains")
+    # A chain id from the libraries or a chain file, as for `start`.
+    detect_parser.add_argument("--chain", default=None)
+    sub.add_parser("chains").add_argument("--available", action="store_true")
     sub.add_parser("settings")
-    gate = sub.add_parser("gate")
-    gate.add_argument("--name", required=True)
+    produced = sub.add_parser("produced")
+    produced.add_argument("--kind", required=True)
+    produced.add_argument("--path", required=True)
+    sub.add_parser("mark").add_argument("--on-failure-ran", action="store_true", required=True)
+    # The forge's merge train or queue dropped the PR: `on_merge_rejected`, not
+    # `on_base_changed`.
+    sub.add_parser("restart").add_argument("--merge-rejected", action="store_true")
     reject = sub.add_parser("reject")
     reject.add_argument("--note", required=True)
     # The last gate rejects work that an earlier node produced: its own hook only
@@ -1926,6 +2438,8 @@ def main(argv: list[str] | None = None) -> int:
     decisions.add_argument("--unreported", action="store_true")
     decisions.add_argument("--mark", action="store_true")
     sub.add_parser("export").add_argument("--to", type=Path, required=True)
+    # A pre-V1 run migrate cannot move: closed, its records kept, so migrate can go on.
+    sub.add_parser("migrate").add_argument("--abandon", default=None, metavar="CHAIN_ID")
     sub.add_parser("import").add_argument("--from", dest="source", type=Path, required=True)
     # The verbs with no arguments of their own.
     for name in VERBS:
@@ -1935,17 +2449,29 @@ def main(argv: list[str] | None = None) -> int:
     for name, needs in VERBS.items():
         if "chain" in needs:
             sub.choices[name].add_argument("--chain-id", default=None)
+    return parser
 
-    args = parser.parse_args(argv)
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     root = repo_root()
     chain_id = getattr(args, "chain_id", None)
+
+    if args.verb not in BEFORE_MIGRATE and _legacy_registry(root):
+        raise SystemExit(
+            f"kraft-lite: {STATE_DIR}/registry.yaml is the pre-V1 hook registry. "
+            "Run: python3 kl.py migrate"
+        )
 
     if args.verb == "detect":
         print(json.dumps(detect(root, args.chain), indent=2))
         return 0
 
     if args.verb == "chains":
-        print(json.dumps(chain_summaries(store_for(root).load()), indent=2))
+        if args.available:
+            print(json.dumps(kl_chains.available(root, os.environ), indent=2))
+        else:
+            print(json.dumps(chain_summaries(store_for(root).load()), indent=2))
         return 0
 
     if args.verb == "settings":
@@ -1958,21 +2484,43 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(_import(root, store, args.source), indent=2))
         return 0
 
+    # Before `_ours`: a legacy run is what it moves, and `_chain` refuses one.
+    if args.verb == "migrate":
+        host = sys.modules[__name__]
+        if args.abandon is not None:
+            out = kl_migrate.abandon(host, root, store, args.abandon)
+        else:
+            out = kl_migrate.migrate(host, root, store)
+        print(json.dumps(out, indent=2))
+        return 0
+
     if args.verb == "start":
+        _refuse_beside_a_legacy_run(root, store.load())
         new_id = new_chain_id()
-        # Not `_chain`: its legacy rung exists to keep runs already in flight
-        # walking, and nothing deletes `chain.json`. Reading it here would make
-        # every future `start` in an upgraded directory run that old template
-        # instead of the packaged default.
-        chain = json.loads((args.chain or DEFAULT_CHAIN).read_text())
-        validate_hooks(root, chain)
+        attached = {k: getattr(args, k) for k in ATTACHMENT_KINDS if getattr(args, k)}
+        if args.slice_of is None:
+            chain = _start_chain(root, args.chain, attached)
+        else:
+            chain = _start_slice(root, args.slice_of, args.chain, attached)
         _freeze_chain(root, chain, new_id)
-        records = materialize(chain, args.title, new_id)
-        # The epic is a container, not a step: close it now so the walk starts at
-        # the first real node.
-        records[0]["status"] = "closed"
+        records = _start_records(chain, args.title, new_id)
+        if args.slice_of is not None:
+            records[0] = set_label(records[0], SLICE_LAYER_LABEL, "")
+        for kind, path in attached.items():
+            records[0] = set_label(
+                records[0], f"{ARTIFACT_LABEL}{kind}=", _artifact_path(root, path)
+            )
         store.write(records)
-        print(json.dumps({"chain_id": new_id, "backend": backend(root)}))
+        print(
+            json.dumps(
+                {
+                    "chain_id": new_id,
+                    "backend": backend(root),
+                    "chain": chain["id"],
+                    "source": chain["source"],
+                }
+            )
+        )
         return 0
 
     everything = store.load()
@@ -1981,10 +2529,22 @@ def main(argv: list[str] | None = None) -> int:
     # A verb run without the flag still has to read the template of the chain it
     # actually resolved, not the directory's last one.
     resolved_id = epic["id"] if epic else None
-    chain = _chain(root, None, resolved_id)
+    finished = bool(records) and all(r["status"] == "closed" for r in records)
+    chain = _chain(root, resolved_id, finished)
     node_record = current(records)
     if node_record is None and "open_node" in VERBS[args.verb]:
         raise SystemExit("kraft-lite: no open node — the chain is finished or was never started")
+    if chain is None and resolved_id is not None and args.verb != "state":
+        # Finished before V1: `state` answers `done`, the rest read a chain it lacks.
+        raise SystemExit(
+            f"kraft-lite: chain {resolved_id} finished on the pre-V1 format; its {args.verb} "
+            "needs the previous Kraft Lite"
+        )
+    node_id = label_value(node_record, NODE_LABEL)
+    # Only for a verb that acts on the node: `summary` or `export` of a run whose
+    # frozen chain lost a node still answers.
+    if "open_node" in VERBS[args.verb]:
+        definition = _definition(root, chain, resolved_id, node_id)
 
     if "log" in VERBS[args.verb]:
         if resolved_id is None:
@@ -2009,7 +2569,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.verb == "slices":
-        print(json.dumps(slices_view(everything, resolved_id), indent=2))
+        view = dict(slices_view(everything, resolved_id), shape=shape_view(chain, epic))
+        print(json.dumps(view, indent=2))
         return 0
 
     if args.verb == "slice-set":
@@ -2020,28 +2581,54 @@ def main(argv: list[str] | None = None) -> int:
         made = slices_for_gate(everything, node_record, resolved_id, args.slices, root, chain)
         store.write([bank_wait(dict(node_record, status="closed")), *made])
     elif args.verb in ("close", "approve"):
-        _refuse_close_before_slices(everything, resolved_id, node_record)
+        if args.verb == "close" and definition["kind"] == "gate":
+            raise SystemExit(f"kraft-lite: {node_id} is a gate: approve or reject it")
+        _refuse_close_before_slices(everything, resolved_id, node_record, chain)
         store.write([bank_wait(dict(node_record, status="closed"))])
     elif args.verb == "gate":
-        store.write([open_gate(dict(node_record, status="blocked"), args.name)])
-    elif args.verb == "reject" and args.from_node:
-        tail = rewind(records, args.from_node, args.note)
-        store.write([*tail, *rewind_slices(everything, resolved_id, tail)])
+        if definition["kind"] != "gate":
+            raise SystemExit(
+                f"kraft-lite: {node_id} is an exec node, not a gate node: "
+                "run its tasks and close it"
+            )
+        store.write([open_gate(dict(node_record, status="blocked"), node_id)])
+    elif args.verb == "reject" and (args.from_node or definition["kind"] == "gate"):
+        target = args.from_node or definition["reject_to"] or _exec_before(chain, node_id)
+        tail = rewind(records, target, args.note)
+        store.write([*tail, *rewind_slices(everything, resolved_id, tail, chain)])
+    elif args.verb == "restart":
+        store.write(
+            _restart(
+                everything,
+                records,
+                resolved_id,
+                node_record,
+                definition,
+                chain,
+                args.merge_rejected,
+            )
+        )
+    elif args.verb == "produced":
+        if not ARTIFACT_KIND.fullmatch(args.kind):
+            raise SystemExit(
+                f"kraft-lite: --kind must be an artifact kind (letters, digits, _ . -), "
+                f"not {args.kind!r}"
+            )
+        prefix = f"{ARTIFACT_LABEL}{args.kind}="
+        store.write([set_label(node_record, prefix, _artifact_path(root, Path(args.path)))])
+    elif args.verb == "mark":
+        if not definition.get("on_failure"):
+            raise SystemExit(f"kraft-lite: {node_id} has no on_failure to have run")
+        store.write([set_label(node_record, ON_FAILURE_RAN_LABEL, "")])
     elif args.verb == "reject":
         description = node_record.get("description", "")
         # Banked on the way out too: a gate that ends in a rejection held the human
-        # exactly as long as one that ends in an approval.
-        store.write(
-            [
-                bank_wait(
-                    dict(
-                        node_record,
-                        status="open",
-                        description=f"{description}\n{NOTE_PREFIX}{args.note}",
-                    )
-                )
-            ]
+        # exactly as long as one that ends in an approval. A rejection starts a new
+        # round, so the node's `on_failure` may run again.
+        reopened = dict(
+            node_record, status="open", description=f"{description}\n{NOTE_PREFIX}{args.note}"
         )
+        store.write([bank_wait(drop_label(reopened, ON_FAILURE_RAN_LABEL))])
     elif args.verb == "attempt":
         charged = spend_attempt(node_record)
         count = attempts(charged)
@@ -2057,61 +2644,84 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-#: Which installed skill names plausibly serve which hook. Deliberately keyword
-#: matching and deliberately generous: init reports every candidate and asks the
-#: human only when there is more than one. A wrong guess offered as a choice is
-#: cheap; a missing candidate is a hook the human has to fill in by hand.
-HOOK_KEYWORDS = {
-    "on.spec.requested": ("brainstorm", "spec", "requirement"),
-    "on.plan.requested": ("plan",),
-    "on.chain.review_ready": ("chain-review",),
-    "on.env.prepare": ("worktree", "env"),
-    "on.implementation.start": ("test-driven", "tdd", "implement"),
-    # No candidates: scanning repos for undeclared submodule changes is the
-    # forge adapter's own job, not something an installed skill serves.
-    "on.repos.scan": (),
-    "on.test.run": (),
-    # A slice's implementation runs as subagents, one per task.
-    "on.slice.implementation.start": ("subagent-driven", "subagent"),
-    # No candidates: which tests to run comes from the slice's own instructions.
-    "on.slice.test.run": (),
-    "on.review.local.run": ("review",),
-    # No candidates: rebasing onto the repo's current HEAD is the forge
-    # adapter's own job, not something an installed skill serves.
-    "on.mr.rebase": (),
-    "on.mr.describe": ("mr-metadata",),
-    "on.mr.open": ("finishing", "branch", "pull-request", "merge-request"),
-    # No candidates: rewriting a merge request description from the branch is
-    # the forge adapter's own job, not something an installed skill serves.
-    "on.mr.sync": (),
-    "on.ci.poll": (),
-    "on.review.mr.run": ("review",),
-    "on.human_review.requested": (),
-    "on.merge": ("finishing", "merge"),
-    # No candidates: watching the pipeline the merge itself just triggered on
-    # the target branch is the forge adapter's own job, not something an
-    # installed skill serves.
-    "on.merge.watch": (),
+#: Which installed skill names plausibly serve which task. Keyed by the library
+#: component an agent task extends, and by the ref or target of a builtin or
+#: forge step. Deliberately keyword matching and deliberately generous: init
+#: reports every candidate and asks the human only when there is more than one.
+#: A wrong guess offered as a choice is cheap; a missing candidate is a skill
+#: the human has to name by hand. An empty tuple says no installed skill serves
+#: the task; a name missing from the table derives its keywords from its own
+#: words (see `_task_keywords`).
+TASK_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "spec_author": ("brainstorm", "spec", "design"),
+    "plan_author": ("plan",),
+    "revise_chain": ("chain-review",),
+    "implementer": ("test-driven", "tdd", "implement"),
+    "code_review": ("review",),
+    # No candidates: the repair tasks and the judge act on what their node's
+    # verification reported, not on anything an installed skill is for.
+    "repair_verification": (),
+    "repair_mr_feedback": (),
+    "repair_mr_checks": (),
+    "repair_merge_queue_failure": (),
+    "strict_judge": (),
+    "write_work_brief": ("brief",),
+    "write_summary": ("summary",),
+    "describe_mr": ("mr", "pr", "metadata", "describe"),
+    # No candidates: which tests to run and how to rebase are the repo's own
+    # commands and the walk's own builtins, not something a skill serves.
+    "kraft.verify_changed_test_scopes": (),
+    "kraft.mr_rebase": (),
+    "mr.open_draft": ("finishing", "branch", "pull-request", "merge-request"),
+    # No candidates: pushing the branch, watching CI or review, and marking the
+    # draft ready are the forge adapter's own job.
+    "mr.sync": (),
+    "mr.ci": (),
+    "mr.automated_review": (),
+    "mr.mark_ready": (),
+    "mr.external_approval": (),
+    "mr.merge": ("finishing", "merge"),
+    "mr.post_merge_ci": (),
 }
 
-#: Words in a hook name that say when it fires, not what it does. A custom hook
-#: derives its candidates from the words that are left, so these must not match
-#: a skill: `on.deploy.staging` should look for deploy skills, not for every
+#: Words in a task name that say when it runs, not what it does. A repo's own
+#: task derives its candidates from the words that are left, so these must not
+#: match a skill: `deploy_staging` should look for deploy skills, not for every
 #: skill with "start" in its name.
-HOOK_STOPWORDS = frozenset({"on", "requested", "run", "start", "prepare", "poll", "open", "ready"})
+TASK_STOPWORDS = frozenset(
+    {"task", "main", "step", "run", "start", "prepare", "poll", "open", "ready", "await"}
+)
 
 
-def _hook_keywords(hook: str) -> tuple[str, ...]:
+def _task_keywords(name: str, words_of: str) -> tuple[str, ...]:
     """Keywords to match installed skill names against.
 
-    `HOOK_KEYWORDS` is the curated answer for the hooks that ship with the default
-    chain — it encodes judgements the name alone cannot, like `on.mr.open` wanting
-    `finishing`. It is not the list of hooks that exist: a custom chain names
-    hooks nobody curated, and those derive from their own words.
+    `TASK_KEYWORDS` is the curated answer for the tasks the bundled library
+    ships; it encodes judgements the name alone cannot, like `mr.open_draft`
+    wanting `finishing`. It is not the list of tasks that exist: a repo's own
+    task names nothing curated, and those derive from `words_of`.
     """
-    if hook in HOOK_KEYWORDS:
-        return HOOK_KEYWORDS[hook]
-    return tuple(w for w in re.split(r"[._]", hook) if w and w not in HOOK_STOPWORDS)
+    if name in TASK_KEYWORDS:
+        return TASK_KEYWORDS[name]
+    return tuple(w for w in re.split(r"[._-]", words_of) if w and w not in TASK_STOPWORDS)
+
+
+def _keyword_in(keyword: str, name: str) -> bool:
+    """Whether `keyword`'s words begin consecutive words of the skill `name`.
+
+    Whole words, because `pr` inside `compress` or `project-artifact` is not a
+    pull request. A word of three letters or fewer must match exactly (or take
+    an `s`); a longer one matches the start of a word, so `plan` finds `plans`
+    and `brainstorm` finds `brainstorming`."""
+    parts, words = re.findall(r"[a-z0-9]+", keyword.lower()), re.findall(r"[a-z0-9]+", name.lower())
+
+    def same(part: str, word: str) -> bool:
+        return word in (part, part + "s") if len(part) <= 3 else word.startswith(part)
+
+    return any(
+        all(same(part, words[i + j]) for j, part in enumerate(parts))
+        for i in range(len(words) - len(parts) + 1)
+    )
 
 
 SKILL_ROOTS = (
@@ -2235,20 +2845,57 @@ def _installed_skills(root: Path) -> list[str]:
     return sorted(names)
 
 
-def detect(root: Path, chain_path: Path | None = None) -> dict:
-    chain = json.loads((chain_path or DEFAULT_CHAIN).read_text())
-    # dict.fromkeys, not set: init writes the registry in this order, and a
-    # registry whose keys follow the chain reads like the run it configures.
-    hooks = dict.fromkeys(task for node in chain["nodes"] for task in node["tasks"])
+def detect(root: Path, chain_ref: str | Path | None = None) -> dict:
+    """What `init` needs to write the bindings: the repo's test and CI commands,
+    the installed skills that could serve each task of the chain (a library id
+    or a chain file, as `start` takes it), and `proposed`, the bindings that
+    differ from the defaults and need no question."""
+    chain = _resolve_chain(root, chain_ref)
     installed = _installed_skills(root)
-    skills = {}
-    for hook in hooks:
-        keywords = _hook_keywords(hook)
-        skills[hook] = [n for n in installed if any(k in n.lower() for k in keywords)]
+    candidates: dict[str, dict[str, list[str]]] = {"tasks": {}, "builtins": {}, "forge": {}}
+    agents: dict[str, dict] = {}
+    for task in _dispatched_tasks(chain):
+        kind = task["kind"]
+        if kind == "agent":
+            section, name = "tasks", (task["components"] or [task["path"]])[0]
+            words_of = name if task["components"] else task["id"]
+        elif kind in ("builtin", "forge"):
+            section = "builtins" if kind == "builtin" else "forge"
+            name = task["ref"] if kind == "builtin" else task["target"]
+            words_of = name
+        else:
+            continue
+        keywords = _task_keywords(name, words_of)
+        found = {n for n in installed if any(_keyword_in(k, n) for k in keywords)}
+        if task.get("skill") in installed:
+            found.add(task["skill"])
+        candidates[section][name] = sorted(found | set(candidates[section].get(name, ())))
+        if section == "tasks":
+            agents.setdefault(name, task)
+
+    test, ci = _test_command(root), _ci_command(root)
+    proposed: dict[str, dict] = {}
+    # A task with exactly one candidate that is not already its own skill is
+    # bound to it; two or more are the human's to choose between.
+    bound = {
+        name: {"kind": "skill", "skill": found[0], "prompt": agents[name]["prompt"]}
+        for name, found in candidates["tasks"].items()
+        if len(found) == 1 and found[0] != agents[name].get("skill")
+    }
+    if bound:
+        proposed["tasks"] = bound
+    if test:
+        proposed["builtins"] = {
+            "kraft.verify_changed_test_scopes": {"kind": "subprocess", "command": list(test)}
+        }
+    if ci:
+        proposed["forge"] = {"mr.ci": {"kind": "subprocess", "command": list(ci)}}
     return {
-        "test_command": _test_command(root),
-        "ci_command": _ci_command(root),
-        "skills": skills,
+        "test_command": test,
+        "ci_command": ci,
+        "chain": chain["id"],
+        "candidates": candidates,
+        "proposed": proposed,
     }
 
 

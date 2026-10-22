@@ -1,5 +1,6 @@
-"""init writes a filled-in registry rather than asking ten questions, so the
-guesses have to be right — and honest about ambiguity when it exists."""
+"""init writes the bindings from what `detect` finds rather than asking ten
+questions, so the guesses have to be right -- and honest about ambiguity when
+it exists."""
 
 from __future__ import annotations
 
@@ -13,6 +14,8 @@ PLUGIN = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN))
 
 import kl  # noqa: E402
+import kl_bindings  # noqa: E402
+import kl_chains  # noqa: E402
 
 
 def test_a_justfile_test_recipe_wins(tmp_path):
@@ -45,45 +48,76 @@ def test_a_makefile_without_a_test_target_is_not_a_match(tmp_path):
     assert kl.detect(tmp_path)["test_command"] is None
 
 
-def test_installed_skills_are_matched_to_hooks(tmp_path):
-    skills = tmp_path / ".claude" / "skills" / "superpowers" / "skills"
-    for name in ("brainstorming", "writing-plans", "test-driven-development"):
-        (skills / name).mkdir(parents=True)
-        (skills / name / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
-    (tmp_path / ".claude" / "skills" / "superpowers" / ".claude-plugin").mkdir(parents=True)
-    (tmp_path / ".claude" / "skills" / "superpowers" / ".claude-plugin" / "plugin.json").write_text(
-        json.dumps({"name": "superpowers"})
-    )
+def _install(tmp_path, *names, plugin=None):
+    """SKILL.md files under the repo's `.claude/skills`, inside `plugin`'s
+    manifest when one is named."""
+    base = tmp_path / ".claude" / "skills"
+    if plugin:
+        (base / plugin / ".claude-plugin").mkdir(parents=True)
+        (base / plugin / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": plugin}))
+        base = base / plugin / "skills"
+    for name in names:
+        (base / name).mkdir(parents=True)
+        (base / name / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
 
-    found = kl.detect(tmp_path)["skills"]
-    assert "superpowers:brainstorming" in found["on.spec.requested"]
-    assert "superpowers:writing-plans" in found["on.plan.requested"]
-    assert "superpowers:test-driven-development" in found["on.implementation.start"]
+
+def _chain_file(tmp_path, *task_ids):
+    """A one-node chain of inline agent tasks with exactly these ids."""
+    path = tmp_path / "custom.yaml"
+    tasks = "".join(
+        f"      - id: {t}\n        kind: agent\n        prompt: Do {t}.\n" for t in task_ids
+    )
+    path.write_text(f"id: custom\nnodes:\n  - id: only\n    kind: exec\n    tasks:\n{tasks}")
+    return path
+
+
+def test_installed_skills_are_matched_to_tasks(tmp_path):
+    _install(
+        tmp_path,
+        "brainstorming",
+        "writing-plans",
+        "test-driven-development",
+        plugin="superpowers",
+    )
+    found = kl.detect(tmp_path)["candidates"]["tasks"]
+    assert "superpowers:brainstorming" in found["spec_author"]
+    assert "superpowers:writing-plans" in found["plan_author"]
+    assert "superpowers:test-driven-development" in found["implementer"]
 
 
 def test_a_skill_outside_a_plugin_is_reported_unprefixed(tmp_path):
-    plain = tmp_path / ".claude" / "skills" / "code-review"
-    plain.mkdir(parents=True)
-    (plain / "SKILL.md").write_text("---\nname: code-review\n---\n")
-    found = kl.detect(tmp_path)["skills"]
-    assert "code-review" in found["on.review.local.run"]
+    _install(tmp_path, "code-review")
+    assert "code-review" in kl.detect(tmp_path)["candidates"]["tasks"]["code_review"]
 
 
-def test_every_hook_in_the_chain_gets_a_key_even_with_nothing_installed(tmp_path, monkeypatch):
+def test_every_task_in_the_chain_gets_a_key_even_with_nothing_installed(tmp_path, monkeypatch):
     monkeypatch.setattr(kl, "SKILL_ROOTS", (Path(".claude") / "skills",))
-    chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
-    hooks = {hook for node in chain["nodes"] for hook in node["tasks"]}
-    found = kl.detect(tmp_path)["skills"]
-    assert set(found) == hooks, "a hook with no key would leave a hole in the registry"
-    assert all(candidates == [] for candidates in found.values())
+    chain = kl_chains.resolve(tmp_path, {}, "default")
+    tasks = [t for n in chain["nodes"] if n["kind"] == "exec" for t in _chain_tasks(n)]
+    found = kl.detect(tmp_path)["candidates"]
+    assert set(found["tasks"]) == {t["components"][0] for t in tasks if t["kind"] == "agent"}
+    assert set(found["builtins"]) == {t["ref"] for t in tasks if t["kind"] == "builtin"}
+    assert set(found["forge"]) == {t["target"] for t in tasks if t["kind"] == "forge"}
+    assert all(not c for section in found.values() for c in section.values()), (
+        "a task with no key would leave a hole in the bindings"
+    )
 
 
-def test_hook_keywords_covers_exactly_the_shipped_chains_hooks():
-    hooks = set()
-    for name in ("default", "slice"):
-        chain = json.loads((PLUGIN / "chains" / f"{name}.json").read_text())
-        hooks |= {hook for node in chain["nodes"] for hook in node["tasks"]}
-    assert set(kl.HOOK_KEYWORDS) == hooks
+def _chain_tasks(node):
+    rejected = node["on_merge_rejected"]
+    handlers = (node, node["on_failure"], node["fix_loop"], rejected and rejected["repair"])
+    judge = [node["fix_loop"]["judge"]] if node["fix_loop"] and node["fix_loop"]["judge"] else []
+    return [t for c in handlers if c for s in c["steps"] for t in s["tasks"]] + judge
+
+
+def test_task_keywords_cover_the_library():
+    """A component with no `TASK_KEYWORDS` entry silently falls back to splitting
+    its own name into keywords -- the behaviour meant for a repo's own tasks,
+    not one the bundled library curated on purpose."""
+    _, library = kl_chains.libraries(PLUGIN, {})
+    agents = {n for n, raw in library.components["tasks"].items() if raw["kind"] == "agent"}
+    expected = agents | set(kl_chains.BUILTIN_REFS) | set(kl_chains.FORGE_TARGETS)
+    assert set(kl.TASK_KEYWORDS) == expected
 
 
 def test_keywords_do_not_match_on_short_substrings(tmp_path, monkeypatch):
@@ -91,110 +125,179 @@ def test_keywords_do_not_match_on_short_substrings(tmp_path, monkeypatch):
     short enough to appear inside unrelated words offers the human a menu of
     nonsense and buries the real candidate."""
     monkeypatch.setattr(kl, "SKILL_ROOTS", (Path(".claude") / "skills",))
-    skills = tmp_path / ".claude" / "skills"
-    for name in ("compress", "claude-md-improver", "project-artifact"):
-        (skills / name).mkdir(parents=True)
-        (skills / name / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
-    assert kl.detect(tmp_path)["skills"]["on.mr.open"] == []
+    _install(tmp_path, "compress", "claude-md-improver", "project-artifact")
+    assert kl.detect(tmp_path)["candidates"]["tasks"]["describe_mr"] == []
 
 
-def _registry(root, hooks):
-    directory = root / kl.STATE_DIR
-    directory.mkdir(parents=True, exist_ok=True)
-    body = "# a registry\n" + "".join(
-        f"{hook}:\n  kind: prompt\n  prompt: do the thing\n  # also found: (none)\n"
-        for hook in hooks
+def test_a_long_keyword_does_not_match_inside_a_word(tmp_path, monkeypatch):
+    monkeypatch.setattr(kl, "SKILL_ROOTS", (Path(".claude") / "skills",))
+    _install(tmp_path, "explanation-style", "airplane-mode", "plans-index")
+    assert kl.detect(tmp_path)["candidates"]["tasks"]["plan_author"] == ["plans-index"]
+
+
+def test_a_tasks_own_installed_skill_is_a_candidate(tmp_path, monkeypatch):
+    # Nothing in the name `deploy` suggests `acme:zzz`; only the task's own `skill` does.
+    monkeypatch.setattr(kl, "_installed_skills", lambda root: ["acme:zzz"])
+    chain = tmp_path / "own.yaml"
+    chain.write_text(
+        "id: own\nnodes:\n  - id: only\n    kind: exec\n    tasks:\n"
+        "      - id: deploy\n        kind: agent\n        prompt: Deploy.\n"
+        "        skill: acme:zzz\n"
     )
-    (directory / "registry.yaml").write_text(body)
+    got = kl.detect(tmp_path, str(chain))
+    assert got["candidates"]["tasks"] == {"only.main.deploy": ["acme:zzz"]}
+    assert got["proposed"] == {}
 
 
-def test_registry_hooks_reads_the_top_level_keys_only(tmp_path):
-    """kl.py may not import yaml, so the scan has to be a regex. Nested keys are
-    indented and must not be mistaken for hooks."""
-    _registry(tmp_path, ["on.spec.requested", "on.test.run"])
-    assert kl.registry_hooks(tmp_path) == {"on.spec.requested", "on.test.run"}
+def test_a_short_keyword_still_matches_as_a_whole_word(tmp_path, monkeypatch):
+    monkeypatch.setattr(kl, "SKILL_ROOTS", (Path(".claude") / "skills",))
+    _install(tmp_path, "pr-description", "mr-metadata")
+    got = kl.detect(tmp_path)["candidates"]["tasks"]["describe_mr"]
+    assert got == ["mr-metadata", "pr-description"]
 
 
-def test_registry_hooks_is_none_when_there_is_no_registry(tmp_path):
-    assert kl.registry_hooks(tmp_path) is None
-
-
-def test_start_rejects_a_chain_whose_hooks_are_not_bound(tmp_path, monkeypatch, capsys):
-    """An unbound hook is otherwise only discovered mid-walk, by which point the
-    chain has already run its earlier nodes."""
-    monkeypatch.setattr(kl.shutil, "which", lambda name: None)
-    monkeypatch.chdir(tmp_path)
-    _registry(tmp_path, ["on.spec.requested"])
-    with pytest.raises(SystemExit) as caught:
-        kl.main(["start", "--title", "t"])
-    message = str(caught.value)
-    assert "on.plan.requested" in message, "the unbound hooks are named"
-    assert "on.spec.requested" not in message, "the bound one is not"
-
-
-def test_start_accepts_the_shipped_chain_against_a_full_registry(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(kl.shutil, "which", lambda name: None)
-    monkeypatch.chdir(tmp_path)
-    chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
-    _registry(tmp_path, sorted({t for n in chain["nodes"] for t in n["tasks"]}))
-    kl.main(["start", "--title", "t"])
-    assert "chain_id" in json.loads(capsys.readouterr().out)
-
-
-def test_start_without_a_registry_warns_but_runs(tmp_path, monkeypatch, capsys):
-    """The start skill already refuses to run without a registry. Erroring here
-    too would only cost every existing test a fixture."""
-    monkeypatch.setattr(kl.shutil, "which", lambda name: None)
-    monkeypatch.chdir(tmp_path)
-    kl.main(["start", "--title", "t"])
-    captured = capsys.readouterr()
-    assert "chain_id" in json.loads(captured.out)
-    assert "registry" in captured.err
-
-
-def _chain_file(tmp_path, *hooks):
-    """A one-node chain naming exactly these hooks."""
-    path = tmp_path / "custom.json"
-    path.write_text(
-        json.dumps(
-            {
-                "id": "custom",
-                "loops": {},
-                "nodes": [{"id": "only", "tasks": list(hooks), "gate_after": None}],
-            }
-        )
-    )
-    return path
-
-
-def test_a_custom_hook_gets_candidates_from_its_own_words(tmp_path, monkeypatch):
+def test_a_custom_task_gets_candidates_from_its_own_words(tmp_path, monkeypatch):
     monkeypatch.setattr(
         kl, "_installed_skills", lambda root: ["acme:deploy-checklist", "other:unrelated"]
     )
-    got = kl.detect(tmp_path, _chain_file(tmp_path, "on.deploy.staging"))
-    assert got["skills"] == {"on.deploy.staging": ["acme:deploy-checklist"]}
+    got = kl.detect(tmp_path, str(_chain_file(tmp_path, "deploy_staging")))
+    assert got["candidates"]["tasks"] == {"only.main.deploy_staging": ["acme:deploy-checklist"]}
 
 
-def test_a_curated_hook_keeps_its_curated_keywords(tmp_path, monkeypatch):
-    # `finishing` is not a word in `on.mr.open`; only the curated table knows it.
+def test_a_curated_target_keeps_its_curated_keywords(tmp_path, monkeypatch):
+    # `finishing` is not a word in `mr.open_draft`; only the curated table knows it.
     monkeypatch.setattr(
         kl, "_installed_skills", lambda root: ["superpowers:finishing-a-development-branch"]
     )
-    got = kl.detect(tmp_path, _chain_file(tmp_path, "on.mr.open"))
-    assert got["skills"]["on.mr.open"] == ["superpowers:finishing-a-development-branch"]
+    got = kl.detect(tmp_path)["candidates"]["forge"]
+    assert got["mr.open_draft"] == ["superpowers:finishing-a-development-branch"]
 
 
-def test_a_hook_of_only_structural_words_reports_no_candidates(tmp_path, monkeypatch):
+def test_a_task_of_only_structural_words_reports_no_candidates(tmp_path, monkeypatch):
     monkeypatch.setattr(kl, "_installed_skills", lambda root: ["anything:at-all"])
-    got = kl.detect(tmp_path, _chain_file(tmp_path, "on.run.start"))
-    assert got["skills"] == {"on.run.start": []}
+    got = kl.detect(tmp_path, str(_chain_file(tmp_path, "run_start")))
+    assert got["candidates"]["tasks"] == {"only.main.run_start": []}
 
 
-def test_the_packaged_chain_still_reports_its_seventeen_hooks(tmp_path):
+def test_the_packaged_chain_still_reports_its_tasks(tmp_path):
     got = kl.detect(tmp_path)
-    chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
-    assert set(got["skills"]) == {hook for node in chain["nodes"] for hook in node["tasks"]}
-    assert len(got["skills"]) == 17
+    assert got["chain"] == "default"
+    # 13 agent tasks: the merge-rejection repair is one.
+    assert [len(got["candidates"][section]) for section in ("tasks", "builtins", "forge")] == [
+        13,
+        2,
+        8,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("chain", "expected"),
+    [
+        pytest.param(None, "default", id="the_default_chain"),
+        pytest.param("quick-task", "quick-task", id="a_library_id"),
+        pytest.param("PATH", "custom", id="a_chain_file"),
+    ],
+)
+def test_detect_resolves_its_chain_like_start(tmp_path, kl_cli, chain, expected):
+    path = _chain_file(tmp_path, "one")
+    given = [] if chain is None else ["--chain", str(path) if chain == "PATH" else chain]
+    args = ["detect", *given]
+    assert kl_cli(tmp_path, *args)["chain"] == expected
+
+
+def test_detect_refuses_a_chain_that_does_not_exist(tmp_path, kl_cli):
+    refused = kl_cli(tmp_path, "detect", "--chain", "no-such-chain", ok=False)
+    assert "no-such-chain" in refused.stderr
+
+
+@pytest.fixture
+def skilled(tmp_path, monkeypatch):
+    """`detect` over a repo with a test command, and `skills` installed."""
+    monkeypatch.setattr(kl, "SKILL_ROOTS", (Path(".claude") / "skills",))
+
+    def detect(*skills, test=True):
+        if test:
+            (tmp_path / "Makefile").write_text("test:\n\tpytest\n")
+        _install(tmp_path, *skills)
+        monkeypatch.setattr(kl, "_ci_command", lambda root: None)
+        return kl.detect(tmp_path)["proposed"]
+
+    return detect
+
+
+@pytest.mark.parametrize(
+    ("skills", "test", "expect"),
+    [
+        pytest.param(
+            (),
+            True,
+            {
+                "builtins": {
+                    "kraft.verify_changed_test_scopes": {
+                        "kind": "subprocess",
+                        "command": ["make", "test"],
+                    }
+                }
+            },
+            id="test_command_becomes_subprocess",
+        ),
+        pytest.param((), False, {}, id="no_test_command_proposes_nothing"),
+        pytest.param(
+            ("writing-plans",),
+            False,
+            {
+                "tasks": {
+                    "plan_author": {
+                        "kind": "skill",
+                        "skill": "writing-plans",
+                        "prompt": (
+                            "Produce an executable implementation plan from the approved spec."
+                        ),
+                    }
+                }
+            },
+            id="single_skill_candidate_bound",
+        ),
+        pytest.param(("writing-plans", "plan-critic"), False, {}, id="two_candidates_left_unbound"),
+    ],
+)
+def test_proposed_bindings(skilled, skills, test, expect):
+    assert skilled(*skills, test=test) == expect
+
+
+def test_a_ci_command_becomes_the_ci_subprocess(tmp_path, monkeypatch):
+    monkeypatch.setattr(kl, "_ci_command", lambda root: ["gh", "pr", "checks"])
+    assert kl.detect(tmp_path)["proposed"] == {
+        "forge": {"mr.ci": {"kind": "subprocess", "command": ["gh", "pr", "checks"]}}
+    }
+
+
+def test_a_task_already_bound_to_its_own_skill_proposes_nothing(tmp_path, monkeypatch):
+    # kraft:spec is the library's own skill for spec_author, and it is installed:
+    # the default already runs it, so binding it again says nothing.
+    monkeypatch.setattr(kl, "_installed_skills", lambda root: ["kraft:spec"])
+    got = kl.detect(tmp_path)
+    assert got["candidates"]["tasks"]["spec_author"] == ["kraft:spec"]
+    assert got["proposed"] == {}
+
+
+def test_a_second_candidate_beside_the_installed_own_skill_is_left_to_init(tmp_path, monkeypatch):
+    monkeypatch.setattr(kl, "_installed_skills", lambda root: ["kraft:spec", "acme:spec-writer"])
+    got = kl.detect(tmp_path)
+    assert got["candidates"]["tasks"]["spec_author"] == ["acme:spec-writer", "kraft:spec"]
+    assert got["proposed"] == {}
+
+
+def test_the_proposal_passes_the_validator_that_reads_bindings(tmp_path, monkeypatch):
+    monkeypatch.setattr(kl, "_installed_skills", lambda root: ["acme:writing-plans"])
+    monkeypatch.setattr(kl, "_ci_command", lambda root: ["glab", "ci", "status"])
+    (tmp_path / "Makefile").write_text("test:\n\tpytest\n")
+    proposed = kl.detect(tmp_path)["proposed"]
+    assert set(proposed) == set(kl_bindings.SECTIONS)
+    # JSON is YAML, and read_bindings is what `start` runs the file through.
+    (tmp_path / ".kraft-lite").mkdir()
+    (tmp_path / kl_bindings.BINDINGS).write_text(json.dumps(proposed))
+    assert kl_bindings.read_bindings(tmp_path) == proposed
 
 
 def test_a_gitlab_repo_with_glab_installed_polls_with_glab(tmp_path, monkeypatch):

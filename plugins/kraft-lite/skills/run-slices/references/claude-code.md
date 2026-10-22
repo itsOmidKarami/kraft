@@ -2,8 +2,8 @@
 
 Sources: the `claude-code-remote` MCP server's tools, and code.claude.com/docs
 (agent view, Claude Code in the cloud, cross-session messaging, scheduled
-tasks). Where an ability is marked unconfirmed, use the fallback named, not a
-guessed tool.
+tasks). Where an ability is marked unconfirmed, look for it as discover.md says,
+then use the fallback named, never a guessed tool.
 
 Contents: Start a child, Message a child, Be messaged, Archive a child, Check in
 later, Reading and finding a child, Which channel.

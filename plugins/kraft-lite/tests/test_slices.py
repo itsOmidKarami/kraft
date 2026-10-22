@@ -400,8 +400,10 @@ def test_slices_of_another_chain_are_not_ours():
 
 
 @pytest.mark.parametrize("backend", ["jsonl", "bd"])
-def test_slice_records_are_invisible_to_the_chain_machinery(backend, fake_bd, tmp_path):
-    chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
+def test_slice_records_are_invisible_to_the_chain_machinery(
+    backend, fake_bd, tmp_path, default_chain
+):
+    chain = default_chain
     store = (
         kl.JsonlStore(tmp_path / "chain.jsonl") if backend == "jsonl" else kl.BdStore(run=fake_bd)
     )
@@ -427,9 +429,8 @@ def keys(entries):
     return [e["key"] for e in entries]
 
 
-def test_approve_with_slices_at_chain_finalized_creates_them(walk, kl_cli, tmp_path):
-    walk.to_chain_review(tmp_path)
-    kl_cli(tmp_path, "gate", "--name", "chain_finalized")
+def test_approve_with_slices_at_the_slice_gate_creates_them(walk, kl_cli, tmp_path):
+    walk.to_slice_gate(tmp_path)
     state = kl_cli(tmp_path, "approve", "--slices", str(walk.write_plan(tmp_path, plan())))
 
     assert state["node"] == "implementation" and state["status"] == "open"
@@ -460,53 +461,33 @@ def test_approve_with_slices_at_chain_finalized_creates_them(walk, kl_cli, tmp_p
 @pytest.mark.parametrize(
     "setup, message",
     [
-        pytest.param("at_spec_gate", "only accepted at chain_finalized", id="at_spec_gate"),
-        pytest.param("already_sliced", "already sliced", id="already_sliced"),
+        pytest.param("at_spec_gate", "only accepted at chain_revision_approval", id="at_spec_gate"),
         # Sliced wins over "wrong gate": the first check is the one a person can act on.
+        pytest.param("already_sliced", "already sliced", id="already_sliced"),
         pytest.param("sliced_and_open", "already sliced", id="sliced_and_not_blocked"),
-        pytest.param("sliced_and_other_gate", "already sliced", id="sliced_and_other_gate"),
-        # Slicing is keyed to the default chain's node ids and its gate: a custom
-        # chain without them is refused, not walked with no slice guard at all.
+        # A chain without the shape is refused naming what it lacks, not walked
+        # with no slice guard at all.
         pytest.param(
-            "chain_without_nodes",
-            "slicing needs the default chain's nodes; this run's chain 'custom' has no "
-            "mr_checks, post_merge_watch",
-            id="custom_chain_without_nodes",
-        ),
-        pytest.param(
-            "chain_with_another_gate",
-            "slicing needs chain_review's gate to be chain_finalized, as in the default "
-            "chain; this run's chain 'custom' gates it with 'finalized'",
-            id="custom_chain_with_another_gate",
+            "chain_without_the_shape",
+            "chain 'quick-task' cannot be sliced: no gate before the first build node",
+            id="chain_without_the_shape",
         ),
     ],
 )
-def test_slices_are_only_accepted_at_chain_finalized(walk, setup, message, kl_cli, tmp_path):
+def test_slices_are_only_accepted_at_the_slice_gate(walk, setup, message, kl_cli, tmp_path):
     if setup == "at_spec_gate":
         walk.start(tmp_path)
-        kl_cli(tmp_path, "gate", "--name", "spec_approval")
-    elif setup.startswith("chain_"):
-        chain = json.loads((PLUGIN / "chains" / "default.json").read_text())
-        chain["id"] = "custom"
-        if setup == "chain_without_nodes":
-            dropped = ("mr_checks", "post_merge_watch")
-            chain["nodes"] = [n for n in chain["nodes"] if n["id"] not in dropped]
-        else:
-            [review] = [n for n in chain["nodes"] if n["id"] == "chain_review"]
-            review["gate_after"] = "finalized"
-        (tmp_path / "custom.json").write_text(json.dumps(chain))
-        kl_cli(tmp_path, "start", "--title", "t", "--chain", str(tmp_path / "custom.json"))
-        for name in ("spec_approval", "plan_approval", "chain_finalized"):
-            kl_cli(tmp_path, "gate", "--name", name)
-            if name != "chain_finalized":
-                kl_cli(tmp_path, "approve")
+        walk.to(tmp_path, "spec_approval")
+        kl_cli(tmp_path, "gate")
+    elif setup == "chain_without_the_shape":
+        kl_cli(tmp_path, "start", "--title", "t", "--chain", "quick-task")
     else:
         walk.slice(tmp_path, plan())
         if setup == "already_sliced":
-            # A gate of that name opened again, by hand, on the sliced run.
-            kl_cli(tmp_path, "gate", "--name", "chain_finalized")
-        elif setup == "sliced_and_other_gate":
-            kl_cli(tmp_path, "gate", "--name", "something_else")
+            # A gate blocked on the sliced run, later in the chain.
+            walk.merge_slices(tmp_path)
+            walk.to(tmp_path, "local_review")
+            kl_cli(tmp_path, "gate")
     before = (kl_cli(tmp_path, "slices"), kl_cli(tmp_path, "state"))
 
     refused = kl_cli(
@@ -518,8 +499,7 @@ def test_slices_are_only_accepted_at_chain_finalized(walk, setup, message, kl_cl
 
 
 def test_a_rejected_slicing_leaves_nothing_behind(walk, kl_cli, tmp_path):
-    walk.to_chain_review(tmp_path)
-    kl_cli(tmp_path, "gate", "--name", "chain_finalized")
+    walk.to_slice_gate(tmp_path)
     kl_cli(tmp_path, "reject", "--note", "regroup")
 
     out = kl_cli(tmp_path, "slices")
@@ -542,8 +522,7 @@ def test_a_rejected_slicing_leaves_nothing_behind(walk, kl_cli, tmp_path):
 def test_a_broken_plan_file_is_refused_and_the_gate_stays_shut(
     walk, write, named, kl_cli, tmp_path
 ):
-    walk.to_chain_review(tmp_path)
-    kl_cli(tmp_path, "gate", "--name", "chain_finalized")
+    walk.to_slice_gate(tmp_path)
     path = tmp_path / "plan.json"
     write(path)
 
@@ -756,8 +735,7 @@ def test_slice_set_that_changes_nothing_writes_nothing(walk, flags, kl_cli, tmp_
 def test_slice_verbs_still_answer_after_the_chain_is_done(walk, kl_cli, tmp_path):
     walk.slice(tmp_path, plan())
     walk.merge_slices(tmp_path)
-    while kl_cli(tmp_path, "state")["status"] != "done":
-        kl_cli(tmp_path, "close")
+    walk.finish(tmp_path)
 
     assert keys(kl_cli(tmp_path, "slices")["slices"]) == ["a", "b", "c"]
     kl_cli(tmp_path, "slice-set", "--slice", "a", "--status", "running")
@@ -767,22 +745,24 @@ def test_slice_verbs_still_answer_after_the_chain_is_done(walk, kl_cli, tmp_path
 @pytest.mark.parametrize(
     "verb",
     [
-        ["close"],
-        ["approve"],
-        ["gate", "--name", "x"],
-        ["reject", "--note", "x"],
-        ["attempt"],
-        ["approve", "--slices", "plan.json"],
+        pytest.param(["close"], id="close"),
+        pytest.param(["approve"], id="approve"),
+        pytest.param(["gate"], id="gate"),
+        pytest.param(["reject", "--note", "x"], id="reject"),
+        pytest.param(["attempt"], id="attempt"),
+        pytest.param(["approve", "--slices", "plan.json"], id="approve_slices"),
+        pytest.param(["produced", "--kind", "spec", "--path", "x"], id="produced"),
+        pytest.param(["mark", "--on-failure-ran"], id="mark"),
+        pytest.param(["restart"], id="restart"),
+        pytest.param(["restart", "--merge-rejected"], id="restart_merge_rejected"),
     ],
-    ids=["close", "approve", "gate", "reject", "attempt", "approve_slices"],
 )
 def test_a_finished_chain_still_refuses_the_verbs_that_need_an_open_node(
     walk, verb, kl_cli, tmp_path
 ):
     walk.slice(tmp_path, plan())
     walk.merge_slices(tmp_path)
-    while kl_cli(tmp_path, "state")["status"] != "done":
-        kl_cli(tmp_path, "close")
+    walk.finish(tmp_path)
 
     refused = kl_cli(tmp_path, *verb, ok=False)
 

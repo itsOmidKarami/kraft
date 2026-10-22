@@ -16,6 +16,7 @@ if str(PLUGIN) not in sys.path:
     sys.path.insert(0, str(PLUGIN))
 
 import kl  # noqa: E402
+import kl_chains  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -24,7 +25,8 @@ def _isolated_home(request, tmp_path_factory, monkeypatch):
     `kl.SKILL_ROOTS` resolved against the real home when `kl` was imported:
     what `detect` reports, and how long it takes, would depend on whoever
     runs the suite. The roots are moved under an empty home, and `HOME` with
-    them for a `kl.py` run as a child.
+    them for a `kl.py` run as a child. The variables that name a user library
+    go too, so `start` resolves from the bundled one, as on a fresh machine.
 
     An e2e test keeps the real `HOME`: the real `bd` it drives commits with
     the git identity configured there."""
@@ -40,6 +42,30 @@ def _isolated_home(request, tmp_path_factory, monkeypatch):
     monkeypatch.setattr(kl, "SKILL_ROOTS", tuple(moved(root) for root in kl.SKILL_ROOTS))
     if request.node.get_closest_marker("e2e") is None:
         monkeypatch.setenv("HOME", str(home))
+        for name in ("KRAFT_CONFIG_DIR", "KRAFT_TEMPLATES_DIR", "KRAFT_HOME"):
+            monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch) -> Path:
+    """An empty home, which `Path.home()` answers for the test."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    return home
+
+
+@pytest.fixture(scope="module")
+def texts():
+    """Every skill's SKILL.md, by skill name."""
+    return {path.parent.name: path.read_text() for path in (PLUGIN / "skills").glob("*/SKILL.md")}
+
+
+@pytest.fixture
+def default_chain(_isolated_home, tmp_path_factory):
+    """Kraft's packaged V1 `default`, as `start` resolves and freezes it from
+    the bundled library."""
+    return kl_chains.resolve(tmp_path_factory.mktemp("bare"), {}, "default")
 
 
 @pytest.fixture
@@ -118,14 +144,30 @@ class Walk:
     def start(self, cwd: Path) -> str:
         return self.run(cwd, "start", "--title", "A feature")["chain_id"]
 
-    def to_chain_review(self, cwd: Path) -> str:
+    def advance(self, cwd: Path) -> dict:
+        """Past the current node: a gate node blocked and approved, an exec node
+        closed. Returns the state after it."""
+        if self.run(cwd, "state")["kind"] == "gate":
+            self.run(cwd, "gate")
+            return self.run(cwd, "approve")
+        return self.run(cwd, "close")
+
+    def to(self, cwd: Path, node: str) -> None:
+        """Walked on until `node` is the current one."""
+        while (state := self.run(cwd, "state"))["node"] != node:
+            assert state["status"] != "done", f"the chain finished without reaching {node}"
+            self.advance(cwd)
+
+    def finish(self, cwd: Path) -> None:
+        """Walked on to `done`."""
+        while self.run(cwd, "state")["status"] != "done":
+            self.advance(cwd)
+
+    def to_chain_revision(self, cwd: Path) -> str:
         """A chain whose spec and plan gates are approved, so the next node is
-        `chain_review`. Returns the chain id."""
+        `chain_revision`. Returns the chain id."""
         chain_id = self.start(cwd)
-        for name in ("spec_approval", "plan_approval"):
-            self.run(cwd, "gate", "--name", name)
-            self.run(cwd, "approve")
-        assert self.run(cwd, "state")["node"] == "chain_review"
+        self.to(cwd, "chain_revision")
         return chain_id
 
     def plan(self, **over) -> dict:
@@ -139,10 +181,17 @@ class Walk:
         path.write_text(json.dumps(plan or SLICE_PLAN))
         return path
 
+    def to_slice_gate(self, cwd: Path) -> str:
+        """A chain blocked at `chain_revision_approval`, where it is sliced.
+        Returns the chain id."""
+        chain_id = self.to_chain_revision(cwd)
+        self.run(cwd, "close")
+        self.run(cwd, "gate")
+        return chain_id
+
     def slice(self, cwd: Path, plan: dict | None = None) -> str:
-        """A chain sliced at `chain_finalized`, standing at `implementation`."""
-        chain_id = self.to_chain_review(cwd)
-        self.run(cwd, "gate", "--name", "chain_finalized")
+        """A chain sliced at `chain_revision_approval`, standing at `implementation`."""
+        chain_id = self.to_slice_gate(cwd)
         self.run(cwd, "approve", "--slices", str(self.write_plan(cwd, plan)))
         return chain_id
 

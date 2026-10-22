@@ -1,0 +1,57 @@
+# This repo's Kraft Lite bindings: which local skill, instruction or command runs a
+# chain task here, where Lite's default does not fit. Keys are Kraft's own names:
+# a library task component (or canonical path) under `tasks`, a builtin ref under
+# `builtins`, a forge target under `forge`. A task left out runs its default.
+tasks:
+  spec_author:
+    kind: skill
+    skill: superpowers:brainstorming
+    prompt: "Agree requirements and write a spec before any code."
+  plan_author:
+    kind: skill
+    skill: superpowers:writing-plans
+    prompt: "Turn the approved spec into a written, step-by-step implementation plan."
+  revise_chain:
+    kind: prompt
+    prompt: "Read back the whole chain - spec, plan, and the nodes still to run - and confirm the order and the gates still match the work before anything is built."
+  implementer:
+    kind: skill
+    skill: superpowers:test-driven-development
+    prompt: "Implement the plan, writing the failing test before the code each time."
+  code_review:
+    kind: skill
+    skill: superpowers:requesting-code-review
+    prompt: "Review the working tree for correctness and for anything simpler that would do."
+  describe_mr:
+    kind: skill
+    skill: mr-metadata
+    prompt: "Write the merge request's title and description from the finished diff."
+builtins:
+  # `just test` runs pytest-testmon, which derives the affected tests from coverage of
+  # what changed, so it cannot go stale the way a hand-picked file list did.
+  kraft.verify_changed_test_scopes:
+    kind: subprocess
+    command: [just, test]
+  kraft.mr_rebase:
+    kind: prompt
+    prompt: "Rebase the branch onto its target if it has drifted before merging."
+forge:
+  mr.open_draft:
+    kind: skill
+    skill: superpowers:finishing-a-development-branch
+    prompt: "Decide how this branch integrates and open the merge request."
+  # Runs once and reports; the `next` skill never waits on it.
+  mr.ci:
+    kind: subprocess
+    command: [gh, pr, checks]
+  mr.automated_review:
+    kind: skill
+    skill: superpowers:requesting-code-review
+    prompt: "Review the merge request as published, not just the local tree."
+  mr.merge:
+    kind: skill
+    skill: superpowers:finishing-a-development-branch
+    prompt: "Merge the branch and clean up the worktree."
+  mr.post_merge_ci:
+    kind: prompt
+    prompt: "Watch the merge until it lands or fails, then report which."

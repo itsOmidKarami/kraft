@@ -313,26 +313,31 @@ def test_an_answered_decision_survives_importing_its_held_copy(where, walk, kl_c
     assert (entry["held"], entry["answer"], entry["answered_by"]) == (False, "yes", "user")
 
 
-def test_export_carries_the_frozen_template(walk, kl_cli, tmp_path):
+def test_export_carries_the_frozen_template(walk, kl_cli, tmp_path, default_chain):
     here, there = dirs(tmp_path, "here", "there")
     out = tmp_path / "state"
-    default = json.loads(kl.DEFAULT_CHAIN.read_text())
-    custom = {**default, "id": "short", "nodes": default["nodes"][:2]}
-    (tmp_path / "short.json").write_text(json.dumps(custom))
-    chain_id = kl_cli(here, "start", "--title", "t", "--chain", str(tmp_path / "short.json"))[
+    (tmp_path / "short.yaml").write_text("extends: default\nremove: [plan, plan_approval]\n")
+    chain_id = kl_cli(here, "start", "--title", "t", "--chain", str(tmp_path / "short.yaml"))[
         "chain_id"
     ]
+    custom = json.loads(kl._frozen_path(here, chain_id).read_text())
+    assert custom["id"] == "short" and len(custom["nodes"]) == len(default_chain["nodes"]) - 2
 
     kl_cli(here, "export", "--to", str(out))
 
-    assert json.loads((out / "chains" / f"{chain_id}.json").read_text()) == custom
+    assert json.loads((out / "chain.json").read_text()) == custom
     kl_cli(there, "import", "--from", str(out))
     assert json.loads(kl._frozen_path(there, chain_id).read_text()) == custom
     assert kl_cli(there, "state") == kl_cli(here, "state")
 
-    # A frozen template already here is the run's own; an export never replaces it.
-    (out / "chains" / f"{chain_id}.json").write_text(json.dumps(default))
-    kl_cli(there, "import", "--from", str(out))
+    # A frozen chain already here is the run's own: a run's chain never changes
+    # after start, so an export carrying another is refused, naming both.
+    (out / "chain.json").write_text(json.dumps(default_chain))
+    refused = kl_cli(there, "import", "--from", str(out), ok=False)
+    assert (
+        f"{out / 'chain.json'} is not the chain {chain_id} started with, which is "
+        f"{kl._frozen_path(there, chain_id)}" in refused.stderr
+    )
     assert json.loads(kl._frozen_path(there, chain_id).read_text()) == custom
 
 
@@ -355,7 +360,7 @@ def test_export_writes_no_documents(walk, kl_cli, tmp_path):
 
     kl_cli(tmp_path, "export", "--to", str(out))
 
-    assert files_under(out) == ["chains/" + chain_id + ".json", "decisions.jsonl", "records.jsonl"]
+    assert files_under(out) == ["chain.json", "decisions.jsonl", "records.jsonl"]
 
 
 def test_export_into_a_checkout_replaces_only_its_own_files(walk, kl_cli, tmp_path):
@@ -447,6 +452,37 @@ MALFORMED = {
 }
 
 
+#: A chain.json that says V1 and lacks what the walk reads, by the problem.
+BAD_CHAINS = {
+    "chain_without_nodes": {"format": "v1", "id": "x"},
+    "chain_node_without_kind": {"format": "v1", "id": "x", "nodes": [{"id": "a", "steps": []}]},
+    "chain_exec_without_steps": {
+        "format": "v1",
+        "id": "x",
+        "nodes": [{"id": "a", "kind": "exec"}],
+    },
+    # Every key the walk reads is checked, not only the ids and kinds.
+    "chain_exec_without_fix_loop": {
+        "format": "v1",
+        "id": "x",
+        "nodes": [{"id": "a", "kind": "exec", "steps": [], "on_failure": None}],
+    },
+    "chain_gate_without_message": {
+        "format": "v1",
+        "id": "x",
+        "nodes": [{"id": "g", "kind": "gate", "artifact": None, "reject_to": None}],
+    },
+}
+
+
+#: A chain.json that is the default but for one top-level string it lacks.
+LACKING = {"chain_without_id": "id", "chain_without_source": "source"}
+
+
+def lacking(chain: dict, problem: str) -> dict:
+    return {k: v for k, v in chain.items() if k != LACKING.get(problem)}
+
+
 def stray_record(problem: str) -> dict:
     labels = {
         "another_chains_slice": [f"{kl.SLICE_OF_LABEL}kl-bbbbbbbb"],
@@ -473,7 +509,11 @@ def stray_record(problem: str) -> dict:
         pytest.param("no_records", "no export at {out}: {out}/records.jsonl", id="no_records"),
         pytest.param("no_epic", "holds 0 chain epics", id="no_epic"),
         pytest.param("two_epics", "holds 2 chain epics", id="two_epics"),
-        pytest.param("no_template", "no frozen template", id="no_template"),
+        pytest.param(
+            "no_template",
+            "{out} was exported by an older Kraft Lite: no chain.json",
+            id="no_template",
+        ),
         # Everything else in the store is the directory's own: an export brings
         # its chain's epic and nodes, its run and its slices, and nothing more.
         *[
@@ -483,6 +523,25 @@ def stray_record(problem: str) -> dict:
                 id=problem,
             )
             for problem, stray in STRAYS.items()
+        ],
+        # A chain.json that says V1 but lacks what the walk reads, and a local
+        # frozen chain that cannot be compared with it.
+        *[
+            pytest.param(problem, named, id=problem)
+            for problem, named in {
+                "chain_without_nodes": "is not a usable V1 chain: it has no list of nodes",
+                "chain_node_without_kind": "is not a usable V1 chain: node 'a' has no kind",
+                "chain_exec_without_steps": "is not a usable V1 chain: exec node 'a' has no steps",
+                "chain_exec_without_fix_loop": (
+                    "is not a usable V1 chain: exec node 'a' has no fix_loop"
+                ),
+                "chain_gate_without_message": (
+                    "is not a usable V1 chain: gate node 'g' has no message"
+                ),
+                "chain_without_id": "is not a usable V1 chain: it has no id",
+                "chain_without_source": "is not a usable V1 chain: it has no source",
+                "corrupt_local_chain": "cannot read the chain {there}/.kraft-lite/chains/kl-a",
+            }.items()
         ],
         # Read from elsewhere, so a line it cannot read is named, not a traceback.
         *[
@@ -497,29 +556,31 @@ def stray_record(problem: str) -> dict:
         ],
     ],
 )
-def test_import_refuses_an_export_that_names_no_single_chain(problem, named, kl_cli, tmp_path):
+def test_import_refuses_an_export_that_names_no_single_chain(
+    problem, named, kl_cli, tmp_path, default_chain
+):
     (there,) = dirs(tmp_path, "there")
     out = tmp_path / "state"
     if problem != "no_directory":
         out.mkdir()
     if problem == "no_epic":
         (out / "records.jsonl").write_text("")
-    chain = json.loads(kl.DEFAULT_CHAIN.read_text())
+    chain = default_chain
     epics = {
         "two_epics": ["kl-aaaaaaaa", "kl-bbbbbbbb"],
         "no_template": ["kl-aaaaaaaa"],
-        **dict.fromkeys([*STRAYS, *MALFORMED], ["kl-aaaaaaaa"]),
+        **dict.fromkeys(
+            [*STRAYS, *MALFORMED, *BAD_CHAINS, *LACKING, "corrupt_local_chain"], ["kl-aaaaaaaa"]
+        ),
     }
     for chain_id in epics.get(problem, [BAD_CHAIN_IDS.get(problem)]):
         if chain_id is None:
             continue
         kl.append_jsonl(out / "records.jsonl", kl.materialize(chain, "t", chain_id))
         if problem != "no_template":
-            (out / "chains").mkdir(exist_ok=True)
-            # The template sits where the id points, as an export made to escape would.
-            template = out / "chains" / f"{chain_id}.json"
-            template.parent.mkdir(parents=True, exist_ok=True)
-            template.write_text(json.dumps(chain))
+            (out / "chain.json").write_text(
+                json.dumps(BAD_CHAINS.get(problem, lacking(chain, problem)))
+            )
     if problem in STRAYS:
         kl.append_jsonl(out / "records.jsonl", [stray_record(problem)])
     if problem in MALFORMED:
@@ -527,13 +588,17 @@ def test_import_refuses_an_export_that_names_no_single_chain(problem, named, kl_
         # First in its file, so the line named is line 1.
         bad = out / name
         bad.write_text(line + "\n" + (bad.read_text() if bad.exists() else ""))
+    if problem == "corrupt_local_chain":
+        kl._frozen_path(there, "kl-aaaaaaaa").parent.mkdir(parents=True)
+        kl._frozen_path(there, "kl-aaaaaaaa").write_text("{nope")
     before = files_under(tmp_path)
 
     refused = kl_cli(there, "import", "--from", str(out), ok=False)
 
     assert "Traceback" not in refused.stderr
-    assert named.format(out=out) in refused.stderr
-    assert files_under(tmp_path) == before and not (there / ".kraft-lite").exists()
+    assert named.format(out=out, there=there) in refused.stderr
+    assert files_under(tmp_path) == before
+    assert problem == "corrupt_local_chain" or not (there / ".kraft-lite").exists()
 
 
 @pytest.mark.parametrize("bad", BAD_CHAIN_IDS.values(), ids=BAD_CHAIN_IDS.keys())
@@ -557,7 +622,9 @@ def test_no_path_is_built_from_a_chain_id_start_never_minted(build, bad, tmp_pat
     ],
     ids=lambda verb: verb[0],
 )
-def test_a_stored_chain_id_that_start_never_minted_reaches_no_path(verb, kl_cli, tmp_path):
+def test_a_stored_chain_id_that_start_never_minted_reaches_no_path(
+    verb, kl_cli, tmp_path, default_chain
+):
     """A store written by hand, or by another tool through bd, can hold any epic
     id; every verb that builds a path from it refuses before reading or writing.
     An absolute id is the one that walks: `chain_index` groups a chain under the
@@ -565,7 +632,7 @@ def test_a_stored_chain_id_that_start_never_minted_reaches_no_path(verb, kl_cli,
     (here,) = dirs(tmp_path, "here")
     evil = str(tmp_path / "evil")
     assert "." not in evil, "a `.` in the temporary path would hide the chain's nodes"
-    chain = json.loads(kl.DEFAULT_CHAIN.read_text())
+    chain = default_chain
     records = kl.materialize(chain, "t", evil)
     records[0]["status"] = "closed"
     kl.append_jsonl(here / ".kraft-lite" / "chain.jsonl", records)

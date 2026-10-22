@@ -1615,7 +1615,13 @@ class DockerBackend:
         )
 
     def oneshot(
-        self, sandbox: dict, cwd: str | Path, home: str | Path, executables: Iterable[str] = ()
+        self,
+        sandbox: dict,
+        cwd: str | Path,
+        home: str | Path,
+        executables: Iterable[str] = (),
+        *,
+        work_item_id: str | None = None,
     ) -> Oneshot:
         # `executables` is for a host that must show them; an image has its own.
         try:
@@ -1626,7 +1632,9 @@ class DockerBackend:
     def launch_failed(self, cidfile: Path, returncode: int | None = None) -> bool:
         return launch_failed(cidfile, returncode)
 
-    def code_out(self, refs: Sequence[RefStore], session_id: str) -> list[str]:
+    def code_out(
+        self, refs: Sequence[RefStore], session_id: str, *, work_item_id: str
+    ) -> list[str]:
         return _refstore.sync_all(refs, session_id)
 
     def code_out_item(self, run_base: Path, work_item_id: str) -> list[str]:

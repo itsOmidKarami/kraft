@@ -295,11 +295,12 @@ jobs:
     # the exceptions that follow `changes`. On a docs-only pull request the
     # path-gated jobs report `skipped`, which passes, and `docs tests` must then
     # succeed; on any other change `docs tests` is expected to skip. On a pull
-    # request that changes no Python, `e2e (real CLIs)` skips as well. Anything
-    # else -- failure, cancelled, or a skip nobody asked for -- fails.
+    # request that changes no Python, `e2e (real CLIs)` and `e2e (macOS sandbox)`
+    # skip as well. Anything else -- failure, cancelled, or a skip nobody asked
+    # for -- fails.
     # tests/test_ci_workflow.py runs this script on each of those cases.
     name: test
-    needs: [changes, lint, test, docs-tests, e2e-cli, frontend, vscode, e2e, ui-contract]
+    needs: [changes, lint, test, docs-tests, e2e-cli, e2e-macos, frontend, vscode, e2e, ui-contract]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     env:
@@ -309,9 +310,9 @@ jobs:
     steps:
       - run: |
           # Job ids, not check names: `e2e` is playwright, `e2e-cli` is
-          # e2e (real CLIs), and `test` is the whole python matrix. Read into
-          # a variable first, so a jq error fails the step instead of
-          # vanishing inside a process substitution.
+          # e2e (real CLIs), `e2e-macos` is e2e (macOS sandbox), and `test` is
+          # the whole python matrix. Read into a variable first, so a jq error
+          # fails the step instead of vanishing inside a process substitution.
           results=$(jq -er 'to_entries[] | "\(.key) \(.value.result)"' <<<"$NEEDS")
           if [ -z "$results" ]; then
             echo "::error::no job results to check"
@@ -325,7 +326,7 @@ jobs:
               *:success:*) ;;
               docs-tests:skipped:false:*) fail ;;  # docs-only: it stands in for the shards
               docs-tests:skipped:*) ;;             # a code change skips it
-              e2e-cli:skipped:*:false) ;;          # no Python changed
+              e2e-cli:skipped:*:false | e2e-macos:skipped:*:false) ;;  # no Python changed
               # docs-only: the path-gated jobs skip, and only they may
               test:skipped:false:* | frontend:skipped:false:* | vscode:skipped:false:*) ;;
               e2e:skipped:false:* | ui-contract:skipped:false:*) ;;
@@ -379,6 +380,59 @@ jobs:
         with:
           name: e2e-reports
           path: e2e-junit.xml
+
+  e2e-macos:
+    # `kind: os` on a Mac runs under Seatbelt (`/usr/bin/sandbox-exec`), which
+    # no Linux runner has: the darwin paths of the launcher, the profile and the
+    # launch run here and nowhere else. Its e2e test is the twin of the bwrap
+    # one. KRAFT_E2E_REQUIRE=sandbox-exec makes a skipped sandbox-exec test an
+    # error, as for the Linux job. Nothing is installed beyond the repo's own
+    # setup (uv): the runner's own macOS, git, curl and sh are what the sandbox
+    # shows a worker. macos-15-intel is the x86_64 runner: the variadic
+    # `sandbox_check` call and Homebrew under /usr/local differ there.
+    name: e2e (macOS sandbox, ${{ matrix.os }})
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.python != 'false' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    # The runner's Homebrew Python links openssl from /opt/homebrew, which a sandbox
+    # does not show; uv's own Python carries its libraries, as most installs do.
+    env:
+      UV_PYTHON_PREFERENCE: only-managed
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: git identity
+        run: |
+          git config --global user.email ci@kraft.invalid
+          git config --global user.name "Kraft CI"
+      - run: uv sync --frozen
+      - run: >
+          uv run pytest -n logical --durations=25 -rs --junitxml=e2e-macos-junit.xml
+          tests/worker/test_gates_seatbelt.py
+          tests/worker/backends/test_seatbelt.py
+          tests/worker/backends/test_seatbelt_launch.py
+          tests/worker/test_os_init.py
+          tests/worker/test_os_init_sweep.py
+          tests/worker/test_refstore.py
+          tests/worker/test_mounts.py
+          tests/worker/test_host_view.py
+        env:
+          KRAFT_E2E_REQUIRE: sandbox-exec
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-macos-reports-${{ matrix.os }}
+          path: e2e-macos-junit.xml
 
   lite-floor:
     # The kraft-lite plugin claims to need "python3 and nothing else". Both ends

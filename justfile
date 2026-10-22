@@ -244,6 +244,12 @@ bundle:
     rm -f src/kraft/_bundled/config/access.yaml
     rm -f src/kraft/_bundled/config/notify.yaml
 
+# Refresh Kraft Lite's bundled copy of the packaged library (library.yaml and
+# chains/). tests/plugins/test_kraft_lite_parity.py fails until this is run.
+[doc("Copy the packaged library into plugins/kraft-lite/config")]
+kraft-lite-config:
+    rm -rf plugins/kraft-lite/config && mkdir -p plugins/kraft-lite/config/chains && cp config/library.yaml plugins/kraft-lite/config/ && cp config/chains/*.yaml plugins/kraft-lite/config/chains/
+
 # Install `kraft` as a real command (then just run `kraft` from anywhere).
 # State lands in ~/.kraft, seeded from config/ on first run.
 [doc("Install `kraft` as a real command; state in ~/.kraft")]

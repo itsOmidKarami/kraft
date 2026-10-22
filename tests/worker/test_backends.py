@@ -92,7 +92,7 @@ class Remote:
     def launch_failed(self, cidfile):
         return False
 
-    def code_out(self, refs, session_id):
+    def code_out(self, refs, session_id, *, work_item_id):
         return []
 
     def code_out_item(self, run_base, work_item_id):
@@ -250,7 +250,7 @@ async def test_a_collect_that_fails_still_publishes_the_sessions_commits(
     monkeypatch.setattr(
         remote, "code_in", lambda *a, **kw: (SimpleNamespace(carried=None, branch=None),)
     )
-    monkeypatch.setattr(remote, "code_out", lambda refs, sid: published.append(sid) or [])
+    monkeypatch.setattr(remote, "code_out", lambda refs, sid, **kw: published.append(sid) or [])
     monkeypatch.setattr(remote, "collect", fail)
     await database.write(
         lambda c: store.create_work_item(

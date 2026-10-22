@@ -220,7 +220,7 @@ them unless you use the same tools:
 | `.beads/` | beads config and git hooks for the maintainer's private tracker | No |
 | `.agents/` | a beads skill for agent sessions; `just setup` adds superpowers and impeccable beside it, gitignored | Only with an agent other than Claude Code |
 | `.codex/` | Codex hooks that call `bd`; they fail without beads installed | No |
-| `.kraft-lite/` | this repo's Kraft Lite hook registry | No |
+| `.kraft-lite/` | this repo's Kraft Lite bindings (`bindings.yaml`) | No |
 | `.gitlab/` | the PR template for GitLab, from before the move to GitHub; a symlink to `.github/`'s | No |
 
 ## Tests

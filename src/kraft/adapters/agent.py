@@ -1155,6 +1155,7 @@ async def run_agent_task(
                     cwd,
                     _backends.for_sandbox(sandbox).home(run_dirs, work_item_id),
                     executables=(exe[0],),
+                    work_item_id=work_item_id,
                 )
                 if sandbox
                 else None
@@ -1189,6 +1190,7 @@ async def run_agent_task(
                     cwd,
                     _backends.for_sandbox(sandbox).home(run_dirs, work_item_id),
                     executables=(exe[0],),
+                    work_item_id=work_item_id,
                 )
                 if sandbox
                 else None

@@ -361,7 +361,9 @@ async def _sync_refs(
     """Publish the item branch out of a sandboxed session, in every repository
     of its checkout, and record why not where it could not: the branch there
     then stays where it was, and a person decides."""
-    problems = await asyncio.to_thread(backend.code_out, refs, session_id)
+    problems = await asyncio.to_thread(
+        backend.code_out, refs, session_id, work_item_id=work_item_id
+    )
     branch = refs[0].branch if refs else None
     for problem in problems:
         await _record_unsynced(db, branch, work_item_id, session_id, problem)
