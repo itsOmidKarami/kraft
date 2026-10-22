@@ -2,8 +2,10 @@
 (Linux) or sandbox-exec (macOS). The macOS branches also run on Linux, under a
 driver that claims `sys.platform == "darwin"` and stubs what needs a real Mac."""
 
+import base64
 import json
 import os
+import re
 import resource
 import shlex
 import signal
@@ -15,6 +17,8 @@ import time
 from pathlib import Path
 
 import pytest
+
+from kraft.worker import os_init
 
 OS_INIT = Path(__file__).parents[2] / "src/kraft/worker/os_init.py"
 PY = [sys.executable, "-I", "-S"]
@@ -390,16 +394,21 @@ def test_init_environment(tmp_path, env, code, want, darwin):
 
 
 @pytest.mark.parametrize(
-    ("cmd", "code", "last"),
+    ("cmd", "code", "last", "darwin"),
     [
-        (["/nonexistent/cmd"], 127, HINT),
-        ([*PY, "-c", "raise SystemExit(127)"], 127, HINT),
-        (["/etc/passwd"], 126, "kraft: /etc/passwd is not executable"),
+        (["/nonexistent/cmd"], 127, HINT, False),
+        ([*PY, "-c", "raise SystemExit(127)"], 127, HINT, False),
+        pytest.param(
+            ["/etc/passwd"], 126, "kraft: /etc/passwd is not executable", False, marks=linux_only
+        ),
+        # Seatbelt refuses a file it hides as a permission error, or sh's 126
+        (["/etc/passwd"], 126, HINT, True),
+        ([*PY, "-c", "raise SystemExit(126)"], 126, HINT, True),
     ],
-    ids=["missing", "exits-127", "not-executable"],
+    ids=["missing", "exits-127", "not-executable", "unreadable-on-macos", "exits-126-on-macos"],
 )
-def test_init_exec_failure(cmd, code, last):
-    r = run(init_argv(*cmd))
+def test_init_exec_failure(cmd, code, last, darwin):
+    r = run(init_argv(*cmd, darwin=darwin))
     assert (r.returncode, r.stderr.splitlines()[-1]) == (code, last)
 
 
@@ -439,14 +448,18 @@ def test_launch_refuses_unknown_arch(launcher, claims, want):
     assert (r.returncode, r.stdout, r.stderr.strip()) == (125, "", want)
 
 
-def _unix_server(path, conns=1):
+def _unix_server(path, conns=1, seen=None):
+    """A stand-in for the channel socket: answers `pong:` and the first 16 bytes, which
+    it also appends to `seen`."""
     srv = socket.socket(socket.AF_UNIX)
     srv.bind(str(path))
     srv.listen(conns)
 
     def handle(conn):
         try:
-            conn.sendall(b"pong:" + conn.recv(16))
+            first = conn.recv(16)
+            seen is None or seen.append(first)
+            conn.sendall(b"pong:" + first)
         except OSError:
             pass
         finally:
@@ -536,10 +549,12 @@ def record(tmp_path):
 
 
 RELAY_CLIENT = (
-    "import os, socket, urllib.parse\n"
+    "import base64, os, socket, urllib.parse\n"
     "u = urllib.parse.urlparse(os.environ['HTTPS_PROXY'])\n"
+    "auth = base64.b64encode(f'{u.username}:{u.password}'.encode()).decode()\n"
     "c = socket.create_connection((u.hostname, u.port), timeout=10)\n"
-    "c.sendall(b'ping')\n"
+    "head = f'POST http://x/ HTTP/1.1\\r\\nProxy-Authorization: Basic {auth}\\r\\n\\r\\n'\n"
+    "c.sendall(head.encode() + b'ping')\n"
     "c.shutdown(socket.SHUT_WR)\n"
     "buf = b''\n"
     "while data := c.recv(100):\n"
@@ -554,10 +569,11 @@ def test_launch_darwin_relay(launcher, tmp_path, short_run):
     r = run(launcher("launch", py(RELAY_CLIENT), relay=sock, darwin=True))
     seen = record(tmp_path)
     port = int(seen["argv"][2].removeprefix("RELAY_PORT="))
-    assert (r.stdout.strip(), seen["argv"][1], port > 0) == ("pong:ping", "-D", True)
-    assert {seen["env"][n] for n in ("HTTPS_PROXY", "http_proxy", "HTTP_PROXY", "https_proxy")} == {
-        f"http://127.0.0.1:{port}"
-    }
+    # the client proved it holds the token the launcher put in the proxy URL
+    assert (r.stdout.strip(), seen["argv"][1], port > 0) == ("pong:POST http://x/ H", "-D", True)
+    urls = {seen["env"][n] for n in ("HTTPS_PROXY", "http_proxy", "HTTP_PROXY", "https_proxy")}
+    assert len(urls) == 1
+    assert re.fullmatch(rf"http://kraft:[\w-]{{43}}@127\.0\.0\.1:{port}", urls.pop())
     assert (seen["env"]["NO_PROXY"], seen["env"]["NODE_USE_ENV_PROXY"]) == ("", "1")
 
 
@@ -636,3 +652,98 @@ def test_launch_darwin_returns_with_a_survivor(launcher, tmp_path):
 def test_macos_refuses_what_it_does_not_do(launcher, tmp_path, argv, want):
     r = run(argv(launcher, tmp_path))
     assert (r.returncode != 0, want in r.stderr) == (True, True)
+
+
+def _relay(short_run, token, seen):
+    """A relay in this process in front of a stand-in channel socket; its port."""
+    sock = short_run.base / "r.sock"
+    _unix_server(sock, seen=seen)
+    srv = os_init._listen(0)
+    os_init._start_relay(str(sock), srv, token)
+    return srv.getsockname()[1]
+
+
+def _send(port, data):
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as c:
+        c.sendall(data)
+        buf = b""
+        while chunk := c.recv(1000):
+            buf += chunk
+    return buf
+
+
+def _head(auth):
+    lines = ["CONNECT x:443 HTTP/1.1", "Host: x:443", *([auth] if auth else [])]
+    return ("\r\n".join(lines) + "\r\n\r\n").encode()
+
+
+def _basic(token):
+    return base64.b64encode(f"kraft:{token}".encode()).decode()
+
+
+DENIED = b'HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="kraft"'
+
+
+@pytest.mark.parametrize(
+    ("data", "reply", "reached"),
+    [
+        (_head(None), DENIED, []),
+        (_head(f"Proxy-Authorization: Basic {_basic('other')}"), DENIED, []),
+        (_head(f"Proxy-Authorization: Bearer {_basic('tok')}"), DENIED, []),
+        (_head(f"X-Other: Basic {_basic('tok')}"), DENIED, []),
+        (b"A" * (os_init.HEAD_LIMIT + 10), DENIED, []),
+        (_head(f"Proxy-Authorization: Basic {_basic('tok')}"), b"pong:CONNECT x:443 HT", True),
+        (_head(f"proxy-authorization:Basic {_basic('tok')} "), b"pong:CONNECT x:443 HT", True),
+    ],
+    ids=[
+        "no-header",
+        "wrong-token",
+        "wrong-scheme",
+        "other-header",
+        "head-too-long",
+        "right-token",
+        "lowercase",
+    ],
+)
+def test_relay_wants_the_token(short_run, data, reply, reached):
+    seen = []
+    port = _relay(short_run, "tok", seen)
+    assert _send(port, data).startswith(reply)
+    time.sleep(0.2)  # a refused connection must never have reached the channel
+    assert bool(seen) is bool(reached)
+
+
+def test_relay_survives_the_thread_limit(short_run, monkeypatch):
+    port = _relay(short_run, None, [])
+    real, failed = threading.Thread, []
+
+    def flaky(*args, **kw):
+        thread = real(*args, **kw)
+        if not failed:  # the first connection's thread cannot start
+            failed.append(thread)
+            thread.start = lambda: (_ for _ in ()).throw(RuntimeError("can't start new thread"))
+        return thread
+
+    monkeypatch.setattr(os_init.threading, "Thread", flaky)
+    with socket.create_connection(("127.0.0.1", port)) as c:  # dropped
+        assert c.recv(10) == b""
+    monkeypatch.undo()
+    assert _ask(port) == b"pong:ping"
+
+
+def test_launch_darwin_survives_a_sandbox_exec_that_will_not_start(launcher, tmp_path):
+    sweeps = tmp_path / "sweeps"
+    argv = launcher("launch", py("pass"), darwin=True, sweeps=sweeps)
+    argv = [a.replace(str(tmp_path / "sandbox-exec"), "/nonexistent/sandbox-exec") for a in argv]
+    r = run(argv)
+    marker, control, tmpdir = session_files(tmp_path)
+    assert (r.returncode, "cannot start" in r.stderr, tmpdir.exists()) == (125, True, False)
+    assert sweeps.read_text().split() == [str(marker), str(control)]  # the marker was swept
+
+
+def test_launch_darwin_stops_copying_a_survivor_that_keeps_writing(launcher, tmp_path):
+    survivor = "for i in $(seq 400); do echo x; sleep 0.05; done"
+    code = f"import subprocess; subprocess.Popen(['sh', '-c', {survivor!r}]); print('out')"
+    began = time.monotonic()
+    r = run(launcher("launch", py(code), darwin=True, sweeps=tmp_path / "sweeps"))
+    assert (r.stdout.startswith("out\n"), time.monotonic() - began < 10) == (True, True)

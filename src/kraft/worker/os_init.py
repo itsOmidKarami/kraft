@@ -16,12 +16,15 @@ literal in the command's environment.
 
 from __future__ import annotations
 
+import base64
 import ctypes
 import errno
 import functools
+import hmac
 import os
 import platform
 import resource
+import secrets
 import select
 import shutil
 import signal
@@ -43,6 +46,8 @@ STARTED_ENV = "OS_INIT_STARTED_FD"
 SANDBOX_FILTER_PATH = 1
 SANDBOX_CHECK_NO_REPORT = 0x40000000
 PROC_PIDTBSDINFO = 3
+DRAIN_SECONDS = 2  # how long a survivor's output is still copied after the sweep
+HEAD_LIMIT = 65536  # the largest request head the relay reads before it has the token
 CHASE_GAP = 64  # absent pids in a row that end the walk past the snapshot
 QUIET_PASSES = 3  # empty scans, 20 ms apart, before the marker goes
 #: The worker's proxy environment under `network:` on macOS, as `mounts.RELAY_PROXY_ENV`
@@ -141,9 +146,16 @@ def _launch(mode, argv):
         pass_fds.append(st_w)
         kw = {"stdout": out_w, "stderr": out_w}
     # A oneshot's client may hold the operator's terminal: a new session takes it off.
-    proc = subprocess.Popen(
-        cmd, env=env, pass_fds=pass_fds, start_new_session=darwin and mode == "oneshot", **kw
-    )
+    try:
+        proc = subprocess.Popen(
+            cmd, env=env, pass_fds=pass_fds, start_new_session=darwin and mode == "oneshot", **kw
+        )
+    except OSError as e:
+        if not darwin:
+            raise
+        print(f"kraft: os sandbox: cannot start {cmd[0]}: {e}", file=sys.stderr)
+        _end_session(opts)  # the marker, the temporary directory
+        return 125
     if seccomp is not None:
         os.close(seccomp)
 
@@ -183,9 +195,12 @@ def _prepare_darwin(opts, env, cmd):
         return cmd
     listener = _listen(0)  # the kernel picks: the profile cannot say "the port I bound"
     port = listener.getsockname()[1]
-    env.update({n: f"http://127.0.0.1:{port}" for n in PROXY_NAMES})
+    # The port is open to every process on the Mac, so the relay answers only whoever
+    # holds this session's token, which the proxy URL carries.
+    token = secrets.token_urlsafe(32)
+    env.update({n: f"http://kraft:{token}@127.0.0.1:{port}" for n in PROXY_NAMES})
     env.update({"NO_PROXY": "", "no_proxy": "", "NODE_USE_ENV_PROXY": "1"})
-    _start_relay(opts["--relay-sock"], listener)
+    _start_relay(opts["--relay-sock"], listener, token)
     return [cmd[0], "-D", f"RELAY_PORT={port}", *cmd[1:]]
 
 
@@ -210,13 +225,17 @@ def _exit_code_of(returncode):
 
 def _copy(out_r, st_r, started_file, ended=None):
     """Copy the output pipe to fd 1 until EOF; note the first started byte. With
-    `ended`, also stop once it is set and nothing is left to read."""
+    `ended`, also stop once it is set and nothing is left to read, or
+    `DRAIN_SECONDS` after it, for a survivor that keeps writing."""
     watch = [out_r, st_r]
     broken = False
+    stop_at = None
     while out_r in watch:
         ready = select.select(watch, [], [], None if ended is None else 0.2)[0]
-        if not ready and ended is not None and ended.is_set():
-            break
+        if ended is not None and ended.is_set():
+            stop_at = stop_at or time.monotonic() + DRAIN_SECONDS
+            if not ready or time.monotonic() > stop_at:
+                break
         for fd in ready:
             data = os.read(fd, 65536)
             if not data:
@@ -250,11 +269,51 @@ def _pump(src, dst):
         pass
 
 
-def _relay_conn(conn, path):
+DENIED = (
+    b"HTTP/1.1 407 Proxy Authentication Required\r\n"
+    b'Proxy-Authenticate: Basic realm="kraft"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'
+)
+
+
+def _read_head(conn):
+    """The request head up to its blank line (and whatever followed in the same
+    reads), or None when it is too long, never ends or the peer is gone."""
+    conn.settimeout(5)
+    buf = b""
+    try:
+        while (end := buf.find(b"\r\n\r\n") + 4) == 3:
+            if len(buf) > HEAD_LIMIT or not (data := conn.recv(HEAD_LIMIT)):
+                return None
+            buf += data
+        conn.settimeout(None)
+    except OSError:
+        return None
+    return buf if end <= HEAD_LIMIT else None
+
+
+def _authorized(head, token):
+    want = b"Basic " + base64.b64encode(f"kraft:{token}".encode())
+    for line in head.split(b"\r\n\r\n", 1)[0].split(b"\r\n")[1:]:
+        name, _, value = line.partition(b":")
+        if name.strip().lower() == b"proxy-authorization" and hmac.compare_digest(
+            value.strip(), want
+        ):
+            return True
+    return False
+
+
+def _relay_conn(conn, path, token=None):
     up = None
     try:
+        head = b""
+        if token is not None:
+            head = _read_head(conn)
+            if head is None or not _authorized(head, token):
+                conn.sendall(DENIED)  # nothing reaches the channel
+                return
         up = socket.socket(socket.AF_UNIX)
         up.connect(path)
+        up.sendall(head)
         t = threading.Thread(target=_pump, args=(up, conn), daemon=True)
         t.start()
         _pump(conn, up)
@@ -275,8 +334,9 @@ def _listen(port):
     return srv
 
 
-def _start_relay(path, srv):
-    """Forward each connection `srv` accepts to the unix socket at `path`."""
+def _start_relay(path, srv, token=None):
+    """Forward each connection `srv` accepts to the unix socket at `path`; with a
+    `token`, only those whose request head carries it."""
     soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
     if soft != hard:  # each relayed connection holds two descriptors
         resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
@@ -288,7 +348,11 @@ def _start_relay(path, srv):
             except OSError:  # EMFILE and the like: wait for descriptors, never give up
                 time.sleep(0.05)
                 continue
-            threading.Thread(target=_relay_conn, args=(conn, path), daemon=True).start()
+            try:
+                threading.Thread(target=_relay_conn, args=(conn, path, token), daemon=True).start()
+            except RuntimeError:  # the thread limit: drop this one, keep listening
+                conn.close()
+                time.sleep(0.05)
 
     threading.Thread(target=accept_loop, daemon=True).start()
 
@@ -299,10 +363,9 @@ def _libc():
 
 
 def _sandbox_check():
-    """`sandbox_check(pid, operation, type, path) -> int` over libsystem_sandbox.
-    It is variadic: arm64 passes a variadic argument on the stack, where ctypes
-    would put it in a register, so five unused `c_long` fill x3-x7 and the path
-    comes ninth; x86_64 passes the four in registers."""
+    """`sandbox_check(pid, operation, type, path) -> int` over libsystem_sandbox. It
+    is variadic: only the first three arguments are declared, so ctypes passes the
+    path as a variadic one, as the C ABI wants."""
     machine = platform.machine()
     if machine not in ("arm64", "x86_64"):
         raise OSError(f"kind: os supports arm64 and x86_64 Macs, not {machine}")
@@ -310,16 +373,9 @@ def _sandbox_check():
         fn = _libc().sandbox_check
     except AttributeError as e:
         raise OSError("libsystem_sandbox has no sandbox_check") from e
-    fill = (0,) * 5 if machine == "arm64" else ()
     fn.restype = ctypes.c_int
-    fn.argtypes = [
-        ctypes.c_int,
-        ctypes.c_char_p,
-        ctypes.c_int,
-        *[ctypes.c_long] * len(fill),
-        ctypes.c_char_p,
-    ]
-    return lambda pid, operation, kind, path: fn(pid, operation, kind, *fill, path)
+    fn.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+    return lambda pid, operation, kind, path: fn(pid, operation, kind, ctypes.c_char_p(path))
 
 
 def session_pids(marker, control, stop=False):
@@ -456,6 +512,8 @@ def _init(argv):
         child = subprocess.Popen(cmd)  # raises when the exec fails: no byte then
     except PermissionError:
         print(f"kraft: {cmd[0]} is not executable", file=sys.stderr)
+        if sys.platform == "darwin":  # Seatbelt refuses an unreadable file as a permission error
+            print(HINT, file=sys.stderr)
         return 126
     except OSError:
         print(HINT, file=sys.stderr)
@@ -479,7 +537,7 @@ def _init(argv):
     except ChildProcessError:
         pass
     code = _exit_code(status)
-    if code == 127:
+    if code == 127 or (code == 126 and sys.platform == "darwin"):  # sh's "Operation not permitted"
         print(HINT, file=sys.stderr)
     return code
 

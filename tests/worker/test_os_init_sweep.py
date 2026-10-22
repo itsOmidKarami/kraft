@@ -2,6 +2,7 @@
 The first tests run anywhere, with libsandbox faked; the e2e ones run real
 sandboxes on a Mac."""
 
+import ctypes
 import os
 import struct
 import subprocess
@@ -30,20 +31,16 @@ class _Fn:
         return self.fn(*args)
 
 
-@pytest.mark.parametrize(
-    ("machine", "sees", "types"),
-    [
-        ("arm64", (1, b"op", 2, 0, 0, 0, 0, 0, b"/p"), 9),
-        ("x86_64", (1, b"op", 2, b"/p"), 4),
-    ],
-    ids=["arm64-path-ninth", "x86_64-path-fourth"],
-)
-def test_sandbox_check_declaration(monkeypatch, machine, sees, types):
+@pytest.mark.parametrize("machine", ["arm64", "x86_64"])
+def test_sandbox_check_declaration(monkeypatch, machine):
+    # Variadic: only the first three arguments are declared, the path rides after them.
     fn = _Fn()
     monkeypatch.setattr(os_init.platform, "machine", lambda: machine)
     monkeypatch.setattr(os_init, "_libc", lambda: SimpleNamespace(sandbox_check=fn))
     os_init._sandbox_check()(1, b"op", 2, b"/p")
-    assert (fn.calls, len(fn.argtypes)) == ([sees], types)
+    [(pid, operation, kind, path)] = fn.calls
+    assert ((pid, operation, kind, path.value), len(fn.argtypes)) == ((1, b"op", 2, b"/p"), 3)
+    assert isinstance(path, ctypes.c_char_p)
 
 
 @pytest.mark.parametrize(
