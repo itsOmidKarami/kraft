@@ -129,7 +129,9 @@ branch. The shipped `default` chain sets it on `merge_request_feedback`:
 When a rebase moves the base, Kraft re-runs the exec nodes from `restart_from`
 through this node: the [span](/concepts/vocabulary#span). A gate in that range
 keeps its approval after a clean rebase. It reopens, and needs approving again,
-after a rebase that needed a conflict resolved.
+after a rebase that needed a conflict resolved. A `chain_finalized` gate in the
+range reopens after a clean rebase too, since a fix loop in the span can commit
+before the walk passes it again.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|

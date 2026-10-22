@@ -12,6 +12,7 @@ from support.item_walk import NO_SETUP, approve, walk_once
 
 from kraft import executor, inplace, store
 from kraft import policy as _policy
+from kraft.executor import gates
 from kraft.executor.context import BASE_MOVED
 
 
@@ -466,17 +467,26 @@ def _gated(*gates, **rebase_fields):
     return [verify, *(v1_node(g, "gate") for g in gates or ("review",)), rebase, publish]
 
 
-@pytest.mark.parametrize("refused_rewind", [False, True], ids=["approved", "a-refused-rewind"])
+@pytest.mark.parametrize(
+    ("refused_rewind", "final"),
+    [(False, False), (True, False), (False, True)],
+    ids=["approved", "a-refused-rewind", "but-the-final-gate"],
+)
 async def test_a_clean_restart_passes_every_approved_gate_in_its_span(
-    item_on, script, refused_rewind
+    item_on, script, refused_rewind, final
 ):
     """Ruling 162 with two approved gates in the span: a clean moved base
     reopens neither, and the restarted walk passes over both -- the older
     `review` too, though `signoff`'s approval is the newer gate event. A
     person's changes asked before them, whose action was refused (cancelled),
-    sent nothing back and takes neither approval. The shipped chain's one gate:
+    sent nothing back and takes neither approval. A `chain_finalized`
+    `signoff` reopens all the same: `verify`'s fix loop can commit in the
+    span, and its approval would let that reach the merge unseen. The shipped
+    chain's one gate:
     test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head."""
-    it = await item_on(_gated("review", "signoff", **RESTART), "rebase")
+    verify, review, signoff, rebase, publish = _gated("review", "signoff", **RESTART)
+    signoff = {**signoff, "chain_finalized": final}
+    it = await item_on([verify, review, signoff, rebase, publish], "rebase")
     for gate in ("review", "signoff"):
         await approve(it, gate)
     if refused_rewind:
@@ -486,8 +496,15 @@ async def test_a_clean_restart_passes_every_approved_gate_in_its_span(
         await it.database.write(lambda c: store.cancel_rewind(c, it.id, "r1"))
     script.effects = {"sync": _moves_base(it)}
 
-    assert await _walk_from(it, "rebase") == "completed"
+    assert await _walk_from(it, "rebase") == ("awaiting_gate" if final else "completed")
     assert len(it.events("base_change_restart")) == 1
+    if final:
+        assert script.calls == ["sync", "open", "check"]
+        assert [e["payload"] for e in it.events("gate_reopened")] == [
+            {"gate": "signoff", "reason": "base_changed"}
+        ]
+        assert gates.pending_gate(it.database, it.id) == "signoff"
+        return
     assert script.calls == ["sync", "open", "check", "sync", "open", "publish"]
     assert [e["payload"]["gate"] for e in it.events("gate_requested")] == ["review", "signoff"]
     assert it.events("gate_reopened") == []

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
@@ -2367,7 +2367,7 @@ async def _clear_span_counters(db, work_item_id: str, span) -> None:
             )
 
 
-async def _reopen_gates(db, work_item_id: str, nodes, span: range, reason: str) -> None:
+async def _reopen_gates(db, work_item_id: str, nodes, span: Iterable[int], reason: str) -> None:
     """Reopen every approved gate among the nodes at `span`'s indexes, saying
     `reason`: each one whose approval stands, read gate by gate."""
     for i in span:
@@ -2427,11 +2427,13 @@ async def _restart_span(
     `reopen_gates` is whether a conflict was resolved to get here (Ruling 162).
     A clean rebase -- the forge's forced rebase included, which succeeds only
     with no textual conflict -- changes nothing a gate saw, so an approved gate
-    in the span keeps its approval and the restarted walk passes over it. A
-    resolved conflict changed code no gate saw: every approved gate in the span
+    in the span keeps its approval and the restarted walk passes over it --
+    all but a `chain_finalized` one, which reopens (`base_changed`) whatever
+    `reopen_gates` says: the span's own fix loops can commit before the walk
+    passes it again, and its approval is what lets the merge run. A resolved
+    conflict changed code no gate saw: every approved gate in the span
     reopens, and a human approves it again. A merge-rejection rewind always
-    reopens them, clean rebase or not: the rewound span's own fix loops can
-    commit before any gate sees the head again.
+    reopens them, clean rebase or not, for the same reason as the final gate.
     """
     node = nodes[index]
     bound = cap(policy)
@@ -2445,6 +2447,16 @@ async def _restart_span(
     span = [n for n in nodes[target : index + 1] if isinstance(n.node, ExecNode)]
     if reopen_gates:
         await _reopen_gates(db, work_item_id, nodes, range(target, index), reopen_reason)
+    else:
+        # A clean rebase changed nothing a gate saw, but the span's own fix
+        # loops can commit before the walk comes back past the final gate:
+        # that one reopens all the same, or its approval would let them merge.
+        finals = [
+            i
+            for i in range(target, index)
+            if isinstance(nodes[i].node, GateNode) and nodes[i].node.chain_finalized
+        ]
+        await _reopen_gates(db, work_item_id, nodes, finals, "base_changed")
     await _clear_span_counters(db, work_item_id, span)
     # The cursor moves last, after the gates reopened: a crash before it
     # leaves the item on node `index`, where a resume finds its unanswered

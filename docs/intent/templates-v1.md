@@ -1746,11 +1746,12 @@ origin: src/kraft/adapters/forge/run.py §_run_one -- Kraft-tx0dz. A member's re
 ## REQ base-change-restart-passes-an-approved-gate
 
 A base-change restart after a clean rebase SHALL NOT reopen any gate in its
-span that was already approved; the restarted walk SHALL pass over each one. A restart
+span that was already approved but a `chain_finalized` one, which SHALL reopen
+with the reason `base_changed`; the restarted walk SHALL pass over each other one. A restart
 after an explicit conflict handler resolved a rebase conflict SHALL reopen every
 approved gate in its span, whether the conflict arose inside the walk or when
 `/retry` or `/resume` refreshed the worktree.
-enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head, tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[approved], tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[a-refused-rewind], tests/executor/test_base_change.py::test_a_resolved_conflict_reopens_the_approved_gates_in_its_span, tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[retry], tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[resume]
+enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head, tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[approved], tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[a-refused-rewind], tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[but-the-final-gate], tests/executor/test_base_change.py::test_a_resolved_conflict_reopens_the_approved_gates_in_its_span, tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[retry], tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[resume]
 origin: src/kraft/executor/walk.py §_restart_for_base_change -- Omid's decision: a clean rebase, the forge's forced rebase included, changes nothing a gate saw; a resolved conflict changed code no gate saw, so a human approves again. Distinct from `retry-reopens-invalidated-gates`: a restart is the walk's answer to a moved base, not an operator's retry.
 
 ## REQ optional-pre-draft-gate-keeps-work-local
