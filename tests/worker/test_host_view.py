@@ -408,6 +408,21 @@ def test_system_dirs_per_platform(monkeypatch, platform, has, excluded):
         host_view.system_dirs.cache_clear()
 
 
+@pytest.mark.parametrize("answer", ["", "\n", "{dir}\n"], ids=["empty", "blank", "selected"])
+def test_system_dirs_adds_the_selected_developer_dir_only_when_named(
+    fake_darwin, monkeypatch, tmp_path, answer
+):
+    """An empty `xcode-select -p` answer is no directory, not the cwd."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    done = subprocess.CompletedProcess([], 0, answer.format(dir=tmp_path), "")
+    monkeypatch.setattr(host_view.subprocess, "run", lambda *a, **k: done)
+    dirs = host_view.system_dirs()
+    assert (tmp_path.resolve() in dirs) == (answer == "{dir}\n")
+    assert cwd.resolve() not in dirs
+
+
 @pytest.fixture
 def fresh_interpreter():
     host_view.init_interpreter.cache_clear()

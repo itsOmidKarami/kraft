@@ -65,6 +65,39 @@ def test_render_order(tmp_path):
     assert "RELAY_PORT" not in profile()
 
 
+def test_render_late_allows_follow_the_mounts(tmp_path):
+    """A read-only mount holding the tmpdir (a oneshot shows home read-only) must
+    not deny the worker its own tmpdir, marker and socket: last match wins."""
+    home = tmp_path.resolve() / "home"
+    tmp = home / "run" / "tmp" / "s"
+    tmp.mkdir(parents=True)
+    text = profile(mounts=[Mount(home, home, True)], tmpdir=tmp, marker=home / "run" / "m")
+    ro = text.index(f'(deny file-write* (subpath "{home}"))')
+    sub = f'(subpath "{tmp}")'
+    for rule in (
+        f"(allow file-read* file-write* {sub})",
+        f"(allow network-bind network-inbound network-outbound (local unix-socket {sub})",
+        f"(allow network-outbound (remote unix-socket {sub})",
+        f'(allow file-read-data (literal "{home}/run/m"))',
+        '(allow file-write* (literal "/dev/null"))',
+    ):
+        assert text.index(rule) > ro, rule
+
+
+def test_render_sorts_mounts_by_their_resolved_depth(tmp_path):
+    """`lnk` is two components deep but resolves to four: the ro child written
+    through it must still render after its rw parent."""
+    root = tmp_path.resolve()
+    parent = root / "d1" / "d2" / "d3"
+    (parent / "c").mkdir(parents=True)
+    (root / "lnk").symlink_to(parent)
+    text = profile(
+        mounts=[Mount(root / "lnk" / "c", root / "lnk" / "c", True), Mount(parent, parent, False)]
+    )
+    rw = text.index(f'(allow file-read* file-write* (subpath "{parent}"))')
+    assert rw < text.index(f'(deny file-write* (subpath "{parent}/c"))')
+
+
 def test_render_usr_local_then_roots(monkeypatch):
     monkeypatch.setattr(host_view, "system_excluded", lambda: (Path("/usr/local"),))
     text = profile(read_roots=[Path("/usr/local/opt/python@3.12")])

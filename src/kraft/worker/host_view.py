@@ -78,10 +78,11 @@ def system_dirs() -> tuple[Path, ...]:
     ]
     try:
         out = subprocess.run(["xcode-select", "-p"], capture_output=True, text=True, timeout=5)
-        selected = Path(out.stdout.strip()).resolve() if out.returncode == 0 else None
+        picked = out.stdout.strip() if out.returncode == 0 else ""
+        selected = Path(picked).resolve() if picked else None
     except (OSError, subprocess.SubprocessError):
         selected = None
-    if selected and str(selected) != "." and not any(_within(selected, d) for d in dirs):
+    if selected and not any(_within(selected, d) for d in dirs):
         dirs.append(selected)
     return tuple(dirs)
 

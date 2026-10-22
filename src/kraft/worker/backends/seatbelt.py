@@ -89,6 +89,16 @@ def render_profile(
     out += [f"(deny file-read* {sub(p)})" for p in host_view.system_excluded()]
     out += [f"(allow file-read* {sub(p)})" for p in read_roots]
     out += [f"(allow file-read* {lit(p)})" for p in read_literals]
+    # Shallowest first, by the rendered path: a deeper mount must override the
+    # tree it sits in. The worker's own tmpdir and devices follow the mounts so
+    # a read-only mount holding them cannot deny them.
+    for m in sorted(mounts, key=lambda m: len(_real(m.dst).parts)):
+        dst = _real(m.dst)
+        where = sub(dst) if dst.is_dir() else lit(dst)
+        if m.ro:
+            out += [f"(allow file-read* {where})", f"(deny file-write* {where})"]
+        else:
+            out.append(f"(allow file-read* file-write* {where})")
     out += [f"(allow file-write* {lit(p)})" for p in DEV_WRITES]
     out += [
         f"(allow file-read* file-write* {sub(tmpdir)})",
@@ -96,14 +106,6 @@ def render_profile(
         f"(allow network-outbound (remote unix-socket {sub(tmpdir)}))",
         f"(allow file-read-data {lit(marker)})",
     ]
-    # Shallowest first: a deeper mount must override the tree it sits in.
-    for m in sorted(mounts, key=lambda m: len(m.dst.parts)):
-        dst = _real(m.dst)
-        where = sub(dst) if dst.is_dir() else lit(dst)
-        if m.ro:
-            out += [f"(allow file-read* {where})", f"(deny file-write* {where})"]
-        else:
-            out.append(f"(allow file-read* file-write* {where})")
     out += [f"(deny file-read* {lit(p)})" for p in denied_reads]
     if relay:
         out.append(

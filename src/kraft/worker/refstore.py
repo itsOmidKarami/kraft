@@ -40,6 +40,7 @@ import logging
 import os
 import re
 import shutil
+import stat
 import subprocess
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
@@ -100,6 +101,13 @@ def _locked(shadow: Path) -> Iterator[None]:
             yield
         finally:
             fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+def _refuse_direct(store: RefStore) -> None:
+    """A direct store's shadow is the real common gitdir, which sync and
+    rebuild rmtree."""
+    if store.direct:
+        raise ValueError(f"{store.common} is a direct store: it has no private ref store to sync")
 
 
 def _meta_path(shadow: Path) -> Path:
@@ -313,6 +321,7 @@ def _prepare(
             f"{store.common} keeps its refs in {storage!r} storage, and a sandbox's ref store "
             "supports only git's default files storage"
         )
+    _refuse_direct(store)
     with _locked(store.shadow):
         store = _refresh(store, session_id, set(live), work_item_id)
         for point in mount_points:
@@ -334,7 +343,9 @@ def prepare_direct(
     With a `branch`, makes its ref a loose file and its reflog's directories
     now, host-side, since the worker may create only the files themselves, and
     records the value in a sidecar beside `sandbox-git/` that no worker
-    writes: `check_direct` puts it back. Nothing is created under `S`."""
+    writes: `check_direct` puts it back. It creates the loose ref and the
+    reflog's directories under the common gitdir, but no store under
+    `sandbox-git/` beyond the sidecar."""
     root = Path(cwd).resolve()
     root_dirs = _sandbox.linked_gitdirs(root)
     if root_dirs is None:
@@ -354,48 +365,85 @@ def prepare_direct(
     return stores
 
 
+def _remove(path: Path) -> None:
+    """Remove whatever the worker left at `path` without following it: a
+    symlink or file by unlink, a real directory by rmtree."""
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def _validate_direct(store: RefStore, shadow: Path) -> str | None:
+    """`check_direct`'s body, under the lock: record the branch ref if it is a
+    bare commit id, else put back the recorded value (or remove the ref when
+    none was recorded) and return why."""
+    ref = store.common / "refs" / "heads" / store.branch
+    text = _sandbox.read_regular(ref, store.common)
+    value = text.strip() if text is not None else None
+    meta = _read_meta(shadow)
+    if value and _OID.fullmatch(value) and _is_commit(store.common, value):
+        _write_meta(shadow, {**meta, "value": value})
+        return None
+    old = meta.get("value", "")
+    what = repr(value[:80]) if value is not None else "something that is not a regular file"
+    if old:
+        if ref.is_dir() and not ref.is_symlink():
+            shutil.rmtree(ref)
+        ref.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ref.with_name(ref.name + ".kraft-restore")
+        _remove(tmp)  # a planted symlink there would be written through
+        tmp.write_text(old + "\n")
+        os.replace(tmp, ref)
+        return f"the worker left refs/heads/{store.branch} as {what}; restored {old}"
+    _remove(ref)  # packed-refs then holds the truth, or the branch is gone
+    return f"the worker left refs/heads/{store.branch} as {what}; removed it"
+
+
 def _record_direct(base: Path, store: RefStore) -> None:
     common, branch = store.common, store.branch
     shadow = shadow_dir(base, store.worktree_gitdir)
     ref = common / "refs" / "heads" / branch
-    value = _real_branch(common, branch)
-    if value and not os.path.lexists(ref):
-        # Only in `packed-refs`: git writes the loose file on a move, not on a no-op.
-        _git(common, "update-ref", f"refs/heads/{branch}", value)
-        if not ref.exists():
-            ref.parent.mkdir(parents=True, exist_ok=True)
-            ref.write_text(value + "\n")
-    (common / "logs" / "refs" / "heads" / branch).parent.mkdir(parents=True, exist_ok=True)
     with _locked(shadow):
+        if _meta_path(shadow).exists():
+            # A session that ended without `check_direct` (a restart) may have left
+            # a symref to main: never record that as the branch's value.
+            _validate_direct(store, shadow)
+        value = _real_branch(common, branch)
+        ref.parent.mkdir(parents=True, exist_ok=True)
+        (common / "logs" / "refs" / "heads" / branch).parent.mkdir(parents=True, exist_ok=True)
+        if value and not os.path.lexists(ref):
+            # Only in `packed-refs`: the worker can create a loose file but not
+            # the ref's directories, and git rewrites the file only on a move.
+            tmp = ref.with_name(ref.name + ".kraft-tmp")
+            tmp.write_text(value + "\n")
+            os.replace(tmp, ref)
         _write_meta(shadow, {"branch": branch, "value": value})
 
 
 def check_direct(base: Path, store: RefStore) -> str | None:
     """After a session, the direct store's branch ref must still be a bare
     object id naming a commit: that is recorded as its new value. Anything
-    else (a symref to `main`, a tree, garbage) is put back to the recorded
-    value, and why is returned for the caller to record. A leftover `.lock`
-    is removed either way."""
+    else (a symref to `main`, a tree, garbage, a missing or non-file ref) is
+    put back to the recorded value, and why is returned for the caller to
+    record. A leftover `.lock` is removed either way, and so is a branch
+    reflog that is not a regular file, which host git would append through."""
     if store.branch is None:
         return None
     ref = store.common / "refs" / "heads" / store.branch
+    reflog = store.common / "logs" / "refs" / "heads" / store.branch
     shadow = shadow_dir(base, store.worktree_gitdir)
     with _locked(shadow):
-        ref.with_name(ref.name + ".lock").unlink(missing_ok=True)
-        text = _sandbox.read_regular(ref, store.common)
-        value = text.strip() if text is not None else None
-        meta = _read_meta(shadow)
-        if value and _OID.fullmatch(value) and _is_commit(store.common, value):
-            _write_meta(shadow, {**meta, "value": value})
-            return None
-        old = meta.get("value", "")
-        if ref.is_dir() and not ref.is_symlink():
-            shutil.rmtree(ref)
-        tmp = ref.with_name(ref.name + ".kraft-restore")
-        tmp.write_text(old + "\n")
-        os.replace(tmp, ref)
-        what = repr(value[:80]) if value is not None else "something that is not a regular file"
-        return f"the worker left refs/heads/{store.branch} as {what}; restored {old}"
+        problem = _validate_direct(store, shadow)
+        # The ref is restored first: one path that cannot be removed never skips it.
+        lock = ref.with_name(ref.name + ".lock")
+        for path, keep_file in ((lock, False), (reflog, True)):
+            try:
+                if os.path.lexists(path) and not (keep_file and stat.S_ISREG(path.lstat().st_mode)):
+                    _remove(path)
+            except OSError as exc:
+                logger.warning("could not remove %s: %s", path, exc)
+        return problem
 
 
 def _mount_point(shadow: Path, point: Path) -> None:
@@ -472,6 +520,7 @@ def sync(store: RefStore, session_id: str | None = None) -> str | None:
     """Publish the item branch out of `S` after a session, and forget that
     `session_id` has it mounted. Returns why it could not publish, for the
     caller to record; never raises for a git refusal."""
+    _refuse_direct(store)
     with _locked(store.shadow):
         try:
             return _publish(store)

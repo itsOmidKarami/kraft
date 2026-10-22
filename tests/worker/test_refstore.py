@@ -336,41 +336,108 @@ def direct(worktree, tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("content", "lock", "bad"),
+    "kind",
     [
-        ("{work}", False, False),
-        ("ref: refs/heads/main", False, True),
-        ("{tree}", False, True),
-        ("not an oid", False, True),
-        ("main", False, True),
-        (None, True, False),
-        ("junk", False, False),
+        "commit",
+        "symref",
+        "tree",
+        "garbage",
+        "revname",
+        "stale-lock",
+        "no-branch",
+        "lock-dir",
+        "lock-symlink",
+        "ref-symlink",
+        "ref-dir",
+        "ref-deleted",
+        "ref-parent-gone",
+        "restore-tmp-symlink",
+        "reflog-symlink",
+        "reflog-dir",
+        "no-recorded-value",
     ],
-    ids=["commit", "symref", "tree", "garbage", "revname", "stale-lock", "no-branch"],
 )
-def test_check_direct(repo, direct, request, content, lock, bad):
+def test_check_direct(repo, direct, tmp_path, kind):
     base, store, ref = direct
     main = git(repo, "rev-parse", "main")
     start = ref.read_text().strip()
     work = _commit_object(repo, main, "work")
-    shown = (content or "").format(work=work, tree=git(repo, "rev-parse", f"{main}^{{tree}}"))
-    if content:
-        ref.write_text(shown + "\n")
-    if lock:
-        ref.with_name(ref.name + ".lock").write_text("")
-    if request.node.callspec.id == "no-branch":
+    tree = git(repo, "rev-parse", f"{main}^{{tree}}")
+    lock = ref.with_name(ref.name + ".lock")
+    reflog = store.common / "logs" / "refs" / "heads" / BRANCH
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    text = {
+        "commit": work,
+        "symref": "ref: refs/heads/main",
+        "tree": tree,
+        "garbage": "not an oid",
+        "revname": "main",
+        "stale-lock": start,
+        "no-branch": "junk",
+    }.get(kind)
+    if text:
+        ref.write_text(text + "\n")
+    if kind == "stale-lock":
+        lock.write_text("")
+    if kind == "lock-dir":
+        (lock / "x").mkdir(parents=True)
+        ref.write_text("not an oid\n")
+    if kind == "lock-symlink":
+        lock.symlink_to(outside / "victim")
+        ref.write_text("not an oid\n")
+    if kind == "ref-symlink":
+        ref.unlink()
+        ref.symlink_to(outside / "victim")
+    if kind == "ref-dir":
+        ref.unlink()
+        (ref / "x").mkdir(parents=True)
+    if kind == "ref-deleted":
+        ref.unlink()
+    if kind == "ref-parent-gone":
+        shutil.rmtree(ref.parent)
+    if kind == "restore-tmp-symlink":
+        ref.write_text("not an oid\n")
+        ref.with_name(ref.name + ".kraft-restore").symlink_to(outside / "victim")
+    if kind == "reflog-symlink":
+        reflog.unlink(missing_ok=True)
+        reflog.symlink_to(outside / "victim")
+    if kind == "reflog-dir":
+        reflog.unlink(missing_ok=True)
+        reflog.mkdir()
+    if kind == "no-recorded-value":
+        refstore._meta_path(refstore.shadow_dir(base, store.worktree_gitdir)).unlink()
+        ref.write_text("not an oid\n")
+    if kind == "no-branch":
         store = replace(store, branch=None)
 
     problem = refstore.check_direct(base, store)
 
-    assert not ref.with_name(ref.name + ".lock").exists()
-    if bad:
-        assert problem == f"the worker left refs/heads/{BRANCH} as {shown!r}; restored {start}"
-        assert ref.read_text().strip() == start
+    assert not os.path.lexists(lock)
+    assert not (outside / "victim").exists()
+    if kind in ("reflog-symlink", "reflog-dir"):
+        assert not os.path.lexists(reflog)
+    if kind == "no-recorded-value":
+        assert problem == f"the worker left refs/heads/{BRANCH} as 'not an oid'; removed it"
+        assert not os.path.lexists(ref)
         return
-    assert problem is None
-    assert ref.read_text().strip() == (shown if content else start)
-    if content == "{work}":
+    if kind in ("symref", "tree", "garbage", "revname", "lock-dir", "lock-symlink"):
+        shown = {"tree": tree, "lock-dir": "not an oid", "lock-symlink": "not an oid"}.get(
+            kind, text
+        )
+        assert problem == f"the worker left refs/heads/{BRANCH} as {shown!r}; restored {start}"
+    elif kind == "restore-tmp-symlink":
+        assert problem and f"restored {start}" in problem
+    elif kind in ("ref-symlink", "ref-dir", "ref-deleted", "ref-parent-gone"):
+        what = "something that is not a regular file"
+        assert problem == f"the worker left refs/heads/{BRANCH} as {what}; restored {start}"
+    else:
+        assert problem is None
+    if kind in ("commit", "no-branch"):
+        assert ref.read_text().strip() == (work if kind == "commit" else "junk")
+    else:
+        assert ref.is_file() and not ref.is_symlink() and ref.read_text().strip() == start
+    if kind == "commit":
         # The accepted value is the one a later bad write is put back to.
         ref.write_text("not an oid\n")
         assert "restored " + work in refstore.check_direct(base, store)
@@ -401,6 +468,34 @@ def test_prepare_direct(repo, worktree, tmp_path, kind):
     sidecar = refstore._meta_path(refstore.shadow_dir(base, store.worktree_gitdir))
     assert json.loads(sidecar.read_text()) == {"branch": branch, "value": want}
     assert [p for p in (base / "sandbox-git").iterdir() if p.is_dir()] == []
+
+
+def test_prepare_direct_puts_back_what_the_last_session_left(direct, worktree):
+    """A session that ended without `check_direct` (a daemon restart) left a
+    symref to main; the next prepare must not record it as the branch's value."""
+    base, store, ref = direct
+    start = ref.read_text().strip()
+    ref.write_text("ref: refs/heads/main\n")
+
+    refstore.prepare_direct(base, worktree, BRANCH)
+
+    assert ref.read_text().strip() == start
+    sidecar = refstore._meta_path(refstore.shadow_dir(base, store.worktree_gitdir))
+    assert json.loads(sidecar.read_text())["value"] == start
+
+
+@pytest.mark.parametrize("call", ["sync", "sync_all", "prepare"])
+def test_a_direct_store_is_never_synced_or_rebuilt(direct, call):
+    """Its shadow is the real common gitdir: sync and rebuild rmtree it."""
+    base, store, _ = direct
+    run = {
+        "sync": lambda: refstore.sync(store),
+        "sync_all": lambda: refstore.sync_all([store]),
+        "prepare": lambda: refstore._prepare(base, store),
+    }[call]
+    with pytest.raises(ValueError, match="direct"):
+        run()
+    assert (store.common / "objects").is_dir()
 
 
 def test_prepare_direct_needs_a_linked_worktree(repo, tmp_path):
