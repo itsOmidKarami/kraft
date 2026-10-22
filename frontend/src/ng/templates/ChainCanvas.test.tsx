@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ChainCanvas } from "./ChainCanvas";
 import { EXT, EXTENDING_VIEW } from "./draft/fixture.extending";
 import { inheritedResult } from "./draft/fixture.inherited";
+import { mergeView } from "./draft/fixture.merge";
 import type { NodeInheritance, Result } from "./draft/types";
 
 const SCOPE = { area: "chains", key: "team" } as const;
@@ -94,5 +95,18 @@ describe("a child add-on's chain", () => {
     // The mark is a word for a screen reader too, not only a colour under the node.
     expect(el).toHaveAccessibleDescription(meta ?? "");
     if (tone) expect(el.querySelector(".graph-meta")).toHaveClass(`tone-${tone}`);
+  });
+});
+
+describe("a selected node's way back", () => {
+  const arcs = () => [...document.querySelectorAll(".arc-label")].map((l) => [l.textContent, [...l.classList].find((c) => c.startsWith("tone-"))]);
+  it.each([
+    { id: "a gate rejects to its reject_to", view: mergeView(), sel: "final_review", want: [["reject", "tone-reject"]] },
+    { id: "a merge node rewinds to its restart", view: mergeView(), sel: "merge", want: [["on merge rejected", "tone-rewind"]] },
+    { id: "a merge node without the policy has none", view: mergeView({ policy: false }), sel: "merge", want: [] },
+    { id: "another exec node has none", view: mergeView(), sel: "verification", want: [] },
+  ])("$id", ({ view, sel, want }) => {
+    render(<ChainCanvas scope={{ area: "chains", key: "default" }} result={view.result} selected={sel} pending={null} reserve={0} onSelect={() => {}} onOpen={() => {}} onFocusNode={() => {}} onEscape={() => {}} onBackground={() => {}} onAdd={async () => true} />);
+    expect(arcs()).toEqual(want);
   });
 });

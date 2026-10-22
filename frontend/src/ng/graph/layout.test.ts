@@ -49,8 +49,9 @@ describe("chain layout", () => {
   it("draws no arc to or from a node the row leaves out", () => {
     expect(arcShapes(layout(chain.slice(1)), [{ kind: "loop", node: "a" }, { kind: "reject", from: "g", to: "a" }])).toEqual([]);
   });
-  it("draws the rebase above the chain and the reject below it", () => {
-    const [rebase, reject] = arcShapes(layout(chain), [{ kind: "rebase", from: "b", to: "a" }, { kind: "reject", from: "g", to: "a" }]);
+  it("draws the rebase above the chain, and the reject and a merge rejection's rewind below it", () => {
+    const [rebase, reject, rewind] = arcShapes(layout(chain), [{ kind: "rebase", from: "b", to: "a" }, { kind: "reject", from: "g", to: "a" }, { kind: "rewind", from: "b", to: "a" }]);
+    expect(rewind).toMatchObject({ tone: "rewind", dashed: true, d: "M389 116 C389 222 155 222 155 170", label: { x: 272, y: 196, text: "on merge rejected" } });
     expect(rebase.d).toBe("M365 66 C365 -23 179 -23 179 66");
     expect(rebase.label).toEqual({ x: 272, y: 0, text: "rebase → a" });
     expect(reject.d).toBe("M272 116 C272 222 155 222 155 170");

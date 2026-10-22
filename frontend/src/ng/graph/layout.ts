@@ -15,7 +15,9 @@ export type ChainNode = GraphItem & {
 export type ChainArc =
   | { kind: "loop"; node: string; tone?: "idle" | "active" | "red"; label?: string }
   | { kind: "rebase"; from: string; to: string; label?: string }
-  | { kind: "reject"; from: string; to: string };
+  | { kind: "reject"; from: string; to: string }
+  /** A merge node's `on_merge_rejected`: after its repair, the item restarts back at `to`. */
+  | { kind: "rewind"; from: string; to: string };
 export type Seam = { at: number; open?: boolean; always?: boolean; title?: string };
 
 /** A seam's "+" button: the 24px a pointer target needs. */
@@ -54,10 +56,10 @@ export type ChainLayout = ReturnType<typeof layout>;
 /** A seam sits at the middle of edge `at` (between point `at` and `at + 1`, the start mark being point 0). */
 export const seamX = (lay: ChainLayout, at: number) => (lay.edges[at] ? (lay.edges[at].x1 + lay.edges[at].x2) / 2 : null);
 
-export type ArcShape = { key: string; d: string; arrow: string; tone: "idle" | "active" | "red" | "reject"; dashed: boolean; label?: { x: number; y: number; text: string } };
+export type ArcShape = { key: string; d: string; arrow: string; tone: "idle" | "active" | "red" | "reject" | "rewind"; dashed: boolean; label?: { x: number; y: number; text: string } };
 
-/** The three arc kinds: a loop above a node, a rebase above the chain, a reject below it. An arc to or from a node
- *  the row does not draw (another run's) is not drawn. */
+/** The arc kinds: a loop above a node, a rebase above the chain, a reject or a merge rejection's rewind below it.
+ *  An arc to or from a node the row does not draw (another run's) is not drawn. */
 export function arcShapes(lay: ChainLayout, arcs: ChainArc[]): ArcShape[] {
   const own = new Map(lay.items.map((i) => [i.node.id, i.cx]));
   const top = L.CY - L.BOX / 2;
@@ -75,6 +77,7 @@ export function arcShapes(lay: ChainLayout, arcs: ChainArc[]): ArcShape[] {
       return [{ key: `rebase${k}`, tone: "idle", dashed: true, d: `M${fx} ${top - 3} C${fx} ${top - 92} ${tx} ${top - 92} ${tx} ${top - 3}`, arrow: `M${tx - 5} ${top - 10} L${tx} ${top - 3} L${tx + 5} ${top - 10}`, label: { x: (fx + tx) / 2, y: top - 69, text: a.label ?? `rebase → ${a.to}` } }];
     }
     const yb = L.CY + 126;
-    return [{ key: `reject${k}`, tone: "reject", dashed: true, d: `M${f} ${L.CY + 20} C${f} ${yb} ${t} ${yb} ${t} ${L.CY + 74}`, arrow: `M${t - 5} ${L.CY + 81} L${t} ${L.CY + 74} L${t + 5} ${L.CY + 81}`, label: { x: (f + t) / 2, y: L.CY + 100, text: "reject" } }];
+    // A rewind takes a reject's path, under its own name: the two never show at once (one is a gate's, one a merge node's).
+    return [{ key: `${a.kind}${k}`, tone: a.kind, dashed: true, d: `M${f} ${L.CY + 20} C${f} ${yb} ${t} ${yb} ${t} ${L.CY + 74}`, arrow: `M${t - 5} ${L.CY + 81} L${t} ${L.CY + 74} L${t + 5} ${L.CY + 81}`, label: { x: (f + t) / 2, y: L.CY + 100, text: a.kind === "rewind" ? "on merge rejected" : "reject" } }];
   });
 }

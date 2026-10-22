@@ -85,7 +85,9 @@
 .arc path.is-dashed { stroke-dasharray: 4 3; }
 .arc.tone-idle path { stroke: var(--stroke); }
 .arc.tone-active path { stroke: var(--warn); }
-.arc.tone-red path, .arc.tone-reject path { stroke: var(--bad); }
+.arc.tone-red path, .arc.tone-reject path, .arc.tone-rewind path { stroke: var(--bad); }
+/* A merge rejection's rewind is dotted where a reject is dashed, and named on its label: the colour is the same. */
+.arc.tone-rewind path.is-dashed { stroke-dasharray: 0.5 4; stroke-linecap: round; stroke-width: 2; }
 /* An open loop step's fork off the arc: its join dots take the arc's tone, and it comes in with the frame's tasks. */
 .arc.tone-idle circle { fill: var(--stroke); }
 .arc.tone-active circle { fill: var(--warn); }
@@ -94,8 +96,8 @@
 .is-calm .arc-fork { animation: scope-in .12s linear; }
 .arc-label { position: absolute; transform: translate(-50%, -50%); padding: 0 5px; background: var(--bg); font-size: var(--fs-label); white-space: nowrap; color: var(--text-sub); pointer-events: none; }
 .arc-label.tone-active { color: var(--warn); }
-.arc-label.tone-red, .arc-label.tone-reject { color: var(--bad); }
-.arc-label.tone-reject { font-family: ui-monospace, Menlo, monospace; }
+.arc-label.tone-red, .arc-label:is(.tone-reject, .tone-rewind) { color: var(--bad); }
+.arc-label:is(.tone-reject, .tone-rewind) { font-family: ui-monospace, Menlo, monospace; }
 .mark-start { position: absolute; width: 20px; height: 20px; box-sizing: border-box; border-radius: 50%; border: 1px solid var(--stroke); color: var(--text-sub); display: flex; align-items: center; justify-content: center; font-size: var(--fs-label); background: var(--bg); }
 .mark-end { position: absolute; width: 16px; height: 16px; box-sizing: border-box; border-radius: 4px; border: 1px solid var(--stroke); background: var(--surface); }
 

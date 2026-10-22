@@ -3,7 +3,7 @@ import type { ChainArc, ChainNode, Seam } from "../graph/layout";
 import { EDITOR_FIT } from "../graph/camera";
 import { StageGraph } from "../graph/StageGraph";
 import type { Op, Result, Scope } from "./draft/types";
-import { authoredNodes, changeAt, extendsOf, inheritedAt, inheritedName, kindOf, nodeGlyph, originOf, problemsAt, type NodeA } from "./draft/view";
+import { authoredNodes, changeAt, extendsOf, inheritedAt, inheritedName, kindOf, nodeGlyph, originOf, problemsAt, resolvedNode, type NodeA } from "./draft/view";
 import { SeamMenu } from "./menus/SeamMenu";
 import { ReadOnly } from "./addon";
 import { problemWord } from "./problems";
@@ -41,6 +41,18 @@ function rejectTarget(r: Result, nodes: NodeA[], i: number): string | undefined 
   const g = nodes[i];
   if (typeof g.reject_to === "string") return g.reject_to;
   for (let k = i - 1; k >= 0; k--) if (kindOf(r, nodes[k]) === "exec") return nodes[k].id;
+}
+
+/** The selected node's way back, drawn under the chain: a gate's reject, or a merge node's rewind to the
+ *  `on_merge_rejected` restart (as resolved, so an inherited policy draws too). Read only: nothing drags it. */
+function backArc(r: Result, nodes: NodeA[], i: number): ChainArc[] {
+  const n = nodes[i];
+  if (kindOf(r, n) === "gate") {
+    const to = rejectTarget(r, nodes, i);
+    return to ? [{ kind: "reject", from: n.id, to }] : [];
+  }
+  const policy = (resolvedNode(r, n.id) ?? n).on_merge_rejected as { restart_from?: unknown } | null | undefined;
+  return typeof policy?.restart_from === "string" ? [{ kind: "rewind", from: n.id, to: policy.restart_from }] : [];
 }
 
 /** Level 1 of the editor: the chain drawn from the draft's model (brief B.2). */
@@ -113,8 +125,7 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
   const drag = parent && onDrag ? { ...onDrag, over: (id: string, to: number) => onDrag.over(id, live(to, id)), drop: (id: string, to: number) => onDrag.drop(id, live(to, id)) } : onDrag;
   const unapplied = !!parent && r.extending?.nodes === null;
   const sel = authored.findIndex((n) => n.id === selected);
-  const target = sel >= 0 && kindOf(r, authored[sel]) === "gate" ? rejectTarget(r, authored, sel) : undefined;
-  const arcs: ChainArc[] = target && selected ? [{ kind: "reject", from: selected, to: target }] : [];
+  const arcs: ChainArc[] = sel >= 0 ? backArc(r, authored, sel) : [];
   const close = () => {
     setMenu(null);
     anchor.current?.focus();
