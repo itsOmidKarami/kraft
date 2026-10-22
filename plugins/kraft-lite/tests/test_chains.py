@@ -728,16 +728,24 @@ def test_repo_library_names_its_own(tmp_path, home, written, components):
             ("mine", "{file}"),
             id="outside",
         ),
-        # A draft beside the repo library: its `extends` is the repo's.
-        pytest.param(".kraft/drafts", "", ["a"], ["own"], ("repo:mine", "{file}"), id="in_kraft"),
+        # A draft beside the repo library is not one of its chains.
+        pytest.param(
+            ".kraft/drafts",
+            "remove: [verify]\n",
+            ["implementation"],
+            ["implementer"],
+            ("mine", "{file}"),
+            id="beside_the_repo_library",
+        ),
         # One of the repo library's own chains: that chain, as `repo:mine`.
         pytest.param(".kraft/chains", "", ["a"], ["own"], ("repo:mine", "repo"), id="repo_chain"),
     ],
 )
 def test_resolve_path_argument(tmp_path, home, folder, edit, nodes, components, id_and_source):
-    """A chain file resolves its `extends` against the library it sits in: the
-    repo's for a file under `.kraft/`, else the instance's, here the bundled one.
-    The repo has a `quick-task` of its own, so the two cannot agree by accident."""
+    """A chain file in the repo library's `chains/` is that repo chain; any
+    other resolves its `extends` against the instance library, here the
+    bundled one. The repo has a `quick-task` of its own, so the two cannot
+    agree by accident."""
     repo_lib = "tasks:\n  own: {kind: agent, prompt: Mine.}\n"
     write_library(
         tmp_path / ".kraft", repo_lib, {"quick-task": _task_chain("{id: t, extends: own}")}

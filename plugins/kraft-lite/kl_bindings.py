@@ -236,8 +236,7 @@ def unused(bindings: Mapping, tasks: list[dict], slice_tasks: list[dict]) -> lis
         ("", bindings, tasks),
         (f"{SLICE}.", bindings.get(SLICE) or {}, slice_tasks),
     ):
-        names = {task["path"] for task in among}
-        names.update(name for task in among for name in task.get("components") or ())
+        names = {key for task in among for section, key in _keys(task) if section == "tasks"}
         found += [f"{prefix}tasks.{key}" for key in layer.get("tasks") or {} if key not in names]
     return found
 

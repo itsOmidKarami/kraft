@@ -1470,8 +1470,8 @@ def _dispatcher(root: Path, first_build: str | None = None, bindings: dict | Non
     follows: this repo's bindings (`bindings`, else read from `root`) over the
     defaults, with the skills installed in this harness, and for a child
     walking a slice (`first_build`, its chain's first build node) the slice
-    layer over both. Read per call, so a binding edited mid-run counts from
-    the next `state`."""
+    layer over both. `state` makes one per call, so a binding edited mid-run
+    counts from the next `state`; `start` passes the bindings it checked."""
     if bindings is None:
         bindings = kl_bindings.read_bindings(root)
     installed = set(_installed_skills(root))
