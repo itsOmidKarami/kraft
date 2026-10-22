@@ -684,19 +684,12 @@ async def test_run_task_tears_down_the_container_on_cancel(run, docker, database
 
 
 @pytest.mark.parametrize(
-    ("filed", "identity", "passthrough"),
-    [
-        (None, {}, ["OPENAI_API_KEY", "MY_REPO", "GIT_AUTHOR_NAME"]),
-        (
-            {"/repo": ("MY_REPO", "OPENAI_API_KEY")},
-            {"GIT_AUTHOR_NAME": "Daemon"},
-            ["OPENAI_API_KEY", "MY_REPO"],
-        ),
-    ],
+    ("filed", "late"),
+    [(None, ["GIT_AUTHOR_NAME"]), ({"/repo": ("MY_REPO", "OPENAI_API_KEY")}, [])],
     ids=["live", "names-as-filed"],
 )
 async def test_run_task_passes_env_through_to_docker_argv(
-    run, docker, monkeypatch, run_dirs, filed, identity, passthrough
+    run, docker, monkeypatch, run_dirs, filed, late
 ):
     """Kraft-rki: `env=` was silently dropped once `sandbox` was set -- only
     `FORWARDED_ENV` crosses into the container bare. `dispatch.py` passes
@@ -705,8 +698,7 @@ async def test_run_task_passes_env_through_to_docker_argv(
     `env=` into `-e` flags; this checks `run_task` forwards it at all. An item
     sandboxed at filing passes only the names it was filed with (Kraft-8g7fp)."""
     snapshot = SimpleNamespace(repository_env_names=filed)
-    # The item's snapshot as the launch's env narrowing reads it, and only there.
-    reader = SimpleNamespace(materialized_chain_of=lambda row: snapshot)
+    reader = SimpleNamespace(materialized_chain_of=lambda row: snapshot)  # dispatch's alone
     monkeypatch.setattr("kraft.executor.dispatch.store", reader)
     seen = {}
     real_docker_argv = docker_backend.docker_argv
@@ -732,12 +724,14 @@ async def test_run_task_passes_env_through_to_docker_argv(
     # The container has no ~/.gitconfig: the identity crosses as env, under a
     # repository's own `env:`. That, and a credential, cross by name only
     # (Kraft-1u0hp); the CLI gets a home that outlives --rm.
+    # A repository name it was not filed with leaves the daemon's identity in place.
+    identity = {} if late else {"GIT_AUTHOR_NAME": "Daemon"}
     assert seen["env"] == {
         **identity,
         "GIT_COMMITTER_NAME": "Daemon",
         "PYTHONDONTWRITEBYTECODE": "1",
     }
-    assert list(seen["passthrough"]) == passthrough
+    assert list(seen["passthrough"]) == ["OPENAI_API_KEY", "MY_REPO", *late]
     assert seen["home"] == run_dirs.base / "items" / "w1" / "sandbox-home"
 
 
