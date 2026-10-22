@@ -18,6 +18,9 @@ from pathlib import Path
 import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PLUGIN))
+
+import kl as lite  # noqa: E402  (`kl` below is the CLI helper)
 
 # e2e("bd"): the main suite runs this in CI's e2e-cli job, not the unit job.
 # The skipif stays for lite-floor, which runs this directory without
@@ -132,3 +135,42 @@ def test_the_jsonl_fallback_file_is_importable_by_bd(tmp_path, bd_repo):
         ["bd", "import", str(fallback)], cwd=bd_repo, capture_output=True, text=True
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_a_write_replaces_the_labels_bd_held(bd_repo, monkeypatch):
+    """`bd import` merges a record's labels into the row it updates, so a label
+    the record dropped stays unless the store removes it: a slice read as
+    `in_review` forever after it merged (Kraft-lpkgd). A label holding a comma
+    or a quote is removed whole, never split."""
+    monkeypatch.chdir(bd_repo)
+    store = lite.BdStore()
+    store.write(
+        [
+            {
+                "_type": "issue",
+                "id": "kl-lbl1",
+                "title": "a slice",
+                "issue_type": "task",
+                "status": "open",
+                "labels": [
+                    f"{lite.SLICE_STATUS_LABEL}waiting",
+                    f"{lite.TASKS_LABEL}1,2",
+                    'kraft-note:a"b',
+                ],
+            }
+        ]
+    )
+    for status, tasks, note in (("running", "1,2", 'a"b'), ("merged", "1,2,3", 'c"d')):
+        record = next(r for r in store.load() if r["id"] == "kl-lbl1")  # two writes in a second
+        record = lite.set_label(record, lite.SLICE_STATUS_LABEL, status)
+        record = lite.set_label(record, lite.TASKS_LABEL, tasks)
+        store.write([lite.set_label(record, "kraft-note:", note)])
+
+    labels = next(r for r in store.load() if r["id"] == "kl-lbl1")["labels"]
+    for prefix, want in (
+        (lite.SLICE_STATUS_LABEL, "merged"),
+        (lite.SEQ_LABEL, "3"),
+        (lite.TASKS_LABEL, "1,2,3"),
+        ("kraft-note:", 'c"d'),
+    ):
+        assert [x for x in labels if x.startswith(prefix)] == [prefix + want], prefix

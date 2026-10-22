@@ -552,7 +552,25 @@ class BdStore:
         return [json.loads(line) for line in out.splitlines() if line.strip()]
 
     def write(self, records: list[dict]) -> None:
-        self._bd(["import", "-"], stdin=_jsonl(_prepare(records)))
+        self._import(_prepare(records), self.load())
+
+    def _import(self, records: list[dict], held: list[dict]) -> None:
+        """`import` the records, then drop each label the store held for one
+        that the record no longer has: `import` merges labels into the row it
+        updates, so `set_label` alone would leave the old value beside the new
+        (Kraft-lpkgd). `--remove-label` leaves `updated_at` alone."""
+        self._bd(["import", "-"], stdin=_jsonl(records))
+        before = {r["id"]: r.get("labels") or [] for r in held}
+        for record in records:
+            stale = [
+                x for x in before.get(record["id"], []) if x not in (record.get("labels") or [])
+            ]
+            if stale:
+                # Each value is read as CSV: quoted, a label's own comma or quote survives.
+                quoted = ['"' + x.replace('"', '""') + '"' for x in stale]
+                self._bd(
+                    ["update", record["id"], *(a for q in quoted for a in ("--remove-label", q))]
+                )
 
     def write_raw(self, records: list[dict], local: list[dict]) -> None:
         """Records as exported, for `import`, past bd's guard without `_prepare`.
@@ -562,8 +580,7 @@ class BdStore:
         win, and bd keeps the local row on a tie or a newer guard. `local` is
         what `import` loaded, so the store is not exported a second time.
         """
-        out = _past_local(records, local)
-        self._bd(["import", "-"], stdin=_jsonl(out))
+        self._import(_past_local(records, local), local)
 
 
 def repo_root(start: Path | None = None) -> Path:
