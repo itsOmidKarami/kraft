@@ -33,6 +33,11 @@
 .cfg-v.is-prose { font: var(--fs-label)/1.45 inherit; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .cfg-v.is-unset { color: var(--text-muted); }
 .cfg-row.is-own .cfg-v, .cfg-row.is-own .cfg-k { color: var(--text); }
+/* A node policy's "restart from <node>" outgrows the value column: it, or its picker, takes its own line under its key, at the values' edge. */
+.cfg-row.is-stacked { row-gap: 2px; }
+.cfg-row.is-stacked .cfg-k { flex: 1 0 104px; }
+.cfg-row.is-stacked > :is(.cfg-v, .cfg-pick, .cfg-edit) { order: 1; flex-basis: 100%; margin-left: 110px; }
+.cfg-row.is-stacked :is(.cfg-note, .cfg-err) { order: 2; }
 .cfg-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text); }
 /* An own value only the item's draft holds, until Review & apply applies it. */
 /* A value the chain's draft changes: the changed-value mark, on the value and a line at the row's edge. */

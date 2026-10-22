@@ -3,7 +3,8 @@ import { Pencil, RotateCcw } from "lucide-react";
 import { IconButton } from "../../ui/IconButton";
 import { Switch } from "../../ui/Switch";
 import { authoredAt, chainCapGroups, expandedRows, extendsOf, isAdded, rowChanged, settingRows, sourceWord } from "../draft/view";
-import { editedField, editedValue, editOps, fieldMeta, parse, RECOVERY_NOTE, show, type FieldMeta } from "../fields";
+import { editedField, editedValue, editOps, fieldMeta, parse, POLICIES, RECOVERY_NOTE, show, type FieldMeta } from "../fields";
+import { breakable } from "../../ui/breakable";
 import { Fold, Head, Note } from "./controls";
 import type { PaneKind } from "./describe";
 import type { PaneCtx } from "./Overview";
@@ -107,14 +108,15 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
     const v = editedValue(row.field, row.value);
     setEditing(Array.isArray(v) ? v.join(", ") : v == null ? "" : String(v));
   };
+  const stacked = POLICIES.has(row.field) && (editing !== null || row.value != null);
   return (
-    <div className={`cfg-row${own ? " is-own" : ""}${changed ? " is-changed" : ""}`}>
+    <div className={`cfg-row${own ? " is-own" : ""}${changed ? " is-changed" : ""}${stacked ? " is-stacked" : ""}`}>
       <span className="cfg-k">{label}</span>
       {meta.kind === "bool" && !readOnly ? (
         // A yes/no field is a switch: one click sets it.
         <span className="cfg-v"><Switch label={label} checked={!!row.value} disabled={!!row.locked} onChange={(on) => ctx.draft.field(ctx.path, row.field, on)} /></span>
       ) : editing === null ? (
-        <span className={`cfg-v${meta.kind === "long" ? " is-prose" : ""}${row.value == null || row.value === "" ? " is-unset" : ""}`}>{show(row.value, meta.kind)}</span>
+        <span className={`cfg-v${meta.kind === "long" ? " is-prose" : ""}${row.value == null || row.value === "" ? " is-unset" : ""}`}>{POLICIES.has(row.field) ? breakable(show(row.value, meta.kind)) : show(row.value, meta.kind)}</span>
       ) : (
         <Editor meta={meta} field={row.field} value={editing} ctx={ctx} onSave={save} onRefuse={(m) => setErr(`${label}: ${m}`)} onCancel={() => { setEditing(null); setErr(null); }} label={label} />
       )}
@@ -163,7 +165,7 @@ function Editor({ meta, field, value, label, ctx, onSave, onRefuse, onCancel }: 
   };
   if (options && options.length)
     return (
-      <Select autoFocus aria-label={label} mono value={text} onKeyDown={keys} onBlur={() => onSave(text)} onChange={(e) => { setText(e.target.value); onSave(e.target.value); }}>
+      <Select autoFocus aria-label={label} className="cfg-pick" mono value={text} onKeyDown={keys} onBlur={() => onSave(text)} onChange={(e) => { setText(e.target.value); onSave(e.target.value); }}>
         <option value="">not set</option>
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </Select>

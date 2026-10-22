@@ -10,6 +10,7 @@ import { effortsFor, useHarnessOptions } from "./useHarnessOptions";
 import { autoEscalates } from "../escalateWords";
 import { ROUTE_LABEL, routeOf } from "../fields";
 import { STEPS_IN_ORDER } from "../../library/sharedWords";
+import { breakable } from "../../ui/breakable";
 
 export type PaneCtx = {
   r: Result;
@@ -149,7 +150,7 @@ function NodeOverview({ ctx }: { ctx: PaneCtx }) {
       <Kv k="fix loop" v={fix ? `${plural(fixSteps.length, "repair step")}${fix.judge ? " · judge" : ""}` : "none"} muted={!fix} onClick={() => ctx.goTo(fix ? `${path}.fix_loop` : path)} />
       <Kv k="escalation" v={esc ? str(esc.id) : `none · auto-escalates ${delay}`} mono={!!esc} muted={!esc} onClick={esc ? () => ctx.goTo(`${path}.escalation.${str(esc.id)}`) : undefined} />
       <Kv k="on failure" v={onFailure ? "node handler" : "none"} muted={!onFailure} />
-      {takesMergeRejection(node) && <Kv k="on merge rejected" v={rejected ? `restart from ${rejected.restart_from} · ${plural(repairs, "repair task")}` : "none"} mono={!!rejected} muted={!rejected} />}
+      {takesMergeRejection(node) && <Kv k="on merge rejected" v={rejected ? <>{rejected.restart_from ? <>restart from {breakable(rejected.restart_from)} · </> : null}{plural(repairs, "repair task")}</> : "none"} muted={!rejected} />}
     </>
   );
 }
