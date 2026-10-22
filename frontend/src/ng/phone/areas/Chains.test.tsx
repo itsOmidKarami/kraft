@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChainNodeView, ChainsList, ChainView } from "./Chains";
 import { mountAt, posts, view, where } from "./testkit";
+import { mergeView } from "../../templates/draft/fixture.merge";
 
 const NODES = [
   { id: "spec", kind: "exec", tasks: ["spec.main.author"], steps: [["spec.main.author"]], gate_after: null },
@@ -109,6 +110,39 @@ describe("Chains (L.1)", () => {
     await userEvent.click(await screen.findByRole("button", { name: /^reject to/ }));
     await userEvent.type(screen.getByLabelText("reject to", { selector: "input" }), "nope{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent(/exec node before this gate/);
+  });
+
+  describe("a merge node's on merge rejected", () => {
+    const MERGE = { id: "merge", kind: "exec", tasks: ["merge.main.merge"], steps: [["merge.main.merge"]], gate_after: null };
+    const openMerge = (policy: boolean, v = mergeView({ policy })) => mountAt(<ChainNodeView />, "/templates/chains/default/nodes/merge", "/templates/chains/:chain/nodes/:node", answers({ "GET /templates/chains": [200, [{ ...CHAINS[0], nodes: [...NODES, MERGE] }]], "GET /drafts/chains/default": [200, v], "POST /drafts/chains/default/ops": [200, { ...v, ops: [] }] }));
+    const pick = async (choice: RegExp) => {
+      await userEvent.click(await screen.findByRole("button", { name: /^on merge rejected/ }));
+      await userEvent.click(await screen.findByRole("radio", { name: choice }));
+    };
+    const sent = (calls: ReturnType<typeof openMerge>["calls"]) => posts(calls).map((c) => (c.body as { ops: unknown[] }).ops);
+
+    it("a first restart picked adds the policy whole, its repair empty", async () => {
+      const { calls } = openMerge(false);
+      await userEvent.click(await screen.findByRole("button", { name: /^on merge rejected/ }));
+      expect(screen.getByRole("radio", { name: /^not set/ })).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("radio", { name: /^verification/ }));
+      await waitFor(() => expect(sent(calls)).toEqual([[{ op: "add_handler", path: "merge", kind: "on_merge_rejected" }, { op: "set_field", path: "merge", field: "on_merge_rejected.restart_from", value: "verification" }]]));
+    });
+
+    it.each([
+      { id: "another restart moves it", choice: /^verification/, value: "verification" },
+      { id: "its empty choice says it drops the repair, and does", choice: /^remove \(drops the repair\)/, value: null },
+    ])("one set: $id", async ({ choice, value }) => {
+      const { calls } = openMerge(true);
+      await pick(choice);
+      await waitFor(() => expect(sent(calls)).toEqual([[{ op: "set_field", path: "merge", field: "on_merge_rejected.restart_from", value }]]));
+    });
+
+    it("with no exec node before the final gate, it reads, and says why", async () => {
+      openMerge(true, mergeView({ tail: true }));
+      expect(await screen.findByText("No earlier exec node to restart from.")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^on merge rejected/ })).toBeNull();
+    });
   });
 
   it("a task's settings are its own path's", async () => {

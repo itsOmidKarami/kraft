@@ -9,7 +9,7 @@ import { Fold, Head, Note } from "./controls";
 import type { PaneKind } from "./describe";
 import type { PaneCtx } from "./Overview";
 import { useHarnessOptions } from "./useHarnessOptions";
-import { choicesFor, modelsFor, NOUN, optionsFor } from "../fieldChoices";
+import { choicesFor, modelsFor, noRestart, NOUN, optionsFor, unsetLabel } from "../fieldChoices";
 import { Combobox, notListed, unlisted } from "../../ui/Combobox";
 import { useProviders } from "../../harnesses/useProviders";
 import { useLibrary } from "../useLibrary";
@@ -108,6 +108,8 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
     const v = editedValue(row.field, row.value);
     setEditing(Array.isArray(v) ? v.join(", ") : v == null ? "" : String(v));
   };
+  // A merge rejection with no node to restart from only reads: anything typed would be refused.
+  const stuck = noRestart(meta, ctx);
   const stacked = POLICIES.has(row.field) && (editing !== null || row.value != null);
   return (
     <div className={`cfg-row${own ? " is-own" : ""}${changed ? " is-changed" : ""}${stacked ? " is-stacked" : ""}`}>
@@ -118,11 +120,11 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
       ) : editing === null ? (
         <span className={`cfg-v${meta.kind === "long" ? " is-prose" : ""}${row.value == null || row.value === "" ? " is-unset" : ""}`}>{POLICIES.has(row.field) ? breakable(show(row.value, meta.kind)) : show(row.value, meta.kind)}</span>
       ) : (
-        <Editor meta={meta} field={row.field} value={editing} ctx={ctx} onSave={save} onRefuse={(m) => setErr(`${label}: ${m}`)} onCancel={() => { setEditing(null); setErr(null); }} label={label} />
+        <Editor meta={meta} field={row.field} value={editing} unset={unsetLabel(row.field, row.value)} ctx={ctx} onSave={save} onRefuse={(m) => setErr(`${label}: ${m}`)} onCancel={() => { setEditing(null); setErr(null); }} label={label} />
       )}
       {own && row.source !== undefined && <span className="cfg-dot" aria-label="overridden here" />}
       {row.source !== undefined && <Badge tone={own ? "muted" : undefined} title={row.source}>{sourceWord(row.source)}</Badge>}
-      {readOnly ? null : row.locked ? (
+      {readOnly || stuck ? null : row.locked ? (
         <span className="cfg-lock" title={row.locked}>locked</span>
       ) : meta.elsewhere ? (
         <>
@@ -138,12 +140,13 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
         )
       )}
       {row.recovery && <p className="cfg-note">{RECOVERY_NOTE}</p>}
+      {stuck && !readOnly && <p className="cfg-note">{stuck}</p>}
       {err && <p className="cfg-err" role="alert">{err}</p>}
     </div>
   );
 }
 
-function Editor({ meta, field, value, label, ctx, onSave, onRefuse, onCancel }: { meta: FieldMeta; field: string; value: string; label: string; ctx: PaneCtx; onSave: (t: string) => void; onRefuse: (message: string) => void; onCancel: () => void }) {
+function Editor({ meta, field, value, unset, label, ctx, onSave, onRefuse, onCancel }: { meta: FieldMeta; field: string; value: string; /** The picker's empty choice, by what it does. */ unset: string; label: string; ctx: PaneCtx; onSave: (t: string) => void; onRefuse: (message: string) => void; onCancel: () => void }) {
   const [text, setText] = useState(value);
   const opts = useHarnessOptions();
   const library = useLibrary();
@@ -166,7 +169,7 @@ function Editor({ meta, field, value, label, ctx, onSave, onRefuse, onCancel }: 
   if (options && options.length)
     return (
       <Select autoFocus aria-label={label} className="cfg-pick" mono value={text} onKeyDown={keys} onBlur={() => onSave(text)} onChange={(e) => { setText(e.target.value); onSave(e.target.value); }}>
-        <option value="">not set</option>
+        <option value="">{unset}</option>
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </Select>
     );

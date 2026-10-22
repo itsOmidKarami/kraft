@@ -129,7 +129,7 @@ describe("Config tab", () => {
     expect(rowOf("on merge rejected")).toHaveTextContent("restart from merge_request_feedback");
     await userEvent.click(within(rowOf("on merge rejected")).getByRole("button", { name: "Edit on merge rejected" }));
     const select = within(rowOf("on merge rejected")).getByRole("combobox");
-    expect([...select.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["not set", "spec", "implementation", "verification", "merge_request_feedback"]);
+    expect([...select.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["remove (drops the repair)", "spec", "implementation", "verification", "merge_request_feedback"]);
     await userEvent.selectOptions(select, "verification");
     expect(draft.field).toHaveBeenCalledWith("merge", "on_merge_rejected.restart_from", "verification");
     expect(draft.ops).not.toHaveBeenCalled();
@@ -140,12 +140,21 @@ describe("Config tab", () => {
     await configTab();
     await showDefaults();
     await userEvent.click(within(rowOf("on merge rejected")).getByRole("button", { name: "Edit on merge rejected" }));
+    // With nothing to drop yet, the empty choice is only that.
+    expect(within(rowOf("on merge rejected")).getByRole("option", { name: "not set" })).toBeInTheDocument();
     await userEvent.selectOptions(within(rowOf("on merge rejected")).getByRole("combobox"), "spec");
     expect(draft.ops).toHaveBeenCalledWith([
       { op: "add_handler", path: "merge", kind: "on_merge_rejected" },
       { op: "set_field", path: "merge", field: "on_merge_rejected.restart_from", value: "spec" },
     ]);
     expect(draft.field).not.toHaveBeenCalled();
+  });
+
+  it("reads on merge rejected, with why, when no exec node comes before the final gate", async () => {
+    mount("merge", {}, mergeView({ tail: true }));
+    await configTab();
+    expect(within(rowOf("on merge rejected")).queryByRole("button", { name: "Edit on merge rejected" })).toBeNull();
+    expect(rowOf("on merge rejected")).toHaveTextContent("No earlier exec node to restart from.");
   });
 
   it("lists on merge rejected only on a node that merges or declares it", async () => {

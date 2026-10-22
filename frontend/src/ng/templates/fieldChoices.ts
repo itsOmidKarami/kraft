@@ -37,6 +37,18 @@ export function rejectRestartTargets({ r, scope, path }: At): string[] {
   return nodes.slice(0, limit).filter((n) => kindOf(r, n) === "exec").map((n) => n.id);
 }
 
+/** Why a merge rejection's restart row has nothing to pick, or null when it has: the row then only reads, since any
+ *  value typed would be refused. A library node has no chain order to restart in. */
+export function noRestart(meta: FieldMeta, at: At): string | null {
+  if (meta.options !== "rejectRestart") return null;
+  if (at.scope.area === "library") return "Read-only here: a library node has no chain to restart in.";
+  return rejectRestartTargets(at).length ? null : "No earlier exec node to restart from.";
+}
+
+/** The restart picker's empty choice, by what it does: clearing a merge rejection's restart drops the whole policy,
+ *  its repair too (the server's `_RESTARTS`). */
+export const unsetLabel = (field: string, current: unknown) => (field === "on_merge_rejected" && current != null ? "remove (drops the repair)" : "not set");
+
 /** What one value of each closed set is, for its refusal. */
 export const NOUN: Record<ChoiceSource, string> = {
   ref: "action",

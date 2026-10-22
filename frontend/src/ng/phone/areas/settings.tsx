@@ -2,7 +2,7 @@ import { detailOf } from "../../http";
 import { useProviders } from "../../harnesses/useProviders";
 import type { ConfigDraft } from "../../templates/draft/useConfigDraft";
 import { rowChanged, sourceWord } from "../../templates/draft/view";
-import { choicesFor, modelsFor, NOUN, optionsFor } from "../../templates/fieldChoices";
+import { choicesFor, modelsFor, noRestart, NOUN, optionsFor, unsetLabel } from "../../templates/fieldChoices";
 import { editedValue, editOps, fieldMeta, parse, RECOVERY_NOTE, show } from "../../templates/fields";
 import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
 import { useLibrary } from "../../templates/useLibrary";
@@ -37,12 +37,15 @@ export function useSettingRows(draft: ConfigDraft, edit: (e: Edit) => void, read
       const base: RowSpec = { key: x.field, label, mono: true, changed, sub: x.locked ?? (x.recovery ? RECOVERY_NOTE : x.source === undefined ? undefined : own ? "set here" : `from ${sourceWord(x.source)}`), value: show(x.value, meta.kind) };
       if (readOnly || x.locked) return base;
       if (meta.elsewhere) return { ...base, sub: meta.elsewhere };
+      // A merge rejection with no node to restart from only reads: anything typed would be refused.
+      const stuck = noRestart(meta, at);
+      if (stuck) return { ...base, sub: stuck };
       if (meta.kind === "bool") return { ...base, value: undefined, sw: !!x.value, onSwitch: (on) => void send(x.field, on) };
       // A node policy is edited by its one key; a merge rejection is added whole the first time (`editOps`).
       const current = editedValue(x.field, x.value);
       const list = optionsFor(meta, at, opts);
       if (list?.length)
-        return { ...base, onEdit: () => edit({ kind: "choice", title: label, options: [{ value: "", label: "not set" }, ...list.map((value) => ({ value, label: value }))], value: typeof current === "string" ? current : "", set: (v) => send(x.field, v || null, x.value) }) };
+        return { ...base, onEdit: () => edit({ kind: "choice", title: label, options: [{ value: "", label: unsetLabel(x.field, x.value) }, ...list.map((value) => ({ value, label: value }))], value: typeof current === "string" ? current : "", set: (v) => send(x.field, v || null, x.value) }) };
       const choices = choicesFor(meta, at, harnesses, library);
       const closed = !!choices?.length;
       const suggested = meta.suggest === "model" ? modelsFor(providers, harnesses, harness) : [];
