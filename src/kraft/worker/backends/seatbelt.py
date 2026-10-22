@@ -12,12 +12,15 @@ import logging
 import os
 import platform
 import shutil
+import sqlite3
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Literal, NamedTuple
 
 from kraft.paths import RunDirs
+from kraft.vocab import SandboxEvent
+from kraft.worker import channel as _channel
 from kraft.worker import host_view, os_init, shim
 from kraft.worker.backends import bwrap
 from kraft.worker.ca import write_whole
@@ -321,11 +324,12 @@ def probe_darwin() -> str | None:
     return f"sandbox-exec cannot start a sandbox here: {err}"
 
 
-async def end_session(files: SessionFiles, name: str) -> bool:
+async def end_session(files: SessionFiles, name: str, *, work_item_id: str | None) -> bool:
     """End every process a session left (`os_init.sweep`, in a thread, bounded),
     then remove its temporary directory and profile. False when processes
     remain or the sweep failed: the marker stays, so a later sweep still finds
-    them, and so does the temporary directory. `name` is for the log."""
+    them, and so does the temporary directory, and the item (when known) gets a
+    `sandbox_session_outlived`. `name` is the marker's, for the log and the event."""
     if not files.marker.exists() and not files.tmpdir.exists():
         files.profile.unlink(missing_ok=True)
         return True
@@ -334,11 +338,26 @@ async def end_session(files: SessionFiles, name: str) -> bool:
             asyncio.to_thread(os_init.sweep, str(files.marker), str(files.control)), SWEEP_SECONDS
         )
     except (OSError, TimeoutError) as exc:
-        logger.warning("session %s: its processes could not be swept: %s", name, exc or "timed out")
+        error = str(exc) or "timed out"
+        logger.warning("session %s: its processes could not be swept: %s", name, error)
+        await _record_outlived(work_item_id, {"session": name, "pids": [], "error": error})
         return False
     if left:
         logger.warning("session %s: processes survived the sweep, pids %s", name, left)
+        await _record_outlived(work_item_id, {"session": name, "pids": left})
         return False
     shutil.rmtree(files.tmpdir, ignore_errors=True)
     files.profile.unlink(missing_ok=True)
     return True
+
+
+async def _record_outlived(work_item_id: str | None, payload: dict) -> None:
+    """The event, through the server's channel registry; none outside a server."""
+    if work_item_id is None or (registry := _channel.current()) is None:
+        return
+    try:
+        await registry.record(work_item_id, SandboxEvent.SESSION_OUTLIVED, payload)
+    # A swept marker's name may look like an item's and name none, or the server is
+    # stopping: a close never fails on the event, and the warning above stands.
+    except (sqlite3.Error, RuntimeError) as exc:
+        logger.warning("session %s: its sandbox event was not recorded: %s", payload["session"], exc)

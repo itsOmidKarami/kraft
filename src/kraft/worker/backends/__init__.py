@@ -81,13 +81,21 @@ class SandboxBackend(Protocol):
         `session_id=` and `work_item_id=` name the session it runs, together
         or not at all."""
 
-    def oneshot(self, sandbox: dict, cwd, home, executables: Iterable[str] = ()):
+    def oneshot(
+        self,
+        sandbox: dict,
+        cwd,
+        home,
+        executables: Iterable[str] = (),
+        *,
+        work_item_id: str | None = None,
+    ):
         """Short commands in the session's image, asked as its session would
         but with no network, stdin attached: `.argv()` per command (the
         argv up to it), `await .close()` after. `executables` are the commands
         it will run, for a backend that shows the host's own (`kind: os`
-        resolves them; Docker's image has its own). `worker.sandbox.SandboxNotReady`
-        where it cannot."""
+        resolves them; Docker's image has its own). `work_item_id` is whose
+        events a close records. `worker.sandbox.SandboxNotReady` where it cannot."""
 
     def client_cwd(self, session_id: str, *, work_item_id: str) -> Path | None:
         """The directory to start the wrapped command's client in, made for
@@ -98,7 +106,9 @@ class SandboxBackend(Protocol):
         ran: `cidfile` is what the launch was given to write, `returncode`
         what it exited with."""
 
-    def code_out(self, refs: Sequence[RefStore], session_id: str) -> list[str]:
+    def code_out(
+        self, refs: Sequence[RefStore], session_id: str, *, work_item_id: str
+    ) -> list[str]:
         """Publish what the session committed, in every repository of the
         checkout; why not, per repository that could not."""
 

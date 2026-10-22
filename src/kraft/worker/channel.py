@@ -78,6 +78,11 @@ class ChannelRegistry:
         either transport."""
         return self._proxy
 
+    async def record(self, work_item_id: str, type: SandboxEvent, payload: dict) -> None:
+        """Append a sandbox event for the item: how a backend, which holds no
+        database, records one."""
+        await self._db.write(lambda c: events.append(c, work_item_id, type, payload))
+
     async def _serve(self, channel: _Channel, reader, writer) -> None:
         task = asyncio.current_task()
         channel.serving.add(task)
@@ -143,9 +148,7 @@ class ChannelRegistry:
         no socket, and None. `credentials` are what its proxy injects."""
 
         async def record(payload: dict) -> None:
-            await self._db.write(
-                lambda c: events.append(c, work_item_id, SandboxEvent.EGRESS_REFUSED, payload)
-            )
+            await self.record(work_item_id, SandboxEvent.EGRESS_REFUSED, payload)
 
         session = EgressSession(
             session_id,

@@ -353,17 +353,21 @@ def probe_host(*, refresh: bool = False) -> str | None:
 class OsOneshot:
     """`worker.backends.docker.Oneshot` for `kind: os`. Under bwrap nothing
     outlives a client, since `--die-with-parent` ends the sandbox with it; on
-    macOS `close` sweeps what a client killed on a timeout left (`files`)."""
+    macOS `close` sweeps what a client killed on a timeout left (`files`), and
+    tells `work_item_id` of what it could not end."""
 
     prefix: list[str]
     files: SessionFiles | None = None
+    work_item_id: str | None = None
 
     def argv(self) -> list[str]:
         return list(self.prefix)
 
     async def close(self) -> None:
         if self.files is not None:
-            await _seatbelt().end_session(self.files, self.files.marker.name)
+            await _seatbelt().end_session(
+                self.files, self.files.marker.name, work_item_id=self.work_item_id
+            )
 
 
 class OsBackend:
@@ -478,7 +482,13 @@ class OsBackend:
         return bwrap_argv(cmd, cwd, sandbox, mounts, **launch)
 
     def oneshot(
-        self, sandbox: dict, cwd: str | Path, home: str | Path, executables: Iterable[str] = ()
+        self,
+        sandbox: dict,
+        cwd: str | Path,
+        home: str | Path,
+        executables: Iterable[str] = (),
+        *,
+        work_item_id: str | None = None,
     ) -> OsOneshot:
         if problem := probe_host():
             raise SandboxNotReady(problem)
@@ -509,7 +519,7 @@ class OsBackend:
                     ["sh", "-c", _ONESHOT_SH, str(home)], cwd, sandbox, mounts, key=key, **launch
                 )
                 files = _seatbelt().session_files(launch["run_dirs"].base, key)
-                return OsOneshot(prefix, files)
+                return OsOneshot(prefix, files, work_item_id)
             prefix = bwrap_argv(
                 ["sh", "-c", _ONESHOT_SH, ONESHOT_HOME_RO], cwd, sandbox, mounts, **launch
             )
@@ -533,7 +543,9 @@ class OsBackend:
         markers = _seatbelt().markers_dir(_run_dirs().base)
         return any(markers.glob(f"{glob.escape(work_item_id)}-*"))
 
-    def code_out(self, refs: Sequence[RefStore], session_id: str) -> list[str]:
+    def code_out(
+        self, refs: Sequence[RefStore], session_id: str, *, work_item_id: str
+    ) -> list[str]:
         if sys.platform == "darwin":
             base = _run_dirs().base
             problems = [
@@ -542,19 +554,12 @@ class OsBackend:
                 if (p := _refstore.check_direct(base, store, item_live=self._item_live))
             ]
             # `close` swept first; a marker left is a sweep that could not end the session.
-            markers = _seatbelt().markers_dir(base)
-            left = [
-                m
-                for m in markers.glob(f"*{session_id}")
-                if m.name == session_id or m.name.endswith(f"-{session_id}")
-            ]
-            return [
-                *problems,
-                *(
-                    f"processes of session {m.name} outlived it (marker {m} still exists)"
-                    for m in left
-                ),
-            ]
+            marker = _seatbelt().markers_dir(base) / ids.qualified(work_item_id, session_id)
+            if marker.exists():
+                problems.append(
+                    f"processes of session {marker.name} outlived it (marker {marker} still exists)"
+                )
+            return problems
         return _refstore.sync_all(refs, session_id)
 
     def code_out_item(self, run_base: Path, work_item_id: str) -> list[str]:
@@ -572,7 +577,9 @@ class OsBackend:
         if sys.platform != "darwin":
             return  # --die-with-parent and the pid namespace ended everything
         key = ids.qualified(work_item_id, session_id)
-        await _seatbelt().end_session(_seatbelt().session_files(_run_dirs().base, key), key)
+        await _seatbelt().end_session(
+            _seatbelt().session_files(_run_dirs().base, key), key, work_item_id=work_item_id
+        )
 
     async def egress_transport(self) -> str:
         return "unix"
@@ -599,7 +606,11 @@ class OsBackend:
             # `control` is no session's. A leftover setup one (`ids.qualified` of its item and
             # setup id) or `oneshot-` one is an orphan too: its launcher removes it on a clean exit.
             if name != "control" and name not in kept:
-                if await _seatbelt().end_session(_seatbelt().session_files(run_base, name), name):
+                # `<item>-<session>` names its item; a bare legacy id or `oneshot-` one none.
+                item, dash, _ = name.partition("-")
+                item = item if dash and len(item) == ids.WORK_ITEM_LENGTH else None
+                files = _seatbelt().session_files(run_base, name)
+                if await _seatbelt().end_session(files, name, work_item_id=item):
                     swept.append(name)
         return swept
 

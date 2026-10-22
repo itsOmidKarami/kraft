@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 from support.harness import git
 
-from kraft.worker import host_view, os_init, shim
+from kraft.worker import channel, host_view, os_init, shim
 from kraft.worker.backends import bwrap, seatbelt
 from kraft.worker.backends.docker import _ONESHOT_SH
 from kraft.worker.mounts import session_mounts
@@ -225,6 +225,23 @@ def sweeps(monkeypatch):
     return calls
 
 
+@pytest.fixture
+def recorded(monkeypatch):
+    """The server's channel registry replaced: the `(item, type, payload)` it records."""
+    got = []
+
+    class Registry:
+        async def record(self, work_item_id, type, payload):
+            got.append((work_item_id, type, payload))
+
+    monkeypatch.setattr(channel, "_CURRENT", Registry())
+    return got
+
+
+def _outlived(item, session, pids, **extra):
+    return [(item, "sandbox_session_outlived", {"session": session, "pids": pids, **extra})]
+
+
 def _made(mac, key):
     """What a launch leaves behind: its marker, temporary directory and profile."""
     f = mac.files(key)
@@ -235,8 +252,13 @@ def _made(mac, key):
     return f
 
 
-async def test_oneshot_shows_its_home_at_its_own_path_and_closes_clean(mac, sweeps):
-    shot = bwrap.OsBackend().oneshot(SANDBOX, mac.wt, mac.home, executables=(str(mac.cli),))
+@pytest.mark.parametrize("left", [[], [4242]], ids=["clean", "survivors"])
+async def test_oneshot_shows_its_home_at_its_own_path_and_sweeps_on_close(
+    mac, sweeps, recorded, left
+):
+    shot = bwrap.OsBackend().oneshot(
+        SANDBOX, mac.wt, mac.home, executables=(str(mac.cli),), work_item_id="w1"
+    )
     opts, rest = _launch(shot.argv())
     f = shot.files
     assert f.marker.name.startswith("oneshot-") and opts["--marker"] == str(f.marker)
@@ -247,23 +269,34 @@ async def test_oneshot_shows_its_home_at_its_own_path_and_closes_clean(mac, swee
     assert f'(deny file-write* (subpath "{mac.home.resolve()}"))' in text
     assert f'(allow file-read* (subpath "{mac.real.resolve()}"))' in text
     _made(mac, f.marker.name)
+    sweeps.left = left
 
     await shot.close()
 
-    assert sweeps.asked == [f.marker.name] and not f.tmpdir.exists() and not f.profile.exists()
+    assert sweeps.asked == [f.marker.name] and f.tmpdir.exists() == bool(left)
+    assert recorded == (_outlived("w1", f.marker.name, left) if left else [])
 
 
 @pytest.mark.parametrize(
-    ("left", "error", "kept", "logged"),
+    ("left", "error", "kept", "logged", "event"),
     [
-        ([], None, False, ""),
-        ([4242], None, True, "survived the sweep, pids [4242]"),
-        ([], OSError("no sandbox_check"), True, "could not be swept: no sandbox_check"),
+        ([], None, False, "", []),
+        ([4242], None, True, "survived the sweep, pids [4242]", _outlived("w1", "w1-s1", [4242])),
+        (
+            [],
+            OSError("no sandbox_check"),
+            True,
+            "could not be swept: no sandbox_check",
+            _outlived("w1", "w1-s1", [], error="no sandbox_check"),
+        ),
     ],
     ids=["clean", "survivors", "sweep-fails"],
 )
-async def test_close_sweeps_its_own_marker_only(mac, sweeps, caplog, left, error, kept, logged):
-    """Co-tasks of one item run side by side: closing one never touches the other's."""
+async def test_close_sweeps_its_own_marker_only(
+    mac, sweeps, recorded, caplog, left, error, kept, logged, event
+):
+    """Co-tasks of one item run side by side: closing one never touches the other's.
+    A session it could not end is the item's event, with the pids still alive."""
     mine, other = _made(mac, "w1-s1"), _made(mac, "w1-s2")
     sweeps.left, sweeps.error = left, error
 
@@ -273,6 +306,7 @@ async def test_close_sweeps_its_own_marker_only(mac, sweeps, caplog, left, error
     assert (mine.tmpdir.exists(), mine.profile.exists()) == (kept, kept)
     assert other.tmpdir.exists() and other.marker.exists() and other.profile.exists()
     assert (logged in caplog.text) if logged else not caplog.records
+    assert recorded == event
 
 
 async def test_close_has_nothing_to_sweep_for_a_session_it_never_ran(mac, sweeps):
@@ -291,6 +325,16 @@ async def test_sweep_ends_only_what_no_live_session_owns(mac, sweeps):
 
     assert sorted(sweeps.asked) == sorted(f.marker.name for f in orphans) == sorted(swept)
     assert live.marker.exists() and live.tmpdir.exists() and mac.files().control.exists()
+
+
+async def test_sweep_tells_an_item_of_its_session_it_could_not_end(mac, sweeps, recorded):
+    """Only a marker named `<item>-<session>` has an item to tell."""
+    for key in ("w2345678-s9", "oneshot-abc", "a" * 32):
+        _made(mac, key)
+    sweeps.left = [5]
+
+    assert await bwrap.OsBackend().sweep([]) == []
+    assert recorded == _outlived("w2345678", "w2345678-s9", [5])
 
 
 async def test_sweep_does_nothing_on_linux(mac, sweeps, monkeypatch):
@@ -344,7 +388,7 @@ def test_a_lock_a_killed_git_left_goes_unless_a_co_task_is_live(
         _made(item.mac, marker)
 
     if through == "code_out":
-        item.backend.code_out(refs, "s1")
+        item.backend.code_out(refs, "s1", work_item_id="w1")
     else:
         item.backend.code_out_item(run_dirs.base, "w1")
 
@@ -360,7 +404,7 @@ def test_a_branch_aimed_at_main_is_put_back_before_anything_reads_it(item, run_d
     item.ref.write_text("ref: refs/heads/main\n")
 
     if through == "code_out":
-        problems = item.backend.code_out(refs, "s1")
+        problems = item.backend.code_out(refs, "s1", work_item_id="w1")
     else:
         problems = item.backend.code_out_item(run_dirs.base, "w1")
 
@@ -370,8 +414,15 @@ def test_a_branch_aimed_at_main_is_put_back_before_anything_reads_it(item, run_d
 
 @pytest.mark.parametrize(
     ("marker", "problems"),
-    [(None, 0), ("w1-s1", 1), ("w1-s2", 0), ("w1-xs1", 0), ("a" * 32, 0)],
-    ids=["swept", "survivors", "another-session", "id-as-a-suffix", "another-legacy-session"],
+    [(None, 0), ("w1-s1", 1), ("w1-s2", 0), ("w1-xs1", 0), ("w2-s1", 0), ("a" * 32, 0)],
+    ids=[
+        "swept",
+        "survivors",
+        "another-session",
+        "id-as-a-suffix",
+        "same-id-another-item",
+        "another-legacy-session",
+    ],
 )
 def test_code_out_tells_of_a_session_the_sweep_could_not_end(item, marker, problems):
     """`run_task` goes on to `code_out` after `close`; a marker still there means
@@ -380,7 +431,7 @@ def test_code_out_tells_of_a_session_the_sweep_could_not_end(item, marker, probl
     if marker:
         _made(item.mac, marker)
 
-    got = item.backend.code_out(refs, "s1")
+    got = item.backend.code_out(refs, "s1", work_item_id="w1")
 
     assert len(got) == problems
     assert all("outlived" in p and "w1-s1" in p for p in got)
@@ -510,6 +561,6 @@ def test_a_wrapped_commit_lands_on_the_item_branch(repo, tmp_path, run_dirs, mon
     done = _launch_for_real(argv, wt)
 
     assert done.returncode == 0, done.stderr
-    assert backend.code_out(refs, "s1") == []
+    assert backend.code_out(refs, "s1", work_item_id="w1") == []
     assert git(repo, "log", "-1", "--format=%s", BRANCH) == "x"
     assert git(repo, "rev-parse", "main") == main
