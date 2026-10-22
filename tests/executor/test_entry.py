@@ -319,3 +319,37 @@ async def test_a_chain_policy_over_the_ceiling_is_refused_before_any_side_effect
     assert database.read(lambda c: c.execute("SELECT id FROM work_items").fetchall()) == []
     assert not any(run_dirs.items.iterdir())
     assert filed == []
+
+
+@pytest.mark.parametrize("chain_policy", [_SANDBOXED, None], ids=["sandboxed", "unsandboxed"])
+async def test_a_sandboxed_item_freezes_its_harness_hosts_and_env_names_at_filing(
+    database, run_dirs, tmp_path, monkeypatch, chain_policy
+):
+    """Kraft-8g7fp: what a sandboxed item's launches may reach beyond the
+    sandbox is frozen with it -- every harness's hosts and declared
+    credentials, and its repository's env names, never their values. An
+    unsandboxed item freezes neither, and keeps reading them live."""
+    from kraft import store
+    from kraft.policy import TemplatePolicyOverride
+
+    config = tmp_path / "config"
+    config.mkdir()
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config))
+    entry = {"path": str(tmp_path), "env": {"CI": "a-secret"}, "env_passthrough": ["NPM_TOKEN"]}
+    (config / "repos.yaml").write_text(json.dumps({"repos": [entry]}))
+    chain = _quick_task()
+    if chain_policy is not None:
+        policy = TemplatePolicyOverride.model_validate(chain_policy)
+        chain = dataclasses.replace(chain, chain=chain.chain.model_copy(update={"policy": policy}))
+
+    row = _row(database, await _intake(database, run_dirs, tmp_path, chain))
+    filed = store.materialized_chain_of(row)
+
+    if chain_policy is None:
+        assert (filed.harness_egress, filed.repository_env_names) == (None, None)
+        return
+    assert filed.repository_env_names == {str(tmp_path): ("CI", "NPM_TOKEN")}
+    assert "a-secret" not in row["materialized_chain"]
+    claude = filed.harness_egress["claude"]
+    assert "api.anthropic.com" in claude.network_requires
+    assert {c.env for c in claude.credentials} >= {"ANTHROPIC_API_KEY"}

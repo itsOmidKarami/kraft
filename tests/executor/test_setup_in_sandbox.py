@@ -414,6 +414,38 @@ async def test_the_walk_runs_both_setups_in_the_items_sandbox(
     assert seen == [(expected, bool(expected) or None)] * 2
 
 
+async def test_the_walks_setups_pass_only_the_env_names_the_item_was_filed_with(
+    tmp_path, repo, monkeypatch
+):
+    """Kraft-8g7fp: a name added to the entry's `env:` or `env_passthrough`
+    after a sandboxed item was filed never reaches its setup command; one
+    dropped since is dropped."""
+    seen = []
+
+    async def run_setup_command(worktree, repo, repo_entry, *, sandbox=None, checkout=None):
+        seen.append((repo_entry.env, repo_entry.env_passthrough))
+        return ""
+
+    async def run_task(*_a, **_kw):
+        return "done"
+
+    monkeypatch.setattr(kraft_builtins, "run_setup_command", run_setup_command)
+    monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
+    filed = {"/repo": ("CI", "X_KEY", "GONE")}
+    chain = dataclasses.replace(v1_chain(_SUBPROCESS, repo=repo), repository_env_names=filed)
+    live = {"env": {"CI": "1", "LATE": "2"}, "env_passthrough": ["X_KEY", "Y_KEY"]}
+
+    status, *_ = await v1_walk(
+        tmp_path,
+        chain,
+        repo=repo,
+        repo_entry=entry_of({"setup_command": _SETUP, "sandbox": _SANDBOX, **live}),
+    )
+
+    assert status == "completed"
+    assert seen == [({"CI": "1"}, ["X_KEY"])] * 2
+
+
 async def test_a_sandboxed_setup_command_given_no_checkout_never_runs(tmp_path, monkeypatch):
     """Whichever caller forgot the checkout, members and all: nothing runs."""
     calls = _record_run(monkeypatch)

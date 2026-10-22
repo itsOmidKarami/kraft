@@ -390,6 +390,25 @@ def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
     return {**lowered.policy.model_dump(), "kit": policy.kit}
 
 
+def frozen_repo_entry(row, entry: RepoEntry | None) -> RepoEntry | None:
+    """`entry` as a launch of this item passes it to a worker: for an item
+    sandboxed at filing, its `env:` and `env_passthrough` cut to the names it
+    was filed with (`MaterializedChain.repository_env_names`), so a later
+    `repos.yaml` edit can drop a name but never add one (Kraft-8g7fp). A
+    repository with no frozen entry passes none. Anything else: `entry`."""
+    snapshot = store.materialized_chain_of(row) if row is not None else None
+    frozen = snapshot.repository_env_names if snapshot is not None else None
+    if entry is None or frozen is None:
+        return entry
+    names = set(frozen.get(entry.path, ()))
+    return entry.model_copy(
+        update={
+            "env": {k: v for k, v in entry.env.items() if k in names},
+            "env_passthrough": [n for n in entry.env_passthrough if n in names],
+        }
+    )
+
+
 async def ensure_kit(row, launch: LaunchContext | None) -> tuple[_kit.Fetched, _kit.Lowered] | None:
     """Fetch and lower the item's Kit, if it runs in one, before anything
     reads its sandbox: the walk before the worktree, dispatch before a

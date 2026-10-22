@@ -4,12 +4,14 @@ route is its caller; these pin what it accepts and how it refuses."""
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 from support.harness import v1_node, v1_task, v1_task_at
 
 from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.templates.environment import WorkItemTarget
-from kraft.templates.models import Chain, MaterializedChain, ResolvedChain
+from kraft.templates.models import Chain, HarnessReach, MaterializedChain, ResolvedChain
 from kraft.templates.retry import RetryOverrideError, validate_retry_override
 
 
@@ -35,10 +37,18 @@ def _chain(**maxima) -> MaterializedChain:
     )
 
 
-def test_an_empty_override_changes_nothing():
+#: What a sandboxed item freezes beside its sandbox at filing (Kraft-8g7fp).
+_REACH = {
+    "harness_egress": {"codex": HarnessReach(network_requires=("api.openai.com",))},
+    "repository_env_names": {"/r": ("CI",)},
+}
+
+
+@pytest.mark.parametrize("filed", [{}, _REACH], ids=["plain", "sandboxed-reach"])
+def test_an_empty_override_changes_nothing(filed):
     """The effective policy is the scope's own, unchanged; a scope with none
-    has none."""
-    chain = _chain()
+    has none. The fork keeps what the item froze at filing."""
+    chain = dataclasses.replace(_chain(), **filed)
     result = validate_retry_override(chain, "build.work.implement")
     assert result.task_config == {}
     assert result.policy.allowed_tools == ["Read", "Edit"]

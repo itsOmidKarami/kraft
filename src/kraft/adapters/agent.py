@@ -33,7 +33,7 @@ from kraft.addons import load as addons_load
 from kraft.config import RepoEntry, git_read
 from kraft.policy import InstancePolicy
 from kraft.templates.environment import HarnessProfileTable
-from kraft.templates.models import AgentTask
+from kraft.templates.models import AgentTask, HarnessReach
 from kraft.vocab import ADVANCING
 from kraft.worker import backends as _backends
 from kraft.worker import callback as _callback
@@ -950,6 +950,19 @@ def _install_hook(
             raise LaunchRefused(str(exc)) from exc
 
 
+def _harness_reach(row, h: _harness.Harness) -> HarnessReach:
+    """What harness `h` adds to this launch's reach: as the item was filed
+    when it was sandboxed then (`MaterializedChain.harness_egress`), else
+    the live harness file. A harness the item was filed without adds no host
+    and declares no credential, so a profile moved onto it after filing
+    widens nothing (Kraft-8g7fp)."""
+    snapshot = store.materialized_chain_of(row) if row is not None else None
+    frozen = snapshot.harness_egress if snapshot is not None else None
+    if frozen is None:
+        return HarnessReach(network_requires=h.network_requires, credentials=h.credentials)
+    return frozen.get(h.id) or HarnessReach()
+
+
 async def run_agent_task(
     db,
     run_dirs,
@@ -1040,6 +1053,7 @@ async def run_agent_task(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
     in_place = item_row is not None and store.is_in_place(item_row)
+    reach = _harness_reach(item_row, h)
     ctx = build_context(
         usage_source=h.capabilities["usage"].source,
         context_channel=h.capabilities["context"].channel,
@@ -1333,8 +1347,8 @@ async def run_agent_task(
         repo_entry=repo_entry,
         reader=reader,
         time_cap=time_cap,
-        network_requires=h.network_requires,
-        declared=h.credentials,
+        network_requires=reach.network_requires,
+        declared=reach.credentials,
         files=files,
         rate_limit_key={"harness": harness_id, "model": model} if harness_id else None,
         harness=harness,

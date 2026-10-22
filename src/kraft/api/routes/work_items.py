@@ -1174,7 +1174,15 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
                 repository_steering=previous.repository_steering if previous else None,
                 attachment_kinds=kinds,
                 skip_nodes=_kept_skips(st, row, repo_entry, previous, filed_kinds, new_chain),
-            ).to_json()
+            )
+            if previous is not None:
+                # Frozen with the sandbox, so kept across a switch like steering.
+                new_materialized = dataclasses.replace(
+                    new_materialized,
+                    harness_egress=previous.harness_egress,
+                    repository_env_names=previous.repository_env_names,
+                )
+            new_materialized = new_materialized.to_json()
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
     elif body.attachments is not None:

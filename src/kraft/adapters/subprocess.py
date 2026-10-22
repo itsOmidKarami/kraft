@@ -848,6 +848,14 @@ async def _run_task(
             )
             raise
 
+    if backend is not None:
+        # `executor` imports this module.
+        from kraft.executor.dispatch import frozen_repo_entry
+
+        item_row = db.read(
+            lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+        )
+        repo_entry = frozen_repo_entry(item_row, repo_entry)
     full_env = worker_env(repo_entry, {**(env or {}), "KRAFT_RESULT_PATH": str(result_path)})
     # A managed credential's value goes to the egress proxy, read from the
     # worker env like any other; the container holds its sentinel, and the

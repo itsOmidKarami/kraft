@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -82,6 +83,37 @@ def in_place_by(repo_entry: RepoEntry | None, asked: bool | None) -> str | None:
             return "'worktrees: false' on its repos.yaml entry"
         return None
     return "--in-place" if asked else None
+
+
+def with_frozen_reach(materialized: MaterializedChain, repo: str) -> MaterializedChain:
+    """`materialized` with what a sandboxed item's launches reach beyond the
+    sandbox frozen beside it (Kraft-8g7fp): every harness's hosts and declared
+    credentials (`harness_egress`), and the env names each repository it runs
+    in passes in (`repository_env_names`), names only. `ConfigError` for an
+    unreadable `repos.yaml`, so the item is refused rather than filed with
+    nothing frozen."""
+    from kraft import harness as _harness
+    from kraft.config import connected_entry, load_repos
+    from kraft.paths import config_dir
+    from kraft.templates.models import HarnessReach
+
+    repos = load_repos(config_dir() / "repos.yaml")
+    entries = [connected_entry(repos, repo)]
+    if materialized.target.kind == "workspace":
+        by_id = {r.id: r for r in repos if r.id}
+        entries += [by_id.get(rid) for rid in materialized.target.repositories()]
+    return dataclasses.replace(
+        materialized,
+        # Every harness, not only the chain's: `harnesses.yaml` is read live,
+        # so a profile can move a task onto another provider after filing.
+        harness_egress={
+            hid: HarnessReach(network_requires=h.network_requires, credentials=h.credentials)
+            for hid, h in _harness.load(None).valid.items()
+        },
+        repository_env_names={
+            e.path: tuple(dict.fromkeys([*e.env, *e.env_passthrough])) for e in entries if e
+        },
+    )
 
 
 def in_place_sandbox_problem(
@@ -256,6 +288,8 @@ async def intake(
         )
     ):
         raise ValueError(problem)
+    if materialized.with_item_policy(policy_override).item_sandbox() is not None:
+        materialized = with_frozen_reach(materialized, repo)
     # Everything above is pure; everything below has a side effect. A chain
     # the instance policy refuses (`PolicyError`, a `ValueError`) is refused
     # here, before a bead is filed or an attachment copied -- a trigger used to

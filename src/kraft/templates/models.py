@@ -53,6 +53,7 @@ from kraft.policy import (
     SCOPE_CAP_FIELDS,
     InstancePolicy,
     PolicyError,
+    SandboxCredential,
     SandboxPolicy,
     TaskPolicyOverride,
     TemplatePolicyOverride,
@@ -1789,6 +1790,18 @@ class ResolvedChain:
         )
 
 
+class HarnessReach(BaseModel):
+    """What one harness adds to a sandboxed launch, as it stood when the item
+    was filed (`MaterializedChain.harness_egress`): the hosts its CLI must
+    reach (`Harness.network_requires`) and the credentials it declares
+    (`Harness.credentials`), which fill a sandbox entry naming just `env`."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    network_requires: tuple[str, ...] = ()
+    credentials: tuple[SandboxCredential, ...] = ()
+
+
 class _StoredMaterialization(BaseModel):
     """`MaterializedChain`'s stored form, so the mapping between the snapshot
     and its column lives on the model rather than in whatever writes the row.
@@ -1849,6 +1862,10 @@ class _StoredMaterialization(BaseModel):
     #: `MaterializedChain.repository_steering`. Absent from a snapshot stored
     #: before repository steering was frozen, which reads back as `None`.
     repository_steering: dict[str, dict[str, str]] | None = None
+    #: `MaterializedChain.harness_egress`; absent unless sandboxed at filing.
+    harness_egress: dict[str, HarnessReach] | None = None
+    #: `MaterializedChain.repository_env_names`; absent unless sandboxed at filing.
+    repository_env_names: dict[str, tuple[str, ...]] | None = None
     #: `ResolvedChain.addons`. Absent when the chain uses no add-on, and from
     #: a snapshot stored before add-ons were pinned.
     addons: dict[str, dict[str, str | None]] | None = None
@@ -1890,6 +1907,17 @@ class MaterializedChain:
     #: repository's names against the live library, the way they read the
     #: steering files they were filed with (`worker.steering.for_repository`).
     repository_steering: Mapping[str, Mapping[str, str]] | None = None
+    #: A sandboxed item's harnesses as filed, by harness id: what each adds to
+    #: a launch (`HarnessReach`), frozen with the sandbox so a later harness
+    #: file never widens what a running item may reach. A harness with no
+    #: entry adds nothing. `None`: no sandbox at filing, or a snapshot stored
+    #: before this was frozen, whose launches read the live harness.
+    harness_egress: Mapping[str, HarnessReach] | None = None
+    #: A sandboxed item's env names as filed, by repository path: each
+    #: entry's `env:` keys and `env_passthrough`. A launch passes only the
+    #: live names among them (`dispatch.frozen_repo_entry`); values are never
+    #: stored. `None`: as for `harness_egress`.
+    repository_env_names: Mapping[str, tuple[str, ...]] | None = None
 
     # Fork lineage is deliberately NOT a field here. `RunFork.parent`
     # (`kraft.templates.forks`, the `run_forks` table) is the one place a fork's
@@ -2041,7 +2069,9 @@ class MaterializedChain:
         `harness: codex`, a `harnesses.yaml` profile id, and dispatch
         resolves it live (`adapters.agent.harness_profile`). That is intended:
         `harnesses.yaml` holds settings for this Kraft install -- which
-        executable, which defaults -- not the chain's content.
+        executable, which defaults -- not the chain's content. What a
+        sandboxed item's harnesses add to its reach is frozen, though
+        (`harness_egress`).
         """
         return _StoredMaterialization(
             chain=self.chain.chain,
@@ -2056,6 +2086,10 @@ class MaterializedChain:
                 if self.repository_steering is None
                 else {p: dict(t) for p, t in self.repository_steering.items()}
             ),
+            harness_egress=None if self.harness_egress is None else dict(self.harness_egress),
+            repository_env_names=(
+                None if self.repository_env_names is None else dict(self.repository_env_names)
+            ),
         ).model_dump_json(
             # A single-repository item with no attachment keeps its exact shape,
             # and a worktree item's target its pre-in-place one: an older build,
@@ -2064,6 +2098,8 @@ class MaterializedChain:
                 **({"repository_policies": True} if not self.repository_policies else {}),
                 **({"untrimmed": True} if self.untrimmed is None else {}),
                 **({"repository_steering": True} if self.repository_steering is None else {}),
+                **({"harness_egress": True} if self.harness_egress is None else {}),
+                **({"repository_env_names": True} if self.repository_env_names is None else {}),
                 **({"addons": True} if not self.chain.addons else {}),
                 **({"target": {"in_place": True}} if not self.target.in_place else {}),
             }
@@ -2088,4 +2124,6 @@ class MaterializedChain:
             repository_policies=stored.repository_policies,
             untrimmed=stored.untrimmed,
             repository_steering=stored.repository_steering,
+            harness_egress=stored.harness_egress,
+            repository_env_names=stored.repository_env_names,
         )

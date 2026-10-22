@@ -2,6 +2,7 @@
 enforced in the container or the launch is refused, never run unenforced."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +10,8 @@ from kraft import harness
 from kraft.adapters import agent
 from kraft.adapters.agent import LaunchRefused
 from kraft.paths import RunDirs
+from kraft.policy import DEFAULT_SENTINEL
+from kraft.templates.models import HarnessReach
 
 BARE = {"kind": "docker", "image": "x"}
 #: No `network:`, knowingly: the launch runs, and the checks below are the ones
@@ -195,11 +198,40 @@ def test_claude_in_a_sandbox_without_network_is_refused_before_launch(run, tmp_p
         run(harness="claude", run_dirs=RunDirs(base=tmp_path), sandbox=DOCKER)
 
 
-def test_a_named_credential_is_launched_as_its_harness_declares_it(run, tmp_path):
+_FILED = HarnessReach(network_requires=("filed.example",))
+
+
+@pytest.mark.parametrize(
+    ("frozen", "hosts", "inject"),
+    [
+        (None, ("api.anthropic.com",), [("api.anthropic.com", "x-api-key")]),
+        ({"claude": _FILED}, ("filed.example",), []),
+        ({"codex": _FILED}, (), []),
+    ],
+    ids=["live", "as-filed", "harness-filed-without"],
+)
+def test_a_named_credential_is_launched_as_its_harness_declares_it(
+    run, tmp_path, monkeypatch, frozen, hosts, inject
+):
     """Ruling E2: `- env: NAME` takes the harness's declaration, sentinel and
-    all, and the launch hands it on to be managed."""
+    all, and the launch hands it on to be managed. For an item sandboxed at
+    filing, the harness's hosts and declarations are the ones it was filed
+    with, and a harness it was filed without adds none (Kraft-8g7fp)."""
+    filed = SimpleNamespace(harness_egress=frozen, chain=SimpleNamespace(nodes=()))
+    monkeypatch.setattr("kraft.store.materialized_chain_of", lambda row: filed)
+    monkeypatch.setattr("kraft.store.is_in_place", lambda row: False)
     sandbox = {**NETWORKED, "credentials": [{"env": "ANTHROPIC_API_KEY"}]}
-    seen = run(harness="claude", command="claude", run_dirs=RunDirs(base=tmp_path), sandbox=sandbox)
+    seen = run(
+        harness="claude",
+        command="claude",
+        run_dirs=RunDirs(base=tmp_path),
+        sandbox=sandbox,
+        db=SimpleNamespace(read=lambda fn: {"id": "w1", "branch": None}),
+    )
     (credential,) = harness.manage(harness.sandbox_credentials(sandbox), seen["declared"])
-    assert credential.sentinel == "sk-ant-api03-kraft-proxy-managed"
-    assert [(i.domain, i.header) for i in credential.inject] == [("api.anthropic.com", "x-api-key")]
+    assert credential.sentinel == (
+        "sk-ant-api03-kraft-proxy-managed" if frozen is None else DEFAULT_SENTINEL
+    )
+    assert [(i.domain, i.header) for i in credential.inject] == inject
+    assert set(hosts) <= set(seen["network_requires"])
+    assert frozen is None or tuple(seen["network_requires"]) == hosts

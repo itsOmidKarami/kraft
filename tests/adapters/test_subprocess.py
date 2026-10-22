@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import psutil
 import pytest
@@ -682,12 +683,31 @@ async def test_run_task_tears_down_the_container_on_cancel(run, docker, database
     assert docker.read_text().splitlines() == ["kraft-w1-s-sandbox-cancel"]
 
 
-async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypatch, run_dirs):
+@pytest.mark.parametrize(
+    ("filed", "identity", "passthrough"),
+    [
+        (None, {}, ["OPENAI_API_KEY", "MY_REPO", "GIT_AUTHOR_NAME"]),
+        (
+            {"/repo": ("MY_REPO", "OPENAI_API_KEY")},
+            {"GIT_AUTHOR_NAME": "Daemon"},
+            ["OPENAI_API_KEY", "MY_REPO"],
+        ),
+    ],
+    ids=["live", "names-as-filed"],
+)
+async def test_run_task_passes_env_through_to_docker_argv(
+    run, docker, monkeypatch, run_dirs, filed, identity, passthrough
+):
     """Kraft-rki: `env=` was silently dropped once `sandbox` was set -- only
     `FORWARDED_ENV` crosses into the container bare. `dispatch.py` passes
     `PYTHONDONTWRITEBYTECODE=1` for `on.test.run` so a fix-loop re-measure
     cannot import a stale `.pyc`. `docker_argv` itself (backends/test_docker.py) turns
-    `env=` into `-e` flags; this checks `run_task` forwards it at all."""
+    `env=` into `-e` flags; this checks `run_task` forwards it at all. An item
+    sandboxed at filing passes only the names it was filed with (Kraft-8g7fp)."""
+    snapshot = SimpleNamespace(repository_env_names=filed)
+    # The item's snapshot as the launch's env narrowing reads it, and only there.
+    reader = SimpleNamespace(materialized_chain_of=lambda row: snapshot)
+    monkeypatch.setattr("kraft.executor.dispatch.store", reader)
     seen = {}
     real_docker_argv = docker_backend.docker_argv
 
@@ -712,8 +732,12 @@ async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypat
     # The container has no ~/.gitconfig: the identity crosses as env, under a
     # repository's own `env:`. That, and a credential, cross by name only
     # (Kraft-1u0hp); the CLI gets a home that outlives --rm.
-    assert seen["env"] == {"GIT_COMMITTER_NAME": "Daemon", "PYTHONDONTWRITEBYTECODE": "1"}
-    assert list(seen["passthrough"]) == ["OPENAI_API_KEY", "MY_REPO", "GIT_AUTHOR_NAME"]
+    assert seen["env"] == {
+        **identity,
+        "GIT_COMMITTER_NAME": "Daemon",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    assert list(seen["passthrough"]) == passthrough
     assert seen["home"] == run_dirs.base / "items" / "w1" / "sandbox-home"
 
 

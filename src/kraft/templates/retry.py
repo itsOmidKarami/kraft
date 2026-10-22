@@ -167,6 +167,8 @@ def validate_retry_override(
         repository_policies=chain.repository_policies,
         item_policy=chain.item_policy,
         repository_steering=chain.repository_steering,
+        harness_egress=chain.harness_egress,
+        repository_env_names=chain.repository_env_names,
     )
     return RetryOverride(
         path=path,

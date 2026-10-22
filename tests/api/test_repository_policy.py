@@ -117,6 +117,27 @@ def test_every_item_filed_in_a_repository_is_bound_by_its_policy(client, repo):
     assert _snapshot(client, wid)["policy"]["deny_tools"] == ["WebFetch"]
 
 
+@pytest.mark.api_client(edit_templates=_two_chains)
+def test_a_sandboxed_items_env_names_survive_a_repos_yaml_edit_and_a_switch(client, repo):
+    """Kraft-8g7fp: the env names a sandboxed item passes in are its
+    repository's at filing, names only, kept across a template switch; a
+    name added to the entry later is not among them."""
+    templates = client.app.state.templates_dir
+    _connect(templates, repo, sandbox=_SANDBOX, env={"CI": "1"}, env_passthrough=["NPM_TOKEN"])
+    wid = _file(client, repo, chain_template="one").json()["id"]
+    _connect(
+        templates, repo, sandbox=_SANDBOX, env={"CI": "1", "LATE": "x"}, env_passthrough=["AWS"]
+    )
+
+    switched = client.patch(f"/api/work-items/{wid}", json={"chain_template": "two"})
+
+    assert switched.status_code == 200, switched.text
+    snapshot = _snapshot(client, wid)
+    assert snapshot["chain"]["id"] == "two"
+    assert snapshot["repository_env_names"] == {str(repo): ["CI", "NPM_TOKEN"]}
+    assert "api.anthropic.com" in snapshot["harness_egress"]["claude"]["network_requires"]
+
+
 @pytest.mark.parametrize("door", ["/api/work-items", "/api/triggers"])
 def test_a_repository_policy_the_instance_refuses_is_a_422_at_intake(client, repo, door):
     client.app.state.instance_policy = _instance(allowed_tools=["Read"])

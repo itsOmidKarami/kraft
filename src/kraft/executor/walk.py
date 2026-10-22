@@ -2845,13 +2845,15 @@ async def run_once(
         # A sandboxed item's setup_command runs in its sandbox, never on the
         # host (Kraft-p8nem).
         sandbox = dispatch.item_sandbox(row, launch)
+        # Its setup command passes only the env names the item was filed with.
+        repo_entry = dispatch.frozen_repo_entry(row, launch.repo_entry if launch else None)
         worktree = await _builtins.ensure_worktree(
             db,
             run_dirs,
             repo=row["repo"],
             work_item_id=work_item_id,
             attachments=entry.attachments_of(row),
-            repo_entry=launch.repo_entry if launch else None,
+            repo_entry=repo_entry,
             sandbox=sandbox,
             repositories=launch.repositories if launch else None,
         )
@@ -2874,7 +2876,7 @@ async def run_once(
             await _builtins.prepare_runtime(
                 worktree,
                 Path(row["repo"]),
-                launch.repo_entry if launch else None,
+                repo_entry,
                 sandbox=sandbox,
                 # Its members now exist, checked out by Kraft just above.
                 checkout=stops.sandbox_checkout(row, launch, worktree) if sandbox else None,
