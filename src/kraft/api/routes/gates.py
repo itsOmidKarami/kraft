@@ -10,6 +10,8 @@ from kraft.api.routes.lifecycle import (
     _moved_under_refusal,
     _stop_live_sessions,
     chain_or_409,
+    head_moved_refusal,
+    head_refusal,
     held_refusal,
     refresh_base,
 )
@@ -47,6 +49,9 @@ class GateApprove(BaseModel):
     #: The chain revision's digest, as the artifact the approver read carried
     #: it (Kraft-ec66w). Other gate kinds need none.
     digest: str | None = None
+    #: The head the person was shown at the final gate, as `kraft view show`
+    #: printed it (`kraft.reviewed_head.token`). Other gates need none.
+    head: str | None = None
 
 
 async def apply_approval(
@@ -296,6 +301,12 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
     blocking = st.db.read(lambda c: store.open_must_fix(c, wid))
     if blocking:
         raise HTTPException(409, f"must-fix review threads are not resolved: {', '.join(blocking)}")
+    # At the final gate the approval names the head the person was shown. What
+    # can be known without stopping anything is checked first: a refusal here
+    # must not cost an in-flight reviewer.
+    head = body.head if body else None
+    if refused := head_refusal(st, row, gate, head):
+        raise HTTPException(409, refused)
     # A pending gate's status is already needs_human (never active), so the
     # only thing running here can be this gate's own in-flight auto_escalate
     # review -- and a human decision is exactly what outranks a verdict
@@ -319,6 +330,8 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
     # looked: one that moved the branch since it started refuses the approval.
     tips = reviewed_head.pin_for(st.db, row, gate, inplace.item_folder(st.run_dirs, row))
     _moved_under_refusal(st, wid, gate, stopped, tips)
+    if refused := head_moved_refusal(tips, head):
+        raise HTTPException(409, refused)
 
     try:
         nodes, reason = await apply_approval(

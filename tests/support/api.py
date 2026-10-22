@@ -181,12 +181,17 @@ def _approve_gate(client, wid, gate, timeout=30):
     (Kraft-11e0) then 409s a manual approve that lands in that window. Retry
     until the in-flight review finishes and frees the task slot, rather than
     every caller re-deriving this.
+
+    At a chain's final gate the approval names the head the item shows, read
+    afresh on each attempt. The refusal for a missing head is not retried: it
+    is the test's mistake, not a window.
     """
     deadline = time.monotonic() + timeout
     r = None
     while time.monotonic() < deadline:
-        r = client.post(f"/api/work-items/{wid}/gates/{gate}/approve")
-        if r.status_code != 409:
+        shown = client.get(f"/api/work-items/{wid}").json().get("review_head")
+        r = client.post(f"/api/work-items/{wid}/gates/{gate}/approve", json={"head": shown})
+        if r.status_code != 409 or "kraft view show" in r.text:
             return r
         time.sleep(_POLL)
     raise AssertionError(f"{gate} still 409 after {timeout}s: {r.text if r else '(no attempt)'}")

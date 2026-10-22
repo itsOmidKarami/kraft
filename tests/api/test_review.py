@@ -251,19 +251,49 @@ def test_threads_are_refused_on_a_finished_item(client, repo, monkeypatch):
     assert _new_thread(client, wid, anchor_sha="0" * 40).status_code == 409
 
 
+def _approving(client, wid: str) -> dict:
+    """A review's `approve` body, naming the head the final review shows."""
+    return {
+        "outcome": "approve",
+        "head": client.get(f"/api/work-items/{wid}").json()["review_head"],
+    }
+
+
+@_REVIEW
+@pytest.mark.parametrize("named", [True, False], ids=["with-the-head", "no-head"])
+def test_a_review_approve_names_the_head_the_final_review_showed(client, gated, named):
+    """`head` rides on a review's approve as it does on `POST .../approve`: one
+    without it is refused, and a refused review records nothing."""
+    body = _approving(client, gated) if named else {"outcome": "approve"}
+
+    r = client.post(f"/api/work-items/{gated}/gates/chain_review/review", json=body)
+
+    detail = client.get(f"/api/work-items/{gated}").json()
+    if named:
+        assert r.status_code == 200, r.text
+        assert detail["last_review_sha"]
+    else:
+        assert r.status_code == 409 and "kraft view show" in r.text
+        assert (detail["pending_gate"], detail["last_review_sha"]) == ("chain_review", None)
+
+
 @_REVIEW
 def test_approve_is_refused_while_a_must_fix_is_open_even_a_draft(client, gated):
     """Review Focus 4, at every human door."""
     tid = _new_thread(client, gated).json()["id"]  # a draft must_fix
     r = client.post(
-        f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "approve"}
+        f"/api/work-items/{gated}/gates/chain_review/review", json=_approving(client, gated)
     )
     assert r.status_code == 409 and tid in r.text
-    assert client.post(f"/api/work-items/{gated}/gates/chain_review/approve").status_code == 409
+    head = {"head": _approving(client, gated)["head"]}
+    assert (
+        client.post(f"/api/work-items/{gated}/gates/chain_review/approve", json=head).status_code
+        == 409
+    )
     client.post(f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "comment"})
     client.post(f"/api/threads/{tid}/resolve")
     r = client.post(
-        f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "approve"}
+        f"/api/work-items/{gated}/gates/chain_review/review", json=_approving(client, gated)
     )
     assert r.status_code == 200, r.text
 
@@ -280,7 +310,7 @@ def test_approve_that_the_gate_refuses_writes_no_review(client, gated):
     brief.unlink()
 
     r = client.post(
-        f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "approve"}
+        f"/api/work-items/{gated}/gates/chain_review/review", json=_approving(client, gated)
     )
     assert r.status_code == 422, r.text
     body = client.get(f"/api/work-items/{gated}").json()

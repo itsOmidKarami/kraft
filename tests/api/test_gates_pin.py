@@ -17,18 +17,33 @@ from kraft.api import deps
 from .test_gates import _create_running_session
 
 
-@pytest.mark.parametrize("final", [True, False], ids=["the-final-gate", "another-gate"])
+@pytest.mark.parametrize(
+    ("final", "sent", "refusal"),
+    [
+        (True, "shown", None),
+        (True, None, "kraft view show"),
+        (True, "stale", "moved since you looked"),
+        (False, None, None),
+    ],
+    ids=[
+        "the-final-gate-with-the-shown-head",
+        "the-final-gate-with-no-head",
+        "the-final-gate-after-the-branch-moved",
+        "another-gate",
+    ],
+)
 @pytest.mark.parametrize(
     ("door", "event"),
     [("gates/spec_approval/approve", "gate_approved"), ("skip", "node_skipped")],
     ids=["approved", "skipped"],
 )
 def test_passing_the_final_gate_pins_the_head_it_passes(
-    client, repo, monkeypatch, final, door, event
+    client, repo, monkeypatch, final, sent, refusal, door, event
 ):
     """An approval of the final gate, or a skip of it -- a person passing it
-    explicitly -- records the branch tip it passes, which is all the merge
-    may push. Any other gate pins nothing."""
+    explicitly -- names the head they were shown and pins that one tip, all the
+    merge may push; with no head, or after the branch moved, it is refused and
+    nothing is pinned. Any other gate needs no head and pins nothing."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     if final:
         monkeypatch.setattr(reviewed_head, "final_gate", lambda row: "spec_approval")
@@ -36,14 +51,24 @@ def test_passing_the_final_gate_pins_the_head_it_passes(
     _poll_events(client, wid, "gate_requested")
     item = client.get(f"/api/work-items/{wid}").json()
     worktree = Path(item["worktree_path"])
+    shown = git(worktree, "rev-parse", f"refs/heads/{item['branch']}")
+    assert item.get("review_head") == (shown if final else None)
+    artifact = client.get(f"/api/work-items/{wid}/artifact")
+    assert artifact.status_code == 200, artifact.text
+    assert artifact.json().get("head") == (shown if final else None)
+    if sent == "stale":
+        (worktree / "later.txt").write_text("a commit after the page was read\n")
+        commit_all(worktree, "later")
     head = git(worktree, "rev-parse", f"refs/heads/{item['branch']}")
-    assert item.get("review_head") == (head if final else None)
-    shown = client.get(f"/api/work-items/{wid}/artifact")
-    assert shown.status_code == 200, shown.text
-    assert shown.json().get("head") == (head if final else None)
 
-    r = client.post(f"/api/work-items/{wid}/{door}", json={})
+    r = client.post(f"/api/work-items/{wid}/{door}", json={"head": shown} if sent else {})
 
+    if refusal:
+        assert r.status_code == 409 and refusal in r.json()["detail"], r.text
+        types = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
+        assert event not in types
+        assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "spec_approval"
+        return
     assert r.status_code == 200, r.text
     [passed] = [e["payload"] for e in _poll_events(client, wid, event) if e["type"] == event]
     if not final:
@@ -66,7 +91,9 @@ def test_the_refresh_after_approving_the_final_gate_keeps_the_approved_head(
     (repo / "moved.txt").write_text("moved on\n")
     commit_all(repo, "moved on")
 
-    r = client.post(f"/api/work-items/{wid}/gates/spec_approval/approve")
+    head = client.get(f"/api/work-items/{wid}").json()["review_head"]
+
+    r = client.post(f"/api/work-items/{wid}/gates/spec_approval/approve", json={"head": head})
 
     assert r.status_code == 200, r.text
     evts = _poll_events(client, wid, "worktree_rebase_verified")
@@ -113,14 +140,16 @@ def _agent_at_work(client, wid: str, *, recorded: bool) -> None:
 
 
 @pytest.mark.parametrize(
-    ("door", "event", "final", "recorded", "commits", "refused"),
+    ("door", "event", "final", "recorded", "commits", "refused", "sends"),
     [
-        ("gates/spec_approval/approve", "gate_approved", True, True, True, True),
-        ("gates/spec_approval/approve", "gate_approved", True, True, False, False),
-        ("gates/spec_approval/approve", "gate_approved", True, False, False, True),
-        ("gates/spec_approval/approve", "gate_approved", False, True, True, False),
-        ("skip", "node_skipped", True, True, True, True),
-        ("skip", "node_skipped", True, True, False, False),
+        ("gates/spec_approval/approve", "gate_approved", True, True, True, True, True),
+        ("gates/spec_approval/approve", "gate_approved", True, True, False, False, True),
+        ("gates/spec_approval/approve", "gate_approved", True, False, False, True, True),
+        ("gates/spec_approval/approve", "gate_approved", False, True, True, False, True),
+        ("skip", "node_skipped", True, True, True, True, True),
+        ("skip", "node_skipped", True, True, False, False, True),
+        ("gates/spec_approval/approve", "gate_approved", True, True, False, True, False),
+        ("skip", "node_skipped", True, True, False, True, False),
     ],
     ids=[
         "approved-over-an-agent-that-committed",
@@ -129,10 +158,12 @@ def _agent_at_work(client, wid: str, *, recorded: bool) -> None:
         "approved-another-gate-over-an-agent-that-committed",
         "skipped-over-an-agent-that-committed",
         "skipped-over-an-agent-that-committed-nothing",
+        "approved-with-no-head-stops-nothing",
+        "skipped-with-no-head-stops-nothing",
     ],
 )
 def test_passing_the_final_gate_over_a_live_agent_pins_nothing_it_wrote(
-    client, repo, monkeypatch, door, event, final, recorded, commits, refused
+    client, repo, monkeypatch, door, event, final, recorded, commits, refused, sends
 ):
     """An agent still at work at the final gate (a reviewer, a reply) may
     have committed after the person last looked. Approving or skipping the
@@ -140,7 +171,8 @@ def test_passing_the_final_gate_over_a_live_agent_pins_nothing_it_wrote(
     recorded no start to tell -- the decision is refused and the item left
     paused, so a second look is what pins. An agent that moved nothing costs
     no second look: the head is pinned. Any other gate pins nothing, and
-    goes on."""
+    goes on. A decision that names no head is refused before the agent is
+    stopped, so the agent keeps working."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid, **_: None)
     if final:
@@ -155,8 +187,15 @@ def test_passing_the_final_gate_over_a_live_agent_pins_nothing_it_wrote(
         commit_all(worktree, "the agent's own edit")
     head = git(worktree, "rev-parse", f"refs/heads/{item['branch']}")
 
-    r = client.post(f"/api/work-items/{wid}/{door}", json={})
+    r = client.post(
+        f"/api/work-items/{wid}/{door}", json={"head": item["review_head"]} if sends else {}
+    )
 
+    if not sends:
+        assert r.status_code == 409 and "kraft view show" in r.json()["detail"], r.text
+        sessions = client.get(f"/api/work-items/{wid}").json()["worker_sessions"]
+        assert [s["status"] for s in sessions if s["id"] == "r1"] == ["running"]
+        return
     if not refused:
         assert r.status_code == 200, r.text
         [passed] = [e["payload"] for e in _poll_events(client, wid, event) if e["type"] == event]
@@ -173,7 +212,8 @@ def test_passing_the_final_gate_over_a_live_agent_pins_nothing_it_wrote(
     item = client.get(f"/api/work-items/{wid}").json()
     assert (item["status"], item["pending_gate"]) == ("paused", "spec_approval")
 
-    again = client.post(f"/api/work-items/{wid}/{door}", json={})
+    shown = client.get(f"/api/work-items/{wid}").json()["review_head"]
+    again = client.post(f"/api/work-items/{wid}/{door}", json={"head": shown})
 
     assert again.status_code == 200, again.text
     [passed] = [e["payload"] for e in _poll_events(client, wid, event) if e["type"] == event]

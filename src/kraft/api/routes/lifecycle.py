@@ -79,6 +79,9 @@ class Skip(BaseModel):
     #: `node.step` or `node.step.task` inside it. Absent, the current node or
     #: pending gate.
     path: str | None = None
+    #: The head the person was shown at the final gate, as `kraft view show`
+    #: printed it (`kraft.reviewed_head.token`). Other nodes need none.
+    head: str | None = None
 
 
 class Progress(BaseModel):
@@ -264,6 +267,49 @@ def _moved_under_refusal(
         f"an agent was still at work on this item at gate {gate!r}, and the branch may have "
         f"changed since it started; it is stopped and the item paused: look at it again, "
         f"then {verb}",
+    )
+
+
+def _short_head(head: str | None) -> str:
+    """A head token as a person reads it in a refusal."""
+    if not head:
+        return "unreadable"
+    return head[:19] if head.startswith("sha256:") else head[:12]
+
+
+def head_refusal(
+    st, row, gate: str | None, head: str | None, *, verb: str = "approving"
+) -> str | None:
+    """Why a person's approval or skip of `gate` may not go on before it stops
+    anything: at the final gate, a branch tip Kraft cannot read, or no `head`
+    to say which one was reviewed (`kraft.reviewed_head.token`). None for any
+    other gate. Checked before a live agent is stopped, so a client's mistake
+    costs nothing."""
+    tips = reviewed_head.pin_for(st.db, row, gate, inplace.item_folder(st.run_dirs, row))
+    if tips is None:
+        return None
+    if unreadable := next((path for path, tip in tips.items() if tip is None), None):
+        return (
+            f"Kraft cannot read the branch tip of {unreadable}; "
+            f"nothing can be {'approved' if verb == 'approving' else 'skipped'} until it can"
+        )
+    if not head:
+        return (
+            f"{verb} the final review needs the head you reviewed: "
+            "read it with `kraft view show` and pass `--head`"
+        )
+    return None
+
+
+def head_moved_refusal(tips, head: str | None) -> str | None:
+    """Why a decision naming `head` may not pin `tips`, as read once the
+    stop is done: the branch is not the one the person was shown. None when
+    it is, or for a gate that pins nothing (`tips` None)."""
+    if tips is None or reviewed_head.token(tips) == head:
+        return None
+    return (
+        f"the branch moved since you looked: you reviewed {_short_head(head)}, "
+        f"it is now {_short_head(reviewed_head.token(tips))}; look again"
     )
 
 
@@ -2173,6 +2219,9 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
                 )
         if target is not None:
             return await _skip_within_node(st, request, wid, row, target, body.note)
+        pending = board._pending_gate(st, wid)
+        if refused := head_refusal(st, row, pending, body.head, verb="skipping"):
+            raise HTTPException(409, refused)
         if row["status"] in RUNNING:
             # Cancel the old walk *first*, before the claim and before
             # skip_node. Cancelling afterwards left a window -- every await
@@ -2205,6 +2254,8 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
         if board.next_skippable_node(row, gate) != node_id:
             raise HTTPException(409, f"path: {node_id!r} does not allow skipping")
 
+        if refused := head_refusal(st, row, node_id, body.head, verb="skipping"):
+            raise HTTPException(409, refused)
         sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
         # A person passing the final gate passes the head as it stands
         # (`kraft.reviewed_head`; None for any other node). An agent still at
@@ -2216,6 +2267,8 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
             stopped, sessions = await _stop_live_sessions(st, wid), []
         tips = reviewed_head.pin_for(st.db, row, node_id, inplace.item_folder(st.run_dirs, row))
         _moved_under_refusal(st, wid, node_id, stopped, tips, verb="skip")
+        if refused := head_moved_refusal(tips, body.head):
+            raise HTTPException(409, refused)
 
         # Bracketed from *before* the claim to the hand-off (the claim-then-return
         # class). A claim makes this item read `active`, which means "a walk is

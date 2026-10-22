@@ -513,7 +513,10 @@ def reach_gate(client: httpx.Client, wid: str, gate: str, timeout: float = 300.0
         if here == gate:
             return "gate"
         if here:
-            client.post(f"/work-items/{wid}/gates/{here}/approve").raise_for_status()
+            head = item.get("review_head")
+            client.post(
+                f"/work-items/{wid}/gates/{here}/approve", json={"head": head}
+            ).raise_for_status()
         elif describe(item)[0] in {"failed", "completed", "cancelled"}:
             return describe(item)[0]
         time.sleep(0.5)

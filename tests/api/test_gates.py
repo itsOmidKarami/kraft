@@ -215,7 +215,8 @@ def test_chain_review_repeated_approve_keeps_erroring(client, repo, tmp_path, mo
     _review_brief_path(client, wid).unlink()
 
     first = _approve_gate(client, wid, "chain_review")
-    second = client.post(f"/api/work-items/{wid}/gates/chain_review/approve")
+    head = client.get(f"/api/work-items/{wid}").json()["review_head"]
+    second = client.post(f"/api/work-items/{wid}/gates/chain_review/approve", json={"head": head})
     assert first.status_code == second.status_code == 422
     assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "chain_review"
 
