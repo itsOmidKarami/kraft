@@ -29,7 +29,8 @@ def _isolated_home(request, tmp_path_factory, monkeypatch):
     go too, so `start` resolves from the bundled one, as on a fresh machine.
 
     An e2e test keeps the real `HOME`: the real `bd` it drives commits with
-    the git identity configured there."""
+    the git identity configured there. Its library variable still points at an
+    empty folder, so the operator's own `~/.kraft/config` is never read."""
     home = tmp_path_factory.mktemp("home")
     real = Path.home()
 
@@ -44,6 +45,8 @@ def _isolated_home(request, tmp_path_factory, monkeypatch):
         monkeypatch.setenv("HOME", str(home))
         for name in ("KRAFT_CONFIG_DIR", "KRAFT_TEMPLATES_DIR", "KRAFT_HOME"):
             monkeypatch.delenv(name, raising=False)
+    else:
+        monkeypatch.setenv("KRAFT_CONFIG_DIR", str(home / ".kraft" / "config"))
 
 
 @pytest.fixture

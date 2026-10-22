@@ -97,6 +97,27 @@ def test_state_reports_a_gate_node(walk, kl_cli, tmp_path):
     ]
 
 
+@pytest.mark.parametrize(
+    "verb",
+    [
+        pytest.param(["produced", "--kind", "spec", "--path", "spec.md "], id="produced"),
+        pytest.param(["start", "--title", "t", "--spec", "spec.md "], id="start_spec"),
+    ],
+)
+def test_a_path_bd_could_not_unlabel_is_refused(walk, verb, kl_cli, tmp_path):
+    """bd's label removal trims its argument, so a label value ending in
+    whitespace would stay on the record forever (Kraft-6tf4c)."""
+    walk.start(tmp_path)
+    (tmp_path / "spec.md ").write_text("# spec\n")
+    frozen = tmp_path / kl.STATE_DIR / "chains"
+    before = (stored(tmp_path), sorted(frozen.iterdir()))
+
+    refused = kl_cli(tmp_path, *verb, ok=False)
+
+    assert "kraft-artifact:spec='spec.md ' starts or ends with whitespace" in refused.stderr
+    assert (stored(tmp_path), sorted(frozen.iterdir())) == before
+
+
 #: A chain whose gate names no `reject_to`, after two exec nodes.
 UNAIMED = """\
     nodes:

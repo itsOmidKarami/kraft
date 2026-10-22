@@ -260,7 +260,14 @@ def label_value(record: dict | None, prefix: str) -> str | None:
 
 
 def set_label(record: dict, prefix: str, value: str) -> dict:
-    """Return a copy with exactly one label under `prefix`."""
+    """Return a copy with exactly one label under `prefix`. A value that starts
+    or ends with whitespace is refused: `bd import` stores it as given, but bd's
+    label removal trims its argument, so the label could never be taken off."""
+    if value != value.strip():
+        raise SystemExit(
+            f"kraft-lite: {prefix}{value!r} starts or ends with whitespace, "
+            "which bd could never remove from the record"
+        )
     return dict(record, labels=[*drop_label(record, prefix)["labels"], f"{prefix}{value}"])
 
 
@@ -2502,7 +2509,6 @@ def main(argv: list[str] | None = None) -> int:
             chain = _start_chain(root, args.chain, attached)
         else:
             chain = _start_slice(root, args.slice_of, args.chain, attached)
-        _freeze_chain(root, chain, new_id)
         records = _start_records(chain, args.title, new_id)
         if args.slice_of is not None:
             records[0] = set_label(records[0], SLICE_LAYER_LABEL, "")
@@ -2510,6 +2516,7 @@ def main(argv: list[str] | None = None) -> int:
             records[0] = set_label(
                 records[0], f"{ARTIFACT_LABEL}{kind}=", _artifact_path(root, path)
             )
+        _freeze_chain(root, chain, new_id)  # after the labels, so a refused one leaves nothing
         store.write(records)
         print(
             json.dumps(
