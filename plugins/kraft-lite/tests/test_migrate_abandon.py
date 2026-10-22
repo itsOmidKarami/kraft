@@ -4,18 +4,12 @@ move at all."""
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
 
-PLUGIN = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PLUGIN))
+import kl
+import kl_migrate
 
-import kl  # noqa: E402
-import kl_migrate  # noqa: E402
-
-from .test_migrate import TEMPLATE, legacy_run, snapshot, stored  # noqa: E402
+from .test_migrate import TEMPLATE, legacy_run, snapshot, stored
 
 
 @pytest.mark.parametrize(
@@ -85,11 +79,13 @@ def test_abandon_refuses_what_is_not_an_unfinished_legacy_run(run, abandon, kl_c
     "how, verb",
     [
         *(
-            pytest.param(how, verb, id=f"{how}-{verb}")
-            for how in ("finished", "abandoned")
+            pytest.param("finished", verb, id=f"finished-{verb}")
             for verb in ("state", "chains", "summary", "start", "migrate")
         ),
         pytest.param("finished", "close", id="finished-close"),
+        # Abandoning only leaves every record closed, as `finished` does; the verbs
+        # past `state` read nothing else.
+        pytest.param("abandoned", "state", id="abandoned-state"),
     ],
 )
 def test_a_finished_legacy_run_blocks_nothing(how, verb, kl_cli, tmp_path):

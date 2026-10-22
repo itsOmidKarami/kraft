@@ -260,7 +260,14 @@ def label_value(record: dict | None, prefix: str) -> str | None:
 
 
 def set_label(record: dict, prefix: str, value: str) -> dict:
-    """Return a copy with exactly one label under `prefix`."""
+    """Return a copy with exactly one label under `prefix`. A value that starts
+    or ends with whitespace is refused: `bd import` stores it as given, but bd's
+    label removal trims its argument, so the label could never be taken off."""
+    if value != value.strip():
+        raise SystemExit(
+            f"kraft-lite: {prefix}{value!r} starts or ends with whitespace, "
+            "which bd could never remove from the record"
+        )
     return dict(record, labels=[*drop_label(record, prefix)["labels"], f"{prefix}{value}"])
 
 
@@ -1458,13 +1465,15 @@ def _definition(root: Path, chain: dict, chain_id: str | None, node_id: str | No
     return definition
 
 
-def _dispatcher(root: Path, first_build: str | None = None):
+def _dispatcher(root: Path, first_build: str | None = None, bindings: dict | None = None):
     """How `state` turns a frozen task into the one instruction the walk
-    follows: this repo's bindings over the defaults, with the skills installed
-    in this harness, and for a child walking a slice (`first_build`, its
-    chain's first build node) the slice layer over both. Read per call, so a
-    binding edited mid-run counts from the next `state`."""
-    bindings = kl_bindings.read_bindings(root)
+    follows: this repo's bindings (`bindings`, else read from `root`) over the
+    defaults, with the skills installed in this harness, and for a child
+    walking a slice (`first_build`, its chain's first build node) the slice
+    layer over both. `state` makes one per call, so a binding edited mid-run
+    counts from the next `state`; `start` passes the bindings it checked."""
+    if bindings is None:
+        bindings = kl_bindings.read_bindings(root)
     installed = set(_installed_skills(root))
 
     def dispatch(task: dict) -> dict:
@@ -1678,8 +1687,9 @@ def _refuse_close_before_slices(
     everything: list[dict], chain_id: str, node_record: dict, chain: dict
 ) -> None:
     """A `SystemExit` for closing a sliced run's node before the slices it waits
-    on, by `close` or by `approve`. `run_slices` waits for every slice done for the
-    run's mode: closing it moves the walk on to what checks seams between
+    on: an exec node by `close`, a gate by `approve`. `run_slices` waits for
+    every slice done for the run's mode: closing it moves the walk on to what
+    checks seams between
     slices that are not all there yet. `await_user_merges` waits for every slice
     merged: the user's merges are all it waits on, and closing it first finishes
     the run before any of them."""
@@ -2230,19 +2240,29 @@ def _resolve_chain(root: Path, chain: str | Path | None) -> dict:
     return kl_chains.resolve(root, os.environ, ref=ref)
 
 
-def _start_chain(root: Path, chain: str | None, attached: dict[str, Path]) -> dict:
+def _start_chain(
+    root: Path, chain: str | None, attached: dict[str, Path]
+) -> tuple[dict, list[str]]:
     """The chain `start` freezes: `chain` resolved by `_resolve_chain`; then
     trimmed for the attached kinds. Every task is dispatched once before anything is written, so
     a bindings file Lite cannot use, or a task it has no instruction for, stops
-    `start` rather than the walk at that node."""
+    `start` rather than the walk at that node. Returned with the bindings
+    `tasks` keys that match no task of the chain, checked before the trim: a
+    binding for a node the attachments skip is not a typo."""
     for kind, path in attached.items():
         if not path.is_file():
             raise SystemExit(f"kraft-lite: --{kind} {path}: no such file")
-    resolved = kl_chains.trim(_resolve_chain(root, chain), set(attached))
-    dispatch = _dispatcher(root)
+    full = _resolve_chain(root, chain)
+    resolved = kl_chains.trim(full, set(attached))
+    bindings = kl_bindings.read_bindings(root)
+    dispatch = _dispatcher(root, bindings=bindings)
     for task in _dispatched_tasks(resolved):
         dispatch(task)
-    return resolved
+    try:
+        slice_tasks = _dispatched_tasks(kl_shape.child_chain(full))
+    except kl_chains.ChainError:
+        slice_tasks = []  # A chain that cannot be sliced reads no `slice:` binding.
+    return resolved, kl_bindings.unused(bindings, _dispatched_tasks(full), slice_tasks)
 
 
 def _start_records(chain: dict, title: str, chain_id: str) -> list[dict]:
@@ -2269,6 +2289,15 @@ def _start_slice(root: Path, path: Path, chain: str | None, attached: dict) -> d
     for task in _dispatched_tasks(child):
         dispatch(task)
     return child
+
+
+def _refuse_unless_gate(definition: dict, node_id: str) -> None:
+    """`gate` and `approve` are a gate node's: on an exec node they would
+    block or close it with its tasks unrun."""
+    if definition["kind"] != "gate":
+        raise SystemExit(
+            f"kraft-lite: {node_id} is an exec node, not a gate node: run its tasks and close it"
+        )
 
 
 def _exec_before(chain: dict, node_id: str) -> str:
@@ -2498,11 +2527,13 @@ def main(argv: list[str] | None = None) -> int:
         _refuse_beside_a_legacy_run(root, store.load())
         new_id = new_chain_id()
         attached = {k: getattr(args, k) for k in ATTACHMENT_KINDS if getattr(args, k)}
+        # A child's slice is part of the chain the controller started, which
+        # already reported its unused bindings.
+        unused: list[str] = []
         if args.slice_of is None:
-            chain = _start_chain(root, args.chain, attached)
+            chain, unused = _start_chain(root, args.chain, attached)
         else:
             chain = _start_slice(root, args.slice_of, args.chain, attached)
-        _freeze_chain(root, chain, new_id)
         records = _start_records(chain, args.title, new_id)
         if args.slice_of is not None:
             records[0] = set_label(records[0], SLICE_LAYER_LABEL, "")
@@ -2510,6 +2541,7 @@ def main(argv: list[str] | None = None) -> int:
             records[0] = set_label(
                 records[0], f"{ARTIFACT_LABEL}{kind}=", _artifact_path(root, path)
             )
+        _freeze_chain(root, chain, new_id)  # after the labels, so a refused one leaves nothing
         store.write(records)
         print(
             json.dumps(
@@ -2518,6 +2550,7 @@ def main(argv: list[str] | None = None) -> int:
                     "backend": backend(root),
                     "chain": chain["id"],
                     "source": chain["source"],
+                    "unused_bindings": unused,
                 }
             )
         )
@@ -2583,14 +2616,12 @@ def main(argv: list[str] | None = None) -> int:
     elif args.verb in ("close", "approve"):
         if args.verb == "close" and definition["kind"] == "gate":
             raise SystemExit(f"kraft-lite: {node_id} is a gate: approve or reject it")
+        if args.verb == "approve":
+            _refuse_unless_gate(definition, node_id)
         _refuse_close_before_slices(everything, resolved_id, node_record, chain)
         store.write([bank_wait(dict(node_record, status="closed"))])
     elif args.verb == "gate":
-        if definition["kind"] != "gate":
-            raise SystemExit(
-                f"kraft-lite: {node_id} is an exec node, not a gate node: "
-                "run its tasks and close it"
-            )
+        _refuse_unless_gate(definition, node_id)
         store.write([open_gate(dict(node_record, status="blocked"), node_id)])
     elif args.verb == "reject" and (args.from_node or definition["kind"] == "gate"):
         target = args.from_node or definition["reject_to"] or _exec_before(chain, node_id)

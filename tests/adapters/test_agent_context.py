@@ -63,3 +63,15 @@ def test_front_matter_asked_for_keeps_a_digits_only_id_a_string(artifact):
     assert by_kind["summary"]["worker_session_id"] == "012345"
     for fm in by_kind.values():
         assert fm["work_item_ids"] == ["01234567"]
+
+
+def test_a_resumed_launch_names_its_own_session_files(run):
+    """Kraft-vjo4g: a resumed conversation remembers the summary and result
+    paths of the session it began in, and wrote there; each session's are its
+    own, so the turn must be told this one's."""
+    cmd = run(session_id="s2", resume_session_id="cli-session-abc")["cmd"]
+    prompt = cmd[cmd.index("-p") + 1]
+    out = "/kraft/run/items/w1/sessions/s2/out"
+    assert f"{out}/summary.md" in prompt
+    assert f"$KRAFT_RESULT_PATH, which is now {out}/result.json" in prompt
+    assert 'worker_session_id: "s2"' in prompt

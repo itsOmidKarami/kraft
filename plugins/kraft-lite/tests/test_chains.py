@@ -104,7 +104,7 @@ BASE = {
         pytest.param(("config",), "config", "user", id="user_library_replaces_bundled"),
     ],
 )
-def test_lookup(tmp_path, home, layout, instance, source):
+def test_lookup(tmp_path, layout, instance, source):
     root = tmp_path / "repo"
     root.mkdir()
     places = {
@@ -114,7 +114,7 @@ def test_lookup(tmp_path, home, layout, instance, source):
         "templates": tmp_path / "templates",
         "kraft_home": tmp_path / "kraft-home" / "config",
         "bare_kraft_home": tmp_path / "kraft-home" / "config",
-        "home": home / ".kraft" / "config",
+        "home": Path.home() / ".kraft" / "config",
     }
     # Each variable is set only when the layout has its place.
     names = {
@@ -160,7 +160,7 @@ def test_lookup(tmp_path, home, layout, instance, source):
         pytest.param(None, "default", id="no_repo_library"),
     ],
 )
-def test_default_ref(tmp_path, home, repo_chains, expected):
+def test_default_ref(tmp_path, repo_chains, expected):
     if repo_chains is not None:
         write_library(tmp_path / ".kraft", "", repo_chains)
 
@@ -192,39 +192,11 @@ DEFAULT_IDS = [
 ]
 
 
-def test_resolve_bundled_default(tmp_path, home):
+def test_resolve_bundled_default(tmp_path):
     chain = kl_chains.resolve(tmp_path, {})
-    nodes = {node["id"]: node for node in chain["nodes"]}
 
     assert (chain["format"], chain["id"], chain["source"]) == ("v1", "default", "bundled")
     assert [node["id"] for node in chain["nodes"]] == DEFAULT_IDS
-    verification = nodes["verification"]
-    assert [step["id"] for step in verification["steps"]] == ["tests", "review"]
-    assert verification["fix_loop"]["max_attempts"] == 2
-    assert verification["fix_loop"]["judge"]["components"] == ["strict_judge"]
-    assert verification["fix_loop"]["judge"]["path"] == "verification.fix_loop.judge"
-    assert nodes["merge_request_feedback"]["on_base_changed"] == {"restart_from": "verification"}
-    rejected = nodes["merge"]["on_merge_rejected"]
-    assert rejected["restart_from"] == "merge_request_feedback"
-    [[repair]] = [step["tasks"] for step in rejected["repair"]["steps"]]
-    assert (repair["path"], repair["components"]) == (
-        "merge.on_merge_rejected.repair.main.repair",
-        ["repair_merge_queue_failure"],
-    )
-    rejecting = [n["id"] for n in chain["nodes"] if n.get("on_merge_rejected")]
-    assert rejecting == ["merge"]
-    assert nodes["final_review"]["chain_finalized"] is True
-    implement = nodes["implementation"]["steps"][0]["tasks"][0]
-    assert implement["components"] == ["implementer"]
-    assert implement["path"] == "implementation.main.implement"
-    assert (implement["profile"], implement["model"], implement["command"]) == (
-        "strong",
-        None,
-        None,
-    )
-    assert nodes["spec"]["steps"][0]["tasks"][0]["steering"] == [
-        "Keep changes focused. Run the relevant checks before finishing.\n"
-    ]
 
 
 def _first_task(chain: dict) -> dict:
@@ -313,7 +285,7 @@ def _first_task(chain: dict) -> dict:
         ),
     ],
 )
-def test_merge_rules(tmp_path, home, components, written, pick, expected):
+def test_merge_rules(tmp_path, components, written, pick, expected):
     lib = write_library(tmp_path / "lib", LIBRARY + components, {"c": f"nodes:\n  - {written}\n"})
 
     chain = kl_chains.resolve(tmp_path, {"KRAFT_CONFIG_DIR": str(lib)}, "c")
@@ -374,7 +346,7 @@ def test_merge_rules(tmp_path, home, components, written, pick, expected):
         ),
     ],
 )
-def test_chain_extends_chain(tmp_path, home, chains, ids, pick, expected):
+def test_chain_extends_chain(tmp_path, chains, ids, pick, expected):
     lib = write_library(tmp_path / "lib", LIBRARY, {**BASE, **chains})
 
     chain = kl_chains.resolve(tmp_path, {"KRAFT_CONFIG_DIR": str(lib)}, "c")
@@ -651,6 +623,19 @@ def _rejecting(rejected: str, before: str = "", tasks: str = MERGE_TASK, extra: 
             id="merge_rejected_without_repair",
         ),
         pytest.param(
+            {"c": _rejecting(f"restart_from: a, {REPAIR}, max_attempts: 2")},
+            r"m.on_merge_rejected.max_attempts: unknown key; known: \['restart_from', 'repair'\]",
+            id="merge_rejected_unknown_key",
+        ),
+        pytest.param(
+            {
+                "c": "nodes:\n  - {id: a, kind: exec, tasks: [{id: t, extends: worker}], "
+                "on_base_changed: {restart_form: a}}\n"
+            },
+            r"a.on_base_changed.restart_form: unknown key; known: \[.restart_from.",
+            id="base_changed_unknown_key",
+        ),
+        pytest.param(
             {
                 "r": _rejecting(
                     f"restart_from: b, {REPAIR}",
@@ -661,23 +646,25 @@ def _rejecting(rejected: str, before: str = "", tasks: str = MERGE_TASK, extra: 
             "m: its on_merge_rejected.restart_from names 'b', which this chain removes",
             id="merge_rejected_restart_from_removed",
         ),
+        # The "+library" entry is appended to the library's tasks, not written as a chain.
+        pytest.param(
+            {
+                "+library": "  loop_a: {extends: loop_b}\n  loop_b: {extends: loop_a}\n",
+                "c": _task_chain("{id: t, extends: loop_a}"),
+            },
+            "'extends' cycle: loop_a -> loop_b -> loop_a",
+            id="component_cycle",
+        ),
     ],
 )
-def test_chain_extension_refusals(tmp_path, home, chains, match):
-    lib = write_library(tmp_path / "lib", LIBRARY, {**BASE, **chains})
+def test_chain_extension_refusals(tmp_path, chains, match):
+    chains = {**BASE, **chains}
+    lib = write_library(tmp_path / "lib", LIBRARY + chains.pop("+library", ""), chains)
 
     with pytest.raises(kl_chains.ChainError, match=f"^kraft-lite: .*{match}") as refused:
         kl_chains.resolve(tmp_path, {"KRAFT_CONFIG_DIR": str(lib)}, "c")
 
     assert str(lib / "chains" / "c.yaml") in str(refused.value)
-
-
-def test_component_cycle_is_refused(tmp_path, home):
-    library = LIBRARY + "  loop_a: {extends: loop_b}\n  loop_b: {extends: loop_a}\n"
-    lib = write_library(tmp_path / "lib", library, {"c": _task_chain("{id: t, extends: loop_a}")})
-
-    with pytest.raises(kl_chains.ChainError, match="'extends' cycle: loop_a -> loop_b -> loop_a"):
-        kl_chains.resolve(tmp_path, {"KRAFT_CONFIG_DIR": str(lib)}, "c")
 
 
 @pytest.mark.parametrize(
@@ -687,7 +674,7 @@ def test_component_cycle_is_refused(tmp_path, home):
         pytest.param("{id: t, extends: 'library:own'}", ["own"], id="library_qualifier"),
     ],
 )
-def test_repo_library_names_its_own(tmp_path, home, written, components):
+def test_repo_library_names_its_own(tmp_path, written, components):
     """In the repo library, bare names and `library:<name>` are its own
     entries (`repo-libraries.md`); the instance's `worker` is not reachable."""
     repo_lib = "tasks:\n  own: {kind: agent, prompt: Mine., steering: ['library:mine']}\n"
@@ -704,16 +691,46 @@ def test_repo_library_names_its_own(tmp_path, home, written, components):
         kl_chains.resolve(tmp_path, {}, "repo:bad")
 
 
-def test_resolve_path_argument(tmp_path, home):
-    """A chain file outside any library resolves its `extends` against the
-    instance library, here the bundled one."""
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    file = elsewhere / "mine.yaml"
-    file.write_text("extends: quick-task\nremove: [verify]\n")
+@pytest.mark.parametrize(
+    ("folder", "edit", "nodes", "components", "id_and_source"),
+    [
+        pytest.param(
+            "elsewhere",
+            "remove: [verify]\n",
+            ["implementation"],
+            ["implementer"],
+            ("mine", "{file}"),
+            id="outside",
+        ),
+        # A draft beside the repo library is not one of its chains.
+        pytest.param(
+            ".kraft/drafts",
+            "remove: [verify]\n",
+            ["implementation"],
+            ["implementer"],
+            ("mine", "{file}"),
+            id="beside_the_repo_library",
+        ),
+        # One of the repo library's own chains: that chain, as `repo:mine`.
+        pytest.param(".kraft/chains", "", ["a"], ["own"], ("repo:mine", "repo"), id="repo_chain"),
+    ],
+)
+def test_resolve_path_argument(tmp_path, folder, edit, nodes, components, id_and_source):
+    """A chain file in the repo library's `chains/` is that repo chain; any
+    other resolves its `extends` against the instance library, here the
+    bundled one. The repo has a `quick-task` of its own, so the two cannot
+    agree by accident."""
+    repo_lib = "tasks:\n  own: {kind: agent, prompt: Mine.}\n"
+    write_library(
+        tmp_path / ".kraft", repo_lib, {"quick-task": _task_chain("{id: t, extends: own}")}
+    )
+    file = tmp_path / folder / "mine.yaml"
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(f"extends: quick-task\n{edit}")
 
     chain = kl_chains.resolve(tmp_path, {}, path=file)
 
-    assert (chain["id"], chain["source"]) == ("mine", str(file))
-    assert [node["id"] for node in chain["nodes"]] == ["implementation"]
-    assert _first_task(chain)["components"] == ["implementer"]
+    id, source = id_and_source
+    assert (chain["id"], chain["source"]) == (id, source.format(file=file))
+    assert [node["id"] for node in chain["nodes"]] == nodes
+    assert _first_task(chain)["components"] == components

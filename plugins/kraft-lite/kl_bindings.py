@@ -226,6 +226,21 @@ def _entry(entry: object, where: str, refuse: Callable[[str, str], BindingError]
         need("why")
 
 
+def unused(bindings: Mapping, tasks: list[dict], slice_tasks: list[dict]) -> list[str]:
+    """The `tasks` keys that name no task by path or component: top-level keys
+    against `tasks`, `slice:` keys against `slice_tasks`, the tasks a child
+    walks. A typo, or a binding for another chain; this run never reads them
+    either way, so `start` reports them."""
+    found = []
+    for prefix, layer, among in (
+        ("", bindings, tasks),
+        (f"{SLICE}.", bindings.get(SLICE) or {}, slice_tasks),
+    ):
+        names = {key for task in among for section, key in _keys(task) if section == "tasks"}
+        found += [f"{prefix}tasks.{key}" for key in layer.get("tasks") or {} if key not in names]
+    return found
+
+
 # -- dispatch ---------------------------------------------------------------
 
 

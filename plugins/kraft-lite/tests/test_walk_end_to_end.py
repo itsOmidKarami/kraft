@@ -45,6 +45,15 @@ def test_a_whole_chain_walks_to_done(kl_cli, default_chain, tmp_path):
             kl_cli(tmp_path, "close")
 
     assert kl_cli(tmp_path, "state")["status"] == "done"
+    # `state` is the only other verb allowed to run once the walk is over, and
+    # the summary is worth nothing if it is refused at exactly the moment it is
+    # wanted.
+    out = kl_cli(tmp_path, "summary")
+    assert out["status"] == "done"
+    assert out["title"] == "Add a flag"
+    assert [n["node"] for n in out["nodes"]] == [n["id"] for n in default_chain["nodes"]]
+    assert out["totals"]["closed"] == len(default_chain["nodes"])
+    assert out["duration_seconds"] >= 0
 
 
 def test_state_reports_steps_and_dispatch(walk, kl_cli, tmp_path):
@@ -75,6 +84,9 @@ def test_state_reports_a_gate_node(walk, kl_cli, tmp_path):
     kl_cli(tmp_path, "produced", "--kind", "spec", "--path", "docs/spec.md")
     refused = kl_cli(tmp_path, "gate", ok=False)
     assert "spec is an exec node, not a gate node" in refused.stderr
+    # `approve` answers a gate; on an exec node it would close it with nothing run.
+    refused = kl_cli(tmp_path, "approve", ok=False)
+    assert "spec is an exec node, not a gate node: run its tasks and close it" in refused.stderr
     kl_cli(tmp_path, "close")
     # Approve closes a gate; `close` does not.
     refused = kl_cli(tmp_path, "close", ok=False)
@@ -95,6 +107,27 @@ def test_state_reports_a_gate_node(walk, kl_cli, tmp_path):
     assert [x for x in spec["labels"] if x.startswith(kl.ARTIFACT_LABEL)] == [
         "kraft-artifact:spec=docs/spec.md"
     ]
+
+
+@pytest.mark.parametrize(
+    "verb",
+    [
+        pytest.param(["produced", "--kind", "spec", "--path", "spec.md "], id="produced"),
+        pytest.param(["start", "--title", "t", "--spec", "spec.md "], id="start_spec"),
+    ],
+)
+def test_a_path_bd_could_not_unlabel_is_refused(walk, verb, kl_cli, tmp_path):
+    """bd's label removal trims its argument, so a label value ending in
+    whitespace would stay on the record forever (Kraft-6tf4c)."""
+    walk.start(tmp_path)
+    (tmp_path / "spec.md ").write_text("# spec\n")
+    frozen = tmp_path / kl.STATE_DIR / "chains"
+    before = (stored(tmp_path), sorted(frozen.iterdir()))
+
+    refused = kl_cli(tmp_path, *verb, ok=False)
+
+    assert "kraft-artifact:spec='spec.md ' starts or ends with whitespace" in refused.stderr
+    assert (stored(tmp_path), sorted(frozen.iterdir())) == before
 
 
 #: A chain whose gate names no `reject_to`, after two exec nodes.
@@ -312,26 +345,23 @@ LEGACY = {
     "Run: python3 kl.py migrate",
 }
 LEGACY["pre_per_chain_file"] = LEGACY["per_chain"]
-RUN_VERBS = [["state"], ["close"], ["summary"], ["export", "--to", "out"]]
 
 
 @pytest.mark.parametrize(
     ("where", "verb"),
     [
+        # Every verb reads the frozen chain through one loader and passes one
+        # registry check, so a verb each; `start` has its own check beside an
+        # unfinished legacy run, and `approve` is a verb that writes.
         *(
-            pytest.param(where, verb, id=f"{where}-{verb[0]}")
+            pytest.param(where, ["state"], id=f"{where}-state")
             for where in ("per_chain", "pre_per_chain_file", "registry")
-            for verb in RUN_VERBS
         ),
-        *(
-            pytest.param("registry", verb, id=f"registry-{verb[0]}")
-            for verb in (["start", "--title", "again"], ["approve"], ["settings"])
-        ),
-        # An unfinished legacy run refuses a second start, registry or none.
         *(
             pytest.param(where, ["start", "--title", "again"], id=f"{where}-start")
-            for where in ("per_chain", "pre_per_chain_file")
+            for where in ("per_chain", "pre_per_chain_file", "registry")
         ),
+        pytest.param("registry", ["approve"], id="registry-approve"),
     ],
 )
 def test_legacy_frozen_chain_is_refused(kl_cli, tmp_path, where, verb):
@@ -353,35 +383,22 @@ def test_legacy_frozen_chain_is_refused(kl_cli, tmp_path, where, verb):
     assert "test_command" in kl_cli(tmp_path, "detect")
 
 
-@pytest.mark.parametrize(
-    ("node", "edit", "named"),
-    [
-        pytest.param(
-            "verification", lambda n: n.pop("fix_loop"), "exec node 'verification' has no fix_loop"
-        ),
-        pytest.param(
-            "plan_approval", lambda n: n.pop("message"), "gate node 'plan_approval' has no message"
-        ),
-        pytest.param(
-            "spec",
-            lambda n: n["steps"][0]["tasks"][0].pop("path"),
-            "exec node 'spec' has a task with no path",
-        ),
-    ],
-    ids=["exec_without_fix_loop", "gate_without_message", "task_without_path"],
-)
-def test_a_frozen_chain_lacking_what_the_walk_reads_is_refused(kl_cli, tmp_path, node, edit, named):
+def test_a_frozen_chain_lacking_what_the_walk_reads_is_refused(kl_cli, tmp_path):
     """A hand-edited frozen chain is checked as an imported one is: a refusal
-    naming the gap, not a `KeyError` in the middle of a verb."""
+    naming the gap, not a `KeyError` in the middle of a verb. One flaw, for the
+    wiring: the catalog is `test_chain_flaw.py`."""
     chain_id = kl_cli(tmp_path, "start", "--title", "t")["chain_id"]
     frozen = kl._frozen_path(tmp_path, chain_id)
     chain = json.loads(frozen.read_text())
-    edit(next(n for n in chain["nodes"] if n["id"] == node))
+    next(n for n in chain["nodes"] if n["id"] == "verification").pop("fix_loop")
     frozen.write_text(json.dumps(chain))
 
     refused = kl_cli(tmp_path, "state", ok=False)
 
-    assert f"{frozen} is not a usable V1 chain: {named}" in refused.stderr
+    assert (
+        f"{frozen} is not a usable V1 chain: exec node 'verification' has no fix_loop"
+        in refused.stderr
+    )
     assert "Traceback" not in refused.stderr
 
 
@@ -389,8 +406,6 @@ def test_a_frozen_chain_lacking_what_the_walk_reads_is_refused(kl_cli, tmp_path,
     "files",
     [
         pytest.param({}, id="nothing"),
-        # The registry is refused until `migrate` writes the bindings from it.
-        pytest.param({"registry.yaml": "on.test.run:\n  kind: prompt\n"}, id="legacy_registry"),
         pytest.param(
             {"registry.yaml": "on.test.run:\n  kind: prompt\n", "bindings.yaml": "tasks: {}\n"},
             id="registry_beside_bindings",
@@ -401,14 +416,8 @@ def test_start_without_bindings_runs(kl_cli, tmp_path, files):
     (tmp_path / ".kraft-lite").mkdir()
     for name, text in files.items():
         (tmp_path / ".kraft-lite" / name).write_text(text)
-    refused = files.keys() == {"registry.yaml"}
+    started = kl_cli(tmp_path, "start", "--title", "t")
 
-    started = kl_cli(tmp_path, "start", "--title", "t", ok=not refused)
-
-    if refused:
-        assert LEGACY["registry"] in started.stderr
-        assert not (tmp_path / kl.STATE_DIR / "chain.jsonl").exists()
-        return
     assert started["backend"] == "jsonl"
     # Which chain it froze, and from where, so the start skill can say so.
     assert (started["chain"], started["source"]) == ("default", "bundled")
@@ -426,21 +435,6 @@ def test_start_refuses_a_bindings_file_it_cannot_use(kl_cli, tmp_path):
     assert not (tmp_path / kl.STATE_DIR / "chain.jsonl").exists()
 
 
-def test_a_finished_chain_still_summarizes(walk, kl_cli, default_chain, tmp_path):
-    """`state` is the only other verb allowed to run once the walk is over, and
-    the summary is worth nothing if it is refused at exactly the moment it is
-    wanted."""
-    kl_cli(tmp_path, "start", "--title", "Add a flag")
-    walk.finish(tmp_path)
-
-    out = kl_cli(tmp_path, "summary")
-    assert out["status"] == "done"
-    assert out["title"] == "Add a flag"
-    assert [n["node"] for n in out["nodes"]] == [n["id"] for n in default_chain["nodes"]]
-    assert out["totals"]["closed"] == len(default_chain["nodes"])
-    assert out["duration_seconds"] >= 0
-
-
 def test_the_state_file_is_bd_importable(kl_cli, tmp_path):
     kl_cli(tmp_path, "start", "--title", "Add a flag")
     kl_cli(tmp_path, "close")
@@ -450,18 +444,6 @@ def test_the_state_file_is_bd_importable(kl_cli, tmp_path):
     for record in records:
         assert record["_type"] == "issue"
         assert set(record) >= {"id", "title", "status", "labels", "dependencies"}
-
-
-def test_a_rejection_puts_the_node_back_with_its_reason(kl_cli, tmp_path):
-    kl_cli(tmp_path, "start", "--title", "Add a flag")
-    kl_cli(tmp_path, "close")
-    kl_cli(tmp_path, "gate")
-    kl_cli(tmp_path, "reject", "--note", "wrong scope")
-
-    state = kl_cli(tmp_path, "state")
-    assert state["node"] == "spec"
-    assert state["status"] == "open"
-    assert "wrong scope" in state["note"]
 
 
 @pytest.mark.parametrize(

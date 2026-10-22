@@ -29,7 +29,8 @@ def _isolated_home(request, tmp_path_factory, monkeypatch):
     go too, so `start` resolves from the bundled one, as on a fresh machine.
 
     An e2e test keeps the real `HOME`: the real `bd` it drives commits with
-    the git identity configured there."""
+    the git identity configured there. Its library variable still points at an
+    empty folder, so the operator's own `~/.kraft/config` is never read."""
     home = tmp_path_factory.mktemp("home")
     real = Path.home()
 
@@ -44,6 +45,8 @@ def _isolated_home(request, tmp_path_factory, monkeypatch):
         monkeypatch.setenv("HOME", str(home))
         for name in ("KRAFT_CONFIG_DIR", "KRAFT_TEMPLATES_DIR", "KRAFT_HOME"):
             monkeypatch.delenv(name, raising=False)
+    else:
+        monkeypatch.setenv("KRAFT_CONFIG_DIR", str(home / ".kraft" / "config"))
 
 
 @pytest.fixture
@@ -144,24 +147,30 @@ class Walk:
     def start(self, cwd: Path) -> str:
         return self.run(cwd, "start", "--title", "A feature")["chain_id"]
 
-    def advance(self, cwd: Path) -> dict:
+    def advance(self, cwd: Path, state: dict | None = None) -> dict:
         """Past the current node: a gate node blocked and approved, an exec node
-        closed. Returns the state after it."""
-        if self.run(cwd, "state")["kind"] == "gate":
+        closed. Returns the state after it.
+
+        Every verb prints the chain's new state, so a caller that walks on can
+        pass the `state` it already holds and spare the read."""
+        state = state or self.run(cwd, "state")
+        if state["kind"] == "gate":
             self.run(cwd, "gate")
             return self.run(cwd, "approve")
         return self.run(cwd, "close")
 
     def to(self, cwd: Path, node: str) -> None:
         """Walked on until `node` is the current one."""
-        while (state := self.run(cwd, "state"))["node"] != node:
+        state = self.run(cwd, "state")
+        while state["node"] != node:
             assert state["status"] != "done", f"the chain finished without reaching {node}"
-            self.advance(cwd)
+            state = self.advance(cwd, state)
 
     def finish(self, cwd: Path) -> None:
         """Walked on to `done`."""
-        while self.run(cwd, "state")["status"] != "done":
-            self.advance(cwd)
+        state = self.run(cwd, "state")
+        while state["status"] != "done":
+            state = self.advance(cwd, state)
 
     def to_chain_revision(self, cwd: Path) -> str:
         """A chain whose spec and plan gates are approved, so the next node is

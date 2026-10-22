@@ -28,7 +28,7 @@ migrate`, first. No bindings file is needed otherwise: every task has a default.
 
 It prints the chain id, which backend holds the state, and the chain it froze
 with where that came from, for example
-`{"chain_id": "<id>", "backend": "jsonl", "chain": "default", "source": "bundled"}`:
+`{"chain_id": "<id>", "backend": "jsonl", "chain": "default", "source": "bundled", "unused_bindings": []}`:
 `bd`, or `jsonl` for a file under `.kraft-lite/`; `bundled`, `user`, `repo` (the
 repo's own `.kraft/`, as it stands in the working tree) or the file's path. Say
 all of it, so the user knows where their state lives, which chain is theirs and

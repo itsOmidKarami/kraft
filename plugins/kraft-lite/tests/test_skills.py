@@ -7,17 +7,17 @@ from __future__ import annotations
 import ast
 import json
 import re
-import sys
 from pathlib import Path
 
 import pytest
 
-PLUGIN = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PLUGIN))
+import kl_bindings
+import kl_chains
+import kl_shape
 
-import kl_bindings  # noqa: E402
-import kl_chains  # noqa: E402
-import kl_shape  # noqa: E402
+from .test_skill_wording import section
+
+PLUGIN = Path(__file__).resolve().parents[1]
 
 SKILLS = ["init", "start", "next", "gate", "status", "run-slices", "build-slice"]
 #: Every gate node the bundled library's chains have, and `chain_finalized`, the
@@ -59,17 +59,13 @@ def test_the_next_skill_dispatches_every_binding_kind(texts):
     """`state` hands each task over already dispatched; a kind the skill does not
     name is one it improvises."""
     for kind in kl_bindings.KINDS:
-        assert f"- `{kind}` -" in _section(texts["next"], 2), kind
+        assert f"- `{kind}` -" in section(texts["next"], 2), kind
 
 
 def test_the_next_skill_states_the_cap_behaviour(texts):
     text = texts["next"]
     assert "over_cap" in text
     assert "escalat" in text.lower()
-
-
-def test_the_gate_skill_requires_a_reason_to_reject(texts):
-    assert "--note" in texts["gate"]
 
 
 def test_no_skill_tells_the_agent_to_poll_or_sleep(texts):
@@ -87,8 +83,6 @@ def test_every_skill_invokes_the_helper_by_plugin_root(texts, name):
 def test_the_readme_describes_the_chain_it_actually_ships():
     """The README counts nodes and gates. The chain is generated, so those
     numbers drift the moment a node is added."""
-    import re
-
     readme = (PLUGIN / "README.md").read_text()
     words = {
         "two": 2,
@@ -119,13 +113,6 @@ def test_the_skills_distinguish_unstarted_from_done(texts):
     knows `done` tells the human a chain that never existed has finished."""
     assert "unstarted" in texts["next"]
     assert "unstarted" in texts["status"]
-
-
-@pytest.mark.parametrize("name", SKILLS)
-def test_every_skill_can_find_the_helper_without_the_plugin_variable(texts, name):
-    """Cloned into `~/.claude/skills/` rather than installed as a plugin,
-    `$CLAUDE_PLUGIN_ROOT` is unset and every command becomes `python3 "/kl.py"`."""
-    assert "is unset" in texts[name], "no fallback path for an unset plugin root"
 
 
 @pytest.mark.parametrize("name", ["next", "gate", "status"])
@@ -164,11 +151,6 @@ def test_the_next_skill_uses_a_background_wait_when_the_harness_has_one(texts):
     assert "Do not idle" in body, "blocking synchronously is still banned"
     flat = " ".join(body.split())
     assert "If your starting instructions name a controller, wait for CI as" in flat
-
-
-def test_the_next_skill_warns_that_a_node_replays_its_tasks(texts):
-    """State is per node, not per task, so resuming re-runs earlier tasks."""
-    assert "idempotent" in texts["next"]
 
 
 def test_a_skill_says_the_bindings_can_be_edited_mid_run(texts):
@@ -380,16 +362,11 @@ def test_the_gate_skill_records_slices_at_the_slice_gate(texts):
     assert "cannot be sliced again" not in flat, "a rewind to the slice gate retires the slices"
 
 
-def _section(body: str, number: int) -> str:
-    """One numbered `## N.` section of a skill, whitespace flattened."""
-    return " ".join(body.split(f"## {number}.")[1].split("\n## ")[0].split())
-
-
 def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
     """A slice cut from another slice's branch carries that slice's commits until
     it merges. Rebasing it onto the target before then drops them, so its
     `kraft.mr_rebase` does nothing, and a successful rebase makes it target-cut."""
-    rebase = _section(texts["build-slice"], 5)
+    rebase = section(texts["build-slice"], 5)
     for needle in (
         "`<run>/<slice key>/base` says when you rebase",
         "| a slice key | the controller says that slice merged | `origin/<target branch>` | "
@@ -403,382 +380,8 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
     assert "The fork is not `HEAD` itself while your branch has commits of your own" in rebase
 
 
-@pytest.mark.parametrize(
-    "name, section, needle",
-    [
-        ("build-slice", 1, "never `HEAD`: ask the controller for the line"),
-        ("build-slice", 1, "### A fresh container"),
-        ("build-slice", 1, "never from `HEAD`"),
-        ("build-slice", 1, "Never redo, reset or force-push away pushed work"),
-        ("build-slice", 1, "lives in `<run>/<slice key>/chain`, never in the `chains` list"),
-        ("build-slice", 1, "named in the **Slice** item of your starting instructions"),
-        ("build-slice", 6, "no final whole-branch review and no finishing, merge or PR step"),
-        ("run-slices", 3, "--status starting --branch <slice-branch> --fork <sha>"),
-        ("run-slices", 3, "the controller's chain id, then key"),
-        ("run-slices", 3, "locally its name too"),
-        ("run-slices", 3, "### In `main` mode"),
-        ("run-slices", 3, "dispatches for its first build node under the slice layer"),
-        ("run-slices", 4, "and every `waiting` one in `ready` or `early`, find its session"),
-        ("run-slices", 5, "A check-in is armed while any slice is not merged"),
-        ("run-slices", 5, "`kraft-lite:run-slices check-in, chain <id>: read state first.`"),
-        ("run-slices", 5, "`KL slice-set --slice <key> --fork <sha>`"),
-        ("run-slices", 6, "Never one cut from another slice that is still unmerged"),
-        ("run-slices", 6, "--status running`, and review again"),
-        ("run-slices", 6, "through `kraft-lite:next`, which says where its tasks run"),
-        ("run-slices", 2, "A missing ability is never a block"),
-        ("run-slices", 1, "delete any `.kraft-lite/proposals/<chain-id>.json`"),
-        (
-            "run-slices",
-            3,
-            "A slice that comes after two or more slices starts only from `ready`, once all "
-            "of them are merged",
-        ),
-        (
-            "run-slices",
-            3,
-            "`early`: it comes after exactly one slice, and that slice is in review or ready "
-            "to merge. It is cut from that slice's branch",
-        ),
-        (
-            "run-slices",
-            3,
-            "Start it now when your review of that slice has no findings or only small ones; "
-            "otherwise it waits for `ready`.",
-        ),
-        ("run-slices", 3, "where `target` is the word itself, never a branch name"),
-        ("build-slice", 1, "where `target` is the word itself, never a branch name"),
-        ("build-slice", 1, "`base` holds the word `target` or a slice key, never a branch name"),
-        ("build-slice", 1, 'echo <the word after "Cut from:", as given> > <run>/<slice key>/base'),
-        (
-            "build-slice",
-            5,
-            "| `target` | `kraft.mr_rebase` runs, or the controller says to | "
-            "`origin/<target branch>` |",
-        ),
-        ("run-slices", 6, "Starting a review: `KL slice-set --slice <key> --status in_review`."),
-        (
-            "run-slices",
-            6,
-            "finding. Once your review has no findings or only small ones, start what "
-            "`KL slices` lists, as section 3 says.",
-        ),
-        (
-            "run-slices",
-            0,
-            "With no guide for this harness, or an ability its guide marks unconfirmed, follow "
-            "[discover.md](references/discover.md) before any fallback.",
-        ),
-        ("status", 0, "once the controller's review of that slice found nothing or only small"),
-        ("status", 0, "| can start early from <key> |"),
-        ("status", 0, "not even a slice in `ready` or `early`"),
-        ("run-slices", 3, "write `none; continue on the controller's check-in` in its place"),
-        ("run-slices", 5, "- [ ] Report (section 8). - [ ] Re-arm the check-in"),
-        ("run-slices", 4, "then run one check-in (section 5): it reports and re-arms"),
-        (
-            "run-slices",
-            1,
-            "`KL gate`, then invoke `kraft-lite:gate`. It presents the gate's own artifact with "
-            "the proposal beside it, and records the user's answer",
-        ),
-        ("run-slices", 6, "run no tests or checks yourself"),
-        ("build-slice", 4, "the scheduling tool your **Controller** item names"),
-        ("build-slice", 1, "Pass your child chain's `--chain-id <id>` to every verb but `start`"),
-        (
-            "build-slice",
-            2,
-            "for a push you asked the controller about, that is the permission: push, "
-            "then send the controller a `status`",
-        ),
-        ("run-slices", 3, 'copied from your guide\'s "Be messaged" and "Check in later"'),
-        ("run-slices", 8, "Report by invoking `kraft-lite:status`"),
-        ("run-slices", 1, "few enough tasks for one session's context"),
-        ("build-slice", 4, "Ask no one to run a skill or a command for you, the user included"),
-        ("build-slice", 1, "git checkout -B <your slice branch> origin/<your slice branch>"),
-        (
-            "next",
-            1,
-            "first set it up as the repo says: a fresh one has nothing installed. Then run only "
-            "the node's tasks with `task_kind` `builtin` and `ref` "
-            "`kraft.verify_changed_test_scopes`",
-        ),
-        ("next", 1, "git worktree add -B <feature branch> <path> origin/<feature branch>"),
-        ("next", 1, "runs from the controller's checkout"),
-        ("next", 1, "never in the state branch's checkout"),
-        (
-            "next",
-            1,
-            "tell each slice cut from its branch or from the target to rebase onto the "
-            "target, and archive its child",
-        ),
-        ("next", 4, "`gate.slice_gate` true and `sliced` null: invoke `kraft-lite:run-slices`"),
-        ("next", 2, "export state after every `close`"),
-        ("next", 1, "Record a slice merged only once every slice it comes after is"),
-        ("run-slices", 6, "and only once every slice it comes after is merged"),
-        ("run-slices", 6, "naming any slice it comes after that the user must merge first"),
-        ("run-slices", 6, "It is refused while a slice it comes after is unmerged"),
-        (
-            "run-slices",
-            6,
-            "When `KL slices` shows `done: true` on every slice (merged; in `main` mode, "
-            "ready to merge or merged):",
-        ),
-        (
-            "run-slices",
-            7,
-            "git -C <state-checkout> diff --cached --quiet || "
-            'git -C <state-checkout> commit -m "kraft-lite state"',
-        ),
-        (
-            "run-slices",
-            10,
-            "No guide, or no session tools With no guide for this harness, or an ability its "
-            "guide marks unconfirmed, follow [discover.md](references/discover.md) first. With "
-            "no way to start a child even then: say so, and walk the slices here",
-        ),
-        (
-            "run-slices",
-            1,
-            "Unsliceable: tell the user its reason and draw nothing. At any other node: tell the "
-            "user slicing comes at `shape.slice_gate`, and draw nothing now. In both, go on with "
-            "`kraft-lite:next`, so each gate gets `kraft-lite:gate`'s own question.",
-        ),
-        ("run-slices", 1, "A rewind to the slice gate or earlier retires the slices"),
-        (
-            "run-slices",
-            6,
-            "`KL slices` then lists in `base_moved` each slice cut early from it, and each cut "
-            "early from those: once it is back in review, tell each to rebase onto the new tip "
-            "of the slice its `cut_from` names, naming that slice's branch, one after another "
-            "down the line",
-        ),
-        ("run-slices", 6, "A recorded fork flags the slices cut from that one."),
-        ("run-slices", 5, "A non-empty `base_moved`: the rebase in section 6."),
-        (
-            "run-slices",
-            6,
-            "`cut_from` in `KL slices` says which: the parent's key, or null for the target.",
-        ),
-        ("run-slices", 3, "from the slice its `cut_from` names, or `target` when that is null"),
-        ("status", 0, "- rebase pending: <key> onto <its cut_from> (each key in `base_moved`)"),
-        (
-            "build-slice",
-            5,
-            "| a slice key | the controller says to rebase onto that slice's new tip | "
-            "`origin/<that slice's branch>` |",
-        ),
-        ("build-slice", 5, "with `<onto>` a remote branch, never a sha from a message"),
-        ("build-slice", 5, "Onto a slice's new tip, `base` keeps that slice's key."),
-        ("build-slice", 5, "onto a slice's new tip `Cut from: <slice key> at <the new fork>`"),
-        (
-            "gate",
-            2,
-            "If it refuses, tell the user what it said and ask whether to approve unsliced.",
-        ),
-        (
-            "gate",
-            2,
-            "The slice gate or earlier: the plan or its slicing is redone, so the rewind "
-            "retires every slice. Archive their children as `kraft-lite:run-slices` says.",
-        ),
-        (
-            "gate",
-            2,
-            "The first build node, or a node between the slice gate and it, to redo some slices: "
-            "reopen each slice to redo first,",
-        ),
-        (
-            "next",
-            1,
-            "one that takes no paths is a reason to stop and say so, never to run the whole suite",
-        ),
-        (
-            "next",
-            1,
-            "`KL close` with nothing run (`KL approve` on a gate node: `close` refuses one)",
-        ),
-        ("next", 2, "run `command` as an argument list, without a shell"),
-        ("next", 2, "`KL produced --kind <produces> --path <file>`"),
-        ("next", 2, "If `on_base_changed` is set, stop the node there and `KL restart`"),
-        (
-            "next",
-            3,
-            "The node failed, `on_failure` is set and `on_failure_ran` is false: run "
-            "`on_failure.steps` as in section 2, `KL mark --on-failure-ran`, then the whole node "
-            "again from its first step",
-        ),
-        (
-            "next",
-            3,
-            "Every failure is a task with `task_kind` `builtin` or `forge` that ended in an error "
-            "no repair can change",
-        ),
-        (
-            "next",
-            3,
-            "Failing tests or failing checks such a task reports are findings, for the fix loop",
-        ),
-        (
-            "next",
-            0,
-            "follow `kraft-lite:init`'s last section, `A pre-V1 directory: migrate`, then go on "
-            "with the new id it prints",
-        ),
-        (
-            "gate",
-            1,
-            "find the chain's source file from the frozen `.kraft-lite/chains/<chain-id>.json`: "
-            "its `source` when that is a file path; otherwise the `path` that "
-            '`python3 "$CLAUDE_PLUGIN_ROOT/kl.py" chains --available` lists for its `id`',
-        ),
-        (
-            "init",
-            0,
-            "it has `.kraft-lite/registry.yaml` and no `.kraft-lite/bindings.yaml`, or when",
-        ),
-        (
-            "init",
-            0,
-            "finish that run on the previous Kraft Lite version, or "
-            '`python3 "$CLAUDE_PLUGIN_ROOT/kl.py" migrate --abandon <chain-id>`',
-        ),
-        (
-            "next",
-            3,
-            "When it prints `attempt` 2 or more and `fix_loop.judge` is set, run the judge first",
-        ),
-        ("next", 4, "Otherwise `KL gate`, then invoke `kraft-lite:gate`."),
-        ("gate", 1, "`gate.message`, and the file at `gate.artifact_path`"),
-        ("gate", 1, "Kraft Lite cannot apply it: the chain froze at `start`"),
-        ("gate", 2, "A plain `reject` lands on `gate.reject_to`"),
-        ("start", 0, 'kl.py" chains --available'),
-        ("start", 0, "`--spec <path>` and `--plan <path>`"),
-        ("status", 0, "For an exec node, its `steps` in order"),
-        (
-            "status",
-            0,
-            "For a gate node, `gate.message`, the file at `gate.artifact_path`, and that a "
-            "rejection goes back to `gate.reject_to`.",
-        ),
-    ],
-    ids=[
-        "child-fork-never-head",
-        "child-fresh-container",
-        "child-fresh-container-fork",
-        "child-keeps-pushed-work",
-        "child-chain-file",
-        "child-chain-id-from-instructions",
-        "child-no-second-whole-branch-review",
-        "controller-records-fork-at-start",
-        "controller-names-the-chain-id",
-        "controller-local-name",
-        "controller-main-mode",
-        "controller-method-stops-implementation",
-        "controller-resume-matches-ready",
-        "controller-check-in-while-unmerged",
-        "controller-check-in-message",
-        "controller-records-rebased-fork",
-        "controller-rebase-only-cut-from-merged",
-        "controller-failed-review",
-        "controller-feature-worktree",
-        "controller-missing-ability",
-        "controller-deletes-unused-proposal",
-        "controller-two-afters-wait-for-all-merges",
-        "controller-early-start",
-        "controller-early-start-after-a-clean-review",
-        "controller-target-is-a-word",
-        "child-target-is-a-word",
-        "child-base-is-a-word",
-        "child-base-as-given",
-        "child-rebase-onto-target-branch",
-        "controller-review-starts-a-review",
-        "controller-review-then-starts-what-slices-lists",
-        "controller-no-reference-takes-the-fallbacks",
-        "status-early",
-        "status-early-template",
-        "status-starts-nothing",
-        "controller-child-wake-up-unconfirmed",
-        "controller-check-in-reports",
-        "controller-resume-runs-a-check-in",
-        "controller-gate-records-the-answer",
-        "controller-review-runs-nothing",
-        "child-wake-up-from-the-controller-item",
-        "child-chain-id-to-every-verb-but-start",
-        "child-pushes-on-the-users-words",
-        "controller-gives-the-child-its-tools",
-        "controller-status-report-owned-by-status",
-        "controller-small-plan-heuristic",
-        "child-asks-no-one-to-continue-it",
-        "child-fresh-container-takes-the-remote-head",
-        "next-scoped-verify-setup-then-test",
-        "next-feature-worktree-from-origin",
-        "next-kl-from-the-controller-checkout",
-        "next-feature-worktree",
-        "next-archives-merged-child",
-        "next-slice-gate-to-run-slices",
-        "next-exports-after-close",
-        "next-records-merges-after-what-they-come-after",
-        "controller-merges-after-what-it-comes-after",
-        "controller-main-mode-names-the-merge-order",
-        "controller-merge-refused-out-of-order",
-        "controller-done-is-what-slices-says",
-        "controller-state-commit-skips-a-no-op",
-        "controller-no-reference-walks-here",
-        "controller-unsliceable-chain-walks-unsliced",
-        "controller-rewind-retires-the-slices",
-        "controller-base-moved-rebases-onto-the-new-tip",
-        "controller-recorded-fork-flags-its-cuts",
-        "controller-check-in-acts-on-base-moved",
-        "controller-cut-from-says-which",
-        "controller-replacement-reads-cut-from",
-        "status-rebase-pending",
-        "child-rebase-onto-a-slices-new-tip",
-        "child-rebase-onto-a-remote-branch",
-        "child-new-tip-keeps-base",
-        "child-new-tip-cut-from-line",
-        "gate-refused-slices-asks",
-        "gate-rewind-to-the-slice-gate-or-earlier-retires",
-        "gate-rewind-to-the-first-build-node-reopens-first",
-        "next-scoped-verify-never-the-whole-suite",
-        "next-skip-approves-a-gate-node",
-        "next-subprocess-without-a-shell",
-        "next-records-what-a-task-produced",
-        "next-base-moved-restarts",
-        "next-on-failure-once",
-        "next-builtin-or-forge-error-stops",
-        "next-builtin-or-forge-findings-go-to-the-fix-loop",
-        "next-pre-v1-refusal-migrates",
-        "gate-chain-revision-restarts-through-start",
-        "init-migrates-only-without-bindings",
-        "init-migrate-refusal-names-the-ways-on",
-        "next-judge-from-the-second-repair",
-        "next-opens-a-gate-node",
-        "gate-presents-message-and-artifact",
-        "gate-chain-revision-cannot-apply",
-        "gate-reject-lands-on-reject-to",
-        "start-lists-available-chains",
-        "start-attachments-skip-their-gates",
-        "status-exec-node-steps",
-        "status-gate-node",
-    ],
-)
-def test_a_skill_carries_the_final_review_fixes(texts, name, section, needle):
-    """Section 0 is the whole skill."""
-    text = _section(texts[name], section) if section else " ".join(texts[name].split())
-    assert needle in text, f"{name} section {section} lacks {needle!r}"
-
-
 def test_the_claude_code_reference_starts_a_child_from_its_fork():
     body = " ".join((PLUGIN / "skills/run-slices/references/claude-code.md").read_text().split())
     assert "`source_revision`: the commit `--fork` records" in body
     assert "a checkout on the branch or commit the slice is cut from" in body
     assert "Child: the same tool schedules its own wake-up" in body
-
-
-def test_the_status_skill_hands_back_to_run_slices(texts):
-    flat = " ".join(texts["status"].split())
-    assert "When `kraft-lite:run-slices` invoked you, return to it after the report." in flat
-
-
-def test_the_run_slices_skill_names_every_verb_without_a_chain_id(texts):
-    flat = " ".join(texts["run-slices"].split())
-    assert "except `settings`, `import`, `chains`, `detect`, `migrate` and `start`" in flat

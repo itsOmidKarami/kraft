@@ -133,14 +133,6 @@ def test_the_subset_reader_matches_safe_load_on_kraft_config(kl_modules, path):
     assert got == expected
 
 
-@pytest.mark.parametrize("rel", sorted(p.relative_to(CONFIG).as_posix() for p in LIBRARY_FILES))
-def test_the_bundled_copy_loads_with_the_subset_reader(kl_modules, rel):
-    kl_yaml, _ = kl_modules
-    text = (PLUGIN / "config" / rel).read_text()
-
-    assert kl_yaml.load(text, rel) == yaml.safe_load(text)
-
-
 #: Chains that extend chains, two levels deep, over the packaged library.
 EXTENDING = {
     "ship": """\

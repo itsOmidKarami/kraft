@@ -5,15 +5,10 @@ from __future__ import annotations
 
 import copy
 import json
-import sys
-from pathlib import Path
 
 import pytest
 
-PLUGIN = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PLUGIN))
-
-import kl  # noqa: E402
+import kl
 
 CHAIN_ID = "kl-feature1"
 

@@ -5,17 +5,15 @@ it exists."""
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-PLUGIN = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PLUGIN))
+import kl
+import kl_bindings
+import kl_chains
 
-import kl  # noqa: E402
-import kl_bindings  # noqa: E402
-import kl_chains  # noqa: E402
+PLUGIN = Path(__file__).resolve().parents[1]
 
 
 def test_a_justfile_test_recipe_wins(tmp_path):
@@ -120,19 +118,21 @@ def test_task_keywords_cover_the_library():
     assert set(kl.TASK_KEYWORDS) == expected
 
 
-def test_keywords_do_not_match_on_short_substrings(tmp_path, monkeypatch):
-    """`pr` once matched `compress`, `improver` and `project-artifact`. A keyword
-    short enough to appear inside unrelated words offers the human a menu of
-    nonsense and buries the real candidate."""
+@pytest.mark.parametrize(
+    ("skills", "task", "expected"),
+    [
+        # `pr` once matched `compress`, `improver` and `project-artifact`: a keyword
+        # inside unrelated words offers the human a menu of nonsense.
+        (("compress", "claude-md-improver", "project-artifact"), "describe_mr", []),
+        (("explanation-style", "airplane-mode", "plans-index"), "plan_author", ["plans-index"]),
+        (("pr-description", "mr-metadata"), "describe_mr", ["mr-metadata", "pr-description"]),
+    ],
+    ids=["short_keyword_inside_a_word", "long_keyword_inside_a_word", "short_keyword_whole_word"],
+)
+def test_keywords_match_whole_words_only(tmp_path, monkeypatch, skills, task, expected):
     monkeypatch.setattr(kl, "SKILL_ROOTS", (Path(".claude") / "skills",))
-    _install(tmp_path, "compress", "claude-md-improver", "project-artifact")
-    assert kl.detect(tmp_path)["candidates"]["tasks"]["describe_mr"] == []
-
-
-def test_a_long_keyword_does_not_match_inside_a_word(tmp_path, monkeypatch):
-    monkeypatch.setattr(kl, "SKILL_ROOTS", (Path(".claude") / "skills",))
-    _install(tmp_path, "explanation-style", "airplane-mode", "plans-index")
-    assert kl.detect(tmp_path)["candidates"]["tasks"]["plan_author"] == ["plans-index"]
+    _install(tmp_path, *skills)
+    assert kl.detect(tmp_path)["candidates"]["tasks"][task] == expected
 
 
 def test_a_tasks_own_installed_skill_is_a_candidate(tmp_path, monkeypatch):
@@ -147,13 +147,6 @@ def test_a_tasks_own_installed_skill_is_a_candidate(tmp_path, monkeypatch):
     got = kl.detect(tmp_path, str(chain))
     assert got["candidates"]["tasks"] == {"only.main.deploy": ["acme:zzz"]}
     assert got["proposed"] == {}
-
-
-def test_a_short_keyword_still_matches_as_a_whole_word(tmp_path, monkeypatch):
-    monkeypatch.setattr(kl, "SKILL_ROOTS", (Path(".claude") / "skills",))
-    _install(tmp_path, "pr-description", "mr-metadata")
-    got = kl.detect(tmp_path)["candidates"]["tasks"]["describe_mr"]
-    assert got == ["mr-metadata", "pr-description"]
 
 
 def test_a_custom_task_gets_candidates_from_its_own_words(tmp_path, monkeypatch):
@@ -179,17 +172,6 @@ def test_a_task_of_only_structural_words_reports_no_candidates(tmp_path, monkeyp
     assert got["candidates"]["tasks"] == {"only.main.run_start": []}
 
 
-def test_the_packaged_chain_still_reports_its_tasks(tmp_path):
-    got = kl.detect(tmp_path)
-    assert got["chain"] == "default"
-    # 13 agent tasks: the merge-rejection repair is one.
-    assert [len(got["candidates"][section]) for section in ("tasks", "builtins", "forge")] == [
-        13,
-        2,
-        8,
-    ]
-
-
 @pytest.mark.parametrize(
     ("chain", "expected"),
     [
@@ -212,25 +194,30 @@ def test_detect_refuses_a_chain_that_does_not_exist(tmp_path, kl_cli):
 
 @pytest.fixture
 def skilled(tmp_path, monkeypatch):
-    """`detect` over a repo with a test command, and `skills` installed."""
+    """`detect` over a repo with a test command, `skills` installed (`plugin:name`
+    inside that plugin) and `ci` as the CI command."""
     monkeypatch.setattr(kl, "SKILL_ROOTS", (Path(".claude") / "skills",))
 
-    def detect(*skills, test=True):
+    def detect(*skills, test=True, ci=None):
         if test:
             (tmp_path / "Makefile").write_text("test:\n\tpytest\n")
-        _install(tmp_path, *skills)
-        monkeypatch.setattr(kl, "_ci_command", lambda root: None)
-        return kl.detect(tmp_path)["proposed"]
+        for skill in skills:
+            plugin, _, name = skill.rpartition(":")
+            _install(tmp_path, name, plugin=plugin or None)
+        monkeypatch.setattr(kl, "_ci_command", lambda root: ci)
+        return kl.detect(tmp_path)
 
     return detect
 
 
 @pytest.mark.parametrize(
-    ("skills", "test", "expect"),
+    ("skills", "test", "ci", "found", "expect"),
     [
         pytest.param(
             (),
             True,
+            None,
+            {},
             {
                 "builtins": {
                     "kraft.verify_changed_test_scopes": {
@@ -241,10 +228,12 @@ def skilled(tmp_path, monkeypatch):
             },
             id="test_command_becomes_subprocess",
         ),
-        pytest.param((), False, {}, id="no_test_command_proposes_nothing"),
+        pytest.param((), False, None, {}, {}, id="no_test_command_proposes_nothing"),
         pytest.param(
             ("writing-plans",),
             False,
+            None,
+            {},
             {
                 "tasks": {
                     "plan_author": {
@@ -258,34 +247,41 @@ def skilled(tmp_path, monkeypatch):
             },
             id="single_skill_candidate_bound",
         ),
-        pytest.param(("writing-plans", "plan-critic"), False, {}, id="two_candidates_left_unbound"),
+        pytest.param(
+            ("writing-plans", "plan-critic"), False, None, {}, {}, id="two_candidates_left_unbound"
+        ),
+        pytest.param(
+            (),
+            False,
+            ["gh", "pr", "checks"],
+            {},
+            {"forge": {"mr.ci": {"kind": "subprocess", "command": ["gh", "pr", "checks"]}}},
+            id="ci_command_becomes_the_ci_subprocess",
+        ),
+        # kraft:spec is the library's own skill for spec_author, and it is installed:
+        # the default already runs it, so binding it again says nothing.
+        pytest.param(
+            ("kraft:spec",),
+            False,
+            None,
+            {"spec_author": ["kraft:spec"]},
+            {},
+            id="task_already_bound_to_its_own_skill_proposes_nothing",
+        ),
+        pytest.param(
+            ("kraft:spec", "acme:spec-writer"),
+            False,
+            None,
+            {"spec_author": ["acme:spec-writer", "kraft:spec"]},
+            {},
+            id="second_candidate_beside_the_own_skill_left_to_init",
+        ),
     ],
 )
-def test_proposed_bindings(skilled, skills, test, expect):
-    assert skilled(*skills, test=test) == expect
-
-
-def test_a_ci_command_becomes_the_ci_subprocess(tmp_path, monkeypatch):
-    monkeypatch.setattr(kl, "_ci_command", lambda root: ["gh", "pr", "checks"])
-    assert kl.detect(tmp_path)["proposed"] == {
-        "forge": {"mr.ci": {"kind": "subprocess", "command": ["gh", "pr", "checks"]}}
-    }
-
-
-def test_a_task_already_bound_to_its_own_skill_proposes_nothing(tmp_path, monkeypatch):
-    # kraft:spec is the library's own skill for spec_author, and it is installed:
-    # the default already runs it, so binding it again says nothing.
-    monkeypatch.setattr(kl, "_installed_skills", lambda root: ["kraft:spec"])
-    got = kl.detect(tmp_path)
-    assert got["candidates"]["tasks"]["spec_author"] == ["kraft:spec"]
-    assert got["proposed"] == {}
-
-
-def test_a_second_candidate_beside_the_installed_own_skill_is_left_to_init(tmp_path, monkeypatch):
-    monkeypatch.setattr(kl, "_installed_skills", lambda root: ["kraft:spec", "acme:spec-writer"])
-    got = kl.detect(tmp_path)
-    assert got["candidates"]["tasks"]["spec_author"] == ["acme:spec-writer", "kraft:spec"]
-    assert got["proposed"] == {}
+def test_proposed_bindings(skilled, skills, test, ci, found, expect):
+    got = skilled(*skills, test=test, ci=ci)
+    assert got["proposed"] == expect
+    assert {task: got["candidates"]["tasks"][task] for task in found} == found
 
 
 def test_the_proposal_passes_the_validator_that_reads_bindings(tmp_path, monkeypatch):

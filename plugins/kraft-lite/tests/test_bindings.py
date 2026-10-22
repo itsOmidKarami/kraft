@@ -246,19 +246,6 @@ def skill(name: str, text: str = "fallback") -> dict:
         ),
         pytest.param(
             task(components=["implementer"]),
-            {"tasks": {"implementer": prompt("outer")}},
-            lambda name: True,
-            "build",
-            {
-                "kind": "skill",
-                "skill": "superpowers:subagent-driven-development",
-                "prompt": kl_bindings.SLICE_DEFAULTS["tasks"]["implementer"]["prompt"],
-                "source": "slice-default:tasks.implementer",
-            },
-            id="slice_layer_default_implementer",
-        ),
-        pytest.param(
-            task(components=["implementer"]),
             {},
             lambda name: False,
             "build",
@@ -280,6 +267,7 @@ def skill(name: str, text: str = "fallback") -> dict:
             {
                 "kind": "skill",
                 "skill": "superpowers:subagent-driven-development",
+                "prompt": kl_bindings.SLICE_DEFAULTS["tasks"]["implementer"]["prompt"],
                 "source": "slice-default:tasks.implementer",
             },
             id="slice_layer_default_by_first_build_node",
@@ -350,38 +338,35 @@ def skill(name: str, text: str = "fallback") -> dict:
             {"kind": "prompt", "prompt": None, "source": "default:agent"},
             id="slice_layer_off_ignores_slice_section",
         ),
+        pytest.param(
+            task(kind="forge", target="mr.automated_review"),
+            {},
+            lambda name: False,
+            "build",
+            {
+                "kind": "skip",
+                "why": "the controller's PR review is this review",
+                "source": "slice-default:forge.mr.automated_review",
+            },
+            id="slice_layer_default_skips_the_automated_review",
+        ),
+        pytest.param(
+            task(produces="spec", profile="fast", model="m", effort="low", prompt="x"),
+            {},
+            lambda name: False,
+            None,
+            {
+                "path": "build.main.main_task",
+                "produces": "spec",
+                "hints": {"profile": "fast", "model": "m", "effort": "low"},
+            },
+            id="carries_path_produces_and_hints",
+        ),
     ],
 )
 def test_dispatch(chain_task, bindings, installed, first_build, expect):
     got = kl_bindings.dispatch(chain_task, bindings, installed, first_build=first_build)
     assert {key: got[key] for key in expect} == expect
-
-
-def test_dispatch_carries_path_produces_and_hints():
-    got = kl_bindings.dispatch(
-        task(produces="spec", profile="fast", model="m", effort="low", prompt="x"),
-        {},
-        lambda name: False,
-    )
-    assert (got["path"], got["produces"], got["hints"]) == (
-        "build.main.main_task",
-        "spec",
-        {"profile": "fast", "model": "m", "effort": "low"},
-    )
-
-
-def test_slice_default_skips_the_automated_review():
-    got = kl_bindings.dispatch(
-        task(kind="forge", target="mr.automated_review"),
-        {},
-        lambda name: False,
-        first_build="build",
-    )
-    assert (got["kind"], got["why"], got["source"]) == (
-        "skip",
-        "the controller's PR review is this review",
-        "slice-default:forge.mr.automated_review",
-    )
 
 
 def test_every_kraft_ref_and_target_has_a_default():

@@ -6,15 +6,11 @@ that set a run's mode."""
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-PLUGIN = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PLUGIN))
-
-import kl  # noqa: E402
+import kl
 
 #: The spec's table, typed out again rather than worked out by `kl_shape.sliced_action`,
 #: so the test fails when the code drifts from the spec rather than following it.
@@ -107,13 +103,11 @@ ABC = [
         pytest.param("feature", "spec", None, id="another_node"),
     ],
 )
-# `approve` closes the node as `close` does.
-@pytest.mark.parametrize("verb", ["close", "approve"])
 def test_implementation_closes_only_once_every_slice_is_done(
-    walk, mode, moves, not_done, verb, kl_cli, tmp_path
+    walk, mode, moves, not_done, kl_cli, tmp_path
 ):
     def finish():
-        return kl_cli(tmp_path, verb, ok=not_done is None)
+        return kl_cli(tmp_path, "close", ok=not_done is None)
 
     walk.slice(tmp_path, walk.plan(mode=mode, slices=ABC))
     if moves == "spec":
@@ -151,9 +145,8 @@ ALL_READY = [
         pytest.param("final_review", "approve", "bc", id="final_review_two_unmerged"),
         pytest.param("final_review", "approve", "c", id="final_review_approve"),
         pytest.param("merge", "close", "c", id="merge"),
-        pytest.param("merge", "approve", "c", id="merge_approve"),
         pytest.param("final_review", "approve", "", id="final_review_all_merged"),
-        pytest.param("merge", "approve", "", id="merge_all_merged"),
+        pytest.param("merge", "close", "", id="merge_all_merged"),
     ],
 )
 def test_main_modes_await_nodes_close_only_once_the_user_merged_every_slice(

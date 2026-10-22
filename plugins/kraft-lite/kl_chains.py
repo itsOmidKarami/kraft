@@ -59,6 +59,12 @@ ROUTES = (("profile",), ("model", "effort"))
 OWN = "library"
 REPO = "repo:"
 MAIN = "main"
+#: The keys of the handlers Lite walks by name, as Kraft's `BaseChangePolicy`
+#: and `MergeRejectionPolicy` declare them.
+HANDLER_KEYS = {
+    "on_base_changed": ("restart_from", "on_conflict"),
+    "on_merge_rejected": ("restart_from", "repair"),
+}
 #: Recovery Kraft runs that Lite's frozen shape has no place for: refused at
 #: resolve rather than walked past without it.
 UNSUPPORTED = "is not supported by Kraft Lite"
@@ -183,6 +189,11 @@ def resolve(
     repo, instance = libraries(root, env)
     if path is not None:
         path = Path(path)
+        # One of the repo library's own chain files is that chain, as
+        # `repo:<id>` resolves it: its `extends` are the repo library's.
+        own = {file.resolve(): name for name, file in (repo.files if repo else {}).items()}
+        if path.resolve() in own:
+            return resolve(root, env, ref=REPO + own[path.resolve()])
         data = _mapping(path, kl_yaml.read(path), "a chain file")
         id = data.get("id") or path.stem
         # Not one of the library's chains, so `extends: <its own id>` is the library's.
@@ -599,6 +610,13 @@ class _Validator:
             for key in ("on_failure", "fix_loop", "on_base_changed", "on_merge_rejected"):
                 if node.get(key) is not None and not isinstance(node[key], dict):
                     raise self.fail(f"{id}.{key}", "must be a mapping")
+            for key, known in HANDLER_KEYS.items():
+                # Kraft forbids any other key; read past, a typo drops the setting.
+                for written in node.get(key) or {}:
+                    if written not in known:
+                        raise self.fail(
+                            f"{id}.{key}.{written}", f"unknown key; known: {list(known)}"
+                        )
             if kind == "exec":
                 self.shape(node, id)
                 # Kraft refuses it at load: trim could not drop the node cleanly.

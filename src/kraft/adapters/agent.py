@@ -90,6 +90,16 @@ _CTX = (
     "intended — do not `git add -f` it or otherwise force it in."
 )
 
+#: Appended to a resumed launch's instruction (Kraft-vjo4g).
+_RESUMED_FILES = (
+    "\n\nThis turn runs as a new worker session, {session_id}, with its own files. "
+    "Write the session summary to {summary_path}, with "
+    'worker_session_id: "{session_id}" in its front-matter, and the JSON result to '
+    "$KRAFT_RESULT_PATH, which is now {result_path}. Any other summary or result "
+    "path earlier in this conversation belonged to an earlier session: do not "
+    "write there, Kraft no longer reads it."
+)
+
 #: Where an item's agent works: `_CTX`'s `{checkout}`, a worktree's or a person's own.
 _WORKTREE = (
     "You are working in a git worktree cut for this work item, on its own "
@@ -1016,6 +1026,13 @@ async def run_agent_task(
 
     files = files or item_paths.session_files(run_dirs, work_item_id, session_id)
     task_instruction = _bounded_instruction(files.instruction, task_instruction)
+    if resume_session_id:
+        # The resumed conversation remembers the session files of the launch it
+        # began in, each session's own path on every backend; written there,
+        # the result is refused (seatbelt), lost (container) or unread (host).
+        task_instruction += _RESUMED_FILES.format(
+            session_id=session_id, summary_path=files.summary, result_path=files.result
+        )
     # Every launch is told where its item's documents are, whoever launched
     # it: a node's own pass, a fix loop, an override, an escalation turn or a
     # gate review.
