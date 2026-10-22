@@ -685,7 +685,8 @@ must be `read_only` (`on_failure: {read_only: true, tasks: [...]}`, or every
 step of a `steps` plan): it answers a merge that failed for another reason,
 and the merge re-runs in place, so it may wait, retry or comment but never
 commit. A read_only violation there holds the item at `restart_from` with the
-gates reopened. Its rewinds count under `<node>.on_merge_rejected`, 3
+gates reopened. Any merging node after the final gate restarts an
+`on_base_changed` before that gate too. Its rewinds count under `<node>.on_merge_rejected`, 3
 attempts over a week unless `loops:` overrides them, checked before the repair
 runs. Coming back to the merge node with the drop unanswered -- a resume, a
 rate-limit relaunch, a person's retry of that node -- runs the repair again;

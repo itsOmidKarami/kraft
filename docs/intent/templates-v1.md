@@ -1228,6 +1228,14 @@ The system SHALL reject an `on_base_changed.restart_from` target that is
 missing, is not an execution node, or is later than the declaring node.
 enforced-by: tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[missing], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[gate], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[later], tests/templates/test_failure_controls.py::test_a_backward_restart_target_is_accepted[earlier], tests/templates/test_failure_controls.py::test_a_backward_restart_target_is_accepted[itself]
 
+## REQ a-merging-node-restarts-a-base-change-before-the-final-gate
+
+IF a node with an `mr.merge` task comes after the chain's first
+`chain_finalized` gate and its `on_base_changed.restart_from` names a node
+after that gate -- itself included -- THEN the system SHALL refuse the chain.
+enforced-by: tests/templates/test_failure_controls.py::test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it[merging-restarts-itself], tests/templates/test_failure_controls.py::test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it[merging-restarts-past-the-gate], tests/templates/test_failure_controls.py::test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it[before-the-gate], tests/templates/test_failure_controls.py::test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it[no-merge]
+origin: src/kraft/templates/models.py §Chain -- `mr.merge` answers `conflict` when its forced rebase cannot clear one; the conflict handler's resolution, restarted in place, would merge with no person seeing it.
+
 ## REQ rebase-conflict-requires-explicit-handler
 
 The system SHALL attempt automatic rebase-conflict resolution only when the

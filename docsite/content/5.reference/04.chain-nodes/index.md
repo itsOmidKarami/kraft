@@ -135,7 +135,7 @@ before the walk passes it again.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `restart_from` | string | required | Names this node or an earlier exec node, never a gate. |
+| `restart_from` | string | required | Names this node or an earlier exec node, never a gate. On a node with an `mr.merge` task after a `chain_finalized` gate, it must name a node before that gate. |
 | `on_conflict` | mapping | none | Names the task or steps that resolve a conflicting rebase. |
 
 If a retry or resume starts at a node that has its own `mr_rebase` task and an
@@ -212,6 +212,10 @@ marks the plan or every step:
 If a read_only handler changes the worktree all the same, the item stops with
 `read_only_violated`, held at `restart_from` with the span's gates reopened, so
 no retry merges the change unseen.
+
+An `on_base_changed` on this node, or on any node with an `mr.merge` task after
+the `chain_finalized` gate, must restart before that gate: a conflict
+resolution would otherwise be merged unseen.
 
 Without `on_merge_rejected`, a drop stops the item at once, with the forge's
 reason in the stop, even when the drop comes on the re-measure after the

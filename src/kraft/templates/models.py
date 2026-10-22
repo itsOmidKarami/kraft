@@ -1060,6 +1060,16 @@ class Chain(BaseModel):
                         f"node {node.id!r}: on_base_changed.restart_from {target!r} must name "
                         f"this or an earlier execution node in {where}"
                     )
+                # A merging node past the final gate restarts before it: its
+                # conflict handler's resolution, or a fix cycle in the span,
+                # would otherwise reach the merge with no person seeing it.
+                past_final = final is not None and final < position
+                if node.merges() and past_final and index[target] > final:
+                    raise ValueError(
+                        f"node {node.id!r}: on_base_changed.restart_from {target!r} must name "
+                        f"an execution node before the final gate {self.nodes[final].id!r}, "
+                        f"since {node.id!r} merges, in {where}"
+                    )
             if node.on_merge_rejected is not None:
                 # Strictly earlier: the repaired head must pass the merge
                 # request's own checks again before it is offered to the forge.

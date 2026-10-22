@@ -350,6 +350,55 @@ def test_a_read_only_on_failure_may_share_a_node_with_on_merge_rejected(shape, f
     assert plan_steps[0].id == checked
 
 
+def _past_the_final_gate(restart_from: str, tasks) -> dict:
+    """early -> final (the final gate) -> ready -> land, which runs `tasks`
+    and restarts a base change at `restart_from`, resolving a conflict."""
+    base_change = {"restart_from": restart_from, "on_conflict": plan(sub("resolve"))}
+    return {
+        "id": "c",
+        "nodes": [
+            exec_node("early", tasks=[sub()]),
+            {"id": "final", "kind": "gate", "chain_finalized": True},
+            exec_node("ready", tasks=[sub()]),
+            exec_node("land", tasks=tasks, on_base_changed=base_change),
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ("restart_from", "tasks", "refused"),
+    [
+        ("land", [merge()], True),
+        ("ready", [merge()], True),
+        ("early", [merge()], False),
+        ("land", [sub()], False),
+    ],
+    ids=[
+        "merging-restarts-itself",
+        "merging-restarts-past-the-gate",
+        "before-the-gate",
+        "no-merge",
+    ],
+)
+def test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it(
+    restart_from, tasks, refused
+):
+    """The conflict handler's resolution, or a fix cycle in the restarted
+    span, would otherwise reach the merge with no person seeing it: `mr.merge`
+    answers `conflict` when its forced rebase cannot clear one. A node that
+    does not merge may still restart itself."""
+    chain = _past_the_final_gate(restart_from, tasks)
+    if not refused:
+        assert tm.Chain.model_validate(chain).nodes[3].on_base_changed.restart_from == restart_from
+        return
+    with pytest.raises(ValidationError) as caught:
+        tm.Chain.model_validate(chain)
+    assert (
+        f"node 'land': on_base_changed.restart_from {restart_from!r} must name an execution "
+        "node before the final gate 'final', since 'land' merges, in c"
+    ) in str(caught.value)
+
+
 @pytest.mark.parametrize(
     "tasks",
     [
