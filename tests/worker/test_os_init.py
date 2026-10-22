@@ -1,7 +1,11 @@
-"""The os sandbox's launcher and init, run as scripts with a stand-in for bwrap."""
+"""The os sandbox's launcher and init, run as scripts with a stand-in for bwrap
+(Linux) or sandbox-exec (macOS). The macOS branches also run on Linux, under a
+driver that claims `sys.platform == "darwin"` and stubs what needs a real Mac."""
 
+import json
 import os
 import resource
+import shlex
 import signal
 import socket
 import subprocess
@@ -18,11 +22,12 @@ HINT = (
     "kraft: a command was not found inside the os sandbox; "
     "add its directory to the sandbox's expose list"
 )
+linux_only = pytest.mark.skipif(sys.platform != "linux", reason="a Linux-only fence")
 
 # Stands in for bwrap: checks `--seccomp <fd>` follows argv[0] and that fd is
 # open, then runs the rest. It rebuilds the environment from /proc so Python's
 # own locale coercion cannot add a name.
-STAND_IN = """#!{python}
+BWRAP = """#!@PYTHON@
 import os, sys
 assert sys.argv[1] == "--seccomp", sys.argv
 os.fstat(int(sys.argv[2]))
@@ -31,36 +36,130 @@ env = dict(kv.split(b"=", 1) for kv in raw if kv)
 os.execve(sys.argv[3], sys.argv[3:], env)
 """
 
+# Stands in for sandbox-exec: records its argv and environment beside itself, skips
+# `-f FILE` and `-D K=V`, then runs the rest.
+SANDBOX_EXEC = """#!@PYTHON@
+import json, os, sys
+here = os.path.dirname(os.path.realpath(__file__))
+with open(os.path.join(here, "record.json"), "w") as f:
+    json.dump({"argv": sys.argv, "env": dict(os.environ)}, f)
+i = 1
+while sys.argv[i] in ("-D", "-f"):
+    i += 2
+os.execve(sys.argv[i], sys.argv[i:], os.environ)
+"""
 
-@pytest.fixture
-def bwrap(tmp_path):
-    path = tmp_path / "bwrap"
-    path.write_text(STAND_IN.format(python=os.path.realpath(sys.executable)))
+# What a launcher or init run "on a Mac" is, off one: the platform claimed, and
+# the pieces that need libsandbox stubbed (a sweep records its markers and removes
+# the marker as the real one does). The real machine check stays.
+DRIVER = """
+import importlib.util, os, sys
+real = sys.platform
+sys.platform = "darwin"
+log, mode, *rest = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("os_init", @OS_INIT@)
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+def sweep(marker, control, passes=10):
+    with open(log, "a") as f:
+        f.write(marker + "\\n" + control + "\\n")
+    os.path.exists(marker) and os.unlink(marker)
+    return []
+m.sweep = sweep
+if real != "darwin":
+    m._sandbox_check = lambda: None
+sys.exit(m.main([mode, *rest]))
+"""
+
+ENV_NAMES = """
+import os
+if os.path.exists('/proc/self/environ'):
+    raw = open('/proc/self/environ', 'rb').read().split(b'\\0')
+    print(sorted(kv.split(b'=')[0].decode() for kv in raw if kv))
+else:
+    print(sorted(os.environ))
+"""
+
+
+def claiming(*claims):
+    """A `-c` source that runs os_init.py as __main__ after the given statements."""
+    body = "\n".join(claims)
+    run_path = f"runpy.run_path({str(OS_INIT)!r}, run_name='__main__')"
+    return f"import platform, runpy, sys\n{body}\n{run_path}"
+
+
+def _script(path, text):
+    path.write_text(text.replace("@PYTHON@", os.path.realpath(sys.executable)))
     path.chmod(0o755)
-    return path
+    return str(path)
+
+
+def session_files(tmp_path):
+    """(marker, control, tmpdir) a darwin launcher is given."""
+    root = tmp_path / "session"
+    return root / "markers" / "s", root / "markers" / "control", root / "tmp" / "s"
 
 
 @pytest.fixture
-def filt(tmp_path):
-    path = tmp_path / "filter.bpf"
-    path.write_bytes(b"\0" * 8)
-    return path
+def launcher(tmp_path):
+    """Build the launcher's argv around a stand-in confiner. `darwin` picks the macOS
+    form (default: this machine's); off a Mac that runs under the driver, and a
+    test on a Mac may ask for the driver too, to see the sweeps (`sweeps=FILE`)."""
+
+    def build(
+        mode,
+        inner,
+        *,
+        keep="",
+        started=None,
+        setenv=(),
+        relay=None,
+        darwin=None,
+        sweeps=None,
+        plain=False,
+    ):
+        real = sys.platform == "darwin"
+        darwin = real if darwin is None else darwin
+        argv = ["--keep", keep]
+        if darwin:
+            marker, control, tmpdir = session_files(tmp_path)
+            argv += ["--marker", str(marker), "--control", str(control), "--tmpdir", str(tmpdir)]
+            argv += ["--relay-sock", str(relay)] if relay else []
+            confiner = [_script(tmp_path / "sandbox-exec", SANDBOX_EXEC), "-f", "profile.sb"]
+        else:
+            (tmp_path / "filter.bpf").write_bytes(b"\0" * 8)
+            argv += ["--seccomp-file", str(tmp_path / "filter.bpf")]
+            confiner = [_script(tmp_path / "bwrap", BWRAP)]
+        for pair in setenv:
+            argv += ["--setenv", pair]
+        argv += ["--started", str(started)] if started else []
+        argv += ["--", *confiner, *inner]
+        if darwin and (sweeps or not real) and not plain:
+            src = DRIVER.replace("@OS_INIT@", repr(str(OS_INIT)))
+            return [*PY, "-c", src, str(sweeps or tmp_path / "sweeps.log"), mode, *argv]
+        return [*PY, str(OS_INIT), mode, *argv]
+
+    return build
+
+
+def init_argv(*cmd, sock=None, port=None, darwin=False, chdir=None):
+    relay = ["--sock", str(sock), "--port", str(port)] if sock else []
+    argv = [
+        *PY,
+        str(OS_INIT),
+        "init",
+        *relay,
+        *(["--chdir", str(chdir)] if chdir else []),
+        "--",
+        *cmd,
+    ]
+    if darwin and sys.platform != "darwin":
+        return [*PY, "-c", claiming("sys.platform = 'darwin'"), *argv[4:]]
+    return argv
 
 
 def py(code, *args):
     return [*PY, "-c", code, *args]
-
-
-def launcher(mode, bwrap, filt, inner, *, keep="", started=None):
-    argv = [*PY, str(OS_INIT), mode, "--keep", keep, "--seccomp-file", str(filt)]
-    if started:
-        argv += ["--started", str(started)]
-    return [*argv, "--", str(bwrap), *inner]
-
-
-def init_argv(*cmd, sock=None, port=None):
-    relay = ["--sock", str(sock), "--port", str(port)] if sock else []
-    return [*PY, str(OS_INIT), "init", *relay, "--", *cmd]
 
 
 def run(argv, **kw):
@@ -78,14 +177,10 @@ def wait_for(path, timeout=10):
 @pytest.mark.parametrize(
     ("under_init", "want_fd"), [(False, True), (True, False)], ids=["launcher", "init-drops-fd"]
 )
-def test_launch_env_filtered(bwrap, filt, under_init, want_fd):
-    code = (
-        "raw = open('/proc/self/environ', 'rb').read().split(b'\\0')\n"
-        "print(sorted(kv.split(b'=')[0].decode() for kv in raw if kv))"
-    )
+def test_launch_env_filtered(launcher, under_init, want_fd):
     env = {"FOO": "1", "BAR": "2", "SECRET": "x"}
-    inner = init_argv(*py(code)) if under_init else py(code)
-    out = run(launcher("launch", bwrap, filt, inner, keep="FOO,MISSING"), env=env).stdout
+    inner = init_argv(*py(ENV_NAMES)) if under_init else py(ENV_NAMES)
+    out = run(launcher("launch", inner, keep="FOO,MISSING"), env=env).stdout
     assert ("'FOO'" in out, "BAR" in out or "SECRET" in out) == (True, False)
     assert ("OS_INIT_STARTED_FD" in out) is want_fd
 
@@ -99,9 +194,9 @@ def test_launch_env_filtered(bwrap, filt, under_init, want_fd):
     ],
     ids=["child-writes", "exec-fails", "init-starts"],
 )
-def test_launch_started(bwrap, filt, tmp_path, inner, wrote):
+def test_launch_started(launcher, tmp_path, inner, wrote):
     started = tmp_path / "started"
-    r = run(launcher("launch", bwrap, filt, inner, started=started))
+    r = run(launcher("launch", inner, started=started))
     assert started.exists() is wrote
     if wrote:
         assert started.read_text() == "started\n"
@@ -112,7 +207,7 @@ def test_launch_started(bwrap, filt, tmp_path, inner, wrote):
 @pytest.mark.parametrize(
     "sig", [signal.SIGINT, signal.SIGTERM, signal.SIGHUP], ids=["int", "term", "hup"]
 )
-def test_launch_outlives_signal(bwrap, filt, tmp_path, sig):
+def test_launch_outlives_signal(launcher, tmp_path, sig):
     ready = tmp_path / "ready"
     code = (
         "import signal, time, pathlib, sys\n"
@@ -120,17 +215,17 @@ def test_launch_outlives_signal(bwrap, filt, tmp_path, sig):
         f"pathlib.Path({str(ready)!r}).touch()\n"
         "time.sleep(30)\n"
     )
-    p = subprocess.Popen(launcher("launch", bwrap, filt, py(code)), start_new_session=True, env={})
+    p = subprocess.Popen(launcher("launch", py(code)), start_new_session=True, env={})
     wait_for(ready)
     os.killpg(p.pid, sig)
     assert p.wait(timeout=20) == 7
 
 
 COPIES = (
-    "import os, sys\n"
+    "import os, stat, sys\n"
     "print('one', flush=True); print('two', file=sys.stderr, flush=True)\n"
-    "print(os.readlink('/proc/self/fd/1').startswith('pipe:'), flush=True)\n"
-    "try:\n    open('/proc/self/fd/1', 'a').write('X')\nexcept OSError: pass\n"
+    "print(stat.S_ISFIFO(os.fstat(1).st_mode), flush=True)\n"
+    "try:\n    open('/dev/fd/1', 'a').write('X')\nexcept OSError: pass\n"
 )
 LOG_FAILS = (
     "import pathlib; print('x' * 200000, flush=True); pathlib.Path(DONE).touch()\n"
@@ -149,9 +244,9 @@ KILLED = "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
     ],
     ids=["copies", "log-write-fails", "bwrap-killed-by-signal"],
 )
-def test_launch_copies_output(bwrap, filt, tmp_path, code, sink, want_rc, want):
+def test_launch_copies_output(launcher, tmp_path, code, sink, want_rc, want):
     log, done = tmp_path / "log", tmp_path / "done"
-    argv = launcher("launch", bwrap, filt, py(code.replace("DONE", repr(str(done)))))
+    argv = launcher("launch", py(code.replace("DONE", repr(str(done)))))
     if sink == "file":
         with log.open("wb") as f:
             r = subprocess.run(argv, stdout=f, env={}, timeout=30)
@@ -167,13 +262,14 @@ def test_launch_copies_output(bwrap, filt, tmp_path, code, sink, want_rc, want):
     assert (r.returncode, got) == (want_rc, want)
 
 
-def test_oneshot_passes_stdio_through(bwrap, filt):
+def test_oneshot_passes_stdio_through(launcher):
     code = "import os, sys; print(sys.stdin.read().upper(), 'OS_INIT_STARTED_FD' in os.environ)"
-    r = run(launcher("oneshot", bwrap, filt, py(code)), input="hi")
+    r = run(launcher("oneshot", py(code)), input="hi")
     assert r.stdout.strip() == "HI False"
 
 
-def test_launch_keyring(bwrap, filt):
+@linux_only
+def test_launch_keyring(launcher):
     # The driver puts a key in its own session keyring, then becomes the launcher.
     driver = (
         "import ctypes, os, sys\n"
@@ -192,7 +288,7 @@ def test_launch_keyring(bwrap, filt):
     )
     probe_alone = run(py(driver.replace("os.execv(sys.argv[1], sys.argv[1:])", "") + probe))
     assert int(probe_alone.stdout) > 0, probe_alone  # the key is findable without the launcher
-    r = run([*PY, "-c", driver, *launcher("launch", bwrap, filt, py(probe))])
+    r = run([*PY, "-c", driver, *launcher("launch", py(probe))])
     assert int(r.stdout) == -1, r
 
 
@@ -240,9 +336,17 @@ def test_init_forwards_signal(tmp_path, detached, group):
     ("script", "limit"),
     [
         # The subshell exits at once, orphaning the grandchild onto the init (a subreaper).
-        ("(sh -c 'echo $$ > {pid}; exit 0' &); sleep 0.5; test ! -e /proc/$(cat {pid})", 20),
+        pytest.param(
+            "(sh -c 'echo $$ > {pid}; exit 0' &); sleep 0.5; test ! -e /proc/$(cat {pid})",
+            20,
+            marks=linux_only,
+        ),
         # Init ends with CMD; it does not wait out an orphan that is still running.
-        ("(setsid sleep 30 >/dev/null 2>&1 &); exit 0", 10),
+        (
+            f"({shlex.quote(sys.executable)} -c 'import os, time; os.setsid(); time.sleep(30)'"
+            " >/dev/null 2>&1 &); exit 0",
+            10,
+        ),
     ],
     ids=["reaps-zombie", "exits-with-cmd-not-orphans"],
 )
@@ -254,20 +358,35 @@ def test_init_reaps(tmp_path, script, limit):
 
 
 @pytest.mark.parametrize(
-    ("env", "code", "want"),
+    ("env", "code", "want", "darwin"),
     [
-        ({"TMPDIR": "/elsewhere"}, "import os; print(os.environ['TMPDIR'])", "/tmp"),
-        (
+        pytest.param(
+            {"TMPDIR": "/elsewhere"},
+            "import os; print(os.environ['TMPDIR'])",
+            "/tmp",
+            False,
+            marks=linux_only,
+            id="tmpdir-is-tmp",
+        ),
+        pytest.param(
+            {"TMPDIR": "/the/session"},
+            "import os; print(os.environ['TMPDIR'])",
+            "/the/session",
+            True,
+            id="tmpdir-kept-on-macos",
+        ),
+        pytest.param(
             {"HOME": "HOMEDIR/made/here"},
             "import os; print(os.path.isdir(os.environ['HOME']))",
             "True",
+            False,
+            id="home-created",
         ),
     ],
-    ids=["tmpdir-is-tmp", "home-created"],
 )
-def test_init_environment(tmp_path, env, code, want):
+def test_init_environment(tmp_path, env, code, want, darwin):
     env = {k: v.replace("HOMEDIR", str(tmp_path)) for k, v in env.items()}
-    assert run(init_argv(*py(code)), env=env).stdout.strip() == want
+    assert run(init_argv(*py(code), darwin=darwin), env=env).stdout.strip() == want
 
 
 @pytest.mark.parametrize(
@@ -284,20 +403,40 @@ def test_init_exec_failure(cmd, code, last):
     assert (r.returncode, r.stderr.splitlines()[-1]) == (code, last)
 
 
-def test_launch_refuses_unknown_arch(bwrap, filt):
-    # Run the launcher with platform.machine() faked, so no keyring join is possible.
-    driver = (
-        "import platform, runpy, sys\n"
-        "platform.machine = lambda: 'riscv64'\n"
-        f"runpy.run_path({str(OS_INIT)!r}, run_name='__main__')"
+@pytest.mark.parametrize(
+    ("sub", "code"), [("", 0), ("none", 125)], ids=["enters", "refuses-missing"]
+)
+def test_init_chdir(tmp_path, sub, code):
+    here = tmp_path.resolve() / sub
+    r = run(init_argv(*py("import os; print(os.getcwd())"), chdir=here))
+    assert (r.returncode, r.stdout.strip(), "cannot enter" in r.stderr) == (
+        code,
+        "" if code else str(here),
+        bool(code),
     )
-    argv = launcher("launch", bwrap, filt, py("print('ran')"))
-    r = run([*PY, "-c", driver, *argv[4:]])
-    assert (r.returncode, r.stdout, r.stderr.strip()) == (
-        125,
-        "",
-        "kraft: no keyctl number for riscv64; refusing to start the sandbox",
-    )
+
+
+@pytest.mark.parametrize(
+    ("claims", "want"),
+    [
+        pytest.param(
+            [],
+            "kraft: no keyctl number for riscv64; refusing to start the sandbox",
+            marks=linux_only,
+            id="linux-keyctl",
+        ),
+        pytest.param(
+            ["sys.platform = 'darwin'"],
+            "kraft: os sandbox: kind: os supports arm64 and x86_64 Macs, not riscv64",
+            id="macos-sandbox-check",
+        ),
+    ],
+)
+def test_launch_refuses_unknown_arch(launcher, claims, want):
+    # Run the launcher with platform.machine() faked, so nothing can be started on it.
+    argv = launcher("launch", py("print('ran')"), darwin=bool(claims), plain=True)
+    r = run([*PY, "-c", claiming("platform.machine = lambda: 'riscv64'", *claims), *argv[4:]])
+    assert (r.returncode, r.stdout, r.stderr.strip()) == (125, "", want)
 
 
 def _unix_server(path, conns=1):
@@ -323,27 +462,29 @@ def _unix_server(path, conns=1):
 
 
 def _ask(port):
+    """What the relay answers a connection with, retried until it does: right after
+    descriptor exhaustion it may still drop connections it has no descriptor for."""
     end = time.monotonic() + 10
     while True:
         try:
-            c = socket.create_connection(("127.0.0.1", port), timeout=5)
-            break
+            with socket.create_connection(("127.0.0.1", port), timeout=5) as c:
+                c.sendall(b"ping")
+                buf = b""
+                while data := c.recv(100):
+                    buf += data
+            if buf:
+                return buf
         except OSError:
-            assert time.monotonic() < end, "relay never listened"
-            time.sleep(0.05)
-    with c:
-        c.sendall(b"ping")
-        buf = b""
-        while data := c.recv(100):
-            buf += data
-    return buf
+            pass
+        assert time.monotonic() < end, "relay never answered"
+        time.sleep(0.05)
 
 
-def test_relay_reconnects_per_connection(tmp_path):
+def test_relay_reconnects_per_connection(short_run):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    sock = tmp_path / "s.sock"
+    sock = short_run.base / "s.sock"
     _unix_server(sock)
     p = subprocess.Popen(
         init_argv(*py("import time; time.sleep(30)"), sock=sock, port=port),
@@ -360,11 +501,11 @@ def test_relay_reconnects_per_connection(tmp_path):
         p.wait()
 
 
-def test_relay_survives_descriptor_exhaustion(tmp_path):
+def test_relay_survives_descriptor_exhaustion(short_run):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    sock = tmp_path / "s.sock"
+    sock = short_run.base / "s.sock"
     _unix_server(sock, conns=100)
 
     def small_limit():
@@ -386,3 +527,83 @@ def test_relay_survives_descriptor_exhaustion(tmp_path):
     finally:
         os.killpg(p.pid, signal.SIGKILL)
         p.wait()
+
+
+def record(tmp_path):
+    return json.loads((tmp_path / "record.json").read_text())
+
+
+RELAY_CLIENT = (
+    "import os, socket, urllib.parse\n"
+    "u = urllib.parse.urlparse(os.environ['HTTPS_PROXY'])\n"
+    "c = socket.create_connection((u.hostname, u.port), timeout=10)\n"
+    "c.sendall(b'ping')\n"
+    "c.shutdown(socket.SHUT_WR)\n"
+    "buf = b''\n"
+    "while data := c.recv(100):\n"
+    "    buf += data\n"
+    "print(buf.decode())\n"
+)
+
+
+def test_launch_darwin_relay(launcher, tmp_path, short_run):
+    sock = short_run.base / "s.sock"
+    _unix_server(sock)
+    r = run(launcher("launch", py(RELAY_CLIENT), relay=sock, darwin=True))
+    seen = record(tmp_path)
+    port = int(seen["argv"][2].removeprefix("RELAY_PORT="))
+    assert (r.stdout.strip(), seen["argv"][1], port > 0) == ("pong:ping", "-D", True)
+    assert {seen["env"][n] for n in ("HTTPS_PROXY", "http_proxy", "HTTP_PROXY", "https_proxy")} == {
+        f"http://127.0.0.1:{port}"
+    }
+    assert (seen["env"]["NO_PROXY"], seen["env"]["NODE_USE_ENV_PROXY"]) == ("", "1")
+
+
+def test_launch_darwin_env(launcher, tmp_path):
+    env = {"FOO": "1", "SECRET": "x", "HTTPS_PROXY": "http://elsewhere"}
+    argv = launcher(
+        "launch", py("pass"), keep="FOO", setenv=["HOME=/x", "EMPTY=", "A=b=c"], darwin=True
+    )
+    run(argv, env=env)
+    seen = record(tmp_path)
+    got = {n: seen["env"].get(n) for n in ("FOO", "SECRET", "HOME", "EMPTY", "A", "HTTPS_PROXY")}
+    assert got == {
+        "FOO": "1",
+        "SECRET": None,
+        "HOME": "/x",
+        "EMPTY": "",
+        "A": "b=c",
+        "HTTPS_PROXY": None,
+    }
+    assert seen["env"]["TMPDIR"] == str(session_files(tmp_path)[2])
+    assert "OS_INIT_STARTED_FD" in seen["env"]
+    assert "-D" not in seen["argv"]  # no relay without --relay-sock
+
+
+SESSION_STATE = (
+    "import os, sys\n"
+    "marker, control, tmpdir = sys.argv[1:]\n"
+    "mode = lambda p: oct(os.stat(p).st_mode & 0o777)\n"
+    "print(mode(marker), os.path.getsize(marker), mode(control), mode(tmpdir))\n"
+    "print(os.getsid(0) == os.getpid())\n"
+    "raise SystemExit(3)\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("mode", "new_session"), [("launch", False), ("oneshot", True)], ids=["launch", "oneshot"]
+)
+def test_launch_darwin_session(launcher, tmp_path, mode, new_session):
+    marker, control, tmpdir = session_files(tmp_path)
+    sweeps = tmp_path / "sweeps"
+    argv = launcher(
+        mode, py(SESSION_STATE, str(marker), str(control), str(tmpdir)), darwin=True, sweeps=sweeps
+    )
+    r = run(argv)
+    # made before the sandbox, empty and private; swept and cleaned after, whatever the status
+    assert (r.returncode, r.stdout.split()) == (
+        3,
+        ["0o600", "0", "0o600", "0o700", str(new_session)],
+    )
+    assert sweeps.read_text().split() == [str(marker), str(control)]
+    assert not tmpdir.exists()
