@@ -3,10 +3,15 @@ and what it refuses. Text only; the real sandbox-exec is proven by the e2e tier.
 
 from __future__ import annotations
 
+import fcntl
 import os
+import pty
 import re
+import select
 import subprocess
 import sys
+import termios
+import tty
 from pathlib import Path
 
 import pytest
@@ -135,6 +140,8 @@ def test_dev_is_read_by_name_never_whole():
         assert f'(allow file-read* (literal "/dev/{name}"))' in text
     # Rendered resolved: a symlink on Linux, the directory itself on a Mac.
     assert f'(allow file-read* (subpath "{os.path.realpath("/dev/fd")}"))' in text
+    # And the one file outside `/dev` the `git` shim through Xcode.app needs.
+    assert '(allow file-read* (subpath "/Library/Preferences/com.apple.dt.Xcode.plist"))' in text
 
 
 @pytest.mark.e2e("sandbox-exec")
@@ -299,7 +306,7 @@ def test_the_mounts_of_a_direct_store_render(repo, tmp_path):
     assert f'(deny file-write* (subpath "{common}/objects/info"))' in text
 
 
-def _sandboxed(tmp_path: Path, argv: list[str], *, mounts=(), cwd="/", **kw):
+def _sandbox_argv(tmp_path: Path, argv: list[str], *, mounts=(), **kw) -> list[str]:
     prof = tmp_path / "p.sb"
     prof.write_text(
         profile(
@@ -310,8 +317,12 @@ def _sandboxed(tmp_path: Path, argv: list[str], *, mounts=(), cwd="/", **kw):
             **kw,
         )
     )
+    return ["sandbox-exec", "-f", str(prof), *argv]
+
+
+def _sandboxed(tmp_path: Path, argv: list[str], *, mounts=(), cwd="/", **kw):
     return subprocess.run(
-        ["sandbox-exec", "-f", str(prof), *argv],
+        _sandbox_argv(tmp_path, argv, mounts=mounts, **kw),
         capture_output=True,
         text=True,
         cwd=cwd,
@@ -369,6 +380,44 @@ def test_the_operators_other_terminals_cannot_be_opened(tmp_path, target):
         assert outside.returncode == 0, outside.stderr
     run = _sandboxed(tmp_path, [*_PY, _OPEN, path])
     assert (run.returncode == 0) == (target == "null"), run.stderr
+
+
+@pytest.mark.e2e("sandbox-exec")
+@pytest.mark.parametrize("sandboxed", [False, True], ids=["control-outside", "refused-inside"])
+def test_tiocsti_cannot_type_into_a_controlling_terminal(tmp_path, sandboxed):
+    """Outside the sandbox the ioctl puts a character into the terminal's input; inside it
+    is refused. The control run is what shows the terminal is one that takes the injection.
+    The process stays alive after the ioctl: a session leader's exit hangs the terminal up
+    and flushes what was typed."""
+    master, slave = pty.openpty()
+    tty.setraw(slave)
+    code = (
+        "import fcntl, sys, termios, time; fcntl.ioctl(0, termios.TIOCSTI, b'x'); "
+        "print('injected', flush=True); time.sleep(30)"
+    )
+    argv = [*_PY, code]
+    if sandboxed:
+        argv = _sandbox_argv(tmp_path, argv)
+    proc = subprocess.Popen(
+        argv,
+        stdin=slave,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+        preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0),
+    )
+    try:
+        said = proc.stdout.readline()
+        typed = os.read(slave, 1) if select.select([slave], [], [], 1)[0] else b""
+    finally:
+        proc.kill()
+        proc.wait()
+        os.close(master)
+        os.close(slave)
+    assert (said.strip(), typed) == (("", b"") if sandboxed else ("injected", b"x")), (
+        proc.stderr.read()
+    )
 
 
 @pytest.mark.e2e("sandbox-exec")

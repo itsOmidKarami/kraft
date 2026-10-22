@@ -82,10 +82,21 @@ def system_dirs() -> tuple[Path, ...]:
         selected = Path(picked).resolve() if picked else None
     except (OSError, subprocess.SubprocessError):
         selected = None
+    # `xcode-select -p` inside Xcode.app is `Xcode.app/Contents/Developer`, and the `/usr/bin/git`
+    # shim runs `xcodebuild`, which loads frameworks from `Contents/SharedFrameworks`: show the
+    # app's `Contents`, which holds no operator data, not only `Developer`.
+    if (
+        selected
+        and selected.name == "Developer"
+        and selected.parent.name == "Contents"
+        and selected.parent.parent.suffix == ".app"
+    ):
+        selected = selected.parent
     if selected:
         from kraft.paths import kraft_home
 
-        # `xcode-select -p` follows DEVELOPER_DIR, which the operator's shell may point anywhere.
+        # `xcode-select -p` follows DEVELOPER_DIR, which the operator's shell may point anywhere:
+        # checked on what is shown, after the widening.
         home = Path(os.environ.get("HOME") or Path.home())
         if protected_refusal(selected, home, kraft_home()):
             selected = None

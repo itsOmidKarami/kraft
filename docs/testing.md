@@ -34,7 +34,8 @@ something. This is normative for `tests/` and `frontend/src/**/*.test.*`;
   one or two tests per contract, never behaviour sweeps. If the binary is
   missing the test skips and names the binary; CI's e2e job sets
   `KRAFT_E2E_REQUIRE=bd,bwrap,docker,podman`, so for those four that skip
-  becomes a failure. Every `e2e` marker must name at least one
+  becomes a failure, and its macOS job sets `sandbox-exec` the same way.
+  Every `e2e` marker must name at least one
   CLI (`pytest_collection_modifyitems` in `tests/conftest.py` raises
   `UsageError` if it doesn't) — `dev/check_tests.py` catches the same defect
   statically, before collection. A test naming a real agent (`claude`)

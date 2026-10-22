@@ -31,7 +31,16 @@ SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 SWEEP_SECONDS = 30
 
 #: Readable besides `host_view.system_dirs()`; none holds operator data.
-SYSTEM_READS = ("/private/etc", "/private/var/db/timezone", "/private/var/db/dyld", "/dev/fd")
+SYSTEM_READS = (
+    "/private/etc",
+    "/private/var/db/timezone",
+    "/private/var/db/dyld",
+    "/dev/fd",
+    # With Xcode.app selected, `/usr/bin/git` is a shim through `xcodebuild`, which refuses
+    # to run ("You have not agreed to the Xcode license") unless it reads this: the licence
+    # version the machine agreed to, no operator data.
+    "/Library/Preferences/com.apple.dt.Xcode.plist",
+)
 #: By name, never `/dev` whole: it holds the operator's other terminals, and
 #: reading one is their keystrokes.
 DEV_READS = ("/dev/null", "/dev/zero", "/dev/random", "/dev/urandom", "/dev/dtracehelper")
