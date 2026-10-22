@@ -287,10 +287,11 @@ async def _resume_adopted_escalation(
     callers compute themselves, from this session's own `escalation_message`
     event -- `session_id` there is this session's own `worker_sessions.id`
     (`escalate.dispatch` mints one id, `store.new_session_id`, and uses it as both).
-    `events.read_after` is exclusive of its own `after_seq`, so using this
-    event's own `seq` as the cursor correctly excludes it while including
-    everything the turn produced after it -- the same events a live caller's
-    pre-dispatch cursor would also have excluded.
+    `events.read_after` is exclusive of its own `after_seq`, so the cursor is
+    the seq just before this event's: what the turn produced, the event itself
+    included, as a live caller's pre-dispatch cursor reads it. The message is
+    where a turn on a merge node records the tips `walk.hold_after_escalation`
+    compares, so a cursor past it would merge the turn's commit unseen.
 
     Called from `_adopt`'s tail (the live-pid branch of `reattach()`,
     already running inside a backgrounded `asyncio.Task`) and, via
@@ -325,7 +326,7 @@ async def _resume_adopted_escalation(
         db,
         run_dirs,
         work_item_id=work_item_id,
-        cursor=sent["seq"],
+        cursor=sent["seq"] - 1,
         policy=policy,
         launch=launch,
         bd_cwd=bd_cwd,
