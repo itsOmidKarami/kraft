@@ -3,7 +3,9 @@ and what it refuses. Text only; the real sandbox-exec is proven by the e2e tier.
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -134,3 +136,26 @@ def test_odd_path_matches_only_itself(tmp_path):
     assert (odd / "f").read_text() == "x\n"
     assert write(sibling / "f") != 0
     assert not (sibling / "f").exists()
+
+
+@pytest.mark.e2e("sandbox-exec")
+@pytest.mark.parametrize(
+    "code",
+    [
+        "import multiprocessing as m; m.Lock().acquire()",
+        "import multiprocessing.shared_memory as m; m.SharedMemory(create=True, size=8).unlink()",
+    ],
+    ids=["lock", "shared-memory"],
+)
+def test_python_multiprocessing_runs(tmp_path, code):
+    prof = tmp_path / "p.sb"
+    prof.write_text(profile(read_roots=[Path(sys.base_prefix)], tmpdir=tmp_path / "t"))
+    exe = os.path.realpath(sys.executable)
+    run = subprocess.run(
+        ["sandbox-exec", "-f", str(prof), exe, "-I", "-S", "-c", code],
+        capture_output=True,
+        text=True,
+        cwd="/",
+        timeout=60,
+    )
+    assert run.returncode == 0, run.stderr

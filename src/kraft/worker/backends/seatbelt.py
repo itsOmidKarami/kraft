@@ -24,6 +24,12 @@ MACH_SERVICES: tuple[str, ...] = (
     "com.apple.system.opendirectoryd.libinfo",  # getpwuid: python pwd, node os.userInfo
 )
 
+#: Python's `multiprocessing.Lock` (a named POSIX semaphore) and
+#: `shared_memory`; both fail without these, and the names are global to the
+#: operator's processes, so only the prefixes the runtime itself makes.
+IPC_SEM_PREFIX = "/mp-"
+IPC_SHM_PREFIX = "/psm_"
+
 _NEVER = (
     "com.apple.SecurityServer",
     "com.apple.securityd",
@@ -68,6 +74,10 @@ def render_profile(
         "(allow process-info* (target same-sandbox))",
         "(allow sysctl-read)",
         "(allow file-read-metadata)",
+    ]
+    out += [
+        f'(allow ipc-posix-sem (ipc-posix-name-prefix "{IPC_SEM_PREFIX}"))',
+        f'(allow ipc-posix-shm (ipc-posix-name-prefix "{IPC_SHM_PREFIX}"))',
     ]
     if MACH_SERVICES:
         names = " ".join(f'(global-name "{s}")' for s in MACH_SERVICES)
