@@ -89,6 +89,11 @@ def system_dirs() -> tuple[Path, ...]:
         home = Path(os.environ.get("HOME") or Path.home())
         if protected_refusal(selected, home, kraft_home()):
             selected = None
+    # `xcode-select -p` inside Xcode.app is `Xcode.app/Contents/Developer`, and the `/usr/bin/git`
+    # shim runs `xcodebuild`, which loads frameworks from `Contents/SharedFrameworks`: show the
+    # app's `Contents`, which holds no operator data, not only `Developer`.
+    if selected and selected.name == "Developer" and selected.parent.parent.suffix == ".app":
+        selected = selected.parent
     if selected and not any(_within(selected, d) for d in dirs):
         dirs.append(selected)
     return tuple(dirs)

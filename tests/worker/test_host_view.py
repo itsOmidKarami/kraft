@@ -431,6 +431,15 @@ def test_system_dirs_adds_the_selected_developer_dir_only_when_named(
     assert cwd.resolve() not in dirs
 
 
+def test_system_dirs_shows_all_of_a_selected_xcode_app(fake_darwin, monkeypatch, tmp_path):
+    """`git` is a shim into `xcodebuild`, which loads frameworks from beside `Developer`."""
+    app = tmp_path / "Xcode.app" / "Contents"
+    (app / "Developer").mkdir(parents=True)
+    done = subprocess.CompletedProcess([], 0, f"{app / 'Developer'}\n", "")
+    monkeypatch.setattr(host_view.subprocess, "run", lambda *a, **k: done)
+    assert app.resolve() in host_view.system_dirs()
+
+
 @pytest.fixture
 def fresh_interpreter():
     host_view.init_interpreter.cache_clear()
