@@ -2,7 +2,6 @@
 name: release
 description: Cuts a Kraft release - a release candidate, a sweep of the installed rc, a fix loop until the sweep is clean, then the stable release on PyPI, GitHub, Homebrew, Open VSX and the VS Code Marketplace. Use when the maintainer asks to cut a release, start with an rc, or ship X.Y.Z.
 disable-model-invocation: true
-argument-hint: "[rc|stable]"
 ---
 
 # Release Kraft
@@ -19,26 +18,59 @@ Two names, used throughout:
   largest `release::` label among the PRs since `<last-tag>`; read it from the
   dry run. Never pick a number yourself.
 
+Run the scripts from the repo root: `.claude/skills/release/scripts/…`.
+
 **Never hand-edit** `CHANGELOG.md`, `vscode/CHANGELOG.md`, plugin manifest
 versions, or `_Added in next_` notes. The release writes them.
 
 **Stop and ask the maintainer before:**
 
-1. Adding or changing any PR label (for example `notes::highlight`).
+1. Changing a label on any PR but your own fix PRs (for example adding
+   `notes::highlight`).
 2. The stable (non-rc) run. PyPI publishes cannot be undone.
 3. Any fix that changes code, unless they have already said "fix what you find".
+4. Anything after a real run that did not conclude `success`: no rerun, no
+   publishing by hand, no yanking.
 
-An rc run needs no extra confirmation once they have asked for one.
+An rc run needs no extra confirmation once they have asked for one, unless its
+dry run plans a version they would not expect (a major, or a number other than
+the one the last rc led to).
 
 **Tools.** Where `gh` exists, use it. A cloud session has no `gh`: use the GitHub
 MCP tools instead (load them with ToolSearch, and reload them if they vanish
 mid-session). Each step gives both.
 
 ```
-preflight -> local sweep -> rc dry run -> rc -> rc sweep --clean--> ask -> stable dry run -> stable -> stamp PR
-                  ^                                  |finding
-                  +------- fix on main, next rc -----+
+preflight -> rc dry run -> rc -> rc sweep --clean--> ask -> stable dry run -> go? -> stable -> stamp PR
+    ^                               |finding
+    +------ fix on main, next rc ---+
 ```
+
+## Dispatching a run
+
+Every run, dry or real, goes the same way. `gh workflow run` returns before the
+run exists, so the newest run straight after a dispatch is often the previous one.
+
+1. Note the newest `release.yml` run's id: `gh run list --workflow release.yml -L 1 --json databaseId`
+   / `list_workflow_runs`, resource `release.yml`, perPage 1.
+2. Dispatch, always with `sha`, so the release is the commit that passed CI even
+   if someone merges in the meantime:
+   `gh workflow run release.yml --ref main -f dry_run=<true|false> -f pre=<rc|none> -f sha=<sha>`
+   / `actions_run_trigger` with `method: run_workflow`, `workflow_id: release.yml`,
+   `ref: main`, `inputs: {dry_run: "<true|false>", pre: "<rc|none>", sha: "<sha>"}`.
+3. Poll until a run with a larger id appears, then wait in the background until
+   it is `completed`.
+4. Read its job log (`gh run view <id> --log` / `list_workflow_jobs` on the run,
+   then `get_job_logs` with the `job_id`). It prints the notes (Highlights if any,
+   New, Fixes, each line ending in its PR number), then one of:
+   - `dry run: would release vX.Y.Z…`: a dry run's plan.
+   - `releasing vX.Y.Z…`: a real run. A real run whose log lacks this line is the
+     wrong run.
+   - `nothing since <last-tag> ships; not releasing`: every PR is
+     `release::none`. Stop and report.
+   - an error naming a PR: a label problem (no `release::` label or two, a
+     misspelled `notes::` label, `notes::highlight` on a `release::none` PR).
+     Report it; fixing someone's label is the maintainer's call.
 
 ## Phase 1: Preflight
 
@@ -51,78 +83,57 @@ Is there something to release, and is main's tip safe to release from?
    Each squash commit ends in its PR number. Note the likely headline.
 4. Check open PRs for anything that looks meant for this release, and mention it
    (`gh pr list` / `list_pull_requests`, state `open`).
-5. Main's tip must have a `test` run that is `completed` / `success`, or the
-   workflow refuses to run: `gh run list --workflow test --branch main --commit <sha>`
-   / `list_workflow_runs` on branch `main`. If it is still running, do Phase 2
-   while you wait.
+5. Main's tip must have a `test` run on a push that is `completed` / `success`,
+   or the workflow refuses it:
+   `gh run list --workflow test --branch main --event push --commit <sha>`
+   / `list_workflow_runs` on branch `main`, event `push`. Wait for it if it is
+   still running.
 
 Record the tip sha. Every later run is pinned to it.
 
-Label problems (a PR with no `release::` label or two, a misspelled `notes::`
-label, `notes::highlight` on a `release::none` PR) need no check here: the dry run
-fails on each, naming the PR.
+There is no local test sweep. That `test` run covers lint, the docs checks,
+intent pins, the backend suite, the frontend and the demo smoke, and the workflow
+will not release a sha without it. What CI cannot see is the published wheel,
+which Phase 3 installs.
 
-## Phase 2: Local sweep
-
-The checks CI does not repeat at release time, about 10 minutes. CI already ran
-the full backend suite on main; do not rerun it. Write each step's log to a file
-and show only its tail. Any failure goes to the fix loop before an rc is cut.
-
-| Step | Command | Pass means |
-|---|---|---|
-| `just`, if missing | `uv tool install rust-just` | `which just` prints a path |
-| Set up | `just setup` | exit 0 |
-| Lint | `just lint` | "All checks passed" and formatting clean |
-| Frontend | `just test-ui` | exit 0 |
-| Intent pins | `just intent` | 0 unpinned, 0 broken |
-| Dashboard demo | `just demo-smoke` | every Playwright test passes |
-
-`kraft admin templates lint` needs a running server, so it runs in Phase 4.
-
-## Phase 3: Cut the release candidate
+## Phase 2: Cut the release candidate
 
 An rc goes to PyPI and a GitHub pre-release, and nothing else: no Homebrew, no
 stamp PR, no Marketplace, no Open VSX.
 
-1. **Dry run**, pinned to the tip sha:
-   `gh workflow run release.yml --ref main -f dry_run=true -f pre=rc -f sha=<sha>`
-   / `actions_run_trigger` with `method: run_workflow`, `workflow_id: release.yml`,
-   `ref: main`, `inputs: {dry_run: true, pre: "rc", sha: "<sha>"}`.
-   Find the run (`gh run list --workflow release.yml -L 1` / `list_workflow_runs`,
-   resource `release.yml`, perPage 1), wait for it to finish, and read the job log
-   (`gh run view <run-id> --log` / `list_workflow_jobs`, then `get_job_logs` with
-   the `job_id`). The log prints the notes (Highlights if any, New, Fixes, each
-   line ending in its PR number), then `dry run: would release vX.Y.ZrcN`. A
-   label problem fails the run here instead, naming the PR.
-2. **Real run.** The same call with `dry_run=false`. Always pass `sha`: it pins the
-   release to the commit that passed CI and your sweep, even if someone merges
-   in the meantime.
-3. **Wait for PyPI** in the background: `scripts/wait_published.sh X.Y.ZrcN`. Then
-   confirm the run concluded `success` and the GitHub Release exists as a
-   pre-release with the install line at the top of its notes.
+1. **Dry run** with `pre=rc` (see "Dispatching a run"). Show the maintainer the
+   notes and the planned `vX.Y.ZrcN`.
+2. **Real run**, the same inputs with `dry_run=false`.
+3. If it concluded `success`, wait in the background:
+   `.claude/skills/release/scripts/wait_published.sh X.Y.ZrcN`. Then check the
+   GitHub Release (`gh release view vX.Y.ZrcN` / `list_releases`): a pre-release,
+   the install line at the top of its notes, the wheel and `kraft-X.Y.ZrcN.vsix`
+   attached. If it did not conclude `success`, see "A real run that failed".
 
-## Phase 4: Sweep the release candidate
+## Phase 3: Sweep the release candidate
 
 Test what users will install: the wheel from PyPI, in a clean venv on Python
 3.12 (the floor), with its own `KRAFT_HOME` and port.
 
-1. `scripts/smoke.sh X.Y.ZrcN` (a second argument picks the port, default 8799).
-   It prints:
+1. `.claude/skills/release/scripts/smoke.sh X.Y.ZrcN` (a second argument picks
+   the port, default 8799). It prints:
    - the version, which must be the rc
    - `kraft admin health`: `status ok` and the rc version
    - `kraft admin doctor`: every check `ok`, except the expected failures below
    - `kraft admin templates lint`: no errors
    - the web UI's `<title>Kraft`
-2. **Exercise the headline feature by hand** on the installed rc, in the work dir
-   the script printed, with that `KRAFT_HOME`. Write the inputs that should pass
-   and one that should fail, and check that the CLI tells them apart. For v2.2.0
-   (chains extending chains) that was: a `config/chains/lean.yaml` with
-   `extends: default` and a `remove:` list; a `broken.yaml` removing a node that
-   does not exist, which `kraft admin templates lint` must name; delete it,
-   `kraft admin reload`, lint clean; and `kraft admin templates show lean --resolved`
-   leaving out the removed nodes.
+2. **Exercise the headline feature by hand** on the installed rc. Start it again
+   with the work dir the script printed, and set `KRAFT_HOME` to its `home/`. Feed it
+   inputs that should pass and one that should fail, and check that the CLI tells
+   them apart. For v2.2.0 (chains extending chains) that was: a
+   `config/chains/lean.yaml` with `extends: default` and a `remove:` list; a
+   `broken.yaml` removing a node that does not exist, which
+   `kraft admin templates lint` must name; delete it, `kraft admin reload`, lint
+   clean; and `kraft admin templates show lean --resolved` leaving out the removed
+   nodes.
 3. Pick one or two more features from the notes that a smoke run can reach, and
    exercise them the same way.
+4. Delete the work dir when you are done with it.
 
 **Expected doctor failures** (not regressions): `kraft on PATH` always fails,
 since the smoke venv is never on `PATH`; `mcp server` fails where Kraft's MCP is
@@ -130,75 +141,87 @@ not registered, as in a cloud session. Anything else failing is a finding.
 
 ## Fix loop
 
-A finding from Phase 2 or Phase 4 is fixed on main and shipped as the next rc;
-an rc is never patched in place. v2.1.0 went through rc1 to rc7 this way.
+A finding from Phase 3 is fixed on main and shipped as the next rc; an rc is
+never patched in place. v2.1.0 went through rc1 to rc7 this way.
 
 1. **Report the finding**: what failed, the command, the output, and whether it
    blocks the release.
 2. **Fix it** on a branch, following `CONTRIBUTING.md`: one PR per fix, with a
-   `## Changelog` section and a `release::` label. A fix to a feature no stable
-   release has shipped yet can be `release::none`, since the feature's own entry
-   covers it (#978). A fix to something users already have is `release::patch`.
+   `## Changelog` section and a `release::` label you choose and tell the
+   maintainer about. A fix to a feature no stable release has shipped yet is
+   `release::none`, since the feature's own entry covers it. A fix to something
+   users already have is `release::patch`.
 3. **Prove it** before pushing: `just lint`, `just test` on the touched code,
-   `just test-ui` for the frontend, and the failing sweep step again.
+   `just test-ui` for the frontend, and the step that failed again.
 4. **Open the PR, watch it to green**, and ask the maintainer to merge it (or
    merge it if they have said to).
-5. **Back to Phase 1** on the new tip: wait for its `test` run, redo the local
-   sweep, cut the next rc. The workflow numbers it `rcN+1` itself.
+5. **Back to Phase 1** on the new tip, then the next rc. The workflow numbers it
+   `rcN+1` itself.
 
-Repeat until a full Phase 4 sweep comes back clean. Only then go on to Phase 5.
+Repeat until a full Phase 3 sweep comes back clean. Only then go on to Phase 4.
 
-## Phase 5: Stable release
+## Phase 4: Stable release
 
-The stable run publishes everywhere and cannot be undone, so it starts with
-questions. **Ask in one prompt** (`AskUserQuestion`, with a recommended option):
+The stable run publishes everywhere and cannot be undone.
 
-- **Highlight:** if the rc notes had no Highlights section, propose the headline
-  PR. Check first that its `## Changelog` line reads as a headline.
-- **Credentials:** you cannot check them. Ask the maintainer to confirm the two
-  under "Before a stable run" in `RELEASING.md`. If `VSCE_PAT` is empty, the
-  Marketplace steps are skipped and the run still goes green.
-- **Go / hold.**
-
-Then:
-
-1. If they picked a highlight, add the label: `gh pr edit <n> --add-label notes::highlight`
+1. **Ask in one prompt** (`AskUserQuestion`, with a recommended option):
+   - **Highlight:** if the rc notes had no Highlights section, propose the
+     headline PR. Check first that its `## Changelog` line reads as a headline.
+   - **Credentials:** you cannot check them. Ask the maintainer to confirm the two
+     under "Before a stable run" in `RELEASING.md`. If `VSCE_PAT` is empty, the
+     Marketplace steps are skipped and the run still goes green.
+2. If they picked a highlight, add the label: `gh pr edit <n> --add-label notes::highlight`
    / `issue_write` with `method: update`. `issue_write` replaces the whole label
    set, so send the existing `release::` label too:
    `labels: ["release::minor", "notes::highlight"]`.
-2. Confirm main has not moved past the pinned sha in a way that matters:
-   `git log <sha>..origin/main` is empty, or every new commit is `release::none`.
-3. **Dry run** with `pre=none` and the same `sha`. The log must show the notes,
-   Highlights included if you added one, and `dry run: would release vX.Y.Z`.
-4. **Real run**, the same inputs with `dry_run=false`.
-5. Wait in the background: `scripts/wait_published.sh X.Y.Z pypi brew openvsx`.
-   Then confirm the run concluded `success` and check the rest:
+3. `git fetch origin main`. If `git log <sha>..origin/main` shows any commit that
+   is not `release::none`, it is not in the rc you swept: go back to Phase 1 for
+   a new rc, or ask the maintainer whether to release the pinned sha anyway.
+4. **Dry run** with `pre=none` and the same `sha`. The version must be the last
+   rc's without its suffix (`v2.3.0` after `v2.3.0rc2`). If it is not, a label
+   changed since the rc: stop and report.
+5. **Ask Go / hold**, showing the notes and the version.
+6. On Go, the **real run**, the same inputs with `dry_run=false`.
+7. If it concluded `success`, wait in the background:
+   `.claude/skills/release/scripts/wait_published.sh X.Y.Z pypi brew openvsx`.
+   Then check the rest:
 
    | Target | Check |
    |---|---|
    | GitHub Release | `vX.Y.Z`, not a pre-release, wheel and `.vsix` attached |
-   | VS Code Marketplace | the run's "publish the VS Code extension" step succeeded; its listing check only warns |
-   | Docs | the `docs` run the release dispatched passed |
+   | VS Code Marketplace | the run's "publish the VS Code extension" step succeeded. Skipped means `VSCE_PAT` is empty and the extension is not published: report it. |
+   | Docs | the `docs` run the release dispatched passed; a warning that it was not dispatched means run `docs` by hand |
 
-6. `scripts/smoke.sh X.Y.Z`, as in Phase 4.
+8. `.claude/skills/release/scripts/smoke.sh X.Y.Z`, as in Phase 3.
 
-## Phase 6: After the release
+## A real run that failed
+
+Stop and report: the run, the step that failed, and its log. Do not rerun,
+publish by hand, or yank anything without the maintainer. What happens next
+depends on where it failed. A build before the tag push leaves nothing behind,
+and a rerun is safe. After the tag, a rerun plans nothing, and the targets that
+did not publish are finished by hand. `RELEASING.md`, "What a stable run
+publishes", lists the steps in order and the commands for each.
+
+## Phase 5: After the release
 
 The release is done when the stamp PR has merged.
 
 1. **Stamp PR.** The release bot opens
    `chore: stamp plugin manifests and changelog for vX.Y.Z` (`release::none`) and
    auto-merges it once CI passes; for v2.2.0 that took about 9 minutes. Find it
-   (`gh pr list --search "stamp plugin manifests vX.Y.Z"` / `search_pull_requests`).
-   If it is still open, watch it to green. If it is red, the usual cause is an
-   `_Added in next_` note on a patch release (`RELEASING.md`, "Docs Added in notes").
+   with `gh pr list --state all --search "stamp plugin manifests vX.Y.Z"`
+   / `search_pull_requests`. If it is still open, watch it to green. If a check
+   fails, read that check's log and report it. A patch release that ships an
+   `_Added in next_` note does not fail it: the stamp step warns and adds a line
+   to the PR (`RELEASING.md`, "Docs Added in notes").
 2. **Report**, outcome first: the version, where it is published, what the sweeps
    checked, anything that warned, and the release link.
 3. **Offer an announcement.** Build it from `CHANGELOG.md` on main, grouped by
    theme rather than by version, with the install lines
    (`uv tool install kraft-sdlc`, `brew tap itsOmidKarami/kraft && brew install kraft`,
-   `kraft admin update`) and the live demo link. Keep every feature claim to what
-   the changelog says.
+   `kraft admin update`) and the live demo, https://kraft-sdlc.dev/demo/. Keep
+   every feature claim to what the changelog says.
 
 ## Gotchas
 
@@ -211,4 +234,3 @@ The release is done when the stamp PR has merged.
 | A large tool result lands in a file | Parse it with Python instead of reading it whole. |
 | Foreground `sleep` is blocked | Wait with a `run_in_background` command or a Monitor. Never chain short sleeps. |
 | `git pull origin main` on a cloud session's branch | It fast-forwards the branch, and the stop hook reports an unpushed commit. Use `git fetch` only; if it happens, push the branch, which carries only main's commits. |
-| A merge lands between the rc and stable | Pin `sha` on every run, and check `git log <sha>..origin/main` before the stable one. |

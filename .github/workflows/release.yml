@@ -157,8 +157,13 @@ jobs:
             echo
             cat "$RUNNER_TEMP/body.md"
           } >> "$GITHUB_STEP_SUMMARY"
-          # The log too: the API serves job logs but not the summary page.
+          # The log too: the API serves job logs but not the summary page. The
+          # notes are PR text, so a line opening with `::` must not run as a
+          # workflow command.
+          STOP=$(openssl rand -hex 16)
+          echo "::stop-commands::$STOP"
           cat "$RUNNER_TEMP/body.md"
+          echo "::$STOP::"
           if [ -z "$TAG" ]; then
             echo "nothing since ${PREVIOUS:-the start} ships; not releasing"
           elif [ "$DRY_RUN" = "true" ]; then

@@ -14,9 +14,11 @@ served() {
             grep '^  url' | grep -qF "/v$V/" ;;
     openvsx) [ "$(curl -sf https://open-vsx.org/api/kraft-sdlc/kraft |
                  python3 -c 'import sys,json; print(json.load(sys.stdin).get("version"))' 2>/dev/null)" = "$V" ] ;;
-    *) echo "unknown target: $1"; exit 2 ;;
   esac
 }
+for t in "$@"; do
+  case "$t" in pypi|brew|openvsx) ;; *) echo "unknown target: $t"; exit 2 ;; esac
+done
 for t in "$@"; do
   for _ in $(seq 1 "${TRIES:-120}"); do
     served "$t" && { echo "$t ok"; continue 2; }
