@@ -82,6 +82,10 @@ def failure_cause(text: str) -> Literal["forge_auth", "forge_unreachable"] | Non
 
 ApprovalState = Literal["pending", "approved"]
 
+QueueKind = Literal["none", "train", "queue"]
+QueueState = Literal["absent", "queued", "merging", "merged", "dropped"]
+DropCause = Literal["code", "conflict", "not_added", "other"]  # "infra" is decided in run.py
+
 
 @dataclass(frozen=True)
 class ReviewResult:
@@ -191,6 +195,23 @@ class CIStatus:
     no_checks: bool = False
 
 
+@dataclass(frozen=True)
+class QueueRead:
+    """Where a merge request stands in the repo's merge train or merge queue,
+    in the forge-neutral vocabulary. The default is a repository with neither."""
+
+    kind: QueueKind = "none"
+    state: QueueState = "absent"
+    #: Set only when `state == "dropped"`.
+    cause: DropCause | None = None
+    #: The forge's own words, verbatim.
+    reason: str = ""
+    #: The failed train/queue pipeline or checks.
+    failure: CIStatus | None = None
+    #: That pipeline/run, else the merge request.
+    url: str = ""
+
+
 class Forge(Protocol):
     async def open_mr(
         self,
@@ -226,6 +247,7 @@ class Forge(Protocol):
         self, *, repo: Path, branch: str, mr: MR, labels: tuple[str, ...]
     ) -> None: ...
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None: ...
+    async def merge_queue(self, *, repo: Path, branch: str, base: str) -> QueueRead: ...
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None: ...
     async def rerun_after_description_change(
         self, *, repo: Path, branch: str, ci: CIStatus
@@ -363,6 +385,17 @@ class FakeForge:
     #: Numbers `reopen_mr` has put back, in call order -- a test's receipt
     #: that the call landed, the same role `retried`/`merged` play.
     reopened: list[int] = field(default_factory=list)
+    #: Every merge request number `merge` was called with, queued, dropped or
+    #: landed alike -- a test's receipt of how often the forge was asked.
+    merge_calls: list[int] = field(default_factory=list)
+    #: The repo's merge train or queue, as `merge_queue` reports its kind.
+    queue_kind: QueueKind = "none"
+    #: What each `merge` call on a fake with a train or queue does, consumed one
+    #: per call: the merge request is dropped, and stays so until the next
+    #: `merge`. With none left, `merge_delay` behaves as before.
+    queue_drops: list[QueueRead] = field(default_factory=list)
+    #: Drops consumed and not yet superseded by another `merge`, by number.
+    _dropped: dict[int, QueueRead] = field(default_factory=dict)
 
     @staticmethod
     def _next(script: list):
@@ -506,6 +539,11 @@ class FakeForge:
             number = max(candidates, default=0)
         if number not in self.opened:
             raise ForgeError(f"no such merge request: {mr.number}")
+        self.merge_calls.append(number)
+        self._dropped.pop(number, None)
+        if self.queue_kind != "none" and self.queue_drops:
+            self._dropped[number] = self.queue_drops.pop(0)
+            return
         if self.merge_delay:
             self._landing[number] = self.merge_delay
             self._queued_head[number] = _head(repo)
@@ -554,3 +592,16 @@ class FakeForge:
             merge_queued=number in self._landing,
             merged_sha=self._merged_head.get(number) or "",
         )
+
+    async def merge_queue(self, *, repo: Path, branch: str, base: str) -> QueueRead:
+        if self.queue_kind == "none":
+            return QueueRead()
+        numbers = [n for n, b in self.opened.items() if b == branch and self._matches(n, repo)]
+        number = max(numbers, default=0)
+        if number in self._dropped:
+            return self._dropped[number]
+        if number in self.merged:
+            return QueueRead(kind=self.queue_kind, state="merged")
+        if number in self._landing:
+            return QueueRead(kind=self.queue_kind, state="queued")
+        return QueueRead(kind=self.queue_kind)

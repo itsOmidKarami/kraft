@@ -1009,7 +1009,9 @@ async def _run_task(
             # session folder holds what the host writes and trusts. `db.write`
             # so this session's own row is seen.
             results = await db.write(lambda c: store.result_files(c, run_dirs, work_item_id))
-            cmd = backend.wrap(
+            # Off the loop: `kind: os` walks the mounted trees for credential files.
+            cmd = await asyncio.to_thread(
+                backend.wrap,
                 cmd,
                 root,
                 sandbox,
@@ -1118,6 +1120,14 @@ async def _run_task(
                 return "config_error"
         finally:
             log.close()  # the child holds its own dup'd fd
+    except _sandbox.SandboxRefused as exc:
+        # A refusal from `wrap` is a stop for a person, like `SandboxNotReady`
+        # above; the `finally` closes a route it opened.
+        log_path.write_text(f"kraft: {exc}\n")
+        await db.write(
+            lambda c: store.session_exited(c, session_id, "config_error", work_item_id=work_item_id)
+        )
+        return "config_error"
     finally:
         if network and not launched:
             await close_egress(backend, session_id, work_item_id=work_item_id)

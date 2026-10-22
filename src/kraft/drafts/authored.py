@@ -29,7 +29,7 @@ LIBRARY_KEYS = ("steering", "tasks", "steps", "nodes")
 NODE_KEYS = (
     "id", "kind", "extends", "icon", "message", "artifact", "artifact_required", "reject_to",
     "timeout", "chain_finalized", "tasks", "steps", "on_failure", "fix_loop", "escalation",
-    "on_base_changed", "auto_review", "policy", "skippable", "read_only",
+    "on_base_changed", "on_merge_rejected", "auto_review", "policy", "skippable", "read_only",
 )  # fmt: skip
 TASK_KEYS = (
     "id", "kind", "extends", "icon", "harness", "ref", "command", "target", "prompt", "skill",
@@ -42,6 +42,7 @@ SHAPE_KEYS = ("tasks", "steps", JUDGE_SEGMENT, "max_attempts")
 NESTED_KEYS = {
     "policy": tuple(TemplatePolicyOverride.model_fields),
     "on_base_changed": ("restart_from", "on_conflict"),
+    "on_merge_rejected": ("restart_from", "repair"),
     "wait": ("polling",),
     "polling": ("initial_interval", "max_interval"),
 }
@@ -107,7 +108,8 @@ def at(
 ) -> dict | None:
     """The authored mapping at canonical `path` (`ResolvedChain.task_paths`:
     `node.step.task`, `node.fix_loop.judge`, `node.escalation.<id>`,
-    `gate.auto_review`, `node.on_base_changed.on_conflict.step`, …; `""` is the
+    `gate.auto_review`, `node.on_base_changed.on_conflict.step`,
+    `node.on_merge_rejected.repair.step`, …; `""` is the
     file). A library path starts `nodes.<name>`, `steps.<name>`, `tasks.<name>`
     or `steering.<name>`. None when the file has nothing there.
 
@@ -244,6 +246,9 @@ def _walk(data: dict, fn: Callable[[dict], None]) -> None:
         base_change = n.get("on_base_changed")
         if isinstance(base_change, dict) and isinstance(base_change.get("on_conflict"), dict):
             shape(base_change["on_conflict"])
+        rejected = n.get("on_merge_rejected")
+        if isinstance(rejected, dict) and isinstance(rejected.get("repair"), dict):
+            shape(rejected["repair"])
 
     for n in [*_dicts(data.get("nodes")), *added_nodes(data)]:
         node(n)
@@ -358,6 +363,11 @@ class _Walk:
             if not (rest and rest[0] == "on_conflict" and isinstance(base_change, dict)):
                 return None
             return self.shape(base_change.get("on_conflict"), rest[1:])
+        if head == "on_merge_rejected":
+            rejected = self.child(n, head, Namespace.NODES)
+            if not (rest and rest[0] == "repair" and isinstance(rejected, dict)):
+                return None
+            return self.shape(rejected.get("repair"), rest[1:])
         return self.shape(n, segs, Namespace.NODES)
 
     def shape(self, c: object, segs: list[str], namespace: Namespace | None = None) -> _Found:

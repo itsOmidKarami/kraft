@@ -42,8 +42,9 @@ def test_a_kit_is_pinned_by_digest(ref, loads):
         {"resources": {"cpu": 2.0}},
         {"credentials": [{"env": "K"}]},
         {"unrestricted_network": True},
+        {"expose": ["/opt/tool"]},
     ],
-    ids=["image", "network", "resources", "credentials", "unrestricted-network"],
+    ids=["image", "network", "resources", "credentials", "unrestricted-network", "expose"],
 )
 def test_a_kit_sandbox_takes_no_local_fields(field):
     """Open question 4: the enforced surface is exactly the Kit's."""
@@ -51,12 +52,14 @@ def test_a_kit_sandbox_takes_no_local_fields(field):
         policy.SandboxPolicy.model_validate({**KIT, **field})
 
 
-@pytest.mark.parametrize("field", ["runtime", "kit"])
+@pytest.mark.parametrize(
+    "field",
+    [{"runtime": "docker"}, {"kit": KIT["kit"]}, {"expose": ["/opt/tool"]}],
+    ids=["runtime", "kit", "expose"],
+)
 def test_a_docker_sandbox_takes_no_kit_fields(field):
-    with pytest.raises(ValidationError, match=f"kind: docker takes no '{field}'"):
-        policy.SandboxPolicy.model_validate(
-            {"kind": "docker", "image": "kraft/worker:1", field: KIT[field]}
-        )
+    with pytest.raises(ValidationError, match=f"kind: docker takes no '{next(iter(field))}'"):
+        policy.SandboxPolicy.model_validate({"kind": "docker", "image": "kraft/worker:1", **field})
 
 
 def test_a_kit_sandbox_names_its_runtime():

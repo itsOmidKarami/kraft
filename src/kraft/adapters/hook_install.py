@@ -360,6 +360,9 @@ async def _codex_hook(
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         cwd=cwd,
+        # Off the terminal a foreground `kraft` holds: nothing a sandbox runs
+        # may type into it (TIOCSTI).
+        start_new_session=True,
     )
     msgs = [
         {

@@ -82,7 +82,7 @@ origin: src/kraft/worker/backends/docker.py §docker_argv -- the session folder 
 WHILE a sandboxed session runs, the system SHALL NOT mount read-write any path
 under `run/items/<id>/` other than its own `result.json`, its own
 `summary.md`, its item's `docs/` and its item's sandbox home.
-enforced-by: tests/worker/backends/test_docker_session_files.py::test_a_session_writes_only_its_own_two_files_and_its_item_s_docs, tests/adapters/test_subprocess_sandbox_results.py::test_a_session_records_its_folder_and_mounts_only_its_out_files
+enforced-by: tests/worker/backends/test_docker_session_files.py::test_a_session_writes_only_its_own_two_files_and_its_item_s_docs, tests/adapters/test_subprocess_sandbox_results.py::test_a_session_records_its_folder_and_mounts_only_its_out_files, tests/worker/backends/test_bwrap.py::test_session_only_from_kraft_home
 origin: src/kraft/adapters/subprocess.py §run_task -- each file a single-file bind mount, which cannot be removed or swapped for a symlink from inside the container.
 
 ## REQ a-harness-is-granted-only-out-and-docs

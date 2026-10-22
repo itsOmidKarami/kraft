@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import math
+import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -1155,7 +1156,12 @@ def _allows(phase: NetworkPhase, domain: str) -> bool:
 #: A Kit reference pinned by digest: `<name>[:<tag>]@sha256:<64 hex>`.
 KIT_REF = r"^[^@\s]+@sha256:[0-9a-f]{64}$"
 #: What `kind: kit` refuses beside the Kit.
-_KIT_REFUSES = ("image", "network", "resources", "credentials", "unrestricted_network")
+_KIT_REFUSES = ("image", "network", "resources", "credentials", "unrestricted_network", "expose")
+
+
+#: What `kind: os` refuses: it has no image, Kit, resource limits or managed
+#: credentials, and the channel is not optional.
+_OS_REFUSES = ("image", "runtime", "kit", "resources", "unrestricted_network", "credentials")
 
 
 class SandboxPolicy(BaseModel):
@@ -1163,7 +1169,10 @@ class SandboxPolicy(BaseModel):
     `resources` and reaching only what `network` allows
     (`kraft.worker.backends`), with `credentials` managed by the egress
     proxy; or `kind: kit`, a Kit pinned by digest that sets all of those
-    itself and is lowered to `kind: docker` at launch (`worker.kit.lower`).
+    itself and is lowered to `kind: docker` at launch (`worker.kit.lower`);
+    or `kind: os`, the host's own agent CLI under the operating system's
+    process sandbox (`worker.backends.bwrap`), reaching Kraft only through its
+    session's channel and seeing the host only through `expose`.
     A permission-shaped safety field (Ruling 105): once a layer sets one, no
     narrower layer may change or remove it -- the whole value, `resources`,
     `network`, `credentials` and a Kit's reference included."""
@@ -1172,7 +1181,7 @@ class SandboxPolicy(BaseModel):
 
     #: `docker` runs `image` under this policy's own fields; `kit` runs a
     #: Docker Sandbox Kit, lowered to `docker` at launch (`worker.kit`).
-    kind: Literal["docker", "kit"]
+    kind: Literal["docker", "kit", "os"]
     #: `kind: docker` only.
     image: StrictStr | None = Field(default=None, min_length=1)
     #: `kind: kit` only: the runtime that runs the Kit.
@@ -1193,6 +1202,29 @@ class SandboxPolicy(BaseModel):
     #: injecting the real value (spec §6). Needs `network`: without it
     #: there is no proxy to inject them.
     credentials: tuple[SandboxCredential, ...] | None = Field(default=None, strict=False)
+    #: `kind: os` only: host paths made visible read-only, for a toolchain
+    #: outside `/usr`. Each is absolute or starts `~/`.
+    expose: tuple[StrictStr, ...] | None = Field(default=None, strict=False)
+
+    @field_validator("expose")
+    @classmethod
+    def _expose_paths(cls, value: tuple | None) -> tuple | None:
+        """`expose: []` exposes nothing: the same sandbox as no key."""
+        for path in value or ():
+            if not (path.startswith("/") or path.startswith("~/")):
+                raise ValueError(f"{path!r} is not an absolute or ~/ path")
+        if value:
+            # Inside the validator: `host_view` is reached from `backends`,
+            # which imports this module.
+            from kraft.paths import kraft_home
+            from kraft.worker import host_view
+
+            home = Path(os.environ.get("HOME") or Path.home())
+            for path in value:
+                p = home / path[2:] if path.startswith("~/") else Path(path)
+                if why := host_view.protected_refusal(p, home, kraft_home()):
+                    raise ValueError(f"expose {path!r} is protected: {why}")
+        return value or None
 
     @field_validator("resources")
     @classmethod
@@ -1220,6 +1252,14 @@ class SandboxPolicy(BaseModel):
             raise ValueError(
                 "'unrestricted_network' and 'network' contradict: the first accepts a "
                 "container with no egress policy, the second is one"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _os_needs_network(self) -> SandboxPolicy:
+        if self.kind == "os" and self.network is None:
+            raise ValueError(
+                "kind: os needs 'network': without it nothing keeps the worker from Kraft's API"
             )
         return self
 
@@ -1271,6 +1311,8 @@ class SandboxPolicy(BaseModel):
             dumped.pop("unrestricted_network", None)
         if "credentials" in dumped:
             dumped["credentials"] = list(dumped["credentials"])
+        if "expose" in dumped:
+            dumped["expose"] = list(dumped["expose"])
         return dumped
 
     @model_validator(mode="before")
@@ -1300,7 +1342,12 @@ class SandboxPolicy(BaseModel):
                     f"not {data.get('kit')!r}"
                 )
             return data
-        if local := [k for k in ("runtime", "kit") if data.get(k) is not None]:
+        if data["kind"] == "os":
+            refused = [k for k in _OS_REFUSES if data.get(k) not in (None, False)]
+            if refused:
+                raise ValueError(f"kind: os takes no {', '.join(map(repr, refused))}")
+            return data
+        if local := [k for k in ("runtime", "kit", "expose") if data.get(k) is not None]:
             raise ValueError(f"kind: docker takes no {', '.join(map(repr, local))}")
         if not isinstance(data.get("image"), str) or not data["image"]:
             raise ValueError("needs a non-empty string 'image'")

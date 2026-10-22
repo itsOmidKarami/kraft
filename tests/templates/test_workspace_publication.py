@@ -283,6 +283,30 @@ async def test_a_members_conflict_is_rebased_onto_its_own_origin(
     assert _base_ref(database, row) == base_ref
 
 
+async def test_a_member_dropped_from_its_merge_train_stays_open(
+    database, run_dirs, tmp_path, monkeypatch
+):
+    """The forge took a member's merge request off its merge train after
+    Kraft asked: `merge_rejected`, and the member's row stays `open` for the
+    node's merge-rejection recovery rather than recorded `failed`."""
+    row, worktree, _ = await _publishable(database, run_dirs, tmp_path, pointer="ignore")
+    drop = forge.QueueRead(kind="train", state="dropped", cause="conflict", reason="conflict")
+    fake = forge.FakeForge(queue_kind="train", queue_drops=[drop], ci_states=["success"])
+    await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
+    only_the_root_has_an_identity(monkeypatch, tmp_path, row)
+
+    results = [
+        await _run(
+            *(database, run_dirs, row, worktree, fake, monkeypatch, "merge"),
+            orig_repo=Path(row["repo"]),
+        )
+        for _ in range(2)
+    ]
+
+    assert results == ["waiting", "merge_rejected"]
+    assert _repos(database, row)["submodule"] == "open"
+
+
 @pytest.mark.parametrize(
     ("legacy", "pointer"),
     [(False, "ignore"), (True, "skip")],

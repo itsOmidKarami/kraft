@@ -319,6 +319,49 @@ async def test_a_checkout_stop_from_a_session_outside_the_walk_keeps_no_node_tas
 
 
 @pytest.mark.parametrize(
+    "moved",
+    [
+        None,
+        "gate_rejected",
+        "run_forked",
+        "base_change_restart",
+        "merge_rejection_restart",
+        "fix_cycle_started",
+    ],
+)
+async def test_a_checkout_stop_keeps_its_task_only_until_the_walk_moves_on(database, moved):
+    """A resume keeps the stopped task's own `done` once, until anything sends
+    the walk elsewhere: a rejection, a fork, a span restart, a fix cycle."""
+    from support.store_fixtures import mk_item
+
+    await mk_item(database)
+    task = "implementation.main.implement"
+    await database.write(
+        lambda c: store.create_session(
+            c,
+            id="s1",
+            work_item_id="w1",
+            node_id="implementation",
+            hook_point=task,
+            log_path="/l/s1",
+            result_path="/r/s1",
+        )
+    )
+    await database.write(lambda c: store.session_exited(c, "s1", "done", work_item_id="w1"))
+    facts = {"task": task, "rerun": False, "round": 0, "session": "s1"}
+    stop = {"node_id": "implementation", "reason": "x", "kind": "checkout", "facts": facts}
+    await database.write(lambda c: events.append(c, "w1", "work_item_needs_human", stop))
+    if moved is not None:
+        await database.write(lambda c: events.append(c, "w1", moved, {}))
+
+    kept = database.read(
+        lambda c: dispatch.kept_past_checkout_stop(c, "w1", "implementation", task, 0)
+    )
+
+    assert kept == (None if moved else "done")
+
+
+@pytest.mark.parametrize(
     "target, check_clean", [(_IN_PLACE, False), (None, True)], ids=["in-place", "worktree"]
 )
 async def test_open_mr_refuses_a_dirty_folder_only_for_a_worktree_item(

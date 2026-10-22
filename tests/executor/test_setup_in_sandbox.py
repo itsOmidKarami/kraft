@@ -16,7 +16,7 @@ from support.harness import entry_of, fake_docker_bin, v1_chain, v1_walk
 from support.workspace import member_checkout, repositories, workspace_item
 
 # The backend that shares no filesystem, and a channel registry for its egress.
-from worker.test_backends import Remote, channels  # noqa: F401
+from worker.test_backends import Remote
 
 from kraft import builtins as kraft_builtins
 from kraft import config as _config
@@ -610,7 +610,7 @@ async def test_a_managed_credential_reaches_a_sandboxed_command_as_its_sentinel(
     item_on,
     tmp_path,
     monkeypatch,
-    channels,  # noqa: F811
+    channels,
     task,
 ):
     """Spec §6 for code the worker wrote: a subprocess task and a test scope

@@ -354,6 +354,45 @@ async def test_renaming_a_node_rewrites_and_lists_every_reference_to_it(st):
     assert r.problems == []
 
 
+#: The shipped `merge` node given a merge-rejection repair that restarts at
+#: `merge_request_feedback`.
+REJECTED = """\
+id: merge
+kind: exec
+tasks:
+  - {id: merge, extends: merge_mr}
+on_merge_rejected:
+  restart_from: merge_request_feedback
+  repair: {tasks: [{id: repair, extends: implementer, model: opus}]}
+"""
+
+
+async def test_a_merge_rejection_is_addressed_and_its_restart_is_a_reference(st):
+    """Its repair's tasks are edited at their own paths, its node lists the
+    policy without the repair, and its `restart_from` is renamed and ordered
+    like the other pointers."""
+    fragment = ("set_fragment", {"path": "merge", "yaml": REJECTED})
+    repair = "merge.on_merge_rejected.repair.main.repair"
+    r = apply(
+        st,
+        fragment,
+        *fields(repair, ("effort", "high")),
+        ("rename", {"path": "merge_request_feedback", "id": "feedback"}),
+    )
+    assert r.problems == []
+    assert authored.at(r.model, repair)["effort"] == "high"
+    assert {"path": "merge", "field": "on_merge_rejected.restart_from"} in r.answers[-1]["updated"]
+    assert r.nodes["merge"]["on_merge_rejected"]["restart_from"] == "feedback"
+    sources = r.result["sources"]
+    assert sources["merge"]["on_merge_rejected"]["value"] == {"restart_from": "feedback"}
+    assert sources[repair]["model"] == {"value": "opus", "source": "chain"}
+    assert sources[repair]["prompt"]["source"] == "library:tasks.implementer"
+    assert refused(st, fragment, ("move", {"path": "merge", "to": 0})) == (
+        "can't move merge: merge restarts from merge_request_feedback after a rejected merge, "
+        "which would not come before it"
+    )
+
+
 async def test_renaming_a_task_or_a_slot_changes_its_id_only(st):
     r = apply(
         st,
@@ -479,6 +518,26 @@ async def test_renaming_a_library_task_rewrites_every_use_and_pulls_its_chains_i
     assert authored.at(quick, "implementation.main.implement")["extends"] == "builder"
     assert list(r.model["library.yaml"]["tasks"]).index("builder") == 3
     assert r.problems == []
+
+
+MERGING = """id: merging
+nodes:
+  - {id: build, kind: exec, tasks: [{id: t, kind: subprocess, command: "true"}]}
+  - id: merge
+    kind: exec
+    tasks: [{id: merge, extends: merge_mr}]
+    on_merge_rejected: {restart_from: build, repair: {tasks: [{id: fix, extends: implementer}]}}
+"""
+
+
+async def test_renaming_a_library_task_rewrites_its_use_in_a_merge_rejection_repair(st):
+    (st.templates_dir / "chains" / "merging.yaml").write_text(MERGING)
+    r = library(st, ("rename", {"path": "tasks.implementer", "id": "builder"}))
+    repair = "merge.on_merge_rejected.repair.main.fix"
+    assert {"file": "chains/merging.yaml", "path": repair, "field": "extends"} in r.answers[0][
+        "updated"
+    ]
+    assert authored.at(r.model["chains/merging.yaml"], repair)["extends"] == "builder"
 
 
 TEAM_USES = """id: team

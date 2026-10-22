@@ -139,7 +139,7 @@ def test_model_dump_repo_keeps_an_explicit_value(tmp_path):
     [
         ({"sandbox": {"kind": "docker"}}, "image"),
         ({"sandbox": "docker"}, "sandbox: must be a mapping, not 'docker'"),
-        ({"sandbox": {"kind": "podman", "image": "y"}}, r"known: \['docker', 'kit'\]"),
+        ({"sandbox": {"kind": "podman", "image": "y"}}, r"known: \['docker', 'kit', 'os'\]"),
         ({"sandbox": {**_SANDBOX, "network": "none"}}, "'network'"),
         ({"worktrees": False, "sandbox": _SANDBOX}, "cannot be sandboxed"),
         ({"worktrees": False, "policy": {"sandbox": _SANDBOX}}, "cannot be sandboxed"),
@@ -260,7 +260,7 @@ def test_a_malformed_sandbox_is_refused_naming_its_entry(tmp_path):
         _load(tmp_path, {"path": "/r", "sandbox": {"kind": "podman", "image": "y"}})
 
     assert str(refused.value) == (
-        "repos.yaml: /r: sandbox: kind 'podman' is not supported; known: ['docker', 'kit']"
+        "repos.yaml: /r: sandbox: kind 'podman' is not supported; known: ['docker', 'kit', 'os']"
     )
 
 

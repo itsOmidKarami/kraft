@@ -68,6 +68,8 @@
           "launch_fallback",
           "launch_fallback_exhausted",
           "left_uncommitted",
+          "merge_queue_dropped",
+          "merge_rejection_restart",
           "mr_closed",
           "mr_labels_set",
           "mr_opened",

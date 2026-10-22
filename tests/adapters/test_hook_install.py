@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 from support.harness import git
+from support.session_leader import SESSION_LEADER_ONLY
 
 from kraft.adapters import hook_install as hi
 
@@ -372,10 +373,12 @@ def test_codex_flags_are_cached_per_binary_and_command(fake_codex, tmp_path):
 
 
 class _Here:
-    """A `runner` that runs codex right here: the sandboxed path, no container."""
+    """A `runner` that runs codex right here: the sandboxed path, no container.
+    It runs it only in a session of its own, off any terminal, as a oneshot's
+    client must be."""
 
     def argv(self):
-        return []
+        return [sys.executable, "-c", SESSION_LEADER_ONLY]
 
     async def close(self):
         pass

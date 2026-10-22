@@ -51,6 +51,11 @@ FORWARDED_ENV = (
 )
 
 
+class SandboxRefused(RuntimeError):
+    """This host cannot run a sandbox the way it is set up: a stop for a
+    person, never a task failure."""
+
+
 class SandboxNotReady(RuntimeError):
     """A backend's `prepare` could not ready the host side of a launch: the
     launch stops as `config_error` with this message, never goes ahead

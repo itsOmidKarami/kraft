@@ -58,7 +58,7 @@ def test_the_session_key_migration_keeps_every_row_and_lets_items_share_an_id(tm
     conn = db._connect(path)
     db.migrate(conn)
 
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 55
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     after = [
         tuple(r)
         for r in conn.execute(

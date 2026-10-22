@@ -40,6 +40,7 @@ from kraft.executor.context import (
     CONFIG_ERROR,
     CONFLICT,
     INFRA_STOP,
+    MERGE_REJECTED,
     RATE_LIMITED,
     READ_ONLY_VIOLATED,
     REPAIR_DOUBTED,
@@ -1755,7 +1756,7 @@ def kept_past_checkout_stop(c, wid: str, node_id: str, task_path: str, round: in
         "SELECT 1 FROM events WHERE work_item_id = ? AND seq > ? AND ("
         "(type = ? AND json_extract(payload, '$.node_id') != ?) "
         "OR (type = ? AND json_extract(payload, '$.node_id') = ?) "
-        "OR type IN (?, ?, ?, ?)) LIMIT 1",
+        "OR type IN (?, ?, ?, ?, ?)) LIMIT 1",
         (
             wid,
             stop["seq"],
@@ -1766,6 +1767,7 @@ def kept_past_checkout_stop(c, wid: str, node_id: str, task_path: str, round: in
             GateEvent.REJECTED,
             ChainEvent.RUN_FORKED,
             ChainEvent.BASE_CHANGE_RESTART,
+            ChainEvent.MERGE_REJECTION_RESTART,
             ChainEvent.FIX_CYCLE_STARTED,
         ),
     ).fetchone()
@@ -2220,6 +2222,13 @@ async def measure_node(
         ]
         if conflicted:
             return CONFLICT, conflicted, [r for r in results if isinstance(r, BaseException)]
+    # A merge train or queue dropped the merge request: never a recovery's or a
+    # fix cycle's to answer, which could re-queue what a person took off or
+    # merge their own commit unseen. The node's `on_merge_rejected` repairs
+    # it, or, with none, `walk` stops the item for a person.
+    rejected = [t for t, r in outcomes if r == MERGE_REJECTED]
+    if rejected:
+        return MERGE_REJECTED, rejected, [r for r in results if isinstance(r, BaseException)]
     # Logged before the BUDGET rung returns: a co-task can raise in the same node
     # as a budget-refused agent, and that traceback is the only record of it.
     excs = [r for r in results if isinstance(r, BaseException)]
@@ -2264,10 +2273,12 @@ def _recoverable(result: object, node: ResolvedNode) -> bool:
     agent asked is addressed to a human, and no repair task can answer it
     (Kraft-rv6i). A rebase `conflict` belongs to the node's explicit conflict
     handler when it declares one (`rebase-conflict-requires-explicit-
-    handler`), so no recovery handler spends itself on it first."""
+    handler`), so no recovery handler spends itself on it first. A merge
+    train's or queue's `merge_rejected` is never one: the node's
+    `on_merge_rejected` answers it, or a person."""
     if isinstance(result, BaseException) and not isinstance(result, _builtins.RebaseConflict):
         return True
-    if result in _ADVANCING or result in _STOPS or result == "needs_context":
+    if result in _ADVANCING or result in _STOPS or result in ("needs_context", MERGE_REJECTED):
         return False
     conflict = result == CONFLICT or isinstance(result, _builtins.RebaseConflict)
     return not (conflict and node.on_conflict)

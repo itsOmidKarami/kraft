@@ -37,6 +37,7 @@ class SessionStatus(StrEnum):
     CONFLICT = "conflict"
     INFRA = "infra"
     INFRA_STOP = "infra_stop"
+    MERGE_REJECTED = "merge_rejected"
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,7 @@ SESSION_TRAITS = total(
         S.CONFLICT: _T(),
         S.INFRA: _T(),
         S.INFRA_STOP: _T(),
+        S.MERGE_REJECTED: _T(),
     },
     name="SESSION_TRAITS",
 )

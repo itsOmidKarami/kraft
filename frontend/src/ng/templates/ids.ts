@@ -2,7 +2,7 @@
  *  `_IDENTIFIER`, `models.py` `RESERVED_SEGMENTS`). The server checks again;
  *  this only lets the card say why before sending (Decisions §9 Invalid id). */
 const ID = /^[a-z][a-z0-9_-]*$/;
-export const RESERVED = ["main", "on_failure", "fix_loop", "judge", "escalation", "on_base_changed", "on_conflict"];
+export const RESERVED = ["main", "on_failure", "fix_loop", "judge", "escalation", "on_base_changed", "on_conflict", "on_merge_rejected"];
 
 export function idError(id: string, taken: string[]): string | null {
   if (!id) return null;

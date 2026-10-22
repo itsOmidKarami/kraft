@@ -2,7 +2,10 @@
 opencode older than 2.0.0 refuses the argv Kraft builds, so the launch asks
 `--version` first and refuses by name instead of failing inside the agent."""
 
+import sys
+
 import pytest
+from support.session_leader import SESSION_LEADER_ONLY
 
 from kraft.adapters.agent import LaunchRefused
 from kraft.paths import RunDirs
@@ -46,7 +49,9 @@ def test_a_sandboxed_opencode_is_asked_in_its_image(run, tmp_path, monkeypatch):
         closed = False
 
         def argv(self):
-            return ["sh", "-c", "echo opencode v1.0.4", "sh"]
+            # Asked off the terminal: a oneshot's client leads its own session.
+            leader = [sys.executable, "-c", SESSION_LEADER_ONLY]
+            return [*leader, "sh", "-c", "echo opencode v1.0.4", "sh"]
 
         async def close(self):
             Image.closed = True

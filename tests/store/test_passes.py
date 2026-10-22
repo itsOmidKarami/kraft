@@ -2,7 +2,9 @@
 event log says sent it back."""
 
 import pytest
+from support.store_fixtures import mk_item
 
+from kraft import events, store
 from kraft.store.passes import number_passes
 
 ORDER = ["spec", "impl", "verify", "gate", "ship"]
@@ -152,6 +154,13 @@ CASES = [
         id="base-change-restart-of-other-nodes",
     ),
     pytest.param(
+        [_s(1), _s(6)],
+        [_e(5, "merge_rejection_restart", nodes=["impl", "verify"])],
+        [1, 2],
+        [{"pass": 1}, {"pass": 2, "reason": "merge_rejected"}],
+        id="merge-rejection-restart",
+    ),
+    pytest.param(
         [_s(1), _s(2, round=2), _s(3, round=0)],
         [],
         [1, 1, 2],
@@ -244,3 +253,33 @@ def test_each_node_counts_its_own_passes():
 
     assert passes == {"s1": 1, "s2": 1, "s6": 2, "s7": 2, "s9": 3}
     assert [len(nodes[n]) for n in ("impl", "verify")] == [2, 3]
+
+
+@pytest.mark.parametrize(
+    ("restart", "reason"),
+    [("base_change_restart", "base_change"), ("merge_rejection_restart", "merge_rejected")],
+)
+async def test_an_items_span_restart_starts_a_pass_from_its_event_log(database, restart, reason):
+    """`session_passes` reads the restart off the item's own events."""
+    await mk_item(database)
+    for sid, before in (("s1", True), ("s2", False)):
+        if not before:
+            await database.write(
+                lambda c: events.append(c, "w1", restart, {"nodes": ["impl", "verify"]})
+            )
+        await database.write(
+            lambda c, sid=sid: store.create_session(
+                c,
+                id=sid,
+                work_item_id="w1",
+                node_id="verify",
+                hook_point="verify.main.test",
+                log_path=f"/l/{sid}",
+                result_path=f"/r/{sid}",
+            )
+        )
+
+    passes, nodes = database.read(lambda c: store.session_passes(c, "w1", ORDER))
+
+    assert passes == {"s1": 1, "s2": 2}
+    assert nodes["verify"] == [{"pass": 1}, {"pass": 2, "reason": reason}]

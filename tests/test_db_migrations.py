@@ -272,6 +272,9 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
             ("-- unique only with work_item_id", "  id             TEXT PRIMARY KEY,"),
             ("repository     TEXT,", "  repository     TEXT"),
         )
+    if version < 56:
+        old = "                    'waiting', 'conflict', 'infra', 'infra_stop')),"
+        replace = (*replace, ("'infra_stop', 'merge_rejected')),", old))
     added = {47: "review_viewed", 48: "config_drafts", 49: "item_drafts", 50: "intake_checks"}
     skip_stmts = (*skip_stmts, *(t for since, t in added.items() if version < since))
     schema = "\n".join(
@@ -390,7 +393,7 @@ def test_migrate_v9_to_v10_widens_worker_sessions_status(tmp_path):
             ),
             ("'unknown',", ""),
             ("done_with_concerns", ""),
-            ("                    'waiting', 'conflict', 'infra', 'infra_stop')),", ""),
+            ("'infra_stop', 'merge_rejected')),", ""),
         ),
     )
     schema.insert_item(conn)
@@ -456,7 +459,7 @@ def test_migrate_v26_to_v27_widens_worker_sessions_status_for_ci_verdicts(tmp_pa
         26,
         replace=(
             (
-                "                    'waiting', 'conflict', 'infra', 'infra_stop')),",
+                "'infra_stop', 'merge_rejected')),",
                 "                    'waiting')),",
             ),
         ),
@@ -729,7 +732,7 @@ def test_migrate_v16_to_v17_rebuilds_for_rate_limited(tmp_path):
         16,
         drop_lines=(
             "                      'rate_limited', 'waiting', 'queued', 'blocked')),",
-            "                    'waiting', 'conflict', 'infra', 'infra_stop')),",
+            "'infra_stop', 'merge_rejected')),",
         ),
         replace=(
             (

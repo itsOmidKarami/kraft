@@ -768,3 +768,25 @@ def wait_clock(monkeypatch):
     clock = Clock()
     monkeypatch.setattr(waits, "_now", lambda: clock.now.isoformat())
     return clock
+
+
+@pytest.fixture
+def short_run():
+    """A run dir short enough for a socket path: pytest's own tmp_path on
+    macOS alone is past the 104 bytes a unix socket path may be."""
+    base = Path(tempfile.mkdtemp(prefix="kraft-sn-", dir="/tmp"))
+    yield RunDirs(base).ensure()
+    shutil.rmtree(base, ignore_errors=True)
+
+
+@pytest.fixture
+async def channels(database, short_run):
+    """A channel registry installed as the daemon's, on a run dir short
+    enough for a unix socket path."""
+    from kraft.worker import channel
+
+    registry = channel.ChannelRegistry(short_run, database)
+    channel.install(registry)
+    yield registry
+    await registry.close_all()
+    channel.install(None)

@@ -4,7 +4,6 @@ import os
 import shutil
 import socket
 import subprocess
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,10 +16,9 @@ from kraft import events, ids, store
 from kraft.adapters import subprocess as sp
 from kraft.config import ConfigError
 from kraft.executor.context import LaunchContext
-from kraft.paths import RunDirs
 from kraft.worker import backends, ca, channel, reattach
 from kraft.worker.backends import docker as docker_backend
-from kraft.worker.sandbox import Checkout, SandboxNotReady
+from kraft.worker.sandbox import Checkout, SandboxNotReady, SandboxRefused
 
 _CHAIN = """
 - id: implementation
@@ -52,6 +50,8 @@ class Remote:
         self.wrapped_env: list[dict] = []
         #: What `owner_refusal` answers.
         self.foreign: str | None = None
+        #: The reason `wrap` raises `SandboxRefused` with, when set.
+        self.refuse: str | None = None
 
     def home(self, run_dirs, work_item_id):
         return run_dirs.base / "remote-home" / work_item_id
@@ -73,9 +73,16 @@ class Remote:
         return None
 
     def wrap(self, cmd, cwd, sandbox, results_dir, env=None, *, session_id, work_item_id, **kw):
+        if self.refuse:
+            raise SandboxRefused(self.refuse)
         self.wrapped_with.append(kw.get("ca_bundle"))
         self.wrapped_env.append(env)
-        self.calls.append("wrap")
+        # Off the event loop: a backend's wrap may walk the trees it mounts.
+        try:
+            asyncio.get_running_loop()
+            self.calls.append("wrap on the event loop")
+        except RuntimeError:
+            self.calls.append("wrap")
         sent = self.outbox / f"{ids.qualified(work_item_id, session_id)}.json"
         return ["env", f"KRAFT_RESULT_PATH={sent}", *cmd]
 
@@ -144,8 +151,13 @@ def docker_closed(monkeypatch):
 
 @pytest.mark.parametrize(
     ("kind", "asked"),
-    [("docker", ["docker"]), (None, ["docker", "remote"]), ("retired", ["docker", "remote"])],
-    ids=["recorded", "none-recorded", "no-longer-registered"],
+    [
+        ("docker", ["docker"]),
+        ("os", ["os"]),
+        (None, ["docker", "os", "remote"]),
+        ("retired", ["docker", "os", "remote"]),
+    ],
+    ids=["recorded", "recorded-os", "none-recorded", "no-longer-registered"],
 )
 def test_a_session_is_closed_by_the_backend_it_recorded_else_by_every_one(remote, kind, asked):
     assert [b.kind for b in backends.for_session(kind)] == asked
@@ -290,22 +302,33 @@ async def test_a_session_whose_backend_is_not_ready_stops_before_it_launches(
     assert "roots could not be read" in log
 
 
+@pytest.mark.parametrize(
+    ("sandbox", "calls"),
+    [
+        ({"kind": "remote"}, []),
+        (
+            {"kind": "remote", "network": {"runtime": {"allow": ["a.io"]}}},
+            ["open_session", "close_session"],
+        ),
+    ],
+    ids=["no-network", "network-route-closed"],
+)
+async def test_a_refused_wrap_stops_the_session_as_config_error(
+    database, run_dirs, tmp_path, remote, channels, sandbox, calls
+):
+    remote.refuse = "this host cannot run the sandbox"
+    assert await _run_on_remote(database, run_dirs, tmp_path, sandbox) == "config_error"
+    assert remote.calls == calls
+    assert "this host cannot run the sandbox" in own_files(run_dirs, "s1").log.read_text()
+    row = database.read(
+        lambda c: c.execute("SELECT status FROM worker_sessions WHERE id = 's1'").fetchone()
+    )
+    assert row["status"] == "config_error"
+
+
 # --- network: the session's egress route -------------------------------------------------
 
 _POLICED = {"kind": "remote", "network": {"runtime": {"allow": ["a.io"], "deny": ["b.io"]}}}
-
-
-@pytest.fixture
-async def channels(database):
-    """A channel registry installed as the daemon's, on a run dir short
-    enough for a unix socket path."""
-    base = Path(tempfile.mkdtemp(prefix="kraft-sn-", dir="/tmp"))
-    registry = channel.ChannelRegistry(RunDirs(base).ensure(), database)
-    channel.install(registry)
-    yield registry
-    await registry.close_all()
-    channel.install(None)
-    shutil.rmtree(base, ignore_errors=True)
 
 
 @pytest.mark.parametrize("transport", ["unix", "tls"])
@@ -734,3 +757,20 @@ async def test_a_setup_command_under_network_without_a_channel_or_route_never_ru
     assert ran == [] and "wrap" not in remote.calls
     if missing == "route":
         assert remote.calls[-1] == "close_session" and not remote.sock_path.exists()
+
+
+async def test_a_setup_command_whose_wrap_is_refused_never_runs(remote, tmp_path, monkeypatch):
+    remote.refuse = "this host cannot run the sandbox"
+    ran = []
+    monkeypatch.setattr(kraft_builtins, "_run_setup", lambda *a, **kw: ran.append(a))
+
+    with pytest.raises(RuntimeError, match="cannot run: this host cannot run"):
+        await kraft_builtins.run_setup_command(
+            tmp_path,
+            tmp_path,
+            entry_of({"setup_command": "true"}),
+            sandbox={"kind": "remote"},
+            checkout=Checkout(tmp_path, {}),
+        )
+
+    assert ran == []

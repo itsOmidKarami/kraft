@@ -94,7 +94,7 @@ export function reposOf(item: ItemDetail): { id: string | null; name: string }[]
 const CHIP: Record<SessionStatus, ChipState> = {
   running: "running", pending: "waiting", paused: "waiting", needs_context: "waiting", rate_limited: "waiting", waiting: "waiting",
   done: "done", done_with_concerns: "done",
-  failed: "failed", capped_out: "failed", config_error: "failed", unknown: "failed", conflict: "failed", infra: "failed", infra_stop: "failed",
+  failed: "failed", capped_out: "failed", config_error: "failed", unknown: "failed", conflict: "failed", infra: "failed", infra_stop: "failed", merge_rejected: "failed",
 };
 
 function chipState(s: WorkerSession | undefined, passed: boolean | null): ChipState {

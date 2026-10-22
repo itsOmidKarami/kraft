@@ -424,6 +424,17 @@
           ],
           "default": null
         },
+        "on_merge_rejected": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MergeRejectionPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "policy": {
           "anyOf": [
             {
@@ -859,6 +870,22 @@
       "title": "GateNode",
       "type": "object"
     },
+    "MergeRejectionPolicy": {
+      "additionalProperties": false,
+      "description": "`on_merge_rejected`: what an execution node does when the forge drops\nthe merge request it asked to merge from a merge train or merge queue.\n\n`repair` is a recovery-shaped handler that fixes the branch against the\ntarget as it is now; then the chain restarts at `restart_from`, which\nmust name an *earlier* execution node (checked by `Chain`, which alone can\nsee the order): the repaired head goes back through the merge request's\nown checks before it is offered to the forge again. Only a node with an\n`mr.merge` task can have a merge rejected, which `Chain` checks too, on\nthe expanded node.",
+      "properties": {
+        "repair": {
+          "$ref": "#/$defs/RecoveryPlan"
+        },
+        "restart_from": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Restart From",
+          "type": "string"
+        }
+      },
+      "title": "MergeRejectionPolicy",
+      "type": "object"
+    },
     "NetworkPhase": {
       "additionalProperties": false,
       "description": "One phase's allow and deny lists. Deny wins; an empty allow grants\nnothing.",
@@ -1063,7 +1090,7 @@
     },
     "SandboxPolicy": {
       "additionalProperties": false,
-      "description": "Where a task's process runs: `kind: docker` in `image`, within\n`resources` and reaching only what `network` allows\n(`kraft.worker.backends`), with `credentials` managed by the egress\nproxy; or `kind: kit`, a Kit pinned by digest that sets all of those\nitself and is lowered to `kind: docker` at launch (`worker.kit.lower`).\nA permission-shaped safety field (Ruling 105): once a layer sets one, no\nnarrower layer may change or remove it -- the whole value, `resources`,\n`network`, `credentials` and a Kit's reference included.",
+      "description": "Where a task's process runs: `kind: docker` in `image`, within\n`resources` and reaching only what `network` allows\n(`kraft.worker.backends`), with `credentials` managed by the egress\nproxy; or `kind: kit`, a Kit pinned by digest that sets all of those\nitself and is lowered to `kind: docker` at launch (`worker.kit.lower`);\nor `kind: os`, the host's own agent CLI under the operating system's\nprocess sandbox (`worker.backends.bwrap`), reaching Kraft only through its\nsession's channel and seeing the host only through `expose`.\nA permission-shaped safety field (Ruling 105): once a layer sets one, no\nnarrower layer may change or remove it -- the whole value, `resources`,\n`network`, `credentials` and a Kit's reference included.",
       "properties": {
         "credentials": {
           "anyOf": [
@@ -1079,6 +1106,21 @@
           ],
           "default": null,
           "title": "Credentials"
+        },
+        "expose": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expose"
         },
         "image": {
           "anyOf": [
@@ -1096,7 +1138,8 @@
         "kind": {
           "enum": [
             "docker",
-            "kit"
+            "kit",
+            "os"
           ],
           "title": "Kind",
           "type": "string"

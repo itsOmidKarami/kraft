@@ -183,14 +183,15 @@ def retry_after_cap(
     if by_person:
         clear_loop_counters(conn, work_item_id, node_id, key)
     # Item-wide, not node-scoped -- a human's `/retry` is the same explicit
-    # "give this a fresh budget" for every node's base-change restarts
-    # (`walk._restart_for_base_change`) that it already is for every other
-    # loop cap here. A restart span never clears these itself: that is what
-    # bounds a base that keeps moving.
+    # "give this a fresh budget" for every node's base-change and
+    # merge-rejection restarts (`walk._restart_span`) that it already is for
+    # every other loop cap here. A restart span never clears these itself:
+    # that is what bounds a base that keeps moving, or a train that keeps
+    # rejecting.
     if by_person:
         conn.execute(
-            "DELETE FROM retry_counters WHERE work_item_id = ? AND key LIKE ?",
-            (work_item_id, "%.on_base_changed"),
+            "DELETE FROM retry_counters WHERE work_item_id = ? AND (key LIKE ? OR key LIKE ?)",
+            (work_item_id, "%.on_base_changed", "%.on_merge_rejected"),
         )
     # A stale pinned pipeline must not survive a manual retry any more than
     # the exhausted ci_infra counter above does (Kraft-ivh1).

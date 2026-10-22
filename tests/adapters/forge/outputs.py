@@ -111,3 +111,21 @@ GH_PR_LIST_AUTO_MERGE = (
     '[{"number":7,"url":"https://github.com/o/r/pull/7","state":"OPEN",'
     '"autoMergeRequest":{"enabledAt":"2026-09-22T10:00:00Z","mergeMethod":"SQUASH"}}]'
 )
+
+# `glab ci get -F json` for the pipeline in GLAB_CI_FAILED, trimmed to the
+# fields this code reads: the pipeline object carries its jobs inline, so one
+# call names every job (glab 1.117.0, 2026-09-09).
+GLAB_CI_GET_FAILED = (
+    '{"id":2826926700,"status":"failed","jobs":['
+    '{"id":16392037101,"name":"lint-and-test","status":"success"},'
+    '{"id":16392037104,"name":"release-impact","status":"failed"}]}'
+)
+
+# The tail of `glab ci trace release-impact`, the only place the reason for MR
+# !89's red pipeline was ever written down.
+GLAB_CI_TRACE = (
+    '$ python3 dev/next_tag.py "" "$CI_MERGE_REQUEST_LABELS" > /dev/null\n'
+    "no release:: label; expected one of ('major', 'minor', 'patch', 'none')\n"
+    "This MR needs one of: release::major, release::minor, release::patch, release::none\n"
+    "ERROR: Job failed: exit code 1\n"
+)

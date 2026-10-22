@@ -5,7 +5,7 @@ route is its caller; these pin what it accepts and how it refuses."""
 from __future__ import annotations
 
 import pytest
-from support.harness import v1_node, v1_task
+from support.harness import v1_node, v1_task, v1_task_at
 
 from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.templates.environment import WorkItemTarget
@@ -141,6 +141,51 @@ def test_an_override_the_task_or_its_policy_bounds_refuse_names_its_field(
         validate_retry_override(chain, path, task_config=task_config, policy=policy)
     assert refused.value.field == field, refused.value
     assert chain.to_json() == before
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "build.on_base_changed.on_conflict.main.resolve",
+        "merge.on_merge_rejected.repair.main.repair",
+    ],
+    ids=["on-conflict", "merge-rejected-repair"],
+)
+def test_a_retry_addresses_a_node_policys_handler_task(path):
+    """A handler a node policy declares is retried at its own path: the
+    override lands on that task and no other."""
+    nodes = [
+        v1_node(
+            tasks=[_agent("work")],
+            on_base_changed={
+                "restart_from": "build",
+                "on_conflict": {"tasks": [_agent("resolve")]},
+            },
+        ),
+        v1_node(
+            "merge",
+            tasks=[{"id": "merge", "kind": "forge", "target": "mr.merge"}],
+            on_merge_rejected={"restart_from": "build", "repair": {"tasks": [_agent("repair")]}},
+        ),
+    ]
+    chain = ResolvedChain.from_chain(Chain.model_validate({"id": "c", "nodes": nodes})).materialize(
+        target=WorkItemTarget.for_repository("target"),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput()),
+    )
+
+    result = validate_retry_override(
+        chain, path, task_config={"prompt": "again"}, policy={"deny_tools": ["Bash"]}
+    )
+
+    assert v1_task_at(result.chain, path).task.prompt == "again"
+    assert result.chain.policy_at(path).deny_tools == ("Bash",)
+    prompts = {
+        t.path: t.task.prompt
+        for n in result.chain.chain.nodes
+        for t in n.tasks()
+        if t.path != path and t.task.kind == "agent"
+    }
+    assert set(prompts.values()) == {"do it"}, prompts
 
 
 def test_a_harness_change_is_held_to_the_paths_allowed_harnesses():
