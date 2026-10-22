@@ -352,7 +352,12 @@ async def test_gh_cancel_merge_undoes_only_what_holds_the_pull_request(
         ),
         (
             '{"merge_trains_enabled":true,"merge_pipelines_enabled":true}',
-            ["api", "-X", "DELETE", "projects/:id/merge_trains/merge_requests/54"],
+            [
+                "api",
+                "-X",
+                "POST",
+                "projects/:id/merge_requests/54/cancel_merge_when_pipeline_succeeds",
+            ],
         ),
     ],
     ids=["merge-when-pipeline-succeeds", "merge-train"],
@@ -369,17 +374,24 @@ async def test_glab_cancel_merge_cancels_the_merge_when_pipeline_succeeds_or_the
     assert cli.calls("glab")[-1].split() == argv
 
 
-async def test_glab_cancel_merge_that_fails_raises_unless_nothing_was_queued(cli, tmp_path):
+@pytest.mark.parametrize(
+    "failure",
+    [
+        FailWith("glab: 406 Not Acceptable"),
+        # `glab api` exits 0 on this: the endpoint answers 201 with the error in the body.
+        '{"status":"error","message":"Cannot cancel the automatic merge","http_status":406}',
+    ],
+    ids=["http-406", "201-status-error"],
+)
+async def test_glab_cancel_merge_that_fails_raises_unless_nothing_was_queued(
+    cli, tmp_path, failure
+):
     """The forge may still merge when a cancel fails, so it fails loudly; the
     refusal GitLab gives a merge request with nothing to cancel is not one."""
-    cli.stub(
-        "glab",
-        routes={"api projects/:id": '{"id":1}'},
-        default=FailWith("glab: 406 Not Acceptable"),
-    )
+    cli.stub("glab", default=failure, routes={})
     glab = forge.GlabCli()
 
-    with pytest.raises(forge.ForgeError, match="406"):
+    with pytest.raises(forge.ForgeError, match="cancel|406"):
         await glab.cancel_merge(
             repo=tmp_path, branch="b", mr=forge.MRRef(54, "u", state="open", merge_queued=True)
         )

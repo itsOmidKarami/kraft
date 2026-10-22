@@ -696,36 +696,34 @@ class GlabCli(mr_ops.CliWaits):
         return found.head_sha if found else ""
 
     async def cancel_merge(self, *, repo: Path, branch: str, mr: MRRef) -> None:
-        """Take the merge request off the train, or cancel its merge when the
-        pipeline succeeds. A merge request that was neither (`merge_queued`
-        false) has nothing to cancel, and GitLab's refusal of that is not one."""
+        """Cancel the merge request's auto-merge, which also takes it off the
+        merge train (GitLab has no endpoint that removes one from a train
+        alone). A merge request that was neither queued nor set to merge
+        (`merge_queued` false) has nothing to cancel, and GitLab's refusal of
+        that is not a failure. The endpoint answers `201` with
+        `{"status": "error"}` when it cancelled nothing, which `glab api` takes
+        for success, so the body is read."""
         try:
-            if await self._train_enabled(repo):
-                await git.run_git(
-                    repo,
-                    [
-                        "glab",
-                        "api",
-                        "-X",
-                        "DELETE",
-                        f"projects/:id/merge_trains/merge_requests/{mr.number}",
-                    ],
-                )
-            else:
-                await git.run_git(
-                    repo,
-                    [
-                        "glab",
-                        "api",
-                        "-X",
-                        "POST",
-                        f"projects/:id/merge_requests/{mr.number}/cancel_merge_when_pipeline_succeeds",
-                    ],
-                )
+            raw = await git.run_git(
+                repo,
+                [
+                    "glab",
+                    "api",
+                    "-X",
+                    "POST",
+                    f"projects/:id/merge_requests/{mr.number}/cancel_merge_when_pipeline_succeeds",
+                ],
+            )
         except ForgeError as exc:
             gone = _http_status(exc) == 404 or "406" in str(exc)
             if mr.merge_queued or not gone:
                 raise
+            return
+        body = mr_ops.parse_json(raw, "glab cancel merge") if raw.strip() else {}
+        if isinstance(body, dict) and body.get("status") == "error" and mr.merge_queued:
+            raise ForgeError(
+                f"glab could not cancel the merge of !{mr.number}: {body.get('message', body)}"
+            )
 
     async def _add_to_train(self, repo: Path, branch: str, mr: MR, head: str) -> None:
         """Queue the merge request on the train explicitly. Before GitLab 19.1

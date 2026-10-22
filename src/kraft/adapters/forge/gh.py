@@ -95,7 +95,6 @@ _REMOVED_BY_HAND = re.compile(
     ),
     re.IGNORECASE,
 )
-#: The branch GitHub builds a queued pull request's merge group on.
 #: What `gh pr merge --match-head-commit` prints when the head is not the one named
 #: (GitHub: "Head branch was modified. Review and try the merge again.").
 _HEAD_MODIFIED = "head branch was modified"
@@ -119,6 +118,7 @@ mutation($id: ID!) {
 }
 """
 
+#: The branch GitHub builds a queued pull request's merge group on.
 _QUEUE_BRANCH = "gh-readonly-queue/{base}/pr-{number}-"
 _QUEUE_QUERY = """
 query($owner: String!, $name: String!, $base: String!, $n: Int!) {
