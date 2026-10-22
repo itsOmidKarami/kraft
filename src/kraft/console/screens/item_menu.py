@@ -87,7 +87,8 @@ class MenuActions:
         note = await self._ask(f"Skip {what} on {item['id'][:8]}", [SKIP], required=False)
         if note is not None:
             said = answers.item_action(answers.skipped(what))
-            await acts.act(self.app, client.skip(note or None, item["id"]), said)
+            skipping = client.skip(note or None, item["id"], head=item.get("review_head"))
+            await acts.act(self.app, skipping, said)
 
     async def _unblock(self, item: dict) -> None:
         await acts.act(self.app, client.unblock(item["id"]), answers.unblocked)

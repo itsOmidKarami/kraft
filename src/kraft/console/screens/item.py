@@ -104,9 +104,11 @@ class Item(ChainTab, MenuActions, View):
         self.tab = TABS[0][0]
         self.crumb = "Board"
         #: The gate whose document the Overview shows, and that document's
-        #: digest: approve sends the digest of what was read (spec §7.2).
+        #: digest and the head the item showed with it: approve sends the
+        #: digest of what was read (spec §7.2), and at the final review the head.
         self.read_gate: str | None = None
         self.digest: str | None = None
+        self.head: str | None = None
         #: `(updated_at, actions)` of the last read: a live event that leaves
         #: them alone reads nothing.
         self._key: tuple | None = None
@@ -175,7 +177,7 @@ class Item(ChainTab, MenuActions, View):
         from kraft.console.screens import VIEWS  # defined after this module loads
 
         self.crumb = VIEWS[self.app._last_top].label
-        self.read_gate = self.digest = None
+        self.read_gate = self.digest = self.head = None
         self.events, self.more = [], False
         self._lines = []
         self.session_id = None
@@ -375,7 +377,7 @@ class Item(ChainTab, MenuActions, View):
         approve waits; else where the item stands. Then every node."""
         # Nothing is read until the document answers: approve stays shut for
         # the length of the reads, and never offers the last version's digest.
-        self.read_gate = self.digest = None
+        self.read_gate = self.digest = self.head = None
         self.refresh_bindings()
         lines: list[str | Text] = []
         stop = item.get("stop") or {}
@@ -399,6 +401,9 @@ class Item(ChainTab, MenuActions, View):
                 if warning := render.artifact_truncated(document):
                     lines += ["", Text(warning, style=self.app.theme_variables["warning"])]
                 self.digest = document.get("digest")
+            # From the item rendered, not the document: the route that carries
+            # the document 404s with none, and the final review is still decided.
+            self.head = item.get("review_head")
             self.read_gate = gate
         else:
             lines += self._stopped(item)
@@ -651,17 +656,17 @@ class Item(ChainTab, MenuActions, View):
         if self.tab != "overview":
             self.show_tab("overview")
         elif item := self.item:
-            digest = self.digest
+            digest, head = self.digest, self.head
             # Shut until the next read answers: a second `a` would approve twice.
-            self.read_gate = self.digest = None
+            self.read_gate = self.digest = self.head = None
             self.refresh_bindings()
-            self.run_worker(partial(self._approve, item, digest), group="act")
+            self.run_worker(partial(self._approve, item, digest, head), group="act")
 
-    async def _approve(self, item: dict, digest: str | None) -> None:
+    async def _approve(self, item: dict, digest: str | None, head: str | None) -> None:
         gate = item["pending_gate"]
         if await acts.act(
             self.app,
-            client.approve_gate(gate, item["id"], digest),
+            client.approve_gate(gate, item["id"], digest, head),
             answers.item_action(f"approved {gate} on {{id}}"),
             decided=True,
         ):

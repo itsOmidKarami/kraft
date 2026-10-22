@@ -57,7 +57,7 @@ def test_brackets_step_through_the_tabs_and_a_shows_the_overview_first(board, mo
     seen, calls = console.run(scenario)
     # Round the start to the last tab.
     assert seen == ["chain", "overview", item_view.TABS[-1][0], ("overview", [])]
-    assert calls == [("approve_gate", ("spec_approval", "a91c03fe", "d1g3st"), {})]
+    assert calls == [("approve_gate", ("spec_approval", "a91c03fe", "d1g3st", None), {})]
 
 
 def test_the_activity_reads_newest_first_and_end_reads_earlier(board, monkeypatch):
@@ -655,4 +655,6 @@ def test_the_overview_shows_the_new_version_of_the_document_on_return(board, mon
         await console.until(pilot, lambda: calls)
         return calls
 
-    assert console.run(scenario) == [("approve_gate", ("spec_approval", "a91c03fe", "n3wd1g"), {})]
+    assert console.run(scenario) == [
+        ("approve_gate", ("spec_approval", "a91c03fe", "n3wd1g", None), {})
+    ]

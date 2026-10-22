@@ -170,6 +170,30 @@ def test_a_menu_entry_asks_what_it_needs_and_says_what_the_server_did(
     )
 
 
+def test_skipping_the_final_review_names_the_head_the_item_showed(board, monkeypatch):
+    """The menu's skip sends the `review_head` of the item it was opened on."""
+    item = _detail(ITEM, review_head="f1nal")
+    _serve(monkeypatch, item)
+    sent: list[dict] = []
+
+    async def skip(*args, **kwargs):
+        sent.append(kwargs)
+        return {"id": ITEM["id"]}
+
+    monkeypatch.setattr(client, "skip", skip)
+    console = board([ITEM])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, ITEM["id"])
+        await _pick(console, pilot, app, "skip")
+        await console.until(pilot, lambda: isinstance(app.screen, Note))
+        await pilot.press("enter")
+        await console.until(pilot, lambda: sent)
+        return sent
+
+    assert console.run(scenario) == [{"head": "f1nal"}]
+
+
 def test_cancel_says_what_it_stops_and_keeps_above_its_reason(board, monkeypatch):
     """Spec §7.2, §7.8: the cancel's confirm is `cancel_preview`, in the web's
     Cancel card words."""

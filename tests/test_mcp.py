@@ -427,6 +427,30 @@ def test_approve_gate_forwards_the_digest_the_artifact_carried(monkeypatch):
     assert seen["kwargs"].get("digest") == "d1"
 
 
+@pytest.mark.parametrize(
+    ("tool", "client_fn", "args"),
+    [
+        ("approve_gate", "approve_gate", {}),
+        ("skip_work_item", "skip", {}),
+        ("submit_review", "submit_review", {"outcome": "approve"}),
+    ],
+)
+def test_the_final_review_tools_forward_the_head_the_item_showed(
+    monkeypatch, tool, client_fn, args
+):
+    """Approving, skipping or reviewing the final gate names the head
+    `get_work_item` returned as `review_head`."""
+    seen = {}
+
+    async def fake(*a, **kw):
+        seen["a"], seen["kw"] = a, kw
+        return {"id": "w1", "status": "active"}
+
+    monkeypatch.setattr(mcp.client, client_fn, fake)
+    asyncio.run(mcp.build().call_tool(tool, {"work_item_id": "w1", "head": "h1", **args}))
+    assert "h1" in (*seen["a"], *seen["kw"].values())
+
+
 def test_submit_review_says_only_a_human_should_decide():
     """The same warning `approve_gate`'s docstring carries."""
     tool = next(t for t in _tools() if t.name == "submit_review")

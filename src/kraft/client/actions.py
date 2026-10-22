@@ -290,15 +290,20 @@ async def _pending_gate_of(work_item_id: str) -> str:
 
 
 async def approve_gate(
-    gate: str | None = None, work_item_id: str | None = None, digest: str | None = None
+    gate: str | None = None,
+    work_item_id: str | None = None,
+    digest: str | None = None,
+    head: str | None = None,
 ) -> dict:
     """Approve the gate a work item is waiting on. A chain revision's approval
-    needs the `digest` its artifact carried (Kraft-ec66w)."""
+    needs the `digest` its artifact carried (Kraft-ec66w), and the final
+    review's the `head` the item showed (`review_head`)."""
     target = await context._forbid_self_action(work_item_id)
     gate = gate or await _pending_gate_of(target)
+    body = {k: v for k, v in {"digest": digest, "head": head}.items() if v}
     return await transport._act(
         f"/work-items/{transport.segment(target)}/gates/{transport.segment(gate)}/approve",
-        {"digest": digest} if digest else None,
+        body or None,
     )
 
 
@@ -429,17 +434,23 @@ async def raise_budget(budget_usd: float | None, work_item_id: str | None = None
 
 
 async def skip(
-    note: str | None = None, work_item_id: str | None = None, path: str | None = None
+    note: str | None = None,
+    work_item_id: str | None = None,
+    path: str | None = None,
+    head: str | None = None,
 ) -> dict:
     """Advance past the current node or pending gate without running or
     approving it -- or, with `path`, skip only a `node.step` or
     `node.step.task` inside the current node, stopping nothing beside it.
     Works whether the item is running, paused, or stopped for a human.
+    Skipping the final review needs the `head` the item showed (`review_head`).
     """
     target = await context._forbid_self_action(work_item_id)
     payload: dict = {"note": note.strip()} if note and note.strip() else {}
     if path:
         payload["path"] = path
+    if head:
+        payload["head"] = head
     return await transport._act(f"/work-items/{transport.segment(target)}/skip", payload)
 
 
@@ -740,11 +751,13 @@ async def submit_review(
     work_item_id: str | None = None,
     summary: str | None = None,
     node: str | None = None,
+    head: str | None = None,
 ) -> dict:
     """Send your drafts with an outcome: comment, request_changes, or approve
-    (approve needs a pending gate). Only a person should decide this."""
+    (approve needs a pending gate, and at the final review the `head` the item
+    showed). Only a person should decide this."""
     target = await context._forbid_self_action(work_item_id)
-    payload = {"outcome": outcome, "summary": summary, "node": node}
+    payload = {"outcome": outcome, "summary": summary, "node": node, "head": head}
     return await transport._act(
         f"/work-items/{transport.segment(target)}/review",
         {k: v for k, v in payload.items() if v is not None},

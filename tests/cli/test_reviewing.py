@@ -322,7 +322,39 @@ def test_kraft_item_approve_sends_the_digest_it_was_given(app, monkeypatch):
     monkeypatch.setattr(transport, "_act", fake_act)
     cli.main(["item", "approve", "w1", "--gate", "chain_revision_approval", "--digest", "d1"])
     cli.main(["item", "approve", "w1", "--gate", "spec_approval"])
+    cli.main(["item", "approve", "w1", "--gate", "chain_review", "--head", "h1"])
     assert sent == {
         "/work-items/w1/gates/chain_revision_approval/approve": {"digest": "d1"},
         "/work-items/w1/gates/spec_approval/approve": None,
+        "/work-items/w1/gates/chain_review/approve": {"head": "h1"},
     }
+
+
+@pytest.mark.parametrize(
+    ("argv", "path", "body"),
+    [
+        (["item", "skip", "w1", "--head", "h1"], "/work-items/w1/skip", {"head": "h1"}),
+        (
+            ["item", "review", "w1", "approve", "--head", "h1"],
+            "/work-items/w1/review",
+            {"outcome": "approve", "head": "h1"},
+        ),
+    ],
+    ids=["skip", "review-approve"],
+)
+def test_the_final_reviews_other_doors_send_the_head_they_were_given(
+    app, monkeypatch, argv, path, body
+):
+    """`--head` is how a CLI caller says which head it reviewed; the verb does
+    not read one for you, which would pin whatever the branch is at the click."""
+    from kraft.client import transport
+
+    sent = {}
+
+    async def fake_act(path, payload=None):
+        sent[path] = payload
+        return {"id": "w1", "status": "active"}
+
+    monkeypatch.setattr(transport, "_act", fake_act)
+    cli.main(argv)
+    assert sent == {path: body}

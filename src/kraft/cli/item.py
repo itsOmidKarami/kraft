@@ -105,7 +105,7 @@ async def _gate_of(ns: argparse.Namespace) -> str:
 def _cmd_approve(ns: argparse.Namespace) -> None:
     async def go():
         gate = await _gate_of(ns)
-        return gate, await client.approve_gate(gate, ns.id, ns.digest)
+        return gate, await client.approve_gate(gate, ns.id, ns.digest, ns.head)
 
     gate, result = asyncio.run(go())
     common.emit(result, common.item_action(f"approved {gate} on {{id}}"), ns.json)
@@ -287,7 +287,7 @@ def _skipping(ns: argparse.Namespace) -> str:
 def _cmd_skip(ns: argparse.Namespace) -> None:
     what = "" if ns.json else _skipping(ns)
     common.emit(
-        asyncio.run(client.skip(ns.note, ns.id, path=ns.path)),
+        asyncio.run(client.skip(ns.note, ns.id, path=ns.path, head=ns.head)),
         common.item_action(answers.skipped(what)),
         ns.json,
     )
@@ -463,7 +463,7 @@ def _cmd_reopen(ns: argparse.Namespace) -> None:
 
 def _cmd_review(ns: argparse.Namespace) -> None:
     outcome = ReviewOutcome(ns.outcome.replace("-", "_"))
-    result = asyncio.run(client.submit_review(outcome, ns.id, ns.summary, ns.node))
+    result = asyncio.run(client.submit_review(outcome, ns.id, ns.summary, ns.node, ns.head))
     if not ns.json and "target" in result:
         print(
             f"request-changes -> {result['target']} ({result['target_reason']}), {result['action']}"
@@ -594,6 +594,10 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     approve.add_argument("id", nargs="?")
     approve.add_argument("--gate", help="default: whichever gate is pending")
     approve.add_argument("--digest", help="a chain revision's, as `kraft view artifact` printed it")
+    approve.add_argument(
+        "--head",
+        help="the final review's: the head `kraft view show` printed, which you reviewed",
+    )
     approve.set_defaults(func=_cmd_approve)
 
     reject = subs.add_parser("reject", parents=[common], help="reject the pending gate")
@@ -662,6 +666,10 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     skip.add_argument(
         "--path",
         help="skip only this node.step or node.step.task of the current node",
+    )
+    skip.add_argument(
+        "--head",
+        help="skipping the final review: the head `kraft view show` printed, which you reviewed",
     )
     skip.set_defaults(func=_cmd_skip)
 
@@ -738,6 +746,10 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     review.add_argument("--summary")
     review.add_argument(
         "--node", help="where request-changes re-runs; default: derived from threads"
+    )
+    review.add_argument(
+        "--head",
+        help="approving the final review: the head `kraft view show` printed, which you reviewed",
     )
     review.set_defaults(func=_cmd_review)
 

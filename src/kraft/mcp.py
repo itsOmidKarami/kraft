@@ -109,7 +109,10 @@ def build() -> MCPServer:
 
     @server.tool()
     async def get_gate_artifact(work_item_id: str | None = None) -> dict:
-        """The spec or plan the work item's pending gate is a decision about."""
+        """The spec or plan the work item's pending gate is a decision about. At
+        the final review it also carries the `head` that approving needs; the
+        document is missing exactly when you skip, so get_work_item's
+        `review_head` is the same value."""
         return await client.artifact(work_item_id)
 
     @server.tool()
@@ -235,15 +238,21 @@ def build() -> MCPServer:
     @server.tool()
     @_answers_as_get_work_item_does
     async def approve_gate(
-        gate: str | None = None, work_item_id: str | None = None, digest: str | None = None
+        gate: str | None = None,
+        work_item_id: str | None = None,
+        digest: str | None = None,
+        head: str | None = None,
     ) -> dict:
         """Approve the human gate a Kraft work item is waiting on, letting the
         chain continue. With no gate name, approves whichever gate is pending;
         the shipped chains' gates are spec_approval, plan_approval and
         chain_revision_approval. A chain revision gate also needs the `digest`
-        get_gate_artifact returned with the revision the human reviewed. Only a
-        human should decide this — ask first."""
-        return await client.approve_gate(gate, work_item_id, digest=digest)
+        get_gate_artifact returned with the revision the human reviewed. The
+        final review (the gate that merges the work) needs the `head` that
+        get_work_item returned as `review_head` (get_gate_artifact returns it
+        as `head`) when the human read the diff; a different one is refused.
+        Only a human should decide this — ask first."""
+        return await client.approve_gate(gate, work_item_id, digest=digest, head=head)
 
     @server.tool()
     @_answers_as_get_work_item_does
@@ -341,14 +350,18 @@ def build() -> MCPServer:
     @server.tool()
     @_answers_as_get_work_item_does
     async def skip_work_item(
-        note: str | None = None, work_item_id: str | None = None, path: str | None = None
+        note: str | None = None,
+        work_item_id: str | None = None,
+        path: str | None = None,
+        head: str | None = None,
     ) -> dict:
         """Advance a Kraft work item past its current node or pending gate,
         without running or approving it -- or, with `path` (`node.step` or
         `node.step.task` inside the current node), skip only that, stopping
         nothing beside it. Works while active, paused, or stopped for a human.
-        Only a human should decide this — ask first."""
-        return await client.skip(note, work_item_id, path=path)
+        Skipping the final review needs the `head` that get_work_item returned
+        as `review_head`. Only a human should decide this — ask first."""
+        return await client.skip(note, work_item_id, path=path, head=head)
 
     @server.tool()
     @_answers_as_get_work_item_does
@@ -557,14 +570,16 @@ def build() -> MCPServer:
         work_item_id: str | None = None,
         summary: str | None = None,
         node: str | None = None,
+        head: str | None = None,
     ) -> dict:
         """Send your drafted review comments on a Kraft work item, with an
         outcome: "comment" (queues them for the next agent; never interrupts),
         "request_changes" (redoes work now, at a pending gate or not), or
-        "approve" (needs a pending gate). `node` overrides where
+        "approve" (needs a pending gate, and at the final review the `head`
+        that get_work_item returned as `review_head`). `node` overrides where
         request_changes re-runs; left out, it is derived from the threads.
         Only a human should decide this — ask first."""
-        return await client.submit_review(outcome, work_item_id, summary, node)
+        return await client.submit_review(outcome, work_item_id, summary, node, head)
 
     @server.tool()
     async def permission_request(

@@ -507,12 +507,12 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
         (
             ["item", "skip", "w1", "--note", "known flake"],
             "skip",
-            {"note": "known flake", "work_item_id": "w1", "path": None},
+            {"note": "known flake", "work_item_id": "w1", "path": None, "head": None},
         ),
         (
             ["item", "skip", "w1", "--path", "verification.review"],
             "skip",
-            {"note": None, "work_item_id": "w1", "path": "verification.review"},
+            {"note": None, "work_item_id": "w1", "path": "verification.review", "head": None},
         ),
         (
             ["item", "resume", "w1", "--steer", "all", "--steer-task", "a.main.b=only b"],

@@ -296,7 +296,14 @@ def test_the_gate_document_is_read_whole_and_scrolls_by_keys(board, monkeypatch)
             _detail(GATE),
             (),
             ["a"],
-            [("approve_gate", ("spec_approval", "a91c03fe", "d1g3st"), {})],
+            [("approve_gate", ("spec_approval", "a91c03fe", "d1g3st", None), {})],
+            None,
+        ),
+        (
+            _detail(GATE, review_head="f1nal"),
+            (),
+            ["a"],
+            [("approve_gate", ("spec_approval", "a91c03fe", "d1g3st", "f1nal"), {})],
             None,
         ),
         (
@@ -317,12 +324,13 @@ def test_the_gate_document_is_read_whole_and_scrolls_by_keys(board, monkeypatch)
             _detail(GATE),
             (),
             ["a", "a"],
-            [("approve_gate", ("spec_approval", "a91c03fe", "d1g3st"), {})],
+            [("approve_gate", ("spec_approval", "a91c03fe", "d1g3st", None), {})],
             None,
         ),
     ],
     ids=[
         "approve-with-the-digest-read",
+        "approve-the-final-review-with-the-head-the-item-showed",
         "must-fix-keeps-approve-shut",
         "retry",
         "a-second-a-sends-nothing",
@@ -351,6 +359,26 @@ def test_a_key_on_the_item_acts_through_the_shared_flow(
     assert got == sent
     if said:
         assert first == said
+
+
+def test_the_final_review_is_approved_with_its_head_though_it_has_no_document(board, monkeypatch):
+    """The head comes from the item the Overview rendered, not from the
+    artifact route, which 404s for a gate with no document -- exactly where a
+    person reaches for a decision with nothing to read."""
+    calls: list[tuple] = []
+    detail = _detail(GATE, review_head="f1nal")
+    _serve(monkeypatch, detail, document=None, calls=calls)
+    console = board([detail])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, detail["id"])
+        await pilot.press("a")
+        await console.until(pilot, lambda: calls)
+        return calls
+
+    assert console.run(scenario) == [
+        ("approve_gate", ("spec_approval", "a91c03fe", None, "f1nal"), {})
+    ]
 
 
 @pytest.mark.parametrize(
@@ -515,7 +543,7 @@ def test_approve_waits_for_the_document_it_would_approve(board, monkeypatch, aga
 
     held, early, opened, sent = console.run(scenario)
     assert (held, early, opened) == (False, [], True)
-    assert sent == [("approve_gate", ("spec_approval", "a91c03fe", "new"), {})]
+    assert sent == [("approve_gate", ("spec_approval", "a91c03fe", "new", None), {})]
 
 
 def test_a_failed_live_read_leaves_the_error_once(board, monkeypatch):
@@ -629,7 +657,7 @@ def test_a_read_for_the_item_shown_before_is_dropped(board, monkeypatch, late):
     stale, title, sent = console.run(scenario)
     assert stale == ("Board › b2b2b2b2", False, False, [])
     assert title == "Board › b2b2b2b2  Second"
-    assert sent == [("approve_gate", ("plan_review", "b2b2b2b2", "d1g3st"), {})]
+    assert sent == [("approve_gate", ("plan_review", "b2b2b2b2", "d1g3st", None), {})]
 
 
 @pytest.mark.parametrize(

@@ -16,6 +16,12 @@ connection error.
   A chain revision gate also needs `approve_gate(digest=...)`, with the
   `digest` that `get_gate_artifact()` returned alongside the revision the person
   read. If the revision changed since, the approval is refused: show it again.
+  The final review (the gate that merges the work) needs
+  `approve_gate(head=...)` too, with the `head` that `get_work_item()` returned
+  as `review_head` when the person read the diff (`get_gate_artifact()` returns
+  it as `head`). Skipping that gate takes `skip_work_item(head=...)`, and
+  `submit_review` takes `head=` for an approve. If the branch moved since, the
+  call is refused: show the change again.
 - `reject_gate(note="...")` - send the chain back to the node that can address
   the note; `node=` overrides where it re-enters, at or before the gate's own. The
   note is required, because a rejection with no reason strands whoever picks the

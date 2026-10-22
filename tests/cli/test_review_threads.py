@@ -88,7 +88,13 @@ from kraft import cli, client
         (
             ["item", "review", "7", "request-changes", "--summary", "s"],
             "submit_review",
-            {"outcome": "request_changes", "work_item_id": "7", "summary": "s", "node": None},
+            {
+                "outcome": "request_changes",
+                "work_item_id": "7",
+                "summary": "s",
+                "node": None,
+                "head": None,
+            },
         ),
     ],
     ids=[
@@ -128,7 +134,7 @@ def test_review_request_changes_json_is_pure_json_even_with_a_target(app, monkey
     """A gateless request-changes always has a `target` key; `--json` must still
     print exactly the payload, with no human-readable line ahead of it."""
 
-    async def fake_submit_review(outcome, work_item_id=None, summary=None, node=None):
+    async def fake_submit_review(outcome, work_item_id=None, summary=None, node=None, head=None):
         return {
             "review_id": "r1",
             "outcome": "request_changes",

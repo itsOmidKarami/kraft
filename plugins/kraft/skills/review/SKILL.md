@@ -56,7 +56,8 @@ does count, even a conditional one ("approve it if it looks fine"): review
 first, act only if your own review meets the condition, and otherwise leave the
 gate pending and report what you found. A gate answered on your say-so has
 stopped meaning anything. A chain revision gate also needs the `digest` from
-`get_gate_artifact()`: see `kraft:gates`.
+`get_gate_artifact()`, and the final review the `head` from `get_work_item()`
+(`review_head`): see `kraft:gates`.
 
 ## If you are a Kraft worker session
 
