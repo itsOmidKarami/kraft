@@ -402,5 +402,18 @@
       "Then runs `restart --merge-rejected --chain-id kl-7f3a91c2` (not a plain `restart`: on_base_changed is null), and continues with kraft-lite:next from merge_request_feedback, so the PR's checks and the final_review gate are answered again, or says it will",
       "Does not merge or re-queue PR #70 itself, and does not stop for the user: rejections (0) is below the cap (3)"
     ]
+  },
+  {
+    "skills": [
+      "kraft-lite:next"
+    ],
+    "query": "[user] Carry on.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite chain kl-7f3a91c2, titled 'Ledger export', on the default chain, is the only chain in the directory. The chain is unsliced; The merge queue has dropped PR #70 three times before in this run, and each time the repair ran and the walk came back through merge_request_feedback and final_review. PR #70 (branch ledger-export) passed its checks again, the user approved it at final_review, and mark_ready and external_approval are closed. The repo merges through GitHub's merge queue. `state --chain-id kl-7f3a91c2` prints: {\"chain_id\": \"kl-7f3a91c2\", \"node\": \"merge\", \"kind\": \"exec\", \"status\": \"open\", \"attempt\": 0, \"cap\": null, \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": null, \"steps\": [{\"id\": \"main\", \"tasks\": [{\"path\": \"merge.main.merge\", \"kind\": \"prompt\", \"skill\": null, \"prompt\": \"Merge the merge request once its checks and approvals allow it, and report the result.\", \"command\": null, \"why\": null, \"produces\": null, \"hints\": {\"profile\": null, \"model\": null, \"effort\": null}, \"source\": \"default:forge.mr.merge\", \"task_kind\": \"forge\", \"ref\": null, \"target\": \"mr.merge\"}]}], \"on_failure\": null, \"on_failure_ran\": false, \"fix_loop\": null, \"on_base_changed\": null, \"on_merge_rejected\": {\"restart_from\": \"merge_request_feedback\", \"repair\": {\"steps\": [{\"id\": \"main\", \"tasks\": [{\"path\": \"merge.on_merge_rejected.repair.main.repair\", \"kind\": \"prompt\", \"skill\": null, \"prompt\": \"Fix what made the merge train or merge queue reject this merge request.\", \"command\": null, \"why\": null, \"produces\": null, \"hints\": {\"profile\": \"strong\", \"model\": null, \"effort\": null}, \"source\": \"default:agent (skill missing)\", \"task_kind\": \"agent\", \"ref\": null, \"target\": null}]}]}, \"rejections\": 3, \"cap\": 3}, \"gate\": null}. The merge task added PR #70 to the merge queue and now reports: `GitHub's merge queue removed PR #70: the required check ci / test failed on its merge group (main had moved 2 commits since the PR's own run). Failed job: ci / test - tests/test_export.py::test_totals AssertionError: 1250 != 1205. PR #70 is open, not merged.` Reading the failure, the cause is plain: src/ledger/export/totals.py rounds each row before summing, and one of main's 2 new commits changed the rounding mode; summing before rounding is a one-line fix.",
+    "expected_behavior": [
+      "Sees on_merge_rejected.rejections already at its cap (3) and stops before any repair: tells the user the merge queue dropped PR #70, with the reason and the failed job (ci / test, test_totals)",
+      "Runs no repair task (merge.on_merge_rejected.repair.main.repair), makes no commit and pushes nothing to the PR's branch",
+      "Runs no `restart` (with or without --merge-rejected), no `attempt` and no `close` (running `restart --merge-rejected` only to see it refused is acceptable, but only with no repair or push before it)",
+      "Does not merge or re-queue PR #70 itself"
+    ]
   }
 ]

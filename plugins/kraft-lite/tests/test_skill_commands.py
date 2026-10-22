@@ -159,20 +159,28 @@ def _section(body: str, number: int) -> str:
         pytest.param(
             "next",
             2,
-            "No step failed, so spend no `attempt` and skip section 3. If `on_merge_rejected` is "
-            "set, run `on_merge_rejected.repair.steps` as above, with the drop's reason and each "
-            "failed job as their input, and push what they change to the PR's branch. Then "
-            "`KL restart --merge-rejected`: it reopens the walk from "
-            "`on_merge_rejected.restart_from` through this node, gates included, so the PR's "
-            "checks and the final gate are answered again before the merge runs.",
-            id="next-merge-rejected-repairs-then-restarts",
+            "No step failed, so spend no `attempt` and skip section 3. First, before any repair "
+            "runs or anything is pushed: with `on_merge_rejected` null, or `rejections` already "
+            "at its `cap`, stop and tell the user why the PR was dropped, as for `over_cap`.",
+            id="next-merge-rejection-cap-before-the-repair",
         ),
         pytest.param(
             "next",
             2,
-            "With `on_merge_rejected` null, or `rejections` already at its `cap`, stop and tell "
-            "the user why the PR was dropped, as for `over_cap`.",
-            id="next-merge-rejection-cap-from-state",
+            "Stop the same way when the forge gave no reason a repair can act on: the PR was "
+            "taken off by hand, or for a reason it does not say.",
+            id="next-merge-rejected-without-a-reason-stops",
+        ),
+        pytest.param(
+            "next",
+            2,
+            "Otherwise run `on_merge_rejected.repair.steps` as above, with the drop's reason and "
+            "each failed job as their input. If they committed nothing, stop and tell the user: "
+            "the forge would drop the same head again. Else push what they committed to the "
+            "PR's branch, then `KL restart --merge-rejected`: it reopens the walk from "
+            "`on_merge_rejected.restart_from` through this node, gates included, so the PR's "
+            "checks and the final gate are answered again before the merge runs.",
+            id="next-merge-rejected-repairs-then-restarts",
         ),
         pytest.param(
             "next",

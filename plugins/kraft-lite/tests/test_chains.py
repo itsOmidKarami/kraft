@@ -27,15 +27,6 @@ def write_library(dir: Path, library: str, chains: dict[str, str]) -> Path:
     return dir
 
 
-@pytest.fixture
-def home(tmp_path, monkeypatch) -> Path:
-    """An empty home, which `Path.home()` answers for the test."""
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
-    return home
-
-
 ONE_NODE = """\
     nodes:
       - id: only
@@ -643,6 +634,16 @@ def _rejecting(rejected: str, before: str = "", tasks: str = MERGE_TASK, extra: 
             },
             "m: on_merge_rejected cannot share a node with fix_loop",
             id="merge_rejected_beside_a_fix_loop",
+        ),
+        pytest.param(
+            {
+                "c": _rejecting(
+                    f"restart_from: a, {REPAIR}",
+                    extra=", on_failure: {tasks: [{id: fix, extends: worker}]}",
+                )
+            },
+            "m: on_merge_rejected cannot share a node with on_failure",
+            id="merge_rejected_beside_on_failure",
         ),
         pytest.param(
             {"c": _rejecting("restart_from: a")},

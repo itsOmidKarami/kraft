@@ -46,6 +46,15 @@ def _isolated_home(request, tmp_path_factory, monkeypatch):
             monkeypatch.delenv(name, raising=False)
 
 
+@pytest.fixture
+def home(tmp_path, monkeypatch) -> Path:
+    """An empty home, which `Path.home()` answers for the test."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    return home
+
+
 @pytest.fixture(scope="module")
 def texts():
     """Every skill's SKILL.md, by skill name."""

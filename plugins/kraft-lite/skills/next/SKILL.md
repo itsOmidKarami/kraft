@@ -101,14 +101,18 @@ at `cap`, stop and ask the user instead, as for `over_cap`.
 The merge task can report that the forge's merge train or merge queue dropped
 the PR instead of merging it: the pipeline it ran on the PR merged into the
 target failed, or the target moved under it. No step failed, so spend no
-`attempt` and skip section 3. If `on_merge_rejected` is set, run
+`attempt` and skip section 3. First, before any repair runs or anything is
+pushed: with `on_merge_rejected` null, or `rejections` already at its `cap`,
+stop and tell the user why the PR was dropped, as for `over_cap`. Stop the same
+way when the forge gave no reason a repair can act on: the PR was taken off by
+hand, or for a reason it does not say. Otherwise run
 `on_merge_rejected.repair.steps` as above, with the drop's reason and each
-failed job as their input, and push what they change to the PR's branch. Then
-`KL restart --merge-rejected`: it reopens the walk from
+failed job as their input. If they committed nothing, stop and tell the user:
+the forge would drop the same head again. Else push what they committed to the
+PR's branch, then `KL restart --merge-rejected`: it reopens the walk from
 `on_merge_rejected.restart_from` through this node, gates included, so the PR's
 checks and the final gate are answered again before the merge runs. Then this
-skill again. With `on_merge_rejected` null, or `rejections` already at its
-`cap`, stop and tell the user why the PR was dropped, as for `over_cap`.
+skill again.
 
 Every step passed: `KL close`, then this skill again. In a sliced run (`sliced`
 not null), export state after every `close`, as `kraft-lite:run-slices`

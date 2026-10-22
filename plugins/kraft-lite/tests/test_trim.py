@@ -9,8 +9,7 @@ import pytest
 
 import kl_chains
 
-# `home` is a fixture: imported, pytest finds it here.
-from .test_chains import DEFAULT_IDS, LIBRARY, home, write_library  # noqa: F401
+from .test_chains import DEFAULT_IDS, LIBRARY, write_library
 
 #: A chain whose gate on the plan sends a rejection back to the spec's author.
 CROSSED = """\
