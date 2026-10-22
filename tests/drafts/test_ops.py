@@ -113,6 +113,57 @@ async def test_remove_handler_writes_null_over_one_the_base_supplies(st):
     assert r.problems == []
 
 
+#: Taking the shipped `merge` node's merge-rejection policy away.
+UNREJECTED = ("remove_handler", {"path": "merge", "kind": "on_merge_rejected"})
+
+
+@pytest.mark.parametrize(
+    ("path", "batch", "restart"),
+    [
+        ("merge", [], "merge_request_feedback"),
+        ("merge", [UNREJECTED], "work_item_summary"),
+        ("implementation", [], "chain_revision"),
+    ],
+    ids=["keeps-the-restart-it-has", "the-last-exec-before-the-final-gate", "the-nearest-exec"],
+)
+async def test_add_handler_gives_a_merge_rejection_an_empty_repair_and_a_restart(
+    st, path, batch, restart
+):
+    """The repair is required, so the policy arrives whole: `restart_from`
+    the one the node has, else the last node `Chain` lets it name."""
+    r = apply(st, *batch, ("add_handler", {"path": path, "kind": "on_merge_rejected"}))
+    assert r.answers[-1] == {"path": f"{path}.on_merge_rejected.repair"}
+    assert r.nodes[path]["on_merge_rejected"] == {
+        "restart_from": restart,
+        "repair": {"steps": [{"id": "main", "tasks": []}]},
+    }
+
+
+@pytest.mark.parametrize(
+    ("path", "why"),
+    [
+        ("spec", "spec has no execution node before it to restart from after a rejected merge"),
+        ("nope", "there is no node 'nope'"),
+    ],
+    ids=["nothing-earlier", "no-such-node"],
+)
+async def test_add_handler_refuses_a_merge_rejection_with_nowhere_to_restart(st, path, why):
+    assert why in refused(st, ("add_handler", {"path": path, "kind": "on_merge_rejected"}))
+
+
+async def test_remove_handler_drops_a_merge_rejection_whole_and_only_a_merge_keeps_its_row(st):
+    """Its repair is required, so removing it takes the restart too; the
+    node still merges, so its Config row stays, unset; a node that does not
+    merge has none."""
+    r = apply(st, UNREJECTED)
+    assert "on_merge_rejected" not in r.nodes["merge"]
+    assert r.problems == []
+    sources = r.result["sources"]
+    assert sources["merge"]["on_merge_rejected"] == {"value": None, "source": "default"}
+    assert "on_merge_rejected" not in sources["verification"]
+    assert "on_base_changed" in sources["verification"]
+
+
 async def test_move_reorders_a_node_a_step_and_a_task_across_steps(st):
     r = apply(
         st,

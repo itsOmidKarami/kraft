@@ -583,6 +583,9 @@ def _sources(
             if name in unread and name not in model.model_fields_set:
                 continue
             value = dumped[name]
+            # Only a node that merges can have a merge rejected: elsewhere, unset, no row.
+            if name == "on_merge_rejected" and value is None and not model.merges():
+                continue
             if name in _HANDLER_OF and isinstance(value, dict):
                 value = {k: v for k, v in value.items() if k != _HANDLER_OF[name]}
             source = _setter(layers, name) if name in model.model_fields_set else "default"

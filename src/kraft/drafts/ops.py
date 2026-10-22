@@ -35,13 +35,19 @@ from kraft.templates.models import (
     PATH_SEPARATOR,
     RESERVED_SEGMENTS,
     TaskKind,
+    merge_rejection_limit,
 )
 
 _IDENTIFIER = TypeAdapter(Identifier)
 #: A named slot's task id, by slot (the prototype's `addTask`).
 _SLOT_IDS = {JUDGE_SEGMENT: "judge", "escalation": "escalate", AUTO_REVIEW_SEGMENT: "reviewer"}
 #: What `add_handler` and `remove_handler` take, as the key it sets.
-_HANDLERS = ("on_failure", "fix_loop", "on_conflict")
+_HANDLERS = ("on_failure", "fix_loop", "on_conflict", "on_merge_rejected")
+#: A node policy's handler, by the kind `add_handler` names: the policy key, then the handler's.
+_POLICY_HANDLERS = {
+    "on_conflict": ("on_base_changed", "on_conflict"),
+    "on_merge_rejected": ("on_merge_rejected", "repair"),
+}
 #: What `remove` drops as a key of its container rather than a list entry.
 _SLOTS = ("fix_loop", JUDGE_SEGMENT, "escalation", AUTO_REVIEW_SEGMENT)
 #: The node policies' restart pointers: clearing one drops its whole policy.
@@ -663,15 +669,48 @@ def add_task(
 def _handler_at(path: str, kind: str) -> tuple[str, str]:
     if kind not in _HANDLERS:
         raise OpError(f"a handler is one of {', '.join(_HANDLERS)}, not {kind!r}")
-    return (
-        (_join(path, "on_base_changed"), "on_conflict") if kind == "on_conflict" else (path, kind)
+    if kind in _POLICY_HANDLERS:
+        policy, key = _POLICY_HANDLERS[kind]
+        return _join(path, policy), key
+    return path, kind
+
+
+def _merge_restart(d: Draft, id: str) -> str:
+    """Where a new `on_merge_rejected` on node `id` restarts: the one it
+    inherits, else the last execution node it may name (`Chain`'s rule, by
+    `merge_rejection_limit`)."""
+    if d.file == authored.LIBRARY:
+        raise OpError(
+            f"{id} has no chain order to restart in; add on_merge_rejected to a chain's node"
+        )
+    nodes = _dicts(d.expanded().get("nodes"))
+    position = next((i for i, n in enumerate(nodes) if n.get("id") == id), None)
+    if position is None:
+        raise OpError(f"on_merge_rejected is a node's, and there is no node {id!r}")
+    if isinstance(restart := _restart_from(nodes[position], "on_merge_rejected"), str):
+        return restart
+    final = next(
+        (i for i, n in enumerate(nodes) if n.get("kind") == "gate" and n.get("chain_finalized")),
+        None,
     )
+    earlier = [
+        n.get("id")
+        for n in nodes[: merge_rejection_limit(position, final)]
+        if n.get("kind") != "gate"
+    ]
+    if not earlier:
+        where = "before its final gate" if final is not None and final < position else "before it"
+        raise OpError(f"{id} has no execution node {where} to restart from after a rejected merge")
+    return earlier[-1]
 
 
 def add_handler(d: Draft, path: str, kind: str) -> dict:
     where, key = _handler_at(path, kind)
     shape = {"steps": [{"id": MAIN_STEP, "tasks": []}]}
-    if kind == "on_conflict":
+    if kind == "on_merge_rejected":
+        # The repair is required, so the policy arrives whole, restart and all.
+        d.put(path, "on_merge_rejected", {"restart_from": _merge_restart(d, path), key: shape})
+    elif kind == "on_conflict":
         # `on_base_changed` is not addressable on its own; `on_conflict` is
         # last in its canonical order, so `put`'s placement is the end.
         if not isinstance(d.own(path, "on_base_changed"), dict):
@@ -684,6 +723,10 @@ def add_handler(d: Draft, path: str, kind: str) -> dict:
 
 def remove_handler(d: Draft, path: str, kind: str) -> None:
     where, key = _handler_at(path, kind)
+    if kind == "on_merge_rejected":
+        # Its repair is required: without one, the policy is no file's.
+        d.drop(path, "on_merge_rejected")
+        return
     if kind != "on_conflict":
         d.drop(where, key)
         return

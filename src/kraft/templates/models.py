@@ -865,6 +865,14 @@ class ExecNode(ExecutionShape):
     read_only: StrictBool = False
     icon: Icon | None = None
 
+    def merges(self) -> bool:
+        """Whether one of the node's own tasks, after `extends` expansion,
+        merges its merge request: the only node `on_merge_rejected` fits. A
+        merge in one of its handlers is not the merge the forge rejects."""
+        return any(
+            isinstance(t, ForgeTask) and t.target == ForgeAction.MR_MERGE for t in self.own_tasks()
+        )
+
     @model_validator(mode="after")
     def _read_only_has_no_fix_loop(self) -> Self:
         # A fix loop writes by design.
@@ -948,6 +956,14 @@ class GateNode(BaseModel):
 AnyNode = Annotated[ExecNode | GateNode, Field(discriminator="kind")]
 
 
+def merge_rejection_limit(position: int, final: int | None) -> int:
+    """The index an `on_merge_rejected.restart_from` target must sit before,
+    for the node at `position` of a chain whose first final gate is at
+    `final`: the node itself, or that gate when it comes first, since a rewind
+    that starts past it would merge the repair's commit unseen."""
+    return final if final is not None and final < position else position
+
+
 #: The forge targets that take a merge request past draft.
 _PUBLISHING = frozenset({ForgeAction.MR_MARK_READY, ForgeAction.MR_MERGE})
 
@@ -1009,7 +1025,7 @@ class Chain(BaseModel):
                     )
                 # Before the final gate, when the merge comes after it: a rewind
                 # that starts past it would merge the repair's commit unseen.
-                if final is not None and final < position and index[target] > final:
+                if index[target] >= merge_rejection_limit(position, final):
                     raise ValueError(
                         f"node {node.id!r}: on_merge_rejected.restart_from {target!r} must name "
                         f"an execution node before the final gate {self.nodes[final].id!r} "
@@ -1023,12 +1039,7 @@ class Chain(BaseModel):
                             f"node {node.id!r}: on_merge_rejected cannot share a node with "
                             f"{other} in {where}"
                         )
-                # The node's own tasks, after `extends` expansion: a merge in
-                # one of its handlers is not the merge the forge rejects.
-                if not any(
-                    isinstance(t, ForgeTask) and t.target == ForgeAction.MR_MERGE
-                    for t in node.own_tasks()
-                ):
+                if not node.merges():
                     raise ValueError(
                         f"node {node.id!r}: on_merge_rejected needs an mr.merge task in the "
                         "same node"
