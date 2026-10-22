@@ -117,6 +117,13 @@ CHECKOUT_REFUSED = "checkout_refused"
 #: the item before the final review again (`walk._stop_unreviewed`).
 UNREVIEWED_HEAD = "unreviewed_head"
 
+#: The forge merged a head the final review did not approve, after Kraft asked
+#: it to merge the approved one: the code is already on the base branch. A stop
+#: for a person (`walk._stop_landed_unreviewed`), not a failure -- a fix loop or
+#: an escalation cannot unmerge it -- and no rewind: reopening gates on code that
+#: has landed would review nothing.
+LANDED_UNREVIEWED = "landed_unreviewed"
+
 
 #: The tier that handles each status, in one place so a new status cannot be
 #: added without declaring where it is handled.
@@ -146,6 +153,7 @@ SCOPE: dict[str, str] = {
     READ_ONLY_VIOLATED: "stop",  # a read_only scope wrote; a person looks
     CHECKOUT_REFUSED: "stop",  # the person's checkout; never forced, never retried
     UNREVIEWED_HEAD: "stop",  # the merge would push code no final review saw
+    LANDED_UNREVIEWED: "stop",  # the forge merged code no final review saw; a person looks
     TIME_CAPPED: "stop",  # a scope's time ran out; a person decides (Ruling 194)
     BASE_MOVED: "chain",  # the bounce, taken by run_once
     CONFLICT_RESOLVED: "chain",  # the same restart, reopening the span's gates

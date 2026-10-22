@@ -27,6 +27,7 @@ from kraft.executor.context import (
     CONFLICT_RESOLVED,
     ESCALATION_COMMITTED,
     INFRA_STOP,
+    LANDED_UNREVIEWED,
     MERGE_REJECTED,
     MERGE_REPAIRED,
     MERGE_REWIND,
@@ -565,6 +566,8 @@ async def _sentinel_stop(
         return await _read_only.stop(db, work_item_id, node.id)
     if verdict == UNREVIEWED_HEAD:
         return await _stop_unreviewed(db, work_item_id, node)
+    if verdict == LANDED_UNREVIEWED:
+        return await _stop_landed_unreviewed(db, work_item_id, node)
     if verdict == BUDGET:
         return await stops.stop_for_budget(db, work_item_id, node, budget)
     if verdict == REPAIR_DOUBTED:
@@ -1174,6 +1177,38 @@ async def _stop_unreviewed(db, work_item_id: str, node: ResolvedNode) -> str:
         nodes[final].id if final is not None else "the final review",
         target,
         store.branch_for(row),
+    )
+    await db.write(
+        lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=StopKind.FAILED)
+    )
+    return "needs_human"
+
+
+async def _stop_landed_unreviewed(db, work_item_id: str, node: ResolvedNode) -> str:
+    """The forge merged a head the final review did not approve
+    (`merge_landed_unreviewed`). Nothing can be held or rewound: the code is on
+    the base branch, so no rewind, no fix loop, no escalation -- a stop for a
+    person naming both heads. `kraft item complete` accepts what landed, and
+    `kraft item skip` on the merge node goes on to what follows it."""
+    row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    raw = db.read(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE work_item_id = ? AND type = ? "
+            "ORDER BY seq DESC LIMIT 1",
+            (work_item_id, ForgeEvent.MERGE_LANDED_UNREVIEWED),
+        ).fetchone()
+    )
+    landed = json.loads(raw["payload"]) if raw else {}
+    snapshot = store.materialized_chain_of(row)
+    base = (snapshot.target.base_branch if snapshot is not None else None) or "the base branch"
+    merged, reviewed = landed.get("merged_head") or "", landed.get("reviewed") or ""
+    reason = (
+        f"node {node.id}: the forge merged {merged[:12] or 'a head Kraft could not read'}, "
+        f"not {reviewed[:12] or 'the head'} the final review approved; "
+        f"check what landed on {base}. `kraft item complete --reason` accepts it, "
+        "`kraft item skip` goes on to what follows the merge"
     )
     await db.write(
         lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=StopKind.FAILED)

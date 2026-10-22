@@ -90,7 +90,11 @@ export function eventLine(e: KraftEvent, nodes?: Nodes, before?: KraftEvent): st
     case "mr_opened": return `MR !${s(p.number)} opened`;
     case "mr_closed": return `MR !${s(p.ref)} closed${p.by && p.by !== "cancel" ? ` by ${s(p.by)}` : ""}`;
     case "mr_reopened": return `MR !${s(p.ref)} reopened`;
-    case "merge_refused_unreviewed": return `${at} · not merged: the code is not what the final review approved`;
+    case "merge_refused_unreviewed":
+      return p.source === "forge"
+        ? `${at} · not merged: a commit reached the merge request after the review; ${p.fast_forwarded ? "it is on the item's branch to review" : "pull it into the branch by hand"}`
+        : `${at} · not merged: the code is not what the final review approved`;
+    case "merge_landed_unreviewed": return `${at} · the forge merged a head the final review did not approve`;
     case "reviewed_head_repinned": return `reviewed head moved${typeof p.cause === "string" && Object.hasOwn(REPINNED_HOW, p.cause) ? REPINNED_HOW[p.cause] : ""}`;
     case "budget_raised": case "budget_changed": return `budget set to $${s(p.budget_usd)}`;
     // Nothing was merged behind the item, so its beads stay open for the operator to close by hand.

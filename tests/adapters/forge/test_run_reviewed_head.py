@@ -5,15 +5,19 @@ Walked through the executor against a `FakeForge`; git is real."""
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 from support.addons import with_origin
 from support.harness import commit_all, entry_of, git, write
 
 from kraft import builtins as _builtins
-from kraft import executor, reviewed_head, store
+from kraft import events, executor, reviewed_head, store
 from kraft.adapters import forge
+from kraft.executor.context import LANDED_UNREVIEWED, UNREVIEWED_HEAD
 
-from .nodes import forge_node
+from .nodes import back_half, forge_node
+from .test_run_merge_queue import _on_branch, _open
 
 ON_A_FORGE = entry_of({"setup_command": "", "forge": "github"})
 NO_SETUP = entry_of({"setup_command": ""})
@@ -239,7 +243,7 @@ async def test_a_commit_that_reaches_the_forge_after_the_final_review_goes_back_
     assert await walk(fake, it) == "needs_human"
 
     branch = store.branch_for(it.row())
-    # The push refused for the forge's commit pushed nothing; a merge refused for it came after a push.
+    # A push refused for the forge's commit pushed nothing; a refused merge came after a push.
     assert fake.merged == [] and fake.pushed == pushed + ([branch] if refused_by == "merge" else [])
     assert [e["payload"] for e in it.events("merge_refused_unreviewed")] == [
         {
@@ -265,3 +269,135 @@ async def test_a_commit_that_reaches_the_forge_after_the_final_review_goes_back_
     assert said in it.events("work_item_needs_human")[-1]["payload"]["reason"]
     pin = database.read(lambda c: reviewed_head.pinned(c, it.id))
     assert list(pin.values()) == [reviewed], "the pin does not move: the commit is unreviewed"
+
+
+class _ReportsNoHead(forge.FakeForge):
+    """A forge that does not say the head of a merge request, as GitLab does
+    for one it has merged (the head it names then may be a rebase's)."""
+
+    async def find_mr(self, *, repo, branch):
+        found = await super().find_mr(repo=repo, branch=branch)
+        return dataclasses.replace(found, head_sha="") if found else None
+
+
+@pytest.mark.parametrize(
+    ("fake", "asked", "verdicts", "cancelled", "landed"),
+    [
+        (
+            lambda forged: forge.FakeForge(merge_delay=3, head_after_merge=forged),
+            True,
+            ["waiting", UNREVIEWED_HEAD],
+            [1],
+            None,
+        ),
+        (
+            lambda forged: forge.FakeForge(merge_delay=1, head_after_merge=forged),
+            True,
+            ["waiting", LANDED_UNREVIEWED, LANDED_UNREVIEWED],
+            [],
+            1,
+        ),
+        (
+            lambda forged: _ReportsNoHead(merge_delay=1, head_after_merge=forged),
+            True,
+            ["waiting", "done"],
+            [],
+            None,
+        ),
+        (
+            lambda forged: forge.FakeForge(forge_head=forged),
+            False,
+            ["done"],
+            [],
+            None,
+        ),
+    ],
+    ids=[
+        "an-open-merge-whose-forge-head-moved-is-cancelled-and-held",
+        "a-merge-that-landed-a-moved-head-stops-and-a-retry-stops-again",
+        "a-merged-mr-with-no-head-reported-is-done",
+        "a-merge-kraft-never-asked-for-is-not-checked",
+    ],
+)
+async def test_a_head_that_moves_on_the_forge_after_the_merge_was_asked_is_caught(
+    run_forge, item_on, repo, fake, asked, verdicts, cancelled, landed
+):
+    """The forge enforces the head named in the merge call, but it may merge
+    later (auto-merge, a queue) and a commit can reach the branch meanwhile.
+    The next observation of a merge Kraft asked for reads the forge's head
+    against the approved one: still open, the merge is cancelled and the item
+    held for review; already merged, nothing can be undone, so the item stops
+    for a person (`merge_landed_unreviewed`) and a plain retry stops again. A
+    forge that names no head for a merged request (GitLab's rebase), and a
+    merge a person made by hand, are not checked."""
+    reviewed = _on_branch(repo)
+    run_forge.item = await item_on(back_half(), repo=repo)
+    pin = {"gate": "final", "by": "human", "tips": {str(repo): reviewed}}
+    await run_forge.database.write(lambda c: events.append(c, "w1", "gate_approved", pin))
+    forged = "f" * 40
+    fake = await _open(fake(forged), repo)
+    if not asked:
+        fake.merged.append(1)
+
+    got = [(await run_forge(fake, "merge", f"m{i}", repo=repo))[0] for i in range(len(verdicts))]
+
+    assert got == verdicts
+    assert fake.cancelled == cancelled
+    recorded = run_forge.events("merge_landed_unreviewed")
+    assert recorded == (
+        [
+            {
+                "node_id": "mr_checks",
+                "repo": str(repo),
+                "reviewed": reviewed,
+                "merged_head": forged,
+                "number": landed,
+            }
+        ]
+        if landed
+        else []
+    ), "once, however often it is retried"
+    refused = run_forge.events("merge_refused_unreviewed")
+    assert [(r["source"], r["current"]) for r in refused] == (
+        [("forge", forged)] if cancelled else []
+    )
+
+
+async def test_a_merge_that_landed_an_unreviewed_head_stops_the_walk_for_a_person(
+    walk, item_on, database, run_dirs, repo
+):
+    """Nothing is held or rewound for code that is already on the base branch:
+    no reopened gate, no fix loop, no escalation -- a `needs_human` stop naming
+    both heads and the two doors that end it."""
+    it = await item_on(_chain(False))
+    await _builtins.ensure_worktree(
+        database, run_dirs, repo=str(repo), work_item_id=it.id, repo_entry=NO_SETUP
+    )
+    write(it.worktree, "feature.txt", "the item's change\n")
+    reviewed = commit_all(it.worktree, "the item's change")
+    forged = "f" * 40
+    fake = forge.FakeForge(ci_states=["success"], merge_delay=1, head_after_merge=forged)
+    assert await walk(fake, it) == "awaiting_gate"
+    tips = reviewed_head.pin_for(database, it.row(), "final", it.worktree)
+    await database.write(lambda c: store.request_gate(c, it.id, "final", "final"))
+    await database.write(lambda c: store.approve_gate(c, it.id, "final", tips=tips))
+    statuses = []
+    for _ in range(3):
+        # As the wait's poller re-enters the walk at its due time.
+        await database.write(lambda c: store.mark_reentered(c, it.id))
+        statuses.append(await walk(fake, it))
+        if statuses[-1] != "waiting":
+            break
+
+    assert statuses[-1] == "needs_human"
+    assert fake.merged == [1]
+    assert [e["payload"]["merged_head"] for e in it.events("merge_landed_unreviewed")] == [forged]
+    assert it.events("gate_reopened") == [] and it.events("merge_refused_unreviewed") == []
+    assert (it.status(), it.row()["current_node_id"], it.row()["stop_kind"]) == (
+        "needs_human",
+        "merge",
+        "failed",
+    )
+    reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
+    assert f"merged {forged[:12]}, not {reviewed[:12]}" in reason
+    assert "kraft item complete" in reason

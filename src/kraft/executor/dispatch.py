@@ -40,6 +40,7 @@ from kraft.executor.context import (
     CONFIG_ERROR,
     CONFLICT,
     INFRA_STOP,
+    LANDED_UNREVIEWED,
     MERGE_REJECTED,
     RATE_LIMITED,
     READ_ONLY_VIOLATED,
@@ -2205,6 +2206,9 @@ async def measure_node(
     # no final review saw, and whatever else happened, it must go back there.
     if UNREVIEWED_HEAD in results:
         return UNREVIEWED_HEAD, [t for t, r in outcomes if r == UNREVIEWED_HEAD], []
+    # And the merge that has already happened, which only a person can answer.
+    if LANDED_UNREVIEWED in results:
+        return LANDED_UNREVIEWED, [t for t, r in outcomes if r == LANDED_UNREVIEWED], []
     # A pause stops the walk where it stands: the node is neither done nor failed,
     # and resume relaunches it. It outranks a co-task's failure, which was almost
     # certainly the same SIGTERM arriving on a different row.

@@ -30,6 +30,9 @@ class ForgeEvent(StrEnum):
     REVIEWED_HEAD_REPINNED = "reviewed_head_repinned"
     #: The merge would have pushed a head the final review did not approve.
     MERGE_REFUSED_UNREVIEWED = "merge_refused_unreviewed"
+    #: The forge merged a head the final review did not approve: Kraft asked for
+    #: the merge, and a commit reached the merge request before it landed.
+    MERGE_LANDED_UNREVIEWED = "merge_landed_unreviewed"
 
 
 _PLAIN = EventTraits()
@@ -53,6 +56,7 @@ FORGE_EVENT_TRAITS = total(
         ForgeEvent.MERGE_QUEUE_DROPPED: _PLAIN,
         ForgeEvent.REVIEWED_HEAD_REPINNED: _PLAIN,
         ForgeEvent.MERGE_REFUSED_UNREVIEWED: _PLAIN,
+        ForgeEvent.MERGE_LANDED_UNREVIEWED: _PLAIN,
     },
     name="FORGE_EVENT_TRAITS",
 )

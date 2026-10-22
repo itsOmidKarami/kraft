@@ -627,7 +627,17 @@ def event_line(
         case "mr_reopened":
             return f"MR !{_s(p.get('ref'))} reopened"
         case "merge_refused_unreviewed":
+            if p.get("source") == "forge":
+                where = (
+                    "it is on the item's branch to review"
+                    if p.get("fast_forwarded")
+                    else "pull it into the branch by hand"
+                )
+                late = "a commit reached the merge request after the review"
+                return f"{node} · not merged: {late}; {where}"
             return f"{node} · not merged: the code is not what the final review approved"
+        case "merge_landed_unreviewed":
+            return f"{node} · the forge merged a head the final review did not approve"
         case "reviewed_head_repinned":
             # Kraft's own rewrite of the approved head (`kraft.reviewed_head.repin`).
             how = {

@@ -4,6 +4,7 @@ repos.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from pathlib import Path
@@ -24,6 +25,7 @@ from kraft.adapters.forge.models import (
     Forge,
     ForgeError,
     HeadMoved,
+    MRRef,
     QueueRead,
 )
 from kraft.automated_review import AutomatedReview
@@ -270,6 +272,56 @@ async def _push_or_hold(
             raise
         return await _refuse_forge_head(db, work_item_id, node_id, repo, branch, exc.remote)
     return None
+
+
+def _moved_head(db, work_item_id: str, repo: Path, found: MRRef) -> tuple[str, str] | None:
+    """`(approved, the forge's)` when a merge Kraft asked for is on a head other
+    than the one the final review approved for `repo`; None when they agree, the
+    forge did not say, or nothing is pinned."""
+    reviewed = reviewed_head.reviewed_tip(db, work_item_id, repo)
+    if reviewed and found.head_sha and found.head_sha != reviewed:
+        return reviewed, found.head_sha
+    return None
+
+
+async def _landed_unreviewed(
+    db, work_item_id: str, node_id: str, repo: Path, found: MRRef, requested: bool
+) -> str | None:
+    """The log of a stop when the merged request `found` is code the final
+    review did not approve, else None. Two ways: a merge this wait asked for
+    (`requested`) landed on a head other than the approved one -- recorded as
+    `merge_landed_unreviewed`, which Kraft cannot undo -- or one already
+    recorded for this merge request, which a plain retry must not clear: only
+    `kraft item complete` or `skip` on the node ends it. A merge Kraft never
+    asked for (a person's, on the forge) is not checked."""
+    recorded = db.read(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE work_item_id = ? AND type = ? "
+            "AND json_extract(payload, '$.repo') = ? AND json_extract(payload, '$.number') = ? "
+            "ORDER BY seq DESC LIMIT 1",
+            (work_item_id, ForgeEvent.MERGE_LANDED_UNREVIEWED, str(repo), found.number),
+        ).fetchone()
+    )
+    if recorded is not None:
+        landed = json.loads(recorded["payload"])
+    else:
+        moved = _moved_head(db, work_item_id, repo, found) if requested else None
+        if moved is None:
+            return None
+        landed = {
+            "node_id": node_id,
+            "repo": str(repo),
+            "reviewed": moved[0],
+            "merged_head": moved[1],
+            "number": found.number,
+        }
+        await db.write(
+            lambda c: events.append(c, work_item_id, ForgeEvent.MERGE_LANDED_UNREVIEWED, landed)
+        )
+    return (
+        f"!{found.number} merged {landed['merged_head'][:12]}, not {landed['reviewed'][:12]}, "
+        "the head the final review approved; the code is on the base branch\n"
+    )
 
 
 async def _refuse_forge_head(
@@ -876,8 +928,14 @@ async def _run_one(
                 existing is not None and existing.state == "open" and existing.merge_queued
             )
             if existing is not None and existing.state == "merged":
-                log = f"already merged (!{existing.number}); nothing to do\n"
-                status = "done"
+                unseen = await _landed_unreviewed(
+                    db, work_item_id, node_id, repo, existing, requested
+                )
+                if unseen is not None:
+                    log, status = unseen, "landed_unreviewed"
+                else:
+                    log = f"already merged (!{existing.number}); nothing to do\n"
+                    status = "done"
             elif (existing is None or existing.state != "open") and requested:
                 gone = existing.state if existing else "gone"
                 log = f"the merge request is {gone}, not merged; nothing landed\n"
@@ -887,6 +945,15 @@ async def _run_one(
                     f"no open merge request for {branch!r}"
                     + (f": !{existing.number} is {existing.state}" if existing else "")
                 )
+            elif requested and (moved := _moved_head(db, work_item_id, repo, existing)):
+                # Asked, and since then the forge's head is not the approved one: a
+                # commit reached the merge request, which the forge would merge
+                # when its checks pass. Cancelled while it still can be (a failed
+                # cancel fails the node: the forge may still merge), then held.
+                await forge.cancel_merge(repo=repo, branch=branch, mr=existing)
+                log = f"cancelled the merge of !{existing.number}, now at {moved[1][:12]}\n"
+                log += await _refuse_forge_head(db, work_item_id, node_id, repo, branch, moved[1])
+                status = "unreviewed"
             elif requested:
                 # This wait already asked for the merge; it is only reading
                 # whether it has landed. Asking again would merge twice on a
@@ -1508,6 +1575,8 @@ async def run_task(
     unobserved: str | None = None
     #: The merge found a head the final review did not approve.
     unreviewed = False
+    #: The forge merged one.
+    landed_unreviewed = False
     checkout_stopped = False
     # Findings only ever reach `finish_session` for a single-target run: a
     # submodule's own CI is not this item's `mr_checks` node, and findings
@@ -1609,7 +1678,13 @@ async def run_task(
                         else (
                             "failed"
                             if one_status
-                            not in ("rebased", "merge_rejected", "unreviewed", *_PENDING)
+                            not in (
+                                "rebased",
+                                "merge_rejected",
+                                "unreviewed",
+                                "landed_unreviewed",
+                                *_PENDING,
+                            )
                             else None
                         )
                     ),
@@ -1633,6 +1708,9 @@ async def run_task(
             # Internal-only too: the session failed to merge, and the walk is
             # told why (`UNREVIEWED_HEAD`), below.
             unreviewed, status = True, "failed"
+        if status == "landed_unreviewed":
+            # And the same for a merge that already happened (`LANDED_UNREVIEWED`).
+            landed_unreviewed, status = True, "failed"
         if status == "rebased":
             # Internal-only marker (worker_sessions.status has no "rebased"
             # value, and the walk's own bounce -- keyed off base_ref moving,
@@ -1682,11 +1760,14 @@ async def run_task(
     from kraft.executor.context import (  # the executor imports this module
         BASE_MOVED,
         CHECKOUT_REFUSED,
+        LANDED_UNREVIEWED,
         UNREVIEWED_HEAD,
     )
 
     if checkout_stopped:
         return CHECKOUT_REFUSED
+    if landed_unreviewed:
+        return LANDED_UNREVIEWED
     if unreviewed:
         return UNREVIEWED_HEAD
     return BASE_MOVED if (moved and has_rebase_bounce and recorded == "done") else recorded
