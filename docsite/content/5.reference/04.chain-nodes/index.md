@@ -221,8 +221,10 @@ repair's commit.
 
 A successful `escalation` task that committed rewinds the chain there, under
 the same cap, instead of re-running the node; one that changed nothing re-runs
-it. An escalation agent's own `kraft item retry` restarts at `restart_from`,
-whatever node it named.
+it. A tip Kraft cannot read, before the escalation or after it, counts as a
+change. An escalation agent's own `kraft item retry` of this node, or of any
+node after `restart_from`, restarts at `restart_from`; one it names at or
+before `restart_from` already passes the gates again, and runs as named.
 
 An `on_base_changed` on this node, or on any node with an `mr.merge` task after
 the `chain_finalized` gate, must restart before that gate: a conflict

@@ -5,6 +5,7 @@ that agent may leave behind."""
 import json
 
 import pytest
+from support.harness import git
 from support.item_walk import (
     MERGE_POLICY,
     NO_SETUP,
@@ -593,22 +594,42 @@ async def test_an_auto_escalation_refused_its_checkout_waits_or_is_skipped(
 
 
 @pytest.mark.parametrize(
-    ("commits", "retries", "start"),
-    [(True, True, 0), (True, False, None), (False, True, 2)],
-    ids=["commits-and-retries", "commits-and-stops", "changes-nothing"],
+    ("does", "named", "start", "forked"),
+    [
+        ("commits", "merge", 0, "feedback"),
+        ("commits", "feedback.main.ci", 0, "feedback.main.ci"),
+        ("commits", None, None, None),
+        ("nothing", "merge", 2, "merge"),
+        ("unreadable", "merge", 0, "feedback"),
+        ("commits-then-ends", "merge", None, None),
+    ],
+    ids=[
+        "commits-and-retries",
+        "commits-and-retries-before-the-hold",
+        "commits-and-stops",
+        "changes-nothing",
+        "tips-unreadable",
+        "ended-meanwhile",
+    ],
 )
 async def test_an_escalation_that_commits_on_a_merge_node_sends_it_back_through_review(
-    item_on, script, monkeypatch, no_rebase_no_walk, commits, retries, start
+    item_on, script, monkeypatch, no_rebase_no_walk, does, named, start, forked
 ):
     """The merge failed for another reason than a drop and Kraft's automatic
     escalation took the stop. Its commit is never merged in place: the item is
     held at `restart_from` with `review` reopened, and the agent's own retry
-    of `merge` starts there instead. With nothing committed it retries
-    `merge` as asked."""
+    of `merge` starts there instead -- a retry it named at or before that
+    point already passes `review`, and is kept. With nothing committed it
+    retries `merge` as asked; with tips git could not read, nothing says so,
+    and it is held. An item that ended while the turn ran is left ended."""
     it = await item_on(merge_chain(on_merge_rejected=MERGE_POLICY))
     await approve(it, "review")
     script.plan["merge"] = ["failed"]
     assert await walk_once(it) == "needs_human"
+    if does == "unreadable":
+        branch = store.branch_for(it.row())
+        git(it.worktree, "checkout", "-q", "--detach", "HEAD")
+        git(it.worktree, "branch", "-q", "-D", branch)
 
     async def turn(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
         # What `escalate.dispatch` records before the agent runs, then the agent.
@@ -617,10 +638,16 @@ async def test_an_escalation_that_commits_on_a_merge_node_sends_it_back_through_
         await database.write(
             lambda c: events.append(c, work_item_id, "escalation_message", message)
         )
-        if commits:
+        if does.startswith("commits"):
             await commits_a_fix(it)(it.row())
-        if retries:
-            asked = _self_retry_event(node_id="merge", path="merge")
+        if does.endswith("ends"):
+            await database.write(
+                lambda c: c.execute(
+                    "UPDATE work_items SET status = 'abandoned' WHERE id = ?", (work_item_id,)
+                )
+            )
+        if named:
+            asked = _self_retry_event(node_id=named.split(".")[0], path=named)
             await database.write(
                 lambda c: events.append(c, work_item_id, "work_item_self_retry_requested", asked)
             )
@@ -630,8 +657,12 @@ async def test_an_escalation_that_commits_on_a_merge_node_sends_it_back_through_
 
     await _escalate(it, launch=executor.LaunchContext(repo_entry=NO_SETUP))
 
-    assert [w["start_index"] for w in no_rebase_no_walk] == ([start] if retries else [])
+    assert [w["start_index"] for w in no_rebase_no_walk] == ([] if start is None else [start])
+    assert [e["payload"]["path"] for e in it.events("run_forked")] == ([forked] if forked else [])
+    held = does in ("commits", "unreadable")
     reopened = [e["payload"] for e in it.events("gate_reopened")]
-    assert reopened == ([{"gate": "review", "reason": "escalation_committed"}] if commits else [])
-    if commits and not retries:
+    assert reopened == ([{"gate": "review", "reason": "escalation_committed"}] if held else [])
+    if held and not named:
         assert (it.status(), it.row()["current_node_id"]) == ("needs_human", "feedback")
+    if does == "commits-then-ends":
+        assert (it.status(), it.row()["current_node_id"]) == ("abandoned", "merge")

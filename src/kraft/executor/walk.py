@@ -41,6 +41,7 @@ from kraft.executor.context import (
 )
 from kraft.store import _now as _now
 from kraft.templates.models import (
+    PATH_SEPARATOR,
     BuiltinAction,
     BuiltinTask,
     ExecNode,
@@ -711,7 +712,7 @@ async def _escalate_stuck(
             {"node_id": node.id, "task": task.path, "status": status},
         )
     )
-    committed = watched and _branch_tips(db, work_item_id, row, worktree) != tips
+    committed = watched and _moved(tips, _branch_tips(db, work_item_id, row, worktree))
     if committed and status not in _ADVANCING:
         # Held before any stop below is written, as after a repair's commit.
         await hold_merge_node(db, work_item_id, row, node, "escalation_committed")
@@ -1015,6 +1016,13 @@ def _branch_tips(db, work_item_id: str, row, worktree) -> dict[str, str | None]:
     return {path: _branch_tip(path, row) for path in dict.fromkeys(checkouts)}
 
 
+def _moved(before: dict, after: dict) -> bool:
+    """Whether anything a merge would push moved between two `_branch_tips`
+    reads. A tip git could not read counts as moved, as after a repair: holding
+    costs a review at most, going on could merge code no gate saw."""
+    return before != after or None in after.values()
+
+
 def _unanswered_drop(
     db, work_item_id: str, node: ResolvedNode, row
 ) -> tuple[dict, list[ResolvedTask], bool] | None:
@@ -1130,6 +1138,10 @@ async def hold_after_escalation(db, run_dirs, work_item_id: str, evts) -> str | 
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
+    if row is None or row["status"] in ENDED:
+        # Abandoned, cancelled or completed while the turn ran: nothing is
+        # left to merge, and nothing may be written over the ending.
+        return None
     try:
         nodes = chain_of(row).chain.nodes
     except LookupError:
@@ -1138,11 +1150,21 @@ async def hold_after_escalation(db, run_dirs, work_item_id: str, evts) -> str | 
     if node is None or not _rejects_merges(node):
         return None
     worktree = inplace.item_folder(run_dirs, row)
-    if _branch_tips(db, work_item_id, row, worktree) == seen["tips"]:
+    if not _moved(seen["tips"], _branch_tips(db, work_item_id, row, worktree)):
         return None
     if row["current_node_id"] == node.id:
         await hold_merge_node(db, work_item_id, row, node, "escalation_committed")
     return node.node.on_merge_rejected.restart_from
+
+
+def retries_past(row, named: str, restart_from: str) -> bool:
+    """Whether a retry of `named` -- a node, step or task path of `row`'s
+    chain -- would start after `restart_from`, past the gates a held commit
+    goes back through (`hold_after_escalation`). A node the chain does not
+    have counts as past it."""
+    order = [n.id for n in chain_of(row).chain.nodes]
+    node = named.split(PATH_SEPARATOR)[0]
+    return node not in order or order.index(node) > order.index(restart_from)
 
 
 def _unrepaired_drop(node: ResolvedNode, drop: dict) -> str | None:

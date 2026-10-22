@@ -1222,10 +1222,23 @@ async def resume_after_escalation(
     payload = request_evt["payload"]
     node_id, steer = payload["node_id"], payload["steer"]
     path, carried = payload.get("path"), payload.get("override")
-    if held_at is not None and not payload.get("restart"):
-        # Whatever it named -- the merge node, most likely -- the agent's own
+    if (
+        held_at is not None
+        and not payload.get("restart")
+        and walk.retries_past(
+            db.read(
+                lambda c: c.execute(
+                    "SELECT * FROM work_items WHERE id = ?", (work_item_id,)
+                ).fetchone()
+            ),
+            path or node_id,
+            held_at,
+        )
+    ):
+        # Named past it -- the merge node, most likely -- the agent's own
         # retry starts where its commit goes back through the final review,
-        # with no override meant for another path.
+        # with no override meant for another path. A target at or before it
+        # already passes that review, and keeps its override.
         node_id, path, carried = held_at, None, None
     # Absent on an event written before this field existed, or on a
     # hand-built test payload -- default False rather than KeyError either way.

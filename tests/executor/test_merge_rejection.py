@@ -369,14 +369,27 @@ async def test_a_read_only_on_failure_on_a_merge_node_retries_the_merge_in_place
     assert it.row()["current_node_id"] == "feedback"
 
 
+def _loses_the_branch(it):
+    """The merge's effect: its branch deleted from under the checkout, so no
+    read of its tip, before the escalation or after it, says anything."""
+
+    async def effect(row):
+        if git(it.worktree, "branch", "--list", store.branch_for(row)):
+            git(it.worktree, "checkout", "-q", "--detach", "HEAD")
+            git(it.worktree, "branch", "-q", "-D", store.branch_for(row))
+
+    return effect
+
+
 @pytest.mark.parametrize(
     ("commits", "ends", "status", "calls"),
     [
         (True, "done", "awaiting_gate", ["ci", "merge", "esc", "ci"]),
         (True, "failed", "needs_human", ["ci", "merge", "esc"]),
         (False, "done", "completed", ["ci", "merge", "esc", "merge"]),
+        ("unreadable", "done", "awaiting_gate", ["ci", "merge", "esc", "ci"]),
     ],
-    ids=["commits-and-rewinds", "commits-and-fails", "changes-nothing"],
+    ids=["commits-and-rewinds", "commits-and-fails", "changes-nothing", "tips-unreadable"],
 )
 async def test_a_merge_node_s_escalation_never_merges_its_commit_in_place(
     item_on, script, commits, ends, status, calls
@@ -386,12 +399,15 @@ async def test_a_merge_node_s_escalation_never_merges_its_commit_in_place(
     committed with no person seeing it: a clean finish that committed rewinds
     to `restart_from` instead, under the merge rejection's cap, with `review`
     reopened; one that committed and then failed is held there. Told so up
-    front, not promised a rerun. With nothing committed the merge reruns."""
+    front, not promised a rerun. With nothing committed the merge reruns; with
+    tips git could not read, before or after, nothing says so, and it rewinds."""
     escalation = v1_task("esc", kind="subprocess", command="true")
     it = await item_on(merge_chain(on_merge_rejected=MERGE_POLICY, escalation=escalation))
     await approve(it, "review")
     script.plan.update({"merge": ["failed", "done"], "esc": [ends]})
-    if commits:
+    if commits == "unreadable":
+        script.effects["merge"] = _loses_the_branch(it)
+    elif commits:
         script.effects["esc"] = commits_a_fix(it)
 
     assert await walk_once(it) == status
