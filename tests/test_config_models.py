@@ -1,4 +1,5 @@
 import pytest
+import yaml
 
 
 def test_first_error_names_the_file_and_the_field():
@@ -41,7 +42,7 @@ def test_intake_defaults_every_missing_key(tmp_path):
     assert config.Intake.load(tmp_path / "does-not-exist.yaml") == config.Intake()
 
 
-@pytest.mark.parametrize("name", ["Access", "Notify", "Intake", "Theme"])
+@pytest.mark.parametrize("name", ["Access", "Notify", "Intake", "Theme", "Update"])
 def test_each_settings_file_loads_and_saves_through_its_own_model(tmp_path, name):
     """Kraft-5d510.7: a settings file's read and write are its model's
     `load`/`save`, the way `Policy.from_yaml` is policy.yaml's, so no caller
@@ -385,3 +386,50 @@ def test_intake_drops_a_max_concurrent_it_no_longer_reads_and_says_so(tmp_path, 
         loaded = config.Intake.load(path)
     assert loaded == config.Intake(enabled=True)
     assert "max_concurrent is read from policy.yaml" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("hours", "at", "allowed"),
+    [
+        pytest.param([], "12:00", True, id="empty-any-hour"),
+        pytest.param(["01:00-06:00"], "03:00", True, id="inside"),
+        pytest.param(["01:00-06:00"], "06:00", False, id="end-exclusive"),
+        pytest.param(["22:00-02:00"], "23:30", True, id="crosses-midnight-late"),
+        pytest.param(["22:00-02:00"], "01:00", True, id="crosses-midnight-early"),
+        pytest.param(["22:00-02:00"], "12:00", False, id="crosses-midnight-noon"),
+        pytest.param(["01:00-02:00", "13:00-14:00"], "13:30", True, id="second-range"),
+    ],
+)
+def test_update_settings_allowed_hours(hours, at, allowed):
+    from datetime import datetime
+
+    from kraft import config
+
+    now = datetime.fromisoformat(f"2026-10-22T{at}:00")
+    assert config.Update(allowed_hours=hours).allows(now) is allowed
+
+
+@pytest.mark.parametrize(
+    ("body", "field"),
+    [
+        pytest.param({"allowed_hours": ["1-6"]}, "allowed_hours", id="short-range"),
+        pytest.param({"allowed_hours": ["25:00-26:00"]}, "allowed_hours", id="no-such-hour"),
+        pytest.param({"allowed_hours": ["03:00-03:00"]}, "allowed_hours", id="empty-range"),
+        pytest.param({"channel": "nightly"}, "channel", id="unknown-channel"),
+    ],
+)
+def test_update_settings_refuses_a_bad_value_naming_the_field(tmp_path, body, field):
+    from kraft import config
+
+    path = tmp_path / "update.yaml"
+    path.write_text(yaml.safe_dump(body))
+    with pytest.raises(config.ConfigError, match=f"update.yaml: .{field}."):
+        config.Update.load(path)
+
+
+def test_update_settings_missing_file_turns_nothing_on(tmp_path):
+    from kraft import config
+
+    update = config.Update.load(tmp_path / "update.yaml")
+    assert (update.auto_update, update.restart_when_free) == (False, False)
+    assert (update.channel, update.allowed_hours) == (None, [])

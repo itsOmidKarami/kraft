@@ -629,3 +629,33 @@ def test_a_save_with_a_flat_cap_is_refused_naming_its_level_and_writes_nothing(
     assert refused.status_code == 422
     assert "use defaults.tasks.time_cap_minutes" in refused.json()["detail"]
     assert (templates_dir / "policy.yaml").read_text() == before
+
+
+# ── update ──
+
+
+def test_put_update_settings_round_trips_and_merges(client, templates_dir):
+    assert client.get("/api/update/settings").json() == {
+        "auto_update": False,
+        "restart_when_free": False,
+        "channel": None,
+        "allowed_hours": [],
+    }
+    assert client.put("/api/update/settings", json={"auto_update": True}).status_code == 200
+    body = {"allowed_hours": ["01:00-06:00"], "channel": "rc"}
+    assert client.put("/api/update/settings", json=body).status_code == 200
+    got = client.get("/api/update/settings").json()
+    assert got == {"auto_update": True, "restart_when_free": False, **body}
+    assert yaml.safe_load((templates_dir / "update.yaml").read_text()) == got
+    # An empty channel is the way back to the installed version's own.
+    assert client.put("/api/update/settings", json={"channel": ""}).json()["channel"] is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"allowed_hours": ["1-6"]}, {"channel": "nightly"}, {"unknown": 1}],
+    ids=["a-bad-range", "an-unknown-channel", "an-unknown-key"],
+)
+def test_put_update_settings_rejects_a_bad_value(client, templates_dir, body):
+    assert client.put("/api/update/settings", json=body).status_code == 422
+    assert not (templates_dir / "update.yaml").exists()

@@ -45,6 +45,8 @@ from kraft.vocab import BY_VALUE
 from kraft.worker import steering as _steering
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from kraft.templates.environment import Workspace
 
 logger = logging.getLogger(__name__)
@@ -1276,6 +1278,68 @@ class Notify(_Model):
         err = exc.errors()[0]
         where = ".".join(str(p) for p in err["loc"])
         return f"notify.yaml: {where}: {err['msg'].removeprefix('Value error, ')}"
+
+
+# ── update ───────────────────────────────────────────────────────────────────
+
+_HOURS = re.compile(r"([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)")
+
+
+def _minutes(hh: str, mm: str) -> int:
+    return int(hh) * 60 + int(mm)
+
+
+#: `config/update.yaml`: when Kraft takes a release and restarts on its own
+#: (`when_free`). Not seeded, so every existing home has no file; a missing one
+#: reads as these defaults, which leave the install doing what it always did.
+class Update(_Model):
+    FILE = "update.yaml"
+
+    #: Mark each new minor or patch release on `channel` automatically.
+    auto_update: bool = False
+    #: Restart on its own when a restart Kraft did not cause is pending and
+    #: Kraft is free (a dev install's, a settings change's).
+    restart_when_free: bool = False
+    #: None: the installed version's own channel.
+    channel: str | None = None
+    #: `HH:MM-HH:MM` ranges in the server's local time; empty is any hour.
+    allowed_hours: list[str] = []
+
+    @field_validator("channel")
+    @classmethod
+    def _known_channel(cls, channel: str | None) -> str | None:
+        from kraft.update import CHANNELS
+
+        if channel is not None and channel not in CHANNELS:
+            raise ValueError(f"unknown channel {channel!r}; one of {', '.join(CHANNELS)}")
+        return channel
+
+    @field_validator("allowed_hours")
+    @classmethod
+    def _ranges(cls, ranges: list[str]) -> list[str]:
+        for text in ranges:
+            m = _HOURS.fullmatch(text)
+            if m is None:
+                raise ValueError(f"{text!r} is not a range like 01:00-06:00")
+            if _minutes(*m.group(1, 2)) == _minutes(*m.group(3, 4)):
+                raise ValueError(f"{text!r} starts and ends at the same time")
+        return ranges
+
+    def allows(self, now: datetime) -> bool:
+        """Whether `now`, in local time, is inside an allowed range. An empty
+        list allows every hour. A range whose end is before its start crosses
+        midnight, and the end is exclusive."""
+        if not self.allowed_hours:
+            return True
+        local = now.astimezone() if now.tzinfo else now
+        at = local.hour * 60 + local.minute
+        for text in self.allowed_hours:
+            m = _HOURS.fullmatch(text)
+            assert m is not None  # the validator took it
+            start, end = _minutes(*m.group(1, 2)), _minutes(*m.group(3, 4))
+            if (start <= at < end) if start < end else (at >= start or at < end):
+                return True
+        return False
 
 
 # ── auto-intake ──────────────────────────────────────────────────────────────

@@ -86,6 +86,12 @@ def test_a_policy_type_error_is_located(ctx):
     assert issue.loc[:1] == ("max_concurrent",)
 
 
+def test_update_names_a_bad_range(ctx):
+    [issue] = config_check.check("update.yaml", "allowed_hours: ['1-6']\n", ctx)
+    assert issue.loc == ("allowed_hours",)
+    assert "1-6" in issue.message
+
+
 def test_access_off_localhost_without_a_password(ctx):
     [issue] = config_check.check("access.yaml", "bind: 0.0.0.0\nport: 8765\n", ctx)
     assert issue.message == "set a password before binding off localhost"

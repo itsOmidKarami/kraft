@@ -58,6 +58,7 @@ FILES = frozenset(
         "access.yaml",
         "theme.yaml",
         "notify.yaml",
+        "update.yaml",
         "addons.yaml",
         "addons.lock",
         "repo-libraries.lock",
@@ -437,6 +438,14 @@ def _check_access(path, data, ctx):
 def _check_theme(path, data, ctx):
     try:
         config_mod.Theme.model_validate(data)
+    except ValidationError as exc:
+        return [_pydantic_issue(path, exc)]
+    return []
+
+
+def _check_update(path, data, ctx):
+    try:
+        config_mod.Update.model_validate(data)
     except ValidationError as exc:
         return [_pydantic_issue(path, exc)]
     return []
@@ -893,6 +902,7 @@ _CHECKERS: dict[str, Callable[[Path, dict, CheckContext], list[TemplateIssue]]] 
     "access.yaml": _check_access,
     "theme.yaml": _check_theme,
     "notify.yaml": _check_notify,
+    "update.yaml": _check_update,
     "addons.yaml": _check_addons,
     "addons.lock": _check_lock,
     "repo-libraries.lock": _check_repo_lock,

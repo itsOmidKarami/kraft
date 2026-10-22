@@ -187,6 +187,7 @@ SCHEMAS: dict[str, Callable[[], dict]] = {
     "sandbox.schema.json": lambda: _model(config_mod.SandboxHost, "Kraft sandbox host"),
     "theme.schema.json": lambda: _model(config_mod.Theme, "Kraft theme"),
     "notify.schema.json": lambda: _model(config_mod.Notify, "Kraft notifications"),
+    "update.schema.json": lambda: _model(config_mod.Update, "Kraft updates"),
     "detectors.schema.json": lambda: _model(detect_mod.DetectorFile, "Kraft repo detectors"),
     # The shape and the typos; what compares entries only the loader checks.
     "addons.schema.json": lambda: _model(AddonsConfig, "Kraft add-ons"),

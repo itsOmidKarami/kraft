@@ -627,6 +627,43 @@ async def put_theme(body: dict, request: Request):
     return theme.effective()
 
 
+class UpdateBody(BaseModel):
+    """`PUT /update/settings`: only what the body names changes, as `PUT /theme`
+    merges, so the About page's switches and its hours save independently."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    auto_update: bool | None = None
+    restart_when_free: bool | None = None
+    #: `""` clears it back to the installed version's own channel.
+    channel: str | None = None
+    allowed_hours: list[str] | None = None
+
+
+@api_router.get("/update/settings")
+async def get_update_settings(request: Request):
+    st = request.app.state
+    return config_mod.Update.load(st.templates_dir / "update.yaml").model_dump()
+
+
+@api_router.put("/update/settings")
+async def put_update_settings(body: UpdateBody, request: Request):
+    st = request.app.state
+    path = st.templates_dir / "update.yaml"
+    try:
+        data = config_mod.Update.load(path).model_dump()
+    except config_mod.ConfigError:
+        data = {}
+    for key, value in body.model_dump(exclude_none=True).items():
+        data[key] = (value or None) if key == "channel" else value
+    try:
+        update = config_mod.Update.model_validate(data)
+    except ValidationError as exc:
+        raise HTTPException(422, config_mod.first_error(exc, config_mod.Update.FILE)) from exc
+    update.save(path)
+    return update.model_dump()
+
+
 @api_router.get("/intake")
 async def get_intake(request: Request):
     """From disk, like `GET /policy`. `intake.yaml` was hand-edited until this

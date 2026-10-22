@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "allowed_hours": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Allowed Hours",
+      "type": "array"
+    },
+    "auto_update": {
+      "default": false,
+      "title": "Auto Update",
+      "type": "boolean"
+    },
+    "channel": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Channel"
+    },
+    "restart_when_free": {
+      "default": false,
+      "title": "Restart When Free",
+      "type": "boolean"
+    }
+  },
+  "title": "Kraft updates",
+  "type": "object"
+}
