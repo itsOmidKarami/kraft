@@ -68,6 +68,7 @@
           "launch_fallback",
           "launch_fallback_exhausted",
           "left_uncommitted",
+          "merge_landed_unreviewed",
           "merge_queue_dropped",
           "merge_refused_unreviewed",
           "merge_rejection_restart",
