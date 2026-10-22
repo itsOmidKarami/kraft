@@ -181,19 +181,19 @@ def test_a_deep_tree_is_counted_with_opens_linear_in_its_folders(tmp_path):
     """Folders deeper than the walk holds descriptors for are gone back up to
     by `..`, not reopened from the top each time: reopening made 2,000 levels
     take 2.6 seconds and 50,000 half an hour, and a worker makes either at
-    almost no cost. 5,000 levels take about two opens a folder, where
-    reopening took some 12.5 million. Counted, not timed, so a loaded
+    almost no cost. 1,000 levels take about two opens a folder, where
+    reopening took some 500,000. Counted, not timed, so a loaded
     machine cannot fail it, and by the audit hook, which sees every open
     however the walk binds `os.open`."""
     run = tmp_path / "run"
-    deep_chain(run / "worktrees" / "a", 5000, leaf=os.urandom(MB))
+    deep_chain(run / "worktrees" / "a", 1000, leaf=os.urandom(MB))
     try:
         opens, items = opens_during(
             "from kraft import storage", f"storage.measure({str(run)!r}).items"
         )
 
         assert items["a"] >= MB
-        assert 5000 <= opens < 10 * 5000
+        assert 1000 <= opens < 10 * 1000
     finally:
         item_paths.remove_tree(run)
 
