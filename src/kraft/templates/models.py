@@ -41,6 +41,7 @@ from pydantic import (
     StrictBool,
     StrictStr,
     ValidationError,
+    ValidationInfo,
     model_validator,
 )
 
@@ -1027,7 +1028,7 @@ class Chain(BaseModel):
     policy: TemplatePolicyOverride | None = None
 
     @model_validator(mode="after")
-    def _nodes_are_addressable(self) -> Self:
+    def _nodes_are_addressable(self, info: ValidationInfo) -> Self:
         ids = [n.id for n in self.nodes]
         _unique("node", ids)
         index = {n.id: i for i, n in enumerate(self.nodes)}
@@ -1063,8 +1064,12 @@ class Chain(BaseModel):
                 # A merging node past the final gate restarts before it: its
                 # conflict handler's resolution, or a fix cycle in the span,
                 # would otherwise reach the merge with no person seeing it.
+                # Authored chains only: a snapshot an item froze before this
+                # rule still loads (`FROZEN`), and the merge itself refuses a
+                # head the final review did not approve (`kraft.reviewed_head`).
                 past_final = final is not None and final < position
-                if node.merges() and past_final and index[target] > final:
+                frozen = (info.context or {}).get("frozen")
+                if node.merges() and past_final and index[target] > final and not frozen:
                     raise ValueError(
                         f"node {node.id!r}: on_base_changed.restart_from {target!r} must name "
                         f"an execution node before the final gate {self.nodes[final].id!r}, "

@@ -4,9 +4,12 @@ handler, and `on_merge_rejected` with its repair. What they *do* is
 `tests/executor/test_recovery.py` and `tests/executor/test_base_change.py`;
 this is their shape and validation."""
 
+import json
+
 import pytest
 import yaml
 from pydantic import ValidationError
+from support.harness import v1_chain
 
 from kraft.templates import models as tm
 from kraft.templates.library import TemplateLibrary
@@ -372,12 +375,14 @@ def _past_the_final_gate(restart_from: str, tasks) -> dict:
         ("ready", [merge()], True),
         ("early", [merge()], False),
         ("land", [sub()], False),
+        ("ready", [merge()], "stored"),
     ],
     ids=[
         "merging-restarts-itself",
         "merging-restarts-past-the-gate",
         "before-the-gate",
         "no-merge",
+        "a-snapshot-stored-before-the-rule",
     ],
 )
 def test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it(
@@ -386,8 +391,17 @@ def test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it(
     """The conflict handler's resolution, or a fix cycle in the restarted
     span, would otherwise reach the merge with no person seeing it: `mr.merge`
     answers `conflict` when its forced rebase cannot clear one. A node that
-    does not merge may still restart itself."""
+    does not merge may still restart itself. A chain an item froze before the
+    rule still loads: refusing it would fail every read of an in-flight item,
+    and its merge refuses a head the final review did not approve anyway."""
     chain = _past_the_final_gate(restart_from, tasks)
+    if refused == "stored":
+        valid = _past_the_final_gate("early", tasks)
+        stored = json.loads(v1_chain(valid["nodes"], repo="/r").to_json())
+        stored["chain"]["nodes"][3]["on_base_changed"]["restart_from"] = restart_from
+        loaded = tm.MaterializedChain.from_json(json.dumps(stored))
+        assert loaded.chain.nodes[3].node.on_base_changed.restart_from == restart_from
+        return
     if not refused:
         assert tm.Chain.model_validate(chain).nodes[3].on_base_changed.restart_from == restart_from
         return
