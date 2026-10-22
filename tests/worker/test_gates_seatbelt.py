@@ -16,6 +16,7 @@ It touches the operator's `crontab` and `at` queue only to compare them before
 and after; `Outside` puts both back if a check left them changed.
 """
 
+import contextlib
 import os
 import pty
 import re
@@ -63,6 +64,7 @@ for call in (
         call()
     except OSError:
         pass
+print("LOG-MARKER-AFTER")
 """,
     "devtty.py": """
 import os, sys
@@ -75,12 +77,15 @@ else:
 """,
     # Every descriptor the agent has, and the controlling terminal if it has one.
     "tiocsti.py": """
-import fcntl, os, termios
+import errno, fcntl, os, termios
 for target in (0, 1, 2, "/dev/tty"):
     try:
         fd = target if isinstance(target, int) else os.open(target, os.O_RDWR)
         fcntl.ioctl(fd, termios.TIOCSTI, b"x")
     except OSError as exc:
+        # EPERM is the sandbox; a descriptor that is no terminal would say ENOTTY.
+        if exc.errno != errno.EPERM:
+            raise SystemExit(f"{target}: {exc}")
         print(target, "refused", exc.errno)
     else:
         raise SystemExit(f"injected into {target}")
@@ -150,79 +155,67 @@ def _out(*argv: str) -> tuple[int, str]:
 
 class Outside:
     """What the test sets up and reads from outside the sandbox: a terminal
-    the operator owns, a unix socket in `/private/tmp`, the operator's `crontab`
-    and `at` queue, and anything a failed fence would have started."""
+    the operator owns, a unix socket in `/private/tmp`, a keychain, the
+    operator's `crontab` and `at` queue, and anything a failed fence would have
+    started. Each is undone on its own, so one failing step skips none of the rest."""
 
     def __init__(self, daemon, tmp_path):
         self.mark = uuid.uuid4().hex[:12]
         self.secret = f"hunter-{self.mark}"
         self.work = daemon.work
-        self.crontab = _out("crontab", "-l")
-        # Beside the saved copy of the crontab, in case the run dies before `__exit__`.
-        (tmp_path / "crontab.saved").write_text(self.crontab[1])
-        self.atq = _out("atq")[1].splitlines()
-        self.calculator = {
-            p.pid for p in psutil.process_iter(["name"]) if p.info["name"] == "Calculator"
-        }
+        self.keychain = daemon.work / "kraft.keychain-db"
         self.touched = tmp_path / f"launchctl-{self.mark}"
         self.label = f"kraft-e2e-{self.mark}"
         self.sock = Path(f"/private/tmp/kraft-e2e-{self.mark}.sock")
-        self.tty_master, tty_slave = pty.openpty()
-        self.tty = os.ttyname(tty_slave)
-        os.close(os.open(self.tty, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY))  # the operator can
-        os.close(tty_slave)
-        self.listener = socket.socket(socket.AF_UNIX)
-        self.listener.bind(str(self.sock))
-        self.listener.listen(1)
+        self.sock_b = Path(f"/private/tmp/kraft-e2e-{self.mark}-b.sock")
+        self.tmp_path = tmp_path
+        self.calculator = {
+            p.pid for p in psutil.process_iter(["name"]) if p.info["name"] == "Calculator"
+        }
 
     def __enter__(self):
-        # A keychain the agent can read as a file but has no security server to open:
-        # `security` reads it outside, which is what makes its failure inside mean something.
-        keychain = self.work / "kraft.keychain-db"
-        _out("security", "create-keychain", "-p", "pw", str(keychain))
-        _out(
-            "security",
-            "add-generic-password",
-            "-a",
-            "acct",
-            "-s",
-            "kraft-e2e",
-            "-w",
-            self.secret,
-            str(keychain),
-        )
-        _out("security", "unlock-keychain", "-p", "pw", str(keychain))
-        assert (
-            _out(
-                "security",
-                "find-generic-password",
-                "-a",
-                "acct",
-                "-s",
-                "kraft-e2e",
-                "-w",
-                str(keychain),
-            )[1].strip()
-            == self.secret
-        )
-        # The comment line is the whole change a successful `crontab FILE` would make.
-        (self.work / "crontab.new").write_text(f"{self.crontab[1]}# kraft-e2e-{self.mark}\n")
+        with contextlib.ExitStack() as stack:  # a failure part-way unwinds what was made
+            self._setup(stack)
+            self._stack = stack.pop_all()
         return self
 
     def __exit__(self, *exc):
-        self.listener.close()
-        self.sock.unlink(missing_ok=True)
-        os.close(self.tty_master)
-        self.restore_crontab()
-        self.remove_at_jobs()
-        _out("launchctl", "remove", self.label)  # a no-op unless the fence was open
-        for p in psutil.process_iter(["name"]):
-            if p.info["name"] == "Calculator" and p.pid not in self.calculator:
-                p.kill()
+        self._stack.close()
+
+    def _setup(self, stack):
+        # Saved first, beside a copy on disk in case the run dies before `__exit__`.
+        self.crontab = _out("crontab", "-l")
+        (self.tmp_path / "crontab.saved").write_text(self.crontab[1])
+        stack.callback(self.restore_crontab)
+        self.atq = _out("atq")[1].splitlines()
+        stack.callback(self.remove_at_jobs)
+        stack.callback(_out, "launchctl", "remove", self.label)  # a no-op unless a fence is open
+        self.tty_master, tty_slave = pty.openpty()
+        stack.callback(os.close, self.tty_master)
+        self.tty = os.ttyname(tty_slave)
+        os.close(os.open(self.tty, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY))  # the operator can
+        os.close(tty_slave)
+        listener = socket.socket(socket.AF_UNIX)
+        stack.callback(listener.close)
+        stack.callback(self.sock.unlink, missing_ok=True)
+        stack.callback(self.sock_b.unlink, missing_ok=True)  # bound only if a fence is open
+        listener.bind(str(self.sock))
+        listener.listen(1)
+        # A keychain the agent can read as a file but has no security server to open:
+        # `security` reads it outside, which is what makes its failure inside mean something.
+        kc, service = str(self.keychain), ("-a", "acct", "-s", "kraft-e2e")
+        stack.callback(_out, "security", "delete-keychain", kc)
+        _out("security", "create-keychain", "-p", "pw", kc)
+        _out("security", "add-generic-password", *service, "-w", self.secret, kc)
+        _out("security", "unlock-keychain", "-p", "pw", kc)
+        assert (
+            _out("security", "find-generic-password", *service, "-w", kc)[1].strip() == self.secret
+        )
+        # The comment line is the whole change a successful `crontab FILE` would make.
+        (self.work / "crontab.new").write_text(f"{self.crontab[1]}# kraft-e2e-{self.mark}\n")
 
     def restore_crontab(self):
-        now = _out("crontab", "-l")
-        if now == self.crontab:
+        if _out("crontab", "-l") == self.crontab:
             return
         if self.crontab[0] == 0:
             subprocess.run(["crontab", "-"], input=self.crontab[1], text=True, check=True)
@@ -266,14 +259,15 @@ run daemon-run-dir cat {d.run_dirs.base}/mcp-token
 run operator-home cat {d.home}/.ssh/kraft-sentinel
 run firmlink-home cat {firmlink}
 run usr-local ls /usr/local
-run keychain security find-generic-password -a acct -s kraft-e2e -w kraft.keychain-db
+run keychain security find-generic-password -a acct -s kraft-e2e -w {out.keychain}
 run launchservices /usr/bin/open -g -j -a Calculator
 run pasteboard pbpaste
-run log-untouchable $PY -I -S log.py
+# Not through `run`: fd 1 here is the pipe the launcher copies to the log.
+$PY -I -S log.py; echo $? > r.log-untouchable.rc; : > r.log-untouchable.out
 run dev-tty $PY -I -S devtty.py {out.tty}
 run tiocsti $PY -I -S tiocsti.py
 run signal-launcher $PY -I -S signal.py
-run unix-socket $PY -I -S sockets.py /private/tmp/kraft-e2e-{out.mark}-b.sock {out.sock}
+run unix-socket $PY -I -S sockets.py {out.sock_b} {out.sock}
 run pool $PY -I -S pool.py
 run launchctl launchctl submit -l {out.label} -- /usr/bin/touch {out.touched}
 run crontab crontab crontab.new
@@ -318,6 +312,7 @@ def _launcher(daemon, sid: str) -> psutil.Process:
 
 
 @pytest.mark.e2e("sandbox-exec")
+@pytest.mark.timeout(240)  # the waits below end by 2 x WAIT_S, with the cleanup after
 def test_os_worker_is_fenced(daemon, tmp_path):
     sid = "s-fenced"
     for name, text in SNIPPETS.items():
@@ -341,6 +336,7 @@ def test_os_worker_is_fenced(daemon, tmp_path):
             (daemon.work / "go").touch()  # a failed run must not leave the agent waiting
         at_jobs = out.at_jobs()
         crontab_after = _out("crontab", "-l")
+        time.sleep(1)  # `open` hands its job to LaunchServices and returns
         calculator = [
             p.pid
             for p in psutil.process_iter(["name"])
@@ -354,21 +350,38 @@ def test_os_worker_is_fenced(daemon, tmp_path):
     log = own_files(daemon.run_dirs, sid).log.read_text()
     refused = [e["payload"] for e in evs if e["type"] == SandboxEvent.EGRESS_REFUSED]
     approve = (daemon.work / "approve.out").read_text()
-    # 127 is a command that is not there, which would pass every "it failed" below.
+    # 127 is a command that is not there, which would pass every "it failed" below. 126,
+    # a refused exec, is the fence itself for `crontab` and `at` (setuid), told apart by its text.
     refusals = (
         *("loopback-api", "other-loopback", "kraft-home", "daemon-run-dir", "operator-home"),
         *("firmlink-home", "usr-local", "launchservices", "pasteboard", "launchctl"),
         *("main-unmoved", "tag-refused", "crontab", "at"),
     )
     held = {name: rc.get(name, 0) not in (0, 127) for name in refusals}
+    for name in ("launchservices", "pasteboard", "launchctl"):
+        held[name] &= rc.get(name) != 126
+    # What Seatbelt itself answers, so the command failed for the fence and for nothing else.
+    for name in (
+        *("kraft-home", "daemon-run-dir", "operator-home", "firmlink-home", "usr-local"),
+        *("crontab", "at", "main-unmoved", "tag-refused"),
+    ):
+        held[name] &= "not permitted" in said.get(name, "")
+
     held["shim-works"] = rc.get("shim-works") == 0
-    held["loopback-api"] &= not daemon.api.hits  # the host's listener was never reached
-    held["other-loopback"] &= not daemon.other.hits
+    held["loopback-api"] &= rc.get("loopback-api") == 7 and not daemon.api.hits  # never reached
+    held["other-loopback"] &= rc.get("other-loopback") == 7 and not daemon.other.hits
     for name in ("kraft-home", "daemon-run-dir", "operator-home", "firmlink-home"):
         held[name] &= "secret" not in said.get(name, "secret")
-    held["keychain"] = rc.get("keychain") not in (None, 0) and out.secret not in said["keychain"]
+    held["keychain"] = (
+        rc.get("keychain") not in (None, 0, 126, 127) and out.secret not in said["keychain"]
+    )
+    # Outside, the pasteboard answers; where it does not (a runner with no GUI session)
+    # its failing inside proves nothing, and the check cannot fail.
+    held["pasteboard"] = rc.get("pasteboard", 0) != 0 or _out("pbpaste")[0] != 0
     held["launchservices"] &= not calculator
-    held["log-untouchable"] = rc.get("log-untouchable") == 0 and "LOG-MARKER-BEFORE" in log
+    held["log-untouchable"] = rc.get("log-untouchable") == 0 and all(
+        marker in log for marker in ("LOG-MARKER-BEFORE", "LOG-MARKER-AFTER")
+    )
     for name in ("dev-tty", "tiocsti", "signal-launcher", "unix-socket", "pool"):
         held[name] = rc.get(name) == 0
     held["relay-token"] = relay.startswith(b"HTTP/1.1 407")
