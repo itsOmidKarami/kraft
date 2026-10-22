@@ -675,6 +675,18 @@ def _handler_at(path: str, kind: str) -> tuple[str, str]:
     return path, kind
 
 
+def _merges(node: Mapping) -> bool:
+    """`ExecNode.merges` over an expanded node: an `mr.merge` among its own
+    tasks, never a handler's."""
+    if node.get("kind") != "exec":
+        return False
+    tasks = [
+        *_dicts(node.get("tasks")),
+        *(t for s in _dicts(node.get("steps")) for t in _dicts(s.get("tasks"))),
+    ]
+    return any(t.get("kind") == "forge" and t.get("target") == "mr.merge" for t in tasks)
+
+
 def _beside_merge_rejection(d: Draft, path: str) -> bool:
     """Whether `path` is in a node that has, or inherits, `on_merge_rejected`:
     where an `on_failure` must be read_only (`Chain`'s rule)."""
@@ -700,7 +712,17 @@ def _merge_restart(d: Draft, id: str) -> str:
     position = next((i for i, n in enumerate(nodes) if n.get("id") == id), None)
     if position is None:
         raise OpError(f"on_merge_rejected is a node's, and there is no node {id!r}")
-    if isinstance(restart := _restart_from(nodes[position], "on_merge_rejected"), str):
+    node = nodes[position]
+    if not _merges(node):
+        # A gate, or a node with no `mr.merge` of its own: nothing it does is a
+        # merge a train could reject (`ExecNode.merges`).
+        raise OpError(f"{id} does not merge: on_merge_rejected needs an mr.merge task in it")
+    declared = node.get("on_merge_rejected")
+    if isinstance(declared, Mapping) and declared.get("repair") is not None:
+        # Put back whole, its repair -- the shipped one a task of its own --
+        # would be an empty step.
+        raise OpError(f"{id} already has an on_merge_rejected; edit its repair")
+    if isinstance(restart := _restart_from(node, "on_merge_rejected"), str):
         return restart
     final = next(
         (i for i, n in enumerate(nodes) if n.get("kind") == "gate" and n.get("chain_finalized")),
