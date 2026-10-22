@@ -2,7 +2,7 @@
 
 Where a work item's files are written and read. Everything but the worktree
 goes under `run/items/<id>/`; a file written before the upgrade is read where
-it is. A worker writes only its own two session files and its item's `docs/`,
+it is. A worker writes only its own session's `out/` and its item's `docs/`,
 and Kraft never follows a link in anything a worker can write.
 
 ## REQ a-gate-document-is-written-to-its-items-docs
@@ -73,17 +73,17 @@ origin: src/kraft/index/service.py §_read_summary -- `session_summary_ref` is r
 ## REQ the-session-folder-is-not-mounted
 
 WHILE a sandboxed session runs, the system SHALL NOT mount any session folder
-as a folder.
-enforced-by: tests/worker/backends/test_docker_session_files.py::test_a_session_writes_only_its_own_two_files_and_its_item_s_docs, tests/adapters/test_subprocess_sandbox_results.py::test_a_session_records_its_folder_and_mounts_only_its_out_files
+itself, nor another session's `out/`.
+enforced-by: tests/worker/backends/test_docker_session_files.py::test_a_session_writes_only_its_own_out_folder_and_its_item_s_docs, tests/adapters/test_subprocess_sandbox_results.py::test_a_session_records_its_folder_and_mounts_only_its_out_files
 origin: src/kraft/worker/backends/docker.py §docker_argv -- the session folder holds the log Kraft reads usage and rate limits from and the exit code the host writes with a plain `>`.
 
-## REQ a-worker-writes-only-its-own-two-files-and-docs
+## REQ a-worker-writes-only-its-own-out-and-docs
 
 WHILE a sandboxed session runs, the system SHALL NOT mount read-write any path
-under `run/items/<id>/` other than its own `result.json`, its own
-`summary.md`, its item's `docs/` and its item's sandbox home.
-enforced-by: tests/worker/backends/test_docker_session_files.py::test_a_session_writes_only_its_own_two_files_and_its_item_s_docs, tests/adapters/test_subprocess_sandbox_results.py::test_a_session_records_its_folder_and_mounts_only_its_out_files, tests/worker/backends/test_bwrap.py::test_session_only_from_kraft_home
-origin: src/kraft/adapters/subprocess.py §run_task -- each file a single-file bind mount, which cannot be removed or swapped for a symlink from inside the container.
+under `run/items/<id>/` other than its own session's `out/`, its item's
+`docs/` and its item's sandbox home.
+enforced-by: tests/worker/backends/test_docker_session_files.py::test_a_session_writes_only_its_own_out_folder_and_its_item_s_docs, tests/adapters/test_subprocess_sandbox_results.py::test_a_session_records_its_folder_and_mounts_only_its_out_files, tests/worker/backends/test_bwrap.py::test_session_only_from_kraft_home
+origin: src/kraft/adapters/subprocess.py §run_task -- `out/` as a folder, not its two files each a single-file mount: a harness that writes its result by rename (a temporary file, then `mv`) fails on a file mount (Kraft-l9ive). Nothing Kraft keeps is in `out/`, and Kraft reads both files without following a link.
 
 ## REQ a-harness-is-granted-only-out-and-docs
 

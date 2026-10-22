@@ -906,11 +906,12 @@ def docker_argv(
     session and has no results to read (a repository's `setup_command`,
     `builtins.run_setup_command`): nothing is mounted.
 
-    What the session writes is mounted back read-write: `result_path` and
-    `rw_files` (its own result and summary, `SessionFiles`), each as a file,
-    which cannot be removed or swapped for a symlink from inside the
-    container; and `rw_dirs` (its item's `docs/`), each as a folder, where
-    it creates the document it was asked for.
+    What the session writes is mounted back read-write: `rw_dirs` (its own
+    `out/` and its item's `docs/`), each as a folder, where it writes its
+    result and summary, by rename if it likes, and the document it was asked
+    for; and `result_path` and `rw_files` (its own result and summary,
+    `SessionFiles`) each as a file, unless one of `rw_dirs` holds it. Kraft
+    reads none of them through a symlink.
 
     `<repo>/.git`, for every repository of the checkout -- the worktree's own
     and each workspace member's: a private ref store (`refstores` below), so

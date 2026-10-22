@@ -114,12 +114,12 @@ def _worker_files(files: item_paths.SessionFiles) -> tuple[Path, ...]:
 
 def _create_worker_files(files: item_paths.SessionFiles) -> None:
     """The files a worker writes, created empty before launch, sandboxed or
-    not: a sandbox mounts each as a file (docker makes a root-owned folder of
-    a mount source that does not exist), and an unsandboxed worker finds its
-    folder there. Created, never truncated or written through a name already
-    there: an escalation thread's summary is its last turn's, emptied by
-    `escalate._archive_last_turn`, and a name a worker planted is left for
-    the no-follow reads to refuse."""
+    not: an older escalation thread's sandbox mounts each as a file (docker
+    makes a root-owned folder of a mount source that does not exist), and
+    every other worker finds them in its folder. Created, never truncated or
+    written through a name already there: an escalation thread's summary is
+    its last turn's, emptied by `escalate._archive_last_turn`, and a name a
+    worker planted is left for the no-follow reads to refuse."""
     files.writable.mkdir(parents=True, exist_ok=True)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
     for path in _worker_files(files):
@@ -867,10 +867,13 @@ async def _run_task(
     refs: Sequence = ()
     root, members = checkout if checkout is not None else (Path(cwd), {})
     # What a sandboxed worker may write outside its worktree and its home:
-    # its own two files, each its own mount, and its item's documents. An
-    # older escalation thread's summary is in the worktree, mounted already.
+    # its own `out/` folder, so a result written by rename lands there
+    # (Kraft-l9ive), and its item's documents. An older escalation thread
+    # writes into the results folder every item shares: only its own files
+    # there, each its own mount, and its summary in the worktree.
     rw_files = _worker_files(files)
-    rw_dirs = (item_paths.docs_dir(run_dirs, work_item_id),)
+    own_dir = () if files.writable == run_dirs.results else (files.writable,)
+    rw_dirs = (item_paths.docs_dir(run_dirs, work_item_id), *own_dir)
     if backend is not None:
         if checkout is None and (unmounted := _declared_members(db, work_item_id)):
             # Fails closed for a caller that forgot: unmounted, a member's
@@ -903,10 +906,9 @@ async def _run_task(
                 )
             )
             return "config_error"
-        # The container writes its result and summary here, each mounted
-        # read-write into it by name -- docker can only bind-mount a file
-        # that already exists, so create them now (empty) rather than letting
-        # docker invent a directory at that path. Likewise the docs folder.
+        # The container writes its result and summary here. Docker makes a
+        # root-owned directory of a mount source that does not exist, so
+        # create them now (empty), and the docs folder.
         _create_worker_files(files)
         for d in rw_dirs:
             d.mkdir(parents=True, exist_ok=True)

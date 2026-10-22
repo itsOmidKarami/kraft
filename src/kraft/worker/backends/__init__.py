@@ -73,7 +73,7 @@ class SandboxBackend(Protocol):
         """The argv that runs `cmd` inside the sandbox; `results` is the files of
         its item's sessions it may read (`store.result_files`), None for none;
         `rw_files=` the files it writes outside its worktree (its result and
-        summary) and `rw_dirs=` the folders (its item's `docs/`), each
+        summary) and `rw_dirs=` the folders (its own `out/` and its item's `docs/`), each
         writable and nothing else of the item's folder; `ca_bundle=` is
         what `prepare` returned, `sentinels=` each proxy-managed
         credential's variable and what it holds in the value's place,

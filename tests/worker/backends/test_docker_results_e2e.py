@@ -1,6 +1,6 @@
 """The results folder against a real container runtime: the one proof that
 the per-file mounts `docker_argv` builds show a session its own work item's
-files and nothing of another's (Kraft-dni4n)."""
+files and nothing of another's (Kraft-dni4n), and a session its own `out/` to write."""
 
 import json
 import shlex
@@ -72,3 +72,32 @@ async def test_a_sandboxed_session_sees_only_its_own_items_results(
     ]
     assert json.loads(own.read_text()) == {"status": "done"}
     assert file["earlier.json"].read_text() == "earlier.json\n"
+
+
+def test_a_sandboxed_session_writes_its_result_by_rename(tmp_path, git_image):
+    """A temporary file beside the result, then `mv` onto it, as a harness
+    writing atomically does: the session's `out/` is its folder to write, so
+    the rename lands where Kraft reads (Kraft-l9ive)."""
+    out = tmp_path / "items" / "w1" / "sessions" / "s1" / "out"
+    out.mkdir(parents=True)
+    result = out / "result.json"
+    result.touch()  # as `run_task` does
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    q = shlex.quote(str(result))
+    done = shlex.quote(json.dumps({"status": "done"}))
+    script = f'set -e; t=$(mktemp {q}.XXXXXX); echo {done} > "$t"; mv "$t" {q}'
+
+    argv = docker.docker_argv(
+        ["sh", "-c", script],
+        worktree,
+        {"kind": "docker", "image": git_image},
+        [],
+        result_path=result,
+        rw_files=(result,),
+        rw_dirs=(out,),
+    )
+    ran = subprocess.run(argv, capture_output=True, text=True)
+
+    assert ran.returncode == 0, ran.stderr
+    assert json.loads(result.read_text()) == {"status": "done"}

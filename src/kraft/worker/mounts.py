@@ -63,8 +63,8 @@ def session_mounts(
     ro_paths: Iterable[Path | str] = (),
 ) -> list[Mount]:
     """The worktree (`cwd`, resolved, read-write), earlier sessions' result
-    files read-only, the session's own files, `rw_dirs`, the gitdirs, then
-    `ro_paths` read-only."""
+    files read-only, the session's own files (each its own mount unless it is
+    in one of `rw_dirs`), `rw_dirs`, the gitdirs, then `ro_paths` read-only."""
     if isinstance(results, str | Path):
         # Iterated, a path is its characters, and the first is `/`.
         raise TypeError("`results` is the files to mount, never the results folder itself")
@@ -76,10 +76,11 @@ def session_mounts(
         # Its own are mounted read-write below; docker refuses a target twice.
         if path not in own:
             mounts.append(Mount(path, path, True))
-    # Each its own file mount: a bind-mounted file cannot be removed or
-    # swapped for a symlink from inside the container.
-    mounts += [Mount(p, p, False) for p in own]
-    mounts += [Mount(p, p, False) for p in dict.fromkeys(Path(d) for d in rw_dirs)]
+    dirs = list(dict.fromkeys(Path(d) for d in rw_dirs))
+    # A file in a read-write folder is that folder's: mounted on its own, it
+    # is a mount point a rename onto it cannot replace (Kraft-l9ive).
+    mounts += [Mount(p, p, False) for p in own if p.parent not in dirs]
+    mounts += [Mount(p, p, False) for p in dirs]
     mounts += _gitdir_mounts(cwd, refstores)
     mounts += [Mount(Path(p), Path(p), True) for p in ro_paths]
     return mounts

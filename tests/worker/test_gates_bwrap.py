@@ -79,7 +79,10 @@ git -c user.name=w -c user.email=w@x commit -qm landed
 echo "commit-lands $?" >> "$out"
 setsid sleep 3141 &
 sleep 0.3; kill -0 $!; echo "orphan-started $?" >> "$out"
-echo '{{"status": "done"}}' > "$KRAFT_RESULT_PATH"
+# By rename, as a harness writing atomically does (Kraft-l9ive); a failed
+# one exits 1, since an empty result file and exit 0 read as done.
+tmp=$(mktemp "$KRAFT_RESULT_PATH.XXXXXX") && echo '{{"status": "done"}}' > "$tmp" &&
+  mv "$tmp" "$KRAFT_RESULT_PATH" || exit 1
 exit 0
 """
 

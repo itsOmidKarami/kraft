@@ -223,13 +223,14 @@ def read_document(
 @dataclass(frozen=True)
 class SessionFiles:
     """One session's files. Only `result` and `summary`, in `writable`, are the
-    worker's: each is mounted read-write as a single file, and `writable` is
-    the folder a harness is granted. The rest are Kraft's, in a folder never
-    mounted or granted: the log Kraft reads usage and rate limits from (its
-    times sidecar is `logs.times_path(log)`), the exit code and container id
-    the host writes with a plain `>`, and the instruction and review package
-    a sandbox mounts read-only. For an escalation turn, `result`, `summary`
-    and `writable` are its thread's (`escalate.thread_files`)."""
+    worker's: `writable` is the folder a sandbox mounts read-write and a
+    harness is granted, so a worker may write either by rename. The rest are
+    Kraft's, in a folder never mounted or granted: the log Kraft reads usage
+    and rate limits from (its times sidecar is `logs.times_path(log)`), the
+    exit code and container id the host writes with a plain `>`, and the
+    instruction and review package a sandbox mounts read-only. For an
+    escalation turn, `result`, `summary` and `writable` are its thread's
+    (`escalate.thread_files`)."""
 
     folder: Path
     log: Path

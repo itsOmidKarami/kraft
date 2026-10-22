@@ -89,8 +89,8 @@ async def test_a_session_records_its_folder_and_mounts_only_its_out_files(
     argv_seen, run_dirs, database, tmp_path
 ):
     """A session started now writes its log and result in its own folder, and
-    its row says so. Sandboxed, it is handed its two `out/` files and its
-    item's `docs/` to write, and its folder itself is never handed over."""
+    its row says so. Sandboxed, it is handed its `out/` and its item's
+    `docs/` to write, and its folder itself is never handed over."""
     await make_item(database, "/r")
 
     await _run(database, run_dirs, tmp_path, "s1")
@@ -103,7 +103,7 @@ async def test_a_session_records_its_folder_and_mounts_only_its_out_files(
     assert f.log.is_file()
     (seen,) = argv_seen
     assert seen["rw_files"] == (f.result, f.summary)
-    assert seen["rw_dirs"] == (item_paths.docs_dir(run_dirs, "w1"),)
+    assert seen["rw_dirs"] == (item_paths.docs_dir(run_dirs, "w1"), f.writable)
     assert {f.folder, f.writable}.isdisjoint(Path(p) for p in seen["results"])
 
 
@@ -114,7 +114,7 @@ async def test_a_sandbox_mounts_its_item_s_home_and_nothing_kraft_keeps(
     """The container's `HOME` is an older item's `sandbox-home/<id>/` while
     it exists, for the chats a paused session resumes from, else the item's
     own folder's. Of that folder it is handed only the home, `docs/` and the
-    session's two files: never what was filed, earlier versions, or the
+    session's `out/`: never what was filed, earlier versions, or the
     session folder."""
     await make_item(database, "/r")
     old = run_dirs.base / "sandbox-home" / "w1"
@@ -135,7 +135,7 @@ async def test_a_sandbox_mounts_its_item_s_home_and_nothing_kraft_keeps(
     assert old_home or not old.exists()
     sources = {Path(v.split(":")[0]) for v in _volumes(seen["argv"])}
     assert {p for p in sources if p.is_relative_to(item)} == {
-        p for p in (home, item / "docs", f.result, f.summary) if p.is_relative_to(item)
+        p for p in (home, item / "docs", f.writable) if p.is_relative_to(item)
     }
 
 

@@ -181,7 +181,9 @@ EOF
 fi
 
 if [ -n "${KRAFT_RESULT_PATH:-}" ]; then
-  rtmp="$(mktemp)"
+  # Beside the result and renamed onto it, as a harness writing atomically
+  # does: a sandbox mounts the session's whole out/ folder (Kraft-l9ive).
+  rtmp="$(mktemp "$KRAFT_RESULT_PATH.XXXXXX")"
   # ponytail: no JSON-string escaping on these values -- test-controlled
   # inputs only. Add escaping (or a
   # `python -c` json.dumps helper) if a caller ever needs a quote/backslash in
@@ -195,10 +197,7 @@ if [ -n "${KRAFT_RESULT_PATH:-}" ]; then
   fi
   json="$json}"
   printf '%s' "$json" > "$rtmp"
-  # In place, not mv: in a sandbox the result file is its own read-write
-  # mount inside a read-only results directory, so a rename onto it fails.
-  cat "$rtmp" > "$KRAFT_RESULT_PATH"
-  rm -f "$rtmp"
+  mv "$rtmp" "$KRAFT_RESULT_PATH"
 fi
 
 # The rest of the stream, in the real CLI's shapes: after the init line above,

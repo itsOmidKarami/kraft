@@ -288,7 +288,10 @@ $PY -I -S -c 'import os; os.setsid(); os.execvp("sleep", ["sleep", "{ORPHAN}"])'
 orphan=$!
 sleep 0.3
 run orphan-started kill -0 $orphan
-echo '{{"status": "done"}}' > "$KRAFT_RESULT_PATH"
+# By rename, as a harness writing atomically does (Kraft-l9ive); a failed
+# one exits 1, since an empty result file and exit 0 read as done.
+tmp=$(mktemp "$KRAFT_RESULT_PATH.XXXXXX") && echo '{{"status": "done"}}' > "$tmp" &&
+  mv "$tmp" "$KRAFT_RESULT_PATH" || exit 1
 exit 0
 """
 
