@@ -20,6 +20,13 @@ const REOPENED_WHY: Readonly<Record<string, string>> = {
   merge_rejected: " after the merge train or queue rejected it",
   escalation_committed: " after an escalation committed a change",
   read_only_violated: " after a read-only step changed files",
+  unreviewed_change: " because the code changed after it was approved",
+};
+
+/** How Kraft itself moved the approved head (`reviewed_head_repinned`'s `cause`), as the console says it. */
+const REPINNED_HOW: Readonly<Record<string, string>> = {
+  rebase: " with Kraft's own rebase",
+  pointer_bump: " with Kraft's own pointer bump",
 };
 
 /** A cancel's own status write: `store.end_work_item` follows `work_item_cancelled` with `work_item_abandoned`.
@@ -83,6 +90,8 @@ export function eventLine(e: KraftEvent, nodes?: Nodes, before?: KraftEvent): st
     case "mr_opened": return `MR !${s(p.number)} opened`;
     case "mr_closed": return `MR !${s(p.ref)} closed${p.by && p.by !== "cancel" ? ` by ${s(p.by)}` : ""}`;
     case "mr_reopened": return `MR !${s(p.ref)} reopened`;
+    case "merge_refused_unreviewed": return `${at} · not merged: the code is not what the final review approved`;
+    case "reviewed_head_repinned": return `reviewed head moved${typeof p.cause === "string" && Object.hasOwn(REPINNED_HOW, p.cause) ? REPINNED_HOW[p.cause] : ""}`;
     case "budget_raised": case "budget_changed": return `budget set to $${s(p.budget_usd)}`;
     // Nothing was merged behind the item, so its beads stay open for the operator to close by hand.
     case "beads_left_open": return `left ${Array.isArray(p.beads) ? p.beads.join(", ") : "its beads"} open: ${cut(s(p.reason), 240)}`;

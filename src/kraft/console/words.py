@@ -628,6 +628,14 @@ def event_line(
             return f"MR !{_s(p.get('ref'))} reopened"
         case "merge_refused_unreviewed":
             return f"{node} · not merged: the code is not what the final review approved"
+        case "reviewed_head_repinned":
+            # Kraft's own rewrite of the approved head (`kraft.reviewed_head.repin`).
+            how = {
+                "rebase": " with Kraft's own rebase",
+                "pointer_bump": " with Kraft's own pointer bump",
+            }
+            cause = p.get("cause")
+            return f"reviewed head moved{how.get(cause, '') if isinstance(cause, str) else ''}"
         case "budget_raised" | "budget_changed":
             return f"budget set to ${_s(p.get('budget_usd'))}"
         case "work_item_title_edited":
