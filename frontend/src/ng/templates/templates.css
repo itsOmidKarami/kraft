@@ -76,6 +76,7 @@
 .bp-note { position: absolute; left: 14px; bottom: 12px; z-index: 3; max-width: min(560px, calc(100% - 200px)); margin: 0; padding: 3px 7px; border-radius: 6px; background: var(--bg); font-size: var(--fs-meta); line-height: 1.5; color: var(--text-sub); pointer-events: none; }
 .bp-note.is-bad { color: var(--bad); }
 .bp-path-seg { display: inline-flex; align-items: center; gap: 6px; }
+.bp-ro { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 .bp-level { padding: 1px 6px; border: 0; border-radius: 5px; background: none; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-sub); cursor: pointer; }
 .bp-level.is-on { color: var(--text); background: var(--surface-2); }
 .bp-canvas { position: relative; flex: 1; min-height: 0; }

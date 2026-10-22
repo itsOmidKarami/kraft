@@ -12,6 +12,16 @@ const cut = (t: string, n = 70) => (t.length > n ? `${t.slice(0, n - 1)}…` : t
 /** Bookkeeping that would drown the run's story in the chain pane's Recent. */
 const QUIET = new Set<EventType>(["worker_session_created", "worker_session_exited", "chain_loaded", "plan_progress", "worktree_prepared", "steer_context_set", "permission_decision", "external_wait_observed", "findings_measured", "run_forked", "cap_counters_reset", "session_reattached"]);
 
+/** What reopened an approved gate (`gate_reopened`'s `reason`), as the console says it. */
+const REOPENED_WHY: Readonly<Record<string, string>> = {
+  retry: " by the retry",
+  conflict_resolved: " after a conflict was resolved",
+  base_changed: " after a base change",
+  merge_rejected: " after the merge train or queue rejected it",
+  escalation_committed: " after an escalation committed a change",
+  read_only_violated: " after a read-only step changed files",
+};
+
 /** A cancel's own status write: `store.end_work_item` follows `work_item_cancelled` with `work_item_abandoned`.
  *  The cancel tells it; "abandoned" alone is the other door, the abandon that deletes the worktree and branch. */
 export const cancelsOwn = (e: KraftEvent, before?: KraftEvent) => e.type === "work_item_abandoned" && before?.type === "work_item_cancelled";
@@ -45,8 +55,8 @@ export function eventLine(e: KraftEvent, nodes?: Nodes, before?: KraftEvent): st
     case "gate_requested": return `${gate} is waiting for you`;
     case "gate_approved": return `${gate} · ${p.by === "agent" || p.by === "kraft" ? "passed on its own" : "approved by you"}`;
     case "gate_rejected": return `${gate} · rejected${p.note ? `: ${cut(s(p.note), 50)}` : ""}`;
-    // An approved gate a retry, or a base-change restart after a resolved conflict, opened again: the rerun asks it anew.
-    case "gate_reopened": return `${gate} · reopened${p.reason === "retry" ? " by the retry" : p.reason === "conflict_resolved" ? " after a conflict was resolved" : ""}`;
+    // An approved gate a retry, a base-change restart, or a merge node sending the item back opened again: the rerun asks it anew.
+    case "gate_reopened": return `${gate} · reopened${typeof p.reason === "string" && Object.hasOwn(REOPENED_WHY, p.reason) ? REOPENED_WHY[p.reason] : ""}`;
     case "fix_cycle_started": return `${at} · fix loop round ${Number(p.cycle ?? 0) + 1}`;
     // What the round did, said once it ended; recent() folds it into the round's start line. null: git could not say.
     case "fix_cycle_finished": return `${at} · fix loop round ${Number(p.cycle ?? 0) + 1}${p.committed === true ? " · the fix committed a change" : p.committed === false ? " · the fix changed nothing" : ""}`;

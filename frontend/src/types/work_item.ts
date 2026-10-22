@@ -421,7 +421,8 @@ export type { SessionStatus };
 export interface NodePass {
   pass: number;
   /** `fixed`: the gate's reviewer repaired the work itself, which the server records as a rejection. */
-  reason?: "reject" | "fixed" | "retry" | "base_change" | "merge_rejected";
+  /** `escalation`: an escalation committed on a merge node, which sends the item back through the final review. */
+  reason?: "reject" | "fixed" | "retry" | "base_change" | "merge_rejected" | "escalation";
   /** The gate whose rejection, or whose reviewer's fix, sent the chain back. */
   gate?: string;
 }

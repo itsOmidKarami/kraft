@@ -556,7 +556,14 @@ def event_line(
             return f"{gate} · rejected{note}"
         case "gate_reopened":
             reason = p.get("reason")
-            why = {"retry": " by the retry", "conflict_resolved": " after a conflict was resolved"}
+            why = {
+                "retry": " by the retry",
+                "conflict_resolved": " after a conflict was resolved",
+                "base_changed": " after a base change",
+                "merge_rejected": " after the merge train or queue rejected it",
+                "escalation_committed": " after an escalation committed a change",
+                "read_only_violated": " after a read-only step changed files",
+            }
             return f"{gate} · reopened{why.get(reason, '') if isinstance(reason, str) else ''}"
         case "fix_cycle_started":
             return f"{node} · fix loop round {_round(p.get('cycle'))}"

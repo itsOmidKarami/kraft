@@ -284,6 +284,7 @@ describe("a node the chain ran again", () => {
     [{ pass: 2, reason: "retry" }, "after a retry"],
     [{ pass: 3, reason: "base_change" }, "after a base change"],
     [{ pass: 2, reason: "merge_rejected" }, "after the merge train or queue rejected it"],
+    [{ pass: 2, reason: "escalation" }, "after an escalation committed a change"],
     [{ pass: 2 }, "started over"],
   ] as const)("says what started a pass: %j → %s", (p, want) => {
     expect(passWhy(p)).toBe(want);

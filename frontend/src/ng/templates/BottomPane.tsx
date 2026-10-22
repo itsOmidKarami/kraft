@@ -5,6 +5,7 @@ import type { NodeStep } from "../graph/nodeLayout";
 import type { GraphItem } from "../graph/types";
 import type { TaskKind } from "../icons";
 import { Button } from "../ui/Button";
+import { Switch } from "../ui/Switch";
 import type { ConfigDraft } from "./draft/useConfigDraft";
 import type { Op } from "./draft/types";
 import type { Scope } from "./draft/types";
@@ -56,6 +57,10 @@ export function tabsFor(selPath: string, node: string, { conflict = false, merge
 
 /** Why a merge node's own on_failure may only read: anything it committed would merge without final review. */
 export const READ_ONLY_RECOVERY = "Read-only here: it can retry, wait or ask, not change code. A change would merge without final review.";
+/** A merge node's on_failure that may write, which the server refuses (a chain-level problem, with no path to mark). */
+export const WRITING_RECOVERY = "Must be read-only here: a change would merge without final review. Turn read only on.";
+/** An on_failure read only by choice, on a node with no merge rejection: what it may do. */
+export const READ_ONLY_PLAN = "Read-only: it can retry, wait or ask, not change code.";
 
 /** What happens after a merge rejection's repair, in words: the item restarts from `restart` and passes again the
  *  gates between it and `node`, rather than retrying the merge where it stands. */
@@ -118,7 +123,8 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
   const tabs = tabsFor(selPath, node, { conflict: !!conflict, merges, fixLoop: !!n?.fix_loop });
   // No tab picked yet (a node just entered): the bar's first.
   const shown = tab && tabs.includes(tab) ? tab : tabs[0];
-  // With a merge rejection declared, any on_failure here may only read (the server refuses one that writes).
+  // With a merge rejection declared, any on_failure here may only read (the server refuses one that writes):
+  // add_handler starts it read_only, on the plan, which covers every step it has or gets.
   const readOnlyRecovery = !!rejected;
   const [raw, setRaw] = useState<number | null>(load);
   const height = open ? clampBottom(raw ?? Math.round(Math.min(300, Math.max(170, (canvasH - 150) * 0.42))), canvasH) : BOTTOM.BAR;
@@ -169,6 +175,9 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
       : shown === "on_conflict" ? normalise(conflict?.on_conflict as NodeA | null)
         : shown === "on_merge_rejected" ? normalise(rejected?.repair as NodeA | null) : null;
   const container = shown === "on_failure" ? `${owner.path}.on_failure` : shown === "fix_loop" ? `${node}.fix_loop` : shown === "on_merge_rejected" ? `${node}.${POLICY_HANDLER.on_merge_rejected}` : `${node}.${POLICY_HANDLER.on_conflict}`;
+  // An on_failure says read_only on the plan (a `tasks` shorthand can say it nowhere else), or on each of its steps.
+  const planReadOnly = shown === "on_failure" && !!handler && !!(r.sources[container]?.read_only?.value ?? handler.read_only);
+  const everyReadOnly = planReadOnly || (!!handler?.steps.length && handler.steps.every((s) => s.read_only === true));
   const esc = shown === "escalation" ? (n?.escalation as Task | null | undefined) ?? null : null;
   const judge = shown === "fix_loop" ? ((n?.fix_loop as Record<string, unknown> | undefined)?.judge as Task | undefined) ?? null : null;
 
@@ -194,20 +203,20 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
     const sid = step ?? nextStepId(ids);
     const taken = handler?.steps.find((s) => s.id === sid)?.tasks.map((t) => t.id) ?? [];
     const id = uniq("kind" in c ? c.kind : c.extends.split(":").pop()!, taken);
-    // A new step of a read-only recovery is read only too, as the one add_handler made.
-    const readOnlyStep: Op[] = shown === "on_failure" && readOnlyRecovery ? [{ op: "set_field", path: `${container}.${sid}`, field: "read_only", value: true }] : [];
-    return [...(step ? [] : [{ op: "add_step", container, at: at ?? ids.length, id: sid }, ...readOnlyStep]), { op: "add_task", container, step: sid, id, ...c }];
+    return [...(step ? [] : [{ op: "add_step", container, at: at ?? ids.length, id: sid }]), { op: "add_task", container, step: sid, id, ...c }];
   };
 
   const rewind = rewindLine(authoredNodes(r, scope).map((x) => ({ id: x.id, gate: kindOf(r, x) === "gate" })), node, rejected?.restart_from);
-  // The line over a handler drawn: what a merge rejection's repair leads to, or why this recovery may only read. A
-  // problem the server puts on the handler or one of its steps (one that writes, here) has no task to mark, so it
-  // takes the line, in the server's words.
+  // The line over a handler drawn: what a merge rejection's repair leads to, or what a read-only recovery may do. A
+  // problem the server puts on the handler or one of its steps has no task to mark, so it takes the line, in the
+  // server's words; a merge node's recovery that may write is refused for the whole chain, so it is said here.
   const own = handler ? [container, ...handler.steps.map((s) => `${container}.${s.id}`)].flatMap((p) => problemsAt(r, p)) : [];
   const note = !handler ? null
     : own.length ? { text: problemText(own[0]), bad: true }
       : shown === "on_merge_rejected" ? { text: rewind, bad: false }
-        : shown === "on_failure" && readOnlyRecovery ? { text: READ_ONLY_RECOVERY, bad: false } : null;
+        : shown !== "on_failure" ? null
+          : readOnlyRecovery ? (everyReadOnly ? { text: READ_ONLY_RECOVERY, bad: false } : { text: WRITING_RECOVERY, bad: true })
+            : planReadOnly ? { text: READ_ONLY_PLAN, bad: false } : null;
 
   const empty = (() => {
     const delay = autoEscalates(r.policy_values?.auto_escalate_delay_s ?? 0);
@@ -285,6 +294,13 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
                   </button>
                 </span>
               ))}
+              {handler && (
+                <span className="bp-ro">
+                  read only
+                  {/* On a merge node, off would be refused: it stays on (the note says why). */}
+                  <Switch label="Read only" checked={planReadOnly} disabled={readOnly || (readOnlyRecovery && planReadOnly)} onChange={(on) => void draft.ops([{ op: "set_field", path: container, field: "read_only", value: on }])} />
+                </span>
+              )}
             </div>
           )}
           <div className="bp-canvas">
