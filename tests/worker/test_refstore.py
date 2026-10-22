@@ -347,21 +347,32 @@ _NOT_FILE = "something that is not a regular file"
 @pytest.mark.parametrize(
     ("kind", "text", "left", "final", "lock_stays"),
     [
-        ("commit", "{work}", None, "{work}", False),
-        ("symref", "ref: refs/heads/main", "'ref: refs/heads/main'", "{start}", False),
-        ("tree", "{tree}", "'{tree}'", "{start}", False),
-        ("garbage", "not an oid", "'not an oid'", "{start}", False),
-        ("revname", "main", "'main'", "{start}", False),
-        ("stale-lock", "{start}", None, "{start}", True),
-        ("no-branch", "junk", None, "junk", False),
-        ("lock-dir", "not an oid", "'not an oid'", "{start}", False),
-        ("lock-symlink", "not an oid", "'not an oid'", "{start}", False),
-        ("ref-symlink", None, _NOT_FILE, "{start}", False),
-        ("ref-dir", None, _NOT_FILE, "{start}", False),
-        ("ref-deleted", None, _NOT_FILE, "{start}", False),
-        ("reflog-symlink", None, None, "{start}", False),
-        ("reflog-dir", None, None, "{start}", False),
-        ("no-recorded-value", "not an oid", "'not an oid'", None, False),
+        pytest.param("commit", "{work}", None, "{work}", False, id="commit"),
+        pytest.param(
+            "symref",
+            "ref: refs/heads/main",
+            "'ref: refs/heads/main'",
+            "{start}",
+            False,
+            id="symref",
+        ),
+        pytest.param("tree", "{tree}", "'{tree}'", "{start}", False, id="tree"),
+        pytest.param("garbage", "not an oid", "'not an oid'", "{start}", False, id="garbage"),
+        pytest.param("revname", "main", "'main'", "{start}", False, id="revname"),
+        pytest.param("stale-lock", "{start}", None, "{start}", True, id="stale-lock"),
+        pytest.param("no-branch", "junk", None, "junk", False, id="no-branch"),
+        pytest.param("lock-dir", "not an oid", "'not an oid'", "{start}", False, id="lock-dir"),
+        pytest.param(
+            "lock-symlink", "not an oid", "'not an oid'", "{start}", False, id="lock-symlink"
+        ),
+        pytest.param("ref-symlink", None, _NOT_FILE, "{start}", False, id="ref-symlink"),
+        pytest.param("ref-dir", None, _NOT_FILE, "{start}", False, id="ref-dir"),
+        pytest.param("ref-deleted", None, _NOT_FILE, "{start}", False, id="ref-deleted"),
+        pytest.param("reflog-symlink", None, None, "{start}", False, id="reflog-symlink"),
+        pytest.param("reflog-dir", None, None, "{start}", False, id="reflog-dir"),
+        pytest.param(
+            "no-recorded-value", "not an oid", "'not an oid'", None, False, id="no-recorded-value"
+        ),
     ],
 )
 def test_check_direct(repo, direct, tmp_path, kind, text, left, final, lock_stays):
