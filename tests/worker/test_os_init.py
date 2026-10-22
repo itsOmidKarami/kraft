@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from kraft.worker import os_init
+from kraft.worker.mounts import RELAY_PROXY_ENV
 
 OS_INIT = Path(__file__).parents[2] / "src/kraft/worker/os_init.py"
 PY = [sys.executable, "-I", "-S"]
@@ -571,10 +572,15 @@ def test_launch_darwin_relay(launcher, tmp_path, short_run):
     port = int(seen["argv"][2].removeprefix("RELAY_PORT="))
     # the client proved it holds the token the launcher put in the proxy URL
     assert (r.stdout.strip(), seen["argv"][1], port > 0) == ("pong:POST http://x/ H", "-D", True)
-    urls = {seen["env"][n] for n in ("HTTPS_PROXY", "http_proxy", "HTTP_PROXY", "https_proxy")}
+    urls_names = ("HTTPS_PROXY", "http_proxy", "HTTP_PROXY", "https_proxy")
+    urls = {seen["env"][n] for n in urls_names}
     assert len(urls) == 1
     assert re.fullmatch(rf"http://kraft:[\w-]{{43}}@127\.0\.0\.1:{port}", urls.pop())
-    assert (seen["env"]["NO_PROXY"], seen["env"]["NODE_USE_ENV_PROXY"]) == ("", "1")
+    # the names are the ones Linux's `RELAY_PROXY_ENV` sets, and the fixed values match
+    assert {n for n in seen["env"] if "proxy" in n.lower()} == set(RELAY_PROXY_ENV)
+    assert {
+        n: v for n, v in seen["env"].items() if n in RELAY_PROXY_ENV and n not in urls_names
+    } == {n: v for n, v in RELAY_PROXY_ENV.items() if n not in urls_names}
 
 
 def test_launch_darwin_env(launcher, tmp_path):
