@@ -71,6 +71,12 @@ class RefStore:
     #: the launch's own worktree.
     checkout: Path | None = None
 
+    @property
+    def direct(self) -> bool:
+        """No private store: the worker writes its own branch's files in the
+        real common gitdir (`prepare_direct`)."""
+        return self.shadow == self.common
+
 
 def shadow_dir(base: Path, worktree_gitdir: Path) -> Path:
     digest = hashlib.sha256(str(worktree_gitdir).encode()).hexdigest()[:16]
@@ -312,6 +318,84 @@ def _prepare(
         for point in mount_points:
             _mount_point(store.shadow, point)
     return store
+
+
+def prepare_direct(
+    base: Path,
+    cwd: Path,
+    branch: str | None,
+    *,
+    members: Mapping[str, tuple[Path, Path] | None] | None = None,
+) -> list[RefStore]:
+    """The direct stores of a launch with no mount namespace to hide a private
+    one in: one per repository (the worktree's own, then each member's), whose
+    `shadow` is the real common gitdir. `members` is as for `prepare_stores`.
+
+    With a `branch`, makes its ref a loose file and its reflog's directories
+    now, host-side, since the worker may create only the files themselves, and
+    records the value in a sidecar beside `sandbox-git/` that no worker
+    writes: `check_direct` puts it back. Nothing is created under `S`."""
+    root = Path(cwd).resolve()
+    root_dirs = _sandbox.linked_gitdirs(root)
+    if root_dirs is None:
+        return []
+    found = [(None, *root_dirs)]
+    for rel, dirs in sorted((members or {}).items()):
+        if dirs is None:
+            raise RuntimeError(
+                f"workspace member {rel} of {root} has no checkout Kraft made from its "
+                "connected repository, so it cannot be mounted into a sandbox"
+            )
+        found.append((root / rel, *dirs))
+    stores = [RefStore(common, common, admin, branch, checkout=co) for co, common, admin in found]
+    for store in stores:
+        if branch is not None:
+            _record_direct(base, store)
+    return stores
+
+
+def _record_direct(base: Path, store: RefStore) -> None:
+    common, branch = store.common, store.branch
+    shadow = shadow_dir(base, store.worktree_gitdir)
+    ref = common / "refs" / "heads" / branch
+    value = _real_branch(common, branch)
+    if value and not os.path.lexists(ref):
+        # Only in `packed-refs`: git writes the loose file on a move, not on a no-op.
+        _git(common, "update-ref", f"refs/heads/{branch}", value)
+        if not ref.exists():
+            ref.parent.mkdir(parents=True, exist_ok=True)
+            ref.write_text(value + "\n")
+    (common / "logs" / "refs" / "heads" / branch).parent.mkdir(parents=True, exist_ok=True)
+    with _locked(shadow):
+        _write_meta(shadow, {"branch": branch, "value": value})
+
+
+def check_direct(base: Path, store: RefStore) -> str | None:
+    """After a session, the direct store's branch ref must still be a bare
+    object id naming a commit: that is recorded as its new value. Anything
+    else (a symref to `main`, a tree, garbage) is put back to the recorded
+    value, and why is returned for the caller to record. A leftover `.lock`
+    is removed either way."""
+    if store.branch is None:
+        return None
+    ref = store.common / "refs" / "heads" / store.branch
+    shadow = shadow_dir(base, store.worktree_gitdir)
+    with _locked(shadow):
+        ref.with_name(ref.name + ".lock").unlink(missing_ok=True)
+        text = _sandbox.read_regular(ref, store.common)
+        value = text.strip() if text is not None else None
+        meta = _read_meta(shadow)
+        if value and _OID.fullmatch(value) and _is_commit(store.common, value):
+            _write_meta(shadow, {**meta, "value": value})
+            return None
+        old = meta.get("value", "")
+        if ref.is_dir() and not ref.is_symlink():
+            shutil.rmtree(ref)
+        tmp = ref.with_name(ref.name + ".kraft-restore")
+        tmp.write_text(old + "\n")
+        os.replace(tmp, ref)
+        what = repr(value[:80]) if value is not None else "something that is not a regular file"
+        return f"the worker left refs/heads/{store.branch} as {what}; restored {old}"
 
 
 def _mount_point(shadow: Path, point: Path) -> None:

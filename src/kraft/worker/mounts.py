@@ -174,7 +174,10 @@ def _linked_mounts(
     given, with the real `objects/` and `lfs/` inside it read-write and
     `HEAD`, `config`, `info/` and `shallow` read-only; the worker's refs,
     reflogs, `packed-refs` and `FETCH_HEAD` all land in the store. Without a
-    store it is read-only whole, and a commit cannot move a ref at all.
+    store it is read-only whole, and a commit cannot move a ref at all. A
+    direct store (no mount namespace to hide one in) is the real common
+    gitdir read-only, with `objects/`, `lfs/` and the item branch's ref, lock
+    and reflog read-write.
     """
     # `.git` itself lives inside the read-write `cwd` mount. Left alone, a
     # sandboxed worker repoints it at a gitdir it builds inside the
@@ -185,12 +188,21 @@ def _linked_mounts(
     mounts = [Mount(git_file, git_file, True)]
     if refstore is None:
         mounts.append(Mount(common, common, True))
+    elif refstore.direct:
+        # The real common gitdir, read-only but for what a commit writes.
+        (common / "lfs").mkdir(exist_ok=True)
+        mounts += [
+            Mount(common, common, True),
+            Mount(common / "objects", common / "objects", False),
+            Mount(common / "lfs", common / "lfs", False),
+        ]
     else:
         mounts.append(Mount(refstore.shadow, common, False))
         for name in (*SHADOW_FILES, *SHADOW_DIRS):
             path = common / name
             if path.exists():
                 mounts.append(Mount(path, path, name not in _RW_SHADOW_DIRS))
+    if refstore is not None:
         # `objects/info` is where `alternates` lives: read-write, a worker
         # names any host directory there and every later sandboxed launch on
         # this repository mounts it (and host git reads objects from it).
@@ -218,4 +230,14 @@ def _linked_mounts(
                 pass
         if path.exists():
             mounts.append(Mount(path, path, True))
+    if refstore is not None and refstore.direct and refstore.branch:
+        heads = common / "refs" / "heads" / refstore.branch
+        mounts += [
+            Mount(p, p, False)
+            for p in (
+                heads,
+                heads.with_name(heads.name + ".lock"),
+                common / "logs" / "refs" / "heads" / refstore.branch,
+            )
+        ]
     return mounts

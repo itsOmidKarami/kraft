@@ -1,6 +1,8 @@
+import json
 import os
 import shutil
 import threading
+from dataclasses import replace
 
 import pytest
 from support.harness import git
@@ -323,3 +325,93 @@ def test_a_mount_point_is_never_made_through_what_a_worker_left_in_the_store(tmp
 def test_a_member_kraft_did_not_check_out_is_never_mounted(repo, worktree, tmp_path):
     with pytest.raises(RuntimeError, match="repos/pkg"):
         refstore.prepare_stores(tmp_path / "run", worktree, BRANCH, members={"repos/pkg": None})
+
+
+@pytest.fixture
+def direct(worktree, tmp_path):
+    """The direct store of the worktree's item branch: `(run base, store, its ref file)`."""
+    base = tmp_path / "run"
+    (store,) = refstore.prepare_direct(base, worktree, BRANCH)
+    return base, store, store.common / "refs" / "heads" / BRANCH
+
+
+@pytest.mark.parametrize(
+    ("content", "lock", "bad"),
+    [
+        ("{work}", False, False),
+        ("ref: refs/heads/main", False, True),
+        ("{tree}", False, True),
+        ("not an oid", False, True),
+        ("main", False, True),
+        (None, True, False),
+        ("junk", False, False),
+    ],
+    ids=["commit", "symref", "tree", "garbage", "revname", "stale-lock", "no-branch"],
+)
+def test_check_direct(repo, direct, request, content, lock, bad):
+    base, store, ref = direct
+    main = git(repo, "rev-parse", "main")
+    start = ref.read_text().strip()
+    work = _commit_object(repo, main, "work")
+    shown = (content or "").format(work=work, tree=git(repo, "rev-parse", f"{main}^{{tree}}"))
+    if content:
+        ref.write_text(shown + "\n")
+    if lock:
+        ref.with_name(ref.name + ".lock").write_text("")
+    if request.node.callspec.id == "no-branch":
+        store = replace(store, branch=None)
+
+    problem = refstore.check_direct(base, store)
+
+    assert not ref.with_name(ref.name + ".lock").exists()
+    if bad:
+        assert problem == f"the worker left refs/heads/{BRANCH} as {shown!r}; restored {start}"
+        assert ref.read_text().strip() == start
+        return
+    assert problem is None
+    assert ref.read_text().strip() == (shown if content else start)
+    if content == "{work}":
+        # The accepted value is the one a later bad write is put back to.
+        ref.write_text("not an oid\n")
+        assert "restored " + work in refstore.check_direct(base, store)
+
+
+@pytest.mark.parametrize("kind", ["loose", "packed-only", "slash-branch"])
+def test_prepare_direct(repo, worktree, tmp_path, kind):
+    base = tmp_path / "run"
+    branch = "kraft/fix-x" if kind == "slash-branch" else BRANCH
+    if branch != BRANCH:
+        git(repo, "worktree", "add", "-q", "-b", branch, str(tmp_path / "wt2"))
+        worktree = tmp_path / "wt2"
+    common = repo / ".git"
+    ref = common / "refs" / "heads" / branch
+    if kind == "packed-only":
+        git(repo, "pack-refs", "--all", "--prune")
+        assert not ref.exists()
+    want = git(repo, "rev-parse", branch)
+    logs = common / "logs" / "refs" / "heads" / branch
+    if kind == "slash-branch":
+        shutil.rmtree(logs.parent)  # git made it with the branch; Kraft must be able to
+
+    (store,) = refstore.prepare_direct(base, worktree, branch)
+
+    assert store.direct and store.shadow == store.common == common and store.checkout is None
+    assert ref.read_text().strip() == want
+    assert logs.parent.is_dir()
+    sidecar = refstore._meta_path(refstore.shadow_dir(base, store.worktree_gitdir))
+    assert json.loads(sidecar.read_text()) == {"branch": branch, "value": want}
+    assert [p for p in (base / "sandbox-git").iterdir() if p.is_dir()] == []
+
+
+def test_prepare_direct_needs_a_linked_worktree(repo, tmp_path):
+    assert refstore.prepare_direct(tmp_path / "run", repo, BRANCH) == []
+
+
+def test_prepare_direct_gives_a_member_its_own_store(tmp_path):
+    ws = member_checkout(tmp_path, BRANCH)
+    root, member = refstore.prepare_direct(
+        tmp_path / "run", ws.wt, BRANCH, members=ws.checkout.members
+    )
+    assert (root.checkout, member.checkout) == (None, ws.wt / "repos" / "pkg")
+    assert member.shadow == member.common == ws.checkout.members["repos/pkg"][0]
+    assert (member.common / "refs" / "heads" / BRANCH).is_file()
