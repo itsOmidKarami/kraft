@@ -459,11 +459,38 @@ def _existing_worktree(it):
     return ensure
 
 
-def _gated(**rebase_fields):
-    """`_chain` with an approvable `review` gate between `verify` and `rebase`,
-    inside the span a restart from `verify` reruns."""
+def _gated(*gates, **rebase_fields):
+    """`_chain` with approvable gates (`review`, unless named) between `verify`
+    and `rebase`, inside the span a restart from `verify` reruns."""
     verify, rebase, publish = _chain(**rebase_fields)
-    return [verify, v1_node("review", "gate"), rebase, publish]
+    return [verify, *(v1_node(g, "gate") for g in gates or ("review",)), rebase, publish]
+
+
+@pytest.mark.parametrize("refused_rewind", [False, True], ids=["approved", "a-refused-rewind"])
+async def test_a_clean_restart_passes_every_approved_gate_in_its_span(
+    item_on, script, refused_rewind
+):
+    """Ruling 162 with two approved gates in the span: a clean moved base
+    reopens neither, and the restarted walk passes over both -- the older
+    `review` too, though `signoff`'s approval is the newer gate event. A
+    person's changes asked before them, whose action was refused (cancelled),
+    sent nothing back and takes neither approval. The shipped chain's one gate:
+    test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head."""
+    it = await item_on(_gated("review", "signoff", **RESTART), "rebase")
+    for gate in ("review", "signoff"):
+        await approve(it, gate)
+    if refused_rewind:
+        await it.database.write(
+            lambda c: store.request_rewind(c, it.id, review_id="r1", target="verify", note="x")
+        )
+        await it.database.write(lambda c: store.cancel_rewind(c, it.id, "r1"))
+    script.effects = {"sync": _moves_base(it)}
+
+    assert await _walk_from(it, "rebase") == "completed"
+    assert len(it.events("base_change_restart")) == 1
+    assert script.calls == ["sync", "open", "check", "sync", "open", "publish"]
+    assert [e["payload"]["gate"] for e in it.events("gate_requested")] == ["review", "signoff"]
+    assert it.events("gate_reopened") == []
 
 
 async def test_a_resolved_conflict_reopens_the_approved_gates_in_its_span(item_on, script):

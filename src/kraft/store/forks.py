@@ -6,6 +6,7 @@ from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store.chain import materialized_chain_of
 from kraft.store.counters import clear_loop_counters, reject_loop_key
+from kraft.store.gates import approval_stands
 from kraft.vocab import ChainEvent, GateEvent
 
 
@@ -80,8 +81,9 @@ def fork_run(
         (fork.materialized_chain, _now(), work_item_id),
     )
     start, _ = fork.start
+    nodes = fork.chain.chain.nodes
     reopened = []
-    for node in fork.chain.chain.nodes[start:]:
+    for i, node in enumerate(nodes[start:], start):
         if isinstance(node.node, ExecNode):
             if by_person:
                 # `walk._loop_key`'s format; the store must not import the executor.
@@ -96,7 +98,7 @@ def fork_run(
                     "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
                     (work_item_id, reject_loop_key(node.id)),
                 )
-            if _approved(conn, work_item_id, node.id):
+            if approval_stands(conn, work_item_id, node.id, {n.id for n in nodes[: i + 1]}):
                 reopened.append(node.id)
                 events.append(
                     conn,
@@ -119,18 +121,6 @@ def fork_run(
         },
     )
     return fork
-
-
-def _approved(conn: sqlite3.Connection, work_item_id: str, gate: str) -> bool:
-    """Whether a decision to reopen stands on `gate`: it was approved, and not
-    reopened since."""
-    row = conn.execute(
-        "SELECT type FROM events WHERE work_item_id = ? "
-        "AND type IN (?, ?) "
-        "AND json_extract(payload, '$.gate') = ? ORDER BY seq DESC LIMIT 1",
-        (work_item_id, GateEvent.APPROVED, GateEvent.REOPENED, gate),
-    ).fetchone()
-    return row is not None and row["type"] == GateEvent.APPROVED
 
 
 def fork_boundary(conn: sqlite3.Connection, work_item_id: str) -> int:

@@ -140,7 +140,7 @@ describe("after the visitor", () => {
     await call("POST", `/work-items/${id}/gates/final_review/approve`);
     expect(passed()).toBe(before + 1);
     // Changes asked at implementation while it runs on: back there once release completes (no fork), then round to
-    // the gate again, which asks again since a later gate's decision is the newest.
+    // the gate again, which asks again since the rewind went back before it.
     expect((await call("POST", `/work-items/${id}/review`, { outcome: "request_changes", node: "implementation" })).body.action).toBe("queued");
     for (let k = 0; k < 16 && S.bundles[id].item.pending_gate !== "final_review"; k++) {
       ticks(1, id);
@@ -242,7 +242,7 @@ describe("after the visitor", () => {
     expect(count(S, id, "node_completed", "implementation")).toBe(2);
   });
 
-  it("a gate already approved is passed over when a rewind walks back through it", async () => {
+  it("a gate already approved is asked again when a rewind walks back through it", async () => {
     const { S, ticks, call } = started();
     const id = board(S, RUNNING);
     ticks(2, id);
@@ -251,11 +251,12 @@ describe("after the visitor", () => {
     expect((await call("POST", `/work-items/${id}/review`, { outcome: "request_changes", node: "work_brief" })).body.action).toBe("queued");
     ticks(1, id);
     expect(S.bundles[id].item.current_node_id).toBe("work_brief");
+    // The rewound `work_brief` is new work under `local_review`, so its approval no longer stands
+    // (`store.approval_stands`): the walk asks it again rather than passing over it.
     expect(ticks(1, id)).toEqual([
       ["worker_session_exited", expect.objectContaining({ status: "done" })],
-      ["node_started", { node_id: "merge_request" }],
-      ["worker_session_created", expect.objectContaining({ hook_point: "merge_request.rebase.rebase" })],
-      ["worker_session_created", expect.objectContaining({ hook_point: "merge_request.open.open_draft" })],
+      ["node_started", { node_id: "local_review" }],
+      ["gate_requested", { gate: "local_review", node_id: "local_review" }],
     ]);
   });
 

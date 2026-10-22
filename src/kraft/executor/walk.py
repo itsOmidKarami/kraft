@@ -1031,7 +1031,7 @@ async def _hold_at_restart(db, work_item_id: str, nodes, index: int, restart_fro
     retry's default target -- goes back through them. Left where it stood,
     the next entry into the merge node would merge code no gate saw."""
     target = next(j for j, n in enumerate(nodes) if n.id == restart_from)
-    await _reopen_gates(db, work_item_id, nodes[target:index], "merge_rejected")
+    await _reopen_gates(db, work_item_id, nodes, range(target, index), "merge_rejected")
     # The span will run again from scratch, as after a rewind: a fresh fix-loop
     # budget for it (Kraft-s7c04.25). No seeded note, unlike a rewind: the only
     # place a stop keeps one is `pending_steer_context`, which every later door
@@ -2340,10 +2340,12 @@ async def _clear_span_counters(db, work_item_id: str, span) -> None:
             )
 
 
-async def _reopen_gates(db, work_item_id: str, span, reason: str) -> None:
-    """Reopen every approved gate among `span`'s nodes, saying `reason`."""
-    for gate in span:
-        if isinstance(gate.node, GateNode) and gates.gate_cleared(db, work_item_id, gate.id):
+async def _reopen_gates(db, work_item_id: str, nodes, span: range, reason: str) -> None:
+    """Reopen every approved gate among the nodes at `span`'s indexes, saying
+    `reason`: each one whose approval stands, read gate by gate."""
+    for i in span:
+        gate = nodes[i]
+        if isinstance(gate.node, GateNode) and gates.gate_cleared(db, work_item_id, nodes, i):
             await db.write(
                 lambda c, g=gate.id: events.append(
                     c, work_item_id, GateEvent.REOPENED, {"gate": g, "reason": reason}, node_id=g
@@ -2415,7 +2417,7 @@ async def _restart_span(
     target = next(j for j, n in enumerate(nodes) if n.id == restart_from)
     span = [n for n in nodes[target : index + 1] if isinstance(n.node, ExecNode)]
     if reopen_gates:
-        await _reopen_gates(db, work_item_id, nodes[target:index], reopen_reason)
+        await _reopen_gates(db, work_item_id, nodes, range(target, index), reopen_reason)
     await _clear_span_counters(db, work_item_id, span)
     # The cursor moves last, after the gates reopened: a crash before it
     # leaves the item on node `index`, where a resume finds its unanswered
@@ -2787,7 +2789,7 @@ async def run_once(
             step, preserve = 0, frozenset()
             continue
 
-        if await gates.maybe_gate(db, work_item_id, node, run_dirs):
+        if await gates.maybe_gate(db, work_item_id, nodes, i, run_dirs):
             await _report_if_undelivered(db, work_item_id, carried)
             # Nothing unanswered is a must-fix at this point, unless the
             # reject cap stopped the bounce above -- either way, the reply

@@ -222,3 +222,37 @@ async def test_default_chain_rewinds_a_train_drop_through_final_review(
         "post_merge_ci",
     ]
     assert script.calls[:2] == ["merge", "repair"]
+
+
+async def test_a_final_review_rejection_asks_the_approved_local_review_again(
+    item_on, script, default_chain
+):
+    """`final_review` rejects to `implementation`, before `local_review`: the
+    re-run walks back through `local_review` with new work, so its earlier
+    approval no longer stands and the walk asks it again rather than passing
+    over it, though no `gate_reopened` names it (`store.reject_gate` writes
+    none)."""
+    it = await item_on(default_chain, "final_review")
+    for gate in _GATES[:-1]:
+        await approve(it, gate)
+    await it.database.write(lambda c: store.request_gate(c, it.id, "final_review", "final_review"))
+    nodes = default_chain.nodes
+    target = await executor.apply_rejection(
+        it.database, POLICY, work_item_id=it.id, nodes=nodes, gate="final_review", note="redo"
+    )
+    assert nodes[target].id == "implementation"
+
+    assert await _walk(it, default_chain, "implementation") == "awaiting_gate"
+    assert script.calls == ["implement", "test_changed_scopes", "code_review", "author"]
+    assert gates.pending_gate(it.database, it.id) == "local_review"
+    [rejected] = it.events("gate_rejected")
+    asked = [
+        e["payload"]["gate"] for e in it.events("gate_requested") if e["seq"] > rejected["seq"]
+    ]
+    assert asked == ["local_review"]
+
+    # Approved again after the rejection, it stands: the walk goes on to the
+    # gate that rejected, which asks again.
+    await it.database.write(lambda c: store.approve_gate(c, it.id, "local_review"))
+    assert await _walk(it, default_chain, "local_review") == "awaiting_gate"
+    assert gates.pending_gate(it.database, it.id) == "final_review"

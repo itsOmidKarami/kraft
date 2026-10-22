@@ -885,6 +885,15 @@ When a gate is rejected, the executor SHALL apply that gate node's own
 enforced-by: tests/executor/test_gates.py::test_gate_rejection_follows_its_own_reject_to, tests/executor/test_gates.py::test_a_rejection_with_no_reject_to_re_enters_the_execution_node_before_the_gate, tests/executor/test_gates.py::test_a_rejection_cannot_be_aimed_forward_past_the_gate, tests/executor/test_gates.py::test_a_fixed_verdict_re_enters_the_execution_node_before_the_gate, tests/api/test_gates.py::test_rejecting_the_final_gate_re_enters_at_implementation, tests/skills/test_gate_review.py::test_verdict_reenters_the_walk_at_the_right_node[reject-0], tests/test_planning_chain.py::test_spec_gate_offers_the_document_then_reject_and_approve
 origin: src/kraft/executor/gates.py §reject_target -- a gate with no `reject_to` re-enters at the nearest preceding *execution* node, not at the gate itself. A V1 gate has no execution shape, so the old fallback dispatched nothing and re-requested the same gate, a ping-pong bounded only by the reject loop's cap; re-running the node that produced what the gate is about is what makes the Kraft-rv6i "measure the repair rather than trust it" rule hold at a gate. A gate with nothing before it falls back to itself, which is the one case where there is no work to re-measure.
 
+## REQ a-rerun-back-before-an-approved-gate-asks-it-again
+
+WHEN a gate's rejection, or a person's request for changes with no gate
+pending, sends the chain back to a node at or before an already approved gate,
+the system SHALL ask that gate again when the re-run reaches it, and SHALL pass
+over it once it is approved again.
+enforced-by: tests/executor/test_default_chain.py::test_a_final_review_rejection_asks_the_approved_local_review_again, tests/executor/test_walk_rewind.py::test_a_rewind_back_past_approved_gates_asks_each_again[one-gate], tests/executor/test_walk_rewind.py::test_a_rewind_back_past_approved_gates_asks_each_again[two-gates]
+origin: src/kraft/store/gates.py §approval_stands -- the re-run is new work under the gate, and neither motion writes a `gate_reopened` for the gates it spans. The walk used to read only the newest gate event of any gate, which re-asked these by accident (a rewind past one approved gate, the newest, passed over it) and re-asked an older approved gate a clean restart should pass. A gate's approval is now read for that gate alone, and these two motions are read from their own events.
+
 ## REQ gate-decision-is-recorded-with-its-note
 
 When a gate is approved or rejected, the system SHALL record a `gate_approved`
@@ -1726,12 +1735,12 @@ origin: src/kraft/adapters/forge/run.py §_run_one -- Kraft-tx0dz. A member's re
 
 ## REQ base-change-restart-passes-an-approved-gate
 
-A base-change restart after a clean rebase SHALL NOT reopen a gate in its span
-that was already approved; the restarted walk SHALL pass over it. A restart
+A base-change restart after a clean rebase SHALL NOT reopen any gate in its
+span that was already approved; the restarted walk SHALL pass over each one. A restart
 after an explicit conflict handler resolved a rebase conflict SHALL reopen every
 approved gate in its span, whether the conflict arose inside the walk or when
 `/retry` or `/resume` refreshed the worktree.
-enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head, tests/executor/test_base_change.py::test_a_resolved_conflict_reopens_the_approved_gates_in_its_span, tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[retry], tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[resume]
+enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head, tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[approved], tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[a-refused-rewind], tests/executor/test_base_change.py::test_a_resolved_conflict_reopens_the_approved_gates_in_its_span, tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[retry], tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[resume]
 origin: src/kraft/executor/walk.py §_restart_for_base_change -- Omid's decision: a clean rebase, the forge's forced rebase included, changes nothing a gate saw; a resolved conflict changed code no gate saw, so a human approves again. Distinct from `retry-reopens-invalidated-gates`: a restart is the walk's answer to a moved base, not an operator's retry.
 
 ## REQ optional-pre-draft-gate-keeps-work-local
@@ -2137,7 +2146,7 @@ approved gate between `restart_from` and the merge node, with the reason
 `merge_rejected`, after a repair's commit and after a conflict that Kraft's
 own rebase cleared alike, so the repaired head is approved again before it is
 queued. A gate before `restart_from` SHALL keep its approval.
-enforced-by: tests/executor/test_merge_rejection.py::test_a_code_drop_runs_the_repair_and_rewinds_with_gates_reopened[commits], tests/executor/test_merge_rejection.py::test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates[plain], tests/executor/test_merge_rejection.py::test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates[the-node-declares-on-base-changed], tests/executor/test_default_chain.py::test_default_chain_rewinds_a_train_drop_through_final_review
+enforced-by: tests/executor/test_merge_rejection.py::test_a_code_drop_runs_the_repair_and_rewinds_with_gates_reopened[commits], tests/executor/test_merge_rejection.py::test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates[plain], tests/executor/test_merge_rejection.py::test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates[the-node-declares-on-base-changed], tests/executor/test_merge_rejection.py::test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates[two-gates], tests/executor/test_default_chain.py::test_default_chain_rewinds_a_train_drop_through_final_review
 origin: src/kraft/executor/walk.py §run_once -- the owner's anti-goal: code an agent wrote must not reach the target branch without being seen at `final_review`. A clean rebase reopens too, since the rewound span's own fix loops can commit before any gate sees the head again.
 
 ## REQ a-repair-that-stops-after-committing-holds-the-item-at-restart-from

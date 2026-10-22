@@ -19,11 +19,12 @@ MERGE_TASK = v1_task("merge", kind="forge", target="mr.merge")
 MERGE_POLICY = {"restart_from": "feedback", "repair": {"tasks": [v1_task("repair")]}}
 
 
-def merge_chain(merge=MERGE_TASK, **merge_fields):
-    """feedback -> review (a gate) -> merge, which declares `merge_fields`."""
+def merge_chain(merge=MERGE_TASK, *, gates=("review",), **merge_fields):
+    """feedback -> review (a gate) -> merge, which declares `merge_fields`.
+    `gates` puts other gates, in order, where `review` stands."""
     return [
         v1_node("feedback", tasks=[v1_task("ci")]),
-        v1_node("review", "gate"),
+        *(v1_node(gate, "gate") for gate in gates),
         v1_node("merge", tasks=[merge], **merge_fields),
     ]
 

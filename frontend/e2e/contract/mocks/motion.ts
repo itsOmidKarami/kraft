@@ -86,7 +86,7 @@ function reply(b: ItemBundle, s: any): string {
  *  at a rewind or of a never-started item) moves `current_node_id` or follows a `node_started`, so the node it stands
  *  on runs. A resume after a skip passes the skipped node, as the server's walk does. */
 const WHERE = new Set(["node_started", "node_completed", "node_skipped", "scope_skipped", "gate_approved"]);
-/** The events that open or close a gate: the newest names whether it is cleared (`gates.gate_cleared`). */
+/** The events that open or close a gate: the newest naming a gate says whether it is cleared (`store.approval_stands`). */
 const GATE_WORD = new Set(["gate_requested", "gate_approved", "gate_rejected", "gate_reopened"]);
 
 type Task = { path: string; agent: boolean };
@@ -121,10 +121,19 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
     return tasksOf(b, node ?? { id: s.node_id }).find((t) => t.path === s.hook_point)?.agent ?? true;
   };
 
-  /** `gates.gate_cleared`: the newest gate event is this gate's approval. */
+  /** `store.approval_stands`: the newest gate event naming this gate is its approval, and nothing since sent the
+   *  chain back at or before it -- a rejection re-entering at its `node`, or a rewind to its `target` not cancelled
+   *  after it -- since that re-run walks back through the gate, which asks again. */
   const cleared = (b: ItemBundle, gate: string) => {
-    const last = [...b.events].reverse().find((e) => GATE_WORD.has(e.type));
-    return last?.type === "gate_approved" && last.payload.gate === gate;
+    const at = b.events.map((e) => GATE_WORD.has(e.type) && e.payload.gate === gate).lastIndexOf(true);
+    if (at < 0 || b.events[at].type !== "gate_approved") return false;
+    const nodes: any[] = b.item.chain_definition?.nodes ?? [];
+    const upstream = nodes.slice(0, nodes.findIndex((n) => n.id === gate) + 1).map((n) => n.id);
+    const since = b.events.slice(at + 1);
+    return !since.some((e, k) =>
+      (e.type === "gate_rejected" && upstream.includes(e.payload.node ?? e.payload.gate)) ||
+      (e.type === "rewind_requested" && upstream.includes(e.payload.target) &&
+        !since.slice(k + 1).some((c) => c.type === "rewind_cancelled" && c.payload.review_id === e.payload.review_id)));
   };
 
   /** How the item stands on its node, by its newest positional event: `done` past it (completed, skipped, its gate

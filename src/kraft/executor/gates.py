@@ -232,7 +232,7 @@ async def bounce_on_feedback(
     rest of this module takes when policy failed to load.
     """
     node = nodes[index]
-    if not isinstance(node.node, GateNode) or gate_cleared(db, work_item_id, node.id):
+    if not isinstance(node.node, GateNode) or gate_cleared(db, work_item_id, nodes, index):
         return None
     threads = db.read(lambda c: store.unanswered(c, work_item_id))
     if not any(t["label"] == ThreadLabel.MUST_FIX for t in threads):
@@ -283,26 +283,24 @@ async def bounce_on_feedback(
     return None if target is None else (target, note)
 
 
-def gate_cleared(db, work_item_id: str, gate: str) -> bool:
-    """True iff the most recent gate_* event for the item is gate_approved <gate>.
+def gate_cleared(db, work_item_id: str, nodes: Sequence[ResolvedNode], index: int) -> bool:
+    """Whether the gate at `nodes[index]` is already cleared, so a walk passes
+    over it: its approval stands (`store.approval_stands`), read for that gate
+    alone and against the chain's order up to it.
 
     `gate_reopened` (a retry's fork, or a base-change restart after a resolved
     conflict) is the newest word on a gate it names, so the rerun requests it
-    again."""
-    evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
-    for e in reversed(evts):
-        if e["type"] in (
-            GateEvent.REQUESTED,
-            GateEvent.APPROVED,
-            GateEvent.REJECTED,
-            GateEvent.REOPENED,
-        ):
-            return e["type"] == GateEvent.APPROVED and e["payload"].get("gate") == gate
-    return False
+    again; so is a later rejection or rewind that sent the chain back at or
+    before it."""
+    gate = nodes[index].id
+    upstream = {n.id for n in nodes[: index + 1]}
+    return db.read(lambda c: store.approval_stands(c, work_item_id, gate, upstream))
 
 
-async def maybe_gate(db, work_item_id: str, node: ResolvedNode, run_dirs=None) -> bool:
-    """Whether the walk stops here because `node` is an unanswered gate
+async def maybe_gate(
+    db, work_item_id: str, nodes: Sequence[ResolvedNode], index: int, run_dirs=None
+) -> bool:
+    """Whether the walk stops here because `nodes[index]` is an unanswered gate
     (`gate-node-opens-and-halts-execution`).
 
     True opens the gate and stops the caller. False means walk on, which covers
@@ -318,9 +316,10 @@ async def maybe_gate(db, work_item_id: str, node: ResolvedNode, run_dirs=None) -
     asking anyone (Kraft-oydes): Kraft approves it, with the proposal's
     rationale on a `chain_revision_unchanged` event.
     """
+    node = nodes[index]
     if not isinstance(node.node, GateNode):
         return False
-    if gate_cleared(db, work_item_id, node.id):
+    if gate_cleared(db, work_item_id, nodes, index):
         return False
     await db.write(lambda c: store.enter_node(c, work_item_id, node.id))
     if node.node.artifact == revision.CHAIN_REVISION and run_dirs is not None:

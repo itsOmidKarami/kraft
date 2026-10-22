@@ -4,10 +4,13 @@ line budget."""
 
 from __future__ import annotations
 
+import pytest
 from support.harness import entry_of
+from support.item_walk import approve
 
 from kraft import executor, store
 from kraft.adapters import forge as _forge
+from kraft.executor import gates
 
 NO_SETUP = entry_of({"setup_command": ""})
 #: The same, on a forge: a V1 forge task runs on `backend: auto`, which reads
@@ -158,3 +161,45 @@ async def test_a_ci_wait_resume_does_not_jump_to_a_pending_rewind(item_on, scrip
     # The waiting node's own completion comes before the rewind's honour --
     # never the other way around (a poller's resume jumping past it).
     assert mr_completed_at < impl_starts[1]
+
+
+@pytest.mark.parametrize(
+    "approved", [("review",), ("review", "signoff")], ids=["one-gate", "two-gates"]
+)
+async def test_a_rewind_back_past_approved_gates_asks_each_again(item_on, script, approved):
+    """Changes requested at `implementation` while `publish` ran, every gate
+    approved: the re-run is new work under each gate, so each asks again
+    rather than passing over it -- the newest approval as much as an older one,
+    though the rewind wrote no `gate_reopened` (`store.approval_stands`). Each
+    approved again after the rewind stands: the walk goes on past it."""
+    gate_nodes = [{"id": g, "kind": "gate"} for g in approved]
+    it = await item_on(
+        [
+            _exec("implementation", _agent("implement")),
+            *gate_nodes,
+            _exec("publish", _agent("ship")),
+        ],
+        "publish",
+    )
+    for gate in approved:
+        await approve(it, gate)
+
+    async def _queue_rewind(row):
+        script.effects.pop("ship", None)
+        await it.database.write(
+            lambda c: store.request_rewind(
+                c, it.id, review_id="r1", target="implementation", note="fix the thing"
+            )
+        )
+
+    script.effects["ship"] = _queue_rewind
+    at = [n.id for n in it.chain.chain.nodes].index
+
+    status = await _walk(it, start_index=at("publish"))
+    for gate in approved:
+        assert status == "awaiting_gate"
+        assert gates.pending_gate(it.database, it.id) == gate
+        await it.database.write(lambda c, g=gate: store.approve_gate(c, it.id, g))
+        status = await _walk(it, start_index=at(gate))
+    assert status == "completed"
+    assert script.calls == ["ship", "implement", "ship"]

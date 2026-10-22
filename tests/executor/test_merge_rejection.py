@@ -26,7 +26,7 @@ def _starts(it):
     return [
         e["payload"]["node_id"]
         for e in it.events("node_started")
-        if e["payload"]["node_id"] != "review"
+        if e["payload"]["node_id"] not in ("review", "signoff")
     ]
 
 
@@ -82,27 +82,36 @@ async def test_a_code_drop_runs_the_repair_and_rewinds_with_gates_reopened(item_
 
 
 @pytest.mark.parametrize(
-    "fields",
-    [{}, {"on_base_changed": {"restart_from": "feedback"}}],
-    ids=["plain", "the-node-declares-on-base-changed"],
+    ("fields", "approved"),
+    [
+        ({}, ("review",)),
+        ({"on_base_changed": {"restart_from": "feedback"}}, ("review",)),
+        ({}, ("review", "signoff")),
+    ],
+    ids=["plain", "the-node-declares-on-base-changed", "two-gates"],
 )
 async def test_a_clean_conflict_rebase_rewinds_without_an_agent_and_reopens_gates(
-    item_on, script, fields
+    item_on, script, fields, approved
 ):
     """Kraft's forced rebase cleared the conflict, so no repair runs; the span's
     approved `review` still reopens, because the rewound span's own fix loops
-    can commit before any gate sees the head again. The base that forced
-    rebase moved is not a second, base-change restart."""
-    it = await item_on(merge_chain(on_merge_rejected=MERGE_POLICY, **fields))
-    await approve(it, "review")
+    can commit before any gate sees the head again -- every approved gate in
+    it, `two-gates` the older one too, though the newer approval came after it.
+    The base that forced rebase moved is not a second, base-change restart."""
+    it = await item_on(merge_chain(gates=approved, on_merge_rejected=MERGE_POLICY, **fields))
+    for gate in approved:
+        await approve(it, gate)
     merge_drops(it, script, "conflict", moves_base=True)
 
     assert await walk_once(it) == "awaiting_gate"
     assert [e["payload"] for e in it.events("gate_reopened")] == [
-        {"gate": "review", "reason": "merge_rejected"}
+        {"gate": gate, "reason": "merge_rejected"} for gate in approved
     ]
-    await approve(it, "review")
-    assert await walk_once(it) == "completed"
+    for gate in approved:
+        assert gates.pending_gate(it.database, it.id) == gate
+        await approve(it, gate)
+        status = await walk_once(it)
+    assert status == "completed"
     assert _starts(it) == ["feedback", "merge", "feedback", "merge"]
     assert script.calls == ["ci", "merge", "ci", "merge"]
     assert not it.events("node_recovery_started")
