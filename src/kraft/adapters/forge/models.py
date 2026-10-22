@@ -24,6 +24,25 @@ class ForgeError(RuntimeError):
     """The forge could not be reached, or answered something unusable."""
 
 
+class HeadMoved(ForgeError):
+    """The forge refused a merge because the head it holds is not the one named
+    (`Forge.merge(head=)`): a commit reached the merge request that nobody
+    reviewed. `current` is the forge's head, "" when it could not be read."""
+
+    def __init__(self, message: str, current: str = ""):
+        super().__init__(message)
+        self.current = current
+
+
+class ForeignCommits(ForgeError):
+    """A push was refused because the remote branch holds commits Kraft did not
+    push and the worktree does not have (`git.push`). `remote` is its tip."""
+
+    def __init__(self, message: str, remote: str = ""):
+        super().__init__(message)
+        self.remote = remote
+
+
 #: What a forge or git failure's own text says about why, lower-cased and
 #: matched as substrings: a rejected credential first (it is also what an
 #: unreachable-looking retry would not fix), then a host that could not be
@@ -131,6 +150,10 @@ class MRRef:
     #: The revision a merged one landed on its target, "" when the forge did
     #: not say -- what a workspace root's pointer names (Kraft-n60oh).
     merged_sha: str = ""
+    #: The forge's current head of the merge request, "" when it did not say
+    #: (or, on GitLab, once merged: the head it reports then may be a rebase's
+    #: landed one). What a merge Kraft asked for is compared against.
+    head_sha: str = ""
 
 
 @dataclass(frozen=True)
@@ -240,7 +263,18 @@ class Forge(Protocol):
     async def branch_ci_status(
         self, *, repo: Path, branch: str, head_sha: str, pipeline_id: str = ""
     ) -> CIStatus: ...
-    async def merge(self, *, repo: Path, branch: str, mr: MR) -> None: ...
+    async def merge(self, *, repo: Path, branch: str, mr: MR, head: str) -> None:
+        """Ask the forge to merge `mr`, and only at `head`, the full sha it may
+        merge: the forge refuses (`HeadMoved`) any other, now or whenever it
+        gets round to merging. An empty `head` raises `ForgeError` unasked."""
+        ...
+
+    async def cancel_merge(self, *, repo: Path, branch: str, mr: MRRef) -> None:
+        """Undo what `merge` asked: auto-merge, merge when the pipeline
+        succeeds, a queue or train entry. Raises `ForgeError` when it cannot,
+        because the forge may still merge."""
+        ...
+
     async def close_mr(self, *, repo: Path, mr: MRRef) -> None: ...
     async def reopen_mr(self, *, repo: Path, mr: MRRef) -> None: ...
     async def set_labels(
@@ -396,6 +430,22 @@ class FakeForge:
     queue_drops: list[QueueRead] = field(default_factory=list)
     #: Drops consumed and not yet superseded by another `merge`, by number.
     _dropped: dict[int, QueueRead] = field(default_factory=dict)
+    #: The head the forge holds for the merge request, when it is not the one
+    #: Kraft pushed: `merge` refuses any other `head` as the real forges do
+    #: (`HeadMoved`), and `find_mr` reports it as `head_sha`.
+    forge_head: str | None = None
+    #: A head the forge comes to hold only once it has accepted a `merge`: a
+    #: commit that reaches the branch after Kraft asked.
+    head_after_merge: str | None = None
+    #: The `head` each `merge` call was handed, refused or not.
+    merge_heads: list[str] = field(default_factory=list)
+    #: Numbers `cancel_merge` has cancelled; a cancelled merge never lands.
+    cancelled: list[int] = field(default_factory=list)
+    #: When set, `push` refuses as `git.push` does for a commit the forge has
+    #: that the worktree lacks (`ForeignCommits`), naming this as the remote.
+    push_refused: str | None = None
+    #: The head each merge request was last asked to merge at, by number.
+    _asked_head: dict[int, str] = field(default_factory=dict)
 
     @staticmethod
     def _next(script: list):
@@ -430,6 +480,12 @@ class FakeForge:
         self.opened_draft[mr.number] = False
 
     async def push(self, *, repo: Path, branch: str) -> None:
+        if self.push_refused:
+            raise ForeignCommits(
+                f"origin/{branch} is at {self.push_refused[:12]}, which Kraft did not push "
+                "and this worktree does not have",
+                remote=self.push_refused,
+            )
         self.pushed.append(branch)
         head = _head(repo)
         for number in list(self._landing):
@@ -526,7 +582,7 @@ class FakeForge:
     async def set_labels(self, *, repo: Path, branch: str, mr: MR, labels: tuple[str, ...]) -> None:
         self.labels.extend(labels)
 
-    async def merge(self, *, repo: Path, branch: str = "", mr: MR) -> None:
+    async def merge(self, *, repo: Path, branch: str = "", mr: MR, head: str = "") -> None:
         # number 0 means "resolve from the branch", which is what `run_task`
         # passes and what both real CLIs do. A fake that rejected it
         # would fail on the one path production always takes.
@@ -539,7 +595,16 @@ class FakeForge:
             number = max(candidates, default=0)
         if number not in self.opened:
             raise ForgeError(f"no such merge request: {mr.number}")
+        self.merge_heads.append(head)
+        if self.forge_head is not None and self.forge_head != head:
+            raise HeadMoved(
+                f"Head branch was modified (the forge holds {self.forge_head[:12]})",
+                current=self.forge_head,
+            )
         self.merge_calls.append(number)
+        self._asked_head[number] = head
+        if self.head_after_merge is not None:
+            self.forge_head = self.head_after_merge
         self._dropped.pop(number, None)
         if self.queue_kind != "none" and self.queue_drops:
             self._dropped[number] = self.queue_drops.pop(0)
@@ -549,7 +614,12 @@ class FakeForge:
             self._queued_head[number] = _head(repo)
         else:
             self.merged.append(number)
-            self._merged_head[number] = _head(repo)
+            self._merged_head[number] = self.forge_head or _head(repo)
+
+    async def cancel_merge(self, *, repo: Path, branch: str, mr: MRRef) -> None:
+        self.cancelled.append(mr.number)
+        self._landing.pop(mr.number, None)
+        self._queued_head.pop(mr.number, None)
 
     async def close_mr(self, *, repo: Path, mr: MRRef) -> None:
         if mr.number not in self.closed:
@@ -577,7 +647,8 @@ class FakeForge:
                 self._landing[number] -= 1
             else:
                 del self._landing[number]
-                self._merged_head[number] = self._queued_head.pop(number)
+                self._merged_head[number] = self.forge_head or self._queued_head.pop(number)
+                self._queued_head.pop(number, None)
                 self.merged.append(number)
         if number in self.merged:
             state = "merged"
@@ -591,6 +662,7 @@ class FakeForge:
             state=state,
             merge_queued=number in self._landing,
             merged_sha=self._merged_head.get(number) or "",
+            head_sha=self.forge_head or self._asked_head.get(number, ""),
         )
 
     async def merge_queue(self, *, repo: Path, branch: str, base: str) -> QueueRead:

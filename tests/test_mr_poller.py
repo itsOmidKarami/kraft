@@ -82,7 +82,7 @@ async def test_tick_leaves_a_merged_or_open_mr_untouched(
     assert it.row()["stop_kind"] == "failed"
 
     # merged
-    await fake.merge(repo=it.worktree, branch=store.branch_for(it.row()), mr=mr)
+    await fake.merge(repo=it.worktree, branch=store.branch_for(it.row()), mr=mr, head="a" * 40)
     assert await mr_poller.tick(app) == []
     assert it.row()["stop_kind"] == "failed"
 

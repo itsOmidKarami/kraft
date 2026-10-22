@@ -58,7 +58,7 @@ class _Unanswered(forge.FakeForge):
     """A merge call that neither lands nor queues anything the forge reports:
     the merge request is open, Kraft asked, and `merge_queued` is false."""
 
-    async def merge(self, *, repo, branch="", mr):
+    async def merge(self, *, repo, branch="", mr, head=""):
         self.merge_calls.append(1)
 
 
@@ -296,7 +296,7 @@ async def test_a_drop_is_seen_after_a_restart_of_the_wait_reader(run_forge, repo
         forge.FakeForge(queue_kind="train", queue_drops=[CODE], ci_states=["success"]), repo
     )
     # The forge's own record of the drop, which outlives Kraft's restart.
-    await restarted.merge(repo=repo, branch=BRANCH, mr=forge.MR(number=0, url=""))
+    await restarted.merge(repo=repo, branch=BRANCH, mr=forge.MR(number=0, url=""), head="a" * 40)
     restarted.merge_calls.clear()
 
     assert (await run_forge(restarted, "merge", "m1", repo=repo))[0] == "merge_rejected"

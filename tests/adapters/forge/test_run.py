@@ -23,7 +23,7 @@ async def _opened(fake: forge.FakeForge, repo, *, merged: bool = False) -> forge
     """`fake` with an MR open on `kraft/w1` in `repo` (and merged, if asked)."""
     mr = await fake.open_mr(repo=repo, branch="kraft/w1", base="main", title="t", body="b")
     if merged:
-        await fake.merge(repo=repo, branch="kraft/w1", mr=mr)
+        await fake.merge(repo=repo, branch="kraft/w1", mr=mr, head="a" * 40)
         fake.pushed.clear()
     return fake
 
@@ -360,9 +360,9 @@ class _Recording(forge.FakeForge):
         self.order.append("ci_status")
         return await super().ci_status(repo=repo, mr=mr, branch=branch, pipeline_id=pipeline_id)
 
-    async def merge(self, *, repo, branch="", mr):
+    async def merge(self, *, repo, branch="", mr, head=""):
         self.order.append("merge")
-        await super().merge(repo=repo, branch=branch, mr=mr)
+        await super().merge(repo=repo, branch=branch, mr=mr, head=head)
 
 
 @pytest.mark.parametrize(
@@ -641,14 +641,14 @@ class _MergesOnlyOnGreen(forge.FakeForge):
         self.last = status.state
         return status
 
-    async def merge(self, *, repo, branch="", mr):
+    async def merge(self, *, repo, branch="", mr, head=""):
         if self.last != "success":
             raise forge.ForgeError(f"merged over a {self.last} pipeline")
-        await super().merge(repo=repo, branch=branch, mr=mr)
+        await super().merge(repo=repo, branch=branch, mr=mr, head=head)
 
 
 class _Refusing(forge.FakeForge):
-    async def merge(self, *, repo, branch="", mr):
+    async def merge(self, *, repo, branch="", mr, head=""):
         raise forge.ForgeError("merge blocked: 1 approval required")
 
 
@@ -657,7 +657,7 @@ class _AutoMergeScheduled(forge.FakeForge):
     GitLab's `mr merge` enables "merge when all checks pass", exits 0, and
     merges nothing."""
 
-    async def merge(self, *, repo, branch="", mr):
+    async def merge(self, *, repo, branch="", mr, head=""):
         return None
 
 

@@ -364,7 +364,8 @@ async def _merge_dropped(
         refused = await _refuse_unreviewed(db, work_item_id, node_id, repo, branch)
         if refused is not None:
             return log + refused, "unreviewed", None
-        await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""))
+        head = reviewed_head.branch_tip(repo, branch) or ""
+        await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""), head=head)
         log += f"the {which}'s own runners failed; asked the forge to queue the same head again\n"
         return log, "merge_pending", None
     if cause == "other":
@@ -932,7 +933,8 @@ async def _run_one(
                 else:
                     # A genuine refusal still raises inside forge.merge and
                     # fails the node.
-                    await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""))
+                    head = reviewed_head.branch_tip(repo, branch) or ""
+                    await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""), head=head)
                     # And a refusal the CLI reported as success does not get
                     # through either: `glab mr merge` exits 0 for "merge when
                     # checks pass" and merges nothing (Kraft-79x3). The landing

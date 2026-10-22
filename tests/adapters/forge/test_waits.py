@@ -177,9 +177,9 @@ class _Counting(forge.FakeForge):
 
     requests = 0
 
-    async def merge(self, *, repo, branch="", mr):
+    async def merge(self, *, repo, branch="", mr, head=""):
         self.requests += 1
-        await super().merge(repo=repo, branch=branch, mr=mr)
+        await super().merge(repo=repo, branch=branch, mr=mr, head=head)
 
 
 async def test_a_merge_that_has_not_landed_is_observed_again_never_requested_again(

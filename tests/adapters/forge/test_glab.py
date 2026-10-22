@@ -652,7 +652,9 @@ async def test_glab_merge_uses_the_number_when_one_is_known(cli, tmp_path):
     cli.stub("glab", routes={"api projects/:id": NO_TRAIN}, default="")
     cli.stub("git", "0")
 
-    await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(number=54, url=""))
+    await forge.GlabCli().merge(
+        repo=tmp_path, branch="kraft/abc", mr=forge.MR(number=54, url=""), head="a" * 40
+    )
 
     assert cli.calls("glab")[-1].startswith("mr merge 54")
 
@@ -664,7 +666,7 @@ async def test_merge_refuses_a_branch_ahead_of_its_remote(cli, tmp_path):
     cli.stub("glab", "")
 
     with pytest.raises(forge.ForgeError, match="ahead of origin/kraft/abc by 2"):
-        await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=NO_MR)
+        await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=NO_MR, head="a" * 40)
 
     assert cli.argv("glab") == [], "glab merged a branch the forge has never seen"
 
@@ -674,7 +676,7 @@ async def test_merge_proceeds_when_the_branch_is_pushed(cli, tmp_path):
     cli.stub("git", "0")
     cli.stub("glab", routes={"api projects/:id": NO_TRAIN}, default="")
 
-    await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=NO_MR)
+    await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=NO_MR, head="a" * 40)
 
     assert cli.calls("glab")[-1].startswith("mr merge")
 

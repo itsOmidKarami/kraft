@@ -144,7 +144,9 @@ def test_merge_refuses_an_unpushed_head_against_real_git(tmp_path, glab):
     commit_all(repo, "late")
 
     with pytest.raises(forge.ForgeError, match="ahead of origin/kraft/abc by 1"):
-        asyncio.run(forge.GlabCli().merge(repo=repo, branch=BRANCH, mr=forge.MR(0, "")))
+        asyncio.run(
+            forge.GlabCli().merge(repo=repo, branch=BRANCH, mr=forge.MR(0, ""), head="a" * 40)
+        )
 
     assert glab.argv("glab") == [], "glab merged a head the forge has never seen"
 
@@ -159,12 +161,12 @@ def test_merge_accepts_a_pushed_head_against_real_git(tmp_path, glab, elsewhere)
         git(repo, "checkout", "-q", "main")
         git(repo, "commit", "-q", "--allow-empty", "-m", "the person's own")
 
-    asyncio.run(forge.GlabCli().merge(repo=repo, branch=BRANCH, mr=forge.MR(0, "")))
+    asyncio.run(forge.GlabCli().merge(repo=repo, branch=BRANCH, mr=forge.MR(0, ""), head="a" * 40))
 
     # glab first asks the project whether it merges through a train (it does
     # not: the stub's answer has no such field); the merge itself runs once.
     assert [c for c in glab.calls("glab") if c.startswith("mr merge")] == [
-        f"mr merge {BRANCH} --yes"
+        f"mr merge {BRANCH} --yes --sha {'a' * 40}"
     ]
     assert not any("merge_trains" in c for c in glab.calls("glab"))
 

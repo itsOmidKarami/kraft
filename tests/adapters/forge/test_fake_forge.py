@@ -48,7 +48,9 @@ async def test_fake_forge_ci_status_carries_sha_jobs_and_block_reason():
 
 async def test_fake_forge_refuses_to_merge_an_unopened_mr():
     with pytest.raises(forge.ForgeError):
-        await forge.FakeForge().merge(repo="/r", mr=forge.MR(number=99, url="http://x/99"))
+        await forge.FakeForge().merge(
+            repo="/r", mr=forge.MR(number=99, url="http://x/99"), head="a" * 40
+        )
 
 
 async def test_fake_forge_find_mr_tracks_its_own_opened_and_merged_lists():
@@ -59,7 +61,7 @@ async def test_fake_forge_find_mr_tracks_its_own_opened_and_merged_lists():
     assert (await f.find_mr(repo="/r", branch="kraft/w1")).state == "open"
     assert await f.find_mr(repo="/r", branch="kraft/other") is None
 
-    await f.merge(repo="/r", branch="kraft/w1", mr=mr)
+    await f.merge(repo="/r", branch="kraft/w1", mr=mr, head="a" * 40)
     assert (await f.find_mr(repo="/r", branch="kraft/w1")).state == "merged"
 
 
@@ -110,7 +112,7 @@ async def test_a_queue_drop_leaves_the_mr_open_and_unqueued(kind, drops, state, 
     f = forge.FakeForge(queue_kind=kind, queue_drops=list(drops), merge_delay=2)
     mr = await _opened(f)
 
-    await f.merge(repo="/r", branch="kraft/abc", mr=mr)
+    await f.merge(repo="/r", branch="kraft/abc", mr=mr, head="a" * 40)
 
     read = await f.merge_queue(repo="/r", branch="kraft/abc", base="main")
     found = await f.find_mr(repo="/r", branch="kraft/abc")
@@ -129,12 +131,50 @@ async def test_a_second_merge_clears_the_drop_and_consumes_the_next():
     f = forge.FakeForge(queue_kind="train", queue_drops=[_DROP, again])
     mr = await _opened(f)
 
-    await f.merge(repo="/r", branch="kraft/abc", mr=mr)
-    await f.merge(repo="/r", branch="kraft/abc", mr=mr)
+    await f.merge(repo="/r", branch="kraft/abc", mr=mr, head="a" * 40)
+    await f.merge(repo="/r", branch="kraft/abc", mr=mr, head="a" * 40)
     assert (await f.merge_queue(repo="/r", branch="kraft/abc", base="main")).cause == "conflict"
 
-    await f.merge(repo="/r", branch="kraft/abc", mr=mr)
+    await f.merge(repo="/r", branch="kraft/abc", mr=mr, head="a" * 40)
 
     found = await f.find_mr(repo="/r", branch="kraft/abc")
     assert (found.state, f.merge_calls) == ("merged", [1, 1, 1])
     assert (await f.merge_queue(repo="/r", branch="kraft/abc", base="main")).state == "merged"
+
+
+async def test_the_fake_refuses_a_head_the_forge_does_not_hold_as_the_real_forges_do():
+    """`forge_head` is the head the forge holds. A merge naming another is
+    refused with `HeadMoved` (and recorded as asked), so a walk test reaches
+    the refusal; `find_mr` reports the head it was asked for, or the forged one."""
+    f = forge.FakeForge(forge_head="f" * 40)
+    mr = await _opened(f)
+
+    with pytest.raises(forge.HeadMoved) as moved:
+        await f.merge(repo="/r", branch="kraft/abc", mr=mr, head="a" * 40)
+
+    assert (moved.value.current, f.merge_heads, f.merged) == ("f" * 40, ["a" * 40], [])
+    assert (await f.find_mr(repo="/r", branch="kraft/abc")).head_sha == "f" * 40
+    await f.merge(repo="/r", branch="kraft/abc", mr=mr, head="f" * 40)
+    assert f.merged == [mr.number]
+
+
+async def test_a_cancelled_merge_never_lands_and_a_late_forge_commit_moves_the_head():
+    f = forge.FakeForge(merge_delay=2, head_after_merge="b" * 40)
+    mr = await _opened(f)
+    await f.merge(repo="/r", branch="kraft/abc", mr=mr, head="a" * 40)
+    queued = await f.find_mr(repo="/r", branch="kraft/abc")
+    assert (queued.merge_queued, queued.head_sha) == (True, "b" * 40)
+
+    await f.cancel_merge(repo="/r", branch="kraft/abc", mr=queued)
+
+    after = await f.find_mr(repo="/r", branch="kraft/abc")
+    assert (f.cancelled, after.state, after.merge_queued) == ([mr.number], "open", False)
+
+
+async def test_the_fake_refuses_a_push_the_forge_has_commits_for():
+    f = forge.FakeForge(push_refused="c" * 40)
+
+    with pytest.raises(forge.ForeignCommits) as refused:
+        await f.push(repo="/r", branch="kraft/abc")
+
+    assert (refused.value.remote, f.pushed) == ("c" * 40, [])

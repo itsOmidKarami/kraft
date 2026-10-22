@@ -15,6 +15,7 @@ from kraft.adapters.forge.models import (
     DropCause,
     FailedJob,
     ForgeError,
+    HeadMoved,
     MRRef,
     QueueRead,
     QueueState,
@@ -661,23 +662,72 @@ class GlabCli(mr_ops.CliWaits):
         await self._new_mr_pipeline(repo, int(mr_ops.parse_json(raw, "glab mr view")["iid"]))
         return True
 
-    async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
-        """Ask GitLab to merge. On a merge train project the merge request is
+    async def merge(self, *, repo: Path, branch: str, mr: MR, head: str) -> None:
+        """Ask GitLab to merge, at `head` only (`--sha`): GitLab answers 409 to
+        a merge request whose source branch is anywhere else, now or when its
+        pipeline succeeds. On a merge train project the merge request is
         added to the train. `glab mr merge` -- which on GitLab before 19.1 can
         merge round a train -- runs only when `projects/:id` says plainly there
         is none (`_train_enabled`); a read that failed raises, as a failed
         `glab mr merge` does."""
+        if not head:
+            raise ForgeError("cannot merge without the head to merge")
         await git._assert_pushed(repo, branch)
-        if await self._train_enabled(repo):
-            await self._add_to_train(repo, branch, mr)
-            return
-        # number 0 is "not known": `run_task` does not thread the MR between
-        # nodes, so the branch names it. Passing a literal 0 would target a
-        # merge request that does not exist.
-        target = mr_ops.target(mr.number, branch)
-        await git.run_git(repo, ["glab", "mr", "merge", *target, "--yes"])
+        try:
+            if await self._train_enabled(repo):
+                await self._add_to_train(repo, branch, mr, head)
+                return
+            # number 0 is "not known": `run_task` does not thread the MR between
+            # nodes, so the branch names it. Passing a literal 0 would target a
+            # merge request that does not exist.
+            target = mr_ops.target(mr.number, branch)
+            await git.run_git(repo, ["glab", "mr", "merge", *target, "--yes", "--sha", head])
+        except ForgeError as exc:
+            if _HEAD_MOVED in str(exc).lower():
+                raise HeadMoved(str(exc), await self._forge_head(repo, branch)) from exc
+            raise
 
-    async def _add_to_train(self, repo: Path, branch: str, mr: MR) -> None:
+    async def _forge_head(self, repo: Path, branch: str) -> str:
+        """The merge request's head as GitLab holds it, "" when it cannot be read."""
+        try:
+            found = await self.find_mr(repo=repo, branch=branch)
+        except ForgeError:
+            return ""
+        return found.head_sha if found else ""
+
+    async def cancel_merge(self, *, repo: Path, branch: str, mr: MRRef) -> None:
+        """Take the merge request off the train, or cancel its merge when the
+        pipeline succeeds. A merge request that was neither (`merge_queued`
+        false) has nothing to cancel, and GitLab's refusal of that is not one."""
+        try:
+            if await self._train_enabled(repo):
+                await git.run_git(
+                    repo,
+                    [
+                        "glab",
+                        "api",
+                        "-X",
+                        "DELETE",
+                        f"projects/:id/merge_trains/merge_requests/{mr.number}",
+                    ],
+                )
+            else:
+                await git.run_git(
+                    repo,
+                    [
+                        "glab",
+                        "api",
+                        "-X",
+                        "POST",
+                        f"projects/:id/merge_requests/{mr.number}/cancel_merge_when_pipeline_succeeds",
+                    ],
+                )
+        except ForgeError as exc:
+            gone = _http_status(exc) == 404 or "406" in str(exc)
+            if mr.merge_queued or not gone:
+                raise
+
+    async def _add_to_train(self, repo: Path, branch: str, mr: MR, head: str) -> None:
         """Queue the merge request on the train explicitly. Before GitLab 19.1
         the merge endpoint could merge directly and bypass the train; this call
         cannot skip it, and `sha` makes GitLab refuse a head nobody reviewed."""
@@ -685,9 +735,8 @@ class GlabCli(mr_ops.CliWaits):
         if iid <= 0:
             _, view = await self._merge_view(repo, branch)
             iid = int(view.get("iid") or 0)
-        sha = await git._head_sha(repo, branch)
-        if iid <= 0 or not sha:
-            raise ForgeError(f"cannot queue {branch} on the merge train: no merge request or head")
+        if iid <= 0:
+            raise ForgeError(f"cannot queue {branch} on the merge train: no merge request")
         await git.run_git(
             repo,
             [
@@ -699,7 +748,7 @@ class GlabCli(mr_ops.CliWaits):
                 "-f",
                 "auto_merge=true",
                 "-f",
-                f"sha={sha}",
+                f"sha={head}",
             ],
         )
 
@@ -858,11 +907,18 @@ class GlabCli(mr_ops.CliWaits):
                     state=_GLAB_MR_STATES.get(str(r.get("state", "")), "closed"),
                     merge_queued=bool(r.get("merge_when_pipeline_succeeds")),
                     merged_sha=_landed(r) if r.get("state") == "merged" else "",
+                    # A merged one's `sha` can be the head GitLab rebased for a
+                    # fast-forward or rebase merge, which is not a head to compare.
+                    head_sha=str(r.get("sha") or "") if r.get("state") == "opened" else "",
                 )
                 for r in rows
             ]
         )
 
+
+#: What GitLab answers (409) to a merge request merged with a `sha` that is not its
+#: source branch's head.
+_HEAD_MOVED = "sha does not match head of source branch"
 
 #: `HTTP 404`, or a status that GitLab's own message follows with its name
 #: later on the line ("404 Merge Train Merge Request Not Found").

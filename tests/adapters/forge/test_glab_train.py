@@ -427,10 +427,10 @@ async def test_merge_queue_reads_a_merged_merge_request_as_merged_not_dropped(cl
 
 async def test_merge_on_a_train_project_posts_to_the_train_with_the_reviewed_sha(cli, tmp_path):
     head = "a" * 40
-    cli.stub("git", routes={"rev-parse refs/heads/kraft/abc": head}, default="0")
+    cli.stub("git", "0")
     cli.stub("glab", routes={"api projects/:id": TRAIN_PROJECT}, default="{}")
 
-    await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, ""))
+    await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, ""), head=head)
 
     assert cli.calls("glab")[-1].split() == [
         "api",
@@ -460,9 +460,11 @@ async def test_merge_off_a_train_project_still_runs_glab_mr_merge(cli, tmp_path,
     cli.stub("git", "0")
     cli.stub("glab", routes={"api projects/:id": project}, default="")
 
-    await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, ""))
+    await forge.GlabCli().merge(
+        repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, ""), head="a" * 40
+    )
 
-    assert cli.calls("glab")[-1] == "mr merge 7 --yes"
+    assert cli.calls("glab")[-1] == f"mr merge 7 --yes --sha {'a' * 40}"
     assert not any("merge_trains" in c for c in cli.calls("glab"))
 
 
@@ -500,7 +502,7 @@ async def test_a_project_read_that_failed_is_not_read_as_no_train(
 
     with pytest.raises(forge.ForgeError):
         if call == "merge":
-            await cli_.merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, ""))
+            await cli_.merge(repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, ""), head="a" * 40)
         else:
             await cli_.merge_queue(repo=tmp_path, branch="kraft/abc", base="main")
 

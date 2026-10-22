@@ -59,10 +59,10 @@ class _LandingForge(forge.FakeForge):
             return status
         return dataclasses.replace(status, block_reason="not_approved", merge_detail="1 approval")
 
-    async def merge(self, *, repo, branch="", mr):
+    async def merge(self, *, repo, branch="", mr, head=""):
         if self.raise_on_merge and Path(repo).name == self.refuse:
             raise forge.ForgeError("merge refused: the branch is protected")
-        await super().merge(repo=repo, branch=branch, mr=mr)
+        await super().merge(repo=repo, branch=branch, mr=mr, head=head)
         git(repo, "push", "-q", "origin", "HEAD:main", env={**os.environ, "FORGE_LANDS": "1"})
         self.order.append(("merge", Path(repo).name))
 
@@ -172,8 +172,8 @@ class _OvertakenForge(_LandingForge):
     """Someone else lands a commit on a member's origin right after the
     item's merge, before the root's turn."""
 
-    async def merge(self, *, repo, branch="", mr):
-        await super().merge(repo=repo, branch=branch, mr=mr)
+    async def merge(self, *, repo, branch="", mr, head=""):
+        await super().merge(repo=repo, branch=branch, mr=mr, head=head)
         if Path(repo).name.startswith("pkg"):
             origin = Path(git(repo, "remote", "get-url", "origin"))
             git(origin, "commit", "-q", "--allow-empty", "-m", "landed after the item's merge")

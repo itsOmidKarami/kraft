@@ -40,7 +40,7 @@ GLAB_MR_LIST_MERGED = (
 #: An open merge request set to merge when its pipeline succeeds.
 GLAB_MR_LIST_AUTO_MERGE = (
     '[{"iid":54,"state":"opened","source_branch":"kraft/abc","merge_when_pipeline_succeeds":true,'
-    '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"}]'
+    '"sha":"f0reign1","web_url":"https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"}]'
 )
 
 #: `head_pipeline` from `glab mr view -F json` for a merged results pipeline,
@@ -103,13 +103,14 @@ GH_PR_VIEW_NEEDS_APPROVAL = (
 
 GH_PR_LIST_MERGED = (
     '[{"number":7,"url":"https://github.com/o/r/pull/7","state":"MERGED",'
-    '"mergeCommit":{"oid":"c0ffee1"}}]'
+    '"mergeCommit":{"oid":"c0ffee1"},"headRefOid":"c0ffee0"}]'
 )
 #: An open pull request with auto-merge enabled: GitHub merges it itself once
 #: its checks pass (`gh pr list --json autoMergeRequest`).
 GH_PR_LIST_AUTO_MERGE = (
     '[{"number":7,"url":"https://github.com/o/r/pull/7","state":"OPEN",'
-    '"autoMergeRequest":{"enabledAt":"2026-09-22T10:00:00Z","mergeMethod":"SQUASH"}}]'
+    '"autoMergeRequest":{"enabledAt":"2026-09-22T10:00:00Z","mergeMethod":"SQUASH"},'
+    '"headRefOid":"f0reign1"}]'
 )
 
 # `glab ci get -F json` for the pipeline in GLAB_CI_FAILED, trimmed to the

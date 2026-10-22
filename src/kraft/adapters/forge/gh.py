@@ -14,6 +14,7 @@ from kraft.adapters.forge.models import (
     DropCause,
     FailedJob,
     ForgeError,
+    HeadMoved,
     MRRef,
     QueueRead,
     QueueState,
@@ -95,6 +96,29 @@ _REMOVED_BY_HAND = re.compile(
     re.IGNORECASE,
 )
 #: The branch GitHub builds a queued pull request's merge group on.
+#: What `gh pr merge --match-head-commit` prints when the head is not the one named
+#: (GitHub: "Head branch was modified. Review and try the merge again.").
+_HEAD_MODIFIED = "head branch was modified"
+
+#: What `cancel_merge` reads: the pull request's id, its auto-merge request and
+#: its merge queue entry.
+_CANCEL_QUERY = """
+query($owner: String!, $name: String!, $n: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $n) {
+      id
+      autoMergeRequest { enabledAt }
+      mergeQueueEntry { id }
+    }
+  }
+}
+"""
+_DEQUEUE_MUTATION = """
+mutation($id: ID!) {
+  dequeuePullRequest(input: {id: $id}) { mergeQueueEntry { id } }
+}
+"""
+
 _QUEUE_BRANCH = "gh-readonly-queue/{base}/pr-{number}-"
 _QUEUE_QUERY = """
 query($owner: String!, $name: String!, $base: String!, $n: Int!) {
@@ -523,10 +547,66 @@ class GhCli(mr_ops.CliWaits):
             args += ["--remove-label", label]
         await git.run_git(repo, args)
 
-    async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
+    async def merge(self, *, repo: Path, branch: str, mr: MR, head: str) -> None:
+        """`gh pr merge` at `head` only (`--match-head-commit`, which gh carries
+        into the auto-merge and merge-queue paths too): GitHub refuses a pull
+        request whose head is any other, however long after this call it would
+        have merged."""
+        if not head:
+            raise ForgeError("cannot merge without the head to merge")
         await git._assert_pushed(repo, branch)
         target = mr_ops.target(mr.number, branch)
-        await git.run_git(repo, ["gh", "pr", "merge", *target, "--squash"])
+        try:
+            await git.run_git(
+                repo, ["gh", "pr", "merge", *target, "--squash", "--match-head-commit", head]
+            )
+        except ForgeError as exc:
+            if _HEAD_MODIFIED in str(exc).lower():
+                raise HeadMoved(str(exc), await self._forge_head(repo, branch)) from exc
+            raise
+
+    async def _forge_head(self, repo: Path, branch: str) -> str:
+        """The pull request's head as GitHub holds it, "" when it cannot be read."""
+        try:
+            found = await self.find_mr(repo=repo, branch=branch)
+        except ForgeError:
+            return ""
+        return found.head_sha if found else ""
+
+    async def cancel_merge(self, *, repo: Path, branch: str, mr: MRRef) -> None:
+        """Take the pull request out of whatever would merge it: auto-merge is
+        disabled, and a merge queue entry dequeued. Each is read first, so a
+        request that is neither is left alone, and a call that fails raises."""
+        data = await self._json(
+            repo,
+            [
+                "api",
+                "graphql",
+                "-F",
+                "owner={owner}",
+                "-F",
+                "name={repo}",
+                "-F",
+                f"n={mr.number}",
+                "-f",
+                f"query={_CANCEL_QUERY}",
+            ],
+            "gh api graphql",
+        )
+        try:
+            pull = data["data"]["repository"]["pullRequest"]
+            auto, queued, node = pull["autoMergeRequest"], pull["mergeQueueEntry"], pull["id"]
+        except (KeyError, TypeError) as exc:
+            raise ForgeError(
+                f"gh api graphql answered without the pull request: {data!r:.200}"
+            ) from exc
+        if auto:
+            await git.run_git(repo, ["gh", "pr", "merge", str(mr.number), "--disable-auto"])
+        if queued:
+            await git.run_git(
+                repo,
+                ["gh", "api", "graphql", "-f", f"id={node}", "-f", f"query={_DEQUEUE_MUTATION}"],
+            )
 
     async def close_mr(self, *, repo: Path, mr: MRRef) -> None:
         await git.run_git(repo, ["gh", "pr", "close", str(mr.number)])
@@ -734,7 +814,7 @@ class GhCli(mr_ops.CliWaits):
                 "--state",
                 "all",
                 "--json",
-                "number,url,state,autoMergeRequest,mergeCommit",
+                "number,url,state,autoMergeRequest,mergeCommit,headRefOid",
                 "-L",
                 "5",
             ],
@@ -748,6 +828,7 @@ class GhCli(mr_ops.CliWaits):
                     state=_GH_MR_STATES.get(str(r.get("state", "")), "closed"),
                     merge_queued=bool(r.get("autoMergeRequest")),
                     merged_sha=str((r.get("mergeCommit") or {}).get("oid") or ""),
+                    head_sha=str(r.get("headRefOid") or ""),
                 )
                 for r in rows
             ]
