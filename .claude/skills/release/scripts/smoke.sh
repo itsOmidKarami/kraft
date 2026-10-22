@@ -2,9 +2,9 @@
 # Install a published kraft-sdlc from PyPI into a throwaway venv and exercise it.
 # Usage: smoke.sh VERSION [PORT]
 # Prints each check's output and exit code for you to read. Exits 1 when the
-# install or the server start fails, or the web UI has no <title>. Leaves its
-# work dir (printed first, under $TMPDIR) with the server log and KRAFT_HOME;
-# the venv is deleted on exit.
+# install or the server start fails, or the web UI has no <title>. Stops its
+# server on exit and leaves its work dir (printed first, under $TMPDIR): venv/,
+# home/ (its KRAFT_HOME) and server.log. Delete it when you are done.
 set -u
 V="${1:?usage: smoke.sh VERSION [PORT]}"; PORT="${2:-8799}"
 URL="http://127.0.0.1:$PORT/"
@@ -23,7 +23,7 @@ unset KRAFT_RUN_DIR KRAFT_CONFIG_DIR KRAFT_TEMPLATES_DIR KRAFT_SKILLS_DIR KRAFT_
       KRAFT_DAEMON_PID KRAFT_DAEMON_PORT
 export KRAFT_HOME="$W/home" KRAFT_PORT="$PORT"
 "$K" admin start --port "$PORT" > "$W/server.log" 2>&1 &
-trap '"$K" admin stop >/dev/null 2>&1; rm -rf "$W/venv"' EXIT
+trap '"$K" admin stop >/dev/null 2>&1' EXIT
 for _ in $(seq 1 60); do curl -sf -o /dev/null "$URL" && break; sleep 1; done
 if ! curl -sf -o /dev/null "$URL"; then
   echo "server did not answer on :$PORT within 60s; end of $W/server.log:"; tail -20 "$W/server.log"; exit 1

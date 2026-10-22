@@ -36,9 +36,11 @@ An rc run needs no extra confirmation once they have asked for one, unless its
 dry run plans a version they would not expect (a major, or a number other than
 the one the last rc led to).
 
-**Tools.** Where `gh` exists, use it. A cloud session has no `gh`: use the GitHub
-MCP tools instead (load them with ToolSearch, and reload them if they vanish
-mid-session). Each step gives both.
+**Tools.** Use `gh` when `gh auth status` succeeds. A cloud session has `gh` but
+no valid token: use the GitHub MCP tools there (load them with ToolSearch, and
+reload them if they vanish mid-session). Each step gives both. MCP tools cannot
+be called from a shell loop, so wait for a run with a background `sleep` (60s
+for a dry run, which takes about a minute) and check again when it ends.
 
 ```
 preflight -> rc dry run -> rc -> rc sweep --clean--> ask -> stable dry run -> go? -> stable -> stamp PR
@@ -57,11 +59,12 @@ run exists, so the newest run straight after a dispatch is often the previous on
    if someone merges in the meantime:
    `gh workflow run release.yml --ref main -f dry_run=<true|false> -f pre=<rc|none> -f sha=<sha>`
    / `actions_run_trigger` with `method: run_workflow`, `workflow_id: release.yml`,
-   `ref: main`, `inputs: {dry_run: "<true|false>", pre: "<rc|none>", sha: "<sha>"}`.
-3. Poll until a run with a larger id appears, then wait in the background until
-   it is `completed`.
-4. Read its job log (`gh run view <id> --log` / `list_workflow_jobs` on the run,
-   then `get_job_logs` with the `job_id`). It prints the notes (Highlights if any,
+   `ref: main`, `inputs: {dry_run: <true|false>, pre: "<rc|none>", sha: "<sha>"}`.
+3. Poll until a `workflow_dispatch` run with a larger id appears, then wait until
+   it is `completed` (`gh run watch <id>` in the background / `list_workflow_jobs`
+   on the run id, whose job `status` and `conclusion` say when it is done).
+4. Read its job log (`gh run view <id> --log` / `get_job_logs` with the job's
+   `job_id`, `return_content: true`, `tail_lines: 300`). It prints the notes (Highlights if any,
    New, Fixes, each line ending in its PR number), then one of:
    - `dry run: would release vX.Y.Z…`: a dry run's plan.
    - `releasing vX.Y.Z…`: a real run. A real run whose log lacks this line is the
@@ -86,8 +89,10 @@ Is there something to release, and is main's tip safe to release from?
 5. Main's tip must have a `test` run on a push that is `completed` / `success`,
    or the workflow refuses it:
    `gh run list --workflow test --branch main --event push --commit <sha>`
-   / `list_workflow_runs` on branch `main`, event `push`. Wait for it if it is
-   still running.
+   / `list_workflow_runs` with `resource_id: test.yml`,
+   `workflow_runs_filter: {branch: main, event: push}`, `perPage: 3`, which
+   cannot filter by commit: pick the run whose `head_sha` is the tip. Wait for it
+   if it is still running.
 
 Record the tip sha. Every later run is pinned to it.
 
@@ -122,10 +127,15 @@ Test what users will install: the wheel from PyPI, in a clean venv on Python
    - `kraft admin doctor`: every check `ok`, except the expected failures below
    - `kraft admin templates lint`: no errors
    - the web UI's `<title>Kraft`
-2. **Exercise the headline feature by hand** on the installed rc. Start it again
-   with the work dir the script printed, and set `KRAFT_HOME` to its `home/`. Feed it
-   inputs that should pass and one that should fail, and check that the CLI tells
-   them apart. For v2.2.0 (chains extending chains) that was: a
+2. **Exercise the headline feature by hand** on the installed rc. The script
+   stopped its server; start it again from the work dir `W` it printed:
+   ```bash
+   unset KRAFT_RUN_DIR KRAFT_CONFIG_DIR KRAFT_TEMPLATES_DIR KRAFT_SKILLS_DIR KRAFT_HOST
+   export KRAFT_HOME=$W/home KRAFT_PORT=8799; K=$W/venv/bin/kraft
+   $K admin start --port 8799 > $W/server2.log 2>&1 &   # $K admin stop when done
+   ```
+   Use `$K` for every command. Feed it inputs that should pass and one that
+   should fail, and check that the CLI tells them apart. For v2.2.0 (chains extending chains) that was: a
    `config/chains/lean.yaml` with `extends: default` and a `remove:` list; a
    `broken.yaml` removing a node that does not exist, which
    `kraft admin templates lint` must name; delete it, `kraft admin reload`, lint
@@ -137,7 +147,8 @@ Test what users will install: the wheel from PyPI, in a clean venv on Python
 
 **Expected doctor failures** (not regressions): `kraft on PATH` always fails,
 since the smoke venv is never on `PATH`; `mcp server` fails where Kraft's MCP is
-not registered, as in a cloud session. Anything else failing is a finding.
+not registered in Claude Code's settings (it reads only the registration, so it
+can pass while the MCP server is down). Anything else failing is a finding.
 
 ## Fix loop
 
