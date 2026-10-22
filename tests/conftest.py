@@ -182,8 +182,8 @@ def pytest_collection_modifyitems(config, items):
     """An e2e test runs only where every CLI it names is installed, and one
     naming a real agent also needs KRAFT_E2E=1, since it spends tokens. Each
     skip names what is missing. A CLI listed in KRAFT_E2E_REQUIRE (CI's e2e
-    job sets `bd,docker,podman`) makes that skip an error, so the job cannot
-    go green having run nothing."""
+    job sets `bd,docker,podman,bwrap`, its macOS job `sandbox-exec`) makes that
+    skip an error, so the job cannot go green having run nothing."""
     required = set(filter(None, os.environ.get("KRAFT_E2E_REQUIRE", "").split(",")))
     for item in items:
         if "e2e" not in item.keywords:
