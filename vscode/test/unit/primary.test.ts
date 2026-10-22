@@ -15,7 +15,8 @@ describe("primaryAction", () => {
     ["paused", item({ display_status: "paused", actions: ["resume"] }), "resume"],
     ["paused without resume", item({ display_status: "paused", actions: [] }), null],
     ["paused, never started", item({ display_status: "paused", current_node_id: null, actions: ["resume"] }), null],
-    ["cap", stopped("cap"), "openInWebUi"],
+    ["cap with a limit to raise", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: null, resume_at: null, raisable: true } }), "openInWebUi"],
+    ["cap with no limit to raise", stopped("cap", { actions: ["retry"] }), "retry"],
     ["conflict", stopped("conflict"), "openInWebUi"],
     ["running", item({ actions: ["pause"] }), null],
   ])("%s", (_, it_, want) => expect(primaryAction(it_)).toBe(want));
