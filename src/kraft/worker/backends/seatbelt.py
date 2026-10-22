@@ -16,7 +16,10 @@ from kraft.worker.mounts import Mount
 from kraft.worker.sandbox import SandboxRefused
 
 #: Readable besides `host_view.system_dirs()`; none holds operator data.
-SYSTEM_READS = ("/private/etc", "/dev", "/private/var/db/timezone", "/private/var/db/dyld")
+SYSTEM_READS = ("/private/etc", "/private/var/db/timezone", "/private/var/db/dyld", "/dev/fd")
+#: By name, never `/dev` whole: it holds the operator's other terminals, and
+#: reading one is their keystrokes.
+DEV_READS = ("/dev/null", "/dev/zero", "/dev/random", "/dev/urandom", "/dev/dtracehelper")
 DEV_WRITES = ("/dev/null", "/dev/zero", "/dev/random", "/dev/urandom")
 #: Never `(allow mach-lookup)` unfiltered: that hands the worker LaunchServices,
 #: Apple Events, the pasteboard and the keychain.
@@ -50,6 +53,23 @@ def _real(path: Path) -> Path:
     return Path(os.path.realpath(path))
 
 
+def _refuse_unpinned_carve_outs(mounts: Sequence[Mount]) -> None:
+    """`(allow file-write* (subpath A))` lets a directory between a read-write
+    directory mount A and a read-only mount R inside it be renamed, carrying R
+    away: only a mount's own directory is pinned or unwritable."""
+    dsts = {_real(m.dst) for m in mounts}
+    for a in (_real(m.dst) for m in mounts if not m.ro and _real(m.dst).is_dir()):
+        for r in (_real(m.dst) for m in mounts if m.ro):
+            for between in r.parents:
+                if between == a:
+                    break
+                if between not in dsts and between.is_relative_to(a):
+                    raise SandboxRefused(
+                        f"kind: os on macOS cannot keep {r} read-only: {between}, between it and "
+                        f"the writable {a}, is not mounted, so the worker could rename it away"
+                    )
+
+
 def render_profile(
     *,
     mounts: Sequence[Mount],
@@ -68,6 +88,7 @@ def render_profile(
             raise SandboxRefused(
                 f"kind: os on macOS will not give write access to {m.dst}: it is a symlink"
             )
+    _refuse_unpinned_carve_outs(mounts)
     sub = lambda p: f"(subpath {quote(_real(Path(p)))})"  # noqa: E731
     lit = lambda p: f"(literal {quote(_real(Path(p)))})"  # noqa: E731
     # `(allow file-write* (subpath D))` also lets D itself be renamed away (rename
@@ -94,6 +115,7 @@ def render_profile(
     out.append('(allow file-read* (literal "/"))')
     out += [f"(allow file-read* {sub(p)})" for p in (*host_view.system_dirs(), *SYSTEM_READS)]
     # The roots go after the deny: an Intel Homebrew Kraft lives under /usr/local.
+    out += [f"(allow file-read* {lit(p)})" for p in DEV_READS]
     out += [f"(deny file-read* {sub(p)})" for p in host_view.system_excluded()]
     out += [f"(allow file-read* {sub(p)})" for p in read_roots]
     out += [f"(allow file-read* {lit(p)})" for p in read_literals]
@@ -117,7 +139,8 @@ def render_profile(
         f"(allow network-outbound (remote unix-socket {sub(tmpdir)}))",
         f"(allow file-read-data {lit(marker)})",
     ]
-    out += [f"(deny file-read* {lit(p)})" for p in denied_reads]
+    # Writes too: a credential renamed inside a read-write tree could be read as the copy.
+    out += [f"(deny file-read* file-write* {lit(p)})" for p in denied_reads]
     if relay:
         out.append(
             '(allow network-outbound (remote ip (string-append "localhost:" (param "RELAY_PORT"))))'

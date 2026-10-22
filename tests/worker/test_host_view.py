@@ -408,18 +408,26 @@ def test_system_dirs_per_platform(monkeypatch, platform, has, excluded):
         host_view.system_dirs.cache_clear()
 
 
-@pytest.mark.parametrize("answer", ["", "\n", "{dir}\n"], ids=["empty", "blank", "selected"])
+@pytest.mark.parametrize(
+    "answer",
+    ["", "\n", "{dir}\n", "{home}\n"],
+    ids=["empty", "blank", "selected", "developer-dir-is-home"],
+)
 def test_system_dirs_adds_the_selected_developer_dir_only_when_named(
     fake_darwin, monkeypatch, tmp_path, answer
 ):
-    """An empty `xcode-select -p` answer is no directory, not the cwd."""
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
+    """An empty `xcode-select -p` answer is no directory, not the cwd; one that
+    is the home (DEVELOPER_DIR=$HOME) is not a system directory."""
+    cwd, dev, home = (tmp_path / n for n in ("cwd", "dev", "home"))
+    for d in (cwd, dev, home):
+        d.mkdir()
+    monkeypatch.setenv("HOME", str(home))
     monkeypatch.chdir(cwd)
-    done = subprocess.CompletedProcess([], 0, answer.format(dir=tmp_path), "")
+    done = subprocess.CompletedProcess([], 0, answer.format(dir=dev, home=home), "")
     monkeypatch.setattr(host_view.subprocess, "run", lambda *a, **k: done)
     dirs = host_view.system_dirs()
-    assert (tmp_path.resolve() in dirs) == (answer == "{dir}\n")
+    assert (dev.resolve() in dirs) == (answer == "{dir}\n")
+    assert home.resolve() not in dirs
     assert cwd.resolve() not in dirs
 
 

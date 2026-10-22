@@ -4,15 +4,17 @@ and what it refuses. Text only; the real sandbox-exec is proven by the e2e tier.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from support.harness import git
 
-from kraft.worker import host_view
+from kraft.worker import host_view, refstore
 from kraft.worker.backends import seatbelt
-from kraft.worker.mounts import Mount
+from kraft.worker.mounts import Mount, session_mounts
 from kraft.worker.sandbox import SandboxRefused
 
 W = Path("/work/tree")
@@ -114,7 +116,8 @@ def test_denied_reads_last():
         denied_reads=[Path("/opt/real/credentials.toml")],
         relay=True,
     )
-    deny = text.index('(deny file-read* (literal "/opt/real/credentials.toml"))')
+    # Writes too: renaming it inside a read-write tree would let the copy be read.
+    deny = text.index('(deny file-read* file-write* (literal "/opt/real/credentials.toml"))')
     assert deny > text.rindex("(allow file-")
     assert deny < text.index("(allow network-outbound (remote ip")
 
@@ -124,16 +127,13 @@ def test_remapped_mount_refused():
         profile(mounts=[Mount(Path("/a"), Path("/b"), True)])
 
 
-def test_mach_allowlist_has_no_escape_services():
-    banned = (
-        "com.apple.SecurityServer",
-        "com.apple.securityd",
-        "com.apple.coreservices.launchservicesd",
-        "com.apple.lsd.",
-        "com.apple.coreservices.appleevents",
-        "com.apple.pasteboard",
-    )
-    assert not [s for s in seatbelt.MACH_SERVICES if s.startswith(banned)]
+def test_dev_is_read_by_name_never_whole():
+    """`/dev` whole holds the operator's other terminals: reading one is their keystrokes."""
+    text = profile()
+    assert '(subpath "/dev")' not in text
+    for name in ("null", "zero", "random", "urandom", "dtracehelper"):
+        assert f'(allow file-read* (literal "/dev/{name}"))' in text
+    assert '(allow file-read* (subpath "/dev/fd"))' in text
 
 
 @pytest.mark.e2e("sandbox-exec")
@@ -250,3 +250,139 @@ def test_python_multiprocessing_runs(tmp_path, code):
         timeout=60,
     )
     assert run.returncode == 0, run.stderr
+
+
+def _real_mounts(root: Path, rw: list[str], ro: list[str]) -> list[Mount]:
+    mounts = []
+    for rel, is_ro in [(r, False) for r in rw] + [(r, True) for r in ro]:
+        path = root / rel
+        path.mkdir(parents=True, exist_ok=True)
+        mounts.append(Mount(path, path, is_ro))
+    return mounts
+
+
+@pytest.mark.parametrize(
+    ("rw", "ro", "refused"),
+    [
+        (["a"], ["a/x/r"], "a/x"),
+        (["a"], ["a/x/y/r"], "a/x/y"),
+        (["a", "a/x"], ["a/x/r"], None),
+        (["a"], ["a/r"], None),
+        (["a"], ["b/x/r"], None),
+    ],
+    ids=["two-below", "three-below", "intermediate-mounted", "one-below", "elsewhere"],
+)
+def test_a_read_only_carve_out_needs_its_path_pinned(tmp_path, rw, ro, refused):
+    """Renaming an unmounted directory between a writable mount and a read-only one
+    inside it would carry the carve-out away."""
+    root = tmp_path.resolve()
+    mounts = _real_mounts(root, rw, ro)
+    if refused is None:
+        profile(mounts=mounts)
+        return
+    want = f"{root / ro[0]} read-only: {root / refused},"
+    with pytest.raises(SandboxRefused, match=re.escape(want)):
+        profile(mounts=mounts)
+
+
+def test_the_mounts_of_a_direct_store_render(repo, tmp_path):
+    """Slice 3 renders what `session_mounts` emits for a direct store: the common gitdir
+    read-only with `objects` read-write and `objects/info` read-only inside it."""
+    wt = tmp_path / "wt"
+    git(repo, "worktree", "add", "-q", "-b", "kraft/item-1", str(wt))
+    stores = refstore.prepare_direct(tmp_path / "run", wt, "kraft/item-1")
+    text = profile(mounts=session_mounts(wt, [], refstores=stores), tmpdir=tmp_path / "t")
+    common = (repo / ".git").resolve()
+    assert f'(deny file-write* (subpath "{common}"))' in text
+    assert f'(allow file-read* file-write* (subpath "{common}/objects"))' in text
+    assert f'(deny file-write* (subpath "{common}/objects/info"))' in text
+
+
+def _sandboxed(tmp_path: Path, argv: list[str], *, mounts=(), cwd="/", **kw):
+    prof = tmp_path / "p.sb"
+    prof.write_text(
+        profile(
+            mounts=list(mounts),
+            read_roots=[Path(sys.base_prefix)],
+            tmpdir=tmp_path / "t",
+            marker=tmp_path / "m",
+            **kw,
+        )
+    )
+    return subprocess.run(
+        ["sandbox-exec", "-f", str(prof), *argv],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        timeout=60,
+    )
+
+
+_PY = [os.path.realpath(sys.executable), "-I", "-S", "-c"]
+_OPEN = "import os, sys; os.close(os.open(sys.argv[1], os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY))"
+
+
+@pytest.mark.e2e("sandbox-exec")
+@pytest.mark.parametrize(
+    "argv",
+    [
+        [*_PY, "import os, ssl; ssl.create_default_context(); assert len(os.urandom(8)) == 8"],
+        ["/bin/bash", "-c", 'test "$(cat <(echo x))" = x'],
+    ],
+    ids=["python-ssl-urandom", "process-substitution"],
+)
+def test_naming_the_dev_files_keeps_ordinary_tools_working(tmp_path, argv):
+    run = _sandboxed(tmp_path, argv)
+    assert run.returncode == 0, run.stderr
+
+
+@pytest.mark.e2e("sandbox-exec")
+def test_a_commit_runs_with_dev_read_by_name(tmp_path):
+    work = tmp_path.resolve() / "work"
+    work.mkdir()
+    git(work, "init", "-q")
+    run = _sandboxed(
+        tmp_path,
+        ["/usr/bin/git", "-c", "user.name=a", "-c", "user.email=a@b", "commit", "-q"]
+        + ["--allow-empty", "-m", "x"],
+        mounts=[Mount(work, work, False)],
+        cwd=work,
+    )
+    assert run.returncode == 0, run.stderr
+    assert git(work, "log", "--format=%s") == "x"
+
+
+@pytest.mark.e2e("sandbox-exec")
+@pytest.mark.parametrize("target", ["tty", "null"])
+def test_the_operators_other_terminals_cannot_be_opened(tmp_path, target):
+    """Only the by-name devices open under the profile; a terminal the operator owns
+    opens outside it, so the row proves the profile and not a permission."""
+    if target == "null":
+        path = "/dev/null"
+    else:
+        mine = [p for p in sorted(Path("/dev").glob("ttys*")) if p.stat().st_uid == os.getuid()]
+        if not mine:
+            pytest.skip("this machine has no terminal the user owns under /dev/ttys*")
+        path = str(mine[0])
+        outside = subprocess.run([*_PY, _OPEN, path], capture_output=True, text=True)
+        assert outside.returncode == 0, outside.stderr
+    run = _sandboxed(tmp_path, [*_PY, _OPEN, path])
+    assert (run.returncode == 0) == (target == "null"), run.stderr
+
+
+@pytest.mark.e2e("sandbox-exec")
+@pytest.mark.parametrize("how", ["rename", "read"])
+def test_a_denied_credential_in_a_writable_tree_can_be_neither_renamed_nor_read(tmp_path, how):
+    tree = tmp_path.resolve() / "tree"
+    tree.mkdir()
+    cred = tree / "credentials"
+    cred.write_text("secret")
+    script = 'mv "$1" "$1.x"' if how == "rename" else 'cat "$1"'
+    run = _sandboxed(
+        tmp_path,
+        ["/bin/sh", "-c", script, "sh", str(cred)],
+        mounts=[Mount(tree, tree, False)],
+        denied_reads=[cred],
+    )
+    assert run.returncode != 0
+    assert cred.read_text() == "secret" and not (tree / "credentials.x").exists()

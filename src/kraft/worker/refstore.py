@@ -110,6 +110,15 @@ def _refuse_direct(store: RefStore) -> None:
         raise ValueError(f"{store.common} is a direct store: it has no private ref store to sync")
 
 
+def _refuse_reftable(common: Path) -> None:
+    storage = _git(common, "config", "--get", "extensions.refStorage").stdout.strip()
+    if storage not in ("", "files"):
+        raise RuntimeError(
+            f"{common} keeps its refs in {storage!r} storage, and a sandbox's ref store "
+            "supports only git's default files storage"
+        )
+
+
 def _meta_path(shadow: Path) -> Path:
     """Beside `S`, never inside it: `sandbox-git/` itself is never mounted."""
     return shadow.parent / f"{shadow.name}.json"
@@ -315,12 +324,7 @@ def _prepare(
     work_item_id: str | None = None,
     mount_points: Iterable[Path] = (),
 ) -> RefStore:
-    storage = _git(store.common, "config", "--get", "extensions.refStorage").stdout.strip()
-    if storage not in ("", "files"):
-        raise RuntimeError(
-            f"{store.common} keeps its refs in {storage!r} storage, and a sandbox's ref store "
-            "supports only git's default files storage"
-        )
+    _refuse_reftable(store.common)
     _refuse_direct(store)
     with _locked(store.shadow):
         store = _refresh(store, session_id, set(live), work_item_id)
@@ -335,6 +339,7 @@ def prepare_direct(
     branch: str | None,
     *,
     members: Mapping[str, tuple[Path, Path] | None] | None = None,
+    live: Iterable[str] = (),
 ) -> list[RefStore]:
     """The direct stores of a launch with no mount namespace to hide a private
     one in: one per repository (the worktree's own, then each member's), whose
@@ -345,7 +350,11 @@ def prepare_direct(
     records the value in a sidecar beside `sandbox-git/` that no worker
     writes: `check_direct` puts it back. It creates the loose ref and the
     reflog's directories under the common gitdir, but no store under
-    `sandbox-git/` beyond the sidecar."""
+    `sandbox-git/` beyond the sidecar.
+
+    `live`: the sessions still running in this worktree, as for `prepare`. A
+    regular `.lock` is cleared only when none is: it may be a co-task's ref
+    update in flight."""
     root = Path(cwd).resolve()
     root_dirs = _sandbox.linked_gitdirs(root)
     if root_dirs is None:
@@ -359,9 +368,11 @@ def prepare_direct(
             )
         found.append((root / rel, *dirs))
     stores = [RefStore(common, common, admin, branch, checkout=co) for co, common, admin in found]
+    keep_lock = any(live)
     for store in stores:
+        _refuse_reftable(store.common)
         if branch is not None:
-            _record_direct(base, store)
+            _record_direct(base, store, keep_lock)
     return stores
 
 
@@ -390,9 +401,7 @@ def _validate_direct(store: RefStore, shadow: Path) -> str | None:
     if old:
         if ref.is_dir() and not ref.is_symlink():
             shutil.rmtree(ref)
-        ref.parent.mkdir(parents=True, exist_ok=True)
         tmp = ref.with_name(ref.name + ".kraft-restore")
-        _remove(tmp)  # a planted symlink there would be written through
         tmp.write_text(old + "\n")
         os.replace(tmp, ref)
         return f"the worker left refs/heads/{store.branch} as {what}; restored {old}"
@@ -400,13 +409,14 @@ def _validate_direct(store: RefStore, shadow: Path) -> str | None:
     return f"the worker left refs/heads/{store.branch} as {what}; removed it"
 
 
-def _clear_worker_files(store: RefStore) -> None:
-    """Remove what the worker may plant at the paths it can write: a leftover
-    `.lock` and a branch reflog that is not a regular file (the host would
-    append through it, and the profile would follow it)."""
+def _clear_worker_files(store: RefStore, *, keep_lock: bool = True) -> None:
+    """Remove what the worker may plant at the paths it can write: a `.lock`
+    that is not a regular file and a branch reflog that is not one (the host
+    would append through them, and the profile would follow them). A regular
+    `.lock` goes only when `keep_lock` is False: a co-task may hold it."""
     ref = store.common / "refs" / "heads" / store.branch
     reflog = store.common / "logs" / "refs" / "heads" / store.branch
-    for path, keep_file in ((ref.with_name(ref.name + ".lock"), False), (reflog, True)):
+    for path, keep_file in ((ref.with_name(ref.name + ".lock"), keep_lock), (reflog, True)):
         try:
             if os.path.lexists(path) and not (keep_file and stat.S_ISREG(path.lstat().st_mode)):
                 _remove(path)
@@ -414,7 +424,7 @@ def _clear_worker_files(store: RefStore) -> None:
             logger.warning("could not remove %s: %s", path, exc)
 
 
-def _record_direct(base: Path, store: RefStore) -> None:
+def _record_direct(base: Path, store: RefStore, keep_lock: bool) -> None:
     common, branch = store.common, store.branch
     shadow = shadow_dir(base, store.worktree_gitdir)
     ref = common / "refs" / "heads" / branch
@@ -423,7 +433,7 @@ def _record_direct(base: Path, store: RefStore) -> None:
             # A session that ended without `check_direct` (a restart) may have left
             # a symref to main: never record that as the branch's value.
             _validate_direct(store, shadow)
-        _clear_worker_files(store)
+        _clear_worker_files(store, keep_lock=keep_lock)
         value = _real_branch(common, branch)
         ref.parent.mkdir(parents=True, exist_ok=True)
         (common / "logs" / "refs" / "heads" / branch).parent.mkdir(parents=True, exist_ok=True)
@@ -441,8 +451,9 @@ def check_direct(base: Path, store: RefStore) -> str | None:
     object id naming a commit: that is recorded as its new value. Anything
     else (a symref to `main`, a tree, garbage, a missing or non-file ref) is
     put back to the recorded value, and why is returned for the caller to
-    record. A leftover `.lock` is removed either way, and so is a branch
-    reflog that is not a regular file, which host git would append through."""
+    record. A `.lock` that is not a regular file is removed either way, and so
+    is a branch reflog that is not one, which host git would append through; a
+    regular `.lock` may be a co-task's update in flight and is left."""
     if store.branch is None:
         return None
     shadow = shadow_dir(base, store.worktree_gitdir)

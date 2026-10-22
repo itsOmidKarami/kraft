@@ -82,6 +82,13 @@ def system_dirs() -> tuple[Path, ...]:
         selected = Path(picked).resolve() if picked else None
     except (OSError, subprocess.SubprocessError):
         selected = None
+    if selected:
+        from kraft.paths import kraft_home
+
+        # `xcode-select -p` follows DEVELOPER_DIR, which the operator's shell may point anywhere.
+        home = Path(os.environ.get("HOME") or Path.home())
+        if protected_refusal(selected, home, kraft_home()):
+            selected = None
     if selected and not any(_within(selected, d) for d in dirs):
         dirs.append(selected)
     return tuple(dirs)
