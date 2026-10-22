@@ -133,7 +133,8 @@ def test_dev_is_read_by_name_never_whole():
     assert '(subpath "/dev")' not in text
     for name in ("null", "zero", "random", "urandom", "dtracehelper"):
         assert f'(allow file-read* (literal "/dev/{name}"))' in text
-    assert '(allow file-read* (subpath "/dev/fd"))' in text
+    # Rendered resolved: a symlink on Linux, the directory itself on a Mac.
+    assert f'(allow file-read* (subpath "{os.path.realpath("/dev/fd")}"))' in text
 
 
 @pytest.mark.e2e("sandbox-exec")
