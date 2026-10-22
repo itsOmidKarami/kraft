@@ -47,7 +47,8 @@ describe("headerState: every display status, from the server's fields only", () 
     ["needs_you", "conflict", "NEEDS YOU", "warn", "conflicts", FULL],
     ["needs_you", "mr_closed", "NEEDS YOU", "warn", "reopen", FULL],
     ["needs_you", "stuck", "NEEDS YOU", "warn", "retry", FULL],
-    ["needs_you", "cap", "NEEDS YOU", "warn", "raise", FULL],
+    // A cap with no limit to raise (a node's time cap) has Retry; the item's own cap, which names its limit, Raise.
+    ["needs_you", "cap", "NEEDS YOU", "warn", "retry", FULL],
     // R12E-05: an escalation's agent would hit the same cap, so /escalate refuses a budget stop.
     ["needs_you", "budget", "NEEDS YOU", "warn", "raise", NO_ESC],
     ["needs_you", "budget", "NEEDS YOU", "warn", "retry", NO_ESC, "daily"],
@@ -59,6 +60,11 @@ describe("headerState: every display status, from the server's fields only", () 
     ["archived", undefined, "ARCHIVED", "muted", "restore", []],
   ] as const)("%s (%s) → %s, %s, %s", (status, kind, badge, tone, main, panel, scope?: Scope) => {
     expect(at(status, kind, scope)).toEqual({ badge, tone, main, panel });
+  });
+
+  it("a cap stop that names its limit has Raise", () => {
+    const limit = { path: "", key: "time_cap_minutes", value: 60, maximum: null } as const;
+    expect(headerState({ display_status: "needs_you", current_node_id: "n", stop: { kind: "cap", node: "n", resume_at: null, reason: null, limit } }).main).toBe("raise");
   });
 
   it("a paused item that never started is NOT STARTED with Start, not PAUSED with Resume", () => {
@@ -132,7 +138,7 @@ describe("the server's actions decide which doors the header offers (F4)", () =>
     ["conflicts: the card's Review the conflicts", { display_status: "needs_you", stop: stopOf("conflict") }, true],
     ["a question with its text: the question card", { display_status: "needs_you", stop: stopOf("question"), needs_context_question: "Which?" }, true],
     ["a question with no text: the other-stop card has Retry, not Answer", { display_status: "needs_you", stop: stopOf("question") }, false],
-    ["a cap: the banner's Raise cap", { display_status: "needs_you", stop: stopOf("cap") }, true],
+    ["a cap: the banner's Raise cap", { display_status: "needs_you", stop: stopOf("cap", { limit: { path: "", key: "time_cap_minutes", value: 60, maximum: null } }) }, true],
     ["a budget the item raises: the banner's Raise cap", { display_status: "needs_you", stop: stopOf("budget", { scope: "work_item" }) }, true],
     ["a budget it cannot raise: the banner has no button, Retry stays", { display_status: "needs_you", stop: stopOf("budget", { scope: "daily" }) }, false],
     ["a closed MR with a ref: the card's Reopen", { display_status: "needs_you", stop: stopOf("mr_closed") }, true],

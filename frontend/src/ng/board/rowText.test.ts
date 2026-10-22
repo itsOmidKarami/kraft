@@ -72,8 +72,10 @@ describe("rowAction", () => {
     const a = (i: WorkItem) => rowAction(i);
     expect(a(row("needs_you", { stop: stop("gate"), pending_gate: "final_review" }))).toEqual({ label: "Review", kind: "gate", gate: "final_review" });
     expect(a(row("needs_you", { stop: stop("question") }))).toMatchObject({ label: "Answer", kind: "peek", tab: "overview" });
-    expect(a(row("needs_you", { stop: stop("cap") }))).toMatchObject({ label: "Raise cap", kind: "peek", tab: "config" });
-    // The row cannot tell a cap the server raises from one it refuses; the peek's banner can.
+    expect(a(row("needs_you", { stop: stop("cap", { raisable: true }) }))).toMatchObject({ label: "Raise cap", kind: "peek", tab: "config" });
+    // A cap with no limit to raise (a node's time cap, a gate's timeout, the idle watchdog) offers Retry, as the peek's banner does.
+    expect(a(row("needs_you", { stop: stop("cap") }))).toEqual({ label: "Retry…", kind: "peek", tab: "overview" });
+    // The row cannot tell a budget the server raises from one it refuses; the peek's banner can.
     expect(a(row("needs_you", { stop: stop("budget") }))).toEqual({ label: "Raise budget", kind: "peek", tab: "config", budget: true });
     expect(a(row("needs_you", { stop: stop("mr_closed") }))).toMatchObject({ label: "Open", kind: "peek" });
     expect(a(row("needs_you", { stop: stop("stuck") }))).toEqual({ label: "Retry…", kind: "peek", tab: "overview" });

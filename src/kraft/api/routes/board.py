@@ -601,6 +601,8 @@ def _list_stop(row, pending_gate: str | None, boundary) -> dict | None:
         "node": row["current_node_id"],
         "resume_at": row["retry_at"],
         "reason": reason,
+        # The detail's `limit` is read against the chain; the row only says there is one to raise.
+        **({"raisable": True} if payload and payload.get("limit") else {}),
     }
 
 

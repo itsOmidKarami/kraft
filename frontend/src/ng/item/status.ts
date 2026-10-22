@@ -148,7 +148,7 @@ function needsYouMain(item: Pick<WorkItem, "stop"> & Doors): Main[] {
     case "gate": return ["gate"];
     case "question": return ["answer"];
     case "budget": return budgetRaise(item) ? ["raise", "retry"] : ["retry"];
-    case "cap": return ["raise"];
+    case "cap": return item.stop.limit ? ["raise"] : ["retry"];
     case "conflict": return ["conflicts"];
     case "mr_closed": return ["reopen", "retry"];
     // stuck, and any stop a later server adds: /retry claims every needs_human item.

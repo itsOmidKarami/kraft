@@ -518,7 +518,7 @@ def test_a_needs_human_row_with_no_stop_kind_is_read_off_its_stop_event(
     assert (detail["display_status"], row["display_status"]) == (display, display)
 
 
-def _capped_item(client, repo, maxima: dict, limit: dict | None) -> dict:
+def _capped_item(client, repo, maxima: dict, limit: dict | None, listed: bool = False) -> dict:
     from support.harness import v1_resolved
 
     from kraft.policy import InstancePolicy, InstancePolicyInput
@@ -539,6 +539,9 @@ def _capped_item(client, repo, maxima: dict, limit: dict | None) -> dict:
     )
     wid = _paused_item(client, repo, materialized_chain=chain.to_json())
     _run(lambda c: store.mark_needs_human(c, wid, "implement", "capped", kind="cap", limit=limit))
+    if listed:
+        rows = client.get("/api/work-items").json()["items"]
+        return next(i for i in rows if i["id"] == wid)["stop"]
     return client.get(f"/api/work-items/{wid}").json()["stop"]
 
 
@@ -588,6 +591,19 @@ def test_a_cap_stop_names_the_limit_that_raises_it_with_the_administrator_maximu
 
 def test_a_cap_stop_with_no_raisable_limit_has_no_limit_key(client, repo):
     assert "limit" not in _capped_item(client, repo, {}, None)
+
+
+@pytest.mark.parametrize(
+    ("limit", "raisable"),
+    [
+        pytest.param(
+            {"path": "", "key": "time_cap_minutes", "value": 60}, True, id="work-item-cap"
+        ),
+        pytest.param(None, False, id="node-time-cap"),
+    ],
+)
+def test_a_listed_cap_stop_says_whether_it_has_a_limit_to_raise(client, repo, limit, raisable):
+    assert _capped_item(client, repo, {}, limit, listed=True).get("raisable", False) is raisable
 
 
 @pytest.mark.parametrize(

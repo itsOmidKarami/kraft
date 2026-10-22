@@ -150,6 +150,8 @@ export interface WorkItemStop {
   reason: string | null;
   facts?: Record<string, unknown>;
   limit?: StopLimit;
+  /** On a list row: a `cap` stop names a limit the item can raise (the detail's `limit`). */
+  raisable?: boolean;
   /** A `budget` stop on the detail: which cap stopped it. `work_item`, the
    *  item's own, is the one `POST /work-items/{id}/budget/raise` takes. */
   scope?: BudgetStop["scope"];

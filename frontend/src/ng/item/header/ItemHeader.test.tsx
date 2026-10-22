@@ -276,7 +276,7 @@ describe("ItemHeader", () => {
   ] as const)("a needs-you %s stop's main button is %s, and it acts", async (kind, name, want: { handler?: keyof Handlers; arg?: string; write?: object; task?: string }) => {
     const calls = stubFetch(WRITES);
     const handlers = { onRaise: vi.fn(), onGate: vi.fn(), onAnswer: vi.fn() };
-    show({ display_status: "needs_you", status: "needs_human", stop: { kind, node: "verification", task: want.task ?? null, resume_at: null, reason: null } }, handlers);
+    show({ display_status: "needs_you", status: "needs_human", stop: { kind, node: "verification", task: want.task ?? null, resume_at: null, reason: null, ...(kind === "cap" && { limit: { path: "", key: "time_cap_minutes", value: 60, maximum: null } }) } }, handlers);
     expect(screen.queryByRole("button", { name: /Pause/ })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name }));
     if (want.handler) {
@@ -291,7 +291,7 @@ describe("ItemHeader", () => {
   it.each<[string, Parameters<typeof detail>[0], string | false | null]>([
     ["a gate", { display_status: "needs_you", ...stop("gate") }, "Cancel…"],
     ["a question", { display_status: "needs_you", needs_context_question: "Which?", ...stop("question") }, "Cancel…"],
-    ["a cap", { display_status: "needs_you", ...stop("cap") }, "Cancel…"],
+    ["a cap", { display_status: "needs_you", ...stop("cap", { limit: { path: "", key: "time_cap_minutes", value: 60, maximum: null } }) }, "Cancel…"],
     ["conflicts", { display_status: "needs_you", ...stop("conflict") }, "Cancel…"],
     ["a closed MR", { display_status: "needs_you", ...stop("mr_closed") }, "Cancel…"],
     ["a stuck loop", { display_status: "needs_you", ...stop("stuck") }, "Cancel…"],

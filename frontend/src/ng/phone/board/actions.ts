@@ -29,7 +29,7 @@ function cardButtonsFor(item: WorkItem, a: NonNullable<ReturnType<typeof admitte
     // As on the desktop row, which opens its peek on the editor: the item opens with the raise sheet over it when it can make
     // one (`budgetRaise`, the limit on a cap) and on its card, which says why, when it cannot. A list row carries neither the
     // stop's limit nor the item's spend, so the card cannot tell a daily or token cap, which the server refuses to raise, from the item's own.
-    case "cap":
+    case "cap": return [{ kind: a.label === "Raise cap" ? "raise" : "open", label: a.label }];
     case "budget": return [{ kind: "raise", label: a.label }];
     case "question": return [{ kind: "answer", label: "Answer…" }];
     default: return [{ kind: "open", label: a.label }];

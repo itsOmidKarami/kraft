@@ -164,8 +164,9 @@ export function rowAction(i: Row): RowAction | null {
   switch (i.stop?.kind) {
     case "gate": return { label: "Review", kind: "gate", gate: i.pending_gate ?? nodeOf(i) };
     case "question": return { label: "Answer", kind: "peek", tab: "overview" };
-    case "cap": return { label: "Raise cap", kind: "peek", tab: "config" };
-    // A row carries neither the stop's limit nor its scope: the peek it opens picks the editor that raises this
+    // Only the item's own cap names a limit (`raisable`); a node's, a gate's or the idle watchdog's has nothing to raise.
+    case "cap": return i.stop.raisable || i.stop.limit ? { label: "Raise cap", kind: "peek", tab: "config" } : { label: "Retry…", kind: "peek", tab: "overview" };
+    // A budget row carries neither the stop's limit nor its scope: the peek it opens picks the editor that raises this
     // cap (`budgetRaise`), or stays on the banner that says why the item can't, with Retry.
     case "budget": return { label: "Raise budget", kind: "peek", tab: "config", budget: true };
     // A stuck loop's and a checkout stop's way on is Retry, on the peek's card (R11a-01): the row said Open.

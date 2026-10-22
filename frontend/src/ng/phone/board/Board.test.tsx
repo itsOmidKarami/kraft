@@ -298,7 +298,7 @@ describe("a card's inline actions (B.4)", () => {
 
   it("cap, budget, question, failed and paused each get their one button", async () => {
     put(
-      item("c1", "needs_you", { stop: { kind: "cap", node: "verification", resume_at: null, reason: null } }),
+      item("c1", "needs_you", { stop: { kind: "cap", node: "verification", resume_at: null, reason: null, raisable: true } }),
       item("b2", "needs_you", { stop: { kind: "budget", node: "verification", resume_at: null, reason: null } }),
       item("q3", "needs_you", { stop: { kind: "question", node: "verification", resume_at: null, reason: "needs_context: allow it?" } }),
       item("f4", "failed", { stop: { kind: "failed", node: "verification", resume_at: null, reason: null } }),
