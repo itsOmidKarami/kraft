@@ -351,5 +351,5 @@ async def test_a_sandboxed_item_freezes_its_harness_hosts_and_env_names_at_filin
     assert filed.repository_env_names == {str(tmp_path): ("CI", "NPM_TOKEN")}
     assert "a-secret" not in row["materialized_chain"]
     claude = filed.harness_egress["claude"]
-    assert "api.anthropic.com" in claude.network_requires
+    assert {"api.anthropic.com"} <= set(claude.network_requires)
     assert {c.env for c in claude.credentials} >= {"ANTHROPIC_API_KEY"}

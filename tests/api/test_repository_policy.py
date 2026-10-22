@@ -135,7 +135,7 @@ def test_a_sandboxed_items_env_names_survive_a_repos_yaml_edit_and_a_switch(clie
     snapshot = _snapshot(client, wid)
     assert snapshot["chain"]["id"] == "two"
     assert snapshot["repository_env_names"] == {str(repo): ["CI", "NPM_TOKEN"]}
-    assert "api.anthropic.com" in snapshot["harness_egress"]["claude"]["network_requires"]
+    assert {"api.anthropic.com"} <= set(snapshot["harness_egress"]["claude"]["network_requires"])
 
 
 @pytest.mark.parametrize("door", ["/api/work-items", "/api/triggers"])
