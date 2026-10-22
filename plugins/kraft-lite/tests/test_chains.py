@@ -514,14 +514,6 @@ def _rejecting(rejected: str, before: str = "", tasks: str = MERGE_TASK, extra: 
             id="on_conflict",
         ),
         pytest.param(
-            {
-                "c": "nodes:\n  - {id: a, kind: exec, tasks: [{id: t, extends: worker}], "
-                "on_base_changed: {restart_form: a}}\n"
-            },
-            r"a.on_base_changed.restart_form: unknown key; known: \[.restart_from.",
-            id="base_changed_unknown_key",
-        ),
-        pytest.param(
             {"c": _looped("judge: {extends: worker}")},
             "a.fix_loop.judge: must be a task with an id",
             id="judge_without_id",
@@ -662,6 +654,14 @@ def _rejecting(rejected: str, before: str = "", tasks: str = MERGE_TASK, extra: 
             {"c": _rejecting(f"restart_from: a, {REPAIR}, max_attempts: 2")},
             r"m.on_merge_rejected.max_attempts: unknown key; known: \['restart_from', 'repair'\]",
             id="merge_rejected_unknown_key",
+        ),
+        pytest.param(
+            {
+                "c": "nodes:\n  - {id: a, kind: exec, tasks: [{id: t, extends: worker}], "
+                "on_base_changed: {restart_form: a}}\n"
+            },
+            r"a.on_base_changed.restart_form: unknown key; known: \[.restart_from.",
+            id="base_changed_unknown_key",
         ),
         pytest.param(
             {
