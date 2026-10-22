@@ -157,6 +157,8 @@ jobs:
             echo
             cat "$RUNNER_TEMP/body.md"
           } >> "$GITHUB_STEP_SUMMARY"
+          # The log too: the API serves job logs but not the summary page.
+          cat "$RUNNER_TEMP/body.md"
           if [ -z "$TAG" ]; then
             echo "nothing since ${PREVIOUS:-the start} ships; not releasing"
           elif [ "$DRY_RUN" = "true" ]; then

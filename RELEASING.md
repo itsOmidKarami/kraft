@@ -43,7 +43,8 @@ because semver compares text, and `rc10` would sort below `rc9`.
 ## Cut a release
 
 Actions → **release** → **Run workflow** on `main`. Tick **dry run** first to see
-the version and notes on the run's summary page without releasing anything.
+the version and notes on the run's summary page, and in the job log, without
+releasing anything.
 Leave **sha** empty to release main's tip, or give a commit on main to release
 an earlier point. That is useful while the tip's tests are still running. It
 cannot be a commit behind the newest release.
