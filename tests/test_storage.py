@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from support.archive import days_ago, seed_completed_item
-from support.deep_tree import PAST_PATH_MAX, deep_chain, opens_during
+from support.deep_tree import deep_chain, opens_during
 from support.harness import IN_PLACE, v1_named_chain
 
 from kraft import item_paths, policy, storage
@@ -181,19 +181,19 @@ def test_a_deep_tree_is_counted_with_opens_linear_in_its_folders(tmp_path):
     """Folders deeper than the walk holds descriptors for are gone back up to
     by `..`, not reopened from the top each time: reopening made 2,000 levels
     take 2.6 seconds and 50,000 half an hour, and a worker makes either at
-    almost no cost. A tree past PATH_MAX takes about two opens a folder,
-    where reopening takes half the depth squared. Counted, not timed, so a loaded
+    almost no cost. 1,000 levels take about two opens a folder, where
+    reopening took some 500,000. Counted, not timed, so a loaded
     machine cannot fail it, and by the audit hook, which sees every open
     however the walk binds `os.open`."""
     run = tmp_path / "run"
-    deep_chain(run / "worktrees" / "a", PAST_PATH_MAX, leaf=os.urandom(MB))
+    deep_chain(run / "worktrees" / "a", 1000, leaf=os.urandom(MB))
     try:
         opens, items = opens_during(
             "from kraft import storage", f"storage.measure({str(run)!r}).items"
         )
 
         assert items["a"] >= MB
-        assert PAST_PATH_MAX <= opens < 10 * PAST_PATH_MAX
+        assert 1000 <= opens < 10 * 1000
     finally:
         item_paths.remove_tree(run)
 

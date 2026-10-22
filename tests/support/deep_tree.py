@@ -1,8 +1,8 @@
 """A chain of folders nested far deeper than a path can name, as a worker can
 make one at almost no cost: what a walk of a worker's folder must survive.
 
-    deep_chain(tmp_path / "run" / "worktrees" / "a", 5000, leaf=b"x" * 4096)
-    # tmp_path/run/worktrees/a/d/d/.../d/big, 5000 `d`s deep
+    deep_chain(tmp_path / "run" / "worktrees" / "a", 1000, leaf=b"x" * 4096)
+    # tmp_path/run/worktrees/a/d/d/.../d/big, 1000 `d`s deep
 """
 
 from __future__ import annotations
@@ -14,9 +14,9 @@ import sys
 from pathlib import Path
 
 # As many levels as PATH_MAX, so the bottom's path is twice too long to name
-# (two characters a level): 4,096 on Linux. Not more: on macOS (1,024) making
-# and removing a nested tree is quadratic in the kernel, and 2,000 levels
-# take about 9s each way.
+# (two characters a level), and a walk that went back up by path could not:
+# 4,096 on Linux. Not more: on macOS (1,024) making and removing a nested
+# tree is quadratic in the kernel, and 2,000 levels take about 9s each way.
 PAST_PATH_MAX = os.pathconf("/", "PC_PATH_MAX")
 
 
