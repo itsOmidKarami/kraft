@@ -360,4 +360,5 @@ async def _record_outlived(work_item_id: str | None, payload: dict) -> None:
     # A swept marker's name may look like an item's and name none, or the server is
     # stopping: a close never fails on the event, and the warning above stands.
     except (sqlite3.Error, RuntimeError) as exc:
-        logger.warning("session %s: its sandbox event was not recorded: %s", payload["session"], exc)
+        name = payload["session"]
+        logger.warning("session %s: its sandbox event was not recorded: %s", name, exc)
