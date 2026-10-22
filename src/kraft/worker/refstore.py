@@ -42,7 +42,7 @@ import re
 import shutil
 import stat
 import subprocess
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -359,9 +359,7 @@ def prepare_direct(
     update in flight."""
     root = Path(cwd).resolve()
     root_dirs = _sandbox.linked_gitdirs(root)
-    if root_dirs is None:
-        return []
-    found = [(None, *root_dirs)]
+    found = [] if root_dirs is None else [(None, *root_dirs)]
     for rel, dirs in sorted((members or {}).items()):
         if dirs is None:
             raise RuntimeError(
@@ -461,24 +459,34 @@ def _record_direct(base: Path, store: RefStore, keep_lock: bool, work_item_id: s
         )
 
 
-def check_direct(base: Path, store: RefStore) -> str | None:
+def check_direct(
+    base: Path, store: RefStore, *, item_live: Callable[[str], bool] | None = None
+) -> str | None:
     """After a session, the direct store's branch ref must still be a bare
     object id naming a commit: that is recorded as its new value. Anything
     else (a symref to `main`, a tree, garbage, a missing or non-file ref) is
     put back to the recorded value, and why is returned for the caller to
     record. A `.lock` that is not a regular file is removed either way, and so
     is a branch reflog that is not one, which host git would append through; a
-    regular `.lock` may be a co-task's update in flight and is left."""
+    regular `.lock` may be a co-task's update in flight and is left, unless
+    `item_live` (given the sidecar's work item id) says no session of the item
+    is left: then it is a killed git's, and would block host git on the branch."""
     if store.branch is None:
         return None
     shadow = shadow_dir(base, store.worktree_gitdir)
     with _locked(shadow):
         problem = _validate_direct(store, shadow)
-        _clear_worker_files(store)  # after the ref is restored: one stuck path never skips it
+        item = _read_meta(shadow).get("work_item_id")
+        alone = item_live is not None and bool(item) and not item_live(item)
+        _clear_worker_files(
+            store, keep_lock=not alone
+        )  # after the ref is restored: one stuck path never skips it
         return problem
 
 
-def check_direct_item(base: Path, work_item_id: str) -> list[str]:
+def check_direct_item(
+    base: Path, work_item_id: str, *, item_live: Callable[[str], bool] | None = None
+) -> list[str]:
     """`check_direct` for every direct store a session of `work_item_id` used,
     for a session that ended without `run_task` there to check it: one adopted,
     or found dead, after a restart. Why each branch was put back, or is gone."""
@@ -495,7 +503,7 @@ def check_direct_item(base: Path, work_item_id: str) -> list[str]:
             read_branch(common, store.branch) is None
         ):
             problems.append(f"refs/heads/{store.branch} is gone; not restored")
-        elif problem := check_direct(base, store):
+        elif problem := check_direct(base, store, item_live=item_live):
             problems.append(problem)
     return problems
 

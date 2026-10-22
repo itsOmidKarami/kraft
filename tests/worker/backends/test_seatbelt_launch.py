@@ -326,6 +326,31 @@ def test_code_in_gives_direct_stores_and_keeps_a_live_co_tasks_lock(item):
     assert not lock.exists()
 
 
+@pytest.mark.parametrize(
+    ("marker", "survives"),
+    [(None, False), ("w1-s2", True), ("w2-s2", False)],
+    ids=["no-other-session", "another-session-of-the-item", "a-session-of-another-item"],
+)
+@pytest.mark.parametrize("through", ["code_out", "code_out_item"])
+def test_a_lock_a_killed_git_left_goes_unless_a_co_task_is_live(
+    item, run_dirs, through, marker, survives
+):
+    """The sweep killed the session's git mid-update: its `.lock` would block host git on
+    the branch. Another live session of the item (judged by its marker) may own it."""
+    refs = item.code_in()
+    lock = item.ref.with_name(item.ref.name + ".lock")
+    lock.write_text("")
+    if marker:
+        _made(item.mac, marker)
+
+    if through == "code_out":
+        item.backend.code_out(refs, "s1")
+    else:
+        item.backend.code_out_item(run_dirs.base, "w1")
+
+    assert lock.exists() == survives
+
+
 @pytest.mark.parametrize("through", ["code_out", "code_out_item"])
 def test_a_branch_aimed_at_main_is_put_back_before_anything_reads_it(item, run_dirs, through):
     """`code_out_item` is what a daemon restart reaches: no `run_task` is left to call

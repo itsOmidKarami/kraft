@@ -138,9 +138,9 @@ def render_profile(
     # `/` itself: every dynamic loader reads it.
     out.append('(allow file-read* (literal "/"))')
     out += [f"(allow file-read* {sub(p)})" for p in (*host_view.system_dirs(), *SYSTEM_READS)]
-    # The roots go after the deny: an Intel Homebrew Kraft lives under /usr/local.
     out += [f"(allow file-read* {lit(p)})" for p in DEV_READS]
     out += [f"(deny file-read* {sub(p)})" for p in host_view.system_excluded()]
+    # The roots go after the deny: an Intel Homebrew Kraft lives under /usr/local.
     out += [f"(allow file-read* {sub(p)})" for p in read_roots]
     out += [f"(allow file-read* {lit(p)})" for p in read_literals]
     # Shallowest first, by the rendered path: a deeper mount must override the
@@ -174,7 +174,7 @@ def render_profile(
 
 class SessionFiles(NamedTuple):
     """What a launch makes on the host, named by its key (`ids.qualified` of a
-    session; `setup-` or `oneshot-` and a uuid for one that has none)."""
+    session, or of a setup's item and setup id; `oneshot-` and a uuid for one that has neither)."""
 
     tmpdir: Path
     marker: Path

@@ -9,6 +9,7 @@ by name (`--keep`), through the launcher's environment.
 from __future__ import annotations
 
 import asyncio
+import glob
 import hashlib
 import os
 import platform
@@ -525,10 +526,21 @@ class OsBackend:
         except OSError:
             return True
 
+    @staticmethod
+    def _item_live(work_item_id: str) -> bool:
+        """Whether a session of the item still has a marker (`ids.qualified` makes its name
+        `<item>-<session>`; Seatbelt postdates the bare legacy ids)."""
+        markers = _seatbelt().markers_dir(_run_dirs().base)
+        return any(markers.glob(f"{glob.escape(work_item_id)}-*"))
+
     def code_out(self, refs: Sequence[RefStore], session_id: str) -> list[str]:
         if sys.platform == "darwin":
             base = _run_dirs().base
-            problems = [p for store in refs if (p := _refstore.check_direct(base, store))]
+            problems = [
+                p
+                for store in refs
+                if (p := _refstore.check_direct(base, store, item_live=self._item_live))
+            ]
             # `close` swept first; a marker left is a sweep that could not end the session.
             markers = _seatbelt().markers_dir(base)
             left = [
@@ -547,7 +559,7 @@ class OsBackend:
 
     def code_out_item(self, run_base: Path, work_item_id: str) -> list[str]:
         if sys.platform == "darwin":
-            return _refstore.check_direct_item(run_base, work_item_id)
+            return _refstore.check_direct_item(run_base, work_item_id, item_live=self._item_live)
         return []  # Docker's already runs for every backend's sessions
 
     async def collect(self, session_id: str, result_path: Path, *, work_item_id: str) -> None:
@@ -584,8 +596,8 @@ class OsBackend:
         swept = []
         for marker in sorted(markers.iterdir()) if markers.is_dir() else ():
             name = marker.name
-            # `control` is no session's. A leftover `setup-` or `oneshot-` one is an orphan
-            # too: its own launcher removes it on a clean exit.
+            # `control` is no session's. A leftover setup one (`ids.qualified` of its item and
+            # setup id) or `oneshot-` one is an orphan too: its launcher removes it on a clean exit.
             if name != "control" and name not in kept:
                 if await _seatbelt().end_session(_seatbelt().session_files(run_base, name), name):
                     swept.append(name)

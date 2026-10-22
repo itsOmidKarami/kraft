@@ -337,7 +337,7 @@ def test_a_member_kraft_did_not_check_out_is_never_mounted(repo, worktree, tmp_p
 def direct(worktree, tmp_path):
     """The direct store of the worktree's item branch: `(run base, store, its ref file)`."""
     base = tmp_path / "run"
-    (store,) = refstore.prepare_direct(base, worktree, BRANCH)
+    (store,) = refstore.prepare_direct(base, worktree, BRANCH, work_item_id="w1")
     return base, store, store.common / "refs" / "heads" / BRANCH
 
 
@@ -498,19 +498,33 @@ def test_check_direct_item_leaves_a_private_store_alone(repo, worktree, prepare,
 
 @pytest.mark.parametrize(
     ("call", "live", "survives"),
-    [("prepare_direct", ["s1"], True), ("prepare_direct", [], False), ("check_direct", [], True)],
-    ids=["prepare-with-a-live-co-task", "prepare-with-none-live", "check-never-removes-it"],
+    [
+        ("prepare_direct", ["s1"], True),
+        ("prepare_direct", [], False),
+        ("check_direct", None, True),
+        ("check_direct", True, True),
+        ("check_direct", False, False),
+    ],
+    ids=[
+        "prepare-with-a-live-co-task",
+        "prepare-with-none-live",
+        "check-without-a-judge-keeps-it",
+        "check-with-the-item-live",
+        "check-with-the-item-gone",
+    ],
 )
 def test_a_regular_lock_is_a_co_tasks_to_keep(direct, worktree, call, live, survives):
     """Co-tasks of one worktree run concurrently: a lock may be one's ref update
-    in flight. Only a launch with no other live session may clear it."""
+    in flight. Only a launch with no other live session, or a check that is told
+    none of the item's is left, may clear it."""
     base, store, ref = direct
     lock = ref.with_name(ref.name + ".lock")
     lock.write_text("")
     if call == "prepare_direct":
         refstore.prepare_direct(base, worktree, BRANCH, live=live)
     else:
-        refstore.check_direct(base, store)
+        judge = None if live is None else lambda item: (item == "w1") == live
+        refstore.check_direct(base, store, item_live=judge)
     assert os.path.lexists(lock) == survives
 
 
@@ -596,6 +610,12 @@ def test_a_direct_store_is_never_synced_or_rebuilt(direct, call):
 
 def test_prepare_direct_needs_a_linked_worktree(repo, tmp_path):
     assert refstore.prepare_direct(tmp_path / "run", repo, BRANCH) == []
+
+
+def test_a_member_kraft_did_not_check_out_is_never_mounted_directly(repo, tmp_path):
+    """As `prepare_stores` refuses it, even when the root is no linked worktree."""
+    with pytest.raises(RuntimeError, match="repos/pkg"):
+        refstore.prepare_direct(tmp_path / "run", repo, BRANCH, members={"repos/pkg": None})
 
 
 def test_prepare_direct_gives_a_member_its_own_store(tmp_path):
