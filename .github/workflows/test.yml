@@ -418,6 +418,9 @@ jobs:
           tests/worker/backends/test_seatbelt_launch.py
           tests/worker/test_os_init.py
           tests/worker/test_os_init_sweep.py
+          tests/worker/test_refstore.py
+          tests/worker/test_mounts.py
+          tests/worker/test_host_view.py
         env:
           KRAFT_E2E_REQUIRE: sandbox-exec
       - if: always()
