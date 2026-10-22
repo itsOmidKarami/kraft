@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from kraft import harness as _harness
-from kraft import ids, inplace, item_paths, store
+from kraft import ids, inplace, item_paths, store, when_free
 from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
 from kraft import registration as _registration
@@ -1024,6 +1024,10 @@ async def run_agent_task(
     #: one `CheckoutBusy` refused (an escalation's message, a review's start).
     on_session: Callable[[], Awaitable[None]] | None = None,
 ) -> str:
+    # An update holds the moment: no session starts until the server restarts.
+    # Before the session row, so nothing is left behind to reattach.
+    if when_free.claimed():
+        raise when_free.Claimed(when_free.MESSAGE)
     # A snapshot frozen before Kraft-9i6xy may still carry a rule: it reads
     # (`policy.FROZEN`), but it never reaches an agent (Kraft-9ct4q).
     for field, names in (("allowed_tools", allowed_tools or ()), ("deny_tools", deny_tools)):

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
-from kraft import events, executor, inplace, reviewed_head, store
+from kraft import events, executor, inplace, reviewed_head, store, when_free
 from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
 from kraft.api.routes.lifecycle import (
@@ -290,6 +290,7 @@ async def _refresh_base_at_gate(request, wid: str, row, gate: str) -> bool:
 
 @api_router.post("/work-items/{wid}/gates/{gate:path}/approve")
 async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove | None = None):
+    when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid, escalation_may=False)
     row = deps._live_work_item_row(st, wid)
@@ -426,6 +427,7 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     the item. The single thing that may park an item at a rejected
     gate is the reject loop's own cap.
     """
+    when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid, escalation_may=False)
     row = deps._live_work_item_row(st, wid)

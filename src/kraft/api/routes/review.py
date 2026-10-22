@@ -13,7 +13,7 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, field_validator, model_validator
 
 from kraft import config as config_mod
-from kraft import executor, inplace, review_reply, store
+from kraft import executor, inplace, review_reply, store, when_free
 from kraft import review as review_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import board, lifecycle
@@ -357,6 +357,9 @@ class ReviewIn(BaseModel):
 
 async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
     wid = row["id"]
+    if body.outcome != ReviewOutcome.COMMENT or gate is not None:
+        # Starts a walk or a reply agent; a comment on no gate starts nothing.
+        when_free.refuse_if_claimed()
     nodes = gate_routes.gate_nodes(st, row) if gate is not None else None
     # Every refusal before the review is written: a refused review records nothing.
     if gate is None and body.outcome == ReviewOutcome.APPROVE:

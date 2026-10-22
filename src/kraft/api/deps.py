@@ -24,7 +24,7 @@ from fastapi import FastAPI, HTTPException
 
 from kraft import builtins as builtins_mod
 from kraft import config as config_mod
-from kraft import executor, ids, storage, store
+from kraft import executor, ids, storage, store, when_free
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git as forge_git
 from kraft.addons import load as addons_load
@@ -135,7 +135,14 @@ def discard(coro) -> None:
 
 def _start(app: FastAPI, wid: str, coro) -> asyncio.Task:
     """Run `coro` as `wid`'s task, in `app.state.tasks`. The caller has
-    checked nothing else holds the key."""
+    checked nothing else holds the key.
+
+    The backstop for the claim an update holds (`when_free`): a route refuses
+    before it writes, a poller does not start, and a start that was already
+    past both when the claim landed stops here."""
+    if when_free.claimed():
+        discard(coro)
+        raise when_free.Claimed(when_free.MESSAGE)
     # Every walk starts here, and a walk is what makes the worktree (later, in
     # its own task): count it now, so the start after this one sees it.
     storage.charge(app, wid)

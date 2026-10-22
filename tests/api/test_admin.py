@@ -168,6 +168,20 @@ def test_a_server_the_installed_service_started_restarts_with_a_202(
     assert ran == [client.app.state]
 
 
+def test_the_apply_chips_restart_lifts_a_failed_update(client, monkeypatch, tmp_path):
+    """A person asking again tries what failed afresh (`when_free.clear_failure`)."""
+    from kraft import when_free
+
+    _installed(monkeypatch, tmp_path, "linux")
+    monkeypatch.setattr(client.app.state, "restart_runner", lambda st: None, raising=False)
+    when_free.record_outcome(client.app.state, status="failed", key="v2.3.0", detail="x")
+    assert when_free.failed_key(client.app.state) == "v2.3.0"
+
+    assert client.post("/api/apply/restart").status_code == 202
+
+    assert when_free.failed_key(client.app.state) is None
+
+
 @pytest.mark.parametrize(
     ("failure", "says"),
     [(OSError("no such file: kraft"), "no such file: kraft"), (SystemExit(2), "2")],

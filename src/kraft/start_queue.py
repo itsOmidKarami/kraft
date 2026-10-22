@@ -37,7 +37,7 @@ import logging
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from kraft import events, storage, store
+from kraft import events, storage, store, when_free
 from kraft.store._common import joined
 from kraft.vocab import WorkItemEvent, WorkItemStatus
 
@@ -76,6 +76,8 @@ def starting(app) -> set[str]:
 async def tick(app) -> list[str]:
     """One pass. Returns the work item ids started, which is usually none."""
     st = app.state
+    if when_free.claimed():
+        return []  # an update holds the moment: nothing starts until the restart
     limit = st.policy.max_concurrent if st.policy else 1
     # Before the queue: an item whose dependencies have all completed joins
     # it, and is started in this same pass when a slot is free.

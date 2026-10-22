@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from kraft import events, store
+from kraft import events, store, when_free
 from kraft.executor import gates
 from kraft.vocab import HOLDS_SLOT, WorkItemStatus
 from kraft.vocab.sql import in_list
@@ -68,6 +68,8 @@ async def tick(app) -> list[str]:
     from kraft.api import deps
 
     st = app.state
+    if when_free.claimed():
+        return []  # an update holds the moment: nothing starts until the restart
     attempted: list[str] = []
     # Same bound `intake.tick`/manual resume already enforce: a dispatch here
     # launches a real agent session, same as a resume does, so it must count

@@ -15,7 +15,7 @@ import asyncio
 import logging
 
 from kraft import policy as policy_mod
-from kraft import store
+from kraft import store, when_free
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.vocab import StopKind, WorkItemStatus
 
@@ -52,6 +52,8 @@ def _key(node_id: str) -> str:
 async def tick(app) -> list[str]:
     """One poll. Returns the work item ids relaunched, which is usually none."""
     st = app.state
+    if when_free.claimed():
+        return []  # an update holds the moment: nothing starts until the restart
     due = st.db.read(
         lambda c: c.execute(
             # `materialized_chain` too, for `store.node_index` -- see waits.py.

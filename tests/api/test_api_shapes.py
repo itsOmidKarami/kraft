@@ -91,6 +91,7 @@ PROBES: dict[str, dict[str, str]] = {
     },
     "GET /api/theme": {},
     "GET /api/update": {},
+    "GET /api/update/settings": {},
     "GET /api/work-items": {"include_abandoned": "true"},
     "GET /api/work-items/{wid}": {"wid": "$ITEM"},
     "GET /api/work-items/{wid}/artifact": {"wid": "$ITEM"},

@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
-from kraft import events, store
+from kraft import events, store, when_free
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.templates.models import WaitBounds
 from kraft.vocab import RESTARTS_RUN, ForgeEvent, WorkItemStatus
@@ -221,6 +221,8 @@ async def tick(app, *, now: str | None = None) -> list[str]:
     """One pass. Returns the work item ids re-entered, which is usually none.
     `now` is for a test that must not sleep out a backoff."""
     st = app.state
+    if when_free.claimed():
+        return []  # an update holds the moment: nothing starts until the restart
     due = st.db.read(
         lambda c: c.execute(
             # `materialized_chain` as well as `chain_definition`: the row is

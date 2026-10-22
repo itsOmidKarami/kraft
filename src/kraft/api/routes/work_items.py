@@ -11,7 +11,7 @@ from pydantic import AliasChoices, BaseModel, Field, model_validator
 from pydantic_core import PydanticCustomError
 
 from kraft import config as config_mod
-from kraft import executor, storage, store
+from kraft import executor, storage, store, when_free
 from kraft import policy as policy_mod
 from kraft.adapters import beads as beads_mod
 from kraft.api import SENTENCE_ERROR, api_router, deps, item_ids
@@ -336,6 +336,9 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             "an agent cannot start the work it files: file it paused (no autostart) "
             "and a human starts it from the board",
         )
+    if body.autostart:
+        # Filed paused otherwise, which starts nothing: only a start waits.
+        when_free.refuse_if_claimed()
     chain_template, chain = deps.intake_chain_or_422(st, body.repo, body.chain_template)
     # Before `executor.intake`, which no longer 502s on a bd failure (Kraft-7gy)
     # and would file the item with no bead and a warning nobody reads. An

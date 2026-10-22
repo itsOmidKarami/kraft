@@ -602,6 +602,15 @@
     "python": "_"
    }
   },
+  "GET /api/update/settings": {
+   "params": {},
+   "shape": {
+    "allowed_hours": [],
+    "auto_update": "_",
+    "channel": "_",
+    "restart_when_free": "_"
+   }
+  },
   "GET /api/work-items": {
    "params": {
     "include_abandoned": "true"

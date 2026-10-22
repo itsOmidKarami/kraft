@@ -179,6 +179,27 @@ def test_gate_approve_advances_chain(client, repo, monkeypatch):
     assert any(e["type"] == "node_started" and e["payload"]["node_id"] == "plan" for e in evts)
 
 
+def test_approve_during_claim(client, repo, monkeypatch):
+    """An update holds the moment: an approval answers 503 and changes nothing,
+    so the gate is still there to approve once the server is back."""
+    from kraft import when_free
+
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    monkeypatch.setattr(when_free, "_claimed", True)
+
+    r = client.post(f"/api/work-items/{wid}/gates/spec_approval/approve")
+
+    assert (r.status_code, r.json()["detail"]) == (503, when_free.MESSAGE)
+    item = client.get(f"/api/work-items/{wid}").json()
+    assert item["status"] == "needs_human"
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    assert not any(e["type"] == "gate_approved" for e in events)
+
+    monkeypatch.setattr(when_free, "_claimed", False)
+    assert client.post(f"/api/work-items/{wid}/gates/spec_approval/approve").status_code == 200
+
+
 def test_approve_rejects_gate_absent_from_this_items_chain(client, repo):
     wid = _post_default(client, repo)
     response = client.post(f"/api/work-items/{wid}/gates/release_ready/approve")

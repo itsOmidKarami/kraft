@@ -27,6 +27,7 @@ from kraft import (
     start_queue,
     storage,
     store,
+    when_free,
 )
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
@@ -1291,6 +1292,7 @@ async def steer_work_item(wid: str, body: Steer, request: Request):
 @api_router.post("/work-items/{wid}/resume")
 async def resume_work_item(wid: str, body: Resume, request: Request):
     """Relaunch the paused node, carrying the steer into the next agent launch."""
+    when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
@@ -1720,6 +1722,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     and is then dropped from the body: a queued or blocked retry made again
     later must not re-read it a second time.
     """
+    when_free.refuse_if_claimed()
     if not body.sandbox_from_config:
         return await _retry(wid, body, request)
     sandbox = await _reread_before_retry(wid, request)
@@ -2173,6 +2176,7 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     is still what decides: if it refuses after all, the answer says the cap
     was raised and the retry was not.
     """
+    when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid, escalation_may=False)
     row = deps._live_work_item_row(st, wid)
@@ -2274,6 +2278,7 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
     needs_human, gate or no gate — because unlike retry/resume/approve/reject,
     skip does not care what state stopped the item, only what node is current.
     """
+    when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
     # /skip has no live task to gate a race the way spawn does for every other
@@ -2605,6 +2610,7 @@ async def reopen_mr(wid: str, request: Request):
     forge failure answers 502 and leaves the item stopped, same posture as
     `_close_cancelled_mr`'s close.
     """
+    when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
@@ -2669,6 +2675,7 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     none exists yet. Only door onto a `needs_human` stop meant for
     back-and-forth with an agent rather than a one-shot retry.
     """
+    when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)

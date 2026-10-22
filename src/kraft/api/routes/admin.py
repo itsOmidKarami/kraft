@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from fastapi import HTTPException, Request
 
 from kraft import apply as apply_mod
-from kraft import update
+from kraft import update, when_free
 from kraft.api import api_router
 
 
@@ -31,6 +31,8 @@ async def post_apply_restart(request: Request):
     st = request.app.state
     if not apply_mod.managed():
         raise HTTPException(409, "started from a terminal: restart it there")
+    # A person asking again: a restart that failed before is tried afresh.
+    when_free.clear_failure(st)
     try:
         getattr(st, "restart_runner", apply_mod.spawn_restart)(st)
     except (OSError, SystemExit) as exc:

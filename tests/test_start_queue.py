@@ -68,6 +68,31 @@ def test_the_queue_starts_the_earliest_item_when_a_slot_frees(client, repo, boar
     _poll_events(client, first, "work_item_resumed")
 
 
+def test_queued_request_kept_while_claimed(client, stopped, board, monkeypatch):
+    """A pass while an update holds the moment starts nothing, and the saved
+    request stays queued for the restarted server (a 503 raised inside the
+    replay would have dropped it as refused)."""
+    from kraft import when_free
+
+    wid = stopped
+    r = client.post(f"/api/work-items/{wid}/retry", json={"steer": "keep it"})
+    assert r.json()["status"] == "queued"
+    _set_status(board, "paused")
+    monkeypatch.setattr(when_free, "_claimed", True)
+
+    assert _tick(client) == []
+
+    assert _status_of(client, wid) == "queued"
+    with _db() as c:
+        saved = json.loads(
+            c.execute("SELECT queued_request FROM work_items WHERE id = ?", (wid,)).fetchone()[0]
+        )
+    assert saved["body"] == {"steer": "keep it"}
+
+    monkeypatch.setattr(when_free, "_claimed", False)
+    assert _tick(client) == [wid]
+
+
 def test_a_start_makes_the_saved_request_again(client, stopped, board):
     """The verb, its body and the caller are what was asked, not defaults."""
     wid = stopped
