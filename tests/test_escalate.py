@@ -476,27 +476,38 @@ _MERGING = v1_chain(
 
 
 @pytest.mark.parametrize(
-    ("chain", "node"),
-    [(_MERGING, "merge"), (_CHAIN, "implementation")],
-    ids=["a-merge-node", "any-other-node"],
+    ("chain", "node", "commits"),
+    [(_MERGING, "merge", False), (_MERGING, "merge", True), (_CHAIN, "implementation", False)],
+    ids=["a-merge-node", "a-merge-node-whose-agent-commits", "any-other-node"],
 )
 async def test_a_turn_on_a_merge_node_records_its_tips_and_is_told_a_commit_goes_back(
-    monkeypatch, database, run_dirs, chain, node
+    monkeypatch, database, run_dirs, chain, node, commits
 ):
     """What `walk.hold_after_escalation` compares once the turn is over -- the
-    branch tips before the agent ran -- rides the turn's `escalation_message`,
-    and the agent is told a commit is not merged in place."""
+    branch tips before the agent ran, or its commit is compared with itself --
+    rides the turn's `escalation_message`, and the agent is told so."""
+    from support.harness import commit_all, git, make_repo, write
+
     seen = {}
+    worktree = run_dirs.worktrees / "w1"
+    await _seed_needs_human(database, run_dirs, "w1", chain, node)
+    if commits:
+        make_repo(run_dirs.worktrees, "w1")
+        row = database.read(lambda c: c.execute("SELECT * FROM work_items").fetchone())
+        git(worktree, "checkout", "-q", "-b", store.branch_for(row))
+    before = git(worktree, "rev-parse", "HEAD") if commits else None
 
     async def fake_run_agent_task(db, run_dirs, *, session_id, task_instruction, **kw):
         seen["task_instruction"] = task_instruction
         await kw["on_session"]()
         kw["files"].log.parent.mkdir(parents=True, exist_ok=True)
         kw["files"].log.write_text("")
+        if commits:
+            write(worktree, "fix.txt", "the agent's\n")
+            commit_all(worktree, "the escalation's commit")
         return "done"
 
     monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
-    await _seed_needs_human(database, run_dirs, "w1", chain, node)
     launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     await escalate.dispatch(database, run_dirs, work_item_id="w1", message="m", launch=launch)
 
@@ -506,8 +517,8 @@ async def test_a_turn_on_a_merge_node_records_its_tips_and_is_told_a_commit_goes
     [message] = [e["payload"] for e in evs if e["type"] == "escalation_message"]
     merging = node == "merge"
     recorded = message.get("merge_node")
-    worktree = str(run_dirs.worktrees / "w1")
-    assert recorded == ({"node_id": "merge", "tips": {worktree: None}} if merging else None)
+    tips = {str(worktree): before}
+    assert recorded == ({"node_id": "merge", "tips": tips} if merging else None)
     told = "Kraft sends the work item back to node implementation"
     assert (told in seen["task_instruction"]) is merging
 
