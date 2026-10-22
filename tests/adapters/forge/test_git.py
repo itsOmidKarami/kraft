@@ -169,22 +169,27 @@ def test_merge_accepts_a_pushed_head_against_real_git(tmp_path, glab, elsewhere)
     assert not any("merge_trains" in c for c in glab.calls("glab"))
 
 
-@pytest.mark.parametrize("recorded", [True, False], ids=["recorded", "pushed-before-the-record"])
-def test_push_publishes_a_rebased_branch_against_real_git(tmp_path, recorded):
+@pytest.mark.parametrize(
+    "pushed", ["recorded", "pushed-before-the-record", "record-behind-a-crash"]
+)
+def test_push_publishes_a_rebased_branch_against_real_git(tmp_path, pushed):
     """Kraft-z6i8. A rebase moves the branch off of what origin last saw --
     here, `main` gaining a commit and the branch rebasing onto it -- and a
     plain `push -u` would die non-fast-forward. `forge.push`'s
     `--force-with-lease` must still publish it. A fix Kraft pushed before
     the rebase is Kraft's own work, not someone else's, so it is no reason
     to refuse. A branch pushed before Kraft kept that record is judged by
-    the remote-tracking ref instead, as every branch was."""
+    the remote-tracking ref instead, as every branch was. Kraft-mre20: a
+    crash between the push and the record leaves the record one push behind,
+    and the fix, once the local branch's tip, is still Kraft's own."""
     repo = _repo_with_origin(tmp_path)
     (repo / "fix.txt").write_text("a verify fix\n")
     commit_all(repo, "a verify fix")
-    if recorded:
+    if pushed == "recorded":
         asyncio.run(forge.push(repo, BRANCH))
     else:
-        git(repo, "update-ref", "-d", f"{forge_git.PUSHED_REFS}/{BRANCH}")
+        if pushed == "pushed-before-the-record":
+            git(repo, "update-ref", "-d", f"{forge_git.PUSHED_REFS}/{BRANCH}")
         git(repo, "push", "-q", "origin", BRANCH)
     origin = tmp_path / "origin.git"
     main_clone = tmp_path / "main-clone"
@@ -229,16 +234,21 @@ def test_push_still_runs_pre_push_under_harden_host_git_env(tmp_path, monkeypatc
     assert marker.exists()
 
 
-@pytest.mark.parametrize("fetched", [False, True], ids=["unseen", "fetched-by-the-checkout"])
-def test_push_refuses_to_overwrite_someone_elses_commits(tmp_path, fetched):
+@pytest.mark.parametrize("case", ["unseen", "fetched-by-the-checkout", "record-behind-a-crash"])
+def test_push_refuses_to_overwrite_someone_elses_commits(tmp_path, case):
     """Kraft-z6i8's other half: a person's commits on the MR branch are
     never overwritten by a rebased push. `fetched` is Kraft-m7ppj: a plain
     `git fetch` in the connected checkout moves the remote-tracking ref the
     worktree shares onto those commits, and a lease on that ref let the push
-    clobber them."""
+    clobber them. Kraft-mre20: a record left behind by a crash excuses only
+    tips the local branch had, never a person's commit on top of them."""
     repo = _repo_with_origin(tmp_path)
+    if case == "record-behind-a-crash":
+        (repo / "fix.txt").write_text("pushed, never recorded\n")
+        commit_all(repo, "a fix")
+        git(repo, "push", "-q", "origin", BRANCH)
     theirs = _someone_else_pushes(tmp_path)
-    if fetched:
+    if case == "fetched-by-the-checkout":
         git(repo, "fetch", "-q", "origin")
     (repo / "work.txt").write_text("rewritten locally\n")
     git(repo, "add", "-A")

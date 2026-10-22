@@ -596,6 +596,11 @@ async def push(repo: Path, branch: str) -> None:
     before the record existed falls back to the remote-tracking ref, as
     every branch did before.
 
+    Kraft dying between its push and the record leaves the record one push
+    behind (Kraft-mre20), so origin's tip also counts as Kraft's own when the
+    local branch once pointed at it (its reflog): a person's commit pushed
+    from elsewhere never was. With no reflog the push refuses, as before.
+
     Run with `sandbox.unhardened_git_env()`, not the inherited, pinned
     process env: by push time the commit is already made, so the pinned
     `core.hooksPath=/dev/null` no longer stops a worker from planting
@@ -629,6 +634,7 @@ async def push(repo: Path, branch: str) -> None:
         remote
         and remote != ours
         and git_read(repo, "rev-list", "-n1", remote, f"^{head}", expected_failure=True) != ""
+        and not _was_local_tip(repo, branch, remote)
     ):
         raise ForgeError(
             f"origin/{branch} is at {remote[:12]}, which Kraft did not push and this "
@@ -651,6 +657,16 @@ async def push(repo: Path, branch: str) -> None:
     args += ["origin", branch]
     await run_git(repo, args, env=env)
     await run_git(repo, ["git", "update-ref", pushed_ref, head])
+
+
+def _was_local_tip(repo: Path, branch: str, sha: str) -> bool:
+    """Whether `refs/heads/<branch>` ever pointed at `sha`, by its reflog. A
+    linked worktree's branch reflog lives in the main repository, and git
+    reads it from there."""
+    log = git_read(
+        repo, "reflog", "show", "--format=%H", f"refs/heads/{branch}", expected_failure=True
+    )
+    return sha in (log or "").split()
 
 
 async def _assert_pushed(repo: Path, branch: str) -> None:
