@@ -17,7 +17,8 @@ export const act = {
   unblock: (id: string) => post(`${at(id)}/unblock`),
   resume: (id: string, steer?: string | null, steers?: Record<string, string>) => post(`${at(id)}/resume`, { steer: steer || null, ...(steers ? { steers } : {}) }),
   retry: (id: string, body: { path?: string; steer?: string | null; task_config?: Record<string, unknown> } = {}) => post<{ attempt?: number }>(`${at(id)}/retry`, body),
-  skip: (id: string, path: string, note?: string) => post(`${at(id)}/skip`, { path, ...(note ? { note } : {}) }),
+  /** `head`: the final review's, as the item showed it; skipping that gate is refused without it. */
+  skip: (id: string, path: string, note?: string, head?: string | null) => post(`${at(id)}/skip`, { path, ...(note ? { note } : {}), ...(head ? { head } : {}) }),
   cancel: (id: string, reason: string, closeMr: boolean) => post<{ close_mr?: { ok: boolean; error?: string } }>(`${at(id)}/cancel`, { reason, close_mr: closeMr }),
   complete: (id: string, reason: string, closeBeads: boolean) => post(`${at(id)}/complete`, { reason, close_beads: closeBeads }),
   escalate: (id: string, message: string, newThread: boolean) => post(`${at(id)}/escalate`, { message, new_thread: newThread }),
@@ -32,7 +33,8 @@ export const act = {
   patch: (id: string, body: Record<string, unknown>) => post(at(id), body, "PATCH"),
   /** Apply the item's draft (Review & apply's own call), for a surface with no draft dialog. */
   applyDraft: (id: string) => post(`${at(id)}/draft/apply`),
-  approve: (id: string, gate: string) => post(`${at(id)}/gates/${encodeURIComponent(gate)}/approve`),
+  /** `head`: the item's `review_head` as the page rendered it; the final review's approval is refused without the head it was shown. */
+  approve: (id: string, gate: string, head?: string | null) => post(`${at(id)}/gates/${encodeURIComponent(gate)}/approve`, head ? { head } : undefined),
   reject: (id: string, gate: string, note: string) => post(`${at(id)}/gates/${encodeURIComponent(gate)}/reject`, { note }),
 };
 

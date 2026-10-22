@@ -23,7 +23,7 @@ import { parsePatch } from "./patch";
 import { useDiffPrefs } from "./prefs";
 import { Toolbar } from "./Toolbar";
 import { useReviewPlace } from "./url";
-import { useArtifact, useCompare, useExpanded, useThreads, useViewed } from "./useReview";
+import { useArtifact, useCompare, useExpanded, useShownHead, useThreads, useViewed } from "./useReview";
 // The item header's styles live with it; this page can be the first one loaded.
 import "../item/item.css";
 import "./review.css";
@@ -54,7 +54,14 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const toItem = (p: Parameters<typeof placeUrl>[1]) => navigate(placeUrl(item.id, p));
   const [place, setPlace] = useReviewPlace(item);
   const diff = useDiffPrefs();
-  const compare = useCompare(item.id, place.from, place.to, !diff.prefs.show_whitespace, item.head_sha);
+  const [again, setAgain] = useState(0);
+  const compare = useCompare(item.id, place.from, place.to, !diff.prefs.show_whitespace, item.head_sha, false, again);
+  const head = useShownHead(compare, item.review_head);
+  // The item first, so the comparison that follows latches the head as it now stands.
+  const rereadDiff = async () => {
+    await reload();
+    setAgain((n) => n + 1);
+  };
   const threads = useThreads(item.id);
   const overlay = useOverlay();
   // Under 1024 the list starts closed and opens over the diff (R7).
@@ -111,7 +118,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
   });
   const artifact = useArtifact(item);
   const next = gateConsequence(item, place.gate);
-  const submit = useSubmit(item, place.gate, threadList, threads.reload, artifact?.state === "ready" ? artifact.data.digest : null);
+  const submit = useSubmit(item, place.gate, threadList, threads.reload, artifact?.state === "ready" ? artifact.data.digest : null, head.shown);
   // Finish your review: closed, or open on an outcome (the bar's Request changes opens it there).
   const [finish, setFinish] = useState<{ outcome?: ReviewOutcome } | null>(null);
   // Escape on the page goes back to the item, as the gate review's × does (GR-1). Whatever is open
@@ -163,6 +170,12 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
         setPrefs={diff.set}
       />
       {next && <p className="rv-next">{next}</p>}
+      {head.moved && (
+        <p className="rv-error rv-bar-error" role="alert">
+          The branch moved since this diff was read; approving it is refused until you look again.{" "}
+          <Button onClick={() => void rereadDiff()}>Reload the diff</Button>
+        </p>
+      )}
       {diff.error && <p className="rv-error rv-bar-error" role="alert">{diff.error}</p>}
       <div className={`rv-body${treeOpen ? " has-tree" : ""}${overlay ? " is-overlay" : ""}`}>
         {treeOpen && (

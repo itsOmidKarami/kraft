@@ -37,7 +37,7 @@ export const COALESCE_MS = 120;
 /** The item page's one loader: `GET /work-items/{id}`, read again after each
  *  burst of this item's events. Components read its result; none fetch the
  *  item themselves. `reload` is for after an action of the page's own. */
-export function useItem(id: string): Loaded & { reload: () => void } {
+export function useItem(id: string): Loaded & { reload: () => Promise<unknown> } {
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const events = useStore((s) => s.eventsByItem[id]?.length ?? 0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -49,7 +49,7 @@ export function useItem(id: string): Loaded & { reload: () => void } {
 
   const fetchNow = useCallback(() => {
     const after = seq.current;
-    api
+    return api
       .getWorkItem(id)
       .then((item) => live.current === id && setLoaded({ state: "ready", item, version: versionOf(item, after) }))
       .catch((e: Error) => live.current === id && setLoaded((l) => (l.state === "ready" ? l : { state: "missing", error: e.message })));

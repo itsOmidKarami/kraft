@@ -19,20 +19,22 @@ const ACTION = { retried: "retried", rerun: "running again", queued: "queued" } 
 
 /** Sends a review and moves on (G.5, G.6): a refusal comes back as the server's words. */
 /** `digest`: the chain revision's, as GET /artifact returned it; an approval at
- *  a chain-revision gate carries it (Kraft-ec66w, #355). */
+ *  a chain-revision gate carries it (Kraft-ec66w, #355). `head`: the final
+ *  review's, as the page latched it with the diff it showed; an approval at that
+ *  gate carries it, and the server refuses one the branch has moved past. */
 /** A thread's lines as its composer and its card name them: " · lines +3 to +5". */
 const where = (t: ReviewThread) => {
   const r = threadRange(t);
   return r ? ` · ${rangeName(r).toLowerCase()}` : "";
 };
 
-export function useSubmit(item: Item, gate: string | null, threads: ReviewThread[], reload: () => void, digest?: string | null) {
+export function useSubmit(item: Item, gate: string | null, threads: ReviewThread[], reload: () => void, digest?: string | null, head?: string | null) {
   const navigate = useNavigate();
   return async (outcome: ReviewOutcome, summary: string): Promise<string | null> => {
     const atGate = !!gate && item.pending_gate === gate;
     const path = atGate ? `/work-items/${encodeURIComponent(item.id)}/gates/${encodeURIComponent(gate!)}/review` : `/work-items/${encodeURIComponent(item.id)}/review`;
     const n = drafts(threads).length;
-    const { status, body } = await request(path, jsonBody("POST", { outcome, ...(summary.trim() && { summary: summary.trim() }), ...(outcome === "approve" && digest && { digest }) }));
+    const { status, body } = await request(path, jsonBody("POST", { outcome, ...(summary.trim() && { summary: summary.trim() }), ...(outcome === "approve" && digest && { digest }), ...(outcome === "approve" && head && { head }) }));
     if (status < 200 || status >= 300) return detailOf(body);
     const threadsSent = `${n} ${n === 1 ? "thread" : "threads"}`;
     if (outcome === "comment") {

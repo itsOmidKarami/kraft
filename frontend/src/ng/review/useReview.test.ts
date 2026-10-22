@@ -6,7 +6,7 @@ import type { EventType } from "../../types/vocab.generated";
 import * as http from "../http";
 import { COALESCE_MS } from "../item/useItem";
 import { parsePatch } from "./patch";
-import { THREADS_POLL_MS, useCompare, useExpanded, useThreads } from "./useReview";
+import { THREADS_POLL_MS, useCompare, useExpanded, useShownHead, useThreads } from "./useReview";
 
 const ev = (work_item_id: string, seq: number, type: EventType): KraftEvent => ({ seq, work_item_id, type, payload: {}, created_at: "t" });
 const calls = (part: string) => vi.mocked(http.request).mock.calls.filter(([p]) => String(p).includes(part)).map(([p]) => String(p));
@@ -52,17 +52,19 @@ describe("useExpanded", () => {
 
 describe("useCompare", () => {
   it("reads again when a target, the whitespace flag or HEAD changes, and only then", async () => {
-    const { rerender } = renderHook((p: { from: CompareTarget; ws: boolean; head: string }) => useCompare("w1", p.from, "latest", p.ws, p.head), {
-      initialProps: { from: "base", ws: false, head: "h1" },
+    const { rerender } = renderHook((p: { from: CompareTarget; ws: boolean; head: string; again: number }) => useCompare("w1", p.from, "latest", p.ws, p.head, false, p.again), {
+      initialProps: { from: "base", ws: false, head: "h1", again: 0 },
     });
-    rerender({ from: "base", ws: false, head: "h1" });
-    rerender({ from: "last_review", ws: false, head: "h1" });
-    rerender({ from: "last_review", ws: true, head: "h1" });
-    rerender({ from: "last_review", ws: true, head: "h2" });
+    rerender({ from: "base", ws: false, head: "h1", again: 0 });
+    rerender({ from: "last_review", ws: false, head: "h1", again: 0 });
+    rerender({ from: "last_review", ws: true, head: "h1", again: 0 });
+    rerender({ from: "last_review", ws: true, head: "h2", again: 0 });
+    rerender({ from: "last_review", ws: true, head: "h2", again: 1 });
     await act(async () => {});
     expect(calls("/compare")).toEqual([
       "/work-items/w1/compare?from=base&to=latest",
       "/work-items/w1/compare?from=last_review&to=latest",
+      "/work-items/w1/compare?from=last_review&to=latest&ignore_whitespace=1",
       "/work-items/w1/compare?from=last_review&to=latest&ignore_whitespace=1",
       "/work-items/w1/compare?from=last_review&to=latest&ignore_whitespace=1",
     ]);
@@ -73,6 +75,30 @@ describe("useCompare", () => {
     const { result } = renderHook(() => useCompare("w1", "last_review", "latest", false, "h"));
     await act(async () => {});
     expect(result.current).toEqual({ state: "error", status: 404, error: "no review has been submitted for this gate" });
+  });
+});
+
+describe("useShownHead", () => {
+  const ready = (sha: string) => ({ state: "ready" as const, data: { to: { sha } } as never });
+  const props = (compare: ReturnType<typeof ready> | { state: "loading" }, reviewHead: string | null) => ({ compare, reviewHead });
+
+  it("latches the head when a comparison arrives, and only then: a head that moves under the same diff is reported, not taken", () => {
+    const first = ready("h1");
+    const { result, rerender } = renderHook((p: ReturnType<typeof props>) => useShownHead(p.compare, p.reviewHead), { initialProps: props({ state: "loading" }, "A") });
+    expect(result.current).toEqual({ shown: null, moved: false });
+    rerender(props(first, "A"));
+    expect(result.current).toEqual({ shown: "A", moved: false });
+    // A member's tip moved: the root's head_sha is unchanged, so the comparison is not read again.
+    rerender(props(first, "B"));
+    expect(result.current).toEqual({ shown: "A", moved: true });
+    // The reload reads the comparison again; what arrives latches the head as it now stands.
+    rerender(props(ready("h1"), "B"));
+    expect(result.current).toEqual({ shown: "B", moved: false });
+  });
+
+  it("has nothing to send, and nothing moved, off the final review", () => {
+    const { result } = renderHook(() => useShownHead(ready("h1"), null));
+    expect(result.current).toEqual({ shown: null, moved: false });
   });
 });
 

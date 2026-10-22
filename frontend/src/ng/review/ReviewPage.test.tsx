@@ -2,6 +2,7 @@ import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-li
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
+import { useStore } from "../../store";
 import * as http from "../http";
 import { DEFAULT_PREFS, useDiffPrefs } from "./prefs";
 import { ReviewPage } from "./ReviewPage";
@@ -85,6 +86,52 @@ describe("an ended item's review", () => {
     expect(await screen.findByRole("region", { name: "a.py" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Comment on this file" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Finish review" })).toBeNull();
+  });
+});
+
+describe("the final review's head", () => {
+  const PATCH = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1,2 @@\n x = 1\n+y = 2\n";
+  const COMPARE = { from: { target: "base", sha: "b" }, to: { target: "latest", sha: "h" }, rebased: false, files: [{ path: "a.py", insertions: 1, deletions: 0, touched_by: [], viewed: false }], groups: [], diff: PATCH, untracked: [], truncated: false, ignore_whitespace: false, diff_max_bytes: 1000 };
+
+  it("approves with the head the diff showed, says when it moved under it, and takes the new one only on reload", async () => {
+    // The page opens on head A; a workspace member then moves, so the root's head_sha stays and review_head becomes B.
+    vi.mocked(api.getWorkItem).mockResolvedValue({ ...ITEM, review_head: "A" } as never);
+    let stale = true;
+    vi.spyOn(http, "request").mockImplementation(async (p, init) =>
+      String(p).includes("/compare")
+        ? { status: 200, body: COMPARE }
+        : init?.method === "POST"
+          ? stale
+            ? { status: 409, body: { detail: "the branch moved since you looked" } }
+            : { status: 200, body: {} }
+          : { status: 200, body: [] },
+    );
+    render(
+      <MemoryRouter initialEntries={["/work-items/w1/review"]}>
+        <Routes><Route path="/work-items/:id/review" element={<ReviewPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("region", { name: "a.py" });
+    const sent = () => vi.mocked(http.request).mock.calls.filter(([, i]) => i?.method === "POST").map(([p, i]) => [String(p), JSON.parse(i!.body as string)]);
+    const reads = () => vi.mocked(http.request).mock.calls.filter(([p]) => String(p).includes("/compare")).length;
+    expect(screen.queryByText(/branch moved since this diff was read/)).toBeNull();
+
+    vi.mocked(api.getWorkItem).mockResolvedValue({ ...ITEM, review_head: "B" } as never);
+    act(() => useStore.setState({ eventsByItem: { w1: [{ seq: 1, work_item_id: "w1", type: "gate_requested", payload: {}, created_at: "t" }] } }));
+    expect(await screen.findByText(/branch moved since this diff was read/)).toBeInTheDocument();
+    expect(reads()).toBe(1);
+
+    // Until it is read again, Approve names the head that was shown, and the server's refusal is shown.
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve" })));
+    expect(sent()).toEqual([["/work-items/w1/gates/final_review/review", { outcome: "approve", head: "A" }]]);
+    expect(await screen.findByText("the branch moved since you looked")).toBeInTheDocument();
+
+    stale = false;
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reload the diff" })));
+    await waitFor(() => expect(screen.queryByText(/branch moved since this diff was read/)).toBeNull());
+    expect(reads()).toBe(2);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve" })));
+    expect(sent().at(-1)).toEqual(["/work-items/w1/gates/final_review/review", { outcome: "approve", head: "B" }]);
   });
 });
 

@@ -15,7 +15,7 @@ import { useSubmit } from "../../review/FinishReview";
 import { parsePatch, type PatchFile } from "../../review/patch";
 import { rangeName, threadRange } from "../../review/range";
 import { readReview } from "../../review/url";
-import { useArtifact, useCompare, useThreads } from "../../review/useReview";
+import { useArtifact, useCompare, useShownHead, useThreads } from "../../review/useReview";
 import { Button } from "../../ui/Button";
 import { Markdown } from "../../ui/Markdown";
 import { Doc } from "../doc/Doc";
@@ -59,19 +59,26 @@ export function GateReviewRoute() {
       </>
     );
   if (loaded.state === "missing") return <ItemMissing />;
-  return <GateReview item={loaded.item} events={events} />;
+  return <GateReview item={loaded.item} events={events} reload={loaded.reload} />;
 }
 
-export function GateReview({ item, events }: { item: ItemDetail; events: KraftEvent[] }) {
+export function GateReview({ item, events, reload }: { item: ItemDetail; events: KraftEvent[]; reload?: () => Promise<unknown> }) {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const place = readReview(params, item);
   const gate = place.gate;
-  const compare = useCompare(item.id, place.from, place.to, false, item.head_sha);
+  const [again, setAgain] = useState(0);
+  const compare = useCompare(item.id, place.from, place.to, false, item.head_sha, false, again);
+  const head = useShownHead(compare, item.review_head);
+  // The item first, so the comparison that follows latches the head as it now stands.
+  const rereadDiff = async () => {
+    await reload?.();
+    setAgain((n) => n + 1);
+  };
   const threadsLoad = useThreads(item.id);
   const threads: ReviewThread[] = threadsLoad.state === "ready" ? threadsLoad.data : [];
   const artifact = useArtifact(item);
-  const submit = useSubmit(item, gate, threads, threadsLoad.reload, artifact?.state === "ready" ? artifact.data.digest : null);
+  const submit = useSubmit(item, gate, threads, threadsLoad.reload, artifact?.state === "ready" ? artifact.data.digest : null, head.shown);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const hasDoc = !!gate && item.pending_gate === gate && !!item.gate_artifact;
@@ -131,6 +138,12 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
           {message && <p className="ph-review-msg">{message}</p>}
           {next && <p className="ph-review-next">{next}</p>}
           <p className="ph-review-next">{readOnly}</p>
+          {head.moved && (
+            <p className="ph-review-next" role="alert">
+              The branch moved since this diff was read; approving it is refused until you look again.{" "}
+              <Button onClick={() => void rereadDiff()}>Reload the diff</Button>
+            </p>
+          )}
         </div>
         {verdict && (
           <section className="ph-autocard" aria-label="Agent review">

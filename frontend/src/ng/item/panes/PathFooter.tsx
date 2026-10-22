@@ -84,7 +84,7 @@ export function PathFooter({ item, path, what, state, reload, extra, only }: { i
         <p className="item-muted">{what === "task" ? "The task stops and does not run again this round." : what === "step" ? "Every task in the step stops; the node goes on with the next step." : "The node stops here; the chain goes on with the next node."}</p>
         {error && <p className="item-error" role="alert">{error}</p>}
         <div className="item-actions">
-          <Button variant="danger" disabled={busy} onClick={() => run(act.skip(item.id, path))}>Skip</Button>
+          <Button variant="danger" disabled={busy} onClick={() => run(act.skip(item.id, path, undefined, item.review_head))}>Skip</Button>
           <Button autoFocus onClick={close}>Cancel</Button>
         </div>
       </div>

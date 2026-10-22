@@ -25,13 +25,16 @@ const Where = () => {
 const render = (ui: ReactElement) => rtlRender(<MemoryRouter initialEntries={["/work-items/w1"]}>{ui}<Where /></MemoryRouter>);
 
 describe("GateFooter", () => {
-  it("approves the gate", async () => {
+  it.each([
+    ["approves the gate", undefined, {}],
+    ["approves the final review with the head the item shows", "A", { head: "A" }],
+  ])("%s", async (_name, review_head, sent) => {
     const calls = stubFetch(WRITES);
     const reload = vi.fn();
-    render(<GateFooter item={pending} gate={gate} reload={reload} onRead={() => {}} />);
+    render(<GateFooter item={{ ...pending, review_head }} gate={gate} reload={reload} onRead={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(reload).toHaveBeenCalled());
-    expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/gates/plan_approval/approve", body: {} }]);
+    expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/gates/plan_approval/approve", body: sent }]);
   });
 
   it("rejects only with a note, naming where it goes back to", async () => {

@@ -231,7 +231,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
           title={`Skip ${name}?`}
           text="The node is marked skipped without running. The chain carries on at the next node."
           busy={busy}
-          confirm={{ label: "Skip node", run: async () => { const r = await run(act.skip(item.id, nodeId), `Skipped ${name}.`); if (r.ok) sheet.close(); } }}
+          confirm={{ label: "Skip node", run: async () => { const r = await run(act.skip(item.id, nodeId, undefined, item.review_head), `Skipped ${name}.`); if (r.ok) sheet.close(); } }}
           onClose={sheet.close}
         />
       )}

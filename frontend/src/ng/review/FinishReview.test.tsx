@@ -70,8 +70,8 @@ const Where = () => {
 };
 const routed = (ui: ReactNode) => render(<MemoryRouter initialEntries={["/work-items/w1/review"]}><Routes><Route path="*" element={<>{ui}<Where /></>} /></Routes></MemoryRouter>);
 
-function Finish({ it = item(), gate = "final_review" as string | null, threads = [th()], reload = () => {}, initial, digest }: { it?: WorkItem; gate?: string | null; threads?: ReviewThread[]; reload?: () => void; initial?: "request_changes" | "approve"; digest?: string }) {
-  const submit = useSubmit(it, gate, threads, reload, digest);
+function Finish({ it = item(), gate = "final_review" as string | null, threads = [th()], reload = () => {}, initial, digest, head }: { it?: WorkItem; gate?: string | null; threads?: ReviewThread[]; reload?: () => void; initial?: "request_changes" | "approve"; digest?: string; head?: string }) {
+  const submit = useSubmit(it, gate, threads, reload, digest, head);
   return <FinishDialog item={it} gate={gate} threads={threads} initial={initial} submit={submit} onClose={() => {}} />;
 }
 const body = () => JSON.parse(vi.mocked(http.request).mock.calls.at(-1)![1]!.body as string);
@@ -178,13 +178,13 @@ describe("FinishDialog", () => {
     expect(await screen.findByText(/sent to work brief/)).toBeInTheDocument();
   });
 
-  it("carries a chain revision's digest on Approve only", async () => {
+  it("carries a chain revision's digest and the final review's head on Approve only", async () => {
     vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: {} });
-    const { unmount } = routed(<Finish threads={[]} digest="d1" />);
+    const { unmount } = routed(<Finish threads={[]} digest="d1" head="A" />);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit review" })));
-    expect(body()).toEqual({ outcome: "approve", digest: "d1" });
+    expect(body()).toEqual({ outcome: "approve", digest: "d1", head: "A" });
     unmount();
-    routed(<Finish digest="d1" />);
+    routed(<Finish digest="d1" head="A" />);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Request changes" })));
     expect(body()).toEqual({ outcome: "request_changes" });
   });

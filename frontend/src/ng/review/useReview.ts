@@ -13,7 +13,7 @@ export type Fetched<T> = { state: "loading" } | { state: "error"; status: number
 /** `GET /compare` for one pair of targets. Read again when either target or
  *  the whitespace flag changes, and when the item's HEAD moves (a new commit
  *  changes `latest`). */
-export function useCompare(id: string, from: CompareTarget, to: CompareTarget, ignoreWhitespace: boolean, head: string | null | undefined, skip = false) {
+export function useCompare(id: string, from: CompareTarget, to: CompareTarget, ignoreWhitespace: boolean, head: string | null | undefined, skip = false, again = 0) {
   const [got, setGot] = useState<Fetched<Compare>>({ state: "loading" });
   useEffect(() => {
     // `skip`: there is nothing to compare yet (a never-started item has no worktree, and the server answers 409).
@@ -26,8 +26,24 @@ export function useCompare(id: string, from: CompareTarget, to: CompareTarget, i
       setGot(status === 200 ? { state: "ready", data: body } : { state: "error", status, error: detailOf(body) });
     });
     return () => void (live = false);
-  }, [id, from, to, ignoreWhitespace, head, skip]);
+  }, [id, from, to, ignoreWhitespace, head, skip, again]);
   return got;
+}
+
+/** The final review's head as the diff on screen showed it. `review_head` is latched when a comparison
+ *  arrives and only then: it can change while `head_sha` does not (a workspace member's tip, the branch ref),
+ *  so the latch cannot ride on the refetch `head_sha` triggers. Approving sends `shown`, and the server's 409
+ *  catches a click on a diff the branch has moved past. `moved` says so; the page's reload reads the item
+ *  and then the comparison again (`useCompare`'s `again`), which latches the head as it then stands. */
+export function useShownHead(compare: Fetched<Compare>, reviewHead: string | null | undefined) {
+  const current = reviewHead ?? null;
+  const now = useRef(current);
+  now.current = current;
+  const [shown, setShown] = useState<string | null>(null);
+  useEffect(() => {
+    if (compare.state === "ready") setShown(now.current);
+  }, [compare]);
+  return { shown, moved: shown !== null && current !== null && current !== shown };
 }
 
 /** The server's most context lines (`CONTEXT_MAX_LINES`): a whole file. */

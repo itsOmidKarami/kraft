@@ -61,16 +61,19 @@ describe("PathFooter", () => {
     expect(!!screen.queryByRole("button", { name: "Retry" })).toBe(shown);
   });
 
-  it("confirms Skip in the pane before sending it, by path", async () => {
+  it.each([
+    ["by path", undefined, { path: "verification" }],
+    ["with the head the item shows at the final review", "A", { path: "verification", head: "A" }],
+  ])("confirms Skip in the pane before sending it, %s", async (_name, review_head, sent) => {
     const calls = stubFetch(WRITES);
     const reload = vi.fn();
-    render(<PathFooter item={detail()} path="verification" what="node" state="running" reload={reload} />);
+    render(<PathFooter item={detail({ review_head })} path="verification" what="node" state="running" reload={reload} />);
     await userEvent.click(screen.getByRole("button", { name: "Skip node" }));
     expect(posts(calls)).toEqual([]);
     expect(screen.getByRole("group", { name: "Skip verification?" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Skip" }));
     await waitFor(() => expect(reload).toHaveBeenCalled());
-    expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/skip", body: { path: "verification" } }]);
+    expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/skip", body: sent }]);
   });
 
   it("retries by path with the steer, and without the steer field when no agent can read it", async () => {
