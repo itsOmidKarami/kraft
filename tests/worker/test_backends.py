@@ -366,6 +366,24 @@ async def test_a_session_under_network_gets_its_route_before_it_is_wrapped(
     assert not channels.socket_path("s1", work_item_id="w1").exists()
 
 
+async def test_a_session_tears_down_its_worker_then_its_relay_then_its_socket(
+    database, run_dirs, tmp_path, remote, channels, monkeypatch
+):
+    """Spec §4: the three closes `run_task` makes, across `backend.close`,
+    `backend.close_session` and `ChannelRegistry.close`, in that order."""
+    real_close = channels.close
+
+    async def close(session_id, *, work_item_id):
+        remote.calls.append("channel_close")
+        await real_close(session_id, work_item_id=work_item_id)
+
+    monkeypatch.setattr(channels, "close", close)
+
+    await _run_on_remote(database, run_dirs, tmp_path, _POLICED)
+
+    assert remote.calls[-3:] == ["close", "close_session", "channel_close"]
+
+
 async def test_a_launch_under_a_kit_gets_its_lists_without_the_harness_hosts(
     database, run_dirs, tmp_path, remote, channels
 ):
