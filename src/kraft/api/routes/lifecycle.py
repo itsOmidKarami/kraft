@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import os
 import shutil
@@ -71,6 +72,10 @@ class Retry(BaseModel):
     #: chain and its policy bounds before anything forks.
     task_config: dict[str, Any] | None = None
     policy: dict[str, Any] | None = None
+    #: Replace the sandbox frozen in the item's snapshot with the one
+    #: `repos.yaml` gives now, before the retry (Kraft-ajzx7). A person's
+    #: call only: a worker or an assistant cannot widen its own sandbox.
+    sandbox_from_config: bool = False
 
 
 class Skip(BaseModel):
@@ -1600,6 +1605,94 @@ async def open_worktree(wid: str, body: OpenDocument, request: Request):
     return search._launch_editor(request, body.editor, path)
 
 
+def _sandbox_reread(st, row) -> tuple[dict | None, dict | None, str, str | None]:
+    """The item's sandbox as frozen and as `repos.yaml` gives it now, each a
+    `model_dump` or None, and the intake and run-fork snapshots with only the
+    new one written in (Kraft-ajzx7). The same layering and refusals as
+    intake (`deps.item_policy`), a workspace item's members included: 422
+    for a sandbox the instance policy, the chain or an in-place target
+    refuses. Ruling 105 stands: only a person's explicit retry re-reads."""
+    from kraft.config import ConfigError
+    from kraft.executor import entry
+    from kraft.templates.models import MaterializedChain
+
+    override = store.policy_override_of(row)
+
+    def reread(raw: str) -> MaterializedChain:
+        frozen = dataclasses.replace(MaterializedChain.from_json(raw), item_policy=override)
+        chain, target = frozen.chain, frozen.target
+
+        def sandboxed(policy, live):
+            # The chain's own layer over the live one, as intake builds it,
+            # but only its sandbox is kept: nothing else here is re-read.
+            return dataclasses.replace(policy, sandbox=chain.chain_policy(live).sandbox)
+
+        members = deps.repository_policies(st, target)
+        out = dataclasses.replace(
+            frozen,
+            policy=sandboxed(frozen.policy, deps.item_policy(st, row["repo"], target)),
+            repository_policies={
+                rid: sandboxed(p, members[rid]) if rid in members else p
+                for rid, p in frozen.repository_policies.items()
+            },
+        )
+        chain.check_scopes(out.policy, override)
+        if problem := entry.in_place_sandbox_problem(out, out.policy, None):
+            raise PolicyError(problem, field="sandbox")
+        if out.item_sandbox() is not None and out.harness_egress is None:
+            out = entry.with_frozen_reach(out, row["repo"])  # as intake freezes it
+        return out
+
+    try:
+        intake = reread(row["materialized_chain"])
+        run = reread(row["run_chain"]) if row["run_chain"] else None
+        old = store.materialized_chain_of(row).item_sandbox()
+        new = (run or intake).item_sandbox()
+    except (PolicyError, ConfigError) as exc:
+        raise HTTPException(422, f"sandbox from repos.yaml: {exc}") from exc
+
+    def dump(sandbox):
+        return sandbox.model_dump() if sandbox is not None else None
+
+    return dump(old), dump(new), intake.to_json(), run.to_json() if run else None
+
+
+@api_router.get("/work-items/{wid}/sandbox-from-config")
+async def sandbox_from_config(wid: str, request: Request):
+    """What `retry --sandbox-from-config` would change, changing nothing:
+    the sandbox frozen in the item's snapshot and the one `repos.yaml`
+    gives now. 422 as the retry would refuse it."""
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    chain_or_409(row)
+    old, new, _, _ = _sandbox_reread(st, row)
+    return {"id": wid, "old": old, "new": new, "changed": old != new}
+
+
+async def _reread_before_retry(wid: str, request: Request) -> dict | None:
+    """Apply `sandbox_from_config` ahead of the retry it rides on: 403 for a
+    worker or an assistant, 422 for a refused sandbox, and nothing written
+    unless the sandbox changes. None when the item is not one a retry
+    takes, which `_retry` then refuses itself."""
+    from kraft.api.routes.gates import _decided_by  # local: it imports this module
+
+    if (who := _decided_by(request)) != "human":
+        raise HTTPException(
+            403,
+            f"sandbox_from_config is a person's call, not an {who}'s: "
+            "a sandbox cannot be widened from inside the work it wraps",
+        )
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    if held_refusal(row) or row["status"] not in admitting(Verb.RETRY):
+        return None
+    chain_or_409(row)
+    old, new, intake, run = _sandbox_reread(st, row)
+    if old != new:
+        await st.db.write(lambda c: store.replace_sandbox(c, wid, intake, run, old=old, new=new))
+    return {"changed": old != new, "old": old, "new": new}
+
+
 # Design 4b. No route back without it: Kraft-bzwi. reopen-mr: B8.
 @api_router.post("/work-items/{wid}/retry")
 async def retry_work_item(wid: str, body: Retry, request: Request):
@@ -1622,8 +1715,16 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     can retry the same stopped node through the exact same function
     after it reopens the merge request, instead of a second copy of this
     logic that could drift from it.
+
+    `sandbox_from_config` re-reads the sandbox first (`_reread_before_retry`)
+    and is then dropped from the body: a queued or blocked retry made again
+    later must not re-read it a second time.
     """
-    return await _retry(wid, body, request)
+    if not body.sandbox_from_config:
+        return await _retry(wid, body, request)
+    sandbox = await _reread_before_retry(wid, request)
+    out = await _retry(wid, body.model_copy(update={"sandbox_from_config": False}), request)
+    return {**out, "sandbox": sandbox} if sandbox is not None else out
 
 
 async def _retry(wid: str, body: Retry, request: Request):

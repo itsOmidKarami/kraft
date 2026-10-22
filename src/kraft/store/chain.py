@@ -8,7 +8,14 @@ from kraft import events
 from kraft.policy import RETIRED_WAIT_TIMEOUT, deprecated
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import write_status
-from kraft.vocab import ChainEvent, GateEvent, SessionEvent, SessionStatus, SettingsEvent
+from kraft.vocab import (
+    ChainEvent,
+    GateEvent,
+    SandboxEvent,
+    SessionEvent,
+    SessionStatus,
+    SettingsEvent,
+)
 
 #: Node fields a per-item override may touch (UI v2 · 04, point 1). Anything
 #: else in a `node_overrides` patch is rejected by the route before it gets
@@ -114,6 +121,26 @@ def set_chain_template(
         SettingsEvent.CHAIN_TEMPLATE_CHANGED,
         {"from": old_template_id, "to": template_id},
     )
+
+
+def replace_sandbox(
+    conn: sqlite3.Connection,
+    work_item_id,
+    materialized_chain: str,
+    run_chain: str | None,
+    *,
+    old: dict | None,
+    new: dict | None,
+) -> None:
+    """Write a stopped item's snapshots with the sandbox `repos.yaml` gives
+    now, the intake one and its run fork's, and record `sandbox_reread` with
+    both sandboxes (Kraft-ajzx7). Everything else in them is as it was."""
+    conn.execute(
+        "UPDATE work_items SET materialized_chain = ?, run_chain = ?, updated_at = ? "
+        "WHERE id = ?",
+        (materialized_chain, run_chain, _now(), work_item_id),
+    )
+    events.append(conn, work_item_id, SandboxEvent.REREAD, {"old": old, "new": new})
 
 
 def set_attachments(

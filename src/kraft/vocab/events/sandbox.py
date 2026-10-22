@@ -16,6 +16,7 @@ class SandboxEvent(StrEnum):
     BRANCH_NOT_SYNCED = "sandbox_branch_not_synced"
     KIT_RESOLVED = "sandbox_kit_resolved"
     SESSION_OUTLIVED = "sandbox_session_outlived"
+    REREAD = "sandbox_reread"
 
 
 _PLAIN = EventTraits()
@@ -28,6 +29,7 @@ SANDBOX_EVENT_TRAITS = total(
         SandboxEvent.BRANCH_NOT_SYNCED: _PLAIN,
         SandboxEvent.KIT_RESOLVED: _PLAIN,
         SandboxEvent.SESSION_OUTLIVED: _PLAIN,
+        SandboxEvent.REREAD: _PLAIN,
     },
     name="SANDBOX_EVENT_TRAITS",
 )

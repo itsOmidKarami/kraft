@@ -257,10 +257,37 @@ def _cmd_resume(ns: argparse.Namespace) -> None:
     )
 
 
+def _sandbox_change(sandbox: dict) -> str:
+    """A `--sandbox-from-config` answer's line: both sandboxes, or that they
+    are the same."""
+    if not sandbox["changed"]:
+        return f"the sandbox in repos.yaml is the one the item has: {sandbox['old']}"
+    return f"sandbox: {sandbox['old']}\n      -> {sandbox['new']}"
+
+
 def _cmd_retry(ns: argparse.Namespace) -> None:
+    if ns.sandbox_from_config and not ns.yes:
+        common.emit(asyncio.run(client.sandbox_from_config(ns.id)), _sandbox_change, ns.json)
+        raise ValueError(
+            "nothing was changed. To give the item this sandbox and retry it, pass --yes"
+        )
+    said = common.item_action("retried {id}", small=answers.retried)
+
+    def say(result: dict) -> str:
+        line = said(result)
+        return f"{_sandbox_change(result['sandbox'])}\n{line}" if "sandbox" in result else line
+
     common.emit(
-        asyncio.run(client.retry(ns.steer, ns.id, path=ns.path, restart=ns.restart)),
-        common.item_action("retried {id}", small=answers.retried),
+        asyncio.run(
+            client.retry(
+                ns.steer,
+                ns.id,
+                path=ns.path,
+                restart=ns.restart,
+                sandbox_from_config=ns.sandbox_from_config,
+            )
+        ),
+        say,
         ns.json,
     )
 
@@ -644,6 +671,13 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     retry_what.add_argument(
         "--restart", action="store_true", help="rerun the whole chain from its first node"
     )
+    retry.add_argument(
+        "--sandbox-from-config",
+        action="store_true",
+        help="give the item the sandbox its repos.yaml entry sets now; shows both, and "
+        "changes nothing without --yes",
+    )
+    retry.add_argument("--yes", action="store_true", help="apply --sandbox-from-config")
     retry.set_defaults(func=_cmd_retry)
 
     raise_budget = subs.add_parser(

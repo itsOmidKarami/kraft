@@ -403,10 +403,13 @@ async def retry(
     work_item_id: str | None = None,
     path: str | None = None,
     restart: bool = False,
+    sandbox_from_config: bool = False,
 ) -> dict:
     """Rerun work on a new run fork, optionally with a steer: the node an item
     stopped on, or `path` (`node`, `node.step`, `node.step.task`) and
     everything after it; `restart` reruns the whole chain.
+    `sandbox_from_config` first replaces the item's frozen sandbox with the
+    one `repos.yaml` gives now: the CLI's, never the MCP tool's.
 
     The only door back onto a `needs_human` stop: resume wants `paused`, pause
     wants `running`, and approve/reject want a pending gate. `_forbid_self_action`
@@ -419,7 +422,16 @@ async def retry(
         payload["path"] = path
     if restart:
         payload["restart"] = True
+    if sandbox_from_config:
+        payload["sandbox_from_config"] = True
     return await transport._act(f"/work-items/{transport.segment(target)}/retry", payload)
+
+
+async def sandbox_from_config(work_item_id: str | None = None) -> dict:
+    """What `retry(sandbox_from_config=True)` would change, changing nothing:
+    the item's frozen sandbox (`old`) and the one `repos.yaml` gives (`new`)."""
+    target = await context._forbid_self_action(work_item_id)
+    return await transport._get(f"/work-items/{transport.segment(target)}/sandbox-from-config")
 
 
 async def raise_budget(budget_usd: float | None, work_item_id: str | None = None) -> dict:
