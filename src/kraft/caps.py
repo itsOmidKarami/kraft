@@ -105,6 +105,8 @@ class Hit:
         where = f"`{self.scope}`" if self.scope else "the work item"
         if self.field == "timeout":
             return f"gate `{self.scope}` waited past its timeout of {self.minutes} minutes"
+        if self.field == "idle_minutes":
+            return f"{where} showed no output for {self.minutes} minutes"
         return f"{where} hit its {_WHAT[self.field]} of {self.minutes} minutes"
 
     @property

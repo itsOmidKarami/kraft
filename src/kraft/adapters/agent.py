@@ -1347,6 +1347,7 @@ async def run_agent_task(
         repo_entry=repo_entry,
         reader=reader,
         time_cap=time_cap,
+        idle_limit=True,
         network_requires=reach.network_requires,
         declared=reach.credentials,
         files=files,

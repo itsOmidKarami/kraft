@@ -269,6 +269,78 @@ async def test_the_kill_reaches_a_sandboxs_container(item_on, run_dirs, monkeypa
     assert it.sessions()[0]["status"] == "capped_out"
 
 
+# ── the idle watchdog ────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("cmd", "idle_limit", "minutes", "killed"),
+    [
+        (["sleep", "30"], True, 1, True),
+        (["sh", "-c", "for i in $(seq 40); do echo .; sleep 0.05; done"], True, 5, False),
+        (["sleep", "1"], True, 0, False),
+        (["sleep", "1"], False, 1, False),
+    ],
+    ids=["silent", "chatty", "off", "command"],
+)
+async def test_an_agent_session_silent_past_the_idle_limit_is_stopped(
+    item_on, run_dirs, fast, monkeypatch, tmp_path, cmd, idle_limit, minutes, killed
+):
+    """A session whose log stops growing for `agent_idle_minutes` is killed and
+    stops like a time cap; one that keeps writing, a command session and `0` are
+    left alone."""
+    monkeypatch.setattr(_subprocess, "IDLE_MINUTES", minutes)
+    it = await item_on(_chain(), "build")
+
+    status = await _subprocess.run_task(
+        it.database,
+        run_dirs,
+        session_id="s1",
+        work_item_id=it.id,
+        node_id="build",
+        hook_point="build.run.impl",
+        cmd=cmd,
+        cwd=tmp_path,
+        group_kill_grace=1,
+        idle_limit=idle_limit,
+        progress_s=0.01,
+    )
+
+    if killed:
+        assert status == caps.TIME_CAPPED
+        assert it.sessions()[0]["status"] == "capped_out"
+        (reached,) = it.events(LimitEvent.TIME_CAP_REACHED)
+        assert reached["payload"]["field"] == "idle_minutes"
+        assert reached["payload"]["reason"] == "`build.run.impl` showed no output for 1 minutes"
+    else:
+        assert status == "done" and not it.events(LimitEvent.TIME_CAP_REACHED)
+
+
+async def test_a_hung_agent_task_stops_the_item_for_a_person(
+    item_on, fake_agent, fast, monkeypatch
+):
+    """`run_agent_task` sets the flag: the walk's agent task, silent past the
+    limit, stops the item as a cap does, outside the stuck set, so no fix cycle
+    or escalation spends money on it."""
+    monkeypatch.setattr(_subprocess, "IDLE_MINUTES", 1)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_SHELL", "sleep 30")
+    agent = {"id": "impl", "kind": "agent", "harness": "fake", "prompt": "Do it."}
+    run = {"id": "run", "tasks": [agent]}
+    chain = ResolvedChain.from_chain(
+        Chain.model_validate({"id": "c", "nodes": [v1_node(steps=[run])]})
+    ).materialize(
+        target=WorkItemTarget.for_repository("target"),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput()),
+    )
+    it = await item_on(chain, "build")
+
+    assert await _walk(it) == "needs_human"
+
+    assert it.row()["stop_kind"] == "cap"
+    assert _reason(it).endswith("showed no output for 1 minutes")
+    assert "limit" not in it.events("work_item_needs_human")[-1]["payload"]
+    assert not it.events("fix_cycle_started") and not it.events("stuck_escalation_started")
+
+
 # ── what the clocks leave out ────────────────────────────────────────────────
 
 

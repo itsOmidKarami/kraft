@@ -800,6 +800,11 @@ async def _run_task(
     #: needs the session's lease (an in-place item's take). Raising ends the
     #: session `config_error`, its message the log, and is raised on.
     before_launch: Callable[[], Awaitable[None]] | None = None,
+    #: Kill the session when its log stays unwritten for `IDLE_MINUTES`, and
+    #: stop it as a time cap does. Only `run_agent_task` sets it: a command
+    #: session (tests, setup) is bounded by its own caps, and a quiet build is
+    #: not a hung agent.
+    idle_limit: bool = False,
 ) -> str:
     files = files or item_paths.session_files(run_dirs, work_item_id, session_id)
     # Kraft's own folder: the log, and the two sidecars below, are written
@@ -1272,16 +1277,33 @@ async def _run_task(
         log_offset = 0
         next_progress = time.monotonic() + progress_s
         capped = False
+        hit: caps.Hit | None = None
+        # The idle watchdog: the log's size, read on the usage tick below.
+        idle_s = IDLE_MINUTES * 60 if idle_limit and IDLE_MINUTES else None
+        last_size = 0
+        active_at = caps.monotonic()
         while proc.poll() is None:
             await asyncio.sleep(poll_s)
             if time_cap is not None and caps.monotonic() >= time_cap.at:
                 # Left through the `finally` below, which kills the group and
                 # tears down a sandbox's container.
                 capped = True
+                hit = time_cap.hit
                 break
             if time.monotonic() < next_progress:
                 continue
             next_progress = time.monotonic() + progress_s
+            if idle_s is not None:
+                try:
+                    size = os.stat(log_path).st_size
+                except OSError:
+                    size = last_size
+                if size > last_size:
+                    last_size, active_at = size, caps.monotonic()
+                elif caps.monotonic() - active_at >= idle_s:
+                    capped = True
+                    hit = caps.Hit(hook_point, "idle_minutes", IDLE_MINUTES, 0.0)
+                    break
             # A bad line or a write hiccup here must not kill this task: the child
             # keeps running and writing its own log fd regardless, so losing this
             # loop silently freezes tokens_in/out for the rest of the session with
@@ -1315,7 +1337,7 @@ async def _run_task(
         else:
             await uncancellable(wind_down())
     if capped:
-        hit = time_cap.hit
+        assert hit is not None
 
         def _capped(c):
             store.session_exited(
