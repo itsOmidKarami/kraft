@@ -388,11 +388,16 @@ jobs:
     # one. KRAFT_E2E_REQUIRE=sandbox-exec makes a skipped sandbox-exec test an
     # error, as for the Linux job. Nothing is installed beyond the repo's own
     # setup (uv): the runner's own macOS, git, curl and sh are what the sandbox
-    # shows a worker.
-    name: e2e (macOS sandbox)
+    # shows a worker. macos-15-intel is the x86_64 runner: the variadic
+    # `sandbox_check` call and Homebrew under /usr/local differ there.
+    name: e2e (macOS sandbox, ${{ matrix.os }})
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.python != 'false' }}
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     # The runner's Homebrew Python links openssl from /opt/homebrew, which a sandbox
     # does not show; uv's own Python carries its libraries, as most installs do.
@@ -426,7 +431,7 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: e2e-macos-reports
+          name: e2e-macos-reports-${{ matrix.os }}
           path: e2e-macos-junit.xml
 
   lite-floor:
