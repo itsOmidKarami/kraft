@@ -22,8 +22,14 @@ def request_gate(conn: sqlite3.Connection, work_item_id, node_id, gate) -> None:
     events.append(conn, work_item_id, GateEvent.REQUESTED, {"gate": gate, "node_id": node_id})
 
 
-def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "human") -> bool | str:
+def approve_gate(
+    conn: sqlite3.Connection, work_item_id, gate, *, by: str = "human", tips: dict | None = None
+) -> bool | str:
     """Clear the gate and set the item running again. True when it is running.
+
+    `tips` is the head the chain's final gate approves (`reviewed_head.pin_for`),
+    read before this write: recorded on `gate_approved`, it is what the merge
+    may push. None for any other gate.
 
     While another in-place item works in this item's checkout
     (`checkout_holder`), the approval is still recorded, the item is paused
@@ -53,7 +59,8 @@ def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "hum
         (_now(), work_item_id),
     ):
         return False
-    events.append(conn, work_item_id, GateEvent.APPROVED, {"gate": gate, "by": by}, node_id=gate)
+    payload = {"gate": gate, "by": by, **({"tips": tips} if tips is not None else {})}
+    events.append(conn, work_item_id, GateEvent.APPROVED, payload, node_id=gate)
     chain.complete_node(conn, work_item_id, gate)
     if holder is None:
         return True

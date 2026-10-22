@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
-from kraft import events, executor, inplace, store
+from kraft import events, executor, inplace, reviewed_head, store
 from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
 from kraft.api.routes.lifecycle import (
@@ -352,8 +352,11 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
         reason="gate approval cleared the gate but could not start a walk",
         handed_off=lambda: deps.task_is_live(request.app, wid),
     ):
+        # The head this approval lets merge, read before the write
+        # (`kraft.reviewed_head`): None unless `gate` is the final one.
+        tips = reviewed_head.pin_for(st.db, row, gate, inplace.item_folder(st.run_dirs, row))
         approval = await st.db.write(
-            lambda c: store.approve_gate(c, wid, gate, by=_decided_by(request))
+            lambda c: store.approve_gate(c, wid, gate, by=_decided_by(request), tips=tips)
         )
         if isinstance(approval, str):
             # Approved, and queued to go on once the checkout frees.

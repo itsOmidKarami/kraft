@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 from kraft import builtins as _builtins
-from kraft import events, inplace, store, waits
+from kraft import events, inplace, reviewed_head, store, waits
 from kraft.adapters import beads
 from kraft.adapters.forge import ci, git
 from kraft.adapters.forge import mr as mr_ops
@@ -179,6 +179,9 @@ async def _rebase_conflict_away(
         row = db.read(
             lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
         )
+    # Kraft's own rebase, with no agent and nothing to resolve: a head the
+    # final review approved stays the approved one, rebased (`repin`).
+    before = reviewed_head.branch_tip(repo, branch)
     try:
         new_head = await _builtins.mr_rebase_forced(
             repo,
@@ -195,12 +198,39 @@ async def _rebase_conflict_away(
         return f"rebase onto {base} failed: {exc}\n", "conflict"
     if not new_head:
         return "", "conflict"
+    after = reviewed_head.branch_tip(repo, branch)
+    await reviewed_head.repin(
+        db, work_item_id, {str(repo): before}, {str(repo): after}, cause="rebase"
+    )
     if moved is None:
         await db.write(lambda c, h=new_head: store.set_base_ref(c, work_item_id, h))
     else:
         moved.append(repo)
     await forge.push(repo=repo, branch=branch)
     return f"rebased {branch} onto {new_head} and re-pushed\n", "done"
+
+
+async def _refuse_unreviewed(
+    db, work_item_id: str, node_id: str, repo: Path, branch: str
+) -> str | None:
+    """Why `merge` must not ask the forge to merge `branch` in `repo` -- its tip
+    is not the head the final review approved (`reviewed_head.unreviewed`),
+    recorded as `merge_refused_unreviewed` -- or None when it may. The walk
+    then holds the item before that review again (`walk._stop_unreviewed`)."""
+    found = reviewed_head.unreviewed(db, work_item_id, repo, branch)
+    if found is None:
+        return None
+    await db.write(
+        lambda c: events.append(
+            c, work_item_id, ForgeEvent.MERGE_REFUSED_UNREVIEWED, {"node_id": node_id, **found}
+        )
+    )
+    current = found["current"][:12] if found["current"] else "a tip that cannot be read"
+    reviewed = found["reviewed"][:12] if found["reviewed"] else "nothing"
+    return (
+        f"not merging {branch}: its tip in {repo} is {current}, but the final review "
+        f"approved {reviewed}\n"
+    )
 
 
 async def _infra_budget_spent(db, work_item_id: str, node_id: str, reason: str) -> bool:
@@ -331,6 +361,9 @@ async def _merge_dropped(
     if cause == "infra":
         if await _infra_budget_spent(db, work_item_id, node_id, log):
             return log, "infra_stop", None
+        refused = await _refuse_unreviewed(db, work_item_id, node_id, repo, branch)
+        if refused is not None:
+            return log + refused, "unreviewed", None
         await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""))
         log += f"the {which}'s own runners failed; asked the forge to queue the same head again\n"
         return log, "merge_pending", None
@@ -810,6 +843,12 @@ async def _run_one(
                 log = f"!{existing.number} is still open; waiting for the merge to land{where}\n"
                 log += unread
                 status = "merge_pending"
+            elif (
+                refused := await _refuse_unreviewed(db, work_item_id, node_id, repo, branch)
+            ) is not None:
+                # A head the final review did not approve is never pushed for
+                # merging, let alone merged (`kraft.reviewed_head`).
+                log, status = refused, "unreviewed"
             else:
                 # The same push ci_poll makes, for the same reason: a
                 # commit made after the last sync is local only, and
@@ -883,6 +922,13 @@ async def _run_one(
                         f"{ci_status.merge_detail}\n"
                     )
                     status = "approval_pending"
+                elif (
+                    refused := await _refuse_unreviewed(db, work_item_id, node_id, repo, branch)
+                ) is not None:
+                    # Read again at the last moment: only Kraft's own clean
+                    # rebase above, which repins, may have moved it since.
+                    log += refused
+                    status = "unreviewed"
                 else:
                     # A genuine refusal still raises inside forge.merge and
                     # fails the node.
@@ -1352,6 +1398,8 @@ async def run_task(
     moved: list[Path] = []
     #: Why the observation could not be made at all, when it could not.
     unobserved: str | None = None
+    #: The merge found a head the final review did not approve.
+    unreviewed = False
     checkout_stopped = False
     # Findings only ever reach `finish_session` for a single-target run: a
     # submodule's own CI is not this item's `mr_checks` node, and findings
@@ -1394,6 +1442,7 @@ async def run_task(
                     base=item_base,
                     title=title,
                     work_item_id=work_item_id,
+                    node_id=node_id,
                     has_source=root_has_changes,
                 )
                 log += root_log
@@ -1451,7 +1500,8 @@ async def run_task(
                         if one_status == "done"
                         else (
                             "failed"
-                            if one_status not in ("rebased", "merge_rejected", *_PENDING)
+                            if one_status
+                            not in ("rebased", "merge_rejected", "unreviewed", *_PENDING)
                             else None
                         )
                     ),
@@ -1471,6 +1521,10 @@ async def run_task(
                 # loop is known to have stopped for this reason alone.
                 status = one_status
                 break
+        if status == "unreviewed":
+            # Internal-only too: the session failed to merge, and the walk is
+            # told why (`UNREVIEWED_HEAD`), below.
+            unreviewed, status = True, "failed"
         if status == "rebased":
             # Internal-only marker (worker_sessions.status has no "rebased"
             # value, and the walk's own bounce -- keyed off base_ref moving,
@@ -1520,10 +1574,13 @@ async def run_task(
     from kraft.executor.context import (  # the executor imports this module
         BASE_MOVED,
         CHECKOUT_REFUSED,
+        UNREVIEWED_HEAD,
     )
 
     if checkout_stopped:
         return CHECKOUT_REFUSED
+    if unreviewed:
+        return UNREVIEWED_HEAD
     return BASE_MOVED if (moved and has_rebase_bounce and recorded == "done") else recorded
 
 
@@ -1621,8 +1678,15 @@ async def _point_at_merged_members(
     staged = await git.run_git(root_repo, ["git", "diff", "--cached", "--name-only"])
     if not staged.strip():
         return []
+    before = reviewed_head.branch_tip(root_repo, branch)
     await git.run_git(
         root_repo, ["git", "commit", "-m", f"chore: bump submodule pointers for {work_item_id}"]
+    )
+    # Kraft's own commit, naming only what its members' merges landed: the
+    # root the final review approved stays the approved one (`repin`).
+    after = reviewed_head.branch_tip(root_repo, branch)
+    await reviewed_head.repin(
+        db, work_item_id, {str(root_repo): before}, {str(root_repo): after}, cause="pointer_bump"
     )
     return bumped
 
@@ -1653,6 +1717,7 @@ async def _ready_root(
     base: str,
     title: str,
     work_item_id: str,
+    node_id: str,
     has_source: bool,
 ) -> tuple[str, str | None]:
     """The root's turn in `merge`, once every member merged: bump a
@@ -1672,6 +1737,11 @@ async def _ready_root(
         existing = await forge.find_mr(repo=root_repo, branch=branch)
         if existing is not None and (existing.state == "merged" or existing.merge_queued):
             return "", None
+    # Before the pointer bump, which a pointer-only root pushes straight onto
+    # its base: a root the final review did not approve goes nowhere.
+    refused = await _refuse_unreviewed(db, work_item_id, node_id, root_repo, branch)
+    if refused is not None:
+        return refused, "unreviewed"
     log = ""
     if root["merge_state"] == "pending" and not has_source:
         log, opened = await _bump_pointer_only_root(

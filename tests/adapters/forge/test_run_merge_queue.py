@@ -11,8 +11,12 @@ from pathlib import Path
 import pytest
 from support.harness import commit_all, git, write
 
+from kraft import events
 from kraft.adapters import forge
 from kraft.adapters.forge import ci
+from kraft.executor.context import UNREVIEWED_HEAD
+
+from .nodes import back_half
 
 BRANCH = "kraft/w1"
 
@@ -297,3 +301,28 @@ async def test_a_drop_is_seen_after_a_restart_of_the_wait_reader(run_forge, repo
 
     assert (await run_forge(restarted, "merge", "m1", repo=repo))[0] == "merge_rejected"
     assert restarted.merge_calls == [], "a restart must not ask for the merge again"
+
+
+async def test_an_infra_drop_never_queues_a_head_the_final_review_did_not_see_again(
+    run_forge, item_on, repo
+):
+    """The train's own runners broke, so the same head is queued again -- but
+    only the head the final review approved: one committed while the train
+    held the merge request is not queued, and the walk is told why."""
+    reviewed = _on_branch(repo)
+    run_forge.item = await item_on(back_half(), repo=repo)
+    pin = {"gate": "final", "by": "human", "tips": {str(repo): reviewed}}
+    await run_forge.database.write(lambda c: events.append(c, "w1", "gate_approved", pin))
+    fake = await _open(_train(INFRA), repo)
+    assert (await run_forge(fake, "merge", "m0", repo=repo))[0] == "waiting"
+    write(repo, "unseen.txt", "committed while the train held it\n")
+    unseen = commit_all(repo, "after the approval")
+
+    assert (await run_forge(fake, "merge", "m1", repo=repo))[0] == UNREVIEWED_HEAD
+
+    # The same wait's session, ended: it did not merge.
+    assert [s["status"] for s in run_forge.sessions()] == ["failed"]
+    assert fake.merge_calls == [1], "asked once, for the approved head"
+    assert run_forge.events("merge_refused_unreviewed") == [
+        {"node_id": "mr_checks", "repo": str(repo), "reviewed": reviewed, "current": unseen}
+    ]

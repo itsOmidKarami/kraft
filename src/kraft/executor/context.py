@@ -110,6 +110,13 @@ READ_ONLY_VIOLATED = "read_only_violated"
 #: log is the reason.
 CHECKOUT_REFUSED = "checkout_refused"
 
+#: The merge handler did not merge: the head it would push is not the one the
+#: final review approved (`kraft.reviewed_head`). A stop, not a failure:
+#: nothing a fix loop or a recovery could write makes the head a reviewed one,
+#: and a commit from either would only be more code nobody saw. The walk holds
+#: the item before the final review again (`walk._stop_unreviewed`).
+UNREVIEWED_HEAD = "unreviewed_head"
+
 
 #: The tier that handles each status, in one place so a new status cannot be
 #: added without declaring where it is handled.
@@ -138,6 +145,7 @@ SCOPE: dict[str, str] = {
     REPAIR_DOUBTED: "stop",  # a repair doubts itself; a person decides
     READ_ONLY_VIOLATED: "stop",  # a read_only scope wrote; a person looks
     CHECKOUT_REFUSED: "stop",  # the person's checkout; never forced, never retried
+    UNREVIEWED_HEAD: "stop",  # the merge would push code no final review saw
     TIME_CAPPED: "stop",  # a scope's time ran out; a person decides (Ruling 194)
     BASE_MOVED: "chain",  # the bounce, taken by run_once
     CONFLICT_RESOLVED: "chain",  # the same restart, reopening the span's gates

@@ -201,9 +201,13 @@ def skip_node(
     note: str | None,
     *,
     session_ids: list[str] | None = None,
+    tips: dict | None = None,
 ) -> None:
     """Advance past `node_id` (its own gate `gate`, if it has one and that is
     what is being bypassed) without running or approving it.
+
+    `tips` is the head a person passes skipping the chain's final gate
+    (`reviewed_head.pin_for`): what the merge may push, as an approval's.
 
     Sets the item back to `active` the same way `approve_gate` and
     `retry_after_cap` do — the caller spawns `executor.run` right after this
@@ -234,7 +238,12 @@ def skip_node(
         conn,
         work_item_id,
         ChainEvent.NODE_SKIPPED,
-        {"node_id": node_id, "gate": gate, "note": note},
+        {
+            "node_id": node_id,
+            "gate": gate,
+            "note": note,
+            **({"tips": tips} if tips is not None else {}),
+        },
     )
     for sid in dict.fromkeys([*(session_ids or []), *(r[0] for r in parked)]):
         conn.execute(

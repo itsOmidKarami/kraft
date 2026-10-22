@@ -1,0 +1,147 @@
+"""`mr.merge` pushes only the head the final review approved
+(`merge-refuses-a-head-final-review-did-not-see`): the pin `kraft.reviewed_head`
+records at the final gate, read right before the forge is asked to merge.
+Walked through the executor against a `FakeForge`; git is real."""
+
+from __future__ import annotations
+
+import pytest
+from support.harness import commit_all, entry_of, write
+
+from kraft import builtins as _builtins
+from kraft import executor, reviewed_head, store
+from kraft.adapters import forge
+
+from .nodes import forge_node
+
+ON_A_FORGE = entry_of({"setup_command": "", "forge": "github"})
+NO_SETUP = entry_of({"setup_command": ""})
+
+#: `merge`'s `on_merge_rejected`, rewinding to `open_mr`, before the final gate.
+REJECTED = {
+    "restart_from": "open_mr",
+    "repair": {"tasks": [{"id": "fix", "kind": "subprocess", "command": "true"}]},
+}
+
+
+#: A node rebasing onto the base itself, before the merge.
+REBASE = {
+    "id": "rebase",
+    "kind": "exec",
+    "tasks": [{"id": "rebase", "kind": "builtin", "ref": "kraft.mr_rebase"}],
+}
+
+
+def _chain(rejects: bool, rebases: bool = False) -> list[dict]:
+    """open_mr -> final (the chain's final gate) -> [rebase ->] merge."""
+    merge = forge_node("merge", "mr.merge")
+    if rejects:
+        merge["on_merge_rejected"] = REJECTED
+    return [
+        forge_node("open_mr", "mr.open_draft"),
+        {"id": "final", "kind": "gate", "chain_finalized": True},
+        *([REBASE] if rebases else []),
+        merge,
+    ]
+
+
+class _ConflictsUntilRebased(forge.FakeForge):
+    """Green, but conflicting with main until `clears_at` pushes have been
+    made: the push after the merge's own forced rebase clears it, as a real
+    forge's next read of the rebased head would."""
+
+    clears_at: int | None = None
+
+    async def push(self, *, repo, branch):
+        await super().push(repo=repo, branch=branch)
+        if self.clears_at is not None and len(self.pushed) >= self.clears_at:
+            self.mergeable = True
+
+
+@pytest.fixture
+def walk(database, run_dirs, monkeypatch):
+    """`await walk(fake, item)`: `executor.run` from the item's cursor, with
+    `forge.run.resolve` answering `fake`."""
+
+    async def go(fake, it):
+        monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+        return await executor.run(
+            database, run_dirs, work_item_id=it.id, launch=executor.LaunchContext(ON_A_FORGE)
+        )
+
+    return go
+
+
+@pytest.mark.parametrize(
+    ("after", "rejects", "pinned", "status", "stands_at"),
+    [
+        ("nothing", False, True, "completed", None),
+        ("a-commit", False, True, "needs_human", "final"),
+        ("a-commit", True, True, "needs_human", "open_mr"),
+        ("a-commit", False, False, "completed", None),
+        ("a-clean-rebase", False, True, "completed", None),
+        ("a-pre-merge-rebase", False, True, "completed", None),
+    ],
+    ids=[
+        "the-approved-head-merges",
+        "a-commit-after-the-approval-goes-back-to-the-final-gate",
+        "a-merge-node-holds-it-at-restart-from",
+        "approved-before-the-pin-is-not-checked",
+        "kraft-s-own-clean-rebase-is-repinned-and-merges",
+        "kraft-s-own-rebase-before-the-merge-is-repinned",
+    ],
+)
+async def test_the_merge_pushes_only_the_head_the_final_review_approved(
+    walk, item_on, database, run_dirs, repo, after, rejects, pinned, status, stands_at
+):
+    """Approving the final gate pins the branch tip. A commit after it -- an
+    agent's, a person's, any route no earlier guard caught -- is never pushed
+    for merging nor merged: the item is held where the final review comes round
+    again, `on_merge_rejected.restart_from` or the gate itself, with the gate
+    reopened, and stops naming the change. Kraft's own conflict-free rebase of
+    the approved head merges, repinned. An item approved before the pin
+    existed is not checked."""
+    it = await item_on(_chain(rejects, rebases=after == "a-pre-merge-rebase"))
+    await _builtins.ensure_worktree(
+        database, run_dirs, repo=str(repo), work_item_id=it.id, repo_entry=NO_SETUP
+    )
+    write(it.worktree, "feature.txt", "the item's change\n")
+    reviewed = commit_all(it.worktree, "the item's change")
+    fake = _ConflictsUntilRebased(ci_states=["success"])
+    assert await walk(fake, it) == "awaiting_gate"
+    tips = reviewed_head.pin_for(database, it.row(), "final", it.worktree) if pinned else None
+    await database.write(lambda c: store.request_gate(c, it.id, "final", "final"))
+    await database.write(lambda c: store.approve_gate(c, it.id, "final", tips=tips))
+    pushed = len(fake.pushed)
+    if after == "a-commit":
+        write(it.worktree, "unseen.txt", "nobody reviewed this\n")
+        unseen = commit_all(it.worktree, "after the approval")
+    elif after == "a-clean-rebase":
+        fake.mergeable, fake.merge_detail = False, "conflict"
+        fake.clears_at = pushed + 2
+    if after.endswith("rebase"):
+        write(repo, "moved.txt", "landed on main meanwhile\n")
+        commit_all(repo, "upstream moved")
+
+    assert await walk(fake, it) == status
+
+    refused = [e["payload"] for e in it.events("merge_refused_unreviewed")]
+    reopened = [e["payload"] for e in it.events("gate_reopened")]
+    if stands_at is None:
+        assert fake.merged == [1]
+        assert refused == [] and reopened == []
+        repinned = [e["payload"] for e in it.events("reviewed_head_repinned")]
+        assert [p["cause"] for p in repinned] == (["rebase"] if after.endswith("rebase") else [])
+        return
+    assert fake.merged == [] and len(fake.pushed) == pushed, "the unseen head went nowhere"
+    assert refused == [
+        {"node_id": "merge", "repo": str(it.worktree), "reviewed": reviewed, "current": unseen}
+    ]
+    assert reopened == [{"gate": "final", "reason": "unreviewed_change"}]
+    assert (it.status(), it.row()["current_node_id"]) == ("needs_human", stands_at)
+    assert it.row()["stop_kind"] == "failed"
+    back = "back through final" + (" from open_mr" if rejects else "")
+    assert it.events("work_item_needs_human")[-1]["payload"]["reason"] == (
+        f"node merge did not merge: the branch is at {unseen[:12]}, not at {reviewed[:12]}, "
+        f"the head final approved; a retry takes it {back}"
+    )

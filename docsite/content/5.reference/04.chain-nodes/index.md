@@ -110,9 +110,44 @@ A recovery that concludes no repair can help reports `failed` with a
 | `reject_to` | string | see Meaning | The exec node a rejection re-enters, with the reviewer's note. It must be before the gate. Without it, a rejection re-enters the nearest exec node before the gate, or re-opens the gate when there is none. |
 | `timeout` | duration | none | How long the gate waits for a decision, such as `90m`. It may not exceed the `total_time_cap_minutes` around it. |
 | `auto_review` | mapping | none | An agent task that may report a verdict first. It takes no `fallback`, and may `extends` a library task. See [Add a security review or a gate reviewer](/guides/customize/add-review-agents). |
-| `chain_finalized` | boolean | `false` | `true` marks the final review. A `chain_finalized` gate always requires its document, whether or not it sets `artifact_required`. |
+| `chain_finalized` | boolean | `false` | `true` marks the final review. A `chain_finalized` gate always requires its document, whether or not it sets `artifact_required`. Its approval decides what a later `mr.merge` may merge: see [What the final review approves](#what-the-final-review-approves). |
 
 A gate takes no `icon`.
+
+### What the final review approves
+
+_Added in next_
+
+Approving the chain's first `chain_finalized` gate records the branch tip it
+approves, in every checkout a merge could push: the item's own, and each
+workspace member not merged yet. Skipping that gate records the tips it passes
+the same way. They are on the `gate_approved` (or `node_skipped`) event, as
+`tips`.
+
+Right before an `mr.merge` task asks the forge to merge, or to queue the merge
+request again after a merge train's own runners failed, it reads the tip it
+would push. When that is not the approved one, it merges nothing and pushes
+nothing, records `merge_refused_unreviewed`, and the item stops for you:
+
+- On a node with [on_merge_rejected](#on_merge_rejected), Kraft holds the item
+  at `restart_from`, with the gates from there to the merge reopened.
+- On any other node, it holds the item at the `chain_finalized` gate,
+  reopened.
+
+A retry from there walks back through the final review, which sees the new
+code. This holds whatever changed the branch: an agent, an escalation, a
+commit of yours, or anything else.
+
+Kraft's own changes to the approved head carry the approval over, recorded as
+`reviewed_head_repinned`: a rebase onto the base branch that needs no conflict
+resolved, with no agent involved (the merge's own forced rebase, an
+`mr_rebase` task, the rebase on approval, resume or retry), and a workspace
+root's commit that points it at its merged members. A rebase that needed a
+conflict resolved, or that rebased a head nobody approved, carries nothing
+over.
+
+An item whose final gate was approved before this check existed, or whose
+chain has no `chain_finalized` gate, merges without it.
 
 ## on_base_changed
 

@@ -6,7 +6,16 @@ from datetime import datetime
 from pathlib import Path
 
 from kraft import builtins as _builtins
-from kraft import escalate, events, gate_review, inplace, item_paths, node_runs, store
+from kraft import (
+    escalate,
+    events,
+    gate_review,
+    inplace,
+    item_paths,
+    node_runs,
+    reviewed_head,
+    store,
+)
 from kraft import policy as _policy
 from kraft.executor import stops
 from kraft.executor.context import LaunchContext, OnApprove
@@ -561,8 +570,12 @@ async def review_gates(
                         )
                     )
                     return "needs_human"
+                # What a final gate's approval lets merge (`kraft.reviewed_head`).
+                tips = reviewed_head.pin_for(db, row, gate, inplace.item_folder(run_dirs, row))
                 approval = await db.write(
-                    lambda c, gate=gate: store.approve_gate(c, work_item_id, gate, by="agent")
+                    lambda c, gate=gate, tips=tips: store.approve_gate(
+                        c, work_item_id, gate, by="agent", tips=tips
+                    )
                 )
                 if isinstance(approval, str):
                     return status_of(db, work_item_id)  # approved, queued for the checkout
@@ -1336,6 +1349,8 @@ async def resume_after_escalation(
             )
             return status
         worktree = inplace.item_folder(run_dirs, row)
+        # After the turn, before Kraft's own rebase: only that rebase repins.
+        before = reviewed_head.tips(db, work_item_id, row, worktree)
         try:
             # The refresh runs host git in the worktree and its members (Kraft-ju36l).
             stops.refuse_planted_repos(row, launch, worktree)
@@ -1363,6 +1378,13 @@ async def resume_after_escalation(
                 )
             )
             return status_of(db, work_item_id)
+        await reviewed_head.repin(
+            db,
+            work_item_id,
+            before,
+            reviewed_head.tips(db, work_item_id, row, worktree),
+            cause="rebase",
+        )
         # `refresh_worktree_base` reports the upstream head even when the
         # branch already contained it (Kraft-jypzx); skip the write when it
         # matches what's already recorded, the ordinary case on a self-retry.

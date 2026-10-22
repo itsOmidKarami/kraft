@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, replace
@@ -8,7 +9,7 @@ from pathlib import Path
 
 from kraft import builtins as _builtins
 from kraft import config as _config
-from kraft import events, inplace, node_runs, store
+from kraft import events, inplace, node_runs, reviewed_head, store
 from kraft import findings as _findings
 from kraft import policy as _policy
 from kraft.adapters import beads
@@ -33,6 +34,7 @@ from kraft.executor.context import (
     READ_ONLY_VIOLATED,
     REPAIR_DOUBTED,
     TIME_CAPPED,
+    UNREVIEWED_HEAD,
     WAIT_TIMED_OUT,
     WAITING,
     LaunchContext,
@@ -561,6 +563,8 @@ async def _sentinel_stop(
             )
             await hold_merge_node(db, work_item_id, row, node, "read_only_violated")
         return await _read_only.stop(db, work_item_id, node.id)
+    if verdict == UNREVIEWED_HEAD:
+        return await _stop_unreviewed(db, work_item_id, node)
     if verdict == BUDGET:
         return await stops.stop_for_budget(db, work_item_id, node, budget)
     if verdict == REPAIR_DOUBTED:
@@ -997,30 +1001,18 @@ def _latest_drop(c, work_item_id: str, node_id: str) -> dict | None:
 
 
 def _branch_tip(checkout, row) -> str | None:
-    """The item's branch tip in `checkout`, or None when git cannot read it:
-    `refs/heads/<branch>`, what the merge pushes, never `HEAD`, which an agent
-    may have moved off the branch (or, in place, a person's)."""
-    return _config.git_read(
-        Path(checkout), "rev-parse", f"refs/heads/{store.branch_for(row)}", expected_failure=True
-    )
+    """The item's branch tip in `checkout` (`reviewed_head.branch_tip`)."""
+    return reviewed_head.branch_tip(checkout, store.branch_for(row))
 
 
-def _branch_tips(db, work_item_id: str, row, worktree) -> dict[str, str | None]:
-    """The item's branch tip in its own checkout and in every workspace member
-    whose merge request has not merged: everything a later merge could push."""
-    checkouts = [str(worktree)] + [
-        r["path"]
-        for r in db.read(lambda c: store.repos_for(c, work_item_id))
-        if r["role"] == "submodule" and r["state"] != "merged"
-    ]
-    return {path: _branch_tip(path, row) for path in dict.fromkeys(checkouts)}
+#: Everything a later merge could push (`reviewed_head.tips`).
+_branch_tips = reviewed_head.tips
 
 
 def _moved(before: dict, after: dict) -> bool:
     """Whether anything a merge would push moved between two `_branch_tips`
-    reads. A tip git could not read counts as moved, as after a repair: holding
-    costs a review at most, going on could merge code no gate saw."""
-    return before != after or None in after.values()
+    reads, a tip git could not read included (`reviewed_head.unchanged`)."""
+    return not reviewed_head.unchanged(before, after)
 
 
 def _unanswered_drop(
@@ -1094,6 +1086,79 @@ async def hold_merge_node(
     restart_from = node.node.on_merge_rejected.restart_from
     await _hold_at_restart(db, work_item_id, nodes, index, restart_from, reason)
     return restart_from
+
+
+def _unreviewed_reason(node_id: str, refusal: dict, member: bool, final: str, target) -> str:
+    """The stop a refused merge (`merge_refused_unreviewed`) leaves."""
+    where = f" in {Path(refusal['repo']).name}" if member else ""
+    current = refusal.get("current")
+    reviewed = refusal.get("reviewed")
+    now = f"is at {current[:12]}" if current else "has a tip git could not read"
+    approved = (
+        f"not at {reviewed[:12]}, the head {final} approved"
+        if reviewed
+        else f"and {final} approved no head for it"
+    )
+    back = f"back through {final}" + (f" from {target}" if target and target != final else "")
+    return (
+        f"node {node_id} did not merge: the branch{where} {now}, {approved}; "
+        f"a retry takes it {back}"
+    )
+
+
+async def _stop_unreviewed(db, work_item_id: str, node: ResolvedNode) -> str:
+    """The merge in `node` refused a head the final review did not approve
+    (`kraft.reviewed_head`). The item is held where that review comes round
+    again -- the node's `on_merge_rejected.restart_from`, or the final gate
+    itself -- with the approved gates between reopened, and stops for a
+    person naming the change. Never a rewind of Kraft's own: something no
+    earlier guard caught wrote the branch, and a person looks before any agent
+    runs on it."""
+    row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    nodes = chain_of(row).chain.nodes
+    index = next(i for i, n in enumerate(nodes) if n.id == node.id)
+    final = next(
+        (
+            i
+            for i in range(index)
+            if isinstance(nodes[i].node, GateNode) and nodes[i].node.chain_finalized
+        ),
+        None,
+    )
+    if _rejects_merges(node):
+        target = node.node.on_merge_rejected.restart_from
+    else:
+        target = nodes[final].id if final is not None else None
+    if target is not None:
+        # Held before the stop is written: a crash between the two leaves the
+        # item before the final review, never stopped on the merge.
+        await _hold_at_restart(db, work_item_id, nodes, index, target, "unreviewed_change")
+    raw = db.read(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE work_item_id = ? AND type = ? "
+            "ORDER BY seq DESC LIMIT 1",
+            (work_item_id, ForgeEvent.MERGE_REFUSED_UNREVIEWED),
+        ).fetchone()
+    )
+    refusal = json.loads(raw["payload"]) if raw else {"repo": "", "current": None}
+    members = db.read(lambda c: store.repos_for(c, work_item_id))
+    member = any(
+        r["role"] == "submodule" and reviewed_head.same_checkout(r["path"], refusal["repo"])
+        for r in members
+    )
+    reason = _unreviewed_reason(
+        node.id,
+        refusal,
+        member,
+        nodes[final].id if final is not None else "the final review",
+        target,
+    )
+    await db.write(
+        lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=StopKind.FAILED)
+    )
+    return "needs_human"
 
 
 def merge_node_of(row) -> ResolvedNode | None:

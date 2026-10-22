@@ -25,6 +25,11 @@ class ForgeEvent(StrEnum):
     AUTOMATED_REVIEW_NOT_CONFIGURED = "automated_review_not_configured"
     AUTOMATED_REVIEW_ERRORED = "automated_review_errored"
     MERGE_QUEUE_DROPPED = "merge_queue_dropped"
+    #: Kraft rewrote the head the final review approved itself -- a clean
+    #: rebase, a pointer bump -- and pinned the new one (`kraft.reviewed_head`).
+    REVIEWED_HEAD_REPINNED = "reviewed_head_repinned"
+    #: The merge would have pushed a head the final review did not approve.
+    MERGE_REFUSED_UNREVIEWED = "merge_refused_unreviewed"
 
 
 _PLAIN = EventTraits()
@@ -46,6 +51,8 @@ FORGE_EVENT_TRAITS = total(
         ForgeEvent.AUTOMATED_REVIEW_NOT_CONFIGURED: _PLAIN,
         ForgeEvent.AUTOMATED_REVIEW_ERRORED: _PLAIN,
         ForgeEvent.MERGE_QUEUE_DROPPED: _PLAIN,
+        ForgeEvent.REVIEWED_HEAD_REPINNED: _PLAIN,
+        ForgeEvent.MERGE_REFUSED_UNREVIEWED: _PLAIN,
     },
     name="FORGE_EVENT_TRAITS",
 )

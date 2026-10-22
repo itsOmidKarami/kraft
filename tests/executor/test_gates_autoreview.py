@@ -26,10 +26,17 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
+from support import worktree as wtree
 from support.addons import drop_store, install_release, pinned_chain
-from support.harness import entry_of, fake_harness_home, write_agent_profiles, write_own_result
+from support.harness import (
+    entry_of,
+    fake_harness_home,
+    git,
+    write_agent_profiles,
+    write_own_result,
+)
 
-from kraft import events, executor, gate_review
+from kraft import events, executor, gate_review, store
 from kraft.adapters import agent as agent_mod
 from kraft.api.routes import artifacts as artifacts_route
 from kraft.api.routes import gates as gates_route
@@ -397,7 +404,6 @@ async def test_a_published_must_fix_thread_downgrades_an_approve_to_undecided(
 ):
     """An agent's `approve` verdict must not clear a gate a person has left an
     unresolved must-fix thread on (review flow §3)."""
-    from kraft import store
 
     it = await item_on(_revision_chain(tmp_path, PROPOSAL, auto_review=REVIEWER), auto_gate=True)
     launch = REVISION_LAUNCH
@@ -434,7 +440,6 @@ async def test_a_review_that_refused_to_launch_says_why_in_its_skipped_event(
     """A gate review that never ran (here a model 1.4 stored that is no model
     id) leaves the gate to a person. The event the board and `kraft view
     events` show must say why, not only `undecided`."""
-    from kraft import store
 
     it = await item_on(_revision_chain(tmp_path, PROPOSAL, auto_review=REVIEWER), auto_gate=True)
     launch = REVISION_LAUNCH
@@ -471,3 +476,29 @@ async def test_review_gates_stops_config_when_on_approve_refuses(item_on, monkey
 
     assert result == "needs_human"
     assert (it.status(), it.row()["stop_kind"]) == ("needs_human", "config")
+
+
+async def test_an_agents_approval_of_the_final_gate_pins_the_head(item_on, repo, monkeypatch):
+    """A final gate an agent reviews and approves passes the head as it stands,
+    as a person's approval does: what the merge may push (`kraft.reviewed_head`)."""
+    nodes = _reviewed()
+    nodes[1]["chain_finalized"] = True
+    it = await item_on(nodes, auto_gate=True)
+    await wtree.ensure(it.database, it.run_dirs, repo)
+    head = git(it.worktree, "rev-parse", f"refs/heads/{store.branch_for(it.row())}")
+    monkeypatch.setattr(
+        gates_module.gate_review, "review", lambda *a, **kw: _resolved(("approve", None))
+    )
+
+    async def _on_approve(row, gate, **_kw):
+        return it.chain.chain.nodes, None
+
+    await _requested(it)
+    await _review(it, on_approve=_on_approve)
+
+    [approved] = it.events("gate_approved")
+    assert approved["payload"] == {
+        "gate": "spec_approval",
+        "by": "agent",
+        "tips": {str(it.worktree): head},
+    }

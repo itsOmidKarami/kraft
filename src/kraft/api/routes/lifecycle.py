@@ -22,6 +22,7 @@ from kraft import (
     inplace,
     item_paths,
     node_runs,
+    reviewed_head,
     start_queue,
     storage,
     store,
@@ -1486,6 +1487,10 @@ async def refresh_base(
         if status == WorkItemStatus.PAUSED or status in ENDED:
             raise HTTPException(409, stopped)
 
+    # Read before the rebase: Kraft's own, clean, so a head the final review
+    # approved stays the approved one, rebased (`reviewed_head.repin`).
+    folder = inplace.item_folder(st.run_dirs, row)
+    before = reviewed_head.tips(st.db, wid, row, folder)
     # No await between this read and the spawn: a stop from here on finds the task.
     active()
     rebasing = (
@@ -1505,6 +1510,9 @@ async def refresh_base(
         # walk's to be handed.
         active()
         raise
+    await reviewed_head.repin(
+        st.db, wid, before, reviewed_head.tips(st.db, wid, row, folder), cause="rebase"
+    )
     # A stop that came after the rebase ended found no task to cancel.
     active()
     return moved
@@ -2210,10 +2218,15 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
                 )
             note = (body.note or "").strip() or None
             session_ids = [s["id"] for s in sessions]
+            # A person passing the final gate passes the head as it stands
+            # (`kraft.reviewed_head`): None for any other node.
+            tips = reviewed_head.pin_for(st.db, row, node_id, inplace.item_folder(st.run_dirs, row))
             # mark first, then signal: same race pause_work_item guards against —
             # a SIGTERM landing before the row says 'paused' resolves as 'failed'.
             await st.db.write(
-                lambda c: store.skip_node(c, wid, node_id, gate, note, session_ids=session_ids)
+                lambda c: store.skip_node(
+                    c, wid, node_id, gate, note, session_ids=session_ids, tips=tips
+                )
             )
             for s in sessions:
                 _terminate(s["pid"], started=s["pid_start_time"])

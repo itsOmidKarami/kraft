@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from kraft import caps as _caps
-from kraft import events, inplace, item_paths, logs, store
+from kraft import events, inplace, item_paths, logs, reviewed_head, store
 from kraft import harness as _harness
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git
@@ -1953,6 +1953,10 @@ async def mr_rebase(
     def remaining() -> float | None:
         return max(0.0, time_cap.at - _caps.monotonic()) if time_cap is not None else None
 
+    # Kraft's own rebase -- the members', their repoint commit and the root's
+    # -- with no agent and nothing to resolve (a conflict raises): a head the
+    # final review approved stays the approved one, rebased.
+    before = reviewed_head.tips(db, work_item_id, row, worktree)
     try:
         moved = await _rebase_members(db, work_item_id, Path(worktree), branch, base, remaining)
         try:
@@ -2016,6 +2020,13 @@ async def mr_rebase(
             )
         )
         return _caps.TIME_CAPPED
+    await reviewed_head.repin(
+        db,
+        work_item_id,
+        before,
+        reviewed_head.tips(db, work_item_id, row, worktree),
+        cause="rebase",
+    )
     # A member's move is never persisted: `base_ref` is the root's (Kraft-puqxq).
     log = "".join(f"[{rel}] rebased {branch} onto {head}\n" for rel, head in moved)
     if new_head:

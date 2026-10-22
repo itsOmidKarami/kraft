@@ -563,6 +563,7 @@ def event_line(
                 "merge_rejected": " after the merge train or queue rejected it",
                 "escalation_committed": " after an escalation committed a change",
                 "read_only_violated": " after a read-only step changed files",
+                "unreviewed_change": " because the code changed after it was approved",
             }
             return f"{gate} · reopened{why.get(reason, '') if isinstance(reason, str) else ''}"
         case "fix_cycle_started":
@@ -625,6 +626,8 @@ def event_line(
             return f"MR !{_s(p.get('ref'))} closed{closer}"
         case "mr_reopened":
             return f"MR !{_s(p.get('ref'))} reopened"
+        case "merge_refused_unreviewed":
+            return f"{node} · not merged: the code is not what the final review approved"
         case "budget_raised" | "budget_changed":
             return f"budget set to ${_s(p.get('budget_usd'))}"
         case "work_item_title_edited":

@@ -46,6 +46,7 @@ from kraft.executor.context import (
     REPAIR_DOUBTED,
     SCOPE,
     TIME_CAPPED,
+    UNREVIEWED_HEAD,
     WAIT_TIMED_OUT,
     WAITING,
     LaunchContext,
@@ -2181,6 +2182,10 @@ async def measure_node(
     # worktree a read_only scope promised to leave alone is not the one it found.
     if READ_ONLY_VIOLATED in results:
         return READ_ONLY_VIOLATED, [t for t, r in outcomes if r == READ_ONLY_VIOLATED], []
+    # Next, and ahead of a pause for the same reason: the merge found a head
+    # no final review saw, and whatever else happened, it must go back there.
+    if UNREVIEWED_HEAD in results:
+        return UNREVIEWED_HEAD, [t for t, r in outcomes if r == UNREVIEWED_HEAD], []
     # A pause stops the walk where it stands: the node is neither done nor failed,
     # and resume relaunches it. It outranks a co-task's failure, which was almost
     # certainly the same SIGTERM arriving on a different row.

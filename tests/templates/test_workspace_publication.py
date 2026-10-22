@@ -385,6 +385,78 @@ async def test_root_mr_not_ready_until_child_mrs_have_merged(
     ]
 
 
+@pytest.mark.parametrize(
+    ("changed", "merges"),
+    [(None, ["pkg", "root"]), ("repos/pkg", []), (".", ["pkg"])],
+    ids=["as-approved", "a-member-changed-after", "the-root-changed-after"],
+)
+async def test_a_workspace_merges_only_what_the_final_review_approved(
+    database, run_dirs, tmp_path, monkeypatch, changed, merges
+):
+    """`merge-refuses-a-head-final-review-did-not-see`, member by member: each
+    checkout's merge pushes only the tip the final review approved there. The
+    root's pointer bump to its merged member is Kraft's own commit, repinned;
+    a commit after the approval, in a member or the root, stops that merge
+    and every one after it."""
+    from kraft import reviewed_head
+    from kraft.executor.context import UNREVIEWED_HEAD
+
+    row, worktree, _ = await _publishable(
+        database, run_dirs, tmp_path, pointer="ignore", root_source=True
+    )
+    fake = _LandingForge()
+    assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr") == "done"
+    tips = reviewed_head.tips(database, row["id"], row, worktree)
+    pin = {"gate": "final", "by": "human", "tips": tips}
+    await database.write(lambda c: events.append(c, row["id"], "gate_approved", pin))
+    if changed:
+        (worktree / changed / "unseen.txt").write_text("nobody reviewed this\n")
+        commit_all(worktree / changed, "after the approval")
+
+    status = await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge")
+
+    assert status == ("done" if changed is None else UNREVIEWED_HEAD)
+    names = {"pkg": "pkg", row["id"]: "root"}
+    assert [names[o[1]] for o in fake.order if o[0] == "merge"] == merges
+    refused = database.read(lambda c: events.read_after(c, 0, row["id"]))
+    refused = [e["payload"]["repo"] for e in refused if e["type"] == "merge_refused_unreviewed"]
+    assert refused == ([] if changed is None else [str((worktree / changed).resolve())])
+    repinned = database.read(lambda c: events.read_after(c, 0, row["id"]))
+    causes = [e["payload"]["cause"] for e in repinned if e["type"] == "reviewed_head_repinned"]
+    assert causes == (["pointer_bump"] if changed is None else [])
+
+
+async def test_a_pointer_only_root_bump_pushes_nothing_the_final_review_did_not_approve(
+    database, run_dirs, tmp_path, monkeypatch
+):
+    """A pointer-only root's bump goes straight onto its base, past any merge
+    request: a root commit made after the approval -- here moving a member the
+    item never changed to a revision nobody built -- is not pushed with it."""
+    from kraft import reviewed_head
+    from kraft.executor.context import UNREVIEWED_HEAD
+
+    row, worktree, origin = await _publishable(
+        database, run_dirs, tmp_path, pointer="bump", second=True, untouched=("pkg2",)
+    )
+    before = git(origin, "rev-parse", "main")
+    fake = _LandingForge()
+    assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr") == "done"
+    tips = reviewed_head.tips(database, row["id"], row, worktree)
+    pin = {"gate": "final", "by": "human", "tips": tips}
+    await database.write(lambda c: events.append(c, row["id"], "gate_approved", pin))
+    pkg2 = worktree / "repos" / "pkg2"
+    git(pkg2, "checkout", "-q", "--detach")
+    git(pkg2, "commit", "-q", "--allow-empty", "-m", "never built here")
+    git(worktree, "add", "repos/pkg2")
+    git(worktree, "commit", "-qm", "move pkg2 after the approval")
+
+    status = await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge")
+
+    assert status == UNREVIEWED_HEAD
+    assert fake.order == [("merge", "pkg")], "the member, reviewed, merged; the root did not"
+    assert git(origin, "rev-parse", "main") == before, "nothing pushed onto the root's base"
+
+
 async def test_a_root_merge_request_opened_for_source_since_reverted_is_still_merged(
     database, run_dirs, tmp_path, monkeypatch
 ):
