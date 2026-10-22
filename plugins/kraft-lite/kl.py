@@ -558,13 +558,25 @@ class BdStore:
         """`import` the records, then drop each label the store held for one
         that the record no longer has: `import` merges labels into the row it
         updates, so `set_label` alone would leave the old value beside the new
-        (Kraft-lpkgd). `--remove-label` leaves `updated_at` alone."""
-        self._bd(["import", "-"], stdin=_jsonl(records))
+        (Kraft-lpkgd). For a row bd kept instead (`tie_kept_local_ids`,
+        `stale_skipped_ids`), the labels this import added are taken back, so
+        the other writer's row stays as it was. `--remove-label` leaves
+        `updated_at` alone."""
+        result = self._bd(["import", "--json", "-"], stdin=_jsonl(records))
+        try:
+            report = json.loads(result.stdout)
+        except (TypeError, ValueError):
+            return  # no report: leave every label, as a plain import did
+        # A row bd kept instead (a tie, or an older copy) still takes our labels:
+        # take back the ones it did not hold. A row it wrote keeps only ours.
+        kept = {*report.get("tie_kept_local_ids", ()), *report.get("stale_skipped_ids", ())}
         before = {r["id"]: r.get("labels") or [] for r in held}
         for record in records:
-            stale = [
-                x for x in before.get(record["id"], []) if x not in (record.get("labels") or [])
-            ]
+            held_labels, ours = before.get(record["id"], []), record.get("labels") or []
+            if record["id"] in kept:
+                stale = [x for x in ours if x not in held_labels]
+            else:
+                stale = [x for x in held_labels if x not in ours]
             if stale:
                 # Each value is read as CSV: quoted, a label's own comma or quote survives.
                 quoted = ['"' + x.replace('"', '""') + '"' for x in stale]

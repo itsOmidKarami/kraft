@@ -174,3 +174,63 @@ def test_a_write_replaces_the_labels_bd_held(bd_repo, monkeypatch):
         ("kraft-note:", 'c"d'),
     ):
         assert [x for x in labels if x.startswith(prefix)] == [prefix + want], prefix
+
+
+def test_a_row_bd_kept_keeps_its_labels(bd_repo, monkeypatch):
+    """Two writers inside one second from one copy, the second also changing
+    another field: bd keeps the first row on the tie but still merges the
+    second's labels in, and those must come back out."""
+    monkeypatch.chdir(bd_repo)
+    monkeypatch.setattr(lite, "_now", lambda: lite.dt.datetime(2026, 10, 22, 6, 0, 0))
+    store = lite.BdStore()
+    store.write(
+        [
+            {
+                "_type": "issue",
+                "id": "kl-tie1",
+                "title": "a slice",
+                "issue_type": "task",
+                "status": "open",
+                "labels": [f"{lite.SLICE_STATUS_LABEL}waiting"],
+                "updated_at": "2026-10-22T05:59:00Z",
+            }
+        ]
+    )
+    stale = next(r for r in store.load() if r["id"] == "kl-tie1")
+    store.write([lite.set_label(stale, lite.SLICE_STATUS_LABEL, "running")])
+    loser = dict(lite.set_label(stale, lite.SLICE_STATUS_LABEL, "in_review"), status="in_progress")
+    store.write([loser])
+
+    row = next(r for r in store.load() if r["id"] == "kl-tie1")
+    assert row["status"] == "open", "bd kept the first writer's row"
+    assert [x for x in row["labels"] if x.startswith(lite.SLICE_STATUS_LABEL)] == [
+        f"{lite.SLICE_STATUS_LABEL}running"
+    ]
+
+
+def test_an_import_replaces_the_labels_too(bd_repo, monkeypatch):
+    """`kl import` writes another machine's records through `write_raw`."""
+    monkeypatch.chdir(bd_repo)
+    store = lite.BdStore()
+    store.write(
+        [
+            {
+                "_type": "issue",
+                "id": "kl-imp1",
+                "title": "a slice",
+                "issue_type": "task",
+                "status": "open",
+                "labels": [f"{lite.SLICE_STATUS_LABEL}in_review"],
+            }
+        ]
+    )
+    local = store.load()
+    theirs = lite.set_label(
+        next(r for r in local if r["id"] == "kl-imp1"), lite.SLICE_STATUS_LABEL, "merged"
+    )
+    store.write_raw([theirs], local)
+
+    labels = next(r for r in store.load() if r["id"] == "kl-imp1")["labels"]
+    assert [x for x in labels if x.startswith(lite.SLICE_STATUS_LABEL)] == [
+        f"{lite.SLICE_STATUS_LABEL}merged"
+    ]
