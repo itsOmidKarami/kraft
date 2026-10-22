@@ -61,7 +61,7 @@ kraft item set-attachments [ID] [--spec P] [--plan P] [--drop KIND]  # revise a 
 kraft item approve [ID] [--head H] / kraft item reject [ID] --note "why"  # --head: the final review's, from `kraft view show`
 kraft item pause [ID] / kraft item resume [ID] --steer "..."
 kraft item unblock [ID] [--dependency ID]   # drop what a blocked or paused item still comes after
-kraft item retry [ID] [--steer "..."]       # the only door back onto a stopped item
+kraft item retry [ID] [--steer "..."] [--sandbox-from-config [--yes]]  # the only door back onto a stopped item; the flag gives it the sandbox repos.yaml sets now
 kraft item raise-budget [ID] --usd N|none   # raise the dollar cap that stopped it (its own or its policy's), and retry
 kraft item skip [ID] [--head H] [--note "..."]  # advance past the current node or gate without running it
 kraft item escalate [ID] --message "..."    # ask an agent to help with a needs_human stop

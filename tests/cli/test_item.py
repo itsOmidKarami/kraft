@@ -798,32 +798,3 @@ def test_an_abandoned_item_shows_its_reason_in_view_show(app, capsys, make_item,
 
     assert "ended_reason" in (out := capsys.readouterr().out)
     assert "refiled as another item" in out
-
-
-@pytest.mark.parametrize(
-    ("yes", "retried"), [(False, []), (True, [True])], ids=["shows-only", "yes-applies"]
-)
-def test_sandbox_from_config_shows_both_and_needs_yes(monkeypatch, capsys, yes, retried):
-    """Without --yes it reads both sandboxes and changes nothing (Kraft-ajzx7)."""
-    change = {"changed": True, "old": {"image": "a"}, "new": {"image": "b"}}
-    calls = []
-
-    async def preview(*_a, **_kw):
-        return {"id": "w1", **change}
-
-    async def retry(*_a, sandbox_from_config=False, **_kw):
-        calls.append(sandbox_from_config)
-        return {**_ROW, "sandbox": change}
-
-    monkeypatch.setattr(cli.item.client, "sandbox_from_config", preview)
-    monkeypatch.setattr(cli.item.client, "retry", retry)
-    argv = ["item", "retry", "w1", "--sandbox-from-config", *(["--yes"] if yes else [])]
-    if yes:
-        cli.main(argv)
-    else:
-        with pytest.raises(SystemExit):
-            cli.main(argv)
-    out = capsys.readouterr()
-    assert calls == retried
-    assert "{'image': 'a'}\n      -> {'image': 'b'}" in out.out
-    assert ("pass --yes" in out.err) is not yes

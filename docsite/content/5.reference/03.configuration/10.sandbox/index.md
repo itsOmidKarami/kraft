@@ -37,7 +37,9 @@ The keys depend on `kind`. A key a `kind` refuses stops `repos.yaml` from loadin
 
 Set the key in `repos.yaml` or in `policy.sandbox`, not both. It is part of the repository policy layer: once it is set, no chain, node or task can turn it off or change it, limits and network policy included, and `sandbox: false` on a repo cannot turn off one a layer set.
 
-An item keeps the sandbox it was filed with. A later change to the key, `expose`, `network`, `resources` and `kit` included, reaches only items filed after it; `kraft item retry` relaunches the item in the sandbox it was filed with. A sandbox set on a repo whose items were filed with none does reach them, at their next launch.
+An item keeps the sandbox it was filed with. A later change to the key, `expose`, `network`, `resources` and `kit` included, reaches only items filed after it; `kraft item retry` relaunches the item in the sandbox it was filed with.
+
+To keep a stopped item and give it the sandbox `repos.yaml` sets now, run `kraft item retry ID --sandbox-from-config`: it prints both, and `--yes` replaces the old one and retries. Only a person can do this: Kraft refuses it from a worker or an assistant. A sandbox set on a repo whose items were filed with none does reach them, at their next launch.
 
 What a sandboxed item reaches beside its sandbox is fixed at filing too: the hosts and credentials each [harness](/reference/configuration/sandbox/network-policy#harness-hosts) adds, and the names in the repo's `env:` and `env_passthrough`. An edit to a harness file or to `repos.yaml` afterwards can remove an env name from the item's launches but never add one, and a harness the item was filed without adds no host and no credential. Kraft keeps only the names: each launch reads their values when it starts.
 
