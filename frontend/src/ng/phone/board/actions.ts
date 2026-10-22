@@ -26,10 +26,10 @@ function cardButtonsFor(item: WorkItem, a: NonNullable<ReturnType<typeof admitte
   if (a.kind === "resume") return [{ kind: "resume", label: "Resume" }];
   if (item.display_status === "failed") return [{ kind: "open", label: "Retry…" }];
   switch (item.stop?.kind) {
-    // As on the desktop row, which opens its peek on the editor: the item opens with the raise sheet over it when it can make
-    // one (`budgetRaise`, the limit on a cap) and on its card, which says why, when it cannot. A list row carries neither the
-    // stop's limit nor the item's spend, so the card cannot tell a daily or token cap, which the server refuses to raise, from the item's own.
-    case "cap": return [{ kind: a.label === "Raise cap" ? "raise" : "open", label: a.label }];
+    // As on the desktop row, which opens its peek on the editor: a cap that names a limit (`raisable`) opens the item with the raise
+    // sheet over it, any other cap on its card, whose Retry is the way on. A budget row carries neither the stop's limit nor the item's
+    // spend, so the card cannot tell a daily or token cap, which the server refuses to raise, from the item's own (`budgetRaise`).
+    case "cap": return [{ kind: item.stop?.raisable || item.stop?.limit ? "raise" : "open", label: a.label }];
     case "budget": return [{ kind: "raise", label: a.label }];
     case "question": return [{ kind: "answer", label: "Answer…" }];
     default: return [{ kind: "open", label: a.label }];

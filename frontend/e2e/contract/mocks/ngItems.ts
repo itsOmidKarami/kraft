@@ -244,7 +244,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
       exited(cr, 0.5);
       ev("work_item_needs_human", { node_id: "verification", reason: "Running time hit its 8h cap", kind: "cap" }, 0.5);
       item.status = "needs_human"; item.display_status = "needs_you";
-      item.stop = stop("cap", "verification.review.code_review", { attempt: 2, reason: "Running time hit its 8h cap", facts: { field: "running_time", cap_s: 28_800 } });
+      item.stop = stop("cap", "verification.review.code_review", { attempt: 2, reason: "Running time hit its 8h cap", facts: { field: "running_time", cap_s: 28_800 }, limit: { path: "", key: "time_cap_minutes", value: 480, maximum: null }, raisable: true });
       break;
     }
     case "waiting": {
