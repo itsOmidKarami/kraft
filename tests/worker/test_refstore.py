@@ -433,6 +433,69 @@ def test_check_direct(repo, direct, tmp_path, kind, text, left, final, lock_stay
         assert "restored " + work in refstore.check_direct(base, store)
 
 
+def test_a_branch_the_host_packed_since_is_not_put_back(repo, direct):
+    """`pack-refs` (or `gc`) on the host after a session removes the loose file; the
+    branch is then in `packed-refs`, at whatever the host moved it to."""
+    base, store, ref = direct
+    moved = _commit_object(repo, git(repo, "rev-parse", "main"), "rebased")
+    git(repo, "update-ref", f"refs/heads/{BRANCH}", moved)
+    git(repo, "pack-refs", "--all", "--prune")
+    assert not ref.exists()
+
+    assert refstore.check_direct(base, store) is None
+    assert git(repo, "rev-parse", BRANCH) == moved
+    assert not ref.exists()
+
+
+@pytest.mark.parametrize(
+    ("item", "gone", "problems"),
+    [("w1", False, 1), ("w2", False, 0), ("w1", True, 1)],
+    ids=["its-item", "another-item", "branch-gone"],
+)
+def test_check_direct_item(direct, worktree, item, gone, problems):
+    """A restart leaves no `run_task` to call `check_direct`: the item's own
+    stores are found by their sidecars."""
+    base, store, ref = direct
+    refstore.prepare_direct(base, worktree, BRANCH, work_item_id="w1")
+    start = ref.read_text().strip()
+    ref.write_text("ref: refs/heads/main\n")
+    if gone:
+        ref.unlink()  # the host (abandon) or the worker deleted it
+
+    got = refstore.check_direct_item(base, item)
+
+    assert len(got) == problems
+    # Never brought back by the recorded value, and a person is told.
+    assert ref.exists() != gone
+    if gone:
+        assert got == [f"refs/heads/{BRANCH} is gone; not restored"]
+    else:
+        assert ref.read_text().strip() == (start if problems else "ref: refs/heads/main")
+
+
+def test_sync_item_leaves_a_direct_store_alone(direct):
+    """An item that ran under both kinds: a leftover private store beside a direct sidecar."""
+    base, store, ref = direct
+    leftover = refstore.shadow_dir(base, store.worktree_gitdir)
+    (leftover / "refs" / "heads" / BRANCH).parent.mkdir(parents=True)
+    (leftover / "refs" / "heads" / BRANCH).write_text(git(store.common, "rev-parse", "main") + "\n")
+    meta = refstore._meta_path(refstore.shadow_dir(base, store.worktree_gitdir))
+    meta.write_text(json.dumps({**json.loads(meta.read_text()), "work_item_id": "w1"}))
+
+    assert refstore.sync_item(base, "w1") == []
+
+
+def test_check_direct_item_leaves_a_private_store_alone(repo, worktree, prepare, tmp_path):
+    """A store `prepare` built has no recorded value to put back: checked as a direct
+    one, its branch would be removed."""
+    prepare(work_item_id="w1")
+    ref = repo / ".git" / "refs" / "heads" / BRANCH
+    ref.write_text("junk\n")
+
+    assert refstore.check_direct_item(tmp_path / "run", "w1") == []
+    assert ref.read_text() == "junk\n"
+
+
 @pytest.mark.parametrize(
     ("call", "live", "survives"),
     [("prepare_direct", ["s1"], True), ("prepare_direct", [], False), ("check_direct", [], True)],
@@ -468,13 +531,20 @@ def test_prepare_direct(repo, worktree, tmp_path, kind):
     if kind == "slash-branch":
         shutil.rmtree(logs.parent)  # git made it with the branch; Kraft must be able to
 
-    (store,) = refstore.prepare_direct(base, worktree, branch)
+    (store,) = refstore.prepare_direct(base, worktree, branch, work_item_id="w1")
 
     assert store.direct and store.shadow == store.common == common and store.checkout is None
     assert ref.read_text().strip() == want
     assert logs.parent.is_dir()
     sidecar = refstore._meta_path(refstore.shadow_dir(base, store.worktree_gitdir))
-    assert json.loads(sidecar.read_text()) == {"branch": branch, "value": want}
+    assert json.loads(sidecar.read_text()) == {
+        "branch": branch,
+        "value": want,
+        "direct": True,
+        "work_item_id": "w1",
+        "common": str(common),
+        "worktree_gitdir": str(store.worktree_gitdir),
+    }
     assert [p for p in (base / "sandbox-git").iterdir() if p.is_dir()] == []
 
 
