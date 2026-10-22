@@ -727,7 +727,7 @@ function settingsFor(variant: Variant, theme: { mode?: string; density?: string;
       budget: { work_item_usd: 5, daily_usd: long ? 250 : null },
       max_concurrent: 3, rate_limit_retries: 5,
       // As config/policy.yaml ships them.
-      forge_cli_timeout_s: 120, archive: { after_days: 30 },
+      forge_cli_timeout_s: 120, agent_idle_minutes: 30, archive: { after_days: 30 },
     },
     // The UX V2 keys as GET /theme answers them (B30): Kraft's default look, as a home with no
     // theme.yaml answers it, so the demo and the docs screenshots show what a new install shows.

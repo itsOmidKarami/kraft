@@ -305,6 +305,7 @@ export interface Policy {
   budget?: { work_item_usd: number | null; daily_usd: number | null };
   max_concurrent: number;
   rate_limit_retries?: number;
+  agent_idle_minutes?: number;
   auto_escalate_stuck?: boolean;
   auto_escalate_stuck_cap?: number;
   auto_escalate_delay_s?: number;
