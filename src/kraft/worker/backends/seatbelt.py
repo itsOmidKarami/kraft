@@ -49,6 +49,9 @@ DEV_WRITES = ("/dev/null", "/dev/zero", "/dev/random", "/dev/urandom")
 #: Apple Events, the pasteboard and the keychain.
 MACH_SERVICES: tuple[str, ...] = (
     "com.apple.system.opendirectoryd.libinfo",  # getpwuid: python pwd, node os.userInfo
+    # Trust evaluation, which Security.framework asks of trustd: a Go CLI's TLS (`gh`) and
+    # `security verify-cert` fail with OSStatus -26276 without it. It holds no secrets.
+    "com.apple.trustd.agent",
 )
 
 #: Python's `multiprocessing.Lock` (a named POSIX semaphore) and

@@ -349,6 +349,32 @@ def test_naming_the_dev_files_keeps_ordinary_tools_working(tmp_path, argv):
 
 
 @pytest.mark.e2e("sandbox-exec")
+def test_a_certificate_verifies_through_the_systems_trust_evaluation(tmp_path):
+    """Security.framework (a Go CLI's TLS, `security verify-cert`) asks trustd to evaluate
+    a chain; with the service not allowed, a root the host trusts fails to verify."""
+    pems = re.findall(
+        r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----\n",
+        Path("/etc/ssl/cert.pem").read_text(),
+        re.S,
+    )
+    certs = tmp_path.resolve() / "certs"
+    certs.mkdir()
+    verify = ["/usr/bin/security", "verify-cert", "-p", "basic", "-L", "-c"]
+    for i, pem in enumerate(pems[:20]):
+        (certs / f"{i}.pem").write_text(pem)
+        if subprocess.run([*verify, str(certs / f"{i}.pem")], capture_output=True).returncode == 0:
+            break
+    else:
+        pytest.fail("the host trusts none of the first 20 roots in /etc/ssl/cert.pem")
+
+    run = _sandboxed(
+        tmp_path, [*verify, str(certs / f"{i}.pem")], mounts=[Mount(certs, certs, True)]
+    )
+
+    assert run.returncode == 0, run.stdout + run.stderr
+
+
+@pytest.mark.e2e("sandbox-exec")
 def test_a_commit_runs_with_dev_read_by_name(tmp_path):
     work = tmp_path.resolve() / "work"
     work.mkdir()
