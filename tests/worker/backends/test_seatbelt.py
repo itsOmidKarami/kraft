@@ -137,6 +137,10 @@ def test_dev_is_read_by_name_never_whole():
     assert f'(allow file-read* (subpath "{os.path.realpath("/dev/fd")}"))' in text
 
 
+def test_the_xcode_licence_is_readable_for_the_git_shim():
+    assert '(subpath "/Library/Preferences/com.apple.dt.Xcode.plist")' in profile()
+
+
 @pytest.mark.e2e("sandbox-exec")
 def test_profile_parses(tmp_path):
     prof = tmp_path / "p.sb"
