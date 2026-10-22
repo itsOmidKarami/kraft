@@ -16,6 +16,7 @@ from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import usage as _usage
 from kraft.adapters import agent as _agent
+from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.subprocess import (
     _kill_group,
     _progress_usage,
@@ -569,6 +570,12 @@ async def _adopt(
     )
     hit = db.read(lambda c: caps.for_session(c, item, row)) if item is not None else None
     deadline = caps.monotonic() + hit.remaining_s if hit is not None else None
+    # The idle watchdog, for an agent's session (only `run_agent_task` records a
+    # harness). Its window starts at adoption, not at the log's last write.
+    idle_minutes = _subprocess.IDLE_MINUTES
+    idle_s = idle_minutes * 60 if row["harness"] is not None and idle_minutes else None
+    last_size = 0
+    active_at = caps.monotonic()
     while _pid_alive(pid):
         if deadline is not None and caps.monotonic() >= deadline:
             await _stop_at_cap(db, row, pid, hit)
@@ -577,6 +584,17 @@ async def _adopt(
         if time.monotonic() < next_progress:
             continue
         next_progress = time.monotonic() + progress_s
+        if idle_s is not None:
+            try:
+                size = os.stat(log_path).st_size
+            except OSError:
+                size = last_size
+            if size > last_size:
+                last_size, active_at = size, caps.monotonic()
+            elif caps.monotonic() - active_at >= idle_s:
+                idle = caps.Hit(row["hook_point"], "idle_minutes", idle_minutes, 0.0)
+                await _stop_at_cap(db, row, pid, idle)
+                return
         try:
             log_offset, live = _progress_usage(log_path, log_offset, seen_usage, reader)
             if live is not None:

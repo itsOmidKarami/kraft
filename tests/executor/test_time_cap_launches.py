@@ -14,6 +14,7 @@ from support.harness import entry_of, v1_task_at
 
 from kraft import caps, escalate, events, executor, gate_review, store
 from kraft.adapters import agent as agent_mod
+from kraft.adapters import subprocess as _subprocess
 from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import Chain, ResolvedChain
@@ -267,6 +268,53 @@ async def test_a_session_adopted_after_a_restart_is_killed_at_its_caps_deadline(
     assert it.events("work_item_needs_human")[-1]["payload"]["reason"] == (
         "`build.main.t` hit its time cap of 1 minutes"
     )
+
+
+@pytest.mark.parametrize(
+    ("harness", "killed"), [("fake", True), (None, False)], ids=["agent", "command"]
+)
+async def test_an_adopted_agent_session_silent_past_the_idle_limit_is_stopped(
+    item_on, database, monkeypatch, harness, killed
+):
+    """An adopted agent session gets a full idle window from adoption and is then
+    stopped like a time cap; a command session's adoption is left alone."""
+    real = time.monotonic
+    monkeypatch.setattr(caps, "monotonic", lambda: real() * 600)
+    monkeypatch.setattr(reattach, "_KILL_GRACE_S", 0.5)
+    monkeypatch.setattr(_subprocess, "IDLE_MINUTES", 1)
+    chain = _materialize(
+        [
+            {
+                "id": "build",
+                "kind": "exec",
+                "tasks": [{"id": "t", "kind": "subprocess", "command": "sleep 30"}],
+            }
+        ]
+    )
+    it = await item_on(chain, "build")
+    proc = subprocess.Popen(["sleep", "30" if killed else "2"], start_new_session=True)
+    try:
+        await it.session("s1", "build.main.t", running=(proc.pid, None), harness=harness)
+        started = time.monotonic()
+
+        await reattach._adopt(
+            database, "s1", proc.pid, work_item_id=it.id, poll_s=0.01, progress_s=0.01
+        )
+
+        assert time.monotonic() - started < 10
+        assert proc.wait(timeout=10) is not None
+    finally:
+        proc.kill()
+    if killed:
+        assert it.sessions()[0]["status"] == "capped_out"
+        (reached,) = it.events(LimitEvent.TIME_CAP_REACHED)
+        assert reached["payload"]["field"] == "idle_minutes"
+        assert it.status() == "needs_human"
+        assert it.events("work_item_needs_human")[-1]["payload"]["reason"] == (
+            "`build.main.t` showed no output for 1 minutes"
+        )
+    else:
+        assert not it.events(LimitEvent.TIME_CAP_REACHED)
 
 
 # ── Kraft-l5fl2: the poller stops only what it measured ──────────────────────
