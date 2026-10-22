@@ -19,12 +19,13 @@ import kl  # noqa: E402
 
 #: Every skill: each walks Kraft's V1 chains.
 V1_SKILLS = ["init", "start", "next", "gate", "status", "run-slices", "build-slice"]
-#: Every file a skill's commands live in: the skills, and run-slices' harness references.
+#: Every file a skill's commands live in: the skills, and every file in run-slices'
+#: `references/` (the harness guides and discover.md).
 COMMAND_FILES = {
     **{name: PLUGIN / "skills" / name / "SKILL.md" for name in V1_SKILLS},
     **{
-        f"references/{harness}": PLUGIN / "skills" / "run-slices" / "references" / f"{harness}.md"
-        for harness in ("claude-code", "codex", "cursor")
+        f"references/{path.stem}": path
+        for path in sorted((PLUGIN / "skills" / "run-slices" / "references").glob("*.md"))
     },
 }
 

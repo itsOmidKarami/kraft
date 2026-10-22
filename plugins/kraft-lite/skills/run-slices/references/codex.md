@@ -1,7 +1,8 @@
 # Codex
 
-Source: the Codex CLI command reference. Where an ability is marked
-unconfirmed, use the fallback named, not a guessed command.
+Source: the Codex CLI command reference. Where an ability is marked unconfirmed,
+look for it as discover.md says, then use the fallback named, never a guessed
+command.
 
 ## Start a child
 

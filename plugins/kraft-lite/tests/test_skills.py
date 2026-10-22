@@ -31,7 +31,7 @@ V1_GATES = {
 #: The chain the README counts nodes and gates of: the bundled library's `default`.
 CHAIN = kl_chains.resolve_bundled("default")
 EVERY_SKILL = sorted(path.parent.name for path in (PLUGIN / "skills").glob("*/SKILL.md"))
-HARNESS_REFERENCES = ["claude-code", "codex", "cursor"]
+HARNESS_REFERENCES = ["claude-code", "codex", "cursor", "gemini", "antigravity", "amp", "opencode"]
 
 
 @pytest.mark.parametrize("name", SKILLS)
@@ -465,9 +465,8 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         (
             "run-slices",
             0,
-            "A harness with no reference here runs on every ability's fallback, whatever its "
-            "own help shows: walk the slices here (section 10), and tell the user nothing wakes "
-            "this session, so they invoke `kraft-lite:run-slices` to continue it.",
+            "With no guide for this harness, or an ability its guide marks unconfirmed, follow "
+            "[discover.md](references/discover.md) before any fallback.",
         ),
         ("status", 0, "once the controller's review of that slice found nothing or only small"),
         ("status", 0, "| can start early from <key> |"),
@@ -490,7 +489,7 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
             "for a push you asked the controller about, that is the permission: push, "
             "then send the controller a `status`",
         ),
-        ("run-slices", 3, 'copied from your reference\'s "Be messaged" and "Check in later"'),
+        ("run-slices", 3, 'copied from your guide\'s "Be messaged" and "Check in later"'),
         ("run-slices", 8, "Report by invoking `kraft-lite:status`"),
         ("run-slices", 1, "few enough tasks for one session's context"),
         ("build-slice", 4, "Ask no one to run a skill or a command for you, the user included"),
@@ -532,9 +531,9 @@ def test_the_child_rebases_by_what_its_branch_was_cut_from(texts):
         (
             "run-slices",
             10,
-            "No reference, or no session tools With no reference for this harness (above), "
-            "or with the abilities really missing after searching deferred tools: say which, "
-            "and walk the slices here",
+            "No guide, or no session tools With no guide for this harness, or an ability its "
+            "guide marks unconfirmed, follow [discover.md](references/discover.md) first. With "
+            "no way to start a child even then: say so, and walk the slices here",
         ),
         (
             "run-slices",

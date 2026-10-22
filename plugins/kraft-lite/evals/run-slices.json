@@ -205,12 +205,13 @@
       "kraft-lite:run-slices"
     ],
     "query": "The slicing is approved. Set the run up and start it.",
-    "setup": "A local Amp CLI controller session (Amp, the coding agent) in repo acme/ledger, checked out at /home/dev/ledger (base branch main), for Kraft Lite chain kl-7f3a91c2 'Ledger export', sliced in feature mode: feature branch feat/ledger-export, pushed to origin at 4c2d9e1; the state branch feat/ledger-export-state is in its own worktree, and the user approved pushing both. `kl.py slices` lists a 'Row model' (task 1), b 'Writers' (tasks 2-4, after a) and c 'Importer' (task 5); ready [a, c], early []. The working setup line `uv sync` and the scoped test command `uv run pytest <paths>` have been run once here. Default rights. The user has said 'go'. The skill's references folder holds claude-code.md, codex.md and cursor.md, and nothing for Amp. This session has a shell, file tools and a subagent tool; the `amp` CLI is on PATH and `amp --help` lists a `threads` command.",
+    "setup": "A local controller session of Heron, a coding agent with a CLI (`heron`), in repo acme/ledger, checked out at /home/dev/ledger (base branch main), for Kraft Lite chain kl-7f3a91c2 'Ledger export', sliced in feature mode: feature branch feat/ledger-export, pushed to origin at 4c2d9e1; the state branch feat/ledger-export-state is in its own worktree, and the user approved pushing both. `kl.py slices` lists a 'Row model' (task 1), b 'Writers' (tasks 2-4, after a) and c 'Importer' (task 5); ready [a, c], early []. Children run locally on this machine. The working setup line `uv sync` and the scoped test command `uv run pytest <paths>` have been run once here. Default rights. The user has said 'go'. The skill's guides cover other harnesses, none Heron, and there is no `.kraft-lite/harnesses/` folder. This session has a shell, file tools and web fetch, and no session tools; it is not in Kraft's own repo and `kraft` is not installed. If run: `heron --version` prints `heron 0.9.2`; `heron --help` lists only `chat` (opens the interactive terminal UI) and `login`; heron's documentation describes neither a non-interactive run nor sessions, messages, archiving or schedules.",
     "expected_behavior": [
-      "Does not refuse or pause the run for want of a harness reference, and does not ask the user to supply one",
-      "Treats starting, messaging, archiving and checking in on sessions as unconfirmed for Amp, and invents no `amp` command or flag to start or message a child session",
+      "Does not refuse or pause the run for want of a guide, and does not ask the user to supply one",
+      "Looks before falling back: its own tool list, a Kraft harness profile for heron, `heron --help` and its subcommands' help, then heron's documentation",
+      "Finds none of the abilities confirmed, writes `.kraft-lite/harnesses/heron.md` marking each UNCONFIRMED with its source and heron 0.9.2, and invents no `heron` command or flag to start or message a child",
       "Applies the fallbacks: walks the slices in this session one after another in `ready` order, starting with a, with the same review, merge and state steps (`kl.py slice-set` for each slice it starts, then export state)",
-      "Says that nothing will wake this session for a check-in, so the user invokes `kraft-lite:run-slices` to continue the run"
+      "Says that nothing will wake this session for a check-in, so the user invokes run-slices to continue the run"
     ]
   },
   {
@@ -293,6 +294,47 @@
       "Draws no proposal now: writes no .kraft-lite/proposals/kl-7f3a91c2.json and runs no `approve --slices`",
       "Leaves spec_approval to its own question: `kraft-lite:gate` (after `kl.py gate` if it is not blocked yet), recording nothing on the user's behalf",
       "Starts no child session"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:run-slices"
+    ],
+    "query": "The slicing is approved. Set the run up and start it.",
+    "setup": "A local controller session of Wren, a coding agent with a CLI (`wren`), in repo acme/ledger, checked out at /home/dev/ledger (base branch main), for Kraft Lite chain kl-7f3a91c2 'Ledger export', sliced in feature mode: feature branch feat/ledger-export, pushed to origin at 4c2d9e1; the state branch feat/ledger-export-state is in its own worktree, and the user approved pushing both. `kl.py slices` lists a 'Row model' (task 1), b 'Writers' (tasks 2-4, after a) and c 'Importer' (task 5); ready [a, c], early []. Children run locally on this machine. The working setup line `uv sync` and the scoped test command `uv run pytest <paths>` have been run once here. Default rights. The user has said 'go'. The skill's guides cover other harnesses, none Wren, and there is no `.kraft-lite/harnesses/` folder. This session has a shell, file tools and web fetch, and no session tools; it is not in Kraft's own repo and `kraft` is not installed. If run: `wren --version` prints `wren 3.4.1`; `wren --help` lists commands `run`, `sessions` and `config`, and options `--model <id>`, `--yes` (approve every tool call) and `--json`; `wren run --help` says `wren run [--model <id>] [--yes] [--json] <prompt>` runs one prompt without a terminal in the current directory and prints the session id on its first JSON line; `wren sessions --help` lists `list`, `send <id> <message>` (adds a message to a session and runs it) and `delete <id>` (deletes it for good). No help text and no page of docs.wren.dev mentions archiving, scheduling, waking a session, or one session messaging another.",
+    "expected_behavior": [
+      "Before starting any child, looks for each ability in this order: its own tool list, a Kraft harness profile (`src/kraft/harnesses/wren.yaml` or `kraft admin harnesses wren`, finding neither), `wren --help` and each subcommand's `--help`, then Wren's documentation",
+      "Confirms only from help output or docs, by read-only commands: start (`wren run --model <model> --yes --json <prompt>`, run inside the slice's worktree) and message (`wren sessions send <id> <message>`) confirmed; be messaged, archive and check in later unconfirmed; starts no trial child to test a command",
+      "Writes `.kraft-lite/harnesses/wren.md` in a guide's shape (Start a child, Message a child, Be messaged, Archive a child, Check in later), each ability with its source, CONFIRMED or UNCONFIRMED, and wren 3.4.1 as the version checked, and logs it with `kl.py decide`",
+      "Uses only confirmed abilities: starts a and c as background `wren run` children in their own worktrees on their slice branches, gives each child the messages file `/home/dev/ledger/.kraft-lite/messages/kl-7f3a91c2/<key>.jsonl` as its channel to the controller, and never uses `wren sessions delete` to archive",
+      "Tells the user what it found and offers `.kraft-lite/harnesses/wren.md` as a guide to ship, and says nothing will wake this session, so they invoke run-slices to continue the run"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:run-slices"
+    ],
+    "query": "The slicing is approved. Set the run up and start it.",
+    "setup": "A local Gemini CLI controller session (`gemini`, with GEMINI_API_KEY set), with Kraft Lite installed as a Gemini CLI extension, in repo acme/ledger, checked out at /home/dev/ledger (base branch main), for Kraft Lite chain kl-7f3a91c2 'Ledger export', sliced in feature mode: feature branch feat/ledger-export, pushed to origin at 4c2d9e1; the state branch feat/ledger-export-state is in its own worktree, and the user approved pushing both. `kl.py slices` lists a 'Row model' (task 1), b 'Writers' (tasks 2-4, after a) and c 'Importer' (task 5); ready [a, c], early []. Children run locally on this machine. The working setup line `uv sync` and the scoped test command `uv run pytest <paths>` have been run once here. Default rights. The user has said 'go'. This session has its shell tool, file tools and web fetch, and no session tools. There is no `.kraft-lite/harnesses/` folder. If run, `gemini --version` prints `0.61.0`, and `gemini --help` and the Gemini CLI docs show nothing for messaging a running session, a session messaging another, archiving or scheduling beyond what the Gemini guide records.",
+    "expected_behavior": [
+      "Takes each ability from the Gemini guide (`references/gemini.md`), and for the ones it marks unconfirmed looks first as discover.md says (a local guide, then read-only `gemini --help` and the docs) before using their fallbacks",
+      "Creates each child's worktree on its slice branch first (`git worktree add -b <slice-branch> <path> <fork sha>`) and starts a and c from inside it, headless and in the background: `gemini --skip-trust -m <a gemini- model> --approval-mode yolo -o stream-json -p \"<starting instructions>\"`, its output to a log file",
+      "Gives each child the messages file `/home/dev/ledger/.kraft-lite/messages/kl-7f3a91c2/<key>.jsonl` as its channel to the controller, and `none; continue on the controller's check-in` for its own wake-up",
+      "Tells each child to invoke `build-slice`, the name Gemini gives `kraft-lite:build-slice`",
+      "Tells the user plainly that nothing will wake this session, and to invoke run-slices to continue the run"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:run-slices"
+    ],
+    "query": "Slicing's approved for this run too. Set it up and go.",
+    "setup": "A local controller session of Wren, a coding agent with a CLI (`wren`), in repo acme/ledger, checked out at /home/dev/ledger (base branch main), for Kraft Lite chain kl-90ab12cd 'Ledger export', sliced in feature mode: feature branch feat/ledger-export, pushed to origin at 4c2d9e1; the state branch feat/ledger-export-state is in its own worktree, and the user approved pushing both. `kl.py slices` lists a 'Row model' (task 1), b 'Writers' (tasks 2-4, after a) and c 'Importer' (task 5); ready [a, c], early []. Children run locally on this machine. The working setup line `uv sync` and the scoped test command `uv run pytest <paths>` have been run once here. Default rights. The user has said 'go'. The skill's guides cover other harnesses, none Wren. This session has a shell, file tools and web fetch, and no session tools. If run: `ls .kraft-lite` prints `bindings.yaml chains decisions harnesses messages proposals`; `ls .kraft-lite/harnesses` prints `wren.md`, which, if read, says it was checked on wren 3.4.1 on 2026-10-02 and records Start a child CONFIRMED from `wren run --help` (`wren run --model <id> --yes --json <prompt>`, run inside the slice's worktree, the session id on the first JSON line), Message a child CONFIRMED from `wren sessions --help` (`wren sessions send <id> <message>`), and Be messaged, Archive a child and Check in later UNCONFIRMED, each with its fallback named; `wren --version` prints `wren 3.4.1`; `wren --help` and the subcommands' help print what that file records.",
+    "expected_behavior": [
+      "Reads `.kraft-lite/harnesses/wren.md` before section 2's checklist, and checks `wren --version` against the 3.4.1 it was checked on",
+      "Does not research again: no `wren --help`, subcommand help or docs lookup for the abilities the file already records",
+      "Starts a and c with the file's confirmed start command, from inside each slice's worktree on its slice branch, and gives each child the messages file `/home/dev/ledger/.kraft-lite/messages/kl-90ab12cd/<key>.jsonl` as its channel to the controller",
+      "Uses the fallbacks for the unconfirmed abilities: tells the user nothing will wake this session, so they invoke run-slices to continue the run"
     ]
   }
 ]

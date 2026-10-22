@@ -1,0 +1,5 @@
+{
+  "name": "kraft-lite",
+  "version": "2.2.0",
+  "description": "Run a Kraft chain in this session: ordered nodes, human gates, capped fix loops. No orchestrator."
+}

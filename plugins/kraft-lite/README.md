@@ -32,6 +32,37 @@ Add `--scope project` to either command to keep it to one repo. The plugin
 version follows Kraft's release tag. To check the install, run
 `/kraft-lite:status` in a repo: it reports that no chain exists yet.
 
+### Other harnesses
+
+The repository also ships manifests for Cursor (`.cursor-plugin/plugin.json`),
+Gemini CLI (`gemini-extension.json`) and Antigravity (`plugin.json`). Amp and
+OpenCode load the skills from a folder. On Gemini CLI, Antigravity, Amp and
+OpenCode, two things differ from Claude Code:
+
+- Skills are not namespaced. `/kraft-lite:next` is the skill `next`, and where a
+  skill's text says `kraft-lite:<name>`, the agent uses `<name>`.
+- There is no plugin-root variable, so each skill finds `kl.py` two directories
+  above its own file. Keep the plugin folder whole: a copy of `skills/` alone
+  leaves `kl.py` behind.
+
+Each install reads a local clone of the Kraft repository, `<kraft>` below
+(`git clone https://github.com/itsOmidKarami/kraft`).
+
+- **Gemini CLI.** `gemini extensions install <kraft>/plugins/kraft-lite --consent`,
+  then restart the CLI; `gemini skills list` lists the skills. Update with
+  `gemini extensions update kraft-lite`. Installing from the GitHub URL is not
+  covered: the extension sits in a subfolder of the repository.
+- **Antigravity.** `agy plugin install <kraft>/plugins/kraft-lite`; `agy plugin list`
+  shows it, and each skill is a slash command by its own name (`/next`). That
+  the install copies `kl.py` along with the skills is not checked yet.
+- **Amp.** In `~/.config/amp/settings.json`, or a repo's `.amp/settings.json`:
+  `{ "amp.skills.path": "<kraft>/plugins/kraft-lite/skills" }`. `amp skills list`
+  lists them. Pull the clone to update.
+- **OpenCode.** In `opencode.json`, on 2.x: `{ "skills": ["<kraft>/plugins/kraft-lite/skills"] }`
+  (1.x: `{"skills": {"paths": [...]}}`), with the absolute path. Don't symlink
+  single skill folders into `~/.config/opencode/skills`: the agent then looks for
+  `kl.py` next to the link. Pull the clone to update.
+
 ## What is fixed and what is not
 
 A chain freezes when it starts, resolved: its nodes cannot be reordered, added
@@ -482,17 +513,24 @@ if `migrate` left one. `/kraft-lite:init` tells you to.
 
 Slices need four abilities from the harness: start a child session, message it,
 be messaged by it, and archive it. The controller also needs a way to check in
-later. `skills/run-slices/references/` maps them to the tools of Claude Code,
-Codex and Cursor, and marks the ones it could not confirm.
+later. The guides in `skills/run-slices/references/` map them to the tools of
+Claude Code, Codex, Cursor, Gemini CLI, Antigravity, Amp and OpenCode, and mark
+the ones they could not confirm.
 
 Where a harness lacks an ability, there is a fallback. A child on the same
 machine writes to a file under `.kraft-lite/messages/`. A child on another
 machine comments on its own draft pull request. A controller that cannot be
 woken says so, and you run `/kraft-lite:run-slices` to continue the run.
 
-If the harness has no session tools at all, the controller walks the slices
-itself, one after another. A harness with no reference, such as Amp or Gemini,
-gets every fallback, and the run goes on.
+On a harness with no guide, or for an ability its guide marks unconfirmed,
+the controller looks before it falls back. It checks its own tools, Kraft's
+harness profile, the CLI's help and the official docs, running only read-only
+commands. It writes what it confirmed, with the source and version, to
+`.kraft-lite/harnesses/<harness>.md`. The next run reads that file first. It
+tells you what it found, and offers the file as a guide to ship.
+
+If the harness can't start a session at all, the controller walks the slices
+itself, one after another, and the run goes on.
 
 A cloud child cannot message a controller on another machine. For a local
 controller with cloud children, pull request comments are the channel.

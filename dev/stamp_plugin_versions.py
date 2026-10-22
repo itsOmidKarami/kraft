@@ -22,6 +22,9 @@ MANIFESTS = (
     _ROOT / "plugins" / "kraft-lite" / ".claude-plugin" / "plugin.json",
     _ROOT / "plugins" / "kraft" / ".cursor-plugin" / "plugin.json",
     _ROOT / "plugins" / "kraft-lite" / ".cursor-plugin" / "plugin.json",
+    # Gemini CLI's extension manifest. Antigravity's `plugins/kraft-lite/plugin.json`
+    # is not here: its schema has no `version` and refuses a key it does not list.
+    _ROOT / "plugins" / "kraft-lite" / "gemini-extension.json",
     # The VS Code extension ships in the same release at the same version.
     _ROOT / "vscode" / "package.json",
     # Its lockfile repeats the version; unstamped, it fell a release behind.

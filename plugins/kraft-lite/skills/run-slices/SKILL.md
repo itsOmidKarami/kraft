@@ -21,12 +21,13 @@ In prose and checklists below, `KL` is short for
 even where it is not written: pass it to every verb except `settings`, `import`,
 `chains`, `detect`, `migrate` and `start`. Type each command in full.
 
-The tools for each ability are in your harness's reference; read it before
-section 2: [Claude Code](references/claude-code.md),
-[Codex](references/codex.md), [Cursor](references/cursor.md).
-A harness with no reference here runs on every ability's fallback, whatever its
-own help shows: walk the slices here (section 10), and tell the user nothing
-wakes this session, so they invoke `kraft-lite:run-slices` to continue it.
+The tools for each ability are in your harness's guide; read it before
+section 2: [Claude Code](references/claude-code.md), [Codex](references/codex.md),
+[Cursor](references/cursor.md), [Gemini CLI](references/gemini.md),
+[Antigravity](references/antigravity.md), [Amp](references/amp.md),
+[OpenCode](references/opencode.md). With no guide for this harness, or an
+ability its guide marks unconfirmed, follow [discover.md](references/discover.md)
+before any fallback.
 
 ## 1. When to slice
 
@@ -70,7 +71,7 @@ chain continues as one.
 Copy this and tick it off; while a line is unticked, no child starts.
 
 ```
-- [ ] Abilities confirmed from the harness reference, or its fallback named: start, message, be messaged, archive, check in later. Deferred tools searched before calling one missing. A missing ability is never a block.
+- [ ] Abilities confirmed from the guide, a local guide, or discover.md, or its fallback named: start, message, be messaged, archive, check in later. Each one with no guide, or that its guide leaves unconfirmed, looked for as discover.md says before its fallback. A missing ability is never a block.
 - [ ] One user approval for every branch this run pushes outside this session's own: the feature branch (`feature` mode), and locally the state branch.
 - [ ] Setup and the scoped test command run once here, and the working setup line written down.
 - [ ] The user has finished giving instructions for this run: ask, and hear "go".
@@ -102,7 +103,7 @@ For each key you start:
 2. Start the session from that commit, where the user said children run for
    this run (locally or in the cloud), else where this session runs. Its own
    branch is the slice branch; its title is `<chain-id> <key>: <slice title>`;
-   it is tagged with the chain id where the reference confirms tags; it has
+   it is tagged with the chain id where the guide confirms tags; it has
    **an explicit model** (middle tier).
 3. `KL slice-set --slice <key> --status running --session <id> --branch <slice-branch>`.
    Started from `early`, also
@@ -131,9 +132,9 @@ The starting instructions, in this order:
    child starts its child chain from.
 2. **Controller:** this session's id, and locally its name too (a local session
    message is addressed by name). The child's own tools, copied from your
-   reference's "Be messaged" and "Check in later": the one that messages you,
+   guide's "Be messaged" and "Check in later": the one that messages you,
    and the one that schedules a message back into its own session. Where the
-   reference marks the child's wake-up unconfirmed, write
+   guide marks the child's wake-up unconfirmed, write
    `none; continue on the controller's check-in` in its place. The channels
    in the order to try them: a session message; on the same machine
    `.kraft-lite/messages/<chain-id>/<key>.jsonl` under this checkout's absolute
@@ -180,7 +181,7 @@ Before any other write and before starting anything:
    an older Kraft Lite is a run from before V1 chains: tell the user it must be
    finished on the previous Kraft Lite version, and write nothing.
 2. `KL slices`. For every `starting` or `running` slice, and every `waiting`
-   one in `ready` or `early`, find its session, in the ways the reference
+   one in `ready` or `early`, find its session, in the ways the guide
    confirms: the recorded session id; a session whose title or name carries
    `<chain-id>` and `<key>`; the chain-id tag; and its slice branch on the remote
    (`git ls-remote origin <slice-branch>`) as evidence a child ran.
@@ -203,7 +204,7 @@ nodes `sliced.action` marks `await_user_merges` close. Its message, word for wor
 ```
 - [ ] `KL state` and `KL slices`. Past the first build node: invoke `kraft-lite:next`, which records the user's merges, and skip to the last line. A non-empty `base_moved`: the rebase in section 6.
 - [ ] Read messages, then `.kraft-lite/messages/<chain-id>/`, then each slice PR's comments.
-- [ ] Per running child: its status summary (fields in the reference), and `git fetch` + `git log` of its branch. Never its full transcript.
+- [ ] Per running child: its status summary (fields in the guide), and `git fetch` + `git log` of its branch. Never its full transcript.
 - [ ] A child shown as blocked: find out on what (often its own subagents) before telling the user anything.
 - [ ] `main` mode: each `ready_to_merge` slice's PR. One the user merged takes the steps after a merge (section 6).
 - [ ] Answer every question (below). Export state.
@@ -331,11 +332,12 @@ marks what it reports, and gives the report its shape.
 List the branches safe to delete (merged slices; the state branch once done)
 for the user to delete. In `feature` mode, the MR node opens the feature PR.
 
-## 10. No reference, or no session tools
+## 10. No guide, or no session tools
 
-With no reference for this harness (above), or with the abilities really
-missing after searching deferred tools: say which, and walk the slices here,
-one after another, in `ready` order, with the same review, merge and state steps.
+With no guide for this harness, or an ability its guide marks unconfirmed,
+follow [discover.md](references/discover.md) first. With no way to start a child
+even then: say so, and walk the slices here, one after another, in `ready`
+order, with the same review, merge and state steps.
 
 ## 11. Models
 
