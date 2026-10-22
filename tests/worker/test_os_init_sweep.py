@@ -19,15 +19,15 @@ OS_INIT = Path(os_init.__file__)
 PY = [sys.executable, "-I", "-S"]
 
 
-class _SandboxCheck:
-    """libsystem_sandbox's `sandbox_check`, recording how it was declared and called."""
+class _Fn:
+    """A callable that, like a ctypes function, takes `argtypes`, and keeps its calls."""
 
-    def __init__(self):
-        self.calls = []
+    def __init__(self, fn=lambda *args: 0):
+        self.fn, self.calls = fn, []
 
     def __call__(self, *args):
         self.calls.append(args)
-        return 0
+        return self.fn(*args)
 
 
 @pytest.mark.parametrize(
@@ -39,68 +39,74 @@ class _SandboxCheck:
     ids=["arm64-path-ninth", "x86_64-path-fourth"],
 )
 def test_sandbox_check_declaration(monkeypatch, machine, sees, types):
-    fn = _SandboxCheck()
+    fn = _Fn()
     monkeypatch.setattr(os_init.platform, "machine", lambda: machine)
     monkeypatch.setattr(os_init, "_libc", lambda: SimpleNamespace(sandbox_check=fn))
     os_init._sandbox_check()(1, b"op", 2, b"/p")
     assert (fn.calls, len(fn.argtypes)) == ([sees], types)
 
 
-def test_sandbox_check_refuses_other_machines(monkeypatch):
-    monkeypatch.setattr(os_init.platform, "machine", lambda: "riscv64")
-    with pytest.raises(OSError, match="supports arm64 and x86_64 Macs, not riscv64"):
+@pytest.mark.parametrize(
+    ("machine", "libc", "want"),
+    [
+        (
+            "riscv64",
+            SimpleNamespace(sandbox_check=_Fn()),
+            "supports arm64 and x86_64 Macs, not riscv64",
+        ),
+        ("arm64", SimpleNamespace(), "has no sandbox_check"),
+    ],
+    ids=["other-machine", "no-symbol"],
+)
+def test_sandbox_check_refused(monkeypatch, machine, libc, want):
+    monkeypatch.setattr(os_init.platform, "machine", lambda: machine)
+    monkeypatch.setattr(os_init, "_libc", lambda: libc)
+    with pytest.raises(OSError, match=want):
         os_init._sandbox_check()
 
 
 @pytest.mark.parametrize(
-    ("rounds", "passes", "killed", "left", "marker_stays"),
+    ("scans", "passes", "killed", "left", "marker_stays"),
     [
-        ([[]], 10, [], [], False),
-        ([[7, 8], []], 10, [(7, "STOP"), (8, "STOP"), (7, "KILL"), (8, "KILL")], [], False),
-        ([[7], [7], []], 2, [(7, "STOP"), (7, "KILL")] * 2, [], False),
-        ([[7]] * 4, 3, [(7, "STOP"), (7, "KILL")] * 3, [7], True),
+        ([[], [], []], 10, [], [], False),
+        ([[7, 8], [], [], []], 10, [(7, "KILL"), (8, "KILL")], [], False),
+        # one empty scan can fall between a fork loop's generations
+        ([[], [7], [], [], []], 10, [(7, "KILL")], [], False),
+        ([[7]] * 4, 3, [(7, "KILL")] * 3, [7], True),
     ],
-    ids=[
-        "nothing-to-do",
-        "stop-all-then-kill-all",
-        "gone-after-last-pass",
-        "stubborn-keeps-marker",
-    ],
+    ids=["nothing-to-do", "kills-then-confirms", "one-quiet-scan-is-not-enough", "stubborn"],
 )
-def test_sweep_passes(monkeypatch, tmp_path, rounds, passes, killed, left, marker_stays):
+def test_sweep_passes(monkeypatch, tmp_path, scans, passes, killed, left, marker_stays):
     marker, control = tmp_path / "markers" / "s", tmp_path / "markers" / "control"
     os_init._touch(str(marker))
-    sent = []
-    monkeypatch.setattr(os_init, "session_pids", lambda m, c: rounds.pop(0))
+    sent, stops = [], []
+    monkeypatch.setattr(
+        os_init, "session_pids", lambda m, c, stop: stops.append(stop) or scans.pop(0)
+    )
     monkeypatch.setattr(
         os_init, "_signal_all", lambda pids, sig: sent.extend((p, sig.name[3:]) for p in pids)
     )
     assert os_init.sweep(str(marker), str(control), passes) == left
     assert (sent, marker.exists(), control.exists()) == (killed, marker_stays, True)
-
-
-class _Fn:
-    """A callable that, like a ctypes function, takes `argtypes`."""
-
-    def __init__(self, fn):
-        self.fn = fn
-
-    def __call__(self, *args):
-        return self.fn(*args)
+    assert set(stops) == {True}  # each scan stops what it finds, before the next generation forks
 
 
 def test_session_pids_filters(monkeypatch):
-    # pid: (user, status, sandboxed, may read the marker, may read the control marker)
-    me = os.getpid()
+    # pid: (user, sandboxed, may read the marker, may read the control marker); None: gone
+    me, uid = os.getpid(), os.geteuid()
     procs = {
-        me: (os.geteuid(), 1, True, True, False),
-        101: (os.geteuid(), 1, True, True, False),
-        102: (os.geteuid() + 1, 1, True, True, False),
-        103: (os.geteuid(), 5, True, True, False),
-        104: (os.geteuid(), 1, False, True, False),
-        105: (os.geteuid(), 1, True, False, False),
-        106: (os.geteuid(), 1, True, True, True),
+        me: (uid, True, True, False),
+        101: (uid, True, True, False),
+        102: (uid + 1, True, True, False),
+        103: None,
+        104: (uid, False, True, False),
+        105: (uid, True, False, False),
+        106: (uid, True, True, True),
     }
+    # born after the listing: a fork loop's newest generations, and one too far on to be its
+    top = max(procs) + 1
+    procs[top] = None  # listed, gone before it was looked at
+    late = {top + 3: procs[101], top + 4: procs[101], top + 300: procs[101]}
 
     def listing(buf, size):
         for i, pid in enumerate(procs if buf is not None else ()):
@@ -108,21 +114,27 @@ def test_session_pids_filters(monkeypatch):
         return len(procs)
 
     def info(pid, flavor, arg, buf, size):
-        struct.pack_into("=II", buf, 4, procs[pid][1], 0)
-        struct.pack_into("=I", buf, 20, procs[pid][0])
+        if (procs | late).get(pid) is None:  # an exited process, a zombie too, gives no info
+            return 0
+        struct.pack_into("=I", buf, 20, (procs | late)[pid][0])
         return 136
 
     def check(pid, operation, kind, path):
-        _, _, sandboxed, marker, control = procs[pid]
+        _, sandboxed, marker, control = (procs | late)[pid]
         if operation is None:
             return int(sandboxed)
         return 0 if (marker, control)[path == b"control"] else 1
 
     libc = SimpleNamespace(proc_listallpids=_Fn(listing), proc_pidinfo=_Fn(info))
+    stopped = []
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(os_init, "_libc", lambda: libc)
     monkeypatch.setattr(os_init, "_sandbox_check", lambda: check)
-    assert os_init.session_pids("marker", "control") == [101]
+    monkeypatch.setattr(os_init, "_signal_all", lambda pids, sig: stopped.extend(pids))
+    assert os_init.session_pids("marker", "control") == [101, top + 3, top + 4]
+    assert stopped == []
+    assert os_init.session_pids("marker", "control", stop=True) == [101, top + 3, top + 4]
+    assert stopped == [101, top + 3, top + 4]
 
 
 # --- on a Mac: the real libsandbox -------------------------------------------------
@@ -256,5 +268,42 @@ def test_launch_sweeps_when_the_command_exits(tmp_path, markers, started):
     assert (gone(started[0]), markers["a"].exists(), (tmp_path / "tmp").exists()) == (
         True,
         False,
+        False,
+    )
+
+
+# Every generation forks and exits, hopping pid for pid; it ends itself after 8 s, so a
+# sweep that fails to catch it leaves nothing behind for long.
+HOPPER = (
+    "import os, time\n"
+    "end = time.time() + 8\n"
+    "while time.time() < end:\n"
+    "    if os.fork():\n"
+    "        os._exit(0)\n"
+)
+
+
+@pytest.mark.e2e("sandbox-exec")
+def test_sweep_outruns_a_fork_loop(markers):
+    sandbox = ["sandbox-exec", "-p", _profile(markers["a"]), os.path.realpath(sys.executable)]
+    p = subprocess.Popen([*sandbox, "-I", "-S", "-c", HOPPER], stdout=subprocess.PIPE)
+    time.sleep(0.3)
+    began = time.monotonic()
+    assert os_init.sweep(str(markers["a"]), str(markers["control"])) == []
+    p.stdout.read()  # EOF once no generation holds the pipe
+    assert time.monotonic() - began < 3
+    p.wait()
+
+
+def test_end_session_keeps_the_exit_path_on_a_failed_sweep(monkeypatch, tmp_path, capsys):
+    def broken(marker, control):
+        raise PermissionError("no")
+
+    monkeypatch.setattr(os_init, "sweep", broken)
+    (tmp_path / "tmp").mkdir()
+    opts = {"--marker": "m", "--control": "c", "--tmpdir": str(tmp_path / "tmp")}
+    os_init._end_session(opts)
+    assert (capsys.readouterr().err.strip(), (tmp_path / "tmp").exists()) == (
+        "kraft: os sandbox: processes survived the sweep: the sweep failed: no",
         False,
     )

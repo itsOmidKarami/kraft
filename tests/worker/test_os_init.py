@@ -480,6 +480,7 @@ def _ask(port):
         time.sleep(0.05)
 
 
+@linux_only  # on macOS the launcher is the relay
 def test_relay_reconnects_per_connection(short_run):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -501,6 +502,7 @@ def test_relay_reconnects_per_connection(short_run):
         p.wait()
 
 
+@linux_only
 def test_relay_survives_descriptor_exhaustion(short_run):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -607,3 +609,30 @@ def test_launch_darwin_session(launcher, tmp_path, mode, new_session):
     )
     assert sweeps.read_text().split() == [str(marker), str(control)]
     assert not tmpdir.exists()
+
+
+def test_launch_darwin_returns_with_a_survivor(launcher, tmp_path):
+    # What the sweep cannot end must not hold the launcher: it holds the pipe open.
+    code = "import subprocess; subprocess.Popen(['sleep', '8']); print('out')"
+    began = time.monotonic()
+    r = run(launcher("launch", py(code), darwin=True, sweeps=tmp_path / "sweeps"))
+    assert (r.stdout, time.monotonic() - began < 5) == ("out\n", True)
+
+
+@pytest.mark.parametrize(
+    ("argv", "want"),
+    [
+        (
+            lambda build, t: init_argv("true", sock=t / "s", port=1, darwin=True),
+            "no relay on macOS",
+        ),
+        (
+            lambda build, t: build("oneshot", py("pass"), relay=t / "s", darwin=True),
+            "oneshot: usage error",
+        ),
+    ],
+    ids=["init-sock", "oneshot-relay"],
+)
+def test_macos_refuses_what_it_does_not_do(launcher, tmp_path, argv, want):
+    r = run(argv(launcher, tmp_path))
+    assert (r.returncode != 0, want in r.stderr) == (True, True)

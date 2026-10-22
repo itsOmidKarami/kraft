@@ -43,7 +43,8 @@ STARTED_ENV = "OS_INIT_STARTED_FD"
 SANDBOX_FILTER_PATH = 1
 SANDBOX_CHECK_NO_REPORT = 0x40000000
 PROC_PIDTBSDINFO = 3
-SZOMB = 5
+CHASE_GAP = 64  # absent pids in a row that end the walk past the snapshot
+QUIET_PASSES = 3  # empty scans, 20 ms apart, before the marker goes
 #: The worker's proxy environment under `network:` on macOS, as `mounts.RELAY_PROXY_ENV`
 #: spells it for Linux, with the port the launcher's relay was given.
 PROXY_NAMES = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
@@ -103,7 +104,8 @@ def _launch(mode, argv):
     opts, cmd = _parse(argv, LAUNCH_FLAGS, repeat=("--setenv",))
     darwin = sys.platform == "darwin"
     need = ("--marker", "--control", "--tmpdir") if darwin else ("--seccomp-file",)
-    if not cmd or not all(n in opts for n in need) or (mode == "oneshot" and "--started" in opts):
+    refused = ("--started", "--relay-sock") if mode == "oneshot" else ()
+    if not cmd or not all(n in opts for n in need) or any(f in opts for f in refused):
         raise SystemExit(f"os_init {mode}: usage error")
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         # Ignored stays ignored across exec, so the sandbox outlives a group signal.
@@ -145,10 +147,13 @@ def _launch(mode, argv):
     if seccomp is not None:
         os.close(seccomp)
 
+    ended = threading.Event()
+
     def wait():
         code = _exit_code_of(proc.wait())
         if darwin:
             _end_session(opts)
+        ended.set()
         return code
 
     if mode == "oneshot":
@@ -156,11 +161,12 @@ def _launch(mode, argv):
     os.close(out_w)
     os.close(st_w)
     # Orphans hold the output pipe open, so the sweep that ends them runs as soon
-    # as the command does, not at EOF.
+    # as the command does, not at EOF; one the sweep cannot end must not hold the
+    # launcher too, so the copy stops once the sweep is over and the pipe is idle.
     result = []
     waiter = threading.Thread(target=lambda: result.append(wait()))
     waiter.start()
-    _copy(out_r, st_r, opts.get("--started"))
+    _copy(out_r, st_r, opts.get("--started"), ended if darwin else None)
     waiter.join()
     return result[0]
 
@@ -189,7 +195,10 @@ def _touch(path):
 
 
 def _end_session(opts):
-    left = sweep(opts["--marker"], opts["--control"])
+    try:
+        left = sweep(opts["--marker"], opts["--control"])
+    except OSError as e:  # the command's status still goes out
+        left = f"the sweep failed: {e}"
     if left:  # the marker stays, so a later sweep finds them
         print(f"kraft: os sandbox: processes survived the sweep: {left}", file=sys.stderr)
     shutil.rmtree(opts["--tmpdir"], ignore_errors=True)
@@ -199,12 +208,16 @@ def _exit_code_of(returncode):
     return 128 - returncode if returncode < 0 else returncode
 
 
-def _copy(out_r, st_r, started_file):
-    """Copy the output pipe to fd 1 until EOF; note the first started byte."""
+def _copy(out_r, st_r, started_file, ended=None):
+    """Copy the output pipe to fd 1 until EOF; note the first started byte. With
+    `ended`, also stop once it is set and nothing is left to read."""
     watch = [out_r, st_r]
     broken = False
     while out_r in watch:
-        for fd in select.select(watch, [], [])[0]:
+        ready = select.select(watch, [], [], None if ended is None else 0.2)[0]
+        if not ready and ended is not None and ended.is_set():
+            break
+        for fd in ready:
             data = os.read(fd, 65536)
             if not data:
                 watch.remove(fd)
@@ -293,7 +306,10 @@ def _sandbox_check():
     machine = platform.machine()
     if machine not in ("arm64", "x86_64"):
         raise OSError(f"kind: os supports arm64 and x86_64 Macs, not {machine}")
-    fn = _libc().sandbox_check
+    try:
+        fn = _libc().sandbox_check
+    except AttributeError as e:
+        raise OSError("libsystem_sandbox has no sandbox_check") from e
     fill = (0,) * 5 if machine == "arm64" else ()
     fn.restype = ctypes.c_int
     fn.argtypes = [
@@ -306,11 +322,14 @@ def _sandbox_check():
     return lambda pid, operation, kind, path: fn(pid, operation, kind, *fill, path)
 
 
-def session_pids(marker, control):
+def session_pids(marker, control, stop=False):
     """The pids of one session's processes: sandboxed, the caller's user, able to
     read `marker` (which only that session's profile allows) and not `control`
     (which no profile allows; an Apple app that may read anywhere under /private
-    passes the other tests and fails this). Empty off macOS."""
+    passes the other tests and fails this). With `stop`, each is sent SIGSTOP the
+    moment it matches, newest first: a scan takes milliseconds, a fork loop's
+    generation less, so stopping only after the scan would find them gone.
+    Empty off macOS."""
     if sys.platform != "darwin":
         return []
     check, libc = _sandbox_check(), _libc()
@@ -324,22 +343,46 @@ def session_pids(marker, control):
     ]
     pids = (ctypes.c_int * (libc.proc_listallpids(None, 0) + 64))()  # slack for new processes
     pids = pids[: max(libc.proc_listallpids(pids, ctypes.sizeof(pids)), 0)]
-    info = ctypes.create_string_buffer(256)  # struct proc_bsdinfo: status at 4, uid at 20
+    info = ctypes.create_string_buffer(256)  # struct proc_bsdinfo: the user at 20
     read = SANDBOX_FILTER_PATH | SANDBOX_CHECK_NO_REPORT
-    found = []
-    for pid in pids:
+
+    def probe(pid):
+        """(is there such a process, is it the session's); a member is stopped when asked."""
+        # A process that has exited (a zombie too) gives no info.
         if pid in (0, os.getpid()) or libc.proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, info, 256) < 24:
-            continue
-        status, uid = struct.unpack_from("=I", info, 4)[0], struct.unpack_from("=I", info, 20)[0]
-        if (
-            uid == os.geteuid()
-            and status != SZOMB
+            return False, False
+        member = (
+            struct.unpack_from("=I", info, 20)[0] == os.geteuid()
             and check(pid, None, 0, None) == 1
             and check(pid, b"file-read-data", read, os.fsencode(marker)) == 0
             and check(pid, b"file-read-data", read, os.fsencode(control)) != 0
-        ):
+        )
+        if member and stop:
+            _signal_all([pid], signal.SIGSTOP)
+        return True, member
+
+    found, vanished = [], []
+    for pid in sorted(pids, reverse=True):
+        alive, member = probe(pid)
+        if member:
             found.append(pid)
-    return found
+        if not alive:
+            vanished.append(pid)
+    # Pids are handed out in order, so a fork loop's newest generations are the pids just
+    # past one that was listed and has gone since (or past a member): walk on from there
+    # until the pids run out or reach a listed one. A probe is cheaper than a generation,
+    # so the walk catches up with the loop where the listing cannot.
+    listed = set(pids)
+    for pid in [*vanished, *found]:
+        gap = 0
+        while gap < CHASE_GAP and pid + 1 not in listed:
+            pid += 1
+            alive, member = probe(pid)
+            gap = 0 if alive else gap + 1
+            if member:
+                found.append(pid)
+                listed.add(pid)
+    return list(dict.fromkeys(found))
 
 
 def _signal_all(pids, sig):
@@ -351,32 +394,37 @@ def _signal_all(pids, sig):
 
 
 def sweep(marker, control, passes=10):
-    """End every process of the session `marker` names: stop them all, then kill
-    them all (a fork loop cannot outrun it, and no pid is reused between), and
-    repeat until a pass finds none. Only an empty pass removes the marker; the pids
-    still alive after `passes` are returned and the marker stays, so a later
-    sweep still finds them."""
+    """End every process of the session `marker` names: each scan stops what it
+    finds, then kills it, and scans again. Only `QUIET_PASSES` empty scans in a
+    row remove the marker (one empty scan can fall between a fork loop's
+    generations, and a marker gone hides the survivors from every later sweep).
+    After `passes` kill rounds the pids still found are returned, stopped, and
+    the marker stays, so a later sweep finds them."""
     _touch(control)  # a control marker that does not exist reads as denied for everyone
-    for _ in range(passes):
-        pids = session_pids(marker, control)
-        if not pids:
-            break
-        _signal_all(pids, signal.SIGSTOP)
-        _signal_all(pids, signal.SIGKILL)
-    else:
-        pids = session_pids(marker, control)
-    if not pids:
-        try:
-            os.unlink(marker)
-        except FileNotFoundError:
-            pass
-    return pids
+    killed = quiet = 0
+    while quiet < QUIET_PASSES:
+        pids = session_pids(marker, control, stop=True)
+        if pids:
+            if killed == passes:
+                return pids
+            killed, quiet = killed + 1, 0
+            _signal_all(pids, signal.SIGKILL)
+        else:
+            quiet += 1
+        time.sleep(0.02)
+    try:
+        os.unlink(marker)
+    except FileNotFoundError:
+        pass
+    return []
 
 
 def _init(argv):
     opts, cmd = _parse(argv, ("--sock", "--port", "--chdir"))
     if not cmd:
         raise SystemExit("os_init init: no command")
+    if sys.platform == "darwin" and "--sock" in opts:
+        raise SystemExit("os_init init: no relay on macOS: the launcher is the relay")
     if sys.platform != "darwin":  # macOS has no subreaper, and the launcher set TMPDIR
         ctypes.CDLL(None, use_errno=True).prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)
         os.environ["TMPDIR"] = "/tmp"
