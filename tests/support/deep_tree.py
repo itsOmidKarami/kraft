@@ -13,6 +13,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# As many levels as PATH_MAX, so the bottom's path is twice too long to name
+# (two characters a level): 4,096 on Linux. Not more: on macOS (1,024) making
+# and removing a nested tree is quadratic in the kernel, and 2,000 levels
+# take about 9s each way.
+PAST_PATH_MAX = os.pathconf("/", "PC_PATH_MAX")
+
 
 def deep_chain(base: Path, depth: int, *, leaf: bytes = b"") -> None:
     """`base` made (with its parents), and `depth` folders named `d` nested

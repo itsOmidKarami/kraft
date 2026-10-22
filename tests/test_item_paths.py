@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 import pytest
-from support.deep_tree import deep_chain, opens_during
+from support.deep_tree import PAST_PATH_MAX, deep_chain, opens_during
 from support.harness import write
 from support.unprivileged import run_unprivileged
 
@@ -658,14 +658,14 @@ def test_a_deep_tree_is_removed_within_a_low_open_file_limit(run_dirs):
     """A worker can nest folders in its `docs/` far deeper than the daemon's
     open-file limit. Removing them holds a bounded number of descriptors,
     goes back up by `..` rather than reopening from the top (about two opens
-    a folder, where reopening would take some 500,000 for 1,000), and
+    a folder, where reopening would take half the depth squared), and
     removes the item's folder whole. Counted, not timed, so a loaded machine
     cannot fail it, and by the audit hook, which sees every open however
     the walk binds `os.open`."""
     item = item_paths.item_dir(run_dirs, "w1")
-    deep_chain(item / "docs", 1000, leaf=b"x")
+    deep_chain(item / "docs", PAST_PATH_MAX, leaf=b"x")
 
     opens, _ = opens_during(_LOW_LIMIT, f"item_paths.remove_tree({str(item)!r})")
 
     assert not os.path.lexists(item)
-    assert 1000 <= opens < 10 * 1000
+    assert PAST_PATH_MAX <= opens < 10 * PAST_PATH_MAX
