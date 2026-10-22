@@ -216,6 +216,11 @@ _LOCAL = {
     "nodes": {
         "extra_check": {"kind": "exec", "tasks": [{"id": "run", "extends": "check"}]},
         "a_gate": {"kind": "gate", "message": "look"},
+        "land_again": {
+            "kind": "exec",
+            "tasks": [{"id": "m", "extends": "merge_it"}],
+            "on_base_changed": {"restart_from": "land_again"},
+        },
     },
 }
 LIBRARY = TemplateLibrary.from_mappings(_LOCAL, (), library_path=Path("library.yaml"))
@@ -361,6 +366,10 @@ def test_a_revision_can_never_skip_or_change_a_gate(change):
             {"add": [_add("build", {"id": "x", "tasks": [{"id": "m", "extends": "merge_it"}]})]},
             "before the final gate",
         ),
+        (
+            {"add": [_add("land", {"id": "land_again", "extends": "land_again"})]},
+            "before the final gate 'final', since 'land_again' merges",
+        ),
         ({"overrides": {"brief.main.run": _override(model="big")}}, "model"),
         ({"overrides": {"build.main.run": _override(time_cap_minutes=90)}}, "cannot exceed"),
         ({"overrides": {"build.main.nope": _override(effort="high")}}, "no node, step or task"),
@@ -375,6 +384,7 @@ def test_a_revision_can_never_skip_or_change_a_gate(change):
         "add-a-duplicate-id",
         "add-after-a-skipped-node",
         "add-a-merge-before-the-final-gate",
+        "add-a-merge-whose-base-change-restarts-past-the-final-gate",
         "model-on-a-subprocess",
         "cap-above-its-parent",
         "override-unknown-path",

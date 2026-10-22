@@ -322,8 +322,9 @@ def revise(
             nodes.append(node)
         nodes += after.get(node.id, [])
     try:
-        # Read back the way a stored snapshot is (`FROZEN`): the nodes already
-        # in it were validated when it was filed, and the added ones just were.
+        # Read back leniently (`FROZEN`): the nodes already in it were validated
+        # when it was filed, and the added ones just were. Not as a stored
+        # snapshot (`STORED_SNAPSHOT`): the chain rules hold for what it adds.
         authored = Chain.model_validate_json(
             chain.chain.chain.model_copy(update={"nodes": nodes}).model_dump_json(),
             context=FROZEN,

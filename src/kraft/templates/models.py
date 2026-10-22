@@ -1014,6 +1014,12 @@ def merge_rejection_limit(position: int, final: int | None) -> int:
 #: The forge targets that take a merge request past draft.
 _PUBLISHING = frozenset({ForgeAction.MR_MARK_READY, ForgeAction.MR_MERGE})
 
+#: Validation context for an item's stored snapshot read back
+#: (`MaterializedChain.from_json`): `FROZEN`, and lenient as well about a chain
+#: rule the item was filed before. Never for a chain Kraft builds now out of a
+#: stored one (a revision): what that adds answers to today's rules.
+STORED_SNAPSHOT = {**FROZEN, "stored_snapshot": True}
+
 
 class Chain(BaseModel):
     """One authored chain file, after `extends` expansion. `id` is optional
@@ -1064,12 +1070,13 @@ class Chain(BaseModel):
                 # A merging node past the final gate restarts before it: its
                 # conflict handler's resolution, or a fix cycle in the span,
                 # would otherwise reach the merge with no person seeing it.
-                # Authored chains only: a snapshot an item froze before this
-                # rule still loads (`FROZEN`), and the merge itself refuses a
-                # head the final review did not approve (`kraft.reviewed_head`).
+                # Not for a snapshot an item stored before this rule, which
+                # still loads (`STORED_SNAPSHOT`, not a revision's `FROZEN`):
+                # its merge refuses a head the final review did not approve
+                # (`kraft.reviewed_head`).
                 past_final = final is not None and final < position
-                frozen = (info.context or {}).get("frozen")
-                if node.merges() and past_final and index[target] > final and not frozen:
+                stored = (info.context or {}).get("stored_snapshot")
+                if node.merges() and past_final and index[target] > final and not stored:
                     raise ValueError(
                         f"node {node.id!r}: on_base_changed.restart_from {target!r} must name "
                         f"an execution node before the final gate {self.nodes[final].id!r}, "
@@ -2069,7 +2076,7 @@ class MaterializedChain:
         try:
             # Read leniently: a rule frozen before Kraft-9i6xy refused one still
             # reads, and its launch is refused instead (Kraft-9ct4q).
-            stored = _StoredMaterialization.model_validate_json(raw, context=FROZEN)
+            stored = _StoredMaterialization.model_validate_json(raw, context=STORED_SNAPSHOT)
         except ValidationError as exc:
             raise TemplateLibraryError(f"not a materialized chain: {first_error(exc)}") from exc
         return cls(

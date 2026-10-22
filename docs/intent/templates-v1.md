@@ -1233,8 +1233,9 @@ enforced-by: tests/templates/test_failure_controls.py::test_a_restart_target_mus
 IF a node with an `mr.merge` task comes after the chain's first
 `chain_finalized` gate and its `on_base_changed.restart_from` names a node
 after that gate -- itself included -- THEN the system SHALL refuse the chain
-as authored, and SHALL still load a work item's chain frozen before the rule.
-enforced-by: tests/templates/test_failure_controls.py::test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it[merging-restarts-itself], tests/templates/test_failure_controls.py::test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it[merging-restarts-past-the-gate], tests/templates/test_failure_controls.py::test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it[before-the-gate], tests/templates/test_failure_controls.py::test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it[no-merge], tests/templates/test_failure_controls.py::test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it[a-snapshot-stored-before-the-rule]
+as authored and a chain revision that adds such a node, and SHALL still load a
+work item's chain stored before the rule.
+enforced-by: tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[add-a-merge-whose-base-change-restarts-past-the-final-gate], tests/templates/test_failure_controls.py::test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it[merging-restarts-itself], tests/templates/test_failure_controls.py::test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it[merging-restarts-past-the-gate], tests/templates/test_failure_controls.py::test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it[before-the-gate], tests/templates/test_failure_controls.py::test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it[no-merge], tests/templates/test_failure_controls.py::test_a_merging_node_past_the_final_gate_restarts_a_base_change_before_it[a-snapshot-stored-before-the-rule]
 origin: src/kraft/templates/models.py §Chain -- `mr.merge` answers `conflict` when its forced rebase cannot clear one; the conflict handler's resolution, restarted in place, would merge with no person seeing it.
 
 ## REQ rebase-conflict-requires-explicit-handler
