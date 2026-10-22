@@ -993,6 +993,9 @@ async def run_agent_task(
     #: An agent outside the walk: `store.CheckoutBusy` while another in-place
     #: item uses the checkout (`store.create_session`).
     takes_checkout: bool = False,
+    #: The branch tips an agent at the final gate starts over, read by the
+    #: caller before this launch (`store.create_session(tips=...)`).
+    tips: dict | None = None,
     #: Awaited once the session is written, before anything else: what the
     #: caller records only for a session that holds its checkout, never for
     #: one `CheckoutBusy` refused (an escalation's message, a review's start).
@@ -1319,6 +1322,7 @@ async def run_agent_task(
         rate_limit_key={"harness": harness_id, "model": model} if harness_id else None,
         harness=harness,
         takes_checkout=takes_checkout,
+        tips=tips,
         model=model,
         ro_paths=rules_files,
         before_launch=before_launch if borrows or on_session else None,

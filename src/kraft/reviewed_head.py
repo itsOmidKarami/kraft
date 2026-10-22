@@ -24,7 +24,7 @@ from pathlib import Path
 
 from kraft import config as _config
 from kraft import events, store
-from kraft.vocab import ChainEvent, ForgeEvent, GateEvent
+from kraft.vocab import ChainEvent, ForgeEvent, GateEvent, SessionEvent
 
 #: A checkout's path -> its branch tip, None where git could not read it.
 Tips = dict[str, str | None]
@@ -84,6 +84,28 @@ def pin_for(db, row, node_id: str | None, worktree) -> Tips | None:
     if node_id is None or node_id != final_gate(row):
         return None
     return tips(db, row["id"], row, worktree)
+
+
+def started_over(c, work_item_id: str, session_id: str) -> Tips | None:
+    """The tips an agent at the final gate recorded as it started (a reviewer,
+    a reply, an escalation turn: `store.create_session(tips=...)`, on its
+    `worker_session_created`). None when its session recorded none."""
+    row = c.execute(
+        "SELECT payload FROM events WHERE work_item_id = ? AND type = ? "
+        "AND json_extract(payload, '$.session_id') = ? ORDER BY seq DESC LIMIT 1",
+        (work_item_id, SessionEvent.WORKER_SESSION_CREATED, session_id),
+    ).fetchone()
+    return json.loads(row["payload"]).get("tips") if row is not None else None
+
+
+def moved_under(db, work_item_id: str, session_ids, now: Mapping[str, str | None]) -> bool:
+    """Whether an agent a person's approval or skip of the final gate just
+    stopped (`session_ids`) may have moved what that decision would pin
+    (`now`): its recorded start tips are not `now`, or it recorded none --
+    an agent started before they were recorded is not known to have left the
+    branch alone, so it counts as having moved it."""
+    starts = db.read(lambda c: [started_over(c, work_item_id, sid) for sid in session_ids])
+    return any(start is None or not unchanged(start, now) for start in starts)
 
 
 def pinned(c, work_item_id: str) -> Tips | None:

@@ -7,6 +7,7 @@ from kraft import events, executor, inplace, reviewed_head, store
 from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
 from kraft.api.routes.lifecycle import (
+    _moved_under_refusal,
     _stop_live_sessions,
     chain_or_409,
     held_refusal,
@@ -311,19 +312,13 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
     stopped = await _stop_live_sessions(st, wid)
     if deps.task_is_live(request.app, wid):
         await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
-    if stopped and gate == reviewed_head.final_gate(row):
-        # The final gate pins the branch as it stands (`kraft.reviewed_head`),
-        # and the agent just stopped (a reviewer, a reply) may have committed
-        # to it after the person last looked. Nothing records the head before
-        # it started, so the approval is refused rather than pin that work:
-        # the item is paused, nothing is live now, and the next approval of
-        # what the person sees pins exactly that.
-        raise HTTPException(
-            409,
-            f"an agent was still at work on this item at gate {gate!r}; it is stopped "
-            "and the item paused, but the branch may have changed since you looked: "
-            "look at it again, then approve",
-        )
+    # The head this approval lets merge (`kraft.reviewed_head`), None unless
+    # `gate` is the final one: read after the stop and pinned as read, so a
+    # commit a dying agent lands later is not in the pin and the merge refuses
+    # it. An agent stopped here may have committed after the person last
+    # looked: one that moved the branch since it started refuses the approval.
+    tips = reviewed_head.pin_for(st.db, row, gate, inplace.item_folder(st.run_dirs, row))
+    _moved_under_refusal(st, wid, gate, stopped, tips)
 
     try:
         nodes, reason = await apply_approval(
@@ -365,9 +360,6 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
         reason="gate approval cleared the gate but could not start a walk",
         handed_off=lambda: deps.task_is_live(request.app, wid),
     ):
-        # The head this approval lets merge, read before the write
-        # (`kraft.reviewed_head`): None unless `gate` is the final one.
-        tips = reviewed_head.pin_for(st.db, row, gate, inplace.item_folder(st.run_dirs, row))
         approval = await st.db.write(
             lambda c: store.approve_gate(c, wid, gate, by=_decided_by(request), tips=tips)
         )

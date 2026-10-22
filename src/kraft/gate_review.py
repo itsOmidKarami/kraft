@@ -124,8 +124,13 @@ async def review(
     gate: str,
     node: ResolvedNode,
     launch: executor.LaunchContext,
+    tips: dict | None = None,
 ) -> tuple[str, str]:
     """Dispatch one gate review. Returns `(verdict, note)`.
+
+    `tips` is the head the reviewer reads, at the final gate
+    (`reviewed_head.pin_for`), recorded on its session: a person's approval
+    that stops it pins only a head it did not move (`reviewed_head.moved_under`).
 
     `node` is the gate itself, and **the gate declares the reviewing task**:
     `GateNode.auto_review` is an ordinary `AnyTask`, resolved and launched like
@@ -370,6 +375,7 @@ async def review(
             time_cap=time_cap,
             harness_id=auto_review.task.harness,
             takes_checkout=True,
+            tips=tips,
             on_session=start,
         )
     except store.CheckoutBusy:

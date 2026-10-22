@@ -65,6 +65,11 @@ def create_session(
     #: review): refused with `CheckoutBusy` while another in-place item uses
     #: the item's checkout. Checked in this write, so none starts beside it.
     takes_checkout: bool = False,
+    #: The item's branch tips as the agent starts (`reviewed_head.pin_for`):
+    #: an agent at the chain's final gate, which a person's approval or skip
+    #: may stop (`reviewed_head.moved_under`). On the `worker_session_created`
+    #: event, so a restart keeps it. None for every other session.
+    tips: dict | None = None,
 ) -> tuple[str, str, str]:
     """`round` is the fix-cycle index this session was dispatched in (0 = first pass).
 
@@ -152,6 +157,7 @@ def create_session(
             "round": round,
             "attempt": attempt,
             "thread": thread,
+            **({"tips": tips} if tips is not None else {}),
         },
     )
     return id, log_path, result_path

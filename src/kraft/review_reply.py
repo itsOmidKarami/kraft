@@ -21,7 +21,7 @@ import asyncio
 import json
 import logging
 
-from kraft import caps, events, executor, inplace, store
+from kraft import caps, events, executor, inplace, reviewed_head, store
 from kraft import overrides as _overrides
 from kraft.adapters import agent as _agent
 from kraft.executor import read_only
@@ -156,6 +156,9 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
     except _steering.SteeringError:
         return "no_agent"
     before = read_only.snapshot(db, row, launch, worktree)
+    # The head it starts over, at the final gate: a person's approval that
+    # stops it pins only a head it did not move (`reviewed_head.moved_under`).
+    tips = reviewed_head.pin_for(db, row, gate, worktree)
     await _agent.run_agent_task(
         db,
         run_dirs,
@@ -185,6 +188,7 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
         time_cap=time_cap,
         harness_id=task.task.harness,
         takes_checkout=True,
+        tips=tips,
     )
     files = read_only.changed(db, row, launch, worktree, before)
     if files:

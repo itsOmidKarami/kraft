@@ -247,6 +247,26 @@ async def _stop_live_sessions(st, wid: str, *, pause_item: bool = True) -> list[
     return ids
 
 
+def _moved_under_refusal(
+    st, wid: str, gate: str, stopped: list[str], tips, *, verb: str = "approve"
+) -> None:
+    """Refuse a person's approval or skip of the final gate (`tips` not None:
+    what it would pin, `kraft.reviewed_head`) when an agent it just stopped
+    (`stopped`: a reviewer, a reply, an escalation turn) may have moved the
+    branch since it started: its start tips are not these, or it recorded
+    none. The agent is stopped and the item paused, so a second look's
+    decision pins what the person saw. An agent that moved nothing costs no
+    second look."""
+    if not stopped or tips is None or not reviewed_head.moved_under(st.db, wid, stopped, tips):
+        return
+    raise HTTPException(
+        409,
+        f"an agent was still at work on this item at gate {gate!r}, and the branch may have "
+        f"changed since it started; it is stopped and the item paused: look at it again, "
+        f"then {verb}",
+    )
+
+
 def _forget_sandbox(run_dirs, worktree: Path, wid: str) -> None:
     """Drop what a sandboxed item kept beside its worktree (its code store,
     and the home its agent CLIs wrote caches and chats into), before the
@@ -2186,6 +2206,16 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
             raise HTTPException(409, f"path: {node_id!r} does not allow skipping")
 
         sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
+        # A person passing the final gate passes the head as it stands
+        # (`kraft.reviewed_head`; None for any other node). An agent still at
+        # work there (a reviewer, a reply) may be moving it: stopped before
+        # the head is read, as `approve_gate` does, and one that moved the
+        # branch since it started refuses the skip, leaving the item paused.
+        stopped: list[str] = []
+        if sessions and node_id == reviewed_head.final_gate(row):
+            stopped, sessions = await _stop_live_sessions(st, wid), []
+        tips = reviewed_head.pin_for(st.db, row, node_id, inplace.item_folder(st.run_dirs, row))
+        _moved_under_refusal(st, wid, node_id, stopped, tips, verb="skip")
 
         # Bracketed from *before* the claim to the hand-off (the claim-then-return
         # class). A claim makes this item read `active`, which means "a walk is
@@ -2218,9 +2248,6 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
                 )
             note = (body.note or "").strip() or None
             session_ids = [s["id"] for s in sessions]
-            # A person passing the final gate passes the head as it stands
-            # (`kraft.reviewed_head`): None for any other node.
-            tips = reviewed_head.pin_for(st.db, row, node_id, inplace.item_folder(st.run_dirs, row))
             # mark first, then signal: same race pause_work_item guards against —
             # a SIGTERM landing before the row says 'paused' resolves as 'failed'.
             await st.db.write(

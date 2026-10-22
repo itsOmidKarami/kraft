@@ -789,6 +789,9 @@ async def _run_task(
     checkout: _sandbox.Checkout | None = None,
     #: `store.create_session(takes_checkout=...)`: an agent outside the walk.
     takes_checkout: bool = False,
+    #: `store.create_session(tips=...)`: the branch tips an agent at the final
+    #: gate starts over.
+    tips: dict | None = None,
     #: Awaited once the session is written, before anything launches: what
     #: needs the session's lease (an in-place item's take). Raising ends the
     #: session `config_error`, its message the log, and is raised on.
@@ -828,6 +831,7 @@ async def _run_task(
             model=model,
             repository=repository,
             takes_checkout=takes_checkout,
+            tips=tips,
         )
     )
     store.replay_claimed()  # a queued replay holds its session (`start_queue`)

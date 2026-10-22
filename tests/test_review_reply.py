@@ -20,7 +20,7 @@ from support.harness import (
     write_harness_profiles,
 )
 
-from kraft import executor, inplace, review_reply, store
+from kraft import executor, inplace, review_reply, reviewed_head, store
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 FAKE_AGENT_COMMAND = f"{sys.executable} {_FAKE_AGENT}"
@@ -84,12 +84,21 @@ async def _published_unanswered_thread(it, *, body="why a list?"):
     return tid
 
 
+@pytest.mark.parametrize("final", [False, True], ids=["a-gate", "the-final-gate"])
 async def test_the_reply_agent_runs_under_the_gate_with_edit_denied(
-    item_on, run_dirs, tmp_path, monkeypatch
+    item_on, run_dirs, tmp_path, monkeypatch, final
 ):
+    """At the final gate its session records the head it starts over, so a
+    person's approval that stops it pins only a head it did not move
+    (`reviewed_head.moved_under`)."""
     prompts, argv = _seed(tmp_path, monkeypatch)
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    if final:
+        monkeypatch.setattr(reviewed_head, "final_gate", lambda row: GATE)
     it = await _item(item_on, run_dirs)
+    worktree = inplace.item_folder(it.run_dirs, it.row())
+    git(worktree, "branch", store.branch_for(it.row()))
+    head = git(worktree, "rev-parse", f"refs/heads/{store.branch_for(it.row())}")
     tid = await _published_unanswered_thread(it, body="why is this a list, not a set?")
 
     status = await review_reply.run(
@@ -104,6 +113,8 @@ async def test_the_reply_agent_runs_under_the_gate_with_edit_denied(
     assert status == "replied"
     [session] = it.sessions(GATE)
     assert session["hook_point"] == f"{GATE}.reply"
+    [created] = it.events("worker_session_created")
+    assert created["payload"].get("tips") == ({str(worktree): head} if final else None)
 
     argv_lines = argv.read_text().splitlines()
     assert argv_lines, "the fake agent was never launched"

@@ -465,6 +465,8 @@ async def review_gates(
         # The head the reviewer reads, for the final gate (`kraft.reviewed_head`):
         # what its approval pins, never a head that moved while it worked. It
         # may commit, so a tip read after its verdict could be its own work.
+        # Recorded on its session too: a person's approval that stops it
+        # checks it moved nothing (`reviewed_head.moved_under`).
         folder = inplace.item_folder(run_dirs, row)
         read_tips = reviewed_head.pin_for(db, row, gate, folder)
         try:
@@ -475,6 +477,7 @@ async def review_gates(
                 gate=gate,
                 node=node,
                 launch=launch,
+                tips=read_tips,
             )
         except store.CheckoutBusy as exc:
             # Started nothing, so no attempt: it waits for the checkout.

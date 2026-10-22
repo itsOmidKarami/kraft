@@ -28,8 +28,10 @@ from kraft import events, executor, gate_review, inplace, item_paths, store
 from kraft import policy as _policy
 from kraft.db import Database
 from kraft.executor import walk
+from kraft.executor.context import Steer
 from kraft.paths import RunDirs
 from kraft.templates.environment import WorkItemTarget
+from kraft.templates.forks import ChainPath
 
 
 @pytest.fixture(autouse=True)
@@ -231,6 +233,7 @@ async def test_dispatch_is_a_worker_with_no_resume(monkeypatch, database, run_di
         gate="spec_approval",
         node=_gate(run_dirs),
         launch=launch,
+        tips={"/the/worktree": "abc123"},
     )
     kw = seen["kwargs"]
     # The safety property: a worker cannot clear its own gate, and
@@ -240,6 +243,7 @@ async def test_dispatch_is_a_worker_with_no_resume(monkeypatch, database, run_di
     # The gate's own declared task, by its canonical path.
     assert kw["hook_point"] == _gate(run_dirs).auto_review.path
     assert kw.get("resume_session_id") is None
+    assert kw["tips"] == {"/the/worktree": "abc123"}
     assert "spec_approval" in kw["task_instruction"]
     # By absolute path: it is in the item's `docs/`, not in the worktree.
     spec = item_paths.docs_dir(run_dirs, "w1") / "spec.md"
@@ -603,8 +607,6 @@ async def test_fixed_verdicts_across_an_agent_retry_still_breach_the_reject_loop
     two runs of fixed verdicts does not buy the reviewer a fresh cycle unless a
     person asked for it. The agent's retry breaches on its first fixed verdict
     (the count goes on from 3); a person's starts a fresh one (1, 2, 3)."""
-    from kraft.templates.forks import ChainPath
-
     await test_repeated_fixed_verdicts_breach_the_reject_loop(monkeypatch, database, run_dirs)
     row = database.read(lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone())
     await database.write(lambda c: store.claim_for_run(c, "w1", from_statuses=["needs_human"]))
@@ -793,8 +795,6 @@ def test_a_gate_reviewers_note_still_reaches_a_dispatch(monkeypatch):
     re-delivers it -- so a judge stop before delivery would discard the entire
     content of a `fixed`/`reject` verdict and park the item having paid for a
     gate-review agent and a judge call and used neither."""
-    from kraft.executor.context import Steer
-
     assert Steer("x", source="gate_review").exempts_judge is True
     assert Steer("x", source="human").exempts_judge is True
     assert Steer("x", source="seeded").exempts_judge is False

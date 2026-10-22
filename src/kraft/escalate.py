@@ -16,7 +16,7 @@ import dataclasses
 import os
 from pathlib import Path
 
-from kraft import caps, events, executor, inplace, item_paths, store
+from kraft import caps, events, executor, inplace, item_paths, reviewed_head, store
 from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import usage as _usage
@@ -714,6 +714,10 @@ async def dispatch(
             files=files,
             time_cap=time_cap,
             takes_checkout=True,
+            # The head it starts over when the item stands on its final gate:
+            # a person's approval that stops it pins only a head it did not
+            # move (`reviewed_head.moved_under`).
+            tips=reviewed_head.pin_for(db, row, row["current_node_id"], worktree),
             # Recorded once the session holds the checkout: a turn refused it
             # has started nothing, and its queued replay records the message.
             on_session=record,

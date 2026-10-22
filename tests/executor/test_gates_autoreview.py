@@ -494,7 +494,10 @@ async def test_an_agents_approval_of_the_final_gate_pins_the_head(
     await wtree.ensure(it.database, it.run_dirs, repo)
     head = git(it.worktree, "rev-parse", f"refs/heads/{store.branch_for(it.row())}")
 
-    async def _reviewer(*_a, **_kw):
+    async def _reviewer(*_a, tips, **_kw):
+        # What it reads, recorded on its session for a person's approval that
+        # stops it (`reviewed_head.moved_under`).
+        assert tips == {str(it.worktree): head}
         if commits:
             (it.worktree / "reviewer.txt").write_text("the reviewer's own edit\n")
             commit_all(it.worktree, "the reviewer's own edit")
