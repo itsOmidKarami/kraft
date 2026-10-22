@@ -573,6 +573,8 @@ class BdStore:
         before = {r["id"]: r for r in held}
         # A kept row another writer moved after `held` was read is not the one we
         # loaded: what we "added" may be theirs too, so it is left whole.
+        # shortcut: a writer landing between this export and the `update` below can still
+        # lose a label it shares with ours; bd has no transaction for labels to close it.
         now = {r["id"]: r.get("updated_at") for r in self.load()} if kept else {}
         moved = {i for i in kept if now.get(i) != (before.get(i) or {}).get("updated_at")}
         for record in (r for r in records if r["id"] not in moved):
