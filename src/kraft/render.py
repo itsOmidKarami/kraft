@@ -475,6 +475,12 @@ def artifact_body(payload: dict) -> str:
             "\n\nTo approve this revision: kraft item approve --digest "
             f"{payload['digest']} {payload.get('work_item_id', '')}".rstrip()
         )
+    if payload.get("head"):
+        # The final review's approval is bound to the head shown (`kraft.reviewed_head`).
+        out += (
+            f"\n\nTo approve this review: kraft item approve --head {payload['head']} "
+            f"{payload.get('work_item_id', '')}"
+        ).rstrip()
     return out
 
 

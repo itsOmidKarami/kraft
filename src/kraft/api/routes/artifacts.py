@@ -6,7 +6,7 @@ import logging
 from fastapi import HTTPException, Query, Request
 
 from kraft import config as config_mod
-from kraft import events, inplace, item_paths, review, store
+from kraft import events, inplace, item_paths, review, reviewed_head, store
 from kraft.api import api_router, deps, perimeter
 from kraft.api.routes import board
 from kraft.api.routes.search import OpenDocument, _launch_editor
@@ -424,11 +424,14 @@ async def get_work_item_artifact(wid: str, request: Request):
         if revised is not None and revised is not chain:
             shown = revision.digest(revised)
             await st.db.write(lambda c: store.show_revision(c, wid, gate, shown))
+    head = reviewed_head.review_head(st.db, row, gate, inplace.item_folder(st.run_dirs, row))
     return {
         **_worktree_document(st, wid, rel, text, truncated, body),
         # A chain revision's approval sends this back (Kraft-ec66w); absent
         # where approving applies nothing.
         **({"digest": shown} if shown else {}),
+        # The final review's approval sends this back (`kraft.reviewed_head`).
+        **({"head": head} if head else {}),
         "artifact_max_bytes": DIFF_MAX_BYTES,
     }
 

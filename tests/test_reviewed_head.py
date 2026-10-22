@@ -52,3 +52,39 @@ async def test_only_a_rewrite_of_the_approved_head_moves_the_pin(
     repinned = database.read(lambda c: events.read_after(c, 0, "w1"))
     moved = [e for e in repinned if e["type"] == "reviewed_head_repinned"]
     assert len(moved) == (1 if pin is not None and pinned != pin else 0)
+
+
+@pytest.mark.parametrize(
+    ("tips", "named"),
+    [
+        ({"/wt": A}, A),
+        ({"/wt": A, "/m": B}, "sha256:"),
+        ({"/m": B, "/wt": A}, "sha256:"),
+        ({"/wt": A, "/m": C}, "differs"),
+        ({"/wt": A, "/m": None}, None),
+        ({"/wt": None}, None),
+    ],
+    ids=[
+        "one-checkout",
+        "two-checkouts",
+        "two-checkouts-built-in-the-other-order",
+        "two-checkouts-member-moved",
+        "a-tip-unreadable",
+        "the-only-tip-unreadable",
+    ],
+)
+def test_the_review_head_token_names_every_checkout(tips, named):
+    """The token a final-review decision names: the bare sha for one checkout,
+    a digest of all of them for a workspace (the same whatever order they were
+    read in, another once any member moves), and nothing when a tip cannot be
+    read."""
+    got = reviewed_head.token(tips)
+
+    if named == "differs":
+        assert got.startswith("sha256:")
+        assert got != reviewed_head.token({"/wt": A, "/m": B})
+    elif named == "sha256:":
+        assert got.startswith("sha256:")
+        assert got == reviewed_head.token({"/wt": A, "/m": B})
+    else:
+        assert got == named

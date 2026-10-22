@@ -112,7 +112,10 @@ def _show_value(item: dict, key: str, value) -> str:
 
 
 def _render_show(item: dict, full: dict | None = None) -> str:
-    pairs = [(key, _show_value(item, key, value)) for key, value in item.items()]
+    pairs = [
+        ("head" if key == "review_head" else key, _show_value(item, key, value))
+        for key, value in item.items()
+    ]
     if full is not None:
         # What the trimmed item drops: the in-place mark, and the kind of stop.
         if full.get("in_place"):

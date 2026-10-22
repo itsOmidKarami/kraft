@@ -6,7 +6,7 @@ from datetime import datetime
 
 from fastapi import HTTPException, Request
 
-from kraft import caps, escalate, events, executor, inplace, storage, store
+from kraft import caps, escalate, events, executor, inplace, reviewed_head, storage, store
 from kraft import config as config_mod
 from kraft import policy as policy_mod
 from kraft import progress as progress_mod
@@ -1377,6 +1377,9 @@ async def get_work_item(wid: str, request: Request):
         # "the node has a gate_after and its sessions are done" cannot see a
         # rejection, and offers Approve on a gate the API will 409 (Kraft).
         "pending_gate": pending,
+        # The head a decision on the pending gate must name, only while that is
+        # the chain's final one (`kraft.reviewed_head`).
+        "review_head": reviewed_head.review_head(st.db, row, pending, folder),
         # A gateless `request_changes` waiting to be honoured at its target
         # node -- by the running node's own completion, the next `/resume`,
         # or the next `/retry` with no path (review threads anywhere §1).

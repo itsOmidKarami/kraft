@@ -17,6 +17,7 @@ approved before the pin existed.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from collections.abc import Mapping
@@ -84,6 +85,27 @@ def pin_for(db, row, node_id: str | None, worktree) -> Tips | None:
     if node_id is None or node_id != final_gate(row):
         return None
     return tips(db, row["id"], row, worktree)
+
+
+def token(tips: Mapping[str, str | None]) -> str | None:
+    """What a person's final-review decision names as the head they were shown:
+    the sha itself for one checkout, so it can be recognised, and a
+    `sha256:` digest over every checkout's realpath and tip for several (a
+    workspace with unmerged members). None when a tip could not be read: there
+    is nothing a decision could name. Clients treat it as opaque."""
+    if not tips or None in tips.values():
+        return None
+    if len(tips) == 1:
+        return next(iter(tips.values()))
+    lines = sorted(f"{os.path.realpath(path)}\0{sha}" for path, sha in tips.items())
+    return "sha256:" + hashlib.sha256("\n".join(lines).encode()).hexdigest()
+
+
+def review_head(db, row, gate: str | None, worktree) -> str | None:
+    """The token a decision on `gate` must carry: that of the tips it would pin
+    (`pin_for`), so None unless `gate` is the chain's final one."""
+    pin = pin_for(db, row, gate, worktree)
+    return token(pin) if pin is not None else None
 
 
 def started_over(c, work_item_id: str, session_id: str) -> Tips | None:

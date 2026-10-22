@@ -290,6 +290,7 @@ export interface WorkItem {
    *  measurement taken on this commit from one taken before it. Only on the
    *  detail endpoint. */
   head_sha?: string | null;
+  review_head?: string | null;
   /** While queued: the start it waits to make and since when. `storage` (detail only) is set when the
    *  worktree storage limit, not a busy slot, is what it waits on; `why: "checkout"` when another in-place
    *  item, `held_by`, is using its checkout. */

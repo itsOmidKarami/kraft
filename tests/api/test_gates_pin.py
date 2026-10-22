@@ -37,6 +37,10 @@ def test_passing_the_final_gate_pins_the_head_it_passes(
     item = client.get(f"/api/work-items/{wid}").json()
     worktree = Path(item["worktree_path"])
     head = git(worktree, "rev-parse", f"refs/heads/{item['branch']}")
+    assert item.get("review_head") == (head if final else None)
+    shown = client.get(f"/api/work-items/{wid}/artifact")
+    assert shown.status_code == 200, shown.text
+    assert shown.json().get("head") == (head if final else None)
 
     r = client.post(f"/api/work-items/{wid}/{door}", json={})
 

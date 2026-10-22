@@ -264,3 +264,27 @@ def test_storage_json_is_the_api_payload(app, capsys):
         "orphans",
     }
     assert (payload["state"], payload["items"]) == (None, [])
+
+
+def test_show_and_artifact_name_the_head_the_final_review_takes(monkeypatch, capsys):
+    """The final review's approval must carry the head it was shown, so the
+    two verbs a person reads it with print it; off that gate there is none."""
+    from kraft.client import transport
+
+    shown = {"id": "w1", "status": "needs_human", "review_head": "a" * 40}
+
+    async def get(path, **_):
+        return shown
+
+    monkeypatch.setattr(transport, "_get", get)
+    cli.main(["view", "show", "w1"])
+    assert ["head", "a" * 40] in [line.split() for line in capsys.readouterr().out.splitlines()]
+    shown = {"id": "w1", "status": "needs_human", "review_head": None}
+    cli.main(["view", "show", "w1"])
+    assert "head" not in capsys.readouterr().out.split()
+
+    from kraft import render
+
+    body = render.artifact_body({"content": "doc", "head": "a" * 40, "work_item_id": "w1"})
+    assert body.endswith(f"kraft item approve --head {'a' * 40} w1")
+    assert "--head" not in render.artifact_body({"content": "doc"})

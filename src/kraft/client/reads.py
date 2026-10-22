@@ -163,6 +163,9 @@ def trim_work_item(item: dict) -> dict:
         # what it has spent, each kind of token apart (Ruling 211)
         **({"usage": item["usage"]["total"]} if item.get("usage") else {}),
         # The item's own policy override (Kraft-ab1bh), only when it has one.
+        # What the final review's approval or skip must name (`kraft.reviewed_head`),
+        # only while that gate is the one pending.
+        **({"review_head": item["review_head"]} if item.get("review_head") else {}),
         **({"policy_override": item["policy_override"]} if item.get("policy_override") else {}),
         # What a task flagged about its own work, owed to whoever decides the
         # next gate (Kraft-e6rv7). Only when there is one.
