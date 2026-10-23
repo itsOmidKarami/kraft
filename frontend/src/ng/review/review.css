@@ -1,6 +1,7 @@
 /* The review page and the gate review overlay (W8). Colours only from W1 tokens. */
 
-.review-page { position: relative; display: flex; flex-direction: column; height: calc(100vh - 44px); min-height: 0; overflow: hidden; box-sizing: border-box; }
+/* clip, not hidden: a hidden box still scrolls under scrollIntoView or focus, which slid the toolbar off the top and left a gap under the bar. */
+.review-page { position: relative; display: flex; flex-direction: column; height: calc(100vh - 44px); min-height: 0; overflow: clip; box-sizing: border-box; }
 .review-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }
 
 /* Syntax (C.4): the five classes on W1 status tokens, so `auto` follows the
