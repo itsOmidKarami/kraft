@@ -83,8 +83,11 @@ class JobRunner:
         kill_grace_s: float = 5.0,
         chunk: int = 1 << 16,
         poll_s: float = 0.05,
+        received_at: float | None = None,
     ) -> None:
         self.spec, self.area, self.api_port = spec, Path(area), api_port
+        # `deadline_s` counts from when the machine got the job (monotonic), not from the command
+        self._received = time.monotonic() if received_at is None else received_at
         self.root = self.area / "items" / spec.work_item_id / "repo"
         self.pathmap = PathMap(
             ((spec.server_run_dir, str(self.area / "run")), (spec.server_worktree, str(self.root)))
@@ -154,6 +157,8 @@ class JobRunner:
                     ),
                     outcome="failed",
                 )
+        if self._expired() and s.cap is not None:  # the transfer and setup used up the cap
+            return Outcome(code=137, capped=s.cap)
         with open(self.log_path, "ab") as log:
             try:
                 self._proc = subprocess.Popen(
@@ -183,12 +188,16 @@ class JobRunner:
         code = self._proc.returncode
         return Outcome(code=128 - code if code < 0 else code, capped=capped)
 
+    def _expired(self) -> bool:
+        s = self.spec
+        return s.deadline_s is not None and time.monotonic() >= self._received + s.deadline_s
+
     async def _until_exit(self) -> dict | None:
         """Wait for the command to exit. The step's time cap and idle limit are enforced here as
         well as on the server, since a sleeping laptop enforces nothing; whichever side fires
         first stops it. Returns the `caps.Hit` (as a dict) that did, if one did."""
         s, began = self.spec, time.monotonic()
-        deadline = None if s.deadline_s is None else began + s.deadline_s
+        deadline = None if s.deadline_s is None else self._received + s.deadline_s
         last_size, active_at = 0, began
         capped: dict | None = None
         while self._proc.poll() is None:

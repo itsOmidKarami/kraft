@@ -6,8 +6,10 @@ import asyncio
 import base64
 import contextlib
 import json
+import pathlib
 import stat
 import sys
+import threading
 
 from support.remote import send_job
 
@@ -176,3 +178,62 @@ async def test_the_socket_is_this_users_only(tmp_path):
     served.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await served
+
+
+async def test_two_daemons_started_together_leave_one_running_and_the_socket_answering(tmp_path):
+    home = tmp_path / "home"
+    stops = [asyncio.Event(), asyncio.Event()]
+    tasks = [_daemon(home, stop=stop) for stop in stops]
+    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED, timeout=1)
+    try:
+        assert len(done) == 1 and len(pending) == 1
+        assert await daemon._answers(daemon.socket_path(home))
+    finally:
+        for stop in stops:
+            stop.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def test_a_retiring_daemons_exit_never_removes_its_successors_socket(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    path = daemon.socket_path(home)
+    unlink, in_finally, resume = pathlib.Path.unlink, threading.Event(), threading.Event()
+    old = {}
+
+    def gated_unlink(self, *args, **kwargs):
+        # the old daemon, in its `finally` with the listener already closed, waits here
+        if (
+            self == path
+            and threading.current_thread() is not threading.main_thread()
+            and old["stop"].is_set()
+        ):
+            in_finally.set()
+            resume.wait(5)
+        return unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "unlink", gated_unlink)
+
+    def run_old() -> None:
+        async def main() -> None:
+            old["loop"], old["stop"] = asyncio.get_running_loop(), asyncio.Event()
+            await daemon.serve(home, kraft_version="2.3.0", stop=old["stop"])
+
+        asyncio.run(main())
+
+    thread = threading.Thread(target=run_old)
+    thread.start()
+    await _until_listening(home)
+    old["loop"].call_soon_threadsafe(old["stop"].set)
+    await asyncio.to_thread(in_finally.wait, 5)
+    successor_stop = asyncio.Event()
+    successor = _daemon(home, stop=successor_stop)  # the relay's spawn, seeing no listener
+    try:
+        await asyncio.wait({successor}, timeout=0.5)
+        resume.set()
+        await asyncio.to_thread(thread.join, 5)
+        assert successor.done() or await daemon._answers(path)
+    finally:
+        resume.set()
+        successor_stop.set()
+        await asyncio.gather(successor, return_exceptions=True)
+        thread.join()

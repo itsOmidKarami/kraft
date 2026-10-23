@@ -149,6 +149,7 @@ class _Job:
         self.task: asyncio.Task | None = None
         self.sent: list[tuple[str, Path]] = []  # blobs handed in, for a resend
         self.final: dict | None = None  # the `finished` or `rejected` frame
+        self.received = time.monotonic()  # when the `job` frame came: the time cap counts from here
 
 
 class Machine:
@@ -364,7 +365,13 @@ class Machine:
             return
         forwarder = Forwarder(lambda m, target, h, b: self._forward(job, m, target, h, b))
         port = await forwarder.start()
-        job.runner = JobRunner(spec, area=self._area, api_port=port, kill_grace_s=self._grace)
+        job.runner = JobRunner(
+            spec,
+            area=self._area,
+            api_port=port,
+            kill_grace_s=self._grace,
+            received_at=job.received,
+        )
         try:
             out = await job.runner.run(
                 self._emit

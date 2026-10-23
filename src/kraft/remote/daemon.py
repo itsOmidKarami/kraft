@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -25,8 +26,10 @@ from kraft.remote.transport import FRAME_LIMIT, StreamTransport
 
 SOCKET = "machine.sock"
 PID_FILE = "machine.pid"
+LOCK_FILE = "machine.lock"
 IDLE_EXIT_S = 600
 RELAY_CONNECT_S = 10.0
+RELAY_RESPAWN_S = 1.0  # a daemon that lost the lock to a retiring one is not the one to wait for
 _COPY_CHUNK = 1 << 16
 #: A unix socket path must fit `sockaddr_un.sun_path`: 104 bytes on macOS, 108 on Linux.
 _SOCKET_PATH_MAX = 100
@@ -50,6 +53,18 @@ def _private_dir(path: Path) -> None:
         raise PermissionError(f"{path} belongs to another user")
     if stat.S_IMODE(info.st_mode) != 0o700:
         path.chmod(0o700)
+
+
+def _take_lock(directory: Path) -> int | None:
+    """The exclusive lock on `machine.lock`, as an open fd (closing it releases the lock), or
+    None when another daemon holds it. The holder alone binds and removes the socket."""
+    fd = os.open(directory / LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return None
+    return fd
 
 
 async def _answers(path: Path) -> bool:
@@ -139,26 +154,30 @@ async def serve(
 ) -> None:
     """Run the daemon until it has been idle for `idle_exit_s` (no connection, no
     unfinished job), a relay of another Kraft version has found it with nothing
-    to do, or `stop` is set. Returns at once when another daemon owns the socket."""
+    to do, or `stop` is set. Returns at once when another daemon holds the lock."""
     path = socket_path(home)
     _private_dir(path.parent)
-    if await _answers(path):
+    lock = _take_lock(path.parent)
+    if lock is None:
         return
-    with contextlib.suppress(FileNotFoundError):
-        path.unlink()  # left by a daemon that died
-    daemon = _Daemon(home, kraft_version)
-    server = await asyncio.start_unix_server(daemon.handle, path=str(path), limit=FRAME_LIMIT)
-    path.chmod(0o600)
-    pid_file = path.parent / PID_FILE
-    pid_file.write_text(str(os.getpid()))
     try:
-        await daemon.run(idle_exit_s, stop or asyncio.Event())
+        with contextlib.suppress(FileNotFoundError):
+            path.unlink()  # left by a daemon that died
+        daemon = _Daemon(home, kraft_version)
+        server = await asyncio.start_unix_server(daemon.handle, path=str(path), limit=FRAME_LIMIT)
+        path.chmod(0o600)
+        pid_file = path.parent / PID_FILE
+        pid_file.write_text(str(os.getpid()))
+        try:
+            await daemon.run(idle_exit_s, stop or asyncio.Event())
+        finally:
+            server.close()
+            with contextlib.suppress(FileNotFoundError):
+                path.unlink()
+            with contextlib.suppress(FileNotFoundError):
+                pid_file.unlink()
     finally:
-        server.close()
-        with contextlib.suppress(FileNotFoundError):
-            path.unlink()
-        with contextlib.suppress(FileNotFoundError):
-            pid_file.unlink()
+        os.close(lock)  # last: until now no other daemon could bind or remove the socket
 
 
 async def _copy(reader, writer) -> None:
@@ -180,22 +199,22 @@ async def relay(
     until either side closes."""
     path = socket_path(home)
     loop = asyncio.get_running_loop()
-    deadline, spawned = loop.time() + RELAY_CONNECT_S, False
+    deadline, spawned_at = loop.time() + RELAY_CONNECT_S, None
     hello = json.dumps({"t": "relay", "kraft": kraft_version}).encode() + b"\n"
     while True:
         try:
             reader, writer = await asyncio.open_unix_connection(str(path), limit=FRAME_LIMIT)
         except OSError:
-            if not spawned:
-                spawn()
-                spawned = True
+            if spawned_at is None or loop.time() - spawned_at > RELAY_RESPAWN_S:
+                spawn()  # twice is safe: the daemon without the lock returns at once
+                spawned_at = loop.time()
         else:
             writer.write(hello)
             await writer.drain()
             if await reader.readline():
                 break
             writer.close()  # a daemon of another version, retiring
-            spawned = False
+            spawned_at = None
         if loop.time() > deadline:
             raise ConnectionError("the machine daemon did not start")
         await asyncio.sleep(0.1)
