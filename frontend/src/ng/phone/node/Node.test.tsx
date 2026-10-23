@@ -198,6 +198,18 @@ describe("the node screen (D)", () => {
     expect(row("on failure")).toBe("repair pass, once");
   });
 
+  it("lists the on-failure handler's tasks once it ran, the one it stopped on failed, each opening as a task", async () => {
+    const handler = ["verification.on_failure.repair.repair_pass", "verification.on_failure.sync.sync_mr"];
+    const V = detail().chain_definition.nodes.map((n) => (n.id === "verification" ? { ...n, on_failure: handler } : n));
+    const sessions = [session({ status: "failed" }), session({ id: "s2", status: "failed", hook_point: handler[0], round: -1, created_at: "2026-09-13T09:05:00Z" })];
+    mount(item("failed", stop("failed", { task: handler[0] }), { chain_definition: { template_id: "default", nodes: V }, worker_sessions: sessions }), "/work-items/w1/nodes/verification");
+    const row = (await screen.findByText("repair_pass")).closest("button")!;
+    expect(row).toHaveTextContent("failed");
+    expect(screen.getByText("sync_mr").closest("button")).toHaveTextContent("not started");
+    await userEvent.click(row);
+    expect(where()).toBe("/work-items/w1/nodes/verification?sel=verification.on_failure.repair.repair_pass");
+  });
+
   it("picks a fix-loop round: its tasks, its repair and its judge, with the round in the URL", async () => {
     mount(looped(), "/work-items/w1/nodes/verification");
     const rounds = await screen.findByRole("group", { name: "Fix loop rounds" });

@@ -7,7 +7,7 @@ import { lineCount } from "../../../format";
 import { NodeGlyph } from "../../graph/NodeGlyph";
 import { act } from "../../item/actions";
 import { chainGraph, rejectTarget } from "../../item/graph";
-import { escalationsOf, ESCALATION, FIX_LOOP, nodeGraph, passList, passOf, stateWord } from "../../item/nodeGraph";
+import { escalationsIn, ESCALATION, FIX_LOOP, nodeGraph, ON_FAILURE, passList, passOf, stateWord } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
 import { TestsLine } from "../../item/TestsLine";
 import { placeUrl, type Place } from "../../item/url";
@@ -73,10 +73,10 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   const overridden = !!mine || drafted.length > 0;
   const next = item.chain_definition.nodes[item.chain_definition.nodes.findIndex((n) => n.id === nodeId) + 1];
   // The round in the URL, as the desktop canvas has its picker: every task, the repair and the judge follow it.
-  const { steps, side, loop, rounds } = useMemo(() => nodeGraph(seen, api, now, events, place.round), [seen, api, now, events, place.round]);
+  const { steps, side, loop, onFailure, rounds } = useMemo(() => nodeGraph(seen, api, now, events, place.round), [seen, api, now, events, place.round]);
   const passes = passList(item, nodeId, place.pass);
   const paths = stepsOf(api).steps;
-  const escalations = escalationsOf(item, nodeId);
+  const escalations = escalationsIn(seen, nodeId);
   const openTask = (step: string, task: string) => navigate(placeUrl(item.id, { node: nodeId, sel: { kind: "task", node: nodeId, step, task }, round: place.round, pass: place.pass }));
   const wall = wallWords(item, api, events, now);
   const m = materialized(item);
@@ -192,6 +192,22 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
                 </div>
               </Block>
             )}
+            {!gate && onFailure && (
+              <Block title="On failure">
+                <div className="ph-list">
+                  {onFailure.map((t) => (
+                    <button key={t.id} type="button" className="ph-row ph-task-row" onClick={() => openTask(ON_FAILURE, t.id)}>
+                      <NodeGlyph kind="exec" size="sm" state={t.state} taskKind={t.taskKind} running={t.running} paused={t.paused} />
+                      <span className="ph-row-text">
+                        <span className="ph-row-label ph-mono">{t.label ?? t.id}</span>
+                        <span className="ph-row-hint">{t.meta ?? stateWord(t.state)}</span>
+                      </span>
+                      <ChevronRight size={16} className="ph-chev" aria-hidden="true" />
+                    </button>
+                  ))}
+                </div>
+              </Block>
+            )}
             {!gate && side && (
               <Block title="Handlers">
                 <div className="ph-list">
@@ -254,7 +270,7 @@ function NodeLog({ item, node, round }: { item: ItemDetail; node: string; round?
   const latest = new Map<string, ItemDetail["worker_sessions"][number]>();
   // A repair carries the round it leads into; a task and the judge, the round they measured.
   const repair = new Set(loopPaths(materialized(item), node).repair);
-  const ran = round ? passOf(item, node).filter((s) => s.round === (repair.has(s.hook_point) ? round : round - 1)) : [...passOf(item, node), ...escalationsOf(item, node)];
+  const ran = round ? passOf(item, node).filter((s) => s.round === (repair.has(s.hook_point) ? round : round - 1)) : [...passOf(item, node), ...escalationsIn(item, node)];
   for (const s of [...ran].sort((a, b) => a.created_at.localeCompare(b.created_at))) latest.set(s.hook_point, s);
   const sessions = [...latest.values()].map((s) => ({ id: s.id, who: taskName(s.hook_point), running: s.status === "running" || s.status === "pending" }));
   const lines = useLogs(item.id, sessions);

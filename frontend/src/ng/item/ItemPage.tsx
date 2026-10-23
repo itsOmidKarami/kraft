@@ -14,7 +14,7 @@ import { ComesAfterCard, PausedCard, StateCard } from "./StateCard";
 import { Brief, DiffLine, Title, useDiffFiles } from "./Top";
 import { ESCALATION } from "./nodeGraph";
 import { reviewedBelow } from "./status";
-import { placeUrl } from "./url";
+import { placeUrl, stopPlace } from "./url";
 import { openBudgetEditor, Workspace } from "./Workspace";
 import { openLimitEditor } from "./RaiseLimit";
 import { runVersion, useItem, type ItemDetail } from "./useItem";
@@ -52,7 +52,7 @@ function Item({ item, version, reload }: { item: ItemDetail; version: string; re
   // Read once for the diff line and the failed card's "work kept".
   const files = useDiffFiles(item.id, runVersion(item), item.worktree_exists === false);
   const openGate = useSelect(item.id);
-  const openNode = (node: string) => navigate(placeUrl(item.id, { sel: { kind: "node", node } }));
+  const openNode = (node: string) => navigate(placeUrl(item.id, stopPlace(item.stop, node, item.chain_definition.nodes)));
   const settings = () => navigate(placeUrl(item.id, { sel: { kind: "chain" }, tab: "config" }));
   // Raise cap (the banner's and the header's) opens the banner's editor on a stop that names its limit (R12b-06),
   // and the budget editor on a budget stop, as the peek's does (R11a-05).

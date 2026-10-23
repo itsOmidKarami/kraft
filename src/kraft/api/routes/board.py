@@ -1339,7 +1339,7 @@ async def get_work_item(wid: str, request: Request):
         "rate_limit": _rate_limit_retries(st, row),
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         # Which pass of its node each session ran in (`store.number_passes`);
-        # an escalation turn is in none.
+        # a gate's reviewer is in none.
         "worker_sessions": [
             {**s, **({"pass": n} if (n := passes[0].get(s["id"])) else {})}
             for s in _sessions_out(sessions, skipped, skipped_nodes)

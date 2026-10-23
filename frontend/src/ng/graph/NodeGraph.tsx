@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { NodeGlyph } from "./NodeGlyph";
-import { G, LOOP_FRAME, loopArc, loopCols, loopColumn, loopFork, loopSlots, nodeEdges, nodeLayout, sideBranch, type NodeStep } from "./nodeLayout";
+import { G, handlerEdges, LOOP_FRAME, loopArc, loopCols, loopColumn, loopFork, loopSlots, nodeEdges, nodeLayout, sideBranch, type NodeStep } from "./nodeLayout";
 import { RoundPicker } from "./RoundPicker";
 import { chipKey, ScopeFrame } from "./ScopeFrame";
 import { frameHeight, frameWidth, type ScopesView } from "../item/scopeView";
@@ -39,8 +39,9 @@ type Props = {
   onScope?: (key: string) => void;
   /** The open task's own close. */
   onCollapse?: () => void;
-  /** The node's own on_failure, as one footer line. */
-  onFailure?: string;
+  /** The node's own on_failure handler's tasks, in order, once it ran: a row under the rest, each selected as
+   *  `on_failure` and `<step>.<task>`. */
+  onFailure?: GraphItem[];
   /** A "+" seam after the last step. */
   seamAfter?: boolean;
   reserve?: number;
@@ -116,11 +117,14 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
   }
   const open = shown && openRow >= 0 ? { step: openStep, row: openRow, w: held.current.w, h: frameHeight(shown.view) } : undefined;
   // A loop with a parallel step is a lane, open or not: its stops on a level line, as steps are on the axis.
-  const laid = { side: !!side, loop: !!loop, loopTasks: arcCols.length, loopLane: arcCols.some((c) => c.tasks.length > 1), loopOpen: openCol?.tasks.length ?? 0, footer: !!onFailure };
-  const closed = useMemo(() => nodeLayout(steps, laid), [steps, side, loop, arcCols.length, laid.loopLane, laid.loopOpen, onFailure]); // eslint-disable-line react-hooks/exhaustive-deps
+  const laid = { side: !!side, loop: !!loop, loopTasks: arcCols.length, loopLane: arcCols.some((c) => c.tasks.length > 1), loopOpen: openCol?.tasks.length ?? 0, handler: onFailure?.length ?? 0 };
+  const closed = useMemo(() => nodeLayout(steps, laid), [steps, side, loop, arcCols.length, laid.loopLane, laid.loopOpen, laid.handler]); // eslint-disable-line react-hooks/exhaustive-deps
   const wide = useMemo(() => (open ? nodeLayout(steps, { ...laid, expand: open }) : closed), [closed, open?.step, open?.row, open?.w, open?.h]); // eslint-disable-line react-hooks/exhaustive-deps
   const lay = phase.layout && open ? wide : closed;
   const { edges, dots } = useMemo(() => nodeEdges(steps, lay), [steps, lay]);
+  const handler = onFailure ?? [];
+  const lane = handlerEdges(lay, handler);
+  const handlerKeys = handler.map((t) => taskKey("on_failure", t.id));
   // The camera measures the world after it has moved, and keeps clear of the zoom and round controls at the foot.
   const settledW = useSettled(lay.W, phase.glide), settledH = useSettled(lay.H, phase.glide);
   const camera = useCamera({ canvas: "node", world: { W: settledW, H: settledH }, opening: "fit", reserve, clearBottom: 56 });
@@ -175,13 +179,22 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
     if (shown && phase.mounted && key === taskKey(shown.step, shown.task) && dir === "ArrowDown" && chipRows.length) return chipRows[0][0];
     // The loop's stops sit on the arc, left to right: ←/→ between them at the same row (clamped), ↑/↓ within an
     // open step, ↑ from a stop's top back to the last step.
+    // The on_failure row: ←/→ along it (clamped), ↑ back to the loop, or the last step.
+    const h = handlerKeys.indexOf(key);
+    if (h >= 0) {
+      if (dir === "ArrowLeft") return handlerKeys[Math.max(0, h - 1)];
+      if (dir === "ArrowRight") return handlerKeys[Math.min(handlerKeys.length - 1, h + 1)];
+      const end = steps.at(-1);
+      if (dir === "ArrowUp") return loopKeys[0]?.[0] ?? (end && (end.tasks.length ? taskKey(end.id, end.tasks.at(-1)!.id) : labelKey(end.id)));
+      return;
+    }
     const c = loopKeys.findIndex((col) => col.includes(key));
     if (c >= 0) {
       const r = loopKeys[c].indexOf(key);
       const at = (cc: number, row: number) => { const col = loopKeys[Math.max(0, Math.min(loopKeys.length - 1, cc))]; return col?.[Math.min(row, col.length - 1)]; };
       if (dir === "ArrowLeft") return at(c - 1, r);
       if (dir === "ArrowRight") return at(c + 1, r);
-      if (dir === "ArrowDown") return at(c, r + 1);
+      if (dir === "ArrowDown") return r + 1 < loopKeys[c].length || !handlerKeys.length ? at(c, r + 1) : handlerKeys[0];
       if (dir === "ArrowUp" && r > 0) return at(c, r - 1);
       const end = steps.at(-1);
       if (dir === "ArrowUp" && end) return end.tasks.length ? taskKey(end.id, end.tasks.at(-1)!.id) : labelKey(end.id);
@@ -199,7 +212,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
     if (dir === "ArrowRight") return at(k + 1, i);
     if (dir === "ArrowLeft") return at(k - 1, i);
     if (dir === "ArrowUp") return at(k, i - 1);
-    if (dir === "ArrowDown") return i >= 0 && i + 1 >= steps[k].tasks.length && loopKeys.length ? loopKeys[0][0] : at(k, i + 1);
+    if (dir === "ArrowDown") return i >= 0 && i + 1 >= steps[k].tasks.length && (loopKeys.length || handlerKeys.length) ? (loopKeys[0]?.[0] ?? handlerKeys[0]) : at(k, i + 1);
   };
   const onKeyDown = (e: KeyboardEvent) => {
     // Esc steps back one: from inside an open loop step, to its box; anywhere else it is the page's own.
@@ -254,8 +267,8 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
         ref={away === undefined ? roving.ref(key) : undefined}
         type="button"
         tabIndex={away === undefined ? roving.tabIndex(key) : -1}
-        // A fix loop's task is selected as `<step>.<task>` but named by the task.
-        aria-label={accessibleName(s.step === "fix_loop" ? { ...t, id: t.label ?? t.id } : t, kind)}
+        // A fix loop's or on_failure's task is selected as `<step>.<task>` but named by the task.
+        aria-label={accessibleName(s.step === "fix_loop" || s.step === "on_failure" ? { ...t, id: t.label ?? t.id } : t, kind)}
         aria-pressed={sel}
         aria-hidden={away || undefined}
         className={`graph-node is-task${sel || t.state === "current" ? " is-bold" : ""}${t.state === "todo" ? " is-todo" : ""}${t.state === "esc" || t.state === "amber" ? " is-warn" : ""}${t.pending ? " is-pending" : ""}${away ? " is-away" : ""}${extra}`}
@@ -283,6 +296,9 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
           {edges.map((e) => <path key={e.key} d={e.d} style={glide(e.d)} className={e.todo ? "edge is-todo" : "edge"} />)}
           {dots.map((d, i) => <circle key={`j${i}`} cx={d.x} cy={d.y} r={3} style={phase.glide ? ({ cx: d.x, cy: d.y } as CSSProperties) : undefined} className="dot" />)}
           {sb && <path d={sb.d} style={glide(sb.d)} className="edge is-side" />}
+          {lane.map((e) => <path key={e.key} d={e.d} style={glide(e.d)} className={e.todo ? "edge is-todo" : "edge"} />)}
+          {/* The row starts in the start mark's column, where the axis and the loop do, at a join of its own. */}
+          {lane.length > 0 && <circle cx={G.startX + 9} cy={lay.handlerY} r={3} style={phase.glide ? ({ cx: G.startX + 9, cy: lay.handlerY } as CSSProperties) : undefined} className="dot" />}
           {loopShape && (
             <g className={`arc tone-${loop.tone ?? "idle"}`}>
               {/* The loop runs from one join to the other only as the fork: its own line is cut between them. */}
@@ -397,7 +413,8 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
           />
         )}
         {sb && side && taskButton({ step: "escalation", task: side.id }, { ...side, state: side.state ?? "esc" }, sb.x, sb.y, "escalation task", " is-side")}
-        {onFailure && <span className="node-footer" style={{ left: G.startX, top: lay.footerY }}>on failure · {onFailure}</span>}
+        {handler.length > 0 && <span className="node-footer" style={{ left: G.startX, top: lay.footerY }}>on failure</span>}
+        {handler.map((t, i) => taskButton({ step: "on_failure", task: t.id }, t, lay.handlerXs[i], lay.handlerY, `on-failure ${t.taskKind ?? "agent"} task`))}
         {seamAfter && seam("after", last ? (last.right + lay.endX) / 2 : (G.startX + 18 + lay.endX) / 2, lay.TY, "Add a step here", (el) => onSeam?.("after", steps.length, el))}
       </div>
       <div className="canvas-zoom" style={{ right: reserve + 12 }}>

@@ -78,6 +78,9 @@ describe("chainGraph", () => {
     const capped = detail({ display_status: "needs_you", stop: { kind: "cap", node: "verification", resume_at: null, reason: null }, worker_sessions: [esc] });
     expect(chainGraph(capped, [], NOW).nodes[2].esc).toBe(false);
     expect(chainGraph(detail({ worker_sessions: [esc] }), [], NOW).nodes[2].esc).toBe(true);
+    // One that answered an earlier pass's stop is that pass's: the pass the node is on now never escalated.
+    const later = sess("verification", { attempt: 2, pass: 2 });
+    expect(chainGraph(detail({ worker_sessions: [{ ...esc, pass: 1 }, later] }), [], NOW).nodes[2].esc).toBe(false);
   });
 
   it("finishes every node of a done item", () => {

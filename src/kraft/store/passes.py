@@ -72,9 +72,10 @@ def number_passes(
     The loop's own repair and judge do not count for the drop (a fix cycle
     that was paused and refunded is measured again at a round below the repair
     it follows), nor does a negative round (`walk._REPAIR_ROUND`). An
-    escalation turn (`escalation`, as the UI's `isEscalation` reads it) belongs
-    to the node, not to a pass of it, and gets no number; nor does a gate's
-    reviewer (`<gate>.auto_review`), whose runs are the attempts of one review.
+    escalation turn (`escalation`, as the UI's `isEscalation` reads it) is in
+    the pass whose stop it answered, the one its node is on, and starts none;
+    a gate's reviewer (`<gate>.auto_review`), whose runs are the attempts of
+    one review, gets no number.
     A stuck node's own escalation task (`<node>.escalation.<task>`) runs inside
     a pass like any task of the node, and is numbered.
 
@@ -87,7 +88,10 @@ def number_passes(
     top: dict[str, int] = {}
     for s in sessions:
         node, hook = s["node_id"], s["hook_point"]
-        if hook == "escalation" or hook.endswith((".escalation", ".auto_review")):
+        if hook == "escalation" or hook.endswith(".escalation"):
+            passes[s["id"]] = len(nodes.get(node, ())) or 1
+            continue
+        if hook.endswith(".auto_review"):
             continue
         started = nodes.setdefault(node, [{"pass": 1}])
         why = retried = None

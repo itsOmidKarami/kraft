@@ -72,8 +72,9 @@ const rowsOf = (st: NodeStep) => Math.max(1, st.tasks.length);
  *  `loopTasks` is how many stops the loop carries (a task, or a step of several) and `loopOpen` the tasks of the step
  *  drawn open, if one is: more than a pair of stops, or an open one, moves the end mark out until they fit, and an
  *  open step takes the loop deeper by its frame. `loopLane`: the loop has a step of several tasks, so it is drawn as
- *  a lane and not an arc (`loopArc`). */
-export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolean; loopTasks?: number; loopLane?: boolean; loopOpen?: number; footer?: boolean; expand?: Expand } = {}) {
+ *  a lane and not an arc (`loopArc`). `handler` is how many tasks the node's on_failure handler has, drawn as a row
+ *  of their own under the rest, its caption over them. */
+export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolean; loopTasks?: number; loopLane?: boolean; loopOpen?: number; handler?: number; expand?: Expand } = {}) {
   const loopN = o.loop ? (o.loopTasks ?? 0) : 0, loopOpen = loopN ? (o.loopOpen ?? 0) : 0, loopLane = loopN > 0 && (!!o.loopLane || loopOpen > 0);
   const ex = o.expand && steps[o.expand.step]?.tasks[o.expand.row] ? o.expand : undefined;
   // The open task's column is the frame and 12px, and the frame sits at its centre.
@@ -140,8 +141,13 @@ export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolea
       H = Math.max(proto + 10, low + G.BOX / 2 + 52 + (loopOpen ? ((loopOpen - 1) * G.ROW) / 2 + 8 : 0));
     }
   }
-  const footerY = H + 4;
-  if (o.footer) H += 26;
+  // The on_failure handler: its caption, then its tasks left to right, a step's pitch apart, under everything else.
+  const footerY = H + 4, handlerY = footerY + 30 + G.BOX / 2;
+  const handlerXs = Array.from({ length: o.handler ?? 0 }, (_, i) => G.startX + 68 + G.COL / 2 + i * (G.COL + G.GAP));
+  if (handlerXs.length) {
+    H = handlerY + G.BOX / 2 + 52;
+    W = Math.max(W, handlerXs.at(-1)! + G.COL / 2 + 24);
+  }
   const cols = steps.map((st, k) => {
     const r = rows(k), ys = r.map((x) => x.y);
     const top = r[0].y - r[0].half, foot = r.at(-1)!.y + r.at(-1)!.half;
@@ -151,7 +157,7 @@ export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolea
     // The label centres on the column, 38px over the first row's box or the open frame.
     return { cx: cx[k], ys, frame, labelY: top - 38, left: cx[k] - half(k), right: cx[k] + half(k), open: opened ? { x: cx[k] - opened.w / 2, y: ys[opened.row] - opened.h / 2, w: opened.w, h: opened.h } : null };
   });
-  return { TY, cx, endX, W, H, cols, maxRows: Math.max(1, ...steps.map(rowsOf)), footerY, loopY, loopLabelY, loopOpen, loopLane };
+  return { TY, cx, endX, W, H, cols, maxRows: Math.max(1, ...steps.map(rowsOf)), footerY, handlerY, handlerXs, loopY, loopLabelY, loopOpen, loopLane };
 }
 export type NodeLayout = ReturnType<typeof nodeLayout>;
 
@@ -178,6 +184,12 @@ export function nodeEdges(steps: NodeStep[], lay: NodeLayout) {
   });
   if (!steps.length) edges.push({ key: "empty", d: `M${G.startX + 18} ${TY} L${endX - 9} ${TY}`, todo: true });
   return { edges, dots };
+}
+
+/** The on_failure handler's row: a line in from under the start mark, and one from each task to the next. */
+export function handlerEdges(lay: NodeLayout, tasks: GraphItem[]): Edge[] {
+  const y = lay.handlerY, xs = lay.handlerXs, todo = (t: GraphItem) => t.state === "todo";
+  return xs.map((x, i) => ({ key: `h${i}`, d: `M${i ? xs[i - 1] + G.BOX / 2 + 4 : G.startX + 9} ${y} L${x - G.BOX / 2 - 4} ${y}`, todo: todo(tasks[i]) }));
 }
 
 /** The escalation branch: a dashed curve from the end mark down-right to its task. */

@@ -2,7 +2,7 @@ import { nameOf } from "../board/rowText";
 import { elapsed, elapsedBetween } from "../../format";
 import type { ChainNode as ApiNode, KraftEvent, WorkerSession } from "../../types";
 import type { ChainArc, ChainNode } from "../graph/layout";
-import { isEscalation, passOf } from "./nodeGraph";
+import { escalationsIn, isEscalation, passOf } from "./nodeGraph";
 import { materialized, nodeTaskKind } from "./chainValues";
 import { isScopeTask } from "./scopeView";
 import type { ItemDetail } from "./useItem";
@@ -56,7 +56,7 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
     const ss = item.worker_sessions.filter((s) => s.node_id === n.id);
     const work = ss.filter((s) => !isEscalation(s));
     const attempt = timesRun(item, work);
-    const out: ChainNode = { id: n.id, kind: kindOf(n), icon: (n.steps?.length ?? 0) > 1 ? "layers" : undefined, taskKind: nodeTaskKind(frozen, n.id), esc: ss.some(isEscalation) && capped !== n.id, attempt: attempt || undefined };
+    const out: ChainNode = { id: n.id, kind: kindOf(n), icon: (n.steps?.length ?? 0) > 1 ? "layers" : undefined, taskKind: nodeTaskKind(frozen, n.id), esc: escalationsIn(item, n.id).length > 0 && capped !== n.id, attempt: attempt || undefined };
     if (cur < 0 || i > cur) return { ...out, state: "todo" };
     if (i < cur) {
       const ms = byNode.get(n.id)?.wall_ms;

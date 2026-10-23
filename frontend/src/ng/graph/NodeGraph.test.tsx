@@ -50,6 +50,23 @@ describe("NodeGraph", () => {
     expect(btn(/^code_review/)).toHaveFocus();
   });
 
+  it("draws the on-failure handler's tasks as a row of their own: named by the task, ↓ from the last row, ↑ back, opened on Enter", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    const handler = [{ id: "repair.repair_feedback", label: "repair_feedback", taskKind: "agent" as const, state: "done" as const }, { id: "sync.sync_mr", label: "sync_mr", taskKind: "subprocess" as const, state: "failed" as const }];
+    render(<NodeGraph name="v" steps={steps.slice(0, 2)} onFailure={handler} selected={{ step: "review", task: "code_review" }} onOpen={onOpen} />);
+    expect(btn(/^sync_mr/)).toHaveAccessibleName("sync_mr, on-failure subprocess task, failed");
+    await user.tab();
+    await user.keyboard("{ArrowDown}");
+    expect(btn(/^repair_feedback/)).toHaveFocus();
+    await user.keyboard("{ArrowRight}{ArrowRight}");
+    expect(btn(/^sync_mr/)).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onOpen).toHaveBeenCalledWith({ step: "on_failure", task: "sync.sync_mr" });
+    await user.keyboard("{ArrowUp}");
+    expect(btn(/^code_review/)).toHaveFocus();
+  });
+
   it("opens on Enter, expands on ⌘Enter and double-click, escapes", async () => {
     const user = userEvent.setup();
     const cb = { onOpen: vi.fn(), onExpand: vi.fn(), onEscape: vi.fn(), onSelect: vi.fn() };

@@ -72,8 +72,13 @@ export function sessionsOf(item: ItemDetail, path: string): WorkerSession[] {
   const pass = all[0] && !isEscalation(all[0]) ? new Map(passOf(item, all[0].node_id).map((s) => [s.id, s])) : undefined;
   return all.flatMap((s) => (pass ? (pass.get(s.id) ?? []) : s)).sort((a, b) => a.attempt - b.attempt || a.created_at.localeCompare(b.created_at));
 }
-/** The node's escalation turns, oldest first. */
+/** The node's escalation turns, oldest first: every pass's, which is how a thread counts its turns. */
 export const escalationsOf = (item: ItemDetail, node: string) => item.worker_sessions.filter((s) => s.node_id === node && isEscalation(s)).sort((a, b) => a.created_at.localeCompare(b.created_at));
+/** The turns of the pass the node is on (`asOfPass`'s, when an earlier one is shown): the ones its graph and lists show. */
+export const escalationsIn = (item: ItemDetail, node: string) => {
+  const pass = passNow(item, node);
+  return escalationsOf(item, node).filter((s) => (s.pass ?? 1) === pass);
+};
 
 /** How many of an item's escalation messages, oldest first, a thread shows for
  *  the turn `upTo`: through that turn's own message, and all of them when no
@@ -134,6 +139,8 @@ export function sessionLook(s: WorkerSession | undefined, now: number): Look {
 /** The step a fix loop's own tasks are selected under: `<node>.fix_loop.<task>`. */
 export const FIX_LOOP = "fix_loop";
 export const JUDGE = "judge";
+/** The step a node's on_failure handler's tasks are selected under, each as `<step>.<task>`: `<node>.on_failure.<step>.<task>`. */
+export const ON_FAILURE = "on_failure";
 
 /** A node's fix-loop rounds, 1-based. A round is one measurement of the node's own steps
  *  (`WorkerSession.round`, 0-based). `total` is the loop's limit, its attempts plus the first measurement,
@@ -164,7 +171,7 @@ export const verdictOf = (events: KraftEvent[] | undefined, node: string, cycle:
 /** A node's inside for NodeGraph (Decisions §7): steps in order, a row per
  *  task with its state in the round shown (a fix-loop node's own round: every
  *  task, its repair and its judge follow it), the escalation side branch, the
- *  fix-loop arc once a round ran, and the on_failure footer line once the handler ran. */
+ *  fix-loop arc once a round ran, and the on_failure handler's tasks once it ran. */
 export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), events?: KraftEvent[], picked?: number) {
   const { steps } = stepsOf(node);
   const frozen = materialized(item);
@@ -182,9 +189,10 @@ export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), eve
       return { id: taskName(path), taskKind: taskKindAt(frozen, path) ?? (ss.some((s) => s.model) ? "agent" : undefined), attempt: shown || isScopeTask(item, path) ? undefined : last?.attempt, ...(!last && skippedAt(item, path) ? SKIPPED : sessionLook(last, now)) };
     }),
   }));
-  const esc = escalationsOf(item, node.id);
-  const lastEsc = esc.at(-1);
-  const side: GraphItem | undefined = lastEsc && { id: ESCALATION, icon: "siren", ...sessionLook(lastEsc, now), meta: `thread ${lastEsc.thread} · turn ${esc.filter((s) => s.thread === lastEsc.thread).length}` };
+  const lastEsc = escalationsIn(item, node.id).at(-1);
+  // Its turn counts the thread's turns up to it, in whatever pass they ran.
+  const turn = lastEsc && escalationsOf(item, node.id).filter((s) => s.thread === lastEsc.thread && s.created_at <= lastEsc.created_at).length;
+  const side: GraphItem | undefined = lastEsc && { id: ESCALATION, icon: "siren", ...sessionLook(lastEsc, now), meta: `thread ${lastEsc.thread} · turn ${turn}` };
   const stop = stopOn(item, node.id);
   const stopped = stop?.kind === "cap" || stop?.kind === "budget";
   const own = loopPaths(frozen, node.id);
@@ -196,9 +204,12 @@ export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), eve
   const looped = !!rounds && (rounds.latest > (rounds.first ?? 1) || (stopped && rounds.latest > 1));
   const tone = stopped && shown === rounds?.latest ? "red" : looped && standsOn(item, node.id) ? "active" : "idle";
   const loop = node.fix_loop && rounds && (looped || inLoop) ? loopOf(item, node, own, shown!, rounds, tone, now, events) : undefined;
-  // Drawn once the handler ran in the pass and round shown, as the arc is: one that never failed has no on-failure to name.
-  const handled = node.on_failure?.length && pass.some((x) => node.on_failure!.includes(x.hook_point) && (!shown || x.round === shown - 1));
-  const onFailure = handled ? node.on_failure!.map(taskName).join(", ") : undefined;
+  // The handler's tasks in order, once it ran in the pass and round shown, as the arc is: one that never failed has none to draw.
+  const handler = node.on_failure ?? [];
+  const ranIn = (path: string) => pass.filter((x) => x.hook_point === path && (!shown || x.round === shown - 1));
+  const onFailure = handler.some((p) => ranIn(p).length)
+    ? handler.map((path): GraphItem => ({ id: path.slice(`${node.id}.${ON_FAILURE}.`.length), label: taskName(path), taskKind: taskKindAt(frozen, path), ...sessionLook(ranIn(path).at(-1), now) }))
+    : undefined;
   return { steps: out, side, loop, onFailure, rounds: rounds && shown ? roundList(item, node, rounds, shown) : undefined };
 }
 

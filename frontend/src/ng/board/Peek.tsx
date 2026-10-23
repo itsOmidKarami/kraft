@@ -18,7 +18,7 @@ import { actionPath } from "../item/paths";
 import { openLimitEditor } from "../item/RaiseLimit";
 import { ComesAfterCard, PausedCard, StateCard } from "../item/StateCard";
 import { bodyOffers, budgetRaise, headerState, MAIN_LABEL, neverStarted, offersRaise } from "../item/status";
-import { placeUrl } from "../item/url";
+import { placeUrl, stopPlace } from "../item/url";
 import { useEvents } from "../item/useEvents";
 import { useItem, type ItemDetail } from "../item/useItem";
 import { Popover } from "../ui/Popover";
@@ -108,7 +108,7 @@ function Overview({ item, version, reload, onRaise, onMore }: { item: ItemDetail
   const [error, setError] = useState<string | null>(null);
   const duplicate = useDuplicate(item.id, setError);
   const events = useEvents(item.id, version);
-  const openNode = (node: string) => navigate(placeUrl(item.id, { sel: { kind: "node", node } }));
+  const openNode = (node: string) => navigate(placeUrl(item.id, stopPlace(item.stop, node, item.chain_definition.nodes)));
   return (
     <div className="peek-overview">
       <div ref={anchor} className="peek-cards">

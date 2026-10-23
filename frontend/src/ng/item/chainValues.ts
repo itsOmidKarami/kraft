@@ -10,7 +10,7 @@ type Pol = Record<string, unknown> | null | undefined;
 export type MTask = { id: string; kind: string; ref?: string | null; execution?: string | null; skill?: string | null; produces?: string | null; harness?: string | null; model?: string | null; effort?: string | null; profile?: string | null; prompt?: string | null; command?: unknown; policy?: Pol };
 type MStep = { id: string; tasks: MTask[]; policy?: Pol };
 type MLoop = { max_attempts?: number | null; tasks?: MTask[] | null; steps?: MStep[] | null; judge?: MTask | null };
-export type MNode = { id: string; kind: string; tasks?: MTask[] | null; steps?: MStep[] | null; policy?: Pol; fix_loop?: MLoop | null; auto_review?: MTask | null; message?: string | null; artifact?: string | null };
+export type MNode = { id: string; kind: string; tasks?: MTask[] | null; steps?: MStep[] | null; policy?: Pol; fix_loop?: MLoop | null; on_failure?: MLoop | null; auto_review?: MTask | null; message?: string | null; artifact?: string | null };
 /** What the item runs against, frozen at intake: a workspace's root and its members, in the order a fanned-out task visits them. */
 export type MTarget = { kind: string; root?: string | null; mounts?: Record<string, { repository: string; path: string }> };
 export type Materialized = {
@@ -46,10 +46,11 @@ export function materialized(item: { materialized_chain?: string | null }): Mate
 /** A node's steps: a `tasks:` node is one step called `main`. */
 export const stepsOfNode = (n: MNode): MStep[] => n.steps ?? (n.tasks ? [{ id: "main", tasks: n.tasks }] : []);
 
-/** A fix loop's own task by what follows `<node>.fix_loop.`: `judge`, or `<step>.<task>`, where a loop written as a
- *  bare `tasks:` list is one step called `main` (`task-group-shorthand-resolves-to-one-step`). */
-function loopTaskAt(node: MNode | undefined, rest: string[]): MTask | undefined {
-  const loop = node?.fix_loop;
+/** A fix loop's or an on_failure handler's own task by what follows `<node>.fix_loop.` or `<node>.on_failure.`:
+ *  the loop's `judge`, or `<step>.<task>`, where one written as a bare `tasks:` list is one step called `main`
+ *  (`task-group-shorthand-resolves-to-one-step`). */
+function loopTaskAt(node: MNode | undefined, rest: string[], at: "fix_loop" | "on_failure" = "fix_loop"): MTask | undefined {
+  const loop = node?.[at];
   if (!loop || !rest.length) return undefined;
   if (rest.length === 1 && rest[0] === "judge") return loop.judge ?? undefined;
   if (rest.length !== 2) return undefined;
@@ -63,7 +64,7 @@ function scopes(m: Materialized, path: string) {
   const node = m.chain.nodes.find((x) => x.id === n);
   const step = node && s ? stepsOfNode(node).find((x) => x.id === s) : undefined;
   // A gate's reviewer is `<gate>.auto_review`: no step of the chain, but a task of its own.
-  const task = step && t ? step.tasks.find((x) => x.id === t) : node?.kind === "gate" && s === "auto_review" && !t ? node.auto_review ?? undefined : s === "fix_loop" ? loopTaskAt(node, path.split(".").slice(2)) : undefined;
+  const task = step && t ? step.tasks.find((x) => x.id === t) : node?.kind === "gate" && s === "auto_review" && !t ? node.auto_review ?? undefined : s === "fix_loop" || s === "on_failure" ? loopTaskAt(node, path.split(".").slice(2), s) : undefined;
   return { node, step, task };
 }
 

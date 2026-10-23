@@ -214,11 +214,11 @@ CASES = [
         id="reject-and-round-drop-are-one-boundary",
     ),
     pytest.param(
-        [_s(6, "verify", task="escalation"), _s(7, task="escalation")],
+        [_s(1), _s(3, task="escalation"), _s(6), _s(7, task="escalation")],
         [REJECT],
-        [None, None],
-        None,
-        id="an-escalation-turn-is-in-no-pass",
+        [1, 1, 2, 2],
+        [{"pass": 1}, {"pass": 2, "reason": "reject", "gate": "gate"}],
+        id="an-escalation-turn-is-in-the-pass-it-answered",
     ),
     pytest.param(
         [_s(1), _s(6), _s(7, round=-2, task="escalation.unstick")],

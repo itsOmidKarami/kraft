@@ -8,7 +8,7 @@ import { detail, FROZEN, LOOPED, SCOPE_PATH, scopeRun, scoped } from "./testkit"
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
 const node: ChainNode = {
-  id: "verification", kind: "exec", gate_after: null, fix_loop: "f", on_failure: ["verification.repair.repair_pass"],
+  id: "verification", kind: "exec", gate_after: null, fix_loop: "f", on_failure: ["verification.on_failure.repair.repair_pass"],
   tasks: ["verification.checks.lint", "verification.checks.typecheck", "verification.review.code_review"],
   steps: [["verification.checks.lint", "verification.checks.typecheck"], ["verification.review.code_review"]],
 };
@@ -29,22 +29,29 @@ describe("nodeGraph", () => {
     ]);
     expect(g.steps[1].tasks[0]).toMatchObject({ running: true, taskKind: "agent" });
     expect(g.loop).toEqual({ tone: "active", label: "round 2", tasks: [] });
-    // Nothing failed in this pass: its on-failure handler never ran, so no footer names it.
+    // Nothing failed in this pass: its on-failure handler never ran, so none of its tasks is drawn.
     expect(g.onFailure).toBeUndefined();
   });
 
-  it("names the on-failure handler in the footer once it ran in the pass shown, and not in a pass it did not", () => {
-    const ran = s("verification.repair.repair_pass", { round: -1 });
+  it("draws the on-failure handler's tasks once it ran in the pass shown, and not in a pass it did not", () => {
+    const ran = s("verification.on_failure.repair.repair_pass", { round: -1 });
     const first = [s("verification.checks.lint", { status: "failed", pass: 1 }), { ...ran, pass: 1 }];
     const item = detail({ node_passes: { verification: [{ pass: 1 }, { pass: 2, reason: "retry" as const }] }, worker_sessions: [...first, s("verification.checks.lint", { pass: 2 })] });
-    expect(nodeGraph(asOfPass(item, "verification", 1), node, NOW).onFailure).toBe("repair_pass");
+    // Selected as `on_failure` and `<step>.<task>`, named by the task.
+    expect(nodeGraph(asOfPass(item, "verification", 1), node, NOW).onFailure).toMatchObject([{ id: "repair.repair_pass", label: "repair_pass", state: "done" }]);
     expect(nodeGraph(item, node, NOW).onFailure).toBeUndefined();
   });
 
-  it("names the on-failure handler only in the round of a fix-loop node that it followed", () => {
+  it("draws each of the handler's tasks as it stands: the one it stopped on failed, one it never reached not started", () => {
+    const handler = ["repair.repair_feedback", "sync.sync_mr", "sync.notify"].map((t) => `verification.on_failure.${t}`);
+    const item = detail({ worker_sessions: [s("verification.checks.lint", { status: "failed" }), s(handler[0], { round: -1 }), s(handler[1], { round: -1, status: "failed" })] });
+    expect(nodeGraph(item, { ...node, on_failure: handler }, NOW).onFailure!.map((t) => [t.label, t.state])).toEqual([["repair_feedback", "done"], ["sync_mr", "failed"], ["notify", "todo"]]);
+  });
+
+  it("draws the on-failure handler only in the round of a fix-loop node that it followed", () => {
     // The handler's re-measure is stamped -1 and reads in the round of the session before it: here round 2.
-    const item = looped({ worker_sessions: [...LOOP_RUN.slice(0, 5), s("verification.repair.repair_pass", { round: -1 })] });
-    expect([1, 2].map((r) => nodeGraph(item, node, NOW, [], r).onFailure)).toEqual([undefined, "repair_pass"]);
+    const item = looped({ worker_sessions: [...LOOP_RUN.slice(0, 5), s("verification.on_failure.repair.repair_pass", { round: -1 })] });
+    expect([1, 2].map((r) => nodeGraph(item, node, NOW, [], r).onFailure?.map((t) => t.label))).toEqual([undefined, ["repair_pass"]]);
   });
 
   it("draws a skipped task as skipped, whether the skip cut its session short or it never ran", () => {
@@ -221,7 +228,19 @@ describe("a node the chain ran again", () => {
   // The server numbers the passes: a reject, a retry or a base change sent the chain back to the node.
   const FIRST = LOOP_RUN.slice(0, 6).map((x) => ({ ...x, pass: 1 }));
   const PASSES = { verification: [{ pass: 1 }, { pass: 2, reason: "reject" as const, gate: "local_review" }] };
-  const again = (round: number) => looped({ node_passes: PASSES, worker_sessions: [...FIRST, s("verification.checks.lint", { round, pass: 2, status: "running", wall_ms: null }), s("verification.escalation", { round: 0 })] });
+  const again = (round: number) => looped({ node_passes: PASSES, worker_sessions: [...FIRST, s("verification.checks.lint", { round, pass: 2, status: "running", wall_ms: null }), s("verification.escalation", { round: 0, pass: 1 })] });
+  const escalated = (...inPass: number[]) => looped({ node_passes: PASSES, worker_sessions: [...FIRST, ...inPass.map((pass) => s("verification.escalation", { round: 0, pass })), s("verification.checks.lint", { pass: 2, status: "running", wall_ms: null })] });
+
+  it.each([
+    [[1], "thread 1 · turn 1", undefined],
+    [[2], undefined, "thread 1 · turn 1"],
+    // A thread's turns count on across passes.
+    [[1, 2], "thread 1 · turn 1", "thread 1 · turn 2"],
+  ])("hangs an escalation on the pass it answered alone: turns in %j → first %s, newest %s", (inPass, first, newest) => {
+    const item = escalated(...inPass);
+    expect(nodeGraph(asOfPass(item, "verification", 1), node, NOW, []).side?.meta).toBe(first);
+    expect(nodeGraph(item, node, NOW, []).side?.meta).toBe(newest);
+  });
 
   it("counts rounds from the pass the node is on, and draws that pass alone", () => {
     const retried = again(0);
@@ -260,7 +279,7 @@ describe("a node the chain ran again", () => {
     expect(nodeGraph(asOfPass(again(0), "verification", 1), node, NOW, []).rounds!.rows.at(-1)).toMatchObject({ n: 2, tone: "ok", outcome: "done" });
     // The item's own state is untouched: it has started, it stands where it stands, and it stopped for what it stopped for.
     expect([first.current_node_id, first.stop, notStarted(first)]).toEqual(["verification", stopped.stop, false]);
-    // Its escalation turns stay: they are the node's, in no pass.
+    // Its escalation turn is this pass's: the server numbers a turn with the pass it answered.
     expect(g.side).toBeDefined();
     // The newest pass, a pass the node never had, and no pick are the item itself.
     for (const n of [2, 9, undefined]) expect(asOfPass(stopped, "verification", n)).toBe(stopped);
