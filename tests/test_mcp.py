@@ -399,6 +399,25 @@ def test_set_node_overrides_forwards_model_effort_and_extra_prompt(monkeypatch):
     assert fields.items() <= seen[0].items()
 
 
+def test_the_mcp_tools_forward_runner(monkeypatch):
+    seen = {}
+
+    def fake(name):
+        async def call(*args, **kwargs):
+            seen[name] = kwargs
+            return {"id": "w1"}
+
+        return call
+
+    for name in ("create_work_item", "set_agent_overrides", "set_node_overrides"):
+        monkeypatch.setattr(mcp.client, name, fake(name))
+    server = mcp.build()
+    asyncio.run(server.call_tool("create_work_item", {"title": "t", "runner": "gpu"}))
+    asyncio.run(server.call_tool("set_agent_overrides", {"runner": "gpu"}))
+    asyncio.run(server.call_tool("set_node_overrides", {"node_id": "plan", "runner": "gpu"}))
+    assert all(seen[n].get("runner") == "gpu" for n in seen) and len(seen) == 3
+
+
 def test_ensure_repo_through_the_mcp_tool_returns_the_stored_entry(app, tmp_path):
     """Kraft-xs3ri: the MCP door, not only the client, hands back what
     `GET /repos` stores for an already-connected repo -- never the probe,

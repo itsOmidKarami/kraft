@@ -175,3 +175,35 @@ def test_set_agent_overrides_sends_only_the_fields_named(tmp_path, monkeypatch):
     monkeypatch.setattr(client.transport, "_send", send)
     asyncio.run(client.set_agent_overrides(model="gpt-big", work_item_id="w1"))
     assert sent == [("PATCH", "/work-items/w1", {"agent_overrides": {"model": "gpt-big"}})]
+
+
+def test_runner_rides_on_filing_and_on_both_override_calls(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    sent = []
+
+    async def send(method, path, **kwargs):
+        sent.append((method, path, kwargs.get("json")))
+        return httpx.Response(200, json={"id": "w1", "status": "paused"})
+
+    monkeypatch.setattr(client.transport, "_send", send)
+    asyncio.run(client.create_work_item("t", repo=str(tmp_path), runner="gpu"))
+    asyncio.run(client.set_agent_overrides(runner="gpu", work_item_id="w1"))
+    asyncio.run(client.set_node_overrides("build", runner="gpu", work_item_id="w1"))
+    assert sent[0][0:2] == ("POST", "/work-items") and sent[0][2]["runner"] == "gpu"
+    assert sent[1:] == [
+        ("PATCH", "/work-items/w1", {"agent_overrides": {"runner": "gpu"}}),
+        ("PATCH", "/work-items/w1", {"node_overrides": {"build": {"runner": "gpu"}}}),
+    ]
+
+
+def test_filing_without_a_runner_does_not_send_one(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    sent = []
+
+    async def send(method, path, **kwargs):
+        sent.append(kwargs.get("json"))
+        return httpx.Response(200, json={"id": "w1", "status": "paused"})
+
+    monkeypatch.setattr(client.transport, "_send", send)
+    asyncio.run(client.create_work_item("t", repo=str(tmp_path)))
+    assert "runner" not in sent[0]

@@ -29,6 +29,7 @@ async def create_work_item(
     budget_usd: float | None | EllipsisType = ...,
     node_overrides: dict | None = None,
     autostart: bool = False,
+    runner: str | None = None,
 ) -> dict:
     """Create a work item. It lands paused: an agent files work, a human starts it.
 
@@ -61,6 +62,9 @@ async def create_work_item(
     intake fields (Kraft-s7c04.33), validated there. `budget_usd` keeps the
     API's presence rule: left at `...` it is not sent and the policy default
     applies; `None` is an explicit "no cap".
+
+    `runner` is where the item's steps run: a machine from workers.yaml, `any`,
+    or `local`; unset, the chain decides.
     """
     if repo is None:
         work_item_id, _origin = await context.standing_item()
@@ -89,6 +93,7 @@ async def create_work_item(
             **({"skip_nodes": skip_nodes} if skip_nodes else {}),
             **({"budget_usd": budget_usd} if budget_usd is not ... else {}),
             **({"node_overrides": node_overrides} if node_overrides else {}),
+            **({"runner": runner} if runner else {}),
             **({"description": description} if description else {}),
             **({"attachments": attachments, "cwd": str(Path.cwd())} if attachments else {}),
         },
@@ -589,13 +594,14 @@ async def set_agent_overrides(
     escalate_model: str | None = None,
     effort: str | None = None,
     *,
+    runner: str | None = None,
     clear: bool = False,
     work_item_id: str | None = None,
 ) -> dict:
-    """Set or clear a Kraft work item's own model/effort override
+    """Set or clear a Kraft work item's own model/effort/runner override
     (Kraft-4k6l), read fresh at every dispatch rather than baked into the
     chain. `clear` sends `{}`, resetting every field to the template's own
-    binding; naming any of `model`/`escalate_model`/`effort` *replaces* the
+    binding; naming any of `model`/`escalate_model`/`effort`/`runner` *replaces* the
     whole stored override, it does not merge with what is already there.
     `_forbid_self_action`, not `resolve_work_item` (Kraft-g1ebw): a running
     worker dialing its own model/effort mid-run is exactly the kind of
@@ -611,12 +617,14 @@ async def set_agent_overrides(
                 "model": model,
                 "escalate_model": escalate_model,
                 "effort": effort,
+                "runner": runner,
             }.items()
             if v is not None
         }
         if not overrides:
             raise transport.ClientError(
-                "kraft: set-overrides needs --model, --escalate-model, --effort, or --clear",
+                "kraft: set-overrides needs --model, --escalate-model, --effort, --runner, "
+                "or --clear",
                 kind=transport.Failure.REFUSED,
             )
     return await transport._patch(
@@ -632,6 +640,7 @@ async def set_node_overrides(
     *,
     model: str | None = None,
     effort: str | None = None,
+    runner: str | None = None,
     extra_prompt: str | None = None,
     reviewers: list[dict] | None = None,
     clear: bool = False,
@@ -663,6 +672,7 @@ async def set_node_overrides(
                 "auto_escalate_delay_s": auto_escalate_delay_s,
                 "model": model,
                 "effort": effort,
+                "runner": runner,
                 "extra_prompt": extra_prompt,
                 "reviewers": reviewers,
             }.items()
@@ -671,8 +681,8 @@ async def set_node_overrides(
         if not fields:
             raise transport.ClientError(
                 "kraft: set-node-override needs --auto-escalate, --auto-escalate-stuck, "
-                "--auto-escalate-delay-s, --model, --effort, --extra-prompt, --reviewer, "
-                "or --clear",
+                "--auto-escalate-delay-s, --model, --effort, --runner, --extra-prompt, "
+                "--reviewer, or --clear",
                 kind=transport.Failure.REFUSED,
             )
     return await transport._patch(

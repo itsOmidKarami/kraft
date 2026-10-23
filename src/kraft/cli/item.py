@@ -92,6 +92,7 @@ def _cmd_create(ns: argparse.Namespace) -> None:
                 budget_usd=ns.budget,
                 node_overrides=_node_overrides(ns.node_override),
                 autostart=ns.autostart,
+                runner=ns.runner,
             )
         ),
         _render_created,
@@ -398,7 +399,12 @@ def _cmd_set_overrides(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(
             client.set_agent_overrides(
-                ns.model, ns.escalate_model, ns.effort, clear=ns.clear, work_item_id=ns.id
+                ns.model,
+                ns.escalate_model,
+                ns.effort,
+                runner=ns.runner,
+                clear=ns.clear,
+                work_item_id=ns.id,
             )
         ),
         common._render_action,
@@ -416,6 +422,7 @@ def _cmd_set_node_override(ns: argparse.Namespace) -> None:
                 ns.auto_escalate_delay_s,
                 model=ns.model,
                 effort=ns.effort,
+                runner=ns.runner,
                 extra_prompt=ns.extra_prompt,
                 reviewers=[r for r in ns.reviewer if r] if ns.reviewer else None,
                 clear=ns.clear,
@@ -622,6 +629,11 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         metavar="NODE.FIELD=VALUE",
         help="a per-node override at intake, the fields set-node-override takes "
         "(repeatable), e.g. plan.auto_escalate=true or implementation.attempts=2",
+    )
+    create.add_argument(
+        "--runner",
+        metavar="NAME",
+        help="where its steps run: a machine from workers.yaml, any, or local",
     )
     create.add_argument(
         "--autostart",
@@ -869,6 +881,11 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     )
     set_overrides.add_argument("--effort", help="low, medium, high, xhigh, or max")
     set_overrides.add_argument(
+        "--runner",
+        metavar="NAME",
+        help="where its steps run: a machine from workers.yaml, any, or local",
+    )
+    set_overrides.add_argument(
         "--clear", action="store_true", help="reset every field to the template's own binding"
     )
     set_overrides.set_defaults(func=_cmd_set_overrides)
@@ -876,7 +893,7 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     set_node_override = subs.add_parser(
         "set-node-override",
         parents=[common],
-        help="per-item override for one node (auto-escalate, model, effort, extra prompt), "
+        help="per-item override for one node (auto-escalate, model, effort, runner, extra prompt), "
         "without touching the template",
         epilog="Each call changes only the flags you give and keeps the node's other "
         "overrides; --clear resets the node. Unlike set-overrides, it merges.",
@@ -903,6 +920,11 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     )
     set_node_override.add_argument(
         "--effort", help="the effort this node's agent tasks run at, over set-overrides"
+    )
+    set_node_override.add_argument(
+        "--runner",
+        metavar="NAME",
+        help="where its steps run: a machine from workers.yaml, any, or local",
     )
     set_node_override.add_argument(
         "--extra-prompt", help="text appended to every agent task's instruction in this node"

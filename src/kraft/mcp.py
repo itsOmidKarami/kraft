@@ -146,6 +146,7 @@ def build() -> MCPServer:
         budget_usd: float | None = None,
         node_overrides: dict | None = None,
         chain_template: str | None = None,
+        runner: str | None = None,
     ) -> dict:
         """File a new Kraft work item. It is created **paused** and does not run:
         a human starts it from the board. Use this to hand finished work off to
@@ -191,7 +192,12 @@ def build() -> MCPServer:
         set a cap but not lift one); `node_overrides` is `{node_id: {field:
         value}}`, the fields `set_node_overrides` takes. Leave all three out
         unless a human asked for them. `chain_template` is `chain`'s 1.x
-        name, still read; pass `chain`."""
+        name, still read; pass `chain`.
+
+        `runner` is where the item's steps run: a machine from workers.yaml,
+        `any` or `local`. A machine name must be in workers.yaml; a sandboxed,
+        in-place, workspace-member, submodule or Git LFS item is refused. Leave
+        it out unless a human asked for one."""
         return await client.create_work_item(
             title,
             repo=repo,
@@ -206,6 +212,7 @@ def build() -> MCPServer:
             in_place=in_place,
             skip_nodes=skip_nodes,
             node_overrides=node_overrides,
+            runner=runner,
             **({"budget_usd": budget_usd} if budget_usd is not None else {}),
         )
 
@@ -455,16 +462,19 @@ def build() -> MCPServer:
         model: str | None = None,
         escalate_model: str | None = None,
         effort: str | None = None,
+        runner: str | None = None,
         clear: bool = False,
         work_item_id: str | None = None,
     ) -> dict:
-        """Set or clear a Kraft work item's own model/effort override, applied
-        to every agent node in its chain without changing the chain itself.
-        `clear` resets every field back to the template's own binding; naming
-        a field replaces the whole stored override rather than merging with
-        it."""
+        """Set or clear a Kraft work item's own model/effort/runner override,
+        applied to every agent node in its chain without changing the chain
+        itself. `clear` resets every field back to the template's own binding;
+        naming a field replaces the whole stored override rather than merging
+        with it. `runner` is where the steps run: a machine from workers.yaml,
+        `any` or `local`; a sandboxed, in-place, workspace-member, submodule or
+        Git LFS item is refused. It takes effect at the next step launch."""
         return await client.set_agent_overrides(
-            model, escalate_model, effort, clear=clear, work_item_id=work_item_id
+            model, escalate_model, effort, runner=runner, clear=clear, work_item_id=work_item_id
         )
 
     @server.tool()
@@ -475,6 +485,7 @@ def build() -> MCPServer:
         auto_escalate_delay_s: int | None = None,
         model: str | None = None,
         effort: str | None = None,
+        runner: str | None = None,
         extra_prompt: str | None = None,
         reviewers: list[dict] | None = None,
         clear: bool = False,
@@ -487,9 +498,13 @@ def build() -> MCPServer:
         automated-review wait reads (each `{"bot": LOGIN}` or `{"check": NAME}`,
         over the repository's; `[]` expects none) -- without touching the Policy
         screen's system defaults or the chain everyone else uses. A
-        model/effort the node's harness refuses is refused here. `clear` resets this node back to
-        the template's own binding; naming a field sets it and keeps the
-        node's other fields. 409s once the node has started."""
+        model/effort the node's harness refuses is refused here. `runner` is
+        where the node's steps run: a machine from workers.yaml, `any` or
+        `local`; a sandboxed, in-place, workspace-member, submodule or Git LFS
+        item is refused. `clear` resets this node back to the template's own
+        binding; naming a field sets it and keeps the node's other fields.
+        409s once the node has started, except a `runner` alone, which takes
+        effect at the node's next step launch."""
         return await client.set_node_overrides(
             node_id,
             auto_escalate,
@@ -497,6 +512,7 @@ def build() -> MCPServer:
             auto_escalate_delay_s,
             model=model,
             effort=effort,
+            runner=runner,
             extra_prompt=extra_prompt,
             reviewers=reviewers,
             clear=clear,
