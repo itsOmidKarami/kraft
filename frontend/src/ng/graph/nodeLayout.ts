@@ -80,7 +80,7 @@ const rowsOf = (st: NodeStep) => Math.max(1, st.tasks.length);
  *  a lane and not an arc (`loopArc`). `handlers` are the on_failure handlers that ran, each a row of `n` tasks a
  *  step's pitch apart, joined to its owner as the escalation is to the node: the node's own off the end mark, beside
  *  and under the escalation; a step's or a task's under everything else, straight down from its owner's column. */
-export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolean; loopTasks?: number; loopLane?: boolean; loopOpen?: number; handlers?: { at?: { step: number; row: number }; n: number }[]; expand?: Expand } = {}) {
+export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolean; loopTasks?: number; loopLane?: boolean; loopOpen?: number; handlers?: { at?: { step: number }; n: number }[]; expand?: Expand } = {}) {
   const loopN = o.loop ? (o.loopTasks ?? 0) : 0, loopOpen = loopN ? (o.loopOpen ?? 0) : 0, loopLane = loopN > 0 && (!!o.loopLane || loopOpen > 0);
   const ex = o.expand && steps[o.expand.step]?.tasks[o.expand.row] ? o.expand : undefined;
   // The open task's column is the frame and 12px, and the frame sits at its centre.

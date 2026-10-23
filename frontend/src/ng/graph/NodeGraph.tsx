@@ -115,19 +115,18 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
     held.current = { key, w: Math.max(key === held.current.key ? held.current.w : 0, frameWidth(shown.view)) };
   }
   const open = shown && openRow >= 0 ? { step: openStep, row: openRow, w: held.current.w, h: frameHeight(shown.view) } : undefined;
+  // The handlers drawn: the node's, and a step's or a task's whose step is on the canvas.
+  const placed = (onFailure ?? []).filter((h) => !h.at || steps.some((st) => st.id === h.at!.step));
   // A loop with a parallel step is a lane, open or not: its stops on a level line, as steps are on the axis.
   const laid = { side: !!side, loop: !!loop, loopTasks: arcCols.length, loopLane: arcCols.some((c) => c.tasks.length > 1), loopOpen: openCol?.tasks.length ?? 0,
-    handlers: (onFailure ?? []).map((h) => {
-      const k = h.at ? steps.findIndex((st) => st.id === h.at!.step) : -1;
-      return { at: k >= 0 ? { step: k, row: Math.max(0, steps[k].tasks.findIndex((t) => t.id === h.at!.task)) } : undefined, n: h.tasks.length };
-    }) };
+    handlers: placed.map((h) => ({ at: h.at && { step: steps.findIndex((st) => st.id === h.at!.step) }, n: h.tasks.length })) };
   // Its rows' shape, so a new array of the same handlers lays nothing out again.
   const handlerShape = JSON.stringify(laid.handlers);
   const closed = useMemo(() => nodeLayout(steps, laid), [steps, side, loop, arcCols.length, laid.loopLane, laid.loopOpen, handlerShape]); // eslint-disable-line react-hooks/exhaustive-deps
   const wide = useMemo(() => (open ? nodeLayout(steps, { ...laid, expand: open }) : closed), [closed, open?.step, open?.row, open?.w, open?.h]); // eslint-disable-line react-hooks/exhaustive-deps
   const lay = phase.layout && open ? wide : closed;
   const { edges, dots } = useMemo(() => nodeEdges(steps, lay), [steps, lay]);
-  const handlers = (onFailure ?? []).flatMap((h, k) => (lay.handlerRows[k] ? [{ ...h, row: lay.handlerRows[k], lines: handlerEdges(lay.handlerRows[k], h.tasks, k) }] : []));
+  const handlers = placed.map((h, k) => ({ ...h, row: lay.handlerRows[k], lines: handlerEdges(lay.handlerRows[k], h.tasks, k) }));
   const handlerKeys = handlers.flatMap((h) => h.tasks.map((t) => taskKey(h.step, t.id)));
   // The camera measures the world after it has moved, and keeps clear of the zoom and round controls at the foot.
   const settledW = useSettled(lay.W, phase.glide), settledH = useSettled(lay.H, phase.glide);

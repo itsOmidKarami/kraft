@@ -48,7 +48,7 @@ describe("node layout", () => {
     expect(sideBranch(lay)).toMatchObject({ x: lay.endX + 84, y: lay.TY + 74 });
   });
   it("hangs each on_failure handler off its owner: the node's off the end mark under the escalation, a task's under its column", () => {
-    const lay = nodeLayout([step("a", 2), step("b", 1)], { side: true, handlers: [{ n: 2 }, { at: { step: 1, row: 0 }, n: 1 }] });
+    const lay = nodeLayout([step("a", 2), step("b", 1)], { side: true, handlers: [{ n: 2 }, { at: { step: 1 }, n: 1 }] });
     const [own, task] = lay.handlerRows;
     // The node's: a row apart under the escalation's box, its first task in that box's column, a step's pitch to the next.
     expect(own).toMatchObject({ own: true, from: { x: lay.endX, y: lay.TY + 9 }, y: sideBranch(lay).y + 92 + 24, xs: [lay.endX + 84, lay.endX + 84 + 154] });

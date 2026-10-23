@@ -193,7 +193,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
               </Block>
             )}
             {!gate && onFailure?.map((h) => (
-              <Block key={h.label} title={h.label.replace(/^on/, "On")}>
+              <Block key={`${h.step}/${h.at?.task ?? ""}`} title={h.label.replace(/^on/, "On")}>
                 <div className="ph-list">
                   {h.tasks.map((t) => (
                     <button key={t.id} type="button" className="ph-row ph-task-row" onClick={() => openTask(h.step, t.id)}>
