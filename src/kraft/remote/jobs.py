@@ -163,7 +163,8 @@ class JobRunner:
                 return Outcome(
                     rejected=f"could not start {argv[0]!r}: {exc}", outcome="config_error"
                 )
-        await emit({"t": "started", "id": s.key})
+        with contextlib.suppress(protocol.Closed):  # offline: the server hears it again on `sync`
+            await emit({"t": "started", "id": s.key})
         tail = asyncio.create_task(self._tail(emit))
         try:
             while self._proc.poll() is None:

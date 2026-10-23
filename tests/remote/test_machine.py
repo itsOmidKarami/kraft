@@ -4,13 +4,19 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import contextlib
 import sys
 
 import pytest
+from support.harness import git, make_repo
+from support.remote import memory_pair
 from websockets.asyncio.server import serve
 
-from kraft.remote import machine, protocol, registry
+from kraft.remote import blobs, bundle, files, machine, protocol, registry
 from kraft.remote.hub import Hub
+from kraft.remote.jobs import JobSpec
+from kraft.remote.machine import Machine
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport, WebSocketTransport
 
 TOKEN = "kwt_machine"
@@ -145,3 +151,122 @@ async def _until(cond, timeout=5.0):
     async with asyncio.timeout(timeout):
         while not cond():
             await asyncio.sleep(0.01)
+
+
+async def _job(tmp_path, argv, *, sid="s1"):
+    """A `Machine` on one end of an in-process pair; the test plays the server and sends one job."""
+    server, machine_t = memory_pair()
+    machine = Machine(tmp_path / "home", kraft_version="2.3.0")
+    task = asyncio.create_task(machine.serve(machine_t, {"server": "srv"}))
+    repo = make_repo(tmp_path, "server")
+    git(repo, "checkout", "-q", "-b", "kraft/x")
+    head = git(repo, "rev-parse", "HEAD").strip()
+    code, tgz = tmp_path / "code.bundle", tmp_path / "files.tgz"
+    bundle.make(repo, "kraft/x", [], code)
+    files.pack([], tgz)
+    spec = JobSpec(
+        work_item_id="w1", session_id=sid, node_id="n", hook_point="n.main.a", argv=argv,
+        cwd=str(repo), env={"KRAFT_SESSION_ID": f"w1/{sid}"}, repo_env={}, passthrough=[],
+        setup_command=None, branch="kraft/x", head=head, base=head, identity={},
+        server_run_dir=str(tmp_path / "run"), server_worktree=str(repo),
+    )  # fmt: skip
+    await server.send(
+        {"t": "job", "id": spec.key, "spec": spec.to_frame(), "blobs": ["code", "files"]}
+    )
+    await blobs.send_blob(server, job=spec.key, name="code", source=code)
+    await blobs.send_blob(server, job=spec.key, name="files", source=tgz)
+    return machine, task, server, spec
+
+
+async def _frames_until(t, kind):
+    frames = []
+    while True:
+        frame = await asyncio.wait_for(t.recv(), 10)
+        frames.append(frame)
+        if frame["t"] == kind:
+            return frames
+
+
+async def _end(t, task):
+    await t.close()
+    with contextlib.suppress(protocol.Closed):
+        await task
+
+
+async def test_a_job_runs_on_the_machine_and_its_log_and_exit_come_back(tmp_path):
+    machine, task, t, spec = await _job(tmp_path, [sys.executable, "-c", "print('hi')"])
+    frames = await _frames_until(t, "finished")
+    assert frames[0]["t"] == "started" and frames[-1]["code"] == 0 and frames[-1]["tip"] is None
+    assert b"".join(base64.b64decode(f["data"]) for f in frames if f["t"] == "log") == b"hi\n"
+    assert (
+        tmp_path / "home" / "remote" / "srv" / "jobs" / "w1__s1" / "session.log"
+    ).read_bytes() == b"hi\n"
+    await _end(t, task)
+
+
+async def test_a_job_that_commits_hands_in_a_bundle_of_exactly_its_commits(tmp_path):
+    script = (
+        "import subprocess; open('made.txt','w').write('x'); subprocess.run(['git','add','-A']); "
+        "subprocess.run(['git','commit','-qm','m'])"
+    )
+    machine, task, t, spec = await _job(tmp_path, [sys.executable, "-c", script])
+    frames = await _frames_until(t, "finished")
+    sink = blobs.BlobSink(tmp_path / "got")
+    got = [sink.add(f) for f in frames if f["t"] == "blob"]
+    assert [f["name"] for f in frames if f["t"] == "blob"][0] == "commits" and got[-1] is not None
+    assert frames[-1]["tip"]
+    assert bundle._git(tmp_path / "server", "bundle", "verify", str(got[-1])).returncode == 0
+    await _end(t, task)
+
+
+async def test_a_finished_job_is_resent_from_the_offset_the_server_names(tmp_path):
+    machine, task, t, spec = await _job(tmp_path, [sys.executable, "-c", "print('hello')"])
+    await _frames_until(t, "finished")
+    await t.send({"t": "sync", "jobs": [{"id": spec.key, "offset": 2}]})
+    frames = await _frames_until(t, "finished")
+    logs = [f for f in frames if f["t"] == "log"]
+    assert logs[0]["offset"] == 2 and base64.b64decode(logs[0]["data"]) == b"llo\n"
+    await _end(t, task)
+
+
+async def test_a_job_whose_cli_is_not_on_the_machine_is_rejected_as_a_config_error(tmp_path):
+    machine, task, t, spec = await _job(tmp_path, ["claude-not-installed"])
+    frame = (await _frames_until(t, "rejected"))[-1]
+    assert frame["outcome"] == "config_error" and "claude-not-installed" in frame["reason"]
+    await _end(t, task)
+
+
+async def test_a_job_the_machine_has_forgotten_is_rejected_when_the_server_asks_after_it(tmp_path):
+    server, machine_t = memory_pair()
+    task = asyncio.create_task(
+        Machine(tmp_path / "home", kraft_version="2.3.0").serve(machine_t, {"server": "srv"})
+    )
+    await server.send({"t": "sync", "jobs": [{"id": "w1/gone", "offset": 0}]})
+    frame = await asyncio.wait_for(server.recv(), 5)
+    assert frame["t"] == "rejected" and frame["id"] == "w1/gone" and "no record" in frame["reason"]
+    await _end(server, task)
+
+
+async def test_the_agents_call_reaches_the_server_as_an_api_frame_and_its_answer_returns(tmp_path):
+    machine, task, t, spec = await _job(tmp_path, ["sh", "-c", "sleep 2"])
+    await _frames_until(t, "started")
+    call = asyncio.create_task(
+        machine.call_server(spec.key, "POST", "/api/work-items/w1/progress?x=1", b"{}")
+    )
+    frame = (await _frames_until(t, "api"))[-1]
+    assert (frame["method"], frame["path"], frame["query"], frame["id"]) == (
+        "POST", "/api/work-items/w1/progress", "x=1", spec.key,
+    )  # fmt: skip
+    await t.send(
+        {
+            "t": "api_result",
+            "rid": frame["rid"],
+            "status": 200,
+            "headers": {"content-type": "application/json"},
+            "body": base64.b64encode(b'{"ok":true}').decode(),
+        }
+    )
+    assert await call == (200, {"content-type": "application/json"}, b'{"ok":true}')
+    await t.send({"t": "signal", "id": spec.key, "sig": "KILL"})
+    await _frames_until(t, "finished")
+    await _end(t, task)
