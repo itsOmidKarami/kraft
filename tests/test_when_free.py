@@ -664,3 +664,12 @@ async def test_the_loop_survives_an_exception(attempt, monkeypatch):
 
     assert len(looks) >= 2
     assert when_free.claimed() is False
+
+
+async def test_a_claim_nobody_restarted_for_lapses(database, monkeypatch):
+    """The helper died before it stopped this server: the claim would refuse
+    every start for good, so it ends after `CLAIM_TTL_S`."""
+    assert when_free.claim(database) is True
+    monkeypatch.setattr(when_free, "CLAIM_TTL_S", -1)
+    assert when_free.claimed() is False
+    when_free.refuse_if_claimed()

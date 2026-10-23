@@ -19,6 +19,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -84,28 +85,37 @@ class Claimed(Exception):
 
 MESSAGE = "Kraft is restarting for an update; try again in a minute"
 
+#: How long a claim may be held. It ends with the process when the restart
+#: works; if the helper died before it stopped this server, the claim would
+#: refuse every start for good, so it lapses and the next look tries again.
+CLAIM_TTL_S = 900
+
 #: Module-level, not on `app.state`: `run_agent_task` has no `app`, and the
 #: claim has to reach it. One server per process.
 _claimed = False
+_claimed_at = 0.0
 
 
 def claim(db) -> bool:
     """Stop every new walk and agent session from starting, if Kraft is free.
     The flag is held until `release_claim`, or until the restart replaces the
     process."""
-    global _claimed
-    if _claimed or not is_free(db):
+    global _claimed, _claimed_at
+    if claimed() or not is_free(db):
         return False
-    _claimed = True
+    _claimed, _claimed_at = True, time.monotonic()
     return True
 
 
 def release_claim() -> None:
-    global _claimed
-    _claimed = False
+    global _claimed, _claimed_at
+    _claimed, _claimed_at = False, 0.0
 
 
 def claimed() -> bool:
+    if _claimed and _claimed_at and time.monotonic() - _claimed_at > CLAIM_TTL_S:
+        logger.warning("update when free: the claim lapsed; the restart never replaced this server")
+        release_claim()
     return _claimed
 
 
@@ -113,7 +123,7 @@ def refuse_if_claimed() -> None:
     """For a route, before its first store write: a start refused afterwards
     would leave the write behind with nothing running (`deps.task_is_live`'s
     reason). Changes nothing."""
-    if _claimed:
+    if claimed():
         from fastapi import HTTPException
 
         raise HTTPException(503, MESSAGE)
@@ -439,7 +449,6 @@ def snapshot(run_dirs, config_dir: Path) -> dict:
     of its own under the run dir. Returns phase 2's fields."""
     import shutil
     import sqlite3
-    import time
 
     root = run_dirs.base / f"{SNAPSHOT_PREFIX}{time.strftime('%Y%m%d-%H%M%S')}"
     config_copy = root / "config"
@@ -498,7 +507,6 @@ def delete_snapshots(run_dirs, *, keep: str | None = None, older_than_s: float =
     """Remove snapshot folders, except `keep` and any younger than
     `older_than_s`."""
     import shutil
-    import time
 
     for folder in run_dirs.base.glob(f"{SNAPSHOT_PREFIX}*"):
         if str(folder) == keep:
