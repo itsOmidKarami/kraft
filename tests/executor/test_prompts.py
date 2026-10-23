@@ -162,13 +162,10 @@ _SCOPES = entry_of(
 )
 
 
-def test_scope_note_shows_verifications_commands_and_tells_the_implementer_not_to_run_them():
+def test_scope_note_tells_the_implementer_to_run_its_own_tests_and_not_the_suite():
     out = prompts.scope_note(_agent_task_model(), _SCOPES)
-    for cmd in ("just test-ui", "just e2e-ci", "just ci-test"):
-        assert cmd in out
-    assert "frontend/**" in out
-    assert "Do not run the commands below" in out
-    assert "the files you touched" in out
+    assert "the files you touched" in out and "Do not run the full test suite" in out
+    assert "just ci-test" not in out  # a listed scope command reads as one to run
 
 
 def test_scope_note_is_empty_for_any_other_hook():
@@ -187,7 +184,7 @@ def test_scope_note_handles_a_legacy_bare_test_command():
     # config.load_repos wraps a bare test_command into a ["**"] scope, but a
     # LaunchContext built by hand may not have been through that.
     out = prompts.scope_note(_agent_task_model(), entry_of({"test_command": "just test"}))
-    assert "just test" in out
+    assert "the files you touched" in out
 
 
 def test_format_findings_renders_job_refs():

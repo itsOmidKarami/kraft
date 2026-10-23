@@ -593,45 +593,29 @@ def review_threads_note(task: AgentTask, work_item_row, db, note: str | None, sa
     ) + body
 
 
-#: What verify will run, shown to the node that can still act on it. 49c0cefd
-#: changed 21 frontend files, read the justfile, and never ran `just e2e-ci`
-#: (`grep -c e2e-ci` in its implementation log = 0); the flake that reached
-#: verify instead cost $17.41 and ~3h there. The agent had the capability and
-#: not the mapping (Kraft-s7c04.8).
-#:
-#: The scope TABLE, not a resolved selection: at implementation dispatch the
-#: agent has written nothing, so the diff is empty and `_matched_scopes` fails
-#: open to every scope. Printing "all of them" would teach it nothing. verify's
-#: own selection is unchanged -- this hands the agent the same mapping so it
-#: applies the same rule to what it actually changed.
-#:
-#: The table is what verification runs, never what the implementer runs: a
-#: repo's scope command can be its whole suite (`just ci-test`), and an
-#: implementer told to run it ran the suite twice before verification ran it
-#: again (Kraft-jl7un). It picks its own tests by path instead.
+#: Which tests the task working from the brief runs. Its own, picked by path:
+#: the repo's test scopes are the full suite in some repos (`just ci-test`), and
+#: an implementer handed that table and told to run "the checks that gate your
+#: paths" ran the whole suite twice before verification ran it again
+#: (Kraft-jl7un). The e2e clause is why there was a table at all: an
+#: implementer once changed 21 frontend files and never ran an e2e spec, and the
+#: flake that reached verify cost $17.41 (Kraft-s7c04.8).
 _SCOPE_NOTE = (
-    "\n\nBefore you finish, run the tests you choose yourself: the tests for "
-    "the files you touched and for the code related to them, by path. Do not "
-    "run the commands below: they run against your diff after you finish "
-    "(verification, then CI), and a failure there costs a full review round. "
-    "They say which kind of test gates which paths, so you know what to pick "
-    "(an e2e spec for a UI change, say):\n{rows}\n"
-    "A changed path matching no scope runs every scope."
+    "\n\nBefore you finish, run the tests for the files you touched and for the "
+    "code related to them, by path, an e2e spec included when it covers a UI file "
+    "you changed. Do not run the full test suite or any repo-wide test command: "
+    "verification and CI run those against your diff after you finish."
 )
 
 
 def scope_note(task: AgentTask, repo_entry: RepoEntry | None) -> str:
-    """The repo's path->command test mapping, for the task working from the
-    brief only -- the same "no skill of its own" rule `progress_note` applies,
-    and never a node id: a chain whose implementing node is called `build` must
-    still get this (Kraft-s7c04.45).
+    """Which tests to run, for the task working from the brief only -- the same
+    "no skill of its own" rule `progress_note` applies, and never a node id: a
+    chain whose implementing node is called `build` must still get this
+    (Kraft-s7c04.45). Nothing for a repo that declares no tests.
     """
     if task.skill is not None or repo_entry is None:
         return ""
-    scopes = [(s.paths, s.command) for s in repo_entry.test_scopes or ()]
-    if not scopes and repo_entry.test_command:
-        scopes = [(["**"], repo_entry.test_command)]
-    if not scopes:
+    if not (repo_entry.test_scopes or repo_entry.test_command):
         return ""
-    rows = "\n".join(f"  {', '.join(paths)}\n      {command}" for paths, command in scopes)
-    return _SCOPE_NOTE.format(rows=rows)
+    return _SCOPE_NOTE
