@@ -54,6 +54,26 @@ async def test_a_step_given_up_on_ends_its_session_unknown(rig):
     assert _row(rig, "s1")["status"] == "unknown"
 
 
+async def test_a_cap_the_machine_enforced_ends_the_session_time_capped(rig, monkeypatch):
+    from dataclasses import replace
+
+    from kraft.remote import launch
+
+    build = launch.build
+    # the server's own deadline is far off; the machine is told a short one
+    monkeypatch.setattr(launch, "build", lambda **kw: replace(build(**kw), deadline_s=0.3))
+    cap = caps.Deadline(caps.monotonic() + 1000, caps.Hit("build.main.a", "time_cap_minutes", 5, 0))
+    status = await _run(rig, "s1", ["sh", "-c", "sleep 30"], runner="gpu", time_cap=cap)
+    assert status == caps.TIME_CAPPED and _row(rig, "s1")["status"] == "capped_out"
+    event = rig.database.read(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE type = 'time_cap_reached' AND work_item_id = ?",
+            (rig.wid,),
+        ).fetchall()
+    )
+    assert len(event) == 1 and "time_cap_minutes" in event[0]["payload"]
+
+
 @pytest.mark.parametrize(
     ("runner", "kwargs", "says"),
     [

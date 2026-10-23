@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import asdict
 
 from kraft import caps, ids, store
 from kraft.remote import placement
@@ -67,6 +68,8 @@ def build(
     identity,
     run_dirs,
     entries,
+    time_cap: caps.Deadline | None,
+    idle_s: float | None,
 ) -> JobSpec:
     done = subprocess.run(
         ["git", "-C", str(cwd), "rev-parse", "--verify", f"refs/heads/{branch}"],
@@ -97,4 +100,8 @@ def build(
         server_worktree=str(cwd),
         dirs=[str(e.path) for e in rw if e.path.is_dir()],
         rw=[str(e.path) for e in rw],
+        # Enforced on the machine as well: while the server is asleep nothing else would.
+        deadline_s=None if time_cap is None else max(0.0, time_cap.at - caps.monotonic()),
+        cap=None if time_cap is None else asdict(time_cap.hit),
+        idle_s=idle_s,
     )

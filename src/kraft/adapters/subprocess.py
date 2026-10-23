@@ -809,6 +809,7 @@ async def _run_task(
     runner: str | None = None,
 ) -> str:
     runner = None if runner == "local" else runner
+    idle_s = IDLE_MINUTES * 60 if idle_limit and IDLE_MINUTES else None
     claim = None
     refusal = None
     run = None
@@ -1155,6 +1156,8 @@ async def _run_task(
                         identity=identity,
                         run_dirs=run_dirs,
                         entries=entries,
+                        time_cap=time_cap,
+                        idle_s=idle_s,
                     )
                     run = await _remote_runs.current().launch(
                         spec, claim, entries=entries, folder=files.folder
@@ -1366,7 +1369,6 @@ async def _run_task(
         capped = False
         hit: caps.Hit | None = None
         # The idle watchdog: the log's size, read on the usage tick below.
-        idle_s = IDLE_MINUTES * 60 if idle_limit and IDLE_MINUTES else None
         last_size = 0
         active_at = caps.monotonic()
         while proc.poll() is None:
@@ -1423,6 +1425,8 @@ async def _run_task(
             await wind_down()
         else:
             await uncancellable(wind_down())
+    if run is not None and run.capped and not capped:
+        capped, hit = True, caps.Hit(**run.capped)  # the machine's own cap fired first
     if capped:
         assert hit is not None
 

@@ -334,7 +334,7 @@ class Machine:
         if out.rejected is not None:
             await self._reject(job, out.outcome or "failed", out.rejected)
             return
-        await self._finish(job, out.code, copy, mapper, pushed)
+        await self._finish(job, out, copy, mapper, pushed)
 
     def _co_tasks(self, job: _Job) -> list[_Job]:
         return [
@@ -346,9 +346,7 @@ class Machine:
             and j.state == "running"
         ]
 
-    async def _finish(
-        self, job: _Job, code: int, copy: Copy, mapper, pushed: dict[str, str]
-    ) -> None:
+    async def _finish(self, job: _Job, out, copy: Copy, mapper, pushed: dict[str, str]) -> None:
         spec = job.spec
         if not self._co_tasks(job):
             with contextlib.suppress(Exception):  # the sweep is best effort, as on the server
@@ -371,7 +369,14 @@ class Machine:
         )
         if tip:
             self._delivered.setdefault(spec.work_item_id, []).append(tip)
-        job.final = {"t": "finished", "id": spec.key, "code": code, "tip": tip, "pushed": changed}
+        job.final = {
+            "t": "finished",
+            "id": spec.key,
+            "code": out.code,
+            "tip": tip,
+            "pushed": changed,
+            "capped": out.capped,
+        }
         job.state = "finished"
         await self._hand_in(job)
 

@@ -9,11 +9,13 @@ import os
 import shutil
 import signal as _signal
 import subprocess
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 
+from kraft import caps
 from kraft.remote import protocol
 from kraft.remote.paths import PathMap
 from kraft.worker.env import BASELINE, worker_env
@@ -43,6 +45,9 @@ class JobSpec:
     server_worktree: str
     dirs: list[str] = field(default_factory=list)  # read-write directories to create (server paths)
     rw: list[str] = field(default_factory=list)  # read-write entries that come back (server paths)
+    deadline_s: float | None = None  # running seconds left at launch: the step's time cap
+    cap: dict | None = None  # the `caps.Hit`, as a dict, that `deadline_s` enforces
+    idle_s: float | None = None  # stop the command when its log is silent this long
 
     @property
     def key(self) -> str:
@@ -61,6 +66,7 @@ class Outcome:
     code: int = 0
     rejected: str | None = None  # set when the command never started
     outcome: str | None = None  # "config_error" | "failed" with `rejected`
+    capped: dict | None = None  # the `caps.Hit` (as a dict) that stopped it: time cap or idle limit
 
 
 def job_dir(area: Path, key: str) -> Path:
@@ -166,16 +172,45 @@ class JobRunner:
         with contextlib.suppress(protocol.Closed):  # offline: the server hears it again on `sync`
             await emit({"t": "started", "id": s.key})
         tail = asyncio.create_task(self._tail(emit))
+        capped: dict | None = None
         try:
-            while self._proc.poll() is None:
-                await asyncio.sleep(self._poll)
+            capped = await self._until_exit()
         finally:
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 # whatever it backgrounded and left running
                 os.killpg(self._proc.pid, _signal.SIGTERM)
         await tail
         code = self._proc.returncode
-        return Outcome(code=128 - code if code < 0 else code)
+        return Outcome(code=128 - code if code < 0 else code, capped=capped)
+
+    async def _until_exit(self) -> dict | None:
+        """Wait for the command to exit. The step's time cap and idle limit are enforced here as
+        well as on the server, since a sleeping laptop enforces nothing; whichever side fires
+        first stops it. Returns the `caps.Hit` (as a dict) that did, if one did."""
+        s, began = self.spec, time.monotonic()
+        deadline = None if s.deadline_s is None else began + s.deadline_s
+        last_size, active_at = 0, began
+        capped: dict | None = None
+        while self._proc.poll() is None:
+            await asyncio.sleep(self._poll)
+            now = time.monotonic()
+            if capped is not None:
+                continue  # stopping; wait for it to go
+            if deadline is not None and now >= deadline and s.cap is not None:
+                capped = s.cap
+            elif s.idle_s is not None:
+                try:
+                    size = os.stat(self.log_path).st_size
+                except OSError:
+                    size = last_size
+                if size > last_size:
+                    last_size, active_at = size, now
+                elif now - active_at >= s.idle_s:
+                    hit = caps.Hit(s.hook_point, "idle_minutes", round(s.idle_s / 60), 0.0)
+                    capped = asdict(hit)
+            if capped is not None:
+                self.signal("KILL")
+        return capped
 
     async def _tail(self, emit: Callable[[dict], Awaitable[None]]) -> None:
         """Send the log from `_sent` as it grows, until the command has exited and it is drained."""

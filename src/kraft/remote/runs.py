@@ -70,6 +70,7 @@ class Run:
     changed: asyncio.Condition = field(default_factory=asyncio.Condition)
     received: dict[str, Path] = field(default_factory=dict)
     sink: blobs.BlobSink | None = None
+    capped: dict | None = None  # the cap the machine stopped the command at
     abandoned: bool = False  # given up on: whatever the machine hands in later is thrown away
 
 
@@ -223,6 +224,7 @@ class Runs:
             return
         run.state = "delivering"
         spec, code = run.spec, int(frame.get("code", 1))
+        run.capped = frame.get("capped")
         lock = self._locks.setdefault(spec.work_item_id, asyncio.Lock())
         async with lock:
             try:

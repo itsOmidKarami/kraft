@@ -24,7 +24,8 @@ Protocol 2. `id` is the job key `"<work item id>/<session id>"`. Frames:
 - `sync`, server to machine on every connect: `{jobs: [{id, offset}]}`. The
   machine resends log from each offset, and a finished job's `finished` and blobs.
 - `signal`, server to machine: `{id, sig}`, `INT` or `KILL`.
-- `finished`, machine to server, after its blobs: `{id, code, tip?, pushed?, reason?}`.
+- `finished`, machine to server, after its blobs: `{id, code, tip?, pushed?, capped?}`; `capped` is
+  the `caps.Hit` (a dict) of the time cap or idle limit that stopped the command on the machine.
 - `delivered`, server to machine: `{id}`; the machine may drop the job's state.
 - `api`, machine to server: `{id, rid, method, path, query, headers, body}`;
   `api_result`, back: `{rid, status, headers, body}`.
