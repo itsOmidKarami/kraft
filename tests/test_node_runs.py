@@ -74,17 +74,27 @@ async def test_in_place_dirty_is_the_items_leftovers_not_the_persons_edits(
 
 @pytest.mark.parametrize(
     "upstream_in, moves",
-    [("merged", True), ("rebased", True), (None, False)],
-    ids=["main-merged-into-the-branch", "branch-rebased-by-hand", "main-moved-alone"],
+    [("merged", True), ("rebased", True), ("forge", True), (None, False), ("landed", False)],
+    ids=[
+        "main-merged-into-the-branch",
+        "branch-rebased-by-hand",
+        "forge-merged-a-main-never-fetched-here",
+        "main-moved-alone",
+        "branch-already-merged-into-main",
+    ],
 )
 async def test_gate_moves_the_base_past_upstream_the_branch_took_in(
-    item_on, run_dirs, repo, upstream_in, moves
+    item_on, run_dirs, repo, tmp_path, upstream_in, moves
 ):
     """A branch that took main in outside Kraft's own rebase must not show
     main's commits as the item's change at the gate."""
     it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation")
     old = git(repo, "rev-parse", "HEAD")
     await it.database.write(lambda c: store.set_base_ref(c, it.id, old))
+    if upstream_in == "forge":
+        git(tmp_path, "init", "-q", "--bare", "origin.git")
+        git(repo, "remote", "add", "origin", str(tmp_path / "origin.git"))
+        git(repo, "push", "-q", "origin", "main")
     git(repo, "checkout", "-q", "-b", "item")
     write(repo, "mine.py", "x = 1\n")
     commit_all(repo, "the item's")
@@ -96,10 +106,26 @@ async def test_gate_moves_the_base_past_upstream_the_branch_took_in(
         git(repo, "merge", "-q", "--no-edit", "main")
     elif upstream_in == "rebased":
         git(repo, "rebase", "-q", "main")
+    elif upstream_in == "forge":
+        # main moved on origin only, and the forge's merge of it came home:
+        # this checkout's own copies of main still say `old`.
+        git(repo, "push", "-q", "origin", "main")
+        git(repo, "merge", "-q", "--no-edit", upstream)
+        git(repo, "branch", "-f", "main", old)
+        git(repo, "update-ref", "refs/remotes/origin/main", old)
+    elif upstream_in == "landed":
+        git(repo, "merge", "-q", "--no-edit", "main")
+        git(repo, "checkout", "-q", "main")
+        git(repo, "merge", "-q", "--no-ff", "--no-edit", "item")
+        git(repo, "checkout", "-q", "item")
 
     await node_runs.gate_requested(it.database, repo, it.id, "implementation")
 
-    assert it.row()["base_ref"] == (upstream if moves else old)
+    want = upstream if moves else old
+    assert it.row()["base_ref"] == want
+    # What the review page reads: the gate attempt's own base.
+    attempts = it.database.read(lambda c: store.gate_attempts(c, it.id, "implementation"))
+    assert attempts[-1]["base_sha"] == want
 
 
 async def test_drop_refs_removes_only_this_items_refs(database, tmp_path):

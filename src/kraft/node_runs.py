@@ -73,15 +73,28 @@ async def _absorbed_base(db, wid: str, row, wt: Path, tip: str) -> str | None:
     moves forward from `base_ref`, and only when the branch moved: the
     merge-base of the tip and upstream does not change when upstream alone does.
 
-    shortcut: reads the local upstream ref, no fetch, so a merge of commits
-    newer than the last fetch moves the base only as far as that fetch."""
+    The local upstream ref first. Only when that finds nothing and the branch
+    holds a merge commit past `base_ref` is upstream fetched (`upstream_head`,
+    bounded): the forge's merge comes home without its main (`bring_home`
+    fetches the item's branch alone), so no ref here may know it yet."""
     from kraft import builtins  # as inplace.taking does: builtins imports inplace
 
     base_ref = row["base_ref"] if row is not None else None
     if not base_ref:
         return None
-    branch = await builtins.base_branch(db, wid, Path(row["repo"]))
-    upstream = _config.git_read(
+
+    def fork_from(upstream: str | None) -> str | None:
+        fork = upstream and _config.git_read(wt, "merge-base", tip, upstream, expected_failure=True)
+        if not fork or fork in (base_ref, tip):
+            return None
+        ahead = _config.git_read(
+            wt, "merge-base", "--is-ancestor", base_ref, fork, expected_failure=True
+        )
+        return fork if ahead is not None else None
+
+    repo = Path(row["repo"])
+    branch = await builtins.base_branch(db, wid, repo)
+    local = _config.git_read(
         wt,
         "rev-parse",
         "--verify",
@@ -91,13 +104,17 @@ async def _absorbed_base(db, wid: str, row, wt: Path, tip: str) -> str | None:
     ) or _config.git_read(
         wt, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", expected_failure=True
     )
-    fork = upstream and _config.git_read(wt, "merge-base", tip, upstream, expected_failure=True)
-    if not fork or fork in (base_ref, tip):
-        return None
-    ahead = _config.git_read(
-        wt, "merge-base", "--is-ancestor", base_ref, fork, expected_failure=True
+    if (fork := fork_from(local)) is not None:
+        return fork
+    merges = _config.git_read(
+        wt, "rev-list", "--merges", "--max-count=1", f"{base_ref}..{tip}", expected_failure=True
     )
-    return fork if ahead is not None else None
+    if not merges:
+        return None
+    try:
+        return fork_from(await builtins.upstream_head(repo, branch))
+    except builtins.BaseBranchMissing:
+        return None
 
 
 async def entered(db, worktree, wid: str, node_id: str) -> None:
