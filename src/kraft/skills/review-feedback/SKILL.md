@@ -51,9 +51,21 @@ For each comment, one at a time:
    it is wrong, does not apply, is already done, or is a preference the
    repository's own conventions do not ask for, decline it and write down why.
 
-A comment that is right but needs a decision the work item did not make (a new
-dependency, a change of behaviour nobody asked for) is declined too, with that
-reason: it is for a person to take up, and your summary is where they will see it.
+A comment that points at a real defect is a finding: a crash, a wrong result, a
+security hole, a failing check. It is a finding even when fixing it takes a
+choice, such as what to raise or return. Put the choice in the finding: name it,
+and recommend the option that matches how the surrounding code already handles
+the same case (a sibling function that raises `ValueError` on bad input is the
+model for this one). Decline a comment for a person only when it asks for
+something beyond a defect fix: a new feature, a new dependency, or a change to an
+interface or behaviour that has no defect behind it. Say that reason in your
+summary, which is where the person will see it.
+
+The same point raised twice (a summary bullet and an inline thread, or two
+bots) is one finding, and your summary says it was a duplicate.
+
+A `check` entry that did not succeed is judged like a comment, from its `output`,
+with the file and line taken from the output when it names them.
 
 Do not look for problems the bots did not raise. Your job is their feedback, not
 a second review of the change.

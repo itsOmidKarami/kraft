@@ -37,6 +37,9 @@ def test_the_skill_exists_and_has_frontmatter(text):
         'Set `status` to `"done"` whatever you decide',
         "source_plugin",
         "previous_review",
+        "points at a real defect is a finding",
+        "is one finding, and your summary says it was a duplicate",
+        "judged like a comment, from its `output`",
     ],
     ids=[
         "reads-the-collection",
@@ -46,6 +49,9 @@ def test_the_skill_exists_and_has_frontmatter(text):
         "done-whatever-it-decides",
         "finding-keys",
         "declined-last-round",
+        "a-real-defect-is-a-finding-even-when-the-fix-takes-a-choice",
+        "a-duplicate-is-one-finding",
+        "a-failed-check-is-judged-like-a-comment",
     ],
 )
 def test_the_skill_states_its_contract(text, phrase):
