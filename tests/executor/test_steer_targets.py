@@ -48,6 +48,8 @@ async def _paused(item_on, *paths):
 
 
 async def _dispatch(it, path, steer):
+    # As a resume does before its walk dispatches anything: a paused item launches nothing.
+    await it.database.write(lambda c: store.claim_for_run(c, it.id, from_statuses=["paused"]))
     node = it.chain.chain.nodes[0]
     task = next(t for t in node.steps[0].tasks if t.path == path)
     await dispatch.dispatch_node(

@@ -81,6 +81,7 @@ from kraft.vocab import (
     SessionStatus,
     StopKind,
     WorkItemEvent,
+    WorkItemStatus,
 )
 from kraft.worker import kit as _kit
 from kraft.worker import sandbox as _sandbox
@@ -1002,6 +1003,19 @@ async def dispatch_node(
     closed, or one is made, with the traceback as the log. Then it re-raises,
     so the verdict is unchanged.
     """
+    # A paused item launches no more of its walk. The pause route cancels the
+    # walk outright; a broken base's pause (`store.pause_for_broken_base`)
+    # comes from another item's forge node and cannot, so between two tasks of
+    # one node, with nothing running for it to signal, this is what stops it.
+    # Escalations and gate replies, which a paused item does run, have doors
+    # of their own.
+    status = db.read(
+        lambda c: c.execute(
+            "SELECT status FROM work_items WHERE id = ?", (work_item_row["id"],)
+        ).fetchone()
+    )
+    if status is not None and status["status"] == WorkItemStatus.PAUSED:
+        return "paused"
     since = db.read(
         lambda c: c.execute("SELECT COALESCE(MAX(rowid), 0) FROM worker_sessions").fetchone()[0]
     )
