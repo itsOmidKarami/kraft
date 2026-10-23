@@ -633,6 +633,7 @@ async def set_node_overrides(
     model: str | None = None,
     effort: str | None = None,
     extra_prompt: str | None = None,
+    reviewers: list[dict] | None = None,
     clear: bool = False,
     work_item_id: str | None = None,
 ) -> dict:
@@ -641,7 +642,8 @@ async def set_node_overrides(
     `auto_escalate_delay_s` fields the Policy screen sets system-wide and a
     chain template sets per node -- without touching either of those -- plus
     the `model`/`effort` its agent tasks launch with and an `extra_prompt`
-    appended to each of their instructions (Kraft-a7ers). `clear`
+    appended to each of their instructions (Kraft-a7ers), and the `reviewers`
+    its automated-review wait reads, over the repository's. `clear`
     sends `{}` for this node, dropping its overrides back to the template;
     naming a field sets it and keeps the node's other fields, as it always
     has (the PATCH route merges a node's fields). 409s once the node has
@@ -662,13 +664,15 @@ async def set_node_overrides(
                 "model": model,
                 "effort": effort,
                 "extra_prompt": extra_prompt,
+                "reviewers": reviewers,
             }.items()
             if v is not None
         }
         if not fields:
             raise transport.ClientError(
                 "kraft: set-node-override needs --auto-escalate, --auto-escalate-stuck, "
-                "--auto-escalate-delay-s, --model, --effort, --extra-prompt, or --clear",
+                "--auto-escalate-delay-s, --model, --effort, --extra-prompt, --reviewer, "
+                "or --clear",
                 kind=transport.Failure.REFUSED,
             )
     return await transport._patch(

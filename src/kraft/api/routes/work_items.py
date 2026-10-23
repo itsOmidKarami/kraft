@@ -21,6 +21,7 @@ from kraft.overrides import (
     harness_refusal,
     item_harness_refusal,
     model_id_problem,
+    reviewers_refusal,
     validate_agent_overrides,
     validate_node_override_fields,
 )
@@ -935,7 +936,10 @@ def _check_node_overrides(
         field_errs = validate_node_override_fields(fields)
         if field_errs:
             raise HTTPException(422, f"node {node_id!r}: {field_errs[0]}")
-        if nodes is not None and (why := harness_refusal(nodes[node_id], fields)):
+        if nodes is not None and (
+            why := harness_refusal(nodes[node_id], fields)
+            or reviewers_refusal(nodes[node_id], fields)
+        ):
             raise HTTPException(422, f"node {node_id!r}: {why}")
         # A per-item fix-loop bound is an operational value, held to the
         # administrator maximum like the item's own policy override is

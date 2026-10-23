@@ -476,13 +476,16 @@ def build() -> MCPServer:
         model: str | None = None,
         effort: str | None = None,
         extra_prompt: str | None = None,
+        reviewers: list[dict] | None = None,
         clear: bool = False,
         work_item_id: str | None = None,
     ) -> dict:
         """Set or clear one node's per-item override on a Kraft work item --
         its auto-escalate settings, the `model`/`effort` its agent tasks launch
-        with (above the item-wide `set_agent_overrides`), and an `extra_prompt`
-        appended to each of their instructions -- without touching the Policy
+        with (above the item-wide `set_agent_overrides`), an `extra_prompt`
+        appended to each of their instructions, and the `reviewers` its
+        automated-review wait reads (each `{"bot": LOGIN}` or `{"check": NAME}`,
+        over the repository's; `[]` expects none) -- without touching the Policy
         screen's system defaults or the chain everyone else uses. A
         model/effort the node's harness refuses is refused here. `clear` resets this node back to
         the template's own binding; naming a field sets it and keeps the
@@ -495,6 +498,7 @@ def build() -> MCPServer:
             model=model,
             effort=effort,
             extra_prompt=extra_prompt,
+            reviewers=reviewers,
             clear=clear,
             work_item_id=work_item_id,
         )

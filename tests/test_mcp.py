@@ -389,7 +389,12 @@ def test_set_node_overrides_forwards_model_effort_and_extra_prompt(monkeypatch):
         return {"id": "w1"}
 
     monkeypatch.setattr(mcp.client, "set_node_overrides", fake)
-    fields = {"model": "opus", "effort": "high", "extra_prompt": "Mind the order."}
+    fields = {
+        "model": "opus",
+        "effort": "high",
+        "extra_prompt": "Mind the order.",
+        "reviewers": [{"bot": "coderabbitai"}],
+    }
     asyncio.run(mcp.build().call_tool("set_node_overrides", {"node_id": "plan", **fields}))
     assert fields.items() <= seen[0].items()
 

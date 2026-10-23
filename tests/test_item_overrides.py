@@ -97,6 +97,8 @@ def test_patch_node_overrides_merges_per_node_not_whole_object(client, repo):
         ({"implementation": {"auto_escalate_delay_s": -1}}, None),
         ({"implementation": {"attempts": 0}}, None),
         ({"implementation": {"wall_clock_s": -1}}, None),
+        ({"implementation": {"reviewers": [{"bot": "b"}]}}, "no task of this node"),
+        ({"merge_request_feedback": {"reviewers": [{"login": "b"}]}}, "reviewers must be"),
     ],
     ids=[
         "unknown-node",
@@ -106,6 +108,8 @@ def test_patch_node_overrides_merges_per_node_not_whole_object(client, repo):
         "negative-auto-escalate-delay",
         "non-positive-attempts",
         "non-positive-wall-clock",
+        "reviewers-on-a-node-with-no-review",
+        "malformed-reviewer",
     ],
 )
 def test_patch_rejects_a_bad_node_override(client, repo, overrides, names):
@@ -116,17 +120,23 @@ def test_patch_rejects_a_bad_node_override(client, repo, overrides, names):
         assert names in r.json()["detail"]
 
 
-def test_patch_sets_a_node_model_override(client, repo):
+@pytest.mark.parametrize(
+    ("node", "fields"),
+    [
+        ("implementation", {"model": "opus", "effort": "high"}),
+        ("merge_request_feedback", {"reviewers": [{"bot": "coderabbitai"}, {"check": "scan"}]}),
+    ],
+    ids=["model", "reviewers"],
+)
+def test_patch_sets_a_node_model_override(client, repo, node, fields):
     """Kraft-df4tc point 2: model/escalate_model/effort join the per-node
-    override fields, reusing the same field-level checks agent_overrides has."""
+    override fields, reusing the same field-level checks agent_overrides has;
+    so do the reviewers a node's automated-review wait reads."""
     wid = _paused_item(client, repo)
-    r = client.patch(
-        f"/api/work-items/{wid}",
-        json={"node_overrides": {"implementation": {"model": "opus", "effort": "high"}}},
-    )
+    r = client.patch(f"/api/work-items/{wid}", json={"node_overrides": {node: fields}})
     assert r.status_code == 200, r.text
     row = client.get(f"/api/work-items/{wid}").json()
-    assert row["node_overrides"]["implementation"] == {"model": "opus", "effort": "high"}
+    assert row["node_overrides"][node] == fields
 
 
 def test_patch_sets_a_node_extra_prompt_and_409s_once_the_node_started(client, repo):

@@ -51,6 +51,19 @@ def _node_overrides(pairs: list[str]) -> dict | None:
     return overrides or None
 
 
+def _reviewer(raw: str) -> dict | None:
+    """One `--reviewer`: `bot:LOGIN` or `check:NAME`, or `none` (None), which
+    alone sends `[]`, no reviewer expected."""
+    if raw == "none":
+        return None
+    kind, sep, name = raw.partition(":")
+    if kind not in ("bot", "check") or not (sep and name):
+        raise argparse.ArgumentTypeError(
+            f"--reviewer takes bot:LOGIN, check:NAME or none, not {raw!r}"
+        )
+    return {kind: name}
+
+
 def _budget(raw: str) -> float | None:
     """`--budget`: dollars, or `none` for an explicit no-cap."""
     try:
@@ -404,6 +417,7 @@ def _cmd_set_node_override(ns: argparse.Namespace) -> None:
                 model=ns.model,
                 effort=ns.effort,
                 extra_prompt=ns.extra_prompt,
+                reviewers=[r for r in ns.reviewer if r] if ns.reviewer else None,
                 clear=ns.clear,
                 work_item_id=ns.id,
             )
@@ -892,6 +906,15 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     )
     set_node_override.add_argument(
         "--extra-prompt", help="text appended to every agent task's instruction in this node"
+    )
+    set_node_override.add_argument(
+        "--reviewer",
+        action="append",
+        default=[],
+        type=_reviewer,
+        metavar="bot:LOGIN|check:NAME",
+        help="a reviewer this node's automated-review wait reads, over the repo's and the "
+        "task's (repeatable); `none` expects none",
     )
     set_node_override.add_argument(
         "--clear", action="store_true", help="reset this node to the template's own binding"

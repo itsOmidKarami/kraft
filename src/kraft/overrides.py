@@ -10,6 +10,8 @@ from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError
 
+from kraft.automated_review import AutomatedReview
+
 #: The levels an override's `effort` may take. Checked at the API rather than at
 #: dispatch: a typo reaching the CLI fails the node *after* the work item has
 #: already paid for a worktree and a session (Kraft-tff).
@@ -89,6 +91,9 @@ class _NodeOverride(_ModelEffortOverride):
     #: Appended to every agent task this node dispatches (Kraft-a7ers), never
     #: in place of the task's own prompt: `extra_prompt_note`.
     extra_prompt: StrictStr | None = None
+    #: The reviewers this node's `mr.automated_review` tasks wait for, over the
+    #: repository's and the task's own (`dispatch._reviewers`). `[]` expects none.
+    reviewers: list[AutomatedReview] | None = None
 
 
 def _errors(
@@ -107,8 +112,12 @@ def _errors(
         schema.model_validate(values)
     except ValidationError as exc:
         errors = exc.errors()
+        # A top-level key only: an unknown key inside a reviewer is that
+        # field's shape, not an unknown field.
         extras = sorted(
-            str(error["loc"][0]) for error in errors if error["type"] == "extra_forbidden"
+            str(error["loc"][0])
+            for error in errors
+            if error["type"] == "extra_forbidden" and len(error["loc"]) == 1
         )
         if extras:
             return [unknown.format(extras=extras)]
@@ -124,6 +133,8 @@ def _errors(
             return [f"{field} must be a boolean"]
         if field == "auto_escalate_delay_s":
             return ["auto_escalate_delay_s must be a non-negative int"]
+        if field == "reviewers":
+            return ["reviewers must be a list of {bot: LOGIN} or {check: NAME}"]
         return [f"{field} must be a positive int"]
     return []
 
@@ -193,6 +204,22 @@ def harness_refusal(node, fields: dict) -> str | None:
             if not (h.supports(capability) and h.value_ok(capability, value)):
                 return f"{key!r} {value!r} is refused by harness {h.id!r} ({resolved.path})"
     return None
+
+
+def reviewers_refusal(node, fields: dict) -> str | None:
+    """Why `reviewers` would change nothing on `node`, or None: it names
+    reviewers and no task of the node waits for one, so the override would
+    be stored and never read."""
+    from kraft.templates.models import ForgeAction, ForgeTask
+
+    if fields.get("reviewers") is None:
+        return None
+    if any(
+        isinstance(t.task, ForgeTask) and t.task.target is ForgeAction.MR_AUTOMATED_REVIEW
+        for t in node.tasks()
+    ):
+        return None
+    return f"reviewers: no task of this node is an {ForgeAction.MR_AUTOMATED_REVIEW.value} wait"
 
 
 def item_harness_refusal(nodes: dict, fields: dict) -> str | None:

@@ -52,6 +52,17 @@ def test_node_override_takes_an_extra_prompt_string_and_nothing_else():
     ]
 
 
+def test_node_override_takes_a_list_of_reviewers_each_named_one_way():
+    assert (
+        overrides.validate_node_override_fields({"reviewers": [{"bot": "b"}, {"check": "c"}]}) == []
+    )
+    assert overrides.validate_node_override_fields({"reviewers": []}) == []
+    for bad in ({"bot": "b"}, [{"bot": "b", "check": "c"}], [{"login": "b"}]):
+        assert overrides.validate_node_override_fields({"reviewers": bad}) == [
+            "reviewers must be a list of {bot: LOGIN} or {check: NAME}"
+        ]
+
+
 @pytest.mark.parametrize(
     ("check", "fields"),
     [
