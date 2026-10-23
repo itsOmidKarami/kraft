@@ -169,3 +169,58 @@ origin: src/kraft/remote/jobs.py
 WHEN the server restarts under a running remote step, the system SHALL re-pair the step with its stand-in and finish its log without a gap, and WHEN the stand-in died with the server, start a new one that resumes at the log file's size.
 enforced-by: tests/remote/test_restart.py::test_a_step_survives_the_server_restarting_and_its_log_is_whole, tests/worker/test_reattach_remote.py::test_a_remote_session_whose_standin_died_gets_a_new_one_that_resumes_at_the_logs_size
 origin: src/kraft/worker/reattach.py
+
+## REQ machine-survives-ssh-drops
+WHEN the ssh session to a machine ends, the system SHALL keep the machine's running steps and their state in the machine daemon, and WHEN a new session connects, hand the same steps back to it with their logs resuming from the server's offset.
+enforced-by: tests/remote/test_daemon.py::test_a_job_outlives_the_relay_that_brought_it, tests/remote/test_daemon.py::test_a_second_relay_starts_no_second_daemon, tests/remote/test_daemon.py::test_the_socket_is_this_users_only
+origin: src/kraft/remote/daemon.py
+
+## REQ offline-calls-wait-for-the-connection
+WHILE a machine has no connection, the system SHALL hold the agent's calls to Kraft until the connection returns, and WHEN the connection drops after a call was sent, SHALL answer that call 503 and SHALL NOT send it again.
+enforced-by: tests/remote/test_machine.py::test_a_call_made_while_offline_is_sent_and_answered_after_reconnect, tests/remote/test_machine.py::test_a_call_in_flight_when_the_connection_drops_is_told_so
+origin: src/kraft/remote/machine.py §_forward
+
+## REQ machine-gives-up-after-give-up-after
+WHEN a machine has had no connection for its `give_up_after` of awake time, the system SHALL stop the steps running on it and write why at the end of each log, and WHERE `give_up_after` is `never`, SHALL NOT stop them.
+enforced-by: tests/remote/test_machine.py::test_a_machine_without_kraft_for_give_up_after_stops_its_jobs, tests/remote/test_machine.py::test_never_keeps_a_job_running_however_long_kraft_is_gone, tests/remote/test_machine.py::test_a_reconnect_before_give_up_after_keeps_the_job, tests/remote/test_hub.py::test_the_welcome_tells_a_machine_its_own_give_up_after[30m-1800.0], tests/remote/test_hub.py::test_the_welcome_tells_a_machine_its_own_give_up_after[never-None]
+origin: src/kraft/remote/machine.py §_give_up
+
+## REQ server-gives-up-on-awake-time
+WHEN a machine has been out of reach for its `give_up_after` of time the server was awake, the system SHALL end each step on it as `unknown`, record `remote_step_given_up`, and discard whatever the machine hands in later, and WHERE `give_up_after` is `never`, SHALL NOT.
+enforced-by: tests/remote/test_hub.py::test_offline_for_counts_from_the_drop_on_the_monotonic_clock, tests/remote/test_runs.py::test_a_run_whose_machine_is_gone_give_up_after_ends_unknown_and_kills_it_on_reconnect, tests/remote/test_runs.py::test_never_does_not_give_up, tests/adapters/test_subprocess_remote.py::test_a_step_given_up_on_ends_its_session_unknown
+origin: src/kraft/remote/runs.py §watch
+
+## REQ removed-machine-gives-up-its-runs
+WHEN a machine is removed from workers.yaml, the system SHALL give up every unfinished step on it at once.
+enforced-by: tests/remote/test_runs.py::test_removing_a_machine_gives_up_its_runs_at_once, tests/api/test_workers.py::test_removing_a_machine_gives_up_the_runs_it_held
+origin: src/kraft/api/routes/workers.py
+
+## REQ machine-enforces-the-steps-caps
+WHILE a step runs on a machine, the system SHALL stop it there when its time cap or idle limit is reached, and WHEN the machine reports that, SHALL end the session `capped_out` with the same `time_cap_reached` event a server-side cap writes.
+enforced-by: tests/remote/test_jobs.py::test_the_time_cap_stops_the_command_on_the_machine, tests/remote/test_jobs.py::test_a_command_whose_log_stays_silent_past_idle_s_is_stopped, tests/adapters/test_subprocess_remote.py::test_a_cap_the_machine_enforced_ends_the_session_time_capped
+origin: src/kraft/remote/jobs.py §_until_exit
+
+## REQ machine-forgets-gone-items
+WHEN an item is archived or abandoned, and on every reconnect for each item the server no longer lists, the system SHALL remove the machine's copy of the item, and SHALL NOT remove it while one of the item's steps is running there.
+enforced-by: tests/remote/test_machine.py::test_forget_removes_an_items_copy_but_not_one_that_is_running[finished], tests/remote/test_machine.py::test_forget_removes_an_items_copy_but_not_one_that_is_running[running], tests/remote/test_machine.py::test_keep_removes_every_item_the_server_no_longer_lists, tests/remote/test_runs.py::test_a_reconnect_tells_the_machine_which_items_to_keep, tests/api/test_archive.py::test_archiving_or_abandoning_tells_the_machines_to_forget_the_item[archive], tests/api/test_archive.py::test_archiving_or_abandoning_tells_the_machines_to_forget_the_item[abandon]
+origin: src/kraft/remote/machine.py §_forget_items
+
+## REQ session-names-its-machine-and-reachability
+The system SHALL name the machine a session ran on, and WHILE a session still running or paused is on a machine that is out of reach, SHALL say since when.
+enforced-by: tests/api/test_board.py::test_a_live_session_on_a_machine_that_is_out_of_reach_says_since_when[running-on-a-dropped-machine], tests/api/test_board.py::test_a_live_session_on_a_machine_that_is_out_of_reach_says_since_when[finished-session], tests/api/test_board.py::test_a_live_session_on_a_machine_that_is_out_of_reach_says_since_when[local-session], tests/remote/test_hub.py::test_unreachable_since_names_the_moment_the_connection_ended_until_it_is_back, tests/cli/test_watching.py::test_logs_name_the_machine_a_remote_session_ran_on[remote]
+origin: src/kraft/api/routes/board.py §_sessions_out
+
+## REQ settings-lists-machines-read-only
+The system SHALL list the registered machines in Settings with their state, and SHALL NOT offer to add, change or remove one there.
+enforced-by: frontend/src/ng/settings/WorkersPage.test.tsx::Settings › Workers, tests/api/test_api_shapes.py::test_the_table_is_what_the_server_returns
+origin: frontend/src/ng/settings/WorkersPage.tsx
+
+## REQ doctor-names-a-chain-on-an-unknown-machine
+IF a chain places a step on a machine that is not in workers.yaml, THEN doctor SHALL fail its chains row naming the machine.
+enforced-by: tests/test_doctor_workers.py::test_a_chain_placed_on_a_machine_workers_yaml_lacks_fails_the_chains_row
+origin: src/kraft/doctor.py §_chains_check
+
+## REQ item-history-records-machine-drops
+WHEN a machine loses or regains its connection, the system SHALL record that on each item with an unfinished step on it, and on no other.
+enforced-by: tests/remote/test_runs.py::test_a_drop_and_a_reconnect_each_note_the_item_whose_step_runs_there
+origin: src/kraft/remote/runs.py §_note_machine
