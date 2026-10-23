@@ -39,7 +39,7 @@ from pydantic import (
 )
 from pydantic_core import PydanticCustomError
 
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import OneOrManyReviewers
 from kraft.policy import PolicyError, SandboxPolicy, TemplatePolicyOverride, ToolNames, _cron_fields
 from kraft.vocab import BY_VALUE
 from kraft.worker import steering as _steering
@@ -328,8 +328,10 @@ class RepoEntry(BaseModel):
     #: The entry's own `deny_tools` and `sandbox` above belong to the same layer
     #: (Ruling 105) and are folded into it by `repository_override`.
     policy: TemplatePolicyOverride | None = None
-    #: The automated reviewer `mr.automated_review` waits for (Ruling 171).
-    automated_review: AutomatedReview | None = None
+    #: The automated reviewers `mr.automated_review` waits for (Ruling 171),
+    #: one or a list: over the review task's own `reviewers`, under the item's
+    #: node override. `[]` expects none, whatever the task names.
+    automated_review: OneOrManyReviewers | None = None
     #: `false`: this repository runs no CI, so both CI waits, `mr.ci` before
     #: the merge and `mr.post_merge_ci` after it, pass at once instead of
     #: waiting on checks that never come (Kraft-9efnk.12). Opt-in: an absent

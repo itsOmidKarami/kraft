@@ -1,7 +1,7 @@
-"""`mr.automated_review` on a real forge (Ruling 171): the repository names its
-reviewer -- a `bot` login or a `check` -- and the backend reads that one
-reviewer off `gh`/`glab`, stubbed at the CLI. A repository that names none
-expects no automated review. The task-level result shapes and the scheduler are
+"""`mr.automated_review` on a real forge (Ruling 171): the item, repository or
+task names its reviewers -- each a `bot` login or a `check` -- and the backend
+reads each off `gh`/`glab`, stubbed at the CLI. None named expects no
+automated review. The task-level result shapes and the scheduler are
 test_waits.py and tests/test_waits.py."""
 
 from __future__ import annotations
@@ -12,8 +12,9 @@ import pytest
 
 from kraft import config
 from kraft.adapters import forge
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import AutomatedReview, as_reviewers
 
+from .nodes import FAIL
 from .outputs import glab_merged_results
 
 HEAD = "abc123"
@@ -59,7 +60,9 @@ def _glab_note(body: str, *, resolved: bool) -> dict:
 
 async def _review(cls, cli, tmp_path, routes, reviewer):
     cli.stub(cls.name, routes=routes, default="{}")
-    return await cls.cls().automated_review(repo=tmp_path, branch="kraft/w1", reviewer=reviewer)
+    return await cls.cls().automated_review(
+        repo=tmp_path, branch="kraft/w1", reviewers=as_reviewers(reviewer)
+    )
 
 
 GH = type("GH", (), {"name": "gh", "cls": forge.GhCli})
@@ -305,6 +308,54 @@ async def test_a_review_check_still_running_is_pending(cli, tmp_path, backend, r
     assert (await _review(backend, cli, tmp_path, routes, CHECK)).state == "pending"
 
 
+# --- several reviewers ---------------------------------------------------------
+
+
+_BOT_CLEAN = {GH_REVIEWS: json.dumps([_gh_review("COMMENTED")]), GH_COMMENTS: "[]"}
+_BOT_FLAGS = {
+    GH_REVIEWS: json.dumps([_gh_review("COMMENTED")]),
+    GH_COMMENTS: json.dumps([{"path": "calc.py", "line": 3, "body": "unused x"}]),
+}
+_CHECK_RUNNING = {GH_RUNS: json.dumps({"check_runs": [{"status": "in_progress"}]})}
+_CHECK_PASSED = {
+    GH_RUNS: json.dumps({"check_runs": [{"status": "completed", "conclusion": "success"}]})
+}
+
+
+_CHECK_READ_FAILS = {GH_RUNS: FAIL}
+
+
+@pytest.mark.parametrize(
+    "bot, check, state, findings",
+    [
+        (_BOT_CLEAN, _CHECK_RUNNING, "pending", ()),
+        # A finding fails it now: the slower reviewer is not waited for.
+        (_BOT_FLAGS, _CHECK_RUNNING, "actionable", ("calc.py:3: unused x",)),
+        (_BOT_CLEAN, _CHECK_PASSED, "clean", ()),
+        # A reviewer whose read failed does not hide what another found.
+        (_BOT_FLAGS, _CHECK_READ_FAILS, "actionable", ("calc.py:3: unused x",)),
+    ],
+    ids=[
+        "one-still-pending",
+        "a-finding-does-not-wait",
+        "all-clean",
+        "a-failed-read-keeps-findings",
+    ],
+)
+async def test_several_reviewers_read_as_one_result(cli, tmp_path, bot, check, state, findings):
+    routes = {"pr view": GH_PR, **bot, **check}
+    review = await _review(GH, cli, tmp_path, routes, [BOT, CHECK])
+
+    assert (review.state, review.findings) == (state, findings)
+
+
+async def test_a_failed_read_without_findings_fails_as_today(cli, tmp_path):
+    routes = {"pr view": GH_PR, **_BOT_CLEAN, **_CHECK_READ_FAILS}
+
+    with pytest.raises(forge.ForgeError):
+        await _review(GH, cli, tmp_path, routes, [BOT, CHECK])
+
+
 # --- no reviewer configured ----------------------------------------------------
 
 
@@ -325,8 +376,12 @@ async def test_a_repository_naming_no_reviewer_settles_clean_and_says_why(run_fo
 
 @pytest.mark.parametrize(
     "block",
-    [{"bot": "coderabbit", "check": "review-bot"}, {}],
-    ids=["both", "neither"],
+    [
+        {"bot": "coderabbit", "check": "review-bot"},
+        {},
+        [{"bot": "a"}, {"bot": "b", "check": "c"}],
+    ],
+    ids=["both", "neither", "a-bad-entry-in-a-list"],
 )
 def test_a_reviewer_is_named_exactly_one_way_or_refused_at_load(tmp_path, block):
     repos = tmp_path / "repos.yaml"

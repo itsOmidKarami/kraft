@@ -194,6 +194,40 @@
       "title": "AgentTask",
       "type": "object"
     },
+    "AutomatedReview": {
+      "additionalProperties": false,
+      "description": "One reviewer whose verdict `mr.automated_review` waits for, named\nexactly one way.\n\n* `bot` -- a forge login. The review settles when that login has reviewed\n  the merge request's current head.\n* `check` -- a check or commit status on the head. It settles when that\n  check completes.\n\nNone named at any layer, no automated reviewer is expected, and the wait settles\nclean at once (`automated_review_not_configured`). How either is read is the\nforge backend's (`automated-review-implementation-is-not-template-\nconfiguration`): this names *which* reviewer, never how to ask it.",
+      "properties": {
+        "bot": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bot"
+        },
+        "check": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Check"
+        }
+      },
+      "title": "AutomatedReview",
+      "type": "object"
+    },
     "BaseChangePolicy": {
       "additionalProperties": false,
       "description": "`on_base_changed`: what an execution node does when its own work moves\nthe worktree base (`base-change-restarts-a-declared-chain-span`).\n\n`restart_from` names the execution node the chain restarts at -- this one\nor an earlier one, never a later one or a gate (`base-change-restart-\ntarget-is-backward`, checked by `Chain`, which alone can see the order).\n\n`on_conflict` is the only way Kraft attempts to resolve a rebase conflict\n(`rebase-conflict-requires-explicit-handler`): a recovery-shaped handler,\nrun when a task of this node fails on a conflict. Absent, a conflict is an\nordinary task failure.",
@@ -724,6 +758,21 @@
             }
           ],
           "default": null
+        },
+        "reviewers": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/AutomatedReview"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewers"
         },
         "scope": {
           "$ref": "#/$defs/TaskScope",

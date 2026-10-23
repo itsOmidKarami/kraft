@@ -157,10 +157,10 @@ _BY_BRANCH = {
         repo=r, branch="kraft/abc", mr=forge.MR(0, ""), labels=("x",)
     ),
     "bot_review": lambda f, r: f.automated_review(
-        repo=r, branch="kraft/abc", reviewer=AutomatedReview(bot="b")
+        repo=r, branch="kraft/abc", reviewers=(AutomatedReview(bot="b"),)
     ),
     "check_review": lambda f, r: f.automated_review(
-        repo=r, branch="kraft/abc", reviewer=AutomatedReview(check="c")
+        repo=r, branch="kraft/abc", reviewers=(AutomatedReview(check="c"),)
     ),
 }
 

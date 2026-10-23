@@ -1,27 +1,37 @@
-"""Which automated reviewer a repository expects (Ruling 171).
+"""Which automated reviewers a merge request waits for (Ruling 171).
 
-Read on a `repos.yaml` entry (`config.RepoEntry`) and by the forge probes
-that wait on it; its own module so the forge adapters need not import the
+Named on a `repos.yaml` entry (`config.RepoEntry`), on the review task
+(`ForgeTask.reviewers`) or by an item's node override, and read by the forge
+probes that wait on them; its own module so the forge adapters need not import the
 config loader to name the type.
 """
 
 from __future__ import annotations
 
-from typing import Self
+from collections.abc import Sequence
+from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    StrictStr,
+    Tag,
+    model_validator,
+)
 
 
 class AutomatedReview(BaseModel):
-    """`automated_review:` on a repository: the one reviewer whose verdict
-    `mr.automated_review` waits for, named exactly one way.
+    """One reviewer whose verdict `mr.automated_review` waits for, named
+    exactly one way.
 
     * `bot` -- a forge login. The review settles when that login has reviewed
       the merge request's current head.
     * `check` -- a check or commit status on the head. It settles when that
       check completes.
 
-    Absent, the repository expects no automated reviewer, and the wait settles
+    None named at any layer, no automated reviewer is expected, and the wait settles
     clean at once (`automated_review_not_configured`). How either is read is the
     forge backend's (`automated-review-implementation-is-not-template-
     configuration`): this names *which* reviewer, never how to ask it.
@@ -37,3 +47,28 @@ class AutomatedReview(BaseModel):
         if (self.bot is None) == (self.check is None):
             raise ValueError("automated_review names exactly one of `bot` or `check`")
         return self
+
+
+#: Every reviewer one `mr.automated_review` wait reads. Empty: none is
+#: expected, and the wait settles clean as not configured.
+Reviewers = tuple[AutomatedReview, ...]
+
+
+def as_reviewers(value: AutomatedReview | Sequence[AutomatedReview | dict] | None) -> Reviewers:
+    """One layer's reviewers as the tuple the forge reads. `repos.yaml` names
+    one or a list; a task names a list; a node override, stored as JSON, a
+    list of mappings."""
+    if value is None:
+        return ()
+    if isinstance(value, AutomatedReview):
+        return (value,)
+    return tuple(r if isinstance(r, AutomatedReview) else AutomatedReview(**r) for r in value)
+
+
+#: A `repos.yaml` entry's `automated_review:`: one reviewer, as written before
+#: lists, or a list. Tagged so a bad entry in a list is reported as itself, not
+#: as the union failing to match.
+OneOrManyReviewers = Annotated[
+    Annotated[AutomatedReview, Tag("one")] | Annotated[list[AutomatedReview], Tag("many")],
+    Discriminator(lambda value: "many" if isinstance(value, list) else "one"),
+]

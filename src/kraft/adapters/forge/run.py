@@ -28,7 +28,7 @@ from kraft.adapters.forge.models import (
     MRRef,
     QueueRead,
 )
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import Reviewers
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import DEFAULT_WAIT, WaitBounds
 from kraft.vocab import RUNNING, ForgeEvent
@@ -552,7 +552,7 @@ async def _run_one(
     hook_point: str,
     meta: mr_ops.MRMeta = _EMPTY_META,
     has_rebase_bounce: bool = False,
-    automated_review: AutomatedReview | None = None,
+    reviewers: Reviewers = (),
     #: The repository's `ci_checks:`; False skips both CI waits.
     ci_checks: bool = True,
     merge_requested: bool = False,
@@ -764,11 +764,9 @@ async def _run_one(
             # configuration`); what comes back is only pending, clean,
             # actionable or error (`automated-review-task-uses-ordinary-task-
             # results`).
-            review = await forge.automated_review(
-                repo=repo, branch=branch, reviewer=automated_review
-            )
+            review = await forge.automated_review(repo=repo, branch=branch, reviewers=reviewers)
             if not review.configured:
-                # The repository names no reviewer, so none is expected: the
+                # No layer names a reviewer, so none is expected: the
                 # wait settles, and the record says why rather than reading as
                 # a clean review (Ruling 171).
                 await db.write(
@@ -1390,9 +1388,9 @@ async def run_task(
     #: A wait handler's resolved bounds (`ForgeTask.wait_bounds`). None -- a
     #: caller with no task, a test -- runs under `DEFAULT_WAIT`.
     wait: WaitBounds | None = None,
-    #: The repository's `automated_review:` (Ruling 171); None names no
-    #: reviewer. Read only by `mr.automated_review`.
-    automated_review: AutomatedReview | None = None,
+    #: The reviewers `mr.automated_review` waits for (Ruling 171), already
+    #: resolved across the item, repository and task layers; empty names none.
+    reviewers: Reviewers = (),
     #: The repository's `ci_checks:`. Read by `mr.ci` and `mr.post_merge_ci`.
     ci_checks: bool = True,
     head_sha: str | None = None,
@@ -1647,7 +1645,7 @@ async def run_task(
                     hook_point=hook_point,
                     meta=meta,
                     has_rebase_bounce=has_rebase_bounce,
-                    automated_review=automated_review,
+                    reviewers=reviewers,
                     ci_checks=ci_checks,
                     merge_requested=requested,
                     check_clean=check_clean,

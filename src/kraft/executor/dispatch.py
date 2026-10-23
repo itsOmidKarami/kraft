@@ -27,7 +27,7 @@ from kraft.adapters import agent as _agent
 from kraft.adapters import forge as _forge
 from kraft.adapters import subprocess as _subprocess
 from kraft.addons import load as _addons_load
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import Reviewers, as_reviewers
 from kraft.config import RepoEntry
 from kraft.executor import entry, prompts, stops
 from kraft.executor import fallback as _fallback
@@ -983,9 +983,16 @@ def _exit_code(row) -> int | None:
     return item_paths.exit_code(raw)
 
 
-def _automated_review(launch: LaunchContext | None) -> AutomatedReview | None:
-    """The repository's named automated reviewer (Ruling 171), if any."""
-    return launch.repo_entry.automated_review if launch and launch.repo_entry else None
+def _reviewers(task: ForgeTask, node_id: str, row, launch: LaunchContext | None) -> Reviewers:
+    """The reviewers an `mr.automated_review` task waits for (Ruling 171): the
+    item's node override, else the repository's `automated_review:`, else the
+    task's own `reviewers` -- the nearest layer that names any, `[]` included."""
+    override = store.node_overrides_of(row).get(node_id, {}).get("reviewers")
+    repo = launch.repo_entry.automated_review if launch and launch.repo_entry else None
+    return next(
+        (as_reviewers(layer) for layer in (override, repo, task.reviewers) if layer is not None),
+        (),
+    )
 
 
 async def dispatch_node(
@@ -1313,7 +1320,7 @@ async def _dispatch_task(
             # repo is on.
             backend="auto",
             repo_forge=launch.repo_entry.forge if launch and launch.repo_entry else None,
-            automated_review=_automated_review(launch),
+            reviewers=_reviewers(t, node.id, work_item_row, launch),
             ci_checks=launch.repo_entry.ci_checks if launch and launch.repo_entry else True,
             # The item's folder: for a worktree item, not the repo, whose
             # checkout is on whatever the human has. Every forge call names

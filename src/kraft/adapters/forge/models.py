@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     # already makes every annotation below lazy, so this is type-checking
     # only.
     from kraft.adapters.forge.mr import MRMeta
-    from kraft.automated_review import AutomatedReview
+    from kraft.automated_review import Reviewers
 
 CIState = Literal["pending", "success", "failed"]
 
@@ -293,7 +293,7 @@ class Forge(Protocol):
 
     async def approval_state(self, *, repo: Path, branch: str) -> ApprovalState: ...
     async def automated_review(
-        self, *, repo: Path, branch: str, reviewer: AutomatedReview | None
+        self, *, repo: Path, branch: str, reviewers: Reviewers
     ) -> ReviewResult: ...
 
 
@@ -394,6 +394,8 @@ class FakeForge:
     #: `automated_review`'s answers, consumed like `ci_states`. A bare state
     #: string is shorthand for a `ReviewResult` with nothing else to say.
     review_results: list[ReviewResult | str] = field(default_factory=lambda: ["clean"])
+    #: The reviewers each `automated_review` read was asked for, in order.
+    reviewers_asked: list[Reviewers] = field(default_factory=list)
     #: `approval_state`'s answers, consumed like `ci_states`.
     approval_states: list[ApprovalState] = field(default_factory=lambda: ["approved"])
     #: `branch_ci_status`'s own script, for the post-merge pipeline; `None`
@@ -560,10 +562,11 @@ class FakeForge:
         return self._next(self.approval_states)
 
     async def automated_review(
-        self, *, repo: Path, branch: str, reviewer: AutomatedReview | None = None
+        self, *, repo: Path, branch: str, reviewers: Reviewers = ()
     ) -> ReviewResult:
         # The script answers whether or not a reviewer is configured: a dev
         # instance and a test both script the review they want to walk.
+        self.reviewers_asked.append(reviewers)
         result = self._next(self.review_results)
         return ReviewResult(result) if isinstance(result, str) else result
 

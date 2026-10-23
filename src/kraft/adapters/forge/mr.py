@@ -17,7 +17,7 @@ from kraft.adapters.forge.models import (
     MRRef,
     ReviewResult,
 )
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import Reviewers
 from kraft.index.ingest import split_front_matter
 from kraft.worker.worktree_read import read_worktree_file
 
@@ -344,18 +344,45 @@ class CliWaits:
         return "pending" if ci.block_reason == "not_approved" else "approved"
 
     async def automated_review(
-        self, *, repo: Path, branch: str, reviewer: AutomatedReview | None
+        self, *, repo: Path, branch: str, reviewers: Reviewers
     ) -> ReviewResult:
-        """The repository's named reviewer, read off the merge request's
-        current head (Ruling 171). No reviewer named: nothing is asked, and
-        the review settles clean as not configured."""
-        if reviewer is None:
+        """Every named reviewer, each read off the merge request's current
+        head (Ruling 171), as one result (`combine_reviews`). None named:
+        nothing is asked, and the review settles clean as not configured. A
+        failed read re-raises, unless another reviewer already found something."""
+        if not reviewers:
             return ReviewResult(
                 "clean", detail="no automated reviewer configured", configured=False
             )
-        if reviewer.bot is not None:
-            return await self._bot_review(repo, branch, reviewer.bot)
-        return await self._check_review(repo, branch, reviewer.check)
+        results: list[ReviewResult] = []
+        failed: ForgeError | None = None
+        for r in reviewers:
+            try:
+                results.append(
+                    await self._bot_review(repo, branch, r.bot)
+                    if r.bot is not None
+                    else await self._check_review(repo, branch, r.check)
+                )
+            except ForgeError as exc:
+                failed = failed or exc
+        # A reviewer that could not be read fails the check as it always has --
+        # unless another's finding is already in hand: that is not lost to it.
+        if failed and not any(r.state == "actionable" for r in results):
+            raise failed
+        return combine_reviews(results)
+
+
+def combine_reviews(results: list[ReviewResult]) -> ReviewResult:
+    """Several reviewers' reads as one. Any finding fails it now, without
+    waiting for the slower reviewers, and carries every finding read so far;
+    else an errored reviewer stops it; else one still pending keeps it
+    waiting; clean only when all of them are."""
+    detail = "; ".join(r.detail for r in results if r.detail)
+    findings = tuple(f for r in results for f in r.findings)
+    for state in ("actionable", "error", "pending"):
+        if any(r.state == state for r in results):
+            return ReviewResult(state, findings=findings, detail=detail)
+    return ReviewResult("clean", detail=detail)
 
 
 def same_login(a: str, b: str) -> bool:

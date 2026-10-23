@@ -2,7 +2,7 @@
   "$defs": {
     "AutomatedReview": {
       "additionalProperties": false,
-      "description": "`automated_review:` on a repository: the one reviewer whose verdict\n`mr.automated_review` waits for, named exactly one way.\n\n* `bot` -- a forge login. The review settles when that login has reviewed\n  the merge request's current head.\n* `check` -- a check or commit status on the head. It settles when that\n  check completes.\n\nAbsent, the repository expects no automated reviewer, and the wait settles\nclean at once (`automated_review_not_configured`). How either is read is the\nforge backend's (`automated-review-implementation-is-not-template-\nconfiguration`): this names *which* reviewer, never how to ask it.",
+      "description": "One reviewer whose verdict `mr.automated_review` waits for, named\nexactly one way.\n\n* `bot` -- a forge login. The review settles when that login has reviewed\n  the merge request's current head.\n* `check` -- a check or commit status on the head. It settles when that\n  check completes.\n\nNone named at any layer, no automated reviewer is expected, and the wait settles\nclean at once (`automated_review_not_configured`). How either is read is the\nforge backend's (`automated-review-implementation-is-not-template-\nconfiguration`): this names *which* reviewer, never how to ask it.",
       "properties": {
         "bot": {
           "anyOf": [
@@ -106,13 +106,24 @@
         "automated_review": {
           "anyOf": [
             {
-              "$ref": "#/$defs/AutomatedReview"
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/AutomatedReview"
+                },
+                {
+                  "items": {
+                    "$ref": "#/$defs/AutomatedReview"
+                  },
+                  "type": "array"
+                }
+              ]
             },
             {
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "title": "Automated Review"
         },
         "ci_checks": {
           "default": true,

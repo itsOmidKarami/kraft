@@ -45,6 +45,7 @@ from pydantic import (
     model_validator,
 )
 
+from kraft.automated_review import AutomatedReview
 from kraft.cap_levels import LEVEL_OF
 from kraft.policy import (
     FROZEN,
@@ -557,6 +558,21 @@ class ForgeTask(TaskBase):
     kind: Literal[TaskKind.FORGE]
     target: Annotated[ForgeAction, _LOOSE]
     wait: WaitPolicy | None = None
+    #: `mr.automated_review` only: the reviewers it waits for when neither the
+    #: item's node override nor the repository's `automated_review:` names
+    #: any. Which reviewers, never how each is read
+    #: (`automated-review-implementation-is-not-template-configuration`).
+    #: `[]` expects none.
+    reviewers: list[AutomatedReview] | None = None
+
+    @model_validator(mode="after")
+    def _reviewers_only_on_the_review(self) -> Self:
+        if self.reviewers is not None and self.target is not ForgeAction.MR_AUTOMATED_REVIEW:
+            raise ValueError(
+                f"reviewers: only an {ForgeAction.MR_AUTOMATED_REVIEW.value} task waits for "
+                f"reviewers, not {self.target.value}"
+            )
+        return self
 
     @model_validator(mode="before")
     @classmethod
