@@ -67,6 +67,7 @@ class _Entry:
     transport: protocol.Transport | None = None
     #: `mono()` when the connection ended, or the hub first knew the machine; None while online.
     offline_since: float | None = None
+    offline_at: str | None = None  # the same moment as a UTC ISO time, for people
     dialer: asyncio.Task | None = None
     outcome: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -111,7 +112,7 @@ class Hub:
         for name, worker in file.workers.items():
             entry = previous.pop(name, None)
             if entry is None:
-                entry = _Entry(worker, offline_since=self._mono())
+                entry = _Entry(worker, offline_since=self._mono(), offline_at=self._now_iso())
             else:
                 changed = (entry.worker.ssh, entry.worker.token_sha256) != (
                     worker.ssh,
@@ -130,6 +131,14 @@ class Hub:
     def _give_up_s(self, name: str) -> float | None:
         worker = self._file.workers.get(name)
         return worker.give_up_s if worker is not None else None
+
+    def _now_iso(self) -> str:
+        return datetime.fromtimestamp(self._clock(), UTC).isoformat()
+
+    def unreachable_since(self, name: str) -> str | None:
+        """When `name` went out of reach (UTC ISO), or None while it is online or unknown."""
+        entry = self._entries.get(name)
+        return entry.offline_at if entry is not None else None
 
     def offline_for(self, name: str) -> float | None:
         """Seconds (awake time) since `name`'s connection ended, or since the hub first knew of it;
@@ -191,7 +200,8 @@ class Hub:
             self._spawn(
                 entry.transport.close()
             )  # replaced: a half-dead old link must not lock the machine out
-        entry.transport, entry.online, entry.reason, entry.offline_since = t, True, "", None
+        entry.transport, entry.online, entry.reason = t, True, ""
+        entry.offline_since = entry.offline_at = None
         entry.kraft, entry.last_seen = peer.kraft, self._clock()
         entry.outcome.set()
         if self.runs is not None:  # tell the runs this machine is back
@@ -210,7 +220,7 @@ class Hub:
         finally:
             if entry.transport is t:
                 entry.transport, entry.online, entry.reason = None, False, why
-                entry.offline_since = self._mono()
+                entry.offline_since, entry.offline_at = self._mono(), self._now_iso()
             await t.close()
 
     async def _on_frame(self, machine: str, frame: dict) -> None:

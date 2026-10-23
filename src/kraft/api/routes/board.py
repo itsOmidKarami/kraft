@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from datetime import datetime
 
 from fastapi import HTTPException, Request
@@ -1238,12 +1239,23 @@ def budget_cap(st, row) -> dict:
     }
 
 
-def _sessions_out(sessions, skipped: frozenset[str], nodes: dict[str, str]) -> list[dict]:
+#: A session in these has its step on a machine, so that machine being out of reach matters.
+_ON_A_MACHINE = (SessionStatus.PENDING, SessionStatus.RUNNING, SessionStatus.PAUSED)
+
+
+def _sessions_out(
+    sessions,
+    skipped: frozenset[str],
+    nodes: dict[str, str],
+    unreachable: Callable[[str], str | None] = lambda _machine: None,
+) -> list[dict]:
     """The item's sessions as the API gives them. `skipped` marks the newest
     session of a task under a skipped path, or of a node skipped after it
     began, unless it had already finished: its stored status is only where the
     skip found it. A fanned-out task has a newest session per repository, and
-    an escalation turn is no task of the node: a node skip does not mark it."""
+    an escalation turn is no task of the node: a node skip does not mark it.
+    `unreachable` says since when a machine is out of reach: a live session on
+    one carries that as `runner_unreachable_since`."""
     newest = {(s["hook_point"], s["repository"]): s["id"] for s in sessions}
 
     def cut_short(s) -> bool:
@@ -1261,7 +1273,16 @@ def _sessions_out(sessions, skipped: frozenset[str], nodes: dict[str, str]) -> l
             )
         )
 
-    return [{**{k: s[k] for k in s.keys()}, "skipped": cut_short(s)} for s in sessions]
+    return [
+        {
+            **{k: s[k] for k in s.keys()},
+            "skipped": cut_short(s),
+            "runner_unreachable_since": (
+                unreachable(s["runner"]) if s["runner"] and s["status"] in _ON_A_MACHINE else None
+            ),
+        }
+        for s in sessions
+    ]
 
 
 @api_router.get("/work-items/{wid}")
@@ -1342,7 +1363,9 @@ async def get_work_item(wid: str, request: Request):
         # a gate's reviewer is in none.
         "worker_sessions": [
             {**s, **({"pass": n} if (n := passes[0].get(s["id"])) else {})}
-            for s in _sessions_out(sessions, skipped, skipped_nodes)
+            for s in _sessions_out(
+                sessions, skipped, skipped_nodes, st.workers_hub.unreachable_since
+            )
         ],
         # Every task or step path a person skipped in this run: a task under
         # one that never ran has no session to carry `skipped`.

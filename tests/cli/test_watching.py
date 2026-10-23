@@ -287,6 +287,26 @@ def test_logs_defaults_to_the_session_that_stopped_the_item(
         assert f"kraft view logs {whole} --session {named}" in err
 
 
+@pytest.mark.parametrize(
+    ("runner", "says"),
+    [("gpu-box", "session s-green ran on gpu-box"), (None, None)],
+    ids=["remote", "local"],
+)
+def test_logs_name_the_machine_a_remote_session_ran_on(
+    app, monkeypatch, capsys, make_item, repo, runner, says
+):
+    wid = make_item(repo)
+
+    async def fake_get(path, **params):
+        return {"lines": []}
+
+    _serves(monkeypatch, {**_GREEN, "runner": runner})
+    monkeypatch.setattr(client.transport, "_get", fake_get)
+    cli.main(["view", "logs", wid])
+    err = capsys.readouterr().err
+    assert (says in err) if says else ("ran on" not in err)
+
+
 def test_logs_n_limits_the_backlog(app, monkeypatch, capsys, make_item, repo):
     wid = make_item(repo)
 

@@ -499,6 +499,9 @@ export interface WorkerSession {
   repository?: string | null;
   /** The machine a remote step ran on (`workers.yaml`); null for a step that ran on the server. */
   runner?: string | null;
+  /** When that machine went out of reach (UTC ISO), for a session still running or paused on it;
+   *  null while it is reachable, and for a session that ran on the server. Optional like `runner`. */
+  runner_unreachable_since?: string | null;
   /** The worktree HEAD this session was dispatched against (Kraft-lu2); null
    *  for a builtin/agent task that stamps nothing, and for a historical row. */
   head_sha: string | null;

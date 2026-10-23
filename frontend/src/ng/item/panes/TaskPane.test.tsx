@@ -48,6 +48,19 @@ describe("task pane", () => {
     expect(within(screen.getByRole("tabpanel")).queryByText("harness")).toBeNull();
   });
 
+  it("names the machine a remote step ran on, and since when it has been unreachable", async () => {
+    const remote = sess("verification.review.code_review", 1, { runner: "gpu-box", status: "running", runner_unreachable_since: "2026-10-23T10:05:00Z" });
+    mount("/work-items/w1/nodes/verification?sel=verification.review.code_review", detail({ worker_sessions: [remote] }));
+    const machine = within(pane("code_review")).getByText("machine").closest("div")!;
+    expect(machine).toHaveTextContent(/^machinegpu-box, unreachable since \d\d:\d\d$/);
+    expect(within(machine).getByText("gpu-box")).toHaveClass("is-mono");
+  });
+
+  it("shows no machine row for a step that ran on the server", async () => {
+    mount("/work-items/w1/nodes/verification?sel=verification.review.code_review");
+    expect(within(screen.getByRole("tabpanel")).queryByText("machine")).toBeNull();
+  });
+
   it("drops the pin when the newest attempt is picked, so the pane follows the next one", async () => {
     mount("/work-items/w1/nodes/verification?sel=verification.review.code_review&attempt=1");
     await pick(/^attempt 1 of 2/, /^Attempt 2/);

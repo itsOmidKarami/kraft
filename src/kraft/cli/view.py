@@ -205,6 +205,8 @@ async def _logs_session(work_item_id: str | None, follow: bool) -> tuple[str, st
         raise ValueError("no worker session has run for this work item yet")
     if note:
         print(note, file=sys.stderr)
+    if session.get("runner"):
+        print(f"session {session['id']} ran on {session['runner']}", file=sys.stderr)
     return item["id"], session["id"]
 
 

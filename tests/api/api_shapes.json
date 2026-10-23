@@ -821,6 +821,7 @@
       "result_path": "_",
       "round": "_",
       "runner": "_",
+      "runner_unreachable_since": "_",
       "sandbox": "_",
       "session_summary_ref": "_",
       "skipped": "_",

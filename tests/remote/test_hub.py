@@ -312,3 +312,15 @@ async def test_offline_for_counts_from_the_drop_on_the_monotonic_clock():
     await accepted
     now[0] += 7
     assert hub.offline_for("home") == 7
+
+
+async def test_unreachable_since_names_the_moment_the_connection_ended_until_it_is_back():
+    hub = Hub("2.3.0", clock=lambda: 1_700_000_000.0)
+    hub.apply(_file())
+    assert hub.unreachable_since("home") == "2023-11-14T22:13:20+00:00"
+    machine, _, accepted = await _dial(hub)
+    assert hub.unreachable_since("home") is None
+    await machine.close()
+    await accepted
+    assert hub.unreachable_since("home") == "2023-11-14T22:13:20+00:00"
+    assert hub.unreachable_since("nobody") is None

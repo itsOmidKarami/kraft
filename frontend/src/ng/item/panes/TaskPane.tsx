@@ -43,6 +43,9 @@ function turnWords(sessions: WorkerSession[], at: WorkerSession): string {
   return `turn ${n} of ${of}${many ? ` · thread ${at.thread}` : ""}`;
 }
 
+/** HH:MM in the viewer's time zone. */
+const localTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+
 const fact = (k: string, v: React.ReactNode) => (v == null || v === "" ? null : <div key={k}><dt>{k}</dt><dd>{v}</dd></div>);
 
 /** The plan's sub-tasks under the plan task's facts: a bar, then one row each with its state and commit. */
@@ -82,6 +85,7 @@ export function TaskOverview({ path, s, docs, onDoc, progress, running }: { path
         {fact("progress", progress ? progressWords(progress, !!running) : null)}
         {fact("kind", s.model ? "agent" : null)}
         {fact("harness", s.harness && <span className="is-mono">{s.harness}</span>)}
+        {fact("machine", s.runner && <><span className="is-mono">{s.runner}</span>{s.runner_unreachable_since ? `, unreachable since ${localTime(s.runner_unreachable_since)}` : null}</>)}
         {fact("model", s.model && <span className="is-mono">{s.model}</span>)}
         {fact("path", <span className="is-mono">{path}</span>)}
         {fact("ran", s.wall_ms != null ? elapsed(s.wall_ms) : null)}
