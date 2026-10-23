@@ -216,9 +216,9 @@ class Runs:
                             {"session_id": spec.session_id, "file": str(path), "kept": str(kept)},
                         )
             except (bundle.BundleRefused, files.FilesRefused) as exc:
+                where = run.claim.machine
                 self._say(
-                    run,
-                    f"\nkraft: the result of this step on {run.claim.machine} was not taken: {exc}\n",
+                    run, f"\nkraft: the result of this step on {where} was not taken: {exc}\n"
                 )
                 code = code or 1
         await self._finish(run, code)

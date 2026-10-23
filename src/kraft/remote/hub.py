@@ -324,7 +324,7 @@ class Hub:
             await asyncio.sleep(poll_s)
 
     def adopt(self, machine: str, key: str) -> Claim:
-        """A slot for a run that was already running before a restart: taken whatever the capacity says."""
+        """A slot for a run already running before a restart: taken whatever the capacity says."""
         self._claims.setdefault(machine, set()).add(key)
         return Claim(machine, key)
 

@@ -9,9 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from support.chain_builders import v1_node
-from support.harness import git, make_repo, v1_chain
-
 from kraft import item_paths, store
 from kraft.remote import files as remote_files
 from kraft.remote import protocol, registry
@@ -21,6 +18,8 @@ from kraft.remote.jobs import JobSpec
 from kraft.remote.machine import Machine
 from kraft.remote.protocol import Closed
 from kraft.remote.runs import Run, Runs
+from support.chain_builders import v1_node
+from support.harness import git, make_repo, v1_chain
 
 _EOF = object()
 
@@ -57,7 +56,7 @@ TOKEN = "kwt_secret"
 
 
 def workers_file(**machines) -> registry.WorkersFile:
-    """Dial-in machines that all use `TOKEN`; each keyword is a machine's extra fields (`capacity`, `repos`)."""
+    """Dial-in machines that all use `TOKEN`; each keyword is a machine's extra fields."""
     return registry.WorkersFile.model_validate(
         {
             "workers": {
@@ -69,7 +68,7 @@ def workers_file(**machines) -> registry.WorkersFile:
 
 
 async def attach(hub: Hub, machine: Machine, name: str = "gpu") -> None:
-    """Dial `machine` into `hub` over a fresh in-process pair, and return once the hub shows it online."""
+    """Dial `machine` into `hub` over a fresh in-process pair; then wait for it to show online."""
     server, client = memory_pair()
     machine.server_t = server
     machine.accepted = asyncio.create_task(hub.accept(server))
@@ -78,6 +77,14 @@ async def attach(hub: Hub, machine: Machine, name: str = "gpu") -> None:
     )
     machine.task = asyncio.create_task(machine.serve(client, welcome))
     await hub.wait_online(name)
+
+
+_IDENTITY = {
+    "GIT_AUTHOR_NAME": "k",
+    "GIT_AUTHOR_EMAIL": "k@x",
+    "GIT_COMMITTER_NAME": "k",
+    "GIT_COMMITTER_EMAIL": "k@x",
+}
 
 
 @dataclass
@@ -99,15 +106,30 @@ class Rig:
     def spec(self, argv, sid="s1", env=None, **extra) -> JobSpec:
         f = self.files(sid)
         return JobSpec(
-            work_item_id=self.wid, session_id=sid, node_id="build", hook_point="build.main.a",
-            argv=argv, cwd=str(self.repo),
-            env={"KRAFT_WORK_ITEM_ID": self.wid, "KRAFT_SESSION_ID": f"{self.wid}/{sid}",
-                 "KRAFT_RESULT_PATH": str(f.result), "KRAFT_DOCS_DIR": str(item_paths.docs_dir(self.run_dirs, self.wid)),
-                 **(env or {})},
-            repo_env={}, passthrough=[], setup_command=None, branch=self.branch, head=self.head, base=self.head,
-            identity={"GIT_AUTHOR_NAME": "k", "GIT_AUTHOR_EMAIL": "k@x", "GIT_COMMITTER_NAME": "k", "GIT_COMMITTER_EMAIL": "k@x"},
-            server_run_dir=str(self.run_dirs.base), server_worktree=str(self.repo), **extra,
-        )  # fmt: skip
+            work_item_id=self.wid,
+            session_id=sid,
+            node_id="build",
+            hook_point="build.main.a",
+            argv=argv,
+            cwd=str(self.repo),
+            env={
+                "KRAFT_WORK_ITEM_ID": self.wid,
+                "KRAFT_SESSION_ID": f"{self.wid}/{sid}",
+                "KRAFT_RESULT_PATH": str(f.result),
+                "KRAFT_DOCS_DIR": str(item_paths.docs_dir(self.run_dirs, self.wid)),
+                **(env or {}),
+            },
+            repo_env={},
+            passthrough=[],
+            setup_command=None,
+            branch=self.branch,
+            head=self.head,
+            base=self.head,
+            identity=_IDENTITY,
+            server_run_dir=str(self.run_dirs.base),
+            server_worktree=str(self.repo),
+            **extra,
+        )
 
     async def run(self, argv, sid="s1", env=None, runner="gpu") -> Run:
         f, docs = self.files(sid), item_paths.docs_dir(self.run_dirs, self.wid)

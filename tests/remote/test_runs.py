@@ -23,7 +23,7 @@ def _event_types(database):
     ]
 
 
-async def test_a_step_runs_on_the_machine_and_its_commits_result_and_log_come_home_before_it_is_over(
+async def test_a_step_runs_on_the_machine_and_its_result_comes_home_before_it_is_over(
     rig,
 ):
     run = await rig.done(await rig.run([sys.executable, "-c", COMMIT]))
@@ -72,7 +72,8 @@ async def test_a_branch_that_moved_while_the_step_ran_is_kept_unsynced_and_not_o
 
 async def test_a_bundle_that_plants_a_repository_fails_the_step_and_touches_nothing(rig):
     plant = (
-        "import subprocess; subprocess.run(['git','update-index','--add','--cacheinfo','160000','1'*40,'evil'],check=True); "
+        "import subprocess; "
+        "subprocess.run(['git','update-index','--add','--cacheinfo','160000','1'*40,'evil'],check=True); "
         "subprocess.run(['git','commit','-qm','x'],check=True); "
         "open(__import__('os').environ['KRAFT_RESULT_PATH'],'w').write('{\"status\":\"done\"}')"
     )
@@ -169,7 +170,7 @@ async def test_a_frame_for_a_run_on_another_machine_is_ignored(rig):
     await rig.done(run)
 
 
-async def test_cancelling_while_the_machine_is_offline_ends_the_run_and_discards_what_it_later_hands_in(
+async def test_cancelling_while_the_machine_is_offline_ends_the_run_and_discards_its_later_hand_in(
     rig,
 ):
     run = await rig.run([sys.executable, "-c", COMMIT + "\nimport time; time.sleep(30)"])
