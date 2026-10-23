@@ -7,7 +7,7 @@ import { usd } from "../../../format";
 import type { CancelPreview } from "../../../types";
 import { act, cancelPreview, type Done } from "../../item/actions";
 import { rejectTarget } from "../../item/graph";
-import { actionPath } from "../../item/paths";
+import { actionPath, retryBody } from "../../item/paths";
 import type { ItemDetail } from "../../item/useItem";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
@@ -37,7 +37,7 @@ export async function steer(item: ItemDetail, text: string): Promise<Done & { pa
   const door = steerDoor(item);
   if (door === "retry") {
     const node = item.chain_definition.nodes.find((n) => n.id === nodeOf(item));
-    return act.retry(item.id, { ...(node && { path: actionPath(node, item.stop?.task) }), steer: text });
+    return act.retry(item.id, { ...retryBody(node, item.stop), steer: text });
   }
   if (door === "pause") {
     const p = await act.pause(item.id);

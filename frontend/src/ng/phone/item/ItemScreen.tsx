@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { DOLLARS_HINT, dollars, dollarsText, elapsedBetween, plural, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { withCode } from "../../item/cause";
-import { actionPath } from "../../item/paths";
+import { actionPath, retryBody } from "../../item/paths";
 import { act, draftToStart } from "../../item/actions";
 import { lines as draftLines } from "../../item/draft/view";
 import { isEscalation } from "../../item/nodeGraph";
@@ -83,7 +83,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
         if (waits) sheet.open("start-draft");
         else void run(act.resume(item.id), "Started.");
       });
-      case "retry": return void run(act.retry(item.id, node ? { path: actionPath(node, item.stop?.task) } : {}), "Retrying.");
+      case "retry": return void run(act.retry(item.id, retryBody(node, item.stop)), "Retrying.");
       case "reopen-mr": return void run(act.reopenMr(item.id), "MR reopened.");
       case "restore": return void run(act.restore(item.id), "Restored.");
       case "board": return navigate("/");

@@ -4,6 +4,11 @@ reruns is tests/executor/test_retry_scopes.py."""
 
 from __future__ import annotations
 
+import os
+import sqlite3
+from contextlib import closing
+from pathlib import Path
+
 import pytest
 from support.api import (
     _budget_stopped_item,
@@ -12,6 +17,11 @@ from support.api import (
     _post_default,
     _set_status,
 )
+
+from kraft import store
+from kraft.executor import walk
+from kraft.policy import Cap
+from kraft.templates.forks import ChainPath
 
 
 @pytest.fixture
@@ -79,16 +89,6 @@ def test_a_plain_retry_after_a_cap_reruns_the_step_it_ran_out_in(
     """Stopped in `verification`'s second step: running out of time or money
     says nothing about the first, which is not rerun. A loop cap, a failure,
     and a cap once a fix may have broken the first step rerun the node."""
-    import os
-    import sqlite3
-    from contextlib import closing
-    from pathlib import Path
-
-    from kraft import store
-    from kraft.executor import walk
-    from kraft.policy import Cap
-    from kraft.templates.forks import ChainPath
-
     wid = _stopped_at(client, repo, "verification")
     db = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
     with closing(sqlite3.connect(db)) as conn, conn:
