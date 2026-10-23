@@ -272,6 +272,8 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
             ("-- unique only with work_item_id", "  id             TEXT PRIMARY KEY,"),
             ("repository     TEXT,", "  repository     TEXT"),
         )
+    if version < 57:
+        drop_lines = (*drop_lines, "runner         TEXT")
     if version < 56:
         old = "                    'waiting', 'conflict', 'infra', 'infra_stop')),"
         replace = (*replace, ("'infra_stop', 'merge_rejected')),", old))

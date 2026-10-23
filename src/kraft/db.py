@@ -26,7 +26,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 56
+SCHEMA_VERSION = 57
 
 _SCHEMA_TEMPLATE = """
 CREATE TABLE work_items (
@@ -216,6 +216,9 @@ CREATE TABLE worker_sessions (
   -- in the item's frozen target. NULL for a task that is not fanned out, a
   -- single-repository item's, and every row older than this column
   repository     TEXT,
+  -- the machine a remote step ran on (`kraft.remote`), NULL for a local one and
+  -- every row older than this column
+  runner         TEXT,
   -- a session's id is unique only within its work item (`store.new_session_id`),
   -- and a row from before that keeps its 32-character id, unique on its own
   PRIMARY KEY (work_item_id, id)
@@ -1398,6 +1401,8 @@ SELECT rowid, id, work_item_id, node_id, hook_point, pid, pid_start_time, log_pa
         "CREATE INDEX idx_worker_sessions_status ON worker_sessions(status)",
         "CREATE INDEX idx_worker_sessions_id ON worker_sessions(id)",
     ],
+    # The machine a remote step ran on (remote workers): NULL is the server itself.
+    56: ["ALTER TABLE worker_sessions ADD COLUMN runner TEXT"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

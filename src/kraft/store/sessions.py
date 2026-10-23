@@ -61,6 +61,8 @@ def create_session(
     #: The repository a fanned-out run (`scope: each_repository`) is for; None
     #: for a task that does not fan out.
     repository: str | None = None,
+    #: The machine a remote step runs on (`workers.yaml`); None on the server.
+    runner: str | None = None,
     #: An agent session outside the walk (escalation, review reply, gate
     #: review): refused with `CheckoutBusy` while another in-place item uses
     #: the item's checkout. Checked in this write, so none starts beside it.
@@ -109,11 +111,12 @@ def create_session(
     conn.execute(
         "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
         "pid_start_time, log_path, result_path, status, attempt, created_at, exited_at, "
-        "round, head_sha, thread, command, started_at, harness, sandbox, model, repository) "
+        "round, head_sha, thread, command, started_at, harness, sandbox, model, repository, "
+        "runner) "
         "VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 'pending', "
         "(SELECT COUNT(*) + 1 FROM worker_sessions "
         "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), "
-        "?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             id,
             work_item_id,
@@ -134,6 +137,7 @@ def create_session(
             sandbox,
             model,
             repository,
+            runner,
         ),
     )
     (attempt,) = conn.execute(

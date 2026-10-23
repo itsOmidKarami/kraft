@@ -40,3 +40,22 @@ def test_migrate_v55_to_v56_admits_merge_rejected_and_keeps_rowids(tmp_path):
     ]
     index_names = {r[0] for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='index'")}
     assert {"idx_worker_sessions_status", "idx_worker_sessions_id"} <= index_names
+
+
+def test_migrate_v56_to_v57_adds_a_nullable_runner_column(tmp_path):
+    """Every session older than the column ran on the server: its runner reads NULL."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(conn, 56)
+    schema.insert_item(conn)
+    conn.execute(
+        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
+        "result_path, status, created_at) VALUES ('s1', 'w1', 'n', 'h', '/l', '/r', 'done', 'now')"
+    )
+    conn.commit()
+    conn.close()
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    assert conn2.execute("SELECT runner FROM worker_sessions WHERE id = 's1'").fetchone()[0] is None
+    conn2.execute("UPDATE worker_sessions SET runner = 'gpu' WHERE id = 's1'")
