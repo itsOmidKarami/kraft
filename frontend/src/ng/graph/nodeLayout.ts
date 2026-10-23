@@ -15,6 +15,11 @@ export type NodeStep = {
   seamBefore?: boolean;
 };
 
+/** An on_failure handler that ran, as a row of its tasks. `step` is what its tasks are selected under (`on_failure` for
+ *  the node's own, else the owner's step, the task then `[<task>.]on_failure.<step>.<task>`); `at` names the step or
+ *  task that owns it, none for the node's own; `label` is the row's caption. */
+export type HandlerRow = { step: string; at?: { step: string; task?: string }; label: string; tasks: GraphItem[] };
+
 /** A curved edge, control points at 0.55 of the run. */
 export function curve(x1: number, y1: number, x2: number, y2: number) {
   const dx = (x2 - x1) * 0.55;
@@ -72,9 +77,10 @@ const rowsOf = (st: NodeStep) => Math.max(1, st.tasks.length);
  *  `loopTasks` is how many stops the loop carries (a task, or a step of several) and `loopOpen` the tasks of the step
  *  drawn open, if one is: more than a pair of stops, or an open one, moves the end mark out until they fit, and an
  *  open step takes the loop deeper by its frame. `loopLane`: the loop has a step of several tasks, so it is drawn as
- *  a lane and not an arc (`loopArc`). `handler` is how many tasks the node's on_failure handler has, drawn as a row
- *  of their own under the rest, its caption over them. */
-export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolean; loopTasks?: number; loopLane?: boolean; loopOpen?: number; handler?: number; expand?: Expand } = {}) {
+ *  a lane and not an arc (`loopArc`). `handlers` are the on_failure handlers that ran, each a row of `n` tasks a
+ *  step's pitch apart, joined to its owner as the escalation is to the node: the node's own off the end mark, beside
+ *  and under the escalation; a step's or a task's under everything else, straight down from its owner's column. */
+export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolean; loopTasks?: number; loopLane?: boolean; loopOpen?: number; handlers?: { at?: { step: number; row: number }; n: number }[]; expand?: Expand } = {}) {
   const loopN = o.loop ? (o.loopTasks ?? 0) : 0, loopOpen = loopN ? (o.loopOpen ?? 0) : 0, loopLane = loopN > 0 && (!!o.loopLane || loopOpen > 0);
   const ex = o.expand && steps[o.expand.step]?.tasks[o.expand.row] ? o.expand : undefined;
   // The open task's column is the frame and 12px, and the frame sits at its centre.
@@ -141,13 +147,25 @@ export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolea
       H = Math.max(proto + 10, low + G.BOX / 2 + 52 + (loopOpen ? ((loopOpen - 1) * G.ROW) / 2 + 8 : 0));
     }
   }
-  // The on_failure handler: its caption, then its tasks left to right, a step's pitch apart, under everything else.
-  const footerY = H + 4, handlerY = footerY + 30 + G.BOX / 2;
-  const handlerXs = Array.from({ length: o.handler ?? 0 }, (_, i) => G.startX + 68 + G.COL / 2 + i * (G.COL + G.GAP));
-  if (handlerXs.length) {
-    H = handlerY + G.BOX / 2 + 52;
-    W = Math.max(W, handlerXs.at(-1)! + G.COL / 2 + 24);
-  }
+  // The on_failure handlers. The node's own start under the escalation's box (or where it would be), a row apart and
+  // its caption clear of the label above; a step's or a task's start under everything else, below their owner.
+  let byNode = TY + 74 + (o.side ? G.ROW + 24 : 0), under = H + 8;
+  const handlerRows = (o.handlers ?? []).map((h) => {
+    const own = !h.at;
+    const x0 = own ? endX + 84 : cx[h.at!.step];
+    const y = own ? byNode : under + 30 + G.BOX / 2;
+    const xs = Array.from({ length: h.n }, (_, i) => x0 + i * (G.COL + G.GAP));
+    // A step's or a task's line leaves under its column's last label and meta, clear of a parallel step's frame: a task in one shares
+    // its step's line, and its caption names it. shortcut: no line from a task inside the column, add one when a
+    // parallel step's tasks get handlers of their own in a shipped chain.
+    const r = own ? undefined : rows(h.at!.step).at(-1)!;
+    const from = own ? { x: endX, y: TY + 9 } : { x: x0, y: r!.y + r!.half + 48 };
+    if (own) byNode = y + G.BOX / 2 + 70;
+    else under = y + G.BOX / 2 + 52;
+    W = Math.max(W, xs.at(-1)! + G.COL / 2 + 24);
+    H = Math.max(H, y + G.BOX / 2 + 52);
+    return { y, xs, from, own, labelY: y - G.BOX / 2 - 22 };
+  });
   const cols = steps.map((st, k) => {
     const r = rows(k), ys = r.map((x) => x.y);
     const top = r[0].y - r[0].half, foot = r.at(-1)!.y + r.at(-1)!.half;
@@ -157,7 +175,7 @@ export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolea
     // The label centres on the column, 38px over the first row's box or the open frame.
     return { cx: cx[k], ys, frame, labelY: top - 38, left: cx[k] - half(k), right: cx[k] + half(k), open: opened ? { x: cx[k] - opened.w / 2, y: ys[opened.row] - opened.h / 2, w: opened.w, h: opened.h } : null };
   });
-  return { TY, cx, endX, W, H, cols, maxRows: Math.max(1, ...steps.map(rowsOf)), footerY, handlerY, handlerXs, loopY, loopLabelY, loopOpen, loopLane };
+  return { TY, cx, endX, W, H, cols, maxRows: Math.max(1, ...steps.map(rowsOf)), handlerRows, loopY, loopLabelY, loopOpen, loopLane };
 }
 export type NodeLayout = ReturnType<typeof nodeLayout>;
 
@@ -186,10 +204,16 @@ export function nodeEdges(steps: NodeStep[], lay: NodeLayout) {
   return { edges, dots };
 }
 
-/** The on_failure handler's row: a line in from under the start mark, and one from each task to the next. */
-export function handlerEdges(lay: NodeLayout, tasks: GraphItem[]): Edge[] {
-  const y = lay.handlerY, xs = lay.handlerXs, todo = (t: GraphItem) => t.state === "todo";
-  return xs.map((x, i) => ({ key: `h${i}`, d: `M${i ? xs[i - 1] + G.BOX / 2 + 4 : G.startX + 9} ${y} L${x - G.BOX / 2 - 4} ${y}`, todo: todo(tasks[i]) }));
+/** An on_failure handler's row: the dashed line from its owner into its first task, and an edge from each task to the
+ *  next. The node's own leaves the end mark downwards and turns into its row on the lane's corner, clear of the
+ *  escalation's swoop; a step's or a task's runs straight down from under its column. */
+export function handlerEdges(row: NodeLayout["handlerRows"][number], tasks: GraphItem[], k: number) {
+  const { y, xs, from } = row;
+  const join = row.own ? `M${from.x} ${from.y} V${y - LANE_R} Q${from.x} ${y} ${from.x + LANE_R} ${y} H${xs[0] - G.BOX / 2 - 4}` : `M${from.x} ${from.y} L${xs[0]} ${y - G.BOX / 2 - 4}`;
+  return {
+    join: { key: `hj${k}`, d: join },
+    edges: xs.slice(1).map((x, i): Edge => ({ key: `h${k}_${i}`, d: `M${xs[i] + G.BOX / 2 + 4} ${y} L${x - G.BOX / 2 - 4} ${y}`, todo: tasks[i + 1]?.state === "todo" })),
+  };
 }
 
 /** The escalation branch: a dashed curve from the end mark down-right to its task. */

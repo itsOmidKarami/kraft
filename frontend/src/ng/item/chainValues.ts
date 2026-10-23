@@ -7,9 +7,9 @@ import type { ItemDetail } from "./useItem";
  *  parts those rows show are typed. */
 type Caps = Record<string, number | null | undefined>;
 type Pol = Record<string, unknown> | null | undefined;
-export type MTask = { id: string; kind: string; ref?: string | null; execution?: string | null; skill?: string | null; produces?: string | null; harness?: string | null; model?: string | null; effort?: string | null; profile?: string | null; prompt?: string | null; command?: unknown; policy?: Pol };
-type MStep = { id: string; tasks: MTask[]; policy?: Pol };
-type MLoop = { max_attempts?: number | null; tasks?: MTask[] | null; steps?: MStep[] | null; judge?: MTask | null };
+export type MTask = { id: string; kind: string; ref?: string | null; execution?: string | null; skill?: string | null; produces?: string | null; harness?: string | null; model?: string | null; effort?: string | null; profile?: string | null; prompt?: string | null; command?: unknown; policy?: Pol; on_failure?: MLoop | null };
+type MStep = { id: string; tasks: MTask[]; policy?: Pol; on_failure?: MLoop | null };
+export type MLoop = { max_attempts?: number | null; tasks?: MTask[] | null; steps?: MStep[] | null; judge?: MTask | null };
 export type MNode = { id: string; kind: string; tasks?: MTask[] | null; steps?: MStep[] | null; policy?: Pol; fix_loop?: MLoop | null; on_failure?: MLoop | null; auto_review?: MTask | null; message?: string | null; artifact?: string | null };
 /** What the item runs against, frozen at intake: a workspace's root and its members, in the order a fanned-out task visits them. */
 export type MTarget = { kind: string; root?: string | null; mounts?: Record<string, { repository: string; path: string }> };
@@ -58,6 +58,9 @@ function loopTaskAt(node: MNode | undefined, rest: string[], at: "fix_loop" | "o
   return steps.find((x) => x.id === rest[0])?.tasks.find((x) => x.id === rest[1]);
 }
 
+/** An on_failure handler's task paths in order, `<owner>.on_failure.<step>.<task>`; a bare `tasks:` list is one step called `main`. */
+export const handlerPaths = (plan: MLoop, owner: string) => (plan.steps ?? (plan.tasks ? [{ id: "main", tasks: plan.tasks }] : [])).flatMap((st) => st.tasks.map((t) => `${owner}.on_failure.${st.id}.${t.id}`));
+
 /** The node, step and task a path names, broadest first. */
 function scopes(m: Materialized, path: string) {
   const [n, s, t] = path.split(".");
@@ -65,6 +68,15 @@ function scopes(m: Materialized, path: string) {
   const step = node && s ? stepsOfNode(node).find((x) => x.id === s) : undefined;
   // A gate's reviewer is `<gate>.auto_review`: no step of the chain, but a task of its own.
   const task = step && t ? step.tasks.find((x) => x.id === t) : node?.kind === "gate" && s === "auto_review" && !t ? node.auto_review ?? undefined : s === "fix_loop" || s === "on_failure" ? loopTaskAt(node, path.split(".").slice(2), s) : undefined;
+  // A step's or a task's own on_failure handler: `<node>.<step>[.<task>].on_failure.<step>.<task>`.
+  const segs = path.split("."), at = segs.indexOf("on_failure");
+  if (step && (at === 2 || at === 3)) {
+    const owner = at === 2 ? step : step.tasks.find((x) => x.id === t);
+    const [hs, ht] = segs.slice(at + 1);
+    const plan = owner?.on_failure;
+    const steps = plan ? plan.steps ?? (plan.tasks ? [{ id: "main", tasks: plan.tasks }] : []) : [];
+    return { node, step, task: segs.length === at + 3 ? steps.find((x) => x.id === hs)?.tasks.find((x) => x.id === ht) : undefined };
+  }
   return { node, step, task };
 }
 

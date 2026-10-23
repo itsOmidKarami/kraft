@@ -1,6 +1,6 @@
 import type { ChainNode } from "../../types";
 import type { Sel } from "../graph/usePaneSelection";
-import { AUTO_REVIEW, ESCALATION, FIX_LOOP, ON_FAILURE } from "./nodeGraph";
+import { AUTO_REVIEW, ESCALATION, FIX_LOOP, inHandler, ON_FAILURE } from "./nodeGraph";
 import { stepsOf } from "./paths";
 
 /** Where the item page is: the node view (if any), the selection, its tab and
@@ -39,6 +39,12 @@ export function pathSel(path: string, nodes: ChainNode[]): Sel | null {
   if (node?.fix_loop && step === FIX_LOOP && task) return { kind: "task", node: n, step, task: [task, ...rest].join(".") };
   // An on_failure handler's task: `<node>.on_failure.<step>.<task>`, one of the hook points the node lists.
   if (step === ON_FAILURE && node?.on_failure?.includes(path)) return { kind: "task", node: n, step, task: [task, ...rest].join(".") };
+  // A step's or a task's own on_failure handler's task: `<node>.<step>[.<task>].on_failure.<step>.<task>`.
+  const at = [task, ...rest].indexOf(ON_FAILURE);
+  if (node && (at === 0 || at === 1) && rest.length === at + 2) {
+    const s = stepsOf(node).steps.find((x) => x.id === step);
+    if (s && (at === 0 || s.tasks.some((t) => t.split(".").at(-1) === task))) return { kind: "task", node: n, step, task: [task, ...rest].join(".") };
+  }
   if (!node || rest.length) return null;
   if (!step) return { kind: "node", node: n };
   // A gate's reviewer is `<gate>.auto_review`: the chain lists no step there, the frozen chain has its task.
@@ -52,9 +58,9 @@ export function pathSel(path: string, nodes: ChainNode[]): Sel | null {
 }
 
 /** Where a stop's "Open <node>" goes: the node, or the task inside it the item stopped on when that is one of its
- *  on_failure handler's, which the chain does not show. */
+ *  on_failure handlers' (the node's, a step's or a task's), which the chain does not show. */
 export function stopPlace(stop: { node?: string | null; task?: string | null } | null | undefined, node: string, nodes: ChainNode[]): Place {
-  const task = stop?.node === node && stop.task?.startsWith(`${node}.${ON_FAILURE}.`) ? pathSel(stop.task, nodes) : null;
+  const task = stop?.node === node && stop.task?.startsWith(`${node}.`) && inHandler(stop.task) ? pathSel(stop.task, nodes) : null;
   return task ? { node, sel: task } : { sel: { kind: "node", node } };
 }
 

@@ -7,7 +7,7 @@ import { lineCount } from "../../../format";
 import { NodeGlyph } from "../../graph/NodeGlyph";
 import { act } from "../../item/actions";
 import { chainGraph, rejectTarget } from "../../item/graph";
-import { escalationsIn, ESCALATION, FIX_LOOP, nodeGraph, ON_FAILURE, passList, passOf, stateWord } from "../../item/nodeGraph";
+import { escalationsIn, ESCALATION, FIX_LOOP, nodeGraph, passList, passOf, stateWord } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
 import { TestsLine } from "../../item/TestsLine";
 import { placeUrl, type Place } from "../../item/url";
@@ -192,11 +192,11 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
                 </div>
               </Block>
             )}
-            {!gate && onFailure && (
-              <Block title="On failure">
+            {!gate && onFailure?.map((h) => (
+              <Block key={h.label} title={h.label.replace(/^on/, "On")}>
                 <div className="ph-list">
-                  {onFailure.map((t) => (
-                    <button key={t.id} type="button" className="ph-row ph-task-row" onClick={() => openTask(ON_FAILURE, t.id)}>
+                  {h.tasks.map((t) => (
+                    <button key={t.id} type="button" className="ph-row ph-task-row" onClick={() => openTask(h.step, t.id)}>
                       <NodeGlyph kind="exec" size="sm" state={t.state} taskKind={t.taskKind} running={t.running} paused={t.paused} />
                       <span className="ph-row-text">
                         <span className="ph-row-label ph-mono">{t.label ?? t.id}</span>
@@ -207,7 +207,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
                   ))}
                 </div>
               </Block>
-            )}
+            ))}
             {!gate && side && (
               <Block title="Handlers">
                 <div className="ph-list">

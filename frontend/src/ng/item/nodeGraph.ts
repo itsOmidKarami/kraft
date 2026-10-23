@@ -1,9 +1,9 @@
 import { allDone, gateName } from "../board/rowText";
 import { elapsed, elapsedBetween } from "../../format";
 import type { ChainNode as ApiNode, KraftEvent, NodePass, SessionStatus, TaskProgress, WorkerSession, WorkItemDocument } from "../../types";
-import type { NodeStep } from "../graph/nodeLayout";
+import type { HandlerRow, NodeStep } from "../graph/nodeLayout";
 import type { GlyphState, GraphItem } from "../graph/types";
-import { attemptsAt, loopPaths, materialized, taskKindAt } from "./chainValues";
+import { attemptsAt, handlerPaths, loopPaths, materialized, nodeAt, stepsOfNode, taskKindAt } from "./chainValues";
 import { stepsOf, taskName } from "./paths";
 import { isScopeTask, scopeLead, scopesView } from "./scopeView";
 import type { ItemDetail } from "./useItem";
@@ -141,6 +141,8 @@ export const FIX_LOOP = "fix_loop";
 export const JUDGE = "judge";
 /** The step a node's on_failure handler's tasks are selected under, each as `<step>.<task>`: `<node>.on_failure.<step>.<task>`. */
 export const ON_FAILURE = "on_failure";
+/** Whether a task path is an on_failure handler's: the node's, a step's or a task's. */
+export const inHandler = (path: string) => path.split(".").includes(ON_FAILURE);
 
 /** A node's fix-loop rounds, 1-based. A round is one measurement of the node's own steps
  *  (`WorkerSession.round`, 0-based). `total` is the loop's limit, its attempts plus the first measurement,
@@ -171,7 +173,7 @@ export const verdictOf = (events: KraftEvent[] | undefined, node: string, cycle:
 /** A node's inside for NodeGraph (Decisions §7): steps in order, a row per
  *  task with its state in the round shown (a fix-loop node's own round: every
  *  task, its repair and its judge follow it), the escalation side branch, the
- *  fix-loop arc once a round ran, and the on_failure handler's tasks once it ran. */
+ *  fix-loop arc once a round ran, and each on_failure handler's tasks once it ran (the node's, a step's, a task's). */
 export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), events?: KraftEvent[], picked?: number) {
   const { steps } = stepsOf(node);
   const frozen = materialized(item);
@@ -204,12 +206,25 @@ export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), eve
   const looped = !!rounds && (rounds.latest > (rounds.first ?? 1) || (stopped && rounds.latest > 1));
   const tone = stopped && shown === rounds?.latest ? "red" : looped && standsOn(item, node.id) ? "active" : "idle";
   const loop = node.fix_loop && rounds && (looped || inLoop) ? loopOf(item, node, own, shown!, rounds, tone, now, events) : undefined;
-  // The handler's tasks in order, once it ran in the pass and round shown, as the arc is: one that never failed has none to draw.
-  const handler = node.on_failure ?? [];
+  // Each on_failure handler that ran in the pass and round shown, as the arc is (one that never failed has none to
+  // draw): the node's own, then each step's and each task's, its tasks in order.
   const ranIn = (path: string) => pass.filter((x) => x.hook_point === path && (!shown || x.round === shown - 1));
-  const onFailure = handler.some((p) => ranIn(p).length)
-    ? handler.map((path): GraphItem => ({ id: path.slice(`${node.id}.${ON_FAILURE}.`.length), label: taskName(path), taskKind: taskKindAt(frozen, path), ...sessionLook(ranIn(path).at(-1), now) }))
-    : undefined;
+  const declared: { at?: HandlerRow["at"]; paths: string[] }[] = node.on_failure?.length ? [{ paths: node.on_failure }] : [];
+  const mine = frozen && nodeAt(frozen, node.id);
+  for (const st of mine ? stepsOfNode(mine) : []) {
+    if (st.on_failure) declared.push({ at: { step: st.id }, paths: handlerPaths(st.on_failure, `${node.id}.${st.id}`) });
+    for (const t of st.tasks) if (t.on_failure) declared.push({ at: { step: st.id, task: t.id }, paths: handlerPaths(t.on_failure, `${node.id}.${st.id}.${t.id}`) });
+  }
+  const handlers = declared.filter((d) => d.paths.some((p) => ranIn(p).length)).map(({ at, paths }): HandlerRow => {
+    const step = at?.step ?? ON_FAILURE;
+    return {
+      step,
+      at,
+      label: at ? `on failure · ${at.task ?? at.step}` : "on failure",
+      tasks: paths.map((path): GraphItem => ({ id: path.slice(`${node.id}.${step}.`.length), label: taskName(path), taskKind: taskKindAt(frozen, path), ...sessionLook(ranIn(path).at(-1), now) })),
+    };
+  });
+  const onFailure = handlers.length ? handlers : undefined;
   return { steps: out, side, loop, onFailure, rounds: rounds && shown ? roundList(item, node, rounds, shown) : undefined };
 }
 

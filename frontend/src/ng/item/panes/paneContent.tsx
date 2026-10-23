@@ -9,7 +9,7 @@ import type { Applied } from "../draft/applied";
 import { AppliedRows } from "../draft/AppliedRows";
 import { DraftConfig } from "../draft/DraftConfig";
 import { DraftNotes } from "../draft/DraftNotes";
-import { AUTO_REVIEW, ESCALATION, escalationsIn, FIX_LOOP, footerState, ON_FAILURE, isEscalation, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, NOT_RUN_IN_ROUND, passWords, sessionLook, sessionsOf, settled, standsOn, stateWord } from "../nodeGraph";
+import { AUTO_REVIEW, ESCALATION, escalationsIn, FIX_LOOP, footerState, inHandler, ON_FAILURE, isEscalation, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, NOT_RUN_IN_ROUND, passWords, sessionLook, sessionsOf, settled, standsOn, stateWord } from "../nodeGraph";
 import { stepsOf, taskName } from "../paths";
 import type { ItemDetail } from "../useItem";
 import { ChainConfig, ChainOverview } from "./ChainPane";
@@ -282,12 +282,12 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const tabs = esc ? [{ value: "thread", label: "Thread" }, ...TASK_TABS] : TASK_TABS;
   const tab = tabs.some((t) => t.value === a.tab) ? a.tab : tabs[0].value;
   const place = r ? (loop === "judge" ? `fix-loop judge · after round ${r}` : loop === "repair" ? `fix-loop repair · between rounds ${r} and ${r + 1}` : `${kind ? `${kind} ` : ""}task · round ${r}${rounds.total ? ` of ${rounds.total}` : ""}`) : null;
-  const lead = place ?? `${esc ? "escalation · " : stepId === ON_FAILURE ? "on failure · " : ""}${kind ? `${kind} ` : ""}task`;
+  const lead = place ?? `${esc ? "escalation · " : inHandler(path) ? "on failure · " : ""}${kind ? `${kind} ` : ""}task`;
   // A round's task says how long it took, as the words run on: "running 41s", "done 31s".
   const took = r && at ? (look.running ? look.meta?.replace(" · ", " ") : look.state === "done" && at.wall_ms != null ? `done ${elapsed(at.wall_ms)}` : undefined) : undefined;
   // A task the round did not run says so in so many words, as the prototype has it.
   const state = took ?? (look.running ? (look.meta ?? "running") : at || !r || !loop ? (at || !r ? lookWord(look) : "not run in this round") : loopIdle(node, loop, r, rounds!, a.events));
-  const head = { crumbs, taskKind: kind as TaskKind | undefined, icon: esc ? "siren" : undefined, title: loop || stepId === ON_FAILURE ? taskName(task) : task, sub: `${lead} · ${state}` };
+  const head = { crumbs, taskKind: kind as TaskKind | undefined, icon: esc ? "siren" : undefined, title: loop || inHandler(path) ? taskName(task) : task, sub: `${lead} · ${state}` };
   if (!at) {
     // A task that has not run keeps its tabs, each saying why it is empty (LV-5). Config is the
     // draft's while it may override the task (W11). On the node the run stands on it can be skipped

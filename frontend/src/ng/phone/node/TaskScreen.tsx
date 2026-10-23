@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ago, elapsed, lineCount, tokenText, usd } from "../../../format";
 import type { WorkerSession } from "../../../types";
-import { escalationsIn, ESCALATION, FIX_LOOP, isSessionDoc, ON_FAILURE, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, NO_DOCUMENTS, progressWords, subTasks, NOT_RUN_IN_ROUND, messagesThrough, passWords, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
+import { escalationsIn, ESCALATION, FIX_LOOP, isSessionDoc, inHandler, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, NO_DOCUMENTS, progressWords, subTasks, NOT_RUN_IN_ROUND, messagesThrough, passWords, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
 import { materialized, planTaskPath } from "../../item/chainValues";
 import { isScopeTask, roundWords, scopeLead, scopesView } from "../../item/scopeView";
@@ -49,7 +49,7 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
   const look = sessionLook(at, now);
   const tabs: { id: TaskTab; label: string }[] = [...(esc ? [{ id: "thread" as const, label: "Thread" }] : []), { id: "overview", label: "Overview" }, { id: "log", label: "Log" }, { id: "config", label: "Config" }];
   const tab = (tabs.some((t) => t.id === place.tab) ? place.tab : tabs[0].id) as TaskTab;
-  const name = esc ? "escalation" : loop || place.sel.step === ON_FAILURE ? taskName(path) : place.sel.task;
+  const name = esc ? "escalation" : loop || inHandler(path) ? taskName(path) : place.sel.task;
   const mine = docs.filter((d) => at && (isSessionDoc(d, at) || (d.hook_point === path && d.attempt === at.attempt)));
   const kind = at?.model ? "agent task" : "task";
   // A node the chain ran again reads one pass at a time: the screen says which.

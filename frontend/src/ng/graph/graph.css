@@ -159,6 +159,9 @@
 .graph-node.is-warn .graph-label, .graph-node.is-side .graph-label { color: var(--warn); }
 .graph-node.is-slot .graph-label { color: var(--ok); }
 .edge.is-side { stroke: var(--warn); stroke-dasharray: 4 4; }
+/* An on_failure handler's line from its owner: dashed as the escalation's, in the plain edge colour. Its caption centres over its first task, as a step's label does. */
+.edge.is-handler { stroke-dasharray: 4 4; }
+.node-footer.is-handler { transform: translateX(-50%); }
 .mark-start.is-node { width: 18px; height: 18px; font-size: var(--fs-label); }
 .seam.is-node { opacity: .6; }
 .seam.is-node:is(:hover, :focus-visible) { opacity: 1; }

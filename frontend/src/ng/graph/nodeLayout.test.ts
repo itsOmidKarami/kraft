@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arcYAt, curve, G, loopArc, loopCols, loopColumn, loopFork, loopSlots, nodeEdges, nodeLayout, sideBranch, type NodeStep } from "./nodeLayout";
+import { arcYAt, curve, G, handlerEdges, loopArc, loopCols, loopColumn, loopFork, loopSlots, nodeEdges, nodeLayout, sideBranch, type NodeStep } from "./nodeLayout";
 
 const step = (id: string, n: number): NodeStep => ({ id, tasks: Array.from({ length: n }, (_, i) => ({ id: `${id}${i}` })) });
 
@@ -47,6 +47,18 @@ describe("node layout", () => {
     const lay = nodeLayout([step("a", 1)], { side: true });
     expect(sideBranch(lay)).toMatchObject({ x: lay.endX + 84, y: lay.TY + 74 });
   });
+  it("hangs each on_failure handler off its owner: the node's off the end mark under the escalation, a task's under its column", () => {
+    const lay = nodeLayout([step("a", 2), step("b", 1)], { side: true, handlers: [{ n: 2 }, { at: { step: 1, row: 0 }, n: 1 }] });
+    const [own, task] = lay.handlerRows;
+    // The node's: a row apart under the escalation's box, its first task in that box's column, a step's pitch to the next.
+    expect(own).toMatchObject({ own: true, from: { x: lay.endX, y: lay.TY + 9 }, y: sideBranch(lay).y + 92 + 24, xs: [lay.endX + 84, lay.endX + 84 + 154] });
+    // Down from the end mark, round the lane's corner, into its first task.
+    expect(handlerEdges(own, [], 0).join.d).toBe(`M${lay.endX} ${lay.TY + 9} V${own.y - 28} Q${lay.endX} ${own.y} ${lay.endX + 28} ${own.y} H${own.xs[0] - 26}`);
+    // The task's (the second step's): straight down from under its column to a row under everything else.
+    expect(task).toMatchObject({ own: false, from: { x: lay.cx[1], y: lay.cols[1].ys[0] + 22 + 48 }, xs: [lay.cx[1]] });
+    expect(lay.H).toBe(Math.max(own.y, task.y) + 22 + 52);
+  });
+
   it("draws a one-row node's fix loop exactly as the prototype does", () => {
     const lay = nodeLayout([step("a", 1)], { loop: true });
     // The prototype: by = H − 30 with H = TY + BOX/2 + 70 + 34; control points at by + 20.

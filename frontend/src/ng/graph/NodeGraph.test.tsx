@@ -53,16 +53,26 @@ describe("NodeGraph", () => {
   it("draws the on-failure handler's tasks as a row of their own: named by the task, ↓ from the last row, ↑ back, opened on Enter", async () => {
     const user = userEvent.setup();
     const onOpen = vi.fn();
-    const handler = [{ id: "repair.repair_feedback", label: "repair_feedback", taskKind: "agent" as const, state: "done" as const }, { id: "sync.sync_mr", label: "sync_mr", taskKind: "subprocess" as const, state: "failed" as const }];
+    const handler = [
+      { step: "on_failure", label: "on failure", tasks: [{ id: "repair.repair_feedback", label: "repair_feedback", taskKind: "agent" as const, state: "done" as const }, { id: "sync.sync_mr", label: "sync_mr", taskKind: "subprocess" as const, state: "failed" as const }] },
+      { step: "checks", at: { step: "checks", task: "unit" }, label: "on failure · unit", tasks: [{ id: "unit.on_failure.main.fix", label: "fix", taskKind: "agent" as const, state: "done" as const }] },
+    ];
     render(<NodeGraph name="v" steps={steps.slice(0, 2)} onFailure={handler} selected={{ step: "review", task: "code_review" }} onOpen={onOpen} />);
     expect(btn(/^sync_mr/)).toHaveAccessibleName("sync_mr, on-failure subprocess task, failed");
+    expect(btn(/^fix,/)).toHaveAccessibleName("fix, on-failure agent task, done");
+    // Each row hangs off its owner by a line of its own, captioned.
+    expect(document.querySelectorAll(".edge.is-handler")).toHaveLength(2);
+    expect(screen.getByText("on failure · unit")).toBeInTheDocument();
     await user.tab();
     await user.keyboard("{ArrowDown}");
     expect(btn(/^repair_feedback/)).toHaveFocus();
-    await user.keyboard("{ArrowRight}{ArrowRight}");
+    await user.keyboard("{ArrowRight}");
     expect(btn(/^sync_mr/)).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(onOpen).toHaveBeenCalledWith({ step: "on_failure", task: "sync.sync_mr" });
+    // The rows are one run for the keys, clamped at its end; a task's handler opens under its step.
+    await user.keyboard("{ArrowRight}{ArrowRight}{Enter}");
+    expect(onOpen).toHaveBeenLastCalledWith({ step: "checks", task: "unit.on_failure.main.fix" });
     await user.keyboard("{ArrowUp}");
     expect(btn(/^code_review/)).toHaveFocus();
   });

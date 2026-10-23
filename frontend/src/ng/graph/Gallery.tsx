@@ -51,7 +51,7 @@ export function Gallery() {
         <div className="gallery-frame is-tall is-stack">
           <ChainStrip nodes={CHAIN_15} viewing="verification" onOpen={setSel} />
           <div className="gallery-area">
-          <NodeGraph name="verification" steps={NODE_VERIFY} selected={task} onSelect={setTask} onOpen={setTask} side={NODE_VERIFY_SIDE} loop={{ tone: "active", label: "fix loop · attempt 2 of 3" }} onFailure={[{ id: "repair.retry_flaky", label: "retry_flaky", state: "done", meta: "1m" }, { id: "sync.sync_mr", label: "sync_mr", state: "failed", meta: "failed" }]} />
+          <NodeGraph name="verification" steps={NODE_VERIFY} selected={task} onSelect={setTask} onOpen={setTask} side={NODE_VERIFY_SIDE} loop={{ tone: "active", label: "fix loop · attempt 2 of 3" }} onFailure={[{ step: "on_failure", label: "on failure", tasks: [{ id: "repair.retry_flaky", label: "retry_flaky", state: "done", meta: "1m" }, { id: "sync.sync_mr", label: "sync_mr", state: "failed", meta: "failed" }] }, { step: "checks", at: { step: "checks", task: "lint" }, label: "on failure · lint", tasks: [{ id: "lint.on_failure.main.autofix", label: "autofix", state: "done", meta: "9s" }] }]} />
           </div>
         </div>
         <div className="gallery-frame">

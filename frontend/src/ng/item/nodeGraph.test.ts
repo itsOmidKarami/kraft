@@ -38,20 +38,29 @@ describe("nodeGraph", () => {
     const first = [s("verification.checks.lint", { status: "failed", pass: 1 }), { ...ran, pass: 1 }];
     const item = detail({ node_passes: { verification: [{ pass: 1 }, { pass: 2, reason: "retry" as const }] }, worker_sessions: [...first, s("verification.checks.lint", { pass: 2 })] });
     // Selected as `on_failure` and `<step>.<task>`, named by the task.
-    expect(nodeGraph(asOfPass(item, "verification", 1), node, NOW).onFailure).toMatchObject([{ id: "repair.repair_pass", label: "repair_pass", state: "done" }]);
+    expect(nodeGraph(asOfPass(item, "verification", 1), node, NOW).onFailure).toMatchObject([{ step: "on_failure", at: undefined, label: "on failure", tasks: [{ id: "repair.repair_pass", label: "repair_pass", state: "done" }] }]);
     expect(nodeGraph(item, node, NOW).onFailure).toBeUndefined();
   });
 
   it("draws each of the handler's tasks as it stands: the one it stopped on failed, one it never reached not started", () => {
     const handler = ["repair.repair_feedback", "sync.sync_mr", "sync.notify"].map((t) => `verification.on_failure.${t}`);
     const item = detail({ worker_sessions: [s("verification.checks.lint", { status: "failed" }), s(handler[0], { round: -1 }), s(handler[1], { round: -1, status: "failed" })] });
-    expect(nodeGraph(item, { ...node, on_failure: handler }, NOW).onFailure!.map((t) => [t.label, t.state])).toEqual([["repair_feedback", "done"], ["sync_mr", "failed"], ["notify", "todo"]]);
+    expect(nodeGraph(item, { ...node, on_failure: handler }, NOW).onFailure![0].tasks.map((t) => [t.label, t.state])).toEqual([["repair_feedback", "done"], ["sync_mr", "failed"], ["notify", "todo"]]);
+  });
+
+  it("draws a task's own handler hung off that task, and a step's that never ran not at all", () => {
+    // lint's handler is a bare `tasks:` list (one step, `main`); review's never ran.
+    const m = JSON.parse(FROZEN);
+    m.chain.nodes[2].steps[0].tasks[0].on_failure = { tasks: [{ id: "autofix", kind: "agent" }] };
+    m.chain.nodes[2].steps[1].on_failure = { steps: [{ id: "again", tasks: [{ id: "rerun", kind: "agent" }] }] };
+    const item = detail({ materialized_chain: JSON.stringify(m), worker_sessions: [s("verification.checks.lint", { status: "failed" }), s("verification.checks.lint.on_failure.main.autofix", { round: -1, status: "running", wall_ms: null })] });
+    expect(nodeGraph(item, node, NOW).onFailure).toMatchObject([{ step: "checks", at: { step: "checks", task: "lint" }, label: "on failure · lint", tasks: [{ id: "lint.on_failure.main.autofix", label: "autofix", taskKind: "agent", state: "current" }] }]);
   });
 
   it("draws the on-failure handler only in the round of a fix-loop node that it followed", () => {
     // The handler's re-measure is stamped -1 and reads in the round of the session before it: here round 2.
     const item = looped({ worker_sessions: [...LOOP_RUN.slice(0, 5), s("verification.on_failure.repair.repair_pass", { round: -1 })] });
-    expect([1, 2].map((r) => nodeGraph(item, node, NOW, [], r).onFailure?.map((t) => t.label))).toEqual([undefined, ["repair_pass"]]);
+    expect([1, 2].map((r) => nodeGraph(item, node, NOW, [], r).onFailure?.[0].tasks.map((t) => t.label))).toEqual([undefined, ["repair_pass"]]);
   });
 
   it("draws a skipped task as skipped, whether the skip cut its session short or it never ran", () => {

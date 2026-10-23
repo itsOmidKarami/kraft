@@ -34,11 +34,16 @@ describe("item URL", () => {
     expect(place.sel).toEqual({ kind: "task", node: "verification", step: "on_failure", task: "repair.fix" });
     expect(placeUrl("w1", place)).toBe("/work-items/w1/nodes/verification?sel=verification.on_failure.repair.fix");
     expect(readPlace("verification", q("sel=verification.on_failure.repair.other"), handled).sel).toEqual({ kind: "node", node: "verification" });
+    // A step's and a task's own handler, under that step: the task `[<task>.]on_failure.<step>.<task>`.
+    expect(readPlace("verification", q("sel=verification.checks.on_failure.again.rerun"), handled).sel).toEqual({ kind: "task", node: "verification", step: "checks", task: "on_failure.again.rerun" });
+    expect(readPlace("verification", q("sel=verification.checks.lint.on_failure.main.fix"), handled).sel).toEqual({ kind: "task", node: "verification", step: "checks", task: "lint.on_failure.main.fix" });
+    expect(readPlace("verification", q("sel=verification.checks.nope.on_failure.main.fix"), handled).sel).toEqual({ kind: "node", node: "verification" });
   });
 
   it.each([
     // Stopped inside the node's on_failure handler, which the chain does not show: the node opens on that task.
     ["verification.on_failure.repair.fix", "/work-items/w1/nodes/verification?sel=verification.on_failure.repair.fix"],
+    ["verification.checks.lint.on_failure.main.fix", "/work-items/w1/nodes/verification?sel=verification.checks.lint.on_failure.main.fix"],
     // Any other stop selects the node on the chain, as before.
     ["verification.checks.lint", "/work-items/w1?sel=verification"],
     [null, "/work-items/w1?sel=verification"],
