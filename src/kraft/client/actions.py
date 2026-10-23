@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from types import EllipsisType
+from urllib.parse import quote
 
 from kraft import answers, config
 from kraft.client import context, reads, transport
@@ -804,6 +805,36 @@ async def reload_templates() -> dict:
     """Reread the template library from disk into the running server, no
     restart."""
     return await transport._act("/templates/reload")
+
+
+async def list_workers() -> dict:
+    """The registered machines and whether each is connected, and why not."""
+    return await transport._get("/workers")
+
+
+async def add_worker(
+    name: str,
+    *,
+    ssh: str | None = None,
+    capacity: int = 1,
+    repos: list[str] | None = None,
+    give_up_after: str | None = None,
+) -> dict:
+    """Register a machine. Without `ssh` the answer carries its one-time token
+    and the command to run on it; with `ssh` the server connects once and
+    answers what happened."""
+    body: dict = {"name": name, "capacity": capacity}
+    body |= {
+        key: value
+        for key, value in (("ssh", ssh), ("repos", repos), ("give_up_after", give_up_after))
+        if value is not None
+    }
+    return await transport._act("/workers", body)
+
+
+async def remove_worker(name: str) -> dict:
+    """Forget a machine: its token or ssh entry stops working, its connection ends."""
+    return await transport._delete(f"/workers/{quote(name, safe='')}")
 
 
 async def reload_addons() -> dict:

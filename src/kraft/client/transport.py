@@ -226,12 +226,14 @@ def _json(response: httpx.Response) -> dict | list:
         ) from exc
 
 
-async def _delete(url: str, **params) -> None:
-    """No body on the way back: DELETE /repos answers 204. The error string is
-    `_get`'s, because a 404 an agent reads must be one sentence either way."""
+async def _delete(url: str, **params) -> dict | list | None:
+    """DELETE /repos answers 204 with no body; a route that answers with one
+    (DELETE /workers/{name}) has it returned. The error string is `_get`'s,
+    because a 404 an agent reads must be one sentence either way."""
     response = await _send("DELETE", url, params=params)
     if response.status_code >= 400:
         raise status_error(response.status_code, _detail(response))
+    return _json(response) if response.content else None
 
 
 async def _patch(path: str, payload: dict) -> dict:

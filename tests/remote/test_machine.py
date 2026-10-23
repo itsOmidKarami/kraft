@@ -116,7 +116,6 @@ async def test_an_unreachable_server_is_logged_and_retried():
     await task
 
 
-@pytest.mark.skip(reason="needs task 8's `worker serve`")
 async def test_stdio_mode_handshakes_over_a_pipe_and_exits_when_ssh_closes_it():
     proc = await asyncio.create_subprocess_exec(
         sys.executable,

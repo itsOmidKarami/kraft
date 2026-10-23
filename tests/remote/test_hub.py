@@ -149,7 +149,6 @@ async def test_last_seen_moves_with_every_frame(monkeypatch):
 # ── ssh mode ──
 
 
-@pytest.mark.skip(reason="enabled in task 8")
 async def test_an_ssh_machine_is_dialled_by_the_server_and_redialled_after_it_drops(
     tmp_path, monkeypatch
 ):
