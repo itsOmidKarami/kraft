@@ -1,4 +1,4 @@
-"""`runs.asgi_call`: a machine's API request made in-process, as the session its connection holds."""
+"""`runs.asgi_call`: a machine's API request, made in-process as the session it holds."""
 
 from support.api import _post_default
 
