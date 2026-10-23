@@ -94,6 +94,7 @@ async def test_a_wrong_token_is_logged_and_retried_not_fatal():
     await _until(lambda: sum("refused: invalid token" in line for line in lines) >= 2)
     stop.set()
     await task
+    assert not hub.snapshot()[0]["online"]
     server.close()
     await hub.close()
 
@@ -114,6 +115,7 @@ async def test_an_unreachable_server_is_logged_and_retried():
     await _until(lambda: sum("cannot connect" in line for line in lines) >= 2)
     stop.set()
     await task
+    assert all("cannot connect" in line for line in lines)
 
 
 async def test_stdio_mode_handshakes_over_a_pipe_and_exits_when_ssh_closes_it():
