@@ -181,28 +181,6 @@ async def test_pausing_between_nodes_stops_the_walk_before_the_next_one_starts(
     assert _types(it).count("work_item_completed") == 1
 
 
-async def test_a_pause_between_two_steps_of_one_node_stops_the_second(item_on, monkeypatch):
-    """Kraft-e7pm's wound inside a node. A broken base's pause comes from
-    another item's forge node and cannot cancel this walk, so it can land
-    between two steps with nothing running to signal: the walk's own launch
-    door reads the status, and the second step never launches."""
-    steps = [{"id": s, "tasks": [_sub(t, ["true"])]} for s, t in (("first", "a"), ("then", "b"))]
-    it = await item_on([{"id": "build", "kind": "exec", "steps": steps}])
-    original = dispatch.dispatch_node
-
-    async def pause_after(*args, **kw):
-        result = await original(*args, **kw)
-        await it.database.write(
-            lambda c: store.pause_for_broken_base(c, it.id, [], broken_by="x", follow_up_bead=None)
-        )
-        return result
-
-    monkeypatch.setattr(dispatch, "dispatch_node", pause_after)
-    assert await _walk(it) == "paused"
-    assert [s["hook_point"] for s in it.sessions()] == ["build.first.a"]
-    assert it.status() == "paused"
-
-
 async def test_run_once_threads_local_files_from_the_launch_context(item_on, repo):
     """Kraft-gxcmy's production wiring: `run_once` passes
     `launch.repo_entry["local_files"]` into `ensure_worktree`. Every other

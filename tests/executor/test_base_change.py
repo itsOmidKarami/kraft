@@ -12,7 +12,7 @@ from support.item_walk import NO_SETUP, approve, walk_once
 
 from kraft import executor, inplace, store
 from kraft import policy as _policy
-from kraft.executor import gates
+from kraft.executor import dispatch, gates
 from kraft.executor.context import BASE_MOVED
 
 
@@ -628,3 +628,25 @@ async def _enter_with_conflict(it, door, steer=None):
     return await executor.run_once(
         it.database, it.run_dirs, work_item_id=it.id, steer=steer, **kwargs
     )
+
+
+async def test_a_pause_between_two_steps_of_one_node_stops_the_second(item_on, monkeypatch):
+    """Kraft-e7pm's wound inside a node. A broken base's pause comes from
+    another item's forge node and cannot cancel this walk, so it can land
+    between two steps with nothing running to signal: the walk's own launch
+    door reads the status, and the second step never launches."""
+    steps = [{"id": s, "tasks": [_sub(t)]} for s, t in (("first", "a"), ("then", "b"))]
+    it = await item_on([{"id": "build", "kind": "exec", "steps": steps}])
+    original = dispatch.dispatch_node
+
+    async def pause_after(*args, **kw):
+        result = await original(*args, **kw)
+        await it.database.write(
+            lambda c: store.pause_for_broken_base(c, it.id, [], broken_by="x", follow_up_bead=None)
+        )
+        return result
+
+    monkeypatch.setattr(dispatch, "dispatch_node", pause_after)
+    assert await walk_once(it) == "paused"
+    assert [s["hook_point"] for s in it.sessions()] == ["build.first.a"]
+    assert it.status() == "paused"
