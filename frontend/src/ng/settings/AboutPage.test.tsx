@@ -36,6 +36,142 @@ describe("updateVerdict", () => {
   it("names the newer release", () => expect(updateVerdict(UPDATE).text).toBe("v2.0.0 is available"));
 });
 
+/** A server that holds updates for when Kraft is free: a release install on uv, with 2.0.0 available. */
+const FREE: UpdateState = {
+  ...UPDATE,
+  latest_in_major: null,
+  check_disabled: false,
+  install_kind: "uv",
+  dev_install: false,
+  restart_kind: "service",
+  marked: null,
+  pending: { release: null, restart: [] },
+  blocked: [],
+  outcome: null,
+};
+const SETTINGS = { auto_update: false, restart_when_free: false, channel: null, allowed_hours: [] as string[] };
+/** Answer each route with its own body, as the real server does. */
+const serve = (state: UpdateState, settings = SETTINGS) => {
+  served = () => reply(200, state);
+  vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+    const path = String(url).replace(/^.*\/api/, "");
+    calls.push(`${init?.method ?? "GET"} ${path}${init?.body ? ` ${init.body}` : ""}`);
+    return Promise.resolve(path.startsWith("/update/settings") ? reply(200, init?.method === "PUT" ? { ...settings, ...JSON.parse(String(init.body)) } : settings) : reply(200, state));
+  });
+};
+
+describe("ng AboutPage: update when Kraft is free", () => {
+  it("release-install-shows-install-when-free: clicking it marks the release", async () => {
+    serve(FREE);
+    render(<AboutPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Install when free" }));
+    expect(calls).toContain('POST /update/mark {"tag":"v2.0.0","channel":"stable"}');
+  });
+
+  it("marked: names the mark and offers Don't, which drops it", async () => {
+    serve({ ...FREE, marked: { tag: "v2.0.0", by: "auto", at: "2026-10-22T10:00:00Z" }, pending: { release: "v2.0.0", restart: [] }, blocked: ["waiting for 1 running item"] });
+    render(<AboutPage />);
+    expect(await screen.findByText("v2.0.0 is marked by auto-update.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Install when free" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Don’t" }));
+    expect(calls).toContain("DELETE /update/mark");
+  });
+
+  it("dev-install-hides-release-controls: only the restart switch and the hours remain", async () => {
+    serve({ ...FREE, dev_install: true });
+    render(<AboutPage />);
+    await screen.findByRole("switch", { name: "Restart when free" });
+    expect(screen.queryByRole("button", { name: "Install when free" })).toBeNull();
+    expect(screen.queryByRole("switch", { name: "Update automatically" })).toBeNull();
+    expect(screen.getByRole("group", { name: "Allowed hours" })).toBeInTheDocument();
+  });
+
+  it("a server that is not a uv install says why it cannot take the release", async () => {
+    serve({ ...FREE, install_kind: "brew" });
+    render(<AboutPage />);
+    expect(await screen.findByText("Installed with Homebrew: update with brew upgrade kraft.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Install when free" })).toBeNull();
+  });
+
+  it("switches-save-update-settings: each switch and the hours PUT their own key", async () => {
+    serve(FREE);
+    render(<AboutPage />);
+    await userEvent.click(await screen.findByRole("switch", { name: "Update automatically" }));
+    expect(calls).toContain('PUT /update/settings {"auto_update":true}');
+    await userEvent.click(screen.getByRole("switch", { name: "Restart when free" }));
+    expect(calls).toContain('PUT /update/settings {"restart_when_free":true}');
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(calls).toContain('PUT /update/settings {"allowed_hours":["01:00-06:00"]}');
+  });
+
+  it("shows the saved hours as chips and removes one", async () => {
+    serve(FREE, { ...SETTINGS, allowed_hours: ["01:00-06:00", "22:00-23:00"] });
+    render(<AboutPage />);
+    expect(await screen.findByText(/01:00–06:00/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Remove 01:00–06:00" }));
+    expect(calls).toContain('PUT /update/settings {"allowed_hours":["22:00-23:00"]}');
+  });
+
+  it("waiting-line-names-the-reason", async () => {
+    serve({ ...FREE, marked: { tag: "v2.0.0", by: "you", at: "" }, pending: { release: "v2.0.0", restart: [] }, blocked: ["outside 01:00-06:00"] });
+    render(<AboutPage />);
+    expect(await screen.findByText("v2.0.0 is marked: it installs, then Kraft restarts. Not yet: outside 01:00-06:00.")).toBeInTheDocument();
+  });
+
+  it("a pending restart that nothing blocks says it happens at the next free moment", async () => {
+    serve({ ...FREE, pending: { release: null, restart: ["installed 2.0.0, running 1.4.0"] } });
+    render(<AboutPage />);
+    expect(await screen.findByText("A restart is waiting (installed 2.0.0, running 1.4.0). It happens at the next free moment.")).toBeInTheDocument();
+  });
+
+  it("newer-major-shown-beside: the in-major release and the new major each have their own button", async () => {
+    serve({ ...FREE, installed: "1.4.0", latest: "v2.0.0", latest_in_major: "v1.4.2" });
+    render(<AboutPage />);
+    await screen.findByText("v1.4.2.");
+    expect(screen.getByText("v2.0.0 is a new major version.")).toBeInTheDocument();
+    const buttons = screen.getAllByRole("button", { name: "Install when free" });
+    expect(buttons).toHaveLength(2);
+    await userEvent.click(buttons[0]);
+    expect(calls).toContain('POST /update/mark {"tag":"v1.4.2","channel":"stable"}');
+  });
+
+  it("check-disabled-noted", async () => {
+    serve({ ...FREE, check_disabled: true });
+    render(<AboutPage />);
+    expect(await screen.findByText(/KRAFT_NO_UPDATE_CHECK is set/)).toBeInTheDocument();
+  });
+
+  it("an attached server says it cannot restart itself", async () => {
+    serve({ ...FREE, restart_kind: "attached" });
+    render(<AboutPage />);
+    expect(await screen.findByText(/started in a terminal, so it cannot restart itself/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["failed", { status: "failed" as const, detail: "the new install would not start: port 'x'", from: "1.4.0", to: "1.4.1", at: new Date().toISOString() }, /^Last update failed, just now: the new install would not start/],
+    ["applied", { status: "applied" as const, detail: "", from: "1.4.0", to: "1.4.1", at: new Date().toISOString() }, /^Last update: applied 1\.4\.0 → 1\.4\.1, just now\./],
+  ])("last-outcome-%s-shows-reason", async (_name, outcome, text) => {
+    serve({ ...FREE, outcome });
+    render(<AboutPage />);
+    expect(await screen.findByText(text)).toBeInTheDocument();
+  });
+
+  it("a server older than this change shows none of it and asks nothing of /update/mark", async () => {
+    render(<AboutPage />);
+    await screen.findByText("v2.0.0 is available");
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Install when free" })).toBeNull();
+  });
+
+  it("choosing a channel also keeps it in update.yaml", async () => {
+    serve(FREE);
+    render(<AboutPage />);
+    await screen.findByText("v2.0.0 is available");
+    await userEvent.click(screen.getByRole("radio", { name: "rc" }));
+    await waitFor(() => expect(calls).toContain('PUT /update/settings {"channel":"rc"}'));
+  });
+});
+
 describe("ng AboutPage", () => {
   it("shows the installed version, the newer one, and the command to run", async () => {
     render(<AboutPage />);

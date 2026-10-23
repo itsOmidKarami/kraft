@@ -259,6 +259,17 @@ describe("ng Sidebar", () => {
     expect(foot).toHaveTextContent(`v0.9.4${word}`);
   });
 
+  it("says a release is marked, not that one is available, once it waits for a free moment", async () => {
+    vi.mocked(api.getHealth).mockResolvedValue(HEALTH as never);
+    vi.mocked(http.request).mockResolvedValue({
+      status: 200,
+      body: { installed: "0.9.4", latest: "v0.9.9", channel: "stable", behind: true, checked_at: null, pending: { release: "v0.9.9", restart: [] } },
+    });
+    mount("/templates/chains");
+    const foot = await screen.findByRole("link", { name: "Kraft v0.9.4, update marked" });
+    expect(foot).toHaveTextContent("v0.9.4update marked");
+  });
+
   // A long dev version is what gets cut, never the badge (Kraft-ehe4a.18).
   it("keeps the badge whole beside a long dev version, the full version in a title", async () => {
     const version = "0.1.dev50+ge1f847a47.d20260101";

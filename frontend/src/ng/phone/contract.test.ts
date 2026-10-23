@@ -64,6 +64,7 @@ const ALLOWED = [
   "settings/useTheme", // the theme a page edits and saves on change, and theme.yaml as it reads
   "settings/boardCodeWords", // the code and board choices, on both layouts
   "settings/accessWords", // what Access says, on both layouts
+  "settings/updateWords", // what About says about updating when Kraft is free, and the types of its payloads, on both layouts
   "settings/notifyWords", // the channels, their state words and the permission lines, on both layouts
   "settings/storageWords", // the categories and the state note
   "settings/policy/ctx", // the policy sections' shared context type and problemAt

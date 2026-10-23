@@ -286,6 +286,9 @@ const json = (body: unknown, status = 200): Answer => ({ status, contentType: "a
  */
 export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { motion: Motion | null } {
   let restarted = 0;
+  // update.yaml and the release marked for when Kraft is free: the About page edits both.
+  const updateSettings = { auto_update: false, restart_when_free: false, channel: null as string | null, allowed_hours: [] as string[] };
+  let updateMark: { tag: string; by: "you" | "auto"; at: string } | null = null;
   const hs = opts.harnesses ? harnessesServer() : null;
   let listReads = 0;
   const itemDrafts = new Map<string, any[]>();
@@ -800,10 +803,18 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       return json({ restart: [], reload: [], managed: true });
     }
     if (p === "/apply/restart") { restarted = 1; return { status: 202, contentType: "application/json", body: JSON.stringify({ restarting: true }) }; }
-    if (p === "/update" || p === "/update/check") {
+    if (p === "/update/settings") return json(method === "PUT" ? Object.assign(updateSettings, req.json()) : updateSettings);
+    if (p === "/update/mark") {
+      updateMark = method === "POST" ? { tag: String(req.json().tag), by: "you", at: new Date().toISOString() } : null;
+    }
+    if (p === "/update" || p === "/update/check" || p === "/update/mark") {
       const at = new Date(Date.now() - 3_600_000).toISOString();
       const v = opts.version;
-      return json({ installed: v ?? "1.4.0", latest: v ? `v${v}` : "v1.5.0", channel: "stable", python: "3.14", behind: !v, checked_at: at });
+      return json({
+        installed: v ?? "1.4.0", latest: v ? `v${v}` : "v1.5.0", channel: updateSettings.channel ?? "stable", python: "3.14", behind: !v, checked_at: at,
+        latest_in_major: v ? `v${v}` : "v1.5.0", check_disabled: false, install_kind: "uv", dev_install: false, restart_kind: "service",
+        marked: updateMark, pending: { release: updateMark?.tag ?? null, restart: [] }, blocked: updateMark ? ["waiting for 1 running item"] : [], outcome: null,
+      });
     }
     if (p === "/intake") return json(st.intake);
     if (p === "/access") return json(st.access);

@@ -1,4 +1,4 @@
-import { BookOpen, Copy, ExternalLink, LifeBuoy, RefreshCw } from "lucide-react";
+import { BookOpen, Copy, Download, ExternalLink, LifeBuoy, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import * as api from "../../../api";
 import { ago } from "../../../format";
@@ -9,14 +9,8 @@ import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, type RowSpec } from "./kit";
 import { docsUrl } from "../../settings/docsUrl";
 import { COPIED_THE_COMMAND, COPIED_THE_DIAGNOSTICS, RELEASE_CHANNEL_HINT } from "../../settings/sharedWords";
+import { ALLOWED_HOURS_HINT, ATTACHED_NOTE, AUTO_UPDATE_HINT, CHECK_OFF_NOTE, NO_SETTINGS, RESTART_WHEN_FREE_HINT, canMark, cannotMark, offers, outcomeLine, parseHours, readSettings, showRange, waitingLine, type UpdateSettings, type UpdateState } from "../../settings/updateWords";
 
-interface UpdateState {
-  installed: string;
-  latest: string | null;
-  channel: string;
-  behind: boolean | null;
-  checked_at: string | null;
-}
 const CHANNELS = ["stable", "rc", "beta", "alpha"].map((c) => ({ value: c, label: c }));
 const RELEASES = "https://github.com/itsOmidKarami/kraft/releases";
 const SUPPORT = "https://kraft-sdlc.dev/project/status-and-support";
@@ -35,6 +29,7 @@ export function AboutScreen() {
   const [channel, setChannel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const [settings, setSettings] = useState<UpdateSettings>(NO_SETTINGS);
   const { edit, node } = useEditor();
 
   const load = useCallback(async (check: boolean, ch: string | null) => {
@@ -53,8 +48,24 @@ export function AboutScreen() {
   }, []);
   useEffect(() => {
     api.getHealth().then(setHealth, () => {});
+    request<UpdateSettings>("/update/settings").then((r) => { if (r.status === 200) setSettings(readSettings(r.body)); }, () => {});
     void load(false, null);
   }, [load]);
+
+  /** Save part of update.yaml and read the update state again, as the desktop page does. Answers the refusal, or null. */
+  const save = async (patch: Partial<UpdateSettings>): Promise<string | null> => {
+    const r = await request<UpdateSettings>("/update/settings", jsonBody("PUT", patch));
+    if (r.status !== 200) return detailOf(r.body);
+    setSettings(readSettings(r.body));
+    await load(false, patch.channel ?? channel);
+    return null;
+  };
+  const mark = async (tag: string | null) => {
+    const r = await request<UpdateState>("/update/mark", tag ? jsonBody("POST", { tag, channel }) : jsonBody("DELETE"));
+    if (r.status !== 200) return setError(detailOf(r.body));
+    setError(null);
+    setUpdate(r.body);
+  };
 
   const verdict = updateVerdict(update);
   const installed = update?.installed ?? health?.version ?? "";
@@ -83,9 +94,24 @@ export function AboutScreen() {
           { label: "installed", value: installed || "…", figure: true, chips: update ? [{ label: update.channel }] : undefined },
           { label: "update", value: verdict.text, chips: [{ label: verdict.tone === "ok" ? "ok" : verdict.tone === "warn" ? "available" : "unknown", tone: verdict.tone === "ok" ? "ok" : verdict.tone === "warn" ? "warn" : undefined }] },
           { label: "Check now", icon: RefreshCw, disabled: checking, sub: checking ? "checking…" : update?.checked_at ? `checked ${ago(update.checked_at)}` : "not checked yet", onClick: () => void load(true, channel) },
-          { label: "channel", value: channel ?? "stable", sub: RELEASE_CHANNEL_HINT, onEdit: () => edit({ kind: "choice", title: "Channel", value: channel ?? "stable", options: CHANNELS, set: async (c) => { setChannel(c); await load(false, c); return null; } }) },
+          { label: "channel", value: channel ?? "stable", sub: RELEASE_CHANNEL_HINT, onEdit: () => edit({ kind: "choice", title: "Channel", value: channel ?? "stable", options: CHANNELS, set: async (c) => { setChannel(c); void save({ channel: c }); await load(false, c); return null; } }) },
         ]}
       />
+      {update?.pending && (
+        <Group
+          title="When Kraft is free"
+          note={[waitingLine(update), update.restart_kind === "attached" ? ATTACHED_NOTE : null, update.check_disabled ? CHECK_OFF_NOTE : null].filter(Boolean).join(" ") || undefined}
+          foot={outcomeLine(update) ?? undefined}
+          rows={[
+            ...offers(update).map((o): RowSpec => ({ key: o.tag, label: "Install when free", sub: `${o.tag}${o.major ? ", a new major version" : ""}`, icon: Download, onClick: () => void mark(o.tag) })),
+            ...(update.marked ? [{ label: "Don’t install", sub: `${update.marked.tag} is marked${update.marked.by === "auto" ? " by auto-update" : ""}`, onClick: () => void mark(null) } as RowSpec] : []),
+            ...(cannotMark(update) ? [{ label: "Install when free", sub: cannotMark(update)!, disabled: true } as RowSpec] : []),
+            ...(canMark(update) ? [{ label: "Update automatically", sub: AUTO_UPDATE_HINT, sw: settings.auto_update, onSwitch: (on: boolean) => void save({ auto_update: on }) } as RowSpec] : []),
+            { label: "Restart when free", sub: RESTART_WHEN_FREE_HINT, sw: settings.restart_when_free, onSwitch: (on: boolean) => void save({ restart_when_free: on }) },
+            { label: "Allowed hours", value: settings.allowed_hours.length ? settings.allowed_hours.map(showRange).join(", ") : "any hour", sub: ALLOWED_HOURS_HINT, onEdit: () => edit({ kind: "text", title: "Allowed hours", help: "Ranges like 01:00-06:00, separated by commas. Leave it empty for any hour.", value: settings.allowed_hours.join(", "), placeholder: "01:00-06:00", set: async (v) => { const p = parseHours(v); return "error" in p ? p.error : save({ allowed_hours: p.ranges }); } }) },
+          ]}
+        />
+      )}
       <section className="ph-group-block" aria-label="Update command">
         <div className="ph-block-head"><h2>Update command</h2></div>
         <p className="ph-note">Run this in a terminal, then restart Kraft. Read the release notes first: a minor release adds capabilities, a major release can change the CLI, the config schema or the state on disk.</p>

@@ -29,11 +29,16 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   const location = useLocation();
   // A newer release on the feed, read once; About has the rest.
   const [behind, setBehind] = useState(false);
+  // A release marked to install when Kraft is free: the badge says so instead of asking for a command.
+  const [marked, setMarked] = useState(false);
   useEffect(() => {
-    request<UpdateState>("/update").then((r) => setBehind(r.status === 200 && r.body.behind === true), () => {});
+    request<UpdateState>("/update").then((r) => {
+      setBehind(r.status === 200 && r.body.behind === true);
+      setMarked(r.status === 200 && !!r.body.pending?.release);
+    }, () => {});
   }, []);
   const restart = restartPending(health);
-  const update = behind || restart;
+  const update = behind || restart || marked;
 
   // Unpinning only changes the mode: an unpinned sidebar is shown while the
   // pointer is over it (or keyboard focus is in it) and hides when it leaves,
@@ -127,9 +132,9 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
         </nav>
         <div className="ng-side-foot">
           {health?.version && (
-            <NavLink to="/settings/about" end className="ng-side-meta" aria-label={`Kraft v${health.version}${restart ? ", restart to finish the update" : behind ? ", update available" : ""}`}>
+            <NavLink to="/settings/about" end className="ng-side-meta" aria-label={`Kraft v${health.version}${restart ? ", restart to finish the update" : marked ? ", update marked" : behind ? ", update available" : ""}`}>
               <span className="ng-side-ver" title={`v${health.version}`}>v{health.version}</span>
-              {update && <span className="ng-side-update"><span className="ng-side-dot" />{restart ? "restart" : "update"}</span>}
+              {update && <span className="ng-side-update"><span className="ng-side-dot" />{restart ? "restart" : marked ? "update marked" : "update"}</span>}
             </NavLink>
           )}
         </div>

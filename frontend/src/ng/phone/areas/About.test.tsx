@@ -36,6 +36,90 @@ describe("updateVerdict", () => {
   it("names the newer release", () => expect(updateVerdict(UPDATE).text).toBe("v2.0.0 is available"));
 });
 
+const FREE = {
+  ...UPDATE,
+  latest_in_major: null,
+  check_disabled: false,
+  install_kind: "uv",
+  dev_install: false,
+  restart_kind: "service",
+  marked: null,
+  pending: { release: null as string | null, restart: [] as string[] },
+  blocked: [] as string[],
+  outcome: null as unknown,
+};
+const SETTINGS = { auto_update: false, restart_when_free: false, channel: null, allowed_hours: [] as string[] };
+const serve = (state: object, settings = SETTINGS) => {
+  vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+    const path = String(url).replace(/^.*\/api/, "");
+    calls.push(`${init?.method ?? "GET"} ${path}${init?.body ? ` ${init.body}` : ""}`);
+    return Promise.resolve(path.startsWith("/update/settings") ? reply(200, init?.method === "PUT" ? { ...settings, ...JSON.parse(String(init.body)) } : settings) : reply(200, state));
+  });
+};
+
+describe("About: update when Kraft is free", () => {
+  it("release-install-shows-install-when-free: tapping it marks the release", async () => {
+    serve(FREE);
+    show();
+    await userEvent.click(await screen.findByRole("button", { name: /^Install when free/ }));
+    expect(calls).toContain('POST /update/mark {"tag":"v2.0.0","channel":"stable"}');
+  });
+
+  it("dev-install-hides-release-controls", async () => {
+    serve({ ...FREE, dev_install: true });
+    show();
+    await screen.findByRole("switch", { name: /^Restart when free/ });
+    expect(screen.queryByRole("button", { name: /^Install when free/ })).toBeNull();
+    expect(screen.queryByRole("switch", { name: /^Update automatically/ })).toBeNull();
+  });
+
+  it("switches-save-update-settings", async () => {
+    serve(FREE);
+    show();
+    await userEvent.click(await screen.findByRole("switch", { name: /^Update automatically/ }));
+    expect(calls).toContain('PUT /update/settings {"auto_update":true}');
+    await userEvent.click(screen.getByRole("switch", { name: /^Restart when free/ }));
+    expect(calls).toContain('PUT /update/settings {"restart_when_free":true}');
+  });
+
+  it("the allowed hours are typed as ranges and refused when they are not", async () => {
+    serve(FREE, { ...SETTINGS, allowed_hours: ["01:00-06:00"] });
+    show();
+    await userEvent.click(await screen.findByRole("button", { name: /^Allowed hours/ }));
+    const field = await screen.findByRole("textbox");
+    await userEvent.clear(field);
+    await userEvent.type(field, "1-6");
+    await userEvent.click(screen.getByRole("button", { name: "Set" }));
+    expect(await screen.findByText("1-6 is not a range like 01:00-06:00.")).toBeInTheDocument();
+    await userEvent.clear(field);
+    await userEvent.type(field, "22:00-02:00, 12:00-13:00");
+    await userEvent.click(screen.getByRole("button", { name: "Set" }));
+    await waitFor(() => expect(calls).toContain('PUT /update/settings {"allowed_hours":["22:00-02:00","12:00-13:00"]}'));
+  });
+
+  it("waiting-line-names-the-reason, and the check-disabled note", async () => {
+    serve({ ...FREE, check_disabled: true, marked: { tag: "v2.0.0", by: "you", at: "" }, pending: { release: "v2.0.0", restart: [] }, blocked: ["waiting for 2 running items"] });
+    show();
+    expect(await screen.findByText(/v2\.0\.0 is marked: it installs, then Kraft restarts\. Not yet: waiting for 2 running items\./)).toBeInTheDocument();
+    expect(screen.getByText(/KRAFT_NO_UPDATE_CHECK is set/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^Don’t install/ }));
+    expect(calls).toContain("DELETE /update/mark");
+  });
+
+  it("newer-major-shown-beside: the in-major release and the new major are each offered", async () => {
+    serve({ ...FREE, installed: "1.4.0", latest: "v2.0.0", latest_in_major: "v1.4.2" });
+    show();
+    expect(await screen.findByText("v1.4.2")).toBeInTheDocument();
+    expect(screen.getByText("v2.0.0, a new major version")).toBeInTheDocument();
+  });
+
+  it("last-outcome-failed-shows-reason", async () => {
+    serve({ ...FREE, outcome: { status: "failed", detail: "the new install would not start", from: "1.4.0", to: "1.4.1", at: new Date().toISOString() } });
+    show();
+    expect(await screen.findByText(/^Last update failed, just now: the new install would not start/)).toBeInTheDocument();
+  });
+});
+
 describe("About (O.5)", () => {
   it("shows the installed version and channel, the newer release, and the command to run", async () => {
     show();
@@ -94,7 +178,7 @@ describe("About (O.5)", () => {
     expect(screen.getByText("kraft admin update")).toHaveAttribute("tabindex", "0");
   });
 
-  it("has no install control", async () => {
+  it("has no install control for a server that does not hold the request", async () => {
     show();
     await screen.findByText("v2.0.0 is available");
     expect(screen.queryByRole("button", { name: /^(install|update now|upgrade)/i })).toBeNull();

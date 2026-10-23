@@ -1,27 +1,22 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { BookOpen, Copy, ExternalLink, LifeBuoy } from "lucide-react";
+import { BookOpen, Copy, ExternalLink, LifeBuoy, X } from "lucide-react";
 import * as api from "../../api";
 import { ago, elapsed } from "../../format";
 import type { Access, Health } from "../../types";
 import { detailOf, jsonBody, request } from "../http";
 import { Button } from "../ui/Button";
+import { IconButton } from "../ui/IconButton";
 import { Segmented } from "../ui/Segmented";
+import { Switch } from "../ui/Switch";
 import { showToast } from "../ui/Toast";
 import "./settings.css";
 import { docsUrl } from "./docsUrl";
 import { installedOlder, olderServer, restartPending } from "../shell/health";
 import { COPIED_THE_COMMAND, COPIED_THE_DIAGNOSTICS, RELEASE_CHANNEL_HINT } from "./sharedWords";
 import { LinkButton } from "../ui/LinkButton";
+export type { UpdateMark, UpdateOutcome, UpdateState } from "./updateWords";
+import { ALLOWED_HOURS_HINT, ATTACHED_NOTE, AUTO_UPDATE_HINT, CHECK_OFF_NOTE, NO_SETTINGS, RESTART_WHEN_FREE_HINT, canMark, cannotMark, offers, outcomeLine, readSettings, showRange, waitingLine, type UpdateSettings, type UpdateState } from "./updateWords";
 
-export interface UpdateState {
-  installed: string;
-  latest: string | null;
-  channel: string;
-  behind: boolean | null;
-  checked_at: string | null;
-  /** The Python this server runs on, "3.14"; absent on an older server. */
-  python?: string;
-}
 const CHANNELS = ["stable", "rc", "beta", "alpha"].map((c) => ({ value: c, label: c }));
 const RELEASES = "https://github.com/itsOmidKarami/kraft/releases";
 const SUPPORT = "https://kraft-sdlc.dev/project/status-and-support";
@@ -44,6 +39,8 @@ export function AboutPage() {
   const [channel, setChannel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const [settings, setSettings] = useState<UpdateSettings>(NO_SETTINGS);
+  const [range, setRange] = useState({ from: "01:00", to: "06:00" });
 
   const load = useCallback(async (check: boolean, ch: string | null) => {
     setError(null);
@@ -62,8 +59,25 @@ export function AboutPage() {
   useEffect(() => {
     api.getHealth().then(setHealth, () => {});
     api.getAccess().then(setAccess, () => {});
+    request<UpdateSettings>("/update/settings").then((r) => { if (r.status === 200) setSettings(readSettings(r.body)); }, () => {});
     void load(false, null);
   }, [load]);
+
+  /** Save part of update.yaml, then read the update state again: what is waiting depends on it. */
+  const save = async (patch: Partial<UpdateSettings>) => {
+    const r = await request<UpdateSettings>("/update/settings", jsonBody("PUT", patch));
+    if (r.status !== 200) return setError(detailOf(r.body));
+    setError(null);
+    setSettings(readSettings(r.body));
+    await load(false, channel);
+  };
+  /** Mark a release (or drop the mark): the answer is the new update state. */
+  const mark = async (tag: string | null) => {
+    const r = await request<UpdateState>("/update/mark", tag ? jsonBody("POST", { tag, channel }) : jsonBody("DELETE"));
+    if (r.status !== 200) return setError(detailOf(r.body));
+    setError(null);
+    setUpdate(r.body);
+  };
 
   const verdict = updateVerdict(update);
   const installed = update?.installed ?? health?.version ?? "";
@@ -104,6 +118,19 @@ export function AboutPage() {
             {update && <span className="set-version-channel">{update.channel}</span>}
             <span className={`set-verdict is-${verdict.tone}`} role="status">{verdict.text}</span>
           </div>
+          {update && offers(update).map((o) => (
+            <div key={o.tag} className="set-about-row">
+              <span className="set-hint">{o.tag}{o.major ? " is a new major version." : "."}</span>
+              <Button onClick={() => void mark(o.tag)}>Install when free</Button>
+            </div>
+          ))}
+          {update?.marked && (
+            <div className="set-about-row">
+              <span className="set-hint">{update.marked.tag} is marked{update.marked.by === "auto" ? " by auto-update" : ""}.</span>
+              <Button onClick={() => void mark(null)}>Don’t</Button>
+            </div>
+          )}
+          {update && cannotMark(update) && <span className="set-hint">{cannotMark(update)}</span>}
           {error && <span className="set-error" role="alert">{error}</span>}
           {installedOlder(health) ? (
             <p className="set-hint is-warn" role="status">
@@ -136,8 +163,39 @@ export function AboutPage() {
           </div>
           <div className="set-about-row" title={RELEASE_CHANNEL_HINT}>
             <span className="set-hint">Channel</span>
-            <Segmented label="Channel" options={CHANNELS} value={channel ?? "stable"} onChange={(c) => { setChannel(c); void load(false, c); }} />
+            <Segmented label="Channel" options={CHANNELS} value={channel ?? "stable"} onChange={(c) => { setChannel(c); void save({ channel: c }); void load(false, c); }} />
           </div>
+          {update?.pending && (
+            <div className="set-when-free">
+              {canMark(update) && (
+                <label className="set-about-row">
+                  <Switch checked={settings.auto_update} label="Update automatically" onChange={(on) => void save({ auto_update: on })} />
+                  <span>Update automatically</span>
+                  <span className="set-hint">{AUTO_UPDATE_HINT}</span>
+                </label>
+              )}
+              <label className="set-about-row">
+                <Switch checked={settings.restart_when_free} label="Restart when free" onChange={(on) => void save({ restart_when_free: on })} />
+                <span>Restart when free</span>
+                <span className="set-hint">{RESTART_WHEN_FREE_HINT}</span>
+              </label>
+              <div className="set-about-row" role="group" aria-label="Allowed hours">
+                <span>Allowed hours</span>
+                {settings.allowed_hours.length === 0 && <span className="set-hint">any hour</span>}
+                {settings.allowed_hours.map((h) => (
+                  <span key={h} className="set-hours-chip">{showRange(h)} <IconButton label={`Remove ${showRange(h)}`} onClick={() => void save({ allowed_hours: settings.allowed_hours.filter((x) => x !== h) })}><X size={12} aria-hidden /></IconButton></span>
+                ))}
+                <input type="time" aria-label="From" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} />
+                <input type="time" aria-label="To" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} />
+                <Button disabled={!range.from || !range.to || range.from === range.to || settings.allowed_hours.includes(`${range.from}-${range.to}`)} onClick={() => void save({ allowed_hours: [...settings.allowed_hours, `${range.from}-${range.to}`] })}>Add</Button>
+                <span className="set-hint">{ALLOWED_HOURS_HINT}</span>
+              </div>
+              {waitingLine(update) && <span className="set-hint">{waitingLine(update)}</span>}
+              {update.restart_kind === "attached" && <span className="set-hint">{ATTACHED_NOTE}</span>}
+              {update.check_disabled && <span className="set-hint is-warn">{CHECK_OFF_NOTE}</span>}
+              {outcomeLine(update) && <span className={`set-hint${update.outcome?.status === "applied" ? "" : " is-warn"}`}>{outcomeLine(update)}</span>}
+            </div>
+          )}
         </section>
 
         <div className="set-about-head">
