@@ -100,6 +100,22 @@ export interface StorageItem {
   /** Completed or abandoned, and not archived: what a clean-up may take. */
   reclaimable: boolean;
 }
+/** One row of `GET /workers`: a machine that may run work item steps (`workers.yaml`). */
+export interface Machine {
+  name: string;
+  mode: "ssh" | "dial-in";
+  online: boolean;
+  /** Why it is offline; empty while online. */
+  reason: string;
+  slots_used: number;
+  capacity: number;
+  /** The repos it is limited to; null for every repo. */
+  repos: string[] | null;
+  last_seen: string | null;
+  kraft_version: string | null;
+  /** `2h`, `30m`, `never`. */
+  give_up_after: string;
+}
 export interface StorageUsage {
   measured_at: string;
   state: StorageState | null;

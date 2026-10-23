@@ -110,6 +110,7 @@ PROBES: dict[str, dict[str, str]] = {
         "format": "jsonl",
     },
     "GET /api/work-items/{wid}/threads": {"wid": "$ITEM"},
+    "GET /api/workers": {},
 }
 
 #: Probes whose second level is data rather than names, skeletoned one level
@@ -134,7 +135,6 @@ SKIPS: dict[str, str] = {
     "GET /api/templates/library/{ref}": "the SPA never calls it: it reads the whole library",
     "GET /api/templates/lint": "the SPA never calls it (`kraft admin templates lint`)",
     "GET /api/work-items/{wid}/sandbox-from-config": "the SPA never calls it (`kraft item retry`)",
-    "GET /api/workers": "the SPA never calls it yet (`kraft admin worker list`)",
     "GET /api/worker-sessions/{sid}/log": "the SPA never calls it: it reads the item-scoped log",
 }
 
@@ -180,7 +180,7 @@ def collect(client, wid: str, filed: str) -> dict[str, dict]:
 @pytest.fixture
 def shapes(client, repo) -> dict[str, dict]:
     """An item at its first gate with a review thread, a paused one filed with
-    a spec, and a chain draft: so the lists the probes read are not empty."""
+    a spec, a registered machine, and a chain draft: so the lists the probes read are not empty."""
     connect_repo(repo)
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
@@ -194,6 +194,7 @@ def shapes(client, repo) -> dict[str, dict]:
         },
     ).json()["id"]
     client.post(f"/api/work-items/{wid}/threads", json={"body": "why?"}).raise_for_status()
+    client.post("/api/workers", json={"name": "box", "capacity": 2}).raise_for_status()
     chain = "chains/default.yaml"
     text = client.get("/api/drafts/chains/default").json()["files"][chain]
     client.put(

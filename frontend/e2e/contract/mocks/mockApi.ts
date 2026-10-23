@@ -1,6 +1,6 @@
 import { NG_CHAINS, NG_EXTENDING_CHAIN, NG_REPOS, NG_WORKSPACES, ngDryRun } from "./ngBoard";
 import { inTreeOrder, tree } from "../../../src/ng/review/model";
-import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, type Scenario } from "./fixtures";
+import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, WORKERS_FIXTURE, type Scenario } from "./fixtures";
 import { makeAreas } from "./areasMock";
 import { ngThreads } from "./ngItems";
 import { harnessesServer, PROVIDER_STATUS } from "./ngHarnesses";
@@ -822,6 +822,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if (p === "/sessions") return json(st.sessions);
     if ((m = p.match(/^\/sessions\/[^/]+$/))) return { status: 204 };
     if (p === "/analytics") return json(S.analytics);
+    if (p === "/workers") return json({ workers: WORKERS_FIXTURE });
     if (p === "/storage") return json(storageFor([...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id].item)));
     if (p === "/storage/preview" && method === "POST") {
       const usage = storageFor([...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id].item));

@@ -1,4 +1,4 @@
-import { Ban, Bell, Bot, Box, ChartColumn, Check, CircleAlert as CircleAlertIcon, CircleDot, Clock as ClockIcon, Cog, Download, FileText, Flag, GitBranch, GitCompare, GitPullRequest, HardDrive, Inbox, Info, Kanban, Layers, LibraryBig, Lock, MessageSquare as MessageSquareIcon, Palette, Pause as PauseIcon, RefreshCw, Scale, ScrollText, Search, Shield, ShieldCheck, Siren, SlidersHorizontal, Sparkles, Terminal, Workflow, type LucideIcon } from "lucide-react";
+import { Ban, Bell, Bot, Box, ChartColumn, Check, CircleAlert as CircleAlertIcon, CircleDot, Clock as ClockIcon, Cog, Download, FileText, Flag, GitBranch, GitCompare, GitPullRequest, HardDrive, Inbox, Info, Kanban, Layers, LibraryBig, Lock, MessageSquare as MessageSquareIcon, Palette, Pause as PauseIcon, RefreshCw, Scale, ScrollText, Search, Shield, ShieldCheck, Siren, SlidersHorizontal, Sparkles, Server, Terminal, Workflow, type LucideIcon } from "lucide-react";
 import { createElement, type ReactElement } from "react";
 import { useIconSet } from "./iconSet";
 import type { TaskKind } from "./graph/types";
@@ -54,5 +54,6 @@ export const NAV_ICON = {
   appearance: Palette,
   boardCode: GitCompare,
   storage: HardDrive,
+  workers: Server,
   about: Info,
 } as const;

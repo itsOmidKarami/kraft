@@ -67,6 +67,7 @@ const ALLOWED = [
   "settings/updateWords", // what About says about updating when Kraft is free, and the types of its payloads, on both layouts
   "settings/notifyWords", // the channels, their state words and the permission lines, on both layouts
   "settings/storageWords", // the categories and the state note
+  "settings/workersWords", // the machines' state, slots and give-up words
   "settings/policy/ctx", // the policy sections' shared context type and problemAt
   "settings/policy/keys", // the set_value keys the Policy page sends
   "settings/policy/sections", // which section a key or a problem belongs to

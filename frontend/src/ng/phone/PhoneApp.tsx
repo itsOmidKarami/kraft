@@ -7,6 +7,7 @@ import { ChainNodeView, ChainsList, ChainView } from "./areas/Chains";
 import { HarnessesList, HarnessView, ProfileView } from "./areas/Harnesses";
 import { LibraryComponentView, LibraryList } from "./areas/Library";
 import { StorageScreen } from "./areas/Storage";
+import { WorkersScreen } from "./areas/Workers";
 import { AboutScreen } from "./areas/About";
 import { AccessScreen } from "./areas/Access";
 import { AppearanceScreen } from "./areas/Appearance";
@@ -90,6 +91,7 @@ export function PhoneApp() {
           <Route path="/settings/board-and-code" element={<BoardCodeScreen />} />
           <Route path="/settings/about" element={<AboutScreen />} />
           <Route path="/settings/storage" element={<StorageScreen />} />
+          <Route path="/settings/workers" element={<WorkersScreen />} />
           <Route path="/settings/*" element={<NotFound />} />
           {/* The shipped addresses that moved (spec §11.2), after the screens: /search is a phone screen and wins over its alias to the board. */}
           {ALIASES.map(([from, to]) => <Route key={from} path={from} element={<Alias to={to} />} />)}

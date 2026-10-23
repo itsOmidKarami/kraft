@@ -24,7 +24,7 @@ describe("More (K.1)", () => {
     const t = screen.getByRole("region", { name: "Templates" });
     expect(within(t).getAllByRole("link").map((l) => l.textContent)).toEqual(["Chains", "Library"]);
     const s = screen.getByRole("region", { name: "Settings" });
-    expect(within(s).getAllByRole("link").map((l) => l.textContent)).toEqual(["Repos", "Harnesses", "Policy", "Auto-intake", "Notifications", "Access", "Appearance", "Board & code", "Storage", "About"]);
+    expect(within(s).getAllByRole("link").map((l) => l.textContent)).toEqual(["Repos", "Harnesses", "Workers", "Policy", "Auto-intake", "Notifications", "Access", "Appearance", "Board & code", "Storage", "About"]);
     expect(within(s).getByRole("link", { name: "About" })).toHaveAttribute("href", "/settings/about");
     expect(screen.getByRole("link", { name: "Archived" })).toHaveAttribute("href", "/archived");
   });
