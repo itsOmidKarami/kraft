@@ -22,10 +22,12 @@ from kraft.overrides import (
     item_harness_refusal,
     model_id_problem,
     reviewers_refusal,
+    runner_problem,
     validate_agent_overrides,
     validate_node_override_fields,
 )
 from kraft.policy import PolicyError, PolicyMaximaInput
+from kraft.remote import placement
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import ExecNode, GateNode, MaterializedChain, ResolvedChain
 from kraft.vocab import HOLDS_SLOT, WorkItemStatus
@@ -132,6 +134,10 @@ class NewWorkItem(_OneChain):
     #: item-wide policy fields, plus `paths: {canonical path: {field: value}}`
     #: for one node, step or task. 422 naming the field it refuses.
     policy: dict | None = None
+    #: Where the item's steps run: a machine, "any" or "local" (the library
+    #: decides when unset). Stored as the item's own override
+    #: (`agent_overrides.runner`).
+    runner: str | None = None
 
 
 def _git_common_dir(path: Path) -> Path | None:
@@ -402,6 +408,23 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         {n.id: n for n in chain.nodes},
         deps.instance_policy(st).maxima,
     )
+    if body.runner and (why := runner_problem(body.runner)):
+        raise HTTPException(422, why)
+    runners = {
+        *placement.library_runners(materialized),
+        *([body.runner] if body.runner else []),
+        *(f["runner"] for f in body.node_overrides.values() if f.get("runner")),
+    }
+    if runners - {placement.LOCAL}:
+        entry_ = deps.connected_or_422(st, body.repo)
+        deps.placement_or_422(
+            st,
+            runners=runners,
+            repo_entry=entry_,
+            in_place=in_place_by is not None,
+            sandboxed=_sandboxed(materialized, entry_),
+            members=[m.path for m in materialized.target.mounts.values()],
+        )
     if dry_run:
         # B33: every check up to and including `_check_node_overrides` has run;
         # nothing is written -- no row, no bead, no attachment copy, no spawn.
@@ -484,6 +507,8 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
 
     if depends_on:
         await st.db.write(lambda c: store.set_dependencies(c, wid, depends_on))
+    if body.runner:
+        await st.db.write(lambda c: store.replace_agent_overrides(c, wid, {"runner": body.runner}))
 
     # Present only when there is one: a null field on every successful create is
     # noise in `kraft item create`'s kv block and in the API.
@@ -702,6 +727,16 @@ async def duplicate_work_item(wid: str, request: Request):
     item_policy = materialized.item_policy
     if problem := entry.in_place_sandbox_problem(materialized, policy, in_place_by):
         raise HTTPException(422, problem)
+    if runners := placement.library_runners(materialized):
+        entry_ = deps.connected_or_422(st, row["repo"])
+        deps.placement_or_422(
+            st,
+            runners=runners,
+            repo_entry=entry_,
+            in_place=in_place_by is not None,
+            sandboxed=_sandboxed(materialized, entry_),
+            members=[m.path for m in materialized.target.mounts.values()],
+        )
     # A title 1.4 stored on several lines, or blank, is folded as a cron
     # trigger's is (`entry.one_line_title`); one with no text anywhere is refused.
     title, description = entry.one_line_title(row["title"], row["description"] or "")
@@ -827,6 +862,24 @@ async def fire_trigger(body: TriggerBody, request: Request):
             raise HTTPException(422, str(exc)) from exc
         if problem := entry.in_place_sandbox_problem(materialized, policy, in_place_by):
             raise HTTPException(422, problem)
+    if runners := placement.library_runners(chain):
+        # A library that places steps on a machine is refused here as at the other doors.
+        entry_ = deps.connected_or_422(st, body.repo)
+        try:
+            materialized = chain.materialize(
+                target=entry.single_repo_target(body.repo, in_place=in_place_by is not None),
+                effective_policy=policy,
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        deps.placement_or_422(
+            st,
+            runners=runners,
+            repo_entry=entry_,
+            in_place=in_place_by is not None,
+            sandboxed=_sandboxed(materialized, entry_),
+            members=[m.path for m in materialized.target.mounts.values()],
+        )
     try:
         wid = await executor.intake(
             st.db,
@@ -911,6 +964,31 @@ class WorkItemPatch(_OneChain):
     cwd: str | None = None
 
 
+def _sandboxed(materialized: MaterializedChain, repo_entry) -> bool:
+    """Whether the item runs sandboxed: the repo's, the chain's or the item's own."""
+    return bool(
+        materialized.item_sandbox()
+        or materialized.chain.scope_sandboxes(materialized.policy)
+        or repo_entry.effective_sandbox
+    )
+
+
+def _check_placement(st, row, runners: set[str]) -> None:
+    """The filing checks, for an override set afterwards, against the stored item."""
+    if not runners - {placement.LOCAL}:
+        return
+    entry_ = deps.connected_or_422(st, row["repo"])
+    snapshot = store.materialized_chain_of(row)
+    deps.placement_or_422(
+        st,
+        runners=runners,
+        repo_entry=entry_,
+        in_place=store.is_in_place(row),
+        sandboxed=_sandboxed(snapshot, entry_) if snapshot else bool(entry_.effective_sandbox),
+        members=[m.path for m in snapshot.target.mounts.values()] if snapshot else [],
+    )
+
+
 def _check_node_overrides(
     overrides: dict[str, dict],
     node_ids: set[str],
@@ -989,11 +1067,15 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
         return
 
     _check_node_overrides(patch, node_ids, nodes, deps.instance_policy(st).maxima)
+    _check_placement(st, row, {f["runner"] for f in patch.values() if f.get("runner")})
 
     def check(c):
         for node_id, fields in patch.items():
-            if store.node_started(c, row["id"], node_id) and not _repairs_refused_model(
-                row, node_id, fields
+            # A runner alone takes effect at the next launch, so a started node keeps it open.
+            if (
+                store.node_started(c, row["id"], node_id)
+                and not _repairs_refused_model(row, node_id, fields)
+                and set(fields) != {"runner"}
             ):
                 raise HTTPException(409, f"node {node_id!r} has started; its config is locked")
 
@@ -1201,6 +1283,8 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         errs = validate_agent_overrides(body.agent_overrides)
         if errs:
             raise HTTPException(422, errs[0])
+        if body.agent_overrides.get("runner"):
+            _check_placement(st, row, {body.agent_overrides["runner"]})
         v1 = store.materialized_chain_of(row)
         if v1 is not None:
             nodes = {n.id: n for n in v1.chain.nodes}

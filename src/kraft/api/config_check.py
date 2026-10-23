@@ -27,6 +27,7 @@ from kraft.addons import load as addons_load
 from kraft.addons import manifest as addon_manifest
 from kraft.addons.config import AddonsConfig, AddonsLock, RepoLibrariesLock
 from kraft.executor import fallback
+from kraft.remote import placement
 from kraft.remote import registry as workers_registry
 from kraft.templates import positions
 from kraft.templates.environment import (
@@ -615,6 +616,31 @@ def launch_problems(
     }
 
 
+def runner_issues(templates_dir: Path, library: TemplateLibrary) -> list[TemplateIssue]:
+    """A chain that places a step on a machine `workers.yaml` does not have. (Which repos a machine
+    may work on depends on the item, so that is checked when an item is filed.)"""
+    try:
+        workers = workers_registry.WorkersFile.load(Path(templates_dir) / workers_registry.FILE)
+    except config_mod.ConfigError:
+        return []  # doctor's workers.yaml row says why
+    issues = []
+    for chain_id in library.chain_ids:
+        try:
+            resolved = library.resolve_chain(chain_id)
+        except TemplateLibraryError:
+            continue  # the lint above already reports it
+        for runner in sorted(placement.library_runners(resolved)):
+            if runner != placement.ANY and runner not in workers.workers:
+                issues.append(
+                    TemplateIssue(
+                        library.chain_file(chain_id),
+                        chain_id,
+                        f"runner {runner!r} is not a machine in workers.yaml",
+                    )
+                )
+    return issues
+
+
 def lint_report(
     templates_dir: Path,
     *,
@@ -658,6 +684,7 @@ def lint_report(
         )
         for (chain, _), why in sorted(problems.items()):
             issues.append(TemplateIssue(library.chain_file(chain), chain, why))
+        issues += runner_issues(templates_dir, library)
     issues += _scope_lint(templates_dir)
     failed = {issue.chain for issue in issues}
     return {

@@ -110,3 +110,22 @@ def test_text_that_is_no_model_id_is_refused_naming_the_rule(model):
     errs = overrides.validate_agent_overrides({"model": model})
     assert len(errs) == 1 and "is not a model id" in errs[0] and "at most 128 characters" in errs[0]
     assert "is not a model id" in overrides.validate_node_override_fields({"model": model})[0]
+
+
+@pytest.mark.parametrize(
+    ("check", "fields"),
+    [
+        (overrides.validate_agent_overrides, {"runner": 3}),
+        (overrides.validate_agent_overrides, {"runner": "Bad Name"}),
+        (overrides.validate_node_override_fields, {"runner": 3}),
+        (overrides.validate_node_override_fields, {"runner": "Bad Name"}),
+    ],
+    ids=["agent-not-a-string", "agent-bad-name", "node-not-a-string", "node-bad-name"],
+)
+def test_a_runner_is_local_any_or_a_machine_name(check, fields):
+    assert check(fields)[0].endswith("'runner' must be local, any or a machine name")
+
+
+def test_a_runner_name_is_accepted():
+    assert overrides.validate_agent_overrides({"runner": "gpu-box"}) == []
+    assert overrides.validate_node_override_fields({"runner": "any"}) == []

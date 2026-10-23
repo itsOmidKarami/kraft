@@ -52,6 +52,11 @@ class Hub:
 
     # ── configuration ──
 
+    @property
+    def file(self) -> registry.WorkersFile:
+        """The `workers.yaml` the hub is running."""
+        return self._file
+
     def apply(self, file: registry.WorkersFile) -> None:
         """Make `file` the running set: start the dial loop of a new ssh
         machine, and drop a removed one or one whose credential changed (a

@@ -31,6 +31,7 @@ OVERRIDABLE_NODE_FIELDS = frozenset(
         "model",
         "escalate_model",
         "effort",
+        "runner",
         "extra_prompt",
         "reviewers",
     }

@@ -71,6 +71,17 @@ def stored_model_refusal(
     return None
 
 
+_RUNNER = re.compile(r"[a-z0-9][a-z0-9_-]{0,38}")
+RUNNER_RULE = "'runner' must be local, any or a machine name"
+
+
+def runner_problem(value: object) -> str | None:
+    """Why `value` is not a placement, or None. A `None` is no value at all."""
+    if value is None or (isinstance(value, str) and _RUNNER.fullmatch(value)):
+        return None
+    return RUNNER_RULE
+
+
 class _ModelEffortOverride(BaseModel):
     """`None` means an explicit reset for the model fields: callers dump with
     `exclude_unset=True`, so an override that was not supplied is absent."""
@@ -80,6 +91,8 @@ class _ModelEffortOverride(BaseModel):
     model: StrictStr | None = None
     escalate_model: StrictStr | None = None
     effort: Effort = Field(default=None)
+    #: Where the steps run: local, any or a machine name (`kraft.remote.placement`).
+    runner: StrictStr | None = None
 
 
 class _NodeOverride(_ModelEffortOverride):
@@ -103,6 +116,8 @@ def _errors(
     known key set to `None` asks a PATCH to drop it, so it is not checked;
     an unknown one is still named."""
     if isinstance(values, dict):
+        if why := runner_problem(values.get("runner")):
+            return [why]
         for field in ("model", "escalate_model"):
             value = values.get(field)
             if isinstance(value, str) and (why := model_id_problem(value)) is not None:
@@ -125,6 +140,8 @@ def _errors(
             return [f"{object_name} must be an object" if object_name else "must be an object"]
         error = errors[0]
         field = str(error["loc"][0])
+        if field == "runner":
+            return [RUNNER_RULE]
         if field in {"model", "escalate_model", "extra_prompt"}:
             return [f"{field!r} must be a string or null"]
         if field == "effort":
@@ -150,15 +167,16 @@ def validate_node_override_fields(fields: dict) -> list[str]:
 
 
 def validate_agent_overrides(overrides: dict) -> list[str]:
-    """A work item's own model/effort override (Kraft-4k6l): keys a subset of
-    `{"model", "escalate_model", "effort"}`, `model`/`escalate_model` strings or
-    `None`, `effort` one of `Effort`. Returns error strings, empty if valid."""
+    """A work item's own model/effort/runner override (Kraft-4k6l): keys a subset of
+    `{"model", "escalate_model", "effort", "runner"}`, `model`/`escalate_model` strings or
+    `None`, `effort` one of `Effort`, `runner` local, any or a machine name. Returns error
+    strings, empty if valid."""
     errors = _errors(
         _ModelEffortOverride,
         overrides,
         unknown=(
             "agent_overrides has unknown key(s) {extras}; only model, "
-            "escalate_model, effort are allowed"
+            "escalate_model, effort, runner are allowed"
         ),
         object_name="agent_overrides",
     )
