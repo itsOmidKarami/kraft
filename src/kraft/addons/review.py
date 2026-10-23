@@ -127,8 +127,13 @@ def _flatten(value: object, at: str, out: dict[str, object], lists: dict[str, li
         lists[at] = [str(item["id"]) for item in value]
         for item in value:
             _flatten(item, f"{at}[{item['id']}]", out, lists)
-    elif value is not None and value != {} and (value != [] or at.endswith(".fallback")):
+    elif (
+        value is not None
+        and value != {}
+        and (value != [] or at.endswith((".fallback", ".reviewers")))
+    ):
         # `fallback: []` says "none"; absent, the task takes its profile's.
+        # `reviewers: []` likewise expects none, where absent defers to the repo.
         out[at] = value
 
 
@@ -325,6 +330,17 @@ def _how(old: object, new: object) -> str:
     return f"{old!r} -> {new!r}"
 
 
+def _named(reviewers: object) -> object:
+    """A `reviewers` list as written: each entry's `bot` or `check`, without the
+    other key the loaded model fills in as None."""
+    if not isinstance(reviewers, list):
+        return reviewers
+    return [
+        {k: v for k, v in r.items() if v is not None} if isinstance(r, Mapping) else r
+        for r in reviewers
+    ]
+
+
 def _chain_change(
     path: str, old: object, new: object, was: _Facts, now: _Facts, names: Collection[str]
 ) -> tuple[str, str]:
@@ -386,6 +402,9 @@ def _chain_change(
         if qualifier not in (None, "kraft", *names):
             return "content", f"{where}: new plugin skill reference {new!r}, handed to the agent"
         return "content", f"{where}: skill {_how(old, new)}"
+    if last == "reviewers":
+        # Who the review wait reads decides whose feedback reaches the fix loop.
+        return "reach", f"{where}: reviewers {_how(_named(old), _named(new))}"
     if last in _INPUTS or last == "steering":
         return "content", f"{where}: {last} {_how(old, new)}"
     return "content", f"{path}: {_how(old, new)}"

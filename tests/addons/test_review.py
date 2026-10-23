@@ -204,6 +204,28 @@ def _gate_needs_no_document(spec):
     _nodes(spec)[1]["artifact_required"] = False
 
 
+def _with_review_task(spec, reviewers=None):
+    """`land` gains an `mr.automated_review` task, naming `reviewers` unless None."""
+    task = {"id": "review", "kind": "forge", "target": "mr.automated_review"}
+    if reviewers is not None:
+        task["reviewers"] = reviewers
+    _nodes(spec)[2]["tasks"].append(task)
+
+
+def _reviewers_added(spec):
+    _with_review_task(spec, [{"bot": "x"}])
+
+
+_reviewers_added.was = _with_review_task
+
+
+def _reviewers_emptied(spec):
+    _with_review_task(spec, [])
+
+
+_reviewers_emptied.was = _reviewers_added
+
+
 def _downgrade(spec):
     spec["manifest_fields"]["version"] = "1.3.9"
 
@@ -241,6 +263,8 @@ def _downgrade(spec):
         (_gate_needs_no_document, "reach", "artifact_required True -> False"),
         (_plugin_ref, "content", "new plugin skill reference 'superpowers:brainstorming'"),
         (_downgrade, "reach", "downgrade: 1.4.0 -> 1.3.9"),
+        (_reviewers_added, "reach", "reviewers set to [{'bot': 'x'}]"),
+        (_reviewers_emptied, "reach", "reviewers [{'bot': 'x'}] -> []"),
     ],
     ids=[
         "gate-removed",
@@ -268,6 +292,8 @@ def _downgrade(spec):
         "gate-needs-no-document",
         "plugin-ref",
         "downgrade",
+        "reviewers-added",
+        "reviewers-emptied",
     ],
 )
 def test_review_calls_out(change, section, says):
