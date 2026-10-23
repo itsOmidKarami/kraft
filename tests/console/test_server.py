@@ -231,7 +231,8 @@ def test_the_servers_keys_run_their_verbs_after_the_consoles_confirm(
                 "refused_intake": None,
                 "refused_workers": None,
             },
-            "reloaded 1 template(s) and intake.yaml and workers.yaml\n  invalid: chain x: no [/] node\n"
+            "reloaded 1 template(s) and intake.yaml and workers.yaml\n"
+            "  invalid: chain x: no [/] node\n"
             "  refused: policy.yaml: bad (the running policy is kept)",
             True,
         ),
