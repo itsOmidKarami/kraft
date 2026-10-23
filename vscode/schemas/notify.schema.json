@@ -90,6 +90,8 @@
           "policy_override_changed",
           "rate_limit_hit",
           "read_only_violated",
+          "remote_docs_conflict",
+          "remote_step_waiting",
           "reply_agent_failed",
           "reply_agent_skipped",
           "reply_agent_wrote",
