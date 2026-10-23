@@ -5,6 +5,100 @@ section from the `## Changelog` part of the pull requests it ships; do not
 edit this file by hand. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## 2.3.0
+
+### Highlights
+
+- Add-ons can build on another add-on: name a parent and a version range in `requires.addons`, inherit its chains, components, steering, skills and profiles, and override, extend or `remove:` what you inherit. `kraft admin addon validate --with DIR` checks a child against its parent's collection. (#982)
+
+- Update and restart when Kraft is free: mark a release on the About page or with `kraft admin update --when-free`, turn on auto-update (minor and patch releases) and restart-when-free in `update.yaml` or About, and optionally limit both to allowed hours. Both are off by default; a failed unattended update goes back to the previous version. (#1047)
+
+### New
+
+- Library: drag the list's edge to resize it, and filter it by source (Local or a specific add-on) as well as by kind. (#981)
+
+- Templates screen, chain pickers, phone, chain canvas and `kraft admin templates show`/`library` mark a child add-on's entries as inherited, overridden or added. (#984)
+
+- A library can name a skill or agent profile a child add-on inherits under the child's name (`team-payments:deploy-review`), and a work item that reads a child add-on keeps its whole tree: it pins every ancestor, and a revision or launch that would run a child on another version of a pinned ancestor is refused. (#985)
+
+- Add-ons: installing an add-on that builds on another also installs the add-ons it builds on, under one review. An update that only a version range holds back now waits (`held`, `--check` exits 1) instead of being refused, and an add-on and the add-ons it builds on update together under one review. (#986)
+
+- Add-ons: auto-update now moves an add-on and the add-ons it builds on together, across collections, and holds the whole set for a person when any member needs one. A parent update that would widen a child add-on is held. (#987)
+
+- Kraft Lite: run a large plan as slices across several sessions, with a controller session that starts, answers, reviews and merges them. (#1005)
+
+- Merge trains and merge queues: when a GitLab merge train or GitHub merge queue rejects a merge request, Kraft now repairs the failure and takes the fix back through the MR pipeline and final review before merging again, instead of waiting out the merge timeout. (#1014)
+
+- `kind: os`: a sandbox with no container, fenced by bubblewrap on Linux, with an `expose:` list for toolchains outside the system directories. An older Kraft cannot load a snapshot that holds `kind: os` or `expose`. (#1017)
+
+- Kraft Lite now runs Kraft's own V1 chains and library: bind a task by its Kraft name in `.kraft-lite/bindings.yaml`, and slice any chain with a plan gate and a build node. Upgrading: run `python3 kl.py migrate` once in each repo that used Kraft Lite; until then its verbs refuse and say so. A run sliced or on a custom chain at upgrade time must finish on the previous version, or be closed with `migrate --abandon <chain-id>`. (#1018)
+
+- `kind: os` sandboxes now run on macOS, under Seatbelt: the host's own agent CLI and toolchain, fenced off from Kraft's control plane and your home folder, with no container. (#1024)
+
+- Kraft Lite's sliced runs now have guides for Gemini CLI, Antigravity, Amp and OpenCode, install steps for each, and on any other harness the controller looks up how to start and message child sessions itself before falling back to one session. (#1031)
+
+- New: `agent_idle_minutes` in `policy.yaml` (default 30, 0 = off) kills an agent session that writes nothing to its log for that long and stops its item for you. (#1043)
+
+- `kraft item retry --sandbox-from-config` gives a stopped item the sandbox its repo's `repos.yaml` entry sets now, instead of filing it again. (#1045)
+
+### Fixes
+
+- Build(deps-dev): Bump vite from 8.3.1 to 8.3.4 in /vscode in the npm_and_yarn group across 1 directory (#989)
+
+- Build(deps-dev): Bump @playwright/test from 1.64.0 to 1.64.1 in /frontend (#990)
+
+- Build(deps-dev): Bump pre-commit from 4.6.2 to 4.7.0 (#991)
+
+- Build(deps-dev): Bump vitest from 4.1.11 to 4.1.12 in /vscode (#992)
+
+- Build(deps-dev): Bump ovsx from 1.2.0 to 1.3.0 in /vscode (#994)
+
+- Build(deps-dev): Bump vitest from 5.0.3 to 5.0.5 in /frontend (#995)
+
+- Build(deps-dev): Bump ruff from 0.17.0 to 0.17.1 (#996)
+
+- Build(deps): Bump lucide-react from 1.55.0 to 1.59.0 in /frontend (#997)
+
+- Build(deps-dev): Bump jsdom from 30.1.1 to 30.1.3 in /frontend (#999)
+
+- Build(deps-dev): Bump @testing-library/user-event from 14.6.7 to 14.6.8 in /frontend (#1000)
+
+- Build(deps): Bump certifi from 2026.7.22 to 2026.10.19 in the uv group across 1 directory (#1006)
+
+- Fix: copying or detaching a child add-on's chain or component now keeps the child's overrides, and an inherited agent profile's fallback keeps pointing at the add-on that defines it. (#1007)
+
+- Build(deps): Bump fastapi from 0.143.0 to 0.143.5 (#1009)
+
+- Build(deps): Bump virtualenv from 21.14.2 to 21.14.9 in the uv group across 1 directory (#1019)
+
+- Fix: Kraft Lite on a beads store now replaces a label it changes instead of keeping the old one beside it, so a merged slice reads as merged and the next slice starts. (#1025)
+
+- Fix: Kraft merges only the code the final review approved, so an escalation, handler or other change after approval sends the item back for review; gate approvals are read per gate; the Templates screen draws and edits a merge node's `on_merge_rejected`. (#1026)
+
+- Kraft Lite: an artifact path that starts or ends with whitespace is refused, since bd could never remove its label later. (#1032)
+
+- Fix: a work item resumed after a pause writes its result where Kraft reads it, instead of into the paused session's folder. (#1033)
+
+- If Kraft crashes after pushing an item's branch but before recording the push, its next rebased push no longer refuses Kraft's own commits as someone else's. (#1037)
+
+- Fix: a harness that writes its result file atomically (a temporary file, then a rename) no longer fails inside a docker, podman or `kind: os` sandbox. (#1038)
+
+- Fix: a sandboxed item keeps the harness hosts and the `env:` / `env_passthrough` names it was filed with. Editing a harness file or `repos.yaml` afterwards no longer widens what a running item can reach. (#1039)
+
+- Fix: a double-click on a board row or a graph node opens it without first flashing the side pane. (#1040)
+
+- Fix: approving or skipping the final review now has to name the head you were shown (`--head`), and the forge merge is pinned to it, so a commit pushed after the review goes back for review instead of merging. (#1041)
+
+- A cap stop that has no limit to raise (a node's time cap, a gate timeout) now offers Retry on the board, the phone and the item page, not Raise cap. (#1042)
+
+- Fix: the review page's changed files are a nested folder tree again, never scroll sideways onto blank rows, and the item page's diff count updates as each plan task finishes. (#1050)
+
+- Fix: on an item's page, `on_failure` handlers' tasks are drawn as boxes you can open, hung off the node, step or task they belong to; an escalation shows only on the pass it happened in, and the review page no longer hides its toolbar and leaves a gap under the bottom bar. (#1051)
+
+- Fix: the board, item, library, new work item and Chains pages no longer slide under their header and leave a gap at the bottom. (#1052)
+
+- Fix: retrying an item that a time cap, a budget cap or rate-limit retries stopped, including through **Raise cap** and `raise-budget`, starts at the step it stopped in instead of rerunning its node from the first step. (#1053)
+
 ## 2.2.0
 
 ### Highlights

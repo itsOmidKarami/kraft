@@ -311,10 +311,10 @@ _Added in 2.1_
 | [`POST /api/apply/restart`](/reference/http-api/repos-chains-harnesses-and-server#post-apiapplyrestart) | Restarts a server that a service manager started. |
 | [`GET /api/update`](/reference/http-api/repos-chains-harnesses-and-server#get-apiupdate) | Answers the cached update check. |
 | [`POST /api/update/check`](/reference/http-api/repos-chains-harnesses-and-server#post-apiupdatecheck) | Asks the release feed now. |
-| [`POST /api/update/mark`](/reference/http-api/repos-chains-harnesses-and-server#post-apiupdatemark), [`DELETE /api/update/mark`](/reference/http-api/repos-chains-harnesses-and-server#delete-apiupdatemark) | Marks a release to install when Kraft is free, or drops the mark. _Added in next_ |
-| [`POST /api/update/restart-when-free`](/reference/http-api/repos-chains-harnesses-and-server#post-apiupdaterestart-when-free) | Asks for one restart at the next free moment. _Added in next_ |
-| [`POST /api/update/confirm`](/reference/http-api/repos-chains-harnesses-and-server#post-apiupdateconfirm) | The restart helper's word that a new server came up. _Added in next_ |
-| [`GET /api/update/settings`](/reference/http-api/repos-chains-harnesses-and-server#get-apiupdatesettings), `PUT /api/update/settings` | `update.yaml`. _Added in next_ |
+| [`POST /api/update/mark`](/reference/http-api/repos-chains-harnesses-and-server#post-apiupdatemark), [`DELETE /api/update/mark`](/reference/http-api/repos-chains-harnesses-and-server#delete-apiupdatemark) | Marks a release to install when Kraft is free, or drops the mark. _Added in 2.3_ |
+| [`POST /api/update/restart-when-free`](/reference/http-api/repos-chains-harnesses-and-server#post-apiupdaterestart-when-free) | Asks for one restart at the next free moment. _Added in 2.3_ |
+| [`POST /api/update/confirm`](/reference/http-api/repos-chains-harnesses-and-server#post-apiupdateconfirm) | The restart helper's word that a new server came up. _Added in 2.3_ |
+| [`GET /api/update/settings`](/reference/http-api/repos-chains-harnesses-and-server#get-apiupdatesettings), `PUT /api/update/settings` | `update.yaml`. _Added in 2.3_ |
 
 ### Config drafts
 

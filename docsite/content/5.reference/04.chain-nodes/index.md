@@ -93,7 +93,7 @@ An exec node declares `tasks` or `steps`, never both.
 | `fix_loop` | mapping | none | Repair tasks or steps, an optional `judge` task, and an optional `max_attempts`. It re-runs until the node passes. See [Fix loop and judge](/reference/chain-nodes/fix-loop). |
 | `escalation` | mapping | none | An agent task dispatched when the node is [stuck](/concepts/vocabulary#stuck) after recovery and the fix loop, before you are asked. On a node with `on_merge_rejected`, see [on_merge_rejected](#on_merge_rejected). |
 | `on_base_changed` | mapping | none | What to re-run when a rebase moves the base. See [on_base_changed](#on_base_changed). |
-| `on_merge_rejected` | mapping | none | What to repair and re-run when a merge train or merge queue drops the merge request. Only on a node with an `mr.merge` task. See [on_merge_rejected](#on_merge_rejected). _Added in next_ |
+| `on_merge_rejected` | mapping | none | What to repair and re-run when a merge train or merge queue drops the merge request. Only on a node with an `mr.merge` task. See [on_merge_rejected](#on_merge_rejected). _Added in 2.3_ |
 | `read_only` | boolean | `false` | `true` makes Kraft verify that the node's steps leave the [worktree](/concepts/vocabulary#worktree) as they found it. Refused on a node with a `fix_loop`. See [read_only](#read_only). |
 | `icon` | string | none | The [icon](#icons) the board draws for the node. |
 
@@ -116,7 +116,7 @@ A gate takes no `icon`.
 
 ### What the final review approves
 
-_Added in next_
+_Added in 2.3_
 
 Approving the chain's first `chain_finalized` gate records the branch tip it
 approves, in every checkout a merge could push: the item's own, and each
@@ -201,7 +201,7 @@ the span.
 
 ## on_merge_rejected
 
-_Added in next_
+_Added in 2.3_
 
 `on_merge_rejected` goes on the exec node that asks the forge to merge: a node
 with an `mr.merge` task in its own steps. The shipped `default` chain sets it on
