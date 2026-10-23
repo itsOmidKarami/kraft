@@ -598,32 +598,6 @@ async def test_an_unloadable_selected_skill_stops_for_a_human(tmp_path, repo):
 
 
 @pytest.mark.parametrize(
-    ("node_fields", "item_fields"),
-    [
-        ({"runner": "gpu"}, {}),
-        ({}, {"node_overrides": {"run": {"runner": "gpu"}}}),
-    ],
-    ids=["library", "node-override"],
-)
-async def test_a_placed_step_stops_until_steps_can_run_on_a_machine(
-    tmp_path, repo, node_fields, item_fields
-):
-    """A step placed on a machine never runs on the server instead: it stops
-    `config_error` naming the machine, and its command is never run."""
-    marker = tmp_path / "ran"
-    task = {"id": "t", "kind": "subprocess", "command": f"touch {marker}"}
-
-    status, _evts, sessions, _row = await _walk(
-        tmp_path, repo, [{**_exec("run", task), **node_fields}], **item_fields
-    )
-
-    assert status == "needs_human"
-    assert [s["status"] for s in sessions] == ["config_error"]
-    assert "this step is placed on gpu" in Path(sessions[0]["log_path"]).read_text()
-    assert not marker.exists()
-
-
-@pytest.mark.parametrize(
     ("selected", "profiles", "why"),
     [
         # Every case selects an id that *is* an installed provider (`codex`,

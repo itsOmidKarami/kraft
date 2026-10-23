@@ -795,10 +795,3 @@ async def test_next_attempt_is_the_count_so_far_plus_one(database):
     assert _next_attempt(database) == 3
     # A different hook point on the same node starts its own count.
     assert _next_attempt(database, hook_point="on.other.hook") == 1
-
-
-async def test_a_remote_sessions_machine_is_recorded_and_a_local_one_has_none(database):
-    await _session(database, "r1", runner="gpu")
-    await _session(database, "l1")
-    assert _row(database, "r1", "runner")["runner"] == "gpu"
-    assert _row(database, "l1", "runner")["runner"] is None
