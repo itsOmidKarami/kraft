@@ -166,6 +166,34 @@ async def test_an_ssh_machine_is_dialled_by_the_server_and_redialled_after_it_dr
     assert _row_names(hub) == []
 
 
+async def test_a_chatty_ssh_machine_stays_online_as_stderr_is_drained(tmp_path, monkeypatch):
+    """A machine that writes more to stderr after the welcome than the stream
+    reader buffers (twice FRAME_LIMIT) would block on it, and stop answering
+    pings, if nobody read it."""
+    bin_dir = stub_ssh(tmp_path / "bin")
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    starts = tmp_path / "starts"
+    machine = (
+        "import json, sys\n"
+        f"open({str(starts)!r}, 'a').write('.')\n"
+        "send = lambda f: (sys.stdout.write(json.dumps(f) + '\\n'), sys.stdout.flush())\n"
+        "send({'t': 'hello', 'protocol': 1, 'kraft': '2.3.0'})\n"
+        "sys.stdin.readline()\n"
+        "sys.stderr.write('x' * 10_000_000)\n"
+        "sys.stderr.flush()\n"
+        "for line in sys.stdin:\n"
+        "    if json.loads(line)['t'] == 'ping':\n"
+        "        send({'t': 'pong'})\n"
+    )
+    hub = Hub("2.3.0", remote_command=(sys.executable, "-c", machine), ping_s=0.2, dead_s=1.5)
+    hub.apply(registry.WorkersFile.model_validate({"workers": {"boxed": {"ssh": "boxed"}}}))
+    assert (await hub.probe("boxed", timeout=20))["connected"]
+    await asyncio.sleep(3)  # past dead_s: only answered pings keep it online
+    assert _row(hub, "boxed")["online"]
+    assert starts.read_text() == "."  # one connection, never redialled
+    await hub.close()
+
+
 def _row_names(hub):
     return [r["name"] for r in hub.snapshot()]
 

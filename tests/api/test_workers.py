@@ -157,7 +157,11 @@ def test_a_machine_with_its_token_connects_without_any_login_cookie(client, monk
 
 
 @pytestmark_remote
-@pytest.mark.parametrize("token", ["kwt_wrong", ""], ids=["wrong-token", "no-token"])
+@pytest.mark.parametrize(
+    "token",
+    ["kwt_wrong", "", 123, {"a": 1}, ["kwt_x"]],
+    ids=["wrong-token", "no-token", "int-token", "object-token", "list-token"],
+)
 def test_a_wrong_or_missing_token_is_refused(client, monkeypatch, token):
     _password(client, monkeypatch)
     _register(client)

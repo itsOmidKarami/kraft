@@ -76,7 +76,9 @@ async def server_handshake(
         raise Closed("no hello") from exc
     name = expected_name
     if name is None:
-        name = identify(hello.get("token") or "") if hello.get("t") == "hello" else None
+        token = hello.get("token")
+        is_token = hello.get("t") == "hello" and isinstance(token, str) and token
+        name = identify(token) if is_token else None
         if name is None:
             await _refuse(t, "invalid token")
     if hello.get("t") != "hello":

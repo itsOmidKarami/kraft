@@ -155,6 +155,8 @@ class Hub:
         while True:
             welcomed = False
             proc = None
+            drain = None
+            stderr_tail = bytearray()
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *self._ssh,
@@ -170,6 +172,7 @@ class Hub:
                     stderr=asyncio.subprocess.PIPE,
                     limit=FRAME_LIMIT,
                 )
+                drain = asyncio.create_task(_drain(proc.stderr, stderr_tail))
                 t = StreamTransport(proc.stdout, proc.stdin)
                 peer = await protocol.server_handshake(
                     t, kraft_version=self.kraft_version, identify=lambda _: None, expected_name=name
@@ -182,12 +185,16 @@ class Hub:
                 if proc is None:
                     entry.reason = f"could not run ssh: {exc}"
                 elif not welcomed:
-                    entry.reason = f"ssh: {await _stderr_tail(proc) or exc}"
+                    await asyncio.wait({drain}, timeout=1.0)  # the child is gone: let EOF land
+                    tail = stderr_tail.decode(errors="replace").strip()[-300:]
+                    entry.reason = f"ssh: {tail or exc}"
             finally:
                 if proc is not None and proc.returncode is None:
                     with contextlib.suppress(ProcessLookupError):
                         proc.kill()
                     await proc.wait()
+                if drain is not None:
+                    drain.cancel()
                 entry.online = False if not entry.transport else entry.online
                 entry.outcome.set()
             delay = FIRST_DELAY_S if welcomed else min(delay * 2, MAX_DELAY_S)
@@ -224,8 +231,9 @@ class Hub:
         ]
 
 
-async def _stderr_tail(proc) -> str:
-    with contextlib.suppress(Exception):
-        data = await asyncio.wait_for(proc.stderr.read(2000), 1.0)
-        return data.decode(errors="replace").strip()[-300:]
-    return ""
+async def _drain(stream, tail: bytearray) -> None:
+    """Read a child's stderr until EOF, keeping only the last 2000 bytes, so a
+    chatty ssh can never fill the pipe and block."""
+    while chunk := await stream.read(65536):
+        tail += chunk
+        del tail[:-2000]
