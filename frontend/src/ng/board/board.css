@@ -1,6 +1,7 @@
 /* The board (ux2-W6). Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279 (+ max-height 719).
    The page never scrolls: the list scrolls inside its own region, the peek's tab body inside the pane. */
-.board-page { position: relative; display: flex; flex-direction: column; height: calc(100vh - 44px); min-height: 0; overflow: hidden; }
+/* clip, not hidden: a hidden box still scrolls under scrollIntoView or focus, sliding the page off its top (as the review page's did). */
+.board-page { position: relative; display: flex; flex-direction: column; height: calc(100vh - 44px); min-height: 0; overflow: clip; }
 .board-body { position: relative; flex: 1 1 0; min-height: 0; }
 .board-list { position: absolute; inset: 0; overflow: auto; }
 .board-list-inner { max-width: 1180px; margin: 0 auto; padding: 0 6px 90px; }
@@ -189,7 +190,8 @@ body:has(.bulk-bar) { --toast-bottom: 88px; }
 
 /* The draft item page (NewItemDraft.dc.html): the item page for an item that does not exist yet. */
 body:has(.draft-page) { --toast-bottom: 88px; }
-.draft-page { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 44px); min-height: 0; overflow: hidden; box-sizing: border-box; padding: 18px 24px 20px; }
+/* clip, not hidden: a hidden box still scrolls under scrollIntoView or focus, sliding the page off its top (as the review page's did). */
+.draft-page { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 44px); min-height: 0; overflow: clip; box-sizing: border-box; padding: 18px 24px 20px; }
 .draft-title { flex: none; box-sizing: border-box; padding: 1px 6px; margin: -1px -6px; border: none; border-radius: 6px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); font: 500 var(--fs-h1)/1.25 var(--font-sans); letter-spacing: -.01em; color: var(--text); }
 .draft-brief { flex: none; min-height: 64px; box-sizing: border-box; resize: vertical; padding: 8px 10px; border: none; border-radius: 6px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); font: var(--fs-meta)/1.55 var(--font-sans); color: var(--text-sub); }
 .draft-title, .draft-brief { max-width: 860px; }

@@ -1,7 +1,9 @@
 /* The Templates areas (Chains first). Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279. */
 .tpl-note { padding: 28px 24px; font-size: var(--fs-meta); color: var(--text-sub); }
 .tpl-note h1 { margin: 0 0 6px; font-size: var(--fs-h2); font-weight: 500; color: var(--text); }
-.tpl-page { position: relative; height: calc(100vh - 44px); overflow: hidden; }
+/* clip, not hidden: a hidden box still scrolls under scrollIntoView or focus, sliding the page off its top (as the review page's did).
+   flow-root keeps the formatting context hidden gave it, which clip does not. */
+.tpl-page { position: relative; display: flow-root; height: calc(100vh - 44px); overflow: clip; }
 .tpl-area { position: absolute; inset: 0; }
 /* A note over the canvas (an extending chain's edits that don't apply, a node it inherits). */
 .tpl-banner { position: absolute; z-index: 4; left: 16px; top: 12px; max-width: min(560px, calc(100% - 460px)); padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: var(--fs-meta); color: var(--text-sub); }
