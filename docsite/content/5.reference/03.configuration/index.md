@@ -19,6 +19,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 | `intake.yaml` | Autonomous pickup of issues, and schedules. | Seeded | [intake.yaml](/reference/configuration/intake) |
 | `notify.yaml` | The notification webhook. | The first save in Settings | [notify.yaml](/reference/configuration/notify) |
 | `update.yaml` | Automatic updates, restarting when Kraft is free, and the hours Kraft may do either in. _Added in 2.3_ | The first save in Settings | [update.yaml](/reference/configuration/update) |
+| `workers.yaml` | The machines that may run work item steps, and how each connects. _Added in next_ | `kraft admin worker`, or you | [workers.yaml](/reference/configuration/workers) |
 | `theme.yaml` | UI appearance. | The first save in Settings | [theme.yaml](/reference/configuration/theme) |
 | `sandbox.yaml` | Which container CLI runs [sandboxed](/concepts/vocabulary#sandbox) tasks, SELinux, and an extra CA. | You | [sandbox.yaml](/reference/configuration/sandbox/sandbox-yaml) |
 | `detectors.yaml` | Your own conventions for the setup and test commands `kraft repo connect` proposes, layered on the shipped table. | You | [detectors.yaml](/reference/configuration/repos/detectors) |
@@ -38,7 +39,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 Three commands check and reload the files:
 
 - `kraft admin doctor` reports anything that does not parse.
-- `kraft admin reload` rereads `policy.yaml`, `library.yaml` with its chains, `intake.yaml`, and `addons.yaml` with `addons.lock`, without a restart. A change to `access.yaml`'s `bind` or `port` needs a restart, and a hand edit of `notify.yaml` takes effect at the next save in Settings or a restart.
+- `kraft admin reload` rereads `policy.yaml`, `library.yaml` with its chains, `intake.yaml`, `workers.yaml`, and `addons.yaml` with `addons.lock`, without a restart. A change to `access.yaml`'s `bind` or `port` needs a restart, and a hand edit of `notify.yaml` takes effect at the next save in Settings or a restart.
 - `kraft admin templates lint` checks the whole library and every chain at once, and writes nothing.
 
 ## In this section
@@ -56,3 +57,4 @@ Three commands check and reload the files:
 - [Add-ons and collections](/reference/configuration/addons): `collection.json`, `addon.json`, `addons.yaml` and `addons.lock`, the naming rules, and when an add-on loads, updates and is restored.
 - [Repo libraries](/reference/configuration/repo-libraries): a repository's own `.kraft/` library, where it is read from, how a person accepts it, and `repo-libraries.lock`.
 - [update.yaml](/reference/configuration/update): every field in `update.yaml`: automatic updates, restarting when Kraft is free, the channel and the allowed hours.
+- [workers.yaml](/reference/configuration/workers): every field in `workers.yaml`: the machines that may run steps, how each connects, and why one is offline.

@@ -100,12 +100,13 @@ def test_a_kraft_session_cannot_manage_machines(client, method, path, body):
 
 def test_a_hand_edit_is_picked_up_by_reload_and_a_broken_one_is_kept_out(client):
     path = client.app.state.templates_dir / "workers.yaml"
-    path.write_text("workers:\n  boxed:\n    ssh: boxed\n")
-    assert client.post("/api/templates/reload").status_code == 200
+    path.write_text(f"workers:\n  boxed:\n    token_sha256: {'a' * 64}\n")
+    assert client.post("/api/templates/reload").json()["refused_workers"] is None
     assert [w["name"] for w in client.get("/api/workers").json()["workers"]] == ["boxed"]
     path.write_text("workers:\n  boxed:\n    capacity: 0\n")
-    client.post("/api/templates/reload")
-    assert client.app.state.invalid_workers and "capacity" in client.app.state.invalid_workers
+    refused = client.post("/api/templates/reload").json()["refused_workers"]
+    assert refused and "capacity" in refused
+    assert client.app.state.invalid_workers == refused
     assert [w["name"] for w in client.get("/api/workers").json()["workers"]] == ["boxed"]
 
 

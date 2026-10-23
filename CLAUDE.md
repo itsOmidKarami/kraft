@@ -112,6 +112,10 @@ kraft admin addon collection add SOURCE [--ref REF] [--auto-update] / list / upd
 kraft admin addon install ADDON@COLLECTION [--as ALIAS] [--auto-update] [--re-install] [-y]  # shows a review; writes nothing until accepted
 kraft admin addon update [ADDON@COLLECTION ...] [-y | --check]  # --check exits 0 current, 1 waiting, 2 refused, 3 could not check
 kraft admin addon auto-update ADDON@COLLECTION on|off / enable|disable ADDON@COLLECTION / uninstall ADDON@COLLECTION / list
+kraft admin worker add NAME [--ssh HOST] [--capacity N] [--repos A,B] [--give-up-after D]  # register a machine; dial-in prints a token once
+kraft admin worker list / kraft admin worker remove NAME
+kraft admin worker serve --server URL --token T | --stdio  # on the machine; --stdio is what the server's ssh runs
+kraft admin worker check [--server URL --token T]  # on the machine: git, agent CLIs, credentials, sandbox runtime
 kraft admin init [--repo] / kraft admin mcp  # register Kraft with an agent
 kraft admin permission-hook codex|cursor     # run by a harness's pre-tool hook, not by hand
 ```

@@ -248,7 +248,16 @@ def reload_summary(result: dict) -> str:
     the console's `l` on the Server says it."""
     refused = result.get("refused_policy")
     refused_intake = result.get("refused_intake")
-    files = [n for n, bad in (("policy.yaml", refused), ("intake.yaml", refused_intake)) if not bad]
+    refused_workers = result.get("refused_workers")
+    files = [
+        n
+        for n, bad in (
+            ("policy.yaml", refused),
+            ("intake.yaml", refused_intake),
+            ("workers.yaml", refused_workers),
+        )
+        if not bad
+    ]
     also = f" and {' and '.join(files)}" if files else ""
     lines = [f"reloaded {len(result.get('valid', []))} template(s){also}"]
     for name, reason in (result.get("invalid_templates") or {}).items():
@@ -260,6 +269,8 @@ def reload_summary(result: dict) -> str:
         lines.append(
             f"  refused: {refused_intake} (the running auto-intake and schedules are kept)"
         )
+    if refused_workers:
+        lines.append(f"  refused: {refused_workers} (the running machines are kept)")
     return "\n".join(lines)
 
 
@@ -270,4 +281,5 @@ def reload_refused(result: dict) -> bool:
         result.get("invalid_templates")
         or result.get("refused_policy")
         or result.get("refused_intake")
+        or result.get("refused_workers")
     )

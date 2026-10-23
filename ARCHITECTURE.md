@@ -25,6 +25,13 @@ bare mirror, extracts each add-on into a content-addressed store under
 See
 [Add-ons and collections](https://kraft-sdlc.dev/reference/configuration/addons).
 
+Remote workers, the other machines that may run steps, are handled by
+`src/kraft/remote/` (not `src/kraft/worker/`, which is the sandbox backends). The
+server keeps one connection per machine in `remote/hub.py`, over a dial-in
+WebSocket or an `ssh` it runs itself, speaking the versioned protocol in
+`remote/protocol.py`. `workers.yaml` is `remote/registry.py`. See
+[workers.yaml](https://kraft-sdlc.dev/reference/configuration/workers).
+
 For how one work item moves from filing to merge, and its seven statuses, see
 [How a work item runs](https://kraft-sdlc.dev/concepts/how-a-work-item-runs).
 For the vocabulary, see

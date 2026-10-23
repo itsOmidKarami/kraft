@@ -493,6 +493,8 @@ async def reload_templates_endpoint(request: Request, body: ReloadBody | None = 
         # An `intake.yaml` that does not load: the running settings and
         # schedules are kept, as the policy is.
         "refused_intake": getattr(st, "invalid_intake", None),
+        # A `workers.yaml` that does not load: the running machines are kept.
+        "refused_workers": getattr(st, "invalid_workers", None),
     }
 
 
