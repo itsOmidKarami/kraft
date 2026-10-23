@@ -612,8 +612,8 @@ def review_threads_note(task: AgentTask, work_item_row, db, note: str | None, sa
 _SCOPE_NOTE = (
     "\n\nBefore you finish, run the tests you choose yourself: the tests for "
     "the files you touched and for the code related to them, by path. Do not "
-    "run the commands below. The verification step runs them against your "
-    "diff after you finish, and a failure there costs a full review round. "
+    "run the commands below: they run against your diff after you finish "
+    "(verification, then CI), and a failure there costs a full review round. "
     "They say which kind of test gates which paths, so you know what to pick "
     "(an e2e spec for a UI change, say):\n{rows}\n"
     "A changed path matching no scope runs every scope."
