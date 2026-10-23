@@ -34,17 +34,6 @@ _INERT_REPO_ENTRY = {"setup_command": "", "test_command": None, "test_scopes": N
 
 
 @pytest.fixture(autouse=True)
-def _no_update_claim_leaks_between_tests():
-    """`when_free`'s claim is a module-level flag, so one test that takes it
-    would refuse every start in the next."""
-    from kraft import when_free
-
-    when_free.release_claim()
-    yield
-    when_free.release_claim()
-
-
-@pytest.fixture(autouse=True)
 def _default_setup_command_for_tests_without_a_launch_context(monkeypatch):
     """`setup_command` has no default (Kraft-kji8w): `ensure_worktree` now
     raises for a bare `repo_entry=None`, which is what every executor test in

@@ -117,30 +117,6 @@ async def test_spawn_closes_the_refused_coroutine_with_no_leak_warning():
     await asyncio.gather(first, return_exceptions=True)
 
 
-async def test_start_under_claim():
-    """An update holds the moment: a start that got past its door closes its
-    coroutine, raises `Claimed` and leaves `app.state.tasks` as it was."""
-    from kraft import when_free
-
-    app = _app()
-    when_free._claimed = True
-    coro = _never_returning()
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        with pytest.raises(when_free.Claimed):
-            deps.spawn(app, "w1", coro)
-        gc.collect()
-    assert not any("was never awaited" in str(w.message) for w in caught)
-    assert app.state.tasks == {}
-    assert coro.cr_frame is None  # closed, not left to be collected
-
-    when_free.release_claim()
-    task = deps.spawn(app, "w1", _never_returning())
-    assert app.state.tasks == {"w1": task}
-    task.cancel()
-    await asyncio.gather(task, return_exceptions=True)
-
-
 async def test_spawn_allows_a_new_task_once_the_old_one_is_done():
     app = _app()
 

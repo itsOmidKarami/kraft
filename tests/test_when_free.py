@@ -14,6 +14,14 @@ from kraft import apply, update, when_free
 from kraft.cli import admin
 
 
+@pytest.fixture(autouse=True)
+def _no_claim_leaks_between_tests():
+    """The claim is a module-level flag: one test that takes it would refuse every start after."""
+    when_free.release_claim()
+    yield
+    when_free.release_claim()
+
+
 async def _set_status(database, wid, status):
     await database.write(
         lambda c: c.execute("UPDATE work_items SET status = ? WHERE id = ?", (status, wid))

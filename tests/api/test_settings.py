@@ -659,3 +659,10 @@ def test_put_update_settings_round_trips_and_merges(client, templates_dir):
 def test_put_update_settings_rejects_a_bad_value(client, templates_dir, body):
     assert client.put("/api/update/settings", json=body).status_code == 422
     assert not (templates_dir / "update.yaml").exists()
+
+
+def test_put_update_settings_does_not_overwrite_a_file_it_cannot_read(client, templates_dir):
+    (templates_dir / "update.yaml").write_text("allowed_hours: ['1-6']\n")
+    assert client.put("/api/update/settings", json={"auto_update": True}).status_code == 422
+    assert client.get("/api/update/settings").status_code == 422
+    assert (templates_dir / "update.yaml").read_text() == "allowed_hours: ['1-6']\n"

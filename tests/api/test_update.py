@@ -8,6 +8,7 @@ import sys
 
 import httpx
 import pytest
+from support.releases import release_entry
 
 from kraft import update
 
@@ -122,21 +123,12 @@ def test_a_failed_check_is_not_retried_by_the_next_page_load(client, feed):
 # ── marking a release for when Kraft is free ──
 
 
-def _wheel(tag, *, prerelease=False):
-    return {
-        "tag_name": tag,
-        "draft": False,
-        "prerelease": prerelease,
-        "assets": [{"name": "k.whl", "browser_download_url": f"https://x/{tag}.whl"}],
-    }
-
-
 @pytest.fixture
 def release_install(feed, monkeypatch):
     """A release install on a uv tool, which can take a mark."""
     monkeypatch.setattr(update, "is_dev_install", lambda entry=None: False)
     monkeypatch.setattr(update, "install_kind", lambda: "uv")
-    feed["payload"] = [_wheel("v0.4.1"), _wheel("v0.4.0")]
+    feed["payload"] = [release_entry("v0.4.1"), release_entry("v0.4.0")]
     return feed
 
 
@@ -176,13 +168,13 @@ def test_mark_refused_when_uv_did_not_install_it(client, release_install, monkey
     ],
 )
 def test_mark_refuses_what_it_could_not_install(client, release_install, tag, status, says):
-    release_install["payload"] = [_wheel("v0.4.1"), _wheel("v0.3.0")]
+    release_install["payload"] = [release_entry("v0.4.1"), release_entry("v0.3.0")]
     r = client.post("/api/update/mark", json={"tag": tag})
     assert (r.status_code, says in r.json()["detail"]) == (status, True)
 
 
 def test_mark_a_major_by_hand_is_accepted(client, release_install):
-    release_install["payload"] = [_wheel("v1.0.0"), _wheel("v0.4.1")]
+    release_install["payload"] = [release_entry("v1.0.0"), release_entry("v0.4.1")]
     body = client.post("/api/update/mark", json={"tag": "v1.0.0"}).json()
     assert body["marked"]["tag"] == "v1.0.0"
 
@@ -203,7 +195,11 @@ def test_restart_when_free_stores_the_one_shot(client, release_install):
 
 
 def test_update_shows_latest_in_major_beside_a_newer_major(client, release_install):
-    release_install["payload"] = [_wheel("v1.0.0"), _wheel("v0.4.1"), _wheel("v0.4.0")]
+    release_install["payload"] = [
+        release_entry("v1.0.0"),
+        release_entry("v0.4.1"),
+        release_entry("v0.4.0"),
+    ]
     body = client.get("/api/update").json()
     assert (body["latest"], body["latest_in_major"], body["behind"]) == ("v1.0.0", "v0.4.1", True)
 
@@ -215,7 +211,10 @@ def test_update_says_check_disabled(client, release_install, monkeypatch):
 
 
 def test_update_uses_the_stored_channel(client, release_install, templates_dir):
-    release_install["payload"] = [_wheel("v0.4.1"), _wheel("v0.5.0rc1", prerelease=True)]
+    release_install["payload"] = [
+        release_entry("v0.4.1"),
+        release_entry("v0.5.0rc1", prerelease=True),
+    ]
     assert client.get("/api/update").json()["latest"] == "v0.4.1"
     client.put("/api/update/settings", json={"channel": "rc"})
 

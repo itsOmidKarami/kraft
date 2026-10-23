@@ -96,11 +96,11 @@ kraft repo library [PATH] [-y | --check]     # review the repo's .kraft/ library
 kraft repo path [ID] (alias cd) / kraft repo open [ID]
 kraft admin start [--host H] [--port P]      # same as bare `kraft`
 kraft admin stop                             # SIGTERM to run/kraft.pid
-kraft admin restart [-y]                     # stop, then start again the same way it was running; -y skips the question
+kraft admin restart [-y] [--when-free]          # stop, then start again the same way it was running; -y skips the question; --when-free waits for nothing to be running
 kraft admin install-service / kraft admin uninstall-service  # launchd or systemd --user unit
 kraft admin health                           # exit 1 when degraded
 kraft admin doctor                           # every check at once; exit 1 on any
-kraft admin update [--restart] [-y] [--channel stable|rc|beta|alpha]  # install the newest release; --restart also restarts
+kraft admin update [--restart] [-y] [--channel stable|rc|beta|alpha] [--when-free [TAG]] [--cancel-when-free]  # install the newest release; --restart also restarts; --when-free marks it for when nothing is running
 kraft admin reindex [--repo PATH]
 kraft admin reload                           # reread the template library, policy.yaml and intake.yaml from disk, no restart
 kraft admin templates lint                   # check every chain in the library; exit 1 on any error

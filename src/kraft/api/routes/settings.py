@@ -650,10 +650,9 @@ async def get_update_settings(request: Request):
 async def put_update_settings(body: UpdateBody, request: Request):
     st = request.app.state
     path = st.templates_dir / "update.yaml"
-    try:
-        data = config_mod.Update.load(path).model_dump()
-    except config_mod.ConfigError:
-        data = {}
+    # A file that does not load answers 422 (`_bad_config_file`): a save never
+    # overwrites what it could not read.
+    data = config_mod.Update.load(path).model_dump()
     for key, value in body.model_dump(exclude_none=True).items():
         data[key] = (value or None) if key == "channel" else value
     try:
