@@ -36,6 +36,7 @@ from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
 from kraft.executor import gates, stops, walk
 from kraft.policy import NO_CAP, PolicyError
+from kraft.remote import runs as remote_runs
 from kraft.templates.forks import ChainPath, PathError, override_record
 from kraft.templates.models import AgentTask, GateNode
 from kraft.templates.retry import RetryOverrideError, validate_retry_override
@@ -297,6 +298,8 @@ def _forget_sandbox(run_dirs, worktree: Path, wid: str) -> None:
     worktree goes."""
     for backend in backends.every():
         backend.release(run_dirs, worktree, wid)
+    if (runs := remote_runs.current()) is not None:
+        runs.forget_soon(wid)  # the copy a machine kept of it
 
 
 def _unpushed_commits(repo: Path, branch: str) -> int | None:

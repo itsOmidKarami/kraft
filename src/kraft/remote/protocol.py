@@ -27,6 +27,9 @@ Protocol 2. `id` is the job key `"<work item id>/<session id>"`. Frames:
 - `finished`, machine to server, after its blobs: `{id, code, tip?, pushed?, capped?}`; `capped` is
   the `caps.Hit` (a dict) of the time cap or idle limit that stopped the command on the machine.
 - `delivered`, server to machine: `{id}`; the machine may drop the job's state.
+- `forget`, server to machine: `{item}`; the item is archived or abandoned, drop its copy (never a
+  job still running). `keep`, after `sync` on every connect: `{items}`, every item the server
+  still has; the machine drops its copy of any other.
 - `api`, machine to server: `{id, rid, method, path, query, headers, body}`;
   `api_result`, back: `{rid, status, headers, body}`.
 """

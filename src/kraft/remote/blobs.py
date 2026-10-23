@@ -15,6 +15,11 @@ MAX_BLOB_BYTES = 4 << 30
 _SAFE = re.compile(r"[^A-Za-z0-9_.-]")
 
 
+def safe(name: str) -> str:
+    """`name` as part of a file name."""
+    return _SAFE.sub("_", name)
+
+
 async def send_blob(t: Transport, *, job: str, name: str, source: Path) -> None:
     size, sent, seq = source.stat().st_size, 0, 0
     with open(source, "rb") as fh:
@@ -47,7 +52,7 @@ class BlobSink:
         self._open: dict[tuple[str, str], int] = {}
 
     def path_of(self, job: str, name: str) -> Path:
-        return self._dir / f"{_SAFE.sub('_', job)}.{_SAFE.sub('_', name)}"
+        return self._dir / f"{safe(job)}.{safe(name)}"
 
     def add(self, frame: dict) -> Path | None:
         seq, last, data = frame.get("seq"), frame.get("last"), frame.get("data")

@@ -349,6 +349,9 @@ class Hub:
         self._claims.setdefault(machine, set()).add(key)
         return Claim(machine, key)
 
+    def online_names(self) -> list[str]:
+        return sorted(n for n, e in self._entries.items() if e.online)
+
     def names(self) -> list[str]:
         return sorted(self._entries)
 

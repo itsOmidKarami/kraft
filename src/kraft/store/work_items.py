@@ -68,6 +68,16 @@ def branch_of(conn: sqlite3.Connection, work_item_id: str) -> str | None:
     return branch_for(row) if row is not None else None
 
 
+def live_item_ids(conn: sqlite3.Connection) -> list[str]:
+    """Every work item a machine may keep its copy of: not archived, not abandoned."""
+    return [
+        r["id"]
+        for r in conn.execute(
+            "SELECT id FROM work_items WHERE archived_at IS NULL AND status != 'abandoned'"
+        )
+    ]
+
+
 def create_work_item(
     conn: sqlite3.Connection,
     *,

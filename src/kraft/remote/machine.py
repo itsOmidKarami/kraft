@@ -19,7 +19,7 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from kraft import paths
+from kraft import item_paths, paths
 from kraft.remote import blobs, files, protocol
 from kraft.remote.forwarder import Forwarder
 from kraft.remote.jobs import JobRunner, JobSpec, job_dir
@@ -273,9 +273,49 @@ class Machine:
             self._api_sent.pop(frame["rid"], None)
             if (fut := self._api.pop(frame["rid"], None)) is not None and not fut.done():
                 fut.set_result(frame)
+        elif kind == "forget":
+            await asyncio.to_thread(self._forget_items, [frame["item"]])
+        elif kind == "keep":
+            kept = set(frame["items"])
+            await asyncio.to_thread(
+                lambda: self._forget_items([w for w in self._held_items() if w not in kept])
+            )
         elif kind == "sync":
             for item in frame["jobs"]:
                 self._spawn(self._resync(item["id"], int(item["offset"])))
+
+    def _held_items(self) -> set[str]:
+        """Every work item this machine keeps something of: a copy, a job folder, a job."""
+        held = {j.spec.work_item_id for j in self._jobs.values()}
+        for parent, split in (("items", None), ("jobs", "__")):
+            if (folder := self._area / parent).is_dir():
+                held |= {p.name.split(split)[0] if split else p.name for p in folder.iterdir()}
+        return held
+
+    def _forget_items(self, items: list[str]) -> None:
+        """Remove what the machine keeps of each item (its copy, its job folders, the files that
+        travelled), except an item with a job that has not finished: that one is asked about again
+        on the next connect."""
+        for wid in items:
+            if any(
+                j.spec.work_item_id == wid and j.state != "finished" for j in self._jobs.values()
+            ):
+                continue
+            for key in [k for k, j in self._jobs.items() if j.spec.work_item_id == wid]:
+                del self._jobs[key]
+            self._delivered.pop(wid, None)
+            self._item_locks.pop(wid, None)
+            doomed = [
+                self._area / "items" / wid,
+                self._area / "run" / "items" / wid,
+                *(self._area / "jobs").glob(f"{wid}__*"),
+                *(self._area / "blobs").glob(f"{blobs.safe(wid)}_*"),
+            ]
+            for path in doomed:
+                if path.is_dir() and not path.is_symlink():
+                    item_paths.remove_tree(path)
+                else:
+                    path.unlink(missing_ok=True)
 
     def _maybe_start(self, job: _Job) -> None:
         if job.state == "receiving" and job.wanted <= set(job.got):

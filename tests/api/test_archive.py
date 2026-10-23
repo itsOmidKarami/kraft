@@ -32,6 +32,22 @@ def test_archive_reclaims_the_worktree_and_keeps_status(client, repo):
     assert detail["archived_at"]
 
 
+@pytest.mark.parametrize("door", ["archive", "abandon"])
+def test_archiving_or_abandoning_tells_the_machines_to_forget_the_item(
+    client, repo, monkeypatch, door
+):
+    from kraft.remote import runs as runs_mod
+
+    told = []
+    monkeypatch.setattr(runs_mod.current(), "forget_soon", told.append)
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _set_status(wid, "completed")
+    body = {"reason": "test"} if door == "abandon" else None
+    assert client.post(f"/api/work-items/{wid}/{door}", json=body).status_code == 200
+    assert told == [wid]
+
+
 @pytest.mark.parametrize(
     "home", ["items/{wid}/sandbox-home", "sandbox-home/{wid}"], ids=["new-home", "old-home"]
 )

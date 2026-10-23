@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from kraft import events, ids, item_paths
+from kraft import events, ids, item_paths, store
 from kraft.remote import blobs, bundle, files, protocol
 from kraft.remote.hub import Claim
 from kraft.remote.jobs import JobSpec
@@ -83,6 +83,10 @@ class Runs:
         self._synced: dict[str, str] = {}
         self._killed: dict[str, set[str]] = {}
         self._tasks: set[asyncio.Task] = set()
+        try:
+            self._loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
 
     def _spawn(self, coro) -> None:
         task = asyncio.create_task(coro)
@@ -308,8 +312,6 @@ class Runs:
             )
 
     def _thread_owner(self, tid: str):
-        from kraft import store
-
         row = self._db.read(lambda c: store.thread_row(c, tid))
         return row["work_item_id"] if row is not None else None
 
@@ -427,6 +429,18 @@ class Runs:
         await self._sync_one(run)
         return run
 
+    def forget_soon(self, work_item_id: str) -> None:
+        """Tell every connected machine to drop its copy of an archived or abandoned item. Plain,
+        and safe from a worker thread (the archive path runs there); best effort, since a machine
+        that is away is told again with `keep` when it comes back."""
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(self._spawn, self._forget(work_item_id))
+
+    async def _forget(self, work_item_id: str) -> None:
+        for name in self.hub.online_names():
+            with contextlib.suppress(protocol.Closed):
+                await self.hub.transport(name).send({"t": "forget", "item": work_item_id})
+
     async def on_connect(self, machine: str) -> None:
         mine = [
             r for r in self._runs.values() if r.claim.machine == machine and r.state != "preparing"
@@ -438,3 +452,5 @@ class Runs:
             await t.send(
                 {"t": "sync", "jobs": [{"id": r.spec.key, "offset": r.offset} for r in mine]}
             )
+            live = await self._db.write(store.live_item_ids)
+            await t.send({"t": "keep", "items": live})

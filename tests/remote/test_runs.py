@@ -288,3 +288,24 @@ async def test_removing_a_machine_gives_up_its_runs_at_once(clocked, database):
     await rig.runs.machine_removed("gpu")
     assert run.exit_code == REMOTE_GAVE_UP and "removed from workers.yaml" in run.spool.read_text()
     assert "remote_step_given_up" in _event_types(database)
+
+
+async def test_a_reconnect_tells_the_machine_which_items_to_keep(rig, database, item_on):
+    from support.chain_builders import v1_node
+    from support.harness import v1_chain
+
+    from kraft import store
+
+    await item_on(v1_chain([v1_node("build")], repo=rig.repo), "build", repo=rig.repo, wid="old1")
+    await database.write(lambda c: store.archive_work_item(c, "old1", by="you"))
+    seen = []
+    original = rig.machine._on_frame
+
+    async def spy(frame):
+        seen.append(frame)
+        await original(frame)
+
+    rig.machine._on_frame = spy
+    await rig.reconnect()
+    await asyncio.sleep(0.3)
+    assert [f["items"] for f in seen if f["t"] == "keep"] == [[rig.wid]]

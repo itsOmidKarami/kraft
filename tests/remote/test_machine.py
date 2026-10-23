@@ -362,3 +362,48 @@ async def test_a_reconnect_before_give_up_after_keeps_the_job(tmp_path):
     await server.send({"t": "signal", "id": spec.key, "sig": "KILL"})
     await _frames_until(server, "finished")
     await _end(server, serving)
+
+
+def _make_copy(machine, wid, sid="s1"):
+    """What a machine keeps of an item: its copy, the files that travelled, a job folder."""
+    area = machine.home / "remote" / "srv"
+    paths = [
+        area / "items" / wid / "repo" / "a.txt",
+        area / "run" / "items" / wid / "docs" / "spec.md",
+        area / "jobs" / f"{wid}__{sid}" / "session.log",
+        area / "blobs" / f"{wid}_{sid}.code",
+    ]
+    for p in paths:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("x")
+    return paths
+
+
+@pytest.mark.parametrize("running", [False, True], ids=["finished", "running"])
+async def test_forget_removes_an_items_copy_but_not_one_that_is_running(tmp_path, running):
+    machine, task, t, spec = await _job(tmp_path, ["sh", "-c", "sleep 30" if running else "true"])
+    await _frames_until(t, "started")
+    if not running:
+        await _frames_until(t, "finished")
+    await t.send({"t": "forget", "item": "w1"})
+    await t.send({"t": "ping"})
+    await _frames_until(t, "pong")  # the machine has handled everything sent before
+    area = tmp_path / "home" / "remote" / "srv"
+    assert (area / "items" / "w1").exists() is running
+    assert (spec.key in machine._jobs) is True if running else (spec.key not in machine._jobs)
+    if running:
+        await t.send({"t": "signal", "id": spec.key, "sig": "KILL"})
+        await _frames_until(t, "finished")
+    await _end(t, task)
+
+
+async def test_keep_removes_every_item_the_server_no_longer_lists(tmp_path):
+    server, machine_t = memory_pair()
+    machine = Machine(tmp_path / "home", kraft_version="2.3.0")
+    task = asyncio.create_task(machine.serve(machine_t, {"server": "srv"}))
+    kept, gone = _make_copy(machine, "live"), _make_copy(machine, "archived")
+    await server.send({"t": "keep", "items": ["live"]})
+    await server.send({"t": "ping"})
+    await _frames_until(server, "pong")
+    assert all(p.exists() for p in kept) and not any(p.exists() for p in gone)
+    await _end(server, task)
