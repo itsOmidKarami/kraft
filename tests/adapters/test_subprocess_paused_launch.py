@@ -44,6 +44,17 @@ def _pause_then_running(original):
     return session_running
 
 
+def _item_paused_first(original):
+    """The item paused before this task's session row existed: a broken-base
+    pause between two tasks of one node, with nothing yet to mark or signal."""
+
+    def create_session(conn, **kwargs):
+        conn.execute("UPDATE work_items SET status = 'paused' WHERE id = 'w1'")
+        return original(conn, **kwargs)
+
+    return create_session
+
+
 def _cancel_on_paused(original, task):
     """`session_status` that cancels `task` the first time it reads paused:
     the `finally`'s first await, on a launch whose `session_running` missed.
@@ -64,6 +75,7 @@ def _cancel_on_paused(original, task):
     [
         pytest.param("create_session", _create_then_pause, False, False, id="before-the-check"),
         pytest.param("session_running", _pause_then_running, True, False, id="after-popen"),
+        pytest.param("create_session", _item_paused_first, True, False, id="item-paused-first"),
         pytest.param(
             "session_running", _pause_then_running, True, True, id="after-popen-then-cancel"
         ),

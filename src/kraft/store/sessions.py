@@ -515,22 +515,39 @@ def session_running(
     conn: sqlite3.Connection, session_id, pid, pid_start_time, *, work_item_id: str
 ) -> bool:
     """Mark a launched session running, and say whether it was. False when a
-    pause landed after the adapter's pre-launch check and before this: the row
-    stays paused, no `worker_session_started` follows its
-    `worker_session_paused`, and the caller stops the child it just launched.
+    pause landed after the adapter's pre-launch check and before this, or the
+    item is paused: the row stays (or is marked) paused, no
+    `worker_session_started` follows its `worker_session_paused`, and the
+    caller stops the child it just launched.
     Raises `LookupError` for a session `work_item_id` has no row for: that is a
     caller's bug, not a pause, and must not read as one."""
     # `status != 'paused'`: a pause that landed while this session was still
-    # pending must not be undone by the launch finishing.
+    # pending must not be undone by the launch finishing. Nor may a paused
+    # item launch one: a pause signals only the sessions it finds, and one
+    # from inside another item's forge node (`pause_for_broken_base`) cannot
+    # cancel this walk as the pause route does, so the walk may still be
+    # starting its next task.
     cur = conn.execute(
         "UPDATE worker_sessions SET status = 'running', pid = ?, pid_start_time = ?, "
-        "started_at = ? WHERE work_item_id = ? AND id = ? AND status != ?",
-        (pid, pid_start_time, _now(), work_item_id, session_id, SessionStatus.PAUSED),
+        "started_at = ? WHERE work_item_id = ? AND id = ? AND status != ? "
+        "AND NOT EXISTS (SELECT 1 FROM work_items WHERE id = ? AND status = ?)",
+        (
+            pid,
+            pid_start_time,
+            _now(),
+            work_item_id,
+            session_id,
+            SessionStatus.PAUSED,
+            work_item_id,
+            WorkItemStatus.PAUSED,
+        ),
     )
     if cur.rowcount == 0:
-        # The guard's only miss on a row that exists is a paused one.
-        if session_status(conn, session_id, work_item_id=work_item_id) != SessionStatus.PAUSED:
+        status = session_status(conn, session_id, work_item_id=work_item_id)
+        if status is None:
             raise LookupError(f"no worker session {session_id!r} on {work_item_id!r}")
+        if status != SessionStatus.PAUSED:
+            stop_escalation_session(conn, work_item_id, session_id)  # marks it paused
         return False
     row = conn.execute(
         "SELECT work_item_id, node_id, hook_point, round, attempt, thread FROM worker_sessions "
