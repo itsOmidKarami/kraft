@@ -141,7 +141,9 @@ async def test_a_relay_of_another_version_retires_an_idle_daemon(tmp_path):
     reader, writer = await asyncio.open_unix_connection(str(daemon.socket_path(home)))
     writer.write(json.dumps({"t": "relay", "kraft": "2.5.0"}).encode() + b"\n")
     await writer.drain()
+    assert await asyncio.wait_for(reader.readline(), 2) == b""  # no ack: the relay starts a new one
     await asyncio.wait_for(served, 2)
+    assert not daemon.socket_path(home).exists()
     writer.close()
 
 

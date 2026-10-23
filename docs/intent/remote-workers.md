@@ -207,7 +207,7 @@ origin: src/kraft/remote/machine.py §_forget_items
 
 ## REQ session-names-its-machine-and-reachability
 The system SHALL name the machine a session ran on, and WHILE a session still running or paused is on a machine that is out of reach, SHALL say since when.
-enforced-by: tests/api/test_board.py::test_a_live_session_on_a_machine_that_is_out_of_reach_says_since_when[running-on-a-dropped-machine], tests/api/test_board.py::test_a_live_session_on_a_machine_that_is_out_of_reach_says_since_when[finished-session], tests/api/test_board.py::test_a_live_session_on_a_machine_that_is_out_of_reach_says_since_when[local-session], tests/remote/test_hub.py::test_unreachable_since_names_the_moment_the_connection_ended_until_it_is_back, tests/cli/test_watching.py::test_logs_name_the_machine_a_remote_session_ran_on[remote]
+enforced-by: tests/api/test_board_runner.py::test_a_live_session_on_a_machine_that_is_out_of_reach_says_since_when[running-on-a-dropped-machine], tests/api/test_board_runner.py::test_a_live_session_on_a_machine_that_is_out_of_reach_says_since_when[finished-session], tests/api/test_board_runner.py::test_a_live_session_on_a_machine_that_is_out_of_reach_says_since_when[local-session], tests/remote/test_hub.py::test_unreachable_since_names_the_moment_the_connection_ended_until_it_is_back, tests/cli/test_watching.py::test_logs_name_the_machine_a_remote_session_ran_on[remote]
 origin: src/kraft/api/routes/board.py §_sessions_out
 
 ## REQ settings-lists-machines-read-only

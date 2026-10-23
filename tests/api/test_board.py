@@ -15,6 +15,7 @@ from support.api import (
     _paused,
     _poll_events,
     _post_default,
+    _seed_session,
     _set_status,
     _wait_for_status,
 )
@@ -157,28 +158,6 @@ def _seed_repo(client, wid, **kwargs):
         row_id = store.add_repo(conn, work_item_id=wid, **kwargs)
         if mr_ref:
             store.update_repo_state(conn, row_id, merge_state="open", mr_ref=mr_ref)
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def _seed_session(client, wid, *, session_id, hook_point, node_id="verify", runner=None):
-    """Write a `worker_sessions` row directly — same reasoning as `_seed_repo`:
-    a judge session normally comes from `dispatch.launch_hook`, which a
-    detail-payload test needs no more than it needs `ensure_worktree`."""
-    db_path = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
-    conn = sqlite3.connect(db_path)
-    try:
-        store.create_session(
-            conn,
-            id=session_id,
-            work_item_id=wid,
-            node_id=node_id,
-            hook_point=hook_point,
-            log_path=f"/tmp/{session_id}.log",
-            result_path=f"/tmp/{session_id}.json",
-            runner=runner,
-        )
         conn.commit()
     finally:
         conn.close()
@@ -789,33 +768,3 @@ def test_a_card_marks_an_item_whose_last_launch_ran_on_a_fallback(client, tmp_pa
 
     _append(wid, "worker_session_started", {"session_id": "s3", "node_id": "m"})
     assert card()["fallback"] is None
-
-
-@pytest.mark.parametrize(
-    ("runner", "status", "machine_out_since", "expected"),
-    [
-        ("gpu", "running", "2026-10-23T10:00:00+00:00", "2026-10-23T10:00:00+00:00"),
-        ("gpu", "running", None, None),
-        ("gpu", "done", "2026-10-23T10:00:00+00:00", None),
-        (None, "running", "2026-10-23T10:00:00+00:00", None),
-    ],
-    ids=["running-on-a-dropped-machine", "machine-back", "finished-session", "local-session"],
-)
-def test_a_live_session_on_a_machine_that_is_out_of_reach_says_since_when(
-    client, repo, monkeypatch, runner, status, machine_out_since, expected
-):
-    wid = client.post(
-        "/api/work-items",
-        json={"autostart": True, "repo": str(repo), "title": "t", "chain_template": "quick-task"},
-    ).json()["id"]
-    _seed_session(client, wid, session_id="r1", hook_point="verify.main.x", runner=runner)
-    db_path = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
-    conn = sqlite3.connect(db_path)
-    conn.execute("UPDATE worker_sessions SET status = ? WHERE id = 'r1'", (status,))
-    conn.commit()
-    conn.close()
-    hub = client.app.state.workers_hub
-    monkeypatch.setattr(hub, "unreachable_since", lambda name: machine_out_since)
-
-    sessions = client.get(f"/api/work-items/{wid}").json()["worker_sessions"]
-    assert next(s for s in sessions if s["id"] == "r1")["runner_unreachable_since"] == expected

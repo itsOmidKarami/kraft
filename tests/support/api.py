@@ -17,7 +17,7 @@ from urllib.parse import urljoin
 
 from fastapi.testclient import TestClient
 
-from kraft import storage
+from kraft import storage, store
 from support.harness import entry_of, fake_templates_dir, isolated_bd
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -536,3 +536,25 @@ async def _cancel_task(app, wid):
     if task is not None:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+def _seed_session(client, wid, *, session_id, hook_point, node_id="verify", runner=None):
+    """Write a `worker_sessions` row directly — same reasoning as `_seed_repo`:
+    a judge session normally comes from `dispatch.launch_hook`, which a
+    detail-payload test needs no more than it needs `ensure_worktree`."""
+    db_path = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        store.create_session(
+            conn,
+            id=session_id,
+            work_item_id=wid,
+            node_id=node_id,
+            hook_point=hook_point,
+            log_path=f"/tmp/{session_id}.log",
+            result_path=f"/tmp/{session_id}.json",
+            runner=runner,
+        )
+        conn.commit()
+    finally:
+        conn.close()
