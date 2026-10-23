@@ -7,12 +7,14 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from kraft import builtins as _builtins
-from kraft import events, inplace, reviewed_head, store, waits
+from kraft import events, inplace, item_paths, reviewed_head, store, waits
 from kraft.adapters import beads
-from kraft.adapters.forge import ci, git
+from kraft.adapters.forge import ci, git, settle
 from kraft.adapters.forge import mr as mr_ops
 from kraft.adapters.forge.gh import GhCli
 from kraft.adapters.forge.glab import GlabCli
@@ -30,7 +32,7 @@ from kraft.adapters.forge.models import (
 )
 from kraft.automated_review import Reviewers
 from kraft.templates.environment import RootPointerPolicy
-from kraft.templates.models import DEFAULT_WAIT, WaitBounds
+from kraft.templates.models import DEFAULT_GRACE, DEFAULT_WAIT, WaitBounds
 from kraft.vocab import RUNNING, ForgeEvent
 from kraft.vocab.sql import in_list
 
@@ -583,6 +585,96 @@ async def _skip_ci(db, work_item_id: str, node_id: str, hook_point: str, orig_re
     return "no CI configured for this repo (ci_checks: false); not waiting\n", "done", None
 
 
+@dataclass(frozen=True)
+class WaitNote:
+    """What the review wait's collect path decided that `waits.observe` has to
+    record with its observation."""
+
+    #: When to look again, because a bot's grace period ends then; None leaves
+    #: it to the backoff.
+    next_at: datetime | None
+    #: Kept in the observation, and read back at the next check.
+    extra: dict
+    #: Every reviewer was settled by the wait's deadline, not by being quiet.
+    settled_by_timeout: bool
+    #: The instant the decision was made at.
+    now: datetime
+
+
+async def _collect_review(
+    forge: Forge,
+    db,
+    *,
+    repo: Path,
+    orig_repo: Path,
+    branch: str,
+    work_item_id: str,
+    node_id: str,
+    hook_point: str,
+    reviewers: Reviewers,
+    bounds: WaitBounds,
+    grace: timedelta,
+    run_dirs,
+    session_id: str,
+    round: int,
+) -> tuple[str, str, WaitNote | None]:
+    """One check of the review wait on its collect path: read every reviewer,
+    decide whether each has finished with the head (`settle.decide`), and once
+    all have, write what they said for the task that reads it
+    (`bot_feedback.json`). Pending is `waiting`; settled is `done` whatever the
+    reviewers said -- the feedback is that task's to judge."""
+    folder = item_paths.session_files(run_dirs, work_item_id, session_id).folder
+    destination = folder / "bot_feedback.json"
+    head = await git._head_sha(repo, branch)
+    if not reviewers:
+        await db.write(
+            lambda c: events.append(
+                c,
+                work_item_id,
+                ForgeEvent.AUTOMATED_REVIEW_NOT_CONFIGURED,
+                {"node_id": node_id, "task": hook_point, "repo": str(orig_repo)},
+            )
+        )
+        _write_collection(destination, head, round, [])
+        return "automated review: no reviewer configured; nothing to collect\n", "done", None
+    # One reading of the clock, so the deadline this tests and the one
+    # `waits.observe` tests are the same instant.
+    now = waits.now()
+    wait = db.read(lambda c: waits.open_wait(c, work_item_id, hook_point))
+    deadline = (
+        datetime.fromisoformat(wait.started["started_at"]) + bounds.timeout
+        if wait is not None
+        else now + bounds.timeout
+    )
+    timed_out = now >= deadline
+    if not head:
+        raise ForgeError(f"cannot read the head of {branch} in {repo}")
+    since = db.read(lambda c: waits.pushed_at(c, work_item_id, repo=str(orig_repo), sha=head))
+    if since is None:
+        since = await git.committed_at(repo, head)
+    feedback = await forge.reviewer_feedback(
+        repo=repo, branch=branch, reviewers=reviewers, since=since
+    )
+    memory = ((wait.last if wait is not None else None) or {}).get("memory", {})
+    decided = settle.decide(
+        feedback, since=since, now=now, grace=grace, memory=memory, timed_out=timed_out
+    )
+    if decided.state == "pending":
+        log = f"automated review: waiting for the reviewers to finish with {head[:7]}\n"
+        return log, "waiting", WaitNote(decided.next_at, {"memory": decided.memory}, False, now)
+    _write_collection(destination, head, round, decided.collection)
+    log = f"automated review: {len(reviewers)} reviewer(s) finished with {head[:7]}\n"
+    return log, "done", WaitNote(None, {"memory": decided.memory}, timed_out, now)
+
+
+def _write_collection(destination: Path, head: str, round: int, collection: list[dict]) -> None:
+    """The collection the reading task is handed (`AgentInput.BOT_FEEDBACK`)."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps({"head": head, "round": round, "reviewers": collection}, indent=2) + "\n"
+    )
+
+
 async def _run_one(
     forge: Forge,
     db,
@@ -614,7 +706,15 @@ async def _run_one(
     run_dirs=None,
     #: `run_task`'s, for `open_mr`.
     check_clean: bool = True,
-) -> tuple[str, str, list[dict] | None]:
+    #: The review wait's collect path (`run_task`'s `reads_feedback` and not a
+    #: multi-repo item), with the grace period, wait bounds, session and round
+    #: it records its collection under.
+    collect: bool = False,
+    grace: timedelta = DEFAULT_GRACE,
+    bounds: WaitBounds = DEFAULT_WAIT,
+    session_id: str = "",
+    round: int = 0,
+) -> tuple[str, str, list[dict] | None, WaitNote | None]:
     """One forge handler against one repo. Extracted from `run_task` so the
     multi-repo loop there can call it once per `work_item_repos` row; a
     single-repo item's behaviour is unchanged -- one call, same log and status
@@ -622,7 +722,9 @@ async def _run_one(
 
     The third element is None for every handler but a code-red `ci_poll`: one
     finding per failed job, for the fix-loop plumbing `on.ci.poll` now feeds
-    (Kraft-cbr §3).
+    (Kraft-cbr §3). The fourth is None for every handler but the review wait's
+    collect path: what it decided about when to look again and what to remember
+    (`WaitNote`).
 
     `meta` is resolved once by the caller against the item's own worktree,
     not `repo` -- a multi-repo item's submodule targets are not where the
@@ -639,6 +741,7 @@ async def _run_one(
     asked for *this* repo's merge (`run_task` works out which repo that was).
     """
     findings: list[dict] | None = None
+    note: WaitNote | None = None
     body = mr_ops.mr_body(work_item_id, branch, await git.commits_on(repo, branch, base), meta)
     # Kraft-vz8e: an MR with no commits runs no CI, so `mr_checks` would wait
     # out its cap on a pipeline that never starts. Refused before it is
@@ -653,7 +756,7 @@ async def _run_one(
     match handler:
         case "open_mr":
             if await git.commits_ahead(repo, branch, base) == 0:
-                return empty, "config_error", findings
+                return empty, "config_error", findings, None
             # Ask first: a rejected review re-entering the chain at
             # implementation walks back through this node, and a retry of
             # an open_mr that crashed after the create lands here too. A
@@ -734,7 +837,12 @@ async def _run_one(
             # left to check once the forge itself says merged.
             existing = await forge.find_mr(repo=repo, branch=branch)
             if existing is not None and existing.state == "merged":
-                return f"already merged (!{existing.number}); nothing to check\n", "done", findings
+                return (
+                    f"already merged (!{existing.number}); nothing to check\n",
+                    "done",
+                    findings,
+                    None,
+                )
             # The worker commits in the worktree and is told not to push
             # (adapters/agent.py:45), and only open_mr and sync_mr ever
             # pushed — sync_mr *after* human review. Without this, a commit
@@ -752,7 +860,7 @@ async def _run_one(
                 branch=branch,
             )
             if not ci_checks:
-                return await _skip_ci(db, work_item_id, node_id, hook_point, orig_repo)
+                return (*await _skip_ci(db, work_item_id, node_id, hook_point, orig_repo), None)
             # One check, not a wait. A pipeline that has not settled hands the
             # wait back to the scheduler (Kraft-ru98, `kraft.waits`); a
             # coroutine that sat here held an intake slot and could not be
@@ -833,6 +941,23 @@ async def _run_one(
                     status = "waiting"
             if status == "failed" and ci_status.failed_jobs:
                 findings = _job_findings(ci_status, log, hook_point)
+        case "automated_review" if collect:
+            log, status, note = await _collect_review(
+                forge,
+                db,
+                repo=repo,
+                orig_repo=orig_repo,
+                branch=branch,
+                work_item_id=work_item_id,
+                node_id=node_id,
+                hook_point=hook_point,
+                reviewers=reviewers,
+                bounds=bounds,
+                grace=grace,
+                run_dirs=run_dirs,
+                session_id=session_id,
+                round=round,
+            )
         case "automated_review":
             # One read. Which reviewer, which webhook or check, is the
             # backend's (`automated-review-implementation-is-not-template-
@@ -909,9 +1034,14 @@ async def _run_one(
             # re-describing a merged MR has nothing left to accomplish.
             existing = await forge.find_mr(repo=repo, branch=branch)
             if existing is not None and existing.state == "merged":
-                return f"already merged (!{existing.number}); nothing to sync\n", "done", findings
+                return (
+                    f"already merged (!{existing.number}); nothing to sync\n",
+                    "done",
+                    findings,
+                    None,
+                )
             if await git.commits_ahead(repo, branch, base) == 0:
-                return empty, "config_error", findings
+                return empty, "config_error", findings, None
             # Stays a draft: publication is `mark_ready`'s, after the chain's final
             # gate. sync also runs in on_failure and fix_loop, i.e. before that
             # gate, so undrafting here published the MR mid-repair.
@@ -977,9 +1107,10 @@ async def _run_one(
                     f"already merged (!{existing.number}); nothing to mark ready\n",
                     "done",
                     findings,
+                    None,
                 )
             if await git.commits_ahead(repo, branch, base) == 0:
-                return empty, "config_error", findings
+                return empty, "config_error", findings, None
             await forge.mark_ready(
                 repo=repo,
                 branch=branch,
@@ -1056,7 +1187,7 @@ async def _run_one(
                         # merge: keep waiting, as before this read existed.
                         unread = f"could not read the merge train or queue: {exc}\n"
                 if queue is not None and queue.state == "dropped":
-                    return await _merge_dropped(
+                    dropped = await _merge_dropped(
                         db,
                         forge,
                         repo=repo,
@@ -1070,6 +1201,7 @@ async def _run_one(
                         moved=moved,
                         run_dirs=run_dirs,
                     )
+                    return (*dropped, None)
                 where = (
                     f" (merge {queue.kind}: {queue.state})"
                     if queue is not None and queue.kind != "none"
@@ -1213,7 +1345,7 @@ async def _run_one(
                             status = "failed"
         case "merge_watch":
             if not ci_checks:
-                return await _skip_ci(db, work_item_id, node_id, hook_point, orig_repo)
+                return (*await _skip_ci(db, work_item_id, node_id, hook_point, orig_repo), None)
             # `base`: the item's base branch, what its merge landed on.
             head_sha = await _builtins.upstream_head(orig_repo, base)
             if head_sha is None:
@@ -1265,7 +1397,12 @@ async def _run_one(
                     ci_status, forge=forge, repo=orig_repo, branch=base, head_sha=head_sha
                 )
                 if status == "abandoned":
-                    return log, await _stop_for_abandoned_run(db, work_item_id, node_id, log), None
+                    return (
+                        log,
+                        await _stop_for_abandoned_run(db, work_item_id, node_id, log),
+                        None,
+                        None,
+                    )
                 if status == "infra":
                     # Same counter, same key format, as `ci_poll`'s own
                     # `ci_infra:<node_id>` (plan-review finding 3, first half):
@@ -1279,7 +1416,7 @@ async def _run_one(
                         # `walk.py`'s node loop already turns this into
                         # `stops.stop_for_infra` -> `needs_human` for any node
                         # (`walk.py:245,340,394`) -- no new plumbing needed here.
-                        return log, "infra_stop", findings
+                        return log, "infra_stop", findings, None
                     log, status = await ci.retry_infra_once(
                         forge,
                         repo=orig_repo,
@@ -1367,7 +1504,7 @@ async def _run_one(
                 "the merge request; this node cannot run.\n"
             )
             status = "config_error"
-    return log, status, findings
+    return log, status, findings, note
 
 
 async def _stop_for_abandoned_run(db, work_item_id: str, node_id: str, log: str) -> str:
@@ -1487,6 +1624,13 @@ async def run_task(
     #: False for an in-place item: `open_mr` does not refuse the person's
     #: own uncommitted edits in their checkout.
     check_clean: bool = True,
+    #: Whether a later task of this node reads what the review bots said
+    #: (`AgentInput.BOT_FEEDBACK`): the review wait then settles and collects
+    #: rather than failing on feedback. A multi-repo item takes the direct path
+    #: either way, so feedback is never collected and then dropped.
+    reads_feedback: bool = False,
+    #: The review wait's grace period (`ForgeTask.grace`).
+    grace: timedelta = DEFAULT_GRACE,
 ) -> str:
     """One forge node -- against every repo `work_item_repos` names for this
     item, deepest submodule first, root last (design 3a), or just `repo` when
@@ -1652,6 +1796,8 @@ async def run_task(
     merged_rows = {r["id"] for r in rows if r["merge_state"] == "merged"}
     awaiting_landing = next((t[0] for t in targets if t[0] not in merged_rows), None)
     log, status = "", "done"
+    collect = handler == "automated_review" and reads_feedback and not multi
+    note: WaitNote | None = None
     #: The members a conflict rebase moved (Kraft-puqxq).
     moved: list[Path] = []
     #: Why the observation could not be made at all, when it could not.
@@ -1710,7 +1856,7 @@ async def run_task(
             # was handed (above); every other handler targets this one's.
             member = role == "submodule" and handler != "merge_watch"
             if settled is None:
-                one_log, one_status, one_findings = await _run_one(
+                one_log, one_status, one_findings, one_note = await _run_one(
                     live_forge,
                     db,
                     repo=target_repo,
@@ -1737,7 +1883,13 @@ async def run_task(
                     repo_row_id=row_id,
                     moved=moved if member else None,
                     run_dirs=run_dirs,
+                    collect=collect,
+                    grace=grace,
+                    bounds=wait or DEFAULT_WAIT,
+                    session_id=session_id,
+                    round=round,
                 )
+                note = one_note or note
             else:
                 one_log, one_status, one_findings = "", settled, None
             if not multi:
@@ -1826,6 +1978,7 @@ async def run_task(
             log=log,
             unobserved=unobserved,
             session_id=session_id,
+            note=note,
         )
     recorded = await _builtins.finish_session(
         db,
@@ -1868,6 +2021,7 @@ async def _observed(
     log: str,
     unobserved: str | None,
     session_id: str,
+    note: WaitNote | None = None,
 ) -> tuple[str, str]:
     """Record one wait observation; return the session's status and log.
 
@@ -1875,12 +2029,19 @@ async def _observed(
     `capped_out`: the wait ran out, which is neither done nor a failure
     (`external-wait-timeout-needs-human`). An observation that could not be
     made at all (`unobserved`, the forge's error) ends the wait as an `error`
-    and keeps its status -- a failure stays a failure."""
+    and keeps its status -- a failure stays a failure.
+
+    The review wait's collect path hands a `note`: its next check, its memory,
+    and the instant it decided at. Settled by the deadline, it is recorded as
+    the pending observation `observe` turns into `timed_out` at that same
+    instant, and the session still ends `done`: for this wait the deadline is a
+    settle (`automated-review-timeout-settles-the-collect-path`), not a stop."""
     kind, own = _WAITS[handler]
+    by_deadline = note is not None and note.settled_by_timeout and status == "done"
     if unobserved is not None:
         state, condition, result = "error", own, unobserved
-    elif status in _PENDING:
-        state, condition, result = "pending", _PENDING[status] or own, "pending"
+    elif status in _PENDING or by_deadline:
+        state, condition, result = "pending", _PENDING.get(status) or own, "pending"
     else:
         # Settled on whatever it was waiting for -- the last pending
         # observation's condition, or the handler's own on a first look.
@@ -1899,8 +2060,15 @@ async def _observed(
             state=state,
             result=result,
             session_id=session_id,
+            now=note.now if note else None,
+            next_at=note.next_at if note else None,
+            extra=note.extra if note else None,
         )
     )
+    if outcome == "timed_out" and by_deadline:
+        return "done", log + (
+            "settled at the wait's deadline; review bots that never posted had nothing to say\n"
+        )
     if outcome == "timed_out":
         return "capped_out", log + (
             f"timed out: still waiting for {condition} at the wait's deadline; "

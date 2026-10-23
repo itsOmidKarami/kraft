@@ -36,6 +36,7 @@
           "base_change_restart",
           "bead_not_filed",
           "beads_left_open",
+          "branch_pushed",
           "budget_changed",
           "budget_raised",
           "cap_counters_reset",

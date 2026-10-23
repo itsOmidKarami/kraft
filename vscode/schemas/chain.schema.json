@@ -18,11 +18,12 @@
       "type": "object"
     },
     "AgentInput": {
-      "description": "What Kraft hands an agent task beyond its prompt, when the task asks for\nit by name. Declared on the task rather than keyed on a task's name or\nrole, which is the indirection V1 deletes (Ruling 47).\n\n* `review_package` -- the change under review written out to a file, its\n  path in `$KRAFT_REVIEW_PACKAGE`: the whole branch since `base_ref`, then\n  from a task's second session on only what changed since its previous\n  one (`review-package-is-delivered-to-a-task-that-declares-it`).\n* `carried_findings` -- the findings the node's last measurement reported,\n  each with its stable tag, so a reworded repeat can be reported as the\n  same finding (`carried-findings-are-delivered-to-a-reviewing-task`).\n* `previous_review` -- the task's own previous completed session's result\n  file and summary, by path\n  (`continuity-note-is-delivered-to-a-resumed-reviewer`).",
+      "description": "What Kraft hands an agent task beyond its prompt, when the task asks for\nit by name. Declared on the task rather than keyed on a task's name or\nrole, which is the indirection V1 deletes (Ruling 47).\n\n* `review_package` -- the change under review written out to a file, its\n  path in `$KRAFT_REVIEW_PACKAGE`: the whole branch since `base_ref`, then\n  from a task's second session on only what changed since its previous\n  one (`review-package-is-delivered-to-a-task-that-declares-it`).\n* `carried_findings` -- the findings the node's last measurement reported,\n  each with its stable tag, so a reworded repeat can be reported as the\n  same finding (`carried-findings-are-delivered-to-a-reviewing-task`).\n* `previous_review` -- the task's own previous completed session's result\n  file and summary, by path\n  (`continuity-note-is-delivered-to-a-resumed-reviewer`).\n* `bot_feedback` -- what the node's `mr.automated_review` wait collected\n  from the review bots once they settled, written to a file whose path is in\n  `$KRAFT_BOT_FEEDBACK`\n  (`automated-review-collects-when-a-later-task-reads-it`).",
       "enum": [
         "review_package",
         "carried_findings",
-        "previous_review"
+        "previous_review",
+        "bot_feedback"
       ],
       "title": "AgentInput",
       "type": "string"
@@ -1789,6 +1790,19 @@
       "additionalProperties": false,
       "description": "`external-wait-has-configurable-timeout-and-polling`: a wait's polling.\nIts timeout is its task's own `policy: total_time_cap_minutes` (Ruling\n196); a `timeout:` written here before that is read as one\n(`ForgeTask._retired_wait_timeout`).",
       "properties": {
+        "grace_period": {
+          "anyOf": [
+            {
+              "format": "duration",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grace Period"
+        },
         "polling": {
           "$ref": "#/$defs/PollingPolicy"
         }

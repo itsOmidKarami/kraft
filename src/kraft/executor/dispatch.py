@@ -1341,6 +1341,14 @@ async def _dispatch_task(
             # Resolved through this task's own policy (Kraft-5p69g); already
             # checked against its maximum when the item was filed.
             wait=t.wait_bounds(task_policy) if t.target.waits else None,
+            # A review wait collects and settles only when a task of its node
+            # will read what it collected; otherwise it fails on feedback now
+            # (`automated-review-collects-when-a-later-task-reads-it`).
+            reads_feedback=any(
+                AgentInput.BOT_FEEDBACK in getattr(other.task, "inputs", ())
+                for other in node.tasks()
+            ),
+            grace=t.grace,
             **common,
         )
 

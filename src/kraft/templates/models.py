@@ -287,11 +287,16 @@ class AgentInput(StrEnum):
       same finding (`carried-findings-are-delivered-to-a-reviewing-task`).
     * `previous_review` -- the task's own previous completed session's result
       file and summary, by path
-      (`continuity-note-is-delivered-to-a-resumed-reviewer`)."""
+      (`continuity-note-is-delivered-to-a-resumed-reviewer`).
+    * `bot_feedback` -- what the node's `mr.automated_review` wait collected
+      from the review bots once they settled, written to a file whose path is in
+      `$KRAFT_BOT_FEEDBACK`
+      (`automated-review-collects-when-a-later-task-reads-it`)."""
 
     REVIEW_PACKAGE = "review_package"
     CARRIED_FINDINGS = "carried_findings"
     PREVIOUS_REVIEW = "previous_review"
+    BOT_FEEDBACK = "bot_feedback"
 
     @property
     def summary(self) -> str:
@@ -303,6 +308,7 @@ _INPUT_SUMMARIES = {
     AgentInput.REVIEW_PACKAGE: "The change under review, written to a file",
     AgentInput.CARRIED_FINDINGS: "The findings the node's last measurement reported",
     AgentInput.PREVIOUS_REVIEW: "This task's previous result and summary",
+    AgentInput.BOT_FEEDBACK: "What the review bots said on the merge request, once they settled",
 }
 
 
@@ -367,6 +373,13 @@ class WaitPolicy(BaseModel):
     model_config = _CONFIG
 
     polling: PollingPolicy = Field(default_factory=PollingPolicy)
+    #: `mr.automated_review` only: how long a review bot must stay quiet after
+    #: its last activity on the head before it counts as finished with it.
+    grace_period: Duration | None = None
+
+
+#: The grace period of a review wait that authors none.
+DEFAULT_GRACE = timedelta(seconds=60)
 
 
 @dataclass(frozen=True)
@@ -567,12 +580,24 @@ class ForgeTask(TaskBase):
 
     @model_validator(mode="after")
     def _reviewers_only_on_the_review(self) -> Self:
-        if self.reviewers is not None and self.target is not ForgeAction.MR_AUTOMATED_REVIEW:
+        if self.target is ForgeAction.MR_AUTOMATED_REVIEW:
+            return self
+        if self.reviewers is not None:
             raise ValueError(
                 f"reviewers: only an {ForgeAction.MR_AUTOMATED_REVIEW.value} task waits for "
                 f"reviewers, not {self.target.value}"
             )
+        if self.wait is not None and self.wait.grace_period is not None:
+            raise ValueError(
+                f"wait.grace_period: only an {ForgeAction.MR_AUTOMATED_REVIEW.value} task "
+                f"waits for review bots to settle, not {self.target.value}"
+            )
         return self
+
+    @property
+    def grace(self) -> timedelta:
+        """How long a review bot must stay quiet to be finished with a push."""
+        return (self.wait and self.wait.grace_period) or DEFAULT_GRACE
 
     @model_validator(mode="before")
     @classmethod

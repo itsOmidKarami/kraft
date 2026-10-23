@@ -43,7 +43,7 @@ NESTED_KEYS = {
     "policy": tuple(TemplatePolicyOverride.model_fields),
     "on_base_changed": ("restart_from", "on_conflict"),
     "on_merge_rejected": ("restart_from", "repair"),
-    "wait": ("polling",),
+    "wait": ("grace_period", "polling"),
     "polling": ("initial_interval", "max_interval"),
 }
 

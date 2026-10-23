@@ -546,7 +546,7 @@ async def test_merge_does_not_treat_a_rebased_submodule_as_landed_in_a_multi_rep
 
     async def fake_run_one(*args, **kwargs):
         calls.append(kwargs["repo"])
-        return "rebased away, not merged\n", "rebased", None
+        return "rebased away, not merged\n", "rebased", None, None
 
     monkeypatch.setattr(forge.run, "_run_one", fake_run_one)
     fake = forge.FakeForge(ci_states=["success"])

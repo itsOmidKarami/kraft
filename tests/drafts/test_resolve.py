@@ -166,7 +166,7 @@ AGENT_ONLY = {
     [
         ('kind: subprocess, command: "true"', {"command"}),
         ("kind: builtin, ref: kraft.mr_rebase", {"ref", "execution"}),
-        ("kind: forge, target: mr.sync", {"target", "wait"}),
+        ("kind: forge, target: mr.sync", {"target", "wait", "reviewers"}),
     ],
     ids=["subprocess", "builtin", "forge"],
 )

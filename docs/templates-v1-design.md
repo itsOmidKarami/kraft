@@ -366,6 +366,7 @@ tasks:
     policy:
       total_time_cap_minutes: 30
     wait:
+      grace_period: 60s
       polling:
         initial_interval: 30s
         max_interval: 5m
