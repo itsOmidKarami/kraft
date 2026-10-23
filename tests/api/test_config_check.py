@@ -131,6 +131,30 @@ def test_a_repo_entry_error_is_located_at_its_entry(ctx):
 
 
 @pytest.mark.parametrize(
+    ("text", "repos", "problem"),
+    [
+        ("workers:\n  a:\n    ssh: h\n", "repos: []\n", None),
+        ("workers:\n  a:\n    ssh: h\n    repos: [kraft]\n", "repos:\n  - path: /r/kraft\n", None),
+        (
+            "workers:\n  a:\n    ssh: h\n    repos: [nope]\n",
+            "repos:\n  - path: /r/kraft\n",
+            "nope",
+        ),
+        ("workers:\n  a:\n    capacity: 2\n", "repos: []\n", "exactly one of"),
+    ],
+    ids=["valid", "repo-resolves", "repo-unknown", "no-mode"],
+)
+def test_workers_yaml_is_checked_and_its_repos_must_resolve(
+    ctx, templates_dir, text, repos, problem
+):
+    (templates_dir / "repos.yaml").write_text(repos)
+    issues = config_check.check("workers.yaml", text, ctx)
+    assert (problem is None) == (issues == [])
+    if problem:
+        assert problem in issues[0].message
+
+
+@pytest.mark.parametrize(
     "relative", ["../access.yaml", "chains/../../x.yaml", "chains/Bad Name.yaml", "notes.txt"]
 )
 def test_a_path_that_is_not_a_config_file_is_refused(ctx, relative):

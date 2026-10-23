@@ -27,6 +27,7 @@ from kraft.addons import load as addons_load
 from kraft.addons import manifest as addon_manifest
 from kraft.addons.config import AddonsConfig, AddonsLock, RepoLibrariesLock
 from kraft.executor import fallback
+from kraft.remote import registry as workers_registry
 from kraft.templates import positions
 from kraft.templates.environment import (
     AgentProfileInput,
@@ -62,6 +63,7 @@ FILES = frozenset(
         "addons.yaml",
         "addons.lock",
         "repo-libraries.lock",
+        "workers.yaml",
     }
 )
 CHAIN_FILE = re.compile(r"chains/([a-z][a-z0-9_-]*)\.yaml")
@@ -432,6 +434,28 @@ def _check_access(path, data, ctx):
         TemplateIssue(path, None, why, loc=("allowed_hosts", index))
         for index, entry in enumerate(data.get("allowed_hosts") or [])
         if (why := config_mod.host_entry_problem(entry))
+    ]
+
+
+def _check_workers(path, data, ctx):
+    try:
+        parsed = workers_registry.WorkersFile.model_validate(data)
+    except ValidationError as exc:
+        return [_pydantic_issue(path, exc)]
+    try:
+        connected = config_mod.load_repos(ctx.templates_dir / "repos.yaml")
+    except config_mod.ConfigError:
+        return []  # repos.yaml's own check says why; do not report its fault twice
+    return [
+        TemplateIssue(
+            path,
+            None,
+            f"worker {name!r}: no connected repo is named {repo!r}",
+            loc=("workers", name, "repos", index),
+        )
+        for name, worker in parsed.workers.items()
+        for index, repo in enumerate(worker.repos or ())
+        if not any(workers_registry.repo_matches(e, repo) for e in connected)
     ]
 
 
@@ -906,4 +930,5 @@ _CHECKERS: dict[str, Callable[[Path, dict, CheckContext], list[TemplateIssue]]] 
     "addons.yaml": _check_addons,
     "addons.lock": _check_lock,
     "repo-libraries.lock": _check_repo_lock,
+    "workers.yaml": _check_workers,
 }

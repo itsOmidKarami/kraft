@@ -638,6 +638,7 @@ MACHINE_CONFIG = (
     "theme.yaml",
     "repos.yaml",
     "intake.yaml",
+    "workers.yaml",
     "harnesses",
 )
 

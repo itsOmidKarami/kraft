@@ -87,6 +87,16 @@ def test_a_file_that_would_not_load_carries_its_problem(client, templates_dir):
     assert item["id"] == "disk:policy.yaml" and item["problem"]
 
 
+def test_a_hand_edited_workers_file_is_pending_and_a_broken_one_carries_its_problem(
+    client, templates_dir
+):
+    put_file(templates_dir, "workers.yaml", "workers:\n  boxed:\n    ssh: boxed\n")
+    assert ids(pending(client)["reload"]) == ["disk:workers.yaml"]
+    put_file(templates_dir, "workers.yaml", "workers:\n  boxed:\n    capacity: 1\n")
+    (item,) = pending(client)["reload"]
+    assert item["id"] == "disk:workers.yaml" and "exactly one of" in item["problem"]
+
+
 def test_a_chain_file_added_on_disk_is_pending(client, templates_dir):
     put_file(templates_dir, "chains/extra.yaml", "id: extra\nnodes: []\n")
     assert "disk:chains/extra.yaml" in ids(pending(client)["reload"])
