@@ -1265,11 +1265,16 @@ async def _run_one(
                         ]
                     )
                     for other_id in broken:
-                        await db.write(
-                            lambda c, oid=other_id: store.pause_for_broken_base(
+                        stopped = await db.write(
+                            lambda c, oid=other_id: _pause_for_broken_base(
                                 c, oid, broken_by=work_item_id, follow_up_bead=follow_up
                             )
                         )
+                        # mark first, then signal, as `pause_work_item` does
+                        from kraft.worker import reattach  # the executor imports this module
+
+                        for s in stopped:
+                            reattach.interrupt_group(s["pid"], started=s["pid_start_time"])
                     log += f"filed {follow_up or '(no bead filed)'}, paused {len(broken)} item(s)\n"
                     status = "done"
         case _:
@@ -1285,6 +1290,13 @@ async def _run_one(
             )
             status = "config_error"
     return log, status, findings
+
+
+def _pause_for_broken_base(c, work_item_id: str, **why) -> list:
+    """The live sessions the pause marked, for the caller to signal."""
+    sessions = store.running_sessions_for_node(c, work_item_id)
+    ids = [s["id"] for s in sessions]
+    return sessions if store.pause_for_broken_base(c, work_item_id, ids, **why) else []
 
 
 async def _stop_for_abandoned_run(db, work_item_id: str, node_id: str, log: str) -> str:

@@ -279,7 +279,9 @@ async def test_an_in_place_resolver_is_not_sent_to_overwrite_an_ignored_file(
 
         async def paused_first(db, *args, **kwargs):
             await db.write(
-                lambda c: store.pause_for_broken_base(c, it.id, broken_by="x", follow_up_bead=None)
+                lambda c: store.pause_for_broken_base(
+                    c, it.id, [], broken_by="x", follow_up_bead=None
+                )
             )
             return await take(db, *args, **kwargs)
 

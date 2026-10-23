@@ -659,8 +659,8 @@ def test_pause_interrupts_the_agent_rather_than_terminating_it(
             raise ProcessLookupError
 
     monkeypatch.setattr(lifecycle.reattach, "_identity_ok", lambda pid, started: identity)
-    monkeypatch.setattr(lifecycle.os, "getpgid", lambda pid: group)
-    monkeypatch.setattr(lifecycle.os, "killpg", killpg)
+    monkeypatch.setattr(lifecycle.reattach.os, "getpgid", lambda pid: group)
+    monkeypatch.setattr(lifecycle.reattach.os, "killpg", killpg)
 
     lifecycle._terminate(4242, started=1.0)
     lifecycle._terminate(None, started=None)

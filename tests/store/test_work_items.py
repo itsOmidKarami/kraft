@@ -542,7 +542,9 @@ async def test_pause_for_broken_base_pauses_and_records_who_and_what(database):
     await mk_item(database, "w1")
     await mk_item(database, "w2")
     await database.write(
-        lambda c: store.pause_for_broken_base(c, "w2", broken_by="w1", follow_up_bead="Kraft-xyz")
+        lambda c: store.pause_for_broken_base(
+            c, "w2", [], broken_by="w1", follow_up_bead="Kraft-xyz"
+        )
     )
     row = _row(database, "w2", "status, retry_at")
     assert row["status"] == "paused"

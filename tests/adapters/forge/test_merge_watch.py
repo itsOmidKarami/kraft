@@ -128,8 +128,12 @@ async def test_merge_watch_waits_instead_of_crashing_when_upstream_head_is_unkno
 
 
 async def test_merge_watch_files_a_follow_up_bead_and_pauses_items_on_the_broken_sha(
-    run_forge, item_on, database, repo, tmp_path
+    run_forge, item_on, database, repo, tmp_path, monkeypatch
 ):
+    from kraft.worker import reattach
+
+    signalled = []
+    monkeypatch.setattr(reattach, "interrupt_group", lambda pid, **_: signalled.append(pid))
     tracker = isolated_bd(tmp_path, name="tracker")
     head_sha = _head(repo)
     run_forge.item = await item_on(back_half(), repo=repo, bead_cwd=str(tracker))
@@ -151,6 +155,12 @@ async def test_merge_watch_files_a_follow_up_bead_and_pauses_items_on_the_broken
                 "UPDATE work_items SET base_ref = ? WHERE id = ?", (b, w)
             )
         )
+    # w2's tests are mid-run: the pause stops them, as a person's would, so
+    # nothing more of its node (a review, a fix round) runs under "paused".
+    await database.write(
+        lambda c: c.execute("UPDATE work_items SET current_node_id = 'mr_checks' WHERE id = 'w2'")
+    )
+    await items["w2"].session("s2", "mr_checks.main.ci", running=(4242, 1.0))
     fake = forge.FakeForge(
         ci_states=["failed"],
         ci_failed_jobs=[(forge.FailedJob("build", "failed", "script_failure"),)],
@@ -164,6 +174,8 @@ async def test_merge_watch_files_a_follow_up_bead_and_pauses_items_on_the_broken
         "w4": "paused",
     }
     assert items["w2"].events("paused_by_broken_base")
+    assert [r["status"] for r in items["w2"].sessions()] == ["paused"]
+    assert signalled == [4242]
     filed = await beads.search("post-merge", cwd=str(tracker))
     assert any("post-merge pipeline broke" in b["title"] for b in filed), filed
 

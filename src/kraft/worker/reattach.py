@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -152,6 +153,36 @@ def launched_group(pid: int, pid_start_time) -> bool:
         return _identity_ok(pid, pid_start_time) and os.getpgid(pid) == pid
     except OSError:
         return False
+
+
+def interrupt_group(pid: int | None, *, started: float | None) -> None:
+    """SIGINT the session's whole process group.
+
+    Sessions are launched with `start_new_session=True`, so the child is its own
+    group leader — signalling the group reaches an agent CLI's own children too,
+    which a bare kill(pid) would orphan.
+
+    SIGINT, not SIGTERM (Kraft-s7c04.18). An agent CLI treats SIGINT as "stop
+    this turn" and flushes its result envelope on the way out; SIGTERM kills it
+    without a word. That envelope carries `total_cost_usd`, and it is the only
+    cost figure Kraft will ever have for a session a human interrupted -- with
+    SIGTERM, 71 of 71 paused sessions recorded NULL cost. Measured against
+    claude 2.1.273: SIGTERM mid-turn produced no further output at all, SIGINT
+    produced `[Request interrupted by user]` and a complete result line.
+
+    Still only the first rung. `adapters.subprocess.run_task` waits for the
+    flush and then `_kill_group` runs the existing SIGTERM -> SIGKILL ladder, so
+    a hook that ignores SIGINT dies exactly as promptly as it did before.
+    """
+    if pid is None:
+        return
+    if not launched_group(pid, started):
+        logger.warning("session pid %s is no longer the process Kraft launched; not signalled", pid)
+        return
+    try:
+        os.killpg(pid, signal.SIGINT)
+    except (ProcessLookupError, PermissionError):
+        pass  # already gone, or not ours — the row still moves to paused
 
 
 async def reap_stopped(db, grace: float = 2.0) -> list[int]:

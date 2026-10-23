@@ -144,7 +144,7 @@ async def test_a_soft_pause_between_steps_ends_the_walk_before_its_take(
 
     async def paused_first(db, *args, **kwargs):
         await db.write(
-            lambda c: store.pause_for_broken_base(c, it.id, broken_by="x", follow_up_bead=None)
+            lambda c: store.pause_for_broken_base(c, it.id, [], broken_by="x", follow_up_bead=None)
         )
         return await take(db, *args, **kwargs)
 

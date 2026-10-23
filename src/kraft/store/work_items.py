@@ -1023,6 +1023,10 @@ def pause_work_item(conn: sqlite3.Connection, work_item_id: str, session_ids: li
     ):
         return
     events.append(conn, work_item_id, WorkItemEvent.PAUSE_REQUESTED, {"sessions": session_ids})
+    _pause_sessions(conn, work_item_id, session_ids, now)
+
+
+def _pause_sessions(conn, work_item_id: str, session_ids: list[str], now: str) -> None:
     for sid in session_ids:
         conn.execute(
             "UPDATE worker_sessions SET status = 'paused', exited_at = ? "
@@ -1033,33 +1037,39 @@ def pause_work_item(conn: sqlite3.Connection, work_item_id: str, session_ids: li
 
 
 def pause_for_broken_base(
-    conn: sqlite3.Connection, work_item_id: str, *, broken_by: str, follow_up_bead: str | None
-) -> None:
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    session_ids: list[str],
+    *,
+    broken_by: str,
+    follow_up_bead: str | None,
+) -> bool:
     """Kraft-43kw: `post_merge_watch` found this item sitting on a commit
     whose pipeline just came back red, and is warning it the way the bead's
     description asks -- scoped to items actually on the broken commit, not a
     broadcast to every open item.
 
-    A soft pause, unlike a human's own `/pause` (`api/routes/lifecycle.py`,
-    which reads `running_sessions_for_node` and SIGTERMs each pid): there is
-    no session id to signal from here, deep inside a different item's forge
-    node. The running node, if any, finishes what it is doing, and
-    `run_once`'s own between-nodes check (Kraft-e7pm, `walk.py`) stops the
-    walk at the next node rather than mid-session -- cheap and eventual, the
-    same posture Part 1's blocked-by pause takes.
+    A pause like a human's own (`pause_work_item`): the current node's live
+    sessions, which the caller read and signals once this returns True, are
+    marked paused. Leaving them running let the node go on under an item that reads
+    paused -- a verification node's tests, its review and its fix rounds,
+    the very rounds that would try to repair the broken base.
     """
+    now = _now()
     if not write_status(
         conn,
         "UPDATE work_items SET status = 'paused', retry_at = NULL, updated_at = ? WHERE id = ?",
-        (_now(), work_item_id),
+        (now, work_item_id),
     ):
-        return
+        return False
     events.append(
         conn,
         work_item_id,
         WorkItemEvent.PAUSED_BY_BROKEN_BASE,
         {"broken_by": broken_by, "follow_up_bead": follow_up_bead},
     )
+    _pause_sessions(conn, work_item_id, session_ids, now)
+    return True
 
 
 def set_steer(conn: sqlite3.Connection, work_item_id: str, text: str) -> None:

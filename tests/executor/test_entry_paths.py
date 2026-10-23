@@ -200,7 +200,7 @@ STATUS_WRITES = {
     "mark_reentered": lambda c, wid: store.mark_reentered(c, wid),
     "pause_work_item": lambda c, wid: store.pause_work_item(c, wid, []),
     "pause_for_broken_base": lambda c, wid: store.pause_for_broken_base(
-        c, wid, broken_by="abc", follow_up_bead=None
+        c, wid, [], broken_by="abc", follow_up_bead=None
     ),
     "claim_for_run": lambda c, wid: store.claim_for_run(c, wid, from_statuses=list(ENDED_STATUSES)),
     "request_gate": lambda c, wid: store.request_gate(c, wid, "n", "g"),
