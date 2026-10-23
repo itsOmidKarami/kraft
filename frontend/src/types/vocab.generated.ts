@@ -129,7 +129,7 @@ export type ForgeEvent = (typeof FORGE_EVENTS)[number];
 export const SANDBOX_EVENTS = ["sandbox_egress_refused", "sandbox_oom_killed", "sandbox_branch_not_synced", "sandbox_kit_resolved", "sandbox_session_outlived", "sandbox_reread"] as const;
 export type SandboxEvent = (typeof SANDBOX_EVENTS)[number];
 
-export const REMOTE_EVENTS = ["remote_step_waiting", "remote_docs_conflict", "remote_step_given_up"] as const;
+export const REMOTE_EVENTS = ["remote_step_waiting", "remote_docs_conflict", "remote_step_given_up", "remote_machine_disconnected", "remote_machine_reconnected"] as const;
 export type RemoteEvent = (typeof REMOTE_EVENTS)[number];
 
 export const SETTINGS_EVENTS = ["chain_template_changed", "attachments_changed", "agent_overrides_changed", "node_overrides_changed", "policy_override_changed", "notification_failed"] as const;

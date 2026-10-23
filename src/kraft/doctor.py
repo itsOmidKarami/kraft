@@ -556,12 +556,18 @@ def _chains_check(templates: Path) -> dict:
     read from disk so it answers with no server running. A chain that does
     not resolve otherwise only shows up as the next intake on it failing."""
     skills = Path(os.environ.get("KRAFT_SKILLS_DIR") or default_skills_dir())
-    report = TemplateLibrary.lint_dir(
-        templates, skills_dir=skills, addons=addons_load.installed(templates)
-    )
-    if report.valid:
+    addons = addons_load.installed(templates)
+    report = TemplateLibrary.lint_dir(templates, skills_dir=skills, addons=addons)
+    issues = list(report.issues)
+    try:  # a chain placed on a machine workers.yaml does not have
+        library = TemplateLibrary.from_yaml_dir(templates, skills_dir=skills, addons=addons)
+    except TemplateLibraryError:
+        library = None  # the lint above says why
+    if library is not None:
+        issues += config_check.runner_issues(templates, library)
+    if not issues:
         return _check("chains", True, f"{len(report.chains)} chain(s) resolve")
-    return _check("chains", False, "; ".join(str(issue) for issue in report.issues))
+    return _check("chains", False, "; ".join(str(issue) for issue in issues))
 
 
 def _addon_checks(templates: Path) -> list[dict]:

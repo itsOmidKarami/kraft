@@ -91,6 +91,8 @@
           "rate_limit_hit",
           "read_only_violated",
           "remote_docs_conflict",
+          "remote_machine_disconnected",
+          "remote_machine_reconnected",
           "remote_step_given_up",
           "remote_step_waiting",
           "reply_agent_failed",

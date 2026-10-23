@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
+import yaml
+
 from kraft import client, doctor
 
 # `app` fixture: tests/conftest.py. It wires client.transport.http() to the ASGI app.
@@ -44,3 +46,20 @@ def test_a_broken_workers_file_fails_the_file_row(app, tmp_path):
     (tmp_path / "templates" / "workers.yaml").write_text("workers:\n  a:\n    capacity: 1\n")
     row = _rows(tmp_path)["workers.yaml"]
     assert not row["ok"] and "exactly one of" in row["detail"]
+
+
+def test_a_chain_placed_on_a_machine_workers_yaml_lacks_fails_the_chains_row(app, tmp_path):
+    placed = {
+        "id": "placed",
+        "runner": "ghost",
+        "nodes": [
+            {
+                "id": "run",
+                "kind": "exec",
+                "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}],
+            }
+        ],
+    }
+    (tmp_path / "templates" / "chains" / "placed.yaml").write_text(yaml.safe_dump(placed))
+    row = {r["name"]: r for r in asyncio.run(doctor.run_checks())}["chains"]
+    assert not row["ok"] and "runner 'ghost' is not a machine in workers.yaml" in row["detail"]

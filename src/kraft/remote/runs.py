@@ -441,7 +441,20 @@ class Runs:
             with contextlib.suppress(protocol.Closed):
                 await self.hub.transport(name).send({"t": "forget", "item": work_item_id})
 
+    async def _note_machine(self, machine: str, type_: RemoteEvent) -> None:
+        """`type_` on every item with an unfinished step on `machine`, so the item's history
+        explains a gap."""
+        for run in [r for r in self._runs.values() if r.claim.machine == machine]:
+            if run.exit_code is None:
+                await self._event(
+                    run.spec, type_, {"machine": machine, "session_id": run.spec.session_id}
+                )
+
+    async def on_disconnect(self, machine: str) -> None:
+        await self._note_machine(machine, RemoteEvent.MACHINE_DISCONNECTED)
+
     async def on_connect(self, machine: str) -> None:
+        await self._note_machine(machine, RemoteEvent.MACHINE_RECONNECTED)
         mine = [
             r for r in self._runs.values() if r.claim.machine == machine and r.state != "preparing"
         ]

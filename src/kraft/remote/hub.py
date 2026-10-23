@@ -221,6 +221,8 @@ class Hub:
             if entry.transport is t:
                 entry.transport, entry.online, entry.reason = None, False, why
                 entry.offline_since, entry.offline_at = self._mono(), self._now_iso()
+                if self.runs is not None:
+                    self._spawn(self.runs.on_disconnect(peer.name))
             await t.close()
 
     async def _on_frame(self, machine: str, frame: dict) -> None:

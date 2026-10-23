@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 import textwrap
 
@@ -199,7 +200,13 @@ async def test_cancelling_while_the_machine_is_offline_ends_the_run_and_discards
 def test_the_remote_event_family_is_registered():
     from kraft.vocab.events import BY_VALUE, EVENT_TRAITS
 
-    families = ("remote_step_waiting", "remote_docs_conflict", "remote_step_given_up")
+    families = (
+        "remote_step_waiting",
+        "remote_docs_conflict",
+        "remote_step_given_up",
+        "remote_machine_disconnected",
+        "remote_machine_reconnected",
+    )
     assert set(families) <= set(BY_VALUE)
     assert all(BY_VALUE[v] in EVENT_TRAITS for v in families)
 
@@ -309,3 +316,29 @@ async def test_a_reconnect_tells_the_machine_which_items_to_keep(rig, database, 
     await rig.reconnect()
     await asyncio.sleep(0.3)
     assert [f["items"] for f in seen if f["t"] == "keep"] == [[rig.wid]]
+
+
+async def test_a_drop_and_a_reconnect_each_note_the_item_whose_step_runs_there(
+    rig, database, item_on
+):
+    from support.chain_builders import v1_node
+    from support.harness import v1_chain
+
+    await item_on(v1_chain([v1_node("build")], repo=rig.repo), "build", repo=rig.repo, wid="idle1")
+    run = await _running(rig)
+    await rig.disconnect()
+    await asyncio.sleep(0.2)
+    await rig.connect()
+    await asyncio.sleep(0.3)
+    got = database.read(
+        lambda c: c.execute(
+            "SELECT work_item_id, type, payload FROM events WHERE type LIKE 'remote_machine_%'"
+        ).fetchall()
+    )
+    assert [(e["work_item_id"], e["type"]) for e in got] == [
+        (rig.wid, "remote_machine_disconnected"),
+        (rig.wid, "remote_machine_reconnected"),
+    ]  # none for "idle1": no step of it runs on the machine
+    assert json.loads(got[0]["payload"]) == {"machine": "gpu", "session_id": "s1"}
+    await rig.runs.signal(run, "KILL")
+    await rig.done(run)
