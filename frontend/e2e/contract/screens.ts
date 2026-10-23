@@ -67,6 +67,7 @@ export async function pickRange(p: Page, a: [string, number], b: [string, number
 }
 const rangeOpen = (a: [string, number], b: [string, number], then?: (p: Page) => Promise<unknown>) => async (pg: Page) => {
   await pg.locator(".review-page").waitFor({ timeout: 8000 });
+  await pg.getByRole("navigation", { name: "Changed files" }).getByRole("button", { name: "progress.py" }).click();
   const [x, y] = a[0] === b[0] ? [a, b] : [a, a];
   await pickRange(pg, x, y);
   if (a[0] !== b[0]) {

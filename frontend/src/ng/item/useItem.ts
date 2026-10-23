@@ -15,11 +15,12 @@ export type ItemDetail = WorkItem & {
  *  reach them. */
 export type Loaded = { state: "loading" } | { state: "missing"; error: string } | { state: "ready"; item: ItemDetail; version: string };
 
-/** The item's row and each session's status, as one string. What sessions
- *  write (documents, the diff) is read again when it moves: a new attempt, one
- *  that ends, a node that moves on. */
+/** The item's row, each session's status and the plan task it is on, as one
+ *  string. What sessions write (documents, the diff) is read again when it
+ *  moves: a new attempt, one that ends, a node that moves on, a plan task done
+ *  (a running session's status does not move between its tasks). */
 export function runVersion(item: ItemDetail): string {
-  return `${item.updated_at}|${item.worker_sessions.map((s) => `${s.id}:${s.status}`).join(",")}`;
+  return `${item.updated_at}|${item.worker_sessions.map((s) => `${s.id}:${s.status}`).join(",")}|${item.progress?.current ?? ""}`;
 }
 
 /** What a read of the item holds, as one string: its `runVersion` and the

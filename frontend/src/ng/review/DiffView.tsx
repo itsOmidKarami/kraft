@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { CompareFile } from "../../types";
-import { ChevronDown, ChevronUp, ChevronsUpDown, EllipsisVertical, MessageSquare, Plus } from "../icons";
+import { ChevronDown, ChevronRight, ChevronUp, ChevronsUpDown, EllipsisVertical, MessageSquare, Plus } from "../icons";
 import { IconButton } from "../ui/IconButton";
 import { Menu } from "../ui/Menu";
 import { showToast } from "../ui/Toast";
@@ -301,7 +301,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
     <section className="rv-file" data-file={file.path} aria-label={file.path}>
       <header className="rv-file-head">
         <button type="button" className="rv-fold" aria-expanded={!collapsed} {...tip(collapsed ? `Expand ${file.path}` : `Collapse ${file.path}`)} onClick={() => p.onCollapse(file.path, !collapsed)}>
-          {collapsed ? "▸" : "▾"}
+          {collapsed ? <ChevronRight size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
         </button>
         <span className="rv-file-path rv-mono" title={file.path} data-allow-ellipsis="">{file.path}</span>
         <span className="rv-add">+{file.insertions}</span>

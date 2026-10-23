@@ -51,15 +51,18 @@
 .rv-tree-filter { margin: 0 10px 6px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font-size: var(--fs-label); }
 .rv-tree-body { flex: 1 1 0; min-height: 0; overflow: auto; padding: 0 6px 6px; }
 .rv-tree-empty.empty { margin: 8px 6px; }
-.rv-folder-row > .rv-mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rv-folder-row { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font-size: var(--fs-meta); text-align: left; cursor: pointer; }
+/* An untracked path is a bare span in its row: it truncates like a file name, or the tree scrolls sideways onto blank rows. */
+.rv-folder-row > .rv-mono, .rv-file-row > .rv-mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-folder-row { box-sizing: border-box; display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 8px 5px calc(8px + var(--depth, 0) * 12px); border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font-size: var(--fs-meta); text-align: left; cursor: pointer; }
 .rv-folder-row.is-static { cursor: default; }
 .rv-folder-row:not(.is-static):is(:hover, :focus-visible) { background: var(--line); }
-.rv-file-row { display: flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 6px; font-size: var(--fs-meta); }
-.rv-file-row.is-nested { padding-left: 20px; }
+/* Focus rings the whole row, inset: the tree's body clips anything drawn outside it. */
+.rv-folder-row:focus-visible, .rv-file-row:has(> .rv-file-name:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
+.rv-file-name:focus-visible { outline: none; }
+.rv-file-row { display: flex; align-items: center; gap: 6px; padding: 2px 8px 2px calc(8px + var(--depth, 0) * 12px); border-radius: 6px; font-size: var(--fs-meta); }
 .rv-file-row.is-on { background: var(--line); }
 .rv-file-row:hover { background: color-mix(in oklab, var(--line) 60%, transparent); }
-.rv-file-icon { flex: none; color: var(--text-muted); }
+.rv-file-icon, .rv-folder-icon { flex: none; color: var(--text-muted); }
 .rv-file-icon[data-lang="python"] { color: var(--info); }
 .rv-file-icon[data-lang="clike"] { color: var(--text-sub); }
 .rv-file-icon[data-lang="shell"] { color: var(--ok); }
@@ -76,7 +79,7 @@
 .rv-files[data-colours="plain"] { --rv-add: var(--diff-add-plain); --rv-del: var(--diff-del-plain); }
 .rv-file { border-bottom: 1px solid var(--line); }
 .rv-file-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; box-sizing: border-box; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: var(--fs-label); }
-.rv-fold { flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.rv-fold { flex: none; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .rv-fold:is(:hover, :focus-visible) { background: var(--line); color: var(--text); }
 .rv-file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--fs-label); }
 .rv-file-note { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); white-space: nowrap; }

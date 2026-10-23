@@ -1,4 +1,5 @@
 import { NG_CHAINS, NG_EXTENDING_CHAIN, NG_REPOS, NG_WORKSPACES, ngDryRun } from "./ngBoard";
+import { inTreeOrder, tree } from "../../../src/ng/review/model";
 import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, type Scenario } from "./fixtures";
 import { makeAreas } from "./areasMock";
 import { ngThreads } from "./ngItems";
@@ -310,13 +311,11 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
   const threadsOf = (wid: string) =>
     (threads[wid] ??= ([
       ...(S.bundles[wid]?.threads ?? []).map((t: any) => ({ anchor_sha: "9c8d7e6", resolved_at: null, draft: false, ...t, comments: t.comments.map((c: any) => ({ thread_id: t.id, review_id: "r1", attempt: null, suggestion: null, claim: null, draft: false, ...c })) })),
+      // In the review tree's order, so the seeded threads land on the file shown first.
       ...(S.bundles[wid]?.item.pending_gate === "final_review" && Object.values(S.ng).includes(wid)
-        ? ngThreads(wid, compareFor(wid, S.variant).files.map((f: { path: string }) => f.path).sort(treeOrder))
+        ? ngThreads(wid, inTreeOrder(tree(compareFor(wid, S.variant).files as never)).map((f) => f.path))
         : []),
     ] as any[]).map((t) => ({ quote: null, start_side: null, ...t })));
-  // The review tree's order: by folder, the top level last, so the seeded threads land on the file shown first.
-  const dirOf = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/") + 1) : "\uffff");
-  const treeOrder = (a: string, b: string) => dirOf(a).localeCompare(dirOf(b)) || a.localeCompare(b);
   const findThread = (tid: string) => Object.values(threads).flat().find((t) => t.id === tid);
   const findComment = (cid: string) => Object.values(threads).flat().flatMap((t) => t.comments).find((c) => c.id === cid);
   const mustFix = (wid: string) => threadsOf(wid).filter((t) => t.label === "must_fix" && t.state !== "resolved").map((t) => t.id);

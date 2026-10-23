@@ -8,6 +8,7 @@ import { Shell } from "../shell/Shell";
 import { ItemPage } from "./ItemPage";
 import { detail, stubFetch } from "./testkit";
 import { usePaneMemory } from "./Workspace";
+import type { ItemDetail } from "./useItem";
 
 const Where = () => {
   const l = useLocation();
@@ -157,14 +158,18 @@ describe("ItemPage, live", () => {
     expect(screen.getAllByRole("menuitemradio").map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "false", "true"]);
   });
 
-  it("reads the diff line again when a new attempt starts", async () => {
-    const path = "verification.review.code_review";
-    const one = detail({ worker_sessions: [sess("r1", path, 1)] });
+  const path = "verification.review.code_review";
+  // A running session's status does not move between plan tasks, so the task it is on must move the diff.
+  it.each([
+    ["a new attempt starts", (one: ItemDetail) => ({ ...one, worker_sessions: [...one.worker_sessions, sess("r2", path, 2, { status: "running" })] })],
+    ["a plan task is done", (one: ItemDetail) => ({ ...one, progress: { current: 2, total: 3, title: "t2" } })],
+  ])("reads the diff line again when %s", async (_name, next) => {
+    const one = detail({ worker_sessions: [sess("r1", path, 1)], progress: { current: 1, total: 3, title: "t1" } });
     const answers: Record<string, [number, unknown]> = { "GET /work-items/w1": [200, one], "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 1, deletions: 0 }] }] };
     stubFetch(answers);
     mount(`/work-items/w1/nodes/verification?sel=${path}`);
     expect(await screen.findByText(/1 file/)).toBeInTheDocument();
-    answers["GET /work-items/w1"] = [200, { ...one, worker_sessions: [...one.worker_sessions, sess("r2", path, 2, { status: "running" })] }];
+    answers["GET /work-items/w1"] = [200, next(one)];
     answers["GET /work-items/w1/diff"] = [200, { files: [{ path: "a.py", insertions: 1, deletions: 0 }, { path: "b.py", insertions: 2, deletions: 0 }] }];
     live(2);
     expect(await screen.findByText(/2 files/)).toBeInTheDocument();

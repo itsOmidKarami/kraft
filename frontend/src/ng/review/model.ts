@@ -65,25 +65,38 @@ export const byNodes = (files: CompareFile[], nodes: string[] | null) =>
   nodes === null ? files : files.filter((f) => f.touched_by.some((n) => nodes.includes(n)));
 
 export interface Folder {
-  /** `""` for the top level; else the directory with a trailing slash. */
+  /** The folder's path with a trailing slash; `""` for the top level. */
   dir: string;
+  /** What its row reads: its own name, or a run of folders that each hold only the next ("src/kraft/"). */
+  name: string;
+  folders: Folder[];
   files: CompareFile[];
 }
 
-/** Files grouped by their directory, folders and files in path order; the top level last (prototype). */
-export function folders(files: CompareFile[], filter = ""): Folder[] {
+/** The files as a folder tree: at each level folders first, then files, each in path order. */
+export function tree(files: CompareFile[], filter = ""): Folder {
   const q = filter.trim().toLowerCase();
-  const by = new Map<string, CompareFile[]>();
+  const root: Folder = { dir: "", name: "", folders: [], files: [] };
   for (const f of files) {
     if (q && !f.path.toLowerCase().includes(q)) continue;
-    const cut = f.path.lastIndexOf("/");
-    const dir = cut < 0 ? "" : f.path.slice(0, cut + 1);
-    by.set(dir, [...(by.get(dir) ?? []), f]);
+    let at = root;
+    for (const part of f.path.split("/").slice(0, -1)) {
+      const dir = `${at.dir}${part}/`;
+      let next = at.folders.find((d) => d.dir === dir);
+      if (!next) at.folders.push((next = { dir, name: `${part}/`, folders: [], files: [] }));
+      at = next;
+    }
+    at.files.push(f);
   }
-  return [...by]
-    .sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)))
-    .map(([dir, fs]) => ({ dir, files: fs.sort((a, b) => a.path.localeCompare(b.path)) }));
+  const settle = (d: Folder): Folder => {
+    while (d.dir && !d.files.length && d.folders.length === 1) d = { ...d.folders[0], name: d.name + d.folders[0].name };
+    return { ...d, folders: d.folders.map(settle).sort((a, b) => a.dir.localeCompare(b.dir)), files: d.files.sort((a, b) => a.path.localeCompare(b.path)) };
+  };
+  return settle(root);
 }
+
+/** A tree's files top to bottom, as the tree lists them. */
+export const inTreeOrder = (d: Folder): CompareFile[] => [...d.folders.flatMap(inTreeOrder), ...d.files];
 
 /** A thread not yet resolved: what the tree counts per file. */
 export const unresolved = (t: ReviewThread) => t.state !== "resolved";

@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { withProducer } from "./mocks/fixtures";
+import { compareFor, withProducer } from "./mocks/fixtures";
 import { app, contract, editorsRoute, focusedName, item, pause, type Row } from "./kit";
 
 /** Review and the document viewer: the gate review, Approve's lock, Esc and focus, Open in editor, search matches. */
@@ -19,6 +19,16 @@ const ROWS: Row[] = [
   {
     name: "review: Approve stays locked while must-fix threads are open [decided]",
     run: async (p) => { await app(p, item("needs-gate", "/review"), { ready: (pg) => pg.locator(".review-page").waitFor() }); await expect(p.getByText(/must[- ]fix/i).first()).toBeVisible(); await expect(p.getByRole("button", { name: /^Approve/ }).first()).toBeDisabled(); },
+  },
+  {
+    name: "review: a long untracked path truncates, so the file tree never scrolls sideways onto blank rows",
+    run: async (p) => {
+      const routes = (pg: Page) => pg.route(/\/work-items\/[^/]+\/compare\?/, (r) => r.fulfill({ json: { ...compareFor(r.request().url().match(/work-items\/([^/]+)\//)![1], "default" as never), untracked: ["frontend/src/ng/review/an_untracked_file_with_a_long_name.tsx"] } }));
+      await app(p, item("needs-gate", "/review"), { routes, ready: (pg) => pg.locator(".review-page").waitFor() });
+      const body = p.locator(".rv-tree-body");
+      await expect(body.getByText(/an_untracked_file/)).toBeVisible();
+      expect(await body.evaluate((e) => e.scrollWidth - e.clientWidth)).toBeLessThanOrEqual(0);
+    },
   },
   {
     name: "review: a diff is coloured from its grammar, loaded as a chunk",
@@ -150,6 +160,7 @@ const ROWS: Row[] = [
     name: "review: dragging the range's last handle extends the range and the open composer keeps its text and follows",
     run: async (p) => {
       await app(p, item("needs-gate", "/review"), { ready: (pg) => pg.locator(".review-page").waitFor({ timeout: 8000 }) });
+      await p.getByRole("navigation", { name: "Changed files" }).getByRole("button", { name: "progress.py" }).click();
       const f = p.locator('[data-file="kraft/progress.py"]');
       const num = (side: string, n: number) => f.getByRole("button", { name: `Pick ${side} line ${n}`, exact: true }).first();
       await num("new", 2).click(); await num("new", 7).click({ modifiers: ["Shift"] }); await num("new", 7).hover(); await pause(p, 200);
