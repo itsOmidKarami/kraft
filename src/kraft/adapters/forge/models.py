@@ -320,6 +320,9 @@ class Forge(Protocol):
     async def automated_review(
         self, *, repo: Path, branch: str, reviewers: Reviewers
     ) -> ReviewResult: ...
+    async def reviewer_feedback(
+        self, *, repo: Path, branch: str, reviewers: Reviewers, since: datetime
+    ) -> list[ReviewerFeedback]: ...
 
 
 def _head(repo: Path) -> str | None:
@@ -421,6 +424,10 @@ class FakeForge:
     review_results: list[ReviewResult | str] = field(default_factory=lambda: ["clean"])
     #: The reviewers each `automated_review` read was asked for, in order.
     reviewers_asked: list[Reviewers] = field(default_factory=list)
+    #: `reviewer_feedback`'s answers, one list per call, consumed like
+    #: `review_results`. Empty, each reviewer answers with nothing to say: a
+    #: bot with no activity, a check that finished and passed.
+    feedback_script: list[list[ReviewerFeedback]] = field(default_factory=list)
     #: `approval_state`'s answers, consumed like `ci_states`.
     approval_states: list[ApprovalState] = field(default_factory=lambda: ["approved"])
     #: `branch_ci_status`'s own script, for the post-merge pipeline; `None`
@@ -594,6 +601,23 @@ class FakeForge:
         self.reviewers_asked.append(reviewers)
         result = self._next(self.review_results)
         return ReviewResult(result) if isinstance(result, str) else result
+
+    async def reviewer_feedback(
+        self, *, repo: Path, branch: str, reviewers: Reviewers, since: datetime
+    ) -> list[ReviewerFeedback]:
+        self.reviewers_asked.append(reviewers)
+        if self.feedback_script:
+            return self._next(self.feedback_script)
+        return [
+            ReviewerFeedback(r, None)
+            if r.bot is not None
+            else ReviewerFeedback(
+                r,
+                None,
+                check={"name": r.check, "finished": True, "conclusion": "success", "output": ""},
+            )
+            for r in reviewers
+        ]
 
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
         self.retried.append(ci.url)

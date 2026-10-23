@@ -17,6 +17,9 @@ from typing import Literal
 from kraft.adapters.forge.models import ReviewerFeedback
 from kraft.automated_review import AutomatedReview
 
+#: The conclusions of a check that has nothing to say, on either forge.
+_PASSED = ("success", "neutral", "skipped")
+
 
 @dataclass(frozen=True)
 class Settled:
@@ -104,7 +107,7 @@ def _collected(item: ReviewerFeedback, how: str | None) -> dict:
         kept = newest.get(summary["kind"])
         if kept is None or summary["updated_at"] > kept["updated_at"]:
             newest[summary["kind"]] = summary
-    failed = item.check is not None and item.check.get("conclusion") != "success"
+    failed = item.check is not None and item.check.get("conclusion") not in _PASSED
     return {
         "reviewer": reviewer_key(item.reviewer),
         "finished": how,

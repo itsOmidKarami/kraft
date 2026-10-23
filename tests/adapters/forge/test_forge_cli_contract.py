@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +15,7 @@ import pytest
 from kraft.adapters import forge
 from kraft.adapters.forge import gh as gh_adapter
 from kraft.adapters.forge import glab as glab_adapter
-from kraft.adapters.forge.gh import _QUEUE_QUERY
+from kraft.adapters.forge.gh import _QUEUE_QUERY, _THREADS_QUERY
 from kraft.adapters.forge.mr import MRMeta
 from kraft.automated_review import AutomatedReview
 
@@ -146,6 +147,9 @@ async def test_open_mr_refuses_a_dirty_worktree(cli, tmp_path, backend, porcelai
     assert cli.argv(backend.name) == [], "the CLI ran over an uncommitted worktree"
 
 
+_SINCE = datetime(2026, 1, 1, tzinfo=UTC)
+_NO_THREADS = {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}
+
 #: Each call that reaches the merge request with no number known.
 _BY_BRANCH = {
     "open_mr": lambda f, r: f.open_mr(repo=r, branch="kraft/abc", base="main", title="t", body="b"),
@@ -162,6 +166,12 @@ _BY_BRANCH = {
     "check_review": lambda f, r: f.automated_review(
         repo=r, branch="kraft/abc", reviewers=(AutomatedReview(check="c"),)
     ),
+    "bot_feedback": lambda f, r: f.reviewer_feedback(
+        repo=r, branch="kraft/abc", reviewers=(AutomatedReview(bot="b"),), since=_SINCE
+    ),
+    "check_feedback": lambda f, r: f.reviewer_feedback(
+        repo=r, branch="kraft/abc", reviewers=(AutomatedReview(check="c"),), since=_SINCE
+    ),
 }
 
 
@@ -176,12 +186,15 @@ async def test_every_merge_request_call_names_the_branch(be, cli, tmp_path, op):
             "pr view": json.dumps(pr),
             "mr view": json.dumps(pr),
             "ci list": outputs.GLAB_CI_SUCCESS,
+            "api graphql": json.dumps(_NO_THREADS),
         },
     )
 
     await _BY_BRANCH[op](be.cls(), tmp_path)
 
-    calls = [c.split() for c in cli.calls(be.name) if c.split()[0] in ("pr", "mr")]
+    # A GraphQL query's own lines are calls of no words, so only the first line
+    # of each call is read.
+    calls = [c.split() for c in cli.calls(be.name) if c.split()[:1] in (["pr"], ["mr"])]
     assert calls
     for call in calls:
         assert "kraft/abc" in call, call
@@ -532,3 +545,63 @@ def test_glab_refuses_a_merge_naming_a_head_the_merge_request_does_not_have(reco
     record_property("glab_sha_refusal", said[-500:])
     assert done.returncode != 0
     assert glab_adapter._HEAD_MOVED in said.lower()
+
+
+@pytest.mark.e2e("gh")
+def test_gh_reviewer_feedback_payload_shapes():
+    """The payloads `GhCli.reviewer_feedback` reads, from a real GitHub: a pull
+    request's issue comments (`user.login`, `updated_at`), its reviews
+    (`commit_id`, `submitted_at`), and the review threads query
+    (`isResolved`, and each comment's `author`, `path`, `line`, `originalLine`
+    and `updatedAt`). Runs against `KRAFT_E2E_GH_REPO` (`owner/name`) at pull
+    request `KRAFT_E2E_GH_PR`."""
+    slug, number = os.environ.get("KRAFT_E2E_GH_REPO"), os.environ.get("KRAFT_E2E_GH_PR")
+    if not (slug and number):
+        pytest.skip("e2e: set KRAFT_E2E_GH_REPO (owner/name) and KRAFT_E2E_GH_PR")
+    owner, _, name = slug.partition("/")
+
+    def api(*args: str) -> object:
+        done = subprocess.run(["gh", "api", *args], capture_output=True, text=True)
+        assert done.returncode == 0, done.stderr
+        return json.loads(done.stdout)
+
+    for comment in api(f"repos/{slug}/issues/{number}/comments?per_page=100"):
+        assert {"user", "body", "updated_at"} <= comment.keys()
+        assert "login" in comment["user"]
+    for review in api(f"repos/{slug}/pulls/{number}/reviews?per_page=100"):
+        assert {"user", "state", "commit_id", "body", "submitted_at"} <= review.keys()
+    data = api(
+        "graphql", "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"n={number}",
+        "-f", f"query={_THREADS_QUERY}",
+    )  # fmt: skip
+    assert "errors" not in data
+    for thread in data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]:
+        assert {"id", "isResolved", "comments"} <= thread.keys()
+        for note in thread["comments"]["nodes"]:
+            assert {"author", "body", "path", "line", "originalLine", "updatedAt"} <= note.keys()
+
+
+@pytest.mark.e2e("glab")
+def test_glab_reviewer_feedback_payload_shapes():
+    """The payloads `GlabCli.reviewer_feedback` reads, from a real GitLab: a
+    merge request's notes (`system`, `author.username`, `updated_at`) and its
+    discussions (`id`, and each note's `resolvable`, `resolved` and `position`).
+    Needs a checkout of a GitLab project (`KRAFT_E2E_GLAB_REPO`) and the iid of
+    one of its merge requests (`KRAFT_E2E_GLAB_MR`)."""
+    repo, iid = os.environ.get("KRAFT_E2E_GLAB_REPO"), os.environ.get("KRAFT_E2E_GLAB_MR")
+    if not (repo and iid):
+        pytest.skip("e2e: set KRAFT_E2E_GLAB_REPO and KRAFT_E2E_GLAB_MR")
+
+    def api(path: str) -> list:
+        done = subprocess.run(
+            ["glab", "api", path], cwd=repo, capture_output=True, text=True, check=True
+        )
+        return json.loads(done.stdout)
+
+    for note in api(f"projects/:id/merge_requests/{iid}/notes?per_page=100"):
+        assert {"system", "author", "body", "updated_at"} <= note.keys()
+        assert "username" in note["author"]
+    for discussion in api(f"projects/:id/merge_requests/{iid}/discussions?per_page=100"):
+        assert {"id", "notes"} <= discussion.keys()
+        for note in discussion["notes"]:
+            assert {"author", "body", "resolvable", "updated_at"} <= note.keys()

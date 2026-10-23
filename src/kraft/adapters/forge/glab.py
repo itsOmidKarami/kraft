@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 from kraft.adapters.forge import git
@@ -19,8 +20,11 @@ from kraft.adapters.forge.models import (
     MRRef,
     QueueRead,
     QueueState,
+    ReviewerFeedback,
     ReviewResult,
 )
+from kraft.automated_review import Reviewers
+
 
 #: glab's pipeline vocabulary, from `glab ci list --help` (glab 1.116.0).
 #: 'skipped' is deliberately not success: nothing proved the branch green, and
@@ -30,6 +34,63 @@ from kraft.adapters.forge.models import (
 #: is never a verdict (Kraft-zn8me). `set_labels` re-creates the MR pipeline
 #: and auto-cancel of redundant pipelines cancels the old one; a pipeline a
 #: person cancelled with no successor is `ci.render_ci`'s "abandoned".
+def _bot_feedback(reviewer, notes: list[dict], discussions: list[dict], since) -> ReviewerFeedback:
+    """One bot's part of the merge request's notes and discussions."""
+    bot = reviewer.bot
+
+    def mine(note: dict) -> bool:
+        return mr_ops.same_login(str((note.get("author") or {}).get("username", "")), bot)
+
+    summaries: list[dict] = []
+    seen: list[datetime | None] = []
+    for n in notes:
+        # A system note ("added 1 commit") and an inline one (a discussion's,
+        # read below) are not the bot's summary.
+        if n.get("system") or n.get("position") or n.get("type") == "DiffNote" or not mine(n):
+            continue
+        at = mr_ops.forge_time(n.get("updated_at"))
+        seen.append(at)
+        if at is not None and at > since:
+            summaries.append(
+                {
+                    "kind": "comment",
+                    "state": None,
+                    "body": n.get("body") or "",
+                    "updated_at": n["updated_at"],
+                }
+            )
+    threads: list[dict] = []
+    for d in discussions:
+        thread = d.get("notes") or []
+        seen += [mr_ops.forge_time(n.get("updated_at")) for n in thread if mine(n)]
+        resolvable = [n for n in thread if n.get("resolvable")]
+        if (
+            thread
+            and mine(thread[0])
+            and resolvable
+            and not all(n.get("resolved") for n in resolvable)
+        ):
+            first = thread[0]
+            where = first.get("position") or {}
+            threads.append(
+                {
+                    "id": d["id"],
+                    "file": where.get("new_path") or where.get("old_path"),
+                    "line": where.get("new_line") or where.get("old_line"),
+                    "body": "\n".join(
+                        [
+                            first.get("body") or "",
+                            *(
+                                f"{(n.get('author') or {}).get('username')}: {n.get('body')}"
+                                for n in thread[1:]
+                            ),
+                        ]
+                    ),
+                }
+            )
+    return ReviewerFeedback(reviewer, mr_ops.newest(seen), tuple(summaries), tuple(threads))
+
+
 _GLAB_STATES: dict[str, CIState] = {
     "success": "success",
     "failed": "failed",
@@ -561,13 +622,12 @@ class GlabCli(mr_ops.CliWaits):
             return ReviewResult("clean", detail=f"{bot}: approved")
         return ReviewResult("pending", detail=f"waiting for {bot} to review")
 
-    async def _check_review(self, repo: Path, branch: str, check: str) -> ReviewResult:
-        """The commit status (a CI job or an external status) named `check`
-        on the MR's head, its latest if it ran more than once. A merged
-        results pipeline's jobs report on its merge commit, not the head, so
-        that commit is read too when the merge request's head pipeline is one
-        built from this head (`_answered_for`)."""
-        mr = await self._json(repo, ["mr", "view", branch, "-F", "json"], "glab mr view")
+    async def _latest_status(self, repo: Path, mr: dict, check: str) -> dict | None:
+        """The commit status (a CI job or an external status) named `check` on
+        the MR's head, its latest if it ran more than once. A merged results
+        pipeline's jobs report on its merge commit, not the head, so that commit
+        is read too when the merge request's head pipeline is one built from
+        this head (`_answered_for`)."""
         head = mr["sha"]
         # (project, commit) pairs: a merge commit lives in its pipeline's own
         # project, which `:id` (the checkout's remote) may not be.
@@ -589,17 +649,67 @@ class GlabCli(mr_ops.CliWaits):
             )
             statuses += got if isinstance(got, list) else []
         mine = sorted((s for s in statuses if s.get("name") == check), key=lambda s: s["id"])
-        if not mine:
-            return ReviewResult("pending", detail=f"waiting for {check} on {head[:7]}")
-        status = str(mine[-1].get("status"))
+        return mine[-1] if mine else None
+
+    async def _check_review(self, repo: Path, branch: str, check: str) -> ReviewResult:
+        """The latest commit status named `check` on the MR's head: pending
+        until it finishes, clean on success, actionable on a failure."""
+        mr = await self._json(repo, ["mr", "view", branch, "-F", "json"], "glab mr view")
+        latest = await self._latest_status(repo, mr, check)
+        if latest is None:
+            return ReviewResult("pending", detail=f"waiting for {check} on {mr['sha'][:7]}")
+        status = str(latest.get("status"))
         if status in ("success", "skipped"):
             return ReviewResult("clean", detail=f"{check}: {status}")
         if status == "failed":  # 'canceled' is never a verdict; it waits below
             return ReviewResult(
                 "actionable",
-                findings=(f"{check} {status}: {mine[-1].get('description') or ''}",),
+                findings=(f"{check} {status}: {latest.get('description') or ''}",),
             )
         return ReviewResult("pending", detail=f"{check}: {status}")
+
+    async def reviewer_feedback(
+        self, *, repo: Path, branch: str, reviewers: Reviewers, since: datetime
+    ) -> list[ReviewerFeedback]:
+        """What each of `reviewers` has said on the merge request, in order. The
+        merge request, and for the bots its notes and discussions, are read once
+        however many reviewers there are. GitLab has no review object, so a bot's
+        summaries are its top-level notes."""
+        mr = await self._json(repo, ["mr", "view", branch, "-F", "json"], "glab mr view")
+        notes = discussions = []
+        if any(r.bot is not None for r in reviewers):
+            # ponytail: one page of 100 of each -- paginate if an MR ever has more.
+            notes = await self._json(
+                repo,
+                ["api", f"projects/:id/merge_requests/{mr['iid']}/notes?per_page=100"],
+                "glab api notes",
+            )
+            discussions = await self._json(
+                repo,
+                ["api", f"projects/:id/merge_requests/{mr['iid']}/discussions?per_page=100"],
+                "glab api discussions",
+            )
+        out = []
+        for r in reviewers:
+            if r.bot is not None:
+                out.append(_bot_feedback(r, notes, discussions, since))
+                continue
+            latest = await self._latest_status(repo, mr, r.check)
+            status = None if latest is None else str(latest.get("status"))
+            out.append(
+                ReviewerFeedback(
+                    r,
+                    None,
+                    check={
+                        "name": r.check,
+                        # 'canceled' is never a verdict: the retry comes after it.
+                        "finished": status in ("success", "failed", "skipped"),
+                        "conclusion": status,
+                        "output": str((latest or {}).get("description") or ""),
+                    },
+                )
+            )
+        return out
 
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
         """Retries every failed/canceled job in the pipeline `ci` read.

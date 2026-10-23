@@ -5,7 +5,9 @@ land -- vocabulary both CLI backends share.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -383,6 +385,15 @@ def combine_reviews(results: list[ReviewResult]) -> ReviewResult:
         if any(r.state == state for r in results):
             return ReviewResult(state, findings=findings, detail=detail)
     return ReviewResult("clean", detail=detail)
+
+
+def forge_time(raw: object) -> datetime | None:
+    """A timestamp as a forge reports it (`2026-01-01T12:00:00Z`), or None."""
+    return datetime.fromisoformat(raw) if isinstance(raw, str) and raw else None
+
+
+def newest(times: Iterable[datetime | None]) -> datetime | None:
+    return max((t for t in times if t is not None), default=None)
 
 
 def same_login(a: str, b: str) -> bool:

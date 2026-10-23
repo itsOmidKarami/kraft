@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from pathlib import Path
 
 from kraft.adapters.forge import git
@@ -18,8 +19,10 @@ from kraft.adapters.forge.models import (
     MRRef,
     QueueRead,
     QueueState,
+    ReviewerFeedback,
     ReviewResult,
 )
+from kraft.automated_review import Reviewers
 
 _GH_MR_STATES: dict[str, str] = {"OPEN": "open", "MERGED": "merged", "CLOSED": "closed"}
 
@@ -40,6 +43,78 @@ _GH_FAILURE_REASON = {
 #: person cancelled with no successor is `ci.render_ci`'s "abandoned".
 _GH_RED = frozenset(_GH_FAILURE_REASON)
 _GH_SETTLED_OK = frozenset({"SUCCESS", "NEUTRAL", "SKIPPED"})
+
+
+def _bot_feedback(
+    reviewer, comments: list[dict], reviews: list[dict], threads: list[dict], head: str, since
+) -> ReviewerFeedback:
+    """One bot's part of the pull request's comments, reviews and threads."""
+    bot = reviewer.bot
+
+    def mine(login: object) -> bool:
+        return mr_ops.same_login(str(login or ""), bot)
+
+    summaries: list[dict] = []
+    seen: list[datetime | None] = []
+    for c in comments:
+        if mine((c.get("user") or {}).get("login")):
+            at = mr_ops.forge_time(c.get("updated_at"))
+            seen.append(at)
+            if at is not None and at > since:
+                summaries.append(
+                    {
+                        "kind": "comment",
+                        "state": None,
+                        "body": c.get("body") or "",
+                        "updated_at": c["updated_at"],
+                    }
+                )
+    for r in reviews:
+        # A draft review is not submitted, and a dismissed one is a
+        # maintainer's "this no longer blocks": neither is the bot speaking.
+        if mine((r.get("user") or {}).get("login")) and r.get("state") not in (
+            "PENDING",
+            "DISMISSED",
+        ):
+            at = mr_ops.forge_time(r.get("submitted_at"))
+            seen.append(at)
+            if r.get("commit_id") == head and at is not None and at > since:
+                summaries.append(
+                    {
+                        "kind": "review",
+                        "state": r.get("state"),
+                        "body": r.get("body") or "",
+                        "updated_at": r["submitted_at"],
+                    }
+                )
+    open_threads: list[dict] = []
+    for t in threads:
+        notes = (t.get("comments") or {}).get("nodes") or []
+        seen += [
+            mr_ops.forge_time(n.get("updatedAt"))
+            for n in notes
+            if mine((n.get("author") or {}).get("login"))
+        ]
+        if notes and mine((notes[0].get("author") or {}).get("login")) and not t.get("isResolved"):
+            first = notes[0]
+            body = "\n".join(
+                [
+                    first.get("body") or "",
+                    *(
+                        f"{(n.get('author') or {}).get('login')}: {n.get('body')}"
+                        for n in notes[1:]
+                    ),
+                ]
+            )
+            open_threads.append(
+                {
+                    "id": t["id"],
+                    "file": first.get("path"),
+                    "line": first.get("line") or first.get("originalLine"),
+                    "body": body,
+                }
+            )
+    return ReviewerFeedback(reviewer, mr_ops.newest(seen), tuple(summaries), tuple(open_threads))
 
 
 def _cancelled_at(rows: list[dict], *, at: str) -> str:
@@ -108,6 +183,25 @@ query($owner: String!, $name: String!, $n: Int!) {
       id
       autoMergeRequest { enabledAt }
       mergeQueueEntry { id }
+    }
+  }
+}
+"""
+#: A pull request's review threads, with each one's comments: what
+#: `reviewer_feedback` reads, since REST review comments carry no resolved flag.
+_THREADS_QUERY = """
+query($owner: String!, $name: String!, $n: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $n) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          comments(first: 100) {
+            nodes { author { login } body path line originalLine updatedAt }
+          }
+        }
+      }
     }
   }
 }
@@ -372,6 +466,95 @@ class GhCli(mr_ops.CliWaits):
         if findings:
             return ReviewResult("actionable", findings=findings, detail=f"{bot}: {last['state']}")
         return ReviewResult("clean", detail=f"{bot}: {last.get('state')}")
+
+    async def reviewer_feedback(
+        self, *, repo: Path, branch: str, reviewers: Reviewers, since: datetime
+    ) -> list[ReviewerFeedback]:
+        """What each of `reviewers` has said on the pull request, in order. The
+        pull request, and for the bots its comments, reviews and threads, are
+        read once however many reviewers there are."""
+        pr = await self._json(
+            repo, ["pr", "view", branch, "--json", "number,headRefOid"], "gh pr view"
+        )
+        number, head = pr["number"], pr["headRefOid"]
+        comments = reviews = threads = []
+        if any(r.bot is not None for r in reviewers):
+            # ponytail: one page of 100 of each -- paginate if a PR ever has more.
+            comments = await self._json(
+                repo,
+                ["api", f"repos/{{owner}}/{{repo}}/issues/{number}/comments?per_page=100"],
+                "gh api comments",
+            )
+            reviews = await self._json(
+                repo,
+                ["api", f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews?per_page=100"],
+                "gh api reviews",
+            )
+            data = await self._json(
+                repo,
+                [
+                    "api",
+                    "graphql",
+                    "-F",
+                    "owner={owner}",
+                    "-F",
+                    "name={repo}",
+                    "-F",
+                    f"n={number}",
+                    "-f",
+                    f"query={_THREADS_QUERY}",
+                ],
+                "gh api graphql",
+            )
+            try:
+                threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+            except (KeyError, TypeError) as exc:
+                raise ForgeError(
+                    f"gh api graphql answered without the review threads: {data!r:.200}"
+                ) from exc
+        return [
+            _bot_feedback(r, comments, reviews, threads, head, since)
+            if r.bot is not None
+            else ReviewerFeedback(r, None, check=await self._check_feedback(repo, head, r.check))
+            for r in reviewers
+        ]
+
+    async def _check_feedback(self, repo: Path, head: str, check: str) -> dict:
+        """The check run `check` on `head`, or else the commit status of that
+        name, as `{"name", "finished", "conclusion", "output"}`. A cancelled run
+        is never finished: GitHub starts its successor a moment later."""
+        runs = (
+            await self._json(
+                repo,
+                ["api", f"repos/{{owner}}/{{repo}}/commits/{head}/check-runs?check_name={check}"],
+                "gh api check-runs",
+            )
+        ).get("check_runs") or []
+        if runs:
+            run = runs[0]
+            conclusion = str(run.get("conclusion") or "")
+            output = run.get("output") or {}
+            return {
+                "name": check,
+                "finished": run.get("status") == "completed" and conclusion != "cancelled",
+                "conclusion": conclusion or None,
+                "output": "\n".join(
+                    str(output[k]) for k in ("title", "summary", "text") if output.get(k)
+                ),
+            }
+        statuses = (
+            await self._json(
+                repo, ["api", f"repos/{{owner}}/{{repo}}/commits/{head}/status"], "gh api status"
+            )
+        ).get("statuses") or []
+        status = next((s for s in statuses if s.get("context") == check), None)
+        state = None if status is None else status.get("state")
+        return {
+            "name": check,
+            "finished": state is not None and state != "pending",
+            "conclusion": state,
+            "output": str((status or {}).get("description") or ""),
+        }
 
     async def _check_review(self, repo: Path, branch: str, check: str) -> ReviewResult:
         """The check run `check` on the PR's head, or else the commit status
