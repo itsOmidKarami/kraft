@@ -24,19 +24,24 @@ CHAIN = "chain"
 LIBRARY = "library"
 
 #: An extending chain (`extends`) writes `remove`, `add` and `overrides` in place of `nodes`.
-CHAIN_KEYS = ("id", "extends", "description", "policy", "remove", "add", "overrides", "nodes")
+CHAIN_KEYS = (
+    "id", "extends", "description", "runner", "policy", "remove", "add", "overrides", "nodes",
+)  # fmt: skip
 LIBRARY_KEYS = ("steering", "tasks", "steps", "nodes")
 NODE_KEYS = (
-    "id", "kind", "extends", "icon", "message", "artifact", "artifact_required", "reject_to",
-    "timeout", "chain_finalized", "tasks", "steps", "on_failure", "fix_loop", "escalation",
-    "on_base_changed", "on_merge_rejected", "auto_review", "policy", "skippable", "read_only",
+    "id", "kind", "extends", "runner", "icon", "message", "artifact", "artifact_required",
+    "reject_to", "timeout", "chain_finalized", "tasks", "steps", "on_failure", "fix_loop",
+    "escalation", "on_base_changed", "on_merge_rejected", "auto_review", "policy", "skippable",
+    "read_only",
 )  # fmt: skip
 TASK_KEYS = (
     "id", "kind", "extends", "icon", "harness", "ref", "command", "target", "prompt", "skill",
     "produces", "profile", "model", "effort", "inputs", "fallback", "steering", "scope",
     "execution", "wait", "reviewers", "policy", "skippable", "on_failure",
 )  # fmt: skip
-STEP_KEYS = ("id", "extends", "icon", "tasks", "on_failure", "policy", "skippable", "read_only")
+STEP_KEYS = (
+    "id", "extends", "runner", "icon", "tasks", "on_failure", "policy", "skippable", "read_only",
+)  # fmt: skip
 SHAPE_KEYS = ("tasks", "steps", JUDGE_SEGMENT, "max_attempts", "read_only")
 #: The order inside a nested mapping, by its key.
 NESTED_KEYS = {

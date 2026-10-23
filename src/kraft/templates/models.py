@@ -40,6 +40,7 @@ from pydantic import (
     PlainSerializer,
     StrictBool,
     StrictStr,
+    StringConstraints,
     ValidationError,
     ValidationInfo,
     model_validator,
@@ -110,6 +111,9 @@ AUTO_REVIEW_SEGMENT = "auto_review"
 #: (`config_check.icon_issues`), never a load failure, so an icon set dropping a
 #: name cannot stop a chain over a cosmetic field (R32).
 Icon = Annotated[StrictStr, Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$")]
+
+#: Where a step runs: `local`, `any` or a machine name (`kraft.remote.placement`).
+RUNNER = Annotated[StrictStr, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]{0,38}$")]
 
 _DURATION = re.compile(r"^(\d+)(s|m|h|d)$")
 _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
@@ -676,6 +680,9 @@ class Step(BaseModel):
     #: around all of them together (`executor.read_only`).
     read_only: StrictBool = False
     icon: Icon | None = None
+    #: Where this runs: a machine name, "any" or "local" (the default). The most specific of
+    #: chain, node and step wins; see kraft.remote.placement.
+    runner: RUNNER | None = None
 
     @model_validator(mode="after")
     def _local_identifiers(self) -> Self:
@@ -715,7 +722,9 @@ class ExecutionShape(BaseModel):
             _unique("step", [s.id for s in self.steps])
         return self
 
-    def resolve_steps(self, prefix: str, scopes: Scopes = ()) -> tuple[ResolvedStep, ...]:
+    def resolve_steps(
+        self, prefix: str, scopes: Scopes = (), runner: str | None = None
+    ) -> tuple[ResolvedStep, ...]:
         """This container's ordered steps and their tasks, each at its canonical
         path under `prefix`, with a `tasks` group normalized to one step named
         `main` (`task-group-shorthand-resolves-to-one-step`). `Step` itself
@@ -725,7 +734,8 @@ class ExecutionShape(BaseModel):
 
         `scopes` are the policy overrides enclosing this container, broadest
         first; each step and task appends its own, and a recovery plan inherits
-        the scopes of the step or task that declares it."""
+        the scopes of the step or task that declares it. `runner` is the placement
+        of whatever owns this container; a step's own wins over it."""
         steps = (
             self.steps
             if self.steps is not None
@@ -742,6 +752,7 @@ class ExecutionShape(BaseModel):
         for step in steps:
             path = f"{prefix}{PATH_SEPARATOR}{step.id}"
             step_scopes = (*scopes, *_own(step.policy))
+            step_runner = step.runner or runner
             tasks = []
             for task in step.tasks:
                 task_path = f"{path}{PATH_SEPARATOR}{task.id}"
@@ -750,8 +761,11 @@ class ExecutionShape(BaseModel):
                     ResolvedTask(
                         path=task_path,
                         task=task,
-                        on_failure=_handler_steps(task.on_failure, task_path, task_scopes),
+                        on_failure=_handler_steps(
+                            task.on_failure, task_path, task_scopes, step_runner
+                        ),
                         scopes=task_scopes,
+                        runner=step_runner,
                     )
                 )
             resolved.append(
@@ -759,10 +773,11 @@ class ExecutionShape(BaseModel):
                     path=path,
                     id=step.id,
                     tasks=tuple(tasks),
-                    on_failure=_handler_steps(step.on_failure, path, step_scopes),
+                    on_failure=_handler_steps(step.on_failure, path, step_scopes, step_runner),
                     scopes=step_scopes,
                     own=step.policy,
                     read_only=step.read_only or every,
+                    runner=step_runner,
                 )
             )
         return tuple(resolved)
@@ -792,13 +807,22 @@ def _own(policy: TaskPolicyOverride | None) -> Scopes:
 
 
 def _handler_steps(
-    plan: RecoveryPlan | None, owner: str, scopes: Scopes = ()
+    plan: RecoveryPlan | None, owner: str, scopes: Scopes = (), runner: str | None = None
 ) -> tuple[ResolvedStep, ...]:
     """`plan`'s steps at `<owner>.on_failure`, or none. The plan sits in its
-    owner's scope, so it inherits `scopes`, the owner's."""
+    owner's scope, so it inherits `scopes` and `runner`, the owner's."""
     return (
-        plan.resolve_steps(f"{owner}{PATH_SEPARATOR}on_failure", scopes) if plan is not None else ()
+        plan.resolve_steps(f"{owner}{PATH_SEPARATOR}on_failure", scopes, runner)
+        if plan is not None
+        else ()
     )
+
+
+def _refuse_inner_runner(where: str, shape: ExecutionShape | None) -> None:
+    """A recovery plan, a fix loop and the like follow their owner's placement."""
+    for step in (shape.steps or ()) if shape is not None else ():
+        if step.runner is not None:
+            raise ValueError(f"{where}: step {step.id!r} sets runner; set runner on the owner")
 
 
 def _refuse_nested_handlers(where: str, shape: ExecutionShape | None) -> None:
@@ -849,6 +873,7 @@ class RecoveryPlan(ExecutionShape):
     @model_validator(mode="after")
     def _no_nested_handler(self) -> Self:
         _refuse_nested_handlers("a recovery plan", self)
+        _refuse_inner_runner("a recovery plan", self)
         return self
 
     def _steps_read_only(self) -> bool:
@@ -881,6 +906,7 @@ class BaseChangePolicy(BaseModel):
     @model_validator(mode="after")
     def _conflict_handler_writes(self) -> Self:
         _refuse_read_only("on_conflict", self.on_conflict)
+        _refuse_inner_runner("on_conflict", self.on_conflict)
         return self
 
 
@@ -904,6 +930,7 @@ class MergeRejectionPolicy(BaseModel):
     @model_validator(mode="after")
     def _repair_writes(self) -> Self:
         _refuse_read_only("on_merge_rejected.repair", self.repair)
+        _refuse_inner_runner("on_merge_rejected.repair", self.repair)
         return self
 
 
@@ -921,6 +948,7 @@ class FixLoop(ExecutionShape):
     @model_validator(mode="after")
     def _no_nested_handler(self) -> Self:
         _refuse_nested_handlers("a fix loop", self)
+        _refuse_inner_runner("a fix loop", self)
         _refuse_read_only("a fix loop", self)
         _refuse_handler_on("a fix loop's judge", self.judge)
         if self.judge is not None and self.judge.icon is not None:
@@ -958,6 +986,9 @@ class ExecNode(ExecutionShape):
     #: from before its first step to after its last (`executor.read_only`).
     read_only: StrictBool = False
     icon: Icon | None = None
+    #: Where this runs: a machine name, "any" or "local" (the default). The most specific of
+    #: chain, node and step wins; see kraft.remote.placement.
+    runner: RUNNER | None = None
 
     def merges(self) -> bool:
         """Whether one of the node's own tasks, after `extends` expansion,
@@ -1031,6 +1062,9 @@ class GateNode(BaseModel):
     #: `task-step-and-node-are-skippable-by-default`: an operator may skip this
     #: component unless it says `false` here.
     skippable: StrictBool = True
+    #: Where the gate's automated review runs: a machine name, "any" or "local" (the
+    #: default). The gate's own, else the chain's; see kraft.remote.placement.
+    runner: RUNNER | None = None
 
     @model_validator(mode="after")
     def _no_handler(self) -> Self:
@@ -1079,6 +1113,9 @@ class Chain(BaseModel):
     description: StrictStr | None = None
     nodes: list[AnyNode] = Field(min_length=1)
     policy: TemplatePolicyOverride | None = None
+    #: Where this runs: a machine name, "any" or "local" (the default). The most specific of
+    #: chain, node and step wins; see kraft.remote.placement.
+    runner: RUNNER | None = None
 
     @model_validator(mode="after")
     def _nodes_are_addressable(self, info: ValidationInfo) -> Self:
@@ -1209,12 +1246,14 @@ class Chain(BaseModel):
         return self
 
 
-def _dedicated(path: str, task: AnyTask | None, scopes: Scopes) -> ResolvedTask | None:
+def _dedicated(
+    path: str, task: AnyTask | None, scopes: Scopes, runner: str | None = None
+) -> ResolvedTask | None:
     """A named-slot task (judge, escalation, gate reviewer) at `path`, in its
-    node's `scopes` plus its own override."""
+    node's `scopes` plus its own override, placed where its node is."""
     if task is None:
         return None
-    return ResolvedTask(path=path, task=task, scopes=(*scopes, *_own(task.policy)))
+    return ResolvedTask(path=path, task=task, scopes=(*scopes, *_own(task.policy)), runner=runner)
 
 
 def _scoped(
@@ -1247,6 +1286,9 @@ class ResolvedTask:
     #: Every policy override enclosing this task, its own last
     #: (`MaterializedChain.policy_for`).
     scopes: Scopes = ()
+    #: The library's placement of this task: its step's, else its node's, else
+    #: its chain's. `None` is unset (the item's own overrides and `local` decide).
+    runner: str | None = None
 
     #: The level its caps' defaults and maxima come from (Ruling 211).
     level: ClassVar[str] = "tasks"
@@ -1268,6 +1310,7 @@ class ResolvedStep:
     #: The override this step sets itself.
     own: TaskPolicyOverride | None = None
     read_only: bool = False
+    runner: str | None = None
 
     level: ClassVar[str] = "steps"
 
@@ -1296,6 +1339,8 @@ class ResolvedNode:
     #: The node's own policy override, if it declares one. Its fix loop's
     #: bounds resolve here (`walk.walk_node`).
     scopes: Scopes = ()
+    #: The node's own placement, else its chain's (`None`: unset).
+    runner: str | None = None
 
     #: A gate is a node, for its caps' level too (Ruling 211).
     level: ClassVar[str] = "nodes"
@@ -1408,6 +1453,7 @@ class ResolvedChain:
             # gate's): `node_scopes` is what each of them inherits before its
             # own step's or task's override.
             node_scopes = _own(node.policy)
+            node_runner = node.runner or chain.runner
 
             if isinstance(node, GateNode):
                 nodes.append(
@@ -1418,8 +1464,10 @@ class ResolvedChain:
                             f"{node.id}{PATH_SEPARATOR}{AUTO_REVIEW_SEGMENT}",
                             node.auto_review,
                             node_scopes,
+                            node_runner,
                         ),
                         scopes=node_scopes,
+                        runner=node_runner,
                     )
                 )
                 continue
@@ -1428,10 +1476,12 @@ class ResolvedChain:
                 ResolvedNode(
                     id=node.id,
                     node=node,
-                    steps=node.resolve_steps(node.id, node_scopes),
-                    on_failure=_handler_steps(node.on_failure, node.id, node_scopes),
+                    steps=node.resolve_steps(node.id, node_scopes, node_runner),
+                    on_failure=_handler_steps(node.on_failure, node.id, node_scopes, node_runner),
                     fix_loop=(
-                        loop.resolve_steps(f"{node.id}{PATH_SEPARATOR}fix_loop", node_scopes)
+                        loop.resolve_steps(
+                            f"{node.id}{PATH_SEPARATOR}fix_loop", node_scopes, node_runner
+                        )
                         if loop is not None
                         else ()
                     ),
@@ -1439,12 +1489,14 @@ class ResolvedChain:
                         f"{node.id}{PATH_SEPARATOR}fix_loop{PATH_SEPARATOR}{JUDGE_SEGMENT}",
                         loop.judge if loop is not None else None,
                         node_scopes,
+                        node_runner,
                     ),
                     escalation=(
                         _dedicated(
                             f"{node.id}{PATH_SEPARATOR}escalation{PATH_SEPARATOR}{node.escalation.id}",
                             node.escalation,
                             node_scopes,
+                            node_runner,
                         )
                         if node.escalation is not None
                         else None
@@ -1453,6 +1505,7 @@ class ResolvedChain:
                         node.on_base_changed.on_conflict.resolve_steps(
                             f"{node.id}{PATH_SEPARATOR}on_base_changed{PATH_SEPARATOR}on_conflict",
                             node_scopes,
+                            node_runner,
                         )
                         if node.on_base_changed is not None
                         and node.on_base_changed.on_conflict is not None
@@ -1462,11 +1515,13 @@ class ResolvedChain:
                         node.on_merge_rejected.repair.resolve_steps(
                             f"{node.id}{PATH_SEPARATOR}on_merge_rejected{PATH_SEPARATOR}repair",
                             node_scopes,
+                            node_runner,
                         )
                         if node.on_merge_rejected is not None
                         else ()
                     ),
                     scopes=node_scopes,
+                    runner=node_runner,
                 )
             )
         return cls(chain=chain, nodes=tuple(nodes), steering=steering, addons=addons)
