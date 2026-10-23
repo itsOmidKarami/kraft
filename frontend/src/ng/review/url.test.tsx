@@ -10,10 +10,13 @@ const q = (s: string) => new URLSearchParams(s);
 
 describe("review URL", () => {
   it("defaults: base to latest at the pending gate; from the last review on a re-review", () => {
+    const reReview = { attempts: [{ n: 1, sha: "h1", base_sha: "b", at: "" }] };
     expect(readReview(q(""), item())).toEqual({ from: "base", to: "latest", nodes: null, file: null, gate: "final_review", doc: false });
-    expect(readReview(q(""), item({ last_review_sha: "h1" })).from).toBe("last_review");
+    expect(readReview(q(""), item({ last_review_sha: "h1", ...reReview })).from).toBe("last_review");
     // Nothing changed since that review: it would compare HEAD with itself.
-    expect(readReview(q(""), item({ last_review_sha: "h2" })).from).toBe("base");
+    expect(readReview(q(""), item({ last_review_sha: "h2", ...reReview })).from).toBe("base");
+    // A review at another gate (local_review before final_review): this gate sees the whole change.
+    expect(readReview(q(""), item({ last_review_sha: "h0", ...reReview })).from).toBe("base");
   });
 
   it("reads every parameter, and drops a target it does not know", () => {

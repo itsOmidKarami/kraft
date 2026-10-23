@@ -142,6 +142,14 @@ describe("the gate review (F)", () => {
     expect(screen.getByRole("button", { name: "Request changes" })).toBeInTheDocument();
   });
 
+  it("names a re-review's partial range, with a way to the whole change, and none on a first look", async () => {
+    mount(gateItem({ gate_artifact: null, last_review_sha: "old", attempts: [{ n: 1, sha: "old", base_sha: "b", at: "" }] }));
+    expect(await screen.findByText(/Files changed since your last review/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Show the whole change" }));
+    expect(where()).toBe("/work-items/w1/review?from=base");
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Show the whole change" })).toBeNull());
+  });
+
   it("says when the diff was cut and a file's patch is missing", async () => {
     mount(gateItem({ gate_artifact: null }), "/work-items/w1/review", { "GET /work-items/w1/compare": [200, { files: FILES, diff: "", untracked: [], truncated: true, diff_max_bytes: 1000 }] });
     await userEvent.click(await screen.findByRole("button", { name: /docs\/search\.md/ }));

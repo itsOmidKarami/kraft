@@ -14,14 +14,16 @@ export interface ReviewPlace {
   doc: boolean;
 }
 
-type Defaults = Pick<WorkItem, "last_review_sha" | "head_sha" | "pending_gate">;
+type Defaults = Pick<WorkItem, "last_review_sha" | "head_sha" | "pending_gate" | "attempts">;
 
 const isTarget = (v: string | null): v is CompareTarget =>
   v === "base" || v === "latest" || v === "last_review" || (!!v && /^attempt:[1-9]\d*$/.test(v));
 
-/** A re-review compares from the last review (prototype `openReview`); a first look from the base. */
+/** A re-review of this gate compares from the last review (prototype `openReview`); a first look from the base.
+ *  A review made at another gate -- `local_review` before `final_review` -- is not a re-review: that gate sees the whole change. */
 export function defaultFrom(item: Defaults): CompareTarget {
-  return item.last_review_sha && item.last_review_sha !== item.head_sha ? "last_review" : "base";
+  const sha = item.last_review_sha;
+  return sha && sha !== item.head_sha && (item.attempts ?? []).some((a) => a.sha === sha) ? "last_review" : "base";
 }
 
 export function readReview(search: URLSearchParams, item: Defaults): ReviewPlace {

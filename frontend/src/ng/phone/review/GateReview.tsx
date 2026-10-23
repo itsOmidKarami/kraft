@@ -14,6 +14,7 @@ import { REQUEST_CHANGES, approveBlock, drafts, gateConsequence, sendsBack } fro
 import { useSubmit } from "../../review/FinishReview";
 import { parsePatch, type PatchFile } from "../../review/patch";
 import { rangeName, threadRange } from "../../review/range";
+import { targetLabel } from "../../review/model";
 import { readReview } from "../../review/url";
 import { useArtifact, useCompare, useShownHead, useThreads } from "../../review/useReview";
 import { Button } from "../../ui/Button";
@@ -127,6 +128,12 @@ export function GateReview({ item, events, reload }: { item: ItemDetail; events:
     next.set("compose", "reject");
     navigate(`?${next}`);
   };
+  // This screen has no compare picker: a part of the change is named, with the way to the whole of it.
+  const wholeChange = () => {
+    const next = new URLSearchParams(params);
+    next.set("from", "base");
+    navigate(`?${next}`, { replace: true });
+  };
 
   return (
     <>
@@ -138,6 +145,12 @@ export function GateReview({ item, events, reload }: { item: ItemDetail; events:
           {message && <p className="ph-review-msg">{message}</p>}
           {next && <p className="ph-review-next">{next}</p>}
           <p className="ph-review-next">{readOnly}</p>
+          {place.from !== "base" && (
+            <p className="ph-review-next">
+              Files changed since {targetLabel(place.from, item)}.{" "}
+              <Button onClick={wholeChange}>Show the whole change</Button>
+            </p>
+          )}
           {head.moved && (
             <p className="ph-review-next" role="alert">
               The branch moved since this diff was read; approving it is refused until you look again.{" "}

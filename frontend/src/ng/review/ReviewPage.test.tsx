@@ -7,7 +7,7 @@ import * as http from "../http";
 import { DEFAULT_PREFS, useDiffPrefs } from "./prefs";
 import { ReviewPage } from "./ReviewPage";
 
-const ITEM = { id: "w1", title: "Cache embeddings", repo: "/r/x", status: "needs_human", display_status: "needs_you", worker_sessions: [], chain_definition: { nodes: [] }, attempts: [], last_review_sha: "h1", head_sha: "h2", pending_gate: "final_review", created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z" };
+const ITEM = { id: "w1", title: "Cache embeddings", repo: "/r/x", status: "needs_human", display_status: "needs_you", worker_sessions: [], chain_definition: { nodes: [] }, attempts: [{ n: 1, sha: "h1", base_sha: "b", at: "2026-10-01T00:00:00Z" }], last_review_sha: "h1", head_sha: "h2", pending_gate: "final_review", created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z" };
 
 let search = "";
 const Where = () => {
