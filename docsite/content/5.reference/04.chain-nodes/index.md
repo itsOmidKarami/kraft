@@ -435,7 +435,7 @@ Every task takes these keys, then the keys of its kind. A task takes no
 | `profile` | string | none | An [agent profile](/reference/harnesses/agent-profiles) from `harnesses.yaml` (`strong`) that sets the model tier. Not allowed with `model` or `effort`. |
 | `model`, `effort` | string | none | This task's runtime options, checked against what the [provider](/concepts/vocabulary#provider) of the task's harness profile accepts. Not allowed with `profile`. |
 | `fallback` | list | unset | Where the launch goes when it is rate-limited or its harness is unavailable. `[]` means none. See [Fallback](/reference/harnesses/fallback-and-escalation). |
-| `inputs` | list | `[]` | What Kraft hands the task: `review_package`, `carried_findings` or `previous_review`. |
+| `inputs` | list | `[]` | What Kraft hands the task: `review_package`, `carried_findings`, `previous_review` or `bot_feedback`, what the review bots said once they settled. With nothing to say, the task is skipped, not started. _Added in next_ |
 
 ### Subprocess task keys
 

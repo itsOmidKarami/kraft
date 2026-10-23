@@ -301,6 +301,7 @@ async def steering_preview(chain: str, task: str, repo: str, request: Request):
         review_package=(
             "<review package>" if AgentInput.REVIEW_PACKAGE in rt.task.inputs else None
         ),
+        bot_feedback="<bot feedback>" if AgentInput.BOT_FEEDBACK in rt.task.inputs else None,
         method_text=inv.method_text,
         skill=rt.task.skill,
         intent_dir=entry.intent_dir,

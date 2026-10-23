@@ -412,6 +412,16 @@ SHALL NOT be.
 enforced-by: tests/executor/test_agent_inputs.py::test_the_review_package_reaches_only_a_task_that_declares_it[declared], tests/executor/test_agent_inputs.py::test_the_review_package_reaches_only_a_task_that_declares_it[undeclared], tests/executor/test_agent_inputs.py::test_the_seeded_code_review_reads_the_review_package_through_its_method, tests/executor/test_seeded_failure_walk.py::test_a_failing_review_walks_verifications_own_fix_loop_never_the_implementer
 origin: src/kraft/templates/models.py §AgentInput -- declared on the task (`inputs: [review_package]`), not keyed on a task's name. Delivered by `executor/dispatch.py` §dispatch_node through `prompts.review_package` and `adapters/agent.py`'s `$KRAFT_REVIEW_PACKAGE`; the seeded fix-loop judge is its first consumer, and the default chain's in-loop code review (`verification.review.code_review`) its second.
 
+## REQ bot-feedback-is-delivered-to-a-task-that-declares-it
+
+An agent task that declares the `bot_feedback` input SHALL be handed what the
+review bots said, as the review wait collected it for this pass of the node,
+and a task that does not declare it SHALL NOT be. WHEN that collection holds no
+summary, no open thread and no failed check, the task SHALL be recorded as done
+with no findings and no agent SHALL be started.
+enforced-by: tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[declared], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[undeclared], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[empty-collection-skips], tests/executor/test_agent_inputs.py::test_a_skipped_triage_is_not_the_previous_review_of_the_next_round, tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[this-round], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[stale-round-collection-ignored], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[left-before-a-restart]
+origin: src/kraft/templates/models.py §AgentInput -- declared as `inputs: [bot_feedback]` and delivered by `executor/dispatch.py` §dispatch_node through `prompts.bot_feedback` and `adapters/agent.py`'s `$KRAFT_BOT_FEEDBACK`; the collection is written by the node's `mr.automated_review` wait (`adapters/forge/run.py` §_collect_review).
+
 ## REQ carried-findings-are-delivered-to-a-reviewing-task
 
 A reviewing agent task SHALL be shown the findings its previous round

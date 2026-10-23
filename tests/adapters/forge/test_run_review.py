@@ -265,7 +265,9 @@ async def test_the_collect_path_settles_then_hands_on_the_collection(
         zip(["bot:a", "bot:b"], finished, strict=True)
     )
     assert {r["reviewer"][4:]: [t["id"] for t in r["threads"]] for r in got["reviewers"]} == threads
-    assert rig.triaged == ["feedback.decide.triage"]
+    # Bots with threads open are read; silent ones leave nothing for the triage to
+    # read, so no agent is started for it.
+    assert rig.triaged == (["feedback.decide.triage"] if quiet else [])
 
 
 async def test_the_next_check_comes_when_a_bots_grace_period_ends_not_at_the_backoff(rig):
@@ -288,7 +290,7 @@ async def test_no_reviewer_named_settles_with_an_empty_collection(rig):
 
     assert len(rig.item.events("automated_review_not_configured")) == 1
     assert rig.collection()["reviewers"] == []
-    assert rig.triaged == ["feedback.decide.triage"]
+    assert rig.triaged == [], "nothing was collected, so nothing is triaged"
 
 
 @pytest.mark.parametrize(

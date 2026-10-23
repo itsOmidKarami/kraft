@@ -4,10 +4,14 @@ consumer is the seeded fix-loop judge and the in-loop code review the second,
 and a reviewer's continuity: its last round's findings and its own last
 session."""
 
+import json
+
 import pytest
 from support.harness import entry_of, v1_named_chain, v1_node, v1_task
 
-from kraft import executor
+from kraft import events, executor
+from kraft.executor import prompts
+from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import AgentInput
 
 NO_SETUP = entry_of({"setup_command": ""})
@@ -229,3 +233,118 @@ async def _measured_many(it, node_id: str, findings) -> None:
             },
         )
     )
+
+
+def _bot_node(**agent_fields):
+    """A node whose review wait is followed by the agent `judge`."""
+    wait = {"id": "wait", "kind": "forge", "target": "mr.automated_review"}
+    judge = v1_task("judge", kind="agent", prompt="Decide.", **agent_fields)
+    steps = [{"id": "settle", "tasks": [wait]}, {"id": "decide", "tasks": [judge]}]
+    return [{"id": "review", "kind": "exec", "steps": steps}]
+
+
+def _collection(said: bool) -> dict:
+    """What a review wait left: one bot with a thread open, or with nothing to say."""
+    thread = {"id": "t1", "file": "calc.py", "line": 3, "body": "unused x"}
+    entry = {"reviewer": "bot:x", "finished": "activity", "check": None}
+    entry |= {"summaries": [], "threads": [thread] if said else []}
+    return {"head": "abc123", "round": 0, "reviewers": [entry]}
+
+
+async def _waited(it, collection: dict, *, round: int = 0) -> None:
+    """The review wait's session, finished, with `collection` in its folder."""
+    await it.session("w0", "review.settle.wait", "done", round=round, head_sha="abc123")
+    written = it.files("w0").bot_feedback
+    written.parent.mkdir(parents=True, exist_ok=True)
+    written.write_text(json.dumps(collection))
+
+
+@pytest.mark.parametrize(
+    "said, inputs, ran, delivered",
+    [
+        (True, ["bot_feedback"], True, True),
+        (True, [], True, False),
+        (False, ["bot_feedback"], False, False),
+    ],
+    ids=["declared", "undeclared", "empty-collection-skips"],
+)
+async def test_bot_feedback_is_delivered_only_when_declared(
+    item_on, fake_agent, tmp_path, monkeypatch, said, inputs, ran, delivered
+):
+    """`bot-feedback-is-delivered-to-a-task-that-declares-it`: the collection the
+    review wait left is copied for the declaring session and named in its
+    launch; a collection with nothing in it starts no agent at all."""
+    seen = tmp_path / "seen-env.txt"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_SHELL", f'printf %s "$KRAFT_BOT_FEEDBACK" > {seen}')
+    # In a person's own checkout, where a task that runs first takes the checkout.
+    in_place = WorkItemTarget.for_repository("sample", in_place=True)
+    it = await item_on(_bot_node(inputs=inputs), "review", target=in_place)
+    await _waited(it, _collection(said))
+
+    launch = executor.LaunchContext(repo_entry=NO_SETUP)
+    assert (
+        await executor.run_once(
+            it.database, it.run_dirs, work_item_id=it.id, start_index=0, start_step=1, launch=launch
+        )
+        == "completed"
+    )
+
+    [session] = [s for s in it.sessions("review") if s["hook_point"] == "review.decide.judge"]
+    assert session["status"] == "done"
+    assert [("$KRAFT_BOT_FEEDBACK" in " ".join(a)) for a in fake_agent.argv()] == (
+        [delivered] if ran else []
+    )
+    own = it.files(session["id"]).bot_feedback
+    assert own.is_file() is delivered
+    assert (seen.read_text() == (str(own) if delivered else "")) if ran else not seen.exists()
+    if delivered:
+        assert json.loads(own.read_text()) == _collection(True)
+    assert len(it.events("task_marked")) == (1 if ran else 0), "nothing is taken for a skip"
+    if not ran:
+        assert session["head_sha"] is None, "a session that read nothing is no review of a head"
+
+
+async def test_a_skipped_triage_is_not_the_previous_review_of_the_next_round(item_on, fake_agent):
+    """The next round's triage is handed its last real verdict: a skip row in
+    between must not stand in for it (`last_review_session` reads only a
+    session at a head)."""
+    it = await item_on(_bot_node(inputs=["bot_feedback", "previous_review"]), "review")
+    await it.session("t0", "review.decide.judge", "done", head_sha="abc123")
+    await _waited(it, _collection(False))
+
+    await executor.run_once(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        start_index=0,
+        start_step=1,
+        launch=executor.LaunchContext(repo_entry=NO_SETUP),
+    )
+
+    skipped = [s for s in it.sessions("review") if s["hook_point"] == "review.decide.judge"]
+    assert [s["head_sha"] for s in skipped] == ["abc123", None]
+    last = prompts.last_review_session(it.database, it.id, "review.decide.judge")
+    assert last["result_path"] == skipped[0]["result_path"]
+
+
+@pytest.mark.parametrize(
+    "ran_at_round, asked_at_round, restarted_after, found",
+    [
+        (0, 0, False, True),
+        (0, 1, False, False),
+        (0, 0, True, False),
+    ],
+    ids=["this-round", "stale-round-collection-ignored", "left-before-a-restart"],
+)
+async def test_the_collection_read_is_this_nodes_this_rounds_and_this_runs(
+    item_on, ran_at_round, asked_at_round, restarted_after, found
+):
+    it = await item_on(_bot_node(inputs=["bot_feedback"]), "review")
+    await _waited(it, _collection(True), round=ran_at_round)
+    if restarted_after:
+        await it.database.write(lambda c: events.append(c, it.id, "work_item_retried", {}))
+    node = it.chain.chain.nodes[0]
+
+    got = prompts.bot_feedback_source(it.database, it.run_dirs, it.id, node, asked_at_round)
+
+    assert (got is not None) is found

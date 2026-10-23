@@ -307,6 +307,26 @@ async def config_error_session(db, run_dirs, common: dict, log: str) -> str:
     )
 
 
+async def skipped_session(db, run_dirs, common: dict, log: str) -> str:
+    """A task with nothing to do, recorded as a session that finished clean with
+    no findings. It carries no head: a session at a head is a review of it
+    (`prompts.last_review_session`), and this one reviewed nothing, so it must
+    not stand in for the previous review of a later round."""
+    _, log_path, result_path = await _builtins.start_session(
+        db, run_dirs, **{**common, "head_sha": None}
+    )
+    return await _builtins.finish_session(
+        db,
+        log_path,
+        result_path,
+        session_id=common["session_id"],
+        work_item_id=common["work_item_id"],
+        status="done",
+        log=log,
+        findings=[],
+    )
+
+
 async def time_capped_session(db, run_dirs, common: dict, hit: _caps.Hit) -> str:
     """A launch a spent time cap refused, recorded as its own session: it
     exits `capped_out`, and `LimitEvent.TIME_CAP_REACHED` names the scope and the cap, so the
@@ -1177,6 +1197,17 @@ async def _dispatch_task(
     if hit is not None and hit.remaining_s <= 0:
         return await time_capped_session(db, run_dirs, common, hit)
     time_cap = _caps.Deadline(_caps.monotonic() + hit.remaining_s, hit) if hit else None
+    # Nothing for a task reading what the review bots said means nothing to
+    # spend on: no checkout taken, no sandbox, no session started
+    # (`bot-feedback-is-delivered-to-a-task-that-declares-it`).
+    if (
+        isinstance(t, AgentTask)
+        and AgentInput.BOT_FEEDBACK in t.inputs
+        and prompts.bot_feedback_source(db, run_dirs, work_item_row["id"], node, round) is None
+    ):
+        return await skipped_session(
+            db, run_dirs, common, "no bot feedback collected; no agent started\n"
+        )
     if not isinstance(t, ForgeTask):
         # Resolved here, once, for every launch this task makes (Ruling 189):
         # a sandbox nobody can resolve stops this task for a human, recorded
@@ -1889,6 +1920,13 @@ async def _launch_agent(
         package = prompts.review_package(
             db, run_dirs, work_item_row["id"], worktree, task.path, common["session_id"]
         )
+    # And the review bots' feedback to a task that declares that: copied for this
+    # session, so a fallback launch's own session is handed it too.
+    feedback = None
+    if AgentInput.BOT_FEEDBACK in t.inputs:
+        feedback = prompts.bot_feedback(
+            db, run_dirs, work_item_row["id"], node, common["round"], common["session_id"]
+        )
     try:
         status = await _agent.run_agent_task(
             db,
@@ -1926,6 +1964,7 @@ async def _launch_agent(
             cwd=worktree,
             repo_entry=launch.repo_entry if launch else None,
             review_package=package,
+            bot_feedback=feedback,
             time_cap=time_cap,
             harness_id=harness_id,
             **common,

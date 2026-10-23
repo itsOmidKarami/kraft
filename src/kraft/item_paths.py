@@ -238,6 +238,10 @@ class SessionFiles:
     cid: Path
     instruction: Path
     review: Path
+    #: What the node's review wait collected from the review bots, for a task
+    #: declaring `bot_feedback`: the wait's own session writes it here, and the
+    #: reading task's session gets a copy.
+    bot_feedback: Path
     result: Path
     summary: Path
     writable: Path
@@ -254,6 +258,7 @@ def session_files(run_dirs, wid: str, sid: str) -> SessionFiles:
         cid=own / "result.cid",
         instruction=own / "instruction.md",
         review=own / "review.md",
+        bot_feedback=own / "bot_feedback.json",
         result=out / "result.json",
         summary=out / "summary.md",
         writable=out,

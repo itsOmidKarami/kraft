@@ -1047,6 +1047,7 @@ def result_files(conn: sqlite3.Connection, run_dirs, work_item_id: str) -> list[
             *shared,
             own.review,
             own.instruction,
+            own.bot_feedback,
             *([result.parent / "summary.md"] if result.parent.parent.parent == sessions else []),
         )
 

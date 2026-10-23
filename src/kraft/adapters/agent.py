@@ -596,6 +596,9 @@ def context_sections(
     #: The path `executor.prompts.review_package` wrote, for a task declaring
     #: `inputs: [review_package]` (`AgentTask.inputs`); None for every other.
     review_package: str | None = None,
+    #: The path `executor.prompts.bot_feedback` wrote, for a task declaring
+    #: `inputs: [bot_feedback]`; None for every other.
+    bot_feedback: str | None = None,
     method_text: str | None = None,
     #: The skill `method_text` was read from: the skill section's source only.
     skill: str | None = None,
@@ -680,6 +683,20 @@ def context_sections(
                 "since an earlier round, the rest of the branch is still yours to "
                 "read with the git command that header names -- use it when you "
                 "need to judge the change as a whole.\n",
+            )
+        )
+    if bot_feedback:
+        # By path too: what the review bots said can be long, and the agent
+        # reads the file itself.
+        sections.append(
+            (
+                "bot_feedback",
+                "kraft",
+                "\n\nWhat the automated reviewers said on this merge request is written "
+                "out at $KRAFT_BOT_FEEDBACK as JSON: for each reviewer, its latest "
+                "summary comment and review, its unresolved inline threads (with "
+                "file and line), and the output of a check that did not succeed. "
+                "Read that file first. It is theirs, not a finding of yours.\n",
             )
         )
     if method_text:
@@ -992,6 +1009,7 @@ async def run_agent_task(
     steering_texts: tuple[str, ...] = (),
     #: PARKED: see `context_sections`' own note on this parameter.
     review_package: str | None = None,
+    bot_feedback: str | None = None,
     artifact: str | None = None,
     method_text: str | None = None,
     #: `--resume <id>`: an escalation turn continuing its item's thread.
@@ -1070,6 +1088,7 @@ async def run_agent_task(
         session_id=session_id,
         artifact=artifact,
         review_package=review_package,
+        bot_feedback=bot_feedback,
         method_text=method_text,
         intent_dir=repo_entry.intent_dir if repo_entry is not None else None,
         steering_texts=steering_texts,
@@ -1337,6 +1356,7 @@ async def run_agent_task(
                 {_hook_install.FAIL_CLOSED_ENV: "1"} if hooked and allowed_tools is not None else {}
             ),
             **({"KRAFT_REVIEW_PACKAGE": review_package} if review_package else {}),
+            **({"KRAFT_BOT_FEEDBACK": bot_feedback} if bot_feedback else {}),
             **config_env,
             **rules_env,
         },

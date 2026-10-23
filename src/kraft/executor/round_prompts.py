@@ -5,6 +5,8 @@ and the judge's prompt. Re-exported by `kraft.executor.prompts`."""
 
 from __future__ import annotations
 
+import json
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -12,8 +14,8 @@ from kraft import findings as _findings
 from kraft import item_paths
 from kraft import review as _review
 from kraft.config import git_read
-from kraft.templates.models import ResolvedTask
-from kraft.vocab import ADVANCING
+from kraft.templates.models import ForgeAction, ForgeTask, ResolvedTask
+from kraft.vocab import ADVANCING, RESTARTS_RUN
 from kraft.vocab.sql import marks
 
 #: Handed to fix cycle N > 1: cycle N-1's own result file, by path, not by
@@ -243,6 +245,68 @@ def review_package(
         since=since,
     )
     return str(path) if path else None
+
+
+def bot_feedback_source(db, run_dirs, work_item_id: str, node, round: int) -> Path | None:
+    """The collection this pass of `node` has to read, or None when it holds
+    nothing to read: the newest session of this node and round, begun since the
+    run last restarted, of one of its `mr.automated_review` tasks (the review
+    wait's collect path wrote `bot_feedback.json` in its folder), unless every
+    reviewer in it has no summary, no open thread and no failed check.
+
+    This node and this round, and nothing from before a restart: a collection
+    from a pass before the last repair describes a head that is gone, and
+    handing it on would have the triage judge feedback the repair already
+    answered. Not "since the node last started": a wait that parked is
+    re-entered through `node_started` again, after its own session began."""
+    hooks = [
+        t.path
+        for t in node.tasks()
+        if isinstance(t.task, ForgeTask) and t.task.target is ForgeAction.MR_AUTOMATED_REVIEW
+    ]
+    if not hooks:
+        return None
+    restarted = db.read(
+        lambda c: c.execute(
+            "SELECT created_at FROM events WHERE work_item_id = ? "
+            f"AND type IN ({marks(RESTARTS_RUN)}) ORDER BY seq DESC LIMIT 1",
+            (work_item_id, *RESTARTS_RUN),
+        ).fetchone()
+    )
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT id FROM worker_sessions WHERE work_item_id = ? AND node_id = ? AND round = ? "
+            f"AND hook_point IN ({marks(hooks)}) AND created_at >= ? "
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (work_item_id, node.id, round, *hooks, restarted["created_at"] if restarted else ""),
+        ).fetchone()
+    )
+    if row is None:
+        return None
+    source = item_paths.session_files(run_dirs, work_item_id, row["id"]).bot_feedback
+    try:
+        collected = json.loads(source.read_text())["reviewers"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    said = any(
+        isinstance(r, dict) and (r.get("summaries") or r.get("threads") or r.get("check"))
+        for r in collected
+    )
+    return source if said else None
+
+
+def bot_feedback(db, run_dirs, work_item_id: str, node, round: int, session_id: str) -> str | None:
+    """What the review bots said, copied to where the session `session_id` is
+    handed it (`SessionFiles.bot_feedback`), and that path; None when there is
+    nothing to read (`bot_feedback_source`). `dispatch` calls it for an agent
+    task that declares `inputs: [bot_feedback]` and for no other."""
+    source = bot_feedback_source(db, run_dirs, work_item_id, node, round)
+    if source is None:
+        return None
+    own = item_paths.session_files(run_dirs, work_item_id, session_id).bot_feedback
+    own.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, own)
+    return str(own)
 
 
 def previous_attempt_note(previous_fix, *, run_dirs) -> str:

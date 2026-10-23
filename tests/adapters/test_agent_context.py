@@ -20,6 +20,7 @@ def test_context_sections_join_to_the_launch_context_in_launch_order():
         usage_source="result_file",
         artifact="spec",
         review_package="/pkg",
+        bot_feedback="/bots.json",
         method_text="METHOD",
         intent_dir="docs/intent/",
     )
@@ -33,6 +34,7 @@ def test_context_sections_join_to_the_launch_context_in_launch_order():
         ("contract", "kraft"),
         ("document", "spec"),
         ("review_package", "kraft"),
+        ("bot_feedback", "kraft"),
         ("skill", "kraft:spec"),
         ("intent", "docs/intent/"),
         ("steering", "repo:house"),
