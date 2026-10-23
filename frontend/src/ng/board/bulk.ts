@@ -24,13 +24,28 @@ async function eachOne(action: "retry" | "resume", ids: string[]): Promise<BulkO
   return { action, ids, results };
 }
 
-export async function sendBulk(action: BulkAction, ids: string[], reason?: string): Promise<BulkOutcome> {
+async function post(action: BulkAction, ids: string[], reason?: string): Promise<BulkOutcome> {
+  const r = await request<{ results: BulkItemResult[] }>("/work-items/bulk", jsonBody("POST", { action, ids, ...(reason ? { reason } : {}) }));
+  return r.status >= 200 && r.status < 300 ? { action, ids, results: r.body.results } : { action, ids, error: detailOf(r.body) };
+}
+
+/** One id per call, so a slow run (archiving deletes worktrees) can say how far it got. */
+async function oneByOne(action: BulkAction, ids: string[], reason: string | undefined, onEach: (done: number) => void): Promise<BulkOutcome> {
+  const results: BulkItemResult[] = [];
+  for (const [n, id] of ids.entries()) {
+    const out = await post(action, [id], reason);
+    results.push(...("results" in out ? out.results : [{ id, ok: false, error: out.error }]));
+    onEach(n + 1);
+  }
+  return { action, ids, results };
+}
+
+/** `onEach`, when given, sends the ids one at a time and is told how many are done after each. */
+export async function sendBulk(action: BulkAction, ids: string[], reason?: string, onEach?: (done: number) => void): Promise<BulkOutcome> {
   let out: BulkOutcome;
   if (action === "retry" || action === "resume") out = await eachOne(action, ids);
-  else {
-    const r = await request<{ results: BulkItemResult[] }>("/work-items/bulk", jsonBody("POST", { action, ids, ...(reason ? { reason } : {}) }));
-    out = r.status >= 200 && r.status < 300 ? { action, ids, results: r.body.results } : { action, ids, error: detailOf(r.body) };
-  }
+  else if (onEach) out = await oneByOne(action, ids, reason, onEach);
+  else out = await post(action, ids, reason);
   // The list moves on every action; read it once rather than wait on each item's events.
   useStore.getState().bootstrap().catch(() => {});
   const ok = "results" in out ? out.results.filter((x) => x.ok).map((x) => x.id) : [];

@@ -59,8 +59,30 @@ describe("CleanupDialog", () => {
     const { sent, onClose, onDone } = mount({ "POST /storage/preview": [200, storagePreview()], "POST /work-items/bulk": bulkOk("w1", "w4") });
     await userEvent.click(await screen.findByRole("button", { name: "Clean up 2 items and free 3 GB" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(sent().map((c) => c.body)).toEqual([{ action: "archive", ids: ["w1", "w4"] }]);
+    // One call per item, so the dialog can show how far it got.
+    expect(sent().map((c) => c.body)).toEqual([{ action: "archive", ids: ["w1"] }, { action: "archive", ids: ["w4"] }]);
     expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("fills a bar, marks each row and counts what is freed while it runs", async () => {
+    let finish!: () => void;
+    vi.spyOn(bulk, "sendBulk").mockImplementation(async (action, ids, _reason, onEach) => {
+      onEach?.(1);
+      await new Promise<void>((r) => { finish = r; });
+      return { action, ids, results: ids.map((id) => ({ id, ok: true })) };
+    });
+    const { onClose } = mount({ "POST /storage/preview": [200, storagePreview()] });
+    await userEvent.click(await screen.findByRole("button", { name: "Clean up 2 items and free 3 GB" }));
+    const bar = await screen.findByRole("progressbar", { name: "Cleaning up" });
+    expect(bar).toHaveAttribute("aria-valuenow", "1");
+    expect(bar).toHaveAttribute("aria-valuemax", "2");
+    expect(screen.getByText("1 of 2 cleaned up · 2 GB freed")).toBeInTheDocument();
+    const [cache, spike] = screen.getAllByRole("listitem");
+    expect(cache).toHaveTextContent("Cleaned up");
+    expect(spike).toHaveTextContent("Cleaning up…");
+    expect(screen.getByRole("button", { name: "Cleaning up…" })).toBeDisabled();
+    finish();
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
   it("will not archive when the preview failed", async () => {

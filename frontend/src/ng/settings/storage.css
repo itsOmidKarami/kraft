@@ -12,10 +12,17 @@
 .set-st-note.is-held { color: var(--bad); }
 .set-st-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .set-st-dlg.dialog { box-sizing: border-box; width: min(560px, 100%); }
+.set-st-progress { display: flex; flex-direction: column; gap: 6px; font-variant-numeric: tabular-nums; }
+.set-st-progress .set-st-bar { height: 6px; border-radius: 3px; }
+.set-st-progress .set-st-fill { border-radius: 3px; background: var(--accent); transition: width .3s cubic-bezier(.16, 1, .3, 1); }
+@media (prefers-reduced-motion: reduce) { .set-st-progress .set-st-fill { transition: none; } }
 .set-st-sum { margin: 0 0 10px; font-size: var(--fs-meta); }
 .set-st-list { margin: 0 0 10px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; max-height: 40vh; overflow-y: auto; }
 .set-st-li { display: flex; flex-direction: column; gap: 1px; font-size: var(--fs-label); }
 .set-st-li-title { font-weight: 500; }
+.set-st-li.is-done .set-st-li-title { color: var(--text-muted); }
+.set-st-li.is-done .set-hint { display: flex; align-items: center; gap: 4px; color: var(--ok); }
+.set-st-li.is-now .set-hint { color: var(--text); }
 .set-st-table { width: 100%; border-collapse: collapse; font-size: var(--fs-meta); }
 .set-st-table th { padding: 4px 8px; text-align: left; font-size: var(--fs-label); font-weight: 400; color: var(--text-muted); }
 .set-st-table td { padding: 7px 8px; border-top: 1px solid var(--line); vertical-align: middle; }

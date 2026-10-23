@@ -185,7 +185,7 @@ describe("Settings › Storage worktrees", () => {
     answers["GET /storage"] = [200, storageUsage({ items: [after.items[0]], reclaimable_bytes: 0, used_bytes: 9 * GB, state: "over_quota" })];
     await userEvent.click(await within(dialog).findByRole("button", { name: "Clean up 2 items and free 3 GB" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(calls.filter((c) => c.path === "/work-items/bulk").map((c) => c.body)).toEqual([{ action: "archive", ids: ["w1", "w4"] }]);
+    expect(calls.filter((c) => c.path === "/work-items/bulk").map((c) => c.body)).toEqual([{ action: "archive", ids: ["w1"] }, { action: "archive", ids: ["w4"] }]);
     expect(calls.filter((c) => c.method === "GET" && c.path === "/storage")).toHaveLength(2);
     // The button that opened the dialog is disabled now: Refresh takes focus rather than the body.
     await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).toHaveFocus());
