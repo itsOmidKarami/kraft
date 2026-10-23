@@ -1,8 +1,33 @@
-"""What a Kraft server and a machine say to each other (remote workers,
-slice 1: the handshake and keep-alive; later slices add job frames).
+"""What a Kraft server and a machine say to each other (remote workers).
 
 One JSON object per frame, `t` names it. Transport-neutral: a `Transport` is
-a WebSocket (dial-in) or an ssh session's stdio (`kraft.remote.transport`)."""
+a WebSocket (dial-in) or an ssh session's stdio (`kraft.remote.transport`).
+
+Protocol 2. `id` is the job key `"<work item id>/<session id>"`. Frames:
+
+- `hello`, `welcome`, `refused`: the handshake. `welcome` also names this
+  install as `server` (`run/server.id`).
+- `ping`, `pong`: keep-alive.
+- `have`, server to machine: `{rid}`; the machine answers `{rid, item, commits}`,
+  up to 500 commits its copy of the item has.
+- `job`, server to machine: `{id, spec, blobs}`. `spec` is `JobSpec.to_frame()`;
+  `blobs` names the `code` and `files` blobs that follow.
+- `blob`, both ways: `{id, name, seq, last, data}` with `data` in base64. `code`
+  (a git bundle) and `files` (a tar.gz) go to the machine; `commits` and `out`
+  come back.
+- `started`, machine to server: `{id}`; setup is done and the command launched.
+- `rejected`, machine to server: `{id, outcome, reason}`; the command never
+  started. `outcome` is `config_error` or `failed`.
+- `log`, machine to server: `{id, offset, data}`, bytes of `session.log` from
+  `offset`.
+- `sync`, server to machine on every connect: `{jobs: [{id, offset}]}`. The
+  machine resends log from each offset, and a finished job's `finished` and blobs.
+- `signal`, server to machine: `{id, sig}`, `INT` or `KILL`.
+- `finished`, machine to server, after its blobs: `{id, code, tip?, pushed?, reason?}`.
+- `delivered`, server to machine: `{id}`; the machine may drop the job's state.
+- `api`, machine to server: `{id, rid, method, path, query, headers, body}`;
+  `api_result`, back: `{rid, status, headers, body}`.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +38,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 #: Bumped when a frame changes meaning. Equal or refused: there is no range.
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 HANDSHAKE_S = 10.0
 PING_S = 20.0
 DEAD_S = 60.0
@@ -62,6 +87,7 @@ async def server_handshake(
     kraft_version: str,
     identify: Callable[[str], str | None],
     expected_name: str | None = None,
+    server_id: str = "",
     timeout: float = HANDSHAKE_S,
 ) -> Peer:
     """Read the machine's `hello`, answer `welcome` or `refused`.
@@ -95,7 +121,13 @@ async def server_handshake(
             machine_protocol=machine if isinstance(machine, int) else None,
         )
     await t.send(
-        {"t": "welcome", "protocol": PROTOCOL_VERSION, "kraft": kraft_version, "name": name}
+        {
+            "t": "welcome",
+            "protocol": PROTOCOL_VERSION,
+            "kraft": kraft_version,
+            "name": name,
+            "server": server_id,
+        }
     )
     return Peer(name, machine_kraft, machine, hello.get("host"))
 

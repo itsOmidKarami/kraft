@@ -97,7 +97,10 @@ async def test_a_version_mismatch_shows_offline_with_both_versions():
     row = _row(hub)
     assert not row["online"]
     assert row["reason"].startswith("refused: incompatible protocol")
-    assert "server speaks 1" in row["reason"] and "machine speaks 99" in row["reason"]
+    assert (
+        f"server speaks {protocol.PROTOCOL_VERSION}" in row["reason"]
+        and "machine speaks 99" in row["reason"]
+    )
 
 
 async def test_a_second_connection_replaces_the_first():
@@ -177,7 +180,7 @@ async def test_a_chatty_ssh_machine_stays_online_as_stderr_is_drained(tmp_path, 
         "import json, sys\n"
         f"open({str(starts)!r}, 'a').write('.')\n"
         "send = lambda f: (sys.stdout.write(json.dumps(f) + '\\n'), sys.stdout.flush())\n"
-        "send({'t': 'hello', 'protocol': 1, 'kraft': '2.3.0'})\n"
+        f"send({{'t': 'hello', 'protocol': {protocol.PROTOCOL_VERSION}, 'kraft': '2.3.0'}})\n"
         "sys.stdin.readline()\n"
         "sys.stderr.write('x' * 10_000_000)\n"
         "sys.stderr.flush()\n"

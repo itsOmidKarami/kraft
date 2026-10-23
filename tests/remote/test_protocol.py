@@ -20,7 +20,12 @@ async def test_a_dial_in_machine_with_a_valid_token_is_welcomed_by_name():
         _server(server),
         protocol.machine_handshake(machine, kraft_version="2.3.1", token="good", host="box"),
     )
-    assert (peer.name, peer.kraft, peer.protocol, peer.host) == ("gpu", "2.3.1", 1, "box")
+    assert (peer.name, peer.kraft, peer.protocol, peer.host) == (
+        "gpu",
+        "2.3.1",
+        protocol.PROTOCOL_VERSION,
+        "box",
+    )
     assert welcome["name"] == "gpu" and welcome["kraft"] == "2.3.0"
 
 
@@ -37,14 +42,14 @@ async def test_an_ssh_machine_is_named_by_the_server_and_sends_no_token():
     ("hello", "reason", "name"),
     [
         ({"token": "bad"}, "invalid token", None),
-        ({"token": "good", "protocol": 99}, "server speaks 1", "gpu"),
+        ({"token": "good", "protocol": 99}, f"server speaks {protocol.PROTOCOL_VERSION}", "gpu"),
         ({"token": "good", "protocol": 99}, "machine speaks 99", "gpu"),
     ],
     ids=["bad-token", "newer-machine-names-server-version", "newer-machine-names-its-own"],
 )
 async def test_a_refused_hello_says_why_to_both_sides(hello, reason, name):
     server, machine = memory_pair()
-    frame = {"t": "hello", "protocol": 1, "kraft": "9.9.9", **hello}
+    frame = {"t": "hello", "protocol": protocol.PROTOCOL_VERSION, "kraft": "9.9.9", **hello}
 
     async def client():
         await machine.send(frame)
@@ -61,7 +66,7 @@ async def test_a_refused_hello_says_why_to_both_sides(hello, reason, name):
                 machine2,
                 kraft_version="9.9.9",
                 token=hello["token"],
-                protocol_version=hello.get("protocol", 1),
+                protocol_version=hello.get("protocol", protocol.PROTOCOL_VERSION),
             ),
             _server(server2),
         )
@@ -95,3 +100,15 @@ async def test_pump_gives_up_on_a_peer_that_says_nothing():
     a, _b = memory_pair()
     with pytest.raises(protocol.Closed, match="no frame"):
         await protocol.pump(a, on_frame=lambda f: asyncio.sleep(0), ping_s=60, dead_s=0.05)
+
+
+async def test_welcome_names_the_server_install():
+    server, machine = memory_pair()
+    task = asyncio.create_task(
+        protocol.server_handshake(
+            server, kraft_version="2.3.0", identify=lambda t: "gpu", server_id="abc123"
+        )
+    )
+    welcome = await protocol.machine_handshake(machine, kraft_version="2.3.0", token="t")
+    await task
+    assert welcome["server"] == "abc123"

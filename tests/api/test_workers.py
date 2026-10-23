@@ -179,7 +179,10 @@ def test_a_machine_on_a_newer_protocol_is_refused_with_both_versions(client, mon
         ws.send_text(_hello(token, protocol_version=99))
         refused = json.loads(ws.receive_text())
     assert refused["t"] == "refused"
-    assert (refused["server_protocol"], refused["machine_protocol"]) == (1, 99)
+    assert (refused["server_protocol"], refused["machine_protocol"]) == (
+        protocol.PROTOCOL_VERSION,
+        99,
+    )
     row = _rows(client)[0]
     assert not row["online"] and "machine speaks 99" in row["reason"]
 
