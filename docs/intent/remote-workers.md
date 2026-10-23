@@ -2,8 +2,8 @@
 
 The other machines Kraft may run steps on, and the connections it keeps to
 them: how a machine is registered, how it proves who it is, and what Kraft
-tells a person when one is not connected. In this release a connected machine
-runs nothing yet.
+tells a person when one is not connected. A connected machine runs the steps
+work items place on it.
 
 ## REQ machine-has-exactly-one-connection-mode
 IF a `workers.yaml` entry names both or neither of `ssh` and `token_sha256`, THEN the system SHALL refuse the file, naming the problem.
@@ -79,3 +79,93 @@ origin: src/kraft/remote/check.py
 WHEN a registered machine is offline, `kraft admin doctor` SHALL report it with the reason as a warning, not a failure.
 enforced-by: tests/test_doctor_workers.py::test_an_offline_machine_is_a_warning_naming_the_reason_not_a_failure, tests/test_doctor_workers.py::test_an_ssh_machine_that_cannot_connect_names_the_servers_own_attempt
 origin: src/kraft/doctor.py §_worker_checks
+
+## REQ runner-the-most-specific-setting-wins
+WHEN a step is launched, the system SHALL place it by the item's node override, else the item's own override, else the library's step, node or chain `runner:`, else on the server.
+enforced-by: tests/remote/test_placement.py::test_the_most_specific_setting_wins[item-beats-library], tests/remote/test_placement.py::test_the_most_specific_setting_wins[node-beats-item], tests/remote/test_placement.py::test_the_most_specific_setting_wins[node-can-force-local], tests/templates/test_runner.py::test_the_most_specific_runner_wins_and_a_flat_task_list_is_one_step, tests/templates/test_runner.py::test_whatever_a_node_owns_takes_its_placement
+origin: src/kraft/remote/placement.py §runner_for
+
+## REQ runner-refuses-a-machine-it-cannot-use
+IF an item names a machine that is not in `workers.yaml` or not allowed for its repo, THEN the system SHALL refuse it with a 422 naming the machine.
+enforced-by: tests/remote/test_placement.py::test_a_machine_that_is_unknown_or_not_allowed_for_the_repo_is_refused[unknown-machine], tests/remote/test_placement.py::test_a_machine_that_is_unknown_or_not_allowed_for_the_repo_is_refused[repo-not-allowed], tests/api/test_runner_overrides.py::test_a_placement_that_cannot_work_is_a_422_that_says_why[unknown-machine]
+origin: src/kraft/remote/placement.py §refusal
+
+## REQ runner-refuses-items-a-machine-cannot-take
+IF an item with a machine runner is in place, sandboxed, or has workspace members, submodules or Git LFS, THEN the system SHALL refuse it, naming both settings.
+enforced-by: tests/remote/test_placement.py::test_filing_problems_name_both_settings_for_in_place_and_sandbox, tests/remote/test_placement.py::test_a_checkout_a_single_bundle_cannot_carry_is_named[submodule-submodules], tests/remote/test_placement.py::test_a_checkout_a_single_bundle_cannot_carry_is_named[lfs-Git LFS], tests/adapters/test_subprocess_remote.py::test_a_placement_that_cannot_hold_is_a_config_error_naming_why_and_runs_nothing[unknown-machine], tests/adapters/test_subprocess_remote.py::test_a_placement_that_cannot_hold_is_a_config_error_naming_why_and_runs_nothing[sandboxed-item]
+origin: src/kraft/remote/placement.py §filing_problems
+
+## REQ any-never-means-the-server
+WHERE a step's runner is `any`, the system SHALL choose the first connected machine that may work on every repo of the item and has a free slot, and SHALL NOT run the step on the server.
+enforced-by: tests/remote/test_hub.py::test_any_takes_the_first_connected_allowed_machine_with_a_free_slot_never_the_laptop, tests/executor/test_remote_walk.py::test_any_picks_the_connected_allowed_machine_and_never_the_server
+origin: src/kraft/remote/hub.py §decide
+
+## REQ machine-capacity-bounds-its-sessions
+WHILE a machine runs as many sessions as its capacity, the system SHALL NOT start another on it.
+enforced-by: tests/remote/test_hub.py::test_a_named_machine_offline_or_full_makes_the_step_wait_and_never_run_elsewhere, tests/remote/test_hub.py::test_a_waiting_claim_is_granted_when_a_slot_frees_and_is_cancellable
+origin: src/kraft/remote/hub.py §claim
+
+## REQ step-waits-for-an-offline-or-full-machine
+WHILE the machine a step is placed on is offline or full, the system SHALL park the step as waiting with no session row, SHALL NOT run it elsewhere, and SHALL NOT count the wait against its time cap.
+enforced-by: tests/executor/test_dispatch_remote.py::test_a_step_on_an_offline_machine_parks_the_item_and_runs_when_it_returns, tests/adapters/test_subprocess_remote.py::test_a_step_waiting_for_a_full_machine_has_no_session_row_and_never_runs_elsewhere, tests/adapters/test_subprocess_remote.py::test_a_wait_moves_the_time_cap_on_by_however_long_it_lasted
+origin: src/kraft/executor/dispatch.py §_dispatch_task
+
+## REQ remote-session-records-its-machine
+WHEN a step runs on a machine, the system SHALL record the machine on its session and keep the stand-in as the session's process.
+enforced-by: tests/adapters/test_subprocess_remote.py::test_a_remote_step_is_a_session_row_with_its_machine_and_the_standin_as_its_process, tests/test_db_migrations_sessions.py::test_migrate_v56_to_v57_adds_a_nullable_runner_column
+origin: src/kraft/adapters/subprocess.py §_run_task
+
+## REQ remote-step-gets-only-the-commits-the-machine-lacks
+WHEN a remote step launches, the system SHALL send the branch head as a bundle that excludes every commit the machine already has.
+enforced-by: tests/remote/test_bundle.py::test_a_first_bundle_carries_the_whole_branch_and_a_later_one_only_what_is_new, tests/remote/test_runs.py::test_the_second_step_is_sent_only_what_the_machine_lacks_and_sees_the_first_steps_work
+origin: src/kraft/remote/runs.py §_send_job
+
+## REQ remote-job-carries-no-server-environment-or-credentials
+The system SHALL NOT send the server's environment or credentials to a machine; the command runs with the machine's own.
+enforced-by: tests/remote/test_jobs.py::test_nothing_of_the_servers_own_environment_or_credentials_reaches_the_command, tests/remote/test_jobs.py::test_the_server_paths_in_argv_and_env_become_the_machines
+origin: src/kraft/remote/jobs.py
+
+## REQ remote-log-resumes-from-the-servers-offset
+WHEN a machine reconnects mid-step, the system SHALL resume the log from the byte count the server has, with nothing doubled or missing.
+enforced-by: tests/remote/test_runs.py::test_the_log_resumes_byte_for_byte_after_the_connection_is_cut_mid_step, tests/remote/test_machine.py::test_a_finished_job_is_resent_from_the_offset_the_server_names
+origin: src/kraft/remote/runs.py §_log
+
+## REQ remote-pause-and-cancel-cross-the-stand-in
+WHEN a remote step is paused, the system SHALL send SIGINT to its command, and WHEN it is cancelled, kill it; the stand-in exits with the command's exit code.
+enforced-by: tests/remote/test_listener.py::test_sigint_and_sigterm_cross_to_the_machine[pause-sends-int], tests/remote/test_listener.py::test_sigint_and_sigterm_cross_to_the_machine[cancel-sends-kill], tests/remote/test_listener.py::test_the_standin_writes_the_machines_log_to_its_stdout_and_exits_with_the_remote_code
+origin: src/kraft/remote/standin.py
+
+## REQ remote-result-is-home-before-the-step-is-over
+WHEN a remote step ends, the system SHALL take its commits, result and `docs/` changes in before the stand-in exits.
+enforced-by: tests/remote/test_runs.py::test_a_step_runs_on_the_machine_and_its_result_comes_home_before_it_is_over
+origin: src/kraft/remote/runs.py §_deliver
+
+## REQ remote-commits-publish-by-compare-and-swap
+WHEN a remote step's commits arrive and the item branch moved meanwhile, the system SHALL keep them at `refs/kraft/unsynced/…`, record `sandbox_branch_not_synced` and leave the branch as it is.
+enforced-by: tests/remote/test_bundle.py::test_a_branch_that_moved_meanwhile_keeps_the_commits_unsynced_and_is_not_overwritten, tests/remote/test_runs.py::test_a_branch_that_moved_while_the_step_ran_is_kept_unsynced_and_not_overwritten
+origin: src/kraft/remote/bundle.py §publish
+
+## REQ remote-bundle-may-not-plant-a-repository
+IF a machine's commits add a nested git repository or do not continue from the head it was sent, THEN the system SHALL fail the step with the reason in its log and leave the branch and worktree untouched.
+enforced-by: tests/remote/test_bundle.py::test_a_bundle_that_plants_a_repository_is_refused_and_leaves_the_branch_alone, tests/remote/test_bundle.py::test_a_bundle_that_is_not_the_item_branch_or_does_not_continue_from_the_base_is_refused, tests/remote/test_runs.py::test_a_bundle_that_plants_a_repository_fails_the_step_and_touches_nothing
+origin: src/kraft/remote/bundle.py §fetch
+
+## REQ remote-docs-conflict-keeps-the-servers-version
+IF the server's copy of a `docs/` file changed since the package left, THEN the system SHALL keep the server's version, save the step's copy in the session's folder, and record `remote_docs_conflict` naming the file.
+enforced-by: tests/remote/test_files.py::test_a_document_a_person_edited_meanwhile_keeps_the_servers_version_and_saves_the_steps, tests/remote/test_runs.py::test_a_document_a_person_edited_while_the_step_ran_keeps_the_servers_version
+origin: src/kraft/remote/files.py §apply_returned
+
+## REQ remote-api-calls-are-held-to-the-sessions-allowlist
+WHEN a remote agent calls Kraft, the system SHALL answer only what `worker/callback.py` allows for that session's own work item, as the connection's session, and SHALL refuse the rest.
+enforced-by: tests/remote/test_runs.py::test_the_agents_kraft_calls_cross_as_requests_held_to_its_own_sessions_allowlist[its-own-item], tests/remote/test_runs.py::test_the_agents_kraft_calls_cross_as_requests_held_to_its_own_sessions_allowlist[another-item], tests/remote/test_runs.py::test_the_agents_kraft_calls_cross_as_requests_held_to_its_own_sessions_allowlist[machine-management]
+origin: src/kraft/remote/runs.py §_api
+
+## REQ remote-step-without-its-cli-or-setup-does-not-start
+IF the agent CLI is missing on the machine or its setup command fails, THEN the system SHALL NOT start the step and SHALL end it as `config_error` or failed with the reason in its log.
+enforced-by: tests/remote/test_jobs.py::test_a_missing_agent_cli_never_starts_and_says_which, tests/remote/test_jobs.py::test_a_failing_setup_stops_the_step_before_the_command, tests/remote/test_listener.py::test_a_config_error_from_the_machine_is_exit_code_78_with_the_reason_in_the_log
+origin: src/kraft/remote/jobs.py
+
+## REQ remote-step-survives-a-server-restart
+WHEN the server restarts under a running remote step, the system SHALL re-pair the step with its stand-in and finish its log without a gap, and WHEN the stand-in died with the server, start a new one that resumes at the log file's size.
+enforced-by: tests/remote/test_restart.py::test_a_step_survives_the_server_restarting_and_its_log_is_whole, tests/worker/test_reattach_remote.py::test_a_remote_session_whose_standin_died_gets_a_new_one_that_resumes_at_the_logs_size
+origin: src/kraft/worker/reattach.py

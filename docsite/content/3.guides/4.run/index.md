@@ -23,3 +23,4 @@ Each guide takes one task from start to finish.
 - [Upgrade from 0.x or a release candidate](/guides/run/upgrade-from-0-x-or-a-release-candidate): move from a 1.5.0 release candidate, an install from before the `kraft-sdlc` rename, or a 0.x home with the old template configuration.
 - [Roll back to 1.4](/guides/run/roll-back): what a rollback does to the database and config, and the steps from 2.0 back to 1.4.
 - [Run items in your own checkout](/guides/run/run-items-in-place): let a repo's work items run in its own checkout instead of a worktree each, and clear a `checkout` stop.
+- [Run a step on another machine](/guides/run/run-a-step-on-another-machine): register a machine, place a node on it, override the placement for one item, and see what comes back.
