@@ -174,7 +174,9 @@ def test_set_agent_overrides_sends_only_the_fields_named(tmp_path, monkeypatch):
 
     monkeypatch.setattr(client.transport, "_send", send)
     asyncio.run(client.set_agent_overrides(model="gpt-big", work_item_id="w1"))
-    assert sent == [("PATCH", "/work-items/w1", {"agent_overrides": {"model": "gpt-big"}})]
+    # the GET reads the stored runner to keep it; the PATCH carries only the named fields
+    assert [(m, p) for m, p, _ in sent] == [("GET", "/work-items/w1"), ("PATCH", "/work-items/w1")]
+    assert sent[-1][2] == {"agent_overrides": {"model": "gpt-big"}}
 
 
 def test_runner_rides_on_filing_and_on_both_override_calls(tmp_path, monkeypatch):
