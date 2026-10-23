@@ -11,6 +11,7 @@ import contextlib
 import os
 import signal
 import sys
+from pathlib import Path
 
 from kraft import client, render, update
 from kraft.cli import common
@@ -119,6 +120,12 @@ def _cmd_serve(ns: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
     asyncio.run(serve())
 
 
+def _cmd_attach(ns: argparse.Namespace) -> None:
+    from kraft.remote import standin
+
+    sys.exit(asyncio.run(standin.attach(Path(ns.run_dir), ns.item, ns.session)))
+
+
 def _cmd_check(ns: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
     if bool(ns.server) != bool(ns.token):
         parser.error("--server and --token go together")
@@ -178,3 +185,11 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
     check_p.add_argument("--server", metavar="URL", help="also try a handshake with this server")
     check_p.add_argument("--token", help="the token for --server")
     check_p.set_defaults(func=lambda ns: _cmd_check(ns, check_p))
+
+    attach_p = verbs.add_parser(
+        "attach", help="run by Kraft, not by hand: carry a remote step's log and signals"
+    )
+    attach_p.add_argument("--run-dir", required=True, help="the server's run directory")
+    attach_p.add_argument("--item", required=True, help="the work item id")
+    attach_p.add_argument("--session", required=True, help="the session id")
+    attach_p.set_defaults(func=_cmd_attach)

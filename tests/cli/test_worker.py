@@ -86,3 +86,13 @@ def test_check_exits_1_when_a_row_fails(monkeypatch, capsys):
     monkeypatch.setattr("kraft.remote.check.run", rows)
     code, out = _run(capsys, "check")
     assert code == 1 and "git" in out
+
+
+def test_attach_is_listed_as_run_by_kraft_and_takes_the_session_it_carries(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["admin", "worker", "--help"])
+    assert "run by Kraft, not by hand" in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        cli.main(["admin", "worker", "attach", "--help"])
+    out = capsys.readouterr().out
+    assert "--run-dir" in out and "--item" in out and "--session" in out

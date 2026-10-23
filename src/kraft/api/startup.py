@@ -42,7 +42,9 @@ from kraft.index import db as index_db
 from kraft.index.service import Indexer
 from kraft.paths import BUNDLED, RunDirs, config_dir, default_run_dir, default_skills_dir
 from kraft.remote import hub as workers_hub
+from kraft.remote import listener as workers_listener
 from kraft.remote import registry as workers_registry
+from kraft.remote import runs as workers_runs
 from kraft.worker import channel as channel_mod
 from kraft.worker import reattach, sandbox
 from kraft.worker.egress import EgressProxy
@@ -429,7 +431,14 @@ async def lifespan(app: FastAPI):
     # the package under a running server, and the metadata read at call time
     # then names the new release while this one's code is still answering.
     app.state.version = update_mod.installed()
-    app.state.workers_hub = workers_hub.Hub(app.state.version)
+    hub = workers_hub.Hub(app.state.version, server_id=workers_hub.server_id(run_dirs.base))
+    app.state.workers_hub = hub
+    hub.runs = workers_runs.Runs(
+        hub, run_dirs=run_dirs, db=database, call=workers_runs.asgi_call(app)
+    )
+    workers_runs.install(hub.runs)
+    app.state.workers_listener = workers_listener.Listener(hub.runs, run_dirs.base)
+    await app.state.workers_listener.start()
     app.state.workers_lock = asyncio.Lock()
     app.state.invalid_workers = None
 
@@ -527,6 +536,8 @@ async def lifespan(app: FastAPI):
             app.state.when_free_task,
         ):
             await _cancel(task)
+        await app.state.workers_listener.close()
+        workers_runs.install(None)
         await app.state.workers_hub.close()
         await deps.stop_addon_work(app.state)
         # Before the walks are cancelled: a setup command runs in a thread

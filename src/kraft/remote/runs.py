@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from kraft import events, ids
+from kraft import events, ids, item_paths
 from kraft.remote import blobs, bundle, files, protocol
 from kraft.remote.hub import Claim
 from kraft.remote.jobs import JobSpec
@@ -23,6 +23,25 @@ from kraft.worker import callback
 logger = logging.getLogger(__name__)
 REMOTE_CONFIG_ERROR = 78
 _current: Runs | None = None
+
+
+def asgi_call(app):
+    """`Runs`'s `call`: a worker API request made in-process, as the session a machine's connection
+    holds, with the daemon's own token."""
+    import httpx
+
+    async def call(method, target, caller, *, content=b"", headers=None):
+        h = {
+            **(headers or {}),
+            "Authorization": f"Bearer {app.state.mcp_token}",
+            "X-Kraft-Session-Id": caller,
+        }
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as c:
+            r = await asyncio.wait_for(c.request(method, target, headers=h, content=content), 60)
+        return r.status_code, dict(r.headers), r.content
+
+    return call
 
 
 def install(runs: Runs | None) -> None:
@@ -313,6 +332,52 @@ class Runs:
             await self.hub.transport(run.claim.machine).send(
                 {"t": "sync", "jobs": [{"id": run.spec.key, "offset": run.offset}]}
             )
+
+    async def recover(self, work_item_id: str, session_id: str) -> Run | None:
+        """The run of a step this process did not start: a stand-in that survived a restart, or one
+        reattach respawned. Rebuilt from what `launch` saved and what the spool holds; None when
+        the session is not a running remote one."""
+        key = ids.session_ref(work_item_id, session_id)
+        if key in self._runs:
+            return self._runs[key]
+        row = self._db.read(
+            lambda c: c.execute(
+                "SELECT status, runner FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+                (work_item_id, session_id),
+            ).fetchone()
+        )
+        if (
+            row is None
+            or row["runner"] is None
+            or row["status"]
+            not in (
+                "pending",
+                "running",
+                "paused",
+            )
+        ):
+            return None
+        folder = item_paths.session_files(self._run_dirs, work_item_id, session_id).folder
+        try:
+            saved = json.loads((folder / "remote-run.json").read_text())
+        except (OSError, ValueError):
+            return None
+        if saved["machine"] not in self.hub.names():
+            return None
+        run = Run(
+            JobSpec.from_frame(saved["spec"]),
+            self.hub.adopt(saved["machine"], key),
+            [files.Entry(Path(e["path"]), e["rw"]) for e in saved["entries"]],
+            folder / "remote.log",
+            folder,
+            pushed=saved["pushed"],
+            state="running",
+            sink=blobs.BlobSink(folder / "in"),
+        )
+        run.offset = run.spool.stat().st_size if run.spool.exists() else 0
+        self._runs[key] = run
+        await self._sync_one(run)
+        return run
 
     async def on_connect(self, machine: str) -> None:
         mine = [

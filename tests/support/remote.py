@@ -15,6 +15,7 @@ from kraft.remote import protocol, registry
 from kraft.remote import runs as runs_mod
 from kraft.remote.hub import Hub
 from kraft.remote.jobs import JobSpec
+from kraft.remote.listener import Listener
 from kraft.remote.machine import Machine
 from kraft.remote.protocol import Closed
 from kraft.remote.runs import Run, Runs
@@ -92,6 +93,7 @@ class Rig:
     hub: Hub
     runs: Runs
     machine: Machine
+    listener: Listener
     repo: Path  # the server's worktree of the item, with the item branch checked out
     branch: str
     head: str
@@ -161,6 +163,22 @@ class Rig:
         await self.disconnect()
         await self.connect()
 
+    async def restart_server(self) -> None:
+        """The server process restarts: a new hub, runs and listener over the same files and
+        database; the machine redials; whatever the old ones were doing is dropped."""
+        await self.listener.close()
+        await self.disconnect()
+        self.hub = Hub("2.3.0", server_id="srv1")
+        self.hub.apply(workers_file(gpu={"capacity": 2}))
+        self.runs = Runs(
+            self.hub, run_dirs=self.run_dirs, db=self.database, call=_recording_call(self.calls)
+        )
+        self.hub.runs = self.runs
+        runs_mod.install(self.runs)
+        self.listener = Listener(self.runs, self.run_dirs.base)
+        await self.listener.start()
+        await self.connect()
+
 
 def _recording_call(calls: list):
     async def call(method, target, caller, *, content=b"", headers=None):
@@ -183,11 +201,14 @@ async def make_rig(
     runs = Runs(hub, run_dirs=run_dirs, db=database, call=_recording_call(calls))
     hub.runs = runs
     runs_mod.install(runs)
+    listener = Listener(runs, run_dirs.base)
+    await listener.start()
     machine = Machine(tmp_path / "machine-home", kraft_version="2.3.0")
     rig = Rig(
         hub,
         runs,
         machine,
+        listener,
         repo,
         branch,
         git(repo, "rev-parse", "HEAD").strip(),
