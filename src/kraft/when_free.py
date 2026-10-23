@@ -296,17 +296,24 @@ class Pending:
 _said: set[str] = set()
 
 
-def settings(st) -> config_mod.Update:
-    """`update.yaml`, read fresh. One that does not load reads as the defaults,
-    which leave everything off."""
+def _load(st) -> tuple[config_mod.Update, str | None]:
+    """`update.yaml`, read fresh, and why it does not load when it does not.
+    One that does not load reads as the defaults; `pending` blocks on it."""
     try:
-        return config_mod.Update.load(st.templates_dir / config_mod.Update.FILE)
+        return config_mod.Update.load(st.templates_dir / config_mod.Update.FILE), None
     except config_mod.ConfigError as exc:
         # Read every minute: said once per message, not once per look.
         if str(exc) not in _said:
             _said.add(str(exc))
             logger.warning("%s; update when free is off until it is fixed", exc)
-        return config_mod.Update()
+        return config_mod.Update(), str(exc)
+
+
+def settings(st) -> config_mod.Update:
+    """`update.yaml`, read fresh. One that does not load reads as the defaults,
+    and `pending` blocks everything, marked and asked included, until it is
+    fixed."""
+    return _load(st)[0]
 
 
 def effective_channel(cfg: config_mod.Update) -> str:
@@ -350,7 +357,7 @@ def pending(st, now: datetime | None = None) -> Pending:
     from kraft.cli import admin
 
     now = now or datetime.now().astimezone()
-    cfg = settings(st)
+    cfg, broken = _load(st)
     data = _read(st)
     out = Pending()
 
@@ -376,6 +383,9 @@ def pending(st, now: datetime | None = None) -> Pending:
 
     key = pending_key(st, out.release, items)
     failed = data.get("failed")
+    if broken:
+        name, _, why = broken.partition(": ")
+        out.blocked.append(f"{name} does not load: {why}")
     if key and isinstance(failed, dict) and failed.get("key") == key:
         out.blocked.append(f"the last attempt failed: {failed.get('detail')}")
     if out.release:

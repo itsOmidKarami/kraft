@@ -87,3 +87,10 @@ WHERE `update.yaml` does not exist, the system SHALL NOT install or restart on
 its own.
 enforced-by: tests/test_config_models.py::test_update_settings_missing_file_turns_nothing_on, tests/test_when_free.py::test_nothing_pending_does_nothing_and_claims_nothing, tests/test_when_free.py::test_pending_names_what_and_why[newer-install-switch-off]
 origin: src/kraft/config.py §Update
+
+## REQ a-broken-update-yaml-installs-and-restarts-nothing
+
+WHILE `update.yaml` does not load, the system SHALL NOT install or restart
+when free, a marked release and an asked restart included, and SHALL say why.
+enforced-by: tests/test_when_free.py::test_pending_names_what_and_why[broken-update-yaml-blocks-a-mark], tests/test_when_free.py::test_pending_names_what_and_why[broken-update-yaml-blocks-an-asked-restart]
+origin: src/kraft/when_free.py §pending

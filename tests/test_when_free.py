@@ -115,6 +115,16 @@ def _failed_mark(st, monkeypatch):
     monkeypatch.setattr(update, "is_behind", lambda release: True)
 
 
+def _broken_yaml_marked(st, monkeypatch):
+    _marked_outside_hours(st, monkeypatch)
+    _configure(st, allowed_hours=["01:00-06:00"], bogus_key=1)
+
+
+def _broken_yaml_asked(st, monkeypatch):
+    when_free.ask_restart(st)
+    _configure(st, bogus_key=1)
+
+
 def _failed_settings(st, monkeypatch):
     _a_restart_item(monkeypatch)
     _configure(st, restart_when_free=True)
@@ -172,6 +182,24 @@ def _failed_then_changed_settings(st, monkeypatch):
             False,
             "outside 01:00-06:00",
             id="marked-release-outside-hours",
+        ),
+        pytest.param(
+            _broken_yaml_marked,
+            "2.2.0",
+            "2.2.0",
+            False,
+            False,
+            "update.yaml does not load: ",
+            id="broken-update-yaml-blocks-a-mark",
+        ),
+        pytest.param(
+            _broken_yaml_asked,
+            "2.2.0",
+            "2.2.0",
+            False,
+            True,
+            "update.yaml does not load: ",
+            id="broken-update-yaml-blocks-an-asked-restart",
         ),
         pytest.param(
             _failed_mark,
