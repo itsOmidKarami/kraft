@@ -36,6 +36,7 @@ from kraft.paths import (
     linked_advice,
     linked_pre_2_config_dir,
 )
+from kraft.remote import registry
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentTask, ForgeTask
@@ -96,6 +97,13 @@ async def run_checks() -> list[dict]:
     if health is not None:
         checks.append(_restart_check(health))
     checks.extend(_config_checks())
+    listed = None
+    if health is not None:
+        try:
+            listed = (await client.list_workers())["workers"]
+        except ValueError:
+            listed = None  # a server older than the route
+    checks.extend(_worker_checks(listed))
     checks.append(_pidfile_check())
     checks.extend(_agent_checks())
     checks.append(await _mcp_check(health is not None))
@@ -249,6 +257,35 @@ def _config_row(templates: Path) -> dict:
     if linked := linked_pre_2_config_dir():
         return _check("config", True, f"{templates}; {linked_advice(linked)}", warn=True)
     return _check("config", True, str(templates))
+
+
+def _worker_checks(workers: list[dict] | None) -> list[dict]:
+    """`workers.yaml`, and each registered machine as the server sees it. Nothing
+    for an install with no machines. An offline machine is a warning, not a
+    failure: a laptop that sleeps is not a broken Kraft. An ssh machine is
+    dialled by the server's own `ssh`, so a service without your SSH agent can
+    fail where your shell succeeds: say whose attempt this is."""
+    path = config_dir() / registry.FILE
+    if not path.is_file():
+        return []
+    try:
+        registry.WorkersFile.load(path)
+    except config.ConfigError as exc:
+        return [_check(registry.FILE, False, str(exc))]
+    rows = [_check(registry.FILE, True, "parses")]
+    for w in workers or []:
+        name = f"worker: {w['name']}"
+        if w["online"]:
+            rows.append(_check(name, True, f"{w['mode']}, kraft {w['kraft_version']}"))
+            continue
+        detail = f"offline: {w['reason']}"
+        if w["mode"] == "ssh":
+            detail += (
+                " (the server's own ssh attempt, not your shell's: "
+                "a service may lack your SSH agent)"
+            )
+        rows.append(_check(name, True, detail, warn=True))
+    return rows
 
 
 def _config_checks() -> list[dict]:
