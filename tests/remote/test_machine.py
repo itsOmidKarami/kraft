@@ -256,3 +256,38 @@ async def test_the_agents_call_reaches_the_server_as_an_api_frame_and_its_answer
     await t.send({"t": "signal", "id": spec.key, "sig": "KILL"})
     await _frames_until(t, "finished")
     await _end(t, task)
+
+
+async def test_a_call_made_while_offline_is_sent_and_answered_after_reconnect(tmp_path):
+    machine, task, t, spec = await _job(tmp_path, ["sh", "-c", "sleep 30"])
+    await _frames_until(t, "started")
+    await _end(t, task)
+    call = asyncio.create_task(machine.call_server(spec.key, "GET", "/api/work-items/w1"))
+    await asyncio.sleep(0.3)
+    assert not call.done()
+    server, machine_t = memory_pair()
+    serving = asyncio.create_task(machine.serve(machine_t, {"server": "srv"}))
+    frame = (await _frames_until(server, "api"))[-1]
+    await server.send({"t": "api_result", "rid": frame["rid"], "status": 200, "body": ""})
+    assert (await call)[0] == 200
+    await server.send({"t": "signal", "id": spec.key, "sig": "KILL"})
+    await _frames_until(server, "finished")
+    await _end(server, serving)
+
+
+async def test_a_call_in_flight_when_the_connection_drops_is_told_so(tmp_path):
+    machine, task, t, spec = await _job(tmp_path, ["sh", "-c", "sleep 30"])
+    await _frames_until(t, "started")
+    call = asyncio.create_task(machine.call_server(spec.key, "POST", "/api/work-items/w1/x"))
+    await _frames_until(t, "api")
+    await _end(t, task)
+    status, _, body = await asyncio.wait_for(call, 5)
+    assert status == 503 and b"dropped" in body
+    server, machine_t = memory_pair()
+    serving = asyncio.create_task(machine.serve(machine_t, {"server": "srv"}))
+    await server.send({"t": "signal", "id": spec.key, "sig": "KILL"})
+    frames = await _frames_until(server, "finished")
+    assert not [
+        f for f in frames if f["t"] == "api"
+    ]  # a call that may have been acted on is not resent
+    await _end(server, serving)

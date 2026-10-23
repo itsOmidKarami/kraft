@@ -14,7 +14,6 @@ import itertools
 import socket
 import subprocess
 import sys
-import time
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -161,6 +160,7 @@ class Machine:
         self._sink: blobs.BlobSink | None = None
         self._jobs: dict[str, _Job] = {}
         self._api: dict[str, asyncio.Future] = {}
+        self._api_sent: dict[str, protocol.Transport] = {}  # rid -> the connection it went out on
         self._rid = itertools.count(1)
         self._item_locks: dict[
             str, asyncio.Lock
@@ -183,6 +183,10 @@ class Machine:
         finally:
             if self._t is t:
                 self._t = None
+            for rid in [r for r, sent_on in self._api_sent.items() if sent_on is t]:
+                del self._api_sent[rid]  # answered on the connection that is gone: it never will be
+                if (fut := self._api.pop(rid, None)) is not None and not fut.done():
+                    fut.set_result(_DROPPED)
             for key in [k for k, j in self._jobs.items() if j.state == "receiving"]:
                 del self._jobs[key]  # a half-received job: the server sends it again
 
@@ -225,6 +229,7 @@ class Machine:
         elif kind == "delivered":
             self._jobs.pop(frame["id"], None)
         elif kind == "api_result":
+            self._api_sent.pop(frame["rid"], None)
             if (fut := self._api.pop(frame["rid"], None)) is not None and not fut.done():
                 fut.set_result(frame)
         elif kind == "sync":
@@ -368,21 +373,30 @@ class Machine:
             "headers": {"content-type": headers.get("content-type", "")},
             "body": base64.b64encode(body).decode(),
         }
-        deadline = time.monotonic() + 60
-        while True:
-            try:
-                await self._emit(frame)
-                break
-            except protocol.Closed:
-                if time.monotonic() > deadline:
-                    self._api.pop(rid, None)
-                    return _TIMED_OUT
-                await asyncio.sleep(0.2)
         try:
-            answer = await asyncio.wait_for(fut, 60)
-        except TimeoutError:
+            while True:
+                t = self._t
+                if t is None:
+                    if job.state == "finished":
+                        return _DROPPED  # the agent is gone; nobody is waiting for this
+                    await asyncio.sleep(0.2)
+                    continue
+                self._api_sent[rid] = t  # before the send: the connection may end during it
+                try:
+                    await t.send(frame)
+                except protocol.Closed:
+                    self._api_sent.pop(rid, None)  # not sent: wait for the next connection
+                    if fut.done():
+                        fut = self._api[rid] = asyncio.get_running_loop().create_future()
+                    await asyncio.sleep(0.2)
+                    continue
+                break
+            answer = await fut
+        finally:
             self._api.pop(rid, None)
-            return _TIMED_OUT
+            self._api_sent.pop(rid, None)
+        if isinstance(answer, tuple):
+            return answer
         return answer["status"], answer.get("headers", {}), base64.b64decode(answer.get("body", ""))
 
     async def call_server(self, job_id: str, method: str, path: str, body: bytes = b""):
@@ -390,8 +404,10 @@ class Machine:
         return await self._forward(self._jobs[job_id], method, path, {}, body)
 
 
-_TIMED_OUT = (
-    504,
+#: What a call gets when the connection drops after it was sent. The server may have acted on
+#: it, so it is not resent.
+_DROPPED = (
+    503,
     {"content-type": "application/json"},
-    b'{"detail": "Kraft did not answer in time"}',
+    b'{"detail": "the connection to Kraft dropped during this call; try again"}',
 )
