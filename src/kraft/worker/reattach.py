@@ -32,6 +32,7 @@ from kraft.config import ConfigError
 from kraft.executor import gates
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import ESCALATION_HOOK, sweep_stragglers
+from kraft.remote import respawn as _remote_respawn
 from kraft.store._common import _now, _span_ms
 from kraft.templates.models import AgentTask, TaskScope
 from kraft.vocab import (
@@ -925,6 +926,14 @@ async def reattach(
         )
         for r in rows
     }
+    # A remote step whose stand-in died with the server gets a new one, which resumes the log at the
+    # file's size (`remote.respawn`); one that cannot be recovered falls through to the stop below.
+    rows = [dict(r) for r in rows]
+    for r in rows:
+        key = (r["work_item_id"], r["id"])
+        if r.get("runner") and r["status"] == SessionStatus.RUNNING and not adopt[key]:
+            if (pid := await _remote_respawn.standin_for(db, run_dirs, r)) is not None:
+                r["pid"], adopt[key] = pid, True
     # Kraft-s7c04.51: a session started 13 seconds before this exact scan was
     # declared unconfirmed on the very first look -- "cannot have lost its PID
     # identity" that young. Those get one retry, in case `_identity_ok`'s
