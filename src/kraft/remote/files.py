@@ -169,12 +169,13 @@ def apply_returned(
     """On the server: write back what the step changed, but only inside the read-write entries.
     Under a `docs` folder, a file the server's copy changed since the package left keeps the
     server's version; the step's is saved under `keep_dir`. The archive is untrusted: it is counted
-    before anything is written, so a refusal applies nothing."""
+    and every member decided before anything is written, so a refusal applies nothing."""
     applied = Applied()
     with tarfile.open(archive, "r:gz") as tar:
         members = [m for m in tar if m.isreg()]
         if len(members) > MAX_FILES or sum(m.size for m in members) > MAX_BYTES:
             raise _too_many("what the step returned")
+    plan: list[tuple[Path, bytes, Path | None]] = []  # (dest, data, keep): keep set on a conflict
     with tarfile.open(archive, "r:gz") as tar:
         for m in tar:
             if not m.isreg() or ".." in Path(m.name).parts or m.name.startswith("/"):
@@ -183,7 +184,10 @@ def apply_returned(
             dest = Path("/" + m.name)
             if entry is None or not _no_links(dest, entry):
                 continue
+            if dest.exists() and not dest.is_file():
+                continue
             data = tar.extractfile(m).read()
+            keep = None
             if (
                 entry.path.name == "docs"
                 and dest.exists()
@@ -193,14 +197,17 @@ def apply_returned(
                 keep = keep_dir / (
                     dest.name if dest == entry.path else dest.relative_to(entry.path)
                 )
-                keep.parent.mkdir(parents=True, exist_ok=True)
-                keep.write_bytes(data)
-                applied.conflicts.append(dest)
-                applied.kept.append(keep)
-                continue
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            tmp = dest.with_name(dest.name + ".kraft-tmp")
-            tmp.write_bytes(data)
-            os.replace(tmp, dest)
-            applied.written.append(dest)
+            plan.append((dest, data, keep))
+    for dest, data, keep in plan:
+        if keep is not None:
+            keep.parent.mkdir(parents=True, exist_ok=True)
+            keep.write_bytes(data)
+            applied.conflicts.append(dest)
+            applied.kept.append(keep)
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.name + ".kraft-tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, dest)
+        applied.written.append(dest)
     return applied

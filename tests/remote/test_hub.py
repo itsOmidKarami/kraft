@@ -218,6 +218,9 @@ def _repos(*names):
 
 async def test_a_named_machine_offline_or_full_makes_the_step_wait_and_never_run_elsewhere():
     hub = Hub("2.3.0")
+    hub._file = _file()  # named in the file, but apply has not made its entry: a wait
+    not_yet = "waiting for home (offline: not connected yet)"
+    assert hub.decide("home", _repos("kraft")).wait == not_yet
     hub.apply(_file())
     assert hub.decide("home", _repos("kraft")) == Verdict(
         wait="waiting for home (offline: never connected)"

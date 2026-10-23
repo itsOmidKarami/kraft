@@ -468,9 +468,10 @@ def build() -> MCPServer:
     ) -> dict:
         """Set or clear a Kraft work item's own model/effort/runner override,
         applied to every agent node in its chain without changing the chain
-        itself. `clear` resets every field back to the template's own binding;
-        naming a field replaces the whole stored override rather than merging
-        with it. `runner` is where the steps run: a machine from workers.yaml,
+        itself. `clear` resets every field, the runner too, back to the template's own
+        binding; naming a field replaces the stored override rather than merging
+        with it, but a call that does not name `runner` keeps the stored one. `runner` is
+        where the steps run: a machine from workers.yaml,
         `any` or `local`; a sandboxed, in-place, workspace-member, submodule or
         Git LFS item is refused. It takes effect at the next step launch."""
         return await client.set_agent_overrides(

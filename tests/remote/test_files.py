@@ -2,6 +2,7 @@
 
 import io
 import tarfile
+from pathlib import Path
 
 import pytest
 
@@ -71,15 +72,25 @@ def _archive(path, *names):
 
 
 @pytest.mark.parametrize(
-    "name",
-    ["../escape", "etc/passwd", "tmp/elsewhere/x"],
-    ids=["dotdot", "absolute-elsewhere", "not-an-entry"],
+    "names, written",
+    [
+        (["../escape"], []),
+        (["etc/passwd"], []),
+        (["tmp/elsewhere/x"], []),
+        (["{docs}/new.md", "{docs}/sub"], ["{docs}/new.md"]),
+    ],
+    ids=["dotdot", "absolute-elsewhere", "not-an-entry", "second-is-a-directory"],
 )
-def test_a_returned_archive_cannot_write_outside_the_read_write_entries(tmp_path, name):
+def test_a_returned_archive_cannot_write_outside_the_read_write_entries(tmp_path, names, written):
     docs, out, prev, items = _tree(tmp_path)
-    archive = _archive(tmp_path / "evil.tgz", name)
+    (docs / "sub").mkdir()  # a directory on the server where the archive names a file
+    inside = str(docs).lstrip("/")
+    archive = _archive(tmp_path / "evil.tgz", *(n.format(docs=inside) for n in names))
     got = files.apply_returned(archive, items, {}, tmp_path / "kept")
-    assert got.written == [] and not (tmp_path / "escape").exists()
+    assert (
+        got.written == [docs / Path(w).name for w in written] and not (tmp_path / "escape").exists()
+    )
+    assert (docs / "sub").is_dir() and not (docs / "sub").is_symlink()
 
 
 def test_a_returned_archive_over_the_file_count_is_refused_and_writes_nothing(

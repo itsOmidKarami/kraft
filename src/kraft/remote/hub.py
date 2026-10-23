@@ -283,11 +283,15 @@ class Hub:
                 return Verdict(refusal=why)
             names, wait_text = [runner], f"waiting for {runner}"
         for n in names:
-            e = self._entries[n]
-            if e.online and self.slots_used(n) < e.worker.capacity:
+            e = self._entries.get(n)
+            if e is not None and e.online and self.slots_used(n) < e.worker.capacity:
                 return Verdict(machine=n)
-        if (runner != placement.ANY or pinned is not None) and not self._entries[names[0]].online:
-            return Verdict(wait=f"{wait_text} (offline: {self._entries[names[0]].reason})")
+        if runner != placement.ANY or pinned is not None:
+            first = self._entries.get(names[0])  # workers.yaml may name it before apply made it
+            if first is None:
+                return Verdict(wait=f"{wait_text} (offline: not connected yet)")
+            if not first.online:
+                return Verdict(wait=f"{wait_text} (offline: {first.reason})")
         return Verdict(wait=wait_text)
 
     async def claim(

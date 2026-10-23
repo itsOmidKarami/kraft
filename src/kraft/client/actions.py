@@ -601,8 +601,9 @@ async def set_agent_overrides(
     """Set or clear a Kraft work item's own model/effort/runner override
     (Kraft-4k6l), read fresh at every dispatch rather than baked into the
     chain. `clear` sends `{}`, resetting every field to the template's own
-    binding; naming any of `model`/`escalate_model`/`effort`/`runner` *replaces* the
-    whole stored override, it does not merge with what is already there.
+    binding, the runner too; naming any of `model`/`escalate_model`/`effort`/`runner`
+    *replaces* the stored override, it does not merge with what is already there, except
+    that a call which does not name `runner` keeps the stored one.
     `_forbid_self_action`, not `resolve_work_item` (Kraft-g1ebw): a running
     worker dialing its own model/effort mid-run is exactly the kind of
     self-action the other verbs already refuse.
@@ -627,6 +628,11 @@ async def set_agent_overrides(
                 "or --clear",
                 kind=transport.Failure.REFUSED,
             )
+        if runner is None:  # where steps run is not an edit to the model: keep the stored one
+            item = await transport._get(f"/work-items/{transport.segment(target)}")
+            kept = (item.get("agent_overrides") or {}).get("runner")
+            if kept:
+                overrides["runner"] = kept
     return await transport._patch(
         f"/work-items/{transport.segment(target)}", {"agent_overrides": overrides}
     )

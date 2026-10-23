@@ -46,3 +46,30 @@ def test_a_runner_is_set_from_the_terminal_at_filing_and_afterwards(app, monkeyp
         "plan": {"runner": "any"},
         "implementation": {"runner": "gpu"},
     }
+
+
+@pytest.mark.parametrize(
+    "args, expected",
+    [
+        (["--model", "opus"], {"model": "opus", "runner": "gpu"}),
+        (["--runner", "any"], {"runner": "any"}),
+        (["--clear"], {}),
+    ],
+    ids=["a-model-edit-keeps-the-runner", "naming-a-runner-replaces-it", "clear-drops-it-too"],
+)
+def test_set_overrides_keeps_the_runner_it_does_not_name(
+    app, monkeypatch, capsys, repo, args, expected
+):
+    from kraft.remote import registry
+
+    (pathlib.Path(os.environ["KRAFT_CONFIG_DIR"]) / "workers.yaml").write_text(
+        f"workers:\n  gpu:\n    token_sha256: {registry.hash_token('kwt_x')}\n"
+    )
+    asyncio.run(client.ensure_repo(str(repo)))
+    monkeypatch.chdir(repo)
+    cli.main(["item", "create", "t", "--runner", "gpu", "--json"])
+    wid = json.loads(capsys.readouterr().out)["id"]
+    cli.main(["item", "set-overrides", wid, *args, "--json"])
+    capsys.readouterr()
+    cli.main(["view", "show", wid, "--json"])
+    assert (json.loads(capsys.readouterr().out)["agent_overrides"] or {}) == expected

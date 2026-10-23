@@ -872,7 +872,8 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         help="per-item model/effort override, without changing the chain; "
         "replaces the whole override",
         epilog="Each call replaces the item-wide override: a flag you leave out goes back "
-        "to the template's own binding. To change one node alone, use set-node-override.",
+        "to the template's own binding, except --runner, which a call that leaves it out keeps. "
+        "To change one node alone, use set-node-override.",
     )
     set_overrides.add_argument("id", nargs="?")
     set_overrides.add_argument("--model", help="plain model override")
@@ -886,7 +887,9 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         help="where its steps run: a machine from workers.yaml, any, or local",
     )
     set_overrides.add_argument(
-        "--clear", action="store_true", help="reset every field to the template's own binding"
+        "--clear",
+        action="store_true",
+        help="reset every field, the runner too, to the template's own binding",
     )
     set_overrides.set_defaults(func=_cmd_set_overrides)
 
