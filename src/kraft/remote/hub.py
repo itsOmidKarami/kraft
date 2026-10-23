@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from kraft import caps
 from kraft.config import RepoEntry
 from kraft.remote import placement, protocol, registry
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport
@@ -64,6 +65,8 @@ class _Entry:
     last_seen: float | None = None
     kraft: str | None = None
     transport: protocol.Transport | None = None
+    #: `mono()` when the connection ended, or the hub first knew the machine; None while online.
+    offline_since: float | None = None
     dialer: asyncio.Task | None = None
     outcome: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -78,12 +81,15 @@ class Hub:
         ping_s: float = protocol.PING_S,
         dead_s: float = protocol.DEAD_S,
         clock=time.time,
+        mono: Callable[[], float] | None = None,
         server_id: str = "",
     ) -> None:
         self.kraft_version = kraft_version
         self.server_id = server_id
         self._ssh, self._remote = ssh_command, remote_command
         self._ping_s, self._dead_s, self._clock = ping_s, dead_s, clock
+        # What `give_up_after` is judged on: monotonic, so time the server slept is not counted.
+        self._mono = mono or (lambda: caps.monotonic())
         self._file = registry.WorkersFile()
         self._entries: dict[str, _Entry] = {}
         self._background: set[asyncio.Task] = set()
@@ -105,7 +111,7 @@ class Hub:
         for name, worker in file.workers.items():
             entry = previous.pop(name, None)
             if entry is None:
-                entry = _Entry(worker)
+                entry = _Entry(worker, offline_since=self._mono())
             else:
                 changed = (entry.worker.ssh, entry.worker.token_sha256) != (
                     worker.ssh,
@@ -124,6 +130,14 @@ class Hub:
     def _give_up_s(self, name: str) -> float | None:
         worker = self._file.workers.get(name)
         return worker.give_up_s if worker is not None else None
+
+    def offline_for(self, name: str) -> float | None:
+        """Seconds (awake time) since `name`'s connection ended, or since the hub first knew of it;
+        None while it is online."""
+        entry = self._entries.get(name)
+        if entry is None or entry.offline_since is None:
+            return None
+        return self._mono() - entry.offline_since
 
     def _drop(self, entry: _Entry) -> None:
         if entry.dialer is not None:
@@ -177,7 +191,7 @@ class Hub:
             self._spawn(
                 entry.transport.close()
             )  # replaced: a half-dead old link must not lock the machine out
-        entry.transport, entry.online, entry.reason = t, True, ""
+        entry.transport, entry.online, entry.reason, entry.offline_since = t, True, "", None
         entry.kraft, entry.last_seen = peer.kraft, self._clock()
         entry.outcome.set()
         if self.runs is not None:  # tell the runs this machine is back
@@ -196,6 +210,7 @@ class Hub:
         finally:
             if entry.transport is t:
                 entry.transport, entry.online, entry.reason = None, False, why
+                entry.offline_since = self._mono()
             await t.close()
 
     async def _on_frame(self, machine: str, frame: dict) -> None:

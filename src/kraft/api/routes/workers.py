@@ -149,6 +149,8 @@ async def remove_worker(name: str, request: Request):
         return registry.WorkersFile(workers={n: w for n, w in current.workers.items() if n != name})
 
     await _edit(request, remove)
+    # Nothing will come back from a machine that is no longer listed.
+    await request.app.state.workers_hub.runs.machine_removed(name)
     return {"removed": name}
 
 

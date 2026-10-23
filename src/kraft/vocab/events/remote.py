@@ -13,12 +13,17 @@ __all__ = ["REMOTE_EVENT_TRAITS", "RemoteEvent"]
 class RemoteEvent(StrEnum):
     STEP_WAITING = "remote_step_waiting"
     DOCS_CONFLICT = "remote_docs_conflict"
+    STEP_GIVEN_UP = "remote_step_given_up"
 
 
 _PLAIN = EventTraits()
 
 REMOTE_EVENT_TRAITS = total(
     RemoteEvent,
-    {RemoteEvent.STEP_WAITING: _PLAIN, RemoteEvent.DOCS_CONFLICT: _PLAIN},
+    {
+        RemoteEvent.STEP_WAITING: _PLAIN,
+        RemoteEvent.DOCS_CONFLICT: _PLAIN,
+        RemoteEvent.STEP_GIVEN_UP: _PLAIN,
+    },
     name="REMOTE_EVENT_TRAITS",
 )

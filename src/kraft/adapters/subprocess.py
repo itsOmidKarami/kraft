@@ -1459,6 +1459,8 @@ async def _run_task(
         status = "config_error"
     if runner is not None and returncode == 78 and status == "failed":
         status = "config_error"  # the machine could not start the command (remote/standin.py)
+    if runner is not None and returncode == _remote_runs.REMOTE_GAVE_UP:
+        status = "unknown"  # the machine is out of reach, as a process that vanished is
     # A session that exits clean with no result file at all never reached the
     # end of its own contract -- `_resolve`'s exit-code fallback cannot tell
     # "no contract" (a plain subprocess hook) from "broke the contract" (an

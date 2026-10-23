@@ -22,6 +22,8 @@ from kraft.worker import callback
 
 logger = logging.getLogger(__name__)
 REMOTE_CONFIG_ERROR = 78
+#: The machine was out of reach for `give_up_after`: the step ends as a vanished process does.
+REMOTE_GAVE_UP = 79
 _current: Runs | None = None
 
 
@@ -68,6 +70,7 @@ class Run:
     changed: asyncio.Condition = field(default_factory=asyncio.Condition)
     received: dict[str, Path] = field(default_factory=dict)
     sink: blobs.BlobSink | None = None
+    abandoned: bool = False  # given up on: whatever the machine hands in later is thrown away
 
 
 class Runs:
@@ -159,6 +162,11 @@ class Runs:
         run = self._runs.get(frame.get("id"))
         if run is None or run.claim.machine != machine:
             return  # a run this server does not hold on that machine
+        if run.abandoned:
+            if kind in ("finished", "rejected"):  # the machine may drop the job now
+                with contextlib.suppress(protocol.Closed):
+                    await self.hub.transport(machine).send({"t": "delivered", "id": run.spec.key})
+            return
         if kind == "started":
             run.state = "running"
         elif kind == "log":
@@ -319,6 +327,44 @@ class Runs:
                 run.exit_code, run.state = 143, "finished"
                 run.delivered.set()
                 await self._notify(run)
+
+    async def watch(self, poll_s: float = 30.0) -> None:
+        """Forever: give up on every run whose machine was out of reach for its `give_up_after`.
+        Only time the server was awake counts (`Hub.offline_for`); `never` is never given up on."""
+        while True:
+            for run in [r for r in self._runs.values() if r.exit_code is None]:
+                worker = self.hub.file.workers.get(run.claim.machine)
+                gone = self.hub.offline_for(run.claim.machine)
+                if worker is None or gone is None or worker.give_up_s is None:
+                    continue
+                if gone >= worker.give_up_s:
+                    await self.give_up(
+                        run,
+                        f"{run.claim.machine} has been unreachable for {worker.give_up_after}",
+                        after=worker.give_up_after,
+                    )
+            await asyncio.sleep(poll_s)
+
+    async def give_up(self, run: Run, why: str, *, after: str = "removed") -> None:
+        """End a run whose machine is not coming back in time: its session becomes `unknown`, the
+        machine is told to stop it when it returns, and what it hands in then is ignored."""
+        if run.exit_code is not None:
+            return
+        machine, spec = run.claim.machine, run.spec
+        self._say(run, f"\nkraft: {why}; this step is given up\n")
+        await self._event(
+            spec,
+            RemoteEvent.STEP_GIVEN_UP,
+            {"session_id": spec.session_id, "machine": machine, "after": after},
+        )
+        self._killed.setdefault(machine, set()).add(spec.key)
+        run.abandoned = True
+        await self._finish(run, REMOTE_GAVE_UP)
+
+    async def machine_removed(self, name: str) -> None:
+        """`name` is no longer in workers.yaml: nothing will come back from it."""
+        for run in [r for r in self._runs.values() if r.claim.machine == name]:
+            await self.give_up(run, f"{name} was removed from workers.yaml")
 
     async def wait_delivered(self, run: Run, timeout: float) -> bool:
         try:

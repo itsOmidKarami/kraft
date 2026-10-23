@@ -298,3 +298,17 @@ async def test_a_waiting_claim_is_granted_when_a_slot_frees_and_is_cancellable()
     assert _row(hub)["slots_used"] == 2
     await machine.close()
     await accepted
+
+
+async def test_offline_for_counts_from_the_drop_on_the_monotonic_clock():
+    now = [500.0]
+    hub = Hub("2.3.0", mono=lambda: now[0])
+    hub.apply(_file())
+    assert hub.offline_for("home") == 0  # the hub has known it, offline, since now
+    machine, _, accepted = await _dial(hub)
+    now[0] += 1000
+    assert hub.offline_for("home") is None  # online
+    await machine.close()
+    await accepted
+    now[0] += 7
+    assert hub.offline_for("home") == 7

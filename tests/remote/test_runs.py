@@ -4,6 +4,10 @@ import textwrap
 
 import pytest
 from support.harness import git, write
+from support.remote import make_rig, workers_file
+
+from kraft.remote import runs as runs_mod
+from kraft.remote.runs import REMOTE_GAVE_UP
 
 COMMIT = textwrap.dedent(
     """
@@ -195,5 +199,92 @@ async def test_cancelling_while_the_machine_is_offline_ends_the_run_and_discards
 def test_the_remote_event_family_is_registered():
     from kraft.vocab.events import BY_VALUE, EVENT_TRAITS
 
-    assert {"remote_step_waiting", "remote_docs_conflict"} <= set(BY_VALUE)
-    assert all(BY_VALUE[v] in EVENT_TRAITS for v in ("remote_step_waiting", "remote_docs_conflict"))
+    families = ("remote_step_waiting", "remote_docs_conflict", "remote_step_given_up")
+    assert set(families) <= set(BY_VALUE)
+    assert all(BY_VALUE[v] in EVENT_TRAITS for v in families)
+
+
+class _Mono:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+async def clocked(tmp_path, database, run_dirs, item_on):
+    """`await clocked(give_up_after)`: the rig, with the hub's awake clock in the test's hands."""
+    made = []
+
+    async def make(give_up_after):
+        mono = _Mono()
+        rig = await make_rig(
+            tmp_path,
+            database,
+            run_dirs,
+            item_on,
+            hub_kwargs={"mono": mono},
+            workers=workers_file(gpu={"capacity": 2, "give_up_after": give_up_after}),
+        )
+        made.append(rig)
+        return rig, mono
+
+    yield make
+    for rig in made:
+        await rig.listener.close()
+        runs_mod.install(None)
+        await rig.hub.close()
+
+
+async def _running(rig, sid="s1"):
+    run = await rig.run(["sh", "-c", "sleep 30"], sid=sid)
+    while run.state != "running":
+        await asyncio.sleep(0.02)
+    return run
+
+
+async def test_a_run_whose_machine_is_gone_give_up_after_ends_unknown_and_kills_it_on_reconnect(
+    clocked, database
+):
+    rig, mono = await clocked("2s")
+    run = await _running(rig)
+    await rig.disconnect()
+    mono.now += 1
+    watching = asyncio.create_task(rig.runs.watch(poll_s=0.02))
+    await asyncio.sleep(0.2)
+    assert run.exit_code is None  # not yet: only a second of it
+    mono.now += 2
+    await rig.done(run)
+    watching.cancel()
+    assert run.exit_code == REMOTE_GAVE_UP and "given up" in run.spool.read_text()
+    assert "remote_step_given_up" in _event_types(database)
+    assert rig.hub.slots_used("gpu") == 0
+    killed = rig.machine._jobs[run.spec.key].runner
+    await rig.connect()  # the server tells it to stop; what it hands in is thrown away
+    while killed._proc.poll() is None:
+        await asyncio.sleep(0.02)
+    await asyncio.sleep(0.3)
+    assert run.exit_code == REMOTE_GAVE_UP and not rig.files("s1").result.exists()
+
+
+async def test_never_does_not_give_up(clocked):
+    rig, mono = await clocked("never")
+    run = await _running(rig)
+    await rig.disconnect()
+    mono.now += 86400
+    watching = asyncio.create_task(rig.runs.watch(poll_s=0.02))
+    await asyncio.sleep(0.3)
+    watching.cancel()
+    assert run.exit_code is None
+    await rig.connect()
+    await rig.runs.signal(run, "KILL")
+    await rig.done(run)
+
+
+async def test_removing_a_machine_gives_up_its_runs_at_once(clocked, database):
+    rig, _ = await clocked("2h")
+    run = await _running(rig)
+    await rig.runs.machine_removed("gpu")
+    assert run.exit_code == REMOTE_GAVE_UP and "removed from workers.yaml" in run.spool.read_text()
+    assert "remote_step_given_up" in _event_types(database)

@@ -439,6 +439,7 @@ async def lifespan(app: FastAPI):
     workers_runs.install(hub.runs)
     app.state.workers_listener = workers_listener.Listener(hub.runs, run_dirs.base)
     await app.state.workers_listener.start()
+    app.state.workers_watch_task = asyncio.create_task(hub.runs.watch())
     app.state.workers_lock = asyncio.Lock()
     app.state.invalid_workers = None
 
@@ -536,6 +537,7 @@ async def lifespan(app: FastAPI):
             app.state.when_free_task,
         ):
             await _cancel(task)
+        await _cancel(app.state.workers_watch_task)
         await app.state.workers_listener.close()
         workers_runs.install(None)
         await app.state.workers_hub.close()

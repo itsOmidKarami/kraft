@@ -63,6 +63,18 @@ def test_removing_a_machine_forgets_it_and_404s_when_unknown(client):
     assert client.delete("/api/workers/home").status_code == 404
 
 
+def test_removing_a_machine_gives_up_the_runs_it_held(client, monkeypatch):
+    gone = []
+
+    async def machine_removed(name):
+        gone.append(name)
+
+    monkeypatch.setattr(client.app.state.workers_hub.runs, "machine_removed", machine_removed)
+    client.post("/api/workers", json={"name": "home"})
+    client.delete("/api/workers/home")
+    assert gone == ["home"]
+
+
 def test_adding_an_ssh_machine_connects_once_and_reports_why_it_could_not(client):
     client.app.state.workers_hub._ssh = ("no-such-ssh-binary",)
     reply = client.post("/api/workers", json={"name": "boxed", "ssh": "boxed"})

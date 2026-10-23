@@ -50,9 +50,9 @@ SECTIONS = {
 
 def test_the_families_are_the_ten_in_docs_order_and_hold_every_type():
     assert FAMILIES == tuple(SECTIONS)
-    assert [len(f) for f in FAMILIES] == [27, 26, 18, 9, 9, 7, 18, 6, 2, 6]
+    assert [len(f) for f in FAMILIES] == [27, 26, 18, 9, 9, 7, 18, 6, 3, 6]
     assert EVENT_TYPES == tuple(m for f in FAMILIES for m in f)
-    assert len(BY_VALUE) == len(EVENT_TYPES) == 128
+    assert len(BY_VALUE) == len(EVENT_TYPES) == 129
     assert list(EVENT_TRAITS) == list(EVENT_TYPES)
 
 

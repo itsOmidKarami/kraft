@@ -45,6 +45,15 @@ async def test_a_remote_step_is_a_session_row_with_its_machine_and_the_standin_a
     assert rig.files("s1").log.read_text() == "on the machine\n"
 
 
+async def test_a_step_given_up_on_ends_its_session_unknown(rig):
+    task = asyncio.create_task(_run(rig, "s1", ["sh", "-c", "sleep 30"], runner="gpu"))
+    while not (run := rig.runs.find(rig.wid, "s1")) or run.state != "running":
+        await asyncio.sleep(0.02)
+    await rig.runs.give_up(run, "gpu has been unreachable for 2h")
+    assert await asyncio.wait_for(task, 20) == "unknown"
+    assert _row(rig, "s1")["status"] == "unknown"
+
+
 @pytest.mark.parametrize(
     ("runner", "kwargs", "says"),
     [
