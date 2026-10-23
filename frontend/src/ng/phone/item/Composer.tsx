@@ -7,7 +7,7 @@ import { usd } from "../../../format";
 import type { CancelPreview } from "../../../types";
 import { act, cancelPreview, type Done } from "../../item/actions";
 import { rejectTarget } from "../../item/graph";
-import { actionPath, retryBody } from "../../item/paths";
+import { retryBody } from "../../item/paths";
 import type { ItemDetail } from "../../item/useItem";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";

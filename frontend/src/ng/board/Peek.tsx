@@ -14,7 +14,7 @@ import { EscalateCard, PauseConfirm } from "../item/header/Dialogs";
 import { useDuplicate } from "../item/header/ItemHeader";
 import { totals, useDiffFiles, useOpenThreads } from "../item/Top";
 import { ChainConfig, ChainOverview } from "../item/panes/ChainPane";
-import { actionPath, retryBody } from "../item/paths";
+import { retryBody } from "../item/paths";
 import { openLimitEditor } from "../item/RaiseLimit";
 import { ComesAfterCard, PausedCard, StateCard } from "../item/StateCard";
 import { bodyOffers, budgetRaise, headerState, MAIN_LABEL, neverStarted, offersRaise } from "../item/status";

@@ -10,7 +10,7 @@ import { showToast } from "../../ui/Toast";
 import { act } from "../actions";
 import { useDraft } from "../draft/context";
 import { DraftState, ReviewButton } from "../draft/DraftBar";
-import { actionPath, retryBody } from "../paths";
+import { retryBody } from "../paths";
 import { archivable, bodyOffers, headerState, menuDoors, neverStarted, type PanelItem } from "../status";
 import type { ItemDetail } from "../useItem";
 import { CancelCard } from "./CancelCard";

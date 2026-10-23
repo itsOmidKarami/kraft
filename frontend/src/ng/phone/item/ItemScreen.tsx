@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { DOLLARS_HINT, dollars, dollarsText, elapsedBetween, plural, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { withCode } from "../../item/cause";
-import { actionPath, retryBody } from "../../item/paths";
+import { retryBody } from "../../item/paths";
 import { act, draftToStart } from "../../item/actions";
 import { lines as draftLines } from "../../item/draft/view";
 import { isEscalation } from "../../item/nodeGraph";
