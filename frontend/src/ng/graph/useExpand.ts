@@ -3,7 +3,7 @@ import { useMedia } from "../useMedia";
 
 /** Where the open/close of a task's frame is. `mounted`: the frame is in the page; `layout`: the canvas is
  *  laid out for it open (the frame grows from the box, the rest moves aside); `content`: its rows show;
- *  `glide`: something is still moving, so the camera waits to refit. */
+ *  `glide`: something is still moving, the camera's refit too. */
 export type Phase = { mounted: boolean; layout: boolean; content: boolean; glide: boolean };
 
 /** Open: the box becomes the frame while everything else makes room, then the rows fade in. Close: the rows
@@ -43,12 +43,3 @@ export function useExpand(open: boolean, reduced: boolean): Phase {
 
 /** Whether the person asked for less motion, live. */
 export const useReducedMotion = () => useMedia("(prefers-reduced-motion: reduce)");
-
-/** `value`, held back while `hold` is true: the camera measures the world after the move, not during it. */
-export function useSettled<T>(value: T, hold: boolean): T {
-  const [settled, setSettled] = useState(value);
-  useEffect(() => {
-    if (!hold) setSettled(value);
-  }, [value, hold]);
-  return settled;
-}

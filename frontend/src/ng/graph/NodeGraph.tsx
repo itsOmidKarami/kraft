@@ -7,7 +7,7 @@ import { frameHeight, frameWidth, type ScopesView } from "../item/scopeView";
 import type { Rounds } from "../item/nodeGraph";
 import { accessibleName, breakable, type GlyphState, type GraphItem } from "./types";
 import { useCamera } from "./useCamera";
-import { useExpand, useReducedMotion, useSettled } from "./useExpand";
+import { useExpand, useReducedMotion } from "./useExpand";
 import { useRoving } from "./useRoving";
 import { ZoomControls } from "./ZoomControls";
 import "./graph.css";
@@ -102,7 +102,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
   const kept = useRef(expand);
   if (expand) kept.current = expand;
   const expanding = useExpand(!!expand, calm);
-  // Either frame moving holds the camera and glides the rest.
+  // Either frame moving glides the rest, the camera with it.
   const phase = { ...expanding, glide: expanding.glide || loopPhase.glide };
   const shown = expand ?? (phase.mounted ? kept.current : undefined);
   const openStep = shown ? steps.findIndex((st) => st.id === shown.step) : -1;
@@ -128,9 +128,9 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
   const { edges, dots } = useMemo(() => nodeEdges(steps, lay), [steps, lay]);
   const handlers = placed.map((h, k) => ({ ...h, row: lay.handlerRows[k], lines: handlerEdges(lay.handlerRows[k], h.tasks, k) }));
   const handlerKeys = handlers.flatMap((h) => h.tasks.map((t) => taskKey(h.step, t.id)));
-  // The camera measures the world after it has moved, and keeps clear of the zoom and round controls at the foot.
-  const settledW = useSettled(lay.W, phase.glide), settledH = useSettled(lay.H, phase.glide);
-  const camera = useCamera({ canvas: "node", world: { W: settledW, H: settledH }, opening: "fit", reserve, clearBottom: 56 });
+  // The camera frames the world it is moving to, in the same 420ms (`is-glide`), so the zoom does not snap after the move;
+  // it keeps clear of the zoom and round controls at the foot.
+  const camera = useCamera({ canvas: "node", world: { W: lay.W, H: lay.H }, opening: "fit", reserve, clearBottom: 56 });
   const selKey = selected && (selected.scope && selected.task ? chipKey(selected.step, selected.task, selected.scope) : selected.task ? taskKey(selected.step, selected.task) : labelKey(selected.step));
   const firstStep = steps[0];
   const single = useSingleClick();

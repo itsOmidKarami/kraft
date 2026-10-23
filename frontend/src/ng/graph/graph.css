@@ -264,6 +264,7 @@
 .pane-facts dd { margin: 0; color: var(--text); }
 
 /* An open changed-test-scope task: a frame of repositories, each with its scopes as chips. */
+.canvas-world.is-glide { transition: transform .42s cubic-bezier(.2,.8,.2,1); }
 .canvas-world.is-glide :is(.graph-node, .step-label, .step-frame, .mark-end, .arc-label, .node-footer, .seam, .seam-below, .scope-frame) { transition: left .42s cubic-bezier(.2,.8,.2,1), top .42s cubic-bezier(.2,.8,.2,1), width .42s cubic-bezier(.2,.8,.2,1), height .42s cubic-bezier(.2,.8,.2,1); }
 .canvas-world.is-glide :is(.edge, .arc path) { transition: d .42s cubic-bezier(.2,.8,.2,1); }
 .canvas-world.is-glide .dot { transition: cx .42s cubic-bezier(.2,.8,.2,1), cy .42s cubic-bezier(.2,.8,.2,1); }

@@ -65,15 +65,13 @@ describe("NodeGraph with a task open", () => {
     expect(px(frame()!, "width")).toBe(was);
   });
 
-  it("fits the camera to the new world once the move is over, not while the world is still moving", async () => {
+  // A refit held until the move ends snaps the zoom after it: the camera moves to the new world with everything else.
+  it("fits the camera to the new world while the world moves, not after", async () => {
     const { rerender } = render(<NodeGraph name="v" steps={steps} />);
-    const held = world().style.transform;
+    const was = world().style.transform;
     rerender(<NodeGraph name="v" steps={steps} expand={expand} />);
-    await waitFor(() => expect(px(frame()!, "width")).toBe(frameWidth(view)));
+    await waitFor(() => expect(world().style.transform).not.toBe(was));
     expect(world()).toHaveClass("is-glide");
-    expect(world().style.transform).toBe(held);
-    await waitFor(() => expect(world()).not.toHaveClass("is-glide"));
-    await waitFor(() => expect(world().style.transform).not.toBe(held));
   });
 
   it("fades the rows first on closing, then moves everything back and takes the frame away", async () => {
