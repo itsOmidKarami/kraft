@@ -3,6 +3,7 @@ keeps new work from starting while an update installs and the server restarts.""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -337,3 +338,321 @@ def test_a_snapshot_restores_config_and_databases_and_drops_a_stale_wal(tmp_path
     assert not wal.exists()
     with sqlite3.connect(run_dirs.db) as c:
         assert c.execute("SELECT v FROM t").fetchone()[0] == "before"
+
+
+# ── apply_once ───────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def attempt(state, monkeypatch, tmp_path):
+    """A release install that could update itself, with the installer, the
+    start check, the snapshot, the reinstall and the restarter faked. `calls`
+    records them in order; `app` is what `apply_once` takes."""
+
+    monkeypatch.delenv("KRAFT_NO_UPDATE_CHECK", raising=False)
+    calls = []
+    installed = {"version": "2.2.0"}
+    busy = {"now": False}
+    seen = {}
+    release = {"result": update.Release("v2.2.1", "https://x/k.whl")}
+    prechecks = {"reason": None}
+    performs = {"exit": 0, "raises": None}
+    start_check = {"why": None}
+
+    def perform(rel, **_k):
+        calls.append(("perform", rel.tag))
+        if performs["raises"]:
+            raise SystemExit(performs["raises"])
+        installed["version"] = rel.tag.removeprefix("v")
+        return performs["exit"]
+
+    def latest_in_major(major, **kwargs):
+        calls.append(("latest_in_major", major, kwargs["channel"]))
+        return release["result"]
+
+    def take(run_dirs, config_dir):
+        calls.append(("snapshot",))
+        busy["now"] = seen.get("busy_after_snapshot", False)
+        return {"config_dir": str(config_dir), "config_snapshot": "/s", "db_snapshots": {}}
+
+    monkeypatch.setattr(update, "installed", lambda: installed["version"])
+    monkeypatch.setattr(update, "installed_requirement", lambda: REQUIREMENT)
+    monkeypatch.setattr(update, "_python", lambda: "3.13")
+    monkeypatch.setattr(update, "perform", perform)
+    monkeypatch.setattr(update, "latest_in_major", latest_in_major)
+    monkeypatch.setattr(
+        admin,
+        "update_prechecks",
+        lambda rel, **kw: calls.append(("prechecks", kw["interactive"])) or prechecks["reason"],
+    )
+    monkeypatch.setattr(
+        when_free, "_start_check", lambda: calls.append(("start_check",)) or start_check["why"]
+    )
+    monkeypatch.setattr(when_free, "snapshot", take)
+    monkeypatch.setattr(
+        when_free, "_reinstall", lambda req: calls.append(("reinstall", req)) or True
+    )
+    real_counts = when_free.busy_counts
+    monkeypatch.setattr(
+        when_free, "busy_counts", lambda db: (1, 0) if busy["now"] else real_counts(db)
+    )
+    state.when_free_restarter = lambda st: calls.append(("restart",))
+    return SimpleNamespace(
+        app=SimpleNamespace(state=state),
+        st=state,
+        calls=calls,
+        installed=installed,
+        busy=busy,
+        seen=seen,
+        release=release,
+        prechecks=prechecks,
+        performs=performs,
+        start_check=start_check,
+        config=lambda **s: _configure(state, **s),
+        names=lambda: [c[0] for c in calls],
+    )
+
+
+REQUIREMENT = {"name": "kraft-sdlc", "specifier": "==2.2.0"}
+
+
+async def test_nothing_pending_does_nothing_and_claims_nothing(attempt):
+    assert await when_free.apply_once(attempt.app, now=NOON) is None
+    assert attempt.names() == []
+    assert when_free.claimed() is False
+
+
+async def test_auto_update_marks_a_patch_installs_it_and_hands_the_restart_over(attempt):
+    attempt.config(auto_update=True)
+
+    line = await when_free.apply_once(attempt.app, now=NOON)
+
+    assert attempt.names() == [
+        "latest_in_major",
+        "prechecks",
+        "perform",
+        "start_check",
+        "snapshot",
+        "restart",
+    ]
+    assert attempt.calls[0] == ("latest_in_major", 2, "stable")
+    assert ("prechecks", False) in attempt.calls  # unattended: it asks nothing
+    assert when_free.marked(attempt.st)["by"] == "auto"
+    assert when_free.claimed() is True  # held until the restart replaces the process
+    record = when_free.read_rollback(attempt.st.run_dirs)
+    assert (record["from_version"], record["target"], record["kind"]) == (
+        "2.2.0",
+        "2.2.1",
+        "release",
+    )
+    assert record["requirement"] == REQUIREMENT
+    assert record["config_snapshot"] == "/s"
+    assert line.startswith("restarting 2.2.0")
+
+
+async def test_an_rc_install_checks_the_rc_channel(attempt, monkeypatch):
+    attempt.installed["version"] = "2.3.0rc1"
+    attempt.st.version = "2.3.0rc1"
+    attempt.release["result"] = update.Release("v2.3.0rc2", "u")
+    attempt.config(auto_update=True)
+    await when_free.apply_once(attempt.app, now=NOON)
+    assert attempt.calls[0] == ("latest_in_major", 2, "rc")
+
+
+async def test_the_configured_channel_beats_the_installed_ones(attempt):
+    attempt.config(auto_update=True, channel="beta")
+    await when_free.apply_once(attempt.app, now=NOON)
+    assert attempt.calls[0] == ("latest_in_major", 2, "beta")
+
+
+async def test_it_never_auto_marks_a_major(attempt):
+    """The check asks for the installed major only; a 3.0.0 on the feed is
+    shown on About and taken on a person's mark."""
+    attempt.release["result"] = None
+    attempt.config(auto_update=True)
+    assert await when_free.apply_once(attempt.app, now=NOON) is None
+    assert attempt.calls == [("latest_in_major", 2, "stable")]
+    assert when_free.marked(attempt.st) is None
+
+
+async def test_a_dev_install_never_marks(attempt, monkeypatch):
+    monkeypatch.setattr(update, "is_dev_install", lambda entry=None: True)
+    attempt.config(auto_update=True)
+    assert await when_free.apply_once(attempt.app, now=NOON) is None
+    assert attempt.calls == []
+
+
+async def test_the_check_off_switch_stops_auto_update(attempt, monkeypatch):
+    monkeypatch.setenv("KRAFT_NO_UPDATE_CHECK", "1")
+    attempt.config(auto_update=True)
+    assert await when_free.apply_once(attempt.app, now=NOON) is None
+    assert attempt.calls == []
+
+
+async def test_auto_update_leaves_a_persons_mark_alone(attempt):
+    when_free.mark(attempt.st, "v3.0.0", "you")
+    attempt.config(auto_update=True)
+    await when_free._auto_mark(attempt.st, when_free.settings(attempt.st))
+    assert when_free.marked(attempt.st)["tag"] == "v3.0.0"
+
+
+async def test_busy_at_claim_installs_nothing(attempt, database, item_on, run_dirs, monkeypatch):
+    from support.harness import v1_named_chain
+
+    it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation")
+    await _set_status(database, it.id, "active")
+    when_free.mark(attempt.st, "v2.2.1", "you")
+    # Free when pending() looked, busy when the claim did.
+    monkeypatch.setattr(
+        when_free, "pending", lambda st, now=None: when_free.Pending(release="v2.2.1")
+    )
+
+    assert await when_free.apply_once(attempt.app, now=NOON) is None
+
+    assert "perform" not in attempt.names() and when_free.claimed() is False
+
+
+async def test_a_precheck_that_would_ask_refuses_the_install(attempt):
+    when_free.mark(attempt.st, "v2.2.1", "you")
+    attempt.prechecks["reason"] = "release@acme would stop loading"
+
+    line = await when_free.apply_once(attempt.app, now=NOON)
+
+    assert "perform" not in attempt.names() and "restart" not in attempt.names()
+    assert line.startswith("refused v2.2.1")
+    assert when_free.marked(attempt.st) is None
+    assert when_free.claimed() is False
+    assert when_free.read_rollback(attempt.st.run_dirs) is None
+    assert when_free.outcome(attempt.st)["status"] == "refused"
+    assert when_free.failed_key(attempt.st) == "v2.2.1"
+
+
+async def test_perform_raising_systemexit_is_a_refusal_too(attempt):
+    when_free.mark(attempt.st, "v2.2.1", "you")
+    attempt.performs["raises"] = "uv is not on PATH"
+
+    await when_free.apply_once(attempt.app, now=NOON)
+
+    assert "restart" not in attempt.names()
+    assert when_free.marked(attempt.st) is None and when_free.claimed() is False
+    assert "uv is not on PATH" in when_free.outcome(attempt.st)["detail"]
+
+
+async def test_an_install_that_exits_nonzero_is_put_back(attempt):
+    when_free.mark(attempt.st, "v2.2.1", "you")
+    attempt.performs["exit"] = 2
+
+    await when_free.apply_once(attempt.app, now=NOON)
+
+    assert ("reinstall", REQUIREMENT) in attempt.calls and "restart" not in attempt.names()
+    assert when_free.outcome(attempt.st)["status"] == "failed"
+    assert when_free.claimed() is False
+
+
+async def test_a_start_check_that_fails_on_a_release_puts_the_old_one_back(attempt):
+    when_free.mark(attempt.st, "v2.2.1", "you")
+    attempt.start_check["why"] = "access.yaml: port 'x'"
+
+    await when_free.apply_once(attempt.app, now=NOON)
+
+    assert attempt.names() == ["prechecks", "perform", "start_check", "reinstall"]
+    assert attempt.calls[-1] == ("reinstall", REQUIREMENT)
+    outcome = when_free.outcome(attempt.st)
+    assert outcome["status"] == "failed" and "access.yaml" in outcome["detail"]
+    assert when_free.failed_key(attempt.st) == "v2.2.1"
+    assert when_free.claimed() is False
+    assert when_free.read_rollback(attempt.st.run_dirs) is None
+
+
+async def test_becoming_busy_before_the_restart_keeps_the_install_and_waits(attempt):
+    when_free.mark(attempt.st, "v2.2.1", "you")
+    attempt.seen["busy_after_snapshot"] = True
+
+    line = await when_free.apply_once(attempt.app, now=NOON)
+
+    assert "restart" not in attempt.names() and when_free.claimed() is False
+    assert "went busy" in line
+    # The install stays; once free again the next look goes straight to the restart.
+    attempt.seen["busy_after_snapshot"] = False
+    attempt.busy["now"] = False
+    attempt.calls.clear()
+    attempt.st.version = "2.2.0"
+
+    await when_free.apply_once(attempt.app, now=NOON)
+
+    assert attempt.names() == ["start_check", "snapshot", "restart"]
+    assert when_free.read_rollback(attempt.st.run_dirs)["requirement"] == REQUIREMENT
+
+
+async def test_outside_the_allowed_hours_nothing_happens(attempt):
+    when_free.mark(attempt.st, "v2.2.1", "you")
+    attempt.config(allowed_hours=["01:00-06:00"])
+    assert await when_free.apply_once(attempt.app, now=NOON) is None
+    assert attempt.calls == [] and when_free.claimed() is False
+
+
+async def test_a_pending_settings_restart_installs_nothing(attempt, monkeypatch):
+    monkeypatch.setattr(
+        apply, "pending", lambda _st: {"restart": _items("bind changed"), "reload": []}
+    )
+    attempt.config(restart_when_free=True)
+
+    await when_free.apply_once(attempt.app, now=NOON)
+
+    assert attempt.names() == ["start_check", "snapshot", "restart"]
+    record = when_free.read_rollback(attempt.st.run_dirs)
+    assert (record["kind"], record["requirement"], record["target"]) == ("settings", None, None)
+
+
+async def test_a_start_check_that_fails_on_a_settings_restart_leaves_it_unapplied(
+    attempt, monkeypatch
+):
+    monkeypatch.setattr(
+        apply, "pending", lambda _st: {"restart": _items("bind changed"), "reload": []}
+    )
+    attempt.config(restart_when_free=True)
+    attempt.start_check["why"] = "port 'x'"
+
+    await when_free.apply_once(attempt.app, now=NOON)
+
+    assert attempt.names() == ["start_check"]  # nothing installed, so nothing reinstalled
+    assert when_free.outcome(attempt.st)["status"] == "failed"
+    assert when_free.claimed() is False
+
+
+async def test_an_exception_after_the_claim_releases_it(attempt):
+    when_free.mark(attempt.st, "v2.2.1", "you")
+
+    def explode(st):
+        raise RuntimeError("boom")
+
+    attempt.st.when_free_restarter = explode
+    with pytest.raises(RuntimeError):
+        await when_free.apply_once(attempt.app, now=NOON)
+    assert when_free.claimed() is False
+
+
+async def test_the_loop_survives_an_exception(attempt, monkeypatch):
+    looks = []
+
+    async def apply_once(app, *, now=None):
+        looks.append(1)
+        if len(looks) == 1:
+            when_free.claim(attempt.st.db)
+            raise RuntimeError("boom")
+        return "ran"
+
+    monkeypatch.setattr(when_free, "apply_once", apply_once)
+    monkeypatch.setattr(when_free, "INTERVAL_S", 0.01)
+    task = asyncio.ensure_future(when_free.loop(attempt.app))
+    try:
+        for _ in range(200):
+            if len(looks) >= 2:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert len(looks) >= 2
+    assert when_free.claimed() is False

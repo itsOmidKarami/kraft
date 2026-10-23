@@ -66,6 +66,7 @@ BACKGROUND_TASKS = (
     "mr_poller_task",
     "apply_task",
     "addon_update_task",
+    "when_free_task",
 )
 
 
@@ -123,6 +124,9 @@ def start_background(app: FastAPI) -> None:
     # After the library is loaded from the lock: a start never waits on the network.
     deps.in_background(app, deps.auto_update_addons)
     app.state.addon_update_task = asyncio.ensure_future(deps.auto_update_daily(app))
+    # Off by default costs a look a minute at a file and the database: it
+    # installs and restarts only what a person marked, or `update.yaml` allows.
+    app.state.when_free_task = asyncio.ensure_future(when_free.loop(app))
 
 
 async def _probation_timer(app: FastAPI) -> None:
@@ -494,6 +498,7 @@ async def lifespan(app: FastAPI):
             # The daily task first: it is what starts the next add-on task.
             app.state.addon_update_task,
             app.state.apply_task,
+            app.state.when_free_task,
         ):
             await _cancel(task)
         await deps.stop_addon_work(app.state)
