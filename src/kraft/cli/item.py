@@ -659,7 +659,9 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     resume.set_defaults(func=_cmd_resume)
 
     retry = subs.add_parser(
-        "retry", parents=[common], help="re-run the node a stopped item stopped on"
+        "retry",
+        parents=[common],
+        help="re-run the node a stopped item stopped on (after a time or budget cap, its step)",
     )
     retry.add_argument("id", nargs="?")
     retry.add_argument("--steer", help="carried into the retry's prompt")

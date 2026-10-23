@@ -14,7 +14,7 @@ import { EscalateCard, PauseConfirm } from "../item/header/Dialogs";
 import { useDuplicate } from "../item/header/ItemHeader";
 import { totals, useDiffFiles, useOpenThreads } from "../item/Top";
 import { ChainConfig, ChainOverview } from "../item/panes/ChainPane";
-import { actionPath } from "../item/paths";
+import { actionPath, retryBody } from "../item/paths";
 import { openLimitEditor } from "../item/RaiseLimit";
 import { ComesAfterCard, PausedCard, StateCard } from "../item/StateCard";
 import { bodyOffers, budgetRaise, headerState, MAIN_LABEL, neverStarted, offersRaise } from "../item/status";
@@ -224,7 +224,7 @@ function Footer({ cards, item, reload, offline, onOpen, onRaise, onAnswer }: { c
     if (hs.main === "resume") return void run(act.resume(item.id));
     // Start never applies a draft: with one, the item page asks first (R9b-01's other door).
     if (hs.main === "start") return void startHere();
-    if (hs.main === "retry") return void run(act.retry(item.id, node ? { path: actionPath(node, item.stop?.task) } : {}));
+    if (hs.main === "retry") return void run(act.retry(item.id, retryBody(node, item.stop)));
     if (hs.main === "archive") return void run(act.archive(item.id));
     return void run(act.restore(item.id));
   };

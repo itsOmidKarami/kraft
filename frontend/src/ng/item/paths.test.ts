@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ChainNode } from "../../types";
-import { actionPath, stepsOf } from "./paths";
+import type { ChainNode, WorkItemStop } from "../../types";
+import { actionPath, retryBody, stepsOf } from "./paths";
 
 const v1: ChainNode = {
   id: "verification",
@@ -39,5 +39,15 @@ describe("actionPath", () => {
     ["a task path of another node", v1, "merge_request.open.open_draft", "verification"],
   ] as const)("falls back to the node for %s", (_, node, task, path) => {
     expect(actionPath(node, task)).toBe(path);
+  });
+});
+
+describe("retryBody", () => {
+  const stop = (kind: WorkItemStop["kind"]): WorkItemStop => ({ kind, node: "verification", task: "verification.checks.lint", resume_at: null, reason: null });
+  it("names the stopped task on a failure", () => {
+    expect(retryBody(v1, stop("failed"))).toEqual({ path: "verification.checks.lint" });
+  });
+  it.each(["cap", "budget"] as const)("leaves a %s stop's start to the server, the step it ran out in", (kind) => {
+    expect(retryBody(v1, stop(kind))).toEqual({});
   });
 });

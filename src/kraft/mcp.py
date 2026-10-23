@@ -325,7 +325,8 @@ def build() -> MCPServer:
         restart: bool = False,
     ) -> dict:
         """Rerun work on a stopped Kraft work item, with `steer` carried into the
-        retry's prompt: the node it stopped on, or `path` (canonical: `node`,
+        retry's prompt: the node it stopped on (after a time or budget cap, the
+        step it stopped in), or `path` (canonical: `node`,
         `node.step` or `node.step.task`) and everything after it; `restart`
         reruns the whole chain. This is the only way back onto an item that
         stopped for a human: resume only takes a paused item. With every slot busy

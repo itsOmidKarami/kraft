@@ -10,7 +10,7 @@ import { showToast } from "../../ui/Toast";
 import { act } from "../actions";
 import { useDraft } from "../draft/context";
 import { DraftState, ReviewButton } from "../draft/DraftBar";
-import { actionPath } from "../paths";
+import { actionPath, retryBody } from "../paths";
 import { archivable, bodyOffers, headerState, menuDoors, neverStarted, type PanelItem } from "../status";
 import type { ItemDetail } from "../useItem";
 import { CancelCard } from "./CancelCard";
@@ -145,7 +145,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
     if (asksFirst()) return draft!.setReviewing(true, start);
     if (hs.main === "start") return void startFresh();
     if (hs.main === "resume") return start();
-    if (hs.main === "retry") return void run(act.retry(item.id, node ? { path: actionPath(node, item.stop?.task) } : {}));
+    if (hs.main === "retry") return void run(act.retry(item.id, retryBody(node, item.stop)));
     if (hs.main === "archive") return void run(act.archive(item.id));
     return void run(act.restore(item.id));
   };

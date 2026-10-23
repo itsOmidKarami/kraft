@@ -1,4 +1,4 @@
-import type { ChainNode } from "../../types";
+import type { ChainNode, WorkItemStop } from "../../types";
 
 /** A step of a node: its id and its tasks' canonical paths. */
 export interface Step {
@@ -35,4 +35,11 @@ export function actionPath(node: ChainNode, task?: string | null): string {
   const own = steps.flatMap((s) => s.tasks);
   const full = task.includes(".") ? own.find((t) => t === task) : own.find((t) => taskName(t) === task);
   return full ?? node.id;
+}
+
+/** A Retry's body. A cap or budget stop leaves where to start to the server,
+ *  which reruns the step the item ran out in (lifecycle `_stopped_step`); any
+ *  other stop names its task. */
+export function retryBody(node: ChainNode | undefined, stop?: WorkItemStop | null): { path?: string } {
+  return !node || stop?.kind === "cap" || stop?.kind === "budget" ? {} : { path: actionPath(node, stop?.task) };
 }

@@ -63,6 +63,51 @@ def test_a_retry_hands_its_target_to_the_fork(client, repo, retried, body, path,
 
 
 @pytest.mark.parametrize(
+    ("kind", "capped", "fixed", "path"),
+    [
+        ("cap", None, False, "verification.review"),
+        ("budget", None, False, "verification.review"),
+        ("cap", {"cycles": 3, "attempts": 3}, False, "verification"),
+        ("cap", None, True, "verification"),
+        ("failed", None, False, "verification"),
+    ],
+    ids=["time-cap", "budget", "loop-cap", "after-a-fix-cycle", "failure"],
+)
+def test_a_plain_retry_after_a_cap_reruns_the_step_it_ran_out_in(
+    client, repo, retried, kind, capped, fixed, path
+):
+    """Stopped in `verification`'s second step: running out of time or money
+    says nothing about the first, which is not rerun. A loop cap, a failure,
+    and a cap once a fix may have broken the first step rerun the node."""
+    import os
+    import sqlite3
+    from contextlib import closing
+    from pathlib import Path
+
+    from kraft import store
+    from kraft.executor import walk
+    from kraft.policy import Cap
+    from kraft.templates.forks import ChainPath
+
+    wid = _stopped_at(client, repo, "verification")
+    db = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
+    with closing(sqlite3.connect(db)) as conn, conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("UPDATE work_items SET current_step = 1 WHERE id = ?", (wid,))
+        store.mark_needs_human(conn, wid, "verification", "ran out", capped, kind=kind)
+        if fixed:
+            row = conn.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            node = ChainPath.parse(store.materialized_chain_of(row), "verification").node
+            store.bump_counter(conn, wid, walk._loop_key(node), Cap(attempts=3, wall_clock_s=600))
+
+    r = client.post(f"/api/work-items/{wid}/retry", json={})
+
+    assert r.status_code == 200, r.text
+    _wait_for(lambda: "target" in retried)
+    assert retried["target"].path == path
+
+
+@pytest.mark.parametrize(
     ("body", "status", "says"),
     [
         ({"path": "verification.nope"}, 422, "path: 'verification.nope': node"),

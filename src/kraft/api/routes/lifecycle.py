@@ -1758,6 +1758,8 @@ async def _retry(wid: str, body: Retry, request: Request):
                 }
             )
     chain = chain_or_409(row)
+    if body.path is None and not body.restart:
+        body = body.model_copy(update={"path": _stopped_step(st, wid, chain, row)})
     target = _retry_target(chain, row, body)
     override = _retry_override(chain, target, body)
     # The node the rerun starts at: what a steer has to reach from, whose
@@ -2080,6 +2082,28 @@ def _retry_target(chain, row, body: Retry) -> ChainPath | None:
             f"({row['current_node_id']!r}); a retry reruns work, it does not skip ahead",
         )
     return target
+
+
+def _stopped_step(st, wid: str, chain, row) -> str | None:
+    """A plain retry's path after a cap or budget stop: the step the item was
+    in (`current_step`), not its node's first. Running out of time, money or
+    rate-limit retries says nothing about the steps already passed, so they
+    are not paid for again. None -- the whole node -- for a loop cap
+    (`capped`), a verdict on the node, and once its fix loop has run, since a
+    fix can break what an earlier step passed (`fix-loop-remeasures-the-whole-
+    node`)."""
+    if row["stop_kind"] not in (StopKind.CAP, StopKind.BUDGET) or not row["current_step"]:
+        return None
+    if ((board._current_stop(st, wid) or {}).get("capped")) is not None:
+        return None
+    node = chain.chain.nodes[store.node_index(row, row["current_node_id"])]
+    if isinstance(node.node, GateNode) or row["current_step"] >= len(node.steps):
+        return None
+    if node.node.fix_loop is not None and st.db.read(
+        lambda c: store.read_counter(c, wid, walk._loop_key(node))
+    ):
+        return None
+    return node.steps[row["current_step"]].path
 
 
 def _retry_override(chain, target: ChainPath | None, body: Retry):
