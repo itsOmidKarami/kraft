@@ -2,7 +2,8 @@
 
 Two ways in. Dial-in: this process opens a WebSocket to the server and keeps
 redialling. `--stdio`: the server ran `ssh host kraft admin worker serve
---stdio`, and the protocol is this process's stdin and stdout."""
+--stdio`, and the protocol is this process's stdin and stdout, relayed to the
+machine daemon (`kraft.remote.daemon`) that holds the jobs."""
 
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ from kraft.remote import blobs, files, protocol
 from kraft.remote.forwarder import Forwarder
 from kraft.remote.jobs import JobRunner, JobSpec, job_dir
 from kraft.remote.paths import PathMap
-from kraft.remote.transport import FRAME_LIMIT, StreamTransport, WebSocketTransport
+from kraft.remote.transport import FRAME_LIMIT, WebSocketTransport
 from kraft.remote.workdir import Copy
 
 CONNECT_PATH = "/api/workers/connect"
@@ -100,27 +101,41 @@ async def dial_in(
             await asyncio.wait_for(stop.wait(), delay)
 
 
+def _spawn_daemon() -> None:
+    """Start the machine daemon detached from this ssh session, its output in `daemon.log`."""
+    remote = paths.kraft_home() / "remote"
+    remote.mkdir(parents=True, exist_ok=True)
+    with open(remote / "daemon.log", "ab", opener=paths.private) as log:
+        subprocess.Popen(
+            [sys.executable, "-m", "kraft", "admin", "worker", "serve", "--daemon"],
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+        )
+
+
 async def run_stdio(*, kraft_version: str, stdin=None, stdout=None) -> None:
-    """The ssh side: handshake with no token, then keep alive until ssh closes
-    the pipe. `stdout` is the binary file the protocol is written to, which is
-    not `sys.stdout`: anything else this process prints must not corrupt it."""
+    """The ssh side: copy the protocol between this process's stdin and stdout and
+    the machine daemon, which keeps the jobs when ssh drops. `stdout` is the binary
+    file the protocol is written to, which is not `sys.stdout`: anything else this
+    process prints must not corrupt it."""
+    from kraft.remote import daemon
+
     loop = asyncio.get_running_loop()
     reader = asyncio.StreamReader(limit=FRAME_LIMIT)
     await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), stdin or sys.stdin)
     w_transport, w_protocol = await loop.connect_write_pipe(
         asyncio.streams.FlowControlMixin, stdout or sys.stdout
     )
-    t = StreamTransport(reader, asyncio.StreamWriter(w_transport, w_protocol, reader, loop))
-    try:
-        machine = Machine(paths.kraft_home(), kraft_version=kraft_version)
-        welcome = await protocol.machine_handshake(
-            t, kraft_version=kraft_version, host=socket.gethostname()
-        )
-        await machine.serve(t, welcome)
-    except (protocol.Closed, protocol.Refused):
-        pass  # ssh closed the pipe, or the server said no: either way this process is done
-    finally:
-        await t.close()
+    writer = asyncio.StreamWriter(w_transport, w_protocol, reader, loop)
+    await daemon.relay(
+        paths.kraft_home(),
+        kraft_version=kraft_version,
+        stdin=reader,
+        stdout=writer,
+        spawn=_spawn_daemon,
+    )
 
 
 class _Job:
@@ -152,6 +167,10 @@ class Machine:
         ] = {}  # item -> preparing its copy, one job at a time
         self._delivered: dict[str, list[str]] = {}  # item -> tips the server has already taken
         self._background: set[asyncio.Task] = set()
+
+    def busy(self) -> bool:
+        """Does it hold a job: running, or finished and not yet taken by the server?"""
+        return bool(self._jobs)
 
     async def serve(self, t, welcome: dict) -> None:
         """Until the connection ends (raises `protocol.Closed`)."""

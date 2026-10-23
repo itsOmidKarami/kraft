@@ -2,7 +2,7 @@
 
 import sys
 
-from support.remote import make_rig
+from support.remote import make_rig, stop_daemon
 from support.stub_ssh import stub_ssh
 
 from kraft.remote import registry
@@ -42,6 +42,7 @@ async def test_an_ssh_machine_runs_a_step_through_the_servers_own_ssh(
         assert run.exit_code == 0 and run.spool.read_text() == "over ssh\n"
         assert (tmp_path / "machine-home" / "remote" / "srv1").is_dir()  # one area per server
     finally:
+        stop_daemon(tmp_path / "machine-home")
         await rig.listener.close()
         runs_mod.install(None)
         await rig.hub.close()

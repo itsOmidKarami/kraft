@@ -9,13 +9,11 @@ import contextlib
 import sys
 
 import pytest
-from support.harness import git, make_repo
-from support.remote import memory_pair
+from support.remote import memory_pair, send_job, stop_daemon
 from websockets.asyncio.server import serve
 
-from kraft.remote import blobs, bundle, files, machine, protocol, registry
+from kraft.remote import blobs, bundle, machine, protocol, registry
 from kraft.remote.hub import Hub
-from kraft.remote.jobs import JobSpec
 from kraft.remote.machine import Machine
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport, WebSocketTransport
 
@@ -124,7 +122,10 @@ async def test_an_unreachable_server_is_logged_and_retried():
     assert all("cannot connect" in line for line in lines)
 
 
-async def test_stdio_mode_handshakes_over_a_pipe_and_exits_when_ssh_closes_it():
+async def test_stdio_mode_handshakes_over_a_pipe_and_exits_when_ssh_closes_it(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "home"))
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
@@ -132,7 +133,7 @@ async def test_stdio_mode_handshakes_over_a_pipe_and_exits_when_ssh_closes_it():
         "admin",
         "worker",
         "serve",
-        "--stdio",  # wired in Task 8
+        "--stdio",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -145,6 +146,7 @@ async def test_stdio_mode_handshakes_over_a_pipe_and_exits_when_ssh_closes_it():
     assert peer.name == "boxed" and peer.protocol == protocol.PROTOCOL_VERSION
     await t.close()
     assert await asyncio.wait_for(proc.wait(), 10) == 0
+    stop_daemon(tmp_path / "home")
 
 
 async def _until(cond, timeout=5.0):
@@ -158,23 +160,7 @@ async def _job(tmp_path, argv, *, sid="s1"):
     server, machine_t = memory_pair()
     machine = Machine(tmp_path / "home", kraft_version="2.3.0")
     task = asyncio.create_task(machine.serve(machine_t, {"server": "srv"}))
-    repo = make_repo(tmp_path, "server")
-    git(repo, "checkout", "-q", "-b", "kraft/x")
-    head = git(repo, "rev-parse", "HEAD").strip()
-    code, tgz = tmp_path / "code.bundle", tmp_path / "files.tgz"
-    bundle.make(repo, "kraft/x", [], code)
-    files.pack([], tgz)
-    spec = JobSpec(
-        work_item_id="w1", session_id=sid, node_id="n", hook_point="n.main.a", argv=argv,
-        cwd=str(repo), env={"KRAFT_SESSION_ID": f"w1/{sid}"}, repo_env={}, passthrough=[],
-        setup_command=None, branch="kraft/x", head=head, base=head, identity={},
-        server_run_dir=str(tmp_path / "run"), server_worktree=str(repo),
-    )  # fmt: skip
-    await server.send(
-        {"t": "job", "id": spec.key, "spec": spec.to_frame(), "blobs": ["code", "files"]}
-    )
-    await blobs.send_blob(server, job=spec.key, name="code", source=code)
-    await blobs.send_blob(server, job=spec.key, name="files", source=tgz)
+    spec = await send_job(server, tmp_path, argv, sid=sid)
     return machine, task, server, spec
 
 

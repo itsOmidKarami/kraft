@@ -5,13 +5,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
+import signal
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from kraft import item_paths, store
+from kraft.remote import blobs, bundle, protocol, registry
 from kraft.remote import files as remote_files
-from kraft.remote import protocol, registry
 from kraft.remote import runs as runs_mod
 from kraft.remote.hub import Hub
 from kraft.remote.jobs import JobSpec
@@ -220,3 +222,34 @@ async def make_rig(
     if online:
         await rig.connect()
     return rig
+
+
+async def send_job(server, tmp_path, argv, *, sid="s1", **extra) -> JobSpec:
+    """Play the server: send a machine one job (a fresh repo branch, an empty `files` blob)."""
+    repo = make_repo(tmp_path, "server")
+    git(repo, "checkout", "-q", "-b", "kraft/x")
+    head = git(repo, "rev-parse", "HEAD").strip()
+    code, tgz = tmp_path / "code.bundle", tmp_path / "files.tgz"
+    bundle.make(repo, "kraft/x", [], code)
+    remote_files.pack([], tgz)
+    spec = JobSpec(
+        work_item_id="w1", session_id=sid, node_id="n", hook_point="n.main.a", argv=argv,
+        cwd=str(repo), env={"KRAFT_SESSION_ID": f"w1/{sid}"}, repo_env={}, passthrough=[],
+        setup_command=None, branch="kraft/x", head=head, base=head, identity={},
+        server_run_dir=str(tmp_path / "run"), server_worktree=str(repo), **extra,
+    )  # fmt: skip
+    await server.send(
+        {"t": "job", "id": spec.key, "spec": spec.to_frame(), "blobs": ["code", "files"]}
+    )
+    await blobs.send_blob(server, job=spec.key, name="code", source=code)
+    await blobs.send_blob(server, job=spec.key, name="files", source=tgz)
+    return spec
+
+
+def stop_daemon(home: Path) -> None:
+    """End the machine daemon a test's `serve --stdio` started under `home`."""
+    from kraft.remote import daemon
+
+    with contextlib.suppress(FileNotFoundError, ProcessLookupError, ValueError):
+        pid = (daemon.socket_path(home).parent / daemon.PID_FILE).read_text()
+        os.kill(int(pid), signal.SIGTERM)

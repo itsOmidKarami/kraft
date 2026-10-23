@@ -100,6 +100,9 @@ def _cmd_serve(ns: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
     from kraft.remote import machine
 
     version = update.installed()
+    if ns.daemon:
+        _serve_daemon(version)
+        return
     if ns.stdio:
         # The protocol owns the real stdout. Anything else printed, by this
         # process or a library, goes to stderr so it cannot corrupt a frame.
@@ -116,6 +119,20 @@ def _cmd_serve(ns: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
             with contextlib.suppress(NotImplementedError):
                 loop.add_signal_handler(sig, stop.set)
         await machine.dial_in(ns.server, ns.token, kraft_version=version, stop=stop)
+
+    asyncio.run(serve())
+
+
+def _serve_daemon(version: str) -> None:
+    from kraft import paths
+    from kraft.remote import daemon
+
+    async def serve() -> None:
+        stop = asyncio.Event()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with contextlib.suppress(NotImplementedError):
+                asyncio.get_running_loop().add_signal_handler(sig, stop.set)
+        await daemon.serve(paths.kraft_home(), kraft_version=version, stop=stop)
 
     asyncio.run(serve())
 
@@ -176,6 +193,9 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
     how = serve_p.add_mutually_exclusive_group(required=True)
     how.add_argument("--server", metavar="URL", help="dial in to this Kraft server")
     how.add_argument("--stdio", action="store_true", help="speak on stdin and stdout, for ssh")
+    how.add_argument(
+        "--daemon", action="store_true", help=argparse.SUPPRESS
+    )  # started by --stdio, not by hand
     serve_p.add_argument("--token", help="the token `worker add` printed")
     serve_p.set_defaults(func=lambda ns: _cmd_serve(ns, serve_p))
 
