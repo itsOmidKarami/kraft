@@ -291,12 +291,16 @@ class AgentInput(StrEnum):
     * `bot_feedback` -- what the node's `mr.automated_review` wait collected
       from the review bots once they settled, written to a file whose path is in
       `$KRAFT_BOT_FEEDBACK`
-      (`automated-review-collects-when-a-later-task-reads-it`)."""
+      (`automated-review-collects-when-a-later-task-reads-it`).
+    * `triage_verdict` -- where the node's triage of that feedback wrote its
+      latest verdict, by path, for the review brief to report what the triage
+      declined (`triage-verdict-is-delivered-to-the-review-brief`)."""
 
     REVIEW_PACKAGE = "review_package"
     CARRIED_FINDINGS = "carried_findings"
     PREVIOUS_REVIEW = "previous_review"
     BOT_FEEDBACK = "bot_feedback"
+    TRIAGE_VERDICT = "triage_verdict"
 
     @property
     def summary(self) -> str:
@@ -309,6 +313,7 @@ _INPUT_SUMMARIES = {
     AgentInput.CARRIED_FINDINGS: "The findings the node's last measurement reported",
     AgentInput.PREVIOUS_REVIEW: "This task's previous result and summary",
     AgentInput.BOT_FEEDBACK: "What the review bots said on the merge request, once they settled",
+    AgentInput.TRIAGE_VERDICT: "Where the triage of the review bots' feedback wrote its verdict",
 }
 
 

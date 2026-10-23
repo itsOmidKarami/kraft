@@ -422,6 +422,15 @@ with no findings and no agent SHALL be started.
 enforced-by: tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[declared], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[undeclared], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[empty-collection-skips], tests/executor/test_agent_inputs.py::test_a_skipped_triage_is_not_the_previous_review_of_the_next_round, tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[this-round], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[stale-round-collection-ignored], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[left-before-a-restart]
 origin: src/kraft/templates/models.py §AgentInput -- declared as `inputs: [bot_feedback]` and delivered by `executor/dispatch.py` §dispatch_node through `prompts.bot_feedback` and `adapters/agent.py`'s `$KRAFT_BOT_FEEDBACK`; the collection is written by the node's `mr.automated_review` wait (`adapters/forge/run.py` §_collect_review).
 
+## REQ triage-verdict-is-delivered-to-the-review-brief
+
+An agent task that declares the `triage_verdict` input SHALL be pointed at the
+latest verdict of the chain's review-bot triage, by path, and SHALL NOT be when
+no triage has judged anything: a triage skipped for having nothing to read is no
+verdict.
+enforced-by: tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-triage-ran], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[only-a-skip-row], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-skip-after-a-verdict], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[chain-without-triage], tests/executor/test_agent_inputs.py::test_the_triage_verdict_reaches_only_a_task_that_declares_it[declared], tests/executor/test_agent_inputs.py::test_the_triage_verdict_reaches_only_a_task_that_declares_it[undeclared], tests/skills/test_review_feedback.py::test_the_review_brief_is_told_to_report_what_the_triage_declined
+origin: src/kraft/templates/models.py §AgentInput -- declared as `inputs: [triage_verdict]` on the seeded `write_summary` and delivered by `executor/dispatch.py` §dispatch_node through `prompts.triage_verdict_note`, the verdict being the triage session `prompts.last_review_session` returns.
+
 ## REQ carried-findings-are-delivered-to-a-reviewing-task
 
 A reviewing agent task SHALL be shown the findings its previous round

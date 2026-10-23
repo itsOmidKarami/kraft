@@ -27,6 +27,7 @@ from kraft.executor.round_prompts import (
     stuck_escalation_instruction as stuck_escalation_instruction,
 )
 from kraft.executor.round_prompts import summary_at as summary_at
+from kraft.executor.round_prompts import triage_verdict_note as triage_verdict_note
 from kraft.templates.models import AgentTask
 from kraft.worker import callback as _callback
 

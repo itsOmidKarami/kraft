@@ -11,10 +11,10 @@ import sqlite3
 from pathlib import Path
 
 from kraft import findings as _findings
-from kraft import item_paths
+from kraft import item_paths, store
 from kraft import review as _review
 from kraft.config import git_read
-from kraft.templates.models import ForgeAction, ForgeTask, ResolvedTask
+from kraft.templates.models import AgentInput, AgentTask, ForgeAction, ForgeTask, ResolvedTask
 from kraft.vocab import ADVANCING, RESTARTS_RUN
 from kraft.vocab.sql import marks
 
@@ -147,6 +147,41 @@ def previous_review_note(row, *, run_dirs) -> str:
     `inputs: [previous_review]`; "" on its first session
     (`continuity-note-is-delivered-to-a-resumed-reviewer`)."""
     return _session_note(row, _PREVIOUS_REVIEW, _PREVIOUS_REVIEW_SUMMARY, run_dirs=run_dirs)
+
+
+#: What the review brief is told about the bots' feedback the triage did not
+#: act on (`triage-verdict-is-delivered-to-the-review-brief`). Like the
+#: deferred findings above, it exists so a decision made without a person
+#: reaches the person at the final gate rather than being quietly dropped.
+_TRIAGE_VERDICT = (
+    "\n\nAn agent triaged the automated reviewers' comments on this merge request "
+    "before it reached you, and acted on those it found right. Its latest verdict is the "
+    "result file at {result_path}{summary}.\n"
+    'Add a short section, "Review-bot feedback not acted on", naming each comment it '
+    "declined, who made it, and why it was declined, in its own words where you can. "
+    "Leave the section out when it declined nothing."
+)
+_TRIAGE_VERDICT_SUMMARY = " and its session summary at {summary_ref}, which lists what it declined"
+
+
+def triage_verdict_note(db, work_item_id: str, row, *, run_dirs) -> str:
+    """Where the latest verdict of the item's triage task is, by path, for a
+    task declaring `inputs: [triage_verdict]`; "" when the chain has no triage
+    or none has judged anything yet (a skipped one, which found nothing to
+    read, is no verdict: `last_review_session` reads only sessions at a head).
+
+    The triage is the task of the item's chain that declares `bot_feedback`."""
+    chain = store.materialized_chain_of(row).chain
+    hooks = [
+        t.path
+        for node in chain.nodes
+        for t in node.tasks()
+        if isinstance(t.task, AgentTask) and AgentInput.BOT_FEEDBACK in t.task.inputs
+    ]
+    for hook in hooks:
+        if (found := last_review_session(db, work_item_id, hook)) is not None:
+            return _session_note(found, _TRIAGE_VERDICT, _TRIAGE_VERDICT_SUMMARY, run_dirs=run_dirs)
+    return ""
 
 
 def fix_attempt_note(row, *, run_dirs) -> str:

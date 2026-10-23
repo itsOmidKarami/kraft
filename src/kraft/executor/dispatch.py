@@ -1472,6 +1472,10 @@ async def _dispatch_task(
                 prompts.last_review_session(db, work_item_row["id"], task.path),
                 run_dirs=run_dirs,
             )
+        if AgentInput.TRIAGE_VERDICT in t.inputs:
+            instruction += prompts.triage_verdict_note(
+                db, work_item_row["id"], work_item_row, run_dirs=run_dirs
+            )
     item_override = (
         json.loads(work_item_row["agent_overrides"]) if work_item_row["agent_overrides"] else {}
     )

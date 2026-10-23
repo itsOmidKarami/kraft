@@ -348,3 +348,29 @@ async def test_the_collection_read_is_this_nodes_this_rounds_and_this_runs(
     got = prompts.bot_feedback_source(it.database, it.run_dirs, it.id, node, asked_at_round)
 
     assert (got is not None) is found
+
+
+@pytest.mark.parametrize("declared", [True, False], ids=["declared", "undeclared"])
+async def test_the_triage_verdict_reaches_only_a_task_that_declares_it(
+    item_on, fake_agent, declared
+):
+    """`triage-verdict-is-delivered-to-the-review-brief`: the task that writes the
+    review brief is pointed at the triage's latest verdict, and any other is not."""
+    brief = v1_task("write", kind="agent", prompt="Write.")
+    if declared:
+        brief["inputs"] = ["triage_verdict"]
+    it = await item_on(
+        [*_bot_node(inputs=["bot_feedback"]), v1_node("brief", tasks=[brief])], "brief"
+    )
+    _, _, result = await it.session("t0", "review.decide.judge", "done", head_sha="abc123")
+    await it.database.write(
+        lambda c: c.execute(
+            "UPDATE worker_sessions SET session_summary_ref = 'summaries/t0.md' WHERE id = 't0'"
+        )
+    )
+
+    await _run(it)
+
+    [prompt] = fake_agent.prompts()
+    assert (result in prompt) is declared
+    assert ("summaries/t0.md" in prompt) is declared

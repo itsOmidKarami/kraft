@@ -98,6 +98,10 @@ def test_the_triage_entry_gives_the_exact_shipped_yaml():
         "            extends: triage_review_feedback\n"
     )
     assert task in library and task.rstrip("\n") in entry.how
+    brief = (
+        "    produces: review_brief\n    skill: kraft:review-brief\n    inputs: [triage_verdict]\n"
+    )
+    assert brief in library and "    inputs: [triage_verdict]" in entry.how
     assert step in library and step.rstrip("\n") in entry.how
     assert entry.present == ("library.yaml", "tasks", "triage_review_feedback")
 

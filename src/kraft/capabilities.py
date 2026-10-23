@@ -147,7 +147,10 @@ MANIFEST: tuple[Capability, ...] = (
             "        read_only: true\n"
             "        tasks:\n"
             "          - id: triage\n"
-            "            extends: triage_review_feedback"
+            "            extends: triage_review_feedback\n"
+            "and so the review brief reports what the triage declined, add to the "
+            "`write_summary` task:\n"
+            "    inputs: [triage_verdict]"
         ),
         present=("library.yaml", "tasks", "triage_review_feedback"),
     ),

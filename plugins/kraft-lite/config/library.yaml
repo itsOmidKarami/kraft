@@ -181,6 +181,7 @@ tasks:
     prompt: Write the work-item summary and review brief.
     produces: review_brief
     skill: kraft:review-brief
+    inputs: [triage_verdict]
 
   mark_mr_ready:
     kind: forge

@@ -61,3 +61,10 @@ def test_the_seeded_triage_task_selects_this_skill_and_reads_the_feedback():
     assert task["skill"] == "kraft:review-feedback"
     assert task["inputs"] == ["bot_feedback", "previous_review"]
     assert task["profile"] == "fast"
+
+
+def test_the_review_brief_is_told_to_report_what_the_triage_declined():
+    brief = (SKILL.parent.parent / "review-brief" / "SKILL.md").read_text()
+    assert "Review-bot feedback not acted on" in brief
+    task = yaml.safe_load(LIBRARY.read_text())["tasks"]["write_summary"]
+    assert task["inputs"] == ["triage_verdict"]

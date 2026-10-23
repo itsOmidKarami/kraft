@@ -54,6 +54,14 @@ Read, in this order:
   than no brief, because it converts a human check into a rubber stamp.
 - **What the local review flagged**, including findings that did not burn a fix
   cycle. A minor finding nobody is shown is a silent discard.
+- **Review-bot feedback not acted on**, when your instructions point you at an
+  agent's verdict on the automated reviewers' comments. A comment it declined
+  was judged wrong, already handled, or not for this change, by an agent and not
+  a person: name each one, who made it, where, and why it was declined, from the
+  summary your instructions name. Say that it is still unresolved on the merge
+  request, because a repository that requires resolved conversations holds the
+  merge until a person resolves it. Leave the section out when there is no
+  verdict or it declined nothing.
 - **What was deliberately left out**, and why. Scope the reviewer did not
   expect is most of what gets rejected at this gate.
 - **What you are unsure about.** Doubts are information for the human, not an
