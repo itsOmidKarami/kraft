@@ -581,7 +581,7 @@ def _trigger(repo):
 
 
 def _fallback(data, paths):
-    data.setdefault("profiles", {})["fast"] = {
+    data.setdefault("profiles", {})["spare"] = {
         "model": {"claude": "sonnet"},
         "fallback": [{"profile": "app:deep"}],
     }

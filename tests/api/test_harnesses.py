@@ -42,6 +42,9 @@ def _max_effort_chain(templates_dir):
     library = yaml.safe_load(path.read_text())
     for task in library["tasks"].values():
         task.pop("model", None)
+        # `fast` names no model for codex either, and says so first.
+        if task.get("profile") == "fast":
+            task.pop("profile")
     path.write_text(yaml.safe_dump(library, sort_keys=False))
 
 

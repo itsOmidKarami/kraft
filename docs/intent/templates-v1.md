@@ -1938,7 +1938,8 @@ origin: config/library.yaml §await_automated_review
 ## REQ default-post-draft-flow-is-ordered
 
 The default chain SHALL create a draft merge request, await CI, run any
-declared automated-review task, address CI failures and actionable feedback,
+declared automated-review task, decide with a triage step which of the review
+bots' feedback needs a change, address CI failures and the feedback that does,
 produce a work-item summary and review, and then request final-gate approval.
 After approval, it SHALL mark the merge request ready, await external approval,
 and merge.
@@ -1946,11 +1947,12 @@ enforced-by: tests/api/test_default_chain_walk.py::test_approving_every_gate_thr
 
 ## REQ post-draft-feedback-uses-node-recovery-controls
 
-CI failures and actionable automated-review feedback in the post-draft flow
-SHALL enter that execution node's recovery or fix-loop controls. After a
+CI failures in the post-draft flow SHALL enter that execution node's recovery
+or fix-loop controls. Review-bot feedback SHALL enter the fix loop only as the
+findings of the triage step, and not the node's `on_failure`. After a
 successful repair, the system SHALL resynchronize the draft merge request and
 remeasure the node.
-enforced-by: tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[on_failure], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[fix_loop]
+enforced-by: tests/adapters/forge/test_run_review.py::test_a_triaged_bot_comment_reaches_the_fix_loop[flagged], tests/adapters/forge/test_run_review.py::test_a_triaged_bot_comment_reaches_the_fix_loop[declined], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[on_failure], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[fix_loop]
 
 ## REQ missing-external-approval-is-normal-pending-state
 

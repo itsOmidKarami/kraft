@@ -80,6 +80,14 @@ tasks:
     profile: strong
     prompt: Resolve the current CI failures and actionable merge-request feedback.
 
+  triage_review_feedback:
+    kind: agent
+    harness: claude
+    profile: fast
+    prompt: Decide which of the review bots' feedback on this merge request needs a change.
+    skill: kraft:review-feedback
+    inputs: [bot_feedback, previous_review]
+
   repair_mr_checks:
     kind: agent
     harness: claude
@@ -244,6 +252,11 @@ nodes:
         tasks:
           - id: await_review
             extends: await_automated_review
+      - id: review_feedback
+        read_only: true
+        tasks:
+          - id: triage
+            extends: triage_review_feedback
     on_failure:
       steps:
         - id: repair

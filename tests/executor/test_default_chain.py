@@ -136,6 +136,7 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
     assert script.calls == [
         "await_ci",
         "await_review",
+        "triage",
         "test_changed_scopes",
         "code_review",
         "author",
@@ -144,6 +145,7 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
         "open",
         "await_ci",
         "await_review",
+        "triage",
         "author",
     ]
     [restart] = it.events("base_change_restart")
@@ -169,7 +171,7 @@ async def test_a_rebase_in_draft_merge_request_does_not_restart_merge_request_fe
     script.effects = {"rebase": _moves_base_once(it)}
 
     assert await _walk(it, default_chain, "draft_merge_request") == "awaiting_gate"
-    assert script.calls == ["rebase", "open", "await_ci", "await_review", "author"]
+    assert script.calls == ["rebase", "open", "await_ci", "await_review", "triage", "author"]
     assert it.events("base_change_restart") == []
     assert gates.pending_gate(it.database, it.id) == "final_review"
     assert it.row()["base_ref"] == "1" * 40

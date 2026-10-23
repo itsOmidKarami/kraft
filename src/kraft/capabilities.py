@@ -126,6 +126,31 @@ MANIFEST: tuple[Capability, ...] = (
         ),
         present=("library.yaml", "steering", "never-signal-processes-you-didnt-start"),
     ),
+    Capability(
+        version="2.4.0",
+        name="triage_review_feedback",
+        what="review bots' feedback is collected once they settle and a cheap agent decides "
+        "what needs fixing, instead of every bot comment going to the fix loop",
+        how=(
+            "add to library.yaml's `tasks:`:\n"
+            "  triage_review_feedback:\n"
+            "    kind: agent\n"
+            "    harness: claude\n"
+            "    profile: fast\n"
+            "    prompt: Decide which of the review bots' feedback on this merge request needs "
+            "a change.\n"
+            "    skill: kraft:review-feedback\n"
+            "    inputs: [bot_feedback, previous_review]\n"
+            "then add a third step to post_draft_feedback's `steps:` in library.yaml, after "
+            "`automated_review`:\n"
+            "      - id: review_feedback\n"
+            "        read_only: true\n"
+            "        tasks:\n"
+            "          - id: triage\n"
+            "            extends: triage_review_feedback"
+        ),
+        present=("library.yaml", "tasks", "triage_review_feedback"),
+    ),
 )
 
 

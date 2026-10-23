@@ -544,8 +544,27 @@ SINCE = [
     ("default", "merge.on_merge_rejected.repair.main.repair", "claude", "sonnet", "high", None),
 ]
 
-#: What the shipped library launches: `BEFORE`, with `SINCE` in chain order.
-SHIPPED_LAUNCHES = [*BEFORE[:-1], *SINCE, BEFORE[-1]]
+#: The review-feedback triage, on the `fast` tier, in the feedback node's first steps.
+TRIAGE = (
+    "default",
+    "merge_request_feedback.review_feedback.triage",
+    "claude",
+    "haiku",
+    "low",
+    None,
+)
+_FEEDBACK_REPAIR = next(
+    i for i, row in enumerate(BEFORE) if row[1].endswith("on_failure.repair.repair_feedback")
+)
+
+#: What the shipped library launches: `BEFORE`, with `SINCE` and the triage in chain order.
+SHIPPED_LAUNCHES = [
+    *BEFORE[:_FEEDBACK_REPAIR],
+    TRIAGE,
+    *BEFORE[_FEEDBACK_REPAIR:-1],
+    *SINCE,
+    BEFORE[-1],
+]
 
 
 def test_the_shipped_library_selects_profiles_and_launches_as_before(monkeypatch):
@@ -558,8 +577,9 @@ def test_the_shipped_library_selects_profiles_and_launches_as_before(monkeypatch
         "repair_mr_checks",
         "repair_merge_queue_failure",
         "strict_judge",
+        "triage_review_feedback",
     }
-    assert {t.get("profile") for t in library.values()} == {None, "strong"}
+    assert {t.get("profile") for t in library.values()} == {None, "strong", "fast"}
     assert not [n for n, t in library.items() if "model" in t or "effort" in t]
     assert _launches(SHIPPED, monkeypatch) == SHIPPED_LAUNCHES
 
@@ -598,8 +618,9 @@ def test_the_shipped_library_on_an_rc_harnesses_file_is_named_not_substituted(
     monkeypatch.setenv("KRAFT_CONFIG_DIR", str(home))
     # Only the profile rows: whether `claude` is on this machine's PATH is not the point.
     failed = [r for r in doctor._agent_checks() if not r["ok"] and r["name"].startswith("profile")]
-    assert [r["name"] for r in failed] == ["profile: strong"]
-    assert "profile 'strong' is not defined in harnesses.yaml" in failed[0]["detail"]
+    assert sorted(r["name"] for r in failed) == ["profile: fast", "profile: strong"]
+    [strong] = [r for r in failed if r["name"] == "profile: strong"]
+    assert "profile 'strong' is not defined in harnesses.yaml" in strong["detail"]
 
 
 def test_the_capability_manifest_tells_an_rc_home_about_profiles():

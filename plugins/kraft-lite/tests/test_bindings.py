@@ -103,6 +103,22 @@ def skill(name: str, text: str = "fallback") -> dict:
             id="path_binding_keeps_the_task_kind",
         ),
         pytest.param(
+            task(
+                skill="kraft:review-feedback",
+                prompt="Decide which of the review bots' feedback needs a change.",
+            ),
+            {},
+            lambda name: True,
+            None,
+            {
+                "kind": "skip",
+                "skill": None,
+                "prompt": None,
+                "source": "default:skills.kraft:review-feedback",
+            },
+            id="review_feedback_triage_is_skipped",
+        ),
+        pytest.param(
             task(kind="forge", target="mr.ci"),
             {"forge": {"mr.ci": {"kind": "subprocess", "command": ["gh", "pr", "checks"]}}},
             lambda name: True,

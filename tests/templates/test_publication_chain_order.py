@@ -12,7 +12,7 @@ from support.harness import entry_of
 
 from kraft.adapters import forge
 from kraft.executor.context import LaunchContext
-from kraft.templates.models import Chain
+from kraft.templates.models import AgentInput, Chain
 
 NO_SETUP = entry_of({"setup_command": ""})
 
@@ -113,6 +113,17 @@ def test_the_seeded_default_chain_publishes_in_the_required_order():
     ]
     ids = [n.id for n in chain.nodes]
     assert ids.index("work_item_summary") < ids.index("final_review") < ids.index("mark_ready")
+    # And in the feedback node a read-only triage step decides, after the review
+    # wait, what the bots said that needs a change.
+    feedback = next(n for n in chain.nodes if n.id == "merge_request_feedback")
+    assert [(step.id, step.read_only) for step in feedback.steps] == [
+        ("ci", False),
+        ("automated_review", False),
+        ("review_feedback", True),
+    ]
+    [triage] = feedback.steps[2].tasks
+    assert (triage.task.skill, triage.task.profile) == ("kraft:review-feedback", "fast")
+    assert triage.task.inputs == [AgentInput.BOT_FEEDBACK, AgentInput.PREVIOUS_REVIEW]
 
 
 async def test_a_pre_draft_gate_keeps_the_work_local(item_on, database, run_dirs, monkeypatch):

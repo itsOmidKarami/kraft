@@ -92,6 +92,19 @@ FORGE_DEFAULTS: dict[str, dict] = {
     },
 }
 
+#: What an agent task selecting a Kraft-only skill runs, by the skill's name,
+#: when the repo's bindings do not say: these skills read a file Kraft's own
+#: forge adapter writes, which Lite has none of.
+SKILL_DEFAULTS: dict[str, dict] = {
+    "kraft:review-feedback": {
+        "kind": "skip",
+        "why": (
+            "Kraft collects the review bots' comments for this step; Lite's review step "
+            "already reports what they said"
+        ),
+    },
+}
+
 #: What a child walking a slice runs unless `slice:` in the bindings says otherwise.
 #: `tasks.implementer` goes to every agent task in the child chain's first build
 #: node's own steps, whatever component it extends (`IMPLEMENTER`); the rest by
@@ -331,6 +344,8 @@ def _default(task: dict, installed: Callable[[str], bool]) -> tuple[dict, str]:
     kind = task.get("kind")
     if kind == "agent":
         skill = task.get("skill")
+        if skill in SKILL_DEFAULTS:
+            return SKILL_DEFAULTS[skill], f"default:skills.{skill}"
         if skill and not installed(skill):
             # Said in the source, as for a bound skill, so the walk can say it fell back.
             return {"kind": "prompt", **_fields(task)}, "default:agent" + SKILL_MISSING

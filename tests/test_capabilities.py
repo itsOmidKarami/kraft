@@ -74,6 +74,34 @@ def test_the_mr_rebase_entry_gives_the_exact_shipped_yaml():
     assert steps.rstrip("\n") in entry.how
 
 
+def test_the_triage_entry_gives_the_exact_shipped_yaml():
+    """Review-bot triage is a library task and a step an existing install's
+    never-overwritten library does not have, so the `how` an operator pastes in
+    must be the *shipped* YAML."""
+    [entry] = [c for c in capabilities.MANIFEST if c.name == "triage_review_feedback"]
+    library = (ROOT / "config" / "library.yaml").read_text()
+    task = (
+        "  triage_review_feedback:\n"
+        "    kind: agent\n"
+        "    harness: claude\n"
+        "    profile: fast\n"
+        "    prompt: Decide which of the review bots' feedback on this merge request needs a "
+        "change.\n"
+        "    skill: kraft:review-feedback\n"
+        "    inputs: [bot_feedback, previous_review]\n"
+    )
+    step = (
+        "      - id: review_feedback\n"
+        "        read_only: true\n"
+        "        tasks:\n"
+        "          - id: triage\n"
+        "            extends: triage_review_feedback\n"
+    )
+    assert task in library and task.rstrip("\n") in entry.how
+    assert step in library and step.rstrip("\n") in entry.how
+    assert entry.present == ("library.yaml", "tasks", "triage_review_feedback")
+
+
 @pytest.mark.parametrize("seeded", ["1.0.0", "1.0.1", "1.0.2"])
 def test_every_install_seeded_before_the_rebase_shipped_is_told_about_it(seeded):
     """`mr_rebase` shipped in 1.0.3; 1.0.1 and 1.0.2 went out without it, so an

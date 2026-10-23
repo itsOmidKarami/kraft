@@ -13,6 +13,7 @@ from support.harness import entry_of
 from kraft import waits
 from kraft.adapters import forge
 from kraft.api import deps
+from kraft.automated_review import AutomatedReview
 
 #: A `now` every parked wait is due by, so the test never sleeps out a backoff.
 LATER = "2999-01-01T00:00:00+00:00"
@@ -39,14 +40,20 @@ def _walk_to_the_end(client, wid, timeout=WALK_TIMEOUT):
 
 
 def _on_a_fake_forge(monkeypatch, **states) -> forge.FakeForge:
-    """Every agent on the fake `claude`, every repo on the returned forge."""
+    """Every agent on the fake `claude`, every repo on the returned forge,
+    expecting one review check (`automated_review`)."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     fake = forge.FakeForge(**states)
     monkeypatch.setattr(forge.run, "_DEV_FAKE", fake)
-    monkeypatch.setattr(
-        deps, "_connected", lambda repos, path: entry_of({"setup_command": "", "forge": "fake"})
-    )
+    reviewed = {"setup_command": "", "forge": "fake", "automated_review": {"check": "review"}}
+    monkeypatch.setattr(deps, "_connected", lambda repos, path: entry_of(reviewed))
     return fake
+
+
+def _review_check(*, finished: bool) -> forge.ReviewerFeedback:
+    """The review check, running or passed: nothing for the triage to read."""
+    check = {"name": "review", "finished": finished, "conclusion": "success", "output": ""}
+    return forge.ReviewerFeedback(AutomatedReview(check="review"), None, check=check)
 
 
 def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci(
@@ -60,7 +67,7 @@ def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_me
     fake = _on_a_fake_forge(
         monkeypatch,
         ci_states=["pending", "success"],
-        review_results=["pending", "clean"],
+        feedback_script=[[_review_check(finished=False)], [_review_check(finished=True)]],
         approval_states=["pending", "approved"],
         merge_delay=1,
         branch_ci_states=["pending", "success"],

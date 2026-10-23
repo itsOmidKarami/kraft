@@ -6,11 +6,14 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 from support.harness import commit_all, entry_of, fake_harness_home, v1_resolved, write
 
+from kraft import builtins as _builtins
 from kraft import executor, policy, store, waits
 from kraft.adapters import forge
 from kraft.automated_review import AutomatedReview, as_reviewers
@@ -19,6 +22,7 @@ from kraft.executor import dispatch
 from .nodes import forge_node
 from .test_run_chain import _multi_repo_item, _run_task
 
+ROOT = Path(__file__).resolve().parents[3]
 _BOT = {"bot": "coderabbitai"}
 _TASK_BOT = {"bot": "task-bot"}
 _ITEM_CHECK = {"check": "item-check"}
@@ -128,9 +132,25 @@ def _feedback(reviewer, active=None, *, threads=()):
     )
 
 
-def _review_node(minutes, *, reads=True, reviewers=(_A, _B)):
+def _shipped_triage_step() -> dict:
+    """The step the shipped `post_draft_feedback` runs after its review wait,
+    its task as the shipped library defines it, on the test's fake harness."""
+    library = yaml.safe_load((ROOT / "config" / "library.yaml").read_text())
+    [step] = [
+        s for s in library["nodes"]["post_draft_feedback"]["steps"] if s["id"] == "review_feedback"
+    ]
+    [task] = step["tasks"]
+    shipped = library["tasks"][task["extends"]]
+    # The harness and what it selects are the test's own; everything else is the library's.
+    own = {k: v for k, v in shipped.items() if k not in ("harness", "profile", "skill")}
+    return {**step, "tasks": [{"id": task["id"], **own, "harness": "fake"}]}
+
+
+def _review_node(minutes, *, reads=True, reviewers=(_A, _B), loop=False):
     """One node: the review wait, and (when `reads`) a task that reads what it
-    collected, in the step after."""
+    collected, in the step after. `loop` gives it the recovery the shipped
+    `post_draft_feedback` has: `on_failure` for a failed check, a fix loop for
+    findings."""
     wait = {
         "id": "review",
         "kind": "forge",
@@ -141,36 +161,55 @@ def _review_node(minutes, *, reads=True, reviewers=(_A, _B)):
     }
     steps = [{"id": "settle", "tasks": [wait]}]
     if reads:
-        triage = {
-            "id": "triage",
-            "kind": "agent",
-            "harness": "fake",
-            "prompt": "Decide.",
-            "inputs": ["bot_feedback"],
+        steps.append(_shipped_triage_step())
+    node = {"id": "feedback", "kind": "exec", "steps": steps}
+    if loop:
+
+        def repair(id):
+            return {"id": id, "kind": "agent", "harness": "fake", "prompt": "Fix it."}
+
+        node["on_failure"] = {"steps": [{"id": "checks", "tasks": [repair("repair_checks")]}]}
+        node["fix_loop"] = {
+            "steps": [{"id": "fix", "tasks": [repair("repair")]}],
+            "max_attempts": 2,
         }
-        steps.append({"id": "decide", "tasks": [triage]})
-    return {"id": "feedback", "kind": "exec", "steps": steps}
+    return node
 
 
 @pytest.fixture
 def rig(item_on, database, run_dirs, monkeypatch, wait_clock, tmp_path):
     """`await rig(node, fake)` files the node as an item; `await rig.walk()`
     walks it from its own cursor with the clock where `rig.clock` put it.
-    `rig.triaged` lists the tasks the walk launched an agent for."""
+    `rig.triaged` lists the tasks the walk launched an agent for, and each
+    `triage` among them answers the next of `rig.verdicts` (the findings it
+    writes) as a session of its own."""
 
     class Rig:
         triaged: list[str] = []
+        verdicts: list[list[dict]] = []
 
         async def __call__(self, node, fake):
             monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
             # A harness for the reading task to select; what it launches is
             # replaced below, since only whether it is reached is asked.
             monkeypatch.setenv("KRAFT_HOME", str(fake_harness_home(tmp_path, ["true"])))
-            self.triaged = []
+            self.triaged, self.verdicts = [], []
 
-            async def launched(*_, task, **__):
+            async def launched(db, run_dirs, t, node, row, worktree, *, task, common, **_):
                 self.triaged.append(task.path)
-                return "done", True
+                found = self.verdicts.pop(0) if t.id == "triage" and self.verdicts else []
+                _, log, result = await _builtins.start_session(db, run_dirs, **common)
+                status = await _builtins.finish_session(
+                    db,
+                    log,
+                    result,
+                    session_id=common["session_id"],
+                    work_item_id=common["work_item_id"],
+                    status="done",
+                    log="scripted\n",
+                    findings=found,
+                )
+                return status, True
 
             monkeypatch.setattr(dispatch, "_launch_agent", launched)
             self.item = await item_on([node])
@@ -267,7 +306,7 @@ async def test_the_collect_path_settles_then_hands_on_the_collection(
     assert {r["reviewer"][4:]: [t["id"] for t in r["threads"]] for r in got["reviewers"]} == threads
     # Bots with threads open are read; silent ones leave nothing for the triage to
     # read, so no agent is started for it.
-    assert rig.triaged == (["feedback.decide.triage"] if quiet else [])
+    assert rig.triaged == (["feedback.review_feedback.triage"] if quiet else [])
 
 
 async def test_the_next_check_comes_when_a_bots_grace_period_ends_not_at_the_backoff(rig):
@@ -348,3 +387,40 @@ async def test_a_multi_repo_item_takes_the_direct_path_whatever_its_node_reads(
     assert status == "failed"
     assert fake.reviewers_asked == [(_A,)]
     assert not list(run_dirs.base.rglob("bot_feedback.json"))
+
+
+_FLAGGED = {
+    "severity": "important",
+    "message": 'rename x, as the bot says: "unused x"',
+    "file": "calc.py",
+    "line": 1,
+    "source_plugin": "review-feedback",
+}
+
+
+@pytest.mark.parametrize(
+    "verdicts, launched",
+    [
+        # The triage flags a comment: the fix loop's repair runs, the node is
+        # measured again, and the second triage finds nothing more to change.
+        ([[_FLAGGED], []], ["triage", "repair", "triage"]),
+        # The triage declines everything: the node completes with no repair.
+        ([[]], ["triage"]),
+    ],
+    ids=["flagged", "declined"],
+)
+async def test_a_triaged_bot_comment_reaches_the_fix_loop(rig, verdicts, launched):
+    thread = _feedback(_A, 1, threads=["a1"])
+    await rig(
+        _review_node(30, reviewers=(_A,), loop=True), forge.FakeForge(feedback_script=[[thread]])
+    )
+    rig.verdicts = list(verdicts)
+
+    rig.clock(10)
+    assert await rig.walk() == "waiting"
+    rig.clock(63)
+    assert await rig.walk() == "completed"
+
+    # Bot feedback reaches the fix loop as the triage's findings, so the node's
+    # `on_failure` (for a failed check) never runs for it.
+    assert [path.rsplit(".", 1)[-1] for path in rig.triaged] == launched
