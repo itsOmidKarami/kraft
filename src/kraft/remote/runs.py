@@ -171,6 +171,7 @@ class Runs:
             if kind in ("finished", "rejected"):  # the machine may drop the job now
                 with contextlib.suppress(protocol.Closed):
                     await self.hub.transport(machine).send({"t": "delivered", "id": run.spec.key})
+                    self._runs.pop(run.spec.key, None)
             return
         if kind == "started":
             run.state = "running"
@@ -214,8 +215,10 @@ class Runs:
             await self.hub.transport(run.claim.machine).send({"t": "delivered", "id": run.spec.key})
         run.delivered.set()
         await self._notify(run)
-        # long enough for the stand-in to read the exit
-        asyncio.get_running_loop().call_later(600, self._runs.pop, run.spec.key, None)
+        if not run.abandoned:
+            # long enough for the stand-in to read the exit; a given-up run stays until the
+            # machine, however late it returns, hands in and is told `delivered`
+            asyncio.get_running_loop().call_later(600, self._runs.pop, run.spec.key, None)
 
     async def _reject(self, run: Run, frame: dict) -> None:
         self._say(run, f"kraft: {frame.get('reason', 'the machine could not start this step')}\n")

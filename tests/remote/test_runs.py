@@ -273,6 +273,23 @@ async def test_a_run_whose_machine_is_gone_give_up_after_ends_unknown_and_kills_
         await asyncio.sleep(0.02)
     await asyncio.sleep(0.3)
     assert run.exit_code == REMOTE_GAVE_UP and not rig.files("s1").result.exists()
+    assert rig.runs.find(rig.wid, "s1") is None  # told `delivered`, so the machine dropped it too
+    assert run.spec.key not in rig.machine._jobs
+
+
+async def test_a_given_up_run_outlives_the_exit_timer_until_the_machine_hands_in(clocked):
+    rig, _ = await clocked("2h")
+    run = await _running(rig)
+    await rig.disconnect()
+    loop, later = asyncio.get_running_loop(), []
+    real = loop.call_later
+    loop.call_later = lambda delay, *a: later.append(delay) or real(delay, *a)
+    try:
+        await rig.runs.machine_removed("gpu")
+    finally:
+        loop.call_later = real
+    assert 600 not in later
+    assert rig.runs.find(rig.wid, "s1") is run
 
 
 async def test_never_does_not_give_up(clocked):
