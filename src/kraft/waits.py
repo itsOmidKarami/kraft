@@ -124,6 +124,12 @@ def pushed_at(conn, work_item_id: str, *, repo: str, sha: str) -> datetime | Non
     return datetime.fromisoformat(row["created_at"]) if row else None
 
 
+def now() -> datetime:
+    """The clock a wait reads, as a datetime: one read for a caller that has
+    to make a decision and then hand the same instant to `observe`."""
+    return datetime.fromisoformat(_now())
+
+
 def observe(
     conn,
     work_item_id: str,
@@ -136,6 +142,9 @@ def observe(
     state: State,
     result: str,
     session_id: str | None = None,
+    now: datetime | None = None,
+    next_at: datetime | None = None,
+    extra: dict | None = None,
 ) -> Literal["pending", "settled", "timed_out", "error"]:
     """Record one observation of `task`'s wait, in the caller's transaction,
     and say what it amounts to. `state` is what the forge saw: `pending`,
@@ -147,8 +156,15 @@ def observe(
     bounds differ -- its item's policy override changed (Kraft-ab1bh) -- is
     rebounded to them from this observation on, its deadline counted from
     its own start. `session_id` is the session the observation ran in,
-    recorded on the outcome."""
-    now = datetime.fromisoformat(_now())
+    recorded on the outcome.
+
+    The seam for a wait that decides for itself when to look again and what to
+    remember: `now` is the instant the caller decided at, so the deadline test
+    here and its decision agree (it reads the clock itself when not given);
+    `next_at` is the next observation the caller wants, kept ahead of the
+    backoff but never past the deadline; `extra` is merged into the observation
+    and so comes back in `OpenWait.last`."""
+    now = now or datetime.fromisoformat(_now())
     ids = {"task": task, "node_id": node_id}
     wait = open_wait(conn, work_item_id, task)
     if wait is None:
@@ -196,14 +212,21 @@ def observe(
     if state == "error":
         end("error")
         return "error"
-    seen = {**ids, "observation": n, "condition": condition, "state": state, "result": result}
+    seen = {
+        **ids,
+        "observation": n,
+        "condition": condition,
+        "state": state,
+        "result": result,
+        **(extra or {}),
+    }
     deadline = datetime.fromisoformat(wait.started["deadline"])
     if state == "settled" or now >= deadline:
         events.append(conn, work_item_id, ForgeEvent.EXTERNAL_WAIT_OBSERVED, seen)
         outcome = "settled" if state == "settled" else "timed_out"
         end(outcome)
         return outcome
-    due = min(now + wait.bounds.interval_after(n), deadline)
+    due = min(next_at or now + wait.bounds.interval_after(n), deadline)
     events.append(
         conn,
         work_item_id,
