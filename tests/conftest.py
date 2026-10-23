@@ -790,3 +790,30 @@ async def channels(database, short_run):
     yield registry
     await registry.close_all()
     channel.install(None)
+
+
+@pytest.fixture
+async def rig(tmp_path, database, run_dirs, item_on):
+    """An in-process server (hub, runs) and one online machine `gpu` (capacity 2), a repo on the
+    item's branch, and an item (`rig1`) whose rows the events are written against."""
+    from support.remote import make_rig
+
+    from kraft.remote import runs as runs_mod
+
+    r = await make_rig(tmp_path, database, run_dirs, item_on)
+    yield r
+    runs_mod.install(None)
+    await r.hub.close()
+
+
+@pytest.fixture
+async def rig_offline(tmp_path, database, run_dirs, item_on):
+    """The same, with the machine not yet connected: `await rig_offline.connect()` brings it up."""
+    from support.remote import make_rig
+
+    from kraft.remote import runs as runs_mod
+
+    r = await make_rig(tmp_path, database, run_dirs, item_on, online=False)
+    yield r
+    runs_mod.install(None)
+    await r.hub.close()

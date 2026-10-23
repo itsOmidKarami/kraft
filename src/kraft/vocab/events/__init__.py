@@ -16,6 +16,7 @@ from kraft.vocab.events.escalation import ESCALATION_EVENT_TRAITS, EscalationEve
 from kraft.vocab.events.forge import FORGE_EVENT_TRAITS, ForgeEvent
 from kraft.vocab.events.gate import GATE_EVENT_TRAITS, GateEvent
 from kraft.vocab.events.limit import LIMIT_EVENT_TRAITS, LimitEvent
+from kraft.vocab.events.remote import REMOTE_EVENT_TRAITS, RemoteEvent
 from kraft.vocab.events.sandbox import SANDBOX_EVENT_TRAITS, SandboxEvent
 from kraft.vocab.events.session import SESSION_EVENT_TRAITS, SessionEvent
 from kraft.vocab.events.settings import SETTINGS_EVENT_TRAITS, SettingsEvent
@@ -37,6 +38,7 @@ __all__ = [
     "ForgeEvent",
     "GateEvent",
     "LimitEvent",
+    "RemoteEvent",
     "SandboxEvent",
     "SessionEvent",
     "SettingsEvent",
@@ -52,6 +54,7 @@ type EventType = (
     | EscalationEvent
     | ForgeEvent
     | SandboxEvent
+    | RemoteEvent
     | SettingsEvent
 )
 
@@ -65,6 +68,7 @@ FAMILIES: tuple[type[StrEnum], ...] = (
     EscalationEvent,
     ForgeEvent,
     SandboxEvent,
+    RemoteEvent,
     SettingsEvent,
 )
 
@@ -98,6 +102,7 @@ EVENT_TRAITS: Mapping[EventType, EventTraits] = MappingProxyType(
         **ESCALATION_EVENT_TRAITS,
         **FORGE_EVENT_TRAITS,
         **SANDBOX_EVENT_TRAITS,
+        **REMOTE_EVENT_TRAITS,
         **SETTINGS_EVENT_TRAITS,
     }
 )

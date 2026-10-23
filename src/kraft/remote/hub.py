@@ -175,11 +175,13 @@ class Hub:
         entry.transport, entry.online, entry.reason = t, True, ""
         entry.kraft, entry.last_seen = peer.kraft, self._clock()
         entry.outcome.set()
+        if self.runs is not None:  # tell the runs this machine is back
+            self._spawn(self.runs.on_connect(peer.name))
         why = "disconnected"
         try:
             await protocol.pump(
                 t,
-                on_frame=self._on_frame,
+                on_frame=lambda frame: self._on_frame(peer.name, frame),
                 ping_s=self._ping_s,
                 dead_s=self._dead_s,
                 on_seen=lambda: setattr(entry, "last_seen", self._clock()),
@@ -191,8 +193,9 @@ class Hub:
                 entry.transport, entry.online, entry.reason = None, False, why
             await t.close()
 
-    async def _on_frame(self, frame: dict) -> None:
-        logger.debug("machine frame ignored (slice 1): %s", frame.get("t"))
+    async def _on_frame(self, machine: str, frame: dict) -> None:
+        if self.runs is not None:
+            await self.runs.on_frame(machine, frame)
 
     # ── ssh ──
 
@@ -319,6 +322,14 @@ class Hub:
                 on_wait(v.wait)
                 said = v.wait
             await asyncio.sleep(poll_s)
+
+    def adopt(self, machine: str, key: str) -> Claim:
+        """A slot for a run that was already running before a restart: taken whatever the capacity says."""
+        self._claims.setdefault(machine, set()).add(key)
+        return Claim(machine, key)
+
+    def names(self) -> list[str]:
+        return sorted(self._entries)
 
     def release(self, claim: Claim) -> None:
         self._claims.get(claim.machine, set()).discard(claim.key)

@@ -1,4 +1,4 @@
-"""The event-type vocabulary: nine families, 115 types, three shared groups."""
+"""The event-type vocabulary: ten families, 128 types, three shared groups."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from kraft.vocab import (
     ForgeEvent,
     GateEvent,
     LimitEvent,
+    RemoteEvent,
     SandboxEvent,
     SessionEvent,
     SettingsEvent,
@@ -42,15 +43,16 @@ SECTIONS = {
     EscalationEvent: ("Escalation", ""),
     ForgeEvent: ("Forge, CI and waits", ""),
     SandboxEvent: ("Sandbox", "sandbox_"),
+    RemoteEvent: ("Remote workers", "remote_"),
     SettingsEvent: ("Settings changed", ""),
 }
 
 
-def test_the_families_are_the_nine_in_docs_order_and_hold_every_type():
+def test_the_families_are_the_ten_in_docs_order_and_hold_every_type():
     assert FAMILIES == tuple(SECTIONS)
-    assert [len(f) for f in FAMILIES] == [27, 26, 18, 9, 9, 7, 18, 6, 6]
+    assert [len(f) for f in FAMILIES] == [27, 26, 18, 9, 9, 7, 18, 6, 2, 6]
     assert EVENT_TYPES == tuple(m for f in FAMILIES for m in f)
-    assert len(BY_VALUE) == len(EVENT_TYPES) == 126
+    assert len(BY_VALUE) == len(EVENT_TYPES) == 128
     assert list(EVENT_TRAITS) == list(EVENT_TYPES)
 
 
@@ -132,12 +134,13 @@ def test_the_docs_page_lists_exactly_each_familys_types(family):
 #: `end_work_item` appends the two types it unpacked from `MANUAL_ENDS`,
 #: which holds members; `_restart_span` appends the `ChainEvent` its caller
 #: names (`restart_event: ChainEvent`); `ChannelRegistry.record` appends the
-#: `SandboxEvent` its caller names.
+#: `SandboxEvent` its caller names; `Runs._event` appends the member its caller names.
 _UNPACKED = {
     ("store/work_items.py", "audit"),
     ("store/work_items.py", "ordinary"),
     ("executor/walk.py", "restart_event"),
     ("worker/channel.py", "type"),
+    ("remote/runs.py", "type_"),
 }
 
 
