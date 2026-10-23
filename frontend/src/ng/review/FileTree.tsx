@@ -9,6 +9,12 @@ import { familyOf, languageOf, type Family } from "./languages";
 /** A row's indent, one step per folder it sits in. */
 const depth = (d: number) => ({ "--depth": d }) as CSSProperties;
 
+/** The deepest row's depth: a folder's row sits at `d`, its files one deeper. */
+const deepest = (f: Folder, d: number): number => Math.max(f.files.length ? d : 0, ...f.folders.map((s) => Math.max(d, deepest(s, d + 1))));
+
+/** 12px a level, narrowed on a deep tree so the deepest row's indent stays within 72px of the 260px column and its name keeps room. */
+const indentStep = (root: Folder) => ({ "--step": `${Math.min(12, Math.floor(72 / Math.max(1, deepest(root, 0))))}px` }) as CSSProperties;
+
 /** A file's icon, by the language the diff reads it as. */
 const ICON: Record<Family, typeof File> = { clike: FileCode, python: FileCode, shell: FileTerminal, yaml: FileCog, markdown: FileText, plain: File };
 
@@ -82,7 +88,7 @@ export function FileTree(p: {
         <span className="rv-del">−{del}</span>
       </div>
       <input className="rv-tree-filter" type="search" placeholder="Filter files" aria-label="Filter files" value={filter} onChange={(e) => setFilter(e.target.value)} />
-      <div className="rv-tree-body">
+      <div className="rv-tree-body" style={indentStep(root)}>
         {level(root, 0)}
         {filter.trim() && !shownN && !untracked.length && <NoMatch className="rv-tree-empty" query={filter} onClear={() => setFilter("")} />}
         {untracked.length > 0 && (

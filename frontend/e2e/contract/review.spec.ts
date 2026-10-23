@@ -31,6 +31,19 @@ const ROWS: Row[] = [
     },
   },
   {
+    name: "review: a tree 14 folders deep, branching at each, still leaves every file name 100px",
+    run: async (p) => {
+      // A file beside each folder, so no folder shares its row: the indent's worst case.
+      const dirs = Array.from({ length: 14 }, (_, i) => `level_${i}_folder`);
+      const paths = dirs.map((_, i) => `${dirs.slice(0, i + 1).join("/")}/file_at_depth_${i + 1}.py`);
+      const routes = (pg: Page) => pg.route(/\/work-items\/[^/]+\/compare\?/, (r) => { const c = compareFor(r.request().url().match(/work-items\/([^/]+)\//)![1], "default" as never); return r.fulfill({ json: { ...c, files: paths.map((path) => ({ ...c.files[0], path })) } }); });
+      await app(p, item("needs-gate", "/review"), { routes, ready: (pg) => pg.locator(".review-page").waitFor() });
+      const widths = await p.locator(".rv-tree-body .rv-file-name").evaluateAll((bs) => bs.map((b) => b.clientWidth));
+      expect(widths).toHaveLength(14);
+      expect(Math.min(...widths)).toBeGreaterThanOrEqual(100);
+    },
+  },
+  {
     name: "review: a diff is coloured from its grammar, loaded as a chunk",
     run: async (p) => { await app(p, item("needs-gate", "/review"), { ready: (pg) => pg.locator(".review-page").waitFor() }); await expect(p.locator(".rv-code .tok-kw", { hasText: "def" }).first()).toBeVisible({ timeout: 5000 }); },
   },
