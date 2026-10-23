@@ -120,6 +120,12 @@ def test_the_mcp_endpoint_is_the_channel_session_own(method):
         ("POST", "/api/work-items/w-other/../w-own/progress"),
         ("POST", "/api/work-items/w-own%2F..%2Fw-other/progress"),
         ("GET", "/mcp/../api/work-items"),
+        # Machines are a person's: no session lists, adds or removes one, or
+        # dials in as one.
+        ("GET", "/api/workers"),
+        ("POST", "/api/workers"),
+        ("DELETE", "/api/workers/gpu-box"),
+        ("GET", "/api/workers/connect"),
     ],
 )
 def test_anything_else_is_refused(method, path):

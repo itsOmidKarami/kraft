@@ -36,6 +36,9 @@ def test_the_tools_are_registered():
         "search",
         "create_work_item",
         "ensure_repo",
+        "add_worker",
+        "list_workers",
+        "remove_worker",
         "approve_gate",
         "reject_gate",
         "pause_work_item",
@@ -70,6 +73,21 @@ def test_the_permission_tool_says_it_is_not_for_the_agent_to_call():
     would be asking Kraft's opinion about a tool use that is not happening."""
     tool = next(t for t in _tools() if t.name == "permission_request")
     assert "not for you to call" in tool.description.lower()
+
+
+def test_the_worker_tools_call_the_same_client_functions_the_cli_does(monkeypatch):
+    calls = []
+
+    async def add(name, **kwargs):
+        calls.append((name, kwargs))
+        return {"token": "kwt_x"}
+
+    monkeypatch.setattr(mcp.client, "add_worker", add)
+    result = asyncio.run(
+        mcp.build().call_tool("add_worker", {"name": "gpu", "ssh": "gpu", "capacity": 2})
+    )
+    assert calls == [("gpu", {"ssh": "gpu", "capacity": 2, "repos": None, "give_up_after": None})]
+    assert "kwt_x" in result.content[0].text
 
 
 def test_no_standalone_steer_tool_is_exposed():

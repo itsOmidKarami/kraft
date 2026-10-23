@@ -236,6 +236,36 @@ def build() -> MCPServer:
         )
 
     @server.tool()
+    async def add_worker(
+        name: str,
+        ssh: str | None = None,
+        capacity: int = 1,
+        repos: list[str] | None = None,
+        give_up_after: str | None = None,
+    ) -> dict:
+        """Register a machine that may run work item steps. With `ssh` (a host
+        or ~/.ssh/config alias) Kraft connects to it once and reports the
+        result; without it, the reply carries a one-time `token` and the exact
+        command to run on the machine. `repos` limits it to those connected
+        repos; `give_up_after` is a duration like 2h or "never". Machine
+        management is a person's call: ask first."""
+        return await client.add_worker(
+            name, ssh=ssh, capacity=capacity, repos=repos, give_up_after=give_up_after
+        )
+
+    @server.tool()
+    async def list_workers() -> dict:
+        """List the registered machines: mode, online or offline and why,
+        slots used, repos, last seen, Kraft version."""
+        return await client.list_workers()
+
+    @server.tool()
+    async def remove_worker(name: str) -> dict:
+        """Remove a registered machine and revoke its token or ssh entry. Its
+        running sessions are treated as gone."""
+        return await client.remove_worker(name)
+
+    @server.tool()
     @_answers_as_get_work_item_does
     async def approve_gate(
         gate: str | None = None,
