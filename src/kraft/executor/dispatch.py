@@ -232,8 +232,9 @@ def _select_scopes(
     dispatched after the session exits cannot be acted on by it. `verify` is
     this function's only caller now, and the same-selection property C1 was
     after is instead conveyed to the implementation agent as a prompt note
-    (`prompts.scope_note`) built from the repo's scope table, so it can apply
-    the same rule to its own diff before it finishes.
+    (`prompts.scope_note`) built from the repo's scope table, so it knows
+    which kind of test gates its paths. It runs its own targeted tests and
+    leaves these commands to verify (Kraft-jl7un).
 
     The commands are the repo's, and only the repo's. V1 has no registry to
     fall back to and deliberately no command on the task: the task names an

@@ -162,11 +162,13 @@ _SCOPES = entry_of(
 )
 
 
-def test_scope_note_lists_every_scope_command_for_the_implementer():
+def test_scope_note_shows_verifications_commands_and_tells_the_implementer_not_to_run_them():
     out = prompts.scope_note(_agent_task_model(), _SCOPES)
     for cmd in ("just test-ui", "just e2e-ci", "just ci-test"):
         assert cmd in out
     assert "frontend/**" in out
+    assert "Do not run the commands below" in out
+    assert "the files you touched" in out
 
 
 def test_scope_note_is_empty_for_any_other_hook():
