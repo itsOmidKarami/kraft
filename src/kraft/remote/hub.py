@@ -1,23 +1,59 @@
 """The server's side of the machines: who is connected, over which mode, and
-why one is not. Nothing here places work (slice 2); it keeps the connection
-and tells the truth about it."""
+why one is not, and which of them has a free slot for a step (`decide`, `claim`)."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import logging
+import secrets
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 
-from kraft.remote import protocol, registry
+from kraft.config import RepoEntry
+from kraft.remote import placement, protocol, registry
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport
 
 logger = logging.getLogger(__name__)
 
 REMOTE_COMMAND = ("kraft", "admin", "worker", "serve", "--stdio")
 FIRST_DELAY_S, MAX_DELAY_S = 1.0, 30.0
+
+
+@dataclass(frozen=True)
+class Claim:
+    """One slot of one machine, held by a step from launch to the end of its session."""
+
+    machine: str
+    key: str  # "<work item id>/<session id>"
+
+
+class PlacementRefused(Exception):
+    """str() is the reason; a `config_error` at launch."""
+
+
+@dataclass(frozen=True)
+class Verdict:
+    machine: str | None = None  # who would take it now
+    wait: str | None = None  # "waiting for gpu-box" / "waiting for any machine allowed for kraft"
+    refusal: str | None = None
+
+
+def server_id(run_dir: Path) -> str:
+    """This install's stable id (`run/server.id`), made once; a machine keeps one working area
+    per server under it."""
+    path = Path(run_dir) / "server.id"
+    try:
+        found = path.read_text().strip()
+    except OSError:
+        found = ""
+    if not found:
+        found = secrets.token_hex(6)
+        path.write_text(found)
+    return found
 
 
 @dataclass
@@ -42,13 +78,17 @@ class Hub:
         ping_s: float = protocol.PING_S,
         dead_s: float = protocol.DEAD_S,
         clock=time.time,
+        server_id: str = "",
     ) -> None:
         self.kraft_version = kraft_version
+        self.server_id = server_id
         self._ssh, self._remote = ssh_command, remote_command
         self._ping_s, self._dead_s, self._clock = ping_s, dead_s, clock
         self._file = registry.WorkersFile()
         self._entries: dict[str, _Entry] = {}
         self._background: set[asyncio.Task] = set()
+        self._claims: dict[str, set[str]] = {}  # machine -> claim keys
+        self.runs = None  # set by the app: remote.runs.Runs
 
     # ── configuration ──
 
@@ -110,6 +150,7 @@ class Hub:
                 t,
                 kraft_version=self.kraft_version,
                 identify=lambda token: registry.find_by_token(self._file, token),
+                server_id=self.server_id,
             )
         except protocol.Refused as refused:
             if (entry := self._entries.get(refused.name or "")) is not None:
@@ -180,7 +221,11 @@ class Hub:
                 drain = asyncio.create_task(_drain(proc.stderr, stderr_tail))
                 t = StreamTransport(proc.stdout, proc.stdin)
                 peer = await protocol.server_handshake(
-                    t, kraft_version=self.kraft_version, identify=lambda _: None, expected_name=name
+                    t,
+                    kraft_version=self.kraft_version,
+                    identify=lambda _: None,
+                    expected_name=name,
+                    server_id=self.server_id,
                 )
                 welcomed = True
                 await self._run(entry, peer, t)
@@ -205,6 +250,85 @@ class Hub:
             delay = FIRST_DELAY_S if welcomed else min(delay * 2, MAX_DELAY_S)
             await asyncio.sleep(delay)
 
+    # ── placing ──
+
+    def slots_used(self, name: str) -> int:
+        return len(self._claims.get(name, ()))
+
+    def decide(
+        self, runner: str, repos: Sequence[RepoEntry], *, pinned: str | None = None
+    ) -> Verdict:
+        """Who would take a step placed on `runner` now, or why it waits or is refused. `pinned`
+        is the machine a resumed session must go back to."""
+        label = placement.repos_label(repos)
+        if pinned is not None:
+            if pinned not in self._entries:
+                return Verdict(
+                    refusal=f"machine {pinned!r}, where this step started, "
+                    "is no longer in workers.yaml"
+                )
+            names, wait_text = [pinned], f"waiting for {pinned}"
+        elif runner == placement.ANY:
+            names = [
+                n for n, e in sorted(self._entries.items()) if placement.allows(e.worker, repos)
+            ]
+            if not names:
+                return Verdict(
+                    refusal="runner 'any' finds no machine in workers.yaml "
+                    f"that may work on {label}"
+                )
+            wait_text = f"waiting for any machine allowed for {label}"
+        else:
+            if (why := placement.refusal(runner, workers=self._file, repos=repos)) is not None:
+                return Verdict(refusal=why)
+            names, wait_text = [runner], f"waiting for {runner}"
+        for n in names:
+            e = self._entries[n]
+            if e.online and self.slots_used(n) < e.worker.capacity:
+                return Verdict(machine=n)
+        if (runner != placement.ANY or pinned is not None) and not self._entries[names[0]].online:
+            return Verdict(wait=f"{wait_text} (offline: {self._entries[names[0]].reason})")
+        return Verdict(wait=wait_text)
+
+    async def claim(
+        self,
+        runner: str,
+        repos: Sequence[RepoEntry],
+        key: str,
+        *,
+        pinned: str | None = None,
+        on_wait: Callable[[str], None] | None = None,
+        poll_s: float = 0.5,
+    ) -> Claim:
+        """A slot for `key`, waiting (and saying so through `on_wait`, once per reason) until a
+        machine can take it. Raises `PlacementRefused`; cancelling the caller gives nothing back
+        because nothing is held while it waits."""
+        said = None
+        while True:
+            v = self.decide(runner, repos, pinned=pinned)
+            if v.refusal:
+                raise PlacementRefused(v.refusal)
+            if v.machine:
+                self._claims.setdefault(v.machine, set()).add(key)
+                return Claim(v.machine, key)
+            if on_wait is not None and v.wait != said:
+                on_wait(v.wait)
+                said = v.wait
+            await asyncio.sleep(poll_s)
+
+    def release(self, claim: Claim) -> None:
+        self._claims.get(claim.machine, set()).discard(claim.key)
+
+    def transport(self, name: str) -> protocol.Transport:
+        entry = self._entries.get(name)
+        if entry is None or entry.transport is None:
+            raise protocol.Closed(f"{name} is offline")
+        return entry.transport
+
+    async def wait_online(self, name: str, poll_s: float = 0.2) -> None:
+        while not ((entry := self._entries.get(name)) and entry.online):
+            await asyncio.sleep(poll_s)
+
     # ── reading ──
 
     async def probe(self, name: str, timeout: float) -> dict:
@@ -223,7 +347,7 @@ class Hub:
                 "mode": e.worker.mode,
                 "online": e.online,
                 "reason": e.reason,
-                "slots_used": 0,
+                "slots_used": self.slots_used(name),
                 "capacity": e.worker.capacity,
                 "repos": e.worker.repos,
                 "last_seen": (

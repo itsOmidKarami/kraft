@@ -11,7 +11,7 @@ from support.remote import memory_pair
 from support.stub_ssh import stub_ssh
 
 from kraft.remote import protocol, registry
-from kraft.remote.hub import Hub
+from kraft.remote.hub import Hub, Verdict
 
 TOKEN = "kwt_secret"
 
@@ -208,3 +208,80 @@ async def test_ssh_that_cannot_run_reports_why_instead_of_hanging(tmp_path, monk
     outcome = await hub.probe("boxed", timeout=5)
     assert outcome["connected"] is False and "could not run ssh" in outcome["detail"]
     await hub.close()
+
+
+def _repos(*names):
+    from support.harness import entry_of
+
+    return [entry_of({"path": f"/r/{n}", "name": n}) for n in names]
+
+
+async def test_a_named_machine_offline_or_full_makes_the_step_wait_and_never_run_elsewhere():
+    hub = Hub("2.3.0")
+    hub.apply(_file())
+    assert hub.decide("home", _repos("kraft")) == Verdict(
+        wait="waiting for home (offline: never connected)"
+    )
+    machine, _w, accepted = await _dial(hub)
+    first = await hub.claim("home", _repos("kraft"), "w/1", poll_s=0.01)
+    await hub.claim("home", _repos("kraft"), "w/2", poll_s=0.01)  # capacity is 2
+    assert _row(hub)["slots_used"] == 2
+    assert hub.decide("home", _repos("kraft")).wait == "waiting for home"  # full, not offline
+    hub.release(first)
+    assert hub.decide("home", _repos("kraft")).machine == "home"
+    await machine.close()
+    await accepted
+
+
+async def test_any_takes_the_first_connected_allowed_machine_with_a_free_slot_never_the_laptop():
+    hub = Hub("2.3.0")
+    hub.apply(
+        _file(spare={"token_sha256": registry.hash_token("kwt_spare")})
+    )  # `spare` takes any repo
+    nobody = "waiting for any machine allowed for kraft"
+    assert hub.decide("any", _repos("kraft")).wait == nobody  # nobody is connected
+    machine, _w, accepted = await _dial(hub)  # home is; spare is not
+    assert hub.decide("any", _repos("kraft")).machine == "home"
+    infra = hub.decide("any", _repos("infra")).wait  # home may not take infra
+    assert infra == "waiting for any machine allowed for infra"
+    only_home = Hub("2.3.0")
+    only_home.apply(_file())
+    assert "no machine" in only_home.decide("any", _repos("infra")).refusal
+    await machine.close()
+    await accepted
+
+
+def test_the_server_id_is_made_once_and_kept(tmp_path):
+    from kraft.remote.hub import server_id
+
+    first = server_id(tmp_path)
+    assert first and server_id(tmp_path) == first
+
+
+async def test_a_pinned_machine_removed_from_the_file_is_a_refusal_naming_it():
+    hub = Hub("2.3.0")
+    hub.apply(_file())
+    assert "gone" in hub.decide("any", _repos("kraft"), pinned="gone").refusal
+
+
+async def test_a_waiting_claim_is_granted_when_a_slot_frees_and_is_cancellable():
+    hub = Hub("2.3.0")
+    hub.apply(_file())
+    machine, _w, accepted = await _dial(hub)
+    held = [await hub.claim("home", _repos("kraft"), f"w/{i}", poll_s=0.01) for i in range(2)]
+    seen = []
+    waiter = asyncio.create_task(
+        hub.claim("home", _repos("kraft"), "w/3", on_wait=seen.append, poll_s=0.01)
+    )
+    await asyncio.sleep(0.05)
+    assert not waiter.done() and seen == ["waiting for home"]  # said once
+    hub.release(held[0])
+    assert (await asyncio.wait_for(waiter, 1)).machine == "home"
+    cancelled = asyncio.create_task(hub.claim("home", _repos("kraft"), "w/4", poll_s=0.01))
+    await asyncio.sleep(0.02)
+    cancelled.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled
+    assert _row(hub)["slots_used"] == 2
+    await machine.close()
+    await accepted
