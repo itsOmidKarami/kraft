@@ -316,18 +316,48 @@ def _fetch_majors(now: float, channel: str) -> dict[int, Release] | None:
     return majors
 
 
-def latest_in_major(major: int, *, channel: str = "stable", force: bool = False) -> Release | None:
+def latest_in_major(
+    major: int, *, channel: str = "stable", force: bool = False, cache_only: bool = False
+) -> Release | None:
     """The newest installable release in `channel` whose major version is
     `major`, or None. `latest` is the newest overall, so once 3.0.0 is out it
-    never offers a 2.x install the 2.9.1 patch; this does."""
+    never offers a 2.x install the 2.9.1 patch; this does. `cache_only` never
+    fetches, as for `latest`."""
     now = time.time()
     if not force:
         cached = _read_majors(now, channel)
         if cached is not None:
             return cached.get(major)
-        if _recently_failed(now, channel):
+        if cache_only or _recently_failed(now, channel):
             return None
     return (_fetch_majors(now, channel) or {}).get(major)
+
+
+def release_for(tag: str, *, channel: str = "stable") -> Release | None:
+    """The release named `tag`, if the feed lists it with a wheel on `channel`.
+    A person marking a version by hand may name any of them, not only the
+    newest; the feed is read for it (never the cache), and nothing raises."""
+    try:
+        payload = _fetch(f"{RELEASES_URL}?per_page=100", TIMEOUT)
+    except Exception:  # noqa: BLE001 -- as `latest`: unknown is None
+        return None
+    if not isinstance(payload, list):
+        return None
+    wanted = tag if tag.startswith("v") else f"v{tag}"
+    only = [e for e in payload if isinstance(e, dict) and e.get("tag_name") == wanted]
+    return _newest(_parse_majors(only, channel))
+
+
+def cannot_install_reason(kind: str) -> str:
+    """Why Kraft will not install a release into an install made by `kind`
+    (`install_kind`, not `uv`), and what does."""
+    if kind == "brew":
+        return "this Kraft was installed with Homebrew; update it with `brew upgrade kraft`"
+    how = {"pipx": "pipx", "pip": "pip", "source": "from a source checkout"}.get(kind, kind)
+    return (
+        f"this Kraft was installed {'with ' if kind in ('pipx', 'pip') else ''}{how}, which Kraft "
+        "does not update for you; `kraft admin update` prints the command that does"
+    )
 
 
 def _parts(raw: str) -> tuple[int, ...]:

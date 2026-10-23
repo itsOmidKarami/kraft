@@ -595,11 +595,23 @@
    "params": {},
    "shape": {
     "behind": "_",
+    "blocked": [],
     "channel": "_",
+    "check_disabled": "_",
     "checked_at": "_",
+    "dev_install": "_",
+    "install_kind": "_",
     "installed": "_",
     "latest": "_",
-    "python": "_"
+    "latest_in_major": "_",
+    "marked": "_",
+    "outcome": "_",
+    "pending": {
+     "release": "_",
+     "restart": []
+    },
+    "python": "_",
+    "restart_kind": "_"
    }
   },
   "GET /api/update/settings": {

@@ -776,6 +776,24 @@ async def submit_review(
     )
 
 
+async def mark_update(tag: str, channel: str | None = None) -> dict:
+    """Install release `tag` when Kraft is free (`POST /update/mark`)."""
+    return await transport._act("/update/mark", {"tag": tag, "channel": channel})
+
+
+async def unmark_update() -> dict:
+    """Drop the mark (`DELETE /update/mark`); answers what is pending now."""
+    response = await transport._send("DELETE", "/update/mark")
+    if response.status_code >= 400:
+        raise transport.status_error(response.status_code, transport._detail(response))
+    return transport._json(response)
+
+
+async def restart_when_free() -> dict:
+    """One restart at the next free moment (`POST /update/restart-when-free`)."""
+    return await transport._act("/update/restart-when-free")
+
+
 async def confirm_update() -> dict:
     """The restart helper telling a new server on probation that it came up as
     the process the update expected, so it may start its pollers."""

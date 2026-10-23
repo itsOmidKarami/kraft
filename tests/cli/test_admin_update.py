@@ -304,3 +304,108 @@ def test_unattended_precheck_refuses_a_stale_kraft_tool(monkeypatch, tmp_path):
     monkeypatch.setattr(update, "_stale_kraft_tool", lambda _run: True)
     reason = cli.admin.update_prechecks(update.Release("v2.9.0", "u"), interactive=False)
     assert reason is not None and "before the rename" in reason
+
+
+# ── --when-free ──
+
+
+@pytest.fixture
+def held(monkeypatch):
+    """A running server that holds the request: what the client was asked."""
+    from kraft import client
+
+    calls = []
+    state = {
+        "installed": "2.2.0",
+        "latest": "v2.3.0",
+        "behind": True,
+        "blocked": ["waiting for 1 running item"],
+    }
+
+    async def update_available(channel=None):
+        calls.append(("update_available", channel))
+        return state
+
+    async def mark_update(tag, channel=None):
+        calls.append(("mark", tag, channel))
+        return state
+
+    async def unmark_update():
+        calls.append(("unmark",))
+        return state
+
+    async def restart_when_free():
+        calls.append(("restart",))
+        return state
+
+    monkeypatch.setattr(client, "update_available", update_available)
+    monkeypatch.setattr(client, "mark_update", mark_update)
+    monkeypatch.setattr(client, "unmark_update", unmark_update)
+    monkeypatch.setattr(client, "restart_when_free", restart_when_free)
+    monkeypatch.setattr(
+        cli.admin,
+        "_confirm_running_agents",
+        lambda *_a, **_k: pytest.fail("asked about running agents"),
+    )
+    return calls, state
+
+
+def test_when_free_marks_newest(held, capsys):
+    calls, _ = held
+    cli.main(["admin", "update", "--when-free"])
+    assert calls == [("update_available", None), ("mark", "v2.3.0", None)]
+    assert "v2.3.0 will be installed when Kraft is free (waiting: waiting for 1" in (
+        capsys.readouterr().out
+    )
+
+
+def test_when_free_with_a_tag(held):
+    calls, _ = held
+    cli.main(["admin", "update", "--when-free", "v3.0.0", "--channel", "rc"])
+    assert calls == [("mark", "v3.0.0", "rc")]
+
+
+def test_when_free_when_already_current_marks_nothing(held, capsys):
+    calls, state = held
+    state["behind"] = False
+    cli.main(["admin", "update", "--when-free"])
+    assert calls == [("update_available", None)]
+    assert "up to date" in capsys.readouterr().out
+
+
+def test_cancel_when_free(held):
+    calls, _ = held
+    cli.main(["admin", "update", "--cancel-when-free"])
+    assert calls == [("unmark",)]
+
+
+def test_restart_when_free(held, capsys):
+    calls, _ = held
+    cli.main(["admin", "restart", "--when-free"])
+    assert calls == [("restart",)]
+    assert "Kraft will restart once nothing is running" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("argv", "says"),
+    [
+        pytest.param(["update", "--when-free"], "kraft admin update", id="update"),
+        pytest.param(["restart", "--when-free"], "kraft admin start", id="restart"),
+    ],
+)
+def test_when_free_with_no_server_exits_1(monkeypatch, capsys, argv, says):
+    """Nothing holds the request, so it is refused and what works without a
+    server is named."""
+    from kraft import client
+
+    async def unreachable(*_a, **_k):
+        raise client.transport._unreachable()
+
+    for name in ("update_available", "mark_update", "restart_when_free"):
+        monkeypatch.setattr(client, name, unreachable)
+
+    with pytest.raises(SystemExit) as exit_:
+        cli.main(["admin", *argv])
+
+    assert exit_.value.code == 1
+    assert says in capsys.readouterr().err

@@ -117,3 +117,125 @@ def test_a_failed_check_is_not_retried_by_the_next_page_load(client, feed):
     feed["payload"] = RELEASE_JSON
     assert client.post("/api/update/check").json()["latest"] == "v0.4.0"
     assert feed["fetches"] == 2
+
+
+# ── marking a release for when Kraft is free ──
+
+
+def _wheel(tag, *, prerelease=False):
+    return {
+        "tag_name": tag,
+        "draft": False,
+        "prerelease": prerelease,
+        "assets": [{"name": "k.whl", "browser_download_url": f"https://x/{tag}.whl"}],
+    }
+
+
+@pytest.fixture
+def release_install(feed, monkeypatch):
+    """A release install on a uv tool, which can take a mark."""
+    monkeypatch.setattr(update, "is_dev_install", lambda entry=None: False)
+    monkeypatch.setattr(update, "install_kind", lambda: "uv")
+    feed["payload"] = [_wheel("v0.4.1"), _wheel("v0.4.0")]
+    return feed
+
+
+def test_mark_then_get_shows_it(client, release_install):
+    body = client.post("/api/update/mark", json={"tag": "v0.4.1"}).json()
+
+    assert body["marked"]["tag"] == "v0.4.1" and body["marked"]["by"] == "you"
+    assert body["pending"]["release"] == "v0.4.1"
+    assert client.get("/api/update").json()["marked"]["tag"] == "v0.4.1"
+
+
+def test_a_tag_without_the_v_is_the_same_release(client, release_install):
+    client.post("/api/update/mark", json={"tag": "0.4.1"})
+    assert client.get("/api/update").json()["marked"]["tag"] == "v0.4.1"
+
+
+def test_mark_refused_on_dev_install(client, release_install, monkeypatch):
+    monkeypatch.setattr(update, "is_dev_install", lambda entry=None: True)
+    r = client.post("/api/update/mark", json={"tag": "v0.4.1"})
+    assert r.status_code == 409 and "dev install" in r.json()["detail"]
+    assert client.get("/api/update").json()["marked"] is None
+
+
+@pytest.mark.parametrize("kind", ["brew", "pipx", "pip", "source"])
+def test_mark_refused_when_uv_did_not_install_it(client, release_install, monkeypatch, kind):
+    monkeypatch.setattr(update, "install_kind", lambda: kind)
+    r = client.post("/api/update/mark", json={"tag": "v0.4.1"})
+    assert r.status_code == 409
+    assert client.get("/api/update").json()["marked"] is None
+
+
+@pytest.mark.parametrize(
+    ("tag", "status", "says"),
+    [
+        pytest.param("v9.9.9", 404, "no release v9.9.9", id="no-such-release"),
+        pytest.param("v0.3.0", 409, "not newer", id="the-installed-one"),
+    ],
+)
+def test_mark_refuses_what_it_could_not_install(client, release_install, tag, status, says):
+    release_install["payload"] = [_wheel("v0.4.1"), _wheel("v0.3.0")]
+    r = client.post("/api/update/mark", json={"tag": tag})
+    assert (r.status_code, says in r.json()["detail"]) == (status, True)
+
+
+def test_mark_a_major_by_hand_is_accepted(client, release_install):
+    release_install["payload"] = [_wheel("v1.0.0"), _wheel("v0.4.1")]
+    body = client.post("/api/update/mark", json={"tag": "v1.0.0"}).json()
+    assert body["marked"]["tag"] == "v1.0.0"
+
+
+def test_unmark(client, release_install):
+    client.post("/api/update/mark", json={"tag": "v0.4.1"})
+    body = client.delete("/api/update/mark").json()
+    assert body["marked"] is None and body["pending"]["release"] is None
+
+
+def test_restart_when_free_stores_the_one_shot(client, release_install):
+    from kraft import when_free
+
+    body = client.post("/api/update/restart-when-free").json()
+
+    assert body["pending"]["restart"] == ["a restart was asked for"]
+    assert when_free._read(client.app.state)["restart_asked"]
+
+
+def test_update_shows_latest_in_major_beside_a_newer_major(client, release_install):
+    release_install["payload"] = [_wheel("v1.0.0"), _wheel("v0.4.1"), _wheel("v0.4.0")]
+    body = client.get("/api/update").json()
+    assert (body["latest"], body["latest_in_major"], body["behind"]) == ("v1.0.0", "v0.4.1", True)
+
+
+def test_update_says_check_disabled(client, release_install, monkeypatch):
+    assert client.get("/api/update").json()["check_disabled"] is False
+    monkeypatch.setenv("KRAFT_NO_UPDATE_CHECK", "1")
+    assert client.get("/api/update").json()["check_disabled"] is True
+
+
+def test_update_uses_the_stored_channel(client, release_install, templates_dir):
+    release_install["payload"] = [_wheel("v0.4.1"), _wheel("v0.5.0rc1", prerelease=True)]
+    assert client.get("/api/update").json()["latest"] == "v0.4.1"
+    client.put("/api/update/settings", json={"channel": "rc"})
+
+    body = client.get("/api/update").json()
+    assert (body["channel"], body["latest"]) == ("rc", "v0.5.0rc1")
+    # An explicit channel is for that read only.
+    assert client.get("/api/update?channel=stable").json()["latest"] == "v0.4.1"
+    assert client.get("/api/update").json()["channel"] == "rc"
+
+
+def test_update_says_what_it_is_waiting_for_and_what_became_of_the_last_try(
+    client, release_install
+):
+    from kraft import when_free
+
+    client.post("/api/update/mark", json={"tag": "v0.4.1"})
+    st = client.app.state
+    when_free.record_outcome(st, status="failed", key="v0.4.1", detail="would not start")
+
+    body = client.get("/api/update").json()
+
+    assert body["outcome"]["status"] == "failed"
+    assert any("would not start" in why for why in body["blocked"])

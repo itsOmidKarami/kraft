@@ -1537,6 +1537,13 @@ def _cmd_restart(ns: argparse.Namespace) -> None:
     if getattr(ns, "confirm", False):
         _restart_confirm(ns)
         return
+    if getattr(ns, "when_free", False):
+        state = _when_free_call(
+            client.restart_when_free, instead="start one with `kraft admin start`"
+        )
+        why = f" (waiting: {state['blocked'][0]})" if state.get("blocked") else ""
+        print(f"kraft: Kraft will restart once nothing is running{why}")
+        return
     _confirm_running_agents(ns, "restarting", ask=True)
     _refuse_restart_with_no_server()
     _restart(ns)
@@ -1821,8 +1828,51 @@ def _exit(why: str) -> NoReturn:
     raise SystemExit(f"kraft admin update: {why}")
 
 
+def _when_free_call(make_call, *, instead: str):
+    """A `--when-free` request, which a running server holds until Kraft is
+    free. With none running there is nothing to hold it, and `instead` says
+    what works without one."""
+    try:
+        return asyncio.run(make_call())
+    except client.transport.ClientError as exc:
+        if exc.kind != client.transport.Failure.UNREACHABLE:
+            raise
+        print(f"kraft: no server is running to hold the request: {instead}", file=sys.stderr)
+        raise SystemExit(1) from None
+
+
+def _update_when_free(ns: argparse.Namespace) -> None:
+    """`update --when-free [TAG]`: mark a release for when Kraft is free, the
+    newest on the channel unless a tag is given."""
+    instead = "`kraft admin update` installs now, and works without one"
+    tag = ns.when_free
+    if not tag:
+        state = _when_free_call(lambda: client.update_available(ns.channel), instead=instead)
+        tag = state.get("latest")
+        if not tag:
+            print(
+                "kraft admin update: could not reach the release feed. Try again.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        if state.get("behind") is False:
+            print(f"kraft {state['installed']} is up to date ({tag} is the newest release)")
+            return
+    state = _when_free_call(lambda: client.mark_update(tag, ns.channel), instead=instead)
+    why = f" (waiting: {state['blocked'][0]})" if state.get("blocked") else ""
+    print(f"kraft: {tag} will be installed when Kraft is free{why}")
+
+
 def _cmd_update(ns: argparse.Namespace) -> None:
     from kraft import update
+
+    if ns.cancel_when_free:
+        _when_free_call(client.unmark_update, instead="there is no mark to drop without one")
+        print("kraft: no release is marked for when Kraft is free")
+        return
+    if ns.when_free is not None:
+        _update_when_free(ns)
+        return
 
     if why := _config_precheck(interactive=True, assume_yes=ns.yes):
         _exit(why)
@@ -1910,6 +1960,14 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
         ),
     )
     restart.add_argument("-y", "--yes", action="store_true", help="do not ask about running agents")
+    restart.add_argument(
+        "--when-free",
+        action="store_true",
+        help=(
+            "ask for one restart at the next free moment instead: nothing running, "
+            "inside the allowed hours (update.yaml); needs a running server to hold it"
+        ),
+    )
     # The helper an update when Kraft is free hands the restart to; not for typing.
     restart.add_argument("--confirm", action="store_true", help=argparse.SUPPRESS)
     restart.set_defaults(func=_cmd_restart)
@@ -1960,6 +2018,23 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
             "restart a running server after a successful update, the same way it was "
             "running; this ends any running agent, so pause running items first"
         ),
+    )
+    update_p.add_argument(
+        "--when-free",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="TAG",
+        help=(
+            "install the newest release on the channel, or TAG, once nothing is running "
+            "and the hour is allowed (update.yaml), then restart; needs a running server "
+            "to hold the request"
+        ),
+    )
+    update_p.add_argument(
+        "--cancel-when-free",
+        action="store_true",
+        help="drop the release marked with --when-free (or marked on the About page)",
     )
     update_p.set_defaults(func=_cmd_update)
 

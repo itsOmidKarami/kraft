@@ -368,7 +368,7 @@ def pending(st, now: datetime | None = None) -> Pending:
         if update.is_dev_install():
             out.blocked.append("a dev install has no release to install")
         elif (kind := update.install_kind()) != "uv":
-            out.blocked.append(f"this Kraft was installed with {kind}, which Kraft cannot update")
+            out.blocked.append(update.cannot_install_reason(kind))
     if admin.restart_kind(st.run_dirs.base) == "attached":
         out.blocked.append("attached to a terminal")
     if not cfg.allows(now):
