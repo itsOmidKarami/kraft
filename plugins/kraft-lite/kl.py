@@ -2695,6 +2695,7 @@ TASK_KEYWORDS: dict[str, tuple[str, ...]] = {
     "repair_mr_feedback": (),
     "repair_mr_checks": (),
     "repair_merge_queue_failure": (),
+    "triage_review_feedback": (),
     "strict_judge": (),
     "write_work_brief": ("brief",),
     "write_summary": ("summary",),
