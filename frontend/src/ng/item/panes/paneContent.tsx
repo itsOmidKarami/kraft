@@ -322,7 +322,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   // only, once it is done. A node's own tasks only, the ones GET /artifacts/{kind} reads for (`ResolvedNode.produces`).
   const produces = (!esc && !rev && !loop && at === sessions.at(-1) && at.status === "done" && frozen && taskAt(frozen, path)?.produces) || undefined;
   const bodies: Record<string, ReactNode> = {
-    thread: <Thread item={item} version={a.version} node={node.id} upTo={at === sessions.at(-1) ? undefined : at} reload={a.reload} onNode={(n) => a.pick({ kind: "node", node: n })} />,
+    thread: <Thread item={item} version={a.version} node={node.id} upTo={at === sessions.at(-1) && !item.earlier_pass ? undefined : at} reload={a.reload} onNode={(n) => a.pick({ kind: "node", node: n })} />,
     overview: (
       <>
         {/* The changed-test-scope task says how its round went, and what its canvas frame means, above the usual facts. */}

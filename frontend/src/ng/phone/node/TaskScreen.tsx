@@ -185,7 +185,7 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
             ...(at?.head_sha ? ([["head", <span key="h" className="ph-mono">{at.head_sha.slice(0, 10)}</span>]] as [string, React.ReactNode][]) : []),
           ]} />
         )}
-        {tab === "thread" && <Thread item={item} version={version} node={nodeId} upTo={at === sessions.at(-1) ? undefined : at} />}
+        {tab === "thread" && <Thread item={item} version={version} node={nodeId} upTo={at === sessions.at(-1) && !item.earlier_pass ? undefined : at} />}
       </div>
     </>
   );

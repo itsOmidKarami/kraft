@@ -199,7 +199,7 @@ describe("task pane", () => {
     expect(facts).toHaveTextContent("harnesscodex");
   });
 
-  it("shows the thread through the turn picked above the tabs, and all of it on the latest", async () => {
+  it("shows the thread through the turn picked above the tabs, and all of it on the latest, not on an earlier pass's last", async () => {
     const turns = detail({ worker_sessions: [sess("escalation", 1, { id: "e1", node_id: "verification" }), sess("escalation", 2, { id: "e2", node_id: "verification" })] });
     const msg = (seq: number, turn: number, message: string, session_id: string, node_id = "verification") => ({ seq, work_item_id: "w1", type: "escalation_message", payload: { thread: 1, turn, message, session_id }, node_id, created_at: "2026-09-13T09:00:00Z" });
     // The last message is about another node: the latest turn here still shows it.
@@ -209,10 +209,17 @@ describe("task pane", () => {
     expect(screen.queryByText("Try the other config.")).toBeNull();
     expect(screen.getByText("2 later messages after this turn.")).toBeInTheDocument();
     first.unmount();
-    mount("/work-items/w1/nodes/verification?sel=verification.escalation.escalation", turns, events);
+    const latest = mount("/work-items/w1/nodes/verification?sel=verification.escalation.escalation", turns, events);
     expect(await screen.findByText("Try the other config.")).toBeInTheDocument();
     expect(screen.getByText("Why did lint fail?")).toBeInTheDocument();
     expect(screen.getByText("And the merge request?")).toBeInTheDocument();
+    latest.unmount();
+    // Each turn in a pass of its own: pass 1's one turn is its last, not the thread's latest, so its thread stops there.
+    const [e1, e2] = turns.worker_sessions;
+    const passed = detail({ node_passes: { verification: [{ pass: 1 }, { pass: 2, reason: "retry" as const }] }, worker_sessions: [{ ...e1, pass: 1 }, { ...e2, pass: 2 }] });
+    mount("/work-items/w1/nodes/verification?sel=verification.escalation.escalation&pass=1", passed, events);
+    expect(await screen.findByText("Why did lint fail?")).toBeInTheDocument();
+    expect(screen.queryByText("Try the other config.")).toBeNull();
   });
 
   it("counts the escalation's sessions as turns, the word its Thread tab uses (R10b-06)", async () => {
