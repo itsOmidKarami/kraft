@@ -196,11 +196,13 @@ async def test_a_hook_with_its_own_skill_is_not_told_to_implement(item_on, fake_
     assert "Judge the change against them." in review_prompt
 
 
-async def test_the_implementer_is_told_which_commands_gate_its_paths(item_on, fake_agent):
-    """49c0cefd's agent could run `just e2e-ci` and was never told it existed
-    (Kraft-s7c04.8). The implementation prompt now carries the repo's
-    path->command mapping. An agent task with a skill of its own -- a
-    different job, dispatched in the same run -- must not get it
+async def test_only_the_implementer_is_told_to_run_its_own_tests_and_not_the_suite(
+    item_on, fake_agent
+):
+    """The implementation prompt tells the agent to run the tests for what it
+    touched and never the repo's suite, and names no scope command: a listed
+    one read as one to run (Kraft-jl7un). An agent task with a skill of its
+    own -- a different job, dispatched in the same run -- gets no such note
     (Kraft-s7c04.45: keyed on the task, not the node id)."""
     it = await item_on(
         [
@@ -219,9 +221,9 @@ async def test_the_implementer_is_told_which_commands_gate_its_paths(item_on, fa
     )
 
     impl_prompt, other_prompt = fake_agent.prompts()
-    for cmd in ("just test-ui", "just e2e-ci", "just ci-test"):
-        assert cmd in impl_prompt
-        assert cmd not in other_prompt
+    assert "Do not run the full test suite" in impl_prompt
+    assert "Do not run the full test suite" not in other_prompt
+    assert not any(cmd in impl_prompt for cmd in ("just test-ui", "just e2e-ci", "just ci-test"))
 
 
 async def test_dispatch_carries_the_notes_authorship_into_the_prompt(
