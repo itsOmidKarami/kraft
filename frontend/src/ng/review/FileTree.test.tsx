@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Compare, CompareFile, ReviewThread } from "../../types";
 import * as http from "../http";
 import { FileTree } from "./FileTree";
+import { inTreeOrder, tree as buildTree } from "./model";
 import { useViewed, type Fetched } from "./useReview";
 
 const file = (path: string, viewed = false): CompareFile => ({ path, insertions: 3, deletions: 1, touched_by: ["implementation"], viewed });
@@ -51,7 +52,10 @@ describe("FileTree", () => {
   });
 
   it("nests folders, folders before files; a folder holding only one folder shares its row", () => {
-    tree({ files: [file("src/kraft/review/tree.py"), file("src/kraft/model.py"), file("src/kraft/review/rows.py"), file("README.md")], selected: null, untracked: [], isViewed: () => false });
+    const files = [file("src/kraft/review/tree.py"), file("src/kraft/model.py"), file("src/kraft/review/rows.py"), file("README.md")];
+    tree({ files, selected: null, untracked: [], isViewed: () => false });
+    // The order the page opens files in (its first is one-file mode's default) is the rows' order.
+    expect(inTreeOrder(buildTree(files)).map((f) => f.path)).toEqual(["src/kraft/review/rows.py", "src/kraft/review/tree.py", "src/kraft/model.py", "README.md"]);
     const rows = [...document.querySelectorAll(".rv-folder-row, .rv-file-name")].map((r) => `${(r as HTMLElement).style.getPropertyValue("--depth") || (r.parentElement as HTMLElement).style.getPropertyValue("--depth")} ${r.textContent}`);
     expect(rows).toEqual(["0 src/kraft/", "1 review/", "2 rows.py", "2 tree.py", "1 model.py", "0 README.md"]);
     fireEvent.click(screen.getByRole("button", { name: "review/" }));
