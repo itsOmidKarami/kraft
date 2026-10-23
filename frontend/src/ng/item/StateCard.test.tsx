@@ -419,6 +419,12 @@ describe("PausedCard", () => {
     expect(posts(calls).map((c) => c.body)).toEqual([{ steer: null }, { steer: "look at reindex first" }]);
   });
 
+  it("says when a broken base paused it, and who broke it", async () => {
+    stubFetch({ "GET /work-items/w1/events": [200, [{ type: "paused_by_broken_base", payload: { broken_by: "w7", follow_up_bead: null }, created_at: "2026-10-23T16:57:04Z", node_id: null }]] });
+    render(<PausedCard item={detail({ display_status: "paused", worker_sessions: [] })} reload={() => {}} />);
+    expect(await screen.findByText("The merge of w7 broke the base this item is built on, so Kraft paused it. Resume it once the base is fixed.")).toBeInTheDocument();
+  });
+
   it("offers no Resume when the server's actions refuse it (F4)", () => {
     render(<PausedCard item={detail({ display_status: "paused", worker_sessions: [paused("verification.review.code_review")], actions: ["steer", "cancel"] })} reload={() => {}} />);
     expect(screen.queryByRole("button", { name: /Resume/ })).toBeNull();

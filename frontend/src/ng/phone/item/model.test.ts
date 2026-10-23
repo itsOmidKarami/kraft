@@ -148,13 +148,17 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     expect(cardOf(mk("done", null, { mr_ref: { number: 7, url: "u" } }))).toMatchObject({ tone: "ok", where: "MR !7 merged", text: undefined });
     expect(cardOf(mk("done"))).toMatchObject({ text: "The chain finished. No merge request was opened." });
   });
-  it("names the closer of a closed MR and the reason of a cancel from the events", () => {
+  it("names the closer of a closed MR, the reason of a cancel and a broken base from the events", () => {
     const ev = (type: EventType, payload: object) => ({ type, payload, created_at: "2026-09-13T08:00:00Z", node_id: null }) as never;
     expect(cardOf(mk("needs_you", stop("mr_closed", { facts: { ref: 142 } })), [ev("mr_closed", { by: "dana" })])?.where).toMatch(/closed by dana/);
     expect(cardOf(mk("cancelled"), [ev("work_item_cancelled", { reason: "wrong repo" })])?.facts).toContainEqual(["reason", "wrong repo"]);
     expect(cardOf(mk("cancelled", null, { ended_reason: "refiled as w9" }), [ev("work_item_abandoned", { reason: "refiled as w9" })]))
       .toMatchObject({ title: "Abandoned", facts: [["reason", "refiled as w9"]] });
     expect(cardOf(mk("cancelled"), [ev("work_item_abandoned", {})])?.facts).toContainEqual(["reason", "no reason given"]);
+    const broken = ev("paused_by_broken_base", { broken_by: "w7", follow_up_bead: "Kraft-1vezz" });
+    expect(cardOf(mk("paused"), [broken])?.text).toBe("The merge of w7 broke the base this item is built on, so Kraft paused it. Resume it once the base is fixed (follow-up Kraft-1vezz).");
+    // A person's pause after it is the reason now.
+    expect(cardOf(mk("paused"), [broken, ev("pause_requested", {})])?.text).toMatch(/^Nothing runs until you resume/);
   });
 });
 
