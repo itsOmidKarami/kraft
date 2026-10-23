@@ -53,6 +53,7 @@ from kraft.executor.context import (
     LaunchContext,
     Steer,
 )
+from kraft.remote import placement
 from kraft.store import _now as _now
 from kraft.templates import revision
 from kraft.templates.models import (
@@ -1233,6 +1234,19 @@ async def _dispatch_task(
         # The whole checkout a sandboxed launch mounts, members included:
         # exactly the one the drift check above passed, not a second reading.
         checkout = verified if sandbox else None
+    # Until a step can run on a machine, a placed one stops here: it must never
+    # run on the server instead (the anti-goal of `kraft.remote`).
+    if (
+        _takes_the_checkout(t)
+        and (runner := placement.runner_for(work_item_row, task.runner, node.id)) != placement.LOCAL
+    ):
+        return await config_error_session(
+            db,
+            run_dirs,
+            common,
+            f"kraft: this step is placed on {runner}, and this Kraft cannot run steps "
+            "on a machine yet\n",
+        )
     # Right before a task that needs the folder, never on the walk's entry; a
     # forge task or a rebase does not run in it here.
     if inplace.is_in_place(work_item_row) and _takes_the_checkout(t):
