@@ -1,4 +1,4 @@
-import { BookOpen, Copy, Download, ExternalLink, LifeBuoy, RefreshCw } from "lucide-react";
+import { BookOpen, Code, Copy, Download, ExternalLink, LifeBuoy, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import * as api from "../../../api";
 import { ago } from "../../../format";
@@ -14,6 +14,7 @@ import { ALLOWED_HOURS_HINT, ATTACHED_NOTE, AUTO_UPDATE_HINT, CHECK_OFF_NOTE, NO
 const CHANNELS = ["stable", "rc", "beta", "alpha"].map((c) => ({ value: c, label: c }));
 const RELEASES = "https://github.com/itsOmidKarami/kraft/releases";
 const SUPPORT = "https://kraft-sdlc.dev/project/status-and-support";
+const SOURCE = "https://github.com/itsOmidKarami/kraft";
 
 /** What the update feed said, in words. A feed that did not answer is "unknown", never "up to date": the server sends null, not false (W16 E). */
 export function updateVerdict(u: UpdateState | null): { tone: "ok" | "warn" | "muted"; text: string } {
@@ -129,6 +130,7 @@ export function AboutScreen() {
       <Group rows={[
         { label: "Documentation", icon: BookOpen, onClick: () => window.open(docsUrl(health?.version, update?.latest), "_blank", "noopener,noreferrer") } as RowSpec,
         { label: "Status and support", icon: LifeBuoy, sub: "macOS and Linux. Only the latest release gets fixes.", onClick: () => window.open(SUPPORT, "_blank", "noopener,noreferrer") } as RowSpec,
+        { label: "Source on GitHub", icon: Code, onClick: () => window.open(SOURCE, "_blank", "noopener,noreferrer") } as RowSpec,
       ]} />
       {node}
     </AreaScreen>

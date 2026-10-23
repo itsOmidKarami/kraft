@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { BookOpen, Copy, ExternalLink, LifeBuoy, X } from "lucide-react";
+import { BookOpen, Code, Copy, ExternalLink, LifeBuoy, X } from "lucide-react";
 import * as api from "../../api";
 import { ago, elapsed } from "../../format";
 import type { Access, Health } from "../../types";
@@ -20,6 +20,7 @@ import { ALLOWED_HOURS_HINT, ATTACHED_NOTE, AUTO_UPDATE_HINT, CHECK_OFF_NOTE, NO
 const CHANNELS = ["stable", "rc", "beta", "alpha"].map((c) => ({ value: c, label: c }));
 const RELEASES = "https://github.com/itsOmidKarami/kraft/releases";
 const SUPPORT = "https://kraft-sdlc.dev/project/status-and-support";
+const SOURCE = "https://github.com/itsOmidKarami/kraft";
 
 /** What the update feed said, in words. A feed that did not answer is "unknown": it
  *  is never read as "up to date" (the server sends null, not false). */
@@ -214,6 +215,7 @@ export function AboutPage() {
         <div className="set-about-links">
           <a className="set-linkrow" href={docsUrl(health?.version, update?.latest)} target="_blank" rel="noopener noreferrer"><BookOpen size={16} aria-hidden /><span>Documentation</span><ExternalLink size={14} aria-hidden /></a>
           <a className="set-linkrow" href={SUPPORT} target="_blank" rel="noopener noreferrer"><LifeBuoy size={16} aria-hidden /><span>Status and support</span><ExternalLink size={14} aria-hidden /></a>
+          <a className="set-linkrow" href={SOURCE} target="_blank" rel="noopener noreferrer"><Code size={16} aria-hidden /><span>Source on GitHub</span><ExternalLink size={14} aria-hidden /></a>
         </div>
         <span className="set-hint">macOS and Linux{update?.python && ` · Python ${update.python}`} · Only the latest release gets fixes.</span>
       </div>

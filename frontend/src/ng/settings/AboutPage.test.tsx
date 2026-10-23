@@ -338,6 +338,7 @@ describe("ng AboutPage", () => {
     expect([...rows.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["Health", "Address", "Run directory", "Process", "Search index"]);
     expect(screen.getByRole("link", { name: "Documentation" })).toHaveAttribute("href", expect.stringContaining("kraft-sdlc.dev"));
     expect(screen.getByRole("link", { name: "Status and support" })).toHaveClass("set-linkrow");
+    expect(screen.getByRole("link", { name: "Source on GitHub" })).toHaveAttribute("href", "https://github.com/itsOmidKarami/kraft");
   });
 
   it("marks the search index with a warning dot until it has scanned cleanly", async () => {
