@@ -3,7 +3,7 @@ import type { DisplayStatus, WorkItemStop } from "../../../types";
 import type { EventType } from "../../../types/vocab.generated";
 import { chainGraph } from "../../item/graph";
 import { detail } from "../../item/testkit";
-import { FORGE_LOGIN_HINT } from "../../item/cause";
+import { BROKEN_BASE_TEXT, FORGE_LOGIN_HINT } from "../../item/cause";
 import { cardOf, kebabOf, nodeSub, pairOf } from "./model";
 
 const stop = (kind: WorkItemStop["kind"], over: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", resume_at: null, reason: null, ...over });
@@ -156,7 +156,7 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
       .toMatchObject({ title: "Abandoned", facts: [["reason", "refiled as w9"]] });
     expect(cardOf(mk("cancelled"), [ev("work_item_abandoned", {})])?.facts).toContainEqual(["reason", "no reason given"]);
     const broken = ev("paused_by_broken_base", { broken_by: "w7", follow_up_bead: "Kraft-1vezz" });
-    expect(cardOf(mk("paused"), [broken])?.text).toBe("The merge of w7 broke the base this item is built on, so Kraft paused it. Resume it once the base is fixed (follow-up Kraft-1vezz).");
+    expect(cardOf(mk("paused"), [broken])).toMatchObject({ text: BROKEN_BASE_TEXT, facts: [["broken by", "w7", "w7"], ["follow-up", "Kraft-1vezz"]] });
     // A person's pause after it is the reason now.
     expect(cardOf(mk("paused"), [broken, ev("pause_requested", {})])?.text).toMatch(/^Nothing runs until you resume/);
   });

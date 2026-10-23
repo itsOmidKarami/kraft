@@ -15,7 +15,7 @@ import { actionPath, taskName } from "./paths";
 import { pathSel, placeUrl } from "./url";
 import { useLogLines } from "./useLogLines";
 import { totals } from "./Top";
-import { brokenBaseText, FORGE_LOGIN_HINT, failedFix, failureFacts, headline, keptLine, withCode } from "./cause";
+import { BROKEN_BASE_TEXT, brokenBase, FORGE_LOGIN_HINT, failedFix, failureFacts, headline, keptLine, withCode } from "./cause";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
 import { CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, WAITING_ON_THE_PROVIDER, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "./sharedWords";
@@ -308,8 +308,10 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
 
 /** The events a card needs that the detail does not carry (who closed the MR,
  *  which node opened it, the cancel's reason, why it paused): read once, for those cards only. */
-function useEndEvents(item: ItemDetail): KraftEvent[] {
-  const wants = ["cancelled", "done", "paused"].includes(item.display_status ?? "") || item.stop?.kind === "mr_closed";
+function useEndEvents(
+  item: ItemDetail,
+  wants = item.display_status === "cancelled" || item.display_status === "done" || item.stop?.kind === "mr_closed",
+): KraftEvent[] {
   const [events, setEvents] = useState<KraftEvent[]>([]);
   useEffect(() => {
     if (!wants) return setEvents([]);
@@ -365,7 +367,7 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
   const [target, setTarget] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const why = brokenBaseText(useEndEvents(item));
+  const broken = brokenBase(useEndEvents(item, item.display_status === "paused"));
   if (item.display_status !== "paused") return null;
   if (neverStarted(item)) return <NotStartedCard item={item} />;
   const resumes = admits(item, "resume", true);
@@ -385,7 +387,15 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
   };
   return (
     <FoldingCard id={item.id} tone="neutral" glyph={<Pause size={14} aria-hidden />} title="Paused" where={what.trim()}>
-      {why && <p className="item-card-text">{why}</p>}
+      {broken && (
+        <>
+          <p className="item-card-text">{BROKEN_BASE_TEXT}</p>
+          <dl className="item-facts item-card-facts">
+            <div><dt>broken by</dt><dd><Link className={linkButtonClass({ inline: true })} to={`/work-items/${encodeURIComponent(broken.by)}`}>{broken.by}</Link></dd></div>
+            {broken.bead && <div><dt>follow-up</dt><dd>{broken.bead}</dd></div>}
+          </dl>
+        </>
+      )}
       {steerable && <textarea aria-label="Steer" className="item-input" rows={2} placeholder="Steer the next agent (optional)" value={steer} onChange={(e) => setSteer(e.target.value)} onKeyDown={sendOnModEnter(() => resume(true), !busy && !!steer.trim())} />}
       {steerable && paused.length > 1 && (
         <label className="item-check">

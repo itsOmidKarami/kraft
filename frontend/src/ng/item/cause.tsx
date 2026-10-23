@@ -78,11 +78,13 @@ export const headline = (reason: string | null | undefined) => (reason ?? "").re
 /** The events that pause an item; the latest says why a paused one is. */
 const PAUSES = new Set(["pause_requested", "paused_by_broken_base", "work_item_blocked_by_dependency"]);
 
-/** Why a paused item paused when no person did: another item's merge broke the base it is built on. The same words
- *  on the desktop's paused card and the phone's. Null for any other pause. */
-export function brokenBaseText(events: KraftEvent[]): string | null {
+/** Why a paused item paused when no person did: another item's merge broke the base it is built on. The desktop's
+ *  paused card and the phone's say it in these words, with who broke it and the follow-up bead as facts. Null for
+ *  any other pause. */
+export const BROKEN_BASE_TEXT = "Another item's merge broke the base this one is built on, so Kraft paused it. Resume it once the base is fixed.";
+export function brokenBase(events: KraftEvent[]): { by: string; bead: string | null } | null {
   const last = [...events].reverse().find((e) => PAUSES.has(e.type));
   if (last?.type !== "paused_by_broken_base") return null;
   const bead = last.payload.follow_up_bead;
-  return `The merge of ${String(last.payload.broken_by)} broke the base this item is built on, so Kraft paused it. Resume it once the base is fixed${typeof bead === "string" ? ` (follow-up ${bead})` : ""}.`;
+  return { by: String(last.payload.broken_by), bead: typeof bead === "string" ? bead : null };
 }

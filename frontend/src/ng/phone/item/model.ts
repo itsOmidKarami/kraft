@@ -4,7 +4,7 @@ import type { ItemAction, KraftEvent, StopLimit } from "../../../types";
 import { admits, budgetRaise, headerState, archivable, NOT_RAISABLE, offersRaise, RAISE_REFUSED, RELEASED } from "../../item/status";
 import { doneText, gateMessage, materialized } from "../../item/chainValues";
 import { taskName } from "../../item/paths";
-import { brokenBaseText, FORGE_LOGIN_HINT, failedFix, keptLine } from "../../item/cause";
+import { BROKEN_BASE_TEXT, brokenBase, FORGE_LOGIN_HINT, failedFix, keptLine } from "../../item/cause";
 import { escalationsOf, ESCALATION } from "../../item/nodeGraph";
 import { limitPolicy } from "../../item/limitPolicy";
 import type { ItemDetail } from "../../item/useItem";
@@ -144,7 +144,15 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
       return { tone: "info", title: "Queued", where: WAITING_FOR_CHECKOUT, text: CHECKOUT_FREES, facts: q.held_by ? [[IN_USE_BY, q.held_by_title ?? q.held_by, q.held_by]] : [] };
     }
     case "escalated": return { tone: "warn", title: "Escalation running", where: item.current_node_id ? `at ${nameOf(item.chain_definition.nodes, item.current_node_id)}` : undefined, text: "An agent is looking at this. It resumes the run, or comes back with a question for you.", facts: [] };
-    case "paused": return item.current_node_id ? { tone: "muted", title: "Paused", where: `at ${nameOf(item.chain_definition.nodes, item.current_node_id)}`, text: brokenBaseText(events) ?? "Nothing runs until you resume. Steering resumes the item with your note.", facts: [] } : null;
+    case "paused": {
+      if (!item.current_node_id) return null;
+      const broken = brokenBase(events);
+      return {
+        tone: "muted", title: "Paused", where: `at ${nameOf(item.chain_definition.nodes, item.current_node_id)}`,
+        text: broken ? BROKEN_BASE_TEXT : "Nothing runs until you resume. Steering resumes the item with your note.",
+        facts: broken ? [["broken by", broken.by, broken.by], ...(broken.bead ? [["follow-up", broken.bead] as [string, string]] : [])] : [],
+      };
+    }
     case "done": return { tone: "ok", title: "Done", where: item.mr_ref ? `MR !${item.mr_ref.number} merged` : undefined, text: doneText(item), facts: spent(item) };
     case "cancelled": {
       const ev = [...events].reverse().find((e) => e.type === "work_item_cancelled");
