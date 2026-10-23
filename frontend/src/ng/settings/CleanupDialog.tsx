@@ -35,7 +35,8 @@ export function CleanupDialog({ ids, usage, onClose, onDone }: { ids: string[]; 
   const [preview, setPreview] = useState<StoragePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(0);
+  // One entry per item the run has reached, in order: whether it was cleaned up.
+  const [ran, setRan] = useState<boolean[]>([]);
   const [failed, setFailed] = useState<{ id: string; title: string; error: string }[] | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const nowRef = useRef<HTMLLIElement>(null);
@@ -54,13 +55,15 @@ export function CleanupDialog({ ids, usage, onClose, onDone }: { ids: string[]; 
 
   const take = preview?.items.filter((i) => i.archivable) ?? [];
   const skipped = preview?.items.filter((i) => !i.archivable) ?? [];
-  const freedSoFar = take.slice(0, done).reduce((n, i) => n + i.bytes, 0);
+  const done = ran.length;
+  const cleaned = ran.filter(Boolean).length;
+  const freedSoFar = take.reduce((n, i, k) => n + (ran[k] ? i.bytes : 0), 0);
   // Keep the row being cleaned up in view as the run moves down the list.
   useEffect(() => { if (busy) nowRef.current?.scrollIntoView?.({ block: "nearest" }); }, [busy, done]);
 
   const confirm = async () => {
     setBusy(true);
-    const out = await sendBulk("archive", take.map((i) => i.id), undefined, setDone);
+    const out = await sendBulk("archive", take.map((i) => i.id), undefined, (ok) => setRan((r) => [...r, ok]));
     // This dialog names the failures; the board's bar would repeat them on the next visit.
     // Only this call's own answer: a board failure nobody has read yet stays.
     if (useBulk.getState().last === out) useBulk.getState().set(null);
@@ -100,12 +103,12 @@ export function CleanupDialog({ ids, usage, onClose, onDone }: { ids: string[]; 
           <p className="set-st-sum"><b>Frees {humanSize(preview.freed_bytes)}.</b> {lands(preview, usage)}</p>
           <ul className="set-st-list">
             {take.map((i, n) => {
-              const state = !busy ? null : n < done ? "done" : n === done ? "now" : null;
+              const state = !busy ? null : n < done ? (ran[n] ? "done" : "missed") : n === done ? "now" : null;
               return (
                 <li key={i.id} ref={state === "now" ? nowRef : undefined} className={state ? `set-st-li is-${state}` : "set-st-li"}>
                   <span className="set-st-li-title">{i.title} <span className="set-mono">{humanSize(i.bytes)}</span></span>
                   <span className="set-hint">
-                    {state === "done" ? <><Check size={12} aria-hidden /> Cleaned up</> : state === "now" ? "Cleaning up…" : `${lost(i)} · ${i.branch_kept ? "branch stays: it has commits nothing else holds" : "branch is deleted"}`}
+                    {state === "done" ? <><Check size={12} aria-hidden /> Cleaned up</> : state === "missed" ? "Not cleaned up" : state === "now" ? "Cleaning up…" : `${lost(i)} · ${i.branch_kept ? "branch stays: it has commits nothing else holds" : "branch is deleted"}`}
                   </span>
                 </li>
               );
@@ -119,10 +122,10 @@ export function CleanupDialog({ ids, usage, onClose, onDone }: { ids: string[]; 
           </ul>
           {busy ? (
             <div className="set-st-progress">
-              <div className="set-st-bar" role="progressbar" aria-label="Cleaning up" aria-valuemin={0} aria-valuemax={take.length} aria-valuenow={done} aria-valuetext={`${done} of ${take.length} cleaned up`}>
+              <div className="set-st-bar" role="progressbar" aria-label="Cleaning up" aria-valuemin={0} aria-valuemax={take.length} aria-valuenow={done} aria-valuetext={`${done} of ${take.length} done`}>
                 <div className="set-st-fill" style={{ width: `${(done / take.length) * 100}%` }} />
               </div>
-              <p className="set-hint" role="status">{done} of {take.length} cleaned up · {humanSize(freedSoFar)} freed</p>
+              <p className="set-hint" role="status">{cleaned} of {take.length} cleaned up{done > cleaned ? `, ${done - cleaned} not` : ""} · {humanSize(freedSoFar)} freed</p>
             </div>
           ) : (
             <p className="set-hint">Each item moves to Archived. You can restore it there as a record; its worktree is not brought back.</p>

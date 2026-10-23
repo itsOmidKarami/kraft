@@ -64,10 +64,13 @@ describe("CleanupDialog", () => {
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
-  it("fills a bar, marks each row and counts what is freed while it runs", async () => {
+  it.each([
+    ["went through", true, "1 of 2 cleaned up · 2 GB freed", "Cleaned up"],
+    ["was refused", false, "0 of 2 cleaned up, 1 not · 0 KB freed", "Not cleaned up"],
+  ])("fills a bar, marks each row and counts what is freed while it runs: the first %s", async (_name, ok, line, first) => {
     let finish!: () => void;
     vi.spyOn(bulk, "sendBulk").mockImplementation(async (action, ids, _reason, onEach) => {
-      onEach?.(1);
+      onEach?.(ok);
       await new Promise<void>((r) => { finish = r; });
       return { action, ids, results: ids.map((id) => ({ id, ok: true })) };
     });
@@ -76,9 +79,9 @@ describe("CleanupDialog", () => {
     const bar = await screen.findByRole("progressbar", { name: "Cleaning up" });
     expect(bar).toHaveAttribute("aria-valuenow", "1");
     expect(bar).toHaveAttribute("aria-valuemax", "2");
-    expect(screen.getByText("1 of 2 cleaned up · 2 GB freed")).toBeInTheDocument();
+    expect(screen.getByText(line)).toBeInTheDocument();
     const [cache, spike] = screen.getAllByRole("listitem");
-    expect(cache).toHaveTextContent("Cleaned up");
+    expect(cache).toHaveTextContent(first);
     expect(spike).toHaveTextContent("Cleaning up…");
     expect(screen.getByRole("button", { name: "Cleaning up…" })).toBeDisabled();
     finish();

@@ -23,6 +23,7 @@
 .set-st-li.is-done .set-st-li-title { color: var(--text-muted); }
 .set-st-li.is-done .set-hint { display: flex; align-items: center; gap: 4px; color: var(--ok); }
 .set-st-li.is-now .set-hint { color: var(--text); }
+.set-st-li.is-missed .set-hint { color: var(--bad); }
 .set-st-table { width: 100%; border-collapse: collapse; font-size: var(--fs-meta); }
 .set-st-table th { padding: 4px 8px; text-align: left; font-size: var(--fs-label); font-weight: 400; color: var(--text-muted); }
 .set-st-table td { padding: 7px 8px; border-top: 1px solid var(--line); vertical-align: middle; }

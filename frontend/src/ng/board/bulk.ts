@@ -30,18 +30,18 @@ async function post(action: BulkAction, ids: string[], reason?: string): Promise
 }
 
 /** One id per call, so a slow run (archiving deletes worktrees) can say how far it got. */
-async function oneByOne(action: BulkAction, ids: string[], reason: string | undefined, onEach: (done: number) => void): Promise<BulkOutcome> {
+async function oneByOne(action: BulkAction, ids: string[], reason: string | undefined, onEach: (ok: boolean) => void): Promise<BulkOutcome> {
   const results: BulkItemResult[] = [];
-  for (const [n, id] of ids.entries()) {
+  for (const id of ids) {
     const out = await post(action, [id], reason);
     results.push(...("results" in out ? out.results : [{ id, ok: false, error: out.error }]));
-    onEach(n + 1);
+    onEach("results" in out && out.results.some((r) => r.id === id && r.ok));
   }
   return { action, ids, results };
 }
 
-/** `onEach`, when given, sends the ids one at a time and is told how many are done after each. */
-export async function sendBulk(action: BulkAction, ids: string[], reason?: string, onEach?: (done: number) => void): Promise<BulkOutcome> {
+/** `onEach`, when given, sends the ids one at a time and is told after each whether it went through. */
+export async function sendBulk(action: BulkAction, ids: string[], reason?: string, onEach?: (ok: boolean) => void): Promise<BulkOutcome> {
   let out: BulkOutcome;
   if (action === "retry" || action === "resume") out = await eachOne(action, ids);
   else if (onEach) out = await oneByOne(action, ids, reason, onEach);
