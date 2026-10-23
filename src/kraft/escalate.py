@@ -22,6 +22,7 @@ from kraft import policy as _policy
 from kraft import usage as _usage
 from kraft.adapters import agent as _agent
 from kraft.executor import LaunchContext, stops
+from kraft.remote import placement as _placement
 from kraft.templates.models import AgentTask, GateNode, TaskKind
 from kraft.vocab import LIVE, ChainEvent, EscalationEvent, GateEvent, LimitEvent, WorkItemEvent
 from kraft.vocab.sql import in_list
@@ -721,6 +722,7 @@ async def dispatch(
             # Recorded once the session holds the checkout: a turn refused it
             # has started nothing, and its queued replay records the message.
             on_session=record,
+            runner=_placement.remote(_placement.node_runner(row, row["current_node_id"])),
         )
     except store.CheckoutBusy:
         raise

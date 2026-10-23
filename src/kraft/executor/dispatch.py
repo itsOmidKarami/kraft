@@ -54,6 +54,7 @@ from kraft.executor.context import (
     Steer,
 )
 from kraft.remote import placement
+from kraft.remote import runs as _remote_runs
 from kraft.store import _now as _now
 from kraft.templates import revision
 from kraft.templates.models import (
@@ -77,6 +78,7 @@ from kraft.vocab import (
     ChainEvent,
     GateEvent,
     LimitEvent,
+    RemoteEvent,
     SandboxEvent,
     SessionEvent,
     SessionStatus,
@@ -307,6 +309,54 @@ async def config_error_session(db, run_dirs, common: dict, log: str) -> str:
         status=CONFIG_ERROR,
         log=log,
     )
+
+
+async def _place(db, run_dirs, task, node, row, launch, runner, sandbox, common):
+    """None to go on; otherwise the status that stops or parks the step: a `config_error` session
+    for a placement that cannot hold, `WAITING` while the machine is offline or full."""
+    runs = _remote_runs.current()
+    if runs is None:
+        return await config_error_session(
+            db,
+            run_dirs,
+            common,
+            f"{task.path}: runner {runner!r} needs machines, and this process has none\n",
+        )
+    repos = [launch.repo_entry] if launch and launch.repo_entry else []
+    problems = placement.filing_problems(
+        [runner],
+        workers=runs.hub.file,
+        repos=repos,
+        in_place=inplace.is_in_place(row),
+        sandboxed=sandbox is not None,
+        repo_path=row["repo"],
+        members=_builtins.item_mounts(row),
+    )
+    if problems:
+        return await config_error_session(db, run_dirs, common, f"{task.path}: {problems[0]}\n")
+    pinned = (
+        db.read(lambda c: store.pinned_machine(c, row["id"], node.id))
+        if runner == placement.ANY
+        else None
+    )
+    verdict = runs.hub.decide(runner, repos, pinned=pinned)
+    if verdict.refusal:
+        return await config_error_session(db, run_dirs, common, f"{task.path}: {verdict.refusal}\n")
+    if verdict.wait:
+        payload = {"task": task.path, "node_id": node.id, "reason": verdict.wait}
+
+        def write(c):
+            last = c.execute(
+                "SELECT payload FROM events WHERE work_item_id = ? AND type = ? "
+                "ORDER BY seq DESC LIMIT 1",
+                (row["id"], RemoteEvent.STEP_WAITING),
+            ).fetchone()
+            if last is None or json.loads(last["payload"]) != payload:
+                events.append(c, row["id"], RemoteEvent.STEP_WAITING, payload, node_id=node.id)
+
+        await db.write(write)
+        return WAITING
+    return None
 
 
 async def skipped_session(db, run_dirs, common: dict, log: str) -> str:
@@ -593,6 +643,7 @@ async def _run_changed_test_scopes(
     sandbox: dict | None,
     checkout: _sandbox.Checkout | None = None,
     time_cap: _caps.Deadline | None = None,
+    runner: str | None = None,
 ) -> str:
     """`kraft.verify_changed_test_scopes`: run the repo's own test scopes that
     the branch's changed paths select, and report one aggregate result.
@@ -657,6 +708,7 @@ async def _run_changed_test_scopes(
             sandbox=sandbox,
             checkout=checkout,
             time_cap=time_cap,
+            runner=runner,
             **{
                 **common,
                 "session_id": db.read(
@@ -1234,19 +1286,21 @@ async def _dispatch_task(
         # The whole checkout a sandboxed launch mounts, members included:
         # exactly the one the drift check above passed, not a second reading.
         checkout = verified if sandbox else None
-    # Until a step can run on a machine, a placed one stops here: it must never
-    # run on the server instead (the anti-goal of `kraft.remote`).
-    if (
-        _takes_the_checkout(t)
-        and (runner := placement.runner_for(work_item_row, task.runner, node.id)) != placement.LOCAL
-    ):
-        return await config_error_session(
-            db,
-            run_dirs,
-            common,
-            f"kraft: this step is placed on {runner}, and this Kraft cannot run steps "
-            "on a machine yet\n",
-        )
+    # Where the step runs. A placed one waits for its machine or stops: it must never run on the
+    # server instead (the anti-goal of `kraft.remote`).
+    runner = placement.LOCAL
+    if _takes_the_checkout(t):
+        runner = placement.runner_for(work_item_row, task.runner, node.id)
+        if (
+            runner != placement.LOCAL
+            and (
+                blocked := await _place(
+                    db, run_dirs, task, node, work_item_row, launch, runner, sandbox, common
+                )
+            )
+            is not None
+        ):
+            return blocked
     # Right before a task that needs the folder, never on the walk's entry; a
     # forge task or a rebase does not run in it here.
     if inplace.is_in_place(work_item_row) and _takes_the_checkout(t):
@@ -1340,6 +1394,7 @@ async def _dispatch_task(
                         sandbox=sandbox,
                         checkout=checkout,
                         time_cap=time_cap,
+                        runner=placement.remote(runner),
                     )
                 )
             case _:  # pragma: no cover -- the type already refuses this
@@ -1365,6 +1420,7 @@ async def _dispatch_task(
                 sandbox=sandbox,
                 checkout=checkout,
                 time_cap=time_cap,
+                runner=placement.remote(runner),
                 **common,
             )
         )
@@ -1641,6 +1697,7 @@ async def _dispatch_task(
             note=note,
             note_source=note_source,
             time_cap=time_cap,
+            runner=runner,
         )
         if final:
             return status
@@ -1912,6 +1969,7 @@ async def _launch_agent(
     note,
     note_source: str,
     time_cap,
+    runner: str | None = None,
 ) -> tuple[str, bool]:
     """One candidate's launch for `dispatch_node`: `(status, final)`, `final`
     when the launch never started and the status is the task's answer as it
@@ -1999,6 +2057,7 @@ async def _launch_agent(
             bot_feedback=feedback,
             time_cap=time_cap,
             harness_id=harness_id,
+            runner=placement.remote(runner),
             **common,
         )
     except _agent.LaunchRefused as exc:

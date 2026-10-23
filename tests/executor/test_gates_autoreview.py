@@ -523,3 +523,17 @@ async def test_an_agents_approval_of_the_final_gate_pins_the_head(
         "by": "agent",
         "tips": {str(it.worktree): head},
     }
+
+
+async def test_the_reviewer_runs_where_its_gate_is_placed(item_on, tmp_path, monkeypatch):
+    nodes = _spec_gate_chain(_profile_reviewer("deep"))
+    nodes[1]["runner"] = "gpu"  # the gate
+    it = await item_on(nodes, auto_gate=True)
+    fake_harness_home(tmp_path, ["true"])
+    write_agent_profiles(
+        Path(os.environ["KRAFT_HOME"]) / "config", {"deep": {"model": {"fake": "opus"}}}
+    )
+
+    _, _, launched = await _review_spec_gate(it, monkeypatch)
+
+    assert [kw["runner"] for kw in launched] == ["gpu"]

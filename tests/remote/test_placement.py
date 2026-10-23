@@ -123,3 +123,13 @@ def test_library_runners_lists_every_machine_the_chain_names():
         [v1_node("a", runner="gpu"), v1_node("b", runner="local"), v1_node("c")], repo="/r"
     )
     assert placement.library_runners(chain) == {"gpu"}
+
+
+def test_a_nodes_own_launches_follow_its_placement_and_then_the_items_overrides():
+    chain = v1_chain([v1_node("a", runner="gpu"), v1_node("b")], repo="/r")
+    row = {"materialized_chain": chain.to_json(), "agent_overrides": None, "node_overrides": None}
+    assert (placement.node_runner(row, "a"), placement.node_runner(row, "b")) == ("gpu", "local")
+    row["agent_overrides"] = '{"runner": "box"}'
+    assert (placement.node_runner(row, "a"), placement.node_runner(row, "b")) == ("box", "box")
+    assert placement.remote("local") is None and placement.remote("box") == "box"
+    assert placement.remote(None) is None

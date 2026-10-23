@@ -23,6 +23,7 @@ from kraft.adapters import agent as _agent
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.profiles import HarnessUnavailable, harness_table
 from kraft.executor.fallback import fallback_list
+from kraft.remote import placement as _placement
 from kraft.templates.models import AgentTask, ResolvedNode
 from kraft.vocab import ADVANCING, GateEvent
 from kraft.worker import steering as _steering
@@ -377,6 +378,7 @@ async def review(
             takes_checkout=True,
             tips=tips,
             on_session=start,
+            runner=_placement.remote(_placement.runner_for(row, auto_review.runner, node.id)),
         )
     except store.CheckoutBusy:
         raise

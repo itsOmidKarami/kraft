@@ -210,3 +210,22 @@ async def test_item_skips_gate_reviews_and_escalation_turns(database, run_dirs, 
     await _escalate(database, run_dirs)
 
     assert launched[0]["harness_id"] == "cx"
+
+
+@pytest.mark.parametrize(
+    ("library", "override", "want"),
+    [(None, None, None), ("gpu", None, "gpu"), ("gpu", "box", "box"), ("gpu", "local", None)],
+    ids=["unplaced", "library", "item-override", "forced-local"],
+)
+async def test_an_escalation_turn_follows_the_placement_of_its_node(
+    database, run_dirs, launched, library, override, want
+):
+    await _item(
+        database, run_dirs, nodes=[{**_NODES[0], **({"runner": library} if library else {})}]
+    )
+    if override:
+        await database.write(
+            lambda c: store.set_agent_overrides(c, "w1", json.dumps({"runner": override}))
+        )
+    await _escalate(database, run_dirs)
+    assert launched[0]["runner"] == want

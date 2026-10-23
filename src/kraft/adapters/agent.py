@@ -1041,7 +1041,10 @@ async def run_agent_task(
     #: caller records only for a session that holds its checkout, never for
     #: one `CheckoutBusy` refused (an escalation's message, a review's start).
     on_session: Callable[[], Awaitable[None]] | None = None,
+    #: The machine this launch runs on (`kraft.remote.placement`), or None for the server.
+    runner: str | None = None,
 ) -> str:
+    runner = None if runner == "local" else runner
     # An update holds the moment: no session starts until the server restarts.
     # Before the session row, so nothing is left behind to reattach.
     if when_free.claimed():
@@ -1205,7 +1208,7 @@ async def run_agent_task(
         # ponytail: a sandboxed launch asks its image on every launch (one short
         # container); cache on the image id if that shows.
         try:
-            runner = (
+            oneshot_runner = (
                 await asyncio.to_thread(
                     _backends.for_sandbox(sandbox).oneshot,
                     sandbox,
@@ -1220,7 +1223,7 @@ async def run_agent_task(
         except _sandbox.SandboxNotReady:
             found = None  # the backend's own probe refuses this launch, by name
         else:
-            found = await _cli_version(exe, h.id, cwd, runner)
+            found = await _cli_version(exe, h.id, cwd, oneshot_runner)
         if found is not None and _harness.version_key(found) < _harness.version_key(h.min_version):
             raise LaunchRefused(
                 f"harness {harness!r} ({h.path}) needs {shlex.join(exe)} {h.min_version} or newer, "
@@ -1240,7 +1243,7 @@ async def run_agent_task(
         try:
             # The session's own codex vouches for the hook: a sandbox's is the
             # image's, and another version may hash it otherwise (skipped).
-            runner = (
+            oneshot_runner = (
                 await asyncio.to_thread(
                     _backends.for_sandbox(sandbox).oneshot,
                     sandbox,
@@ -1253,7 +1256,7 @@ async def run_agent_task(
                 else None
             )
             hook_argv = await _hook_install.codex_hook_flags(
-                exe, _hook_install.hook_argv(h.id, sandbox), Path(cwd), runner
+                exe, _hook_install.hook_argv(h.id, sandbox), Path(cwd), oneshot_runner
             )
         except (_hook_install.CodexTrustError, _sandbox.SandboxNotReady) as exc:
             # Never launched unenforced, never with every hook trusted.
@@ -1323,6 +1326,25 @@ async def run_agent_task(
     # task (`dispatch._dispatch_task`): take the checkout once the session
     # holds its lease, mark it, and check it after.
     borrows = takes_checkout and in_place
+    # Files a machine must be given because they live outside git: the cursor hook, and the
+    # harness config the CLI reads (its chats stay where they were made).
+    remote_ro: tuple[str, ...] = ()
+    if runner and not sandbox:
+        config_dir = config_env.get(h.config_env) if h.config_env else None
+        hook_file = Path(cwd) / ".cursor" / "hooks.json"
+        remote_ro = tuple(
+            str(p)
+            for p in (
+                *(
+                    [hook_file]
+                    if hooked
+                    and h.permission_hook == "cursor"
+                    and _hook_install.needs_hook(allowed_tools, deny_tools, grants)
+                    else []
+                ),
+                *([Path(config_dir) / name for name in h.config_files] if config_dir else []),
+            )
+        )
 
     async def before_launch() -> None:
         if on_session is not None:
@@ -1380,8 +1402,9 @@ async def run_agent_task(
         takes_checkout=takes_checkout,
         tips=tips,
         model=model,
-        ro_paths=rules_files,
+        ro_paths=(*rules_files, *remote_ro),
         before_launch=before_launch if borrows or on_session else None,
+        runner=runner,
     )
     if borrows:
         await inplace.check_task(db, run_dirs, item_row, Path(cwd), node_id, hook_point)

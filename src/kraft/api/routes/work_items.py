@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import unicodedata
 from pathlib import Path
 from typing import Literal
@@ -1279,16 +1280,22 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
 
     item_policy = _item_policy(row, body.policy, new_materialized)
 
-    if body.agent_overrides is not None:
-        errs = validate_agent_overrides(body.agent_overrides)
+    agent_overrides = body.agent_overrides
+    if agent_overrides is not None:
+        errs = validate_agent_overrides(agent_overrides)
         if errs:
             raise HTTPException(422, errs[0])
-        if body.agent_overrides.get("runner"):
-            _check_placement(st, row, {body.agent_overrides["runner"]})
+        # Where steps run is not an edit to the model: a replacement that does not name `runner`
+        # keeps the stored one. `{}` is the clear and takes it too.
+        kept = json.loads(row["agent_overrides"] or "{}").get("runner")
+        if agent_overrides and "runner" not in agent_overrides and kept:
+            agent_overrides = {**agent_overrides, "runner": kept}
+        if agent_overrides.get("runner"):
+            _check_placement(st, row, {agent_overrides["runner"]})
         v1 = store.materialized_chain_of(row)
         if v1 is not None:
             nodes = {n.id: n for n in v1.chain.nodes}
-            if (why := item_harness_refusal(nodes, body.agent_overrides)) is not None:
+            if (why := item_harness_refusal(nodes, agent_overrides)) is not None:
                 raise HTTPException(422, why)
 
     def apply(c):
@@ -1308,8 +1315,8 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
             )
         if body.chain_template is not None:
             store.set_chain_template(c, wid, body.chain_template, new_materialized)
-        if body.agent_overrides is not None:
-            written["agent_overrides"] = store.replace_agent_overrides(c, wid, body.agent_overrides)
+        if agent_overrides is not None:
+            written["agent_overrides"] = store.replace_agent_overrides(c, wid, agent_overrides)
         if body.node_overrides is not None:
             now = store.set_node_overrides(c, wid, body.node_overrides)
             # Each node the request named, as stored: `{node: {}}` once it is

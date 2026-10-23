@@ -99,3 +99,18 @@ def filing_problems(
         if why := checkout_problem(repo_path, members=members):
             problems.append(f"runner {runner!r} cannot take this item: {why}")
     return problems
+
+
+def remote(runner: str | None) -> str | None:
+    """What `run_task`'s `runner=` takes: None for `local` and for no placement."""
+    return None if runner in (None, LOCAL) else runner
+
+
+def node_runner(row, node_id: str) -> str:
+    """A node's own launches that carry no task (an escalation turn, a review reply)."""
+    snapshot = store.materialized_chain_of(row)
+    library = None
+    if snapshot is not None:
+        node = next((n for n in snapshot.chain.nodes if n.id == node_id), None)
+        library = node.runner if node is not None else None
+    return runner_for(row, library, node_id)

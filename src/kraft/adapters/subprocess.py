@@ -805,7 +805,30 @@ async def _run_task(
     #: session (tests, setup) is bounded by its own caps, and a quiet build is
     #: not a hung agent.
     idle_limit: bool = False,
+    #: The machine this step runs on (`kraft.remote.placement`), or None for the server.
+    runner: str | None = None,
 ) -> str:
+    runner = None if runner == "local" else runner
+    claim = None
+    refusal = None
+    run = None
+    if runner is not None:
+        # Lazy: `kraft.remote` imports `store` and `caps`, which import this module's callers.
+        from kraft.remote import files as _remote_files
+        from kraft.remote import launch as _launch
+        from kraft.remote import runs as _remote_runs
+        from kraft.remote import standin as _standin
+
+        claim, refusal, time_cap = await _launch.claim(
+            db,
+            work_item_id=work_item_id,
+            session_id=session_id,
+            node_id=node_id,
+            runner=runner,
+            repo_entry=repo_entry,
+            sandbox=sandbox,
+            time_cap=time_cap,
+        )
     files = files or item_paths.session_files(run_dirs, work_item_id, session_id)
     # Kraft's own folder: the log, and the two sidecars below, are written
     # by the host and never handed to the worker (`SessionFiles`).
@@ -841,13 +864,22 @@ async def _run_task(
             repository=repository,
             takes_checkout=takes_checkout,
             tips=tips,
+            runner=claim.machine if claim is not None else None,
         )
     )
     store.replay_claimed()  # a queued replay holds its session (`start_queue`)
+    if refusal is not None:
+        log_path.write_text(f"kraft: {refusal}\n")
+        await db.write(
+            lambda c: store.session_exited(c, session_id, "config_error", work_item_id=work_item_id)
+        )
+        return "config_error"
     if before_launch is not None:
         try:
             await before_launch()
         except BaseException as exc:
+            if claim is not None:
+                _remote_runs.current().hub.release(claim)
             # A row left pending would hold the checkout lease for good.
             log_path.write_text(f"kraft: {str(exc) or 'cancelled before launch'}\n")
             await db.write(
@@ -1090,6 +1122,54 @@ async def _run_task(
             _create_worker_files(files)
             for d in rw_dirs:
                 d.mkdir(parents=True, exist_ok=True)
+            if runner is not None:
+                try:
+                    entries = _remote_files.entries(
+                        results=await db.write(
+                            lambda c: store.result_files(c, run_dirs, work_item_id)
+                        ),
+                        ro=[
+                            p
+                            for p in (files.instruction, files.review, *map(Path, ro_paths))
+                            if p.exists()
+                        ],
+                        rw_dirs=rw_dirs,
+                        rw_files=[Path(p) for p in rw_files],
+                    )
+                    item_row = db.read(
+                        lambda c: c.execute(
+                            "SELECT base_ref FROM work_items WHERE id = ?", (work_item_id,)
+                        ).fetchone()
+                    )
+                    spec = _launch.build(
+                        work_item_id=work_item_id,
+                        session_id=session_id,
+                        node_id=node_id,
+                        hook_point=hook_point,
+                        cmd=cmd,
+                        cwd=cwd,
+                        env={**(env or {}), "KRAFT_RESULT_PATH": str(result_path)},
+                        repo_entry=repo_entry,
+                        branch=await db.write(lambda c: store.branch_of(c, work_item_id)),
+                        base=item_row["base_ref"],
+                        identity=identity,
+                        run_dirs=run_dirs,
+                        entries=entries,
+                    )
+                    run = await _remote_runs.current().launch(
+                        spec, claim, entries=entries, folder=files.folder
+                    )
+                except (RuntimeError, OSError, _remote_files.FilesRefused) as exc:
+                    log_path.write_text(f"kraft: {exc}\n")
+                    _remote_runs.current().hub.release(claim)
+                    await db.write(
+                        lambda c: store.session_exited(
+                            c, session_id, "config_error", work_item_id=work_item_id
+                        )
+                    )
+                    return "config_error"
+                cmd = _standin.argv(run_dirs.base, work_item_id, session_id)
+                group_kill_grace = max(group_kill_grace, 30.0)
         # A sandbox's client may run somewhere of the backend's own, not in the
         # worktree: nothing it leaves behind lands where a worker commits.
         client_cwd = (
@@ -1131,6 +1211,8 @@ async def _run_task(
                 # Safe to write: in this path the child never took the fd.
                 missing = "working directory" if not Path(cwd).is_dir() else f"command {cmd[0]!r}"
                 log.write(f"could not start {' '.join(cmd)} in {cwd}: no such {missing} ({exc})\n")
+                if run is not None:
+                    await _remote_runs.current().signal(run, "KILL")
                 # Not "failed": a task that never launched is a configuration
                 # problem, and reporting it as a task failure opens a fix cycle no
                 # agent can win by editing source (Kraft-579). The caller
@@ -1156,6 +1238,8 @@ async def _run_task(
     finally:
         if network and not launched:
             await close_egress(backend, session_id, work_item_id=work_item_id)
+        if claim is not None and run is None:
+            _remote_runs.current().hub.release(claim)
     # The child owns the log fd, so it keeps writing across a Kraft restart — which
     # is the whole premise of reattach. A watcher thread therefore *tails the file*
     # rather than draining a pipe: piping through the parent would give the
@@ -1210,6 +1294,9 @@ async def _run_task(
         try:
             await _kill_group(pgid, group_kill_grace, reap=proc.poll)
         finally:
+            if run is not None:
+                # The machine's commits, result and documents are home before this reads them.
+                await _remote_runs.current().wait_delivered(run, 60)
             # Nested so neither a collect nor a close that raises skips what
             # follows it: the session's commits are published whatever became
             # of its result file.
@@ -1370,6 +1457,8 @@ async def _run_task(
     # below so it can't be shadowed by require_result_file or post_resolve.
     if backend is not None and status == "failed" and backend.launch_failed(cidfile, returncode):
         status = "config_error"
+    if runner is not None and returncode == 78 and status == "failed":
+        status = "config_error"  # the machine could not start the command (remote/standin.py)
     # A session that exits clean with no result file at all never reached the
     # end of its own contract -- `_resolve`'s exit-code fallback cannot tell
     # "no contract" (a plain subprocess hook) from "broke the contract" (an

@@ -405,3 +405,32 @@ async def test_an_in_place_reply_agent_that_writes_nothing_did_not_write(
 
     assert status == "replied"
     assert it.events("reply_agent_wrote") == []
+
+
+async def test_the_reply_agent_runs_where_the_item_places_its_node(
+    item_on, run_dirs, tmp_path, monkeypatch
+):
+    _seed(tmp_path, monkeypatch)
+    it = await _item(item_on, run_dirs)
+    await it.database.write(
+        lambda c: store.set_agent_overrides(c, it.id, json.dumps({"runner": "gpu"}))
+    )
+    await _published_unanswered_thread(it)
+    seen = []
+
+    async def _capture(_db, _rd, **kw):
+        seen.append(kw)
+        return "done"
+
+    monkeypatch.setattr(review_reply._agent, "run_agent_task", _capture)
+
+    await review_reply.run(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        gate=GATE,
+        nodes=it.chain.chain.nodes,
+        launch=LAUNCH,
+    )
+
+    assert [kw["runner"] for kw in seen] == ["gpu"]

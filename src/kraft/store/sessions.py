@@ -1101,3 +1101,23 @@ def resumable_agent_session(
         (work_item_id, latest["created_at"]),
     ).fetchone()
     return None if newer_pass else latest
+
+
+def pinned_machine(conn, work_item_id: str, node_id: str) -> str | None:
+    """The machine of the node's latest remote session since the node was last entered: where an
+    `any` step started stays where it started for the rest of the pass (resume state lives
+    there)."""
+    entered = (
+        conn.execute(
+            "SELECT MAX(created_at) FROM events "
+            "WHERE work_item_id = ? AND type = ? AND node_id = ?",
+            (work_item_id, ChainEvent.NODE_STARTED, node_id),
+        ).fetchone()[0]
+        or ""
+    )
+    row = conn.execute(
+        "SELECT runner FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
+        "AND runner IS NOT NULL AND created_at >= ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        (work_item_id, node_id, entered),
+    ).fetchone()
+    return row["runner"] if row is not None else None

@@ -25,6 +25,7 @@ from kraft import caps, events, executor, inplace, reviewed_head, store
 from kraft import overrides as _overrides
 from kraft.adapters import agent as _agent
 from kraft.executor import read_only
+from kraft.remote import placement as _placement
 from kraft.templates.models import AgentTask
 from kraft.vocab import GateEvent
 from kraft.worker import callback as _callback
@@ -189,6 +190,7 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
         harness_id=task.task.harness,
         takes_checkout=True,
         tips=tips,
+        runner=_placement.remote(_placement.node_runner(row, gate)),
     )
     files = read_only.changed(db, row, launch, worktree, before)
     if files:

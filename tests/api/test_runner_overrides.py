@@ -100,3 +100,16 @@ def test_lint_names_a_chain_whose_runner_is_not_a_machine(client, templates_dir)
     issues = client.get("/api/templates/lint").json()["issues"]
     (issue,) = [i for i in issues if i["chain"] == "placed"]
     assert "'ghost' is not a machine in workers.yaml" in issue["message"]
+
+
+@pytest.mark.parametrize(
+    ("sent", "stored"),
+    [({"effort": "low"}, {"effort": "low", "runner": "gpu"}), ({}, {})],
+    ids=["a-replacement-without-runner-keeps-it", "the-clear-clears-it"],
+)
+def test_a_patch_that_does_not_name_the_runner_keeps_the_stored_one(client, repo, sent, stored):
+    _machines(client, gpu={})
+    wid = _file(client, repo, runner="gpu").json()["id"]
+    reply = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": sent})
+    assert reply.status_code == 200, reply.text
+    assert (_overrides(client, wid) or {}) == stored
