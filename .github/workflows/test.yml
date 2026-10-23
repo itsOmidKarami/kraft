@@ -347,7 +347,10 @@ jobs:
     name: e2e (real CLIs)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.python != 'false' }}
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: that label moved to 26.04 on 2026-10-23, whose
+    # runner has too little free disk for the podman image builds and fails
+    # the bwrap launcher test. Unpin once those pass there.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
