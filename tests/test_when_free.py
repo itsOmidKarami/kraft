@@ -381,7 +381,14 @@ def attempt(state, monkeypatch, tmp_path):
     def take(run_dirs, config_dir):
         calls.append(("snapshot",))
         busy["now"] = seen.get("busy_after_snapshot", False)
-        return {"config_dir": str(config_dir), "config_snapshot": "/s", "db_snapshots": {}}
+        copy = run_dirs.base / f"{when_free.SNAPSHOT_PREFIX}{len(seen.setdefault('taken', []))}"
+        (copy / "config").mkdir(parents=True)
+        seen["taken"].append(copy)
+        return {
+            "config_dir": str(config_dir),
+            "config_snapshot": str(copy / "config"),
+            "db_snapshots": {},
+        }
 
     monkeypatch.setattr(update, "installed", lambda: installed["version"])
     monkeypatch.setattr(update, "installed_requirement", lambda: REQUIREMENT)
@@ -454,7 +461,7 @@ async def test_auto_update_marks_a_patch_installs_it_and_hands_the_restart_over(
         "release",
     )
     assert record["requirement"] == REQUIREMENT
-    assert record["config_snapshot"] == "/s"
+    assert record["config_snapshot"] == str(attempt.seen["taken"][0] / "config")
     assert line.startswith("restarting 2.2.0")
 
 
@@ -590,6 +597,85 @@ async def test_becoming_busy_before_the_restart_keeps_the_install_and_waits(atte
 
     assert attempt.names() == ["start_check", "snapshot", "restart"]
     assert when_free.read_rollback(attempt.st.run_dirs)["requirement"] == REQUIREMENT
+
+
+def _snapshots(attempt):
+    return sorted(attempt.st.run_dirs.base.glob(f"{when_free.SNAPSHOT_PREFIX}*"))
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "restarter-raises-after-install-is-not-retried",
+        "went-busy-leaves-no-snapshot",
+        "two-busy-attempts-leave-one-snapshot-at-most",
+    ],
+)
+async def test_apply_once(attempt, case):
+    """The failure paths after the snapshot: a restart that cannot start is not
+    tried again every minute, and no attempt that hands nothing off leaves a
+    snapshot behind."""
+    when_free.mark(attempt.st, "v2.2.1", "you")
+    if case == "restarter-raises-after-install-is-not-retried":
+
+        def raises(st):
+            raise OSError("no helper")
+
+        attempt.st.when_free_restarter = raises
+        await when_free.apply_once(attempt.app, now=NOON)
+        assert when_free.failed_key(attempt.st) == "v2.2.1"
+        assert _snapshots(attempt) == []
+        attempt.calls.clear()
+        assert await when_free.apply_once(attempt.app, now=NOON) is None
+        assert attempt.calls == []
+    elif case == "went-busy-leaves-no-snapshot":
+        attempt.seen["busy_after_snapshot"] = True
+        await when_free.apply_once(attempt.app, now=NOON)
+        assert _snapshots(attempt) == []
+        assert not when_free.read_rollback(attempt.st.run_dirs).get("config_snapshot")
+    else:
+        stale = attempt.st.run_dirs.base / f"{when_free.SNAPSHOT_PREFIX}stale"
+        stale.mkdir()
+        for busy in (True, True, False):
+            attempt.seen["busy_after_snapshot"] = busy
+            attempt.busy["now"] = False
+            attempt.st.version = "2.2.0"
+            await when_free.apply_once(attempt.app, now=NOON)
+            assert len(_snapshots(attempt)) <= 1
+        assert _snapshots(attempt) == [attempt.seen["taken"][-1]]
+
+
+@pytest.mark.parametrize(
+    ("kind", "target", "kept"),
+    [
+        pytest.param("release", "2.2.0", True, id="release-installed-keeps-its-record"),
+        pytest.param("release", "2.2.1", False, id="release-not-installed-is-cleared"),
+        pytest.param("settings", None, False, id="settings-is-cleared"),
+    ],
+)
+async def test_settle_unhanded(state, kind, target, kept):
+    """A crashed attempt's record: a release whose install is on disk still
+    owes its restart; anything else goes, with its snapshot."""
+    folder = state.run_dirs.base / f"{when_free.SNAPSHOT_PREFIX}1"
+    (folder / "config").mkdir(parents=True)
+    record = when_free.write_rollback(
+        state.run_dirs, kind=kind, target=target, config_snapshot=str(folder / "config")
+    )
+
+    when_free.settle_unhanded(state.run_dirs, record)
+
+    assert (when_free.read_rollback(state.run_dirs) is not None) is kept
+    assert folder.is_dir() is kept
+
+
+async def test_a_handed_off_restart_keeps_its_snapshot_and_says_so(attempt):
+    when_free.mark(attempt.st, "v2.2.1", "you")
+
+    await when_free.apply_once(attempt.app, now=NOON)
+
+    record = when_free.read_rollback(attempt.st.run_dirs)
+    assert record["handed_off"] is True and record["handed_off_at"]
+    assert len(_snapshots(attempt)) == 1
 
 
 async def test_outside_the_allowed_hours_nothing_happens(attempt):

@@ -329,10 +329,14 @@ def restart_items(st) -> list[dict]:
 
 
 def pending_key(st, release: str | None, items: list[dict]) -> str | None:
-    """What a failed attempt is keyed on: the tag; else the settings it would
-    have applied; else the dev build it would have restarted into."""
+    """What a failed attempt is keyed on: the tag; the tag of a release already
+    installed and waiting for its restart (so the restart that finishes an
+    install keeps the install's key); else the settings it would have applied;
+    else the dev build it would have restarted into."""
     if release:
         return release
+    if installed_tag := _read(st).get("installed_by_mark"):
+        return f"v{installed_tag}"
     if items:
         return _settings_key(items)
     installed, running = update.installed(), getattr(st, "version", None) or update.installed()
@@ -472,6 +476,36 @@ def snapshot(run_dirs, config_dir: Path) -> dict:
         "config_snapshot": str(config_copy),
         "db_snapshots": snapshots,
     }
+
+
+def _snapshot_folder(record: dict) -> Path | None:
+    copy = record.get("config_snapshot")
+    folder = Path(copy).parent if copy else None
+    return folder if folder and folder.name.startswith(SNAPSHOT_PREFIX) else None
+
+
+def drop_snapshot(record: dict) -> None:
+    """Delete the snapshot folder a record names, if it names one."""
+    import shutil
+
+    if folder := _snapshot_folder(record):
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def handed_off(record: dict | None) -> bool:
+    """The restart was handed to the helper. A record without it is an attempt
+    that never got that far."""
+    return bool(record and record.get("handed_off"))
+
+
+def settle_unhanded(run_dirs, record: dict) -> None:
+    """At startup, a record whose restart was never handed off: a crashed
+    attempt. A release whose install is on disk still owes its restart, so its
+    record stays for the loop; any other is cleared, with its snapshot."""
+    if record.get("kind") == "release" and record.get("target") == update.installed():
+        return
+    drop_snapshot(record)
+    clear_rollback(run_dirs)
 
 
 def restore_snapshot(run_dirs, record: dict) -> None:
@@ -701,11 +735,17 @@ async def _apply_claimed(app, st, cfg, got: Pending, admin) -> str | None:
             st, record.get("key"), f"the new install would not start: {why}", record, reinstall=True
         )
     taken = await asyncio.to_thread(snapshot, run_dirs, config_dir_of(st))
+    # One snapshot at most is kept: older ones are of attempts that went nowhere.
+    delete_snapshots(run_dirs, keep=str(_snapshot_folder(taken)))
     write_rollback(run_dirs, **taken)
     if not is_free(st.db):
+        drop_snapshot(taken)
+        write_rollback(run_dirs, config_snapshot=None, db_snapshots={})
         release_claim()
         return "went busy before the restart; the install stays and the restart waits"
     restarter = getattr(st, "when_free_restarter", None) or default_restarter()
+    # Only a restart handed off starts the next server on probation.
+    write_rollback(run_dirs, handed_off=True, handed_off_at=_now())
     try:
         restarter(st)
     except (OSError, SystemExit) as exc:
@@ -728,6 +768,8 @@ def _failed(st, key, detail: str, record: dict, *, reinstall: bool = False) -> s
             else ("; the previous version could not be reinstalled")
         )
         note_installed(st, None)
+    # Nothing is restarting, so a snapshot an attempt took has no use.
+    drop_snapshot(read_rollback(st.run_dirs) or {})
     clear_rollback(st.run_dirs)
     record_outcome(
         st,

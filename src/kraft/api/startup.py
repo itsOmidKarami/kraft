@@ -375,8 +375,13 @@ async def lifespan(app: FastAPI):
     # probation: it answers `/health` and serves the UI, and starts no walk,
     # poller or loop until the restart helper confirms it, or `PROBATION_S`
     # passes with the server up (`end_probation`). A record left by an attempt
-    # nobody confirmed (the loop or the helper died mid-way) reads the same.
-    app.state.probation = when_free.read_rollback(run_dirs) is not None
+    # nobody confirmed (the helper died mid-way) reads the same. A record whose
+    # restart was never handed off is an attempt that did not get that far, and
+    # a manual restart is not an update's: it starts at once.
+    leftover = when_free.read_rollback(run_dirs)
+    app.state.probation = when_free.handed_off(leftover)
+    if leftover is not None and not app.state.probation:
+        when_free.settle_unhanded(run_dirs, leftover)
     app.state.resume_walks = resume_walks
     if not app.state.probation:
         resume_walks()

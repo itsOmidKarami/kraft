@@ -112,10 +112,11 @@ def test_start_up_stops_an_in_place_agent_a_stopped_server_left(left_running, cl
 
 
 @pytest.fixture
-def on_probation(tmp_path, monkeypatch):
-    """A record an update left: it was installed and the restart began, and no
-    helper confirmed the server that came up. Placed before the server starts,
-    so the fixture has to come before `client` in a test's arguments."""
+def on_probation(request, tmp_path, monkeypatch):
+    """A record an update left: it was installed and the restart began (param
+    False: it never got that far), and no helper confirmed the server that came
+    up. Placed before the server starts, so the fixture has to come before
+    `client` in a test's arguments."""
     from types import SimpleNamespace
 
     from kraft import when_free
@@ -123,7 +124,18 @@ def on_probation(tmp_path, monkeypatch):
     from kraft.worker import reattach
 
     run_dirs = RunDirs(tmp_path / "run").ensure()
-    when_free.write_rollback(run_dirs, old_pid=1, from_version="2.2.0", target=None)
+    handed_off = getattr(request, "param", True)
+    snapshot = run_dirs.base / f"{when_free.SNAPSHOT_PREFIX}1"
+    (snapshot / "config").mkdir(parents=True)
+    when_free.write_rollback(
+        run_dirs,
+        old_pid=1,
+        from_version="2.2.0",
+        target=None,
+        kind="settings",
+        config_snapshot=str(snapshot / "config"),
+        **({"handed_off": True} if handed_off else {}),
+    )
     started, spawned = [], []
     real = startup.start_background
     monkeypatch.setattr(startup, "start_background", lambda app: started.append(1) or real(app))
@@ -136,7 +148,13 @@ def on_probation(tmp_path, monkeypatch):
         deps, "spawn", lambda app, wid, coro: spawned.append(wid) or deps.discard(coro)
     )
     monkeypatch.setattr(when_free, "PROBATION_S", 3600)
-    return SimpleNamespace(run_dirs=run_dirs, started=started, spawned=spawned)
+    return SimpleNamespace(
+        run_dirs=run_dirs,
+        started=started,
+        spawned=spawned,
+        handed_off=handed_off,
+        snapshot=snapshot,
+    )
 
 
 def _wait_for(check, seconds=5.0):
@@ -163,6 +181,30 @@ def test_leftover_record(on_probation, monkeypatch, client):
     )
     assert on_probation.spawned == [] and on_probation.started == []
     assert when_free.read_rollback(on_probation.run_dirs) is not None
+
+
+@pytest.mark.parametrize(
+    "on_probation",
+    [
+        pytest.param(False, id="record-not-handed-off-starts-no-probation"),
+        pytest.param(True, id="handed-off-record-starts-probation"),
+    ],
+    indirect=True,
+)
+def test_probation(on_probation, client):
+    """Only a restart this feature handed off starts the new server on
+    probation; a record that never got that far is a crashed attempt, and a
+    manual restart over it starts everything at once and confirms nothing."""
+    from kraft import when_free
+
+    handed_off = on_probation.handed_off
+    st = client.app.state
+    assert st.probation is handed_off
+    assert on_probation.started == ([] if handed_off else [1])
+    assert on_probation.spawned == ([] if handed_off else ["w1"])
+    assert when_free.outcome(st) is None
+    assert (when_free.read_rollback(on_probation.run_dirs) is not None) is handed_off
+    assert on_probation.snapshot.is_dir() is handed_off
 
 
 @pytest.fixture

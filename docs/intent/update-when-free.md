@@ -45,6 +45,21 @@ probation ends.
 enforced-by: tests/api/test_startup.py::test_leftover_record, tests/api/test_startup.py::test_confirm_ends_it, tests/api/test_startup.py::test_probation_ends_by_itself
 origin: src/kraft/api/startup.py §end_probation
 
+## REQ only-a-handed-off-restart-starts-probation
+
+WHEN a server starts on a rollback record whose restart was never handed to the
+helper, the system SHALL start its walks and pollers at once and SHALL NOT
+record an update as applied.
+enforced-by: tests/api/test_startup.py::test_probation[record-not-handed-off-starts-no-probation], tests/api/test_startup.py::test_probation[handed-off-record-starts-probation]
+origin: src/kraft/api/startup.py §lifespan
+
+## REQ an-attempt-that-hands-off-nothing-leaves-no-snapshot
+
+IF an attempt does not hand the restart to the helper, THEN the system SHALL
+delete the snapshot it took, and SHALL NOT repeat a restart that failed.
+enforced-by: tests/test_when_free.py::test_apply_once[went-busy-leaves-no-snapshot], tests/test_when_free.py::test_apply_once[two-busy-attempts-leave-one-snapshot-at-most], tests/test_when_free.py::test_apply_once[restarter-raises-after-install-is-not-retried]
+origin: src/kraft/when_free.py §_apply_claimed
+
 ## REQ auto-update-takes-only-minor-and-patch-releases
 
 WHERE `auto_update` is on, the system SHALL mark only a release of the
