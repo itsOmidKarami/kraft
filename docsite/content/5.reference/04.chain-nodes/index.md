@@ -463,11 +463,25 @@ Every task takes these keys, then the keys of its kind. A task takes no
 |---|---|---|---|
 | `target` | string | required | `mr.open_draft`, `mr.sync`, `mr.ci`, `mr.automated_review`, `mr.mark_ready`, `mr.external_approval`, `mr.merge` or `mr.post_merge_ci`. |
 | `wait` | mapping | none | For a target that waits: `polling`, with an `initial_interval` and a `max_interval`. Set the timeout with the task's `policy`. |
+| `wait.grace_period` | duration | `60s` | Only on `mr.automated_review`: how long a review bot must stay quiet after its last activity on the head to count as finished. Refused on any other target. _Added in next_ |
+| `reviewers` | list | unset | Only on `mr.automated_review`: the reviewers it waits for, each `{bot: LOGIN}` or `{check: NAME}`. The item's `reviewers` override and the repo's `automated_review` come first. `[]` names none. _Added in next_ |
 
 ```yaml
 wait: {polling: {initial_interval: 30s, max_interval: 5m}}
 policy: {total_time_cap_minutes: 90}
 ```
+
+A review wait that names its bots and waits for them to settle:
+
+```yaml
+- id: await_review
+  kind: forge
+  target: mr.automated_review
+  reviewers: [{bot: coderabbitai}, {check: security-scan}]
+  wait: {grace_period: 90s}
+```
+
+The shipped chain follows it with a triage step. See [Waiting for several reviewers](/reference/configuration/repos#waiting-for-several-reviewers).
 
 ## read_only
 

@@ -27,7 +27,7 @@ repos:
     policy:
       allowed_tools: [Read, Edit, Bash]
     automated_review:
-      bot: coderabbitai     # exactly one of bot or check
+      bot: coderabbitai     # one reviewer: exactly one of bot or check; or a list of them
     ci_checks: true
 ```
 
@@ -89,7 +89,7 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `automated_review` | mapping | `null` | The one automated reviewer a chain's `mr.automated_review` task waits for: `bot: <login>` or `check: <name>`. See [Automated review](#automated-review). |
+| `automated_review` | mapping or list | `null` | The automated reviewers a chain's `mr.automated_review` task waits for, each `bot: <login>` or `check: <name>`. A list names several; `[]` names none. See [Automated review](#automated-review). _Added in next_ |
 | `ci_checks` | boolean | `true` | Set `false` on a repo with no CI, so both CI waits pass at once instead of waiting on checks that never come. See [`ci_checks`](#ci_checks). |
 | `library_auto_update` | boolean | `false` | Take text-only changes to this repo's accepted [repo library](/reference/configuration/repo-libraries#automatic-updates) without a person. |
 
@@ -184,16 +184,39 @@ _Added in 2.1_
 
 ### Automated review
 
-`automated_review` names exactly one reviewer, one of two ways. It is the reviewer a chain's `mr.automated_review` task waits for.
+<!-- not new: the field and its section are old; the list form, the layers and the collect path below are newer -->
+`automated_review` names one reviewer, or a list of them, each named one of two ways. They are the reviewers a chain's `mr.automated_review` task waits for.
 
 - `bot: <login>` settles when that forge login has reviewed the merge request's current head.
   - On GitHub, changes requested or any inline comment is actionable (one finding per comment), and anything else is clean. A dismissed review does not count.
   - On GitLab, the bot's unresolved discussions are actionable and its approval is clean. A GitLab approval is not tied to a commit, so a bot's approval of an earlier head still reads as clean, unless the project resets approvals on push.
 - `check: <name>` settles when that check run or commit status on the head completes. Success is clean. Failure is actionable, with its output as the finding.
 
-Unset, the repository expects no automated review: the task settles clean at once and records `automated_review_not_configured`. A reviewer that errors stops the item for you rather than spending a repair.
+Unset here and everywhere else, the repository expects no automated review: the task settles clean at once and records `automated_review_not_configured`. A reviewer that errors stops the item for you rather than spending a repair.
 
 Kraft reads only the first page of 100 of each list it asks for: the pull request's reviews, a review's comments, and a GitLab merge request's discussions and commit statuses. A bot with no match on that first page reads as not having reviewed yet.
+
+### Waiting for several reviewers
+_Added in next_
+
+Reviewers can be named in three places. The nearest wins, and its list is the whole list:
+
+1. The item's own `reviewers` override on the review node: `kraft item set-node-override --node N --reviewer bot:LOGIN`.
+2. This repo's `automated_review`.
+3. The review task's `reviewers` in the chain or library.
+
+`[]` counts as naming reviewers, meaning none: `automated_review: []` turns the review off even when the chain's task lists bots. A reviewer with both `bot` and `check`, or neither, is refused when the file loads.
+
+What the wait does with them depends on the chain.
+
+- **The collect path.** When a later task in the same node declares the `bot_feedback` input, as the shipped triage step does, the wait holds until every reviewer has finished with the latest push, then hands what they said to that task. The wait never fails on feedback; the triage agent decides what needs a change.
+- **The direct path.** Otherwise, any reviewer's actionable feedback fails the wait at once, with every finding read in that check, and goes to the fix loop. A timeout stops the item for you. A multi-repo item always takes this path, as does a chain from before the triage step.
+
+A bot is finished with a push when it has been active since Kraft pushed that head and then quiet for the grace period, `wait.grace_period` on the task (60 seconds by default). Its activity is a new or edited comment, a review, an inline comment, or a thread it resolved. Threads already open on the first check set a baseline and are not activity. A check is finished when it completes.
+
+On the collect path the timeout settles the wait: a bot that never posted had nothing to say, and the item goes on with what was collected. The timeout is recorded in the wait's events as `timed_out`.
+
+Forge clocks are compared with Kraft's push time as they are, with no allowance for skew. A bot that posts a placeholder and edits it long after the grace period is read early; a longer `grace_period` on that chain is the fix.
 
 ### `ci_checks`
 
