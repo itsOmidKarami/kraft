@@ -41,6 +41,8 @@ from kraft.db import Database
 from kraft.index import db as index_db
 from kraft.index.service import Indexer
 from kraft.paths import BUNDLED, RunDirs, config_dir, default_run_dir, default_skills_dir
+from kraft.remote import hub as workers_hub
+from kraft.remote import registry as workers_registry
 from kraft.worker import channel as channel_mod
 from kraft.worker import reattach, sandbox
 from kraft.worker.egress import EgressProxy
@@ -127,6 +129,22 @@ def start_background(app: FastAPI) -> None:
     # Off by default costs a look a minute at a file and the database: it
     # installs and restarts only what a person marked, or `update.yaml` allows.
     app.state.when_free_task = asyncio.ensure_future(when_free.loop(app))
+    load_workers(app)
+
+
+def load_workers(app: FastAPI) -> None:
+    """Run the machines `workers.yaml` names: dial the ssh ones. A file that
+    does not load runs none and is named by `invalid_workers`, as a bad
+    `intake.yaml` is."""
+    try:
+        file = workers_registry.WorkersFile.load(app.state.templates_dir / workers_registry.FILE)
+    except config_mod.ConfigError as exc:
+        logger.warning("workers.yaml is unreadable, no machines are used: %s", exc)
+        file = workers_registry.WorkersFile()
+        app.state.invalid_workers = str(exc)
+    else:
+        app.state.invalid_workers = None
+    app.state.workers_hub.apply(file)
 
 
 async def _probation_timer(app: FastAPI) -> None:
@@ -411,6 +429,9 @@ async def lifespan(app: FastAPI):
     # the package under a running server, and the metadata read at call time
     # then names the new release while this one's code is still answering.
     app.state.version = update_mod.installed()
+    app.state.workers_hub = workers_hub.Hub(app.state.version)
+    app.state.workers_lock = asyncio.Lock()
+    app.state.invalid_workers = None
 
     dist = Path(os.environ.get("KRAFT_FRONTEND_DIST") or DEFAULT_FRONTEND_DIST)
     app.state.frontend_dist = dist if dist.is_dir() else None
@@ -506,6 +527,7 @@ async def lifespan(app: FastAPI):
             app.state.when_free_task,
         ):
             await _cancel(task)
+        await app.state.workers_hub.close()
         await deps.stop_addon_work(app.state)
         # Before the walks are cancelled: a setup command runs in a thread
         # no cancel reaches, and would outlive this server.

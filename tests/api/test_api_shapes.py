@@ -134,6 +134,7 @@ SKIPS: dict[str, str] = {
     "GET /api/templates/library/{ref}": "the SPA never calls it: it reads the whole library",
     "GET /api/templates/lint": "the SPA never calls it (`kraft admin templates lint`)",
     "GET /api/work-items/{wid}/sandbox-from-config": "the SPA never calls it (`kraft item retry`)",
+    "GET /api/workers": "the SPA never calls it yet (`kraft admin worker list`)",
     "GET /api/worker-sessions/{sid}/log": "the SPA never calls it: it reads the item-scoped log",
 }
 

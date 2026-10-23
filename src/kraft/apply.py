@@ -22,6 +22,7 @@ from kraft import config as config_mod
 from kraft import intake as intake_mod
 from kraft import storage
 from kraft.api import config_check, deps
+from kraft.remote import registry as workers_registry
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ async def watcher(app) -> None:
 
 
 async def reload(app, only: Sequence[str] | None = None) -> str | None:
-    """`policy.yaml`, the library and `intake.yaml` reread into the running server,
+    """`policy.yaml`, the library, `intake.yaml` and `workers.yaml` reread into the running server,
     the poller replaced. A policy that does not validate is refused and the
     running one kept (its reason is returned); so is an `intake.yaml` that
     does not load, its reason kept as `st.invalid_intake` for the caller,
@@ -180,11 +181,28 @@ async def reload(app, only: Sequence[str] | None = None) -> str | None:
         st.intake_off = False
         set_loaded(st, "intake.yaml", digest)
     await intake_mod.restart(app)
+    _reload_workers(st)
     notify(app)
     # A lock pulled into config/ may name a store this machine does not have.
     # In the background: a restore may fetch for longer than a caller waits.
     deps.in_background(app, deps.restore_addons)
     return refused
+
+
+def _reload_workers(st) -> None:
+    """`workers.yaml` reread: the machines it names are the running set (a
+    removed one, or one with a new credential, loses its connection). One that
+    does not load keeps the running set, its reason kept as
+    `st.invalid_workers`, and stays pending."""
+    digest = _digest(st.templates_dir / workers_registry.FILE)
+    try:
+        file = workers_registry.WorkersFile.load(st.templates_dir / workers_registry.FILE)
+    except config_mod.ConfigError as exc:
+        st.invalid_workers = str(exc)
+        return
+    st.workers_hub.apply(file)
+    st.invalid_workers = None
+    set_loaded(st, workers_registry.FILE, digest)
 
 
 def managed() -> bool:

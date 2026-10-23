@@ -85,6 +85,7 @@ from kraft.api.routes import (  # noqa: E402,F401
     settings,
     storage,
     work_items,
+    workers,
 )
 
 app.include_router(api_router)
