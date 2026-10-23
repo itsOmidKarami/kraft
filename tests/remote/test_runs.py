@@ -73,7 +73,8 @@ async def test_a_branch_that_moved_while_the_step_ran_is_kept_unsynced_and_not_o
 async def test_a_bundle_that_plants_a_repository_fails_the_step_and_touches_nothing(rig):
     plant = (
         "import subprocess; "
-        "subprocess.run(['git','update-index','--add','--cacheinfo','160000','1'*40,'evil'],check=True); "
+        "subprocess.run(['git','update-index','--add','--cacheinfo',"
+        "'160000','1'*40,'evil'],check=True); "
         "subprocess.run(['git','commit','-qm','x'],check=True); "
         "open(__import__('os').environ['KRAFT_RESULT_PATH'],'w').write('{\"status\":\"done\"}')"
     )
