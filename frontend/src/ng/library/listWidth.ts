@@ -5,16 +5,16 @@ import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as R
 export const LIST = { MIN: 200, MAX: 480, DEFAULT: 250, STEP: 16, CANVAS: 480 } as const;
 const KEY = "kraft.ng.library.list";
 
-const load = () => {
+const load = (key: string, fallback: number) => {
   try {
-    return Number(localStorage.getItem(KEY)) || LIST.DEFAULT;
+    return Number(localStorage.getItem(key)) || fallback;
   } catch {
-    return LIST.DEFAULT;
+    return fallback;
   }
 };
-const save = (w: number) => {
+const save = (key: string, w: number) => {
   try {
-    localStorage.setItem(KEY, String(w));
+    localStorage.setItem(key, String(w));
   } catch {
     // Private windows: the width just isn't remembered.
   }
@@ -24,16 +24,16 @@ export type ListSize = ReturnType<typeof useListWidth>;
 
 /** The library list's width, dragged or keyed by its right edge, remembered per browser, held under the page's room.
  *  `page` is the page's width (0 until measured), for what the list leaves the canvas. A double click puts it back to
- *  the default. */
-export function useListWidth(page: number) {
-  const [raw, setRaw] = useState(load);
+ *  the default. `key` and `fallback` let another page's list (the review's file tree) keep its own. */
+export function useListWidth(page: number, key: string = KEY, fallback: number = LIST.DEFAULT) {
+  const [raw, setRaw] = useState(() => load(key, fallback));
   const max = Math.max(LIST.MIN, Math.min(LIST.MAX, (page || Infinity) - LIST.CANVAS));
   const clamp = (w: number) => Math.round(Math.max(LIST.MIN, Math.min(max, w)));
   const width = clamp(raw);
   const set = (w: number) => {
     const c = clamp(w);
     setRaw(c);
-    save(c);
+    save(key, c);
   };
   // The drag in flight, so leaving the page mid-drag lets go of the window.
   const stop = useRef<(() => void) | null>(null);
@@ -50,7 +50,7 @@ export function useListWidth(page: number) {
     const end = (save_: boolean) => () => {
       stop.current?.();
       // A click that never moved keeps what was stored; a cancelled drag keeps where it was.
-      if (save_ && last !== w0) save(last);
+      if (save_ && last !== w0) save(key, last);
     };
     const up = end(true), cancel = end(false);
     stop.current = () => {
@@ -75,7 +75,7 @@ export function useListWidth(page: number) {
   const handle = {
     role: "separator", "aria-orientation": "vertical", "aria-label": "Resize the list",
     "aria-valuenow": width, "aria-valuemin": LIST.MIN, "aria-valuemax": max,
-    tabIndex: 0, onPointerDown, onKeyDown, onDoubleClick: () => set(LIST.DEFAULT),
+    tabIndex: 0, onPointerDown, onKeyDown, onDoubleClick: () => set(fallback),
   } as const;
   return { width, handle };
 }

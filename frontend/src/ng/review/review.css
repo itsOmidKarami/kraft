@@ -45,8 +45,11 @@
 .rv-diff { flex: 1 1 0; min-width: 0; overflow-x: hidden; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
 
 /* File tree (prototype 412–417). Under 1024 it opens over the diff (R7). */
-.rv-tree { flex: none; width: 260px; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.rv-tree { position: relative; flex: none; width: var(--rv-tree-w, 260px); display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
 .rv-body.is-overlay .rv-tree { position: absolute; inset: 0 auto 0 16px; z-index: 5; width: min(300px, calc(100% - 40px)); box-shadow: 4px 0 18px var(--side-shade); }
+.rv-tree-handle { position: absolute; top: 0; bottom: 0; right: -9px; width: 6px; z-index: 3; cursor: col-resize; touch-action: none; }
+.rv-tree-handle:focus-visible { outline-offset: -2px; }
+.rv-tree-handle:is(:hover, :focus-visible) { background: linear-gradient(90deg, transparent 2px, var(--text-muted) 2px, var(--text-muted) 4px, transparent 4px); }
 .rv-tree-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px 6px; font-size: var(--fs-label); color: var(--text-sub); }
 .rv-tree-count { flex: 1 1 auto; }
 .rv-tree-filter { margin: 0 10px 6px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font-size: var(--fs-label); }

@@ -5,6 +5,7 @@ import type { CompareFile, ReviewThread } from "../../types";
 import { ChevronDown, ChevronRight, File, FileCode, FileCog, FileTerminal, FileText } from "../icons";
 import { inTreeOrder, threadSummary, tree, unresolved, type Folder } from "./model";
 import { familyOf, languageOf, type Family } from "./languages";
+import type { ListSize } from "../library/listWidth";
 
 /** A row's indent, one step per folder it sits in. */
 const depth = (d: number) => ({ "--depth": d }) as CSSProperties;
@@ -31,6 +32,8 @@ export function FileTree(p: {
   isViewed: (path: string) => boolean;
   onSelect: (path: string) => void;
   error: string | null;
+  /** From useListWidth: the tree's width and its right edge's handle. None where its box sets the width. */
+  size?: ListSize;
 }) {
   const [filter, setFilter] = useState("");
   const [closed, setClosed] = useState<Set<string>>(new Set());
@@ -81,7 +84,7 @@ export function FileTree(p: {
   const shownN = inTreeOrder(root).length;
   const untracked = p.untracked.filter((u) => u.toLowerCase().includes(filter.trim().toLowerCase()));
   return (
-    <nav className="rv-tree" aria-label="Changed files">
+    <nav className="rv-tree" aria-label="Changed files" style={p.size && ({ "--rv-tree-w": `${p.size.width}px` } as CSSProperties)}>
       <div className="rv-tree-head">
         <span className="rv-tree-count">{filter.trim() ? `${shownN} of ${plural(p.files.length, "file")}` : plural(p.files.length, "file")}</span>
         <span className="rv-add">+{add}</span>
@@ -105,6 +108,7 @@ export function FileTree(p: {
         <span>{threadSummary(p.threads)}</span>
         {p.error && <span className="rv-error" role="alert">{p.error}</span>}
       </div>
+      {p.size && <div className="rv-tree-handle" {...p.size.handle} aria-label="Resize the file list" />}
     </nav>
   );
 }

@@ -154,6 +154,19 @@ describe("a file's header and its hunks", () => {
   };
   const lines = () => [...document.querySelectorAll(".rv-code")].map((c) => c.textContent);
 
+  it("resizes the file list by its right edge, and remembers the width", async () => {
+    localStorage.clear();
+    await open();
+    const edge = screen.getByRole("separator", { name: "Resize the file list" });
+    expect(edge).toHaveAttribute("aria-valuenow", "260");
+    fireEvent.keyDown(edge, { key: "ArrowRight" });
+    expect(edge).toHaveAttribute("aria-valuenow", "276");
+    expect(screen.getByRole("navigation", { name: "Changed files" }).style.getPropertyValue("--rv-tree-w")).toBe("276px");
+    expect(localStorage.getItem("kraft.ng.review.tree")).toBe("276");
+    fireEvent.doubleClick(edge);
+    expect(edge).toHaveAttribute("aria-valuenow", "260");
+  });
+
   it("folds a file marked viewed, and opens it again when the mark is taken off", async () => {
     await open();
     await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: "Viewed" })));

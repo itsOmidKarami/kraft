@@ -10,7 +10,8 @@ import { openBudgetEditor } from "../item/Workspace";
 import { openLimitEditor } from "../item/RaiseLimit";
 import { useItem, type ItemDetail } from "../item/useItem";
 import { materialized, producerOf } from "../item/chainValues";
-import { useOverlay } from "../graph/useResizable";
+import { useOverlay, useWidth } from "../graph/useResizable";
+import { useListWidth } from "../library/listWidth";
 import { Button } from "../ui/Button";
 import { useComments } from "./Comments";
 import { DiffView, pickOf, type Pick } from "./DiffView";
@@ -67,6 +68,8 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
   // Under 1024 the list starts closed and opens over the diff (R7).
   const [treeOpen, setTreeOpen] = useState(!overlay);
   useEffect(() => setTreeOpen(!overlay), [overlay]);
+  const [bodyRef, bodyW] = useWidth();
+  const treeSize = useListWidth(bodyW, "kraft.ng.review.tree", 260);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // The files folded by their Viewed mark: each stays folded for as long as its mark holds.
   const [byMark, setByMark] = useState<Set<string>>(new Set());
@@ -177,7 +180,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
         </p>
       )}
       {diff.error && <p className="rv-error rv-bar-error" role="alert">{diff.error}</p>}
-      <div className={`rv-body${treeOpen ? " has-tree" : ""}${overlay ? " is-overlay" : ""}`}>
+      <div ref={bodyRef} className={`rv-body${treeOpen ? " has-tree" : ""}${overlay ? " is-overlay" : ""}`}>
         {treeOpen && (
           <FileTree
             files={files}
@@ -188,6 +191,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
             isViewed={viewed.isViewed}
             onSelect={select}
             error={viewed.error}
+            size={overlay ? undefined : treeSize}
           />
         )}
         <section className="rv-diff" aria-label="Diff" aria-busy={compare.state === "loading"}>
