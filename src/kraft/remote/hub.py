@@ -121,6 +121,10 @@ class Hub:
         for gone in previous.values():
             self._drop(gone)
 
+    def _give_up_s(self, name: str) -> float | None:
+        worker = self._file.workers.get(name)
+        return worker.give_up_s if worker is not None else None
+
     def _drop(self, entry: _Entry) -> None:
         if entry.dialer is not None:
             entry.dialer.cancel()
@@ -151,6 +155,7 @@ class Hub:
                 kraft_version=self.kraft_version,
                 identify=lambda token: registry.find_by_token(self._file, token),
                 server_id=self.server_id,
+                give_up_after_s=self._give_up_s,
             )
         except protocol.Refused as refused:
             if (entry := self._entries.get(refused.name or "")) is not None:
@@ -229,6 +234,7 @@ class Hub:
                     identify=lambda _: None,
                     expected_name=name,
                     server_id=self.server_id,
+                    give_up_after_s=entry.worker.give_up_s,
                 )
                 welcomed = True
                 await self._run(entry, peer, t)

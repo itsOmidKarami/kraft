@@ -65,6 +65,16 @@ async def test_an_unconnected_machine_lists_offline_and_never_connected():
     }
 
 
+@pytest.mark.parametrize(("setting", "seconds"), [("30m", 1800.0), ("never", None)])
+async def test_the_welcome_tells_a_machine_its_own_give_up_after(setting, seconds):
+    hub = Hub("2.3.0")
+    hub.apply(_file(home2={"token_sha256": registry.hash_token("kwt_b"), "give_up_after": setting}))
+    machine, welcome, accepted = await _dial(hub, "kwt_b")
+    assert welcome["give_up_after_s"] == seconds
+    await machine.close()
+    await accepted
+
+
 async def test_a_dial_in_machine_with_its_token_is_online_with_its_version():
     hub = Hub("2.3.0")
     hub.apply(_file())

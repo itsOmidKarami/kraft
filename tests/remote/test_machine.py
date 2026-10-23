@@ -155,11 +155,11 @@ async def _until(cond, timeout=5.0):
             await asyncio.sleep(0.01)
 
 
-async def _job(tmp_path, argv, *, sid="s1"):
+async def _job(tmp_path, argv, *, sid="s1", welcome=None, **machine_kw):
     """A `Machine` on one end of an in-process pair; the test plays the server and sends one job."""
     server, machine_t = memory_pair()
-    machine = Machine(tmp_path / "home", kraft_version="2.3.0")
-    task = asyncio.create_task(machine.serve(machine_t, {"server": "srv"}))
+    machine = Machine(tmp_path / "home", kraft_version="2.3.0", **machine_kw)
+    task = asyncio.create_task(machine.serve(machine_t, {"server": "srv", **(welcome or {})}))
     spec = await send_job(server, tmp_path, argv, sid=sid)
     return machine, task, server, spec
 
@@ -290,4 +290,75 @@ async def test_a_call_in_flight_when_the_connection_drops_is_told_so(tmp_path):
     assert not [
         f for f in frames if f["t"] == "api"
     ]  # a call that may have been acted on is not resent
+    await _end(server, serving)
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+async def _offline_job(tmp_path, give_up_after_s):
+    """A `sleep 30` job on a machine whose connection has just dropped; the clock is the test's."""
+    clock = _Clock()
+    machine, task, t, spec = await _job(
+        tmp_path,
+        ["sh", "-c", "sleep 30"],
+        welcome={"give_up_after_s": give_up_after_s},
+        clock=clock,
+        give_up_poll_s=0.02,
+    )
+    await _frames_until(t, "started")
+    await _end(t, task)
+    return machine, clock, spec
+
+
+def _alive(machine, spec) -> bool:
+    return machine._jobs[spec.key].runner._proc.poll() is None
+
+
+async def _rejoin(machine, spec):
+    """The server comes back; the job it was running is finished, so it hands in."""
+    server, machine_t = memory_pair()
+    serving = asyncio.create_task(machine.serve(machine_t, {"server": "srv"}))
+    await server.send({"t": "signal", "id": spec.key, "sig": "KILL"})
+    await server.send({"t": "sync", "jobs": [{"id": spec.key, "offset": 0}]})
+    await _frames_until(server, "finished")
+    await _end(server, serving)
+
+
+async def test_a_machine_without_kraft_for_give_up_after_stops_its_jobs(tmp_path):
+    machine, clock, spec = await _offline_job(tmp_path, 2)
+    clock.now = 1.9
+    await asyncio.sleep(0.2)
+    assert _alive(machine, spec)
+    clock.now = 2.1
+    await _until(lambda: not _alive(machine, spec))
+    log = tmp_path / "home" / "remote" / "srv" / "jobs" / "w1__s1" / "session.log"
+    assert log.read_text().endswith("kraft: stopped on this machine after 2s without Kraft\n")
+    await _rejoin(machine, spec)
+
+
+async def test_never_keeps_a_job_running_however_long_kraft_is_gone(tmp_path):
+    machine, clock, spec = await _offline_job(tmp_path, None)
+    clock.now = 86400
+    await asyncio.sleep(0.3)
+    assert _alive(machine, spec)
+    await _rejoin(machine, spec)
+
+
+async def test_a_reconnect_before_give_up_after_keeps_the_job(tmp_path):
+    machine, clock, spec = await _offline_job(tmp_path, 2)
+    clock.now = 1
+    server, machine_t = memory_pair()
+    serving = asyncio.create_task(machine.serve(machine_t, {"server": "srv", "give_up_after_s": 2}))
+    await asyncio.sleep(0.1)
+    clock.now = 10
+    await asyncio.sleep(0.3)
+    assert _alive(machine, spec)
+    await server.send({"t": "signal", "id": spec.key, "sig": "KILL"})
+    await _frames_until(server, "finished")
     await _end(server, serving)

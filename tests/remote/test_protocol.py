@@ -29,6 +29,16 @@ async def test_a_dial_in_machine_with_a_valid_token_is_welcomed_by_name():
     assert welcome["name"] == "gpu" and welcome["kraft"] == "2.3.0"
 
 
+@pytest.mark.parametrize("give_up", [7200.0, None], ids=["two-hours", "never"])
+async def test_the_welcome_carries_how_long_the_machine_waits_for_the_server(give_up):
+    server, machine = memory_pair()
+    _, welcome = await asyncio.gather(
+        _server(server, give_up_after_s=give_up),
+        protocol.machine_handshake(machine, kraft_version="2.3.0", token="good"),
+    )
+    assert welcome["give_up_after_s"] == give_up
+
+
 async def test_an_ssh_machine_is_named_by_the_server_and_sends_no_token():
     server, machine = memory_pair()
     peer, _ = await asyncio.gather(

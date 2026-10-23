@@ -14,6 +14,7 @@ import itertools
 import socket
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -144,6 +145,7 @@ class _Job:
         self.state = "receiving"  # receiving | running | finished
         self.started = False
         self.runner: JobRunner | None = None
+        self.stopped: str | None = None  # why the machine ended it without the server
         self.task: asyncio.Task | None = None
         self.sent: list[tuple[str, Path]] = []  # blobs handed in, for a resend
         self.final: dict | None = None  # the `finished` or `rejected` frame
@@ -153,8 +155,22 @@ class Machine:
     """What a machine does with a connection: it keeps its jobs, working copies and `delivered`
     bookkeeping across connections, and `serve` runs once per connection."""
 
-    def __init__(self, home: Path, *, kraft_version: str, kill_grace_s: float = 5.0) -> None:
+    def __init__(
+        self,
+        home: Path,
+        *,
+        kraft_version: str,
+        kill_grace_s: float = 5.0,
+        clock: Callable[[], float] = time.monotonic,
+        give_up_poll_s: float = 1.0,
+    ) -> None:
         self.home, self.kraft_version, self._grace = Path(home), kraft_version, kill_grace_s
+        # monotonic: it does not advance while a laptop sleeps, so neither does the wait
+        self._clock, self._give_up_poll = clock, give_up_poll_s
+        self._give_up_s: float | None = (
+            None  # the server's `give_up_after`, from its latest welcome
+        )
+        self._watchdog: asyncio.Task | None = None
         self._t: protocol.Transport | None = None
         self._area: Path = self.home / "remote" / "default"
         self._sink: blobs.BlobSink | None = None
@@ -177,18 +193,43 @@ class Machine:
         self._area = self.home / "remote" / str(welcome.get("server") or "default")
         self._area.mkdir(parents=True, exist_ok=True)
         self._sink = blobs.BlobSink(self._area / "blobs")
+        self._give_up_s = welcome.get("give_up_after_s")
         self._t = t
+        self._stop_watchdog()
         try:
             await protocol.pump(t, on_frame=self._on_frame)
         finally:
             if self._t is t:
                 self._t = None
+                if self._give_up_s is not None and self._running():
+                    self._watchdog = asyncio.create_task(self._give_up(self._give_up_s))
             for rid in [r for r, sent_on in self._api_sent.items() if sent_on is t]:
                 del self._api_sent[rid]  # answered on the connection that is gone: it never will be
                 if (fut := self._api.pop(rid, None)) is not None and not fut.done():
                     fut.set_result(_DROPPED)
             for key in [k for k, j in self._jobs.items() if j.state == "receiving"]:
                 del self._jobs[key]  # a half-received job: the server sends it again
+
+    def _running(self) -> list[_Job]:
+        return [j for j in self._jobs.values() if j.state == "running"]
+
+    def _stop_watchdog(self) -> None:
+        if self._watchdog is not None:
+            self._watchdog.cancel()
+            self._watchdog = None
+
+    async def _give_up(self, after_s: float) -> None:
+        """No connection for `after_s` (by `clock`): stop every job still running."""
+        since = self._clock()
+        while self._clock() - since < after_s:
+            await asyncio.sleep(self._give_up_poll)
+        why = f"kraft: stopped on this machine after {_duration(after_s)} without Kraft\n"
+        for job in self._running():
+            job.stopped = why
+            if job.runner is not None:
+                with open(job.runner.log_path, "ab") as log:
+                    log.write(why.encode())
+                job.runner.signal("KILL")
 
     async def _emit(self, frame: dict) -> None:
         if self._t is None:
@@ -278,6 +319,9 @@ class Machine:
                 await self._reject(job, "failed", f"the machine could not prepare this step: {why}")
                 return
             job.started = True
+        if job.stopped is not None:  # given up on while it was being prepared
+            await self._reject(job, "failed", job.stopped.strip())
+            return
         forwarder = Forwarder(lambda m, target, h, b: self._forward(job, m, target, h, b))
         port = await forwarder.start()
         job.runner = JobRunner(spec, area=self._area, api_port=port, kill_grace_s=self._grace)
@@ -411,3 +455,10 @@ _DROPPED = (
     {"content-type": "application/json"},
     b'{"detail": "the connection to Kraft dropped during this call; try again"}',
 )
+
+
+def _duration(seconds: float) -> str:
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if seconds >= size and seconds % size == 0:
+            return f"{int(seconds // size)}{unit}"
+    return f"{seconds:g}s"
