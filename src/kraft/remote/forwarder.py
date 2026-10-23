@@ -1,5 +1,6 @@
-"""A job's way to Kraft: a minimal HTTP/1.1 server on the machine's loopback, so the `kraft` CLI and
-anything else that dials `KRAFT_HOST:KRAFT_PORT` reaches the server over the machine's one connection."""
+"""A job's way to Kraft: a minimal HTTP/1.1 server on the machine's loopback, so the `kraft` CLI
+and anything else that dials `KRAFT_HOST:KRAFT_PORT` reaches the server over the machine's one
+connection."""
 
 from __future__ import annotations
 

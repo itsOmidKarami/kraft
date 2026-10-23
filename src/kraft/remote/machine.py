@@ -250,11 +250,8 @@ class Machine:
                 for d in spec.dirs:
                     mapper(d.lstrip("/")).mkdir(parents=True, exist_ok=True)
             except (subprocess.CalledProcessError, OSError, files.FilesRefused) as exc:
-                await self._reject(
-                    job,
-                    "failed",
-                    f"the machine could not prepare this step: {getattr(exc, 'stderr', None) or exc}",
-                )
+                why = getattr(exc, "stderr", None) or exc
+                await self._reject(job, "failed", f"the machine could not prepare this step: {why}")
                 return
             job.started = True
         forwarder = Forwarder(lambda m, target, h, b: self._forward(job, m, target, h, b))
