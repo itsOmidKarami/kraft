@@ -15,6 +15,10 @@ class ForgeEvent(StrEnum):
     MR_CLOSED = "mr_closed"
     MR_REOPENED = "mr_reopened"
     MR_LABELS_SET = "mr_labels_set"
+    #: Kraft pushed the item's branch and the head it reached is new: the
+    #: moment a review bot's activity starts counting for that head
+    #: (`waits.pushed_at`).
+    BRANCH_PUSHED = "branch_pushed"
     EXTERNAL_WAIT_STARTED = "external_wait_started"
     EXTERNAL_WAIT_OBSERVED = "external_wait_observed"
     EXTERNAL_WAIT_REBOUNDED = "external_wait_rebounded"
@@ -44,6 +48,7 @@ FORGE_EVENT_TRAITS = total(
         ForgeEvent.MR_CLOSED: _PLAIN,
         ForgeEvent.MR_REOPENED: _PLAIN,
         ForgeEvent.MR_LABELS_SET: _PLAIN,
+        ForgeEvent.BRANCH_PUSHED: _PLAIN,
         ForgeEvent.EXTERNAL_WAIT_STARTED: _PLAIN,
         ForgeEvent.EXTERNAL_WAIT_OBSERVED: _PLAIN,
         ForgeEvent.EXTERNAL_WAIT_REBOUNDED: _PLAIN,

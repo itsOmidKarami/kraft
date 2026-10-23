@@ -143,6 +143,36 @@ def backend_for(backend: str, repo_forge: str | None) -> str:
     return cli
 
 
+async def _record_push(
+    db, *, work_item_id: str, node_id: str | None, orig_repo: Path, repo: Path, branch: str
+) -> None:
+    """Record that Kraft has pushed `branch`, as `branch_pushed`, when its head
+    is not the one the newest such event for `orig_repo` names. By head, not by
+    what the forge reports: `git push` is a no-op on a branch that is up to
+    date, and a `FakeForge` pushes nothing. The review wait counts a bot's
+    activity from this moment (`waits.pushed_at`)."""
+    sha = await git._head_sha(repo, branch)
+    if not sha:
+        return
+
+    def _write(c) -> None:
+        newest = c.execute(
+            "SELECT json_extract(payload, '$.sha') AS sha FROM events "
+            "WHERE work_item_id = ? AND type = ? AND json_extract(payload, '$.repo') = ? "
+            "ORDER BY seq DESC LIMIT 1",
+            (work_item_id, ForgeEvent.BRANCH_PUSHED, str(orig_repo)),
+        ).fetchone()
+        if newest is None or newest["sha"] != sha:
+            events.append(
+                c,
+                work_item_id,
+                ForgeEvent.BRANCH_PUSHED,
+                {"node_id": node_id, "repo": str(orig_repo), "sha": sha},
+            )
+
+    await db.write(_write)
+
+
 async def _rebase_conflict_away(
     db,
     forge: Forge,
@@ -155,6 +185,9 @@ async def _rebase_conflict_away(
     moved: list[Path] | None = None,
     run_dirs=None,
     node_id: str | None = None,
+    #: The node a recorded push (`branch_pushed`) is for, when `node_id` is
+    #: unset: only the merge handler's `node_id` changes how a refused push ends.
+    push_node_id: str | None = None,
 ) -> tuple[str, str]:
     """Force-rebase onto `base`'s current tip -- the item's base branch, the one
     thing that can turn a real conflict into nothing left to fix, since a
@@ -222,6 +255,14 @@ async def _rebase_conflict_away(
             raise
         held = await _refuse_forge_head(db, work_item_id, node_id, repo, branch, exc.remote)
         return f"rebased {branch} onto {new_head}, but not pushed: {held}", "unreviewed"
+    await _record_push(
+        db,
+        work_item_id=work_item_id,
+        node_id=node_id or push_node_id,
+        orig_repo=orig_repo,
+        repo=repo,
+        branch=branch,
+    )
     return f"rebased {branch} onto {new_head} and re-pushed\n", "done"
 
 
@@ -259,7 +300,7 @@ def _pinned(db, work_item_id: str) -> bool:
 
 
 async def _push_or_hold(
-    forge: Forge, db, work_item_id: str, node_id: str, repo: Path, branch: str
+    forge: Forge, db, work_item_id: str, node_id: str, repo: Path, orig_repo: Path, branch: str
 ) -> str | None:
     """Push `branch` for the merge. None once it is pushed. When the forge holds
     commits Kraft did not push and a final review pinned the head (`git.push`
@@ -271,6 +312,14 @@ async def _push_or_hold(
         if not _pinned(db, work_item_id):
             raise
         return await _refuse_forge_head(db, work_item_id, node_id, repo, branch, exc.remote)
+    await _record_push(
+        db,
+        work_item_id=work_item_id,
+        node_id=node_id,
+        orig_repo=orig_repo,
+        repo=repo,
+        branch=branch,
+    )
     return None
 
 
@@ -618,6 +667,14 @@ async def _run_one(
                 # MR is not something either CLI does in this call, so the
                 # reused path keeps today's title.
                 await forge.push(repo=repo, branch=branch)
+                await _record_push(
+                    db,
+                    work_item_id=work_item_id,
+                    node_id=node_id,
+                    orig_repo=orig_repo,
+                    repo=repo,
+                    branch=branch,
+                )
                 await forge.update_mr(repo=repo, branch=branch, body=body)
                 number, url = existing.number, existing.url
                 log, status = f"reusing !{number}: {url}\n", "done"
@@ -635,6 +692,15 @@ async def _run_one(
                     body=body,
                     meta=meta,
                     check_clean=check_clean,
+                )
+                # `open_mr` pushes the branch before it creates the request.
+                await _record_push(
+                    db,
+                    work_item_id=work_item_id,
+                    node_id=node_id,
+                    orig_repo=orig_repo,
+                    repo=repo,
+                    branch=branch,
                 )
                 number, url = mr.number, mr.url
                 log, status = f"opened {url}\n", "done"
@@ -677,6 +743,14 @@ async def _run_one(
             # red, forever (Kraft-bxj8). `git push` is a no-op when the
             # branch is up to date, so this costs one git call.
             await forge.push(repo=repo, branch=branch)
+            await _record_push(
+                db,
+                work_item_id=work_item_id,
+                node_id=node_id,
+                orig_repo=orig_repo,
+                repo=repo,
+                branch=branch,
+            )
             if not ci_checks:
                 return await _skip_ci(db, work_item_id, node_id, hook_point, orig_repo)
             # One check, not a wait. A pipeline that has not settled hands the
@@ -748,6 +822,7 @@ async def _run_one(
                     work_item_id=work_item_id,
                     moved=moved,
                     run_dirs=run_dirs,
+                    push_node_id=node_id,
                 )
                 log += rebase_log
                 if status == "done" and not has_rebase_bounce:
@@ -844,6 +919,14 @@ async def _run_one(
             # mr_checks' findings -- is local only until this runs, and
             # `merge` refuses a branch ahead of its remote (Kraft-nh5m).
             await forge.push(repo=repo, branch=branch)
+            await _record_push(
+                db,
+                work_item_id=work_item_id,
+                node_id=node_id,
+                orig_repo=orig_repo,
+                repo=repo,
+                branch=branch,
+            )
             # The description `open_mr` wrote predates every commit verify
             # and mr_checks added, so it is rewritten from the branch head
             # before a human is asked to read it (Kraft-c09h).
@@ -1002,7 +1085,9 @@ async def _run_one(
                 # merging, let alone merged (`kraft.reviewed_head`).
                 log, status = refused, "unreviewed"
             elif (
-                held := await _push_or_hold(forge, db, work_item_id, node_id, repo, branch)
+                held := await _push_or_hold(
+                    forge, db, work_item_id, node_id, repo, orig_repo, branch
+                )
             ) is not None:
                 # The forge holds commits Kraft did not push, which the final
                 # review did not see: brought home, and held for another look.

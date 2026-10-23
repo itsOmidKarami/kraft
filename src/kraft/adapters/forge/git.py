@@ -11,6 +11,7 @@ import logging
 import os
 import subprocess
 from collections.abc import Collection, Mapping
+from datetime import datetime
 from pathlib import Path
 
 from kraft.adapters.forge.models import ForeignCommits, ForgeError
@@ -700,6 +701,13 @@ async def _head_sha(repo: Path, branch: str = "") -> str:
         return (await run_git(repo, ["git", "rev-parse", rev])).strip()
     except ForgeError:
         return ""
+
+
+async def committed_at(repo: Path, sha: str) -> datetime:
+    """`sha`'s committer time: when a head Kraft has no push record of (one an
+    older Kraft pushed, or a person) is taken to have reached the forge."""
+    raw = await run_git(repo, ["git", "log", "-1", "--format=%cI", sha])
+    return datetime.fromisoformat(raw.strip())
 
 
 async def commits_on(repo: Path, branch: str, base: str) -> tuple[str, ...]:

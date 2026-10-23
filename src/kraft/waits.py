@@ -112,6 +112,18 @@ def open_wait(conn, work_item_id: str, task: str) -> OpenWait | None:
     return None
 
 
+def pushed_at(conn, work_item_id: str, *, repo: str, sha: str) -> datetime | None:
+    """When Kraft pushed `sha` to `repo`'s branch (`branch_pushed`), or None for
+    a head it has no record of: one an older Kraft pushed, or a person."""
+    row = conn.execute(
+        "SELECT created_at FROM events WHERE work_item_id = ? AND type = ? "
+        "AND json_extract(payload, '$.repo') = ? AND json_extract(payload, '$.sha') = ? "
+        "ORDER BY seq DESC LIMIT 1",
+        (work_item_id, ForgeEvent.BRANCH_PUSHED, repo, sha),
+    ).fetchone()
+    return datetime.fromisoformat(row["created_at"]) if row else None
+
+
 def observe(
     conn,
     work_item_id: str,
