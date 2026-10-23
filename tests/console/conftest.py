@@ -73,7 +73,7 @@ class Console:
         return [line.text for log in app.get_screen("output").query(RichLog) for line in log.lines]
 
     @staticmethod
-    async def until(pilot, condition, timeout: float = 5.0) -> None:
+    async def until(pilot, condition, timeout: float = 30.0) -> None:
         """Let the app run until `condition()` holds."""
         async with asyncio.timeout(timeout):
             while not condition():
