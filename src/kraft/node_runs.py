@@ -66,6 +66,40 @@ def _base(c, wid: str, fallback: str) -> str:
     return (row["base_ref"] if row else None) or fallback
 
 
+async def _absorbed_base(db, wid: str, row, wt: Path, tip: str) -> str | None:
+    """The newer fork point when the branch took upstream in itself -- main
+    merged in by an agent or the forge's "update branch", a rebase by hand --
+    so the gate's diff stops showing upstream's commits as the item's. Only
+    moves forward from `base_ref`, and only when the branch moved: the
+    merge-base of the tip and upstream does not change when upstream alone does.
+
+    shortcut: reads the local upstream ref, no fetch, so a merge of commits
+    newer than the last fetch moves the base only as far as that fetch."""
+    from kraft import builtins  # as inplace.taking does: builtins imports inplace
+
+    base_ref = row["base_ref"] if row is not None else None
+    if not base_ref:
+        return None
+    branch = await builtins.base_branch(db, wid, Path(row["repo"]))
+    upstream = _config.git_read(
+        wt,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"refs/remotes/origin/{branch}",
+        expected_failure=True,
+    ) or _config.git_read(
+        wt, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", expected_failure=True
+    )
+    fork = upstream and _config.git_read(wt, "merge-base", tip, upstream, expected_failure=True)
+    if not fork or fork in (base_ref, tip):
+        return None
+    ahead = _config.git_read(
+        wt, "merge-base", "--is-ancestor", base_ref, fork, expected_failure=True
+    )
+    return fork if ahead is not None else None
+
+
 async def entered(db, worktree, wid: str, node_id: str) -> None:
     wt = _live(worktree)
     sha = _tip(_row(db, wid), wt) if wt else None
@@ -128,12 +162,15 @@ async def gate_requested(db, worktree, wid: str, gate: str, *, run_dirs=None) ->
     # awaited after it keeps the walk's task live past the point a person can
     # already see the gate. The walk is this item's only writer, so the attempt
     # read here is the one `pin_gate` writes.
+    moved = await _absorbed_base(db, wid, row, wt, sha) if sha else None
     attempt = db.read(lambda c: store.next_gate_attempt(c, wid, gate, sha)) if sha else None
     if attempt is not None:
         await asyncio.to_thread(pin_ref, wt, wid, gate, attempt, sha)
 
     def write(c):
         store.request_gate(c, wid, gate, gate)
+        if moved:
+            store.set_base_ref(c, wid, moved)
         if sha:
             store.pin_gate(c, wid, gate, sha=sha, base_sha=_base(c, wid, sha), dirty=dirty)
 

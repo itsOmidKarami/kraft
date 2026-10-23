@@ -72,6 +72,36 @@ async def test_in_place_dirty_is_the_items_leftovers_not_the_persons_edits(
     assert _dirty_flag(it) == left
 
 
+@pytest.mark.parametrize(
+    "upstream_in, moves",
+    [("merged", True), ("rebased", True), (None, False)],
+    ids=["main-merged-into-the-branch", "branch-rebased-by-hand", "main-moved-alone"],
+)
+async def test_gate_moves_the_base_past_upstream_the_branch_took_in(
+    item_on, run_dirs, repo, upstream_in, moves
+):
+    """A branch that took main in outside Kraft's own rebase must not show
+    main's commits as the item's change at the gate."""
+    it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation")
+    old = git(repo, "rev-parse", "HEAD")
+    await it.database.write(lambda c: store.set_base_ref(c, it.id, old))
+    git(repo, "checkout", "-q", "-b", "item")
+    write(repo, "mine.py", "x = 1\n")
+    commit_all(repo, "the item's")
+    git(repo, "checkout", "-q", "main")
+    write(repo, "theirs.py", "y = 1\n")
+    upstream = commit_all(repo, "upstream")
+    git(repo, "checkout", "-q", "item")
+    if upstream_in == "merged":
+        git(repo, "merge", "-q", "--no-edit", "main")
+    elif upstream_in == "rebased":
+        git(repo, "rebase", "-q", "main")
+
+    await node_runs.gate_requested(it.database, repo, it.id, "implementation")
+
+    assert it.row()["base_ref"] == (upstream if moves else old)
+
+
 async def test_drop_refs_removes_only_this_items_refs(database, tmp_path):
     repo = make_repo(tmp_path)
     head = git(repo, "rev-parse", "HEAD")
