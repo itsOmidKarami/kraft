@@ -497,6 +497,8 @@ export interface WorkerSession {
   command?: string | null;
   /** The repository a fanned-out run (`scope: each_repository`) was for; null for a task that does not fan out. */
   repository?: string | null;
+  /** The machine a remote step ran on (`workers.yaml`); null for a step that ran on the server. */
+  runner?: string | null;
   /** The worktree HEAD this session was dispatched against (Kraft-lu2); null
    *  for a builtin/agent task that stamps nothing, and for a historical row. */
   head_sha: string | null;

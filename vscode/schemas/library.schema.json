@@ -487,6 +487,19 @@
           "title": "Read Only",
           "type": "boolean"
         },
+        "runner": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,38}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runner"
+        },
         "skippable": {
           "default": true,
           "title": "Skippable",
@@ -898,6 +911,19 @@
           ],
           "default": null,
           "title": "Reject To"
+        },
+        "runner": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,38}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runner"
         },
         "skippable": {
           "default": true,
@@ -1371,6 +1397,19 @@
           "default": false,
           "title": "Read Only",
           "type": "boolean"
+        },
+        "runner": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,38}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runner"
         },
         "skippable": {
           "default": true,

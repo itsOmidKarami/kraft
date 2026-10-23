@@ -687,7 +687,7 @@ export function serverKeys(b: ItemBundle): ItemBundle {
   if (it.budget_cap && !("key" in it.budget_cap)) it.budget_cap.key = "budget_usd";
   const run = `/Users/dev/.kraft/run/items/${it.id}/sessions`;
   for (const s of b.sessions) fill(s, {
-    harness: "claude", command: null, cost_estimated: false, egress: null, sandbox: null, repository: null, skipped: false, pass: 1, pid: null, pid_start_time: null,
+    harness: "claude", command: null, cost_estimated: false, egress: null, sandbox: null, repository: null, runner: null, skipped: false, pass: 1, pid: null, pid_start_time: null,
     tokens_cache_read: 0, tokens_cache_write: 0, log_path: `${run}/${s.id}/session.log`, result_path: `${run}/${s.id}/out/result.json`,
   });
   return b;
