@@ -9,8 +9,9 @@ import time
 from pathlib import Path
 
 import pytest
-from support.harness import commit_all, git, make_repo
+from support.harness import commit_all, git, make_repo, write
 
+from kraft import carried
 from kraft.cli import verify
 
 
@@ -134,6 +135,70 @@ def test_a_local_file_the_repo_does_not_ignore_is_refused_as_a_worker_refuses_it
     ok, said = _verify(_entry(repo, local_files=[".env"], test_command="true"))
     assert not ok
     assert "local_files: .env not carried" in said
+
+
+@pytest.mark.parametrize(
+    ("ignored", "checkout", "saved", "test_command", "expect_in_said", "ok"),
+    [
+        (
+            True,
+            "co",
+            None,
+            "test -f .testmondata",
+            "carry: .testmondata <- the checkout (git ignores it)",
+            True,
+        ),
+        (
+            True,
+            "co",
+            "saved",
+            "grep -q saved .testmondata",
+            "carry: .testmondata <- the saved copy (git ignores it)",
+            True,
+        ),
+        (True, None, None, "true", "the tool starts cold", True),
+        (
+            False,
+            "co",
+            None,
+            "true",
+            "carry: .testmondata not carried: git does not ignore it",
+            False,
+        ),
+    ],
+    ids=["from-the-checkout", "from-the-saved-copy", "cold", "not-ignored"],
+)
+def test_carry_is_seeded_and_listed_as_a_work_item_would_seed_it(
+    tmp_path, monkeypatch, ignored, checkout, saved, test_command, expect_in_said, ok
+):
+    run_dirs = tmp_path / "run"
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dirs))
+    repo = _repo(tmp_path, {".gitignore": ".testmondata\n"} if ignored else None)
+    if checkout is not None:
+        write(repo, ".testmondata", checkout)
+    if saved is not None:
+        write(tmp_path / "scratch", ".testmondata", saved)
+        carried.save(
+            verify.RunDirs(run_dirs),
+            repo,
+            tmp_path / "scratch",
+            [".testmondata"],
+            tmp_path / "scratch-record.json",
+        )
+    result, said = _verify(_entry(repo, carry=[".testmondata"], test_command=test_command))
+    assert expect_in_said in said
+    assert result is ok, said
+
+
+def test_verify_never_saves_a_carried_copy(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    repo = _repo(tmp_path, {".gitignore": ".testmondata\n"})
+    ok, said = _verify(
+        _entry(repo, carry=[".testmondata"], test_command="sh -c 'echo db > .testmondata'")
+    )
+    assert ok, said
+    store = carried.store_dir(verify.RunDirs(tmp_path / "run"), repo)
+    assert carried.current_generation(store) is None
 
 
 def test_an_areas_setup_runs_before_its_scope(tmp_path):
