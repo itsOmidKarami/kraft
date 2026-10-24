@@ -503,6 +503,35 @@ The changed-test-scope task SHALL await all selected scope results and report
 one aggregate task result.
 enforced-by: tests/executor/test_scopes.py::test_changed_test_scopes_report_one_aggregate_result
 
+## REQ a-scope-command-names-one-scope
+
+IF a command string could belong to more than one test scope identity, THEN the
+system SHALL refuse the repository entry when it loads.
+enforced-by: tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[empty], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[blank], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[unparsable], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[own-command-normalized], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[shared-command-differs], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[equals-another-command], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[equals-another-targeted-normalized], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[equals-an-area-setup], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[area-scope-vs-repo-scope], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[equals-the-bare-test-commands]
+origin: src/kraft/executor/dispatch.py §_run_changed_test_scopes
+
+## REQ verification-runs-a-scopes-targeted-command
+
+WHEN a selected scope declares a `targeted_command` and the round has a
+changed-file list, the system SHALL run it in place of the scope's `command`,
+with `KRAFT_TEST_BASE` and `KRAFT_CHANGED_FILES`.
+enforced-by: tests/executor/test_targeted_scopes.py::test_a_scope_runs_its_targeted_command_in_place_of_the_full_one[a-diff], tests/executor/test_targeted_scopes.py::test_an_empty_diff_after_a_clean_round_runs_the_targeted_command_with_an_empty_list
+origin: src/kraft/executor/dispatch.py §_run_changed_test_scopes
+
+## REQ verification-runs-the-full-command-without-a-diff-or-by-suite
+
+IF the round has no changed-file list, or the task's `suite` is `full`, THEN the
+system SHALL run the scope's `command` and record why.
+enforced-by: tests/executor/test_targeted_scopes.py::test_a_scope_runs_its_targeted_command_in_place_of_the_full_one[no-diff], tests/executor/test_targeted_scopes.py::test_a_scope_runs_its_targeted_command_in_place_of_the_full_one[suite-full]
+origin: src/kraft/executor/dispatch.py §_run_changed_test_scopes
+
+## REQ a-scope-is-one-scope-whichever-command-ran
+
+The system SHALL report a session that ran a scope's targeted command as that
+scope, and mark it targeted.
+enforced-by: tests/executor/test_targeted_scopes.py::test_scope_results_reads_a_session_as_its_scope[targeted], tests/executor/test_targeted_scopes.py::test_scope_results_reads_a_session_as_its_scope[full], tests/executor/test_targeted_scopes.py::test_scope_results_reads_a_session_as_its_scope[dropped-from-config], tests/executor/test_targeted_scopes.py::test_scope_results_reads_a_session_as_its_scope[unreadable-table], tests/executor/test_targeted_scopes.py::test_scope_results_counts_a_scope_once_whichever_command_ran, tests/api/test_scope_runs.py::test_detail_scope_runs_maps_a_targeted_command_to_its_scope[picked-and-started], tests/api/test_scope_runs.py::test_detail_scope_runs_maps_a_targeted_command_to_its_scope[picked-not-started], tests/api/test_scope_runs.py::test_detail_scope_runs_maps_a_targeted_command_to_its_scope[targeted-then-full], tests/api/test_scope_runs.py::test_detail_scope_runs_maps_a_targeted_command_to_its_scope[config-since-dropped-it], tests/api/test_scope_runs.py::test_detail_test_result_marks_a_scope_that_ran_its_targeted_command
+origin: src/kraft/executor/dispatch.py §_run_changed_test_scopes
+
 ## REQ exec-node-orders-concurrent-task-groups
 
 An execution node's `tasks` SHALL be one concurrent task group; its `steps`
