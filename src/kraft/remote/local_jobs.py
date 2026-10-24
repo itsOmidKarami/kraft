@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import signal
 import subprocess
 from dataclasses import dataclass
@@ -38,8 +39,13 @@ class SpawnRefused(Exception):
         self.missing = missing
 
 
-def _record_name(key: str) -> str:
-    return key.replace("/", "__") + ".json"
+#: A session key as the server sends it (`ids.session_ref`): `<work item id>/<session id>`.
+#: Anything else names no session, and must never become a path under `jobs/`.
+_KEY = re.compile(r"[A-Za-z0-9_-]+/[A-Za-z0-9_-]+")
+
+
+def _valid(key: object) -> bool:
+    return isinstance(key, str) and _KEY.fullmatch(key) is not None
 
 
 class LocalJobs:
@@ -50,7 +56,12 @@ class LocalJobs:
         self._adopted: dict[str, tuple[int, float | None]] = {}
 
     def _record_path(self, key: str) -> Path:
-        return self.dir / _record_name(key)
+        if not _valid(key):
+            raise ValueError(f"not a session key: {key!r}")
+        path = (self.dir / (key.replace("/", "__") + ".json")).resolve()
+        if path.parent != self.dir.resolve():
+            raise ValueError(f"not a session key: {key!r}")
+        return path
 
     def _write(self, key: str, pid: int, start: float | None, log_path: str | None) -> None:
         path = self._record_path(key)
@@ -63,13 +74,16 @@ class LocalJobs:
     def _drop(self, key: str) -> None:
         self._children.pop(key, None)
         self._adopted.pop(key, None)
-        self._record_path(key).unlink(missing_ok=True)
+        if _valid(key):
+            self._record_path(key).unlink(missing_ok=True)
 
     def spawn(
         self, key: str, argv: list[str], *, cwd: str, env: dict[str, str], log_path: str
     ) -> Spawned:
         """Start `argv` as a session of its own: a new process group, output appended to
         `log_path` (the server created and truncated it), stdin closed."""
+        if not _valid(key):
+            raise SpawnRefused(f"not a session key: {key!r}")
         try:
             with open(log_path, "ab") as log:
                 proc = subprocess.Popen(
@@ -95,6 +109,8 @@ class LocalJobs:
     def hold(self, key: str, *, pid: int, pid_start_time: float | None) -> bool:
         """Whether `key` is a live session this table holds. A key it does not know is
         adopted when `pid` is still the process the server recorded; a stale record goes."""
+        if not _valid(key):
+            return False
         child = self._children.get(key)
         if child is not None:
             if child.poll() is None:

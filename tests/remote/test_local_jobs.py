@@ -127,3 +127,18 @@ def test_two_tables_removing_one_record_do_not_fail(tmp_path):
     a._children["w/s"].wait()
     b.recover()  # sees a dead process: deletes the record
     assert _wait(lambda: a.reap() == ["w/s"])
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["../x", "w/../../x", "w/s/t", "w", ""],
+    ids=["parent", "nested-parent", "three-parts", "no-slash", "empty"],
+)
+def test_a_key_that_is_not_a_session_ref_never_becomes_a_path(tmp_path, key):
+    log = tmp_path / "l"
+    log.write_bytes(b"")
+    jobs = LocalJobs(tmp_path / "state")
+    with pytest.raises(SpawnRefused):
+        jobs.spawn(key, ["true"], cwd=str(tmp_path), env=bare_env(), log_path=str(log))
+    assert jobs.hold(key, pid=os.getpid(), pid_start_time=None) is False
+    assert list((tmp_path / "state" / "jobs").iterdir()) == []
