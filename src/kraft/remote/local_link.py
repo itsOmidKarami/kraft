@@ -17,7 +17,7 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -247,11 +247,11 @@ class LocalLink(_Row):
         env: dict[str, str],
         log_path: Path,
         exit_path: Path,
-        on_wait: Callable[[str], None] | None = None,
+        on_wait: Callable[[str], Awaitable[None]] | None = None,
     ) -> LocalProc:
         if not self.connected:
             if on_wait is not None:
-                on_wait(WAITING)
+                await on_wait(WAITING)
             await self.wait_connected()
         frame = {
             "t": "spawn",
@@ -319,11 +319,11 @@ class DirectLink(_Row):
         env: dict[str, str],
         log_path: Path,
         exit_path: Path,
-        on_wait: Callable[[str], None] | None = None,
+        on_wait: Callable[[str], Awaitable[None]] | None = None,
     ) -> LocalProc:
         if not self.connected:
             if on_wait is not None:
-                on_wait(WAITING)
+                await on_wait(WAITING)
             await self.wait_connected()
         try:
             spawned = self.jobs.spawn(key, argv, cwd=cwd, env=env, log_path=str(log_path))

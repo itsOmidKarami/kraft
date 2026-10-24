@@ -92,6 +92,10 @@ async def test_spawn_waits_for_the_worker_and_says_so_once(tmp_path):
     log = tmp_path / "log"
     log.write_bytes(b"")
     heard = []
+
+    async def hear(text):
+        heard.append(text)
+
     async with _Rig(tmp_path / "run", delay=0.3) as rig:
         proc = await asyncio.wait_for(
             rig.link.spawn(
@@ -101,7 +105,7 @@ async def test_spawn_waits_for_the_worker_and_says_so_once(tmp_path):
                 env=_env(),
                 log_path=log,
                 exit_path=tmp_path / "x.exit",
-                on_wait=heard.append,
+                on_wait=hear,
             ),
             10,
         )
