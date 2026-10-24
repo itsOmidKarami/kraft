@@ -7,10 +7,19 @@ from pathlib import Path
 import pytest
 from support.harness import commit_all, entry_of, git, write
 
-from kraft import store
+from kraft import events, store
 from kraft.executor import dispatch
 
-from .test_scopes import _BUILTIN, _SRC, _UI, _dispatch, _on_a_branch, _selected
+from .test_scopes import (
+    _BUILTIN,
+    _SRC,
+    _UI,
+    _dispatch,
+    _exited,
+    _on_a_branch,
+    _selected,
+    _verify,
+)
 
 _WEB_AREA = {
     "web": {
@@ -191,3 +200,84 @@ async def test_the_changed_files_list_is_mounted_read_only_for_a_sandbox(
     assert targeted_ro == (targeted_env["KRAFT_CHANGED_FILES"],)
     assert full_ro == ()
     assert not [k for k in full_env if k.startswith("KRAFT_")]
+
+
+_TARGETED_SCOPE = {
+    "paths": ["**"],
+    "command": "just ci-test",
+    "targeted_command": "just test-targeted",
+}
+_PICKED = {"just ci-test": "just test-targeted"}
+
+
+async def _pick(it, targeted):
+    """A dispatch's picks, as the builtin records them before it runs any scope."""
+    payload = {
+        "node_id": "verify",
+        "hook_point": "verify.main.t",
+        "repository": None,
+        "round": 0,
+        "commands": ["just ci-test"],
+        "targeted": targeted,
+    }
+    await it.database.write(lambda c: events.append(c, it.id, "test_scopes_selected", payload))
+
+
+@pytest.mark.parametrize(
+    ("scope", "picked", "ran", "expected"),
+    [
+        pytest.param(
+            _TARGETED_SCOPE,
+            {},
+            "just test-targeted",
+            {"identity": "just ci-test", "targeted": True, "scope": "**"},
+            id="targeted",
+        ),
+        pytest.param(
+            _TARGETED_SCOPE,
+            {},
+            "just ci-test",
+            {"identity": "just ci-test", "scope": "**"},
+            id="full",
+        ),
+        pytest.param(
+            {"paths": ["**"], "command": "just ci-test"},
+            _PICKED,
+            "just test-targeted",
+            {"identity": "just ci-test", "targeted": True, "scope": "**"},
+            id="dropped-from-config",
+        ),
+        pytest.param(
+            None,
+            _PICKED,
+            "just test-targeted",
+            {"identity": "just ci-test", "targeted": True},
+            id="unreadable-table",
+        ),
+    ],
+)
+async def test_scope_results_reads_a_session_as_its_scope(item_on, scope, picked, ran, expected):
+    it = await item_on(_verify(), repo="/r")
+    await _exited(it, [("s1", "done", ran, None)])
+    if picked:
+        await _pick(it, picked)
+    entry = entry_of({"setup_command": "", "test_scopes": [scope]}) if scope else None
+
+    found = dispatch.scope_results(it.database, it.id, "verify", "verify.main.t", entry)
+
+    assert found == [{"command": ran, **expected, "passed": True, "session_id": "s1"}]
+
+
+async def test_scope_results_counts_a_scope_once_whichever_command_ran(item_on):
+    it = await item_on(_verify(), repo="/r")
+    await _exited(
+        it,
+        [("s1", "failed", "just ci-test", None), ("s2", "done", "just test-targeted", None)],
+    )
+    entry = entry_of({"setup_command": "", "test_scopes": [_TARGETED_SCOPE]})
+
+    found = dispatch.scope_results(it.database, it.id, "verify", "verify.main.t", entry)
+
+    assert [(e["session_id"], e["identity"], e["passed"]) for e in found] == [
+        ("s2", "just ci-test", True)
+    ]

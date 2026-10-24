@@ -1047,6 +1047,7 @@ def _test_result(st, row) -> dict | None:
                 "passed": r["passed"],
                 "exit_code": r.get("exit_code"),
                 "session_id": r["session_id"],
+                **({"targeted": True} if r.get("targeted") else {}),
             }
             for r in results
             if not (r.get("setup") and r["passed"])

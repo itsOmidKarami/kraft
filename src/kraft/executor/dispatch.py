@@ -8,7 +8,7 @@ import logging
 import shlex
 import sqlite3
 import traceback
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -865,10 +865,10 @@ async def _run_changed_test_scopes(
 def failed_test_scopes(
     db, work_item_id: str, node_id: str, task_hook: str, repo_entry: RepoEntry | None
 ) -> list[dict]:
-    """What `scope_results` reports as failed, without its `passed` key: the
-    stop's facts."""
+    """What `scope_results` reports as failed, without its `passed`, `identity`
+    and `targeted` keys: the stop's facts, naming the command that ran."""
     return [
-        {k: v for k, v in entry.items() if k != "passed"}
+        {k: v for k, v in entry.items() if k not in ("passed", "identity", "targeted")}
         for entry in scope_results(db, work_item_id, node_id, task_hook, repo_entry)
         if not entry["passed"]
     ]
@@ -878,8 +878,11 @@ def scope_results(
     db, work_item_id: str, node_id: str, task_hook: str, repo_entry: RepoEntry | None
 ) -> list[dict]:
     """The changed-test-scope builtin's latest run of `task_hook`, in the order
-    it ran: `{command, scope?, exit_code?, area?, setup?, passed, session_id}`
-    per command that finished, `setup` marking an area's setup. A command
+    it ran: `{command, identity, targeted?, scope?, exit_code?, area?, setup?,
+    passed, session_id}` per scope that finished, `setup` marking an area's
+    setup. `command` is the command that ran; `identity` is the scope's full
+    command, which a scope that ran its targeted command (`targeted: True`)
+    keeps, so the scope is one scope whichever command a round ran. A command
     still running or paused is neither passed nor failed and is left out.
 
     A stop names these so a person reads the command that went red, not the
@@ -889,14 +892,15 @@ def scope_results(
     head_sha, which one dispatch stamps once. A retry at an unchanged head
     measures at the same round and head as the attempt before it, so the
     entry is what keeps a command the operator has since replaced out of it.
-    A command run twice in the run, a task's own retry, counts by its later
-    row.
+    A scope run twice in the run, a task's own retry, counts by its later
+    row, whichever of its commands that was.
 
     The row records the command it ran, not its scope or area, so both are
     read back off the repo's table by that command, and two scopes that share
     one command read as one: their later row, both scopes' paths, and an area
-    only when they agree on it. One the table no longer declares names no
-    scope."""
+    only when they agree on it. A command the table no longer declares is read
+    through the targeted commands the node's rounds recorded picking
+    (`_picked_targeted`); one neither knows names no scope."""
     rows = db.read(
         lambda c: c.execute(
             "SELECT ws.id, ws.status, ws.round, ws.head_sha, ws.command, ws.log_path, "
@@ -921,20 +925,35 @@ def scope_results(
     if not rows:
         return []
     newest = rows[-1]
+    table = _scope_table(repo_entry)
+    picked = _picked_targeted(
+        p
+        for p in (
+            json.loads(payload)
+            for (payload,) in db.read(
+                lambda c: c.execute(
+                    "SELECT payload FROM events WHERE work_item_id = ? AND type = ? "
+                    "AND node_id = ? ORDER BY seq",
+                    (work_item_id, ChainEvent.TEST_SCOPES_SELECTED, node_id),
+                ).fetchall()
+            )
+        )
+        if p.get("hook_point") == task_hook
+    )
     latest: dict[str, sqlite3.Row] = {}
     for row in rows:
         if row["command"] and (row["round"], row["head_sha"]) == (
             newest["round"],
             newest["head_sha"],
         ):
-            latest.pop(row["command"], None)
-            latest[row["command"]] = row
-    table = _scope_table(repo_entry)
+            identity = _scope_identity(table, row["command"], picked)
+            latest.pop(identity, None)
+            latest[identity] = row
     results = []
-    for command, row in latest.items():
+    for row in latest.values():
         if row["status"] not in COMMAND_FINISHED:
             continue
-        entry: dict = {"command": command, **_scope_facts(table, command)}
+        entry: dict = {"command": row["command"], **_scope_facts(table, row["command"], picked)}
         if (code := _exit_code(row)) is not None:
             entry["exit_code"] = code
         entry["passed"] = row["status"] == SessionStatus.DONE
@@ -943,14 +962,43 @@ def scope_results(
     return results
 
 
-def _scope_facts(table: list[dict], command: str) -> dict:
-    """What the repo's table says a command is: `scope` (the paths it covers),
+def _picked_targeted(payloads: Iterable[dict]) -> dict[str, str]:
+    """The targeted command to the scope it stood for, from the `targeted`
+    maps (`{identity: targeted command}`) of `test_scopes_selected` payloads.
+    A payload without the key is an older event: every scope ran in full."""
+    return {
+        targeted: identity
+        for p in payloads
+        for identity, targeted in (p.get("targeted") or {}).items()
+    }
+
+
+def _scope_identity(table: list[dict], command: str, picked: Mapping[str, str] = {}) -> str:
+    """The scope a recorded command belongs to, as its full command: itself,
+    the scope that declares it as its targeted command, the scope a round
+    recorded picking it for (`picked`, for one the table no longer declares),
+    else the command alone (an area's setup, or a command nothing names)."""
+    for s in table:
+        if shlex.join(s["cmd"]) == command:
+            return command
+    for s in table:
+        if s["targeted_cmd"] and shlex.join(s["targeted_cmd"]) == command:
+            return shlex.join(s["cmd"])
+    return picked.get(command, command)
+
+
+def _scope_facts(table: list[dict], command: str, picked: Mapping[str, str] = {}) -> dict:
+    """What the repo's table says a command is: its `identity` (the scope's full
+    command), `targeted` when it is not that, `scope` (the paths the scope covers),
     `area` when the scopes sharing it agree on one, and `setup` when it is an
-    area's setup and no scope's own. Empty for a command the table no longer
-    declares."""
-    scopes = [s for s in table if shlex.join(s["cmd"]) == command]
+    area's setup and no scope's own. A command the table no longer declares keeps
+    only what `picked` says of it."""
+    identity = _scope_identity(table, command, picked)
+    scopes = [s for s in table if shlex.join(s["cmd"]) == identity]
     setups = [s for s in table if s["setup"] and shlex.join(s["setup"]) == command]
-    facts: dict = {}
+    facts: dict = {"identity": identity}
+    if identity != command:
+        facts["targeted"] = True
     if scopes:
         facts["scope"] = ", ".join(p for s in scopes for p in s["paths"])
     areas = {s["area"] for s in scopes or setups}
@@ -961,12 +1009,13 @@ def _scope_facts(table: list[dict], command: str) -> dict:
     return facts
 
 
-def _scope_order(table: list[dict], command: str) -> float | None:
-    """Where the table lists a command: its scope's index, or half before its
+def _scope_order(table: list[dict], command: str, picked: Mapping[str, str] = {}) -> float | None:
+    """Where the table lists a command's scope: its index, or half before its
     area's first scope for that area's setup, which runs ahead of it. None for
     a command the table no longer declares."""
+    identity = _scope_identity(table, command, picked)
     for i, s in enumerate(table):
-        if shlex.join(s["cmd"]) == command:
+        if shlex.join(s["cmd"]) == identity:
             return i
     for i, s in enumerate(table):
         if s["setup"] and shlex.join(s["setup"]) == command:
@@ -993,17 +1042,20 @@ def scope_runs(
 ) -> list[dict]:
     """Every command the changed-test-scope builtin ran for `task_hook`, in the order it started,
     across the node's passes, their rounds and its repositories:
-    `{session_id, pass, repository, round, command, passed, exit_code?, scope?, area?, setup?,
-    order?, selected?}`. `passed` is None while the command is not finished.
+    `{session_id, pass, repository, round, command, identity, targeted?, passed, exit_code?, scope?,
+    area?, setup?, order?, selected?}`. `passed` is None while the command is not finished.
+    `command` is the command that ran and `identity` the scope's full command, which a round that
+    ran the scope's targeted command (`targeted: True`) shares with one that ran it in full.
     `order` is where the table lists it, so a round's scopes draw in its order.
 
     `passes` is `store.session_passes`' answer for the item: a pass counts its rounds on its own,
     so a round of one is not the same-numbered round of another. A dispatch's picks belong to the
     pass of the first command started after them, and to the node's newest when none has.
 
-    A command its round picked (`test_scopes_selected`) and has not started comes last, `pending`
-    with no session, while the run `live`s on; `selected` marks every entry of a round that recorded
-    its picks, so what it dropped is known before it ends. Only the latest dispatch of a repository
+    A scope its round picked (`test_scopes_selected`) and has not started comes last, `pending`
+    with no session, named by the targeted command the round picked for it, if any, while the run
+    `live`s on; `selected` marks every entry of a round that recorded its picks, so what it
+    dropped is known before it ends. Only the latest dispatch of a repository
     and round counts: its picks, and the sessions after them. A command it picked that never started
     (an area's setup failed, a stop ended the loop) is not pending once the run has moved on, to the
     node's next round or past the node.
@@ -1043,23 +1095,29 @@ def scope_runs(
 
     newest_pass = len(node_passes.get(node_id, [None]))
     # Every pick, in order, with the pass it belongs to.
-    dispatches: list[tuple[int, int, str | None, int, list[str]]] = []
+    dispatches: list[tuple[int, int, str | None, int, list[str], dict[str, str]]] = []
     for seq, p in selections:
         # shortcut: picks carry no pass, so ones that started nothing before the node was sent
         # back are read as the next pass's; stamp the pass on the event if that ever shows.
         n = next((ran_in(r) for r in rows if r["seq"] > seq), newest_pass)
-        dispatches.append((seq, n, p.get("repository"), p["round"], p["commands"]))
+        dispatches.append(
+            (seq, n, p.get("repository"), p["round"], p["commands"], p.get("targeted") or {})
+        )
     # What each round of a pass picked in a repository, from its latest dispatch.
-    picked: dict[tuple[int, str | None, int], tuple[int, list[str]]] = {
-        (n, repo, rnd): (seq, commands) for seq, n, repo, rnd, commands in dispatches
+    picked: dict[tuple[int, str | None, int], tuple[int, list[str], dict[str, str]]] = {
+        (n, repo, rnd): (seq, commands, targeted)
+        for seq, n, repo, rnd, commands, targeted in dispatches
     }
+    # Every targeted command any round picked, to the scope it stood for: a session that ran
+    # one the repo's table has since dropped still belongs to its scope.
+    was_targeted = _picked_targeted(p for _, p in selections)
     # A dispatch replaces the one before it only when no other round was picked between the two: a
     # round measured again straight away (a resume cut it short) is one dispatch, but a round the
     # loop came back to after another one ran (the recovery's re-measure, then a fix cycle's, then
     # the recovery's again on a resumed entry) is a second run of it, and the first is still a run.
     superseded: set[int] = set()
     last_pick: dict[tuple[int, str | None], tuple[int, int]] = {}
-    for seq, n, repo, rnd, _commands in dispatches:
+    for seq, n, repo, rnd, _commands, _targeted in dispatches:
         before = last_pick.get((n, repo))
         if before is not None and before[1] == rnd:
             superseded.add(before[0])
@@ -1072,7 +1130,7 @@ def scope_runs(
         return max(
             (
                 seq
-                for seq, n, repo, rnd, _ in dispatches
+                for seq, n, repo, rnd, _, _ in dispatches
                 if (n, repo, rnd) == key and seq < row["seq"]
             ),
             default=0,
@@ -1091,11 +1149,13 @@ def scope_runs(
     def facts(repo: str | None, command: str) -> dict:
         if repo not in tables:
             tables[repo] = _scope_table(entries(repo))
-        found = _scope_facts(tables[repo], command)
-        if (order := _scope_order(tables[repo], command)) is not None:
+        found = _scope_facts(tables[repo], command, was_targeted)
+        if (order := _scope_order(tables[repo], command, was_targeted)) is not None:
             found["order"] = order
         return found
 
+    # (pass, repository, round, scope, dispatch) of every session: a scope started is not pending.
+    started = set()
     for row in rows:
         repo = row["repository"]
         entry: dict = {
@@ -1112,24 +1172,27 @@ def scope_runs(
         if (code := _exit_code(row)) is not None:
             entry["exit_code"] = code
         out.append(entry)
+        started.add((ran_in(row), repo, row["round"], entry["identity"], owner(row)))
     # What a round picked and has not started: no session yet, so nothing but the command.
-    started = {(ran_in(r), r["repository"], r["round"], r["command"], owner(r)) for r in rows}
     # Only the round of the node's latest pick can still start what it picked.
-    newest = max(((seq, n, rnd) for (n, _, rnd), (seq, _) in picked.items()), default=(0,))[1:]
-    for (n, repo, rnd), (pick_seq, commands) in picked.items():
+    newest = max(((seq, n, rnd) for (n, _, rnd), (seq, _, _) in picked.items()), default=(0,))[1:]
+    for (n, repo, rnd), (pick_seq, commands, targeted) in picked.items():
         for command in commands:
             if live and (n, rnd) == newest and (n, repo, rnd, command, pick_seq) not in started:
+                # A scope is named by the command it will run: its targeted one, if it picked it.
+                shown = targeted.get(command, command)
                 out.append(
                     {
                         "session_id": None,
                         "pass": n,
                         "repository": repo,
                         "round": rnd,
-                        "command": command,
                         "passed": None,
                         "pending": True,
                         "selected": True,
                         **facts(repo, command),
+                        "command": shown,
+                        **({"targeted": True} if shown != command else {}),
                     }
                 )
     return out

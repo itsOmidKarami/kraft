@@ -680,6 +680,20 @@ _SHARED = {
             {"command": "red", "scope": "**, frontend/**"},
             id="a-repo-and-an-area-scope-share-the-command",
         ),
+        pytest.param(
+            [(0, [("s-red", "failed", "just test-targeted", None)])],
+            {
+                "test_scopes": [
+                    {
+                        "paths": ["**"],
+                        "command": "just ci-test",
+                        "targeted_command": "just test-targeted",
+                    }
+                ]
+            },
+            {"command": "just test-targeted", "scope": "**"},
+            id="a-targeted-command-names-the-command-that-ran",
+        ),
     ],
 )
 async def test_a_red_scope_is_named_from_the_latest_run_only(item_on, runs, fields, expected):
