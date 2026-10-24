@@ -11,7 +11,10 @@ import sqlite3
 from types import SimpleNamespace
 from urllib.parse import urlencode
 
+import httpx2
 import pytest
+from mcp.client.session import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -301,3 +304,99 @@ async def test_a_call_past_the_sessions_limit_waits_for_one_to_finish(worker_api
     assert len(api.calls) == egress.MAX_WORKER_CALLS
     api.release.set()
     assert [status for status, _, _ in await asyncio.gather(*calls)] == [200] * 5
+
+
+class _Machine:
+    """What a machine's proxy reaches the server through: every call recorded as `api` gets it."""
+
+    def __init__(self):
+        self.calls: list[tuple] = []
+        self.answer = (200, {"content-type": "application/json"}, b'{"ok": true}')
+
+    async def __call__(self, method, target, caller, kw):
+        self.calls.append((method, target, caller, json.loads(kw["content"]) if kw else None))
+        return self.answer
+
+
+@pytest.fixture
+async def machine_api():
+    """`worker_api`'s session, on a proxy with no daemon: `(machine, proxy, session, ask)`."""
+    machine = _Machine()
+    proxy = egress.EgressProxy(api=machine, environ={})
+    events: list[dict] = []
+
+    async def record(payload):
+        events.append(payload)
+
+    session = egress.EgressSession(
+        "s-own", egress.PhaseLists("runtime", ("**",), ()), record, "w-own"
+    )
+    server = await asyncio.start_server(lambda r, w: proxy.handle(r, w, session), "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+
+    async def ask(verb, form=None):
+        body = urlencode(form or {}).encode()
+        head = [
+            f"POST http://kraft/w/{verb} HTTP/1.1",
+            "Host: kraft",
+            f"Content-Length: {len(body)}",
+        ]
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write("\r\n".join(head).encode() + b"\r\n\r\n" + body)
+        answer = await asyncio.wait_for(reader.read(), 5)
+        writer.close()
+        return int(answer.split()[1]), events
+
+    yield machine, proxy, port, ask
+    server.close()
+
+
+async def test_a_machines_worker_call_goes_over_its_connection_as_the_channel_session(machine_api):
+    machine, _, _, ask = machine_api
+    status, events = await ask("progress", {"task": "3"})
+    assert status == 200 and events == []
+    assert machine.calls == [
+        ("POST", "/api/work-items/w-own/progress", "w-own/s-own", {"task": "3"})
+    ]
+
+
+@pytest.mark.parametrize(
+    ("verb", "form"),
+    [("progress", {"task": "1", "id": "w-other"}), ("show", {"id": "w-other"})],
+    ids=["act-on-another-item", "read-another-item"],
+)
+async def test_a_call_outside_the_allowlist_is_refused_on_the_machine_before_it_is_sent(
+    machine_api, verb, form
+):
+    machine, _, _, ask = machine_api
+    status, events = await ask(verb, form)
+    assert status == 403 and machine.calls == []
+    assert [e["reason"] for e in events] == ["not this session's to call"]
+
+
+async def test_a_permission_ask_over_mcp_reaches_the_server_and_its_answer_comes_back(machine_api):
+    machine, proxy, port, _ = machine_api
+    machine.answer = (
+        200,
+        {"content-type": "application/json"},
+        b'{"behavior": "allow", "updatedInput": {"command": "ls"}}',
+    )
+    async with proxy.serving():
+        http = httpx2.AsyncClient(proxy=f"http://127.0.0.1:{port}")
+        async with (
+            http,
+            streamable_http_client("http://kraft/mcp", http_client=http) as (read, write),
+            ClientSession(read, write) as mcp,
+        ):
+            await mcp.initialize()
+            answer = await mcp.call_tool(
+                "permission_request", {"tool_name": "Bash", "input": {"command": "ls"}}
+            )
+    assert json.loads(answer.content[0].text)["behavior"] == "allow"
+    [(method, target, caller, body)] = machine.calls
+    assert (method, target, caller) == (
+        "POST",
+        "/api/work-items/w-own/sessions/s-own/permission",
+        "w-own/s-own",
+    )
+    assert body["tool_name"] == "Bash"

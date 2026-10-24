@@ -28,6 +28,7 @@ import shutil
 import socket
 import ssl
 import sys
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -64,9 +65,19 @@ class _Channel:
 class ChannelRegistry:
     """Opens and closes sessions' listeners on the running loop."""
 
-    def __init__(self, run_dirs, db, proxy: EgressProxy | None = None):
+    def __init__(
+        self,
+        run_dirs,
+        db,
+        proxy: EgressProxy | None = None,
+        *,
+        record: Callable[[str, str, str, dict], Awaitable[None]] | None = None,
+    ):
+        """On a machine there is no database: `record(work_item_id, session_id, event type,
+        payload)` sends an event to the server instead."""
         self._run_dirs = run_dirs
         self._db = db
+        self._record = record
         self._proxy = proxy or EgressProxy()
         #: By `ids.qualified(work_item_id, session_id)`, which is also the
         #: CN of a TLS-transport session's client certificate (`worker.ca`).
@@ -81,6 +92,10 @@ class ChannelRegistry:
     async def record(self, work_item_id: str, type: SandboxEvent, payload: dict) -> None:
         """Append a sandbox event for the item: how a backend, which holds no
         database, records one."""
+        if self._db is None and self._record is not None:
+            return await self._record(
+                work_item_id, str(payload.get("session_id") or ""), str(type), payload
+            )
         await self._db.write(lambda c: events.append(c, work_item_id, type, payload))
 
     async def _serve(self, channel: _Channel, reader, writer) -> None:

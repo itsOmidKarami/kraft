@@ -229,7 +229,10 @@ class EgressProxy:
     """One per daemon. `connect`, `getaddrinfo` and `environ` are seams for
     tests; the daemon takes the defaults. `app` is the daemon's own API,
     which serves the worker API in-process, beside the session MCP server
-    (`session_mcp`) this proxy serves at `/mcp`; a proxy without one refuses
+    (`session_mcp`) this proxy serves at `/mcp`. On a machine there is no
+    daemon: `api` is the connection to the server instead, `(method, target,
+    caller, request kwargs) -> (status, headers, body)`, and every call goes
+    out through it after the same allowlist check. A proxy with neither refuses
     host `kraft`."""
 
     def __init__(
@@ -239,12 +242,15 @@ class EgressProxy:
         getaddrinfo=None,
         environ: Mapping[str, str] = os.environ,
         app=None,
+        api=None,
     ):
         self._connect = connect
         self._getaddrinfo = getaddrinfo
         self._environ = environ
         self._app = app
-        self._mcp = session_mcp.build(self._ask_permission) if app is not None else None
+        self._api = api
+        serves = app is not None or api is not None
+        self._mcp = session_mcp.build(self._ask_permission) if serves else None
         self._mcp_app = session_mcp.asgi_app(self._mcp) if self._mcp is not None else None
 
     def serving(self):
@@ -359,8 +365,9 @@ class EgressProxy:
         method, host, port, target, headers = request
 
         if _norm(host) == "kraft":
-            if method == "CONNECT" or self._app is None:
-                why = "no worker API here" if self._app is None else "it is plain http://kraft"
+            serves = self._app is not None or self._api is not None
+            if method == "CONNECT" or not serves:
+                why = "no worker API here" if not serves else "it is plain http://kraft"
                 return await self._refuse(
                     writer, session, host, port, f"host 'kraft' is the worker API, and {why}"
                 )
@@ -508,12 +515,12 @@ class EgressProxy:
             if isinstance(call, str):
                 return await _answer(writer, 400, "Bad Request", call)
             api_method, path, payload = call
-            if not callback.allowed(scope, api_method, path, thread_owner=self._thread_owner):
+            if not callback.allowed(scope, api_method, path, thread_owner=self._owner(scope)):
                 return await self._refuse_route(
                     writer, session, f"{api_method} {path}", "not this session's to call"
                 )
             try:
-                reply = await self._call(self._app, api_method, path, _caller(scope), json=payload)
+                reply = await self._worker_call(api_method, path, _caller(scope), json=payload)
             except TimeoutError:
                 return await _answer(writer, 504, "Gateway Timeout", "Kraft did not answer in time")
         status, text = reply.status_code, reply.content
@@ -544,7 +551,7 @@ class EgressProxy:
         `X-Kraft-Session-Id` or `Authorization` the worker sent. Only the
         headers the MCP transport reads are passed."""
         scope = callback.scope_for_channel(session)
-        if not callback.allowed(scope, method, "/mcp", thread_owner=self._thread_owner):
+        if not callback.allowed(scope, method, "/mcp", thread_owner=self._owner(scope)):
             return await self._refuse_route(
                 writer, session, f"{method} /mcp", "not this session's to call"
             )
@@ -576,10 +583,26 @@ class EgressProxy:
         so always `<wid>/<sid>`; a bare id still reaches the flat route."""
         path = _permission_path(caller, "permission")
         # Inside an /mcp call's own bound: shorter, so the tool denies first.
-        reply = await self._call(
-            self._app, "POST", path, caller, json=ask, timeout=CALL_TIMEOUT * 0.8
-        )
+        reply = await self._worker_call("POST", path, caller, json=ask, timeout=CALL_TIMEOUT * 0.8)
         return reply.status_code, reply.json()
+
+    async def _worker_call(
+        self, method: str, path: str, caller: str, *, timeout: float | None = None, **kw
+    ) -> httpx.Response:
+        """A worker API call, made in-process on the daemon's app or, on a machine, over the
+        connection to the server (`api`), which checks it against the allowlist again."""
+        if self._app is not None:
+            return await self._call(self._app, method, path, caller, timeout=timeout, **kw)
+        if "json" in kw:
+            kw = {
+                "content": json.dumps(kw["json"]).encode(),
+                "headers": {"content-type": "application/json"},
+            }
+        answer = await asyncio.wait_for(
+            self._api(method, path, caller, kw), timeout or CALL_TIMEOUT
+        )
+        status, headers, body = answer
+        return httpx.Response(status, headers=headers, content=body)
 
     async def _call(
         self, asgi, method: str, path: str, caller: str, *, timeout: float | None = None, **kw
@@ -590,7 +613,12 @@ class EgressProxy:
         `TimeoutError` after `timeout` (`CALL_TIMEOUT`)."""
         headers = {
             **kw.pop("headers", {}),
-            "Authorization": f"Bearer {self._app.state.mcp_token}",
+            # the session MCP server checks no token; only the daemon's own app does
+            **(
+                {"Authorization": f"Bearer {self._app.state.mcp_token}"}
+                if self._app is not None
+                else {}
+            ),
             "X-Kraft-Session-Id": caller,
         }
         # Each app by the name it answers to: the session MCP server by
@@ -603,6 +631,13 @@ class EgressProxy:
             return await asyncio.wait_for(
                 client.request(method, path, headers=headers, **kw), timeout or CALL_TIMEOUT
             )
+
+    def _owner(self, scope: callback.SessionScope):
+        """Answers who owns a thread, for `callback.allowed`. A machine holds no threads, so it
+        takes the session's own item for it: the server, which does, checks it again."""
+        if self._app is None:
+            return lambda tid: scope.work_item_id
+        return self._thread_owner
 
     def _thread_owner(self, tid: str) -> str | None:
         row = self._app.state.db.read(lambda c: store.thread_row(c, tid))

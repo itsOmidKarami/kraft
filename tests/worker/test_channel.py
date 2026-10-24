@@ -82,6 +82,23 @@ async def test_a_sessions_socket_serves_the_proxy_and_records_against_its_item(
     assert [r["payload"]["session_id"] for r in refused] == [OLD_A]
 
 
+async def test_a_machines_registry_sends_a_refusal_as_an_event_instead_of_writing_one(short_run):
+    """No database on a machine: `record` carries the event to the server."""
+    sent = []
+
+    async def record(work_item_id, session_id, type, payload):
+        sent.append((work_item_id, session_id, type, payload["host"]))
+
+    reg = channel.ChannelRegistry(short_run, None, record=record)
+    try:
+        path = await reg.open(OLD_A, "w1", _DENY_ALL)
+        answer = await _ask(path, b"CONNECT api.example.com:443 HTTP/1.1\r\n\r\n")
+    finally:
+        await reg.close_all()
+    assert answer.startswith(b"HTTP/1.1 403 ")
+    assert sent == [("w1", OLD_A, SandboxEvent.EGRESS_REFUSED, "api.example.com")]
+
+
 @pytest.mark.parametrize(
     ("sessions", "folders"),
     [
