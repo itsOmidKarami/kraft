@@ -390,7 +390,7 @@ def test_each_config_area_keeps_a_draft_of_its_files(client, templates_dir, area
         "enabled: true\ninterval_s: 60\npriority_ceiling: 2\n"
         if file == "intake.yaml"
         # The harnesses area reads the file for its profiles; keep them.
-        else (templates_dir / file).read_text().replace("effort: low", "effort: medium")
+        else (templates_dir / file).read_text().replace("model: haiku", "model: sonnet")
         if area == "harnesses" and file == "harnesses.yaml"
         else "x: 1\n"
     )
@@ -511,7 +511,7 @@ def test_a_harnesses_draft_reloads_the_policy_only_when_it_wrote_policy_yaml(
     client, templates_dir, applied
 ):
     path = templates_dir / "harnesses.yaml"
-    edited = path.read_text().replace("effort: low", "effort: medium")
+    edited = path.read_text().replace("model: haiku", "model: sonnet")
     assert edited != path.read_text()
     put_file(client, "harnesses", "harnesses.yaml", edited)
     assert client.post("/api/drafts/harnesses/harnesses/publish").status_code == 200
