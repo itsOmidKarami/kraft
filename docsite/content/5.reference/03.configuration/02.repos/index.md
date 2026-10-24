@@ -162,6 +162,19 @@ Commands compare after shell splitting, so `just  test` and `just test` are one 
 
 An area's test scopes join the repo's and are selected by changed paths the same way. Its `setup` runs once before the first of its scopes runs. Areas are never forge targets.
 
+### `carry`
+_Added in next_
+
+Files a test-selection tool keeps its state in, such as testmon's `.testmondata`. They follow `local_files`' rules: literal file paths inside the repo, no globs or directories, covered by the worktree's `.gitignore`, and never listed in both. Kraft seeds them into every new worktree and saves them back, so the tool does not start cold in each one.
+
+- **Seeding.** Kraft copies the whole set from one source: the repo's newest saved copy when it holds any listed file, else the repo's checkout, never a mix. The checkout is only read, and the copy is discarded when a file changes while it is copied, so the tool starts cold. With neither, it starts cold.
+- **Saving.** After a verification round of `suite: targeted` in which every scope passed on this machine, and a listed file changed, Kraft saves the worktree's set as the newest copy. A sandboxed item, a remote machine, an in-place item and a workspace member never save.
+- **What it is for.** Only state that is safe when stale: the tool checks file content, runs more when unsure, and updates on every run. A tool that trusts its cache by timestamp alone does not belong here.
+- **Throwing one away.** `run/carried/<repo>-<hash>/current` points at the newest copy, under `$KRAFT_RUN_DIR`. Delete that repo's folder and the next item seeds from the checkout, or starts cold. `kraft view storage` counts the copies under "other", outside the quota.
+- **Sandboxed repos.** A repo whose items always run sandboxed never saves, so it stays as warm as its checkout's own record.
+
+`kraft repo connect --verify` seeds the same set and lists where each file came from.
+
 ### `env`
 
 `env` sets literal variables every worker for this repo gets, on top of the worker's allowlist. `env_passthrough` names variables the server already has that the allowlist leaves out. Both are layered on the allowlist, which is not the server's whole environment: [Passed to workers](/reference/configuration/environment-variables#passed-to-workers) lists it, and [Added by the repo](/reference/configuration/environment-variables#added-by-the-repo) says what stays behind unless you name it here.
