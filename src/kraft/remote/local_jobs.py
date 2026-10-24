@@ -11,8 +11,8 @@ import asyncio
 import contextlib
 import json
 import os
-import re
 import signal
+import string
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,13 +39,17 @@ class SpawnRefused(Exception):
         self.missing = missing
 
 
-#: A session key as the server sends it (`ids.session_ref`): `<work item id>/<session id>`.
-#: Anything else names no session, and must never become a path under `jobs/`.
-_KEY = re.compile(r"[A-Za-z0-9_-]+/[A-Za-z0-9_-]+")
+#: The characters of a work item or session id.
+_ID_CHARS = frozenset(string.ascii_letters + string.digits + "_-")
 
 
 def _valid(key: object) -> bool:
-    return isinstance(key, str) and _KEY.fullmatch(key) is not None
+    """A session key as the server sends it (`ids.session_ref`): `<work item id>/<session id>`.
+    Anything else names no session, and must never become a path under `jobs/`."""
+    if not isinstance(key, str) or len(key) > 200:
+        return False
+    parts = key.split("/")
+    return len(parts) == 2 and all(p and set(p) <= _ID_CHARS for p in parts)
 
 
 class LocalJobs:
@@ -58,10 +62,11 @@ class LocalJobs:
     def _record_path(self, key: str) -> Path:
         if not _valid(key):
             raise ValueError(f"not a session key: {key!r}")
-        path = (self.dir / (key.replace("/", "__") + ".json")).resolve()
-        if path.parent != self.dir.resolve():
+        base = os.path.realpath(self.dir)
+        path = os.path.normpath(os.path.join(base, key.replace("/", "__") + ".json"))
+        if not path.startswith(base + os.sep):
             raise ValueError(f"not a session key: {key!r}")
-        return path
+        return Path(path)
 
     def _write(self, key: str, pid: int, start: float | None, log_path: str | None) -> None:
         path = self._record_path(key)
