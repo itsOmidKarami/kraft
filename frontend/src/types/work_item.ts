@@ -442,7 +442,12 @@ export interface ScopeRun {
   hook_point: string;
   repository: string | null;
   round: number;
+  /** The command that ran: a scope's targeted command in a round that ran it. */
   command: string;
+  /** The scope's full command, whichever command ran: what a scope is across rounds. Absent on an older item's. */
+  identity?: string;
+  /** The command that ran was the scope's targeted one, not its full one. */
+  targeted?: true;
   passed: boolean | null;
   exit_code?: number;
   scope?: string;
@@ -583,6 +588,6 @@ export interface FixTarget {
 }
 
 export interface TestResult {
-  scopes: { command: string; scope: string | null; passed: boolean; exit_code: number | null; session_id: string }[];
+  scopes: { command: string; scope: string | null; passed: boolean; exit_code: number | null; session_id: string; targeted?: true }[];
   passed: boolean;
 }

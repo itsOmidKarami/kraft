@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 import { plural } from "../../format";
 import type { KraftEvent } from "../../types";
+import { targetedWords } from "./TestsLine";
 import type { ItemDetail } from "./useItem";
 
 /** What a stop's `facts.cause` says to do about it, in one place for the desktop's state card and the phone's: a
@@ -30,7 +31,7 @@ export function withCode(text: string): ReactNode {
 
 /** "Do I lose anything?": the branch, the files changed on it and whether its tests passed; empty when none is known. */
 export function keptLine(item: ItemDetail, fileCount: number | null | undefined): string {
-  return [item.branch && `branch ${item.branch}`, fileCount && plural(fileCount, "file"), item.test_result?.passed && "tests passing"].filter(Boolean).join(" · ");
+  return [item.branch && `branch ${item.branch}`, fileCount && plural(fileCount, "file"), item.test_result?.passed && `${targetedWords(item.test_result)}tests passing`].filter(Boolean).join(" · ");
 }
 
 /** A cause in words, for the ones the card has no fix text for: a refused credential has `FORGE_LOGIN_HINT`, and a
