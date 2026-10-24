@@ -76,13 +76,6 @@ export function elapsedBetween(
   return Number.isNaN(from) || Number.isNaN(to) ? "0s" : elapsed(to - from);
 }
 
-/** When an item began running: its first session's start, so time spent
- *  filed, queued or blocked behind a dependency does not count. Falls back to
- *  `created_at` for an item nothing has run on yet. */
-export function itemStartedAt(item: { created_at: string; worker_sessions: Pick<WorkerSession, "started_at">[] }): string {
-  return item.worker_sessions.reduce<string | null>((first, s) => (s.started_at && (!first || s.started_at < first) ? s.started_at : first), null) ?? item.created_at;
-}
-
 /** A node's run time: from its latest `node_started` to its `node_completed`,
  *  or — while it has not completed — to when its latest session exited. The
  *  clock is frozen once that session exits (gated, paused, capped, question,

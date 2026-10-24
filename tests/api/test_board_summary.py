@@ -65,6 +65,22 @@ def test_the_detail_reports_the_items_running_time_and_its_cap(client, repo):
     assert detail["running_time"] == {"running_s": 0, "cap_minutes": 480}
 
 
+def test_the_detail_reports_when_the_items_chain_first_moved(client, repo):
+    """The header's clock starts at the first node, not the filing: a wait
+    behind a dependency is no part of it."""
+    wid = client.post(
+        "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+    ).json()["id"]
+    assert client.get(f"/api/work-items/{wid}").json()["started_at"] is None
+
+    _append(wid, "node_started", {"node_id": "a"})
+    first = client.get(f"/api/work-items/{wid}").json()["started_at"]
+    _append(wid, "node_started", {"node_id": "b"})
+    detail = client.get(f"/api/work-items/{wid}").json()
+    assert first is not None and first > detail["created_at"]
+    assert detail["started_at"] == first
+
+
 def test_budget_cap_reports_the_items_policy_budget_usd_when_it_is_the_lower_cap(client, repo):
     """A policy budget_usd stop's Raise cap writes the item's `policy.budget_usd`.
     The detail reports that cap, marked as the item's own and keyed by the field

@@ -346,9 +346,22 @@ def test_completed_and_previous_period_delta(conn):
     assert analytics.compute(conn, range_="all", now=NOW)["totals"]["completed_prev"] is None
 
 
-def test_median_lead_time_and_human_wait_pct(conn):
+@pytest.mark.parametrize(
+    ("first_start", "lead_days"),
+    [
+        pytest.param(None, 0.6, id="no-node-started-counts-from-filing"),
+        # filed at 2.5d, sat blocked, first node at 2d, completed at 1.4d
+        pytest.param(2.0, 0.6, id="counts-from-first-node-started"),
+    ],
+)
+def test_median_lead_time_and_human_wait_pct(conn, first_start, lead_days):
+    if first_start is not None:
+        conn.execute("UPDATE work_items SET created_at = ? WHERE id = 'w1'", (_at(2.5),))
+        _event(conn, "w1", "node_started", {"node_id": "verify"}, _at(first_start))
+        _event(conn, "w1", "node_started", {"node_id": "merge"}, _at(1.5))
+        conn.commit()
     t = analytics.compute(conn, range_="7d", now=NOW)["totals"]
-    assert t["median_lead_ms"] > 0
+    assert t["median_lead_ms"] == round(lead_days * 86_400_000)
     assert 0 <= t["human_wait_pct"] <= 100
 
 

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { ago, cleanTitle, docBody, docTitle, dollars, dollarsText, elapsed, elapsedBetween, itemStartedAt, logLineText, nodeRunSpan, plural, shortId, tokenText, tokenTip, tokenTotal, tokens, until, usd } from "./format";
+import { ago, cleanTitle, docBody, docTitle, dollars, dollarsText, elapsed, elapsedBetween, logLineText, nodeRunSpan, plural, shortId, tokenText, tokenTip, tokenTotal, tokens, until, usd } from "./format";
 import type { KraftEvent, LogLine, WorkerSession } from "./types/work_item";
 import type { EventType } from "./types/vocab.generated";
 
@@ -277,15 +277,4 @@ describe("plural", () => {
     [1, "box", "boxes", "1 box"],
     [2, "box", "boxes", "2 boxes"],
   ])("%s %s", (n, one, many, out) => expect(plural(n, one, many)).toBe(out));
-});
-
-// An item that waited on a dependency counted its wait as run time.
-describe("itemStartedAt", () => {
-  it.each([
-    { id: "nothing ran yet", starts: [], want: "2026-01-01T00:00:00Z" },
-    { id: "pending session only", starts: [null], want: "2026-01-01T00:00:00Z" },
-    { id: "earliest session start", starts: ["2026-01-01T05:00:00Z", "2026-01-01T03:00:00Z", null], want: "2026-01-01T03:00:00Z" },
-  ])("$id", ({ starts, want }) => {
-    expect(itemStartedAt({ created_at: "2026-01-01T00:00:00Z", worker_sessions: starts.map((started_at) => ({ started_at })) })).toBe(want);
-  });
 });

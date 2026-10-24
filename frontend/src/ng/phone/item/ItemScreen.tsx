@@ -1,7 +1,7 @@
 import { EllipsisVertical, MessageSquare } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { DOLLARS_HINT, dollars, dollarsText, elapsedBetween, itemStartedAt, plural, shortId } from "../../../format";
+import { DOLLARS_HINT, dollars, dollarsText, elapsedBetween, plural, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { withCode } from "../../item/cause";
 import { retryBody } from "../../item/paths";
@@ -121,7 +121,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
         <div className="ph-item-top">
           <div className="ph-item-tagline">
             <Badge tone={TAG_TONE[status]}>{hs.badge}</Badge>
-            <span className="ph-item-meta">{elapsedBetween(itemStartedAt(item), ended ? item.updated_at : null, now)} · {item.repo.split("/").filter(Boolean).at(-1)}{item.in_place && <> · <span className="ph-item-inplace">{IN_YOUR_CHECKOUT}</span></>}</span>
+            <span className="ph-item-meta">{elapsedBetween(item.started_at ?? item.created_at, ended ? item.updated_at : null, now)} · {item.repo.split("/").filter(Boolean).at(-1)}{item.in_place && <> · <span className="ph-item-inplace">{IN_YOUR_CHECKOUT}</span></>}</span>
           </div>
           <h1 className="ph-item-title">{item.title}</h1>
           {text && <p className={`ph-brief${brief ? " ph-is-open" : ""}`}>{text}</p>}

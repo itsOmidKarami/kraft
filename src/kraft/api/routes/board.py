@@ -1357,6 +1357,15 @@ async def get_work_item(wid: str, request: Request):
         # The time budget beside the dollars: what the item-wide running-time
         # cap has measured and allows (`caps.running_time`).
         "running_time": st.db.read(lambda c: caps.running_time(c, row)),
+        # When its chain first moved: the header's clock counts from here, not
+        # from filing, so a wait behind a dependency is no part of it. None
+        # until a node starts.
+        "started_at": st.db.read(
+            lambda c: c.execute(
+                "SELECT MIN(created_at) FROM events WHERE work_item_id = ? AND type = ?",
+                (wid, ChainEvent.NODE_STARTED),
+            ).fetchone()[0]
+        ),
         "rate_limit": _rate_limit_retries(st, row),
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         # Which pass of its node each session ran in (`store.number_passes`);
