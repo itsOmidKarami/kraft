@@ -70,6 +70,7 @@ from kraft.templates.models import (
     ResolvedTask,
     SubprocessTask,
     TaskScope,
+    TestSuite,
 )
 from kraft.vocab import (
     ADVANCING,
@@ -665,6 +666,12 @@ def _fan_out(row, worktree, launch: LaunchContext | None) -> list[tuple[str, Pat
     return runs
 
 
+#: Why a scope that declares a `targeted_command` ran its full `command`,
+#: on the round's `test_scopes_selected` event (`full_reason`).
+FULL_NO_DIFF = "no changed-file list: the item has no base commit, or git could not diff it"
+FULL_BY_SUITE = "the task's suite is full"
+
+
 def _selected_commands(to_run: list[dict]) -> list[str]:
     """The commands a selection runs, in order: each area's setup once, ahead of its first scope."""
     out: list[str] = []
@@ -685,6 +692,7 @@ async def _run_changed_test_scopes(
     *,
     common: dict,
     execution: ExecutionMode,
+    suite: TestSuite,
     launch: LaunchContext | None,
     round: int,
     sandbox: dict | None,
@@ -713,6 +721,14 @@ async def _run_changed_test_scopes(
     share one worktree, and two suites writing the same build artifacts is a
     flake nobody can reproduce. `parallel` is bounded by the number of selected
     scopes, which the repo's own table bounds.
+
+    A selected scope that declares a `targeted_command` runs it in place of its
+    `command` (`suite: targeted`, the default) whenever the round has a
+    changed-file list, empty or not; with no list at all, or `suite: full`, it
+    runs `command`, and the event says why (`full_reason`). The targeted
+    command is handed `KRAFT_TEST_BASE`, the item's whole-branch base, and
+    `KRAFT_CHANGED_FILES`, a file in the item's run folder (never the
+    worktree) naming the paths the round was selected from.
     """
     repo_entry = launch.repo_entry if launch else None
     to_run, paths = _select_scopes(
@@ -744,14 +760,45 @@ async def _run_changed_test_scopes(
             "tests)\n",
         )
 
-    async def _run(cmd: list[str]) -> str:
+    # Scope identity -> the targeted argv it runs this round. Empty when no
+    # scope runs targeted: `suite: full`, no changed-file list, or none declares one.
+    picks: dict[str, list[str]] = {}
+    if suite is TestSuite.TARGETED and paths is not None:
+        picks = {shlex.join(s["cmd"]): s["targeted_cmd"] for s in to_run if s["targeted_cmd"]}
+    declares_one = any(s["targeted_cmd"] for s in to_run)
+    full_reason = (
+        None
+        if picks or not declares_one
+        else FULL_BY_SUITE
+        if suite is TestSuite.FULL
+        else FULL_NO_DIFF
+    )
+    changed_files = item_paths.changed_files(run_dirs, work_item_row["id"], node.id, task.path)
+    if picks:
+        changed_files.parent.mkdir(parents=True, exist_ok=True)
+        changed_files.write_text("".join(f"{p}\n" for p in paths or ()), encoding="utf-8")
+    base = _current_base_ref(db, work_item_row["id"])
+
+    async def _run(cmd: list[str], targeted: bool = False) -> str:
         return await _subprocess.run_task(
             db,
             run_dirs,
             cmd=cmd,
             cwd=worktree,
             repo_entry=repo_entry,
-            env=TEST_ENV,
+            env={
+                **TEST_ENV,
+                **(
+                    {
+                        "KRAFT_CHANGED_FILES": str(changed_files),
+                        **({"KRAFT_TEST_BASE": base} if base else {}),
+                    }
+                    if targeted
+                    else {}
+                ),
+            },
+            # A sandbox does not mount the item's run folder: the list goes in read-only.
+            ro_paths=(str(changed_files),) if targeted else (),
             sandbox=sandbox,
             checkout=checkout,
             time_cap=time_cap,
@@ -778,6 +825,8 @@ async def _run_changed_test_scopes(
                 "repository": common.get("repository"),
                 "round": round,
                 "commands": _selected_commands(to_run),
+                "targeted": {identity: shlex.join(argv) for identity, argv in picks.items()},
+                "full_reason": full_reason,
             },
         )
     )
@@ -795,7 +844,8 @@ async def _run_changed_test_scopes(
             ready = await setups[scope["area"]]
             if ready != "done":
                 return ready
-        return await _run(scope["cmd"])
+        identity = shlex.join(scope["cmd"])
+        return await _run(picks.get(identity, scope["cmd"]), targeted=identity in picks)
 
     if execution is ExecutionMode.PARALLEL:
         results = list(await asyncio.gather(*(_scope(s) for s in to_run)))
@@ -1433,6 +1483,7 @@ async def _dispatch_task(
                         worktree,
                         common=common,
                         execution=t.execution,
+                        suite=t.suite,
                         launch=launch,
                         round=round,
                         sandbox=sandbox,
