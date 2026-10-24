@@ -158,9 +158,9 @@ describe("Access (O.3)", () => {
   });
 
   it.each([
-    [0, /No item is active, so no agent is stopped\./],
-    [2, /2 items are active\. Restarting stops their agents; each stops as failed and needs Retry afterwards\./],
-  ])("the Restart sheet says what a restart does to %i active items", async (active, said) => {
+    [0, /Running steps of worktree items carry on through a restart\./],
+    [2, /2 items run in place: restarting stops their agents; each stops as failed and needs Retry afterwards\./],
+  ])("the Restart sheet says what a restart does to %i in-place items", async (active, said) => {
     setup();
     useApply.setState({ restart: [PORT_ITEM], managed: true, active, askRestart: async () => {} });
     await userEvent.click(await screen.findByRole("button", { name: /Restart Kraft/ }));
@@ -176,7 +176,7 @@ describe("Access (O.3)", () => {
     await userEvent.click(await screen.findByRole("button", { name: /Restart Kraft/ }));
     expect(screen.queryByRole("dialog")).toBeNull();
     counted();
-    expect(await screen.findByRole("dialog")).toHaveTextContent("No item is active, so no agent is stopped.");
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Running steps of worktree items carry on through a restart.");
   });
 
   it("says when the environment wins over the saved port", async () => {
