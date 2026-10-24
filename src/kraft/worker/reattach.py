@@ -32,6 +32,9 @@ from kraft.config import ConfigError
 from kraft.executor import gates
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import ESCALATION_HOOK, sweep_stragglers
+from kraft.proc_identity import identity_ok as _identity_ok
+from kraft.proc_identity import pid_alive as _pid_alive
+from kraft.proc_identity import same_start as _same_start  # noqa: F401  (kept for callers of the old name)
 from kraft.remote import respawn as _remote_respawn
 from kraft.store._common import _now, _span_ms
 from kraft.templates.models import AgentTask, TaskScope
@@ -114,36 +117,6 @@ def _reap(pid: int) -> None:
         os.waitpid(pid, os.WNOHANG)
     except ChildProcessError:
         pass
-
-
-def _pid_alive(pid: int) -> bool:
-    """True only if pid names a live process (a zombie/defunct child is NOT alive)."""
-    try:
-        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
-    except psutil.NoSuchProcess:
-        return False
-    except psutil.Error:
-        return False
-
-
-def _identity_ok(pid: int, pid_start_time) -> bool:
-    if pid_start_time is None or not _pid_alive(pid):
-        return False
-    try:
-        return _same_start(psutil.Process(pid).create_time(), pid_start_time)
-    except psutil.Error:
-        return False
-
-
-def _same_start(observed: float, recorded: float) -> bool:
-    """Whether a process's start time is the one recorded at its launch:
-    exactly, or one whole second off. Linux adds a process's ticks since boot
-    to the boot time in whole seconds (`btime`), which moves by one when the
-    wall clock is stepped across a second, a leap second included. A reused
-    pid would have to start a second apart to the tick (10 ms) as well. A
-    larger step reads as another process, which is never signalled."""
-    shift = observed - recorded
-    return abs(shift - round(shift)) < 1e-6 and abs(round(shift)) <= 1
 
 
 def launched_group(pid: int, pid_start_time) -> bool:

@@ -11,18 +11,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import fcntl
-import hashlib
 import json
 import os
 import socket
-import stat
 from collections.abc import Callable
 from pathlib import Path
 
 from kraft.remote import protocol
 from kraft.remote.channels import Channels
 from kraft.remote.machine import Machine
+from kraft.remote.sockets import private_dir, short_socket_path, take_lock
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport
 from kraft.worker import channel
 
@@ -33,40 +31,12 @@ IDLE_EXIT_S = 600
 RELAY_CONNECT_S = 10.0
 RELAY_RESPAWN_S = 1.0  # a daemon that lost the lock to a retiring one is not the one to wait for
 _COPY_CHUNK = 1 << 16
-#: A unix socket path must fit `sockaddr_un.sun_path`: 104 bytes on macOS, 108 on Linux.
-_SOCKET_PATH_MAX = 100
 
 
 def socket_path(home: Path) -> Path:
     """`$KRAFT_HOME/remote/machine.sock`, or where a path that is too long for a
     unix socket is kept instead: a private directory under /tmp named by a hash of the home."""
-    path = Path(home) / "remote" / SOCKET
-    if len(os.fsencode(path)) < _SOCKET_PATH_MAX:
-        return path
-    digest = hashlib.sha1(os.fsencode(path)).hexdigest()[:12]
-    return Path("/tmp") / f"kraft-{os.getuid()}-{digest}" / SOCKET
-
-
-def _private_dir(path: Path) -> None:
-    """`path`, made if missing, as a directory only this user can enter."""
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    info = path.stat()
-    if info.st_uid != os.getuid():
-        raise PermissionError(f"{path} belongs to another user")
-    if stat.S_IMODE(info.st_mode) != 0o700:
-        path.chmod(0o700)
-
-
-def _take_lock(directory: Path) -> int | None:
-    """The exclusive lock on `machine.lock`, as an open fd (closing it releases the lock), or
-    None when another daemon holds it. The holder alone binds and removes the socket."""
-    fd = os.open(directory / LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        os.close(fd)
-        return None
-    return fd
+    return short_socket_path(Path(home) / "remote" / SOCKET)
 
 
 async def _answers(path: Path) -> bool:
@@ -161,8 +131,8 @@ async def serve(
     unfinished job), a relay of another Kraft version has found it with nothing
     to do, or `stop` is set. Returns at once when another daemon holds the lock."""
     path = socket_path(home)
-    _private_dir(path.parent)
-    lock = _take_lock(path.parent)
+    private_dir(path.parent)
+    lock = take_lock(path.parent / LOCK_FILE)
     if lock is None:
         return
     try:
