@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 import pytest
-from support.harness import commit_all, make_repo
+from support.harness import commit_all, git, make_repo
 
 from kraft.cli import verify
 
@@ -145,6 +145,59 @@ def test_an_areas_setup_runs_before_its_scope(tmp_path):
     }
     ok, said = _verify(_entry(repo, test_command="true", areas={"web": area}))
     assert ok, said
+
+
+def _targeted(command: str) -> dict:
+    """A scope whose full command passes and whose targeted one is `command`."""
+    return {"paths": ["**"], "command": "true", "targeted_command": command}
+
+
+@pytest.mark.parametrize("where", ["repo-scope", "area-scope"])
+def test_a_targeted_command_is_rehearsed_against_the_last_commit(tmp_path, where):
+    repo = _repo(tmp_path, {"a.txt": "x"})
+    out = tmp_path / "OUT"
+    scope = _targeted(
+        f'sh -c \'cp "$KRAFT_CHANGED_FILES" {out}; echo "$KRAFT_TEST_BASE" > {out}.base\'',
+    )
+    where_scope = (
+        {"test_scopes": [scope]}
+        if where == "repo-scope"
+        else {
+            "areas": {
+                "web": {
+                    "paths": ["a.txt"],
+                    "setup": "true",
+                    "verification": {"test_scopes": [scope]},
+                }
+            }
+        }
+    )
+
+    ok, said = _verify(_entry(repo, **where_scope))
+
+    assert ok, said
+    assert out.read_text() == "a.txt\n"
+    assert Path(f"{out}.base").read_text().strip() == git(repo, "rev-parse", "HEAD^1")
+    assert "test [" in said and "targeted test [" in said
+
+
+def test_a_single_commit_repo_skips_the_targeted_command_and_says_so(tmp_path):
+    repo = make_repo(tmp_path)
+
+    ok, said = _verify(_entry(repo, test_scopes=[_targeted("false")]))
+
+    assert ok, said
+    assert "skipped" in said and "single commit" in said
+    assert "FAILED" not in said
+
+
+def test_a_failing_targeted_command_fails_verify(tmp_path):
+    repo = _repo(tmp_path, {"a.txt": "x"})
+
+    ok, said = _verify(_entry(repo, test_scopes=[_targeted("false")]))
+
+    assert not ok
+    assert "FAILED" in said
 
 
 def test_a_step_that_leaves_files_a_commit_would_take_fails(tmp_path):
