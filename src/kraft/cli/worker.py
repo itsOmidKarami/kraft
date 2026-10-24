@@ -49,9 +49,9 @@ def _render_list(result: dict) -> str:
         table.append(
             (
                 w["name"],
-                w["mode"],
+                "this machine" if w["mode"] == "local" else w["mode"],
                 "online" if w["online"] else f"offline: {w['reason']}",
-                f"{w['slots_used']}/{w['capacity']}",
+                f"{w['slots_used']}/{'-' if w['capacity'] is None else w['capacity']}",
                 ",".join(w["repos"]) if w["repos"] else "all",
                 _seen(w["last_seen"]),
                 w["kraft_version"] or "-",

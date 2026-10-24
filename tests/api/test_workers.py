@@ -9,8 +9,16 @@ import pytest
 from starlette.websockets import WebSocketDisconnect
 
 from kraft import auth as auth_mod
+from kraft import store
 from kraft.config import read_yaml
 from kraft.remote import protocol, registry
+
+
+def _machines(client):
+    """The listed machines: everything but the local worker, which is always first."""
+    listed = client.get("/api/workers").json()["workers"]
+    assert listed[0]["name"] == "local"
+    return listed[1:]
 
 
 def _file(client):
@@ -27,7 +35,7 @@ def test_adding_a_dial_in_machine_returns_its_token_once_and_stores_only_the_has
     assert stored["token_sha256"] == registry.hash_token(token) and token not in json.dumps(
         _file(client)
     )
-    listed = client.get("/api/workers").json()["workers"]
+    listed = _machines(client)
     assert [(w["name"], w["mode"], w["online"], w["capacity"]) for w in listed] == [
         ("home", "dial-in", False, 2)
     ]
@@ -51,6 +59,29 @@ def test_a_bad_machine_is_refused_and_nothing_is_written(client, payload, status
     assert not (client.app.state.templates_dir / "workers.yaml").exists()
 
 
+def test_the_local_worker_is_listed_first_and_cannot_be_removed(client):
+    (local, *others) = client.get("/api/workers").json()["workers"]
+    assert others == []
+    assert local == {
+        "name": "local",
+        "mode": "local",
+        "online": True,
+        "reason": None,
+        "slots_used": 0,
+        "capacity": None,
+        "repos": None,
+        "last_seen": None,
+        "kraft_version": "direct",
+        "give_up_after": "never",
+    }
+    assert client.delete("/api/workers/local").status_code == 404
+
+
+def test_the_local_workers_running_count_comes_from_the_session_rows(client, monkeypatch):
+    monkeypatch.setattr(store, "running_local_sessions", lambda conn: 3)
+    assert client.get("/api/workers").json()["workers"][0]["slots_used"] == 3
+
+
 def test_a_name_in_use_is_a_409(client):
     assert client.post("/api/workers", json={"name": "home"}).status_code == 201
     assert client.post("/api/workers", json={"name": "home"}).status_code == 409
@@ -59,7 +90,7 @@ def test_a_name_in_use_is_a_409(client):
 def test_removing_a_machine_forgets_it_and_404s_when_unknown(client):
     client.post("/api/workers", json={"name": "home"})
     assert client.delete("/api/workers/home").json() == {"removed": "home"}
-    assert client.get("/api/workers").json() == {"workers": []}
+    assert _machines(client) == []
     assert client.delete("/api/workers/home").status_code == 404
 
 
@@ -91,7 +122,7 @@ def test_adding_an_ssh_machine_connects_once_and_reports_why_it_could_not(client
 )
 def test_a_workers_file_that_does_not_load_runs_no_machines_and_is_named(client):
     assert client.app.state.invalid_workers and "exactly one of" in client.app.state.invalid_workers
-    assert client.get("/api/workers").json() == {"workers": []}
+    assert _machines(client) == []
 
 
 @pytest.mark.parametrize(
@@ -114,12 +145,12 @@ def test_a_hand_edit_is_picked_up_by_reload_and_a_broken_one_is_kept_out(client)
     path = client.app.state.templates_dir / "workers.yaml"
     path.write_text(f"workers:\n  boxed:\n    token_sha256: {'a' * 64}\n")
     assert client.post("/api/templates/reload").json()["refused_workers"] is None
-    assert [w["name"] for w in client.get("/api/workers").json()["workers"]] == ["boxed"]
+    assert [w["name"] for w in _machines(client)] == ["boxed"]
     path.write_text("workers:\n  boxed:\n    capacity: 0\n")
     refused = client.post("/api/templates/reload").json()["refused_workers"]
     assert refused and "capacity" in refused
     assert client.app.state.invalid_workers == refused
-    assert [w["name"] for w in client.get("/api/workers").json()["workers"]] == ["boxed"]
+    assert [w["name"] for w in _machines(client)] == ["boxed"]
 
 
 # ── the dial-in WebSocket ──

@@ -17,9 +17,12 @@ const mount = () =>
   );
 afterEach(() => vi.unstubAllGlobals());
 
+/** `GET /workers` always lists this machine's own worker first. */
+const LOCAL_ROW: Machine = { name: "local", mode: "local", online: true, reason: null, slots_used: 3, capacity: null, repos: null, last_seen: "2026-10-24T09:00:00+00:00", kraft_version: "2.5.0", give_up_after: "never" };
+
 describe("Settings › Workers", () => {
   it("lists each machine with its state, slots, repos and what it does when Kraft is gone", async () => {
-    stubFetch({ "GET /workers": [200, { workers: WORKERS_FIXTURE }] });
+    stubFetch({ "GET /workers": [200, { workers: [LOCAL_ROW, ...WORKERS_FIXTURE] }] });
     mount();
     const table = await screen.findByRole("table", { name: "Machines" });
     const [online, offline] = within(table).getAllByRole("row").slice(1);
@@ -35,8 +38,19 @@ describe("Settings › Workers", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
+  it("local-only: keeps the add hint and counts no machines, the local worker standing apart", async () => {
+    stubFetch({ "GET /workers": [200, { workers: [LOCAL_ROW] }] });
+    mount();
+    expect(await screen.findByText(/kraft admin worker add NAME --ssh HOST/)).toBeInTheDocument();
+    expect(screen.getByText("0 machines")).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Machines" })).toBeNull();
+    const mine = within(screen.getByRole("table", { name: "This machine" })).getAllByRole("row")[1];
+    expect(mine).toHaveTextContent(/^localthis machineonline3 · no limit2\.5\.0$/);
+    expect(mine).not.toHaveTextContent(/gives up|never gives up/);
+  });
+
   it("is read-only: no control to add, edit or remove a machine", async () => {
-    stubFetch({ "GET /workers": [200, { workers: WORKERS_FIXTURE }] });
+    stubFetch({ "GET /workers": [200, { workers: [LOCAL_ROW, ...WORKERS_FIXTURE] }] });
     mount();
     await screen.findByRole("table", { name: "Machines" });
     expect(screen.queryAllByRole("button")).toEqual([]);
