@@ -816,6 +816,20 @@ async def _run_changed_test_scopes(
         if suite is TestSuite.FULL
         else FULL_NO_DIFF
     )
+    # Refused here and not at load: loading would stop every item on an entry
+    # that has one before its operator could read why.
+    for scope in to_run:
+        for argv in (scope["setup"], picks.get(shlex.join(scope["cmd"]), scope["cmd"])):
+            if argv and (op := _config.shell_operator_in(argv)) is not None:
+                shown = " ".join(w if w == op else shlex.quote(w) for w in argv)
+                return await config_error_session(
+                    db,
+                    run_dirs,
+                    common,
+                    f"{task.path}: test command {shown!r} runs without a shell, so {op!r} is "
+                    "passed to it as an argument and the rest never runs; write it as "
+                    "sh -c '...' in repos.yaml\n",
+                )
     changed_files = item_paths.changed_files(run_dirs, work_item_row["id"], node.id, task.path)
     if picks:
         changed_files.parent.mkdir(parents=True, exist_ok=True)

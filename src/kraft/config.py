@@ -19,7 +19,7 @@ import shlex
 import stat
 import subprocess
 import tempfile
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self
@@ -255,6 +255,29 @@ def command_key(text: str) -> str:
         return shlex.join(shlex.split(text))
     except ValueError:
         return text.strip()
+
+
+#: Words that mean something to a shell and nothing to the `exec` a test command
+#: gets: whole words only.
+_SHELL_OPERATORS = frozenset({"&&", "||", "|", ";", ">", ">>", "<", "2>&1", "&"})
+
+
+def shell_operator_in(argv: Sequence[str]) -> str | None:
+    """The first word of `argv` that is a shell operator (`&&`, `|`, `;`...), else
+    None. Test commands run without a shell (`shlex.split`, then exec), so
+    `cd web && npm ci` runs `cd` with `&&` and the rest as arguments, and
+    passes. Only a whole word counts: `sh -c 'cd x && y'` is one word, and so is
+    `--opt=a|b`."""
+    return next((word for word in argv if word in _SHELL_OPERATORS), None)
+
+
+def shell_operator(command: str) -> str | None:
+    """`shell_operator_in` of the command's words. A command `shlex` cannot
+    read gives None; the paths that split it report that."""
+    try:
+        return shell_operator_in(shlex.split(command))
+    except ValueError:
+        return None
 
 
 #: Keys an older `repos.yaml` entry may still carry, and where each went.

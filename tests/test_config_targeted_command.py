@@ -7,6 +7,8 @@ import pytest
 from pydantic import ValidationError
 from support.harness import entry_of
 
+from kraft import config
+
 _S = {"paths": ["**"], "command": "just ci-test", "targeted_command": "just test-targeted"}
 
 
@@ -119,3 +121,32 @@ def test_a_scope_without_one_is_saved_without_the_key():
     entry = entry_of({"test_scopes": [{"paths": ["**"], "command": "just ci-test"}]})
 
     assert entry.model_dump_repo()["test_scopes"] == [{"paths": ["**"], "command": "just ci-test"}]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("cd docsite && npm ci", "&&"),
+        ("pytest | tee log", "|"),
+        ("make a ; make b", ";"),
+        ("pytest > out", ">"),
+        ("serve &", "&"),
+        ("sh -c 'cd docsite && npm ci'", None),
+        ("grep -E 'a|b' x", None),
+        ("just ci-test", None),
+        ("just 'x", None),
+    ],
+    ids=[
+        "and",
+        "pipe",
+        "semicolon",
+        "redirect",
+        "background",
+        "quoted-in-sh-c",
+        "inside-an-argument",
+        "plain",
+        "unreadable",
+    ],
+)
+def test_shell_operator(command, expected):
+    assert config.shell_operator(command) == expected

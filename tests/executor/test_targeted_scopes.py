@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from support.harness import commit_all, entry_of, git, write
 
-from kraft import events, store
+from kraft import events, executor, store
 from kraft.executor import dispatch
 
 from .test_scopes import (
@@ -281,3 +281,81 @@ async def test_scope_results_counts_a_scope_once_whichever_command_ran(item_on):
     assert [(e["session_id"], e["identity"], e["passed"]) for e in found] == [
         ("s2", "just ci-test", True)
     ]
+
+
+def _logs(tmp_path) -> dict:
+    """A scope that records that it ran."""
+    return {"paths": ["**"], "command": f"sh -c 'echo ran >> {tmp_path}/LOG'"}
+
+
+async def _round(item_on, fields, *, task=_BUILTIN):
+    """Dispatch the builtin once, on a branch that changed `web/x.txt`."""
+    it = await item_on(_verify(task))
+    base = git(it.repo, "rev-parse", "HEAD")
+    await it.database.write(lambda c: store.set_base_ref(c, it.id, base))
+    write(it.repo, "web/x.txt", "x")
+    commit_all(it.repo)
+    node = it.chain.chain.nodes[0]
+    status = await dispatch.dispatch_node(
+        it.database,
+        it.run_dirs,
+        node.steps[0].tasks[0],
+        node,
+        it.row(),
+        it.repo,
+        launch=executor.LaunchContext(repo_entry=entry_of({"setup_command": "", **fields})),
+        round=0,
+    )
+    return status, it
+
+
+@pytest.mark.parametrize(
+    ("fields", "written"),
+    [
+        pytest.param(
+            lambda t: {"test_scopes": [_logs(t), {"paths": ["**"], "command": "cd sub && true"}]},
+            "cd sub && true",
+            id="command",
+        ),
+        pytest.param(
+            lambda t: {"test_scopes": [{**_logs(t), "targeted_command": "a && b"}]},
+            "a && b",
+            id="targeted-command",
+        ),
+        pytest.param(
+            lambda t: {
+                "test_scopes": [_logs(t)],
+                "areas": {
+                    "web": {
+                        "paths": ["web/**"],
+                        "setup": "cd web && npm ci",
+                        "verification": {
+                            "test_scopes": [{"paths": ["web/**"], "command": "web-test"}]
+                        },
+                    }
+                },
+            },
+            "cd web && npm ci",
+            id="area-setup",
+        ),
+    ],
+)
+async def test_a_scope_command_written_for_a_shell_stops_the_round(
+    item_on, tmp_path, fields, written
+):
+    status, it = await _round(item_on, fields(tmp_path))
+
+    assert status == "config_error"
+    assert not (tmp_path / "LOG").exists()
+    [session] = it.sessions()
+    log = Path(session["log_path"]).read_text()
+    assert written in log and "runs without a shell" in log and "sh -c '" in log
+
+
+async def test_the_full_suite_never_runs_a_targeted_command_so_never_refuses_it(item_on, tmp_path):
+    scope = {**_logs(tmp_path), "targeted_command": "a && b"}
+
+    status, _ = await _round(item_on, {"test_scopes": [scope]}, task={**_BUILTIN, "suite": "full"})
+
+    assert status == "done"
+    assert (tmp_path / "LOG").read_text().split() == ["ran"]

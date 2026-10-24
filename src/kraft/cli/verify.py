@@ -212,6 +212,19 @@ def _steps(
             ok = False
     ran_setups: set[str] = set()
     for label, area_setup, command, targeted in scopes:
+        refused = [
+            (cmd, op)
+            for cmd in (area_setup, command, targeted)
+            if cmd and (op := config_mod.shell_operator(cmd)) is not None
+        ]
+        for cmd, op in refused:
+            say(
+                f"  test [{label}]: {cmd!r} runs without a shell, so {op!r} is passed to it "
+                "as an argument and the rest never runs; write it as sh -c '...' in repos.yaml"
+            )
+            ok = False
+        if refused:
+            continue
         if area_setup and area_setup not in ran_setups:
             ran_setups.add(area_setup)
             steps.append((f"area setup ({label})", shlex.split(area_setup), None))

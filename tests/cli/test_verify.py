@@ -201,6 +201,16 @@ def test_verify_never_saves_a_carried_copy(tmp_path, monkeypatch):
     assert carried.current_generation(store) is None
 
 
+def test_a_command_written_for_a_shell_is_refused_not_run_as_its_first_word(tmp_path):
+    repo = _repo(tmp_path)
+    ran = tmp_path / "ran"
+    entry = _entry(repo, test_scopes=[{"paths": ["**"], "command": f"touch {ran} && true"}])
+    ok, said = _verify(entry)
+    assert not ok
+    assert "runs without a shell" in said and "sh -c '...'" in said
+    assert not ran.exists()
+
+
 def test_an_areas_setup_runs_before_its_scope(tmp_path):
     repo = _repo(tmp_path, {".gitignore": "web-ready\n"})
     area = {
