@@ -15,7 +15,6 @@ from kraft.remote.local_jobs import LocalJobs
 from kraft.remote.local_link import DirectLink
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport
 
-
 #: The install of the worker `RunningWorker` and `ThreadedWorker` run, and the link a test makes.
 INSTALL = local_serve.install_id("2.3.0")
 
