@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { elapsedBetween } from "../../../format";
+import { elapsedBetween, itemStartedAt } from "../../../format";
 import { useGroupCount } from "../../board/counts";
 import { Clock, EllipsisVertical } from "../../icons";
 import { HeaderActions } from "../../shell/HeaderActions";
@@ -181,8 +181,8 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
           <span className="item-dot" aria-hidden /> {others} {others === 1 ? "other needs" : "others need"} you
         </Link>
       )}
-      <span className="item-elapsed" title={`Created ${new Date(item.created_at).toLocaleString()}`}>
-        <Clock size={12} aria-hidden /> {elapsedBetween(item.created_at, endedAt, now)}
+      <span className="item-elapsed" title={`Since ${new Date(itemStartedAt(item)).toLocaleString()}`}>
+        <Clock size={12} aria-hidden /> {elapsedBetween(itemStartedAt(item), endedAt, now)}
       </span>
       {/* Focusable, so the checkout's path in its tip reaches a keyboard as well as a pointer. */}
       {item.in_place && <Badge className="item-inplace" role="note" tabIndex={0} {...hint(item.worktree_path ?? item.repo)}>{IN_YOUR_CHECKOUT}</Badge>}
