@@ -274,3 +274,18 @@ origin: src/kraft/remote/sandboxed.py §Sandboxed._wrap
 The system SHALL give every machine a process hosts one egress channel registry, the one the sandbox backends read, whichever servers' machines open channels in it.
 enforced-by: tests/remote/test_daemon.py::test_two_servers_machines_in_one_daemon_share_the_registry_the_backends_read
 origin: src/kraft/remote/channels.py
+
+## REQ handshake-carries-capabilities
+The system SHALL send a capability list in `hello` and `welcome` and read a missing or malformed one as empty, so that a machine of an older release of the same major still connects.
+enforced-by: tests/remote/test_protocol.py::test_handshake_caps[old-machine-no-caps], tests/remote/test_protocol.py::test_handshake_caps[caps-listed], tests/remote/test_protocol.py::test_handshake_caps[caps-garbage]
+origin: src/kraft/remote/protocol.py
+
+## REQ job-frames-ignore-unknown-fields
+WHEN a job frame carries a field this version does not know, the machine SHALL ignore the field and run the job.
+enforced-by: tests/remote/test_jobs.py::test_job_spec_ignores_unknown_fields
+origin: src/kraft/remote/jobs.py §from_frame
+
+## REQ another-major-is-turned-away-naming-the-update
+IF a machine runs another major version of Kraft than the server, THEN the server SHALL refuse it with the version to update to.
+enforced-by: tests/remote/test_protocol.py::test_protocol_refusal_text[another-major], tests/remote/test_protocol.py::test_protocol_refusal_text[same-major-other-protocol]
+origin: src/kraft/remote/protocol.py §_refusal_reason

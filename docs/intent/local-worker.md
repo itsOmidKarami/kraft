@@ -64,3 +64,48 @@ origin: src/kraft/api/startup.py
 The system SHALL list the local worker first among the workers, with its running sessions and no capacity, and SHALL NOT let it be removed.
 enforced-by: tests/api/test_workers.py::test_the_local_worker_is_listed_first_and_cannot_be_removed, tests/api/test_workers.py::test_the_local_workers_running_count_comes_from_the_session_rows, tests/cli/test_worker.py::test_list_with_no_machines_shows_only_the_local_worker
 origin: src/kraft/api/routes/workers.py
+
+## REQ clean-stop-leaves-a-running-local-session-running
+WHEN the server stops cleanly, the system SHALL leave a local session of a worktree item that is still running, uncapped and not paused running, with its row `running`, its sandbox and its egress route open, for the next start to adopt through the worker.
+enforced-by: tests/adapters/test_subprocess_local.py::test_clean_stop_keep_rule[kept], tests/adapters/test_subprocess_local.py::test_a_kept_sandboxed_session_keeps_its_container[sandboxed], tests/worker/test_reattach_local.py::test_adopted_sandboxed_session_survives_a_second_stop[kept-by-a-clean-stop], tests/adapters/test_subprocess_in_place.py::test_a_running_session_cancelled_by_a_stopping_server[worktree-is-kept]
+origin: src/kraft/adapters/subprocess.py §kept_through_stop
+
+## REQ clean-stop-still-stops-what-it-must
+WHEN the server stops cleanly, the system SHALL stop a local session that a person paused, that is over its cap or has exited, that belongs to an item running in place, or that runs on another machine, as it did before the worker.
+enforced-by: tests/adapters/test_subprocess_local.py::test_clean_stop_keep_rule[paused-by-a-person], tests/adapters/test_subprocess_local.py::test_a_session_over_its_cap_is_capped_out_while_the_server_stops, tests/adapters/test_subprocess_local.py::test_a_session_that_exits_while_the_server_stops_is_closed_sandboxed, tests/adapters/test_subprocess_in_place.py::test_a_running_session_cancelled_by_a_stopping_server[in-place-is-stopped-while-stopping], tests/adapters/test_subprocess_remote.py::test_a_remote_standin_is_stopped_by_a_clean_stop
+origin: src/kraft/adapters/subprocess.py §kept_through_stop
+
+## REQ stop-now-ends-the-local-sessions
+WHEN `kraft admin stop --now` stops the server, the system SHALL write the stop-now marker before the SIGTERM, the stopping server SHALL read and delete it and stop every local session, and a marker no server read SHALL NOT turn a later clean stop into one.
+enforced-by: tests/cli/test_admin_running_agents.py::test_stop_now_marks_the_stop_for_the_server_and_says_nothing_is_kept, tests/cli/test_admin_running_agents.py::test_stop_now_writes_the_marker_only_when_a_server_runs, tests/adapters/test_subprocess_local.py::test_clean_stop_keep_rule[now-stops-it], tests/api/test_startup.py::test_a_stop_now_marker_ends_the_local_sessions_a_clean_stop_keeps[stop-now-ends], tests/api/test_startup.py::test_a_stop_now_marker_ends_the_local_sessions_a_clean_stop_keeps[clean-stop-keeps], tests/api/test_startup.py::test_boot_deletes_a_stop_now_marker_no_server_read
+origin: src/kraft/api/startup.py
+
+## REQ stop-says-how-many-steps-keep-running
+WHEN `kraft admin stop` stops a server running local steps of worktree items, it SHALL say how many keep running and that nothing answers their permission prompts or enforces their caps until Kraft is back.
+enforced-by: tests/cli/test_admin_running_agents.py::test_stop_says_local_steps_keep_running[two], tests/cli/test_admin_running_agents.py::test_stop_says_local_steps_keep_running[in-place-one-of-two]
+origin: src/kraft/cli/admin.py §_confirm_running_agents
+
+## REQ each-installed-kraft-has-its-own-worker
+The system SHALL run the local worker of each installed kraft on a socket, lock and pid file named for that install, so that a worker of another install is neither displaced nor given new sessions.
+enforced-by: tests/remote/test_local_serve.py::test_install_id_differs_for_a_reinstall_of_the_same_version, tests/remote/test_local_serve.py::test_workers_of_two_installs_run_side_by_side, tests/remote/test_local_link.py::test_start_worker_goes_out_of_the_units_cgroup_under_systemd[detached]
+origin: src/kraft/remote/local_serve.py §install_id
+
+## REQ new-worker-adopts-the-old-workers-sessions
+WHEN a server of a newer install starts its worker while the older one holds sessions, the new worker SHALL hold them by pid identity, and the older one SHALL exit once it has reaped its own, leaving no record behind.
+enforced-by: tests/remote/test_local_worker_process.py::test_new_install_worker_adopts_the_old_workers_sessions, tests/remote/test_local_serve.py::test_two_workers_reaping_one_record_do_not_fail
+origin: src/kraft/remote/local_jobs.py
+
+## REQ service-worker-starts-outside-the-units-cgroup
+WHILE Kraft runs as a systemd service, the system SHALL start the local worker in a scope of its own outside the unit's cgroup, and SHALL start it the plain way when `systemd-run` fails.
+enforced-by: tests/remote/test_local_link.py::test_start_worker_goes_out_of_the_units_cgroup_under_systemd[service-linux], tests/remote/test_local_link.py::test_start_worker_goes_out_of_the_units_cgroup_under_systemd[systemd-run-fails]
+origin: src/kraft/remote/local_link.py §_start_worker
+
+## REQ new-major-update-waits-for-running-steps
+WHEN `kraft admin update --restart` would move a running server to a new major version, the system SHALL mark the release for when Kraft is free instead of restarting, unless `--now` is given, and SHALL refuse `kraft admin restart` onto a new major while an item is active.
+enforced-by: tests/cli/test_admin_running_agents.py::test_update_across_a_major_waits_for_running_steps[across-a-major-waits-for-free], tests/cli/test_admin_running_agents.py::test_update_across_a_major_waits_for_running_steps[now-restarts-at-once], tests/cli/test_admin_running_agents.py::test_restart_onto_a_new_major_with_an_item_active_is_refused[item-active], tests/cli/test_admin_running_agents.py::test_crosses_major[1.4-to-2.0]
+origin: src/kraft/cli/admin.py §_crosses_major
+
+## REQ uninstall-service-says-a-worker-remains
+WHEN `kraft admin uninstall-service` removes the unit while this home's local worker answers, it SHALL say the worker is still finishing its steps and exits on its own.
+enforced-by: tests/cli/test_admin_running_agents.py::test_uninstall_service_says_a_worker_is_still_finishing_its_steps[worker-running]
+origin: src/kraft/cli/admin.py §_say_worker_outlives
