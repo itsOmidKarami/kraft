@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
+import threading
 import time
 
 import psutil
@@ -239,3 +241,68 @@ def test_install_and_current():
     finally:
         local_link.install(None)
     assert local_link.current() is None
+
+
+class _Launches:
+    """`subprocess.Popen` as `_start_worker` calls it: each argv kept, and what `systemd-run`
+    exits with."""
+
+    def __init__(self, systemd_run_exits: int | None) -> None:
+        self.argvs, self.systemd_run_exits = [], systemd_run_exits
+        self.fell_back = threading.Event()
+
+    def __call__(self, argv, **kwargs):
+        self.argvs.append(list(argv))
+        assert kwargs["start_new_session"] is True
+        if len(self.argvs) > 1:
+            self.fell_back.set()
+        exits = self.systemd_run_exits if argv[0] == "systemd-run" else None
+
+        class Process:
+            def wait(self, timeout=None):
+                if exits is None:
+                    raise subprocess.TimeoutExpired(argv, timeout)
+                return exits
+
+        return Process()
+
+
+@pytest.mark.parametrize(
+    ("systemd", "exits", "starts"),
+    [
+        (True, None, ["systemd-run"]),
+        (True, 1, ["systemd-run", "worker"]),
+        (False, None, ["worker"]),
+    ],
+    ids=["service-linux", "systemd-run-fails", "detached"],
+)
+def test_start_worker_goes_out_of_the_units_cgroup_under_systemd(
+    tmp_path, monkeypatch, systemd, exits, starts
+):
+    launches = _Launches(exits)
+    monkeypatch.setattr(local_link.subprocess, "Popen", launches)
+    monkeypatch.setattr(local_link, "_under_systemd", lambda: systemd)
+    monkeypatch.setattr(local_link, "_SYSTEMD_RUN_S", 0.05)
+    monkeypatch.setenv("KRAFT_HOME", "/home/k")
+
+    local_link._start_worker(tmp_path / "run", "2.3.0-abcd1234")
+    if exits:
+        assert launches.fell_back.wait(2)
+
+    first = launches.argvs[0]
+    assert [
+        ("systemd-run" if a[0] == "systemd-run" else "worker") for a in launches.argvs
+    ] == starts
+    worker = launches.argvs[-1]
+    assert worker[-6:] == [
+        "worker",
+        "local",
+        "--run-dir",
+        str(tmp_path / "run"),
+        "--install",
+        "2.3.0-abcd1234",
+    ]
+    if systemd:
+        assert first[:5] == ["systemd-run", "--user", "--scope", "--collect", "--quiet"]
+        assert "--setenv=KRAFT_HOME=/home/k" in first
+        assert first[-len(worker) :] == worker

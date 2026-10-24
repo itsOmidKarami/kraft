@@ -16,6 +16,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -90,31 +91,84 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+#: How long a `systemd-run` that cannot start the worker (no user manager) has to say so.
+_SYSTEMD_RUN_S = 2.0
+
+
+def _under_systemd() -> bool:
+    """Whether this server is a systemd service, whose cgroup a stop of the unit empties."""
+    from kraft import apply
+
+    return sys.platform.startswith("linux") and apply.managed()
+
+
+def _worker_argv(run_base: Path, install: str) -> list[str]:
+    return [
+        sys.executable,
+        "-P",
+        "-m",
+        "kraft",
+        "admin",
+        "worker",
+        "local",
+        "--run-dir",
+        str(run_base),
+        "--install",
+        install,
+    ]
+
+
+def _systemd_scope(argv: list[str]) -> list[str]:
+    """`argv` run in a scope of its own, outside the service's cgroup: stopping or restarting
+    the unit (`KillMode=control-group`) would end the worker and every session in it otherwise,
+    as `apply.spawn_restart` does for its helper. The scope runs the command itself, so the
+    worker is not a child of `systemd-run` and the redirect of its output applies to it."""
+    from kraft.cli import admin
+
+    env = [f"--setenv={k}={v}" for k, v in admin._instance_env().items()]
+    return ["systemd-run", "--user", "--scope", "--collect", "--quiet", *env, *argv]
+
+
 def _start_worker(run_base: Path, install: str) -> None:
-    """Start the worker of install `install` as a process of its own, outliving this server."""
+    """Start the worker of install `install` as a process of its own, outliving this server.
+
+    A session lives in the worker's process group, which `start_new_session` takes out of the
+    server's (launchd leaves it alone). Under a systemd service it is started in a scope of its
+    own; where there is no user manager to do that (`systemd-run` fails at once) it starts the
+    plain way."""
     logs = Path(run_base) / "logs"
     logs.mkdir(parents=True, exist_ok=True)
-    with open(logs / "local-worker.log", "ab") as out:
-        subprocess.Popen(
-            [
-                sys.executable,
-                "-P",
-                "-m",
-                "kraft",
-                "admin",
-                "worker",
-                "local",
-                "--run-dir",
-                str(run_base),
-                "--install",
-                install,
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=out,
-            stderr=out,
-            start_new_session=True,
-            env=os.environ.copy(),
-        )
+    log_path = logs / "local-worker.log"
+    argv = _worker_argv(run_base, install)
+
+    def launch(command: list[str]) -> subprocess.Popen:
+        with open(log_path, "ab") as out:
+            return subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=out,
+                start_new_session=True,
+                env=os.environ.copy(),
+            )
+
+    if not _under_systemd():
+        launch(argv)
+        return
+    scoped = launch(_systemd_scope(argv))
+
+    def fall_back() -> None:
+        try:
+            code = scoped.wait(_SYSTEMD_RUN_S)
+        except subprocess.TimeoutExpired:
+            return  # the scope took the worker and it is running
+        if code != 0:
+            log.warning(
+                "systemd-run could not start the local worker (%s); starting it plainly", code
+            )
+            launch(argv)
+
+    threading.Thread(target=fall_back, daemon=True).start()
 
 
 class _Row:

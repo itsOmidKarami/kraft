@@ -18,6 +18,7 @@ import hashlib
 import logging
 import os
 import re
+import socket
 from pathlib import Path
 
 import kraft
@@ -59,6 +60,21 @@ def lock_path(run_base: Path, install: str) -> Path:
 
 def pid_path(run_base: Path, install: str) -> Path:
     return state_dir(run_base) / f"worker-{install}.pid"
+
+
+def answering(run_base: Path) -> list[str]:
+    """The installs whose worker under `run_base` answers on its socket right now."""
+    found = []
+    for pid_file in sorted(state_dir(run_base).glob("worker-*.pid")):
+        install = pid_file.name.removeprefix("worker-").removesuffix(".pid")
+        with socket.socket(socket.AF_UNIX) as probe:
+            probe.settimeout(0.5)
+            try:
+                probe.connect(str(socket_path(run_base, install)))
+            except OSError:
+                continue
+        found.append(install)
+    return found
 
 
 class _Worker:

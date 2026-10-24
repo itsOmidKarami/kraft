@@ -281,3 +281,147 @@ def test_restart_help_says_when_it_exits_1(capsys):
     assert "With no server running it starts nothing and exits 1" in text
     assert "attached to a terminal is stopped and not started again" in text
     assert "restart exits 1" in text
+
+
+# --- a new major version -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("installed", "target", "crosses"),
+    [
+        ("1.4.2", "2.0.0", True),
+        ("1.4.2", "1.5.0", False),
+        ("2.0.0rc1", "2.0.0", False),
+        ("0.0.0+source", "2.0.0", False),
+        ("1.4.2", "2.0.0.dev3+g1a2b3c", False),
+    ],
+    ids=["1.4-to-2.0", "1.4-to-1.5", "rc-to-final", "source-checkout", "dev-build"],
+)
+def test_crosses_major(installed, target, crosses):
+    assert cli.admin._crosses_major(installed, target) is crosses
+
+
+@pytest.fixture
+def new_release(monkeypatch, tmp_path):
+    """`kraft admin update` finds v2.0.0 while 1.4.2 is installed, and records what it does:
+    `.performed` (installs), `.marked` (tags marked for when Kraft is free)."""
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path / "templates"))
+    state = SimpleNamespace(performed=[], marked=[], running="1.4.2")
+    monkeypatch.setattr(update, "latest", lambda **k: SimpleNamespace(tag="v2.0.0"))
+    monkeypatch.setattr(update, "installed", lambda: "1.4.2")
+    monkeypatch.setattr(update, "is_behind", lambda r: True)
+    monkeypatch.setattr(update, "shadowing_kraft", lambda: None)
+    monkeypatch.setattr(update, "perform", lambda r: state.performed.append(r.tag) or 0)
+    monkeypatch.setattr(cli.admin, "_running_server_version", lambda: state.running)
+    monkeypatch.setattr(
+        cli.admin, "_update_when_free", lambda ns: state.marked.append(ns.when_free)
+    )
+    return state
+
+
+@pytest.mark.parametrize(
+    ("argv", "running", "performed", "marked", "restarts"),
+    [
+        (["--restart"], "1.4.2", False, ["v2.0.0"], False),
+        (["--restart"], "1.4.1", False, ["v2.0.0"], False),
+        (["--restart"], "2.0.0", True, [], True),
+        (["--restart"], None, True, [], True),
+        (["--now"], "1.4.2", True, [], True),
+        ([], "1.4.2", True, [], False),
+    ],
+    ids=[
+        "across-a-major-waits-for-free",
+        "across-a-major-from-another-minor",
+        "within-a-major-restarts-at-once",
+        "no-server-installs-only",
+        "now-restarts-at-once",
+        "no-restart-installs-only",
+    ],
+)
+def test_update_across_a_major_waits_for_running_steps(
+    board, terminal, restarted, new_release, capsys, argv, running, performed, marked, restarts
+):
+    board["active"] = []
+    new_release.running = running
+    cli.main(["admin", "update", *argv])
+    assert (bool(new_release.performed), new_release.marked, bool(restarted)) == (
+        performed,
+        marked,
+        restarts,
+    )
+    said = capsys.readouterr().out
+    assert ("running steps are not interrupted" in said) is bool(marked)
+
+
+def test_update_now_marks_the_stop_for_the_server_and_asks_about_every_item(
+    board, terminal, new_release, tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    run_dirs = RunDirs(tmp_path / "run")
+    held = hold_pidfile(run_dirs.pid, 4171)
+    monkeypatch.setattr(cli.admin, "_service_installed", lambda: True)
+    marked_when_restarted = []
+    monkeypatch.setattr(
+        cli.admin,
+        "_restart_service",
+        lambda: marked_when_restarted.append(run_dirs.stop_now.exists()),
+    )
+    board["active"] = WORKTREE
+    terminal.answer = "y"
+    try:
+        cli.main(["admin", "update", "--now"])
+    finally:
+        held.release()
+    assert marked_when_restarted == [True]
+    assert "restarting the server ends the agent of any active item (1)" in capsys.readouterr().err
+    assert terminal.asked == ["Go on? [y/N] "]
+
+
+@pytest.mark.parametrize(
+    ("running", "active", "refused"),
+    [
+        ("1.4.2", ACTIVE, True),
+        ("1.4.2", WORKTREE, True),
+        ("1.4.2", [], False),
+        ("2.0.0", ACTIVE, False),
+        (None, ACTIVE, False),
+    ],
+    ids=["item-active", "worktree-item-active", "idle", "same-major", "no-server"],
+)
+def test_restart_onto_a_new_major_with_an_item_active_is_refused(
+    board, terminal, restarted, monkeypatch, capsys, running, active, refused
+):
+    monkeypatch.setattr(update, "installed", lambda: "2.0.0")
+    monkeypatch.setattr(cli.admin, "_running_server_version", lambda: running)
+    board["active"] = active
+    if refused:
+        with pytest.raises(SystemExit) as stopped:
+            cli.main(["admin", "restart"])
+        assert stopped.value.code == 1
+        err = " ".join(capsys.readouterr().err.split())
+        assert (
+            "the installed kraft is a new major version: kraft admin restart --when-free waits "
+            "for running steps, kraft admin stop --now && kraft admin start stops them" in err
+        )
+    else:
+        terminal.answer = None
+        cli.main(["admin", "restart"])
+    assert bool(restarted) is not refused
+
+
+@pytest.mark.parametrize("answering", [["2.3.0-abcd1234"], []], ids=["worker-running", "none"])
+def test_uninstall_service_says_a_worker_is_still_finishing_its_steps(
+    tmp_path, monkeypatch, capsys, answering
+):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(cli.admin.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(cli.admin, "_systemd_unit_path", lambda: tmp_path / "kraft.service")
+    monkeypatch.setattr(cli.admin, "_launchd_plist_path", lambda: tmp_path / "kraft.plist")
+    from kraft.remote import local_serve
+
+    monkeypatch.setattr(local_serve, "answering", lambda run_base: answering)
+    cli.main(["admin", "uninstall-service"])
+    said = capsys.readouterr().out
+    assert ("the local worker is still finishing its steps; it exits on its own" in said) is bool(
+        answering
+    )

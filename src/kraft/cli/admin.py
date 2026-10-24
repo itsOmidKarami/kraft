@@ -230,6 +230,19 @@ def _cmd_uninstall_service(ns: argparse.Namespace) -> None:
         print(f"kraft: removed {path}")
     else:
         raise SystemExit(f"kraft admin uninstall-service: unsupported platform {sys.platform}")
+    _say_worker_outlives()
+
+
+def _say_worker_outlives() -> None:
+    """Removing the unit stops the server, not the local worker: it was started outside the
+    unit's cgroup (or its process group) so a stop leaves the steps running."""
+    from kraft.remote import local_serve
+
+    if local_serve.answering(_pid_path().parent):
+        print(
+            "kraft: the local worker is still finishing its steps; "
+            "it exits on its own when they end"
+        )
 
 
 def adopt_pre_2_home(in_use: Path) -> bool:
@@ -1284,6 +1297,35 @@ def _ask(question: str) -> str:
     return sys.stdin.readline()
 
 
+def _mark_stop_now(run_dir: Path | None = None) -> None:
+    """Tell the server about to be stopped that this stop ends the local steps it would leave
+    running (`RunDirs.stop_now`)."""
+    RunDirs(run_dir or _pid_path().parent).stop_now.write_text("")
+
+
+def _running_server_version() -> str | None:
+    """The version of the server answering now, or None when none does."""
+    try:
+        payload = asyncio.run(asyncio.wait_for(client.health(), timeout=_LIST_TIMEOUT))
+    except Exception:  # noqa: BLE001 -- no server, or one that is wedged: nothing to compare
+        return None
+    return payload.get("version")
+
+
+def _is_dev(version: str) -> bool:
+    return ".dev" in version or version.endswith("+source")
+
+
+def _crosses_major(installed: str, target: str) -> bool:
+    """Whether going from `installed` to `target` changes the major version. Never for a dev
+    install (a checkout or a dev build), whose number says nothing about its protocol."""
+    from kraft import update
+
+    if _is_dev(installed) or _is_dev(target):
+        return False
+    return update._parts(installed)[:1] != update._parts(target)[:1]
+
+
 def _cmd_stop(ns: argparse.Namespace, *, warn: bool = True) -> None:
     """SIGTERM to the pid in the run dir, then wait for it to actually go.
 
@@ -1299,7 +1341,7 @@ def _cmd_stop(ns: argparse.Namespace, *, warn: bool = True) -> None:
     if warn:
         _confirm_running_agents(ns, "stopping", ask=False, now=now, keeps=True)
     if now:
-        RunDirs(pid_path.parent).stop_now.write_text("")
+        _mark_stop_now(pid_path.parent)
     os.kill(pid, signal.SIGTERM)
     # 15s, not 5: the poll must not expire before the graceful-shutdown backstop
     # it is waiting on (`_serve`, `_GRACEFUL_SHUTDOWN_S`).
@@ -1570,9 +1612,31 @@ def _cmd_restart(ns: argparse.Namespace) -> None:
         why = f" (waiting: {state['blocked'][0]})" if state.get("blocked") else ""
         print(f"kraft: Kraft will restart once nothing is running{why}")
         return
+    _refuse_restart_across_a_major()
     _confirm_running_agents(ns, "restarting", ask=True)
     _refuse_restart_with_no_server()
     _restart(ns)
+
+
+def _refuse_restart_across_a_major() -> None:
+    """A restart onto a new major version while an item is active: the new server cannot work
+    with the old one's steps, so they would end. `--when-free` waits for them."""
+    from kraft import update
+
+    running = _running_server_version()
+    if running is None or not _crosses_major(running, update.installed()):
+        return
+    try:
+        items = asyncio.run(asyncio.wait_for(client.active_items(), timeout=_LIST_TIMEOUT))
+    except Exception:  # noqa: BLE001
+        return
+    if items:
+        print(
+            "kraft: the installed kraft is a new major version: kraft admin restart --when-free "
+            "waits for running steps, kraft admin stop --now && kraft admin start stops them",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 def _refuse_restart_with_no_server() -> None:
@@ -1590,6 +1654,8 @@ def _refuse_restart_with_no_server() -> None:
 def _restart(ns: argparse.Namespace) -> None:
     """`_cmd_restart` once its question about running agents is answered:
     `update --restart` asks it before installing, not after."""
+    if getattr(ns, "now", False) and _read_pid(_pid_path()) is not None:
+        _mark_stop_now()
     if _service_installed():
         _restart_service()
         return
@@ -1924,9 +1990,24 @@ def _cmd_update(ns: argparse.Namespace) -> None:
         newest = "the newest release" + (f" on the {channel} channel" if named else "")
         print(f"kraft {here} is up to date ({release.tag} is {newest})")
         return
+    now = getattr(ns, "now", False)
+    if now:
+        ns.restart = True
     if ns.restart:
+        running = _running_server_version()
+        if running is not None and not now and _crosses_major(running, release.tag):
+            # The new major cannot take over the steps of the old: they finish first.
+            ns.when_free = release.tag
+            _update_when_free(ns)
+            print(
+                "kraft: it is a new major version, so running steps are not interrupted; "
+                "kraft admin update --now installs and restarts at once"
+            )
+            return
         # Before installing, so answering no leaves nothing half done.
-        _confirm_running_agents(ns, "restarting", ask=True, declined="nothing installed or stopped")
+        _confirm_running_agents(
+            ns, "restarting", ask=True, declined="nothing installed or stopped", now=now
+        )
     print(f"kraft {here} -> {release.tag}")
     update_prechecks(release, interactive=True, assume_yes=ns.yes, channel=channel)
     code = update.perform(release)
@@ -2050,7 +2131,16 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
         action="store_true",
         help=(
             "restart a running server after a successful update, the same way it was "
-            "running; this ends any running agent, so pause running items first"
+            "running; steps of worktree items keep running. An update to a new major "
+            "version waits until nothing is running instead (see --now)"
+        ),
+    )
+    update_p.add_argument(
+        "--now",
+        action="store_true",
+        help=(
+            "install and restart at once, ending every running step, including those a "
+            "restart leaves running and those an update to a new major version waits for"
         ),
     )
     update_p.add_argument(
