@@ -49,7 +49,9 @@ class Copy:
         if (self.bare / "HEAD").exists():
             return
         self.bare.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["git", "init", "-q", "--bare", str(self.bare)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "init", "-q", "--bare", str(self.bare)], check=True, capture_output=True
+        )
         self._bare("config", "user.email", "kraft@machine")
         self._bare("config", "user.name", "kraft")
 
@@ -93,7 +95,9 @@ class Copy:
 
     def bundle_since(self, branch: str, exclude: Iterable[str], dest: Path) -> str | None:
         """Bundle `branch` without `exclude`; its tip, or None when nothing is new."""
-        tip = self._bare("rev-parse", "--verify", f"refs/heads/{branch}", check=False).stdout.strip()
+        tip = self._bare(
+            "rev-parse", "--verify", f"refs/heads/{branch}", check=False
+        ).stdout.strip()
         exclude = list(exclude)
         if not tip or tip in exclude:
             return None

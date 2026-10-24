@@ -70,6 +70,11 @@ def build(
     entries,
     time_cap: caps.Deadline | None,
     idle_s: float | None,
+    sandbox: dict | None = None,
+    egress: dict | None = None,
+    credentials: list[dict] | None = None,
+    sentinels: dict[str, str] | None = None,
+    withheld: list[str] | None = None,
 ) -> JobSpec:
     done = subprocess.run(
         ["git", "-C", str(cwd), "rev-parse", "--verify", f"refs/heads/{branch}"],
@@ -104,4 +109,9 @@ def build(
         deadline_s=None if time_cap is None else max(0.0, time_cap.at - caps.monotonic()),
         cap=None if time_cap is None else asdict(time_cap.hit),
         idle_s=idle_s,
+        sandbox=sandbox,
+        egress=egress,
+        credentials=list(credentials or []),
+        sentinels=dict(sentinels or {}),
+        withheld=list(withheld or []),
     )

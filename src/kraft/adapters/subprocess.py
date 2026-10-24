@@ -912,8 +912,25 @@ async def _run_task(
     credentials = _harness.manage(every, declared, phase="runtime")
     sentinels = {c.env: c.sentinel for c in credentials}
     withheld = {n for c in every for n in (c.env, c.source) if n}
-    rules = _inject.rules(credentials, full_env)
+    rules = _inject.rules(credentials, {} if runner is not None else full_env)
     full_env = {k: v for k, v in full_env.items() if k not in withheld}
+    sandbox_job: dict = {}
+    if backend is not None and runner is not None:
+        # The machine builds this sandbox, so nothing below runs a backend here: it is sent what
+        # the backend needs, and the credentials as declarations only (their values are read
+        # from the machine's own environment).
+        sandbox_job = {
+            "sandbox": dict(sandbox),
+            "egress": PhaseLists.of(
+                sandbox["network"], "runtime", () if sandbox.get("kit") else network_requires
+            ).to_json()
+            if network
+            else None,
+            "credentials": [r.to_json() for r in rules],
+            "sentinels": sentinels,
+            "withheld": sorted(withheld),
+        }
+        backend, network = None, False
     refs: Sequence = ()
     root, members = checkout if checkout is not None else (Path(cwd), {})
     # What a sandboxed worker may write outside its worktree and its home:
@@ -1158,6 +1175,7 @@ async def _run_task(
                         entries=entries,
                         time_cap=time_cap,
                         idle_s=idle_s,
+                        **sandbox_job,
                     )
                     run = await _remote_runs.current().launch(
                         spec, claim, entries=entries, folder=files.folder

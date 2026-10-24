@@ -181,3 +181,8 @@ def test_a_sandboxed_codex_whose_image_cannot_vouch_for_the_hook_is_refused(
     spawned = codex_log.read_text().splitlines() if codex_log.exists() else []
     assert len(spawned) == (2 if why == "image-codex-distrusts" else 0)
     assert image_codex.exists() == (why != "runtime-refuses")
+
+
+def test_a_sandboxed_codex_step_whose_policy_needs_its_hook_cannot_run_on_a_machine(run, tmp_path):
+    with pytest.raises(LaunchRefused, match="sandboxed codex step cannot run on a machine yet"):
+        _codex(run, tmp_path, deny_tools=("Bash",), sandbox=NETWORKED, runner="gpu")

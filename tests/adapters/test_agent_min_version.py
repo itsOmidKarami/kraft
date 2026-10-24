@@ -65,3 +65,18 @@ def test_a_sandboxed_opencode_is_asked_in_its_image(run, tmp_path, monkeypatch):
             sandbox={"kind": "docker", "image": "x", "unrestricted_network": True},
         )
     assert Image.closed
+
+
+def test_a_sandboxed_step_on_a_machine_asks_no_image_of_the_server(run, tmp_path, monkeypatch):
+    def asked(*a, **kw):
+        raise AssertionError("the server's image is not the machine's")
+
+    monkeypatch.setattr("kraft.worker.backends.docker.oneshot", asked)
+    seen = _opencode(
+        run,
+        tmp_path,
+        "opencode v1.0.4",
+        sandbox={"kind": "docker", "image": "x", "unrestricted_network": True},
+        runner="gpu",
+    )
+    assert seen["runner"] == "gpu" and seen["sandbox"]["kind"] == "docker"

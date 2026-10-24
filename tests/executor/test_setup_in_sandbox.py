@@ -12,11 +12,11 @@ import shutil
 import subprocess
 
 import pytest
-from support.harness import entry_of, fake_docker_bin, v1_chain, v1_walk
-from support.workspace import member_checkout, repositories, workspace_item
 
 # The backend that shares no filesystem, and a channel registry for its egress.
-from worker.test_backends import Remote
+from support.fake_backend import Remote
+from support.harness import entry_of, fake_docker_bin, v1_chain, v1_walk
+from support.workspace import member_checkout, repositories, workspace_item
 
 from kraft import builtins as kraft_builtins
 from kraft import config as _config

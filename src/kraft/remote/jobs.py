@@ -48,6 +48,13 @@ class JobSpec:
     deadline_s: float | None = None  # running seconds left at launch: the step's time cap
     cap: dict | None = None  # the `caps.Hit`, as a dict, that `deadline_s` enforces
     idle_s: float | None = None  # stop the command when its log is silent this long
+    # The item's sandbox, which the machine builds itself and never runs the step without. Its
+    # credentials are declarations (`InjectRule.to_json`): the values are the machine's own.
+    sandbox: dict | None = None
+    egress: dict | None = None  # `PhaseLists.to_json()`; None without `network:`
+    credentials: list[dict] = field(default_factory=list)
+    sentinels: dict[str, str] = field(default_factory=dict)  # env name -> the sentinel it holds
+    withheld: list[str] = field(default_factory=list)  # names a sandboxed worker never sees
 
     @property
     def key(self) -> str:

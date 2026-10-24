@@ -1203,7 +1203,9 @@ async def run_agent_task(
             f"HTTP(S)_PROXY, and a sandbox with `network:` has no other route out; use "
             f"another harness, or remove the sandbox's `network`"
         )
-    if h.min_version is not None:
+    # A sandbox built on a machine is not the server's image: asking the server's about the CLI
+    # would answer for the wrong one. The machine's own probe still refuses a missing CLI.
+    if h.min_version is not None and not (sandbox and runner):
         exe = shlex.split(command) if command else [h.command[0]]
         # ponytail: a sandboxed launch asks its image on every launch (one short
         # container); cache on the image id if that shows.
@@ -1240,6 +1242,11 @@ async def run_agent_task(
     hook_argv: tuple[str, ...] = ()
     if h.permission_hook == "codex" and _hook_install.needs_hook(allowed_tools, deny_tools, grants):
         exe = shlex.split(command) if command else [h.command[0]]
+        if sandbox and runner:
+            raise LaunchRefused(
+                f"harness {harness!r}: codex's hook trust is checked against the image that runs "
+                f"it; a sandboxed codex step cannot run on a machine yet"
+            )
         try:
             # The session's own codex vouches for the hook: a sandbox's is the
             # image's, and another version may hash it otherwise (skipped).
