@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from kraft import caps as _caps
+from kraft import carried as _carried
 from kraft import events, inplace, item_paths, logs, reviewed_head, store
 from kraft import harness as _harness
 from kraft.adapters import subprocess as _subprocess
@@ -236,6 +237,22 @@ def _copy_attachments(
         )
 
 
+def _is_ignored(worktree: Path, rel: str) -> bool:
+    """Whether the worktree's own `.gitignore` rules cover `rel`. The worktree's
+    rules, not the base's: `base_ignore_args` widens what counts as ignored for
+    Kraft's own commits, but a plain `git add -A` from an agent sees only what
+    is checked out here."""
+    return (
+        subprocess.run(
+            ["git", "check-ignore", "-q", "--", rel],
+            cwd=str(worktree),
+            capture_output=True,
+            text=True,
+        ).returncode
+        == 0
+    )
+
+
 def _carry_local_files(repo: Path, worktree: Path, rels: list[str]) -> tuple[list[str], list[str]]:
     """Copy `rels` from `repo` into `worktree`. Returns `(carried, refused)`.
 
@@ -285,22 +302,48 @@ def _carry_local_files(repo: Path, worktree: Path, rels: list[str]) -> tuple[lis
         resolved = dest.resolve()
         if resolved != worktree_root and worktree_root not in resolved.parents:
             continue
-        # The worktree's own rules, not the base's: `base_ignore_args` widens what
-        # counts as ignored for Kraft's own commits, but a plain `git add -A`
-        # from an agent sees only what is checked out here.
-        ignored = subprocess.run(
-            ["git", "check-ignore", "-q", "--", rel],
-            cwd=str(worktree),
-            capture_output=True,
-            text=True,
-        )
-        if ignored.returncode != 0:
+        if not _is_ignored(worktree, rel):
             refused.append(rel)
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dest)
         carried.append(rel)
     return carried, refused
+
+
+def _carry_set(
+    run_dirs, repo: Path, worktree: Path, rels: list[str], record: Path | None
+) -> _carried.CarryIn:
+    """Copy a repo's `carry` files into `worktree`, the whole set from one source.
+
+    The repo's newest saved copy when it holds any of them, else the repo's
+    checkout, never files from both: a database from one beside a WAL from the
+    other is a torn record. The copy rules are `_carry_local_files`' (an
+    unignored file is refused). The checkout is only ever read, and a person
+    may be writing to it, so a copy whose source files changed size or mtime
+    while it was made is discarded and the tool starts cold.
+
+    With `record`, writes the baseline: what is in the worktree now, which a
+    later save compares against (`kraft.carried`).
+    """
+    if not rels:
+        return _carried.CarryIn("none", [], [])
+    saved = _carried.saved_set(_carried.store_dir(run_dirs, repo), rels)
+    if saved is not None:
+        taken, refused = _carry_local_files(saved, worktree, rels)
+        carry_in = _carried.CarryIn("saved", taken, refused)
+    else:
+        before = _carried.stats(repo, rels)
+        taken, refused = _carry_local_files(repo, worktree, rels)
+        if _carried.stats(repo, rels) != before:
+            for rel in taken:
+                (worktree / rel).unlink(missing_ok=True)
+            carry_in = _carried.CarryIn("none", [], refused, torn=True)
+        else:
+            carry_in = _carried.CarryIn("checkout" if taken else "none", taken, refused)
+    if record is not None:
+        _carried.write_record(record, carry_in.as_record(_carried.stats(worktree, rels)))
+    return carry_in
 
 
 def _uncarried_local_files(repo: Path, worktree: Path) -> list[str]:
@@ -695,6 +738,7 @@ async def ensure_worktree(
     # above -- skipping setup_command entirely and dispatching into an
     # unprepared worktree.
     local_files = repo_entry.local_files if repo_entry is not None else []
+    carry = repo_entry.carry if repo_entry is not None else []
     # Pin the base before the worktree exists, so the early return above
     # guarantees a crashed-and-retried run never re-pins to a moved HEAD.
     row = db.read(
@@ -752,6 +796,23 @@ async def ensure_worktree(
             "cannot keep them out of a commit): %s",
             work_item_id,
             ", ".join(refused),
+        )
+    # Before `_prepare` like `local_files`: setup may read the tool's state. A
+    # sandboxed item is seeded too (it may read a carried copy, never save one).
+    carry_in = await asyncio.to_thread(
+        _carry_set,
+        run_dirs,
+        Path(repo),
+        worktree,
+        carry,
+        item_paths.carried_record(run_dirs, work_item_id),
+    )
+    if carry_in.refused:
+        logger.warning(
+            "carry entries not carried into %s (the worktree would not ignore them, so "
+            "Kraft cannot keep them out of a commit): %s",
+            work_item_id,
+            ", ".join(carry_in.refused),
         )
     # Every node from `spec` on can commit, and the shared pre-commit hook
     # needs its tooling on PATH, so the worktree must be a working environment
@@ -2312,6 +2373,7 @@ async def prepare_runtime(
     *,
     sandbox: dict | None = None,
     checkout: _sandbox.Checkout | None = None,
+    carried_record: Path | None = None,
 ) -> str:
     """Re-prepare an existing worktree and say what happened.
 
@@ -2341,12 +2403,16 @@ async def prepare_runtime(
     # below rather than only in the server's logger (Kraft-hro48).
     local_files = repo_entry.local_files if repo_entry is not None else []
     refused = [r for r in local_files if (repo / r).exists() and not (worktree / r).exists()]
+    carry = repo_entry.carry if repo_entry is not None else []
     missing = [
         n
         for n in await asyncio.to_thread(_uncarried_local_files, repo, worktree)
-        if n not in refused
+        if n not in refused and n not in carry
     ]
     report = f"worktree ready at {worktree}\n{setup_log}"
+    if carried_record is not None and carry:
+        lines = _carried.report_lines(_carried.read_record(carried_record))
+        report += "\n" + "\n".join(lines) + "\n"
     if refused:
         report += (
             "\nlocal_files entries NOT carried into this worktree -- only a file the "

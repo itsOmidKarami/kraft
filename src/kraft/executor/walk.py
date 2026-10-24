@@ -9,7 +9,7 @@ from pathlib import Path
 
 from kraft import builtins as _builtins
 from kraft import config as _config
-from kraft import events, inplace, node_runs, reviewed_head, store
+from kraft import events, inplace, item_paths, node_runs, reviewed_head, store
 from kraft import findings as _findings
 from kraft import policy as _policy
 from kraft.adapters import beads
@@ -2935,6 +2935,7 @@ async def run_once(
                 sandbox=sandbox,
                 # Its members now exist, checked out by Kraft just above.
                 checkout=stops.sandbox_checkout(row, launch, worktree) if sandbox else None,
+                carried_record=item_paths.carried_record(run_dirs, work_item_id),
             )
             # Never in place: the person's checkout is already set up.
             if start_index == 0 and not inplace.is_in_place(row)
