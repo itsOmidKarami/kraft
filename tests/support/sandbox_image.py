@@ -10,9 +10,10 @@ import pytest
 IMAGE = "kraft-test-git:latest"
 
 
-def build_git_image(cli: str, tmp_path: Path, monkeypatch) -> str:
+def build_git_image(cli: str, tmp_path: Path, monkeypatch, *, curl: bool = False) -> str:
     """`alpine/git` with its `git` entrypoint cleared, so a command runs as
-    itself, built with `cli` and made this machine's runtime through
+    itself (and `curl`, which the `kraft` shim needs, when asked), built with
+    `cli` and made this machine's runtime through
     `sandbox.yaml`, rootless or not as it really is. Skips where the runtime
     cannot build it, unless KRAFT_E2E_REQUIRE names it."""
     from kraft.paths import config_dir
@@ -20,12 +21,17 @@ def build_git_image(cli: str, tmp_path: Path, monkeypatch) -> str:
 
     context = tmp_path / "image"
     context.mkdir()
-    (context / "Dockerfile").write_text("FROM docker.io/alpine/git:latest\nENTRYPOINT []\n")
+    image = f"{IMAGE.split(':')[0]}-curl:latest" if curl else IMAGE
+    (context / "Dockerfile").write_text(
+        "FROM docker.io/alpine/git:latest\n"
+        + ("RUN apk add --no-cache curl\n" if curl else "")
+        + "ENTRYPOINT []\n"
+    )
     built = subprocess.run(
-        [cli, "build", "-q", "-t", IMAGE, str(context)], capture_output=True, text=True
+        [cli, "build", "-q", "-t", image, str(context)], capture_output=True, text=True
     )
     if built.returncode != 0:
-        why = f"e2e: {cli} could not build {IMAGE}: {built.stderr.strip()}"
+        why = f"e2e: {cli} could not build {image}: {built.stderr.strip()}"
         # Where the runtime is required, an unreachable daemon or registry is
         # a failure, never a quiet skip past KRAFT_E2E_REQUIRE.
         if cli in os.environ.get("KRAFT_E2E_REQUIRE", "").split(","):
@@ -53,4 +59,4 @@ def build_git_image(cli: str, tmp_path: Path, monkeypatch) -> str:
     templates.mkdir(parents=True, exist_ok=True)
     (templates / "sandbox.yaml").write_text(f"cli: {cli}\n")
     monkeypatch.setattr(docker, "_RUNTIME", docker.detect_runtime())
-    return IMAGE
+    return image
