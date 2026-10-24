@@ -53,6 +53,7 @@ from kraft.executor.context import (
     LaunchContext,
     Steer,
 )
+from kraft.remote import local_link as _local_link
 from kraft.remote import placement
 from kraft.remote import runs as _remote_runs
 from kraft.store import _now as _now
@@ -93,6 +94,9 @@ from kraft.worker.env import TEST_ENV
 from kraft.worker.worktree_read import read_no_follow
 
 logger = logging.getLogger(__name__)
+
+#: How long a local step waits at placement for the local worker before it parks.
+LOCAL_WORKER_WAIT_S = 10.0
 
 
 def _current_base_ref(db, work_item_id: str) -> str | None:
@@ -342,18 +346,40 @@ async def _place(db, run_dirs, task, node, row, launch, runner, common):
     if verdict.refusal:
         return await config_error_session(db, run_dirs, common, f"{task.path}: {verdict.refusal}\n")
     if verdict.wait:
-        payload = {"task": task.path, "node_id": node.id, "reason": verdict.wait}
+        await _note_waiting(db, row, node, task, verdict.wait)
+        return WAITING
+    return None
 
-        def write(c):
-            last = c.execute(
-                "SELECT payload FROM events WHERE work_item_id = ? AND type = ? "
-                "ORDER BY seq DESC LIMIT 1",
-                (row["id"], RemoteEvent.STEP_WAITING),
-            ).fetchone()
-            if last is None or json.loads(last["payload"]) != payload:
-                events.append(c, row["id"], RemoteEvent.STEP_WAITING, payload, node_id=node.id)
 
-        await db.write(write)
+async def _note_waiting(db, row, node, task, reason: str) -> None:
+    """Say on the board that this step is waiting, once per reason: a walk re-entered while
+    the wait goes on writes nothing new."""
+    payload = {"task": task.path, "node_id": node.id, "reason": reason}
+
+    def write(c):
+        last = c.execute(
+            "SELECT payload FROM events WHERE work_item_id = ? AND type = ? "
+            "ORDER BY seq DESC LIMIT 1",
+            (row["id"], RemoteEvent.STEP_WAITING),
+        ).fetchone()
+        if last is None or json.loads(last["payload"]) != payload:
+            events.append(c, row["id"], RemoteEvent.STEP_WAITING, payload, node_id=node.id)
+
+    await db.write(write)
+
+
+async def _await_local_worker(db, row, node, task) -> str | None:
+    """`WAITING` when the local worker is not connected (it is starting, or being restarted) and
+    does not come up within `LOCAL_WORKER_WAIT_S`; else None. Before any session row, lease or
+    egress exists, so the wait costs the item nothing and a server restart during it parks nothing.
+    A local step never runs in this process instead."""
+    link = _local_link.current()
+    if link is None or link.connected:
+        return None
+    try:
+        await asyncio.wait_for(link.wait_connected(), LOCAL_WORKER_WAIT_S)
+    except TimeoutError:
+        await _note_waiting(db, row, node, task, "waiting for local")
         return WAITING
     return None
 
@@ -1290,15 +1316,12 @@ async def _dispatch_task(
     runner = placement.LOCAL
     if _takes_the_checkout(t):
         runner = placement.runner_for(work_item_row, task.runner, node.id)
-        if (
-            runner != placement.LOCAL
-            and (
-                blocked := await _place(
-                    db, run_dirs, task, node, work_item_row, launch, runner, common
-                )
-            )
-            is not None
-        ):
+        blocked = (
+            await _place(db, run_dirs, task, node, work_item_row, launch, runner, common)
+            if runner != placement.LOCAL
+            else await _await_local_worker(db, work_item_row, node, task)
+        )
+        if blocked is not None:
             return blocked
     # Right before a task that needs the folder, never on the walk's entry; a
     # forge task or a rebase does not run in it here.
