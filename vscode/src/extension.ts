@@ -19,6 +19,7 @@ import { Store, wsSocket } from "./core/store";
 import { ThreadCache } from "./core/threadCache";
 import { hasDrafts } from "./core/threads";
 import { registerConfigChecks } from "./config/check";
+import { registerOpenConfig } from "./config/open";
 import { registerResolved } from "./config/resolved";
 import { registerSchemas } from "./config/schema";
 import { registerGates } from "./gates";
@@ -167,6 +168,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   registerDocs(context, store, api, inScope);
   registerPalette(context, inScope, reveal);
   registerSearch(context, api, reveal);
+  registerOpenConfig(context, loc.templatesDir);
   registerFileWork(context, { api, store, reveal, refusal: () => fileRefusal(state(), api.base), runDir: () => runDir, scope: scopeDeps });
   context.subscriptions.push(
     status,

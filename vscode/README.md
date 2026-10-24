@@ -107,6 +107,9 @@ is open.
 
 ![policy.yaml with an unknown severity flagged by the running Kraft](media/screenshot-config.png)
 
+The gear on the board's title bar, **Open Config…**, lists Kraft's config files
+and chains with a line on what each holds, and opens the one you pick.
+
 Kraft's config files under `$KRAFT_HOME/config` (`policy.yaml`,
 `harnesses.yaml`, `chains/*.yaml` and the rest) are checked by the running
 Kraft as you edit, with the line at fault flagged. With

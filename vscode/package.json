@@ -346,6 +346,12 @@
         "category": "Kraft"
       },
       {
+        "command": "kraft.openConfig",
+        "title": "Open Config\u2026",
+        "category": "Kraft",
+        "icon": "$(settings-gear)"
+      },
+      {
         "command": "kraft.fileWork",
         "title": "File Work Item\u2026",
         "category": "Kraft",
@@ -442,6 +448,11 @@
           "command": "kraft.showThisRepo",
           "when": "view == kraft.board && kraft.allRepos",
           "group": "navigation"
+        },
+        {
+          "command": "kraft.openConfig",
+          "when": "view == kraft.board",
+          "group": "navigation@9"
         }
       ],
       "view/item/context": [

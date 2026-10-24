@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { configFile, isLibraryFile, schemaFor } from "../../src/core/scope";
+import { ABOUT, configFile, configListing, FILES, isLibraryFile, schemaFor } from "../../src/core/scope";
 
 const T = "/home/u/.kraft/config";
 
@@ -36,4 +36,15 @@ it("knows which files the library lint covers", () => {
   expect(isLibraryFile("chains/a.yaml")).toBe(true);
   expect(isLibraryFile("library.yaml")).toBe(true);
   expect(isLibraryFile("policy.yaml")).toBe(false);
+});
+
+describe("configListing", () => {
+  it("lists configuration in ABOUT's order and templates as library.yaml then chains by name, dropping what is not config", () => {
+    expect(configListing(["repos.yaml", "chains/quick-task.yaml", "other.yaml", "library.yaml", "policy.yaml", "chains/default.yaml", "chains/Bad.yaml"]))
+      .toEqual({ configuration: ["policy.yaml", "repos.yaml"], templates: ["library.yaml", "chains/default.yaml", "chains/quick-task.yaml"] });
+  });
+
+  it("describes every file configFile accepts", () => {
+    expect([...FILES].filter((f) => !ABOUT[f])).toEqual([]);
+  });
 });
