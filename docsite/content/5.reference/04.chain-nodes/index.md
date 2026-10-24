@@ -459,6 +459,7 @@ Every task takes these keys, then the keys of its kind. A task takes no
 |---|---|---|---|
 | `ref` | string | required | `kraft.verify_changed_test_scopes` runs the repo's own test scopes. `kraft.mr_rebase` rebases the worktree onto the item's [base branch](/concepts/vocabulary#base-branch). |
 | `execution` | string | `sequential` | `sequential` or `parallel`. |
+| `suite` | string | `targeted` | Only on `kraft.verify_changed_test_scopes`: `targeted` runs each scope's [`targeted_command`](/reference/configuration/repos#targeted_command) where it has one, and `full` always runs its `command`. _Added in next_ |
 
 ### Forge task keys
 

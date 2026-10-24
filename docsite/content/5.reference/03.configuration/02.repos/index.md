@@ -63,7 +63,7 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 |---|---|---|---|
 | `setup_command` | string | `null` | Runs in every new [worktree](/concepts/vocabulary#worktree) before any node starts. Unset, the file still loads, but the repo's next work item stops before its first task. See [`setup_command`](#setup_command). |
 | `test_command` | string | `null` | The command CI actually runs for this repo: what the changed-test-scope verification runs, as one scope over every path. See [`test_command`](#test_command). |
-| `test_scopes` | list of `{paths, command}` | `null` | A monorepo's per-directory test commands. Each `paths` is a non-empty list and each `command` a non-empty string. See [`test_scopes`](#test_scopes). |
+| `test_scopes` | list of `{paths, command, targeted_command}` | `null` | A monorepo's per-directory test commands. Each `paths` is a non-empty list and each `command` a non-empty string. `targeted_command` is optional; see [`targeted_command`](#targeted_command). _Added in next_ |
 | `areas` | mapping of id to area | `{}` | Path-scoped contexts inside this repo: `{paths: [...], setup: "...", verification: {test_scopes: [...]}}`. See [`areas`](#areas). |
 | `intent_dir` | string, a relative path | `null` | Where the repo's intent tree lives, relative to its root. When set, every agent in the repo is told to follow it. Kraft does not run the tree's check: add it to the repo's `test_scopes` yourself. |
 | `local_files` | list of strings | `[]` | Files to copy into every new worktree, for ones `git worktree add` cannot carry: relative paths, no globs or directories, covered by the worktree's `.gitignore`. Anything else is refused, and named in the `worktree_prepared` event (`kraft view events`). |
@@ -136,6 +136,26 @@ It applies above the harness profile's own `defaults:`, below a task's `model:` 
 Every command runs from the repository root, without a shell, so one for a project in a subdirectory names that directory itself: `sh -c 'cd frontend && npm test'` (what connect proposes) or `npm --prefix frontend test`, not `npm test`.
 
 Kraft does not synthesize `test_scopes` from `test_command`: the two stay independently editable.
+
+#### `targeted_command`
+_Added in next_
+
+A scope may name a second command that runs only the tests a change affects. It is optional, and an area's scopes (`areas.<name>.verification.test_scopes`) take it too. Verification runs it in place of `command`, in its first round and in every repair round. A bare `test_command` takes none: write a scope.
+
+- **What it receives.** `KRAFT_TEST_BASE` is the item's whole-branch base commit. `KRAFT_CHANGED_FILES` is the path of a file listing the changed paths, one per line. The list is the diff this round's scopes were selected from: the whole branch in round 0 and after a failed round, and only what changed since after a clean one. Both are set for this command alone, and a sandbox gets the list read-only.
+- **An empty list is an answer.** A round that changed nothing since a clean one still runs it, with an empty list. With no list at all, Kraft runs `command` instead: the item has no base commit, or git could not diff it. A workspace member has no list either. The event says why (`full_reason`).
+- **What it must do.** It runs more, never less, for a change it cannot see: a tool that selects tests from imports has to run everything for a YAML file it knows nothing about. Kraft only hands it the change.
+- **The full suite is the chain's.** A chain whose merge request runs CI leaves the full suite to it. A chain without CI adds a node with `suite: full`: see [Run the full suite as its own node](/guides/customize/write-your-own-chain#run-the-full-suite-as-its-own-node).
+
+`kraft repo connect --verify` runs it too, against `HEAD^1` and the last commit's paths, and skips it on a repo with one commit.
+
+Loading refuses an entry where a command string could name two scopes, because sessions are told apart by their command:
+
+- an empty or blank `targeted_command`, or one that is the scope's own `command`;
+- two scopes with the same `command` but different `targeted_command`;
+- a `targeted_command` equal to another scope's `command`, to another scope's `targeted_command`, or to an area's `setup`.
+
+Commands compare after shell splitting, so `just  test` and `just test` are one string.
 
 ### `areas`
 
