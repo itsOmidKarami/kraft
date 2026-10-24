@@ -2,18 +2,14 @@ import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
-import { ABOUT, configListing } from "../core/scope";
+import { ABOUT, chainDescriptionOf, configListing } from "../core/scope";
 
 type Pick = vscode.QuickPickItem & { open?: string };
 
 const tilde = (path: string) => (path.startsWith(homedir()) ? `~${path.slice(homedir().length)}` : path);
 const separator = (label: string): Pick => ({ label, kind: vscode.QuickPickItemKind.Separator });
 
-/** A chain's own `description:`, when its file has one at the top level. */
-async function chainDescription(path: string): Promise<string | undefined> {
-  const text = await readFile(path, "utf8").catch(() => "");
-  return text.match(/^description:[ \t]*["']?(.+?)["']?[ \t]*$/m)?.[1];
-}
+const chainDescription = async (path: string) => chainDescriptionOf(await readFile(path, "utf8").catch(() => ""));
 
 export function registerOpenConfig(context: vscode.ExtensionContext, templatesDir: string) {
   context.subscriptions.push(vscode.commands.registerCommand("kraft.openConfig", async () => {
@@ -21,7 +17,8 @@ export function registerOpenConfig(context: vscode.ExtensionContext, templatesDi
     try {
       const chains = await readdir(join(templatesDir, "chains")).catch(() => []);
       names = [...(await readdir(templatesDir)), ...chains.map((c) => `chains/${c}`)];
-    } catch {
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") return void vscode.window.showErrorMessage(`Could not read ${templatesDir}: ${(e as Error).message}`);
       const start = "Start Kraft";
       const pick = await vscode.window.showInformationMessage(`No Kraft config at ${templatesDir} yet. Kraft writes it the first time it starts.`, start);
       if (pick === start) await vscode.commands.executeCommand("kraft.startDaemon");

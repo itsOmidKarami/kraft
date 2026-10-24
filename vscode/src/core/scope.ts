@@ -39,5 +39,8 @@ export function configListing(names: readonly string[]): { configuration: string
   return { configuration: known.filter((n) => !isLibraryFile(n)), templates: [...known.filter(isLibraryFile), ...chains] };
 }
 
-export const schemaFor =(relative: string) => (relative.startsWith("chains/") ? "chain.schema.json" : relative.replace(/\.yaml$/, ".schema.json"));
+/** A chain file's own top-level `description:`, when it is on that line; a block scalar (`>`, `|`) is not. */
+export const chainDescriptionOf = (text: string) => text.match(/^description:[ \t]*(?![ \t|>])["']?(.+?)["']?[ \t]*$/m)?.[1];
+
+export const schemaFor = (relative: string) => (relative.startsWith("chains/") ? "chain.schema.json" : relative.replace(/\.yaml$/, ".schema.json"));
 export const isLibraryFile = (relative: string) => relative === "library.yaml" || relative.startsWith("chains/");

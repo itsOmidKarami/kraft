@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ABOUT, configFile, configListing, FILES, isLibraryFile, schemaFor } from "../../src/core/scope";
+import { ABOUT, chainDescriptionOf, configFile, configListing, FILES, isLibraryFile, schemaFor } from "../../src/core/scope";
 
 const T = "/home/u/.kraft/config";
 
@@ -47,4 +47,14 @@ describe("configListing", () => {
   it("describes every file configFile accepts", () => {
     expect([...FILES].filter((f) => !ABOUT[f])).toEqual([]);
   });
+});
+
+describe("chainDescriptionOf", () => {
+  it.each([
+    ["plain", "id: x\ndescription: Spec, plan, build\n", "Spec, plan, build"],
+    ["quoted", "description: \"Quick: no gates\"\n", "Quick: no gates"],
+    ["indented is a node's, not the chain's", "nodes:\n  - id: a\n    description: inner\n", undefined],
+    ["block scalar", "description: >\n  folded text\n", undefined],
+    ["none", "id: x\n", undefined],
+  ])("%s", (_, text, want) => expect(chainDescriptionOf(text)).toBe(want));
 });
