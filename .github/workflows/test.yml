@@ -429,6 +429,7 @@ jobs:
           tests/worker/test_refstore.py
           tests/worker/test_mounts.py
           tests/worker/test_host_view.py
+          tests/remote/test_sandboxed_step.py
         env:
           KRAFT_E2E_REQUIRE: sandbox-exec
       - if: always()
