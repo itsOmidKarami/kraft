@@ -82,3 +82,15 @@ def test_an_old_plain_clone_is_rebuilt_as_a_worktree(tmp_path):
     copy.update(full, branch="kraft/x", head=head)
     assert sandbox.linked_gitdirs(root) is not None
     assert head in copy.commits()
+
+
+def test_a_copy_marked_for_rebuild_is_replaced_not_checked_out_over(tmp_path):
+    server, head, full = _server(tmp_path)
+    copy = Copy(tmp_path / "m" / "repo")
+    copy.update(full, branch="kraft/x", head=head)
+    git(copy.root, "init", "-q", "planted")  # a repository the sandboxed worker made
+    assert copy.planted(head) == ["planted"]
+    copy.rebuild_on_update()
+    copy.update(None, branch="kraft/x", head=head)
+    assert not (copy.root / "planted").exists() and copy.planted(head) == []
+    assert not (copy.bare / "kraft-rebuild").exists() and copy._is_worktree()

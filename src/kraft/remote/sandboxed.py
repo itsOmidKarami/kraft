@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from kraft.paths import RunDirs
 from kraft.vocab import SandboxEvent
 from kraft.worker import backends, ca
+from kraft.worker import refstore as _refstore
 from kraft.worker import sandbox as _sandbox
 from kraft.worker.egress import PhaseLists
 from kraft.worker.inject import InjectRule
@@ -175,6 +176,12 @@ class Sandboxed:
             step=False,
         )
 
+    async def _release_refs(self) -> None:
+        """Forget the ref store a launch that did not happen made (what the server's backends do
+        on release), unless another session of the item is still running in it."""
+        if not self.host.live():
+            await asyncio.to_thread(_refstore.discard, self.host.run_dirs.base, self.root)
+
     async def _wrap(
         self,
         cmd: list[str],
@@ -233,41 +240,46 @@ class Sandboxed:
                     )
                 )
             except (OSError, RuntimeError) as exc:
+                await self._release_refs()  # whatever it made before it failed
                 raise Unavailable(
                     f"{host.machine}: could not prepare the sandbox's ref store: {exc}"
                 ) from exc
-            if step and (
-                problem := await backend.probe(
-                    sandbox, cmd[0], {k: v for k, v in repo_env.items() if k not in withheld}
+            try:
+                if step and (
+                    problem := await backend.probe(
+                        sandbox, cmd[0], {k: v for k, v in repo_env.items() if k not in withheld}
+                    )
+                ):
+                    raise Unavailable(f"{host.machine}: {problem}")
+                ca_bundle = await backend.prepare(
+                    sandbox, kraft_ca=ca.ensure_ca(run_dirs)[0] if rules else None
                 )
-            ):
-                raise Unavailable(f"{host.machine}: {problem}")
-            ca_bundle = await backend.prepare(
-                sandbox, kraft_ca=ca.ensure_ca(run_dirs)[0] if rules else None
-            )
-            network = bool(sandbox.get("network"))
-            proxy_env: dict[str, str] = {}
-            if network and lists is not None:
-                if await backend.egress_transport() == "tls":
-                    await host.start_tls()
-                try:
-                    proxy_env = await _subprocess.open_egress(
-                        None,
-                        backend,
-                        session_id,
-                        wid,
-                        sandbox,
-                        PhaseLists.from_json(lists),
-                        rules,
-                        None,
-                        channels=host.channels,
-                    )
-                except BaseException:
-                    # whatever part of the route did open, closed
-                    await _subprocess.close_egress(
-                        backend, session_id, work_item_id=wid, channels=host.channels
-                    )
-                    raise
+                network = bool(sandbox.get("network"))
+                proxy_env: dict[str, str] = {}
+                if network and lists is not None:
+                    if await backend.egress_transport() == "tls":
+                        await host.start_tls()
+                    try:
+                        proxy_env = await _subprocess.open_egress(
+                            None,
+                            backend,
+                            session_id,
+                            wid,
+                            sandbox,
+                            PhaseLists.from_json(lists),
+                            rules,
+                            None,
+                            channels=host.channels,
+                        )
+                    except BaseException:
+                        # whatever part of the route did open, closed
+                        await _subprocess.close_egress(
+                            backend, session_id, work_item_id=wid, channels=host.channels
+                        )
+                        raise
+            except BaseException:
+                await self._release_refs()  # no `Launch` exists to take them
+                raise
         except _sandbox.SandboxNotReady as exc:
             raise Unavailable(f"{host.machine}: {exc}") from exc
         except OSError as exc:
@@ -314,6 +326,7 @@ class Sandboxed:
             launch.client_cwd = backend.client_cwd(session_id, work_item_id=wid)
         except BaseException as exc:
             await launch.finish(publish=False)
+            await self._release_refs()
             if isinstance(exc, _sandbox.SandboxRefused | _sandbox.SandboxNotReady):
                 raise Unavailable(f"{host.machine}: {exc}") from exc
             raise

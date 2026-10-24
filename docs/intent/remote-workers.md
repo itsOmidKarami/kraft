@@ -259,3 +259,18 @@ origin: src/kraft/remote/runs.py §_deliver
 WHEN a machine sends an event for a step, the system SHALL append it to the item's history only if it is a sandbox event other than a memory kill.
 enforced-by: tests/remote/test_runs.py::test_a_machine_adds_sandbox_events_to_its_items_history_and_nothing_else[egress-refused], tests/remote/test_runs.py::test_a_machine_adds_sandbox_events_to_its_items_history_and_nothing_else[not-synced], tests/remote/test_runs.py::test_a_machine_adds_sandbox_events_to_its_items_history_and_nothing_else[oom-kill-is-not-an-event-frame], tests/remote/test_runs.py::test_a_machine_adds_sandbox_events_to_its_items_history_and_nothing_else[not-a-sandbox-event]
 origin: src/kraft/remote/runs.py §_machine_event
+
+## REQ machine-skips-the-sweep-over-a-planted-repository
+WHEN a sandboxed step ends on a machine and its checkout holds a git repository Kraft did not create, or git cannot say, the system SHALL skip the sweep there, say so in the step's log, bundle only what the worker committed, and replace the checkout from the bare repository before the item's next step instead of checking out over it.
+enforced-by: tests/remote/test_machine.py::test_a_sandboxed_checkout_holding_a_repository_it_made_is_not_swept_and_is_rebuilt, tests/remote/test_workdir.py::test_a_copy_marked_for_rebuild_is_replaced_not_checked_out_over
+origin: src/kraft/remote/machine.py §_finish
+
+## REQ machine-leaves-no-ref-store-for-a-refused-sandbox
+IF a machine refuses a sandboxed step or setup command after it made the session's ref store, or cannot run the setup command, THEN the system SHALL remove that ref store and end the step `config_error` naming the machine.
+enforced-by: tests/remote/test_sandboxed.py::test_a_refusal_after_the_ref_store_was_made_leaves_none_behind, tests/remote/test_sandboxed.py::test_a_setup_runtime_that_vanished_before_the_exec_is_a_config_error
+origin: src/kraft/remote/sandboxed.py §Sandboxed._wrap
+
+## REQ one-channel-registry-per-machine-process
+The system SHALL give every machine a process hosts one egress channel registry, the one the sandbox backends read, whichever servers' machines open channels in it.
+enforced-by: tests/remote/test_daemon.py::test_two_servers_machines_in_one_daemon_share_the_registry_the_backends_read
+origin: src/kraft/remote/channels.py

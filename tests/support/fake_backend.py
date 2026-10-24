@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 
 from kraft import ids
+from kraft.worker import channel
 from kraft.worker.sandbox import SandboxNotReady, SandboxRefused
 
 
@@ -42,6 +43,9 @@ class Remote:
         self.bases: list[Path] = []
         #: The ref stores `code_in` hands back.
         self.refs: tuple = ()
+        #: Whether `channel.current()` held each session's channel when its route was opened:
+        #: where the real backends look for it.
+        self.channel_found: list[bool] = []
 
     def home(self, run_dirs, work_item_id):
         return run_dirs.base / "remote-home" / work_item_id
@@ -119,6 +123,10 @@ class Remote:
         self.touched.append("open_session")
         self.calls.append("open_session")
         self.sock_path = sock_path
+        registry = channel.current()
+        self.channel_found.append(
+            registry is not None and ids.qualified(work_item_id, session_id) in registry._open
+        )
         return self.route if sandbox.get("network") else {}
 
     async def close_session(self, session_id, *, work_item_id):

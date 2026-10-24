@@ -242,6 +242,12 @@ class JobRunner:
                 capture_output=True,
                 text=True,
             )
+        except OSError as exc:  # a runtime that vanished between the probe and the exec
+            return Outcome(
+                rejected=f"{self.host.machine if self.host else 'this machine'}: could not run "
+                f"the setup command: {exc}",
+                outcome="config_error",
+            )
         finally:
             if launch is not None:
                 await launch.finish(publish=False)
@@ -313,6 +319,22 @@ class JobRunner:
             if exited:
                 return
             await asyncio.sleep(self._poll)
+
+    async def note(self, emit: Callable[[dict], Awaitable[None]], text: str) -> None:
+        """Add a line of Kraft's own to the finished job's log, and send it if connected."""
+        data = text.encode()
+        with open(self.log_path, "ab") as log:
+            log.write(data)
+        with contextlib.suppress(protocol.Closed):  # offline: the server has it on `sync`
+            await emit(
+                {
+                    "t": "log",
+                    "id": self.spec.key,
+                    "offset": self._sent,
+                    "data": base64.b64encode(data).decode("ascii"),
+                }
+            )
+            self._sent += len(data)
 
     def rewind(self, offset: int) -> None:
         """The server has this many bytes of the log: resend from there."""

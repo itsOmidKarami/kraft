@@ -16,6 +16,7 @@ from kraft.remote import blobs, bundle, machine, protocol, registry
 from kraft.remote.hub import Hub
 from kraft.remote.machine import Machine
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport, WebSocketTransport
+from kraft.remote.workdir import Copy
 
 TOKEN = "kwt_machine"
 
@@ -451,4 +452,30 @@ async def test_a_sandboxed_step_runs_in_the_backend_and_its_oom_is_in_the_finish
     assert "wrap" in fake.touched and b"hi" in b"".join(
         base64.b64decode(f["data"]) for f in frames if f["t"] == "log"
     )
+    await _end(t, task)
+
+
+PLANT = (
+    "import subprocess; subprocess.run(['git', 'init', '-q', 'sub'], check=True); "
+    "open('stray.txt', 'w').write('x')"
+)
+
+
+async def test_a_sandboxed_checkout_holding_a_repository_it_made_is_not_swept_and_is_rebuilt(
+    tmp_path, short_run, monkeypatch
+):
+    fake, machine, task, t = await _sandboxed_job(
+        tmp_path, short_run, monkeypatch, [sys.executable, "-c", PLANT]
+    )
+    frames = await _frames_until(t, "finished")
+    assert frames[-1]["tip"] is None  # the sweep would have committed stray.txt
+    log = b"".join(base64.b64decode(f["data"]) for f in frames if f["t"] == "log").decode()
+    assert (
+        "kraft: skipped the sweep on gpu: the sandboxed checkout holds git repositories "
+        "Kraft did not create: sub\n" in log
+    )
+    copy = Copy(tmp_path / "home" / "remote" / "srv" / "items" / "w1" / "repo")
+    assert (copy.root / "sub" / ".git").exists()
+    copy.update(None, branch="kraft/x", head=copy._git("rev-parse", "HEAD").stdout.strip())
+    assert not (copy.root / "sub").exists() and not (copy.root / "stray.txt").exists()
     await _end(t, task)

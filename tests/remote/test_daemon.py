@@ -52,13 +52,13 @@ class _Ssh:
             )
         )
 
-    async def welcomed(self) -> None:
+    async def welcomed(self, server_id="srv") -> None:
         await protocol.server_handshake(
             self.t,
             kraft_version="2.3.0",
             identify=lambda _: None,
             expected_name="box",
-            server_id="srv",
+            server_id=server_id,
         )
 
     async def drop(self) -> None:
@@ -237,3 +237,42 @@ async def test_a_retiring_daemons_exit_never_removes_its_successors_socket(tmp_p
         successor_stop.set()
         await asyncio.gather(successor, return_exceptions=True)
         thread.join()
+
+
+async def test_two_servers_machines_in_one_daemon_share_the_registry_the_backends_read(
+    tmp_path, short_run, monkeypatch
+):
+    from support.fake_backend import Remote
+
+    from kraft.worker import backends
+
+    fake = Remote(tmp_path)
+    monkeypatch.setitem(backends._BACKENDS, fake.kind, fake)
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(short_run.base))
+    home = tmp_path / "home"
+    served = _daemon(home)
+    await _until_listening(home)
+    sessions = []
+    for n, server_id in enumerate(["srv-a", "srv-b"], 1):
+        ssh = _Ssh(home)
+        await ssh.welcomed(server_id)
+        folder = tmp_path / server_id
+        folder.mkdir()
+        result = str(home / "remote" / server_id / "run" / "result.json")
+        await send_job(
+            ssh.t,
+            folder,
+            ["true"],
+            sid=f"s{n}",
+            sandbox={"kind": "remote", "network": {"runtime": {"allow": ["api.example.com"]}}},
+            egress={"phase": "runtime", "allow": ["api.example.com"], "deny": []},
+            env={"KRAFT_RESULT_PATH": result},
+        )
+        sessions.append(ssh)
+        await _frames_until(ssh.t, "finished")
+    assert fake.channel_found == [True, True]
+    for ssh in sessions:
+        await ssh.drop()
+    served.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await served

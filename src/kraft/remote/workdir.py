@@ -11,6 +11,10 @@ from pathlib import Path
 from kraft.remote import bundle
 from kraft.worker import sandbox as _sandbox
 
+#: A file in the bare repo marking a copy whose worktree a sandboxed worker planted a repository
+#: in: its next `update` replaces the worktree rather than check out over it.
+_REBUILD = "kraft-rebuild"
+
 
 class Copy:
     """`root` is a linked worktree of the bare repo beside it (`<root>.git`). A sandboxed worker
@@ -72,13 +76,25 @@ class Copy:
                 str(bundle_path),
                 f"+refs/heads/{branch}:refs/kraft/server/{branch}",
             )
-        if self._is_worktree():
+        rebuild = self.bare / _REBUILD
+        if self._is_worktree() and not rebuild.exists():
             self._git("checkout", "-q", "-f", "-B", branch, head)
             return
-        # an old plain clone (or half of one) is replaced, not converted: its ignored files go
+        # an old plain clone (or half of one), or a worktree a sandboxed worker planted a
+        # repository in (host git would read its config), is replaced, not converted or checked
+        # out over: its ignored files go
         shutil.rmtree(self.root, ignore_errors=True)
         self._bare("worktree", "prune")
         self._bare("worktree", "add", "-q", "-f", "-B", branch, str(self.root), head)
+        rebuild.unlink(missing_ok=True)
+
+    def planted(self, base: str) -> list[str] | None:
+        """The git repositories in the worktree Kraft did not create (None: git cannot say)."""
+        return _sandbox.planted_repos(self.root, base)
+
+    def rebuild_on_update(self) -> None:
+        """Do not trust this worktree again: the next `update` makes a fresh one."""
+        (self.bare / _REBUILD).touch()
 
     async def sweep(
         self, *, branch: str, base: str, node_id: str, identity: Mapping[str, str]

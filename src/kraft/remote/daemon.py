@@ -21,6 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from kraft.remote import protocol
+from kraft.remote.channels import Channels
 from kraft.remote.machine import Machine
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport
 from kraft.worker import channel
@@ -84,6 +85,7 @@ class _Daemon:
     def __init__(self, home: Path, kraft_version: str) -> None:
         self.home, self.kraft_version = Path(home), kraft_version
         self.machines: dict[str, Machine] = {}
+        self.channels = Channels()  # one for the process, whichever servers' machines it hosts
         self.current: dict[str, protocol.Transport] = {}  # server id -> its live connection
         self.connections = 0
         self.stale = False  # a relay of another Kraft version has been here
@@ -124,9 +126,9 @@ class _Daemon:
         self.current[server] = t
         machine = self.machines.get(server)
         if machine is None:
-            machine = self.machines[server] = Machine(self.home, kraft_version=self.kraft_version)
-            if channel.current() is None:  # the sandbox backends find their channels here
-                channel.install(machine.channels)
+            machine = self.machines[server] = Machine(
+                self.home, kraft_version=self.kraft_version, channels=self.channels
+            )
         try:
             await machine.serve(t, machine_welcome)
         finally:
@@ -168,6 +170,7 @@ async def serve(
             path.unlink()  # left by a daemon that died
         daemon = _Daemon(home, kraft_version)
         before = channel.current()
+        channel.install(daemon.channels.registry)  # the sandbox backends find their channels here
         server = await asyncio.start_unix_server(daemon.handle, path=str(path), limit=FRAME_LIMIT)
         path.chmod(0o600)
         pid_file = path.parent / PID_FILE
@@ -176,6 +179,7 @@ async def serve(
             await daemon.run(idle_exit_s, stop or asyncio.Event())
         finally:
             channel.install(before)
+            await daemon.channels.close()
             server.close()
             with contextlib.suppress(FileNotFoundError):
                 path.unlink()

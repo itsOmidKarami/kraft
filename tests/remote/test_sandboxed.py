@@ -7,9 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 from support.fake_backend import Remote
+from support.harness import commit_all, git
 
 from kraft.remote.sandboxed import Host
-from kraft.worker import backends, channel
+from kraft.worker import backends, channel, refstore
 from kraft.worker.backends.docker import OomKill
 from kraft.worker.egress import EgressProxy
 from remote.test_jobs import _run, _runner, _spec
@@ -151,3 +152,35 @@ async def test_a_setup_command_runs_in_the_sandbox_too(tmp_path, host, backend, 
     spec = _sandboxed(["true"], setup="exit 0", setup_sandbox={"egress": None, "credentials": []})
     await _step(tmp_path, host, spec)
     assert backend.touched.count("wrap") == 2 and backend.touched.count("probe") == 1
+
+
+async def test_a_setup_runtime_that_vanished_before_the_exec_is_a_config_error(
+    tmp_path, host, backend, monkeypatch
+):
+    monkeypatch.setenv("EXAMPLE_KEY", "v")
+    backend.wrap = lambda cmd, *a, **kw: ["/no/such/runtime", *cmd]
+    spec = _sandboxed(["true"], setup="exit 0", setup_sandbox={"egress": None, "credentials": []})
+    out, _ = await _step(tmp_path, host, spec)
+    assert out.outcome == "config_error"
+    assert out.rejected.startswith("gpu: could not run the setup command: ")
+
+
+async def test_a_refusal_after_the_ref_store_was_made_leaves_none_behind(
+    tmp_path, host, backend, monkeypatch
+):
+    monkeypatch.setenv("EXAMPLE_KEY", "v")
+    runner = _runner(tmp_path, _sandboxed(["true"]), host=host)
+    main = tmp_path / "main"
+    main.mkdir()
+    git(main, "init", "-q")
+    commit_all(main)
+    git(main, "worktree", "add", "-q", "-b", "kraft/x", str(runner.root))
+    backend.code_in = lambda base, cwd, branch, **kw: refstore.prepare_stores(
+        base, cwd, branch, **kw
+    )
+    backend.prepared = "no runtime"
+    out, _ = await _run(runner)
+    assert out.outcome == "config_error" and "no runtime" in out.rejected
+    store = host.run_dirs.base / "sandbox-git"
+    assert backend.touched[-1] == "prepare"  # the refusal came after the ref store was made
+    assert not store.exists() or not list(store.iterdir())
