@@ -224,3 +224,38 @@ origin: src/kraft/doctor.py §_chains_check
 WHEN a machine loses or regains its connection, the system SHALL record that on each item with an unfinished step on it, and on no other.
 enforced-by: tests/remote/test_runs.py::test_a_drop_and_a_reconnect_each_note_the_item_whose_step_runs_there
 origin: src/kraft/remote/runs.py §_note_machine
+
+## REQ sandboxed-step-runs-in-its-sandbox-on-the-machine
+WHEN a step of a sandboxed item runs on a machine, the system SHALL run it inside the sandbox the item was filed with, built by the machine's own backend, and SHALL NOT run a sandbox backend on the server for it.
+enforced-by: tests/remote/test_sandboxed.py::test_the_backend_is_called_in_the_order_a_local_step_uses, tests/remote/test_sandboxed.py::test_a_setup_command_runs_in_the_sandbox_too, tests/adapters/test_subprocess_remote.py::test_a_sandboxed_remote_step_runs_no_backend_on_the_server, tests/remote/test_sandboxed_step.py::test_a_step_runs_in_a_seatbelt_sandbox_the_machine_built, tests/remote/test_sandboxed_step.py::test_a_step_runs_in_a_docker_sandbox_the_machine_built
+origin: src/kraft/remote/sandboxed.py
+
+## REQ sandbox-the-machine-cannot-build-is-a-config-error
+IF a machine cannot build the sandbox of a step it was sent, or lacks a credential value the sandbox injects, THEN the system SHALL end the step `config_error` naming the machine and what is missing, and SHALL NOT run the command.
+enforced-by: tests/remote/test_sandboxed.py::test_a_sandbox_the_machine_cannot_build_stops_the_step_and_runs_nothing[probe-refuses], tests/remote/test_sandboxed.py::test_a_sandbox_the_machine_cannot_build_stops_the_step_and_runs_nothing[prepare-cannot], tests/remote/test_sandboxed.py::test_a_credential_the_machine_lacks_stops_the_step_naming_the_variable, tests/remote/test_sandboxed.py::test_a_machine_with_no_sandbox_support_never_runs_a_sandboxed_step, tests/remote/test_machine.py::test_a_sandbox_the_machine_cannot_build_is_rejected_naming_it_and_nothing_runs
+origin: src/kraft/remote/sandboxed.py §Sandboxed
+
+## REQ no-secret-crosses-to-the-machine
+The system SHALL send a machine the declarations of a sandbox's credentials and never a value, and SHALL give the worker a sentinel where the machine's proxy injects the value.
+enforced-by: tests/adapters/test_subprocess_remote.py::test_a_sandboxed_job_carries_its_sandbox_lists_and_credential_declarations, tests/remote/test_sandboxed.py::test_the_workers_env_holds_the_sentinel_never_the_machines_secret
+origin: src/kraft/adapters/subprocess.py §_run_task
+
+## REQ machine-host-git-never-reads-the-workers-gitdir
+The system SHALL keep a machine's copy of an item as a linked worktree of a bare repository, so that a sandboxed worker gets a private ref store and nothing it writes under its checkout's `.git` is read by the git that updates, sweeps and bundles on the machine.
+enforced-by: tests/remote/test_workdir.py::test_the_copy_is_a_linked_worktree_so_ref_stores_apply, tests/remote/test_workdir.py::test_an_old_plain_clone_is_rebuilt_as_a_worktree, tests/remote/test_sandboxed_step.py::test_a_step_runs_in_a_seatbelt_sandbox_the_machine_built, tests/remote/test_sandboxed_step.py::test_a_step_runs_in_a_docker_sandbox_the_machine_built
+origin: src/kraft/remote/workdir.py
+
+## REQ sandboxed-worker-calls-cross-the-connection-after-the-allowlist
+WHEN a worker in a sandbox on a machine calls the worker API or asks for a permission over MCP, the system SHALL refuse a call outside its session's allowlist on the machine without sending it, and SHALL send the rest to the server over the connection.
+enforced-by: tests/worker/test_egress_worker_api.py::test_a_machines_worker_call_goes_over_its_connection_as_the_channel_session, tests/worker/test_egress_worker_api.py::test_a_call_outside_the_allowlist_is_refused_on_the_machine_before_it_is_sent[act-on-another-item], tests/worker/test_egress_worker_api.py::test_a_call_outside_the_allowlist_is_refused_on_the_machine_before_it_is_sent[read-another-item], tests/worker/test_egress_worker_api.py::test_a_permission_ask_over_mcp_reaches_the_server_and_its_answer_comes_back
+origin: src/kraft/worker/egress.py §EgressProxy
+
+## REQ machine-sandbox-memory-kill-ends-config-error
+WHEN a machine reports that a step's sandbox was killed under its memory limit, the system SHALL end the session `config_error` and record `sandbox_oom_killed`, as for a local step.
+enforced-by: tests/adapters/test_subprocess_remote.py::test_a_memory_kill_in_the_machines_sandbox_ends_the_session_config_error, tests/remote/test_machine.py::test_a_sandboxed_step_runs_in_the_backend_and_its_oom_is_in_the_finished_frame
+origin: src/kraft/remote/runs.py §_deliver
+
+## REQ machine-adds-only-sandbox-events
+WHEN a machine sends an event for a step, the system SHALL append it to the item's history only if it is a sandbox event other than a memory kill.
+enforced-by: tests/remote/test_runs.py::test_a_machine_adds_sandbox_events_to_its_items_history_and_nothing_else[egress-refused], tests/remote/test_runs.py::test_a_machine_adds_sandbox_events_to_its_items_history_and_nothing_else[not-synced], tests/remote/test_runs.py::test_a_machine_adds_sandbox_events_to_its_items_history_and_nothing_else[oom-kill-is-not-an-event-frame], tests/remote/test_runs.py::test_a_machine_adds_sandbox_events_to_its_items_history_and_nothing_else[not-a-sandbox-event]
+origin: src/kraft/remote/runs.py §_machine_event
