@@ -110,6 +110,38 @@ async def test_protocol_refusal_text(machine_kraft, reason):
 
 
 @pytest.mark.parametrize(
+    ("server_kraft", "machine_kraft", "refusal"),
+    [
+        (
+            "2.3.0",
+            "1.9.0",
+            "update kraft on this machine to 2.3.0: it runs 1.9.0, another major version",
+        ),
+        ("3.0.0", "2.3.1.dev15+gabc", None),
+        ("2.3.1.dev15+gabc", "3.0.0", None),
+        ("2.4.0", "2.3.1", None),
+    ],
+    ids=["another-major-same-protocol", "dev-machine", "dev-server", "same-major"],
+)
+async def test_another_major_is_turned_away_whatever_the_protocol(
+    server_kraft, machine_kraft, refusal
+):
+    server, machine = memory_pair()
+    handshakes = asyncio.gather(
+        protocol.server_handshake(server, kraft_version=server_kraft, identify=lambda token: "gpu"),
+        protocol.machine_handshake(machine, kraft_version=machine_kraft, token="good"),
+    )
+    if refusal is None:
+        peer, welcome = await handshakes
+        assert (peer.name, welcome["kraft"]) == ("gpu", server_kraft)
+        return
+    with pytest.raises(protocol.Refused) as refused:
+        await handshakes
+    assert str(refused.value) == refusal
+    assert refused.value.machine_protocol == protocol.PROTOCOL_VERSION
+
+
+@pytest.mark.parametrize(
     ("hello_caps", "expected"),
     [
         ([], frozenset()),

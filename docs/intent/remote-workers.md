@@ -287,5 +287,5 @@ origin: src/kraft/remote/jobs.py §from_frame
 
 ## REQ another-major-is-turned-away-naming-the-update
 IF a machine runs another major version of Kraft than the server, THEN the server SHALL refuse it with the version to update to.
-enforced-by: tests/remote/test_protocol.py::test_protocol_refusal_text[another-major], tests/remote/test_protocol.py::test_protocol_refusal_text[same-major-other-protocol]
-origin: src/kraft/remote/protocol.py §_refusal_reason
+enforced-by: tests/remote/test_protocol.py::test_another_major_is_turned_away_whatever_the_protocol[another-major-same-protocol], tests/remote/test_protocol.py::test_another_major_is_turned_away_whatever_the_protocol[same-major], tests/remote/test_protocol.py::test_protocol_refusal_text[same-major-other-protocol]
+origin: src/kraft/remote/protocol.py §server_handshake

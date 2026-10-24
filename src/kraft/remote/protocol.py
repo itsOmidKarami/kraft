@@ -44,8 +44,6 @@ from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from kraft import update
-
 #: Bumped when a frame changes meaning, and only with a Kraft major: "same major" and "same
 #: protocol" mean the same thing. Equal or refused: there is no range.
 PROTOCOL_VERSION = 2
@@ -102,9 +100,22 @@ def _caps(raw: object) -> frozenset[str]:
     return frozenset()
 
 
+def _major(version: str) -> int | None:
+    """The major of a release version; None for a dev install or anything unparsable, which
+    never counts as another major. Local here: the local worker imports only leaf modules."""
+    if "+" in version or ".dev" in version:
+        return None
+    lead = version.removeprefix("v").split(".", 1)[0]
+    return int(lead) if lead.isascii() and lead.isdigit() else None
+
+
+def _another_major(kraft_version: str, machine_kraft: str) -> bool:
+    server, machine = _major(kraft_version), _major(machine_kraft)
+    return server is not None and machine is not None and server != machine
+
+
 def _refusal_reason(kraft_version: str, machine_kraft: str, machine: object) -> str:
-    server_major, machine_major = update._parts(kraft_version)[:1], update._parts(machine_kraft)[:1]
-    if server_major and machine_major and server_major != machine_major:
+    if _another_major(kraft_version, machine_kraft):
         return (
             f"update kraft on this machine to {kraft_version}: "
             f"it runs {machine_kraft}, another major version"
@@ -148,7 +159,7 @@ async def server_handshake(
         await _refuse(t, "expected hello", name=name)
     machine = hello.get("protocol")
     machine_kraft = str(hello.get("kraft") or "unknown")
-    if machine != PROTOCOL_VERSION:
+    if machine != PROTOCOL_VERSION or _another_major(kraft_version, machine_kraft):
         await _refuse(
             t,
             _refusal_reason(kraft_version, machine_kraft, machine),
