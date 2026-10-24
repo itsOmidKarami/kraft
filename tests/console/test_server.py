@@ -54,7 +54,14 @@ OK_LINES = [
     "Config  templates ✓  policy ✓  intake ✓  ·  Index  ready",
     "Storage  3.1G of 20G  ·  Add-ons  1 update waiting",
 ]
-ACTIVE = [{"id": "a1b2c3d4", "title": "Fix the [/] parser", "current_node_id": "implement"}]
+ACTIVE = [
+    {
+        "id": "a1b2c3d4",
+        "title": "Fix the [/] parser",
+        "current_node_id": "implement",
+        "in_place": True,
+    }
+]
 
 
 def _quiet(monkeypatch, releases=(UP_TO_DATE,)) -> list:
@@ -180,10 +187,10 @@ def test_the_servers_keys_run_their_verbs_after_the_consoles_confirm(
     kraft_is(ECHO)
     _quiet(monkeypatch)
 
-    async def list_work_items(status=None, **kwargs):
+    async def active_items():
         return ACTIVE
 
-    monkeypatch.setattr(client, "list_work_items", list_work_items)
+    monkeypatch.setattr(client, "active_items", active_items)
 
     async def scenario(app, pilot):
         await pilot.press("2", keys[0])
@@ -279,10 +286,10 @@ def test_an_update_that_installed_another_kraft_says_restart_the_console(
     kraft_is(ECHO)
     calls = _quiet(monkeypatch)
 
-    async def no_one_running(status=None, **kwargs):
+    async def no_one_running():
         return []
 
-    monkeypatch.setattr(client, "list_work_items", no_one_running)
+    monkeypatch.setattr(client, "active_items", no_one_running)
 
     async def scenario(app, pilot):
         await console.until(pilot, lambda: calls)
@@ -571,10 +578,10 @@ def test_a_failed_read_after_an_update_forgets_the_old_release(console, kraft_is
     kraft_is(ECHO)
     calls = _quiet(monkeypatch, [RELEASE, FEED_DOWN])
 
-    async def no_one_running(status=None, **kwargs):
+    async def no_one_running():
         return []
 
-    monkeypatch.setattr(client, "list_work_items", no_one_running)
+    monkeypatch.setattr(client, "active_items", no_one_running)
 
     async def scenario(app, pilot):
         await console.until(pilot, lambda: app.release is not None)

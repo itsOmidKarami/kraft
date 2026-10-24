@@ -199,6 +199,13 @@ class RunDirs:
         return self.base / "kraft.mode"
 
     @property
+    def stop_now(self) -> Path:
+        """Written by `kraft admin stop --now` just before the SIGTERM: this stop ends the
+        local sessions it would otherwise leave running. Read and deleted by the stopping
+        server; one left behind is deleted at the next boot."""
+        return self.base / "stop-now"
+
+    @property
     def worktrees(self) -> Path:
         return self.base / "worktrees"
 

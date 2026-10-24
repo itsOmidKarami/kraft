@@ -70,20 +70,22 @@ async function restartAddress(items: ApplyItem[]): Promise<string> {
   return `${location.protocol}//${location.hostname}${port ? `:${port}` : ""}`;
 }
 
-/** How many items are `active`, the count `kraft admin restart` shows before it asks. */
+/** How many active items run in place, the count `kraft admin restart` shows before it asks. */
 async function activeItems(): Promise<number | null> {
-  const r = await request<{ items?: { status?: string }[] }>("/work-items");
-  return r.status === 200 && Array.isArray(r.body.items) ? r.body.items.filter((i) => i.status === "active").length : null;
+  const r = await request<{ items?: { status?: string; in_place?: boolean }[] }>("/work-items");
+  return r.status === 200 && Array.isArray(r.body.items) ? r.body.items.filter((i) => i.status === "active" && i.in_place).length : null;
 }
 
-/** What a restart does to running work, for the confirmations: a restart ends each active item's
- *  agent, and the item stops as failed until someone retries it (`install#a-restart-ends-running-agents`). */
-export function restartNote(active: number | null | undefined): string {
-  if (active === 0) return "No item is active, so no agent is stopped.";
+/** What a restart does to running work, for the confirmations: the steps of worktree items carry
+ *  on and the new server picks them up; the agent of an item running in place ends, and the item
+ *  stops as failed until someone retries it (`install#a-restart-leaves-running-steps-running`). */
+export function restartNote(inPlace: number | null | undefined): string {
+  const carry = "Running steps of worktree items carry on through a restart.";
   const avoid = " Pause them first to avoid that.";
-  if (active == null) return `Restarting stops the agent of any active item. Each stops as failed and needs Retry afterwards.${avoid}`;
-  if (active === 1) return `1 item is active. Restarting stops its agent; it stops as failed and needs Retry afterwards. Pause it first to avoid that.`;
-  return `${active} items are active. Restarting stops their agents; each stops as failed and needs Retry afterwards.${avoid}`;
+  if (inPlace === 0) return carry;
+  if (inPlace == null) return `${carry} The agent of any item running in place stops with it; each stops as failed and needs Retry afterwards.${avoid}`;
+  if (inPlace === 1) return `${carry} 1 item runs in place: restarting stops its agent; it stops as failed and needs Retry afterwards. Pause it first to avoid that.`;
+  return `${carry} ${inPlace} items run in place: restarting stops their agents; each stops as failed and needs Retry afterwards.${avoid}`;
 }
 
 /** A bind address as the host of a URL to it: a wildcard bind is reached on

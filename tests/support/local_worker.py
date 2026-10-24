@@ -116,6 +116,12 @@ def _local_worker(tmp_path_factory):
     local_link.install(DirectLink(LocalJobs(tmp_path_factory.mktemp("local-worker"))))
     yield
     local_link.install(None)
+    # `server_stopping` marks the event loop, and a test loop outlives its test: a stop one test
+    # simulated must not leave local sessions kept (or stopped) for the next.
+    from kraft.adapters import subprocess as sp
+
+    sp._STOPPING.clear()
+    sp._KEEPING.clear()
 
 
 def bare_env() -> dict[str, str]:

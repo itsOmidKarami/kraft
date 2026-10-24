@@ -5,7 +5,10 @@ test_subprocess.py, which is at its line budget."""
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
 
+import psutil
 import pytest
 from support.harness import IN_PLACE, v1_named_chain
 
@@ -56,3 +59,48 @@ async def test_a_task_cancelled_before_its_launch_holds_no_checkout(
         assert database.read(lambda c: store.checkout_holder(c, "b")) is None
         log = (run_dirs.base / session["log_path"]).read_text()
         assert "ended before its launch was recorded" in log
+
+
+@pytest.mark.parametrize(
+    ("target", "survives"),
+    [(None, True), (IN_PLACE, False)],
+    ids=["worktree-is-kept", "in-place-is-stopped-while-stopping"],
+)
+async def test_a_running_session_cancelled_by_a_stopping_server(
+    item_on, run_dirs, database, tmp_path, target, survives
+):
+    """A clean stop leaves a worktree item's local session running; an in-place item's runs in
+    the person's own checkout, and stops."""
+    chain = v1_named_chain(run_dirs.base / "t")
+    await item_on(chain, "implementation", wid="a", target=target)
+    task = asyncio.create_task(
+        sp.run_task(
+            database,
+            run_dirs,
+            session_id="s1",
+            work_item_id="a",
+            node_id="implementation",
+            hook_point="implementation.main.implement",
+            cmd=["sleep", "30"],
+            cwd=tmp_path,
+            poll_s=0.02,
+        )
+    )
+    for _ in range(250):
+        [row] = database.read(lambda c: c.execute("SELECT * FROM worker_sessions").fetchall()) or [
+            None
+        ]
+        if row is not None and row["status"] == "running":
+            break
+        await asyncio.sleep(0.02)
+    sp.server_stopping()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    alive = psutil.pid_exists(row["pid"]) and psutil.Process(row["pid"]).status() != "zombie"
+    try:
+        assert alive is survives
+    finally:
+        if alive:
+            os.killpg(row["pid"], signal.SIGKILL)

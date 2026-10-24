@@ -241,6 +241,7 @@ async def _lifespan(app: FastAPI):
     # gets refused as "a different instance".
     run_dir = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()).resolve()
     run_dirs = RunDirs(run_dir).ensure()
+    run_dirs.stop_now.unlink(missing_ok=True)  # a `stop --now` that never reached a server
     # Every local session is started by the local worker, so its link is up before reattach
     # asks it about the sessions it holds. A link a test installed is kept: API tests never
     # start a real worker. On probation the link starts too: a worker holds sessions and
@@ -580,7 +581,9 @@ async def _lifespan(app: FastAPI):
         # Before the walks are cancelled: a setup command runs in a thread
         # no cancel reaches, and would outlive this server.
         _builtins.end_running_setups()
-        _subprocess.server_stopping()
+        stop_now = run_dirs.stop_now.exists()
+        run_dirs.stop_now.unlink(missing_ok=True)
+        _subprocess.server_stopping(keep_local=not stop_now)
         tasks = list(app.state.tasks.values())
         for task in tasks:
             task.cancel()

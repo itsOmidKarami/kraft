@@ -730,14 +730,51 @@ def _declared_members(db, work_item_id: str) -> list[str]:
 
 #: Event loops whose server is shutting down (`server_stopping`).
 _STOPPING: weakref.WeakSet = weakref.WeakSet()
+#: Those of them that leave running local sessions running (`keep_local`).
+_KEEPING: weakref.WeakSet = weakref.WeakSet()
 
 
-def server_stopping() -> None:
+def server_stopping(*, keep_local: bool = True) -> None:
     """The server on this loop is cancelling its walks: a session cut off
     before its launch now stays `pending`, for restart's reattach to stop
     its item as `infra` ("spawn unconfirmed"). While the server is down the
-    lease holds nothing back."""
-    _STOPPING.add(asyncio.get_running_loop())
+    lease holds nothing back.
+
+    `keep_local`: a local session of a worktree item that is still running is left running, as
+    after a crash, for the next start to adopt through the local worker. `kraft admin stop
+    --now` passes False."""
+    loop = asyncio.get_running_loop()
+    _STOPPING.add(loop)
+    if keep_local:
+        _KEEPING.add(loop)
+    else:
+        _KEEPING.discard(loop)
+
+
+def keeping_local_sessions() -> bool:
+    """Whether the server stopping on this loop leaves running local sessions running."""
+    try:
+        return asyncio.get_running_loop() in _KEEPING
+    except RuntimeError:
+        return False
+
+
+async def kept_through_stop(db, work_item_id: str, session_id: str, *, alive: bool) -> bool:
+    """Whether a local session cancelled by a stopping server is left running. Called only for a
+    session that is local and whose task was cancelled; true when the stop keeps local sessions,
+    its process still `alive`, its row still reads `running` (a pause, skip or cancel by a person
+    writes the row first and stays a stop) and its item is not in place (that session runs in the
+    person's own checkout). A session over its cap never gets here: the poll loop leaves it
+    without a cancel."""
+    if not alive or not keeping_local_sessions():
+        return False
+
+    def _read(c):
+        status = store.session_status(c, session_id, work_item_id=work_item_id)
+        row = c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+        return status == SessionStatus.RUNNING and not store.is_in_place(row)
+
+    return await db.write(_read)
 
 
 async def run_task(db, run_dirs, *, session_id: str, work_item_id: str, **kwargs) -> str:
@@ -1375,6 +1412,8 @@ async def _run_task(
     watcher.start()
     oom: _backends.OomKill | None = None
     started = False
+    capped = False
+    cancelled = False  # the poll loop was cancelled: a pause, a skip, a stop
 
     async def wind_down() -> None:
         """The `finally` below, past stopping the watcher: every way out of the
@@ -1399,6 +1438,15 @@ async def _run_task(
             await db.write(lambda c: store.session_status(c, session_id, work_item_id=work_item_id))
             == SessionStatus.PAUSED
         )
+        # A clean stop leaves a running local session of a worktree item running, as a crash
+        # does, for the next start to adopt through the local worker. Nothing of it is torn
+        # down: not its group, its sandbox, its egress route, nor its refs.
+        if (
+            cancelled
+            and run is None
+            and await kept_through_stop(db, work_item_id, session_id, alive=proc.poll() is None)
+        ):
+            return
         # Only a session that started was ever sent the SIGINT this waits on.
         if paused and started and flush_grace:
             await _flush_sleep(flush_grace)
@@ -1484,7 +1532,6 @@ async def _run_task(
         seen_usage: dict[str, _usage.Usage] = {}
         log_offset = 0
         next_progress = time.monotonic() + progress_s
-        capped = False
         hit: caps.Hit | None = None
         # The idle watchdog: the log's size, read on the usage tick below.
         last_size = 0
@@ -1525,6 +1572,9 @@ async def _run_task(
                     )
             except Exception:
                 logger.exception("usage progress tick failed for session %s", session_id)
+    except asyncio.CancelledError:
+        cancelled = True
+        raise
     finally:
         # A pause or skip cancels this task from inside the poll loop above
         # (deps.cancel -> CancelledError), which used to skip straight past

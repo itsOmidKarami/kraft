@@ -18,7 +18,15 @@ from support.pidfile import hold_pidfile
 from kraft import cli, update
 from kraft.paths import RunDirs
 
-ACTIVE = [{"id": "a1b2", "title": "Add the parser", "current_node_id": "implementation"}]
+ACTIVE = [
+    {
+        "id": "a1b2",
+        "title": "Add the parser",
+        "current_node_id": "implementation",
+        "in_place": True,
+    }
+]
+WORKTREE = [{**ACTIVE[0], "id": "c3d4", "in_place": False}]
 
 
 @pytest.fixture
@@ -27,14 +35,25 @@ def board(monkeypatch):
     not answer."""
     rows = {"active": ACTIVE}
 
-    async def list_work_items(status=None, **kwargs):
+    async def active_items():
         if rows["active"] is None:
             raise ConnectionError("no server")
-        assert status == "active"
         return rows["active"]
 
-    monkeypatch.setattr(cli.admin.client, "list_work_items", list_work_items)
+    monkeypatch.setattr(cli.admin.client, "active_items", active_items)
     return rows
+
+
+@pytest.fixture
+def workers(monkeypatch):
+    """What `GET /workers` says of the local worker, set per test (`slots_used`)."""
+    state = {"slots_used": 0}
+
+    async def list_workers():
+        return {"workers": [{"name": "local", **state}, {"name": "gpu", "slots_used": 9}]}
+
+    monkeypatch.setattr(cli.admin.client, "list_workers", list_workers)
+    return state
 
 
 @pytest.fixture
@@ -103,13 +122,15 @@ def test_restart_lists_active_items_and_asks_in_a_terminal(
         assert stopped.value.code == 1
     err = capsys.readouterr().err
     assert ("nothing was restarted" in err) is not goes_on
-    assert "restarting the server ends the agent of any active item (1)" in err
+    assert "restarting the server ends the agent of any item running in place (1)" in err
     assert "a1b2  implementation  Add the parser" in err
     assert bool(restarted) is goes_on
     assert terminal.asked == (["Go on? [y/N] "] if asked else [])
 
 
-@pytest.mark.parametrize("active", [[], None], ids=["none-active", "no-server"])
+@pytest.mark.parametrize(
+    "active", [[], None, WORKTREE], ids=["none-active", "no-server", "worktree-items-keep-running"]
+)
 def test_restart_with_nothing_running_does_not_ask(board, terminal, restarted, capsys, active):
     """`no-server`: the listing gets no answer from a server that holds its
     pidfile. With no server at all, restart refuses (test_admin.py)."""
@@ -121,22 +142,75 @@ def test_restart_with_nothing_running_does_not_ask(board, terminal, restarted, c
     assert "ends the agent" not in capsys.readouterr().err
 
 
-def test_stop_lists_active_items_but_never_asks(board, terminal, tmp_path, monkeypatch, capsys):
+@pytest.fixture
+def stoppable(tmp_path, monkeypatch):
+    """A server holding its pidfile that exits on SIGTERM; `.run_dirs` and `.signalled`."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     run_dirs = RunDirs(tmp_path / "run")
     held = hold_pidfile(run_dirs.pid, 4171)
+    state = SimpleNamespace(run_dirs=run_dirs, signalled=[], marked_at_signal=[])
 
     def fake_kill(pid, sig):
+        state.signalled.append(sig)
+        state.marked_at_signal.append(run_dirs.stop_now.exists())
         held.release()  # the server's exit drops its lock and its file
         run_dirs.pid.unlink()
 
     monkeypatch.setattr(os, "kill", fake_kill)
+    return state
+
+
+def test_stop_lists_the_items_that_end_but_never_asks(board, terminal, stoppable, capsys):
     terminal.answer = "n"
     cli.main(["admin", "stop"])
     captured = capsys.readouterr()
-    assert "stopping the server ends the agent of any active item (1)" in captured.err
+    assert "stopping the server ends the agent of any item running in place (1)" in captured.err
     assert "stopped (pid 4171)" in captured.out
     assert terminal.asked == []
+
+
+@pytest.mark.parametrize(
+    ("slots", "items", "said"),
+    [
+        (2, WORKTREE, "2 local steps keep running without Kraft"),
+        (1, WORKTREE, "1 local step keeps running without Kraft"),
+        (2, ACTIVE, "1 local step keeps running without Kraft"),  # one of them is in place
+        (1, ACTIVE, None),
+        (0, WORKTREE, None),
+    ],
+    ids=["two", "one", "in-place-one-of-two", "only-in-place", "none"],
+)
+def test_stop_says_local_steps_keep_running(board, workers, stoppable, capsys, slots, items, said):
+    workers["slots_used"] = slots
+    board["active"] = items
+    cli.main(["admin", "stop"])
+    err = " ".join(capsys.readouterr().err.split())
+    if said is None:
+        assert "keep running" not in err and "keeps running" not in err
+        return
+    assert said in err
+    assert "nothing answers their permission prompts or enforces their caps" in err
+    assert "kraft admin stop --now stops them" in err
+    assert not stoppable.run_dirs.stop_now.exists()
+
+
+def test_stop_now_marks_the_stop_for_the_server_and_says_nothing_is_kept(
+    board, workers, stoppable, capsys
+):
+    workers["slots_used"] = 2
+    board["active"] = WORKTREE
+    cli.main(["admin", "stop", "--now"])
+    err = capsys.readouterr().err
+    assert stoppable.marked_at_signal == [True]  # written before the SIGTERM
+    assert "stopping the server ends the agent of any active item (1)" in err
+    assert "keep running" not in err
+
+
+def test_stop_now_writes_the_marker_only_when_a_server_runs(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    cli.main(["admin", "stop", "--now"])
+    assert "no server running" in capsys.readouterr().out
+    assert not RunDirs(tmp_path / "run").stop_now.exists()
 
 
 @pytest.mark.parametrize(("answer", "installs"), [("n", False), ("y", True)], ids=["no", "yes"])

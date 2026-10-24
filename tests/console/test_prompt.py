@@ -135,10 +135,10 @@ def test_enter_runs_the_line_opens_its_view_or_says_why_not(
 ):
     kraft_is(ECHO)
 
-    async def no_one_running(status=None, **kwargs):
+    async def no_one_running():
         return []
 
-    monkeypatch.setattr(client, "list_work_items", no_one_running)
+    monkeypatch.setattr(client, "active_items", no_one_running)
 
     async def scenario(app, pilot):
         await pilot.press("slash")

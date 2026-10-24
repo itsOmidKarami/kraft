@@ -9,7 +9,7 @@ import pytest
 
 from kraft.remote import local_link
 
-from .test_subprocess import _cancelled, _row, _running, run  # noqa: F401
+from .test_subprocess import _cancelled, _row, _running, docker, run  # noqa: F401
 
 
 def _log(row) -> str:
@@ -92,3 +92,102 @@ async def test_a_session_the_worker_refuses_is_a_config_error(run, tmp_path, wha
 
     assert status == "config_error"
     assert f"no such {'working directory' if what == 'cwd' else 'command'}" in _log(row)
+
+
+# --- a clean stop -------------------------------------------------------------------------
+
+
+def _alive(pid: int) -> bool:
+    return psutil.pid_exists(pid) and psutil.Process(pid).status() != "zombie"
+
+
+def _end(pid: int) -> None:
+    import os
+    import signal
+
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+async def _stopped_while_running(run, database, sid, *, stopping, before=None, **kw):  # noqa: F811
+    """`run(["sleep", "30"])` cancelled once running, as the server's shutdown does when
+    `stopping` has marked the loop; `before` runs between the two. The session row, and whether
+    its process outlived the cancel (always ended before this returns)."""
+    from kraft.adapters import subprocess as sp
+
+    task = asyncio.create_task(run(["sleep", "30"], sid, **kw))
+    row = await _running(database, sid)
+    if stopping is not None:
+        sp.server_stopping(**stopping)
+    if before is not None:
+        await before()
+    await _cancelled(task)
+    survived = _alive(row["pid"])
+    after = _row(database, sid)
+    _end(row["pid"])
+    return after, survived
+
+
+@pytest.mark.parametrize(
+    ("stopping", "pause", "kept"),
+    [
+        ({}, False, True),
+        ({"keep_local": False}, False, False),
+        ({}, True, False),
+        (None, False, False),
+    ],
+    ids=["kept", "now-stops-it", "paused-by-a-person", "not-stopping-a-cancel-is-a-stop"],
+)
+async def test_clean_stop_keep_rule(run, database, stopping, pause, kept):  # noqa: F811
+    from kraft import store
+
+    async def pause_it():
+        await database.write(lambda c: store.pause_work_item(c, "w1", ["s1"]))
+
+    row, survived = await _stopped_while_running(
+        run, database, "s1", stopping=stopping, before=pause_it if pause else None, flush_grace=0
+    )
+
+    assert survived is kept
+    if kept:
+        assert row["status"] == "running"  # as after a crash: the next start adopts it
+
+
+async def test_a_session_over_its_cap_is_capped_out_while_the_server_stops(run):  # noqa: F811
+    from kraft import caps
+    from kraft.adapters import subprocess as sp
+
+    sp.server_stopping()
+    cap = caps.Deadline(caps.monotonic() - 1, caps.Hit("on.test.run", "time_cap_minutes", 1, 0))
+
+    status, row = await run(["sleep", "30"], time_cap=cap, group_kill_grace=1.0)
+
+    assert (status, row["status"]) == (caps.TIME_CAPPED, "capped_out")
+    assert not _alive(row["pid"])
+
+
+async def test_a_session_that_exits_while_the_server_stops_is_closed_sandboxed(run, docker):  # noqa: F811
+    from kraft.adapters import subprocess as sp
+
+    from .test_subprocess import DOCKER
+
+    sp.server_stopping()
+
+    status, _ = await run(["true"], "s-exit", sandbox=DOCKER)
+
+    assert status == "done"
+    assert docker.read_text().splitlines() == ["kraft-w1-s-exit"]
+
+
+@pytest.mark.parametrize("sandbox", [False, True], ids=["plain", "sandboxed"])
+async def test_a_kept_sandboxed_session_keeps_its_container(run, database, docker, sandbox):  # noqa: F811
+    from .test_subprocess import DOCKER
+
+    row, survived = await _stopped_while_running(
+        run, database, "s-kept", stopping={}, sandbox=DOCKER if sandbox else None
+    )
+
+    assert survived and row["status"] == "running"
+    assert not docker.exists()  # `docker rm` never ran
