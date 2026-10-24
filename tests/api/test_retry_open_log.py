@@ -7,6 +7,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from support.api import WALK_TIMEOUT, _completed_item
@@ -30,11 +31,18 @@ def _as_authenticated_lan_peer(client, monkeypatch):
     client.headers["authorization"] = f"Bearer {st.mcp_token}"
 
 
+#: The editor route, whose `subprocess` and `shutil` the launch tests stand in for.
+_SEARCH = "kraft.api.routes.search"
+
+
 def _spy_on_launches(monkeypatch):
     """Every editor is installed and every launch is recorded, never performed."""
     launched = []
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: launched.append(argv) or object())
+    monkeypatch.setattr(_SEARCH + ".shutil", SimpleNamespace(which=lambda name: f"/usr/bin/{name}"))
+    # The route's own Popen and which only: patched process-wide, a git call the server
+    # makes meanwhile was recorded as a launch, or crashed on the stand-in `which`.
+    spy = SimpleNamespace(Popen=lambda argv, **kw: launched.append(argv) or object())
+    monkeypatch.setattr(_SEARCH + ".subprocess", spy)
     return launched
 
 
@@ -323,7 +331,7 @@ def test_open_document_reports_501_when_no_editor_is_installed(client, repo, mon
     doc_id = docs[0]["document_id"]
     _as_git_scan_doc(client, monkeypatch, doc_id)
 
-    monkeypatch.setattr("shutil.which", lambda _: None)
+    monkeypatch.setattr(_SEARCH + ".shutil", SimpleNamespace(which=lambda _: None))
     r = client.post(f"/api/documents/{doc_id}/open", json={"editor": "zed"})
     assert r.status_code == 501
 
@@ -350,7 +358,8 @@ def test_open_document_launches_the_named_editor(
     launched = _spy_on_launches(monkeypatch)
     if on_path is not None:
         monkeypatch.setattr(
-            "shutil.which", lambda name: f"/usr/bin/{name}" if name in on_path else None
+            _SEARCH + ".shutil",
+            SimpleNamespace(which=lambda name: f"/usr/bin/{name}" if name in on_path else None),
         )
     _mac_apps(monkeypatch, tmp_path / "Applications", apps)
     r = client.post(f"/api/documents/{doc_id}/open", json={"editor": "code"})
@@ -599,7 +608,8 @@ def test_editors_lists_only_what_this_machine_can_launch(
     client, monkeypatch, tmp_path, on_path, apps, theme, env, expected
 ):
     monkeypatch.setattr(
-        "shutil.which", lambda name: f"/usr/bin/{name}" if name in on_path else None
+        _SEARCH + ".shutil",
+        SimpleNamespace(which=lambda name: f"/usr/bin/{name}" if name in on_path else None),
     )
     _mac_apps(monkeypatch, tmp_path / "Applications", apps)
     if env:
