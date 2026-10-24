@@ -18,10 +18,21 @@ describe("Repos Config row formats", () => {
     expect(models.show({ claude: "opus" })).toBe("claude=opus");
   });
 
-  it("reads and writes test scopes as paths => command", () => {
-    expect(scopes.parse("web/**, docs/** => npm test; api/** => pytest")).toEqual({ value: [{ paths: ["web/**", "docs/**"], command: "npm test" }, { paths: ["api/**"], command: "pytest" }] });
-    expect(scopes.parse("npm test")).toEqual({ error: '"npm test" is not paths => command.' });
-    expect(scopes.show([{ paths: ["a"], command: "c" }])).toBe("a => c");
+  it.each([
+    ["plain", "web/**, docs/** => npm test; api/** => pytest", { value: [{ paths: ["web/**", "docs/**"], command: "npm test" }, { paths: ["api/**"], command: "pytest" }] }],
+    ["targeted-and-plain", "src/** => just ci-test => just test-targeted; docs/** => true", { value: [{ paths: ["src/**"], command: "just ci-test", targeted_command: "just test-targeted" }, { paths: ["docs/**"], command: "true" }] }],
+    ["no-arrow", "npm test", { error: '"npm test" is not paths => command.' }],
+    ["empty-targeted", "a/** => x =>", { error: '"a/** => x =>" is not paths => command.' }],
+  ])("reads test scopes as paths => command => targeted command: %s", (_id, text, parsed) => {
+    // Strict: a scope without a targeted command has no such key, not an undefined one.
+    expect(scopes.parse(text)).toStrictEqual(parsed);
+  });
+
+  it.each([
+    ["plain", [{ paths: ["a"], command: "c" }], "a => c"],
+    ["round-trip", [{ paths: ["src/**"], command: "just ci-test", targeted_command: "just test-targeted" }, { paths: ["docs/**"], command: "true" }], "src/** => just ci-test => just test-targeted; docs/** => true"],
+  ])("writes test scopes back as the text they were read from: %s", (_id, value, text) => {
+    expect(scopes.show(value)).toBe(text);
   });
 
   it("reads a typed \"\" or '' as the empty command, shows it so, and clears a command on blank", () => {

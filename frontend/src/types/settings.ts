@@ -5,6 +5,8 @@ import type { ChainNode } from "./work_item";
 export interface TestScope {
   paths: string[];
   command: string;
+  /** Runs in place of `command` in verification, and only the tests the change affects. */
+  targeted_command?: string;
 }
 
 export interface Repo {
