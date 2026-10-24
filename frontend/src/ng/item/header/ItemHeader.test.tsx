@@ -46,6 +46,11 @@ describe("ItemHeader", () => {
   });
 
   // R11b-11: the header's clock stood still while the pane's counted each second.
+  it("stops its clock when the item ended, not when archiving last touched it", () => {
+    show({ display_status: "archived", status: "completed", started_at: "2026-09-13T08:00:00Z", ended_at: "2026-09-13T09:00:00Z", updated_at: "2026-10-13T09:00:00Z" });
+    expect(document.querySelector(".item-elapsed")).toHaveTextContent(/^1h$/);
+  });
+
   // Filed at 08:00:00; a wait behind a dependency before its first node is not run time.
   it.each([
     { id: "never started: from filing", started_at: null, first: "12s", later: "16s" },

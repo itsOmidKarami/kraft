@@ -678,7 +678,7 @@ export function serverKeys(b: ItemBundle): ItemBundle {
   const ran = b.sessions.reduce((n, s) => n + (s.wall_ms ?? 0), 0);
   fill(it, {
     archived_at: null, archived_by: null, fallback: null, base_ref: null, bead_cwd: null, branch: `kraft/${it.id}`, budget_set: 0, budget_usd: null,
-    ci_pipeline_ref: null, current_step: 0, dependencies: [], depends_on: null, ended_reason: null, escalation_session_id: null, implements_beads: null,
+    ci_pipeline_ref: null, current_step: 0, dependencies: [], depends_on: null, ended_at: null, ended_reason: null, escalation_session_id: null, implements_beads: null,
     judge_stop_note: [], needs_context_question: null, node_passes: {}, pending_rewind: null, pending_steer_context: null, policy_override: null,
     queued: null, queued_request: null, reject_default: null, retry_at: null, root_merge_policy: null, run_chain: null,
     running_time: { running_s: Math.round(ran / 1000), cap_minutes: null }, scope_runs: [], skipped_paths: [], started_at: b.sessions.map((s) => s.started_at).filter(Boolean).sort()[0] ?? null, step: null, stop_kind: null, stop_reason: null,

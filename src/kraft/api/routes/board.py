@@ -1285,6 +1285,15 @@ def _sessions_out(
     ]
 
 
+#: The events that end an item; the latest is when it ended.
+_ENDINGS = (
+    WorkItemEvent.COMPLETED,
+    WorkItemEvent.MANUALLY_COMPLETED,
+    WorkItemEvent.CANCELLED,
+    WorkItemEvent.ABANDONED,
+)
+
+
 @api_router.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
     from kraft.api.routes import lifecycle
@@ -1366,6 +1375,17 @@ async def get_work_item(wid: str, request: Request):
                 (wid, ChainEvent.NODE_STARTED),
             ).fetchone()[0]
         ),
+        # When it ended, for the header's clock to stop at: not `updated_at`,
+        # which archiving bumps, so an archived item would count its 30 days.
+        "ended_at": st.db.read(
+            lambda c: c.execute(
+                "SELECT MAX(created_at) FROM events WHERE work_item_id = ? "
+                f"AND type IN ({in_list(_ENDINGS)})",
+                (wid,),
+            ).fetchone()[0]
+        )
+        if status in ENDED
+        else None,
         "rate_limit": _rate_limit_retries(st, row),
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         # Which pass of its node each session ran in (`store.number_passes`);

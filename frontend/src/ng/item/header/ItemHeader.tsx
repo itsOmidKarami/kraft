@@ -170,7 +170,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
     ...(hs.main ? [] : hs.panel.filter((it) => it !== "archive" || archivable(item)).map((it): MenuItem => ({ label: PANEL_LABEL[it], onSelect: () => onItem(it) }))),
   ];
 
-  const endedAt = ended ? item.updated_at : null;
+  const endedAt = ended ? (item.ended_at ?? item.updated_at) : null;
   return (
     <>
     <DraftState />

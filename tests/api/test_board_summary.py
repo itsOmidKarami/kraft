@@ -81,6 +81,23 @@ def test_the_detail_reports_when_the_items_chain_first_moved(client, repo):
     assert detail["started_at"] == first
 
 
+def test_the_detail_reports_when_the_item_ended_not_when_it_was_archived(client, repo):
+    """The header's clock stops at the item's end: archiving bumps `updated_at`,
+    and an item archived 30 days on would otherwise count them."""
+    wid = client.post(
+        "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+    ).json()["id"]
+    assert client.get(f"/api/work-items/{wid}").json()["ended_at"] is None
+
+    _append(wid, "work_item_completed", {})
+    _run(lambda c: c.execute("UPDATE work_items SET status = 'completed' WHERE id = ?", (wid,)))
+    ended = client.get(f"/api/work-items/{wid}").json()["ended_at"]
+    _run(lambda c: store.archive_work_item(c, wid, by="you"))
+    detail = client.get(f"/api/work-items/{wid}").json()
+    assert ended is not None and detail["updated_at"] > ended
+    assert detail["ended_at"] == ended
+
+
 def test_budget_cap_reports_the_items_policy_budget_usd_when_it_is_the_lower_cap(client, repo):
     """A policy budget_usd stop's Raise cap writes the item's `policy.budget_usd`.
     The detail reports that cap, marked as the item's own and keyed by the field

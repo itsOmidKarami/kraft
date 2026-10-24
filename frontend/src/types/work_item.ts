@@ -246,6 +246,9 @@ export interface WorkItem {
   /** When its chain's first node started, null before then: the item's clock
    *  counts from here, so time filed or blocked behind a dependency is not run time. */
   started_at?: string | null;
+  /** When it ended, null while it has not: the clock stops here, not at
+   *  `updated_at`, which archiving bumps. */
+  ended_at?: string | null;
   /** The gate waiting on a person, straight from the server — a rejected gate
    *  is not pending, which no client-side inference from sessions can see. */
   pending_gate?: string | null;
