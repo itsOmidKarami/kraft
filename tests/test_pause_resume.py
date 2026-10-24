@@ -108,10 +108,16 @@ def test_pause_then_resume_with_a_steer_relaunches_the_task(
         == 200
     )
 
+    # The paused row can read before its walk has unwound; /resume refuses
+    # ("a walk is already running") until it has.
+    from kraft.api import deps
+
+    _wait(lambda: not deps.task_is_live(client.app, wid), "the paused walk to finish")
+
     # this time let the agent finish
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     r = client.post(f"/api/work-items/{wid}/resume", json={})
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     assert r.json()["steer"] == "keep the old signature"
 
     _wait(
