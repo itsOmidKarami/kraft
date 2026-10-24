@@ -806,6 +806,19 @@
           "minItems": 1,
           "title": "Paths",
           "type": "array"
+        },
+        "targeted_command": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Targeted Command"
         }
       },
       "required": [
