@@ -1,9 +1,12 @@
 """The machine's copy of an item."""
 
+import subprocess
+
 from support.harness import commit_all, git, make_repo, write
 
 from kraft.remote import bundle
 from kraft.remote.workdir import Copy
+from kraft.worker import sandbox
 
 IDENTITY = {
     "GIT_AUTHOR_NAME": "k",
@@ -25,7 +28,7 @@ def test_a_copy_follows_the_branch_and_keeps_ignored_files_across_updates(tmp_pa
     server, head1, full = _server(tmp_path)
     copy = Copy(tmp_path / "m" / "items" / "w1" / "repo")
     copy.update(full, branch="kraft/x", head=head1)
-    (copy.root / ".git" / "info" / "exclude").write_text("node_modules/\n")
+    (copy.bare / "info" / "exclude").write_text("node_modules/\n")
     (copy.root / "node_modules").mkdir()
     (copy.root / "node_modules" / "keep").write_text("built once")
     write(server, "n.txt", "n")
@@ -59,3 +62,23 @@ async def test_the_sweep_commits_what_an_agent_left_and_the_bundle_carries_it(tm
     assert tip == git(copy.root, "rev-parse", "HEAD") != head
     assert copy.bundle_since("kraft/x", [tip], tmp_path / "again.bundle") is None  # nothing new
     assert not await copy.sweep(branch="kraft/x", base=head, node_id="build", identity=IDENTITY)
+
+
+def test_the_copy_is_a_linked_worktree_so_ref_stores_apply(tmp_path):
+    _, head, full = _server(tmp_path)
+    copy = Copy(tmp_path / "m" / "items" / "w1" / "repo")
+    copy.update(full, branch="kraft/x", head=head)
+    common, _ = sandbox.linked_gitdirs(copy.root)
+    assert common == copy.bare.resolve()
+    assert git(copy.root, "rev-parse", "--abbrev-ref", "HEAD") == "kraft/x"
+
+
+def test_an_old_plain_clone_is_rebuilt_as_a_worktree(tmp_path):
+    server, head, full = _server(tmp_path)
+    root = tmp_path / "m" / "items" / "w1" / "repo"
+    subprocess.run(["git", "clone", "-q", str(server), str(root)], check=True)
+    assert sandbox.linked_gitdirs(root) is None
+    copy = Copy(root)
+    copy.update(full, branch="kraft/x", head=head)
+    assert sandbox.linked_gitdirs(root) is not None
+    assert head in copy.commits()
