@@ -37,7 +37,7 @@ NODE_KEYS = (
 TASK_KEYS = (
     "id", "kind", "extends", "icon", "harness", "ref", "command", "target", "prompt", "skill",
     "produces", "profile", "model", "effort", "inputs", "fallback", "steering", "scope",
-    "execution", "wait", "reviewers", "policy", "skippable", "on_failure",
+    "execution", "suite", "wait", "reviewers", "policy", "skippable", "on_failure",
 )  # fmt: skip
 STEP_KEYS = (
     "id", "extends", "runner", "icon", "tasks", "on_failure", "policy", "skippable", "read_only",

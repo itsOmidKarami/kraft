@@ -338,6 +338,10 @@
           },
           "title": "Steering",
           "type": "array"
+        },
+        "suite": {
+          "$ref": "#/$defs/TestSuite",
+          "default": "targeted"
         }
       },
       "title": "BuiltinTask",
@@ -1841,6 +1845,15 @@
       },
       "title": "TemplatePolicyOverride",
       "type": "object"
+    },
+    "TestSuite": {
+      "description": "Which of a test scope's commands `kraft.verify_changed_test_scopes`\nruns: its `targeted_command` where it has one (`TARGETED`), or always its\nfull `command` (`FULL`).",
+      "enum": [
+        "targeted",
+        "full"
+      ],
+      "title": "TestSuite",
+      "type": "string"
     },
     "WaitPolicy": {
       "additionalProperties": false,

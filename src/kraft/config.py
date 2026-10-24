@@ -31,12 +31,14 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     StrictStr,
     TypeAdapter,
     ValidationError,
     ValidationInfo,
     field_serializer,
     field_validator,
+    model_serializer,
     model_validator,
 )
 from pydantic_core import PydanticCustomError
@@ -226,6 +228,16 @@ class TestScope(BaseModel):
     #: the changed paths, and runs only the tests the change affects.
     #: `RepoEntry._scope_commands_name_one_scope` checks the whole table.
     targeted_command: StrictStr | None = Field(default=None, min_length=1)
+
+    @model_serializer(mode="wrap")
+    def _omit_an_unset_targeted_command(self, handler: SerializerFunctionWrapHandler) -> dict:
+        """A scope without one is written as it was read: Settings re-saves
+        what `load_repos` returns, and a `targeted_command: null` is not what
+        the operator wrote."""
+        data = handler(self)
+        if data.get("targeted_command") is None:
+            data.pop("targeted_command", None)
+        return data
 
     # Deliberately does *not* synthesize a `["**"]` scope from a legacy
     # `test_command`: that synthesis used to be written into the loaded entry,

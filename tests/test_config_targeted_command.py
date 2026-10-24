@@ -113,3 +113,9 @@ def test_a_table_of_distinct_commands_loads(fields):
     if "areas" in fields:
         area_scope = entry.areas["web"]["verification"]["test_scopes"][0]
         assert area_scope["targeted_command"] == "web-targeted"
+
+
+def test_a_scope_without_one_is_saved_without_the_key():
+    entry = entry_of({"test_scopes": [{"paths": ["**"], "command": "just ci-test"}]})
+
+    assert entry.model_dump_repo()["test_scopes"] == [{"paths": ["**"], "command": "just ci-test"}]
