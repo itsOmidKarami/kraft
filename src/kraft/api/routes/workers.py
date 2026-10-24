@@ -14,8 +14,9 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from kraft import apply as apply_mod
 from kraft import config as config_mod
+from kraft import store
 from kraft.api import api_router, deps, perimeter
-from kraft.remote import protocol, registry
+from kraft.remote import local_link, protocol, registry
 from kraft.remote.transport import WebSocketTransport
 
 #: Bind values that listen everywhere: no single address to tell a machine.
@@ -85,7 +86,13 @@ def _serve_command(st, token: str) -> tuple[str, str]:
 @api_router.get("/workers")
 async def list_workers(request: Request):
     _forbid_sessions(request)
-    return {"workers": request.app.state.workers_hub.snapshot()}
+    st = request.app.state
+    rows = st.workers_hub.snapshot()
+    link = local_link.current()
+    if link is not None:
+        running = st.db.read(store.running_local_sessions)
+        rows = [link.snapshot_row(running), *rows]
+    return {"workers": rows}
 
 
 @api_router.post("/workers", status_code=201)

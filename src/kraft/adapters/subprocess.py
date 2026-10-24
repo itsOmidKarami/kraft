@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 import psutil
 
-from kraft import caps, events, item_paths, logs, store
+from kraft import caps, events, ids, item_paths, logs, store
 from kraft import harness as _harness
 from kraft import usage as _usage
 from kraft.paths import private
@@ -29,6 +29,7 @@ from kraft.vocab import (
     AGENT_REPORTABLE,
     UNREADABLE_EXIT,
     LimitEvent,
+    RemoteEvent,
     SandboxEvent,
     SessionEvent,
     SessionStatus,
@@ -461,6 +462,66 @@ def _resolve_exit_file(path: Path) -> str | None:
     if code is None:
         return None
     return "done" if code == 0 else "failed"
+
+
+class _NoLocalWorker(OSError):
+    """A session was asked to start locally in a process with no link to a local worker."""
+
+
+def _append(path: Path, text: str) -> None:
+    """`text` at the end of the log: the worker appends to it too, so nothing here may write
+    at an offset of its own."""
+    with open(path, "a") as f:
+        f.write(text)
+
+
+async def _start_locally(
+    argv: list[str],
+    *,
+    cwd: str,
+    env: dict[str, str],
+    key: str,
+    log_path: Path,
+    exit_path: Path,
+    db,
+    work_item_id: str,
+    node_id: str,
+    hook_point: str,
+    time_cap: caps.Deadline | None,
+):
+    """`(proc, time_cap)`: the local worker starts `argv` and this server supervises it by pid and
+    by the files it writes. A wait for the worker (it is starting, or being restarted) is
+    said on the board and in the log, and moves `time_cap` on by as long as it lasted."""
+    # Lazy: `kraft.remote` imports `store` and `caps`, which import this module's callers.
+    from kraft.remote import local_link
+
+    link = local_link.current()
+    if link is None:
+        raise _NoLocalWorker("no local worker in this process")
+
+    async def note_wait(text: str) -> None:
+        payload = {"task": hook_point, "node_id": node_id, "reason": text}
+        await db.write(
+            lambda c: events.append(
+                c, work_item_id, RemoteEvent.STEP_WAITING, payload, node_id=node_id
+            )
+        )
+        _append(log_path, f"kraft: {text}\n")
+
+    began = caps.monotonic()
+    proc = await link.spawn(
+        key,
+        argv,
+        cwd=cwd,
+        env=env,
+        log_path=log_path,
+        exit_path=exit_path,
+        on_wait=note_wait,
+    )
+    waited = caps.monotonic() - began
+    if time_cap is not None and waited > 0.05:
+        time_cap = caps.Deadline(time_cap.at + waited, time_cap.hit)
+    return proc, time_cap
 
 
 def _missing_executable(cmd0: str, cwd: Path, env: dict[str, str]) -> bool:
@@ -1221,27 +1282,54 @@ async def _run_task(
                 # stream-json mode waits on stdin before it starts (measured: a 3s
                 # "no stdin data received" stall), and no hook has any business
                 # reading the server's own stdin.
-                proc = subprocess.Popen(
-                    _wrap_with_exit_file(cmd, exit_path),
-                    cwd=str(client_cwd or cwd),
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                    env=full_env,
-                    stdin=subprocess.DEVNULL,
-                )
+                argv = _wrap_with_exit_file(cmd, exit_path)
+                if run is not None:
+                    proc = subprocess.Popen(
+                        argv,
+                        cwd=str(client_cwd or cwd),
+                        stdout=log,
+                        stderr=subprocess.STDOUT,
+                        start_new_session=True,
+                        env=full_env,
+                        stdin=subprocess.DEVNULL,
+                    )
+                else:
+                    proc, time_cap = await _start_locally(
+                        argv,
+                        cwd=str(client_cwd or cwd),
+                        env=full_env,
+                        key=ids.session_ref(work_item_id, session_id),
+                        log_path=log_path,
+                        exit_path=exit_path,
+                        db=db,
+                        work_item_id=work_item_id,
+                        node_id=node_id,
+                        hook_point=hook_point,
+                        time_cap=time_cap,
+                    )
                 # `start_new_session=True` makes this the group's pgid for life,
                 # captured now rather than re-derived after the leader exits.
                 pgid = proc.pid
                 launched = True
-            except FileNotFoundError as exc:
-                # Popen raises this for a missing cwd as well as a missing
+            except OSError as exc:
+                # Popen raises FileNotFoundError for a missing cwd as well as a missing
                 # executable, and the two are fixed in different places. Say which:
                 # the alternative is what this branch used to leave behind — a
                 # zero-byte log, a 5ms "failed", and no way to tell them apart.
-                # Safe to write: in this path the child never took the fd.
-                missing = "working directory" if not Path(cwd).is_dir() else f"command {cmd[0]!r}"
-                log.write(f"could not start {' '.join(cmd)} in {cwd}: no such {missing} ({exc})\n")
+                # Appended, never written at offset 0: a wait note is already there, and
+                # the local worker has the file open too.
+                if isinstance(exc, _NoLocalWorker):
+                    _append(log_path, f"kraft: {exc}\n")
+                elif isinstance(exc, FileNotFoundError):
+                    missing = (
+                        "working directory" if not Path(cwd).is_dir() else f"command {cmd[0]!r}"
+                    )
+                    _append(
+                        log_path,
+                        f"could not start {' '.join(cmd)} in {cwd}: no such {missing} ({exc})\n",
+                    )
+                else:
+                    _append(log_path, f"could not start {' '.join(cmd)} in {cwd}: {exc}\n")
                 if run is not None:
                     await _remote_runs.current().signal(run, "KILL")
                 # Not "failed": a task that never launched is a configuration

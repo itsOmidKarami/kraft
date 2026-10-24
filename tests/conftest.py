@@ -23,7 +23,8 @@ from kraft import db
 from kraft.paths import RunDirs
 
 #: `rig` and `rig_offline`: a server and a machine in one process (`support.remote`).
-pytest_plugins = ["support.rig_fixtures"]
+#: `support.local_worker`: the in-process local worker every test starts its sessions through.
+pytest_plugins = ["support.rig_fixtures", "support.local_worker"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"

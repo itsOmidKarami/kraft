@@ -4,7 +4,7 @@ import type { Machine } from "../../types";
 import { detailOf, request } from "../http";
 import { Badge } from "../ui/Badge";
 import { Block } from "./parts";
-import { ADD_COMMAND, EVERY_REPO, NO_MACHINES, READ_ONLY_NOTE, giveUpWords, slotsWords, stateWords } from "./workersWords";
+import { ADD_COMMAND, EVERY_REPO, NO_MACHINES, READ_ONLY_NOTE, giveUpWords, isLocal, modeWords, slotsWords, stateWords } from "./workersWords";
 import "./settings.css";
 
 /** Settings › Workers: the machines `kraft admin worker list` prints, read-only. Adding one is the
@@ -19,6 +19,9 @@ export function WorkersPage() {
     });
   }, []);
 
+  const local = machines?.find(isLocal);
+  const others = machines?.filter((m) => !isLocal(m));
+
   return (
     <div className="ng-settings">
       <div className="set-page is-cards">
@@ -27,10 +30,36 @@ export function WorkersPage() {
           <p className="lede">The machines that run work item steps, and whether each is reachable.</p>
         </div>
         {error && <p className="set-error" role="alert">{error}</p>}
-        {machines && (
-          <Block id="set-wk-machines" title="Machines" card aside={plural(machines.length, "machine")}>
+        {local && (
+          <Block id="set-wk-local" title="This machine" card>
             <div className="set-st-body">
-              {machines.length === 0 ? (
+              <table className="set-st-table" aria-label="This machine">
+                <thead>
+                  <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col">Mode</th>
+                    <th scope="col">State</th>
+                    <th scope="col" className="is-num">Running</th>
+                    <th scope="col">Kraft</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="set-mono">{local.name}</td>
+                    <td>{modeWords(local)}</td>
+                    <td>{local.online ? <Badge tone="ok">{stateWords(local)}</Badge> : stateWords(local)}</td>
+                    <td className="is-num">{slotsWords(local)}</td>
+                    <td className="set-mono">{local.kraft_version ?? ""}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </Block>
+        )}
+        {others && (
+          <Block id="set-wk-machines" title="Machines" card aside={plural(others.length, "machine")}>
+            <div className="set-st-body">
+              {others.length === 0 ? (
                 <p className="set-hint">{NO_MACHINES} <code className="set-mono">{ADD_COMMAND}</code></p>
               ) : (
                 <table className="set-st-table" aria-label="Machines">
@@ -47,10 +76,10 @@ export function WorkersPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {machines.map((m) => (
+                    {others.map((m) => (
                       <tr key={m.name}>
                         <td className="set-mono">{m.name}</td>
-                        <td>{m.mode}</td>
+                        <td>{modeWords(m)}</td>
                         <td>{m.online ? <Badge tone="ok">{stateWords(m)}</Badge> : stateWords(m)}</td>
                         <td className="is-num">{slotsWords(m)}</td>
                         <td>{m.repos?.length ? m.repos.join(", ") : EVERY_REPO}</td>

@@ -32,6 +32,9 @@ from kraft.config import ConfigError
 from kraft.executor import gates
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import ESCALATION_HOOK, sweep_stragglers
+from kraft.proc_identity import identity_ok as _identity_ok
+from kraft.proc_identity import pid_alive as _pid_alive
+from kraft.remote import local_link as _local_link
 from kraft.remote import respawn as _remote_respawn
 from kraft.store._common import _now, _span_ms
 from kraft.templates.models import AgentTask, TaskScope
@@ -114,36 +117,6 @@ def _reap(pid: int) -> None:
         os.waitpid(pid, os.WNOHANG)
     except ChildProcessError:
         pass
-
-
-def _pid_alive(pid: int) -> bool:
-    """True only if pid names a live process (a zombie/defunct child is NOT alive)."""
-    try:
-        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
-    except psutil.NoSuchProcess:
-        return False
-    except psutil.Error:
-        return False
-
-
-def _identity_ok(pid: int, pid_start_time) -> bool:
-    if pid_start_time is None or not _pid_alive(pid):
-        return False
-    try:
-        return _same_start(psutil.Process(pid).create_time(), pid_start_time)
-    except psutil.Error:
-        return False
-
-
-def _same_start(observed: float, recorded: float) -> bool:
-    """Whether a process's start time is the one recorded at its launch:
-    exactly, or one whole second off. Linux adds a process's ticks since boot
-    to the boot time in whole seconds (`btime`), which moves by one when the
-    wall clock is stepped across a second, a leap second included. A reused
-    pid would have to start a second apart to the tick (10 ms) as well. A
-    larger step reads as another process, which is never signalled."""
-    shift = observed - recorded
-    return abs(shift - round(shift)) < 1e-6 and abs(round(shift)) <= 1
 
 
 def launched_group(pid: int, pid_start_time) -> bool:
@@ -885,6 +858,34 @@ async def _sync_item_refs(db, run_dirs, work_item_id: str) -> None:
         )
 
 
+async def _still_there(rows) -> dict[tuple[str, str], bool]:
+    """Whether each row's process is still the session Kraft started, by `(work item, session)`.
+
+    A local session is the local worker's to answer (`hold`): it checks the identity itself, and
+    adopts a live session it never launched (one started before the worker existed). A remote
+    step's stand-in is a process of this server's own, so its identity is checked here. With
+    no link installed (a caller outside the server) every row is checked here."""
+    link = _local_link.current()
+    local = {
+        ids.session_ref(r["work_item_id"], r["id"]): r
+        for r in rows
+        if link is not None and not r["runner"]
+    }
+    held = (
+        await link.hold([(ref, r["pid"], r["pid_start_time"]) for ref, r in local.items()])
+        if local
+        else {}
+    )
+    return {
+        (r["work_item_id"], r["id"]): (
+            held[ref]
+            if (ref := ids.session_ref(r["work_item_id"], r["id"])) in local
+            else _identity_ok(r["pid"], r["pid_start_time"])
+        )
+        for r in rows
+    }
+
+
 async def reattach(
     db,
     run_dirs,
@@ -918,14 +919,12 @@ async def reattach(
     #
     # Resolved for every row up front, once each, so the grace retry below can
     # be a single sleep for the whole scan.
-    adopt = {
-        (r["work_item_id"], r["id"]): (
-            r["status"] != SessionStatus.PENDING
-            and r["pid"] is not None
-            and _identity_ok(r["pid"], r["pid_start_time"])
+    adopt = {(r["work_item_id"], r["id"]): False for r in rows}
+    adopt.update(
+        await _still_there(
+            [r for r in rows if r["status"] != SessionStatus.PENDING and r["pid"] is not None]
         )
-        for r in rows
-    }
+    )
     # A remote step whose stand-in died with the server gets a new one, which resumes the log at the
     # file's size (`remote.respawn`); one that cannot be recovered falls through to the stop below.
     rows = [dict(r) for r in rows]
@@ -963,8 +962,7 @@ async def reattach(
     ]
     if grace:
         await asyncio.sleep(grace_retry_delay_s)
-        for r in grace:
-            adopt[(r["work_item_id"], r["id"])] = _identity_ok(r["pid"], r["pid_start_time"])
+        adopt.update(await _still_there(grace))
 
     # A container whose teardown failed or timed out before this start is
     # still writing its worktree, and no row names it any more. Swept before

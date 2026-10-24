@@ -43,6 +43,7 @@ from kraft.index.service import Indexer
 from kraft.paths import BUNDLED, RunDirs, config_dir, default_run_dir, default_skills_dir
 from kraft.remote import hub as workers_hub
 from kraft.remote import listener as workers_listener
+from kraft.remote import local_link
 from kraft.remote import registry as workers_registry
 from kraft.remote import runs as workers_runs
 from kraft.worker import channel as channel_mod
@@ -54,6 +55,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_FRONTEND_DIST = BUNDLED / "web"
 
+
+#: How long boot waits for the local worker before resuming walks that would otherwise park.
+LOCAL_WORKER_BOOT_WAIT_S = 10.0
 
 #: The pollers and loops `start_background` assigns to `app.state`, in the order
 #: shutdown cancels them (`lifespan`); None while not started.
@@ -202,6 +206,23 @@ async def _cancel(task: asyncio.Future | None) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """The server's boot and shutdown (`_lifespan`), and the local worker's link, which has to
+    be ended on both a clean stop and a boot that failed half-way: left running it would keep
+    starting workers for a server that is not there."""
+    app.state.local_link_task = None
+    try:
+        async with _lifespan(app):
+            yield
+    finally:
+        task = app.state.local_link_task
+        if task is not None:
+            await _cancel(task)
+            local_link.install(None)
+        app.state.local_link_task = None
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
     # Before anything can run git: every git Kraft (or a worker it spawns)
     # runs is launched with hooks and the other program-valued config keys
     # pinned, so a hook or `core.hooksPath` a worker plants in the one gitdir
@@ -220,6 +241,15 @@ async def lifespan(app: FastAPI):
     # gets refused as "a different instance".
     run_dir = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()).resolve()
     run_dirs = RunDirs(run_dir).ensure()
+    # Every local session is started by the local worker, so its link is up before reattach
+    # asks it about the sessions it holds. A link a test installed is kept: API tests never
+    # start a real worker. On probation the link starts too: a worker holds sessions and
+    # starts none of its own.
+    link = local_link.current()
+    if link is None:
+        link = local_link.LocalLink(run_dirs.base, kraft_version=update_mod.installed())
+        local_link.install(link)
+        app.state.local_link_task = asyncio.create_task(link.run())
     # The credential a non-browser client (kraft mcp, kraft <verb>) presents when
     # auth is on at all. Created once and kept, so a registered MCP client keeps
     # working across restarts.
@@ -403,6 +433,11 @@ async def lifespan(app: FastAPI):
     if leftover is not None and not app.state.probation:
         when_free.settle_unhanded(run_dirs, leftover)
     app.state.resume_walks = resume_walks
+    # So resumed local steps find the worker up instead of parking at placement.
+    try:
+        await asyncio.wait_for(link.wait_connected(), LOCAL_WORKER_BOOT_WAIT_S)
+    except TimeoutError:
+        logger.warning("the local worker is not up yet; local steps wait for it")
     if not app.state.probation:
         resume_walks()
 
