@@ -11,7 +11,7 @@ import signal as _signal
 import subprocess
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -69,7 +69,11 @@ class JobSpec:
 
     @classmethod
     def from_frame(cls, frame: dict) -> JobSpec:
-        return cls(**frame)
+        """Fields this version does not know are ignored, so a newer server's job still runs."""
+        return cls(**{k: v for k, v in frame.items() if k in _FIELDS})
+
+
+_FIELDS = frozenset(f.name for f in fields(JobSpec))
 
 
 @dataclass

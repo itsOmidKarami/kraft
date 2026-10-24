@@ -35,7 +35,7 @@
 /get-started/install#upgrading-from-14: /guides/run/upgrade-from-1-4#update-from-14
 /get-started/install#upgrading-from-a-150-release-candidate: /guides/run/upgrade-from-0-x-or-a-release-candidate#upgrading-from-a-150-release-candidate
 /get-started/install#upgrading-from-older-releases: /guides/run/upgrade-from-0-x-or-a-release-candidate#upgrading-from-older-releases
-/get-started/install#a-restart-ends-running-agents: /guides/run/restart-kraft#a-restart-ends-running-agents
+/get-started/install#a-restart-ends-running-agents: /guides/run/restart-kraft#a-restart-leaves-local-steps-running
 /get-started/install#pin-or-roll-back-a-version: /guides/run/upgrade-kraft#pin-or-roll-back-a-version
 /get-started/install#requirements: /get-started/install#before-you-start
 /get-started/install#verify: /get-started/install#check-it-worked
@@ -422,7 +422,8 @@
 /guides/customize/upgrading-templates#keep-your-templates-in-git: /guides/run/upgrade-your-configuration#keep-your-config-in-git
 /guides/customize/upgrading-templates#diff-against-the-packaged-defaults: /guides/run/upgrade-your-configuration#diff-against-the-shipped-defaults
 /guides/customize/upgrading-templates#verify: /guides/run/upgrade-your-configuration#check-it-worked
-/guides/run/upgrade-kraft#a-restart-ends-running-agents: /guides/run/restart-kraft#a-restart-ends-running-agents
+/guides/run/upgrade-kraft#a-restart-ends-running-agents: /guides/run/restart-kraft#a-restart-leaves-local-steps-running
+/guides/run/restart-kraft#a-restart-ends-running-agents: /guides/run/restart-kraft#a-restart-leaves-local-steps-running
 /guides/run/upgrade-kraft#where-did-a-page-go-and-why-does-my-theme-look-different: /reference/changes-from-1-4#where-the-pages-moved
 /guides/run/logs-and-disk-space#line-times-in-a-session-log: /guides/run/logs-and-disk-space#find-the-logs
 /guides/run/remote-access#verify: /guides/run/remote-access#check-it-worked

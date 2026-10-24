@@ -11,20 +11,35 @@ from kraft.vocab import WorkItemStatus
 from kraft.vocab.total import total
 
 
-def running_agents_warning(doing: str, items: list[dict]) -> list[str]:
+def running_agents_warning(doing: str, items: list[dict], *, now: bool = False) -> list[str]:
     """The lines naming the active `items` whose agents a server stop ends,
-    `doing` being what ends them ("restarting"); none when nothing is active."""
-    if not items:
+    `doing` being what ends them ("restarting"); none when none ends.
+
+    A clean stop leaves the local steps of worktree items running: only an item running in
+    place (`in_place`) ends with it. `now` is a stop that ends every active item's agent
+    (`kraft admin stop --now`)."""
+    ending = items if now else [item for item in items if item.get("in_place")]
+    if not ending:
         return []
+    which = "any active item" if now else "any item running in place"
     return [
-        f"{doing} the server ends the agent of any active item ({len(items)}):",
+        f"{doing} the server ends the agent of {which} ({len(ending)}):",
         *(
             f"  {item['id']}  {item.get('current_node_id') or '-'}  {item['title']}"
-            for item in items
+            for item in ending
         ),
         "  each one stops when Kraft starts again; retry it then. To avoid that, "
         "pause them first (kraft item pause ID) and resume them after.",
     ]
+
+
+def kept_steps_note(count: int) -> str:
+    """What `kraft admin stop` says of the local steps it leaves running."""
+    return (
+        f"{count} local step{'s' if count != 1 else ''} keep{'' if count != 1 else 's'} running "
+        "without Kraft. Until Kraft is back nothing answers their permission prompts or "
+        "enforces their caps; kraft admin stop --now stops them."
+    )
 
 
 def is_item_row(result: object) -> bool:

@@ -69,9 +69,9 @@ describe("More (K.1)", () => {
   });
 
   it.each([
-    [[], /No item is active, so no agent is stopped\./],
-    [[{ status: "active" }, { status: "active" }], /2 items are active\. Restarting stops their agents; each stops as failed and needs Retry afterwards\./],
-  ])("the Restart sheet counts the active items and does not promise they are picked up again (%j)", async (items, said) => {
+    [[], /Running steps of worktree items carry on through a restart\./],
+    [[{ status: "active", in_place: true }, { status: "active", in_place: true }, { status: "active", in_place: false }], /2 items run in place: restarting stops their agents; each stops as failed and needs Retry afterwards\./],
+  ])("the Restart sheet counts the in-place active items and does not promise they are picked up again (%j)", async (items, said) => {
     open({
       "GET /apply": [200, { restart: [{ id: "access.bind", file: "access.yaml", text: "bind changed" }], reload: [], managed: true }],
       "GET /access": [200, { port: 8765 }],
@@ -91,7 +91,7 @@ describe("More (K.1)", () => {
     await userEvent.click(screen.getByRole("button", { name: "Restart Kraft" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     counted();
-    expect(await screen.findByRole("dialog", { name: "Restart Kraft?" })).toHaveTextContent("2 items are active.");
+    expect(await screen.findByRole("dialog", { name: "Restart Kraft?" })).toHaveTextContent("2 items run in place");
   });
 
   it("does not offer Restart when Kraft was started from a terminal, and says so", async () => {

@@ -256,7 +256,9 @@ def no_link_installed(monkeypatch):
     local_link.install(None)
     workers = []
     monkeypatch.setattr(
-        local_link, "_start_worker", lambda run_base: workers.append(ThreadedWorker(run_base))
+        local_link,
+        "_start_worker",
+        lambda run_base, install: workers.append(ThreadedWorker(run_base, install)),
     )
     yield workers
     for worker in workers:
@@ -309,3 +311,40 @@ def test_startup_local_link_boot_fails_after_the_link(no_link_installed, tmp_pat
 
     assert local_link.current() is None
     assert ended == [True]
+
+
+def test_boot_deletes_a_stop_now_marker_no_server_read(tmp_path, client_factory):
+    """`kraft admin stop --now` writes the marker before the SIGTERM; one that never reached a
+    server must not turn the next, clean stop into a `--now`."""
+    marker = RunDirs(tmp_path / "run").stop_now
+    marker.parent.mkdir(parents=True)
+    marker.write_text("")
+
+    with client_factory():
+        assert not marker.exists()
+
+
+@pytest.mark.parametrize(
+    ("stop_now", "kept"), [(False, True), (True, False)], ids=["clean-stop-keeps", "stop-now-ends"]
+)
+def test_a_stop_now_marker_ends_the_local_sessions_a_clean_stop_keeps(
+    tmp_path, client_factory, monkeypatch, stop_now, kept
+):
+    from kraft.adapters import subprocess as sp
+
+    seen = []
+    real = sp.server_stopping
+    monkeypatch.setattr(sp, "server_stopping", lambda **kw: seen.append(kw) or real(**kw))
+    with client_factory() as client:
+        marker = client.app.state.run_dirs.stop_now
+        if stop_now:
+            marker.write_text("")
+    assert seen == [{"keep_local": kept}]
+    assert not marker.exists()
+
+
+@pytest.fixture
+def client_factory(tmp_path, monkeypatch):
+    from support.api import _client
+
+    return lambda: _client(tmp_path, monkeypatch)

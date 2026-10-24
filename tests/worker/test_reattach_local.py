@@ -100,3 +100,34 @@ async def test_a_remote_row_keeps_the_identity_check(item, database, run_dirs):
         proc.wait()
 
     assert link.calls == []
+
+
+@pytest.mark.parametrize(
+    ("stopping", "closed"),
+    [({}, []), ({"keep_local": False}, ["w1/s1"]), (None, ["w1/s1"])],
+    ids=["kept-by-a-clean-stop", "now-closes-it", "cancelled-while-running-closes-it"],
+)
+async def test_adopted_sandboxed_session_survives_a_second_stop(
+    item, database, run_dirs, monkeypatch, stopping, closed
+):
+    """Stop, start, stop again: the second stop cancels the *adopted* task, and its `finally`
+    must not close the container (or the route out) of a session the stop leaves running."""
+    from kraft.adapters import subprocess as sp
+
+    closes = []
+
+    async def close_sandbox(kind, work_item_id, session_id, *, egress=False):
+        closes.append(f"{work_item_id}/{session_id}")
+
+    monkeypatch.setattr(reattach, "_close_sandbox", close_sandbox)
+    with _sleeper() as (proc, started):
+        await item.session("s1", IMPLEMENT, running=(proc.pid, started), sandbox="docker")
+        _, adopted = await reattach.reattach(database, run_dirs)
+        task = adopted["w1-s1"]
+        await asyncio.sleep(0.1)  # the task is inside its poll loop
+        if stopping is not None:
+            sp.server_stopping(**stopping)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert closes == closed

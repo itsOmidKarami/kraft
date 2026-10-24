@@ -145,7 +145,9 @@ def _cmd_local(ns: argparse.Namespace) -> None:
         for sig in (signal.SIGINT, signal.SIGTERM):
             with contextlib.suppress(NotImplementedError):
                 asyncio.get_running_loop().add_signal_handler(sig, stop.set)
-        await local_serve.serve(Path(ns.run_dir), kraft_version=update.installed(), stop=stop)
+        await local_serve.serve(
+            Path(ns.run_dir), kraft_version=update.installed(), stop=stop, install=ns.install
+        )
 
     asyncio.run(serve())
 
@@ -229,4 +231,5 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
 
     local_p = verbs.add_parser("local")  # started by the server; no help line, so not listed
     local_p.add_argument("--run-dir", required=True, help="the server's run directory")
+    local_p.add_argument("--install", help="the install id its socket is named for (the server's)")
     local_p.set_defaults(func=_cmd_local)

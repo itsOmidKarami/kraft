@@ -38,7 +38,6 @@ from kraft.console.prompt import Prompt, commands, for_item
 from kraft.console.screens import VIEWS, Board, Item, View, new_item
 from kraft.console.screens.server import updates_waiting
 from kraft.console.status import StatusLine
-from kraft.vocab import WorkItemStatus
 
 #: The top views, in tab order: the number keys `1`-`4` follow it.
 TABS = ("board", "server", "addons", "repos")
@@ -407,7 +406,7 @@ class KraftConsole(App):
         if running is not None:
             try:
                 async with asyncio.timeout(CONFIRM_LIST_S):
-                    items = await client.list_work_items(WorkItemStatus.ACTIVE)
+                    items = await client.active_items()
             except (client.ClientError, TimeoutError):
                 items = []  # a server that does not answer has none to list
             lines += answers.running_agents_warning(running, items)

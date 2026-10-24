@@ -304,3 +304,26 @@ def test_a_refused_event_stream_says_whether_the_token_was_refused(monkeypatch, 
     with pytest.raises(client.ClientError) as caught:
         asyncio.run(first())
     assert caught.value.kind == kind
+
+
+async def test_active_items_are_the_active_rows_with_whether_they_run_in_place(monkeypatch):
+    from kraft.client import reads
+
+    row = {"title": "t", "repo": "/r", "current_node_id": "n", "pending_gate": None}
+    rows = [
+        {**row, "id": "a", "status": "active", "in_place": True},
+        {**row, "id": "b", "status": "paused", "in_place": True},
+        {**row, "id": "c", "status": "active", "in_place": False},
+        {**row, "id": "d", "status": "active"},  # a server too old to say
+    ]
+
+    async def board_rows(**_):
+        return rows, 0
+
+    monkeypatch.setattr(reads, "board_rows", board_rows)
+
+    assert [(i["id"], i["in_place"]) for i in await client.active_items()] == [
+        ("a", True),
+        ("c", False),
+        ("d", False),
+    ]

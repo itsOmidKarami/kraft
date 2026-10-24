@@ -7,31 +7,46 @@ import pytest
 
 from kraft import answers
 
+_IN_PLACE = [
+    {"id": "a1b2", "title": "Add the parser", "current_node_id": "implement", "in_place": True},
+    {"id": "c3d4", "title": "Not started yet", "current_node_id": None, "in_place": True},
+]
+_WORKTREE = {"id": "e5f6", "title": "In a worktree", "current_node_id": "verify", "in_place": False}
+
 
 @pytest.mark.parametrize(
-    ("items", "lines"),
+    ("items", "now", "lines"),
     [
-        ([], []),
+        ([], False, []),
+        ([_WORKTREE], False, []),
         (
+            [*_IN_PLACE, _WORKTREE],
+            False,
             [
-                {"id": "a1b2", "title": "Add the parser", "current_node_id": "implement"},
-                {"id": "c3d4", "title": "Not started yet", "current_node_id": None},
-            ],
-            [
-                "stopping the server ends the agent of any active item (2):",
+                "stopping the server ends the agent of any item running in place (2):",
                 "  a1b2  implement  Add the parser",
                 "  c3d4  -  Not started yet",
             ],
         ),
+        (
+            [*_IN_PLACE, _WORKTREE],
+            True,
+            [
+                "stopping the server ends the agent of any active item (3):",
+                "  a1b2  implement  Add the parser",
+                "  c3d4  -  Not started yet",
+                "  e5f6  verify  In a worktree",
+            ],
+        ),
     ],
-    ids=["nothing-active", "two-active"],
+    ids=["nothing-active", "worktree-items-keep-running", "in-place-ends", "now-ends-all"],
 )
-def test_the_running_agents_warning_names_each_active_item(items, lines):
-    """Nothing active is no warning at all, not a heading over an empty list;
-    an item between nodes still gets a column, so the ids stay aligned."""
-    said = answers.running_agents_warning("stopping", items)
+def test_the_running_agents_warning_names_each_item_a_stop_ends(items, now, lines):
+    """Nothing ending is no warning at all, not a heading over an empty list; an item between
+    nodes still gets a column, so the ids stay aligned."""
+    said = answers.running_agents_warning("stopping", items, now=now)
     assert said[: len(lines)] == lines
-    assert len(said) == (len(lines) + 1 if items else 0)
+    assert len(said) == (len(lines) + 1 if lines else 0)
 
 
 WHOLE = {"id": "a1", "status": "active", "chain_definition": {}}

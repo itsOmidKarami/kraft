@@ -15,20 +15,27 @@ from kraft.remote.local_jobs import LocalJobs
 from kraft.remote.local_link import DirectLink
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport
 
+#: The install of the worker `RunningWorker` and `ThreadedWorker` run, and the link a test makes.
+INSTALL = local_serve.install_id("2.3.0")
+
 
 class RunningWorker:
     """`local_serve.serve` as a task of the test's own loop."""
 
-    def __init__(self, run_base: Path, **kwargs) -> None:
-        self.run_base, self.stop = Path(run_base), asyncio.Event()
+    def __init__(self, run_base: Path, install: str = INSTALL, **kwargs) -> None:
+        self.run_base, self.install, self.stop = Path(run_base), install, asyncio.Event()
         self.task = asyncio.create_task(
             local_serve.serve(
-                self.run_base, kraft_version="2.3.0", stop=self.stop, **{"reap_s": 0.05, **kwargs}
+                self.run_base,
+                kraft_version="2.3.0",
+                install=install,
+                stop=self.stop,
+                **{"reap_s": 0.05, **kwargs},
             )
         )
 
     async def ready(self) -> None:
-        path = local_serve.socket_path(self.run_base)
+        path = local_serve.socket_path(self.run_base, self.install)
         for _ in range(200):
             if path.exists() or self.task.done():
                 return
@@ -40,10 +47,10 @@ class RunningWorker:
             await asyncio.wait_for(self.task, 5)
 
 
-async def connect(run_base: Path) -> StreamTransport:
-    """The server's end of a handshaken connection to the worker under `run_base`."""
+async def connect(run_base: Path, install: str = INSTALL) -> StreamTransport:
+    """The server's end of a handshaken connection to the worker of `install` under `run_base`."""
     reader, writer = await asyncio.open_unix_connection(
-        str(local_serve.socket_path(run_base)), limit=FRAME_LIMIT
+        str(local_serve.socket_path(run_base, install)), limit=FRAME_LIMIT
     )
     t = StreamTransport(reader, writer)
     await protocol.server_handshake(
@@ -82,10 +89,10 @@ class ScriptedLink:
 class ThreadedWorker:
     """`local_serve.serve` on a thread of its own: for a test whose server runs on another loop."""
 
-    def __init__(self, run_base: Path) -> None:
+    def __init__(self, run_base: Path, install: str = INSTALL) -> None:
         import threading
 
-        self.run_base = Path(run_base)
+        self.run_base, self.install = Path(run_base), install
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stop: asyncio.Event | None = None
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -95,7 +102,11 @@ class ThreadedWorker:
         async def main() -> None:
             self._loop, self._stop = asyncio.get_running_loop(), asyncio.Event()
             await local_serve.serve(
-                self.run_base, kraft_version="2.3.0", stop=self._stop, idle_exit_s=60
+                self.run_base,
+                kraft_version="2.3.0",
+                install=self.install,
+                stop=self._stop,
+                idle_exit_s=60,
             )
 
         asyncio.run(main())
@@ -116,6 +127,12 @@ def _local_worker(tmp_path_factory):
     local_link.install(DirectLink(LocalJobs(tmp_path_factory.mktemp("local-worker"))))
     yield
     local_link.install(None)
+    # `server_stopping` marks the event loop, and a test loop outlives its test: a stop one test
+    # simulated must not leave local sessions kept (or stopped) for the next.
+    from kraft.adapters import subprocess as sp
+
+    sp._STOPPING.clear()
+    sp._KEEPING.clear()
 
 
 def bare_env() -> dict[str, str]:

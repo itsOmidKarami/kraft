@@ -225,3 +225,20 @@ async def test_a_memory_kill_in_the_machines_sandbox_ends_the_session_config_err
         for r in rig.database.read(lambda c: c.execute("SELECT type FROM events").fetchall())
     ]
     assert kinds.count("sandbox_oom_killed") == 1
+
+
+async def test_a_remote_standin_is_stopped_by_a_clean_stop(rig):
+    """Only a local session is kept: the stand-in is this server's own process, and what it
+    stands for is a step on a machine that is told to stop."""
+    import psutil
+
+    task = asyncio.create_task(_run(rig, "s1", ["sh", "-c", "sleep 30"], runner="gpu"))
+    while not (run := rig.runs.find(rig.wid, "s1")) or run.state != "running":
+        await asyncio.sleep(0.02)
+    row = _row(rig, "s1")
+    sp.server_stopping()
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    assert not psutil.pid_exists(row["pid"]) or psutil.Process(row["pid"]).status() == "zombie"

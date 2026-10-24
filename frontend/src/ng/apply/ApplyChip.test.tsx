@@ -9,7 +9,7 @@ const DISK = { id: "disk:policy.yaml", file: "policy.yaml", text: "changed on di
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 let calls: string[];
-let board: { status: string }[];
+let board: { status: string; in_place?: boolean }[];
 beforeEach(() => {
   calls = [];
   board = [];
@@ -73,9 +73,9 @@ describe("ApplyChip", () => {
   });
 
   it.each([
-    [[], /No item is active, so no agent is stopped\./],
-    [[{ status: "active" }, { status: "paused" }], /1 item is active\. Restarting stops its agent; it stops as failed and needs Retry afterwards\./],
-    [[{ status: "active" }, { status: "paused" }, { status: "active" }], /2 items are active\. Restarting stops their agents; each stops as failed and needs Retry afterwards\./],
+    [[{ status: "active" }, { status: "active", in_place: false }], /Running steps of worktree items carry on through a restart\./],
+    [[{ status: "active", in_place: true }, { status: "paused", in_place: true }], /1 item runs in place: restarting stops its agent; it stops as failed and needs Retry afterwards\./],
+    [[{ status: "active", in_place: true }, { status: "paused" }, { status: "active", in_place: true }], /2 items run in place: restarting stops their agents; each stops as failed and needs Retry afterwards\./],
   ])("the dialog says what a restart does to the running work (%j)", async (items, said) => {
     board = items;
     show({ restart: [PORT], managed: true });

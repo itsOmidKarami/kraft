@@ -712,6 +712,7 @@ async def _guarded_adopt(
     `app.state.tasks` forever, since nothing keyed by session_id ever pops it
     (Kraft-mjwz)."""
     adopted = False
+    cancelled = False
     try:
         await _adopt(
             db,
@@ -726,6 +727,7 @@ async def _guarded_adopt(
         )
         adopted = True
     except asyncio.CancelledError:
+        cancelled = True
         raise
     except Exception as exc:  # noqa: BLE001
         logger.exception("adopted session %s crashed", ids.session_ref(work_item_id, session_id))
@@ -739,16 +741,20 @@ async def _guarded_adopt(
         except Exception:  # noqa: BLE001
             logger.exception("could not mark %s needs_human after adopt crash", work_item_id)
     finally:
-        # However this adopted session ends -- its client pid exiting, a
-        # crash, or a shutdown cancelling this task -- its container is
-        # parented by the docker daemon and outlives all three unless
-        # something says so (Kraft-rki). Closing is a no-op for a session
-        # that was never sandboxed, which is why this does not first work out
-        # whether this one was: deciding that per call path is how the third
-        # path got missed twice.
-        await asyncio.shield(_close_sandbox(sandbox, work_item_id, session_id, egress=egress))
-        if run_dirs is not None:
-            await asyncio.shield(_sync_item_refs(db, run_dirs, work_item_id))
+        # A clean stop that leaves running local sessions running leaves this one alone too:
+        # its sandbox, its route out and its refs stay for the next start's adoption.
+        keep = cancelled and await asyncio.shield(_kept_through_stop(db, work_item_id, session_id))
+        if not keep:
+            # However this adopted session ends -- its client pid exiting, a
+            # crash, or a shutdown cancelling this task -- its container is
+            # parented by the docker daemon and outlives all three unless
+            # something says so (Kraft-rki). Closing is a no-op for a session
+            # that was never sandboxed, which is why this does not first work out
+            # whether this one was: deciding that per call path is how the third
+            # path got missed twice.
+            await asyncio.shield(_close_sandbox(sandbox, work_item_id, session_id, egress=egress))
+            if run_dirs is not None:
+                await asyncio.shield(_sync_item_refs(db, run_dirs, work_item_id))
     # After the sandbox is closed, as dispatch sweeps once its launch is over;
     # before the resumed walk, which awaits this task, moves past the node.
     if adopted and run_dirs is not None:
@@ -761,6 +767,23 @@ async def _guarded_adopt(
         # An escalation's ran in `_adopt`, before its self-retry.
         if row["hook_point"] != ESCALATION_HOOK:
             await _sweep_after(db, run_dirs, row, launch_factory)
+
+
+async def _kept_through_stop(db, work_item_id: str, session_id: str) -> bool:
+    """`subprocess.kept_through_stop` for an adopted session: a local one (no `runner`) whose
+    process is still the one it launched."""
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT runner, pid, pid_start_time FROM worker_sessions "
+            "WHERE work_item_id = ? AND id = ?",
+            (work_item_id, session_id),
+        ).fetchone()
+    )
+    if row is None or row["runner"] or row["pid"] is None:
+        return False
+    return await _subprocess.kept_through_stop(
+        db, work_item_id, session_id, alive=_identity_ok(row["pid"], row["pid_start_time"])
+    )
 
 
 async def _oom_killed(

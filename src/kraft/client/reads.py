@@ -66,6 +66,17 @@ async def list_work_items(
     return (await board(status, include_abandoned=include_abandoned))[0]
 
 
+async def active_items() -> list[dict]:
+    """The active items, trimmed as `list_work_items` trims them, each with `in_place`: what a
+    server stop asks, because only an item running in place loses its session to a clean stop."""
+    rows, _ = await board_rows()
+    active = [r for r in rows if r["status"] == WorkItemStatus.ACTIVE]
+    return [
+        {**item, "in_place": bool(row.get("in_place"))}
+        for item, row in zip(trim_work_items(active), active, strict=True)
+    ]
+
+
 async def work_item_ids() -> set[str]:
     """Every work item id the server has a row for: open, ended (cancelled
     and abandoned items included) and archived. The list route answers
