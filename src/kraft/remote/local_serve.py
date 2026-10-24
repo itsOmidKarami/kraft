@@ -43,11 +43,13 @@ class _Worker:
     def __init__(self, jobs: LocalJobs, kraft_version: str) -> None:
         self.jobs, self.kraft_version = jobs, kraft_version
         self.connections = 0
+        self.writers: set[asyncio.StreamWriter] = set()
         self.wake = asyncio.Event()
         self._stopping: set[asyncio.Task] = set()
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         self.connections += 1
+        self.writers.add(writer)
         t = StreamTransport(reader, writer)
         try:
             await protocol.machine_handshake(t, kraft_version=self.kraft_version)
@@ -58,6 +60,7 @@ class _Worker:
             log.exception("local worker connection failed")
         finally:
             self.connections -= 1
+            self.writers.discard(writer)
             writer.close()
             self.wake.set()
 
@@ -115,6 +118,8 @@ class _Worker:
                 await asyncio.wait_for(self.wake.wait(), reap_s)
         for task in list(self._stopping):
             task.cancel()
+        for writer in list(self.writers):
+            writer.close()  # the server learns at once that this worker is gone
 
 
 async def serve(
