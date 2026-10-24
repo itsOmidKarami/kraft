@@ -34,7 +34,6 @@ from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import ESCALATION_HOOK, sweep_stragglers
 from kraft.proc_identity import identity_ok as _identity_ok
 from kraft.proc_identity import pid_alive as _pid_alive
-from kraft.proc_identity import same_start as _same_start  # noqa: F401  (kept for callers of the old name)
 from kraft.remote import respawn as _remote_respawn
 from kraft.store._common import _now, _span_ms
 from kraft.templates.models import AgentTask, TaskScope
