@@ -829,7 +829,6 @@ async def _run_task(
             node_id=node_id,
             runner=runner,
             repo_entry=repo_entry,
-            sandbox=sandbox,
             time_cap=time_cap,
         )
     files = files or item_paths.session_files(run_dirs, work_item_id, session_id)

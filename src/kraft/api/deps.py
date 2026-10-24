@@ -828,9 +828,7 @@ def item_repo_id(st, row) -> str | None:
     return entry.id if entry is not None else None
 
 
-def placement_or_422(
-    st, *, runners, repo_entry, in_place: bool, sandboxed: bool, members=()
-) -> None:
+def placement_or_422(st, *, runners, repo_entry, in_place: bool, members=()) -> None:
     """422 on the first thing about `runners` a machine cannot take (`kraft.remote.placement`)."""
     from kraft.remote import placement
 
@@ -839,7 +837,6 @@ def placement_or_422(
         workers=st.workers_hub.file,
         repos=[repo_entry],
         in_place=in_place,
-        sandboxed=sandboxed,
         repo_path=repo_entry.path,
         members=members,
     )

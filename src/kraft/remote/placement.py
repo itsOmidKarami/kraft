@@ -78,7 +78,6 @@ def filing_problems(
     workers: registry.WorkersFile,
     repos: Sequence[RepoEntry],
     in_place: bool,
-    sandboxed: bool,
     repo_path: str | Path,
     members: Sequence[str] = (),
 ) -> list[str]:
@@ -90,11 +89,6 @@ def filing_problems(
             problems.append(
                 f"runner {runner!r} cannot run an in-place item: it runs in your own checkout "
                 f"(in-place and runner: {runner} cannot be combined)"
-            )
-        if sandboxed:
-            problems.append(
-                f"runner {runner!r} cannot run a sandboxed item yet: a machine would have to "
-                f"build the sandbox (sandbox and runner: {runner} cannot be combined)"
             )
         if why := checkout_problem(repo_path, members=members):
             problems.append(f"runner {runner!r} cannot take this item: {why}")

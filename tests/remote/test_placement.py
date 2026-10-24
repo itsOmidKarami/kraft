@@ -98,21 +98,19 @@ def test_workspace_members_are_named(tmp_path):
     )
 
 
-def test_filing_problems_name_both_settings_for_in_place_and_sandbox(tmp_path):
+def test_filing_problems_name_both_settings_for_in_place(tmp_path):
     repo = make_repo(tmp_path)
     got = placement.filing_problems(
         ["gpu"],
         workers=_workers(),
         repos=[entry_of({"path": str(repo), "name": "kraft"})],
         in_place=True,
-        sandboxed=True,
         repo_path=repo,
     )
     assert any("in-place" in p and "gpu" in p for p in got)
-    assert any("sandbox" in p and "gpu" in p for p in got)
     assert (
         placement.filing_problems(
-            ["local"], workers=_workers(), repos=[], in_place=True, sandboxed=True, repo_path=repo
+            ["local"], workers=_workers(), repos=[], in_place=True, repo_path=repo
         )
         == []
     )

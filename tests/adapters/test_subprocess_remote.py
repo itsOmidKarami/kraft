@@ -12,7 +12,7 @@ from support.harness import entry_of, v1_chain
 
 from kraft import caps
 from kraft.adapters import subprocess as sp
-from kraft.remote import launch, placement
+from kraft.remote import launch
 from kraft.remote import runs as runs_mod
 from kraft.worker import backends
 from kraft.worker.backends.docker import OomKill
@@ -83,9 +83,8 @@ async def test_a_cap_the_machine_enforced_ends_the_session_time_capped(rig, monk
     ("runner", "kwargs", "says"),
     [
         ("ghost", {}, "'ghost' is not a machine in workers.yaml"),
-        ("gpu", {"sandbox": {"kind": "os"}}, "sandboxed item"),
     ],
-    ids=["unknown-machine", "sandboxed-item"],
+    ids=["unknown-machine"],
 )
 async def test_a_placement_that_cannot_hold_is_a_config_error_naming_why_and_runs_nothing(
     rig, runner, kwargs, says
@@ -129,7 +128,6 @@ async def test_a_wait_moves_the_time_cap_on_by_however_long_it_lasted(rig):
         node_id="build",
         runner="gpu",
         repo_entry=None,
-        sandbox=None,
         time_cap=cap,
     )
     assert refusal is None and got.machine == "gpu"
@@ -178,16 +176,11 @@ SANDBOX = {
 @pytest.fixture
 def sandboxed(rig, tmp_path, short_run, monkeypatch):
     """The fake backend registered as the item's sandbox kind -- the machine in this process
-    builds it in a run dir of its own -- the filing refusal (lifted in a later task of the series)
-    out of the way, and every `JobSpec` the launch builds kept."""
+    builds it in a run dir of its own -- and every `JobSpec` the launch builds kept."""
     backend = Remote(tmp_path)
     monkeypatch.setitem(backends._BACKENDS, backend.kind, backend)
     monkeypatch.setenv("KRAFT_RUN_DIR", str(short_run.base))
     monkeypatch.setenv("EXAMPLE_KEY", SECRET)
-    filing = placement.filing_problems
-    monkeypatch.setattr(
-        placement, "filing_problems", lambda *a, **kw: filing(*a, **{**kw, "sandboxed": False})
-    )
     built = []
     build = launch.build
     monkeypatch.setattr(launch, "build", lambda **kw: built.append(build(**kw)) or built[-1])

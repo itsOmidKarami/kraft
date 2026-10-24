@@ -1806,10 +1806,12 @@ class DockerBackend:
             extra = await asyncio.to_thread(_forward.extra_ca)
         except ConfigError as exc:
             return False, str(exc)
-        image = sandbox["image"]
+        image = sandbox.get("image")
         daemon = await docker_call("version", "--format", "{{.Server.Version}}")
         if daemon is None or daemon[0] != 0:
             return False, f"{host.cli} is not installed or its daemon is not reachable"
+        if not image:  # a machine's check: the runtime, before any item's image is known
+            return True, f"{host.describe()} {daemon[1].strip()}, {host.describe_limits()}"
         pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", image)
         if pulled is None or pulled[0] != 0:
             return False, f"image {image!r} is not pulled -- run: {host.cli} pull {image}"

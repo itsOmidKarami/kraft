@@ -3,6 +3,7 @@
 import pytest
 import yaml
 from support.api import _poll_node_started, _post_default
+from support.harness import connect_repo
 
 from kraft.remote import registry
 
@@ -35,6 +36,24 @@ def _overrides(client, wid):
 def test_a_known_machine_is_accepted_at_filing_and_kept_as_the_items_override(client, repo):
     _machines(client, gpu={})
     reply = _file(client, repo, runner="gpu")
+    assert reply.status_code == 201, reply.text
+    assert _overrides(client, reply.json()["id"]) == {"runner": "gpu"}
+
+
+@pytest.mark.parametrize(
+    "sandbox",
+    [
+        {"kind": "docker", "image": "img"},
+        {"kind": "os", "network": {"runtime": {"allow": ["api.example.com"]}}},
+    ],
+    ids=["docker", "os"],
+)
+def test_a_sandboxed_item_may_be_placed_on_a_machine_which_builds_its_sandbox(
+    client, repo, sandbox
+):
+    _machines(client, gpu={})
+    connect_repo(repo, sandbox=sandbox)
+    reply = _file(client, repo, runner="gpu", autostart=False)
     assert reply.status_code == 201, reply.text
     assert _overrides(client, reply.json()["id"]) == {"runner": "gpu"}
 

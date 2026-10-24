@@ -12,7 +12,7 @@ from kraft.remote.hub import PlacementRefused
 from kraft.remote.jobs import JobSpec
 
 
-async def claim(db, *, work_item_id, session_id, node_id, runner, repo_entry, sandbox, time_cap):
+async def claim(db, *, work_item_id, session_id, node_id, runner, repo_entry, time_cap):
     """`(claim, refusal, time_cap)`. A refusal is text for the session's log; a wait is a
     cancellable `await` here, with `time_cap` moved on by however long it lasted."""
     runs = runs_mod.current()
@@ -29,7 +29,6 @@ async def claim(db, *, work_item_id, session_id, node_id, runner, repo_entry, sa
         workers=runs.hub.file,
         repos=repos,
         in_place=bool(row is not None and store.is_in_place(row)),
-        sandboxed=sandbox is not None,
         repo_path=row["repo"] if row is not None else ".",
         members=builtins.item_mounts(row) if row is not None else [],
     )

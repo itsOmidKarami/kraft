@@ -12,9 +12,7 @@ import socket
 from kraft import harness
 from kraft.remote import machine, protocol
 from kraft.remote.transport import FRAME_LIMIT, WebSocketTransport
-
-#: The first one found is the sandbox runtime a sandboxed item would use here.
-SANDBOX_RUNTIMES = ("docker", "podman", "bwrap", "sandbox-exec")
+from kraft.worker import backends
 
 
 def _row(name: str, ok: bool, detail: str = "", *, skipped: bool = False, warn: bool = False):
@@ -24,7 +22,7 @@ def _row(name: str, ok: bool, detail: str = "", *, skipped: bool = False, warn: 
 async def run(
     *, server: str | None = None, token: str | None = None, kraft_version: str
 ) -> list[dict]:
-    rows = [_git(), *_agents(), _sandbox_runtime()]
+    rows = [_git(), *_agents(), *await _sandboxes()]
     if server is not None:
         rows.append(await _server(server, token or "", kraft_version))
     return rows
@@ -63,11 +61,23 @@ def _agents() -> list[dict]:
     return rows
 
 
-def _sandbox_runtime() -> dict:
-    for name in SANDBOX_RUNTIMES:
-        if path := shutil.which(name):
-            return _row("sandbox runtime", True, f"{name}: {path}")
-    return _row("sandbox runtime", True, "none found: sandboxed items cannot run here", warn=True)
+async def _sandboxes() -> list[dict]:
+    """One row per sandbox backend, from its own health check: a sandboxed item's step needs a
+    backend that works here, or it stops `config_error` rather than run unsandboxed. None usable
+    is only a warning: a machine may be for unsandboxed items."""
+    rows, usable = [], 0
+    for backend in backends.every():
+        try:
+            ok, detail = await backend.health({"kind": backend.kind}, refresh=True)
+        except Exception as exc:  # noqa: BLE001 -- a check reports, it does not crash
+            ok, detail = False, f"could not check: {exc}"
+        usable += ok
+        rows.append(_row(f"sandbox: {backend.kind}", True, detail, skipped=not ok))
+    if not usable:
+        rows.append(
+            _row("sandbox runtime", True, "none usable: sandboxed items cannot run here", warn=True)
+        )
+    return rows
 
 
 async def _server(server: str, token: str, kraft_version: str) -> dict:

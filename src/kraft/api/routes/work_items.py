@@ -423,7 +423,6 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             runners=runners,
             repo_entry=entry_,
             in_place=in_place_by is not None,
-            sandboxed=_sandboxed(materialized, entry_),
             members=[m.path for m in materialized.target.mounts.values()],
         )
     if dry_run:
@@ -735,7 +734,6 @@ async def duplicate_work_item(wid: str, request: Request):
             runners=runners,
             repo_entry=entry_,
             in_place=in_place_by is not None,
-            sandboxed=_sandboxed(materialized, entry_),
             members=[m.path for m in materialized.target.mounts.values()],
         )
     # A title 1.4 stored on several lines, or blank, is folded as a cron
@@ -878,7 +876,6 @@ async def fire_trigger(body: TriggerBody, request: Request):
             runners=runners,
             repo_entry=entry_,
             in_place=in_place_by is not None,
-            sandboxed=_sandboxed(materialized, entry_),
             members=[m.path for m in materialized.target.mounts.values()],
         )
     try:
@@ -965,15 +962,6 @@ class WorkItemPatch(_OneChain):
     cwd: str | None = None
 
 
-def _sandboxed(materialized: MaterializedChain, repo_entry) -> bool:
-    """Whether the item runs sandboxed: the repo's, the chain's or the item's own."""
-    return bool(
-        materialized.item_sandbox()
-        or materialized.chain.scope_sandboxes(materialized.policy)
-        or repo_entry.effective_sandbox
-    )
-
-
 def _check_placement(st, row, runners: set[str]) -> None:
     """The filing checks, for an override set afterwards, against the stored item."""
     if not runners - {placement.LOCAL}:
@@ -985,7 +973,6 @@ def _check_placement(st, row, runners: set[str]) -> None:
         runners=runners,
         repo_entry=entry_,
         in_place=store.is_in_place(row),
-        sandboxed=_sandboxed(snapshot, entry_) if snapshot else bool(entry_.effective_sandbox),
         members=[m.path for m in snapshot.target.mounts.values()] if snapshot else [],
     )
 

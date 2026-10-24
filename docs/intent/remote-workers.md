@@ -71,8 +71,8 @@ enforced-by: tests/api/test_workers.py::test_a_kraft_session_cannot_manage_machi
 origin: src/kraft/api/routes/workers.py §_forbid_sessions
 
 ## REQ worker-check-fails-on-missing-essentials
-IF `git` or every agent CLI is missing, or the server given to `kraft admin worker check` cannot be reached, THEN the system SHALL exit 1, and a missing credential or sandbox runtime SHALL only warn.
-enforced-by: tests/remote/test_check.py::test_git_and_one_agent_cli_pass_and_a_missing_credential_only_warns, tests/remote/test_check.py::test_what_must_be_present_fails_when_it_is_not[nothing], tests/remote/test_check.py::test_what_must_be_present_fails_when_it_is_not[no-agent], tests/remote/test_check.py::test_what_must_be_present_fails_when_it_is_not[no-git], tests/remote/test_check.py::test_a_server_that_refuses_the_token_fails_the_server_row, tests/cli/test_worker.py::test_check_exits_1_when_a_row_fails
+IF `git` or every agent CLI is missing, or the server given to `kraft admin worker check` cannot be reached, THEN the system SHALL exit 1, and a missing credential or a sandbox backend that does not work there SHALL only warn.
+enforced-by: tests/remote/test_check.py::test_git_and_one_agent_cli_pass_and_a_missing_credential_only_warns, tests/remote/test_check.py::test_what_must_be_present_fails_when_it_is_not[nothing], tests/remote/test_check.py::test_what_must_be_present_fails_when_it_is_not[no-agent], tests/remote/test_check.py::test_what_must_be_present_fails_when_it_is_not[no-git], tests/remote/test_check.py::test_a_server_that_refuses_the_token_fails_the_server_row, tests/remote/test_check.py::test_a_row_per_sandbox_backend_with_its_health_and_a_warning_when_none_is_usable[one-usable], tests/remote/test_check.py::test_a_row_per_sandbox_backend_with_its_health_and_a_warning_when_none_is_usable[none-usable], tests/remote/test_check.py::test_a_row_per_sandbox_backend_with_its_health_and_a_warning_when_none_is_usable[check-crashes], tests/cli/test_worker.py::test_check_exits_1_when_a_row_fails
 origin: src/kraft/remote/check.py
 
 ## REQ doctor-warns-on-offline-machines
@@ -91,8 +91,8 @@ enforced-by: tests/remote/test_placement.py::test_a_machine_that_is_unknown_or_n
 origin: src/kraft/remote/placement.py §refusal
 
 ## REQ runner-refuses-items-a-machine-cannot-take
-IF an item with a machine runner is in place, sandboxed, or has workspace members, submodules or Git LFS, THEN the system SHALL refuse it, naming both settings.
-enforced-by: tests/remote/test_placement.py::test_filing_problems_name_both_settings_for_in_place_and_sandbox, tests/remote/test_placement.py::test_a_checkout_a_single_bundle_cannot_carry_is_named[submodule-submodules], tests/remote/test_placement.py::test_a_checkout_a_single_bundle_cannot_carry_is_named[lfs-Git LFS], tests/adapters/test_subprocess_remote.py::test_a_placement_that_cannot_hold_is_a_config_error_naming_why_and_runs_nothing[unknown-machine], tests/adapters/test_subprocess_remote.py::test_a_placement_that_cannot_hold_is_a_config_error_naming_why_and_runs_nothing[sandboxed-item]
+IF an item with a machine runner is in place, or has workspace members, submodules or Git LFS, THEN the system SHALL refuse it, naming both settings.
+enforced-by: tests/remote/test_placement.py::test_filing_problems_name_both_settings_for_in_place, tests/remote/test_placement.py::test_a_checkout_a_single_bundle_cannot_carry_is_named[submodule-submodules], tests/remote/test_placement.py::test_a_checkout_a_single_bundle_cannot_carry_is_named[lfs-Git LFS], tests/adapters/test_subprocess_remote.py::test_a_placement_that_cannot_hold_is_a_config_error_naming_why_and_runs_nothing[unknown-machine]
 origin: src/kraft/remote/placement.py §filing_problems
 
 ## REQ any-never-means-the-server

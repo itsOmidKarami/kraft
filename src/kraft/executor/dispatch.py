@@ -311,7 +311,7 @@ async def config_error_session(db, run_dirs, common: dict, log: str) -> str:
     )
 
 
-async def _place(db, run_dirs, task, node, row, launch, runner, sandbox, common):
+async def _place(db, run_dirs, task, node, row, launch, runner, common):
     """None to go on; otherwise the status that stops or parks the step: a `config_error` session
     for a placement that cannot hold, `WAITING` while the machine is offline or full."""
     runs = _remote_runs.current()
@@ -328,7 +328,6 @@ async def _place(db, run_dirs, task, node, row, launch, runner, sandbox, common)
         workers=runs.hub.file,
         repos=repos,
         in_place=inplace.is_in_place(row),
-        sandboxed=sandbox is not None,
         repo_path=row["repo"],
         members=_builtins.item_mounts(row),
     )
@@ -1295,7 +1294,7 @@ async def _dispatch_task(
             runner != placement.LOCAL
             and (
                 blocked := await _place(
-                    db, run_dirs, task, node, work_item_row, launch, runner, sandbox, common
+                    db, run_dirs, task, node, work_item_row, launch, runner, common
                 )
             )
             is not None

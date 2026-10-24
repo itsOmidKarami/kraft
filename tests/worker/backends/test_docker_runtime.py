@@ -261,6 +261,22 @@ async def test_doctor_asks_again_as_a_launch_would(slow_podman, monkeypatch, cap
     assert "asking once more, waiting up to 30 s" in caplog.text
 
 
+async def test_a_machines_check_names_the_runtime_without_an_image_to_ask_about(
+    slow_podman, monkeypatch
+):
+    """`worker check` knows no item's image: the runtime and its daemon, and no image row."""
+    slow_podman(None, True, True)
+    asked = []
+
+    async def call(*args, **_):
+        asked.append(args[0])
+        return 0, "4.9.3\n"
+
+    monkeypatch.setattr(docker, "docker_call", call)
+    ok, detail = await docker.DockerBackend().health({"kind": "docker"})
+    assert ok and "4.9.3" in detail and "image" not in asked
+
+
 def test_a_cached_runtime_is_read_while_a_launch_asks_again(slow_podman):
     """The event loop reads the cached runtime (`docker_argv`, `oom_killed`,
     `launch_failed`) while a launch's thread waits on a slow `info`: the
