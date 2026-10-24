@@ -298,7 +298,8 @@ test *ARGS:
     mode=--testmon
     case " $* " in *" --no-testmon "*) mode= ;; esac
     if [ -n "$mode" ]; then
-        inputs=(src/kraft ':(glob,exclude)src/kraft/**/*.py' fixtures config tests/support docs/intent plugins/kraft/skills)
+        # macOS ships bash 3.2, which has no mapfile. The list is dev/targeted_tests.py's BLIND.
+        inputs=(); while IFS= read -r p; do inputs+=("$p"); done < <(uv run python dev/targeted_tests.py pathspecs)
         base=$(git merge-base HEAD origin/main 2>/dev/null || echo HEAD)
         changed=$({ git diff --name-only "$base" -- "${inputs[@]}"; git ls-files --others --exclude-standard -- "${inputs[@]}"; } 2>/dev/null | sort -u)
         if [ -n "$changed" ] && [ -n "$*" ]; then
@@ -535,7 +536,14 @@ fix:
 # frontend, vscode, playwright and kraft-lite jobs have recipes of their own
 # (CONTRIBUTING.md, "What CI checks").
 [doc("CI's lint and test jobs, in order, on the full suite (no testmon)")]
-ci-test:
+ci-test: ci-checks
+    uv run pytest -m "not e2e" -n logical
+
+# Everything `ci-test` runs that is not the test run, then the intent check
+# (which `ci-test` used to run after the tests; it now runs before them).
+# `test-targeted` shares it, so the two cannot drift apart.
+[doc("CI's checks that are not the test run: lint, docs, tests layout, intent")]
+ci-checks:
     uv run ruff check .
     uv run ruff format --check .
     uv run python dev/check_docs_coverage.py
@@ -546,8 +554,16 @@ ci-test:
     uv run python dev/check_docs_ledes.py
     uv run python dev/check_docs_added_in.py
     uv run python dev/check_tests.py
-    uv run pytest -m "not e2e" -n logical
     uv run python -m kraft.intent
+
+# `ci-test` with only the tests the change can break: testmon's picks under
+# xdist, plus the tests that check committed generated files. A change testmon
+# cannot see (a chain YAML, a skill, a fixture) runs the full suite instead;
+# dev/targeted_tests.py says which and why. Kraft's own verification runs this,
+# and the full suite is left to the merge request's CI.
+[doc("CI's checks, then only the tests the change can break (full suite when testmon cannot see it)")]
+test-targeted: ci-checks
+    uv run python dev/targeted_tests.py run
 
 # Preview the docs site with live reload at http://localhost:3000/kraft/
 docs:

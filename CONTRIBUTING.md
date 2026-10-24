@@ -268,7 +268,9 @@ that changes those and `frontend/**`, and nothing else and no `.py` file,
 skips the job marked *(python)* and runs the unit tier on Python 3.14 alone:
 no Python moved, so every unit test still runs, once. A push to `main` runs
 everything. `just ci-test` runs `lint` and the unit tier, in CI's order, on
-the full suite.
+the full suite. `just test-targeted` is `just ci-test` with the tests testmon
+picks, and the full suite when it cannot see the change; Kraft's own
+verification runs it.
 
 | CI job | What it runs | Run it locally with |
 |---|---|---|
