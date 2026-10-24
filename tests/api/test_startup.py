@@ -243,3 +243,69 @@ def test_shutdown_during_probation_is_clean(on_probation, client):
     """Nothing was started, so shutdown cancels only what exists; leaving the
     client raises if it does not."""
     assert client.app.state.probation is True
+
+
+@pytest.fixture
+def no_link_installed(monkeypatch):
+    """The server starts its own link, as outside a test: no `DirectLink` stands in, and
+    the worker it asks for is one on a thread of this test."""
+    from support.local_worker import ThreadedWorker
+
+    from kraft.remote import local_link
+
+    local_link.install(None)
+    workers = []
+    monkeypatch.setattr(
+        local_link, "_start_worker", lambda run_base: workers.append(ThreadedWorker(run_base))
+    )
+    yield workers
+    for worker in workers:
+        worker.close()
+
+
+def test_startup_local_link_none_installed_waits_for_the_worker_before_resuming(
+    no_link_installed, client
+):
+    from kraft.remote import local_link
+
+    link = local_link.current()
+    assert isinstance(link, local_link.LocalLink)
+    assert link.connected, "the lifespan yielded before the worker was up"
+    assert len(no_link_installed) == 1
+    assert client.app.state.local_link_task is not None
+
+
+def test_startup_local_link_direct_link_installed_starts_no_worker(client):
+    from kraft.remote import local_link
+
+    assert isinstance(local_link.current(), local_link.DirectLink)
+    assert client.app.state.local_link_task is None
+
+
+def test_startup_local_link_boot_fails_after_the_link(no_link_installed, tmp_path, monkeypatch):
+    """A boot that fails half-way leaves no link task respawning workers for a server that
+    is not there."""
+    from support import api as api_support
+
+    from kraft.remote import local_link
+    from kraft.worker import reattach
+
+    ended = []
+
+    async def forever(self):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            ended.append(True)
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("boot failed after the link")
+
+    monkeypatch.setattr(local_link.LocalLink, "run", forever)
+    monkeypatch.setattr(reattach, "reattach", boom)
+    # Any exception: the egress proxy a failed boot never closed adds an error of its own.
+    with pytest.raises(Exception), api_support._client(tmp_path, monkeypatch):  # noqa: B017
+        pass
+
+    assert local_link.current() is None
+    assert ended == [True]
