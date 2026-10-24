@@ -41,7 +41,15 @@ it("knows which files the library lint covers", () => {
 describe("configListing", () => {
   it("lists configuration in ABOUT's order and templates as library.yaml then chains by name, dropping what is not config", () => {
     expect(configListing(["repos.yaml", "chains/quick-task.yaml", "other.yaml", "library.yaml", "policy.yaml", "chains/default.yaml", "chains/Bad.yaml"]))
-      .toEqual({ configuration: ["policy.yaml", "repos.yaml"], templates: ["library.yaml", "chains/default.yaml", "chains/quick-task.yaml"] });
+      .toEqual(expect.objectContaining({ configuration: ["policy.yaml", "repos.yaml"], templates: ["library.yaml", "chains/default.yaml", "chains/quick-task.yaml"] }));
+  });
+
+  it.each([
+    ["neither written", ["policy.yaml"], ["sandbox.yaml", "detectors.yaml"]],
+    ["one written", ["policy.yaml", "sandbox.yaml"], ["detectors.yaml"]],
+    ["both written", ["sandbox.yaml", "detectors.yaml"], []],
+  ])("offers the hand-written files not there yet: %s", (_, names, missing) => {
+    expect(configListing(names).missing).toEqual(missing);
   });
 
   it("describes every file configFile accepts", () => {

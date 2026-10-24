@@ -30,13 +30,22 @@ export const ABOUT: Readonly<Record<string, string>> = {
   "library.yaml": "Nodes, tasks and steps the chains extend",
 };
 
+/** The files only a person writes, so Open Config offers them before they exist, with the header a new one starts
+ *  from. The web UI's Settings writes the other missing ones, and `kraft admin addon` writes addons.yaml. */
+export const STARTERS: Readonly<Record<string, string>> = {
+  "sandbox.yaml": "# sandbox.yaml: the container runtime sandboxed tasks use on this machine.\n# https://kraft-sdlc.dev/reference/configuration/sandbox/sandbox-yaml\n",
+  "detectors.yaml": "# detectors.yaml: teaches `kraft repo connect` your own test and setup conventions.\n# https://kraft-sdlc.dev/reference/configuration/repos/detectors\n",
+};
+
 /** The config files present in `names` (relative paths, as `configFile` returns them), split as
- *  Kraft splits them: library.yaml and chains/ are templates, the rest is configuration. */
-export function configListing(names: readonly string[]): { configuration: string[]; templates: string[] } {
+ *  Kraft splits them: library.yaml and chains/ are templates, the rest is configuration. `missing`
+ *  is the STARTERS files that are not there yet. */
+export function configListing(names: readonly string[]): { configuration: string[]; templates: string[]; missing: string[] } {
   const present = new Set(names.filter((n) => FILES.has(n) || CHAIN.test(n)));
   const known = Object.keys(ABOUT).filter((n) => present.has(n));
   const chains = [...present].filter((n) => CHAIN.test(n)).sort();
-  return { configuration: known.filter((n) => !isLibraryFile(n)), templates: [...known.filter(isLibraryFile), ...chains] };
+  const missing = Object.keys(STARTERS).filter((n) => !present.has(n));
+  return { configuration: known.filter((n) => !isLibraryFile(n)), templates: [...known.filter(isLibraryFile), ...chains], missing };
 }
 
 /** A chain file's own top-level `description:`, when it is on that line; a block scalar (`>`, `|`) is not. */
