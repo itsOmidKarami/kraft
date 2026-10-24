@@ -8,7 +8,11 @@ import os
 import signal
 from pathlib import Path
 
-from kraft.remote import local_serve, protocol
+import pytest
+
+from kraft.remote import local_link, local_serve, protocol
+from kraft.remote.local_jobs import LocalJobs
+from kraft.remote.local_link import DirectLink
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport
 
 
@@ -100,3 +104,20 @@ class ThreadedWorker:
         if self._loop is not None and self._stop is not None:
             self._loop.call_soon_threadsafe(self._stop.set)
         self.thread.join(5)
+
+
+@pytest.fixture(autouse=True)
+def _local_worker(tmp_path_factory):
+    """Local sessions are started by the local worker, never by the server itself. A test gets
+    that worker's surface over an in-process job table (`DirectLink`), through the same
+    `local_link.current()` door the server uses, so no test starts a real worker process.
+    Not under `tmp_path`: many tests use it as a checkout or a `cwd`, and job records must
+    not land in it."""
+    local_link.install(DirectLink(LocalJobs(tmp_path_factory.mktemp("local-worker"))))
+    yield
+    local_link.install(None)
+
+
+def bare_env() -> dict[str, str]:
+    """The environment a launch is given when only a command is wanted: `PATH` and nothing else."""
+    return {"PATH": os.environ["PATH"]}

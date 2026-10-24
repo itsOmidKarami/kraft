@@ -165,6 +165,7 @@ class LocalLink(_Row):
         self.run_base, self.kraft_version, self.retry_s = Path(run_base), kraft_version, retry_s
         self._start = start_worker or (lambda: _start_worker(self.run_base))
         self._t: protocol.Transport | None = None
+        self._was_up = False
         self._pending: dict[tuple[str, str], list[asyncio.Future]] = {}
 
     async def run(self) -> None:
@@ -172,11 +173,11 @@ class LocalLink(_Row):
         last_start = -_START_EVERY_S
         while True:
             pause = self.retry_s
+            self._was_up = False
             try:
-                if not await self._round():
-                    if time.monotonic() - last_start >= _START_EVERY_S:
-                        last_start = time.monotonic()
-                        self._start()
+                if not await self._round() and time.monotonic() - last_start >= _START_EVERY_S:
+                    last_start = time.monotonic()
+                    self._start()
             except asyncio.CancelledError:
                 raise
             except (protocol.Closed, OSError):
@@ -184,6 +185,8 @@ class LocalLink(_Row):
             except Exception:
                 log.exception("local worker link failed")
                 pause = max(pause, _START_EVERY_S)
+            if self._was_up:
+                last_start = -_START_EVERY_S  # it was up and went: the next round may start another
             await asyncio.sleep(pause)
 
     async def _round(self) -> bool:
@@ -199,7 +202,7 @@ class LocalLink(_Row):
             peer = await protocol.server_handshake(
                 t, kraft_version=self.kraft_version, identify=lambda _: None, expected_name="local"
             )
-            self.peer_version, self._t = peer.kraft, t
+            self.peer_version, self._t, self._was_up = peer.kraft, t, True
             self._set_connected(True)
             await protocol.pump(t, on_frame=self._on_frame)
         finally:

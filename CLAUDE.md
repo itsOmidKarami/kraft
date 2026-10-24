@@ -116,6 +116,7 @@ kraft admin worker add NAME [--ssh HOST] [--capacity N] [--repos A,B] [--give-up
 kraft admin worker list / kraft admin worker remove NAME
 kraft admin worker serve --server URL --token T | --stdio  # on the machine; --stdio is what the server's ssh runs
 kraft admin worker check [--server URL --token T]  # on the machine: git, agent CLIs, credentials, sandbox runtime
+kraft admin worker local --run-dir D         # run by the server, not by hand: the local worker that starts every local session
 kraft admin init [--repo] / kraft admin mcp  # register Kraft with an agent
 kraft admin permission-hook codex|cursor     # run by a harness's pre-tool hook, not by hand
 ```

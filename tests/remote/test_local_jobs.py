@@ -10,12 +10,9 @@ import time
 
 import psutil
 import pytest
+from support.local_worker import bare_env
 
 from kraft.remote.local_jobs import LocalJobs, SpawnRefused
-
-
-def _env():
-    return {"PATH": os.environ["PATH"]}
 
 
 def _wait(predicate, seconds=5.0):
@@ -48,7 +45,9 @@ def test_spawn_records_and_reap_drops_the_session(tmp_path):
     jobs = LocalJobs(tmp_path)
     log = tmp_path / "l"
     log.write_bytes(b"")
-    spawned = jobs.spawn("w/s", ["sleep", "30"], cwd=str(tmp_path), env=_env(), log_path=str(log))
+    spawned = jobs.spawn(
+        "w/s", ["sleep", "30"], cwd=str(tmp_path), env=bare_env(), log_path=str(log)
+    )
     try:
         assert psutil.Process(spawned.pid).ppid() == os.getpid()
         assert os.getpgid(spawned.pid) == spawned.pid
@@ -65,9 +64,9 @@ def test_recover_keeps_only_live_identities(tmp_path):
     log = tmp_path / "l"
     log.write_bytes(b"")
     alive = first.spawn(
-        "w/alive", ["sleep", "30"], cwd=str(tmp_path), env=_env(), log_path=str(log)
+        "w/alive", ["sleep", "30"], cwd=str(tmp_path), env=bare_env(), log_path=str(log)
     )
-    dead = first.spawn("w/dead", ["true"], cwd=str(tmp_path), env=_env(), log_path=str(log))
+    dead = first.spawn("w/dead", ["true"], cwd=str(tmp_path), env=bare_env(), log_path=str(log))
     first._children["w/dead"].wait()
     try:
         second = LocalJobs(tmp_path)  # a restarted worker: no children of its own
@@ -112,7 +111,7 @@ def test_spawn_refused(tmp_path, cwd_is, missing):
     jobs = LocalJobs(tmp_path / "state")
     with pytest.raises(SpawnRefused) as caught:
         jobs.spawn(
-            "w/s", [sys.executable, "-c", "pass"], cwd=str(cwd), env=_env(), log_path=str(log)
+            "w/s", [sys.executable, "-c", "pass"], cwd=str(cwd), env=bare_env(), log_path=str(log)
         )
     assert caught.value.missing == missing
     assert str(caught.value)
@@ -124,7 +123,7 @@ def test_two_tables_removing_one_record_do_not_fail(tmp_path):
     b = LocalJobs(tmp_path)
     log = tmp_path / "l"
     log.write_bytes(b"")
-    a.spawn("w/s", ["true"], cwd=str(tmp_path), env=_env(), log_path=str(log))
+    a.spawn("w/s", ["true"], cwd=str(tmp_path), env=bare_env(), log_path=str(log))
     a._children["w/s"].wait()
     b.recover()  # sees a dead process: deletes the record
     assert _wait(lambda: a.reap() == ["w/s"])

@@ -21,12 +21,10 @@ from support.real_binaries import GUARDED_BINARIES as _GUARDED_BINARIES
 from kraft import client as kraft_client
 from kraft import db
 from kraft.paths import RunDirs
-from kraft.remote import local_link
-from kraft.remote.local_jobs import LocalJobs
-from kraft.remote.local_link import DirectLink
 
 #: `rig` and `rig_offline`: a server and a machine in one process (`support.remote`).
-pytest_plugins = ["support.rig_fixtures"]
+#: `support.local_worker`: the in-process local worker every test starts its sessions through.
+pytest_plugins = ["support.rig_fixtures", "support.local_worker"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -262,18 +260,6 @@ def bd(request, fake_beads) -> Bd:
     if getattr(request, "param", None) == "bd" and fake_beads is not None:
         pytest.fail(f"{request.node.nodeid}: a [bd] case must be marked e2e('bd')")
     return Bd(fake_beads)
-
-
-@pytest.fixture(autouse=True)
-def _local_worker(tmp_path_factory):
-    """Local sessions are started by the local worker, never by the server itself. A test gets
-    that worker's surface over an in-process job table (`DirectLink`), through the same
-    `local_link.current()` door the server uses, so no test starts a real worker process.
-    Not under `tmp_path`: many tests use it as a checkout or a `cwd`, and job records must
-    not land in it."""
-    local_link.install(DirectLink(LocalJobs(tmp_path_factory.mktemp("local-worker"))))
-    yield
-    local_link.install(None)
 
 
 @pytest.fixture(autouse=True)

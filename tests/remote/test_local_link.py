@@ -8,7 +8,7 @@ import time
 
 import psutil
 import pytest
-from support.local_worker import RunningWorker, kill_group
+from support.local_worker import RunningWorker, bare_env, kill_group
 
 from kraft.remote import local_link, local_serve, protocol
 from kraft.remote.local_link import LocalLink, LocalProc
@@ -17,10 +17,6 @@ from kraft.remote.local_link import LocalLink, LocalProc
 @pytest.fixture(autouse=True)
 def _quick_worker_restarts(monkeypatch):
     monkeypatch.setattr(local_link, "_START_EVERY_S", 0.1)
-
-
-def _env():
-    return {"PATH": os.environ["PATH"]}
 
 
 def _gone(pid: int) -> bool:
@@ -102,7 +98,7 @@ async def test_spawn_waits_for_the_worker_and_says_so_once(tmp_path):
                 "w/s",
                 ["sleep", "30"],
                 cwd=str(tmp_path),
-                env=_env(),
+                env=bare_env(),
                 log_path=log,
                 exit_path=tmp_path / "x.exit",
                 on_wait=hear,
@@ -124,7 +120,7 @@ async def test_cancel_while_waiting_starts_nothing(tmp_path):
             "w/s",
             ["sleep", "30"],
             cwd=str(tmp_path),
-            env=_env(),
+            env=bare_env(),
             log_path=tmp_path / "log",
             exit_path=tmp_path / "x.exit",
         )
@@ -156,7 +152,7 @@ async def test_cancel_after_the_spawn_frame_stops_what_the_worker_started(tmp_pa
                 "w/s",
                 ["sleep", "30"],
                 cwd=str(tmp_path),
-                env=_env(),
+                env=bare_env(),
                 log_path=log,
                 exit_path=tmp_path / "x.exit",
             )
@@ -194,7 +190,7 @@ async def test_a_dropped_answer_stops_the_session_after_reconnecting(tmp_path, m
                     "w/s",
                     ["sleep", "30"],
                     cwd=str(tmp_path),
-                    env=_env(),
+                    env=bare_env(),
                     log_path=log,
                     exit_path=tmp_path / "x.exit",
                 ),
@@ -212,7 +208,7 @@ async def test_link_reconnects_after_the_worker_dies(tmp_path):
             "w/s",
             ["sleep", "30"],
             cwd=str(tmp_path),
-            env=_env(),
+            env=bare_env(),
             log_path=log,
             exit_path=tmp_path / "x.exit",
         )
