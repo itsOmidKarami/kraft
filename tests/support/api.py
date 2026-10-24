@@ -197,12 +197,25 @@ def _approve_gate(client, wid, gate, timeout=30):
     raise AssertionError(f"{gate} still 409 after {timeout}s: {r.text if r else '(no attempt)'}")
 
 
-def _approve_review(client, wid, gate="chain_review"):
-    """A review's `approve` at `gate`, naming the head the final review shows (`review_head`)."""
-    shown = client.get(f"/api/work-items/{wid}").json()["review_head"]
-    return client.post(
-        f"/api/work-items/{wid}/gates/{gate}/review", json={"outcome": "approve", "head": shown}
-    )
+def _approve_review(client, wid, gate="chain_review", timeout=30):
+    """A review's `approve` at `gate`, naming the head the final review shows (`review_head`).
+
+    Retried past "a walk is already running": the gate turns pending a moment
+    before the walk that reached it lets go of the item, as `_approve_gate` notes.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        shown = client.get(f"/api/work-items/{wid}").json()["review_head"]
+        r = client.post(
+            f"/api/work-items/{wid}/gates/{gate}/review", json={"outcome": "approve", "head": shown}
+        )
+        if (
+            r.status_code != 409
+            or "walk is already running" not in r.text
+            or time.monotonic() > deadline
+        ):
+            return r
+        time.sleep(_POLL)
 
 
 #: The shipped `default` chain reaches its `chain_finalized` gate only after the
