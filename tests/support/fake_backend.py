@@ -38,6 +38,8 @@ class Remote:
         #: What `probe` answers (a refusal), and what `oom_killed` answers.
         self.unrunnable: str | None = None
         self.oom = None
+        #: The run dir each `owner_refusal` and `code_in` was given: whose state it is.
+        self.bases: list[Path] = []
         #: The ref stores `code_in` hands back.
         self.refs: tuple = ()
 
@@ -46,6 +48,7 @@ class Remote:
 
     async def owner_refusal(self, run_dirs, cwd, work_item_id, result_path, **kw):
         self.touched.append("owner_refusal")
+        self.bases.append(run_dirs.base)
         return self.foreign
 
     async def probe(self, sandbox, executable, env):
@@ -62,6 +65,7 @@ class Remote:
 
     def code_in(self, run_base, cwd, branch, **kw):
         self.touched.append("code_in")
+        self.bases.append(run_base)
         return self.refs
 
     def wrap(self, cmd, cwd, sandbox, results_dir, env=None, *, session_id, work_item_id, **kw):

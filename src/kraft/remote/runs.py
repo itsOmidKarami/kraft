@@ -71,6 +71,9 @@ class Run:
     received: dict[str, Path] = field(default_factory=dict)
     sink: blobs.BlobSink | None = None
     capped: dict | None = None  # the cap the machine stopped the command at
+    oom: dict | None = (
+        None  # `{"memory", "confirmed"}`: its sandbox killed it under its memory limit
+    )
     abandoned: bool = False  # given up on: whatever the machine hands in later is thrown away
 
 
@@ -186,6 +189,8 @@ class Runs:
             self._spawn(self._deliver(run, frame))
         elif kind == "api":
             self._spawn(self._api(run, frame))
+        elif kind == "event":
+            self._spawn(self._machine_event(run, frame))
 
     async def _log(self, run: Run, frame: dict) -> None:
         offset, data = frame["offset"], base64.b64decode(frame["data"])
@@ -232,6 +237,7 @@ class Runs:
         run.state = "delivering"
         spec, code = run.spec, int(frame.get("code", 1))
         run.capped = frame.get("capped")
+        run.oom = frame.get("oom")
         lock = self._locks.setdefault(spec.work_item_id, asyncio.Lock())
         async with lock:
             try:
@@ -284,6 +290,19 @@ class Runs:
         await self._db.write(
             lambda c: events.append(c, spec.work_item_id, type_, payload, node_id=spec.node_id)
         )
+
+    #: What a machine may add to an item's history: the sandbox events it sees. Its memory-limit
+    #: kill arrives on `finished` instead, for the server to record as a local one is.
+    _MACHINE_EVENTS = frozenset(SandboxEvent) - {SandboxEvent.OOM_KILLED}
+
+    async def _machine_event(self, run: Run, frame: dict) -> None:
+        type_, payload = frame.get("type"), frame.get("payload")
+        if type_ not in self._MACHINE_EVENTS or not isinstance(payload, dict):
+            self._say(
+                run, f"\nkraft: {run.claim.machine} sent an event of a kind it may not: {type_!r}\n"
+            )
+            return
+        await self._event(run.spec, SandboxEvent(type_), payload)
 
     async def _api(self, run: Run, frame: dict) -> None:
         spec = run.spec

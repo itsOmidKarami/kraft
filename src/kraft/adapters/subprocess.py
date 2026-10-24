@@ -1329,6 +1329,8 @@ async def _run_task(
             if run is not None:
                 # The machine's commits, result and documents are home before this reads them.
                 await _remote_runs.current().wait_delivered(run, 60)
+                if run.oom is not None:  # the machine's sandbox was killed under its memory limit
+                    oom = _backends.OomKill(run.oom["memory"], bool(run.oom["confirmed"]))
             # Nested so neither a collect nor a close that raises skips what
             # follows it: the session's commits are published whatever became
             # of its result file.

@@ -193,17 +193,20 @@ class Machine:
         self._delivered: dict[str, list[str]] = {}  # item -> tips the server has already taken
         self._background: set[asyncio.Task] = set()
         self._name = ""  # what the server calls this machine, from its latest welcome
-        # The egress channels of the sandboxes built here: the worker API and the session MCP
-        # server go over the connection, and a refusal goes up as an event. Opened lazily.
-        self.channels = channel.ChannelRegistry(
-            self.run_dirs,
-            None,
-            EgressProxy(api=self._proxy_api),
-            record=self._record_event,
-        )
+        self._channels: channel.ChannelRegistry | None = None
         self._mcp: asyncio.Task | None = None
         self._tls: channel.TLSListener | None = None
         self._tls_lock = asyncio.Lock()
+
+    @property
+    def channels(self) -> channel.ChannelRegistry:
+        """The egress channels of the sandboxes built here: the worker API and the session MCP
+        server go over the connection, a refusal goes up as an event. Made on first use."""
+        if self._channels is None:
+            self._channels = channel.ChannelRegistry(
+                self.run_dirs, None, EgressProxy(api=self._proxy_api), record=self._record_event
+            )
+        return self._channels
 
     @property
     def run_dirs(self) -> RunDirs:

@@ -359,3 +359,26 @@ async def test_a_drop_and_a_reconnect_each_note_the_item_whose_step_runs_there(
     assert json.loads(got[0]["payload"]) == {"machine": "gpu", "session_id": "s1"}
     await rig.runs.signal(run, "KILL")
     await rig.done(run)
+
+
+@pytest.mark.parametrize(
+    ("type_", "kept"),
+    [
+        ("sandbox_egress_refused", True),
+        ("sandbox_branch_not_synced", True),
+        ("sandbox_oom_killed", False),  # the server records its own, from `finished`
+        ("item_approved", False),
+    ],
+    ids=["egress-refused", "not-synced", "oom-kill-is-not-an-event-frame", "not-a-sandbox-event"],
+)
+async def test_a_machine_adds_sandbox_events_to_its_items_history_and_nothing_else(
+    rig, database, type_, kept
+):
+    run = await rig.run(["sh", "-c", "sleep 30"])
+    await rig.runs.on_frame(
+        "gpu", {"t": "event", "id": run.spec.key, "type": type_, "payload": {"host": "x.test"}}
+    )
+    await asyncio.sleep(0.2)
+    assert (type_ in _event_types(database)) is kept
+    await rig.runs.signal(run, "KILL")
+    await rig.done(run)

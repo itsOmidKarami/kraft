@@ -15,6 +15,7 @@ from kraft.adapters import subprocess as sp
 from kraft.remote import launch, placement
 from kraft.remote import runs as runs_mod
 from kraft.worker import backends
+from kraft.worker.backends.docker import OomKill
 
 
 def _args(rig, sid, cmd, **kw):
@@ -175,11 +176,13 @@ SANDBOX = {
 
 
 @pytest.fixture
-def sandboxed(rig, tmp_path, monkeypatch):
-    """The fake backend registered as the item's sandbox kind, the filing refusal (lifted in a
-    later task of the series) out of the way, and every `JobSpec` the launch builds kept."""
+def sandboxed(rig, tmp_path, short_run, monkeypatch):
+    """The fake backend registered as the item's sandbox kind -- the machine in this process
+    builds it in a run dir of its own -- the filing refusal (lifted in a later task of the series)
+    out of the way, and every `JobSpec` the launch builds kept."""
     backend = Remote(tmp_path)
     monkeypatch.setitem(backends._BACKENDS, backend.kind, backend)
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(short_run.base))
     monkeypatch.setenv("EXAMPLE_KEY", SECRET)
     filing = placement.filing_problems
     monkeypatch.setattr(
@@ -210,5 +213,22 @@ async def test_a_sandboxed_job_carries_its_sandbox_lists_and_credential_declarat
 
 async def test_a_sandboxed_remote_step_runs_no_backend_on_the_server(rig, sandboxed):
     backend, _ = sandboxed
-    await _run(rig, "s1", ["true"], runner="gpu", sandbox=SANDBOX)
-    assert backend.touched == [] and backend.calls == []
+    repo = entry_of({"setup_command": "", "env_passthrough": ["EXAMPLE_KEY"]})
+    status = await _run(rig, "s1", ["true"], runner="gpu", sandbox=SANDBOX, repo_entry=repo)
+    assert status == "done", rig.files("s1").log.read_text()
+    # every call came from the machine, in its own run dir; none was made in the server's
+    assert backend.bases and rig.run_dirs.base not in backend.bases
+
+
+async def test_a_memory_kill_in_the_machines_sandbox_ends_the_session_config_error(rig, sandboxed):
+    backend, _ = sandboxed
+    backend.oom = OomKill("1g", True)
+    repo = entry_of({"setup_command": "", "env_passthrough": ["EXAMPLE_KEY"]})
+    status = await _run(rig, "s1", ["false"], runner="gpu", sandbox=SANDBOX, repo_entry=repo)
+    assert status == "config_error"
+    assert "killed by its memory limit (1g)" in rig.files("s1").log.read_text()
+    kinds = [
+        r["type"]
+        for r in rig.database.read(lambda c: c.execute("SELECT type FROM events").fetchall())
+    ]
+    assert kinds.count("sandbox_oom_killed") == 1

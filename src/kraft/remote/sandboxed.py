@@ -123,10 +123,11 @@ class Sandboxed:
         rules = tuple(InjectRule.from_json(d, env) for d in declared)
         for rule in rules:
             if rule.value is None:
-                where = f"{rule.source} in" if rule.source else ""
+                name = rule.source or rule.env
                 raise Unavailable(
-                    f"{self.host.machine}: the credential {rule.env} has no value "
-                    f"(it is read from {where} this machine's environment)"
+                    f"{self.host.machine}: the credential {rule.env} has no value: {name} is not "
+                    f"set in this machine's environment"
+                    + (" (list it under env_passthrough)" if not rule.source else "")
                 )
         return rules
 
