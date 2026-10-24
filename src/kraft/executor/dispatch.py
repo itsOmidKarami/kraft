@@ -192,7 +192,8 @@ def _last_own_round_head(
 
 def _scope_table(repo_entry: RepoEntry | None) -> list[dict]:
     """The repository's test scopes as verify runs them, before any selection:
-    `{paths, cmd, area, setup}` each, `cmd` and `setup` split into argv."""
+    `{paths, cmd, targeted_cmd, area, setup}` each, the commands and `setup`
+    split into argv; `targeted_cmd` is None for a scope that declares none."""
     if repo_entry is None:
         return []
     repo_scopes = [s.model_dump() for s in repo_entry.test_scopes or ()]
@@ -212,6 +213,9 @@ def _scope_table(repo_entry: RepoEntry | None) -> list[dict]:
         {
             "paths": s["paths"],
             "cmd": shlex.split(s["command"]),
+            "targeted_cmd": shlex.split(s["targeted_command"])
+            if s.get("targeted_command")
+            else None,
             "area": s.get("area"),
             "setup": shlex.split(s["setup"]) if s.get("setup") else None,
         }
@@ -227,10 +231,13 @@ def _select_scopes(
     task_hook: str,
     round: int,
     repo_entry: RepoEntry | None,
-) -> list[dict]:
+) -> tuple[list[dict], list[str] | None]:
     """The scopes the `kraft.verify_changed_test_scopes` builtin should run
-    (test-scope design §3.2-3.3, C7 Kraft-s7c04.14). Their sandbox is the
-    item's (`item_sandbox`).
+    (test-scope design §3.2-3.3, C7 Kraft-s7c04.14), and the changed paths
+    they were selected from: `None` when there is no diff at all (no base
+    commit, or git cannot diff it), `[]` for a diff that is empty, and
+    `([], None)` for a repo with no scopes. Their sandbox is the item's
+    (`item_sandbox`).
 
     Pulled out of `dispatch_node`'s subprocess branch (batch-c1 spec Task 3).
     C1 briefly gave `implementation` its own `on.test.run` dispatch through
@@ -272,7 +279,7 @@ def _select_scopes(
     """
     scopes = _scope_table(repo_entry)
     if not scopes:
-        return []
+        return [], None
     base_ref = _current_base_ref(db, work_item_id)
     # `since` is the diff's lower bound: round <= 0 always measures the whole
     # branch (never reads another round or another node's head), and only a
@@ -287,13 +294,28 @@ def _select_scopes(
     ):
         since = None
     since = since or base_ref
+    # `--no-renames`: a path moved out of a scope lists both sides, so a
+    # scope-less destination cannot hide the source from selection or from a
+    # targeted command. `core.quotePath=false`: a non-ASCII name reaches the
+    # list as itself, not git's quoted `"caf\303\251.py"`. `strip=False`: the
+    # default strip eats a leading space in the first file name.
     diff = (
-        _config.git_read(Path(worktree), "diff", "--name-only", f"{since}...HEAD")
+        _config.git_read(
+            Path(worktree),
+            "-c",
+            "core.quotePath=false",
+            "diff",
+            "--name-only",
+            "--no-renames",
+            f"{since}...HEAD",
+            strip=False,
+        )
         if since
         else None
     )
-    to_run = scopes if diff is None else _matched_scopes(scopes, diff.splitlines())
-    return to_run
+    paths = None if diff is None else diff.splitlines()
+    to_run = scopes if paths is None else _matched_scopes(scopes, paths)
+    return to_run, paths
 
 
 async def config_error_session(db, run_dirs, common: dict, log: str) -> str:
@@ -693,7 +715,7 @@ async def _run_changed_test_scopes(
     scopes, which the repo's own table bounds.
     """
     repo_entry = launch.repo_entry if launch else None
-    to_run = _select_scopes(
+    to_run, paths = _select_scopes(
         db, work_item_row["id"], worktree, node.id, task.path, round, repo_entry
     )
     if not to_run and repo_entry is not None and repo_entry.test_command == "":
