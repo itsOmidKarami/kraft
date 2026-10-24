@@ -14,29 +14,51 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import logging
 import os
+import re
 from pathlib import Path
 
+import kraft
 from kraft.remote import protocol, sockets
 from kraft.remote.local_jobs import LocalJobs, SpawnRefused
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport
 
 log = logging.getLogger(__name__)
 
-SOCKET = "worker.sock"
+
+def install_id(kraft_version: str) -> str:
+    """Names one installed kraft: its version, and a hash of where its package is and when it
+    was last put there. Two installs of the same version string (a dev build reinstalled)
+    get different ids, so an update always starts a worker of its own.
+
+    Each install has its own worker (socket, lock and pid file): a worker is never asked to
+    run the code of a newer kraft than it loaded, and an old one gets no new sessions."""
+    init = Path(kraft.__file__).resolve()
+    try:
+        stamp = str(init.stat().st_mtime_ns)
+    except OSError:
+        stamp = ""
+    digest = hashlib.sha1(f"{init.parent}\0{stamp}".encode()).hexdigest()[:8]
+    return f"{re.sub(r'[^0-9A-Za-z._-]', '_', kraft_version)}-{digest}"
 
 
 def state_dir(run_base: Path) -> Path:
+    """Shared by every install's worker: the sessions they hold are recorded under `jobs/`."""
     return Path(run_base) / "local-worker"
 
 
-def socket_path(run_base: Path) -> Path:
-    return sockets.short_socket_path(state_dir(run_base) / SOCKET)
+def socket_path(run_base: Path, install: str) -> Path:
+    return sockets.short_socket_path(state_dir(run_base) / f"worker-{install}.sock")
 
 
-def pid_path(run_base: Path) -> Path:
-    return state_dir(run_base) / "worker.pid"
+def lock_path(run_base: Path, install: str) -> Path:
+    return state_dir(run_base) / f"worker-{install}.lock"
+
+
+def pid_path(run_base: Path, install: str) -> Path:
+    return state_dir(run_base) / f"worker-{install}.pid"
 
 
 class _Worker:
@@ -127,16 +149,19 @@ async def serve(
     *,
     kraft_version: str,
     stop: asyncio.Event,
+    install: str | None = None,
     idle_exit_s: float = 5.0,
     reap_s: float = 0.2,
 ) -> None:
-    """Run the worker until `stop` is set, or until no server is connected and no session
-    runs for `idle_exit_s`. Returns at once when another worker holds the lock."""
-    directory, path = state_dir(run_base), socket_path(run_base)
+    """Run the worker of install `install` (this kraft's own, by default) until `stop` is set,
+    or until no server is connected and no session runs for `idle_exit_s`. Returns at once when
+    another worker of that install holds the lock."""
+    install = install or install_id(kraft_version)
+    directory, path = state_dir(run_base), socket_path(run_base, install)
     sockets.private_dir(directory)
     if path.parent != directory:
         sockets.private_dir(path.parent)
-    lock = sockets.take_lock(directory / "worker.lock")
+    lock = sockets.take_lock(lock_path(run_base, install))
     if lock is None:
         return
     try:
@@ -147,7 +172,7 @@ async def serve(
         jobs.recover()
         server = await asyncio.start_unix_server(worker.handle, path=str(path), limit=FRAME_LIMIT)
         path.chmod(0o600)
-        pid_file = pid_path(run_base)
+        pid_file = pid_path(run_base, install)
         pid_file.write_text(str(os.getpid()))
         try:
             await worker.run(stop, idle_exit_s, reap_s)

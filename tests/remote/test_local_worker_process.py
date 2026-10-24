@@ -23,8 +23,8 @@ async def _until(predicate, seconds):
     return False
 
 
-def _worker_pid(run_base) -> int:
-    return int(local_serve.pid_path(run_base).read_text())
+def _worker_pid(run_base, install: str) -> int:
+    return int(local_serve.pid_path(run_base, install).read_text())
 
 
 async def test_a_session_outlives_the_worker_and_the_next_worker_holds_it_again(tmp_path):
@@ -36,7 +36,7 @@ async def test_a_session_outlives_the_worker_and_the_next_worker_holds_it_again(
     session = None
     try:
         await asyncio.wait_for(link.wait_connected(), 10)
-        first_worker = _worker_pid(run_base)
+        first_worker = _worker_pid(run_base, link.install)
         session = await link.spawn(
             "w1/s1",
             ["sleep", "30"],
@@ -53,7 +53,7 @@ async def test_a_session_outlives_the_worker_and_the_next_worker_holds_it_again(
         assert psutil.pid_exists(session.pid), "the session ran on without its worker"
         assert session.poll() is None
         assert await _until(lambda: link.connected, 10), "the link did not start a new worker"
-        assert _worker_pid(run_base) != first_worker
+        assert _worker_pid(run_base, link.install) != first_worker
         held = await link.hold([("w1/s1", session.pid, session.pid_start_time)])
         assert held == {"w1/s1": True}
 
@@ -69,8 +69,51 @@ async def test_a_session_outlives_the_worker_and_the_next_worker_holds_it_again(
                 os.killpg(session.pid, signal.SIGKILL)
             except OSError:
                 pass
-        if local_serve.pid_path(run_base).exists():
+        if local_serve.pid_path(run_base, link.install).exists():
             try:
-                os.kill(_worker_pid(run_base), signal.SIGTERM)
+                os.kill(_worker_pid(run_base, link.install), signal.SIGTERM)
             except OSError:
                 pass
+
+
+async def test_new_install_worker_adopts_the_old_workers_sessions(tmp_path):
+    """An update within a major: the new server's worker (a real process) takes over a session
+    the old one started, which reaps nothing else, has no server, and exits on its own."""
+    from support.local_worker import RunningWorker, connect, kill_group, request
+
+    run_base = tmp_path / "run"
+    log = tmp_path / "session.log"
+    log.write_bytes(b"")
+    old = RunningWorker(run_base, install="old-aaaaaaaa", idle_exit_s=0.5)
+    await old.ready()
+    t = await connect(run_base, "old-aaaaaaaa")
+    spawn = {
+        "t": "spawn",
+        "id": "w1/s1",
+        "argv": ["sleep", "30"],
+        "cwd": str(tmp_path),
+        "env": {"PATH": os.environ["PATH"]},
+        "log_path": str(log),
+    }
+    pid = (await request(t, spawn, answer="spawned"))["pid"]
+    await t.close()  # the old server is gone; its worker holds the session
+
+    link = LocalLink(run_base, kraft_version="test", install="new-bbbbbbbb")
+    task = asyncio.create_task(link.run())
+    try:
+        await asyncio.wait_for(link.wait_connected(), 10)
+        assert _worker_pid(run_base, "new-bbbbbbbb") != os.getpid()
+        start = psutil.Process(pid).create_time()
+        assert await link.hold([("w1/s1", pid, start)]) == {"w1/s1": True}
+        assert not old.task.done(), "the old worker holds a session and stays"
+
+        kill_group(pid)
+
+        await asyncio.wait_for(old.task, 0.5 + 3)  # reaped; idle with no server
+        assert await _until(lambda: not list((run_base / "local-worker/jobs").glob("*.json")), 3)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        kill_group(pid)
+        os.kill(_worker_pid(run_base, "new-bbbbbbbb"), signal.SIGTERM)
+        await old.close()

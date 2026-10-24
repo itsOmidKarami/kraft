@@ -256,7 +256,9 @@ def no_link_installed(monkeypatch):
     local_link.install(None)
     workers = []
     monkeypatch.setattr(
-        local_link, "_start_worker", lambda run_base: workers.append(ThreadedWorker(run_base))
+        local_link,
+        "_start_worker",
+        lambda run_base, install: workers.append(ThreadedWorker(run_base, install)),
     )
     yield workers
     for worker in workers:

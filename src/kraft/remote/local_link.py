@@ -90,8 +90,8 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _start_worker(run_base: Path) -> None:
-    """Start the worker as a process of its own, outliving this server."""
+def _start_worker(run_base: Path, install: str) -> None:
+    """Start the worker of install `install` as a process of its own, outliving this server."""
     logs = Path(run_base) / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     with open(logs / "local-worker.log", "ab") as out:
@@ -106,6 +106,8 @@ def _start_worker(run_base: Path) -> None:
                 "local",
                 "--run-dir",
                 str(run_base),
+                "--install",
+                install,
             ],
             stdin=subprocess.DEVNULL,
             stdout=out,
@@ -160,10 +162,14 @@ class LocalLink(_Row):
         kraft_version: str,
         start_worker: Callable[[], None] | None = None,
         retry_s: float = 0.5,
+        install: str | None = None,
     ) -> None:
         super().__init__()
         self.run_base, self.kraft_version, self.retry_s = Path(run_base), kraft_version, retry_s
-        self._start = start_worker or (lambda: _start_worker(self.run_base))
+        #: The worker of this install, and no other: an older one finishes its own sessions
+        #: and exits, a newer one is another server's.
+        self.install = install or local_serve.install_id(kraft_version)
+        self._start = start_worker or (lambda: _start_worker(self.run_base, self.install))
         self._t: protocol.Transport | None = None
         self._was_up = False
         self._pending: dict[tuple[str, str], list[asyncio.Future]] = {}
@@ -193,7 +199,7 @@ class LocalLink(_Row):
         """One connection, from connect to its end. False when nothing was listening."""
         try:
             reader, writer = await asyncio.open_unix_connection(
-                str(local_serve.socket_path(self.run_base)), limit=FRAME_LIMIT
+                str(local_serve.socket_path(self.run_base, self.install)), limit=FRAME_LIMIT
             )
         except OSError:
             return False
