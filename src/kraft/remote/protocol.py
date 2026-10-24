@@ -8,6 +8,8 @@ Protocol 2. `id` is the job key `"<work item id>/<session id>"`. Frames:
 - `hello`, `welcome`, `refused`: the handshake. `welcome` also names this
   install as `server` (`run/server.id`) and carries `give_up_after_s`: how long
   the machine keeps a job running without a connection (seconds, `null` for never).
+  Both carry `caps`, the optional behaviours the sender understands (absent from an
+  older peer, which reads as none).
 - `ping`, `pong`: keep-alive.
 - `have`, server to machine: `{rid}`; the machine answers `{rid, item, commits}`,
   up to 500 commits its copy of the item has.
@@ -38,12 +40,18 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import dataclass, field
 from typing import Protocol
 
-#: Bumped when a frame changes meaning. Equal or refused: there is no range.
+from kraft import update
+
+#: Bumped when a frame changes meaning, and only with a Kraft major: "same major" and "same
+#: protocol" mean the same thing. Equal or refused: there is no range.
 PROTOCOL_VERSION = 2
+#: What this side understands beyond the base protocol. New behaviour an older peer would get
+#: wrong is sent only to a peer that lists it.
+CAPS: frozenset[str] = frozenset()
 HANDSHAKE_S = 10.0
 PING_S = 20.0
 DEAD_S = 60.0
@@ -84,6 +92,27 @@ class Peer:
     kraft: str
     protocol: int
     host: str | None
+    caps: frozenset[str] = field(default_factory=frozenset)
+
+
+def _caps(raw: object) -> frozenset[str]:
+    """The `caps` of a hello or welcome; anything but a list of strings reads as none."""
+    if isinstance(raw, list) and all(isinstance(c, str) for c in raw):
+        return frozenset(raw)
+    return frozenset()
+
+
+def _refusal_reason(kraft_version: str, machine_kraft: str, machine: object) -> str:
+    server_major, machine_major = update._parts(kraft_version)[:1], update._parts(machine_kraft)[:1]
+    if server_major and machine_major and server_major != machine_major:
+        return (
+            f"update kraft on this machine to {kraft_version}: "
+            f"it runs {machine_kraft}, another major version"
+        )
+    return (
+        f"incompatible protocol: server speaks {PROTOCOL_VERSION} (kraft {kraft_version}), "
+        f"machine speaks {machine} (kraft {machine_kraft})"
+    )
 
 
 async def server_handshake(
@@ -122,8 +151,7 @@ async def server_handshake(
     if machine != PROTOCOL_VERSION:
         await _refuse(
             t,
-            f"incompatible protocol: server speaks {PROTOCOL_VERSION} (kraft {kraft_version}), "
-            f"machine speaks {machine} (kraft {machine_kraft})",
+            _refusal_reason(kraft_version, machine_kraft, machine),
             name=name,
             server_protocol=PROTOCOL_VERSION,
             machine_protocol=machine if isinstance(machine, int) else None,
@@ -135,12 +163,13 @@ async def server_handshake(
             "kraft": kraft_version,
             "name": name,
             "server": server_id,
+            "caps": sorted(CAPS),
             "give_up_after_s": give_up_after_s(name)
             if callable(give_up_after_s)
             else give_up_after_s,
         }
     )
-    return Peer(name, machine_kraft, machine, hello.get("host"))
+    return Peer(name, machine_kraft, machine, hello.get("host"), _caps(hello.get("caps")))
 
 
 async def _refuse(t: Transport, reason: str, **extra) -> None:
@@ -158,10 +187,16 @@ async def machine_handshake(
     token: str | None = None,
     host: str | None = None,
     protocol_version: int = PROTOCOL_VERSION,
+    caps: Iterable[str] = CAPS,
     timeout: float = HANDSHAKE_S,
 ) -> dict:
     """Send `hello`, return the server's `welcome`; `Refused` if it says no."""
-    hello = {"t": "hello", "protocol": protocol_version, "kraft": kraft_version}
+    hello = {
+        "t": "hello",
+        "protocol": protocol_version,
+        "kraft": kraft_version,
+        "caps": sorted(caps),
+    }
     if token is not None:
         hello["token"] = token
     if host:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 import pytest
 from support.remote import memory_pair
@@ -59,7 +60,7 @@ async def test_an_ssh_machine_is_named_by_the_server_and_sends_no_token():
 )
 async def test_a_refused_hello_says_why_to_both_sides(hello, reason, name):
     server, machine = memory_pair()
-    frame = {"t": "hello", "protocol": protocol.PROTOCOL_VERSION, "kraft": "9.9.9", **hello}
+    frame = {"t": "hello", "protocol": protocol.PROTOCOL_VERSION, "kraft": "2.9.9", **hello}
 
     async def client():
         await machine.send(frame)
@@ -74,12 +75,73 @@ async def test_a_refused_hello_says_why_to_both_sides(hello, reason, name):
         await asyncio.gather(
             protocol.machine_handshake(
                 machine2,
-                kraft_version="9.9.9",
+                kraft_version="2.9.9",
                 token=hello["token"],
                 protocol_version=hello.get("protocol", protocol.PROTOCOL_VERSION),
             ),
             _server(server2),
         )
+
+
+@pytest.mark.parametrize(
+    ("machine_kraft", "reason"),
+    [
+        (
+            "3.0.0",
+            "update kraft on this machine to 2.3.0: it runs 3.0.0, another major version",
+        ),
+        (
+            "2.9.9",
+            "incompatible protocol: server speaks 2 (kraft 2.3.0), machine speaks 99 (kraft 2.9.9)",
+        ),
+    ],
+    ids=["another-major", "same-major-other-protocol"],
+)
+async def test_protocol_refusal_text(machine_kraft, reason):
+    server, machine = memory_pair()
+    with pytest.raises(protocol.Refused, match=re.escape(reason)) as refused:
+        await asyncio.gather(
+            _server(server),
+            protocol.machine_handshake(
+                machine, kraft_version=machine_kraft, token="good", protocol_version=99
+            ),
+        )
+    assert str(refused.value) == reason and refused.value.machine_protocol == 99
+
+
+@pytest.mark.parametrize(
+    ("hello_caps", "expected"),
+    [
+        ([], frozenset()),
+        (["capacity", "x"], frozenset({"capacity", "x"})),
+        (None, frozenset()),
+        ("capacity", frozenset()),
+        (["ok", 3], frozenset()),
+    ],
+    ids=["none-sent", "caps-listed", "old-machine-no-caps", "caps-garbage", "caps-mixed"],
+)
+async def test_handshake_caps(hello_caps, expected):
+    server, machine = memory_pair()
+    hello = {"t": "hello", "protocol": protocol.PROTOCOL_VERSION, "kraft": "2.3.0", "token": "good"}
+    if hello_caps is not None:
+        hello["caps"] = hello_caps
+
+    async def client():
+        await machine.send(hello)
+        return await machine.recv()
+
+    peer, welcome = await asyncio.gather(_server(server), client())
+    assert peer.caps == expected
+    assert welcome["caps"] == sorted(protocol.CAPS)
+
+
+async def test_the_machine_hello_lists_its_caps():
+    server, machine = memory_pair()
+    peer, _ = await asyncio.gather(
+        _server(server),
+        protocol.machine_handshake(machine, kraft_version="2.3.0", token="good", caps=["a", "b"]),
+    )
+    assert peer.caps == frozenset({"a", "b"})
 
 
 async def test_a_silent_peer_times_out_the_handshake():

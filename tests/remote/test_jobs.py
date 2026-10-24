@@ -32,6 +32,11 @@ def _spec(argv, *, env=None, setup=None, dirs=(), **extra):
     )
 
 
+def test_job_spec_ignores_unknown_fields():
+    frame = {**_spec(["true"]).to_frame(), "a_field_from_a_newer_server": 1}
+    assert JobSpec.from_frame(frame) == _spec(["true"])
+
+
 def _runner(tmp_path, spec, **kw):
     (tmp_path / "area" / "items" / "w1" / "repo").mkdir(parents=True)
     return JobRunner(spec, area=tmp_path / "area", api_port=4242, **kw)
