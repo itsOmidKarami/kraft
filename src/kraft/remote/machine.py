@@ -11,6 +11,7 @@ import asyncio
 import base64
 import contextlib
 import itertools
+import os
 import socket
 import subprocess
 import sys
@@ -20,12 +21,16 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from kraft import item_paths, paths
+from kraft.paths import RunDirs
 from kraft.remote import blobs, files, protocol
 from kraft.remote.forwarder import Forwarder
 from kraft.remote.jobs import JobRunner, JobSpec, job_dir
 from kraft.remote.paths import PathMap
+from kraft.remote.sandboxed import Host
 from kraft.remote.transport import FRAME_LIMIT, WebSocketTransport
 from kraft.remote.workdir import Copy
+from kraft.worker import channel
+from kraft.worker.egress import EgressProxy
 
 CONNECT_PATH = "/api/workers/connect"
 _SCHEMES = {"http": "ws", "https": "wss"}
@@ -64,6 +69,8 @@ async def dial_in(
 
     url, delay = dial_url(server), first_delay
     machine = Machine(paths.kraft_home(), kraft_version=kraft_version)
+    before = channel.current()
+    channel.install(machine.channels)  # the sandbox backends find their channels here
 
     async def once() -> bool:
         """One connection; True when the server welcomed it."""
@@ -99,6 +106,7 @@ async def dial_in(
         delay = first_delay if attempt.result() else min(delay * 2, max_delay)
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(stop.wait(), delay)
+    channel.install(before)
 
 
 def _spawn_daemon() -> None:
@@ -184,6 +192,24 @@ class Machine:
         ] = {}  # item -> preparing its copy, one job at a time
         self._delivered: dict[str, list[str]] = {}  # item -> tips the server has already taken
         self._background: set[asyncio.Task] = set()
+        self._name = ""  # what the server calls this machine, from its latest welcome
+        # The egress channels of the sandboxes built here: the worker API and the session MCP
+        # server go over the connection, and a refusal goes up as an event. Opened lazily.
+        self.channels = channel.ChannelRegistry(
+            self.run_dirs,
+            None,
+            EgressProxy(api=self._proxy_api),
+            record=self._record_event,
+        )
+        self._mcp: asyncio.Task | None = None
+        self._tls: channel.TLSListener | None = None
+        self._tls_lock = asyncio.Lock()
+
+    @property
+    def run_dirs(self) -> RunDirs:
+        """Where the sandbox backends keep their state on this machine (ref stores, the CA,
+        sockets, sandbox homes): its own run dir, as the backends assume."""
+        return RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or paths.default_run_dir()).resolve())
 
     def busy(self) -> bool:
         """Does it hold a job: running, or finished and not yet taken by the server?"""
@@ -195,6 +221,7 @@ class Machine:
         self._area.mkdir(parents=True, exist_ok=True)
         self._sink = blobs.BlobSink(self._area / "blobs")
         self._give_up_s = welcome.get("give_up_after_s")
+        self._name = str(welcome.get("name") or "")
         self._t = t
         self._stop_watchdog()
         try:
@@ -363,14 +390,32 @@ class Machine:
         if job.stopped is not None:  # given up on while it was being prepared
             await self._reject(job, "failed", job.stopped.strip())
             return
+        # A sandboxed worker reaches Kraft through its egress proxy (`channels`), not a port.
+        sandboxed = spec.sandbox is not None
         forwarder = Forwarder(lambda m, target, h, b: self._forward(job, m, target, h, b))
-        port = await forwarder.start()
+        port = None if sandboxed else await forwarder.start()
+        host = None
+        if sandboxed:
+            try:
+                await self._serve_mcp()
+                self.run_dirs.ensure()
+            except OSError as exc:
+                await self._reject(job, "config_error", f"{self._name}: {exc}")
+                return
+            host = Host(
+                machine=self._name or "this machine",
+                run_dirs=self.run_dirs,
+                channels=self.channels,
+                live=lambda: [j.spec.session_id for j in self._co_tasks(job)],
+                start_tls=self._ensure_tls,
+            )
         job.runner = JobRunner(
             spec,
             area=self._area,
             api_port=port,
             kill_grace_s=self._grace,
             received_at=job.received,
+            host=host,
         )
         try:
             out = await job.runner.run(
@@ -423,6 +468,7 @@ class Machine:
             "tip": tip,
             "pushed": changed,
             "capped": out.capped,
+            "oom": out.oom,
         }
         job.state = "finished"
         await self._hand_in(job)
@@ -494,6 +540,49 @@ class Machine:
         if isinstance(answer, tuple):
             return answer
         return answer["status"], answer.get("headers", {}), base64.b64decode(answer.get("body", ""))
+
+    async def _proxy_api(self, method: str, target: str, caller: str, kw: dict):
+        """A sandboxed worker's call through the egress proxy, sent to the server as the job's
+        own (`caller` is the job's key). The server checks it against the allowlist again."""
+        if (job := self._jobs.get(caller)) is None:
+            return 404, {"content-type": "application/json"}, b'{"detail": "no such job here"}'
+        return await self._forward(
+            job, method, target, kw.get("headers") or {}, kw.get("content", b"")
+        )
+
+    async def _record_event(self, work_item_id: str, session_id: str, type_: str, payload: dict):
+        """A sandbox event (a refused host, a branch not synced) for the server to append. It
+        belongs to the job named, else to a running job of the item (a setup command has none)."""
+        job = self._jobs.get(f"{work_item_id}/{session_id}") or next(
+            (j for j in self._running() if j.spec.work_item_id == work_item_id), None
+        )
+        if job is not None:
+            with contextlib.suppress(protocol.Closed):
+                await self._emit(
+                    {"t": "event", "id": job.spec.key, "type": type_, "payload": payload}
+                )
+
+    async def _serve_mcp(self) -> None:
+        """Run the session MCP server the proxy serves, once, for as long as this process lives."""
+        if self._mcp is not None:
+            return
+        ready = asyncio.Event()
+
+        async def hold() -> None:
+            async with self.channels.proxy.serving():
+                ready.set()
+                await asyncio.Event().wait()
+
+        self._mcp = self._spawn(hold())
+        await ready.wait()
+
+    async def _ensure_tls(self) -> None:
+        """The one mTLS listener a VM-backed runtime's relay dials, started when first needed."""
+        async with self._tls_lock:
+            if self._tls is None:
+                tls = channel.TLSListener(self.channels, self.run_dirs)
+                await tls.start()
+                self._tls = tls
 
     async def call_server(self, job_id: str, method: str, path: str, body: bytes = b""):
         """The forwarder's code path, for a test to call without a socket."""

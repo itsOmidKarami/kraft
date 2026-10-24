@@ -18,6 +18,7 @@ from types import SimpleNamespace
 from kraft import caps
 from kraft.remote import protocol
 from kraft.remote.paths import PathMap
+from kraft.remote.sandboxed import Host, Launch, Sandboxed, Unavailable
 from kraft.worker.env import BASELINE, worker_env
 
 #: Names the server's own environment owns: a job never sets them on the machine.
@@ -55,6 +56,9 @@ class JobSpec:
     credentials: list[dict] = field(default_factory=list)
     sentinels: dict[str, str] = field(default_factory=dict)  # env name -> the sentinel it holds
     withheld: list[str] = field(default_factory=list)  # names a sandboxed worker never sees
+    # `egress`, `credentials` and `sentinels` for the install phase, which the setup command runs in
+    setup_sandbox: dict | None = None
+    ro: list[str] = field(default_factory=list)  # read-only files it may read (server paths)
 
     @property
     def key(self) -> str:
@@ -74,6 +78,7 @@ class Outcome:
     rejected: str | None = None  # set when the command never started
     outcome: str | None = None  # "config_error" | "failed" with `rejected`
     capped: dict | None = None  # the `caps.Hit` (as a dict) that stopped it: time cap or idle limit
+    oom: dict | None = None  # `{"memory", "confirmed"}`: the sandbox's memory limit killed it
 
 
 def job_dir(area: Path, key: str) -> Path:
@@ -91,8 +96,9 @@ class JobRunner:
         chunk: int = 1 << 16,
         poll_s: float = 0.05,
         received_at: float | None = None,
+        host: Host | None = None,
     ) -> None:
-        self.spec, self.area, self.api_port = spec, Path(area), api_port
+        self.spec, self.area, self.api_port, self.host = spec, Path(area), api_port, host
         # `deadline_s` counts from when the machine got the job (monotonic), not from the command
         self._received = time.monotonic() if received_at is None else received_at
         self.root = self.area / "items" / spec.work_item_id / "repo"
@@ -114,9 +120,10 @@ class JobRunner:
         own = {k: self.pathmap.text(v) for k, v in s.env.items() if k not in _SERVER_ONLY}
         own.update(s.identity)
         own["KRAFT_RUN_DIR"] = str(self.area / "run")
-        own["KRAFT_HOST"] = "127.0.0.1"
-        if self.api_port is not None:
-            own["KRAFT_PORT"] = str(self.api_port)
+        if s.sandbox is None:  # a sandboxed worker reaches Kraft through its proxy, not a port
+            own["KRAFT_HOST"] = "127.0.0.1"
+            if self.api_port is not None:
+                own["KRAFT_PORT"] = str(self.api_port)
         repo = SimpleNamespace(
             env={k: self.pathmap.text(v) for k, v in s.repo_env.items()},
             env_passthrough=list(s.passthrough),
@@ -142,35 +149,35 @@ class JobRunner:
     async def run(self, emit: Callable[[dict], Awaitable[None]]) -> Outcome:
         s, env = self.spec, self._env()
         argv = [self.pathmap.text(a) for a in s.argv]
-        if (why := self._missing(argv[0], env)) is not None:
-            return Outcome(rejected=why, outcome="config_error")
-        if s.setup_command:
-            done = await asyncio.to_thread(
-                subprocess.run,
-                s.setup_command,
-                shell=True,
-                cwd=self.root,
-                env=env,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-            )
-            (self.dir / "setup.log").write_text(done.stdout + done.stderr)
-            if done.returncode != 0:
-                tail = (done.stderr.strip() or done.stdout.strip())[-300:]
+        box: Sandboxed | None = None
+        if s.sandbox is not None:
+            # Never a step without its sandbox: what this machine cannot build, it does not run.
+            if self.host is None:
                 return Outcome(
-                    rejected=(
-                        f"the setup command failed on this machine: {s.setup_command!r}: {tail}"
-                    ),
-                    outcome="failed",
+                    rejected="this machine has no sandbox runtime set up", outcome="config_error"
                 )
+            try:
+                box = Sandboxed(self.host, s, self.pathmap, self.root, self.dir)
+            except Unavailable as exc:
+                return Outcome(rejected=str(exc), outcome="config_error")
+        elif (why := self._missing(argv[0], env)) is not None:
+            return Outcome(rejected=why, outcome="config_error")
+        if s.setup_command and (failed := await self._setup(env, box)) is not None:
+            return failed
         if self._expired() and s.cap is not None:  # the transfer and setup used up the cap
             return Outcome(code=137, capped=s.cap)
+        launch: Launch | None = None
+        if box is not None:
+            step_env = {k: self.pathmap.text(v) for k, v in s.env.items() if k not in _SERVER_ONLY}
+            try:
+                launch = await box.step(argv, env, step_env)
+            except Unavailable as exc:
+                return Outcome(rejected=str(exc), outcome="config_error")
         with open(self.log_path, "ab") as log:
             try:
                 self._proc = subprocess.Popen(
-                    argv,
-                    cwd=self.pathmap.text(s.cwd),
+                    launch.argv if launch is not None else argv,
+                    cwd=(launch and launch.client_cwd) or self.pathmap.text(s.cwd),
                     env=env,
                     stdin=subprocess.DEVNULL,
                     stdout=log,
@@ -178,6 +185,8 @@ class JobRunner:
                     start_new_session=True,
                 )
             except OSError as exc:
+                if launch is not None:
+                    await launch.finish(publish=False)
                 return Outcome(
                     rejected=f"could not start {argv[0]!r}: {exc}", outcome="config_error"
                 )
@@ -185,15 +194,65 @@ class JobRunner:
             await emit({"t": "started", "id": s.key})
         tail = asyncio.create_task(self._tail(emit))
         capped: dict | None = None
+        oom = None
         try:
-            capped = await self._until_exit()
+            try:
+                capped = await self._until_exit()
+            finally:
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    # whatever it backgrounded and left running
+                    os.killpg(self._proc.pid, _signal.SIGTERM)
+            await tail
         finally:
-            with contextlib.suppress(ProcessLookupError, PermissionError):
-                # whatever it backgrounded and left running
-                os.killpg(self._proc.pid, _signal.SIGTERM)
-        await tail
+            if launch is not None:
+                # the result home, the memory limit asked, the sandbox and its route gone,
+                # the commits published -- whatever became of the command
+                oom = await launch.finish()
         code = self._proc.returncode
-        return Outcome(code=128 - code if code < 0 else code, capped=capped)
+        if launch is not None and launch.launch_failed(code):
+            return Outcome(
+                rejected=f"{self.host.machine}: the sandbox did not start the command",
+                outcome="config_error",
+            )
+        return Outcome(
+            code=128 - code if code < 0 else code,
+            capped=capped,
+            oom={"memory": oom.memory, "confirmed": oom.confirmed} if oom is not None else None,
+        )
+
+    async def _setup(self, env: dict[str, str], box: Sandboxed | None) -> Outcome | None:
+        """The repo's setup command in the machine's copy -- in the item's sandbox when it has
+        one, or not at all. None when it succeeded."""
+        s = self.spec
+        launch: Launch | None = None
+        senv = dict(env)
+        if box is not None:
+            try:
+                launch = await box.setup(s.setup_command, senv)
+            except Unavailable as exc:
+                return Outcome(rejected=str(exc), outcome="config_error")
+        try:
+            done = await asyncio.to_thread(
+                subprocess.run,
+                launch.argv if launch is not None else s.setup_command,
+                shell=launch is None,
+                cwd=(launch and launch.client_cwd) or self.root,
+                env=senv,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+            )
+        finally:
+            if launch is not None:
+                await launch.finish(publish=False)
+        (self.dir / "setup.log").write_text(done.stdout + done.stderr)
+        if done.returncode == 0:
+            return None
+        tail = (done.stderr.strip() or done.stdout.strip())[-300:]
+        return Outcome(
+            rejected=f"the setup command failed on this machine: {s.setup_command!r}: {tail}",
+            outcome="failed",
+        )
 
     def _expired(self) -> bool:
         s = self.spec

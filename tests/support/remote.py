@@ -234,7 +234,8 @@ async def send_job(server, tmp_path, argv, *, sid="s1", **extra) -> JobSpec:
     remote_files.pack([], tgz)
     spec = JobSpec(
         work_item_id="w1", session_id=sid, node_id="n", hook_point="n.main.a", argv=argv,
-        cwd=str(repo), env={"KRAFT_SESSION_ID": f"w1/{sid}"}, repo_env={}, passthrough=[],
+        cwd=str(repo), env={"KRAFT_SESSION_ID": f"w1/{sid}", **extra.pop("env", {})},
+        repo_env={}, passthrough=[],
         setup_command=None, branch="kraft/x", head=head, base=head, identity={},
         server_run_dir=str(tmp_path / "run"), server_worktree=str(repo), **extra,
     )  # fmt: skip

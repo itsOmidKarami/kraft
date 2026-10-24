@@ -23,6 +23,7 @@ from pathlib import Path
 from kraft.remote import protocol
 from kraft.remote.machine import Machine
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport
+from kraft.worker import channel
 
 SOCKET = "machine.sock"
 PID_FILE = "machine.pid"
@@ -121,9 +122,11 @@ class _Daemon:
         if (old := self.current.get(server)) is not None:
             await old.close()  # a relay whose ssh is gone but whose pipe has not noticed yet
         self.current[server] = t
-        machine = self.machines.setdefault(
-            server, Machine(self.home, kraft_version=self.kraft_version)
-        )
+        machine = self.machines.get(server)
+        if machine is None:
+            machine = self.machines[server] = Machine(self.home, kraft_version=self.kraft_version)
+            if channel.current() is None:  # the sandbox backends find their channels here
+                channel.install(machine.channels)
         try:
             await machine.serve(t, machine_welcome)
         finally:
@@ -164,6 +167,7 @@ async def serve(
         with contextlib.suppress(FileNotFoundError):
             path.unlink()  # left by a daemon that died
         daemon = _Daemon(home, kraft_version)
+        before = channel.current()
         server = await asyncio.start_unix_server(daemon.handle, path=str(path), limit=FRAME_LIMIT)
         path.chmod(0o600)
         pid_file = path.parent / PID_FILE
@@ -171,6 +175,7 @@ async def serve(
         try:
             await daemon.run(idle_exit_s, stop or asyncio.Event())
         finally:
+            channel.install(before)
             server.close()
             with contextlib.suppress(FileNotFoundError):
                 path.unlink()

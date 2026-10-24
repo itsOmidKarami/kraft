@@ -595,6 +595,7 @@ async def open_egress(
     lists: PhaseLists,
     credentials: tuple[InjectRule, ...] = (),
     repo: str | None = None,
+    channels=None,
 ) -> dict:
     """Open a session's egress under `sandbox['network']`: its channel, with
     the `credentials` its proxy injects, the lists (and those credentials,
@@ -602,8 +603,9 @@ async def open_egress(
     setup command, which has no row and is never reattached), and the
     backend's route to the channel. The proxy environment the launch adds;
     `SandboxNotReady` whenever any of it is missing -- never a launch with
-    open egress."""
-    channels = _channel.current()
+    open egress. `channels` is the registry to open it in when not this
+    process's (a machine's, which has no database either)."""
+    channels = channels or _channel.current()
     if channels is None:
         raise _sandbox.SandboxNotReady(
             "a sandbox with `network:` reaches out only through the Kraft server's egress "
@@ -635,12 +637,12 @@ async def open_egress(
     return proxy_env
 
 
-async def close_egress(backend, session_id: str, *, work_item_id: str) -> None:
+async def close_egress(backend, session_id: str, *, work_item_id: str, channels=None) -> None:
     """Undo `open_egress`: the backend's route, then the channel."""
     try:
         await backend.close_session(session_id, work_item_id=work_item_id)
     finally:
-        if (channels := _channel.current()) is not None:
+        if (channels := channels or _channel.current()) is not None:
             await channels.close(session_id, work_item_id=work_item_id)
 
 
@@ -919,6 +921,7 @@ async def _run_task(
         # The machine builds this sandbox, so nothing below runs a backend here: it is sent what
         # the backend needs, and the credentials as declarations only (their values are read
         # from the machine's own environment).
+        install = _harness.manage(every, phase="install")
         sandbox_job = {
             "sandbox": dict(sandbox),
             "egress": PhaseLists.of(
@@ -929,6 +932,14 @@ async def _run_task(
             "credentials": [r.to_json() for r in rules],
             "sentinels": sentinels,
             "withheld": sorted(withheld),
+            # The setup command runs in it too, under the install phase's lists and credentials.
+            "setup_sandbox": {
+                "egress": PhaseLists.of(sandbox["network"], "install").to_json()
+                if network
+                else None,
+                "credentials": [r.to_json() for r in _inject.rules(install, {})],
+                "sentinels": {c.env: c.sentinel for c in install},
+            },
         }
         backend, network = None, False
     refs: Sequence = ()

@@ -18,7 +18,7 @@ def _spec(argv, *, env=None, setup=None, dirs=(), **extra):
         cwd="/srv/wt",
         env={"KRAFT_SESSION_ID": "w1/s1", **(env or {})},
         repo_env={},
-        passthrough=[],
+        passthrough=extra.pop("passthrough", []),
         setup_command=setup,
         branch="kraft/x",
         head="h",

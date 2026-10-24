@@ -35,6 +35,11 @@ class Remote:
         self.refuse: str | None = None
         #: Every backend method called, in order: what a step that runs elsewhere never touches.
         self.touched: list[str] = []
+        #: What `probe` answers (a refusal), and what `oom_killed` answers.
+        self.unrunnable: str | None = None
+        self.oom = None
+        #: The ref stores `code_in` hands back.
+        self.refs: tuple = ()
 
     def home(self, run_dirs, work_item_id):
         return run_dirs.base / "remote-home" / work_item_id
@@ -46,7 +51,7 @@ class Remote:
     async def probe(self, sandbox, executable, env):
         self.touched.append("probe")
         self.probed_env = env
-        return None
+        return self.unrunnable
 
     async def prepare(self, sandbox, *, kraft_ca=None):
         self.touched.append("prepare")
@@ -57,7 +62,7 @@ class Remote:
 
     def code_in(self, run_base, cwd, branch, **kw):
         self.touched.append("code_in")
-        return None
+        return self.refs
 
     def wrap(self, cmd, cwd, sandbox, results_dir, env=None, *, session_id, work_item_id, **kw):
         self.touched.append("wrap")
@@ -77,7 +82,7 @@ class Remote:
     def client_cwd(self, session_id, *, work_item_id):
         return None
 
-    def launch_failed(self, cidfile):
+    def launch_failed(self, cidfile, returncode=None):
         return False
 
     def code_out(self, refs, session_id, *, work_item_id):
@@ -95,7 +100,7 @@ class Remote:
 
     async def oom_killed(self, session_id, *, work_item_id):
         self.touched.append("oom_killed")
-        return None
+        return self.oom
 
     async def close(self, session_id, *, work_item_id):
         self.touched.append("close")
