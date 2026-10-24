@@ -15,6 +15,7 @@ from pathlib import Path
 
 from kraft import builtins as _builtins
 from kraft import caps as _caps
+from kraft import carried as _carried
 from kraft import config as _config
 from kraft import events, inplace, item_paths, node_runs, store
 from kraft import findings as _findings
@@ -682,6 +683,48 @@ def _selected_commands(to_run: list[dict]) -> list[str]:
     return out
 
 
+async def _save_carried(
+    run_dirs,
+    row,
+    worktree,
+    repo_entry: RepoEntry | None,
+    *,
+    suite: TestSuite,
+    results: list[str],
+    sandbox: dict | None,
+    runner: str | None,
+) -> None:
+    """Save the item's carried files as the repo's newest copy, after a round
+    that may have updated them. Only when every guard holds: a targeted round in
+    which every scope passed, on this machine, outside a sandbox (its agent code
+    could plant a record the host then trusts), in the item's own worktree (an
+    in-place item's folder is the person's checkout, a workspace member's a
+    mount below the root). `kraft.carried.save` itself saves only when a carried
+    file differs from the baseline. A failed save never fails verification."""
+    if not (repo_entry and repo_entry.carry):
+        return
+    if suite is not TestSuite.TARGETED or not results or any(r != "done" for r in results):
+        return
+    if sandbox is not None or runner is not None:
+        return
+    if Path(worktree).resolve() != (run_dirs.worktrees / row["id"]).resolve():
+        return
+    try:
+        saved = await asyncio.to_thread(
+            _carried.save,
+            run_dirs,
+            row["repo"],
+            Path(worktree),
+            repo_entry.carry,
+            item_paths.carried_record(run_dirs, row["id"]),
+        )
+    except OSError as exc:
+        logger.warning("carried files of %s were not saved: %s", row["id"], exc)
+        return
+    if saved:
+        logger.info("saved %s's carried files as %s's newest copy", row["id"], row["repo"])
+
+
 async def _run_changed_test_scopes(
     db,
     run_dirs,
@@ -856,6 +899,16 @@ async def _run_changed_test_scopes(
             results.append(status)
             if status in _SCOPE_STOP_STATUSES:
                 break
+    await _save_carried(
+        run_dirs,
+        work_item_row,
+        worktree,
+        repo_entry,
+        suite=suite,
+        results=results,
+        sandbox=sandbox,
+        runner=runner,
+    )
     stopped = next((s for s in results if s in _SCOPE_STOP_STATUSES), None)
     if stopped is not None:
         return stopped

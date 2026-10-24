@@ -532,6 +532,27 @@ scope, and mark it targeted.
 enforced-by: tests/executor/test_targeted_scopes.py::test_scope_results_reads_a_session_as_its_scope[targeted], tests/executor/test_targeted_scopes.py::test_scope_results_reads_a_session_as_its_scope[full], tests/executor/test_targeted_scopes.py::test_scope_results_reads_a_session_as_its_scope[dropped-from-config], tests/executor/test_targeted_scopes.py::test_scope_results_reads_a_session_as_its_scope[unreadable-table], tests/executor/test_targeted_scopes.py::test_scope_results_counts_a_scope_once_whichever_command_ran, tests/api/test_scope_runs.py::test_detail_scope_runs_maps_a_targeted_command_to_its_scope[picked-and-started], tests/api/test_scope_runs.py::test_detail_scope_runs_maps_a_targeted_command_to_its_scope[picked-not-started], tests/api/test_scope_runs.py::test_detail_scope_runs_maps_a_targeted_command_to_its_scope[targeted-then-full], tests/api/test_scope_runs.py::test_detail_scope_runs_maps_a_targeted_command_to_its_scope[config-since-dropped-it], tests/api/test_scope_runs.py::test_detail_test_result_marks_a_scope_that_ran_its_targeted_command
 origin: src/kraft/executor/dispatch.py §_run_changed_test_scopes
 
+## REQ carried-files-seed-a-worktree-from-one-source
+
+WHERE a repository declares `carry`, the system SHALL copy the carried files
+into a new worktree from one source only: the repository's newest saved copy
+when it holds any of them, else the repository's checkout, never files from
+both. It SHALL discard a copy taken from the checkout when a source file's size
+or modification time changed while it was copied.
+enforced-by: tests/test_builtins_carry.py::test_carry_set_takes_the_whole_set_from_one_source[saved-copy-wins-over-the-checkout], tests/test_builtins_carry.py::test_carry_set_takes_the_whole_set_from_one_source[checkout-when-nothing-is-saved], tests/test_builtins_carry.py::test_carry_set_takes_the_whole_set_from_one_source[cold-when-there-is-neither], tests/test_builtins_carry.py::test_carry_set_takes_the_whole_set_from_one_source[a-saved-copy-with-none-of-the-listed-files-is-no-saved-copy], tests/test_builtins_carry.py::test_a_checkout_copy_that_changed_while_it_was_copied_is_discarded[mtime], tests/test_builtins_carry.py::test_a_checkout_copy_that_changed_while_it_was_copied_is_discarded[size], tests/test_builtins_carry.py::test_a_checkout_copy_that_changed_while_it_was_copied_is_discarded[appeared]
+origin: src/kraft/carried.py
+
+## REQ carried-files-are-saved-only-by-a-passing-local-unsandboxed-round
+
+WHERE a repository declares `carry`, the system SHALL save an item's carried
+files as the repository's newest copy only after a changed-test-scope round of
+`suite: targeted` in which every scope passed on this machine, for an item that
+is neither sandboxed nor in place, and only when the round changed a carried
+file. It SHALL write each save as a new generation made current by one atomic
+rename.
+enforced-by: tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[all-guards-hold], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[suite-full], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[sandboxed], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[remote-runner], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[a-failed-scope], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[no-results], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[an-in-place-or-member-folder], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[no-carry-declared], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[files-not-touched-by-the-round], tests/test_carried.py::test_save_writes_a_generation_current_points_at, tests/test_carried.py::test_a_save_that_fails_midway_leaves_current_alone
+origin: src/kraft/executor/dispatch.py §_save_carried
+
 ## REQ exec-node-orders-concurrent-task-groups
 
 An execution node's `tasks` SHALL be one concurrent task group; its `steps`
