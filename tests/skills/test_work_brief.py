@@ -45,10 +45,15 @@ def test_the_skill_asks_for_each_section_the_gate_needs(text, section):
         "same way: write what happened, and give no line to what you looked for and did not find",
         "If a check did not run in it, name that check as not run",
         "`kraft view events --json`",
-        "A scope listed in `targeted` ran only its targeted command, so say \"targeted tests "
+        'A scope listed in `targeted` ran only its targeted command, so say "targeted tests '
         'passed", never "tests passed"',
     ],
-    ids=["omits-what-was-not-found", "names-a-check-not-run", "reads-events-as-json", "says-targeted"],
+    ids=[
+        "omits-what-was-not-found",
+        "names-a-check-not-run",
+        "reads-events-as-json",
+        "says-targeted",
+    ],
 )
 def test_the_skill_carries_the_wording_its_briefs_were_tested_with(text, instruction):
     """Each of these changed what authors wrote when the wording was run on real
