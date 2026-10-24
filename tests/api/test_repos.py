@@ -228,7 +228,12 @@ def test_patch_repo_round_trips_a_field(client, repo, templates_dir, field, valu
         ("carry", ["../out"]),
         ("intent_dir", "../out"),
     ],
-    ids=["a-missing-steering-name", "a-glob-in-local-files", "an-escaping-carry-file", "an-escaping-intent-dir"],
+    ids=[
+        "a-missing-steering-name",
+        "a-glob-in-local-files",
+        "an-escaping-carry-file",
+        "an-escaping-intent-dir",
+    ],
 )
 def test_a_refused_patch_writes_nothing(client, repo, templates_dir, field, value):
     """Write-side validation must reject exactly what the read side would

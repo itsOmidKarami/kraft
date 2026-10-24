@@ -12,6 +12,8 @@ Everything an item produces, except its worktree, is written under
     test-scopes/<node>.<hook>.changed-files
                               the paths a targeted test command is told changed:
                               Kraft's, mounted read-only into a sandbox
+    carried.json              what was copied into the worktree from the repo's carried
+                              files, and their sizes and mtimes then: Kraft's, never mounted
 
 Nothing is moved at upgrade: an older item's files stay in `run/logs/`,
 `run/results/`, `run/attachments/`, `run/sandbox-home/` and its worktree's
@@ -75,6 +77,12 @@ def _component(value: str, what: str) -> str:
 def item_dir(run_dirs, wid: str) -> Path:
     """`run/items/<id>/`: everything of the item's but its worktree."""
     return run_dirs.base / ITEMS / _component(wid, "work item id")
+
+
+def carried_record(run_dirs, wid: str) -> Path:
+    """The item's baseline of its repo's carried files (`kraft.carried`):
+    Kraft's, never mounted."""
+    return item_dir(run_dirs, wid) / "carried.json"
 
 
 def docs_dir(run_dirs, wid: str) -> Path:
