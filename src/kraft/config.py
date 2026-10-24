@@ -333,6 +333,9 @@ class RepoEntry(BaseModel):
     # like this starts dragging `.venv` and `node_modules` into every worktree,
     # and a glob is the same trap with extra steps.
     local_files: list[Annotated[str, Field(min_length=1)]] = []
+    # State a selection tool keeps (`.testmondata`), seeded into each new
+    # worktree and saved back after a passing targeted round (`kraft.carried`).
+    carry: list[Annotated[str, Field(min_length=1)]] = []
     # How this repo's worktree is prepared. No default and no fallback: an
     # absent key is "nobody has decided yet" and stops the chain when the
     # worktree is built, while `""` is a deliberate "nothing to do"
@@ -420,9 +423,9 @@ class RepoEntry(BaseModel):
         TypeAdapter(dict[Identifier, Area]).validate_python(v)
         return v
 
-    @field_validator("local_files")
+    @field_validator("local_files", "carry")
     @classmethod
-    def _safe_local_files(cls, v: list[str]) -> list[str]:
+    def _safe_paths(cls, v: list[str]) -> list[str]:
         for rel in v:
             if rel.endswith("/"):
                 raise ValueError(f"entry {rel!r} must name a file")
@@ -431,6 +434,16 @@ class RepoEntry(BaseModel):
             if any(c in rel for c in "*?["):
                 raise ValueError(f"entry {rel!r} must be a literal path, not a glob")
         return v
+
+    @model_validator(mode="after")
+    def _carry_and_local_files_are_disjoint(self) -> RepoEntry:
+        both = set(self.carry) & set(self.local_files)
+        if both:
+            raise ValueError(
+                f"repos.yaml: {self.path}: {', '.join(sorted(both))} listed in both 'carry' and "
+                "'local_files'; carry is saved back after a round, local_files is only copied"
+            )
+        return self
 
     @model_validator(mode="after")
     def _scope_commands_name_one_scope(self) -> RepoEntry:

@@ -67,6 +67,7 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 | `areas` | mapping of id to area | `{}` | Path-scoped contexts inside this repo: `{paths: [...], setup: "...", verification: {test_scopes: [...]}}`. See [`areas`](#areas). |
 | `intent_dir` | string, a relative path | `null` | Where the repo's intent tree lives, relative to its root. When set, every agent in the repo is told to follow it. Kraft does not run the tree's check: add it to the repo's `test_scopes` yourself. |
 | `local_files` | list of strings | `[]` | Files to copy into every new worktree, for ones `git worktree add` cannot carry: relative paths, no globs or directories, covered by the worktree's `.gitignore`. Anything else is refused, and named in the `worktree_prepared` event (`kraft view events`). |
+| `carry` | list of strings | `[]` | Files a test-selection tool keeps its state in, such as `.testmondata`. Kraft seeds them into each new worktree and saves them back after a passing local targeted round. See [`carry`](#carry). _Added in next_ |
 
 ### Environment
 

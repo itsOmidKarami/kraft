@@ -125,6 +125,15 @@
           "default": null,
           "title": "Automated Review"
         },
+        "carry": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Carry",
+          "type": "array"
+        },
         "ci_checks": {
           "default": true,
           "title": "Ci Checks",

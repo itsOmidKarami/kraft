@@ -64,6 +64,11 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         ({"managed": False}, {"managed": False}),
         ({}, {"local_files": []}),
         ({"local_files": [".python-version"]}, {"local_files": [".python-version"]}),
+        ({}, {"carry": []}),
+        (
+            {"carry": [".testmondata", ".testmondata-wal"]},
+            {"carry": [".testmondata", ".testmondata-wal"]},
+        ),
         ({}, {"setup_command": None, "env": {}, "env_passthrough": []}),
         ({}, {"intent_dir": None}),
         ({"intent_dir": "docs/intent"}, {"intent_dir": "docs/intent"}),
@@ -95,6 +100,8 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         "keeps-an-explicit-managed-false",
         "local-files-default-to-empty",
         "keeps-a-declared-local-file",
+        "carry-defaults-to-empty",
+        "keeps-carry",
         "defaults-setup-command-env-and-env-passthrough",
         "intent-dir-defaults-to-none",
         "keeps-an-intent-dir",
@@ -150,6 +157,12 @@ def test_model_dump_repo_keeps_an_explicit_value(tmp_path):
         ({"local_files": [".venv/"]}, "must name a file"),
         ({"local_files": ["*.pyc"]}, "must be a literal path, not a glob"),
         ({"local_files": ["**/*.env"]}, "must be a literal path, not a glob"),
+        ({"carry": ".testmondata"}, "'carry' must be a list"),
+        ({"carry": ["/etc/x"]}, "must be a relative path"),
+        ({"carry": ["../x"]}, "must be a relative path"),
+        ({"carry": [".testmon/"]}, "must name a file"),
+        ({"carry": [".testmon*"]}, "must be a literal path, not a glob"),
+        ({"carry": [".env"], "local_files": [".env"]}, r"\.env.*both 'carry' and 'local_files'"),
         ({"setup_command": ["uv", "sync"]}, "setup_command"),
         ({"env": {"A": 1}}, "'env'"),
         ({"env_passthrough": ["", "OK"]}, "env_passthrough"),
@@ -177,6 +190,12 @@ def test_model_dump_repo_keeps_an_explicit_value(tmp_path):
         "a-local-files-directory-entry",
         "a-local-files-glob-star",
         "a-local-files-glob-double-star",
+        "a-non-list-carry",
+        "an-absolute-carry-file",
+        "a-carry-file-escaping-the-repo",
+        "a-carry-directory-entry",
+        "a-carry-glob",
+        "a-file-in-carry-and-local-files",
         "a-non-string-setup-command",
         "a-non-flat-string-map-env",
         "an-empty-env-passthrough-entry",
@@ -219,7 +238,7 @@ def test_repo_entry_keeps_the_messages_the_hand_rolled_loader_gave(tmp_path):
     assert "repos.yaml" in str(exc.value)
 
 
-@pytest.mark.parametrize("field", ["env_passthrough", "local_files"])
+@pytest.mark.parametrize("field", ["env_passthrough", "local_files", "carry"])
 def test_repo_entry_empty_string_items_use_pydantic_inner_constraints(field):
     with pytest.raises(ValidationError) as exc:
         config.RepoEntry.model_validate({"path": "/a", field: [""]})

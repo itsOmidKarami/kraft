@@ -398,6 +398,7 @@
      {
       "areas": "_",
       "automated_review": "_",
+      "carry": [],
       "ci_checks": "_",
       "deny_tools": [],
       "env": "_",

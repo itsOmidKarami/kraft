@@ -31,6 +31,8 @@ export interface Repo {
    *  (Kraft-gxcmy) -- refused, not copied, if the repo does not gitignore
    *  the entry. */
   local_files: string[];
+  /** Files a test-selection tool keeps its state in, seeded into each worktree and saved back after a passing targeted round. */
+  carry?: string[];
   /** A human has touched this entry — not "this has run". One-way: never
    *  returns to false. Drives the Detected section in ReposPage. */
   managed: boolean;

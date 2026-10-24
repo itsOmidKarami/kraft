@@ -69,6 +69,12 @@ describe("Repos fields", () => {
     expect(patchFor(one, field("policy.time_cap_minutes"), null)).toEqual({ policy: null });
   });
 
+  it("edits carry as a list row and patches it by its own key", () => {
+    expect(field("carry")).toBeDefined();
+    expect(patchFor(platform, field("carry"), [".testmondata"])).toEqual({ carry: [".testmondata"] });
+    expect(valueOf(repo("a", { carry: [".testmondata"] }), field("carry"))).toEqual([".testmondata"]);
+  });
+
   it("names a row's source: the server's word when it has one, else whether this repo sets it", () => {
     expect(sourceOf(repo("a", {}, { sources: { steering: "library", deny_tools: "default", models: "default", policy: {} } }), field("steering"))).toBe("library");
     expect(sourceOf(repo("a", { test_command: "x" }), field("test_command"))).toBe("this repo");

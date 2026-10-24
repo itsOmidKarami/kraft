@@ -622,6 +622,7 @@ class RepoPatch(BaseModel):
     deny_tools: list[str] | None = None
     steering: list[str] | None = None
     local_files: list[str] | None = None
+    carry: list[str] | None = None
     intent_dir: str | None = None
     library_auto_update: bool | None = None
     worktrees: bool | None = None
