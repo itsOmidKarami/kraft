@@ -49,7 +49,7 @@ def test_the_agent_profiles_follow_with_their_model_per_provider(app, capsys, mo
     rows = {line.split()[0]: line.split() for line in tiers[1:]}
     assert set(rows) == {"deep", "strong", "fast"}
     assert rows["fast"][1:] == [
-        "low",
+        "medium",
         "claude=haiku,",
         "fake=haiku",
         "tasks.triage_review_feedback",
