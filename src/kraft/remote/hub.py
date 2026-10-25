@@ -292,6 +292,11 @@ class Hub:
     def slots_used(self, name: str) -> int:
         return len(self._claims.get(name, ()))
 
+    def limit(self, name: str) -> int:
+        """Steps `name` may run at once; one when workers.yaml sets none."""
+        entry = self._entries.get(name)
+        return (entry.worker.capacity if entry is not None else None) or 1
+
     def decide(
         self, runner: str, repos: Sequence[RepoEntry], *, pinned: str | None = None
     ) -> Verdict:
@@ -321,7 +326,7 @@ class Hub:
             names, wait_text = [runner], f"waiting for {runner}"
         for n in names:
             e = self._entries.get(n)
-            if e is not None and e.online and self.slots_used(n) < e.worker.capacity:
+            if e is not None and e.online and self.slots_used(n) < self.limit(n):
                 return Verdict(machine=n)
         if runner != placement.ANY or pinned is not None:
             first = self._entries.get(names[0])  # workers.yaml may name it before apply made it
@@ -405,7 +410,7 @@ class Hub:
                 "online": e.online,
                 "reason": e.reason,
                 "slots_used": self.slots_used(name),
-                "capacity": e.worker.capacity,
+                "capacity": self.limit(name),
                 "repos": e.worker.repos,
                 "last_seen": (
                     datetime.fromtimestamp(e.last_seen, UTC).isoformat() if e.last_seen else None

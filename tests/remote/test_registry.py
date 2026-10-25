@@ -29,7 +29,7 @@ def test_both_modes_load_with_their_defaults(tmp_path):
     )
     gpu, home = loaded.workers["gpu-box"], loaded.workers["home-server"]
     assert (gpu.mode, gpu.capacity, gpu.repos, gpu.give_up_s) == ("ssh", 2, ["kraft"], 7200)
-    assert (home.mode, home.capacity, home.repos, home.give_up_s) == ("dial-in", 1, None, None)
+    assert (home.mode, home.capacity, home.repos, home.give_up_s) == ("dial-in", None, None, None)
 
 
 @pytest.mark.parametrize(
@@ -47,6 +47,8 @@ def test_both_modes_load_with_their_defaults(tmp_path):
         ("workers:\n  a:\n    ssh: h\n    give_up_after: 0h\n", "give_up_after"),
         ("workers:\n  a:\n    token_sha256: nothex\n", "token_sha256"),
         ("workers:\n  a:\n    ssh: h\n    colour: red\n", "colour"),
+        ("local:\n  capacity: 0\n", "capacity"),
+        ("local:\n  ssh: h\n", "ssh"),
     ],
     ids=[
         "neither-mode",
@@ -61,11 +63,21 @@ def test_both_modes_load_with_their_defaults(tmp_path):
         "give-up-zero",
         "token-not-hex",
         "unknown-key",
+        "local-capacity-zero",
+        "local-is-not-a-machine",
     ],
 )
 def test_a_bad_file_is_refused_naming_the_problem(tmp_path, text, why):
     with pytest.raises(ConfigError, match=why):
         _load(tmp_path, text)
+
+
+def test_a_capacity_is_unset_unless_written_and_a_local_block_loads(tmp_path):
+    loaded = _load(tmp_path, "workers:\n  a:\n    ssh: h\nlocal:\n  capacity: 2\n")
+    assert loaded.workers["a"].capacity is None and loaded.local.capacity == 2
+    assert "capacity" not in loaded.to_yaml()["workers"]["a"]
+    assert loaded.with_workers({}).local.capacity == 2
+    assert _load(tmp_path, "workers:\n").local is None
 
 
 def test_an_empty_workers_key_is_no_machines(tmp_path):

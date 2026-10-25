@@ -82,6 +82,15 @@ def test_the_local_workers_running_count_comes_from_the_session_rows(client, mon
     assert client.get("/api/workers").json()["workers"][0]["slots_used"] == 3
 
 
+def test_a_local_block_survives_adding_and_removing_a_machine(client):
+    path = client.app.state.templates_dir / "workers.yaml"
+    path.write_text("local:\n  capacity: 2\n")
+    client.post("/api/workers", json={"name": "home"})
+    assert _file(client)["local"] == {"capacity": 2}
+    client.delete("/api/workers/home")
+    assert _file(client)["local"] == {"capacity": 2}
+
+
 def test_a_name_in_use_is_a_409(client):
     assert client.post("/api/workers", json={"name": "home"}).status_code == 201
     assert client.post("/api/workers", json={"name": "home"}).status_code == 409
