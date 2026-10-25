@@ -249,6 +249,7 @@ def build() -> MCPServer:
         capacity: int | None = None,
         repos: list[str] | None = None,
         give_up_after: str | None = None,
+        groups: list[str] | None = None,
     ) -> dict:
         """Register a machine that may run work item steps. With `ssh` (a host
         or ~/.ssh/config alias) Kraft connects to it once and reports the
@@ -256,16 +257,23 @@ def build() -> MCPServer:
         command to run on the machine. `capacity` caps the steps it runs at
         once (the machine's own limit applies too, if lower; unset: its own,
         else 1). `repos` limits it to those connected
-        repos; `give_up_after` is a duration like 2h or "never". Machine
+        repos; `give_up_after` is a duration like 2h or "never". `groups` puts it in
+        those groups (a step's `runner` can name a group; names share one namespace with
+        machines). Machine
         management is a person's call: ask first."""
         return await client.add_worker(
-            name, ssh=ssh, capacity=capacity, repos=repos, give_up_after=give_up_after
+            name,
+            ssh=ssh,
+            capacity=capacity,
+            repos=repos,
+            give_up_after=give_up_after,
+            groups=groups,
         )
 
     @server.tool()
     async def list_workers() -> dict:
         """List the registered machines: mode, online or offline and why,
-        slots used, repos, last seen, Kraft version."""
+        slots used, the limit in use and who set it, groups, repos, last seen, Kraft version."""
         return await client.list_workers()
 
     @server.tool()

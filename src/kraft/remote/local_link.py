@@ -180,6 +180,7 @@ class _Row:
     def __init__(self, *, connected: bool = False, peer_version: str | None = None) -> None:
         self.connected, self.peer_version = connected, peer_version
         self.capacity: int | None = None
+        self.groups: list[str] = []  # `workers.yaml`'s `local: groups:`
         self._held: set[str] = set()  # the session keys that hold one of the slots
         self.since: str | None = None
         self._up = asyncio.Event()
@@ -243,6 +244,7 @@ class _Row:
             "reason": None if self.connected else "starting",
             "slots_used": running,
             "capacity": self.capacity,
+            "groups": list(self.groups),
             "repos": None,
             "last_seen": self.since,
             "kraft_version": self.peer_version,

@@ -4,6 +4,7 @@ export const NO_MACHINES = "No machines yet. Add one in a terminal:";
 export const ADD_COMMAND = "kraft admin worker add NAME --ssh HOST";
 export const READ_ONLY_NOTE = "Machines are added and removed in a terminal (kraft admin worker) or through the MCP tools; this page only lists them.";
 export const EVERY_REPO = "every repo";
+export const NO_GROUPS = "none";
 
 /** `gpu-box`'s state in a sentence: online, or offline and why. */
 export const stateWords = (m: Machine) => (m.online ? "online" : m.reason ? `offline: ${m.reason}` : "offline");
@@ -18,6 +19,9 @@ export const slotsWords = (m: Machine) => {
   const of = `${m.slots_used} of ${m.capacity}`;
   return m.capacity_source === "machine" ? `${of} · machine's limit` : of;
 };
+
+/** The groups a machine is in, which a step's `runner` can name. */
+export const groupsWords = (m: Machine) => (m.groups.length ? m.groups.join(", ") : NO_GROUPS);
 
 /** The row for this machine's own worker, apart from the machines it can dial. */
 export const isLocal = (m: Machine) => m.mode === "local";

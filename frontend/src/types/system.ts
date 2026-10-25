@@ -116,6 +116,9 @@ export interface Machine {
   capacity_source?: "server" | "machine" | "default";
   /** The limit the machine set for itself in `machine.yaml`; null if none. Absent on the local worker. */
   machine_capacity?: number | null;
+  /** The groups it is in (`groups:` in `workers.yaml`, `local: groups:` for the local worker);
+   * a step's `runner` can name one. */
+  groups: string[];
   /** The repos it is limited to; null for every repo. */
   repos: string[] | null;
   last_seen: string | null;

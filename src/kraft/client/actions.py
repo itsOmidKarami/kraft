@@ -834,6 +834,7 @@ async def add_worker(
     capacity: int | None = None,
     repos: list[str] | None = None,
     give_up_after: str | None = None,
+    groups: list[str] | None = None,
 ) -> dict:
     """Register a machine. Without `ssh` the answer carries its one-time token
     and the command to run on it; with `ssh` the server connects once and
@@ -846,6 +847,7 @@ async def add_worker(
             ("capacity", capacity),
             ("repos", repos),
             ("give_up_after", give_up_after),
+            ("groups", groups),
         )
         if value is not None
     }

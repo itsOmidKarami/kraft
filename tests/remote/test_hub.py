@@ -61,6 +61,7 @@ async def test_an_unconnected_machine_lists_offline_and_never_connected():
         "capacity": 2,
         "capacity_source": "server",
         "machine_capacity": None,
+        "groups": [],
         "repos": ["kraft"],
         "last_seen": None,
         "kraft_version": None,

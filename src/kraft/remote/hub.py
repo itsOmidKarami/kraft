@@ -119,6 +119,7 @@ class Hub:
         previous, self._entries, self._file = self._entries, {}, file
         if (link := local_link.current()) is not None:
             link.capacity = file.local.capacity if file.local is not None else None
+            link.groups = list(file.local.groups) if file.local is not None else []
         for name, worker in file.workers.items():
             entry = previous.pop(name, None)
             if entry is None:
@@ -520,6 +521,7 @@ class Hub:
                 "capacity": self.limit(name),
                 "capacity_source": self.limit_source(name),
                 "machine_capacity": e.machine_capacity,
+                "groups": list(e.worker.groups),
                 "repos": e.worker.repos,
                 "last_seen": (
                     datetime.fromtimestamp(e.last_seen, UTC).isoformat() if e.last_seen else None

@@ -69,6 +69,7 @@ def test_the_local_worker_is_listed_first_and_cannot_be_removed(client):
         "reason": None,
         "slots_used": 0,
         "capacity": None,
+        "groups": [],
         "repos": None,
         "last_seen": None,
         "kraft_version": "direct",
@@ -124,6 +125,15 @@ def test_groups_are_written_kept_and_checked_against_machine_names(client):
     client.delete("/api/workers/b")
     assert _file(client)["workers"]["a"]["groups"] == ["gpu", "linux"]
     assert _file(client)["local"] == {"capacity": 2, "groups": ["gpu"]}
+
+
+def test_the_rows_carry_each_machines_groups_and_the_local_workers_from_local(client):
+    (client.app.state.templates_dir / "workers.yaml").write_text("local:\n  groups: [gpu]\n")
+    assert client.post("/api/templates/reload").json()["refused_workers"] is None
+    client.post("/api/workers", json={"name": "a", "groups": ["gpu", "linux"]})
+    client.post("/api/workers", json={"name": "b"})
+    rows = {w["name"]: w["groups"] for w in client.get("/api/workers").json()["workers"]}
+    assert rows == {"local": ["gpu"], "a": ["gpu", "linux"], "b": []}
 
 
 def test_a_name_in_use_is_a_409(client):
