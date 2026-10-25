@@ -235,4 +235,4 @@
 .set-wk-switch > .field-hint { grid-column: 2; }
 .set-wk-rotate { display: flex; gap: 8px; }
 .set-wk-remove { margin-right: auto; }
-@media (max-width: 480px) { .set-wk-pair { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 767px) { .set-wk-pair { grid-template-columns: minmax(0, 1fr); } }
