@@ -256,9 +256,9 @@ async def test_a_cancel_with_no_successor_stops_for_a_person_at_once(run_forge, 
     from datetime import UTC, datetime, timedelta
 
     an_hour_ago = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
-    fake = await _opened(
-        forge.FakeForge(ci_states=["pending"], ci_cancelled_at=[an_hour_ago]), repo
-    )
+    fake = forge.FakeForge(ci_states=["pending"], ci_cancelled_at=[an_hour_ago])
+    if handler != "merge_watch":  # whose merge request is merged, or unknown to the forge
+        await _opened(fake, repo)
 
     assert await run_forge(fake, handler, "c1", repo=repo, **kw) == ("infra_stop", "infra_stop")
 

@@ -1387,8 +1387,30 @@ async def _run_one(
         case "merge_watch":
             if not ci_checks:
                 return (*await _skip_ci(db, work_item_id, node_id, hook_point, orig_repo), None)
-            # `base`: the item's base branch, what its merge landed on.
-            head_sha = await _builtins.upstream_head(orig_repo, base)
+            # The commit this item merged, kept from the first observation on
+            # (Kraft-h6wi2): what it asks is whether *this* merge broke `base`, and
+            # a base that keeps moving must not keep the answer waiting.
+            wait = db.read(lambda c: waits.open_wait(c, work_item_id, hook_point))
+            seen = wait.last if wait is not None and wait.last else {}
+            head_sha = seen.get("watched_sha")
+            retry = ""
+            if head_sha is None:
+                try:
+                    merged = await forge.find_mr(repo=repo, branch=branch)
+                except ForgeError as exc:
+                    retry = f"the merge commit is not known yet ({exc}), will retry\n"
+                else:
+                    if merged is not None and merged.state != "merged":
+                        retry = f"!{merged.number} is {merged.state}, not merged yet, will retry\n"
+                    else:
+                        # `base`: the item's base branch, what its merge landed on.
+                        # The forge may report no commit, or no merge request at
+                        # all: the tip as first read is then the nearest thing,
+                        # and kept.
+                        head_sha = (
+                            merged.merged_sha if merged is not None else ""
+                        ) or await _builtins.upstream_head(orig_repo, base)
+                        retry = f"rev-parse HEAD failed in {orig_repo}, will retry\n"
             if head_sha is None:
                 # Peer callers (`ensure_worktree`, `refresh_worktree_base`) treat a
                 # failed `rev-parse HEAD` as "nothing to report yet", not a value to
@@ -1396,8 +1418,14 @@ async def _run_one(
                 # both land here. Passing None through would crash
                 # `GhCli.branch_ci_status` (`head_sha[:7]`) or, on GitLab, silently pin
                 # the previous commit's pipeline to this merge's head (code-review).
-                log, status = f"rev-parse HEAD failed in {orig_repo}, will retry\n", "waiting"
+                log, status = retry, "waiting"
             else:
+                note = WaitNote(
+                    None,
+                    {"watched_sha": head_sha, "grace_from": seen.get("grace_from")},
+                    False,
+                    waits.now(),
+                )
                 stored = db.read(
                     lambda c: c.execute(
                         "SELECT ci_pipeline_ref FROM work_items WHERE id = ?", (work_item_id,)

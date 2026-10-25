@@ -9,7 +9,7 @@ from __future__ import annotations
 import subprocess
 
 import pytest
-from support.harness import isolated_bd
+from support.harness import commit_all, isolated_bd, write
 
 from kraft import builtins as _builtins
 from kraft.adapters import beads, forge
@@ -267,3 +267,117 @@ async def test_merge_watch_runs_once_for_a_multi_repo_item(run_forge, item_on, d
     assert (await run_forge(fake, "merge_watch", repo=repo))[0] == "done"
 
     assert len(reads) == 1, reads
+
+
+class _Merged(_NoMrForge):
+    """`find_mr` reports the item's merge request as merged at `merged_sha`
+    (`finds` is what each call answers instead, one at a time), and every
+    `head_sha` a read was asked about is kept."""
+
+    def __init__(self, merged_sha: str | None, *, finds=(), red_sha: str | None = None, **kw):
+        super().__init__(**kw)
+        self.merged_sha, self.finds, self.red_sha = merged_sha, list(finds), red_sha
+        self.asked: list[str] = []
+
+    async def find_mr(self, *, repo, branch):
+        if self.finds:
+            found = self.finds.pop(0)
+            if isinstance(found, Exception):
+                raise found
+            return found
+        if self.merged_sha is None:
+            return None
+        return forge.MRRef(
+            number=7, url="http://fake.forge/7", state="merged", merged_sha=self.merged_sha
+        )
+
+    async def branch_ci_status(self, *, repo, branch, head_sha="", pipeline_id=""):
+        self.asked.append(head_sha)
+        if head_sha == self.red_sha:
+            return forge.CIStatus(
+                state="failed",
+                url="http://fake.forge/red",
+                jobs=("build: failed",),
+                sha=head_sha,
+                failed_jobs=(forge.FailedJob("build", "failed", "script_failure"),),
+            )
+        return await super().branch_ci_status(
+            repo=repo, branch=branch, head_sha=head_sha, pipeline_id=pipeline_id
+        )
+
+
+def _advance_base(repo, name: str) -> str:
+    write(repo, name, name)
+    return commit_all(repo, name)
+
+
+async def test_merge_watch_stays_on_the_merge_commit_when_the_base_moves(
+    run_forge, repo, wait_clock
+):
+    """Kraft-h6wi2: a busy base branch kept the wait on whatever was newest,
+    each merge starting its pipeline over."""
+    merged = _head(repo)
+    fake = _Merged(merged, ci_states=["pending", "success"])
+
+    first = await run_forge(fake, "merge_watch", "s1", repo=repo)
+    _advance_base(repo, "later.txt")
+    wait_clock.advance(60)
+    second = await run_forge(fake, "merge_watch", "s2", repo=repo)
+
+    assert (first[0], second[0]) == ("waiting", "done")
+    assert fake.asked == [merged, merged]
+
+
+async def test_a_later_red_commit_is_not_this_items_break(
+    run_forge, repo, item_on, database, tmp_path
+):
+    merged = _head(repo)
+    tracker = isolated_bd(tmp_path, name="tracker")
+    run_forge.item = await item_on(back_half(), repo=repo, bead_cwd=str(tracker))
+    tip = _advance_base(repo, "later.txt")
+    other = await item_on(back_half(), repo=repo, wid="w2", status="active")
+    await database.write(
+        lambda c: c.execute("UPDATE work_items SET base_ref = ? WHERE id = 'w2'", (tip,))
+    )
+    fake = _Merged(merged, ci_states=["success"], red_sha=tip)
+
+    assert (await run_forge(fake, "merge_watch", repo=repo))[0] == "done"
+
+    assert other.status() == "active"
+    assert not await beads.search("post-merge", cwd=str(tracker))
+
+
+@pytest.mark.parametrize(
+    "merged_sha", [None, ""], ids=["no-merge-request", "merged-without-a-commit"]
+)
+async def test_with_no_merge_commit_the_first_tip_is_kept(run_forge, repo, wait_clock, merged_sha):
+    first_tip = _head(repo)
+    fake = _Merged(merged_sha, ci_states=["pending"])
+
+    await run_forge(fake, "merge_watch", "s1", repo=repo)
+    _advance_base(repo, "later.txt")
+    wait_clock.advance(60)
+    await run_forge(fake, "merge_watch", "s2", repo=repo)
+
+    assert fake.asked == [first_tip, first_tip]
+
+
+@pytest.mark.parametrize(
+    "unknown",
+    [
+        forge.ForgeError("gh is down"),
+        forge.MRRef(number=7, url="u", state="open"),
+    ],
+    ids=["forge-error", "not-merged-yet"],
+)
+async def test_an_unresolved_merge_commit_pins_nothing(run_forge, repo, wait_clock, unknown):
+    merged = _head(repo)
+    fake = _Merged(merged, finds=[unknown], ci_states=["success"])
+
+    first = await run_forge(fake, "merge_watch", "s1", repo=repo)
+    _advance_base(repo, "later.txt")
+    wait_clock.advance(60)
+    second = await run_forge(fake, "merge_watch", "s2", repo=repo)
+
+    assert (first[0], second[0]) == ("waiting", "done")
+    assert fake.asked == [merged]
