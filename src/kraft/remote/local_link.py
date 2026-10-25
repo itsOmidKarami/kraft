@@ -181,6 +181,7 @@ class _Row:
         self.connected, self.peer_version = connected, peer_version
         self.capacity: int | None = None
         self.groups: list[str] = []  # `workers.yaml`'s `local: groups:`
+        self.enabled = True  # `workers.yaml`'s `local: enabled:`; False: no new session starts
         self._held: set[str] = set()  # the session keys that hold one of the slots
         self.since: str | None = None
         self._up = asyncio.Event()
@@ -200,6 +201,8 @@ class _Row:
             self._up.clear()
 
     def free(self) -> bool:
+        if not self.enabled:
+            return False
         return self.capacity is None or len(self._held) < self.capacity
 
     def take(self, key: str) -> bool:
@@ -222,7 +225,11 @@ class _Row:
         Cancelling the wait takes nothing."""
         began, said = time.monotonic(), None
         while not self.take(key):
-            text = f"waiting for local ({len(self._held)} of {self.capacity} running)"
+            text = (
+                f"waiting for local ({len(self._held)} of {self.capacity} running)"
+                if self.enabled
+                else "waiting for local (disabled)"
+            )
             if on_wait is not None and text != said:
                 await on_wait(text)
                 said = text
@@ -244,6 +251,9 @@ class _Row:
             "reason": None if self.connected else "starting",
             "slots_used": running,
             "capacity": self.capacity,
+            "configured_capacity": self.capacity,
+            "enabled": self.enabled,
+            "ssh": None,
             "groups": list(self.groups),
             "repos": None,
             "last_seen": self.since,

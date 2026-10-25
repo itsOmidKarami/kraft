@@ -426,7 +426,7 @@ class Runs:
                     )
             await asyncio.sleep(poll_s)
 
-    async def give_up(self, run: Run, why: str, *, after: str = "removed") -> None:
+    async def give_up(self, run: Run, why: str, *, after: str) -> None:
         """End a run whose machine is not coming back in time: its session becomes `unknown`, the
         machine is told to stop it when it returns, and what it hands in then is ignored."""
         if run.exit_code is not None:
@@ -441,11 +441,6 @@ class Runs:
         self._killed.setdefault(machine, set()).add(spec.key)
         run.abandoned = True
         await self._finish(run, REMOTE_GAVE_UP)
-
-    async def machine_removed(self, name: str) -> None:
-        """`name` is no longer in workers.yaml: nothing will come back from it."""
-        for run in [r for r in self._runs.values() if r.claim.machine == name]:
-            await self.give_up(run, f"{name} was removed from workers.yaml")
 
     async def wait_delivered(self, run: Run, timeout: float) -> bool:
         try:

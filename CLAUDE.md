@@ -112,8 +112,11 @@ kraft admin addon collection add SOURCE [--ref REF] [--auto-update] / list / upd
 kraft admin addon install ADDON@COLLECTION [--as ALIAS] [--auto-update] [--re-install] [-y]  # shows a review; writes nothing until accepted
 kraft admin addon update [ADDON@COLLECTION ...] [-y | --check]  # --check exits 0 current, 1 waiting, 2 refused, 3 could not check
 kraft admin addon auto-update ADDON@COLLECTION on|off / enable|disable ADDON@COLLECTION / uninstall ADDON@COLLECTION / list
-kraft admin worker add NAME [--ssh HOST] [--capacity N] [--repos A,B] [--give-up-after D]  # register a machine; dial-in prints a token once
-kraft admin worker list / kraft admin worker remove NAME
+kraft admin worker add NAME [--ssh HOST] [--capacity N] [--repos A,B] [--give-up-after D] [--disabled]  # register a machine; dial-in prints a token once
+kraft admin worker edit NAME [--capacity N|none] [--give-up-after D] [--group G ... | --no-groups] [--repos A,B | --every-repo] [--ssh HOST]  # only the flags given change
+kraft admin worker enable NAME / kraft admin worker disable NAME  # disabled: running steps finish, nothing new starts
+kraft admin worker rotate-token NAME        # a dial-in machine's new token, printed once; the old one stops
+kraft admin worker list / kraft admin worker remove NAME  # remove is refused while a step runs on the machine
 kraft admin worker serve --server URL --token T | --stdio  # on the machine; --stdio is what the server's ssh runs
 kraft admin worker check [--server URL --token T]  # on the machine: git, agent CLIs, credentials, sandbox runtime
 kraft admin worker local --run-dir D [--install ID]  # run by the server, not by hand: the local worker (one per installed kraft) that starts every local session

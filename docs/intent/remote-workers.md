@@ -210,9 +210,24 @@ WHEN a machine has been out of reach for its `give_up_after` of time the server 
 enforced-by: tests/remote/test_hub.py::test_offline_for_counts_from_the_drop_on_the_monotonic_clock, tests/remote/test_runs.py::test_a_run_whose_machine_is_gone_give_up_after_ends_unknown_and_kills_it_on_reconnect, tests/remote/test_runs.py::test_never_does_not_give_up, tests/adapters/test_subprocess_remote.py::test_a_step_given_up_on_ends_its_session_unknown
 origin: src/kraft/remote/runs.py §watch
 
-## REQ removed-machine-gives-up-its-runs
-WHEN a machine is removed from workers.yaml, the system SHALL give up every unfinished step on it at once.
-enforced-by: tests/remote/test_runs.py::test_removing_a_machine_gives_up_its_runs_at_once, tests/api/test_workers.py::test_removing_a_machine_gives_up_the_runs_it_held
+## REQ removal-refused-while-steps-hold-the-machine
+IF a machine holds a step, THEN the system SHALL refuse to remove it with a 409 that names the items, and SHALL NOT give any step up because a machine was removed.
+enforced-by: tests/api/test_workers.py::test_a_machine_that_holds_a_step_cannot_be_removed_even_before_its_session_runs, tests/api/test_workers.py::test_a_session_row_alone_holds_a_machine_and_the_claim_is_not_counted_twice, tests/api/test_workers.py::test_the_refusal_names_three_items_then_counts_the_rest, tests/api/test_workers.py::test_a_machine_with_a_step_waiting_for_it_can_be_removed_and_gives_no_run_up
+origin: src/kraft/api/routes/workers.py
+
+## REQ disabled-machine-takes-no-new-steps
+WHERE a machine, or the local worker, is disabled in `workers.yaml`, the system SHALL let the steps running on it finish, SHALL NOT start another there, and SHALL say a step waiting for it by name waits for it `(disabled)`.
+enforced-by: tests/remote/test_hub.py::test_a_disabled_machine_takes_no_new_step_and_a_named_wait_says_it_is_disabled[online-named], tests/remote/test_hub.py::test_a_disabled_machine_takes_no_new_step_and_a_named_wait_says_it_is_disabled[offline-named], tests/remote/test_hub.py::test_a_disabled_machine_takes_no_new_step_and_a_named_wait_says_it_is_disabled[online-any], tests/remote/test_hub.py::test_a_disabled_machine_takes_no_new_step_and_a_named_wait_says_it_is_disabled[online-group], tests/remote/test_runs.py::test_a_step_running_on_a_machine_that_is_then_disabled_finishes_and_frees_its_slot, tests/remote/test_local_link.py::test_a_disabled_local_worker_takes_no_session_and_one_waits_saying_so_until_enabled
+origin: src/kraft/remote/hub.py
+
+## REQ machine-edit-rewrites-workers-yaml
+WHEN a machine is edited, the system SHALL change only the fields sent, refuse a value `workers.yaml` could not load again in words, and apply the result without a restart.
+enforced-by: tests/api/test_workers.py::test_editing_a_machine_changes_what_was_sent_and_writes_the_file[disable], tests/api/test_workers.py::test_editing_a_machine_changes_what_was_sent_and_writes_the_file[enable], tests/api/test_workers.py::test_editing_a_machine_changes_what_was_sent_and_writes_the_file[capacity-null], tests/api/test_workers.py::test_editing_a_machine_changes_what_was_sent_and_writes_the_file[ssh-host], tests/api/test_workers.py::test_a_bad_edit_is_refused_in_words_and_the_file_is_unchanged[local-ssh], tests/api/test_workers.py::test_a_bad_edit_is_refused_in_words_and_the_file_is_unchanged[dial-in-ssh], tests/api/test_workers.py::test_a_bad_edit_is_refused_in_words_and_the_file_is_unchanged[enabled-null], tests/api/test_workers.py::test_a_bad_edit_is_refused_in_words_and_the_file_is_unchanged[unknown-repo], tests/api/test_workers.py::test_a_bad_edit_is_refused_in_words_and_the_file_is_unchanged[group-named-like-a-machine], tests/api/test_workers.py::test_an_empty_edit_is_a_200_and_leaves_the_file_alone, tests/api/test_workers.py::test_the_local_workers_edit_writes_only_the_local_block_and_answers_its_row
+origin: src/kraft/api/routes/workers.py
+
+## REQ rotating-a-token-replaces-it
+WHEN a dial-in machine's token is rotated, the system SHALL show the new token once, SHALL NOT accept the old one, and SHALL end the machine's connection.
+enforced-by: tests/api/test_workers.py::test_rotating_a_token_stops_the_old_one_and_drops_the_connection, tests/api/test_workers.py::test_only_a_dial_in_machine_has_a_token_to_rotate[ssh], tests/api/test_workers.py::test_only_a_dial_in_machine_has_a_token_to_rotate[local]
 origin: src/kraft/api/routes/workers.py
 
 ## REQ machine-enforces-the-steps-caps
@@ -230,8 +245,8 @@ The system SHALL name the machine a session ran on, and WHILE a session still ru
 enforced-by: tests/api/test_board_runner.py::test_a_live_session_on_a_machine_that_is_out_of_reach_says_since_when[running-on-a-dropped-machine], tests/api/test_board_runner.py::test_a_live_session_on_a_machine_that_is_out_of_reach_says_since_when[finished-session], tests/api/test_board_runner.py::test_a_live_session_on_a_machine_that_is_out_of_reach_says_since_when[local-session], tests/remote/test_hub.py::test_unreachable_since_names_the_moment_the_connection_ended_until_it_is_back, tests/cli/test_watching.py::test_logs_name_the_machine_a_remote_session_ran_on[remote]
 origin: src/kraft/api/routes/board.py §_sessions_out
 
-## REQ settings-lists-machines-read-only
-The system SHALL list the registered machines in Settings with their state, and SHALL NOT offer to add, change or remove one there.
+## REQ settings-lists-machines
+The system SHALL list the registered machines in Settings with their state.
 enforced-by: frontend/src/ng/settings/WorkersPage.test.tsx::Settings › Workers, tests/api/test_api_shapes.py::test_the_table_is_what_the_server_returns
 origin: frontend/src/ng/settings/WorkersPage.tsx
 

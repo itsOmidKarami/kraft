@@ -3,10 +3,13 @@ authenticates by a per-machine token and nothing else."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
 from starlette.websockets import WebSocketDisconnect
+from support.api import _seed_session
+from support.remote import Peer, attach
 
 from kraft import auth as auth_mod
 from kraft import store
@@ -69,13 +72,21 @@ def test_the_local_worker_is_listed_first_and_cannot_be_removed(client):
         "reason": None,
         "slots_used": 0,
         "capacity": None,
+        "configured_capacity": None,
+        "enabled": True,
+        "ssh": None,
         "groups": [],
         "repos": None,
         "last_seen": None,
         "kraft_version": "direct",
         "give_up_after": "never",
+        "holders": [],
+        "remove_blocked": (
+            "the local worker is part of this Kraft and cannot be removed; disable it instead"
+        ),
     }
-    assert client.delete("/api/workers/local").status_code == 404
+    removed = client.delete("/api/workers/local")
+    assert removed.status_code == 409 and removed.json()["detail"] == local["remove_blocked"]
 
 
 def test_the_local_workers_running_count_comes_from_the_session_rows(client, monkeypatch):
@@ -148,18 +159,6 @@ def test_removing_a_machine_forgets_it_and_404s_when_unknown(client):
     assert client.delete("/api/workers/home").status_code == 404
 
 
-def test_removing_a_machine_gives_up_the_runs_it_held(client, monkeypatch):
-    gone = []
-
-    async def machine_removed(name):
-        gone.append(name)
-
-    monkeypatch.setattr(client.app.state.workers_hub.runs, "machine_removed", machine_removed)
-    client.post("/api/workers", json={"name": "home"})
-    client.delete("/api/workers/home")
-    assert gone == ["home"]
-
-
 def test_adding_an_ssh_machine_connects_once_and_reports_why_it_could_not(client):
     client.app.state.workers_hub._ssh = ("no-such-ssh-binary",)
     reply = client.post("/api/workers", json={"name": "boxed", "ssh": "boxed"})
@@ -185,8 +184,10 @@ def test_a_workers_file_that_does_not_load_runs_no_machines_and_is_named(client)
         ("get", "/api/workers", None),
         ("post", "/api/workers", {"name": "x"}),
         ("delete", "/api/workers/x", None),
+        ("patch", "/api/workers/x", {"enabled": False}),
+        ("post", "/api/workers/x/rotate-token", None),
     ],
-    ids=["list", "add", "remove"],
+    ids=["list", "add", "remove", "edit", "rotate-token"],
 )
 def test_a_kraft_session_cannot_manage_machines(client, method, path, body):
     reply = getattr(client, method)(
@@ -205,6 +206,246 @@ def test_a_hand_edit_is_picked_up_by_reload_and_a_broken_one_is_kept_out(client)
     assert refused and "capacity" in refused
     assert client.app.state.invalid_workers == refused
     assert [w["name"] for w in _machines(client)] == ["boxed"]
+
+
+def test_adding_a_machine_disabled_writes_it(client):
+    client.post("/api/workers", json={"name": "home", "enabled": False})
+    assert _file(client)["workers"]["home"]["enabled"] is False
+    assert _machines(client)[0]["enabled"] is False
+
+
+# ── editing, enabling, rotating, removing ──
+
+
+def _seed(client, workers, local=None):
+    """workers.yaml written by hand and loaded: `workers` is name -> fields (a dial-in token is
+    added unless `ssh` is). The hub's ssh is a binary that is not there, so nothing dials out."""
+    client.app.state.workers_hub._ssh = ("no-such-ssh-binary",)
+    doc = {
+        "workers": {
+            n: {**({} if "ssh" in f else {"token_sha256": registry.hash_token(f"kwt_{n}")}), **f}
+            for n, f in workers.items()
+        }
+    }
+    if local is not None:
+        doc["local"] = local
+    import yaml
+
+    (client.app.state.templates_dir / "workers.yaml").write_text(yaml.safe_dump(doc))
+    assert client.post("/api/templates/reload").json()["refused_workers"] is None
+
+
+def _row(client, name):
+    return next(w for w in client.get("/api/workers").json()["workers"] if w["name"] == name)
+
+
+@pytest.mark.parametrize(
+    ("start", "patch", "stored", "row"),
+    [
+        ({}, {"enabled": False}, {"enabled": False}, {"enabled": False}),
+        ({"enabled": False}, {"enabled": True}, {"enabled": None}, {"enabled": True}),
+        ({}, {"capacity": 3}, {"capacity": 3}, {"capacity": 3, "configured_capacity": 3}),
+        (
+            {"capacity": 3},
+            {"capacity": None},
+            {"capacity": None},
+            {"capacity": 1, "configured_capacity": None, "capacity_source": "default"},
+        ),
+        (
+            {"groups": ["a"]},
+            {"groups": ["b", "c"]},
+            {"groups": ["b", "c"]},
+            {"groups": ["b", "c"]},
+        ),
+        ({"groups": ["a"]}, {"groups": []}, {"groups": None}, {"groups": []}),
+        ({"repos": ["elsewhere"]}, {"repos": None}, {"repos": None}, {"repos": None}),
+        ({}, {"give_up_after": "never"}, {"give_up_after": "never"}, {"give_up_after": "never"}),
+        ({"ssh": "old"}, {"ssh": "new"}, {"ssh": "new"}, {"ssh": "new"}),
+    ],
+    ids=[
+        "disable",
+        "enable",
+        "capacity",
+        "capacity-null",
+        "groups-replace",
+        "groups-empty",
+        "repos-null",
+        "give-up-after",
+        "ssh-host",
+    ],
+)
+def test_editing_a_machine_changes_what_was_sent_and_writes_the_file(
+    client, start, patch, stored, row
+):
+    _seed(client, {"home": start})
+    reply = client.patch("/api/workers/home", json=patch)
+    assert reply.status_code == 200, reply.text
+    entry = _file(client)["workers"]["home"]
+    assert {k: entry.get(k) for k in stored} == stored
+    assert {k: reply.json()["worker"][k] for k in row} == row
+    assert {k: _row(client, "home")[k] for k in row} == row
+
+
+def test_an_empty_edit_is_a_200_and_leaves_the_file_alone(client):
+    _seed(client, {"home": {"capacity": 2}})
+    path = client.app.state.templates_dir / "workers.yaml"
+    before, stamp = path.read_text(), path.stat().st_mtime_ns
+    reply = client.patch("/api/workers/home", json={})
+    assert reply.status_code == 200 and reply.json()["worker"]["capacity"] == 2
+    assert path.read_text() == before and path.stat().st_mtime_ns == stamp
+
+
+@pytest.mark.parametrize(
+    ("name", "patch", "status", "text"),
+    [
+        ("local", {"ssh": "box"}, 422, "the local worker takes only enabled, capacity and groups"),
+        ("local", {"repos": ["x"]}, 422, "not repos"),
+        ("dials", {"ssh": "box"}, 422, "dials in; it has no ssh host"),
+        ("dials", {"enabled": None}, 422, "enabled cannot be null"),
+        ("dials", {"give_up_after": None}, 422, "give_up_after cannot be null"),
+        ("dials", {"groups": None}, 422, "groups cannot be null"),
+        ("dials", {"capacity": 0}, 422, "capacity"),
+        ("dials", {"give_up_after": "soon"}, 422, "give_up_after"),
+        ("dials", {"repos": ["no-such-repo"]}, 422, "no-such-repo"),
+        ("dials", {"repos": []}, 422, "at least one repo"),
+        ("dials", {"groups": ["other"]}, 422, "also a machine name"),
+        ("nobody", {"enabled": False}, 404, "no worker named 'nobody'"),
+    ],
+    ids=[
+        "local-ssh",
+        "local-repos",
+        "dial-in-ssh",
+        "enabled-null",
+        "give-up-null",
+        "groups-null",
+        "capacity-zero",
+        "bad-duration",
+        "unknown-repo",
+        "no-repos",
+        "group-named-like-a-machine",
+        "unknown-machine",
+    ],
+)
+def test_a_bad_edit_is_refused_in_words_and_the_file_is_unchanged(
+    client, name, patch, status, text
+):
+    _seed(client, {"dials": {}, "other": {}})
+    path = client.app.state.templates_dir / "workers.yaml"
+    before = path.read_text()
+    reply = client.patch(f"/api/workers/{name}", json=patch)
+    assert reply.status_code == status and text in str(reply.json()["detail"])
+    assert path.read_text() == before
+
+
+def test_the_local_workers_edit_writes_only_the_local_block_and_answers_its_row(client):
+    _seed(client, {"home": {"capacity": 2}})
+    reply = client.patch(
+        "/api/workers/local", json={"enabled": False, "capacity": 2, "groups": ["farm"]}
+    )
+    assert reply.status_code == 200, reply.text
+    assert (reply.json()["worker"]["name"], reply.json()["worker"]["enabled"]) == ("local", False)
+    assert _file(client)["local"] == {"enabled": False, "capacity": 2, "groups": ["farm"]}
+    assert _file(client)["workers"]["home"]["capacity"] == 2
+    assert not client.app.state.workers_hub.free("home", [])  # offline, but the file still loads
+    assert (
+        client.patch("/api/workers/local", json={"capacity": None}).json()["worker"]["capacity"]
+        is None
+    )
+    assert "capacity" not in _file(client)["local"]
+    assert client.patch("/api/workers/local", json={"groups": ["home"]}).status_code == 422
+
+
+def _claim(client, name, key):
+    """A slot held on `name` for step `key`, as a launch holds it before its session row runs."""
+    return client.app.state.workers_hub.adopt(name, key)
+
+
+def _item(client, repo, title):
+    return client.post("/api/work-items", json={"repo": str(repo), "title": title}).json()["id"]
+
+
+def test_a_host_change_is_refused_while_a_step_holds_the_machine(client):
+    _seed(client, {"boxed": {"ssh": "old"}})
+    _claim(client, "boxed", "w1/s1")
+    refused = client.patch("/api/workers/boxed", json={"ssh": "new"})
+    assert refused.status_code == 409
+    assert "Change its host once they end." in refused.json()["detail"]
+    assert _file(client)["workers"]["boxed"]["ssh"] == "old"
+    assert client.patch("/api/workers/boxed", json={"ssh": "old", "capacity": 2}).status_code == 200
+
+
+def test_rotating_a_token_stops_the_old_one_and_drops_the_connection(client):
+    token = client.post("/api/workers", json={"name": "home"}).json()["token"]
+    hub = client.app.state.workers_hub
+    client.portal.call(lambda: attach(hub, Peer(), "home", caps=frozenset(), token=token))
+    assert client.get("/api/workers").json()["workers"][1]["online"] is True
+    old_hash = _file(client)["workers"]["home"]["token_sha256"]
+
+    reply = client.post("/api/workers/home/rotate-token")
+    assert reply.status_code == 200, reply.text
+    body = reply.json()
+    assert body["token"] != token and body["token"] in body["serve_command"]
+    assert body["worker"]["name"] == "home" and "note" in body
+    stored = registry.WorkersFile.load(client.app.state.templates_dir / "workers.yaml")
+    assert stored.workers["home"].token_sha256 != old_hash
+    assert registry.find_by_token(stored, body["token"]) == "home"
+    assert registry.find_by_token(stored, token) is None
+
+    async def offline():
+        while hub.snapshot()[0]["online"]:  # `_drop` closes the link in a background task
+            await asyncio.sleep(0.01)
+
+    client.portal.call(lambda: asyncio.wait_for(offline(), 5))
+
+
+@pytest.mark.parametrize(
+    ("name", "status"),
+    [("boxed", 409), ("local", 409), ("nobody", 404)],
+    ids=["ssh", "local", "unknown"],
+)
+def test_only_a_dial_in_machine_has_a_token_to_rotate(client, name, status):
+    _seed(client, {"boxed": {"ssh": "box"}})
+    assert client.post(f"/api/workers/{name}/rotate-token").status_code == status
+
+
+def test_a_machine_that_holds_a_step_cannot_be_removed_even_before_its_session_runs(client, repo):
+    _seed(client, {"home": {}})
+    wid = _item(client, repo, "Build the thing")
+    claim = _claim(client, "home", f"{wid}/s1")
+    row = _row(client, "home")
+    assert row["holders"] == [{"id": wid, "title": "Build the thing", "steps": 1}]
+    refused = client.delete("/api/workers/home")
+    assert refused.status_code == 409 and refused.json()["detail"] == row["remove_blocked"]
+    assert "home is running 1 step of Build the thing." in row["remove_blocked"]
+    assert "kraft admin worker disable home" in row["remove_blocked"]
+    assert "home" in _file(client)["workers"]
+    client.app.state.workers_hub.release(claim)
+    assert client.delete("/api/workers/home").json() == {"removed": "home"}
+
+
+def test_a_session_row_alone_holds_a_machine_and_the_claim_is_not_counted_twice(client, repo):
+    _seed(client, {"home": {}})
+    wid = _item(client, repo, "Build the thing")
+    _seed_session(client, wid, session_id="s1", hook_point="build.main.x", runner="home")
+    _seed_session(client, wid, session_id="s2", hook_point="build.main.y", runner="home")
+    _claim(client, "home", f"{wid}/s1")
+    assert _row(client, "home")["holders"] == [{"id": wid, "title": "Build the thing", "steps": 2}]
+    assert "2 steps of Build the thing" in client.delete("/api/workers/home").json()["detail"]
+
+
+def test_the_refusal_names_three_items_then_counts_the_rest(client, repo):
+    _seed(client, {"home": {}})
+    for i in range(5):
+        _claim(client, "home", f"gone{i}/s1")  # items that no longer exist: their id stands in
+    detail = client.delete("/api/workers/home").json()["detail"]
+    assert "home is running 5 steps of gone0, gone1, gone2 and 2 more." in detail
+
+
+def test_a_machine_with_a_step_waiting_for_it_can_be_removed_and_gives_no_run_up(client):
+    _seed(client, {"home": {}})
+    row = _row(client, "home")
+    assert row["holders"] == [] and row["remove_blocked"] is None
+    assert client.delete("/api/workers/home").json() == {"removed": "home"}
 
 
 # ── the dial-in WebSocket ──

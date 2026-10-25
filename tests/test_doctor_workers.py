@@ -29,6 +29,16 @@ def test_an_offline_machine_is_a_warning_naming_the_reason_not_a_failure(app, tm
     assert row["ok"] and row["warn"] and "never connected" in row["detail"]
 
 
+def test_a_disabled_machine_is_reported_as_disabled_without_the_offline_warning(app, tmp_path):
+    (tmp_path / "templates" / "workers.yaml").write_text(
+        f"workers:\n  home:\n    token_sha256: {'a' * 64}\n    enabled: false\n"
+    )
+    asyncio.run(client.reload_templates())
+    row = _rows(tmp_path)["worker: home"]
+    assert row["ok"] and not row.get("warn") and "disabled" in row["detail"]
+    assert "offline" not in row["detail"]
+
+
 def test_an_ssh_machine_that_cannot_connect_names_the_servers_own_attempt(
     app, tmp_path, monkeypatch
 ):

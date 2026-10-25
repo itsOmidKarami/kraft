@@ -406,3 +406,21 @@ async def test_a_session_waiting_for_a_slot_says_so_once_and_takes_it_when_one_f
     await asyncio.gather(cancelled, return_exceptions=True)
     row.release("w/b")
     assert row.free()  # the cancelled wait took nothing
+
+
+async def test_a_disabled_local_worker_takes_no_session_and_one_waits_saying_so_until_enabled():
+    row = local_link._Row()
+    row.enabled = False
+    assert not row.free() and not row.take("w/a")
+    assert row.snapshot_row(0)["enabled"] is False
+    said = []
+
+    async def on_wait(text):
+        said.append(text)
+
+    waiter = asyncio.create_task(row.take_waiting("w/a", on_wait, poll_s=0.01))
+    await asyncio.sleep(0.1)
+    assert said == ["waiting for local (disabled)"] and not waiter.done()
+    row.enabled = True
+    await asyncio.wait_for(waiter, 1)
+    assert row._held == {"w/a"}
