@@ -110,6 +110,46 @@ def _current_base_ref(db, work_item_id: str) -> str | None:
     return row["base_ref"] if row else None
 
 
+async def _effective_base(db, work_item_row, worktree, *, member: bool) -> str | None:
+    """The commit verification measures the whole branch from: where the branch
+    now forks from the base branch's remote-tracking ref, when the stored
+    `base_ref` is an ancestor of that fork point -- an agent that rebased in its
+    own session took in newer base commits, which are not the item's own -- else
+    the stored `base_ref`.
+
+    No fetch (verification must not wait on the network; an agent that rebased
+    fetched first) and no write (`base_ref` is unchanged, so a diff does not
+    change under an item nothing touched). Any failure keeps the stored value,
+    never `None`: `None` reads as "no diff" and runs the full suite. A workspace
+    member keeps it too -- the root's `base_ref` says nothing of its history.
+    """
+    stored = _current_base_ref(db, work_item_row["id"])
+    if stored is None or member:
+        return stored
+    try:
+        branch = await _builtins.base_branch(db, work_item_row["id"], Path(work_item_row["repo"]))
+        cwd = Path(worktree)
+        fork = _config.git_read(
+            cwd, "merge-base", "HEAD", f"refs/remotes/origin/{branch}", expected_failure=True
+        )
+        if fork and (
+            _config.git_read(
+                cwd, "merge-base", "--is-ancestor", stored, fork, expected_failure=True
+            )
+            is not None
+        ):
+            return fork
+    except Exception:
+        logger.debug("could not read the fork point for %s", work_item_row["id"], exc_info=True)
+    return stored
+
+
+def _is_member_run(work_item_row, repository: str | None) -> bool:
+    """Whether a fanned-out run is for a workspace member, not the item's root."""
+    snapshot = store.materialized_chain_of(work_item_row)
+    return repository is not None and snapshot is not None and repository != snapshot.target.root
+
+
 def _path_matches(path: str, patterns: list[str]) -> bool:
     """Gitignore-style precedence over one scope's own `paths` list: the last
     pattern `path` matches wins, so a later `!excl/**` overrides an earlier
@@ -233,6 +273,8 @@ def _select_scopes(
     task_hook: str,
     round: int,
     repo_entry: RepoEntry | None,
+    *,
+    base: str | None = None,
 ) -> tuple[list[dict], list[str] | None]:
     """The scopes the `kraft.verify_changed_test_scopes` builtin should run
     (test-scope design §3.2-3.3, C7 Kraft-s7c04.14), and the changed paths
@@ -282,7 +324,9 @@ def _select_scopes(
     scopes = _scope_table(repo_entry)
     if not scopes:
         return [], None
-    base_ref = _current_base_ref(db, work_item_id)
+    # `base` is the effective base the async caller worked out; without one,
+    # the stored `base_ref`.
+    base_ref = base if base is not None else _current_base_ref(db, work_item_id)
     # `since` is the diff's lower bound: round <= 0 always measures the whole
     # branch (never reads another round or another node's head), and only a
     # round that follows this exact node's own fully clean previous round at
@@ -742,6 +786,7 @@ async def _run_changed_test_scopes(
     checkout: _sandbox.Checkout | None = None,
     time_cap: _caps.Deadline | None = None,
     runner: str | None = None,
+    member: bool = False,
 ) -> str:
     """`kraft.verify_changed_test_scopes`: run the repo's own test scopes that
     the branch's changed paths select, and report one aggregate result.
@@ -774,8 +819,9 @@ async def _run_changed_test_scopes(
     worktree) naming the paths the round was selected from.
     """
     repo_entry = launch.repo_entry if launch else None
+    base = await _effective_base(db, work_item_row, worktree, member=member)
     to_run, paths = _select_scopes(
-        db, work_item_row["id"], worktree, node.id, task.path, round, repo_entry
+        db, work_item_row["id"], worktree, node.id, task.path, round, repo_entry, base=base
     )
     if not to_run and repo_entry is not None and repo_entry.test_command == "":
         # Declared, not missing: `test_command: ""` is a repository that has
@@ -834,7 +880,6 @@ async def _run_changed_test_scopes(
     if picks:
         changed_files.parent.mkdir(parents=True, exist_ok=True)
         changed_files.write_text("".join(f"{p}\n" for p in paths or ()), encoding="utf-8")
-    base = _current_base_ref(db, work_item_row["id"])
 
     async def _run(cmd: list[str], targeted: bool = False) -> str:
         return await _subprocess.run_task(
@@ -1620,6 +1665,7 @@ async def _dispatch_task(
                         checkout=checkout,
                         time_cap=time_cap,
                         runner=placement.remote(runner),
+                        member=_is_member_run(work_item_row, repository),
                     )
                 )
             case _:  # pragma: no cover -- the type already refuses this
@@ -2020,8 +2066,7 @@ async def sweep_stragglers(
     # that branch instead of the item's own (Kraft-v5qd).
     # A fanned-out member run stands in the member's checkout, whose base is
     # its own default branch; every other run is on the item's base branch.
-    snapshot = store.materialized_chain_of(work_item_row)
-    member = repository is not None and snapshot is not None and repository != snapshot.target.root
+    member = _is_member_run(work_item_row, repository)
     base = await _builtins.base_branch(
         db, work_item_row["id"], Path(worktree if member else work_item_row["repo"]), member=member
     )

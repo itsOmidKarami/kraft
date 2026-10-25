@@ -163,6 +163,99 @@ async def test_a_scope_runs_its_targeted_command_in_place_of_the_full_one(
         assert not listed.is_relative_to(it.repo)
 
 
+async def _verify_round(it, scope):
+    node = it.chain.chain.nodes[0]
+    return await dispatch.dispatch_node(
+        it.database,
+        it.run_dirs,
+        node.steps[0].tasks[0],
+        node,
+        it.row(),
+        it.repo,
+        launch=executor.LaunchContext(
+            repo_entry=entry_of({"setup_command": "", "test_scopes": [scope]})
+        ),
+        round=0,
+    )
+
+
+async def _item_with_an_own_commit(item_on, *, origin=None, stored=None):
+    """An item on `main` at its `base_ref` (or `stored`, a commit off that line), one own
+    commit on top. With an `origin`, `main` is pushed there before the own commit."""
+    it = await item_on(_verify())
+    base = git(it.repo, "rev-parse", "HEAD")
+    if stored:
+        git(it.repo, "checkout", "-q", "-b", "side")
+        write(it.repo, "side.txt", "s")
+        commit_all(it.repo)
+        base = git(it.repo, "rev-parse", "HEAD")
+        git(it.repo, "checkout", "-q", "main")
+    await it.database.write(lambda c: store.set_base_ref(c, it.id, base))
+    if origin:
+        git(it.repo, "remote", "add", "origin", str(origin))
+        git(it.repo, "push", "-q", "origin", "main")
+    write(it.repo, "mine.txt", "x")
+    commit_all(it.repo)
+    return it, base
+
+
+def _bare_origin(tmp_path):
+    origin = tmp_path / "origin.git"
+    git(tmp_path, "init", "-q", "--bare", str(origin))
+    return origin
+
+
+def _origin_gains_other_txt(tmp_path, repo):
+    """`origin/main` gains `other.txt`, fetched into `repo`'s remote-tracking ref."""
+    other = tmp_path / "other"
+    git(tmp_path, "clone", "-q", str(tmp_path / "origin.git"), str(other))
+    write(other, "other.txt", "y")
+    commit_all(other)
+    git(other, "push", "-q", "origin", "main")
+    git(repo, "fetch", "-q", "origin")
+    return git(repo, "rev-parse", "origin/main")
+
+
+async def test_a_rebased_branch_is_measured_from_where_it_now_forks(item_on, tmp_path):
+    it, _ = await _item_with_an_own_commit(item_on, origin=_bare_origin(tmp_path))
+    newer = _origin_gains_other_txt(tmp_path, it.repo)
+    git(it.repo, "rebase", "-q", "origin/main")
+
+    assert await _verify_round(it, _scope(tmp_path)) == "done"
+
+    assert (tmp_path / "LIST").read_text().splitlines() == ["mine.txt"]
+    assert (tmp_path / "BASE").read_text().strip() == newer
+
+
+async def test_without_a_remote_tracking_ref_the_stored_base_is_kept(item_on, tmp_path):
+    it, base = await _item_with_an_own_commit(item_on)
+
+    assert await _verify_round(it, _scope(tmp_path)) == "done"
+
+    assert (tmp_path / "LIST").read_text().splitlines() == ["mine.txt"]
+    assert (tmp_path / "BASE").read_text().strip() == base
+
+
+async def test_a_fork_point_not_past_the_stored_base_keeps_it(item_on, tmp_path):
+    it, base = await _item_with_an_own_commit(item_on, origin=_bare_origin(tmp_path), stored=True)
+    _origin_gains_other_txt(tmp_path, it.repo)
+    git(it.repo, "rebase", "-q", "origin/main")
+
+    assert await _verify_round(it, _scope(tmp_path)) == "done"
+
+    assert (tmp_path / "BASE").read_text().strip() == base
+
+
+async def test_a_workspace_member_keeps_the_stored_base(item_on, tmp_path):
+    it, base = await _item_with_an_own_commit(item_on, origin=_bare_origin(tmp_path))
+    _origin_gains_other_txt(tmp_path, it.repo)
+    git(it.repo, "rebase", "-q", "origin/main")
+
+    effective = await dispatch._effective_base(it.database, it.row(), it.repo, member=True)
+
+    assert effective == base
+
+
 async def test_an_empty_diff_after_a_clean_round_runs_the_targeted_command_with_an_empty_list(
     item_on, tmp_path
 ):
