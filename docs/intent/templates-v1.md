@@ -1873,7 +1873,15 @@ enforced-by: tests/test_waits.py::test_interval_grows_from_initial_to_max_while_
 When an external-wait task reaches its configured timeout, the system SHALL
 stop for human action and SHALL NOT classify the timeout as a code failure,
 except an `mr.automated_review` wait on its collect path, which settles.
-enforced-by: tests/adapters/forge/test_run_review.py::test_a_node_nothing_reads_takes_the_direct_path[no-reader-timeout-stops], tests/test_waits.py::test_wait_timeout_stops_for_human_and_is_not_a_code_failure, tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human, tests/test_waits.py::test_a_wait_timeout_and_a_loop_cap_are_reported_apart, tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-declared], tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-undeclared], tests/templates/test_workspace_publication.py::test_a_root_approval_that_never_comes_times_out_for_a_human
+enforced-by: tests/adapters/forge/test_run_review.py::test_a_node_nothing_reads_takes_the_direct_path[no-reader-timeout-stops], tests/test_waits.py::test_wait_timeout_stops_for_human_and_is_not_a_code_failure, tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human[a-pending-run-times-out], tests/test_waits.py::test_a_wait_timeout_and_a_loop_cap_are_reported_apart, tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-declared], tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-undeclared], tests/templates/test_workspace_publication.py::test_a_root_approval_that_never_comes_times_out_for_a_human
+
+## REQ post-merge-wait-ends-when-no-ci-runs
+
+When the merge commit has no CI run at all once a short grace is up, the
+post-merge CI wait SHALL end, recording that nothing was checked, and SHALL NOT
+wait out its timeout; a commit with any run, pending included, SHALL keep
+waiting.
+enforced-by: tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human[no-run-past-the-grace], tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human[no-run-within-the-grace], tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human[a-pending-run-times-out]
 
 ## REQ scope-time-caps-bound-their-own-scope
 
