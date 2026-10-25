@@ -6,12 +6,13 @@ export function SavedCue({ word }: { word: string }) {
 }
 
 /** A titled block of a settings page: the shared frame of Access, Notifications and About. */
-export function Block({ id, title, aside, card, hidden, children }: { id: string; title: string; aside?: string; /** A bordered card (AreaAccess): the title at its top left, the aside at its top right. */ card?: boolean | "dashed"; /** The title is for a screen reader only (a card with no visible heading). */ hidden?: boolean; children: ReactNode }) {
+export function Block({ id, title, aside, action, card, hidden, children }: { id: string; title: string; aside?: string; /** A control at the head's right end. */ action?: ReactNode; /** A bordered card (AreaAccess): the title at its top left, the aside at its top right. */ card?: boolean | "dashed"; /** The title is for a screen reader only (a card with no visible heading). */ hidden?: boolean; children: ReactNode }) {
   return (
     <section className={`set-block${card ? " is-card" : ""}${card === "dashed" ? " is-dashed" : ""}`} aria-labelledby={id}>
       <div className="set-block-head">
         <h2 id={id} className={hidden ? "adr-sr" : undefined}>{title}</h2>
         {aside && <span className="set-block-aside">{aside}</span>}
+        {action && <span className="set-block-action">{action}</span>}
       </div>
       {children}
     </section>

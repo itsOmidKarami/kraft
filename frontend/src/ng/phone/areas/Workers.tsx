@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ago, plural } from "../../../format";
 import type { Machine } from "../../../types";
 import { detailOf, request } from "../../http";
-import { ADD_COMMAND, EVERY_REPO, NO_MACHINES, READ_ONLY_NOTE, giveUpWords, isLocal, modeWords, slotsWords, stateWords } from "../../settings/workersWords";
+import { ADD_COMMAND, EVERY_REPO, NO_MACHINES, READ_ONLY_NOTE, giveUpWords, isLocal, modeWords, slotsWords, stateReason, stateWord } from "../../settings/workersWords";
 import { AreaScreen } from "./AreaScreen";
 import { Group, type RowSpec } from "./kit";
 
@@ -19,14 +19,14 @@ export function WorkersScreen() {
   const local = machines?.find(isLocal);
   const others = machines?.filter((m) => !isLocal(m));
   const localRow: RowSpec[] = local
-    ? [{ key: local.name, label: local.name, mono: true, value: local.online ? "online" : "offline", sub: `${modeWords(local)}${local.online ? "" : `, ${stateWords(local)}`} · ${slotsWords(local)}${local.kraft_version ? ` · ${local.kraft_version}` : ""}` }]
+    ? [{ key: local.name, label: local.name, mono: true, value: stateWord(local), sub: `${modeWords(local)}${stateReason(local) ? `, ${stateReason(local)}` : ""} · ${slotsWords(local)}${local.kraft_version ? ` · ${local.kraft_version}` : ""}` }]
     : [];
   const rows = (others ?? []).map((m): RowSpec => ({
     key: m.name,
     label: m.name,
     mono: true,
-    value: m.online ? "online" : "offline",
-    sub: `${modeWords(m)}${m.online ? "" : `, ${stateWords(m)}`} · ${slotsWords(m)} slots · ${m.repos?.length ? m.repos.join(", ") : EVERY_REPO} · ${giveUpWords(m.give_up_after)}${m.last_seen ? ` · seen ${ago(m.last_seen)}` : ""}`,
+    value: stateWord(m),
+    sub: `${modeWords(m)}${stateReason(m) ? `, ${stateReason(m)}` : ""} · ${slotsWords(m)} slots · ${m.repos?.length ? m.repos.join(", ") : EVERY_REPO} · ${giveUpWords(m.give_up_after)}${m.last_seen ? ` · seen ${ago(m.last_seen)}` : ""}`,
   }));
   return (
     <AreaScreen title="Workers" sub="The machines that run work item steps, and whether each is reachable." yaml={false}>

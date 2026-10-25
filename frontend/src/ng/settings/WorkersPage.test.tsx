@@ -1,11 +1,11 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WORKERS_FIXTURE } from "../../../e2e/contract/mocks/fixtures";
 import type { Machine } from "../../types";
 import { stubFetch } from "../item/testkit";
 import { WorkersPage } from "./WorkersPage";
-import { WithHeader } from "./testkit";
+import { LOCAL_ROW, WithHeader } from "./testkit";
 
 const mount = () =>
   render(
@@ -17,18 +17,38 @@ const mount = () =>
   );
 afterEach(() => vi.unstubAllGlobals());
 
-/** `GET /workers` always lists this machine's own worker first. */
-const LOCAL_ROW: Machine = { name: "local", mode: "local", online: true, reason: null, slots_used: 3, capacity: null, groups: ["gpu"], repos: null, last_seen: "2026-10-24T09:00:00+00:00", kraft_version: "2.5.0", give_up_after: "never" };
+const DISABLED = { ...WORKERS_FIXTURE[1], name: "old-box", enabled: false } as Machine;
+const rows = (...extra: Machine[]) => [200, { workers: [LOCAL_ROW, ...(WORKERS_FIXTURE as Machine[]), ...extra] }] as [number, unknown];
 
 describe("Settings › Workers", () => {
-  it("lists each machine with its state, slots, repos and what it does when Kraft is gone", async () => {
-    stubFetch({ "GET /workers": [200, { workers: [LOCAL_ROW, ...WORKERS_FIXTURE] }] });
+  it("is one table, this machine first, with each machine's connection, state, running steps, groups, repos and version", async () => {
+    stubFetch({ "GET /workers": rows(DISABLED) });
     mount();
     const table = await screen.findByRole("table", { name: "Machines" });
-    const [online, offline] = within(table).getAllByRole("row").slice(1);
-    expect(online).toHaveTextContent(/^gpu-boxsshonline1 of 2gpu, linuxkraft.*2\.4\.0gives up after 2h$/);
-    expect(offline).toHaveTextContent(/^home-serverdial-inoffline: disconnected: end of stream0 of 1noneevery repo/);
-    expect(offline).toHaveTextContent("never gives up");
+    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Name", "Connects", "State", "Running", "Groups", "Repos", "Version", "Actions"]);
+    const [mine, online, offline, off] = within(table).getAllByRole("row").slice(1);
+    expect(mine).toHaveTextContent(/^localthis machineonline3 · no limitgpuevery repo2\.5\.0Edit$/);
+    expect(online).toHaveTextContent(/^gpu-boxover sshonline1 of 2gpu, linuxkraft2\.4\.0Edit$/);
+    expect(offline).toHaveTextContent(/^home-serverdials inoffline\s*disconnected: end of stream0 of 1noneevery repo2\.4\.0Edit$/);
+    expect(off).toHaveTextContent(/^old-boxdials indisabledoffline: disconnected: end of stream/);
+    expect(screen.getByText("4 machines · 1 disabled")).toBeInTheDocument();
+  });
+
+  it("says a disabled machine takes no new steps, in words next to its badge", async () => {
+    stubFetch({ "GET /workers": rows({ ...WORKERS_FIXTURE[0], name: "idle-box", enabled: false } as Machine) });
+    mount();
+    const row = (await screen.findByText("idle-box")).closest("tr")!;
+    expect(within(row).getByText("disabled")).toHaveClass("badge");
+    expect(row).toHaveTextContent("takes no new steps");
+  });
+
+  it("has Add machine at the head of the block, an Edit button on every row, and the note about the terminal", async () => {
+    stubFetch({ "GET /workers": rows() });
+    mount();
+    await screen.findByRole("table", { name: "Machines" });
+    expect(screen.getByRole("button", { name: "Add machine" })).toBeInTheDocument();
+    for (const name of ["local", "gpu-box", "home-server"]) expect(screen.getByRole("button", { name: `Edit ${name}` })).toBeInTheDocument();
+    expect(screen.getByText(/The terminal does the same with kraft admin worker, and both write workers\.yaml\./)).toBeInTheDocument();
   });
 
   it("says when the machine's own limit is the one in use", async () => {
@@ -36,32 +56,33 @@ describe("Settings › Workers", () => {
     stubFetch({ "GET /workers": [200, { workers: [LOCAL_ROW, limited] }] });
     mount();
     const table = await screen.findByRole("table", { name: "Machines" });
-    expect(within(table).getAllByRole("row")[1]).toHaveTextContent("1 of 1 · machine's limit");
+    expect(within(table).getAllByRole("row")[2]).toHaveTextContent("1 of 1 · machine's limit");
   });
 
-  it("says how to add a machine when there is none", async () => {
+  it("with no machine at all, says to add one; the aside counts none", async () => {
     stubFetch({ "GET /workers": [200, { workers: [] satisfies Machine[] }] });
     mount();
-    expect(await screen.findByText(/kraft admin worker add NAME --ssh HOST/)).toBeInTheDocument();
-    expect(screen.queryByRole("table")).toBeNull();
-  });
-
-  it("local-only: keeps the add hint and counts no machines, the local worker standing apart", async () => {
-    stubFetch({ "GET /workers": [200, { workers: [LOCAL_ROW] }] });
-    mount();
-    expect(await screen.findByText(/kraft admin worker add NAME --ssh HOST/)).toBeInTheDocument();
+    expect(await screen.findByText(/No machines yet/)).toBeInTheDocument();
     expect(screen.getByText("0 machines")).toBeInTheDocument();
-    expect(screen.queryByRole("table", { name: "Machines" })).toBeNull();
-    const mine = within(screen.getByRole("table", { name: "This machine" })).getAllByRole("row")[1];
-    expect(mine).toHaveTextContent(/^localthis machineonline3 · no limitgpu2\.5\.0$/);
-    expect(mine).not.toHaveTextContent(/gives up|never gives up/);
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByRole("button", { name: "Add machine" })).toBeInTheDocument();
   });
 
-  it("is read-only: no control to add, edit or remove a machine", async () => {
-    stubFetch({ "GET /workers": [200, { workers: [LOCAL_ROW, ...WORKERS_FIXTURE] }] });
+  it("reads the list again after a machine is added", async () => {
+    const calls = stubFetch({
+      "GET /workers": rows(),
+      "POST /workers": [201, { worker: { ...WORKERS_FIXTURE[1], name: "new-box" }, token: "t0k", serve_command: "kraft admin worker serve --server http://h:1 --token t0k", note: "" }],
+    });
     mount();
     await screen.findByRole("table", { name: "Machines" });
-    expect(screen.queryAllByRole("button")).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Add machine" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /^Name/ }), { target: { value: "new-box" } });
+    fireEvent.click(screen.getByRole("radio", { name: "It dials in to Kraft" }));
+    const gets = () => calls.filter((c) => c.path === "/workers" && c.method === "GET").length;
+    const before = gets();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Add machine" }));
+    expect(await screen.findByText("new-box is added")).toBeInTheDocument();
+    expect(gets()).toBe(before + 1);
   });
 
   it("shows why the server could not list them", async () => {

@@ -6,7 +6,7 @@ import { mountAt } from "./testkit";
 
 const open = (workers: unknown[]) => mountAt(<WorkersScreen />, "/settings/workers", "/settings/workers", { "GET /workers": [200, { workers }] });
 
-const LOCAL_ROW = { name: "local", mode: "local", online: true, reason: null, slots_used: 3, capacity: null, repos: null, last_seen: null, kraft_version: "2.5.0", give_up_after: "never" };
+const LOCAL_ROW = { name: "local", mode: "local", online: true, reason: null, enabled: true, slots_used: 3, capacity: null, repos: null, last_seen: null, kraft_version: "2.5.0", give_up_after: "never" };
 
 describe("Workers (phone)", () => {
   it("lists each machine with whether it is reachable, and offers no control", async () => {
@@ -16,6 +16,14 @@ describe("Workers (phone)", () => {
     expect(screen.getByText("online")).toBeInTheDocument();
     expect(screen.getByText(/disconnected: end of stream/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add|edit|remove/i })).toBeNull();
+  });
+
+  it("reads a disabled machine as disabled, not online", async () => {
+    open([{ ...WORKERS_FIXTURE[0], enabled: false }]);
+    expect(await screen.findByText("gpu-box")).toBeInTheDocument();
+    expect(screen.getByText("disabled")).toBeInTheDocument();
+    expect(screen.queryByText("online")).toBeNull();
+    expect(screen.getByText(/takes no new steps/)).toBeInTheDocument();
   });
 
   it("says how to add a machine when there is none", async () => {
