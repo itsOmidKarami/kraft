@@ -8,20 +8,29 @@ it on disk so a restarted worker finds the sessions its predecessor left running
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import os
-import signal
 import string
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import psutil
 
-from kraft.proc_identity import identity_ok
+from kraft.proc_identity import identity_ok, kill_group
 
 GRACE_S = 10.0
+_GONE_S = 2.0  # after SIGKILL, how long a stop waits for the kernel to clear the group
+
+
+def _members(pgid: int) -> bool:
+    """Whether the group has a member left; macOS answers a zombie-only group `PermissionError`."""
+    try:
+        os.killpg(pgid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -178,20 +187,19 @@ class LocalJobs:
         return None
 
     async def stop(self, key: str, *, grace: float = GRACE_S) -> bool:
-        """SIGTERM the session's group, SIGKILL after `grace` seconds. True if it was held."""
+        """SIGTERM the session's group, SIGKILL whatever of it is left after `grace` seconds:
+        what it backgrounded too, not only its leader. True if it was held."""
         pgid = self._group(key)
         if pgid is None:
             self._drop(key)
             return False
-        with contextlib.suppress(OSError):
-            os.killpg(pgid, signal.SIGTERM)
-        deadline = asyncio.get_running_loop().time() + grace
-        while self._group(key) is not None and asyncio.get_running_loop().time() < deadline:
-            await asyncio.sleep(0.05)
-        if self._group(key) is not None:
-            with contextlib.suppress(OSError):
-                os.killpg(pgid, signal.SIGKILL)
-            while self._group(key) is not None:
-                await asyncio.sleep(0.05)
+        child = self._children.get(key)
+        await kill_group(pgid, grace, reap=child.poll if child is not None else None)
+        # `kill_group` returns as it sends SIGKILL; the answer waits for the group to go.
+        deadline = time.monotonic() + _GONE_S
+        while self._group(key) is not None or _members(pgid):
+            if time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(0.02)
         self._drop(key)
         return True

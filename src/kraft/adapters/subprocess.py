@@ -7,7 +7,6 @@ import logging
 import os
 import shlex
 import shutil
-import signal
 import stat
 import subprocess
 import threading
@@ -21,7 +20,7 @@ from typing import TYPE_CHECKING
 
 import psutil
 
-from kraft import caps, events, ids, item_paths, logs, store
+from kraft import caps, events, ids, item_paths, logs, proc_identity, store
 from kraft import harness as _harness
 from kraft import usage as _usage
 from kraft.paths import private
@@ -596,55 +595,7 @@ async def uncancellable(awaitable):
     return task.result()
 
 
-async def _kill_group(pgid: int, grace: float, reap: Callable[[], object] | None = None) -> None:
-    """SIGTERM `pgid` (again at the first liveness check), then SIGKILL
-    whatever is still there after `grace` seconds. `frontend/e2e/serve.py`'s
-    `_terminate` is the model this copies.
-
-    The session's own child is already gone by the time this runs — this is
-    for what it backgrounded into the same group and never waited on itself
-    (a fixture server, `just dev`), which `start_new_session=True` put in the
-    same process group as the child but this coroutine never touched
-    (Kraft-1nye). `os.killpg` raises `ProcessLookupError` the moment the group
-    has no members left, so the common case (nothing backgrounded) returns
-    almost immediately rather than paying `grace`.
-
-    `reap` is the leader's own `Popen.poll`, called before every liveness
-    check. On a pause or skip this runs from `run_task`'s `finally` while the
-    leader is still alive, so the SIGTERM above kills it but nothing reaps it
-    -- the poll loop that normally would was cancelled out from under it. On
-    Linux an unreaped zombie still counts as a group member, so `killpg(pgid,
-    0)` kept succeeding and every cancel paid the full `grace` (10s by
-    default) before falling through to SIGKILL. macOS raises
-    `PermissionError` for a zombie-only group instead, which is why this
-    passed locally and failed pause/resume, SIGTERM shutdown and the e2e
-    pause flow in CI (Kraft-rki).
-
-    The first liveness check is a second SIGTERM, not a probe: a member forked
-    while the first one was being delivered (what `_wrap_with_exit_file`'s `sh`
-    forks for the worker's command, on a cancel straight after launch) misses it
-    and would otherwise outlive the whole `grace` -- a pause or skip then paid
-    it, flaking under load.
-    """
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        return
-    deadline = time.monotonic() + grace
-    probe = signal.SIGTERM
-    while time.monotonic() < deadline:
-        await asyncio.sleep(0.2)
-        if reap is not None:
-            reap()
-        try:
-            os.killpg(pgid, probe)
-            probe = 0
-        except (ProcessLookupError, PermissionError):
-            return
-    try:
-        os.killpg(pgid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
+_kill_group = proc_identity.kill_group  # moved there for the local worker (Kraft-5c1tm.20)
 
 
 async def open_egress(
