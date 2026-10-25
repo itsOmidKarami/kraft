@@ -195,6 +195,10 @@ class WorkersFile(_Strict):
         checked again: a machine named like a group is a `ValidationError`."""
         return type(self).model_validate({"workers": workers, "local": self.local})
 
+    def with_local(self, local: LocalWorker) -> WorkersFile:
+        """A copy with the `local:` block replaced and the machines kept, checked again."""
+        return type(self).model_validate({"workers": self.workers, "local": local})
+
     def to_yaml(self) -> dict:
         doc = self.model_dump(exclude_none=True)
         for entry in [*doc["workers"].values(), *([doc["local"]] if "local" in doc else [])]:

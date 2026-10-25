@@ -1113,6 +1113,27 @@ def running_local_sessions(conn) -> int:
     ).fetchone()[0]
 
 
+def live_sessions_on(conn, machine: str) -> list[tuple[str, str]]:
+    """`(work item id, session id)` of every pending or running session placed on `machine`."""
+    return [
+        (r["work_item_id"], r["id"])
+        for r in conn.execute(
+            "SELECT work_item_id, id FROM worker_sessions WHERE runner = ? AND status IN "
+            f"({in_list((SessionStatus.PENDING, SessionStatus.RUNNING))})",
+            (machine,),
+        )
+    ]
+
+
+def titles_of(conn, ids_: list[str]) -> dict[str, str]:
+    """The title of each of `ids_` that is still a work item."""
+    marks = ", ".join("?" * len(ids_))
+    return {
+        r["id"]: r["title"]
+        for r in conn.execute(f"SELECT id, title FROM work_items WHERE id IN ({marks})", ids_)
+    }
+
+
 def pinned_runner(
     conn, work_item_id: str, node_id: str, hook_point: str | None = None
 ) -> str | None:

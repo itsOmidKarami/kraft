@@ -262,7 +262,8 @@ def _config_row(templates: Path) -> dict:
 def _worker_checks(workers: list[dict] | None) -> list[dict]:
     """`workers.yaml`, and each registered machine as the server sees it. Nothing
     for an install with no machines. An offline machine is a warning, not a
-    failure: a laptop that sleeps is not a broken Kraft. An ssh machine is
+    failure: a laptop that sleeps is not a broken Kraft, and a disabled one is off on purpose
+    and says so. An ssh machine is
     dialled by the server's own `ssh`, so a service without your SSH agent can
     fail where your shell succeeds: say whose attempt this is."""
     path = config_dir() / registry.FILE
@@ -275,6 +276,9 @@ def _worker_checks(workers: list[dict] | None) -> list[dict]:
     rows = [_check(registry.FILE, True, "parses")]
     for w in workers or []:
         name = f"worker: {w['name']}"
+        if w.get("enabled") is False:  # the person's choice, not a fault
+            rows.append(_check(name, True, "disabled: takes no new steps"))
+            continue
         if w["online"]:
             rows.append(_check(name, True, f"{w['mode']}, kraft {w['kraft_version']}"))
             continue

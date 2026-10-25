@@ -305,6 +305,11 @@ class Hub:
     def slots_used(self, name: str) -> int:
         return len(self._claims.get(name, ()))
 
+    def claims_on(self, name: str) -> list[str]:
+        """The keys of the claims held on `name`, from taken to given back: a step is on a
+        machine from its claim, before its session row says `running`."""
+        return sorted(self._claims.get(name, ()))
+
     def limit(self, name: str) -> int:
         """Steps `name` may run at once: the lower of workers.yaml's `capacity` and the machine's
         own, whichever are set; one when neither is."""

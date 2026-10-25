@@ -1130,8 +1130,11 @@
      {
       "capacity": "_",
       "capacity_source": "_",
+      "configured_capacity": "_",
+      "enabled": "_",
       "give_up_after": "_",
       "groups": [],
+      "holders": [],
       "kraft_version": "_",
       "last_seen": "_",
       "machine_capacity": "_",
@@ -1139,8 +1142,10 @@
       "name": "_",
       "online": "_",
       "reason": "_",
+      "remove_blocked": "_",
       "repos": "_",
-      "slots_used": "_"
+      "slots_used": "_",
+      "ssh": "_"
      }
     ]
    }

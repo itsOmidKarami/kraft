@@ -9,18 +9,13 @@ from unittest.mock import AsyncMock
 import pytest
 from support.chain_builders import v1_node
 from support.harness import v1_chain
-from support.remote import attach
+from support.remote import Peer, attach
 
 from kraft import store
 from kraft.remote import launch, local_link, protocol, registry
 from kraft.remote import runs as runs_mod
 from kraft.remote.hub import Hub
 from kraft.remote.runs import Reserved, Runs
-
-
-class _Peer:
-    async def serve(self, t, welcome):
-        await protocol.pump(t, on_frame=AsyncMock())
 
 
 def _workers(local_group: bool = True, **machines):
@@ -50,7 +45,7 @@ async def world(database, run_dirs, item_on, repo):
     hub.runs = runs
     runs_mod.install(runs)
     for n in ("a", "b"):
-        await attach(hub, _Peer(), n, caps=frozenset({protocol.RESERVE}), token=f"kwt_{n}")
+        await attach(hub, Peer(), n, caps=frozenset({protocol.RESERVE}), token=f"kwt_{n}")
     reserved, unreserved, refuse = [], [], set()
 
     async def reserve(machine, key, *, timeout=30):
