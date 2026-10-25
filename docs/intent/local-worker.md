@@ -42,7 +42,12 @@ origin: src/kraft/worker/reattach.py
 
 ## REQ cancel-after-the-launch-frame-stops-the-session
 WHEN a launch is cancelled or the connection drops after the worker was asked to start a session, the system SHALL have the worker stop whatever it started.
-enforced-by: tests/remote/test_local_link.py::test_cancel_after_the_spawn_frame_stops_what_the_worker_started, tests/remote/test_local_link.py::test_a_dropped_answer_stops_the_session_after_reconnecting
+enforced-by: tests/remote/test_local_link.py::test_cancel_after_the_spawn_frame_stops_what_the_worker_started, tests/remote/test_local_link.py::test_a_dropped_answer_stops_the_session_after_reconnecting[resent-once-the-stop-is-answered], tests/remote/test_local_link.py::test_a_dropped_answer_stops_the_session_after_reconnecting[gives-up-after-three], tests/remote/test_local_link.py::test_a_dropped_answer_stops_the_session_after_reconnecting[stop-unanswered]
+origin: src/kraft/remote/local_link.py §spawn
+
+## REQ a-dropped-spawn-is-sent-again-once-its-stop-is-answered
+WHEN the connection drops while a session is being started and a worker then answers the stop for it, the system SHALL send the start again, a bounded number of times, and SHALL NOT let the worker run two sessions for one key.
+enforced-by: tests/remote/test_local_link.py::test_a_dropped_answer_stops_the_session_after_reconnecting[resent-once-the-stop-is-answered], tests/remote/test_local_link.py::test_a_dropped_answer_stops_the_session_after_reconnecting[gives-up-after-three], tests/remote/test_local_jobs.py::test_a_key_that_is_running_is_not_started_twice
 origin: src/kraft/remote/local_link.py §spawn
 
 ## REQ local-step-waits-for-the-worker
