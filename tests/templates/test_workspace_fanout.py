@@ -253,5 +253,7 @@ async def test_a_changed_path_in_an_area_runs_its_setup_then_its_scope(
             "repository": None,
             "round": 0,
             "commands": ["uv sync", "just test-api"],
+            "targeted": {},
+            "full_reason": None,
         }
     ]

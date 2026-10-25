@@ -95,12 +95,12 @@ kraft repo disconnect [PATH]
 kraft repo library [PATH] [-y | --check]     # review the repo's .kraft/ library and take it; --check exits 0 current, 1 waiting, 2 refused, 3 could not check
 kraft repo path [ID] (alias cd) / kraft repo open [ID]
 kraft admin start [--host H] [--port P]      # same as bare `kraft`
-kraft admin stop                             # SIGTERM to run/kraft.pid
+kraft admin stop [--now]                     # SIGTERM to run/kraft.pid; local steps of worktree items keep running in the worker, --now stops them
 kraft admin restart [-y] [--when-free]          # stop, then start again the same way it was running; -y skips the question; --when-free waits for nothing to be running
 kraft admin install-service / kraft admin uninstall-service  # launchd or systemd --user unit
 kraft admin health                           # exit 1 when degraded
 kraft admin doctor                           # every check at once; exit 1 on any
-kraft admin update [--restart] [-y] [--channel stable|rc|beta|alpha] [--when-free [TAG]] [--cancel-when-free]  # install the newest release; --restart also restarts; --when-free marks it for when nothing is running
+kraft admin update [--restart] [--now] [-y] [--channel stable|rc|beta|alpha] [--when-free [TAG]] [--cancel-when-free]  # install the newest release; --restart also restarts (across a major: waits for nothing to be running); --now restarts at once, ending every step; --when-free marks it for when nothing is running
 kraft admin reindex [--repo PATH]
 kraft admin reload                           # reread the template library, policy.yaml and intake.yaml from disk, no restart
 kraft admin templates lint                   # check every chain in the library; exit 1 on any error
@@ -116,6 +116,7 @@ kraft admin worker add NAME [--ssh HOST] [--capacity N] [--repos A,B] [--give-up
 kraft admin worker list / kraft admin worker remove NAME
 kraft admin worker serve --server URL --token T | --stdio  # on the machine; --stdio is what the server's ssh runs
 kraft admin worker check [--server URL --token T]  # on the machine: git, agent CLIs, credentials, sandbox runtime
+kraft admin worker local --run-dir D [--install ID]  # run by the server, not by hand: the local worker (one per installed kraft) that starts every local session
 kraft admin init [--repo] / kraft admin mcp  # register Kraft with an agent
 kraft admin permission-hook codex|cursor     # run by a harness's pre-tool hook, not by hand
 ```

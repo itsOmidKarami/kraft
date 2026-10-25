@@ -1047,6 +1047,7 @@ def _test_result(st, row) -> dict | None:
                 "passed": r["passed"],
                 "exit_code": r.get("exit_code"),
                 "session_id": r["session_id"],
+                **({"targeted": True} if r.get("targeted") else {}),
             }
             for r in results
             if not (r.get("setup") and r["passed"])
@@ -1285,6 +1286,15 @@ def _sessions_out(
     ]
 
 
+#: The events that end an item; the latest is when it ended.
+_ENDINGS = (
+    WorkItemEvent.COMPLETED,
+    WorkItemEvent.MANUALLY_COMPLETED,
+    WorkItemEvent.CANCELLED,
+    WorkItemEvent.ABANDONED,
+)
+
+
 @api_router.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
     from kraft.api.routes import lifecycle
@@ -1357,6 +1367,26 @@ async def get_work_item(wid: str, request: Request):
         # The time budget beside the dollars: what the item-wide running-time
         # cap has measured and allows (`caps.running_time`).
         "running_time": st.db.read(lambda c: caps.running_time(c, row)),
+        # When its chain first moved: the header's clock counts from here, not
+        # from filing, so a wait behind a dependency is no part of it. None
+        # until a node starts.
+        "started_at": st.db.read(
+            lambda c: c.execute(
+                "SELECT MIN(created_at) FROM events WHERE work_item_id = ? AND type = ?",
+                (wid, ChainEvent.NODE_STARTED),
+            ).fetchone()[0]
+        ),
+        # When it ended, for the header's clock to stop at: not `updated_at`,
+        # which archiving bumps, so an archived item would count its 30 days.
+        "ended_at": st.db.read(
+            lambda c: c.execute(
+                "SELECT MAX(created_at) FROM events WHERE work_item_id = ? "
+                f"AND type IN ({in_list(_ENDINGS)})",
+                (wid,),
+            ).fetchone()[0]
+        )
+        if status in ENDED
+        else None,
         "rate_limit": _rate_limit_retries(st, row),
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         # Which pass of its node each session ran in (`store.number_passes`);

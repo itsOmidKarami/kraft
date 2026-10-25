@@ -200,10 +200,11 @@ def _disabled(client, repo):
     ("field", "value"),
     [
         ("local_files", [".python-version"]),
+        ("carry", [".testmondata"]),
         ("models", {"codex": "gpt-5"}),
         ("intent_dir", "docs/intent"),
     ],
-    ids=["local-files", "models", "intent-dir"],
+    ids=["local-files", "carry", "models", "intent-dir"],
 )
 def test_patch_repo_round_trips_a_field(client, repo, templates_dir, field, value):
     """The Settings UI's only write path for these (Kraft-gxcmy): PATCH goes
@@ -224,9 +225,15 @@ def test_patch_repo_round_trips_a_field(client, repo, templates_dir, field, valu
     [
         ("steering", ["does-not-exist"]),
         ("local_files", ["*.pyc"]),
+        ("carry", ["../out"]),
         ("intent_dir", "../out"),
     ],
-    ids=["a-missing-steering-name", "a-glob-in-local-files", "an-escaping-intent-dir"],
+    ids=[
+        "a-missing-steering-name",
+        "a-glob-in-local-files",
+        "an-escaping-carry-file",
+        "an-escaping-intent-dir",
+    ],
 )
 def test_a_refused_patch_writes_nothing(client, repo, templates_dir, field, value):
     """Write-side validation must reject exactly what the read side would

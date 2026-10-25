@@ -153,11 +153,13 @@ describe("GateBody", () => {
     expect(screen.getByText("status").nextElementSibling).toHaveTextContent(status);
   });
 
-  const scope = (n: number, passed: boolean, name = `s${n}/**`) => ({ command: `cmd${n}`, scope: name, passed, exit_code: passed ? 0 : 1, session_id: `sess${n}` });
+  const scope = (n: number, passed: boolean, name = `s${n}/**`, targeted?: true) => ({ command: `cmd${n}`, scope: name, passed, exit_code: passed ? 0 : 1, session_id: `sess${n}`, ...(targeted && { targeted }) });
   it.each([
     ["no run: no tests line", null, null],
     ["every scope passed", { passed: true, scopes: [scope(1, true), scope(2, true), scope(3, true)] }, "✓ 3 scopes"],
     ["one of three failed, named and linked to its log", { passed: false, scopes: [scope(1, true), scope(2, false, "backend/**"), scope(3, true)] }, "✗ 1 of 3 scopes · cmd2"],
+    ["every scope passed, all targeted", { passed: true, scopes: [scope(1, true, "s1/**", true), scope(2, true, "s2/**", true), scope(3, true, "s3/**", true)] }, "✓ 3 scopes (targeted)"],
+    ["every scope passed, one of three targeted", { passed: true, scopes: [scope(1, true, "s1/**", true), scope(2, true), scope(3, true)] }, "✓ 3 scopes (1 targeted)"],
   ])("tests line: %s", async (_name, test_result, line) => {
     stubFetch();
     render(<GateBody item={{ ...pending, test_result }} version="1" gate={gate} events={[]} />);

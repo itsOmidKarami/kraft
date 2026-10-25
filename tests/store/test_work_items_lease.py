@@ -29,7 +29,7 @@ async def test_a_stopped_sessions_processes_hold_the_checkout_until_they_are_gon
     flush, then a group kill): until then they still write in the checkout.
     A pid now someone else's holds nothing. The window reads the store's
     clock, as the stop wrote it. A wall clock stepped across a second moves
-    Linux's start times by one whole second (`reattach._same_start`); a
+    Linux's start times by one whole second (`proc_identity.same_start`); a
     bigger step reads as someone else's."""
     if frozen:
         monkeypatch.setattr(work_items, "_now", lambda: "2020-01-01T00:00:00+00:00")

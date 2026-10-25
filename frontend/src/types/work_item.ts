@@ -243,6 +243,12 @@ export interface WorkItem {
   archived_by?: "you" | "auto" | null;
   created_at: string;
   updated_at: string;
+  /** When its chain's first node started, null before then: the item's clock
+   *  counts from here, so time filed or blocked behind a dependency is not run time. */
+  started_at?: string | null;
+  /** When it ended, null while it has not: the clock stops here, not at
+   *  `updated_at`, which archiving bumps. */
+  ended_at?: string | null;
   /** The gate waiting on a person, straight from the server — a rejected gate
    *  is not pending, which no client-side inference from sessions can see. */
   pending_gate?: string | null;
@@ -442,7 +448,12 @@ export interface ScopeRun {
   hook_point: string;
   repository: string | null;
   round: number;
+  /** The command that ran: a scope's targeted command in a round that ran it. */
   command: string;
+  /** The scope's full command, whichever command ran: what a scope is across rounds. Absent on an older item's. */
+  identity?: string;
+  /** The command that ran was the scope's targeted one, not its full one. */
+  targeted?: true;
   passed: boolean | null;
   exit_code?: number;
   scope?: string;
@@ -583,6 +594,6 @@ export interface FixTarget {
 }
 
 export interface TestResult {
-  scopes: { command: string; scope: string | null; passed: boolean; exit_code: number | null; session_id: string }[];
+  scopes: { command: string; scope: string | null; passed: boolean; exit_code: number | null; session_id: string; targeted?: true }[];
   passed: boolean;
 }

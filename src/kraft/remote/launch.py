@@ -75,6 +75,7 @@ def build(
     sentinels: dict[str, str] | None = None,
     withheld: list[str] | None = None,
     setup_sandbox: dict | None = None,
+    codex_hook: dict | None = None,
 ) -> JobSpec:
     done = subprocess.run(
         ["git", "-C", str(cwd), "rev-parse", "--verify", f"refs/heads/{branch}"],
@@ -116,4 +117,5 @@ def build(
         withheld=list(withheld or []),
         setup_sandbox=setup_sandbox,
         ro=[str(e.path) for e in entries if not e.rw],
+        codex_hook=codex_hook,
     )

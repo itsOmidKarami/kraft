@@ -237,9 +237,11 @@ class CIStatus:
     #: successor is still registering from one nobody followed up
     #: (Kraft-kbqmk).
     cancelled_at: str = ""
-    #: gh only: the head has no checks registered at all. Pending while they
-    #: are still on their way, but on a pull request that conflicts with its
-    #: base they never come (Kraft-09ze6).
+    #: The head has no checks registered at all. Pending while they are still
+    #: on their way, but on a pull request that conflicts with its base they
+    #: never come (Kraft-09ze6, gh's `ci_status` only), and neither do they on
+    #: a branch whose CI does not run on a push (Kraft-rbjo3, both backends'
+    #: `branch_ci_status`).
     no_checks: bool = False
 
 
@@ -588,6 +590,7 @@ class FakeForge:
             sha=status.sha,
             failed_jobs=status.failed_jobs,
             pipeline_ref=status.pipeline_ref,
+            no_checks=status.no_checks,
         )
 
     async def approval_state(self, *, repo: Path, branch: str) -> ApprovalState:

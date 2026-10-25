@@ -10,7 +10,7 @@ connection error.
 
 # Onboarding a repo
 
-Four steps (connect, register, rehearse, verify), each followed by a check
+Five steps (connect, register, rehearse, narrow the tests, verify), each followed by a check
 against the repo itself — a zero exit code says the command ran, not that what
 it did was right. Then hand off to `kraft:check`.
 
@@ -119,7 +119,59 @@ it did was right. Then hand off to `kraft:check`.
    Do not put a directory or a glob in `local_files`; it takes literal file
    paths, and the list is validated on load.
 
-4. **Verify.** First `kraft admin health`: it exits 1 when the server is not
+4. **Narrow the tests.** Verification runs a scope's `command`, normally the
+   whole suite, in its first round and in every repair round. A repo whose
+   tooling can pick the tests a change affects can let verification run only
+   those, and leave the full suite to the merge request's CI.
+
+   - **Find the tool.** Look for what the repo already uses to pick tests:
+     pytest-testmon, `jest --findRelatedTests`, `nx affected`, Go's package
+     graph, Bazel. For each test scope, propose a `targeted_command` beside its
+     `command`. Kraft gives it `KRAFT_TEST_BASE` (the branch's base commit) and
+     `KRAFT_CHANGED_FILES` (the path of a file listing the changed paths, one
+     per line). It must run more, never less, when it cannot see a change: a
+     YAML or a generated file is invisible to testmon, so the command runs the
+     full suite for one.
+   - **`carry`.** Only for a tool whose state lives in files: testmon's
+     `.testmondata` and `.testmondata-wal` (a single-process run leaves the
+     WAL, an xdist run does not). Only state that is safe when stale: the tool
+     checks file content, runs more when unsure, and updates on every run. A
+     tool that trusts its cache by timestamp alone does not belong in `carry`.
+     The rules are `local_files`': literal file paths, and git must ignore them.
+
+     ```yaml
+     carry:
+       - .testmondata
+     test_scopes:
+       - paths: ["src/**", "tests/**"]
+         command: <the full suite>
+         targeted_command: <the tool's command>
+     ```
+
+   - **Check the command for these.** testmon needs xdist to be fast, and
+     `--testmon-forceselect` because `-m`, `-k`, `--lf` or a `file::test`
+     argument silently turn its selection off. Tests that check committed
+     generated files should always run, since testmon cannot see the import-time
+     code that makes them stale.
+   - **Warn about CI.** Targeted verification leaves the full suite to the
+     merge request's CI. When the repo has no forge remote, sets
+     `ci_checks: false`, or its default chain opens no merge request (like
+     `quick-task`), the full suite then runs nowhere. Say so, and point at the
+     `suite: full` option of the verification task, in a second verification
+     node after `verification`.
+   - **Check that it narrows.** Run the targeted command once to warm it,
+     touch one source file, run it again, and confirm the second run ran far
+     fewer tests than the full command. Do it in the person's own checkout only
+     with their go-ahead, since it writes the tool's state there; otherwise in
+     a scratch worktree.
+   - **No such tool:** say so, and leave both fields out.
+
+   Finish with `kraft repo connect --verify`. It seeds the carried files as a
+   work item would, runs the targeted command against the changes of `HEAD^1`
+   (a repo with a single commit skips that run and says so), and lists each
+   carried file with where it came from and whether git ignores it.
+
+5. **Verify.** First `kraft admin health`: it exits 1 when the server is not
    up, and every check after it needs the server. If it fails, report that
    and stop - `kraft admin start` (or the service) comes first. Then `kraft
    admin doctor` - confirm `mcp server` and the `repo <name>` row both read

@@ -39,17 +39,19 @@ def test_add_prints_the_token_once_and_the_command_to_run_on_the_machine(app, ca
 def test_list_json_is_the_raw_payload(app, capsys):
     _run(capsys, "add", "home")
     code, out = _run(capsys, "list", "--json")
-    assert code == 0 and json.loads(out)["workers"][0]["name"] == "home"
+    assert code == 0 and [w["name"] for w in json.loads(out)["workers"]] == ["local", "home"]
 
 
-def test_list_with_no_machines_says_so(app, capsys):
-    assert _run(capsys, "list") == (0, "no workers\n")
+def test_list_with_no_machines_shows_only_the_local_worker(app, capsys):
+    code, out = _run(capsys, "list")
+    (_header, row) = out.splitlines()
+    assert code == 0 and row.split()[:5] == ["local", "this", "machine", "online", "0/-"]
 
 
 def test_remove_forgets_the_machine(app, capsys):
     _run(capsys, "add", "home")
     assert _run(capsys, "remove", "home")[0] == 0
-    assert _run(capsys, "list")[1] == "no workers\n"
+    assert "home" not in _run(capsys, "list")[1]
     code, out = _run(capsys, "remove", "home")
     assert code == 1 and "home" in out
 

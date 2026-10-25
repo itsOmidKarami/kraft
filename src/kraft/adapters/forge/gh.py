@@ -665,7 +665,9 @@ class GhCli(mr_ops.CliWaits):
             started="createdAt",
         )
         if not current:
-            return CIStatus(state="pending", url="", jobs=(f"no run for {head_sha[:7]} yet",))
+            return CIStatus(
+                state="pending", url="", jobs=(f"no run for {head_sha[:7]} yet",), no_checks=True
+            )
         jobs = tuple(
             f"{r.get('name')}: {r.get('conclusion') or r.get('status') or 'PENDING'}"
             for r in current

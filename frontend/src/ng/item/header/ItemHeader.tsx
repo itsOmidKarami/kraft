@@ -170,7 +170,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
     ...(hs.main ? [] : hs.panel.filter((it) => it !== "archive" || archivable(item)).map((it): MenuItem => ({ label: PANEL_LABEL[it], onSelect: () => onItem(it) }))),
   ];
 
-  const endedAt = ended ? item.updated_at : null;
+  const endedAt = ended ? (item.ended_at ?? item.updated_at) : null;
   return (
     <>
     <DraftState />
@@ -181,8 +181,8 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
           <span className="item-dot" aria-hidden /> {others} {others === 1 ? "other needs" : "others need"} you
         </Link>
       )}
-      <span className="item-elapsed" title={`Created ${new Date(item.created_at).toLocaleString()}`}>
-        <Clock size={12} aria-hidden /> {elapsedBetween(item.created_at, endedAt, now)}
+      <span className="item-elapsed" title={`Since ${new Date(item.started_at ?? item.created_at).toLocaleString()}`}>
+        <Clock size={12} aria-hidden /> {elapsedBetween(item.started_at ?? item.created_at, endedAt, now)}
       </span>
       {/* Focusable, so the checkout's path in its tip reaches a keyboard as well as a pointer. */}
       {item.in_place && <Badge className="item-inplace" role="note" tabIndex={0} {...hint(item.worktree_path ?? item.repo)}>{IN_YOUR_CHECKOUT}</Badge>}

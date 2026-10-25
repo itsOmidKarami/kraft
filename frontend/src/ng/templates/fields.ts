@@ -27,6 +27,7 @@ const META: Record<string, FieldMeta> = {
   steering: { label: "steering", kind: "list", choices: "steering" },
   scope: { label: "runs", kind: "enum", options: ["once", "each_repository"] },
   execution: { label: "order", kind: "enum", options: ["sequential", "parallel"] },
+  suite: { label: "tests", kind: "enum", options: ["targeted", "full"] },
   skippable: { label: "skippable", kind: "bool" },
   read_only: { label: "read only", kind: "bool" },
   ref: { label: "action", kind: "text", choices: "ref" },

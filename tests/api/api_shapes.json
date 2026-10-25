@@ -398,6 +398,7 @@
      {
       "areas": "_",
       "automated_review": "_",
+      "carry": [],
       "ci_checks": "_",
       "deny_tools": [],
       "env": "_",
@@ -723,6 +724,7 @@
      ],
      "template_id": "_"
     },
+    "ended_at": "_",
     "ended_reason": "_",
     "escalation_session_id": "_",
     "escalation_threads": [],
@@ -767,6 +769,7 @@
     },
     "scope_runs": [],
     "skipped_paths": [],
+    "started_at": "_",
     "status": "_",
     "steerable": "_",
     "step": "_",

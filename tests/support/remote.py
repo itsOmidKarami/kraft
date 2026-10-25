@@ -70,13 +70,14 @@ def workers_file(**machines) -> registry.WorkersFile:
     )
 
 
-async def attach(hub: Hub, machine: Machine, name: str = "gpu") -> None:
-    """Dial `machine` into `hub` over a fresh in-process pair; then wait for it to show online."""
+async def attach(hub: Hub, machine: Machine, name: str = "gpu", caps=protocol.CAPS) -> None:
+    """Dial `machine` into `hub` over a fresh in-process pair, saying it understands `caps`;
+    then wait for it to show online."""
     server, client = memory_pair()
     machine.server_t = server
     machine.accepted = asyncio.create_task(hub.accept(server))
     welcome = await protocol.machine_handshake(
-        client, kraft_version="2.3.0", token=TOKEN, host="box"
+        client, kraft_version="2.3.0", token=TOKEN, host="box", caps=caps
     )
     machine.task = asyncio.create_task(machine.serve(client, welcome))
     await hub.wait_online(name)

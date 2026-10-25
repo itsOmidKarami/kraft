@@ -25,6 +25,7 @@ it.each([
   ["view/title", "kraft.fileWork", "view == kraft.board && !kraft.readOnly"],
   ["view/title", "kraft.toggleAllRepos", "view == kraft.board && !kraft.allRepos"],
   ["view/title", "kraft.showThisRepo", "view == kraft.board && kraft.allRepos"],
+  ["view/title", "kraft.openConfig", "view == kraft.board"],
   ["commandPalette", "kraft.toggleAllRepos", "!kraft.allRepos"],
   ["commandPalette", "kraft.showThisRepo", "kraft.allRepos"],
   ["commandPalette", "kraft.fileWork", "!kraft.readOnly"],

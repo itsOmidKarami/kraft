@@ -11,5 +11,11 @@ export const stateWords = (m: Machine) => (m.online ? "online" : m.reason ? `off
 /** What `give_up_after` means for a machine, in words. */
 export const giveUpWords = (after: string) => (after === "never" ? "never gives up" : `gives up after ${after}`);
 
-/** Slots in use, as "1 of 2". */
-export const slotsWords = (m: Machine) => `${m.slots_used} of ${m.capacity}`;
+/** Slots in use, as "1 of 2"; the local worker has no limit of its own: "1 · no limit". */
+export const slotsWords = (m: Machine) => (m.capacity === null ? `${m.slots_used} · no limit` : `${m.slots_used} of ${m.capacity}`);
+
+/** The row for this machine's own worker, apart from the machines it can dial. */
+export const isLocal = (m: Machine) => m.mode === "local";
+
+/** What the Mode column says: `local` reads as the machine Kraft itself runs on. */
+export const modeWords = (m: Machine) => (isLocal(m) ? "this machine" : m.mode);

@@ -9,8 +9,9 @@ import time
 from pathlib import Path
 
 import pytest
-from support.harness import commit_all, make_repo
+from support.harness import commit_all, git, make_repo, write
 
+from kraft import carried
 from kraft.cli import verify
 
 
@@ -136,6 +137,80 @@ def test_a_local_file_the_repo_does_not_ignore_is_refused_as_a_worker_refuses_it
     assert "local_files: .env not carried" in said
 
 
+@pytest.mark.parametrize(
+    ("ignored", "checkout", "saved", "test_command", "expect_in_said", "ok"),
+    [
+        (
+            True,
+            "co",
+            None,
+            "test -f .testmondata",
+            "carry: .testmondata <- the checkout (git ignores it)",
+            True,
+        ),
+        (
+            True,
+            "co",
+            "saved",
+            "grep -q saved .testmondata",
+            "carry: .testmondata <- the saved copy (git ignores it)",
+            True,
+        ),
+        (True, None, None, "true", "the tool starts cold", True),
+        (
+            False,
+            "co",
+            None,
+            "true",
+            "carry: .testmondata not carried: git does not ignore it",
+            False,
+        ),
+    ],
+    ids=["from-the-checkout", "from-the-saved-copy", "cold", "not-ignored"],
+)
+def test_carry_is_seeded_and_listed_as_a_work_item_would_seed_it(
+    tmp_path, monkeypatch, ignored, checkout, saved, test_command, expect_in_said, ok
+):
+    run_dirs = tmp_path / "run"
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dirs))
+    repo = _repo(tmp_path, {".gitignore": ".testmondata\n"} if ignored else None)
+    if checkout is not None:
+        write(repo, ".testmondata", checkout)
+    if saved is not None:
+        write(tmp_path / "scratch", ".testmondata", saved)
+        carried.save(
+            verify.RunDirs(run_dirs),
+            repo,
+            tmp_path / "scratch",
+            [".testmondata"],
+            tmp_path / "scratch-record.json",
+        )
+    result, said = _verify(_entry(repo, carry=[".testmondata"], test_command=test_command))
+    assert expect_in_said in said
+    assert result is ok, said
+
+
+def test_verify_never_saves_a_carried_copy(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    repo = _repo(tmp_path, {".gitignore": ".testmondata\n"})
+    ok, said = _verify(
+        _entry(repo, carry=[".testmondata"], test_command="sh -c 'echo db > .testmondata'")
+    )
+    assert ok, said
+    store = carried.store_dir(verify.RunDirs(tmp_path / "run"), repo)
+    assert carried.current_generation(store) is None
+
+
+def test_a_command_written_for_a_shell_is_refused_not_run_as_its_first_word(tmp_path):
+    repo = _repo(tmp_path)
+    ran = tmp_path / "ran"
+    entry = _entry(repo, test_scopes=[{"paths": ["**"], "command": f"touch {ran} && true"}])
+    ok, said = _verify(entry)
+    assert not ok
+    assert "runs without a shell" in said and "sh -c '...'" in said
+    assert not ran.exists()
+
+
 def test_an_areas_setup_runs_before_its_scope(tmp_path):
     repo = _repo(tmp_path, {".gitignore": "web-ready\n"})
     area = {
@@ -145,6 +220,59 @@ def test_an_areas_setup_runs_before_its_scope(tmp_path):
     }
     ok, said = _verify(_entry(repo, test_command="true", areas={"web": area}))
     assert ok, said
+
+
+def _targeted(command: str) -> dict:
+    """A scope whose full command passes and whose targeted one is `command`."""
+    return {"paths": ["**"], "command": "true", "targeted_command": command}
+
+
+@pytest.mark.parametrize("where", ["repo-scope", "area-scope"])
+def test_a_targeted_command_is_rehearsed_against_the_last_commit(tmp_path, where):
+    repo = _repo(tmp_path, {"a.txt": "x"})
+    out = tmp_path / "OUT"
+    scope = _targeted(
+        f'sh -c \'cp "$KRAFT_CHANGED_FILES" {out}; echo "$KRAFT_TEST_BASE" > {out}.base\'',
+    )
+    where_scope = (
+        {"test_scopes": [scope]}
+        if where == "repo-scope"
+        else {
+            "areas": {
+                "web": {
+                    "paths": ["a.txt"],
+                    "setup": "true",
+                    "verification": {"test_scopes": [scope]},
+                }
+            }
+        }
+    )
+
+    ok, said = _verify(_entry(repo, **where_scope))
+
+    assert ok, said
+    assert out.read_text() == "a.txt\n"
+    assert Path(f"{out}.base").read_text().strip() == git(repo, "rev-parse", "HEAD^1")
+    assert "test [" in said and "targeted test [" in said
+
+
+def test_a_single_commit_repo_skips_the_targeted_command_and_says_so(tmp_path):
+    repo = make_repo(tmp_path)
+
+    ok, said = _verify(_entry(repo, test_scopes=[_targeted("false")]))
+
+    assert ok, said
+    assert "skipped" in said and "single commit" in said
+    assert "FAILED" not in said
+
+
+def test_a_failing_targeted_command_fails_verify(tmp_path):
+    repo = _repo(tmp_path, {"a.txt": "x"})
+
+    ok, said = _verify(_entry(repo, test_scopes=[_targeted("false")]))
+
+    assert not ok
+    assert "FAILED" in said
 
 
 def test_a_step_that_leaves_files_a_commit_would_take_fails(tmp_path):

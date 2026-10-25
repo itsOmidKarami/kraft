@@ -103,12 +103,14 @@ export interface StorageItem {
 /** One row of `GET /workers`: a machine that may run work item steps (`workers.yaml`). */
 export interface Machine {
   name: string;
-  mode: "ssh" | "dial-in";
+  /** `local` is this machine's own worker, always listed first and never removable. */
+  mode: "ssh" | "dial-in" | "local";
   online: boolean;
-  /** Why it is offline; empty while online. */
-  reason: string;
+  /** Why it is offline; empty or null while online. */
+  reason: string | null;
   slots_used: number;
-  capacity: number;
+  /** Null for the local worker: only `max_concurrent` limits local work. */
+  capacity: number | null;
   /** The repos it is limited to; null for every repo. */
   repos: string[] | null;
   last_seen: string | null;

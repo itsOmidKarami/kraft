@@ -70,7 +70,7 @@ def test_detail_scope_runs_is_empty_without_a_changed_test_scope_task(client, re
     assert client.get(f"/api/work-items/{wid}").json()["scope_runs"] == []
 
 
-def _picks(wid, repository, rnd, commands) -> None:
+def _picks(wid, repository, rnd, commands, targeted=None) -> None:
     """A dispatch's picks, as the builtin records them before it runs any scope."""
     _run(
         lambda c: events.append(
@@ -83,6 +83,7 @@ def _picks(wid, repository, rnd, commands) -> None:
                 "repository": repository,
                 "round": rnd,
                 "commands": commands,
+                "targeted": targeted or {},
             },
         )
     )
@@ -333,3 +334,77 @@ def test_detail_names_no_passes_for_a_node_that_ran_once(client, repo, tmp_path)
     wid = _verified_item(client, repo, tmp_path, [("fe-cmd", "done", 0)])
 
     assert client.get(f"/api/work-items/{wid}").json()["node_passes"] == {}
+
+
+_CI = "just ci-test"
+_TARGETED = "just test-targeted"
+_BOTH = {"paths": ["**"], "command": _CI, "targeted_command": _TARGETED}
+
+
+@pytest.mark.parametrize(
+    ("scope", "picks", "sessions", "expected"),
+    [
+        pytest.param(
+            _BOTH,
+            [(0, [_CI], {_CI: _TARGETED})],
+            [("s0", _TARGETED, "done", 0)],
+            [(0, _TARGETED, _CI, True, None)],
+            id="picked-and-started",
+        ),
+        pytest.param(
+            _BOTH,
+            [(0, [_CI], {_CI: _TARGETED})],
+            [],
+            [(0, _TARGETED, _CI, True, True)],
+            id="picked-not-started",
+        ),
+        pytest.param(
+            _BOTH,
+            [(0, [_CI], {_CI: _TARGETED}), (1, [_CI], {})],
+            [("s0", _TARGETED, "done", 0), ("s1", _CI, "done", 1)],
+            [(0, _TARGETED, _CI, True, None), (1, _CI, _CI, None, None)],
+            id="targeted-then-full",
+        ),
+        pytest.param(
+            {"paths": ["**"], "command": _CI},
+            [(0, [_CI], {_CI: _TARGETED})],
+            [("s0", _TARGETED, "done", 0)],
+            [(0, _TARGETED, _CI, True, None)],
+            id="config-since-dropped-it",
+        ),
+    ],
+)
+def test_detail_scope_runs_maps_a_targeted_command_to_its_scope(
+    client, repo, tmp_path, scope, picks, sessions, expected
+):
+    """A scope is its full command in every round: the entry names the command that ran, the scope
+    it belongs to, and whether it was the targeted one, and a started targeted command is not also
+    pending."""
+    wid = _verified_item(client, repo, tmp_path, [], test_scopes=[scope])
+    for rnd, commands, targeted in picks:
+        _picks(wid, "ws", rnd, commands, targeted)
+    for sid, command, status, rnd in sessions:
+        _session(tmp_path, wid, sid, command, status, rnd)
+
+    got = client.get(f"/api/work-items/{wid}").json()["scope_runs"]
+
+    assert [
+        (r["round"], r["command"], r["identity"], r.get("targeted"), r.get("pending")) for r in got
+    ] == expected
+
+
+def test_detail_test_result_marks_a_scope_that_ran_its_targeted_command(client, repo, tmp_path):
+    wid = _verified_item(
+        client,
+        repo,
+        tmp_path,
+        [(_TARGETED, "done", 0), ("be-cmd", "done", 0)],
+        test_scopes=[
+            {"paths": ["frontend/**"], "command": "fe-cmd", "targeted_command": _TARGETED},
+            {"paths": ["backend/**"], "command": "be-cmd"},
+        ],
+    )
+
+    result = client.get(f"/api/work-items/{wid}").json()["test_result"]
+
+    assert [s.get("targeted") for s in result["scopes"]] == [True, None]

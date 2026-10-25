@@ -515,10 +515,34 @@ class TaskBase(BaseModel):
         return data
 
 
+class TestSuite(StrEnum):
+    """Which of a test scope's commands `kraft.verify_changed_test_scopes`
+    runs: its `targeted_command` where it has one (`TARGETED`), or always its
+    full `command` (`FULL`)."""
+
+    __test__ = False  # pytest would collect a class named `Test*` imported into a test module
+
+    TARGETED = "targeted"
+    FULL = "full"
+
+
 class BuiltinTask(TaskBase):
     kind: Literal[TaskKind.BUILTIN]
     ref: Annotated[BuiltinAction, _LOOSE]
     execution: Annotated[ExecutionMode, _LOOSE] = ExecutionMode.SEQUENTIAL
+    suite: Annotated[TestSuite, _LOOSE] = TestSuite.TARGETED
+
+    @model_validator(mode="after")
+    def _suite_only_on_the_verify_task(self) -> Self:
+        # The default is not refused: a stored chain dumps it onto every task.
+        if self.ref is not BuiltinAction.VERIFY_CHANGED_TEST_SCOPES and (
+            self.suite is not TestSuite.TARGETED
+        ):
+            raise ValueError(
+                f"suite: only {BuiltinAction.VERIFY_CHANGED_TEST_SCOPES.value} takes a suite, "
+                f"not {self.ref.value}"
+            )
+        return self
 
 
 class AgentTask(TaskBase):

@@ -15,8 +15,10 @@ from contextlib import contextmanager
 import psutil
 import pytest
 from support.harness import fails_once, fake_docker_bin
+from support.local_worker import ScriptedLink
 
 from kraft import events, store
+from kraft.remote import local_link
 from kraft.worker import reattach, refstore
 
 #: An agent node, then a subprocess node: the two kinds `_adopted_status`
@@ -192,14 +194,8 @@ async def test_unconfirmed_identity_records_which_check_failed(item, database, r
 async def test_a_young_ambiguous_session_gets_one_retry(
     item, database, run_dirs, monkeypatch, confirms, old, expected, calls
 ):
-    answers = iter(confirms)
-    seen = []
-
-    def fake_identity_ok(pid, pid_start_time):
-        seen.append(pid)
-        return next(answers)
-
-    monkeypatch.setattr(reattach, "_identity_ok", fake_identity_ok)
+    link = ScriptedLink(confirms)
+    local_link.install(link)
     with _sleeper() as (proc, _):
         await item.session("s1", IMPLEMENT, running=(proc.pid, 0.0))
         if old:
@@ -212,7 +208,7 @@ async def test_a_young_ambiguous_session_gets_one_retry(
         await asyncio.gather(*adopted.values(), return_exceptions=True)
 
     assert getattr(summary, expected) == ["w1/s1"]
-    assert len(seen) == calls
+    assert link.calls == [["w1/s1"]] * calls
 
 
 async def test_many_young_sessions_share_one_grace_sleep(item, database, run_dirs, monkeypatch):
@@ -228,7 +224,7 @@ async def test_many_young_sessions_share_one_grace_sleep(item, database, run_dir
         sleeps.append(delay)
         return await real_sleep(0, *a, **kw)
 
-    monkeypatch.setattr(reattach, "_identity_ok", lambda pid, pst: False)
+    local_link.install(ScriptedLink([False, False]))
     monkeypatch.setattr(reattach.asyncio, "sleep", counting_sleep)
     for n in range(5):
         await item.session(f"s{n}", IMPLEMENT, running=(90000 + n, 123.0))

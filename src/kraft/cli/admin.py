@@ -41,7 +41,6 @@ from kraft.paths import (
     pre_2_config_dir,
 )
 from kraft.policy import CarriedPolicy
-from kraft.vocab import WorkItemStatus
 
 #: Seconds uvicorn gives in-flight requests and open sockets once told to stop.
 _GRACEFUL_SHUTDOWN_S = 10
@@ -231,6 +230,19 @@ def _cmd_uninstall_service(ns: argparse.Namespace) -> None:
         print(f"kraft: removed {path}")
     else:
         raise SystemExit(f"kraft admin uninstall-service: unsupported platform {sys.platform}")
+    _say_worker_outlives()
+
+
+def _say_worker_outlives() -> None:
+    """Removing the unit stops the server, not the local worker: it was started outside the
+    unit's cgroup (or its process group) so a stop leaves the steps running."""
+    from kraft.remote import local_serve
+
+    if local_serve.answering(_pid_path().parent):
+        print(
+            "kraft: the local worker is still finishing its steps; "
+            "it exits on its own when they end"
+        )
 
 
 def adopt_pre_2_home(in_use: Path) -> bool:
@@ -1217,33 +1229,45 @@ _LIST_TIMEOUT = 2.0
 
 
 def _confirm_running_agents(
-    ns: argparse.Namespace, doing: str, *, ask: bool, declined: str = "nothing was restarted"
+    ns: argparse.Namespace,
+    doing: str,
+    *,
+    ask: bool,
+    declined: str = "nothing was restarted",
+    now: bool = False,
+    keeps: bool = False,
 ) -> None:
     """Name the active items before a stop ends their agents, and, with `ask`,
     let a person at a terminal back out.
 
-    A clean stop cancels every item's task, and the task kills its agent's
-    process group on the way out, so the next start finds the session dead
-    and stops the item (`reattach`). Without a terminal, or with `--yes`,
+    A clean stop leaves the local steps of worktree items running, for the
+    next start to adopt; only an item running in place ends with it (its
+    session runs in the person's own checkout), and the next start finds that
+    session dead and stops the item (`reattach`). `now` is a stop that ends
+    every one (`stop --now`). With `keeps`, the steps left running are counted
+    (`stop` says how many). Without a terminal, or with `--yes`,
     this only warns: a script must not hang on a question. `declined` is what
     answering no left undone; answering no exits 1. A server that does
     not answer has nothing to list, and one that accepts the connection but
     never replies gets `_LIST_TIMEOUT`, not the client's 30 s: a wedged server
     is the usual reason to stop one, and the stop must not wait on it."""
     try:
-        items = asyncio.run(
-            asyncio.wait_for(client.list_work_items(WorkItemStatus.ACTIVE), timeout=_LIST_TIMEOUT)
-        )
+        items = asyncio.run(asyncio.wait_for(client.active_items(), timeout=_LIST_TIMEOUT))
     except TimeoutError:
         print(
             f"kraft: the server did not list its active items within {_LIST_TIMEOUT:g}s; "
-            "any agent it is running ends with it",
+            "any item it runs in place ends with it" + ("" if now else ", and local steps stay"),
             file=sys.stderr,
         )
         return
     except Exception:
         return
-    lines = answers.running_agents_warning(doing, items)
+    if keeps and not now:
+        # An item running in place has a session in the count, and that one stops.
+        kept = _kept_local_steps() - sum(1 for item in items if item.get("in_place"))
+        if kept > 0:
+            print(f"kraft: {answers.kept_steps_note(kept)}", file=sys.stderr)
+    lines = answers.running_agents_warning(doing, items, now=now)
     if not lines:
         return
     print(f"kraft: {lines[0]}", *lines[1:], sep="\n", file=sys.stderr)
@@ -1254,12 +1278,52 @@ def _confirm_running_agents(
         raise SystemExit(1)
 
 
+def _kept_local_steps() -> int:
+    """How many local steps a clean stop leaves running: the `local` row's `slots_used`. 0 when
+    the server does not say."""
+    try:
+        workers = asyncio.run(asyncio.wait_for(client.list_workers(), timeout=_LIST_TIMEOUT))
+        local = next(w for w in workers["workers"] if w["name"] == "local")
+        return int(local.get("slots_used") or 0)
+    except Exception:  # noqa: BLE001 -- a count that cannot be had is not worth stopping for
+        return 0
+
+
 def _ask(question: str) -> str:
     """The answer to `question`, asked on stderr beside the listing it
     follows. `input()` writes its prompt to stdout, so `kraft admin restart >
     log` sat waiting on a question that went into the file."""
     print(question, end="", file=sys.stderr, flush=True)
     return sys.stdin.readline()
+
+
+def _mark_stop_now(run_dir: Path | None = None) -> None:
+    """Tell the server about to be stopped that this stop ends the local steps it would leave
+    running (`RunDirs.stop_now`)."""
+    RunDirs(run_dir or _pid_path().parent).stop_now.write_text("")
+
+
+def _running_server_version() -> str | None:
+    """The version of the server answering now, or None when none does."""
+    try:
+        payload = asyncio.run(asyncio.wait_for(client.health(), timeout=_LIST_TIMEOUT))
+    except Exception:  # noqa: BLE001 -- no server, or one that is wedged: nothing to compare
+        return None
+    return payload.get("version")
+
+
+def _is_dev(version: str) -> bool:
+    return ".dev" in version or version.endswith("+source")
+
+
+def _crosses_major(installed: str, target: str) -> bool:
+    """Whether going from `installed` to `target` changes the major version. Never for a dev
+    install (a checkout or a dev build), whose number says nothing about its protocol."""
+    from kraft import update
+
+    if _is_dev(installed) or _is_dev(target):
+        return False
+    return update._parts(installed)[:1] != update._parts(target)[:1]
 
 
 def _cmd_stop(ns: argparse.Namespace, *, warn: bool = True) -> None:
@@ -1273,8 +1337,11 @@ def _cmd_stop(ns: argparse.Namespace, *, warn: bool = True) -> None:
     if pid is None:
         print("kraft: no server running")
         return
+    now = getattr(ns, "now", False)
     if warn:
-        _confirm_running_agents(ns, "stopping", ask=False)
+        _confirm_running_agents(ns, "stopping", ask=False, now=now, keeps=True)
+    if now:
+        _mark_stop_now(pid_path.parent)
     os.kill(pid, signal.SIGTERM)
     # 15s, not 5: the poll must not expire before the graceful-shutdown backstop
     # it is waiting on (`_serve`, `_GRACEFUL_SHUTDOWN_S`).
@@ -1545,9 +1612,31 @@ def _cmd_restart(ns: argparse.Namespace) -> None:
         why = f" (waiting: {state['blocked'][0]})" if state.get("blocked") else ""
         print(f"kraft: Kraft will restart once nothing is running{why}")
         return
+    _refuse_restart_across_a_major()
     _confirm_running_agents(ns, "restarting", ask=True)
     _refuse_restart_with_no_server()
     _restart(ns)
+
+
+def _refuse_restart_across_a_major() -> None:
+    """A restart onto a new major version while an item is active: the new server cannot work
+    with the old one's steps, so they would end. `--when-free` waits for them."""
+    from kraft import update
+
+    running = _running_server_version()
+    if running is None or not _crosses_major(running, update.installed()):
+        return
+    try:
+        items = asyncio.run(asyncio.wait_for(client.active_items(), timeout=_LIST_TIMEOUT))
+    except Exception:  # noqa: BLE001
+        return
+    if items:
+        print(
+            "kraft: the installed kraft is a new major version: kraft admin restart --when-free "
+            "waits for running steps, kraft admin stop --now && kraft admin start stops them",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 def _refuse_restart_with_no_server() -> None:
@@ -1565,6 +1654,8 @@ def _refuse_restart_with_no_server() -> None:
 def _restart(ns: argparse.Namespace) -> None:
     """`_cmd_restart` once its question about running agents is answered:
     `update --restart` asks it before installing, not after."""
+    if getattr(ns, "now", False) and _read_pid(_pid_path()) is not None:
+        _mark_stop_now()
     if _service_installed():
         _restart_service()
         return
@@ -1899,9 +1990,24 @@ def _cmd_update(ns: argparse.Namespace) -> None:
         newest = "the newest release" + (f" on the {channel} channel" if named else "")
         print(f"kraft {here} is up to date ({release.tag} is {newest})")
         return
+    now = getattr(ns, "now", False)
+    if now:
+        ns.restart = True
     if ns.restart:
+        running = _running_server_version()
+        if running is not None and not now and _crosses_major(running, release.tag):
+            # The new major cannot take over the steps of the old: they finish first.
+            ns.when_free = release.tag
+            _update_when_free(ns)
+            print(
+                "kraft: it is a new major version, so running steps are not interrupted; "
+                "kraft admin update --now installs and restarts at once"
+            )
+            return
         # Before installing, so answering no leaves nothing half done.
-        _confirm_running_agents(ns, "restarting", ask=True, declined="nothing installed or stopped")
+        _confirm_running_agents(
+            ns, "restarting", ask=True, declined="nothing installed or stopped", now=now
+        )
     print(f"kraft {here} -> {release.tag}")
     update_prechecks(release, interactive=True, assume_yes=ns.yes, channel=channel)
     code = update.perform(release)
@@ -1934,27 +2040,35 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
 
     stop = subs.add_parser(
         "stop",
-        help="stop the running server; any agent it is running stops with it",
+        help="stop the running server; local steps of worktree items keep running",
         description=(
-            "Stop the running server. Any agent it is running stops with it, and each "
-            "of those items stops when Kraft starts again. Pause running items first "
-            "(kraft item pause ID) and resume them after. This lists the active items, "
-            "but does not ask."
+            "Stop the running server. The steps it runs on this machine for worktree "
+            "items keep running, and the next start picks them up; until Kraft is back "
+            "nothing answers their permission prompts or enforces their caps. A step of "
+            "an item running in place stops with the server, and the item stops when "
+            "Kraft starts again. --now stops every step, as a stop did before. This "
+            "lists the items that stop, but does not ask."
         ),
+    )
+    stop.add_argument(
+        "--now",
+        action="store_true",
+        help="also stop the steps that would keep running; each item stops when Kraft starts again",
     )
     stop.set_defaults(func=_cmd_stop)
 
     restart = subs.add_parser(
         "restart",
         help=(
-            "stop then start again, the same way it was running; this ends any running "
-            "agent, so pause running items first and retry any it stopped"
+            "stop then start again, the same way it was running; local steps of worktree "
+            "items keep running, those of items running in place stop"
         ),
         description=(
-            "Stop then start again, the same way it was running. This ends any running "
-            "agent, and each of those items stops when Kraft starts again: pause running "
-            "items first (kraft item pause ID) and resume them after, or retry them. It "
-            "lists the active items first and, in a terminal, asks before going on. With "
+            "Stop then start again, the same way it was running. The steps running on "
+            "this machine for worktree items keep running and the new server picks them "
+            "up. A step of an item running in place stops, and that item stops when Kraft "
+            "starts again: pause it first (kraft item pause ID) and resume it after, or "
+            "retry it. It lists those items first and, in a terminal, asks before going on. With "
             "no server running it starts nothing and exits 1 (start one with kraft admin "
             "start). A server running attached to a terminal is stopped and not started "
             "again, since only that terminal can bring it back, and restart exits 1."
@@ -2017,7 +2131,16 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
         action="store_true",
         help=(
             "restart a running server after a successful update, the same way it was "
-            "running; this ends any running agent, so pause running items first"
+            "running; steps of worktree items keep running. An update to a new major "
+            "version waits until nothing is running instead (see --now)"
+        ),
+    )
+    update_p.add_argument(
+        "--now",
+        action="store_true",
+        help=(
+            "install and restart at once, ending every running step, including those a "
+            "restart leaves running and those an update to a new major version waits for"
         ),
     )
     update_p.add_argument(

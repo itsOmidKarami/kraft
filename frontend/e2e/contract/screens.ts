@@ -246,5 +246,5 @@ export const STATES: State[] = [
   // Phone
   { area: "phone", state: "node-yaml", viewport: "phone", app: (p) => app(p, item("running", "/nodes/verification"), { noShell: true, ready: async (pg) => { await pg.getByRole("tab", { name: "YAML" }).click(); await pg.waitForTimeout(400); } }) },
   { area: "phone", state: "item-capped-limit", viewport: "phone", app: (p) => app(p, item("capped"), { noShell: true, tweak: withCapLimit }) },
-  { area: "phone", state: "board-capped", viewport: "phone", app: (p) => app(p, "/", { noShell: true, ready: async (pg) => { await pg.getByRole("button", { name: /Raise (cap|budget)/ }).first().scrollIntoViewIfNeeded(); } }) },
+  { area: "phone", state: "board-capped", viewport: "phone", app: (p) => app(p, "/", { noShell: true, ready: async (pg) => { await pg.getByRole("button", { name: /Raise (cap|budget)/ }).first().evaluate((el) => el.scrollIntoView({ block: "nearest" })); } }) },
 ];

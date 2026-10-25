@@ -29,18 +29,26 @@ export const models = {
   },
 };
 
-type Scope = { paths: string[]; command: string };
-/** `a/**, b/** => pytest -q; c/** => npm test` ↔ `Repo.test_scopes`. */
+type Scope = { paths: string[]; command: string; targeted_command?: string };
+/** `a/**, b/** => pytest -q => pytest --lf; c/** => npm test` ↔ `Repo.test_scopes`: paths, the
+ *  full command, and optionally the command that runs only what a change affects. The second
+ *  arrow needs spaces around it, so a command holding a bare `=>` stays whole. */
 export const scopes = {
-  show: (v: unknown) => ((v as Scope[] | null) ?? []).map((s) => `${s.paths.join(", ")} => ${s.command}`).join("; "),
+  show: (v: unknown) =>
+    ((v as Scope[] | null) ?? [])
+      .map((s) => `${s.paths.join(", ")} => ${s.command}${s.targeted_command ? ` => ${s.targeted_command}` : ""}`)
+      .join("; "),
   parse: (text: string): Parsed => {
     const out: Scope[] = [];
     for (const part of text.split(";").map((s) => s.trim()).filter(Boolean)) {
       const at = part.indexOf("=>");
       const paths = at < 0 ? [] : items(part.slice(0, at));
-      const command = at < 0 ? "" : part.slice(at + 2).trim();
-      if (!paths.length || !command) return { error: `"${part}" is not paths => command.` };
-      out.push({ paths, command });
+      const rest = at < 0 ? "" : part.slice(at + 2).trim();
+      const more = /\s=>(\s|$)/.exec(rest);
+      const command = more ? rest.slice(0, more.index).trim() : rest;
+      const targeted = more ? rest.slice(more.index + more[0].length).trim() : null;
+      if (!paths.length || !command || targeted === "") return { error: `"${part}" is not paths => command.` };
+      out.push(targeted ? { paths, command, targeted_command: targeted } : { paths, command });
     }
     return { value: out.length ? out : null };
   },

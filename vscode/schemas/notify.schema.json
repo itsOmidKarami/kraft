@@ -88,6 +88,7 @@
           "permission_decision",
           "plan_progress",
           "policy_override_changed",
+          "post_merge_ci_absent",
           "rate_limit_hit",
           "read_only_violated",
           "remote_docs_conflict",

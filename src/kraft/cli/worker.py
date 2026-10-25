@@ -49,9 +49,9 @@ def _render_list(result: dict) -> str:
         table.append(
             (
                 w["name"],
-                w["mode"],
+                "this machine" if w["mode"] == "local" else w["mode"],
                 "online" if w["online"] else f"offline: {w['reason']}",
-                f"{w['slots_used']}/{w['capacity']}",
+                f"{w['slots_used']}/{'-' if w['capacity'] is None else w['capacity']}",
                 ",".join(w["repos"]) if w["repos"] else "all",
                 _seen(w["last_seen"]),
                 w["kraft_version"] or "-",
@@ -137,6 +137,21 @@ def _serve_daemon(version: str) -> None:
     asyncio.run(serve())
 
 
+def _cmd_local(ns: argparse.Namespace) -> None:
+    from kraft.remote import local_serve
+
+    async def serve() -> None:
+        stop = asyncio.Event()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with contextlib.suppress(NotImplementedError):
+                asyncio.get_running_loop().add_signal_handler(sig, stop.set)
+        await local_serve.serve(
+            Path(ns.run_dir), kraft_version=update.installed(), stop=stop, install=ns.install
+        )
+
+    asyncio.run(serve())
+
+
 def _cmd_attach(ns: argparse.Namespace) -> None:
     from kraft.remote import standin
 
@@ -213,3 +228,8 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
     attach_p.add_argument("--item", required=True, help="the work item id")
     attach_p.add_argument("--session", required=True, help="the session id")
     attach_p.set_defaults(func=_cmd_attach)
+
+    local_p = verbs.add_parser("local")  # started by the server; no help line, so not listed
+    local_p.add_argument("--run-dir", required=True, help="the server's run directory")
+    local_p.add_argument("--install", help="the install id its socket is named for (the server's)")
+    local_p.set_defaults(func=_cmd_local)

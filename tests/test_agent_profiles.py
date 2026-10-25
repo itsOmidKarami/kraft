@@ -94,7 +94,7 @@ def test_the_shipped_harnesses_file_ships_deep_strong_and_fast():
         {"claude": "sonnet", "codex": "gpt-5.6-terra"},
         "high",
     )
-    assert (profiles["fast"].model, profiles["fast"].effort) == ({"claude": "haiku"}, "low")
+    assert (profiles["fast"].model, profiles["fast"].effort) == ({"claude": "haiku"}, "medium")
 
 
 def test_an_absent_profiles_section_is_an_empty_table():
@@ -550,7 +550,7 @@ TRIAGE = (
     "merge_request_feedback.review_feedback.triage",
     "claude",
     "haiku",
-    "low",
+    "medium",
     None,
 )
 _FEEDBACK_REPAIR = next(

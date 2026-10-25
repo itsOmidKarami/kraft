@@ -223,9 +223,12 @@ def test_abandon_in_place_stops_krafts_own_session_and_nothing_of_the_persons(cl
     from kraft import store
 
     wid = _paused(client, repo, in_place=True)
-    sleep = [sys.executable, "-c", "import time; time.sleep(60)"]
-    agent = subprocess.Popen(sleep, cwd=repo, start_new_session=True)
+    sleep = [sys.executable, "-c", "import time; print(flush=True); time.sleep(60)"]
+    agent = subprocess.Popen(sleep, cwd=repo, start_new_session=True, stdout=subprocess.PIPE)
     theirs = subprocess.Popen(sleep, cwd=repo, start_new_session=True)
+    # Started, not starting: a SIGINT that lands while Python is still importing can be
+    # swallowed ("Exception ignored while calling weakref callback") and leave it sleeping.
+    agent.stdout.readline()
     conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
     conn.row_factory = sqlite3.Row
     started = psutil.Process(agent.pid).create_time()
@@ -256,3 +259,4 @@ def test_abandon_in_place_stops_krafts_own_session_and_nothing_of_the_persons(cl
         for p in (agent, theirs):
             p.kill()
             p.wait()
+        agent.stdout.close()

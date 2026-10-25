@@ -167,10 +167,15 @@ def test_the_stop_button_interrupts_the_command(console, kraft_is):
     )
 
 
-def test_a_popped_screen_does_not_strand_the_command(console, kraft_is):
+def test_a_popped_screen_does_not_strand_the_command(console, kraft_is, tmp_path):
     """Textual cancels the workers of a screen it pops. The command's end must
     not depend on the worker that asked for it."""
-    kraft_is("import time; time.sleep(0.5); print('done')")
+    # Held until both screens are popped: a fixed sleep could finish first on a loaded
+    # runner, and the wait for the command's first line would then never match.
+    go = tmp_path / "go"
+    kraft_is(
+        f"import os, time\nwhile not os.path.exists({str(go)!r}): time.sleep(0.01)\nprint('done')"
+    )
 
     class Asker(Screen):
         def on_mount(self) -> None:
@@ -181,6 +186,7 @@ def test_a_popped_screen_does_not_strand_the_command(console, kraft_is):
         await console.until(pilot, lambda: console.output(app)[-1:] == ["kraft view list"])
         await app.pop_screen()  # the panel the command opened over it
         await app.pop_screen()  # and the screen itself
+        go.touch()
         await console.until(pilot, lambda: app.command is None)
         return await app.run_command(["view", "list"]), console.output(app)
 

@@ -38,6 +38,7 @@ from kraft import builtins as builtins_mod
 from kraft import config as config_mod
 from kraft import detect
 from kraft.adapters.forge.git import LOCK_COMMANDS
+from kraft.paths import RunDirs, default_run_dir
 from kraft.worker.env import TEST_ENV, worker_env
 
 #: Lines of a failed command's output shown; the rest is in the log it names.
@@ -139,31 +140,67 @@ def _changed(worktree: Path, *, setup: bool = False) -> tuple[set[str], set[str]
     return changed, installs
 
 
-def _scopes(entry: config_mod.RepoEntry) -> list[tuple[str, str | None, str]]:
-    """(label, setup to run first, command) per test scope, the repository's
-    then each area's -- `dispatch._select_scopes`' table, with every scope
-    selected, as a change touching everything would."""
-    scopes = [(", ".join(s.paths), None, s.command) for s in entry.test_scopes or ()]
+def _scopes(entry: config_mod.RepoEntry) -> list[tuple[str, str | None, str, str | None]]:
+    """(label, setup to run first, command, targeted command) per test scope,
+    the repository's then each area's -- `dispatch._select_scopes`' table, with
+    every scope selected, as a change touching everything would."""
+    scopes = [
+        (", ".join(s.paths), None, s.command, s.targeted_command) for s in entry.test_scopes or ()
+    ]
     if not scopes and entry.test_command:
-        scopes = [("**", None, entry.test_command)]
+        scopes = [("**", None, entry.test_command, None)]
     for name, area in entry.areas.items():
         for s in (area.get("verification") or {}).get("test_scopes") or []:
             scopes.append(
-                (f"area {name}: {', '.join(s['paths'])}", area.get("setup"), s["command"])
+                (
+                    f"area {name}: {', '.join(s['paths'])}",
+                    area.get("setup"),
+                    s["command"],
+                    s.get("targeted_command"),
+                )
             )
     return scopes
 
 
-def _steps(entry: config_mod.RepoEntry, say) -> tuple[list[tuple[str, list[str] | str]], bool]:
-    """The commands to run, in order, and whether the entry declares enough
-    for a work item to start at all."""
+def _change(worktree: Path, logs: Path) -> dict[str, str] | None:
+    """What a targeted command is handed in place of a work item's change: the
+    last commit, against its first parent (so a merge commit works). The paths
+    go in a file beside the logs, outside the worktree, as a work item's do.
+    None for a repo with a single commit, which has no change to hand."""
+    base = config_mod.git_read(
+        worktree, "rev-parse", "--verify", "-q", "HEAD^1", expected_failure=True
+    )
+    if not base:
+        return None
+    listed = config_mod.git_read(
+        worktree,
+        "-c",
+        "core.quotePath=false",
+        "diff",
+        "--name-only",
+        "--no-renames",
+        "HEAD^1",
+        "HEAD",
+        strip=False,
+    )
+    changed = logs / "changed-files"
+    changed.write_text(listed or "", encoding="utf-8")
+    return {"KRAFT_TEST_BASE": base, "KRAFT_CHANGED_FILES": str(changed)}
+
+
+def _steps(
+    entry: config_mod.RepoEntry, say, change: dict[str, str] | None
+) -> tuple[list[tuple[str, list[str] | str, dict[str, str] | None]], bool]:
+    """The commands to run, in order, each with the extra environment of a
+    targeted step (`change`, see `_change`), and whether the entry declares
+    enough for a work item to start at all."""
     ok = True
-    steps: list[tuple[str, list[str] | str]] = []
+    steps: list[tuple[str, list[str] | str, dict[str, str] | None]] = []
     if entry.setup_command is None:
         say("  setup: none declared -- a work item on this repo stops before it starts")
         ok = False
     elif entry.setup_command:
-        steps.append(("setup", entry.setup_command))
+        steps.append(("setup", entry.setup_command, None))
     else:
         say('  setup: "" (nothing to prepare)')
     scopes = _scopes(entry)
@@ -174,11 +211,31 @@ def _steps(entry: config_mod.RepoEntry, say) -> tuple[list[tuple[str, list[str] 
             say("  tests: none declared -- verify stops every work item here")
             ok = False
     ran_setups: set[str] = set()
-    for label, area_setup, command in scopes:
+    for label, area_setup, command, targeted in scopes:
+        refused = [
+            (cmd, op)
+            for cmd in (area_setup, command, targeted)
+            if cmd and (op := config_mod.shell_operator(cmd)) is not None
+        ]
+        for cmd, op in refused:
+            say(
+                f"  test [{label}]: {cmd!r} runs without a shell, so {op!r} is passed to it "
+                "as an argument and the rest never runs; write it as sh -c '...' in repos.yaml"
+            )
+            ok = False
+        if refused:
+            continue
         if area_setup and area_setup not in ran_setups:
             ran_setups.add(area_setup)
-            steps.append((f"area setup ({label})", shlex.split(area_setup)))
-        steps.append((f"test [{label}]", shlex.split(command)))
+            steps.append((f"area setup ({label})", shlex.split(area_setup), None))
+        steps.append((f"test [{label}]", shlex.split(command), None))
+        if targeted and change is None:
+            say(
+                f"  targeted test [{label}]: skipped: the repo has a single commit, "
+                "so there is no change to hand it"
+            )
+        elif targeted:
+            steps.append((f"targeted test [{label}]", shlex.split(targeted), change))
     return steps, ok
 
 
@@ -228,6 +285,45 @@ def verify(stored: dict, *, say=print, timeout_minutes: float = 30, on_host: boo
     return ok
 
 
+def _seed_carry(entry, repo, worktree, say) -> bool:
+    """Seed the `carry` files as a work item's worktree is seeded, and say where
+    each came from. False when git does not ignore one, which a work item would
+    refuse. Never saves a copy back."""
+    if not entry.carry:
+        return True
+    run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()))
+    carry_in = builtins_mod._carry_set(run_dirs, repo, worktree, list(entry.carry), None)
+    where = "saved copy" if carry_in.source == "saved" else "checkout"
+    if carry_in.torn:
+        say("  carry: the checkout's files changed while they were copied; the tool starts cold")
+    ok = True
+    for rel in entry.carry:
+        if rel in carry_in.refused or (
+            rel not in carry_in.carried
+            and not carry_in.torn
+            and not builtins_mod._is_ignored(worktree, rel)
+        ):
+            say(
+                f"  carry: {rel} not carried: git does not ignore it, "
+                "so a work item would refuse it"
+            )
+            ok = False
+        elif rel in carry_in.carried:
+            say(f"  carry: {rel} <- the {where} (git ignores it)")
+        elif carry_in.torn:
+            continue
+        elif carry_in.source == "none":
+            say(
+                f"  carry: {rel} <- no saved copy and none in the checkout; "
+                "the tool starts cold (git ignores it)"
+            )
+        else:
+            say(
+                f"  carry: {rel} <- not in the {where}; the tool starts without it (git ignores it)"
+            )
+    return ok
+
+
 def _rehearse(entry, repo, worktree, env, logs, timeout_minutes, say) -> bool:
     # The worker's own copy, with its guards: a file the repo does not
     # ignore, or one that would land outside the worktree, is not carried.
@@ -235,16 +331,17 @@ def _rehearse(entry, repo, worktree, env, logs, timeout_minutes, say) -> bool:
     ok = not refused
     for rel in refused:
         say(f"  local_files: {rel} not carried: it is not a file, or the repo does not ignore it")
+    ok = _seed_carry(entry, repo, worktree, say) and ok
     baseline, installed = _changed(worktree)
-    steps, declared = _steps(entry, say)
+    steps, declared = _steps(entry, say, _change(worktree, logs))
     ok = ok and declared
-    for n, (label, argv) in enumerate(steps):
+    for n, (label, argv, extra) in enumerate(steps):
         shown = argv if isinstance(argv, str) else shlex.join(argv)
         say(f"  {label}: {shown} ...")
         log = logs / f"{n:02d}.log"
         # Dispatch runs an area's setup and a test with `TEST_ENV` on top, so
         # the bytecode a Python test would write is no file a work item leaves.
-        step_env = env if label == "setup" else {**env, **TEST_ENV}
+        step_env = env if label == "setup" else {**env, **TEST_ENV, **(extra or {})}
         outcome, took = _run(argv, worktree, step_env, log, timeout_minutes * 60)
         say(f"    {outcome if outcome == 'passed' else outcome.upper()} in {took:.1f}s")
         if outcome != "passed":

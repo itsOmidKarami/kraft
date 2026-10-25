@@ -1103,6 +1103,16 @@ def resumable_agent_session(
     return None if newer_pass else latest
 
 
+def running_local_sessions(conn) -> int:
+    """How many sessions the local worker is running: a running row with a pid and no `runner`
+    (a forge or builtin row has no pid, and a remote step names its machine)."""
+    return conn.execute(
+        "SELECT COUNT(*) FROM worker_sessions "
+        "WHERE status = ? AND runner IS NULL AND pid IS NOT NULL",
+        (SessionStatus.RUNNING,),
+    ).fetchone()[0]
+
+
 def pinned_machine(conn, work_item_id: str, node_id: str) -> str | None:
     """The machine of the node's latest remote session since the node was last entered: where an
     `any` step started stays where it started for the rest of the pass (resume state lives

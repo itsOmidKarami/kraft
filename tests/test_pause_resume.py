@@ -17,6 +17,7 @@ import pytest
 from support.api import _started
 from support.harness import commit_all, git, v1_chain
 
+from kraft.api import deps
 from kraft.config import git_read
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -48,6 +49,20 @@ def _wait(fn, what, timeout=60):
             return got
         time.sleep(0.15)
     raise AssertionError(f"timed out waiting for {what}")
+
+
+def _paused(client, wid):
+    """The item once it reads paused and its walk has unwound (/resume refuses until then)."""
+    return _wait(
+        lambda: (
+            (lambda b: b if b["status"] == "paused" else None)(
+                client.get(f"/api/work-items/{wid}").json()
+            )
+            if not deps.task_is_live(client.app, wid)
+            else None
+        ),
+        "the item to read paused",
+    )
 
 
 def _running_agent(client, wid):
@@ -85,12 +100,7 @@ def test_pause_then_resume_with_a_steer_relaunches_the_task(
     assert r.status_code == 200
     assert r.json()["paused_sessions"] == [session["id"]]
 
-    item = _wait(
-        lambda: (lambda b: b if b["status"] == "paused" else None)(
-            client.get(f"/api/work-items/{wid}").json()
-        ),
-        "the item to read paused",
-    )
+    item = _paused(client, wid)
     paused = next(s for s in item["worker_sessions"] if s["id"] == session["id"])
     # the SIGTERM's non-zero exit must not re-resolve the row as a failure
     assert paused["status"] == "paused"
@@ -101,17 +111,16 @@ def test_pause_then_resume_with_a_steer_relaunches_the_task(
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 409
 
     assert client.post(f"/api/work-items/{wid}/steer", json={"text": "  "}).status_code == 400
-    assert (
-        client.post(
-            f"/api/work-items/{wid}/steer", json={"text": "keep the old signature"}
-        ).status_code
-        == 200
-    )
+    r = client.post(f"/api/work-items/{wid}/steer", json={"text": "keep the old signature"})
+    assert r.status_code == 200
+
+    # The paused row can read before its walk unwinds; /resume refuses until it has.
+    _wait(lambda: not deps.task_is_live(client.app, wid), "the paused walk to finish")
 
     # this time let the agent finish
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     r = client.post(f"/api/work-items/{wid}/resume", json={})
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     assert r.json()["steer"] == "keep the old signature"
 
     _wait(
@@ -255,9 +264,11 @@ def test_resume_rebases_the_worktree_onto_a_moved_head(monkeypatch, repo, client
     _running_agent(client, wid)
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
     _wait(
-        lambda: (lambda b: b if b["status"] == "paused" else None)(
-            client.get(f"/api/work-items/{wid}").json()
-        ),
+        lambda: (
+            lambda b: (
+                b if b["status"] == "paused" and not deps.task_is_live(client.app, wid) else None
+            )
+        )(client.get(f"/api/work-items/{wid}").json()),
         "the item to read paused",
     )
 
@@ -298,9 +309,11 @@ def test_resume_records_a_mismatch_if_the_worktree_moved_after_rebase(monkeypatc
     _running_agent(client, wid)
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
     _wait(
-        lambda: (lambda b: b if b["status"] == "paused" else None)(
-            client.get(f"/api/work-items/{wid}").json()
-        ),
+        lambda: (
+            lambda b: (
+                b if b["status"] == "paused" and not deps.task_is_live(client.app, wid) else None
+            )
+        )(client.get(f"/api/work-items/{wid}").json()),
         "the item to read paused",
     )
 
@@ -345,12 +358,7 @@ def test_resume_skips_rebase_when_worktree_is_dirty(monkeypatch, repo, client):
     )
     _running_agent(client, wid)
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
-    item = _wait(
-        lambda: (lambda b: b if b["status"] == "paused" else None)(
-            client.get(f"/api/work-items/{wid}").json()
-        ),
-        "the item to read paused",
-    )
+    item = _paused(client, wid)
     before_base_ref = item["base_ref"]
     worktree = Path(item["worktree_path"])
     # models a SIGTERM catching the agent mid-edit of a tracked file, nothing
@@ -401,12 +409,7 @@ def test_resume_marks_needs_human_on_a_rebase_conflict(monkeypatch, repo, client
     )
     _running_agent(client, wid)
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
-    item = _wait(
-        lambda: (lambda b: b if b["status"] == "paused" else None)(
-            client.get(f"/api/work-items/{wid}").json()
-        ),
-        "the item to read paused",
-    )
+    item = _paused(client, wid)
     worktree = Path(item["worktree_path"])
 
     # the branch already has a commit touching calc.py, as an earlier node would
@@ -447,8 +450,6 @@ def test_resume_marks_needs_human_on_a_rebase_conflict(monkeypatch, repo, client
     # builtins.py's own literal, version-independent of git's message.
     assert needs_human and "rebase failed for" in needs_human[-1]["payload"]["reason"].lower()
 
-    from kraft.api import deps
-
     # The walk that recorded the stop has finished, auto_escalate_stuck included.
     _wait(lambda: not deps.task_is_live(client.app, wid), "the walk to finish")
     sessions = client.get(f"/api/work-items/{wid}").json()["worker_sessions"]
@@ -480,12 +481,7 @@ def test_resume_skips_rebase_when_branch_already_pushed(tmp_path, monkeypatch, r
     )
     _running_agent(client, wid)
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
-    item_before = _wait(
-        lambda: (lambda b: b if b["status"] == "paused" else None)(
-            client.get(f"/api/work-items/{wid}").json()
-        ),
-        "the item to read paused",
-    )
+    item_before = _paused(client, wid)
     worktree = Path(item_before["worktree_path"])
     git(worktree, "push", "-q", "-u", "origin", item_before["branch"])
 

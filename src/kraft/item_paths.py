@@ -9,6 +9,11 @@ Everything an item produces, except its worktree, is written under
     sessions/<sid>/           one session's files: Kraft's, never mounted
         out/                  the two files the worker writes, and all it is granted
     sandbox-home/             the item's sandboxes' `HOME`
+    test-scopes/<node>.<hook>.changed-files
+                              the paths a targeted test command is told changed:
+                              Kraft's, mounted read-only into a sandbox
+    carried.json              what was copied into the worktree from the repo's carried
+                              files, and their sizes and mtimes then: Kraft's, never mounted
 
 Nothing is moved at upgrade: an older item's files stay in `run/logs/`,
 `run/results/`, `run/attachments/`, `run/sandbox-home/` and its worktree's
@@ -74,6 +79,12 @@ def item_dir(run_dirs, wid: str) -> Path:
     return run_dirs.base / ITEMS / _component(wid, "work item id")
 
 
+def carried_record(run_dirs, wid: str) -> Path:
+    """The item's baseline of its repo's carried files (`kraft.carried`):
+    Kraft's, never mounted."""
+    return item_dir(run_dirs, wid) / "carried.json"
+
+
 def docs_dir(run_dirs, wid: str) -> Path:
     """The item's documents, and what its worker may write them into
     (`$KRAFT_DOCS_DIR`)."""
@@ -89,6 +100,14 @@ def checkout_record(run_dirs, wid: str, name: str) -> Path:
     """An in-place item's record of its checkout (`inplace`): a task's mark,
     or what its tasks left uncommitted. Never mounted."""
     return item_dir(run_dirs, wid) / "checkout" / _component(name, "checkout record")
+
+
+def changed_files(run_dirs, wid: str, node_id: str, hook: str) -> Path:
+    """The list of changed paths a targeted test command is handed
+    (`KRAFT_CHANGED_FILES`), one file per verify task: `hook` is the task's
+    path, whose `/` become `.` so it stays one component."""
+    name = f"{_component(node_id, 'node id')}.{hook.replace('/', '.')}.changed-files"
+    return item_dir(run_dirs, wid) / "test-scopes" / _component(name, "task path")
 
 
 def filed_dir(run_dirs, wid: str) -> Path:

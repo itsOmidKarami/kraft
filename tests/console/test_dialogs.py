@@ -12,13 +12,14 @@ from textual.widgets import Button
 from kraft import client
 from kraft.console import app as console_app
 from kraft.console.dialogs import Confirm, Note
-from kraft.vocab import WorkItemStatus
 
-ACTIVE = [{"id": "a1b2", "title": "Fix the [/] parser", "current_node_id": "implement"}]
+ACTIVE = [
+    {"id": "a1b2", "title": "Fix the [/] parser", "current_node_id": "implement", "in_place": True}
+]
 LISTED = "\n".join(
     [
         "This stops the server and starts it again.",
-        "restarting the server ends the agent of any active item (1):",
+        "restarting the server ends the agent of any item running in place (1):",
         "  a1b2  implement  Fix the [/] parser",
         "  each one stops when Kraft starts again; retry it then. To avoid that, "
         "pause them first (kraft item pause ID) and resume them after.",
@@ -44,15 +45,14 @@ def test_a_confirm_lists_what_a_restart_ends_and_goes_on_only_when_told(
     server that does not answer the listing, or never replies, still gets
     the question rather than a console that hangs."""
 
-    async def list_work_items(status=None, **kwargs):
-        assert status == WorkItemStatus.ACTIVE
+    async def active_items():
         if server == "gone":
             raise client.transport._unreachable()
         if server == "wedged":
             await asyncio.Event().wait()
         return ACTIVE
 
-    monkeypatch.setattr(client, "list_work_items", list_work_items)
+    monkeypatch.setattr(client, "active_items", active_items)
     monkeypatch.setattr(console_app, "CONFIRM_LIST_S", 0.1)
 
     async def scenario(app, pilot):

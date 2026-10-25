@@ -9,11 +9,14 @@ export const SCOPE_REF = "kraft.verify_changed_test_scopes";
 
 export type ChipState = "done" | "failed" | "running" | "waiting" | "skipped";
 export type Chip = {
-  /** The repository and command: what a scope is across rounds, and the URL's `scope`. */
+  /** The repository and the scope's full command: what a scope is across rounds, and the URL's `scope`. */
   key: string;
   /** What the chip reads: its command, trimmed to about 28 characters, or `setup · <area>`. */
   name: string;
+  /** The command that ran: the scope's targeted one in a round that ran it. */
   command: string;
+  /** It ran its targeted command, not the full one. */
+  targeted?: true;
   /** The scope's paths, when the repo's table still names it. */
   paths?: string;
   area?: string;
@@ -70,6 +73,8 @@ export const isScopeTask = (item: ItemDetail, path: string) => {
 };
 
 export const scopeKey = (repository: string | null | undefined, command: string) => `${repository ?? ""}:${command}`;
+/** What a run is a run of: its scope's full command, whichever command ran (an older item's run has no identity). */
+export const runKey = (r: ScopeRun) => scopeKey(r.repository, r.identity ?? r.command);
 /** A command as a chip reads it: about 28 characters, the rest on the tooltip. */
 export const trim = (c: string, n = 28) => (c.length > n ? `${c.slice(0, n - 1)}…` : c);
 const basename = (p: string) => p.replace(/\/+$/, "").split("/").at(-1) || p;
@@ -123,7 +128,7 @@ export function scopesView(item: ItemDetail, path: string, round: number, now: n
   const execution = taskAt(m ?? { chain: { nodes: [] } }, path)?.execution === "parallel" ? "parallel" : "sequential";
   // Runs fanned out over a workspace carry their repository, even a workspace of one; otherwise there is one run, in the item's own checkout.
   const repos = runs.some((r) => r.repository) || !runs.length ? reposOf(item) : [{ id: null, name: basename(item.repo) }];
-  const last = (rs: ScopeRun[]) => [...new Map(rs.map((r) => [scopeKey(r.repository, r.command), r])).values()];
+  const last = (rs: ScopeRun[]) => [...new Map(rs.map((r) => [runKey(r), r])).values()];
   const inRound = (n: number, repo: string | null) => last(runs.filter((r) => r.round === n - 1 && r.repository === repo));
   // The round is still going while one of its commands runs, or the node it belongs to is the one running.
   const node = path.split(".")[0];
@@ -136,14 +141,15 @@ export function scopesView(item: ItemDetail, path: string, round: number, now: n
     const id = repo.id;
     const picked = inRound(round, id);
     const before = round > 1 ? inRound(round - 1, id) : [];
-    const sameAs = (a: ScopeRun, b: ScopeRun) => scopeKey(a.repository, a.command) === scopeKey(b.repository, b.command);
+    const sameAs = (a: ScopeRun, b: ScopeRun) => runKey(a) === runKey(b);
     const chip = (r: ScopeRun, skipped = false): Chip & { order?: number } => {
       const session = sessionOf(r);
       const state = skipped ? "skipped" : r.pending ? "waiting" : chipState(session, r.passed);
       return {
-        key: scopeKey(r.repository, r.command),
+        key: runKey(r),
         name: r.setup ? `setup · ${r.area ?? trim(r.command)}` : trim(r.command),
         command: r.command,
+        targeted: r.targeted,
         paths: r.scope,
         area: r.area,
         setup: r.setup,
@@ -192,7 +198,7 @@ export function otherRounds(item: ItemDetail, path: string, key: string, round: 
   for (let n = from; n <= latest; n++) {
     if (n === round) continue;
     const here = all.filter((r) => r.round === n - 1 && (r.repository ?? "") === repo);
-    const ran = here.filter((r) => r.command === command).at(-1);
+    const ran = here.filter((r) => (r.identity ?? r.command) === command).at(-1);
     out.push(`${n}: ${ran ? (ran.pending ? "waiting" : ran.passed === null ? "running" : ran.passed ? "passed" : "failed") : here.length ? "not picked" : "repo not reached"}`);
   }
   return out;
@@ -206,9 +212,12 @@ export function scopeLead(view: ScopesView): WorkerSession | undefined {
   return (ran.find((c) => c.state === "failed") ?? ran.find((c) => c.state === "running" || c.state === "waiting"))?.session;
 }
 
-/** A scope's runs in a round, oldest first: more than one when it was run again inside the round. */
-export const scopeRuns = (item: ItemDetail, path: string, key: string, round: number): WorkerSession[] =>
-  passOf(item, path.split(".")[0]).filter((s) => s.hook_point === path && s.round === round - 1 && !!s.command && scopeKey(s.repository, s.command) === key).sort((a, b) => a.attempt - b.attempt || a.created_at.localeCompare(b.created_at));
+/** A scope's runs in a round, oldest first: more than one when it was run again inside the round. A session keeps the
+ *  command it ran, so it is joined to its scope by id through `scope_runs`, which names the scope. */
+export const scopeRuns = (item: ItemDetail, path: string, key: string, round: number): WorkerSession[] => {
+  const identity = new Map((item.scope_runs ?? []).filter((r) => r.session_id).map((r) => [r.session_id, r.identity ?? r.command]));
+  return passOf(item, path.split(".")[0]).filter((s) => s.hook_point === path && s.round === round - 1 && !!s.command && scopeKey(s.repository, identity.get(s.id) ?? s.command) === key).sort((a, b) => a.attempt - b.attempt || a.created_at.localeCompare(b.created_at));
+};
 
 /** A chip as one of its scope's runs reads: an earlier run of it in the round, picked. */
 export function chipOfRun(chip: Chip, s: WorkerSession, now: number): Chip {
@@ -230,7 +239,7 @@ export function scopeAt(item: ItemDetail, path: string, key: string, view: Scope
   }
   const row = view.rows.find((r) => (r.id ?? "") === repo);
   // In any pass of the node: a scope another pass ran is a scope of the task.
-  const known = (item.scope_runs ?? []).some((r) => r.hook_point === path && scopeKey(r.repository, r.command) === key);
+  const known = (item.scope_runs ?? []).some((r) => r.hook_point === path && runKey(r) === key);
   if (!known) return { row, command, miss: "not found", why: "Not found: this task ran no scope with this command." };
   // One repository: it is the task that did not get to it, not a repository that was passed over.
   const unreached = { row, command, miss: "not reached" as const, why: view.rows.length > 1 ? "Its repository was not reached this round." : "Not reached: the task did not run it this round." };
@@ -245,9 +254,8 @@ export function scopeAt(item: ItemDetail, path: string, key: string, view: Scope
 export function stateWords(c: Chip): string {
   if (c.state === "skipped") return "not picked";
   const took = c.session?.wall_ms != null ? ` ${elapsed(c.session.wall_ms)}` : "";
-  if (c.state === "done") return `passed${took}`;
-  if (c.state === "failed") return `failed${took}`;
-  return c.meta || (c.state === "waiting" ? "waiting" : "running");
+  const words = c.state === "done" ? `passed${took}` : c.state === "failed" ? `failed${took}` : c.meta || (c.state === "waiting" ? "waiting" : "running");
+  return c.targeted ? `${words} · targeted` : words;
 }
 
 /** The status row: the same, with a dot before the time, and why a dropped scope is. */

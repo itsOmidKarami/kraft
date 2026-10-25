@@ -124,6 +124,11 @@ testpaths = ["tests", "plugins/kraft-lite/tests"]
 # and a SIGALRM raised into an event loop is swallowed by whatever `await` is
 # current. A thread-based timeout dumps every stack and kills the process.
 timeout = 120
+# The project's own version is from git and moves with every commit, so a record
+# made at one commit would match no other (Kraft-4t45n): leave it out of the
+# environment testmon keys its records by. Naming any package replaces the
+# default list, which is only pytest-testmon.
+testmon_ignore_dependencies = ["kraft-sdlc", "kraft", "pytest-testmon"]
 timeout_method = "thread"
 # `async def test_*` runs under anyio's plugin (a transitive dependency, already
 # installed) without a marker on each test; `tests/conftest.py` pins the

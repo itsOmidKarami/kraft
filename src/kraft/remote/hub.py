@@ -64,6 +64,7 @@ class _Entry:
     reason: str = "never connected"
     last_seen: float | None = None
     kraft: str | None = None
+    caps: frozenset[str] = frozenset()  # the connected machine's `protocol.CAPS`
     transport: protocol.Transport | None = None
     #: `mono()` when the connection ended, or the hub first knew the machine; None while online.
     offline_since: float | None = None
@@ -202,7 +203,7 @@ class Hub:
             )  # replaced: a half-dead old link must not lock the machine out
         entry.transport, entry.online, entry.reason = t, True, ""
         entry.offline_since = entry.offline_at = None
-        entry.kraft, entry.last_seen = peer.kraft, self._clock()
+        entry.kraft, entry.caps, entry.last_seen = peer.kraft, peer.caps, self._clock()
         entry.outcome.set()
         if self.runs is not None:  # tell the runs this machine is back
             self._spawn(self.runs.on_connect(peer.name))
@@ -369,6 +370,11 @@ class Hub:
 
     def release(self, claim: Claim) -> None:
         self._claims.get(claim.machine, set()).discard(claim.key)
+
+    def caps(self, name: str) -> frozenset[str]:
+        """What `name`'s connection said it understands; none for a machine never connected."""
+        entry = self._entries.get(name)
+        return entry.caps if entry is not None else frozenset()
 
     def transport(self, name: str) -> protocol.Transport:
         entry = self._entries.get(name)

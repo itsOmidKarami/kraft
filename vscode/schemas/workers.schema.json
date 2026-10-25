@@ -1,0 +1,74 @@
+{
+  "$defs": {
+    "Worker": {
+      "additionalProperties": false,
+      "properties": {
+        "capacity": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Capacity",
+          "type": "integer"
+        },
+        "give_up_after": {
+          "default": "2h",
+          "title": "Give Up After",
+          "type": "string"
+        },
+        "repos": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repos"
+        },
+        "ssh": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ssh"
+        },
+        "token_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token Sha256"
+        }
+      },
+      "title": "Worker",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "workers": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Worker"
+      },
+      "title": "Workers",
+      "type": "object"
+    }
+  },
+  "title": "Kraft remote workers",
+  "type": "object"
+}

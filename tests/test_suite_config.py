@@ -74,6 +74,18 @@ def _throwaway_suite(pytester) -> list[str]:
     return names
 
 
+def test_testmon_keys_its_records_without_this_projects_own_version():
+    """The project's version comes from git and moves with every commit, so a
+    testmon record keyed by it matches no other commit and `just test-targeted`
+    runs the whole suite (Kraft-4t45n.3). Naming any package replaces testmon's
+    default ignore list, so pytest-testmon must be named too."""
+    from testmon.common import get_system_packages
+
+    project = tomllib.loads((_ROOT / "pyproject.toml").read_text())["project"]["name"]
+    keyed = get_system_packages(ignore=_INI["testmon_ignore_dependencies"]).split(", ")
+    assert not [p for p in keyed if p.split(" ")[0] in {project, "pytest-testmon"}]
+
+
 @pytest.mark.parametrize("count", [2, 3])
 def test_shards_split_the_suite_with_nothing_lost_and_nothing_run_twice(
     pytester, monkeypatch, count

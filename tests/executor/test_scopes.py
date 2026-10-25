@@ -35,7 +35,7 @@ async def _on_a_branch(item_on, repo):
 
 
 def _selected(it, round, scopes=(_FRONTEND, _BACKEND)):
-    to_run = dispatch._select_scopes(
+    to_run, _ = dispatch._select_scopes(
         it.database,
         it.id,
         it.repo,
@@ -48,11 +48,34 @@ def _selected(it, round, scopes=(_FRONTEND, _BACKEND)):
 
 
 async def _dispatch(
-    item_on, *, test_scopes, task=_BUILTIN, node_id="verify", wid="w1", test_command=None
+    item_on,
+    *,
+    test_scopes,
+    task=_BUILTIN,
+    node_id="verify",
+    wid="w1",
+    test_command=None,
+    changed: dict[str, str] | None = None,
+    seed=None,
+    round=0,
 ):
     """Dispatch the builtin once, on a repo whose own test scopes are
-    `test_scopes`. Returns the status and the item."""
+    `test_scopes`. Returns the status and the item.
+
+    `changed` is a branch's one commit on top of its base: the base is pinned
+    at the repo's HEAD, then each file is written and committed (`{}` pins the
+    base and commits nothing). `seed(it)` runs after that, before the
+    dispatch, at `round`."""
     it = await item_on(_verify(task, node_id), wid=wid)
+    if changed is not None:
+        base = git(it.repo, "rev-parse", "HEAD")
+        await it.database.write(lambda c: store.set_base_ref(c, it.id, base))
+        for name, body in changed.items():
+            write(it.repo, name, body)
+        if changed:
+            commit_all(it.repo)
+    if seed is not None:
+        await seed(it)
     node = it.chain.chain.nodes[0]
     status = await dispatch.dispatch_node(
         it.database,
@@ -66,6 +89,7 @@ async def _dispatch(
                 {"setup_command": "", "test_scopes": test_scopes, "test_command": test_command}
             ),
         ),
+        round=round,
     )
     return status, it
 
@@ -655,6 +679,20 @@ _SHARED = {
             _SHARED,
             {"command": "red", "scope": "**, frontend/**"},
             id="a-repo-and-an-area-scope-share-the-command",
+        ),
+        pytest.param(
+            [(0, [("s-red", "failed", "just test-targeted", None)])],
+            {
+                "test_scopes": [
+                    {
+                        "paths": ["**"],
+                        "command": "just ci-test",
+                        "targeted_command": "just test-targeted",
+                    }
+                ]
+            },
+            {"command": "just test-targeted", "scope": "**"},
+            id="a-targeted-command-names-the-command-that-ran",
         ),
     ],
 )

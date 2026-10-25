@@ -555,7 +555,18 @@ def compute(
     # the true end.
     lead_times_ms: list[int] = []
     for r in completed_items:
-        c = _parse(r["created_at"])
+        # From the chain's first node, gate or not, not the filing: time
+        # blocked behind a dependency or filed paused is no part of its run.
+        c = _parse(
+            next(
+                (
+                    e["created_at"]
+                    for e in per_item.get(r["id"], [])
+                    if e["type"] == ChainEvent.NODE_STARTED
+                ),
+                r["created_at"],
+            )
+        )
         end = next(
             (
                 _parse(e["created_at"])

@@ -585,6 +585,47 @@ async def _skip_ci(db, work_item_id: str, node_id: str, hook_point: str, orig_re
     return "no CI configured for this repo (ci_checks: false); not waiting\n", "done", None
 
 
+#: How long the merge commit may have no CI run at all before `merge_watch`
+#: takes it that its branch runs none (Kraft-rbjo3): a forge registers a
+#: push's runs within seconds, so minutes of nothing means none are coming --
+#: a workflow on `pull_request` only, say, merged into a non-default branch.
+NO_POST_MERGE_CI_GRACE = timedelta(minutes=5)
+
+
+def _no_run_past_grace(db, work_item_id: str, task: str) -> bool:
+    """Whether `task`'s wait started `NO_POST_MERGE_CI_GRACE` ago or more. A
+    first look has no wait yet, so it never is."""
+    wait = db.read(lambda c: waits.open_wait(c, work_item_id, task))
+    if wait is None:
+        return False
+    started = datetime.fromisoformat(wait.started["started_at"])
+    return waits.now() - started >= NO_POST_MERGE_CI_GRACE
+
+
+async def _no_post_merge_ci(
+    db, work_item_id: str, node_id: str, hook_point: str, orig_repo: Path, base: str, sha: str
+):
+    """The post-merge wait on a merge commit no CI ever ran for: passes, and
+    says it checked nothing -- never "CI passed"."""
+    payload = {
+        "node_id": node_id,
+        "task": hook_point,
+        "repo": str(orig_repo),
+        "branch": base,
+        "sha": sha,
+    }
+    await db.write(
+        lambda c: events.append(c, work_item_id, ForgeEvent.POST_MERGE_CI_ABSENT, payload)
+    )
+    minutes = int(NO_POST_MERGE_CI_GRACE.total_seconds() // 60)
+    return (
+        f"no post-merge CI on {base}: no run started for {sha[:7]} in {minutes} minutes; "
+        "not waiting, and nothing was checked\n",
+        "done",
+        None,
+    )
+
+
 @dataclass(frozen=True)
 class WaitNote:
     """What the review wait's collect path decided that `waits.observe` has to
@@ -1392,6 +1433,13 @@ async def _run_one(
                         lambda c, ref=f"{head_sha}:{ci_status.pipeline_ref}": (
                             store.set_ci_pipeline_ref(c, work_item_id, ref)
                         )
+                    )
+                if ci_status.no_checks and _no_run_past_grace(db, work_item_id, hook_point):
+                    return (
+                        *await _no_post_merge_ci(
+                            db, work_item_id, node_id, hook_point, orig_repo, base, head_sha
+                        ),
+                        None,
                     )
                 log, status = await ci.render_ci(
                     ci_status, forge=forge, repo=orig_repo, branch=base, head_sha=head_sha

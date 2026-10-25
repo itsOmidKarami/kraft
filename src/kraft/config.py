@@ -15,10 +15,11 @@ import ipaddress
 import logging
 import os
 import re
+import shlex
 import stat
 import subprocess
 import tempfile
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self
@@ -30,11 +31,14 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
+    StrictStr,
     TypeAdapter,
     ValidationError,
     ValidationInfo,
     field_serializer,
     field_validator,
+    model_serializer,
     model_validator,
 )
 from pydantic_core import PydanticCustomError
@@ -220,12 +224,60 @@ class TestScope(BaseModel):
 
     paths: list[str] = Field(min_length=1)
     command: str = Field(min_length=1)
+    #: Runs in place of `command` in verification, given the base commit and
+    #: the changed paths, and runs only the tests the change affects.
+    #: `RepoEntry._scope_commands_name_one_scope` checks the whole table.
+    targeted_command: StrictStr | None = Field(default=None, min_length=1)
+
+    @model_serializer(mode="wrap")
+    def _omit_an_unset_targeted_command(self, handler: SerializerFunctionWrapHandler) -> dict:
+        """A scope without one is written as it was read: Settings re-saves
+        what `load_repos` returns, and a `targeted_command: null` is not what
+        the operator wrote."""
+        data = handler(self)
+        if data.get("targeted_command") is None:
+            data.pop("targeted_command", None)
+        return data
 
     # Deliberately does *not* synthesize a `["**"]` scope from a legacy
     # `test_command`: that synthesis used to be written into the loaded entry,
     # and any route that then re-saved repos.yaml (`PATCH`/`DELETE /repos`)
     # persisted it -- baking in whatever `test_command` was current at load
     # time (Kraft-9wzy). Callers that need the wrap do it at the point of use.
+
+
+def command_key(text: str) -> str:
+    """A test command as verification matches a session's command to its
+    scope (`shlex.join(shlex.split(x))`), so `just  test` and `just test` are
+    one string. A command `shlex` cannot read keeps its stripped text: the
+    table must not refuse what loads today."""
+    try:
+        return shlex.join(shlex.split(text))
+    except ValueError:
+        return text.strip()
+
+
+#: Words that mean something to a shell and nothing to the `exec` a test command
+#: gets: whole words only.
+_SHELL_OPERATORS = frozenset({"&&", "||", "|", ";", ">", ">>", "<", "2>&1", "&"})
+
+
+def shell_operator_in(argv: Sequence[str]) -> str | None:
+    """The first word of `argv` that is a shell operator (`&&`, `|`, `;`...), else
+    None. Test commands run without a shell (`shlex.split`, then exec), so
+    `cd web && npm ci` runs `cd` with `&&` and the rest as arguments, and
+    passes. Only a whole word counts: `sh -c 'cd x && y'` is one word, and so is
+    `--opt=a|b`."""
+    return next((word for word in argv if word in _SHELL_OPERATORS), None)
+
+
+def shell_operator(command: str) -> str | None:
+    """`shell_operator_in` of the command's words. A command `shlex` cannot
+    read gives None; the paths that split it report that."""
+    try:
+        return shell_operator_in(shlex.split(command))
+    except ValueError:
+        return None
 
 
 #: Keys an older `repos.yaml` entry may still carry, and where each went.
@@ -304,6 +356,9 @@ class RepoEntry(BaseModel):
     # like this starts dragging `.venv` and `node_modules` into every worktree,
     # and a glob is the same trap with extra steps.
     local_files: list[Annotated[str, Field(min_length=1)]] = []
+    # State a selection tool keeps (`.testmondata`), seeded into each new
+    # worktree and saved back after a passing targeted round (`kraft.carried`).
+    carry: list[Annotated[str, Field(min_length=1)]] = []
     # How this repo's worktree is prepared. No default and no fallback: an
     # absent key is "nobody has decided yet" and stops the chain when the
     # worktree is built, while `""` is a deliberate "nothing to do"
@@ -391,9 +446,9 @@ class RepoEntry(BaseModel):
         TypeAdapter(dict[Identifier, Area]).validate_python(v)
         return v
 
-    @field_validator("local_files")
+    @field_validator("local_files", "carry")
     @classmethod
-    def _safe_local_files(cls, v: list[str]) -> list[str]:
+    def _safe_paths(cls, v: list[str]) -> list[str]:
         for rel in v:
             if rel.endswith("/"):
                 raise ValueError(f"entry {rel!r} must name a file")
@@ -402,6 +457,79 @@ class RepoEntry(BaseModel):
             if any(c in rel for c in "*?["):
                 raise ValueError(f"entry {rel!r} must be a literal path, not a glob")
         return v
+
+    @model_validator(mode="after")
+    def _carry_and_local_files_are_disjoint(self) -> RepoEntry:
+        both = set(self.carry) & set(self.local_files)
+        if both:
+            raise ValueError(
+                f"repos.yaml: {self.path}: {', '.join(sorted(both))} listed in both 'carry' and "
+                "'local_files'; carry is saved back after a round, local_files is only copied"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _scope_commands_name_one_scope(self) -> RepoEntry:
+        """Every command a session can record, a scope's `command` or its
+        `targeted_command`, must map to one scope identity (its full
+        `command`): sessions are told apart by their command string. The
+        table is the one verification builds (`dispatch._scope_table`): the
+        repository's scopes, or its bare `test_command`, then each area's."""
+        # (where, command, targeted_command or None), area scopes as written.
+        rows: list[tuple[str, str, str | None]] = [
+            (f"test_scopes[{i}]", s.command, s.targeted_command)
+            for i, s in enumerate(self.test_scopes or ())
+        ]
+        if not rows and self.test_command:
+            rows.append(("test_command", self.test_command, None))
+        setups: set[str] = set()
+        for name, area in self.areas.items():
+            if area.get("setup"):
+                setups.add(command_key(area["setup"]))
+            for i, scope in enumerate((area.get("verification") or {}).get("test_scopes", ())):
+                where = f"areas.{name}.verification.test_scopes[{i}]"
+                rows.append((where, scope["command"], scope.get("targeted_command")))
+
+        def refuse(where: str, message: str) -> ValueError:
+            return ValueError(f"repos.yaml: {self.path}: {where}: {message}")
+
+        targeted_keys: list[str | None] = []
+        for where, command, targeted in rows:
+            if targeted is None:
+                targeted_keys.append(None)
+                continue
+            try:
+                parts = shlex.split(targeted)
+            except ValueError:
+                raise refuse(where, "targeted_command cannot be read as a command") from None
+            if not parts:
+                raise refuse(where, "targeted_command is blank")
+            key = shlex.join(parts)
+            if key == command_key(command):
+                raise refuse(where, "targeted_command is the same as its command")
+            targeted_keys.append(key)
+
+        by_command: dict[str, set[str | None]] = {}
+        for (where, command, _), key in zip(rows, targeted_keys, strict=True):
+            by_command.setdefault(command_key(command), set()).add(key)
+            if len(by_command[command_key(command)]) > 1:
+                raise refuse(
+                    where,
+                    f"scopes sharing the command {command!r} must share their targeted_command",
+                )
+        owner_of_targeted: dict[str, str] = {}
+        for (where, command, _), key in zip(rows, targeted_keys, strict=True):
+            if key is None:
+                continue
+            if key in by_command:
+                raise refuse(where, f"targeted_command {key!r} is also another scope's command")
+            if owner_of_targeted.setdefault(key, command_key(command)) != command_key(command):
+                raise refuse(
+                    where, f"targeted_command {key!r} is also another scope's targeted_command"
+                )
+            if key in setups:
+                raise refuse(where, f"targeted_command {key!r} is also an area's setup")
+        return self
 
     @field_validator("intent_dir")
     @classmethod

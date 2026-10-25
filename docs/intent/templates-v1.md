@@ -503,6 +503,56 @@ The changed-test-scope task SHALL await all selected scope results and report
 one aggregate task result.
 enforced-by: tests/executor/test_scopes.py::test_changed_test_scopes_report_one_aggregate_result
 
+## REQ a-scope-command-names-one-scope
+
+IF a command string could belong to more than one test scope identity, THEN the
+system SHALL refuse the repository entry when it loads.
+enforced-by: tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[empty], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[blank], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[unparsable], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[own-command-normalized], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[shared-command-differs], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[equals-another-command], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[equals-another-targeted-normalized], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[equals-an-area-setup], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[area-scope-vs-repo-scope], tests/test_config_targeted_command.py::test_an_entry_whose_commands_could_name_two_scopes_is_refused[equals-the-bare-test-commands]
+origin: src/kraft/executor/dispatch.py §_run_changed_test_scopes
+
+## REQ verification-runs-a-scopes-targeted-command
+
+WHEN a selected scope declares a `targeted_command` and the round has a
+changed-file list, the system SHALL run it in place of the scope's `command`,
+with `KRAFT_TEST_BASE` and `KRAFT_CHANGED_FILES`.
+enforced-by: tests/executor/test_targeted_scopes.py::test_a_scope_runs_its_targeted_command_in_place_of_the_full_one[a-diff], tests/executor/test_targeted_scopes.py::test_an_empty_diff_after_a_clean_round_runs_the_targeted_command_with_an_empty_list
+origin: src/kraft/executor/dispatch.py §_run_changed_test_scopes
+
+## REQ verification-runs-the-full-command-without-a-diff-or-by-suite
+
+IF the round has no changed-file list, or the task's `suite` is `full`, THEN the
+system SHALL run the scope's `command` and record why.
+enforced-by: tests/executor/test_targeted_scopes.py::test_a_scope_runs_its_targeted_command_in_place_of_the_full_one[no-diff], tests/executor/test_targeted_scopes.py::test_a_scope_runs_its_targeted_command_in_place_of_the_full_one[suite-full]
+origin: src/kraft/executor/dispatch.py §_run_changed_test_scopes
+
+## REQ a-scope-is-one-scope-whichever-command-ran
+
+The system SHALL report a session that ran a scope's targeted command as that
+scope, and mark it targeted.
+enforced-by: tests/executor/test_targeted_scopes.py::test_scope_results_reads_a_session_as_its_scope[targeted], tests/executor/test_targeted_scopes.py::test_scope_results_reads_a_session_as_its_scope[full], tests/executor/test_targeted_scopes.py::test_scope_results_reads_a_session_as_its_scope[dropped-from-config], tests/executor/test_targeted_scopes.py::test_scope_results_reads_a_session_as_its_scope[unreadable-table], tests/executor/test_targeted_scopes.py::test_scope_results_counts_a_scope_once_whichever_command_ran, tests/api/test_scope_runs.py::test_detail_scope_runs_maps_a_targeted_command_to_its_scope[picked-and-started], tests/api/test_scope_runs.py::test_detail_scope_runs_maps_a_targeted_command_to_its_scope[picked-not-started], tests/api/test_scope_runs.py::test_detail_scope_runs_maps_a_targeted_command_to_its_scope[targeted-then-full], tests/api/test_scope_runs.py::test_detail_scope_runs_maps_a_targeted_command_to_its_scope[config-since-dropped-it], tests/api/test_scope_runs.py::test_detail_test_result_marks_a_scope_that_ran_its_targeted_command
+origin: src/kraft/executor/dispatch.py §_run_changed_test_scopes
+
+## REQ carried-files-seed-a-worktree-from-one-source
+
+WHERE a repository declares `carry`, the system SHALL copy the carried files
+into a new worktree from one source only: the repository's newest saved copy
+when it holds any of them, else the repository's checkout, never files from
+both. It SHALL discard a copy taken from the checkout when a source file's size
+or modification time changed while it was copied.
+enforced-by: tests/test_builtins_carry.py::test_carry_set_takes_the_whole_set_from_one_source[saved-copy-wins-over-the-checkout], tests/test_builtins_carry.py::test_carry_set_takes_the_whole_set_from_one_source[checkout-when-nothing-is-saved], tests/test_builtins_carry.py::test_carry_set_takes_the_whole_set_from_one_source[cold-when-there-is-neither], tests/test_builtins_carry.py::test_carry_set_takes_the_whole_set_from_one_source[a-saved-copy-with-none-of-the-listed-files-is-no-saved-copy], tests/test_builtins_carry.py::test_a_checkout_copy_that_changed_while_it_was_copied_is_discarded[mtime], tests/test_builtins_carry.py::test_a_checkout_copy_that_changed_while_it_was_copied_is_discarded[size], tests/test_builtins_carry.py::test_a_checkout_copy_that_changed_while_it_was_copied_is_discarded[appeared]
+origin: src/kraft/carried.py
+
+## REQ carried-files-are-saved-only-by-a-passing-local-unsandboxed-round
+
+WHERE a repository declares `carry`, the system SHALL save an item's carried
+files as the repository's newest copy only after a changed-test-scope round of
+`suite: targeted` in which every scope passed on this machine, for an item that
+is neither sandboxed nor in place, and only when the round changed a carried
+file. It SHALL write each save as a new generation made current by one atomic
+rename.
+enforced-by: tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[all-guards-hold], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[suite-full], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[sandboxed], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[remote-runner], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[a-failed-scope], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[no-results], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[an-in-place-or-member-folder], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[no-carry-declared], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[files-not-touched-by-the-round], tests/test_carried.py::test_save_writes_a_generation_current_points_at, tests/test_carried.py::test_a_save_that_fails_midway_leaves_current_alone
+origin: src/kraft/executor/dispatch.py §_save_carried
+
 ## REQ exec-node-orders-concurrent-task-groups
 
 An execution node's `tasks` SHALL be one concurrent task group; its `steps`
@@ -1823,7 +1873,15 @@ enforced-by: tests/test_waits.py::test_interval_grows_from_initial_to_max_while_
 When an external-wait task reaches its configured timeout, the system SHALL
 stop for human action and SHALL NOT classify the timeout as a code failure,
 except an `mr.automated_review` wait on its collect path, which settles.
-enforced-by: tests/adapters/forge/test_run_review.py::test_a_node_nothing_reads_takes_the_direct_path[no-reader-timeout-stops], tests/test_waits.py::test_wait_timeout_stops_for_human_and_is_not_a_code_failure, tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human, tests/test_waits.py::test_a_wait_timeout_and_a_loop_cap_are_reported_apart, tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-declared], tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-undeclared], tests/templates/test_workspace_publication.py::test_a_root_approval_that_never_comes_times_out_for_a_human
+enforced-by: tests/adapters/forge/test_run_review.py::test_a_node_nothing_reads_takes_the_direct_path[no-reader-timeout-stops], tests/test_waits.py::test_wait_timeout_stops_for_human_and_is_not_a_code_failure, tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human[a-pending-run-times-out], tests/test_waits.py::test_a_wait_timeout_and_a_loop_cap_are_reported_apart, tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-declared], tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-undeclared], tests/templates/test_workspace_publication.py::test_a_root_approval_that_never_comes_times_out_for_a_human
+
+## REQ post-merge-wait-ends-when-no-ci-runs
+
+When the merge commit has no CI run at all once a short grace is up, the
+post-merge CI wait SHALL end, recording that nothing was checked, and SHALL NOT
+wait out its timeout; a commit with any run, pending included, SHALL keep
+waiting.
+enforced-by: tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human[no-run-past-the-grace], tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human[no-run-within-the-grace], tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human[a-pending-run-times-out]
 
 ## REQ scope-time-caps-bound-their-own-scope
 

@@ -24,7 +24,7 @@ Read these first:
   | Event | What it tells you |
   |---|---|
   | `findings_measured` | One round of the tests and the review. `measured_tasks` are the checks that ran in it and `unmeasured_tasks` the ones that did not: a step that fails stops the steps after it, so a round of red tests has no review in it. A test command that failed is named in a finding, so a round with no test finding passed every command it selected. `dropped` is there only when a reviewer wrote findings wrongly, and that review is not a clean one. |
-  | `test_scopes_selected` | The test commands the round ran. None selected means nothing was tested. |
+  | `test_scopes_selected` | The test commands the round ran, each by its full name. `targeted` maps a scope to the narrower command it ran instead; `full_reason` says why a scope that declares one ran its full command. An older event has neither: every scope ran in full. None selected means nothing was tested. |
   | `fix_cycle_started` | A repair attempt. `max_attempts` is how many the loop allows. If `cycle` starts again at 1, a retry restarted the loop: count each run on its own. |
   | `fix_cycle_refunded` | The attempt with that `cycle` did not count. |
   | `judge_verdict` | What the fix-loop judge said about going on. It rules only when a repair left something to fix, so most runs have none. |
@@ -53,7 +53,8 @@ Every brief has these four sections, in this order:
    the change, so check the plan's tasks against the diff, and say in one
    sentence whether all of them have a change behind them.
 3. **What was verified.** From the last round: each check that ran and what it
-   reported, and the test commands it ran. If a check did not run in it, name
+   reported, and the test commands it ran. A scope listed in `targeted` ran only
+   its targeted command, so say "targeted tests passed", never "tests passed". If a check did not run in it, name
    that check as not run. Then what it took to get there: the rounds that
    were red before a repair turned them green, and how many repair attempts
    were spent out of how many. If the judge ruled, say what it said.

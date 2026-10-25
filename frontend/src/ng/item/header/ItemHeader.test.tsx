@@ -46,15 +46,24 @@ describe("ItemHeader", () => {
   });
 
   // R11b-11: the header's clock stood still while the pane's counted each second.
-  it("ticks its elapsed clock every second while something runs", async () => {
+  it("stops its clock when the item ended, not when archiving last touched it", () => {
+    show({ display_status: "archived", status: "completed", started_at: "2026-09-13T08:00:00Z", ended_at: "2026-09-13T09:00:00Z", updated_at: "2026-10-13T09:00:00Z" });
+    expect(document.querySelector(".item-elapsed")).toHaveTextContent(/^1h$/);
+  });
+
+  // Filed at 08:00:00; a wait behind a dependency before its first node is not run time.
+  it.each([
+    { id: "never started: from filing", started_at: null, first: "12s", later: "16s" },
+    { id: "from its first node", started_at: "2026-09-13T08:00:10Z", first: "2s", later: "6s" },
+  ])("ticks its elapsed clock every second while something runs ($id)", async ({ started_at, first, later }) => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
     try {
       vi.setSystemTime(Date.parse("2026-09-13T08:00:12Z"));
       const running = { id: "s1", node_id: "verification", hook_point: "verification.review.code_review", status: "running", attempt: 1 } as never;
-      show({ worker_sessions: [running] });
-      expect(document.querySelector(".item-elapsed")).toHaveTextContent("12s");
+      show({ worker_sessions: [running], started_at });
+      expect(document.querySelector(".item-elapsed")).toHaveTextContent(new RegExp(`^${first}$`));
       await act(async () => void vi.advanceTimersByTime(4_000));
-      expect(document.querySelector(".item-elapsed")).toHaveTextContent("16s");
+      expect(document.querySelector(".item-elapsed")).toHaveTextContent(new RegExp(`^${later}$`));
     } finally {
       vi.useRealTimers();
     }

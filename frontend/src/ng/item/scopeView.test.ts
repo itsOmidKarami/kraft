@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { frameWidth, isScopeTask, otherRounds, reposOf, scopeAt, scopeLead, scopeRuns, scopesView, type Chip, type ScopesView } from "./scopeView";
+import { frameWidth, isScopeTask, otherRounds, reposOf, scopeAt, scopeLead, scopeRuns, scopesView, stateWords, type Chip, type ScopesView } from "./scopeView";
 import { asOfPass } from "./nodeGraph";
 import { detail, FROZEN, pendingRun, SCOPE_PATH, scopeChain, scopeRun, scoped, WORKSPACE } from "./testkit";
 
@@ -118,6 +118,30 @@ describe("scopesView", () => {
   it("draws an area's setup as a chip ahead of the area's first scope", () => {
     const it = item([run(null, "just test-web", 0, "done", { order: 3, area: "web" }), run(null, "npm ci", 0, "done", { order: 2.5, area: "web", setup: true, scope: undefined })]);
     expect(names(scopesView(it, PATH, 1, NOW)).map((c) => c[0])).toEqual(["setup · web", "just test-web"]);
+  });
+});
+
+describe("a scope whichever command ran", () => {
+  it.each([
+    ["targeted-then-full", [run(null, "just test-targeted", 0, "done", { identity: "just ci-test", targeted: true }), run(null, "just ci-test", 1, "done", { identity: "just ci-test" })]],
+  ])("is one scope: %s", (_id, runs) => {
+    const it = item(runs);
+    const [first, second] = [scopesView(it, PATH, 1, NOW).rows[0].chips[0], scopesView(it, PATH, 2, NOW).rows[0].chips[0]];
+    // The chips share their key, and read the command that ran.
+    expect([first.key, second.key]).toEqual([":just ci-test", ":just ci-test"]);
+    expect([first.command, first.targeted, second.command, second.targeted]).toEqual(["just test-targeted", true, "just ci-test", undefined]);
+    expect(second.fresh).toBeFalsy();
+    expect(stateWords(first)).toMatch(/ · targeted$/);
+    expect(stateWords(second)).not.toMatch(/targeted/);
+    // A session is joined to its scope by id, not by the command it recorded.
+    expect(scopeRuns(it, PATH, ":just ci-test", 1).map((s) => s.command)).toEqual(["just test-targeted"]);
+    expect(otherRounds(it, PATH, ":just ci-test", 2)).toEqual(["1: passed"]);
+    expect(scopeAt(it, PATH, ":just ci-test", scopesView(it, PATH, 2, NOW)).chip?.key).toBe(":just ci-test");
+  });
+
+  it("keys a run with no identity on its command, as an older item's", () => {
+    const it = item([run(null, "just test-a", 0, "done")]);
+    expect(scopesView(it, PATH, 1, NOW).rows[0].chips[0].key).toBe(":just test-a");
   });
 });
 

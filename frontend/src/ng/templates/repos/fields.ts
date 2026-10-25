@@ -38,6 +38,7 @@ export const FIELDS: RepoField[] = [
   { key: "default_chain", group: "Running", label: "default chain", choice: "chain", ...text, fallback: "default" },
   { key: "test_command", group: "Tests", label: "test command", ...command, none: "No tests", empty: NO_TESTS },
   { key: "test_scopes", group: "Tests", label: "test scopes", ...scopes, placeholder: "paths => command; …" },
+  { key: "carry", group: "Tests", label: "carry", ...list, placeholder: "file, file" },
   { key: "setup_command", group: "Running", label: "setup command", ...command, none: "No setup needed", empty: "none" },
   { key: "intent_dir", group: "Running", label: "intent dir", ...text },
   { key: "worktrees", group: "Running", label: "worktrees", choice: "bool", ...onByDefault("Each item in its own worktree", "Items run in this repo's checkout") },

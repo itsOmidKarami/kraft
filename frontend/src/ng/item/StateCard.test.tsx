@@ -277,13 +277,16 @@ describe("StateCard", () => {
     expect(screen.getByRole("region", { name: "Failed" })).toHaveTextContent("work keptbranch kraft/design-the-cache-w1 · 2 files");
   });
 
+  const scoped = (...targeted: (true | undefined)[]) => targeted.map((t, i) => ({ command: `cmd${i}`, scope: null, passed: true, exit_code: 0, session_id: `s${i}`, ...(t && { targeted: t }) }));
   it.each([
-    [true, "branch kraft/design-the-cache-w1 · 2 files · tests passing"],
-    [false, "branch kraft/design-the-cache-w1 · 2 files"],
-    [null, "branch kraft/design-the-cache-w1 · 2 files"],
-  ])("tests passing on the work-kept line only when the verification passed (test_result.passed %s)", (passed, kept) => {
+    [true, [], "branch kraft/design-the-cache-w1 · 2 files · tests passing"],
+    [false, [], "branch kraft/design-the-cache-w1 · 2 files"],
+    [null, [], "branch kraft/design-the-cache-w1 · 2 files"],
+    [true, scoped(true, true), "branch kraft/design-the-cache-w1 · 2 files · targeted tests passing"],
+    [true, scoped(true, undefined), "branch kraft/design-the-cache-w1 · 2 files · partly targeted tests passing"],
+  ])("tests passing on the work-kept line only when the verification passed (test_result.passed %s)", (passed, scopes, kept) => {
     const files = [{ path: "a.py", insertions: 2, deletions: 1 }, { path: "b.py", insertions: 1, deletions: 0 }] as DiffFile[];
-    const test_result = passed === null ? null : { passed, scopes: [] };
+    const test_result = passed === null ? null : { passed, scopes };
     routed(<StateCard item={detail({ display_status: "failed", stop: stop("failed"), branch: "kraft/design-the-cache-w1", worktree_exists: true, test_result })} files={files} {...handlers()} />);
     expect(screen.getByText("work kept").nextElementSibling?.textContent).toBe(kept);
   });
