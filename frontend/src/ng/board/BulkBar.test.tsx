@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import type { DisplayStatus, WorkItem, WorkItemStatus } from "../../types";
 import { detail, stubFetch } from "../item/testkit";
+import { _resetLaterForTests, UNDO_WINDOW_MS } from "../later";
 import { Toaster } from "../ui/Toast";
-import { CANCEL_WINDOW_MS, useBulk } from "./bulk";
+import { useBulk } from "./bulk";
 import { BulkBar } from "./BulkBar";
 
 const item = (id: string, display_status: DisplayStatus, status: WorkItemStatus = "active") => detail({ id, title: `Item ${id}`, display_status, status, bead_id: null });
@@ -28,6 +29,7 @@ beforeEach(() => {
   vi.spyOn(api, "listWorkItems").mockResolvedValue({ items: [], cursor: 1 });
 });
 afterEach(() => {
+  _resetLaterForTests();
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -73,11 +75,27 @@ describe("BulkBar", () => {
     fireEvent.click(go);
     expect(onChecked).toHaveBeenLastCalledWith([]);
     expect(screen.getByText("Cancelling 2 items…")).toBeInTheDocument();
-    await act(async () => vi.advanceTimersByTime(CANCEL_WINDOW_MS - 1));
+    await act(async () => vi.advanceTimersByTime(UNDO_WINDOW_MS - 1));
     expect(bulk()).toHaveLength(0);
     await act(async () => vi.advanceTimersByTime(1));
     expect(bulk()).toEqual([{ method: "POST", path: "/work-items/bulk", body: { action: "cancel", ids: ["r1", "n3"], reason: "superseded by kraft-cb61" } }]);
     expect(calls.some((c) => /abandon/.test(c.path))).toBe(false);
+  });
+
+  it("sends a cancel still inside its window when the page is left, with keepalive so it outlives the page", async () => {
+    vi.useFakeTimers();
+    const { bulk } = mount([RUN, NEED], { "POST /work-items/bulk": okFor("r1", "n3") });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel 2…" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /Reason/ }), { target: { value: "wrong repo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel 2" }));
+    await act(async () => vi.advanceTimersByTime(UNDO_WINDOW_MS - 100));
+    expect(bulk()).toHaveLength(0);
+    await act(async () => void window.dispatchEvent(new Event("pagehide")));
+    expect(bulk()).toHaveLength(1);
+    const init = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.find((c) => c[0] === "/api/work-items/bulk")![1];
+    expect(init.keepalive).toBe(true);
+    await act(async () => vi.advanceTimersByTime(UNDO_WINDOW_MS * 2));
+    expect(bulk()).toHaveLength(1);
   });
 
   it("sends nothing at all when Undo is pressed inside the window, and checks the items again", async () => {
@@ -86,10 +104,10 @@ describe("BulkBar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel 2…" }));
     fireEvent.change(screen.getByRole("textbox", { name: /Reason/ }), { target: { value: "wrong repo" } });
     fireEvent.click(screen.getByRole("button", { name: "Cancel 2" }));
-    await act(async () => vi.advanceTimersByTime(CANCEL_WINDOW_MS - 100));
+    await act(async () => vi.advanceTimersByTime(UNDO_WINDOW_MS - 100));
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     expect(onChecked).toHaveBeenLastCalledWith(["r1", "n3"]);
-    await act(async () => vi.advanceTimersByTime(CANCEL_WINDOW_MS * 2));
+    await act(async () => vi.advanceTimersByTime(UNDO_WINDOW_MS * 2));
     expect(bulk()).toHaveLength(0);
   });
 

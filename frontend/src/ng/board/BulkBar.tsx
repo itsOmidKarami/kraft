@@ -5,7 +5,8 @@ import { admits, headerState, pausable, resumable, retryable } from "../item/sta
 import { useReason } from "../ui/Reason";
 import { ARCHIVE_ONLY_ENDED } from "../ui/reasons";
 import { showToast } from "../ui/Toast";
-import { CANCEL_WINDOW_MS, cancelLater, items, sendBulk, useBulk, VERB } from "./bulk";
+import { UNDO_WINDOW_MS } from "../later";
+import { cancelLater, items, sendBulk, useBulk, VERB } from "./bulk";
 import { LinkButton } from "../ui/LinkButton";
 
 const ended = (i: WorkItem) => i.display_status === "done" || i.display_status === "cancelled";
@@ -65,7 +66,7 @@ export function BulkBar({ checked, byId, offline, onChecked }: { checked: WorkIt
     setConfirm(false);
     setReason("");
     onChecked([]);
-    showToast(`Cancelling ${items(ids.length)}…`, { ms: CANCEL_WINDOW_MS, action: { label: "Undo", run: () => void (undo() && onChecked(checked.map((i) => i.id))) } });
+    showToast(`Cancelling ${items(ids.length)}…`, { ms: UNDO_WINDOW_MS, action: { label: "Undo", run: () => void (undo() && onChecked(checked.map((i) => i.id))) } });
   };
 
   return (
