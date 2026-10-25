@@ -224,6 +224,7 @@ async def test_glab_ci_status_only_trusts_a_pipeline_for_the_current_head(
 
     assert status.state == expected
     assert ("no pipeline for" in status.jobs[0]) is (expected == "pending"), status.jobs
+    assert not status.no_checks, "before the merge a missing pipeline is a plain wait"
     assert says in "\n".join(status.jobs)
     if expected == "success":
         assert status.sha == branch_head, "reported the merge commit, not the head it tested"
@@ -273,16 +274,20 @@ async def test_glab_ci_status_reads_the_newest_pipeline_for_the_head(cli, repo, 
     assert (status.state, status.pipeline_ref) == expected
 
 
-async def test_glab_branch_ci_status_never_resolves_a_merge_request(cli, repo):
+@pytest.mark.parametrize(
+    "raw, state", [("success", "success"), ("running", "pending")], ids=["green", "running"]
+)
+async def test_glab_branch_ci_status_never_resolves_a_merge_request(cli, repo, raw, state):
     """merge_watch's whole reason to call this instead of `ci_status`: the
     checked-out branch's MR is already merged, so this must never shell out to
     `glab mr view` at all (code-review)."""
     head = _head(repo)
-    cli.stub("glab", _pipeline(head, ref="main"))
+    cli.stub("glab", _pipeline(head, ref="main").replace('"success"', f'"{raw}"'))
 
     status = await forge.GlabCli().branch_ci_status(repo=repo, branch="main", head_sha=head)
 
-    assert (status.state, status.mergeable) == ("success", None)
+    assert (status.state, status.mergeable) == (state, None)
+    assert not status.no_checks, "a head with a pipeline has checks, even a running one"
     assert all("mr view" not in call for call in cli.calls("glab"))
 
 
@@ -309,6 +314,8 @@ async def test_glab_branch_ci_status_guards_against_the_caller_s_head_not_the_ch
     )
 
     assert status.state == "pending", "matched a head that is not the caller's"
+    # Nothing for this head at all (Kraft-rbjo3): `merge_watch` gives up after a grace.
+    assert status.no_checks
     assert not any("/repository/commits/" in call for call in cli.calls("glab"))
 
 
