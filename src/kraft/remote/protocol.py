@@ -120,6 +120,11 @@ def machine_caps(capacity: int | None) -> frozenset[str]:
     return CAPS if capacity is None else CAPS | {f"{_CAPACITY}{capacity}"}
 
 
+def valid_capacity(value: object) -> int | None:
+    """A limit a machine sent: a whole number of at least 1, else None (none)."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
+
+
 def reported_capacity(caps: Iterable[str]) -> int | None:
     """The limit a machine's caps report, or None (none reported, or not a whole number >= 1)."""
     for cap in caps:

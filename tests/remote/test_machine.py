@@ -542,6 +542,17 @@ async def test_a_new_connection_keeps_only_the_reservations_the_server_still_hol
     await _end(server, task)
 
 
+async def test_a_reserves_frame_does_not_drop_a_hold_made_after_the_connection_began(tmp_path):
+    """The server's list was written before it asked for this one."""
+    machine = Machine(tmp_path / "home", kraft_version="2.3.0", limit=lambda: 2)
+    server, task = await _serve(machine)
+    await _reserve(server, "w1/a")
+    await server.send({"t": "reserves", "ids": []})
+    assert (await _reserve(server, "w1/b"))["ok"] is True
+    assert (await _reserve(server, "w1/c"))["ok"] is False  # w1/a and w1/b are both held
+    await _end(server, task)
+
+
 async def test_a_job_with_no_reservation_beyond_the_limit_is_refused_before_its_blobs(tmp_path):
     machine = Machine(tmp_path / "home", kraft_version="2.3.0", limit=lambda: 1)
     server, task = await _serve(machine)

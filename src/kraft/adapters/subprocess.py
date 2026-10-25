@@ -728,14 +728,23 @@ async def kept_through_stop(db, work_item_id: str, session_id: str, *, alive: bo
     return await db.write(_read)
 
 
+class _Held:
+    """What `_run_task` has taken that `run_task` must give back when `_run_task` ends before
+    handing it on: the claim on a machine, from the moment it is made to `Runs.launch`."""
+
+    claim = None
+
+
 async def run_task(db, run_dirs, *, session_id: str, work_item_id: str, **kwargs) -> str:
     """`_run_task`, closing the session it wrote when whatever ends it -- a
     cancel, most often a co-task's failure or a stop -- comes before the
     launch: an in-place item's row left `pending` would hold its checkout's
-    lease (`store.folder_holder`) until a restart."""
+    lease (`store.folder_holder`) until a restart. Whatever it still holds then is given back,
+    on every way out."""
+    held = _Held()
     try:
         return await _run_task(
-            db, run_dirs, session_id=session_id, work_item_id=work_item_id, **kwargs
+            db, run_dirs, session_id=session_id, work_item_id=work_item_id, held=held, **kwargs
         )
     except BaseException as exc:
         if asyncio.get_running_loop() in _STOPPING:
@@ -750,6 +759,11 @@ async def run_task(db, run_dirs, *, session_id: str, work_item_id: str, **kwargs
         except Exception:  # noqa: BLE001 -- never in place of what ended the task
             logger.exception("could not close session %s, ended before its launch", session_id)
         raise
+    finally:
+        if held.claim is not None:
+            from kraft.remote import launch as _launch
+
+            _launch.release(held.claim)
 
 
 def _close_unlaunched(conn, session_id: str, work_item_id: str) -> bool:
@@ -861,7 +875,10 @@ async def _run_task(
     #: `JobSpec.codex_hook`: the machine's own codex trusts Kraft's hook there. Only
     #: `run_agent_task` sets it, and only with a `runner`.
     codex_hook: dict | None = None,
+    #: Where this call records the claim it holds until `Runs.launch` takes it over.
+    held: _Held | None = None,
 ) -> str:
+    held = held if held is not None else _Held()
     runner = None if runner == "local" else runner
     idle_s = IDLE_MINUTES * 60 if idle_limit and IDLE_MINUTES else None
     claim = None
@@ -883,12 +900,22 @@ async def _run_task(
             runner=runner,
             repo_entry=repo_entry,
             time_cap=time_cap,
+            needs=(
+                {
+                    CODEX_HOOK: f"harness {codex_hook['harness']!r} cannot run Kraft's "
+                    "permission hook, which this launch's policy needs"
+                }
+                if codex_hook is not None
+                else {}
+            ),
         )
+        held.claim = claim
         hub = _remote_runs.current().hub if claim is not None else None
         if codex_hook is not None and hub is not None and CODEX_HOOK not in hub.caps(claim.machine):
-            # An older machine ignores the field and runs codex with Kraft's hook untrusted:
-            # skipped without a word, its policy unenforced.
-            hub.release(claim)
+            # Backstop: the claim does not hand out a machine without the cap. An older machine
+            # ignores the field and runs codex with Kraft's hook untrusted: skipped without a
+            # word, its policy unenforced.
+            _launch.release(claim)
             refusal = (
                 f"harness {codex_hook['harness']!r} cannot run Kraft's permission hook, which "
                 f"this launch's policy needs: machine {claim.machine!r} runs a Kraft that "
@@ -943,8 +970,6 @@ async def _run_task(
         try:
             await before_launch()
         except BaseException as exc:
-            if claim is not None:
-                _remote_runs.current().hub.release(claim)
             # A row left pending would hold the checkout lease for good.
             log_path.write_text(f"kraft: {str(exc) or 'cancelled before launch'}\n")
             await db.write(
@@ -1254,9 +1279,9 @@ async def _run_task(
                     run = await _remote_runs.current().launch(
                         spec, claim, entries=entries, folder=files.folder
                     )
+                    held.claim = None  # the run owns it now
                 except (RuntimeError, OSError, _remote_files.FilesRefused) as exc:
                     log_path.write_text(f"kraft: {exc}\n")
-                    _remote_runs.current().hub.release(claim)
                     await db.write(
                         lambda c: store.session_exited(
                             c, session_id, "config_error", work_item_id=work_item_id
@@ -1360,8 +1385,6 @@ async def _run_task(
     finally:
         if network and not launched:
             await close_egress(backend, session_id, work_item_id=work_item_id)
-        if claim is not None and run is None:
-            _remote_runs.current().hub.release(claim)
     # The child owns the log fd, so it keeps writing across a Kraft restart — which
     # is the whole premise of reattach. A watcher thread therefore *tails the file*
     # rather than draining a pipe: piping through the parent would give the

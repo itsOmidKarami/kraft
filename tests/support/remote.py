@@ -70,7 +70,9 @@ def workers_file(**machines) -> registry.WorkersFile:
     )
 
 
-async def attach(hub: Hub, machine: Machine, name: str = "gpu", caps=None) -> None:
+async def attach(
+    hub: Hub, machine: Machine, name: str = "gpu", caps=None, token: str = TOKEN
+) -> None:
     """Dial `machine` into `hub` over a fresh in-process pair, saying it understands `caps`
     (what the machine itself lists, by default); then wait for it to show online."""
     server, client = memory_pair()
@@ -79,7 +81,7 @@ async def attach(hub: Hub, machine: Machine, name: str = "gpu", caps=None) -> No
     welcome = await protocol.machine_handshake(
         client,
         kraft_version="2.3.0",
-        token=TOKEN,
+        token=token,
         host="box",
         caps=machine.caps() if caps is None else caps,
     )
