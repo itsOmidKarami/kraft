@@ -10,7 +10,6 @@ tests install a `DirectLink` (the same surface over an in-process job table) ins
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import errno
 import logging
 import os
@@ -35,6 +34,7 @@ WAITING = "waiting for local"
 _START_EVERY_S = 5.0
 _STOP_WAIT_S = 10.0
 _STOP_ANSWER_S = 15.0
+_SPAWN_TRIES = 3  # a worker that keeps dying mid-spawn is not waited on forever
 _ANSWERS = {"spawned": "spawn", "refused": "spawn", "held": "hold", "stopped": "stop"}
 
 
@@ -314,10 +314,6 @@ class LocalLink(_Row):
         exit_path: Path,
         on_wait: Callable[[str], Awaitable[None]] | None = None,
     ) -> LocalProc:
-        if not self.connected:
-            if on_wait is not None:
-                await on_wait(WAITING)
-            await self.wait_connected()
         frame = {
             "t": "spawn",
             "id": key,
@@ -326,23 +322,36 @@ class LocalLink(_Row):
             "env": env,
             "log_path": str(log_path),
         }
-        try:
-            answer = await self._ask("spawn", key, frame)
-        except BaseException as exc:
-            # The worker may have started the session by now, and nobody would hold it.
-            await asyncio.shield(self._stop_quietly(key))
-            if isinstance(exc, protocol.Closed):
-                raise OSError("the local worker went away while starting the session") from exc
-            raise
+        for attempt in range(_SPAWN_TRIES):
+            if not self.connected:
+                if on_wait is not None:
+                    await on_wait(WAITING)
+                await self.wait_connected()
+            try:
+                answer = await self._ask("spawn", key, frame)
+                break
+            except BaseException as exc:
+                # The worker may have started the session by now, and nobody would hold it.
+                stopped = await asyncio.shield(self._stop_quietly(key))
+                if not isinstance(exc, protocol.Closed):
+                    raise
+                # A worker that answered the stop no longer runs `key`: sending it again
+                # cannot start the session twice (Kraft-5c1tm.18).
+                if not stopped or attempt == _SPAWN_TRIES - 1:
+                    raise OSError("the local worker went away while starting the session") from exc
         if answer["t"] == "refused":
             raise _refusal(answer.get("missing"), str(answer.get("reason") or ""), cwd)
         return LocalProc(answer["pid"], answer.get("pid_start_time"), exit_path)
 
-    async def _stop_quietly(self, key: str) -> None:
-        with contextlib.suppress(Exception):
+    async def _stop_quietly(self, key: str) -> bool:
+        """Whether a worker answered the stop for `key`, so it provably no longer runs it."""
+        try:
             if not self.connected:
                 await asyncio.wait_for(self.wait_connected(), _STOP_WAIT_S)
             await self._ask("stop", key, {"t": "stop", "id": key}, _STOP_ANSWER_S)
+        except Exception:
+            return False
+        return True
 
     async def hold(
         self, keys: list[tuple[str, int, float | None]], *, timeout: float = 15.0

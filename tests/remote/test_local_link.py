@@ -206,13 +206,26 @@ def _worker_idle(rig) -> bool:
     return not list((local_serve.state_dir(rig.run_base) / "jobs").glob("*.json"))
 
 
-async def test_a_dropped_answer_stops_the_session_after_reconnecting(tmp_path, monkeypatch):
-    real = local_serve._Worker._frame
+@pytest.mark.parametrize(
+    "drops, stops_answered",
+    [(1, True), (99, True), (1, False)],
+    ids=["resent-once-the-stop-is-answered", "gives-up-after-three", "stop-unanswered"],
+)
+async def test_a_dropped_answer_stops_the_session_after_reconnecting(
+    tmp_path, monkeypatch, drops, stops_answered
+):
+    real, spawns, started, workers = local_serve._Worker._frame, [], [], []
+    monkeypatch.setattr(local_link, "_STOP_ANSWER_S", 0.5)
 
     async def drop(self, t, frame):
+        workers.append(self)
         if frame.get("t") == "spawn":
-            self._spawn(frame["id"], frame)  # started, but the answer never comes
-            raise protocol.Closed("dropped")
+            spawns.append(frame["id"])
+            if len(spawns) <= drops:
+                started.append(self._spawn(frame["id"], frame)["pid"])  # no answer comes
+                raise protocol.Closed("dropped")
+        if frame.get("t") == "stop" and not stops_answered:
+            return
         await real(self, t, frame)
 
     monkeypatch.setattr(local_serve._Worker, "_frame", drop)
@@ -220,19 +233,29 @@ async def test_a_dropped_answer_stops_the_session_after_reconnecting(tmp_path, m
     log.write_bytes(b"")
     async with _Rig(tmp_path / "run") as rig:
         await asyncio.wait_for(rig.link.wait_connected(), 10)
-        with pytest.raises(OSError, match="went away"):
-            await asyncio.wait_for(
-                rig.link.spawn(
-                    "w/s",
-                    ["sleep", "30"],
-                    cwd=str(tmp_path),
-                    env=bare_env(),
-                    log_path=log,
-                    exit_path=tmp_path / "x.exit",
-                ),
-                15,
-            )
-        assert await _until(lambda: _worker_idle(rig), 5)
+        spawn = rig.link.spawn(
+            "w/s",
+            ["sleep", "30"],
+            cwd=str(tmp_path),
+            env=bare_env(),
+            log_path=log,
+            exit_path=tmp_path / "x.exit",
+        )
+        try:
+            if drops == 1 and stops_answered:
+                proc = await asyncio.wait_for(spawn, 15)
+                assert len(spawns) == 2
+                assert _gone(started[0]) and proc.pid != started[0]  # one session, not two
+            else:
+                with pytest.raises(OSError, match="went away"):
+                    await asyncio.wait_for(spawn, 15)
+                assert len(spawns) == (3 if stops_answered else 1)
+                if stops_answered:
+                    assert await _until(lambda: _worker_idle(rig), 5)
+        finally:
+            for pid in [*started, *(c.pid for c in workers[0].jobs._children.values())]:
+                if not _gone(pid):
+                    kill_group(pid)
 
 
 async def test_link_reconnects_after_the_worker_dies(tmp_path):
