@@ -17,7 +17,7 @@ import socket
 from collections.abc import Callable
 from pathlib import Path
 
-from kraft.remote import protocol
+from kraft.remote import machine_config, protocol
 from kraft.remote.channels import Channels
 from kraft.remote.machine import Machine
 from kraft.remote.sockets import private_dir, short_socket_path, take_lock
@@ -88,7 +88,10 @@ class _Daemon:
         await writer.drain()
         t = StreamTransport(reader, writer)
         machine_welcome = await protocol.machine_handshake(
-            t, kraft_version=self.kraft_version, host=socket.gethostname()
+            t,
+            kraft_version=self.kraft_version,
+            host=socket.gethostname(),
+            caps=protocol.machine_caps(machine_config.limit()),
         )
         server = str(machine_welcome.get("server") or "default")
         if (old := self.current.get(server)) is not None:
@@ -97,7 +100,10 @@ class _Daemon:
         machine = self.machines.get(server)
         if machine is None:
             machine = self.machines[server] = Machine(
-                self.home, kraft_version=self.kraft_version, channels=self.channels
+                self.home,
+                kraft_version=self.kraft_version,
+                channels=self.channels,
+                limit=machine_config.limit,
             )
         try:
             await machine.serve(t, machine_welcome)

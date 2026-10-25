@@ -831,17 +831,22 @@ async def add_worker(
     name: str,
     *,
     ssh: str | None = None,
-    capacity: int = 1,
+    capacity: int | None = None,
     repos: list[str] | None = None,
     give_up_after: str | None = None,
 ) -> dict:
     """Register a machine. Without `ssh` the answer carries its one-time token
     and the command to run on it; with `ssh` the server connects once and
     answers what happened."""
-    body: dict = {"name": name, "capacity": capacity}
+    body: dict = {"name": name}
     body |= {
         key: value
-        for key, value in (("ssh", ssh), ("repos", repos), ("give_up_after", give_up_after))
+        for key, value in (
+            ("ssh", ssh),
+            ("capacity", capacity),
+            ("repos", repos),
+            ("give_up_after", give_up_after),
+        )
         if value is not None
     }
     return await transport._act("/workers", body)

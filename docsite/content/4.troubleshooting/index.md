@@ -19,7 +19,7 @@ Find the message you are looking at in the first column, then follow its link.
 | `could not start ...` with `declares neither test_scopes nor test_command in repos.yaml` | [`declares neither test_scopes nor test_command`](/troubleshooting/stop-reasons-in-detail#declares-neither-test_scopes-nor-test_command) |
 | `task failed in node ...`, and the log shows an authentication or login error | [Questions, failed tasks and logins](/troubleshooting/why-did-my-item-stop#questions-failed-tasks-and-logins) |
 | A work item that waits on CI or a review and nothing moves | [Waiting on CI or a review](/troubleshooting/why-did-my-item-stop#waiting-on-ci-or-a-review) |
-| An item that shows `waiting for gpu-box` or `waiting for any machine allowed for ...` | [Waiting for a machine](/troubleshooting/why-did-my-item-stop#waiting-for-a-machine) |
+| An item that shows `waiting for gpu-box (full)` or `waiting for any machine allowed for ...` | [Waiting for a machine](/troubleshooting/why-did-my-item-stop#waiting-for-a-machine) |
 | `kraft: command not found` | [`kraft`: command not found](/troubleshooting/starting-and-reaching-kraft#kraft-command-not-found) |
 | `kraft: refusing to start`, or a port that is already in use | [Kraft won't start: port already in use](/troubleshooting/starting-and-reaching-kraft#kraft-wont-start-port-already-in-use) |
 | A webhook or proxy gets 403 `unexpected Host` | [A webhook or proxy gets 403 "unexpected Host"](/troubleshooting/starting-and-reaching-kraft#a-webhook-or-proxy-gets-403-unexpected-host) |

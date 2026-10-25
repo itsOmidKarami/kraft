@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 from kraft import item_paths, paths
 from kraft.paths import RunDirs
-from kraft.remote import blobs, files, protocol
+from kraft.remote import blobs, files, machine_config, protocol
 from kraft.remote.channels import Channels
 from kraft.remote.forwarder import Forwarder
 from kraft.remote.jobs import JobRunner, JobSpec, job_dir
@@ -32,6 +32,9 @@ from kraft.remote.workdir import Copy
 from kraft.worker import channel
 
 CONNECT_PATH = "/api/workers/connect"
+#: How long a slot held for a step stays held when the server never sends the job or takes it
+#: back: only a server that never returns leaves one to expire.
+RESERVE_TTL_S = 600.0
 _SCHEMES = {"http": "ws", "https": "wss"}
 
 
@@ -68,7 +71,12 @@ async def dial_in(
 
     url, delay = dial_url(server), first_delay
     channels = Channels()  # this process's: the sandbox backends find them in `channel.current()`
-    machine = Machine(paths.kraft_home(), kraft_version=kraft_version, channels=channels)
+    machine = Machine(
+        paths.kraft_home(),
+        kraft_version=kraft_version,
+        channels=channels,
+        limit=machine_config.limit,
+    )
     before = channel.current()
     channel.install(channels.registry)
 
@@ -80,7 +88,11 @@ async def dial_in(
             ) as ws:
                 t = WebSocketTransport(ws.send, ws.recv, ws.close)
                 welcome = await protocol.machine_handshake(
-                    t, kraft_version=kraft_version, token=token, host=socket.gethostname()
+                    t,
+                    kraft_version=kraft_version,
+                    token=token,
+                    host=socket.gethostname(),
+                    caps=machine.caps(),
                 )
                 log(f"connected as {welcome['name']}")
                 try:
@@ -174,6 +186,8 @@ class Machine:
         clock: Callable[[], float] = time.monotonic,
         give_up_poll_s: float = 1.0,
         channels: Channels | None = None,
+        limit: Callable[[], int | None] = lambda: None,
+        ping_s: float = protocol.PING_S,
     ) -> None:
         self.home, self.kraft_version, self._grace = Path(home), kraft_version, kill_grace_s
         # monotonic: it does not advance while a laptop sleeps, so neither does the wait
@@ -195,6 +209,13 @@ class Machine:
         self._delivered: dict[str, list[str]] = {}  # item -> tips the server has already taken
         self._background: set[asyncio.Task] = set()
         self._name = ""  # what the server calls this machine, from its latest welcome
+        # The machine's own limit, read fresh each time (`machine.yaml` may change under it).
+        self._limit, self._ping_s = limit, ping_s
+        self._reported: int | None = None  # the limit the server was last told
+        # step key -> (when the hold lapses, the connection that made it): slots held for steps
+        # the server has not sent yet
+        self._reserved: dict[str, tuple[float, int]] = {}
+        self._connection = 0
         # The process's, shared with every other Machine it hosts: the sandbox backends find the
         # one registry in `channel.current()`. A Machine on its own makes its own.
         self._channels = channels or Channels()
@@ -209,6 +230,10 @@ class Machine:
     @property
     def run_dirs(self) -> RunDirs:
         return self._channels.run_dirs
+
+    def caps(self) -> frozenset[str]:
+        """What to list in the hello: `protocol.CAPS` and the limit as it is now."""
+        return protocol.machine_caps(self._limit())
 
     def holds(self, key: str) -> bool:
         """Is `key` (`<work item>/<session>`) one of this machine's jobs?"""
@@ -229,10 +254,14 @@ class Machine:
         self._give_up_s = welcome.get("give_up_after_s")
         self._name = str(welcome.get("name") or "")
         self._t = t
+        self._connection += 1
+        self._reported = self._limit()  # what the hello said, give or take a moment
         self._stop_watchdog()
+        watcher = asyncio.create_task(self._watch_limit())
         try:
-            await protocol.pump(t, on_frame=self._on_frame)
+            await protocol.pump(t, on_frame=self._on_frame, ping_s=self._ping_s)
         finally:
+            watcher.cancel()
             if self._t is t:
                 self._t = None
                 if self._give_up_s is not None and self._running():
@@ -243,6 +272,8 @@ class Machine:
                     fut.set_result(_DROPPED)
             for key in [k for k, j in self._jobs.items() if j.state == "receiving"]:
                 del self._jobs[key]  # a half-received job: the server sends it again
+                # ... into the slot it had, which the server's `reserves` keeps or drops
+                self._reserved[key] = (self._clock() + RESERVE_TTL_S, self._connection)
 
     def _running(self) -> list[_Job]:
         return [j for j in self._jobs.values() if j.state == "running"]
@@ -288,14 +319,24 @@ class Machine:
                     "commits": Copy(self._area / "items" / wid / "repo").commits(),
                 }
             )
+        elif kind == "reserve":
+            await self._on_reserve(frame)
+        elif kind == "unreserve":
+            self._reserved.pop(frame["id"], None)
+        elif kind == "reserves":
+            kept = set(frame["ids"])
+            self._reserved = {
+                k: held
+                for k, held in self._reserved.items()
+                if k in kept or held[1] >= self._connection
+            }
         elif kind == "job":
-            job = _Job(JobSpec.from_frame(frame["spec"]), set(frame["blobs"]))
-            self._jobs[job.spec.key] = job
-            self._maybe_start(job)
+            await self._on_job(frame)
         elif kind == "blob":
-            if (path := self._sink.add(frame)) is not None and (
-                job := self._jobs.get(frame["id"])
-            ) is not None:
+            job = self._jobs.get(frame["id"])
+            if job is not None and job.state == "finished":
+                return  # turned away: the blobs of a refused job are never written
+            if (path := self._sink.add(frame)) is not None and job is not None:
                 job.got[frame["name"]] = path
                 self._maybe_start(job)
         elif kind == "signal":
@@ -317,6 +358,59 @@ class Machine:
         elif kind == "sync":
             for item in frame["jobs"]:
                 self._spawn(self._resync(item["id"], int(item["offset"])))
+
+    # ── the machine's own limit ──
+
+    def _used(self) -> int:
+        """Slots in use: jobs being received or running, and steps the server holds a slot for."""
+        now = self._clock()
+        self._reserved = {k: held for k, held in self._reserved.items() if held[0] > now}
+        busy = {k for k, j in self._jobs.items() if j.state != "finished"}
+        return len(busy | self._reserved.keys())
+
+    async def _report(self, limit: int | None) -> None:
+        """Tell the server the limit when it is not the one it has."""
+        if limit != self._reported:
+            self._reported = limit
+            with contextlib.suppress(protocol.Closed):
+                await self._emit({"t": "capacity", "capacity": limit})
+
+    async def _watch_limit(self) -> None:
+        """A raised limit reaches the server even when no step is offered."""
+        while True:
+            await asyncio.sleep(self._ping_s)
+            await self._report(self._limit())
+
+    async def _on_reserve(self, frame: dict) -> None:
+        key, limit = frame["id"], self._limit()
+        await self._report(limit)
+        held = key in self._reserved or key in self._jobs
+        ok = held or limit is None or self._used() < limit
+        if ok and not held and limit is not None:
+            self._reserved[key] = (self._clock() + RESERVE_TTL_S, self._connection)
+        with contextlib.suppress(protocol.Closed):
+            await self._emit(
+                {"t": "reserved", "rid": frame["rid"], "id": key, "ok": ok, "capacity": limit}
+            )
+
+    async def _on_job(self, frame: dict) -> None:
+        job = _Job(JobSpec.from_frame(frame["spec"]), set(frame["blobs"]))
+        key, limit = job.spec.key, self._limit()
+        await self._report(limit)
+        if self._reserved.pop(key, None) is None and limit is not None and self._used() >= limit:
+            # a server that reserves never gets here: this one skipped it
+            job.state = "finished"
+            self._jobs[key] = job
+            used = self._used()
+            await self._reject(
+                job,
+                "full",
+                f"{self._name or 'this machine'} has no free slot of its own "
+                f"({used} of {limit} running)",
+            )
+            return
+        self._jobs[key] = job
+        self._maybe_start(job)
 
     def _held_items(self) -> set[str]:
         """Every work item this machine keeps something of: a copy, a job folder, a job."""

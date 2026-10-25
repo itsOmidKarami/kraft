@@ -13,6 +13,7 @@ from support.remote import memory_pair, send_job, stop_daemon
 from websockets.asyncio.server import serve
 
 from kraft.remote import blobs, bundle, machine, protocol, registry
+from kraft.remote import machine as machine_mod
 from kraft.remote.hub import Hub
 from kraft.remote.machine import Machine
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport, WebSocketTransport
@@ -479,3 +480,110 @@ async def test_a_sandboxed_checkout_holding_a_repository_it_made_is_not_swept_an
     copy.update(None, branch="kraft/x", head=copy._git("rev-parse", "HEAD").stdout.strip())
     assert not (copy.root / "sub").exists() and not (copy.root / "stray.txt").exists()
     await _end(t, task)
+
+
+# ── the machine's own limit ──
+
+
+async def _serve(machine, welcome=None):
+    server, machine_t = memory_pair()
+    task = asyncio.create_task(
+        machine.serve(machine_t, {"server": "srv", "name": "gpu", **(welcome or {})})
+    )
+    return server, task
+
+
+async def _reserve(t, key, rid="r"):
+    await t.send({"t": "reserve", "rid": rid, "id": key})
+    return (await _frames_until(t, "reserved"))[-1]
+
+
+async def test_a_machine_holds_a_slot_for_a_step_until_its_job_or_an_unreserve(tmp_path):
+    clock = _Clock()
+    machine = Machine(tmp_path / "home", kraft_version="2.3.0", limit=lambda: 1, clock=clock)
+    server, task = await _serve(machine)
+    assert (await _reserve(server, "w1/a")) == {
+        "t": "reserved", "rid": "r", "id": "w1/a", "ok": True, "capacity": 1,
+    }  # fmt: skip
+    assert (await _reserve(server, "w1/a"))["ok"] is True  # asking again changes nothing
+    refused = await _reserve(server, "w1/b")
+    assert (refused["ok"], refused["capacity"]) == (False, 1)
+    await server.send({"t": "unreserve", "id": "w1/a"})
+    assert (await _reserve(server, "w1/b"))["ok"] is True
+    clock.now = machine_mod.RESERVE_TTL_S + 1  # the server never came back for it
+    assert (await _reserve(server, "w1/c"))["ok"] is True
+    await _end(server, task)
+
+
+async def test_the_job_a_reservation_was_for_runs_and_keeps_the_slot_while_it_does(tmp_path):
+    machine = Machine(tmp_path / "home", kraft_version="2.3.0", limit=lambda: 1)
+    server, task = await _serve(machine)
+    await _reserve(server, "w1/a")
+    await send_job(server, tmp_path, ["sh", "-c", "sleep 30"], sid="a")
+    await _frames_until(server, "started")
+    assert (await _reserve(server, "w1/b"))["ok"] is False
+    await server.send({"t": "signal", "id": "w1/a", "sig": "KILL"})
+    await _frames_until(server, "finished")
+    await server.send({"t": "delivered", "id": "w1/a"})
+    assert (await _reserve(server, "w1/b"))["ok"] is True
+    await _end(server, task)
+
+
+async def test_a_new_connection_keeps_only_the_reservations_the_server_still_holds(tmp_path):
+    machine = Machine(tmp_path / "home", kraft_version="2.3.0", limit=lambda: 2)
+    server, task = await _serve(machine)
+    await _reserve(server, "w1/a")
+    await _reserve(server, "w1/b")
+    await _end(server, task)
+    server, task = await _serve(machine)
+    await server.send({"t": "reserves", "ids": ["w1/a"]})
+    assert (await _reserve(server, "w1/c"))["ok"] is True  # w1/b was dropped, w1/a kept
+    assert (await _reserve(server, "w1/d"))["ok"] is False
+    await _end(server, task)
+
+
+async def test_a_reserves_frame_does_not_drop_a_hold_made_after_the_connection_began(tmp_path):
+    """The server's list was written before it asked for this one."""
+    machine = Machine(tmp_path / "home", kraft_version="2.3.0", limit=lambda: 2)
+    server, task = await _serve(machine)
+    await _reserve(server, "w1/a")
+    await server.send({"t": "reserves", "ids": []})
+    assert (await _reserve(server, "w1/b"))["ok"] is True
+    assert (await _reserve(server, "w1/c"))["ok"] is False  # w1/a and w1/b are both held
+    await _end(server, task)
+
+
+async def test_a_job_with_no_reservation_beyond_the_limit_is_refused_before_its_blobs(tmp_path):
+    machine = Machine(tmp_path / "home", kraft_version="2.3.0", limit=lambda: 1)
+    server, task = await _serve(machine)
+    await send_job(server, tmp_path, ["sh", "-c", "sleep 30"], sid="a")
+    await _frames_until(server, "started")
+    (tmp_path / "second").mkdir()
+    await send_job(server, tmp_path / "second", ["sh", "-c", "sleep 30"], sid="b")
+    refused = (await _frames_until(server, "rejected"))[-1]
+    assert (refused["id"], refused["outcome"]) == ("w1/b", "full")
+    assert refused["reason"] == "gpu has no free slot of its own (1 of 1 running)"
+    await server.send({"t": "sync", "jobs": [{"id": "w1/b", "offset": 0}]})
+    assert (await _frames_until(server, "rejected"))[-1] == refused
+    sink = tmp_path / "home" / "remote" / "srv" / "blobs"
+    assert not list(sink.glob("w1_b.*"))  # none of its blobs was written
+    assert list(sink.glob("w1_a.*"))
+    await server.send({"t": "signal", "id": "w1/a", "sig": "KILL"})
+    await _end(server, task)
+
+
+@pytest.mark.parametrize(("first", "second"), [(3, 1), (1, 3)], ids=["lowered", "raised"])
+async def test_the_machine_reports_a_changed_limit(tmp_path, first, second):
+    limit = [first]
+    machine = Machine(tmp_path / "home", kraft_version="2.3.0", limit=lambda: limit[0], ping_s=0.05)
+    server, task = await _serve(machine)
+    await _until(lambda: machine._t is not None)
+    limit[0] = second
+    frame = (await _frames_until(server, "capacity"))[-1]  # within a ping interval
+    assert frame == {"t": "capacity", "capacity": second}
+    await _reserve(server, "w1/a")
+    await _reserve(server, "w1/b")  # nothing new to say: no second capacity frame
+    await server.send({"t": "ping"})
+    frames = await _frames_until(server, "pong")
+    assert [f for f in frames if f["t"] == "capacity"] == []
+    await _end(server, task)

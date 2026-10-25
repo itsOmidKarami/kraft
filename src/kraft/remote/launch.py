@@ -3,18 +3,41 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Collection, Mapping
 from dataclasses import asdict
 
 from kraft import caps, ids, store
-from kraft.remote import placement
+from kraft.remote import placement, protocol
 from kraft.remote import runs as runs_mod
-from kraft.remote.hub import PlacementRefused
+from kraft.remote.hub import Claim, PlacementRefused
 from kraft.remote.jobs import JobSpec
 
 
-async def claim(db, *, work_item_id, session_id, node_id, runner, repo_entry, time_cap):
+def release(claim: Claim) -> None:
+    """Give back a claim that never reached `Runs.launch`: its hub slot, and the machine's slot
+    held for it. Idempotent."""
+    runs = runs_mod.current()
+    if runs is not None:
+        runs.hub.release(claim)
+        runs.unreserve_soon(claim.machine, claim.key)
+
+
+async def claim(
+    db,
+    *,
+    work_item_id,
+    session_id,
+    node_id,
+    runner,
+    repo_entry,
+    time_cap,
+    needs: Mapping[str, str] | Collection[str] = (),
+):
     """`(claim, refusal, time_cap)`. A refusal is text for the session's log; a wait is a
-    cancellable `await` here, with `time_cap` moved on by however long it lasted."""
+    cancellable `await` here, with `time_cap` moved on by however long it lasted. A machine that
+    listed `reserve` is asked to hold a slot for the step before this returns: one at its own
+    limit turns the step away, and the claim goes on to another machine, or waits for it. Whatever
+    ends this call without a claim has given back everything it took."""
     runs = runs_mod.current()
     if runs is None:
         return None, f"runner {runner!r} needs machines, and this process has none", time_cap
@@ -39,13 +62,30 @@ async def claim(db, *, work_item_id, session_id, node_id, runner, repo_entry, ti
         if runner == placement.ANY
         else None
     )
+    key = ids.session_ref(work_item_id, session_id)
     began = caps.monotonic()
+    got = None
     try:
-        got = await runs.hub.claim(
-            runner, repos, ids.session_ref(work_item_id, session_id), pinned=pinned
-        )
-    except PlacementRefused as exc:
-        return None, str(exc), time_cap
+        while True:
+            try:
+                got = await runs.hub.claim(runner, repos, key, pinned=pinned, needs=needs)
+            except PlacementRefused as exc:
+                return None, str(exc), time_cap
+            if protocol.RESERVE not in runs.hub.caps(got.machine):
+                break  # a machine with no limit of its own is not asked
+            answer = await runs.reserve(got.machine, key)
+            if answer.ok:
+                break
+            machine, got = got.machine, None
+            runs.hub.release(Claim(machine, key))
+            await runs.unreserve(machine, key)
+            if answer.capacity is not None:  # it answered: it is at its own limit
+                runs.hub.set_machine_capacity(machine, answer.capacity)
+                runs.hub.mark_full(machine)
+    except BaseException:
+        if got is not None:
+            release(got)
+        raise
     waited = caps.monotonic() - began
     if time_cap is not None and waited > 0.05:
         time_cap = caps.Deadline(time_cap.at + waited, time_cap.hit)

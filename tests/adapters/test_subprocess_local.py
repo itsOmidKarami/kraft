@@ -74,6 +74,65 @@ async def test_escalation_launch_waits_for_the_worker(run, database):  # noqa: F
     assert len(waiting) == 1 and "waiting for local" in waiting[0]["payload"]
 
 
+async def test_a_session_beyond_the_local_limit_waits_with_no_row_and_says_how_long(
+    run,  # noqa: F811
+    database,
+    monkeypatch,
+):
+    import re
+
+    from kraft import caps
+    from kraft.adapters import subprocess as sp
+
+    local_link.current().capacity = 1
+    seen = []
+    real = sp._run_task
+
+    async def spy(*args, **kw):
+        seen.append(kw)
+        return await real(*args, **kw)
+
+    monkeypatch.setattr(sp, "_run_task", spy)
+    first = asyncio.create_task(run(["sleep", "30"], "s1"))
+    await _running(database, "s1")
+    cap = caps.Deadline(caps.monotonic() + 1000, caps.Hit("on.test.run", "time_cap_minutes", 1, 0))
+    second = asyncio.create_task(run(["/bin/sh", "-c", "echo after"], "s2", time_cap=cap))
+    await asyncio.sleep(0.7)
+
+    assert _row(database, "s2") is None and not second.done()  # no session row while it waits
+    await _cancelled(first)
+    status, row = await asyncio.wait_for(second, 10)
+
+    assert status == "done"
+    assert re.fullmatch(r"kraft: waited \d\.\d s for a local slot", _log(row).splitlines()[0])
+    waiting = database.read(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE type = 'remote_step_waiting'"
+        ).fetchall()
+    )
+    assert len(waiting) == 1 and "waiting for local (1 of 1 running)" in waiting[0]["payload"]
+    moved = seen[-1]["time_cap"]
+    assert moved.at - cap.at >= 0.5 and moved.hit == cap.hit and seen[-1]["waited_s"] >= 0.5
+
+
+@pytest.mark.parametrize("how", ["refused-spawn", "before-launch-raises"])
+async def test_a_session_that_returns_early_gives_its_local_slot_back(run, how):  # noqa: F811
+    link = local_link.current()
+    link.capacity = 1
+
+    async def refuses():
+        raise RuntimeError("no lease")
+
+    if how == "refused-spawn":
+        status, _ = await run(["no-such-command-kraft"])
+        assert status == "config_error"
+    else:
+        with pytest.raises(RuntimeError):
+            await run(["true"], before_launch=refuses)
+
+    assert link.free() and link.take("w1/next")
+
+
 async def test_no_link_installed_is_a_config_error(run):  # noqa: F811
     local_link.install(None)
 

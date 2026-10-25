@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from kraft import cli
+from kraft import cli, paths
 
 
 def _run(capsys, *argv):
@@ -45,7 +45,16 @@ def test_list_json_is_the_raw_payload(app, capsys):
 def test_list_with_no_machines_shows_only_the_local_worker(app, capsys):
     code, out = _run(capsys, "list")
     (_header, row) = out.splitlines()
-    assert code == 0 and row.split()[:5] == ["local", "this", "machine", "online", "0/-"]
+    assert code == 0 and row.split()[:8] == [
+        "local",
+        "this",
+        "machine",
+        "online",
+        "0",
+        "·",
+        "no",
+        "limit",
+    ]
 
 
 def test_remove_forgets_the_machine(app, capsys):
@@ -98,3 +107,24 @@ def test_attach_is_listed_as_run_by_kraft_and_takes_the_session_it_carries(capsy
         cli.main(["admin", "worker", "attach", "--help"])
     out = capsys.readouterr().out
     assert "--run-dir" in out and "--item" in out and "--session" in out
+
+
+@pytest.mark.parametrize(
+    ("row", "slots"),
+    [
+        ({"slots_used": 1, "capacity": 2, "capacity_source": "machine"}, "1 of 2 (machine)"),
+        ({"slots_used": 0, "capacity": 3, "capacity_source": "server"}, "0 of 3"),
+        ({"slots_used": 0, "capacity": 1, "capacity_source": "default"}, "0 of 1"),
+        ({"slots_used": 2, "capacity": None}, "2 · no limit"),
+    ],
+    ids=["machine-lower", "server", "default", "local-no-limit"],
+)
+def test_the_slots_column_says_who_set_the_limit(row, slots):
+    from kraft.cli import worker
+
+    assert worker._slots(row) == slots
+
+
+def test_add_without_a_capacity_writes_none(app, capsys):
+    assert _run(capsys, "add", "home")[0] == 0
+    assert "capacity" not in (paths.config_dir() / "workers.yaml").read_text()

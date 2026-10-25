@@ -40,6 +40,15 @@ def _seen(stamp: str | None) -> str:
     return stamp[:19].replace("T", " ") if stamp else "-"
 
 
+def _slots(w: dict) -> str:
+    """`1 of 2 (machine)` when the machine's own limit is the lower one, `0 of 3`, and
+    `2 · no limit` for the local worker without one."""
+    if w["capacity"] is None:
+        return f"{w['slots_used']} · no limit"
+    of = f"{w['slots_used']} of {w['capacity']}"
+    return f"{of} (machine)" if w.get("capacity_source") == "machine" else of
+
+
 def _render_list(result: dict) -> str:
     rows = result["workers"]
     if not rows:
@@ -51,7 +60,7 @@ def _render_list(result: dict) -> str:
                 w["name"],
                 "this machine" if w["mode"] == "local" else w["mode"],
                 "online" if w["online"] else f"offline: {w['reason']}",
-                f"{w['slots_used']}/{'-' if w['capacity'] is None else w['capacity']}",
+                _slots(w),
                 ",".join(w["repos"]) if w["repos"] else "all",
                 _seen(w["last_seen"]),
                 w["kraft_version"] or "-",
@@ -181,7 +190,12 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
     )
     add_p.add_argument("name", help="lowercase letters, digits, - and _")
     add_p.add_argument("--ssh", metavar="HOST", help="a host or ssh config alias Kraft dials")
-    add_p.add_argument("--capacity", type=int, default=1, help="steps it runs at once (default 1)")
+    add_p.add_argument(
+        "--capacity",
+        type=int,
+        help="steps it runs at once, at most; the machine's own machine.yaml may set it lower "
+        "(default: the machine's, else 1)",
+    )
     add_p.add_argument("--repos", metavar="A,B", help="limit it to these connected repos")
     add_p.add_argument(
         "--give-up-after",

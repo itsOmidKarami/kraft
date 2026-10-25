@@ -135,3 +135,38 @@ async def test_adopted_sandboxed_session_survives_a_second_stop(
         await asyncio.gather(task, return_exceptions=True)
 
     assert closes == closed
+
+
+async def test_an_adopted_local_session_holds_a_slot_until_it_exits(item, database, run_dirs):
+    link = local_link.current()
+    link.capacity = 1
+    with _sleeper(0.5) as (proc, started):
+        await item.session("s1", IMPLEMENT, running=(proc.pid, started))
+        _, adopted = await reattach.reattach(database, run_dirs)
+        await asyncio.sleep(0.1)
+        assert not link.free()  # counted, though it was running before this start
+        await asyncio.wait_for(adopted["w1-s1"], 10)
+    assert link.free()
+
+
+async def test_an_escalation_resumed_after_an_adopted_session_does_not_wait_on_its_slot(
+    item_on, database, run_dirs, monkeypatch
+):
+    link = local_link.current()
+    link.capacity = 1
+    free_when_resumed = []
+
+    async def resumed(*args, **kw):
+        free_when_resumed.append(link.free())
+
+    async def no_sweep(*args, **kw):
+        return None
+
+    monkeypatch.setattr(reattach, "_resume_adopted_escalation", resumed)
+    monkeypatch.setattr(reattach, "_sweep_after", no_sweep)
+    it = await item_on(_CHAIN, "implementation")
+    with _sleeper(0.3) as (proc, started):
+        await it.session("s1", "escalation", running=(proc.pid, started))
+        _, adopted = await reattach.reattach(database, run_dirs)
+        await asyncio.wait_for(adopted["w1-s1"], 10)
+    assert free_when_resumed == [True]

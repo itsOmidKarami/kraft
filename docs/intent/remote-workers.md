@@ -101,9 +101,29 @@ enforced-by: tests/remote/test_hub.py::test_any_takes_the_first_connected_allowe
 origin: src/kraft/remote/hub.py §decide
 
 ## REQ machine-capacity-bounds-its-sessions
-WHILE a machine runs as many sessions as its capacity, the system SHALL NOT start another on it.
-enforced-by: tests/remote/test_hub.py::test_a_named_machine_offline_or_full_makes_the_step_wait_and_never_run_elsewhere, tests/remote/test_hub.py::test_a_waiting_claim_is_granted_when_a_slot_frees_and_is_cancellable
+WHILE a machine runs as many sessions as its limit, the lower of `workers.yaml`'s capacity and the machine's own (one when neither is set), the system SHALL NOT start another on it.
+enforced-by: tests/remote/test_hub.py::test_a_named_machine_offline_or_full_makes_the_step_wait_and_never_run_elsewhere, tests/remote/test_hub.py::test_a_waiting_claim_is_granted_when_a_slot_frees_and_is_cancellable, tests/remote/test_hub.py::test_the_limit_in_use_is_the_lower_of_the_servers_and_the_machines[machine-lower], tests/remote/test_hub.py::test_the_limit_in_use_is_the_lower_of_the_servers_and_the_machines[server-lower]
 origin: src/kraft/remote/hub.py §claim
+
+## REQ machine-turns-away-a-step-beyond-its-own-limit
+WHEN the server asks a machine to hold a slot for a step and the machine runs as many as its own limit, the machine SHALL refuse, and the system SHALL give the step to another free machine it may use, or wait for the named one, with no session row, bundle or blob made for the refusal.
+enforced-by: tests/remote/test_machine.py::test_a_machine_holds_a_slot_for_a_step_until_its_job_or_an_unreserve, tests/adapters/test_subprocess_remote.py::test_a_step_a_machine_turns_away_runs_on_another_with_no_session_on_the_first, tests/adapters/test_subprocess_remote.py::test_a_step_named_for_a_machine_at_its_limit_waits_and_runs_there_once_a_slot_frees
+origin: src/kraft/remote/launch.py §claim
+
+## REQ machine-refuses-an-unreserved-job-beyond-its-limit
+IF a job arrives without a reservation at a machine that runs as many as its own limit, THEN the machine SHALL refuse it as `full` before any of its blobs is written, and the server SHALL end the step with the machine's reason.
+enforced-by: tests/remote/test_machine.py::test_a_job_with_no_reservation_beyond_the_limit_is_refused_before_its_blobs, tests/remote/test_runs.py::test_a_job_a_full_machine_refuses_ends_the_run_with_the_machines_reason
+origin: src/kraft/remote/machine.py §_on_job
+
+## REQ machine-reports-its-limit
+The machine SHALL report its own limit from `machine.yaml` in its hello and again whenever the file changes, and a machine that reports none SHALL be limited by the server's alone.
+enforced-by: tests/remote/test_machine.py::test_the_machine_reports_a_changed_limit[lowered], tests/remote/test_machine.py::test_the_machine_reports_a_changed_limit[raised], tests/remote/test_protocol.py::test_a_machines_own_limit_travels_in_its_hello_caps[limit], tests/remote/test_machine_config.py::test_the_limit_is_what_the_file_says_or_none[set]
+origin: src/kraft/remote/machine.py §_report
+
+## REQ unused-reservation-is-given-back
+WHEN a launch ends after a machine held a slot for it and before the job is sent, the system SHALL tell the machine to drop the slot and free its own.
+enforced-by: tests/adapters/test_subprocess_remote.py::test_a_launch_that_ends_before_the_run_starts_gives_back_the_slot_and_the_hold[spec-fails], tests/adapters/test_subprocess_remote.py::test_a_launch_that_ends_before_the_run_starts_gives_back_the_slot_and_the_hold[cancelled-at-reserve], tests/adapters/test_subprocess_remote.py::test_a_reconnect_keeps_the_holds_the_server_still_has_and_drops_the_rest
+origin: src/kraft/remote/launch.py §release
 
 ## REQ step-waits-for-an-offline-or-full-machine
 WHILE the machine a step is placed on is offline or full, the system SHALL park the step as waiting with no session row, SHALL NOT run it elsewhere, and SHALL NOT count the wait against its time cap.
