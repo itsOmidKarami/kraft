@@ -240,17 +240,39 @@ async def test_gh_branch_ci_status_reads_runs_not_a_pull_request(cli, tmp_path):
     ]
 
 
-async def test_gh_branch_ci_status_waits_for_a_run_matching_the_given_head(cli, tmp_path):
+_CHECK_RUNS = "api repos/{owner}/{repo}/commits/other-sha/check-runs?per_page=1"
+_STATUS = "api repos/{owner}/{repo}/commits/other-sha/status"
+
+
+@pytest.mark.parametrize(
+    "api, no_checks",
+    [
+        # No run and nothing else reported for this head (Kraft-rbjo3):
+        # `merge_watch` gives up after a grace.
+        ({_CHECK_RUNS: '{"check_runs":[]}', _STATUS: '{"statuses":[]}'}, True),
+        # CI from another app (Kraft-5c1tm.19) is a wait, never "no CI".
+        ({_CHECK_RUNS: '{"check_runs":[{"name":"buildkite"}]}'}, False),
+        (
+            {_CHECK_RUNS: '{"check_runs":[]}', _STATUS: '{"statuses":[{"context":"ci/x"}]}'},
+            False,
+        ),
+        # An unreadable answer is a reason to wait, not to pass.
+        ({}, False),
+    ],
+    ids=["nothing-reported", "external-check-run", "commit-status", "api-fails"],
+)
+async def test_gh_branch_ci_status_waits_for_a_run_matching_the_given_head(
+    cli, tmp_path, api, no_checks
+):
     """A run list that has not caught up to `head_sha` yet is a wait, not a
     (wrong-commit) result -- same shape as glab's own sha guard."""
-    cli.stub("gh", GH_RUN_LIST)
+    _gh(cli, FAIL, {"run list": GH_RUN_LIST, **api})
 
     status = await forge.GhCli().branch_ci_status(
         repo=tmp_path, branch="main", head_sha="other-sha"
     )
 
-    # No run at all for this head (Kraft-rbjo3): `merge_watch` gives up after a grace.
-    assert (status.state, status.no_checks) == ("pending", True)
+    assert (status.state, status.no_checks) == ("pending", no_checks)
 
 
 def _run(name: str, conclusion: str, created: str) -> str:

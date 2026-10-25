@@ -258,6 +258,8 @@ The two waits are a chain's `mr.ci` task before the merge and its `mr.post_merge
 
 With `ci_checks` left on, `mr.post_merge_ci` still passes on a merge commit that has no CI run at all five minutes after its wait started, and records `post_merge_ci_absent`. That is a branch whose CI does not run on a push, such as a workflow on `pull_request` only, merged into a branch other than the default. A commit with any run, even a pending one, is waited for as before.
 
+On GitHub, where Kraft reads only Actions runs, a commit whose CI reports from another app as a check run or commit status does not pass this way: the wait stays pending.
+
 ## In this section
 
 - [How connect proposes commands](/reference/configuration/repos/connect-proposals): how `kraft repo connect` proposes setup and test commands, and what to do when it finds none.

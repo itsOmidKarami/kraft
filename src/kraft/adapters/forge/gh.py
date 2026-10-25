@@ -666,7 +666,10 @@ class GhCli(mr_ops.CliWaits):
         )
         if not current:
             return CIStatus(
-                state="pending", url="", jobs=(f"no run for {head_sha[:7]} yet",), no_checks=True
+                state="pending",
+                url="",
+                jobs=(f"no run for {head_sha[:7]} yet",),
+                no_checks=not await self._reports_elsewhere(repo, head_sha),
             )
         jobs = tuple(
             f"{r.get('name')}: {r.get('conclusion') or r.get('status') or 'PENDING'}"
@@ -691,6 +694,26 @@ class GhCli(mr_ops.CliWaits):
             failed_jobs=failed_jobs,
             cancelled_at=_cancelled_at(current, at="updatedAt"),
         )
+
+    async def _reports_elsewhere(self, repo: Path, sha: str) -> bool:
+        """Whether `sha` has a check run or commit status from anything, so
+        CI that is not Actions (Buildkite, CircleCI, the status API) keeps the
+        wait pending instead of passing as "nothing checked". True when either
+        read fails: an unreadable answer is a reason to wait, never to pass."""
+        try:
+            runs = await self._json(
+                repo,
+                ["api", f"repos/{{owner}}/{{repo}}/commits/{sha}/check-runs?per_page=1"],
+                "gh api check-runs",
+            )
+            if runs.get("check_runs"):
+                return True
+            status = await self._json(
+                repo, ["api", f"repos/{{owner}}/{{repo}}/commits/{sha}/status"], "gh api status"
+            )
+            return bool(status.get("statuses"))
+        except (ForgeError, AttributeError):
+            return True
 
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
         """`gh run rerun <id> --failed` for every distinct Actions run behind
