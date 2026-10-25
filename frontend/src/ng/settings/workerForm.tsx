@@ -47,7 +47,7 @@ export function GroupsField({ groups, onChange }: { groups: string[]; onChange: 
   return (
     <div className="set-wk-field">
       <span className="field-label">Groups</span>
-      <PillInput label="Groups" values={groups} onChange={onChange} placeholder="Add a group" empty="In no group. A step's runner can name a group." noun="group" />
+      <PillInput label="Groups" values={groups} onChange={onChange} placeholder="Add a group" placeholderMore="Add a group" empty="In no group. A step's runner can name a group." noun="group" />
     </div>
   );
 }
@@ -59,7 +59,7 @@ export function ReposField({ scope, repos, choices, onScope, onRepos }: { scope:
     <div className="set-wk-field">
       <span className="field-label">Repos</span>
       <Segmented label="Repos" value={scope} onChange={onScope} options={[{ value: "every", label: "Every repo" }, { value: "some", label: "Only some" }]} />
-      {scope === "some" && <PillInput label="Repos" values={repos} onChange={onRepos} choices={choices} noun="connected repo" placeholder="Add a repo" />}
+      {scope === "some" && <PillInput label="Repos" values={repos} onChange={onRepos} choices={choices} noun="connected repo" placeholder="Add a repo" placeholderMore="Add a repo" />}
     </div>
   );
 }

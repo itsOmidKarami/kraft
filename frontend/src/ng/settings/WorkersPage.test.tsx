@@ -26,7 +26,7 @@ afterEach(() => {
 
 const GPU = fixture("gpu-box");
 const HOME = fixture("home-server");
-const DISABLED = { ...HOME, name: "old-box", enabled: false } as Machine;
+const DISABLED = { ...HOME, name: "old-box", enabled: false, groups: ["linux"] } as Machine;
 const rows = (...extra: Machine[]) => [200, { workers: [LOCAL_ROW, GPU, HOME, ...extra] }] as [number, unknown];
 
 describe("Settings › Workers", () => {
@@ -62,13 +62,13 @@ describe("Settings › Workers", () => {
     expect(screen.getByRole("columnheader", { name: "Running" })).toHaveClass("is-num");
   });
 
-  it("dims a disabled row's name, connects, running, repos and version, but not its Edit button", async () => {
+  it("dims a disabled row's name, connects, running, groups, repos and version, but not its Edit button", async () => {
     stubFetch({ "GET /workers": rows(DISABLED) });
     mount();
     const row = (await screen.findByText("old-box")).closest("tr")!;
     expect(row).toHaveClass("is-off");
     const dim = [...row.querySelectorAll("td.is-dim")].map((c) => c.textContent);
-    expect(dim).toEqual(["old-box", "dials in", "0 of 1", "every repo", "2.4.0"]);
+    expect(dim).toEqual(["old-box", "dials in", "0 of 1", "linux", "every repo", "2.4.0"]);
     expect(within(row).getByRole("button", { name: "Edit old-box" }).closest("td")).not.toHaveClass("is-dim");
     expect(screen.getByText("gpu-box").closest("tr")).not.toHaveClass("is-off");
   });

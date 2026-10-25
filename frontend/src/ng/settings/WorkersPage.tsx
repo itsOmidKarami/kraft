@@ -100,7 +100,7 @@ export function WorkersPage() {
                             </div>
                           </td>
                           <td className="is-num is-dim">{slotsWords(m)}</td>
-                          <td>{m.groups.length ? m.groups.join(", ") : <Dash />}</td>
+                          <td className="is-dim">{m.groups.length ? m.groups.join(", ") : <Dash />}</td>
                           <td className="is-dim">{m.repos?.length ? m.repos.join(", ") : EVERY_REPO}</td>
                           <td className="set-mono is-dim">{m.kraft_version ?? <Dash />}</td>
                           <td className="is-act"><Button onClick={() => setEditing(m.name)} aria-label={`Edit ${m.name}`}>Edit</Button></td>

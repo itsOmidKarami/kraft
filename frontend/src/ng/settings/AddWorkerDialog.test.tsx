@@ -125,6 +125,7 @@ describe("AddWorkerDialog", () => {
     expect(posts()[0].body).toEqual({ name: "home-server" });
     expect(screen.getByText("shown once")).toHaveClass("badge", "is-warn");
     expect(screen.getByText("shown once").parentElement).toHaveTextContent("Kraft keeps only the hash");
+    expect(screen.getByText("shown once").parentElement?.firstElementChild).toBe(screen.getByText("shown once"));
     expect(screen.getByLabelText("Command to run on home-server").parentElement).toContainElement(screen.getByRole("button", { name: "Copy" }));
     expect(screen.getByLabelText("Command to run on home-server").textContent).toBe("kraft admin worker serve \\\n  --server http://10.0.0.5:8080 \\\n  --token abc123");
     expect(screen.getByText("Replace the address.")).toBeInTheDocument();

@@ -8,12 +8,14 @@ import { Empty } from "./Empty";
  *  press Enter or comma to add; × or Backspace on an empty input removes one;
  *  Delete or Backspace on a focused pill's × removes it. `added` marks the pills
  *  that are new in the draft (green). The list is announced as it changes. */
-export function PillInput({ label, values, added = [], onChange, placeholder = "type and press Enter", empty, choices, noun = "value", locked }: {
+export function PillInput({ label, values, added = [], onChange, placeholder = "type and press Enter", placeholderMore = "add…", empty, choices, noun = "value", locked }: {
   label: string;
   values: string[];
   added?: string[];
   onChange: (next: string[]) => void;
   placeholder?: string;
+  /** The placeholder once the list has a value. */
+  placeholderMore?: string;
   /** Said under an empty list. */
   empty?: string;
   /** The closed set a pill comes from: listed as you type, and nothing else is added. */
@@ -77,7 +79,7 @@ export function PillInput({ label, values, added = [], onChange, placeholder = "
               className="pill-input"
               aria-label={`Add to ${label}`}
               aria-describedby={empty && !values.length ? `${id}-empty` : undefined}
-              placeholder={values.length ? "add…" : placeholder}
+              placeholder={values.length ? placeholderMore : placeholder}
               value={text}
               choices={choices.filter((c) => !values.includes(c.value))}
               closed
@@ -95,7 +97,7 @@ export function PillInput({ label, values, added = [], onChange, placeholder = "
               className="pill-input"
               aria-label={`Add to ${label}`}
               aria-describedby={empty && !values.length ? `${id}-empty` : undefined}
-              placeholder={values.length ? "add…" : placeholder}
+              placeholder={values.length ? placeholderMore : placeholder}
               value={text}
               onChange={(e) => { setText(e.target.value); setRefused(null); }}
               onKeyDown={onKey}

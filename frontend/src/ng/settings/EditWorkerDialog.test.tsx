@@ -57,6 +57,7 @@ describe("EditWorkerDialog", () => {
     fireEvent.change(giveUp(), { target: { value: "never" } });
     fireEvent.change(field(/ssh host/), { target: { value: "box2.lan" } });
     const groups = screen.getByRole("textbox", { name: "Add to Groups" });
+    expect(groups).toHaveAttribute("placeholder", "Add a group");
     fireEvent.change(groups, { target: { value: "big" } });
     fireEvent.keyDown(groups, { key: "Enter" });
     fireEvent.click(screen.getByRole("radio", { name: "Every repo" }));
