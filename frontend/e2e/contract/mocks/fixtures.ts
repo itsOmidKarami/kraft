@@ -765,8 +765,8 @@ function settingsFor(variant: Variant, theme: { mode?: string; density?: string;
 
 /** `GET /workers`: two machines, one reachable and one that dropped. */
 export const WORKERS_FIXTURE = [
-  { name: "gpu-box", mode: "ssh", online: true, reason: "", slots_used: 1, capacity: 2, capacity_source: "server", machine_capacity: null, repos: ["kraft"], last_seen: "2026-10-23T09:58:00+00:00", kraft_version: "2.4.0", give_up_after: "2h" },
-  { name: "home-server", mode: "dial-in", online: false, reason: "disconnected: end of stream", slots_used: 0, capacity: 1, capacity_source: "default", machine_capacity: null, repos: null, last_seen: "2026-10-23T08:12:00+00:00", kraft_version: "2.4.0", give_up_after: "never" },
+  { name: "gpu-box", mode: "ssh", online: true, reason: "", slots_used: 1, capacity: 2, capacity_source: "server", machine_capacity: null, groups: ["gpu", "linux"], repos: ["kraft"], last_seen: "2026-10-23T09:58:00+00:00", kraft_version: "2.4.0", give_up_after: "2h" },
+  { name: "home-server", mode: "dial-in", online: false, reason: "disconnected: end of stream", slots_used: 0, capacity: 1, capacity_source: "default", machine_capacity: null, groups: [], repos: null, last_seen: "2026-10-23T08:12:00+00:00", kraft_version: "2.4.0", give_up_after: "never" },
 ];
 
 function analyticsFor(variant: Variant) {

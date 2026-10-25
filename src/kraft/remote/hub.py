@@ -119,6 +119,7 @@ class Hub:
         previous, self._entries, self._file = self._entries, {}, file
         if (link := local_link.current()) is not None:
             link.capacity = file.local.capacity if file.local is not None else None
+            link.groups = list(file.local.groups) if file.local is not None else []
         for name, worker in file.workers.items():
             entry = previous.pop(name, None)
             if entry is None:
@@ -360,11 +361,15 @@ class Hub:
         *,
         pinned: str | None = None,
         needs: Mapping[str, str] | Collection[str] = (),
+        exclude: Collection[str] = (),
     ) -> Verdict:
         """Who would take a step placed on `runner` now, or why it waits or is refused. `pinned`
         is the machine a resumed session must go back to. `needs` are caps the machine must list
-        (a mapping gives each one's words for a refusal)."""
+        (a mapping gives each one's words for a refusal). A group is looked at as `any` is, over
+        its remote members: the local worker is not the hub's to give (`launch.placed`).
+        `exclude` leaves out machines that already turned this step away."""
         label = placement.repos_label(repos)
+        group = pinned is None and self._file.is_group(runner)
         if pinned is not None:
             if pinned not in self._entries:
                 return Verdict(
@@ -382,11 +387,27 @@ class Hub:
                     f"that may work on {label}"
                 )
             wait_text = f"waiting for any machine allowed for {label}"
+        elif group:
+            if (why := placement.refusal(runner, workers=self._file, repos=repos)) is not None:
+                return Verdict(refusal=why)
+            names = [
+                n
+                for n in placement.group_members(runner, self._file)
+                if n != placement.LOCAL
+                and (e := self._entries.get(n)) is not None
+                and placement.allows(e.worker, repos)
+            ]
+            if not names:
+                return Verdict(
+                    refusal=f"group {runner!r} finds no machine in workers.yaml that may "
+                    f"work on {label}"
+                )
+            wait_text = f"waiting for a machine in {runner}"
         else:
             if (why := placement.refusal(runner, workers=self._file, repos=repos)) is not None:
                 return Verdict(refusal=why)
             names, wait_text = [runner], f"waiting for {runner}"
-        named = runner != placement.ANY or pinned is not None
+        named = (runner != placement.ANY and not group) or pinned is not None
         first = self._entries.get(names[0])  # workers.yaml may name it before apply made it
         # A named machine that is up without a cap the step needs will never do; for `any`, so
         # are all of them when every candidate is up.
@@ -405,7 +426,7 @@ class Hub:
                 f"machine {n!r} runs a Kraft without {cap!r}; update Kraft on that machine"
             )
         for n in names:
-            if self._has_slot(n, needs):
+            if n not in exclude and self._has_slot(n, needs):
                 return Verdict(machine=n)
         if named:
             if first is None:
@@ -425,18 +446,23 @@ class Hub:
         needs: Mapping[str, str] | Collection[str] = (),
         on_wait: Callable[[str], None] | None = None,
         poll_s: float = 0.5,
-    ) -> Claim:
+        wait: bool = True,
+        exclude: Collection[str] = (),
+    ) -> Claim | None:
         """A slot for `key`, waiting (and saying so through `on_wait`, once per reason) until a
-        machine can take it. Raises `PlacementRefused`; cancelling the caller gives nothing back
-        because nothing is held while it waits."""
+        machine can take it; with `wait=False`, None when none can now. Raises
+        `PlacementRefused`; cancelling the caller gives nothing back because nothing is held
+        while it waits."""
         said = None
         while True:
-            v = self.decide(runner, repos, pinned=pinned, needs=needs)
+            v = self.decide(runner, repos, pinned=pinned, needs=needs, exclude=exclude)
             if v.refusal:
                 raise PlacementRefused(v.refusal)
             if v.machine:
                 self._claims.setdefault(v.machine, set()).add(key)
                 return Claim(v.machine, key)
+            if not wait:
+                return None
             if on_wait is not None and v.wait != said:
                 on_wait(v.wait)
                 said = v.wait
@@ -495,6 +521,7 @@ class Hub:
                 "capacity": self.limit(name),
                 "capacity_source": self.limit_source(name),
                 "machine_capacity": e.machine_capacity,
+                "groups": list(e.worker.groups),
                 "repos": e.worker.repos,
                 "last_seen": (
                     datetime.fromtimestamp(e.last_seen, UTC).isoformat() if e.last_seen else None

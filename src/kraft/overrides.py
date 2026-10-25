@@ -72,7 +72,7 @@ def stored_model_refusal(
 
 
 _RUNNER = re.compile(r"[a-z0-9][a-z0-9_-]{0,38}")
-RUNNER_RULE = "'runner' must be local, any or a machine name"
+RUNNER_RULE = "'runner' must be local, any, a machine or a group from workers.yaml"
 
 
 def runner_problem(value: object) -> str | None:
@@ -91,7 +91,7 @@ class _ModelEffortOverride(BaseModel):
     model: StrictStr | None = None
     escalate_model: StrictStr | None = None
     effort: Effort = Field(default=None)
-    #: Where the steps run: local, any or a machine name (`kraft.remote.placement`).
+    #: Where the steps run: local, any, a machine or a group (`kraft.remote.placement`).
     runner: StrictStr | None = None
 
 
@@ -169,7 +169,7 @@ def validate_node_override_fields(fields: dict) -> list[str]:
 def validate_agent_overrides(overrides: dict) -> list[str]:
     """A work item's own model/effort/runner override (Kraft-4k6l): keys a subset of
     `{"model", "escalate_model", "effort", "runner"}`, `model`/`escalate_model` strings or
-    `None`, `effort` one of `Effort`, `runner` local, any or a machine name. Returns error
+    `None`, `effort` one of `Effort`, `runner` local, any, a machine or a group. Returns error
     strings, empty if valid."""
     errors = _errors(
         _ModelEffortOverride,

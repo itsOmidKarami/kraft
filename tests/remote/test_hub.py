@@ -61,6 +61,7 @@ async def test_an_unconnected_machine_lists_offline_and_never_connected():
         "capacity": 2,
         "capacity_source": "server",
         "machine_capacity": None,
+        "groups": [],
         "repos": ["kraft"],
         "last_seen": None,
         "kraft_version": None,
@@ -452,3 +453,64 @@ async def test_applying_workers_yaml_hands_the_local_workers_limit_to_its_link(l
     hub = Hub("2.3.0")
     hub.apply(registry.WorkersFile.model_validate({"local": local} if local is not None else {}))
     assert local_link.current().capacity == capacity
+
+
+def _grouped(**extra):
+    """Two dial-in machines in group `gpu`, each with its own token, a limit of one."""
+    return registry.WorkersFile.model_validate(
+        {
+            "workers": {
+                n: {
+                    "token_sha256": registry.hash_token(f"kwt_{n}"),
+                    "capacity": 1,
+                    "groups": ["gpu"],
+                    **extra.get(n, {}),
+                }
+                for n in ("a", "b")
+            }
+        }
+    )
+
+
+async def _both_online(hub):
+    for n in ("a", "b"):
+        await attach(hub, _Peer(), n, caps=frozenset(), token=f"kwt_{n}")
+
+
+async def test_a_group_goes_to_its_first_free_member_and_waits_when_none_is():
+    hub = Hub("2.3.0")
+    hub.apply(_grouped())
+    await _both_online(hub)
+    assert hub.decide("gpu", []).machine == "a"
+    first = await hub.claim("gpu", [], "w/1", poll_s=0.01)
+    assert first.machine == "a" and hub.decide("gpu", []).machine == "b"
+    exclude_b = hub.decide("gpu", [], exclude={"b"})
+    assert exclude_b.machine is None and exclude_b.wait == "waiting for a machine in gpu"
+    await hub.claim("gpu", [], "w/2", poll_s=0.01)
+    # both full: the wait names the group alone, no `(offline: ...)` for one member
+    assert hub.decide("gpu", []) == Verdict(wait="waiting for a machine in gpu")
+    assert await hub.claim("gpu", [], "w/3", wait=False) is None
+    hub.release(first)
+    assert (await hub.claim("gpu", [], "w/3", wait=False)).machine == "a"
+
+
+async def test_a_group_member_that_is_excluded_is_passed_over_while_it_has_a_slot():
+    hub = Hub("2.3.0")
+    hub.apply(_grouped())
+    await _both_online(hub)
+    assert (await hub.claim("gpu", [], "w/1", wait=False, exclude={"a"})).machine == "b"
+
+
+async def test_a_group_no_member_may_work_for_is_refused_naming_the_repo():
+    hub = Hub("2.3.0")
+    hub.apply(_grouped(a={"repos": ["kraft"]}, b={"repos": ["kraft"]}))
+    refusal = hub.decide("gpu", _repos("infra")).refusal
+    assert "group 'gpu'" in refusal and "infra" in refusal
+
+
+async def test_a_group_still_hands_a_codex_step_only_to_a_member_that_lists_the_cap():
+    hub = Hub("2.3.0")
+    hub.apply(_grouped())
+    await attach(hub, _Peer(), "a", caps=frozenset(), token="kwt_a")
+    await attach(hub, _Peer(), "b", caps=frozenset({"codex_hook"}), token="kwt_b")
+    assert hub.decide("gpu", [], needs={"codex_hook": "the hook"}).machine == "b"

@@ -53,7 +53,7 @@ def _render_list(result: dict) -> str:
     rows = result["workers"]
     if not rows:
         return "no workers"
-    table = [("NAME", "MODE", "STATE", "SLOTS", "REPOS", "LAST SEEN", "VERSION")]
+    table = [("NAME", "MODE", "STATE", "SLOTS", "GROUPS", "REPOS", "LAST SEEN", "VERSION")]
     for w in rows:
         table.append(
             (
@@ -61,6 +61,7 @@ def _render_list(result: dict) -> str:
                 "this machine" if w["mode"] == "local" else w["mode"],
                 "online" if w["online"] else f"offline: {w['reason']}",
                 _slots(w),
+                ",".join(w.get("groups") or []) or "-",
                 ",".join(w["repos"]) if w["repos"] else "all",
                 _seen(w["last_seen"]),
                 w["kraft_version"] or "-",
@@ -82,6 +83,7 @@ def _cmd_add(ns: argparse.Namespace) -> None:
             capacity=ns.capacity,
             repos=repos,
             give_up_after=ns.give_up_after,
+            groups=ns.group or None,
         )
     )
     common.emit(result, _render_added, ns.json)
@@ -195,6 +197,12 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
         type=int,
         help="steps it runs at once, at most; the machine's own machine.yaml may set it lower "
         "(default: the machine's, else 1)",
+    )
+    add_p.add_argument(
+        "--group",
+        action="append",
+        metavar="G",
+        help="put it in group G, which a step's runner can name (repeatable)",
     )
     add_p.add_argument("--repos", metavar="A,B", help="limit it to these connected repos")
     add_p.add_argument(

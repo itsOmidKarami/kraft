@@ -194,8 +194,8 @@ def build() -> MCPServer:
         unless a human asked for them. `chain_template` is `chain`'s 1.x
         name, still read; pass `chain`.
 
-        `runner` is where the item's steps run: a machine from workers.yaml,
-        `any` or `local`. A machine name must be in workers.yaml; a sandboxed,
+        `runner` is where the item's steps run: a machine or a group from
+        workers.yaml, `any` or `local`. A name must be in workers.yaml; a sandboxed,
         in-place, workspace-member, submodule or Git LFS item is refused. Leave
         it out unless a human asked for one."""
         return await client.create_work_item(
@@ -249,6 +249,7 @@ def build() -> MCPServer:
         capacity: int | None = None,
         repos: list[str] | None = None,
         give_up_after: str | None = None,
+        groups: list[str] | None = None,
     ) -> dict:
         """Register a machine that may run work item steps. With `ssh` (a host
         or ~/.ssh/config alias) Kraft connects to it once and reports the
@@ -256,16 +257,23 @@ def build() -> MCPServer:
         command to run on the machine. `capacity` caps the steps it runs at
         once (the machine's own limit applies too, if lower; unset: its own,
         else 1). `repos` limits it to those connected
-        repos; `give_up_after` is a duration like 2h or "never". Machine
+        repos; `give_up_after` is a duration like 2h or "never". `groups` puts it in
+        those groups (a step's `runner` can name a group; names share one namespace with
+        machines). Machine
         management is a person's call: ask first."""
         return await client.add_worker(
-            name, ssh=ssh, capacity=capacity, repos=repos, give_up_after=give_up_after
+            name,
+            ssh=ssh,
+            capacity=capacity,
+            repos=repos,
+            give_up_after=give_up_after,
+            groups=groups,
         )
 
     @server.tool()
     async def list_workers() -> dict:
         """List the registered machines: mode, online or offline and why,
-        slots used, repos, last seen, Kraft version."""
+        slots used, the limit in use and who set it, groups, repos, last seen, Kraft version."""
         return await client.list_workers()
 
     @server.tool()
@@ -473,8 +481,8 @@ def build() -> MCPServer:
         itself. `clear` resets every field, the runner too, back to the template's own
         binding; naming a field replaces the stored override rather than merging
         with it, but a call that does not name `runner` keeps the stored one. `runner` is
-        where the steps run: a machine from workers.yaml,
-        `any` or `local`; a sandboxed, in-place, workspace-member, submodule or
+        where the steps run: a machine or a group from
+        workers.yaml, `any` or `local`; a sandboxed, in-place, workspace-member, submodule or
         Git LFS item is refused. It takes effect at the next step launch."""
         return await client.set_agent_overrides(
             model, escalate_model, effort, runner=runner, clear=clear, work_item_id=work_item_id
@@ -502,8 +510,8 @@ def build() -> MCPServer:
         over the repository's; `[]` expects none) -- without touching the Policy
         screen's system defaults or the chain everyone else uses. A
         model/effort the node's harness refuses is refused here. `runner` is
-        where the node's steps run: a machine from workers.yaml, `any` or
-        `local`; a sandboxed, in-place, workspace-member, submodule or Git LFS
+        where the node's steps run: a machine or a group from workers.yaml,
+        `any` or `local`; a sandboxed, in-place, workspace-member, submodule or Git LFS
         item is refused. `clear` resets this node back to the template's own
         binding; naming a field sets it and keeps the node's other fields.
         409s once the node has started, except a `runner` alone, which takes

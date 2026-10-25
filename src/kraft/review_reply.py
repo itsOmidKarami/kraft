@@ -191,6 +191,7 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
         takes_checkout=True,
         tips=tips,
         runner=_placement.remote(_placement.node_runner(row, gate)),
+        follow_node=True,
     )
     files = read_only.changed(db, row, launch, worktree, before)
     if files:

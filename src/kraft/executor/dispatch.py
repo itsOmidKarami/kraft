@@ -17,7 +17,7 @@ from kraft import builtins as _builtins
 from kraft import caps as _caps
 from kraft import carried as _carried
 from kraft import config as _config
-from kraft import events, inplace, item_paths, node_runs, store
+from kraft import events, ids, inplace, item_paths, node_runs, store
 from kraft import findings as _findings
 from kraft import harness as _harness
 from kraft import overrides as _overrides
@@ -54,6 +54,7 @@ from kraft.executor.context import (
     LaunchContext,
     Steer,
 )
+from kraft.remote import launch as _remote_launch
 from kraft.remote import local_link as _local_link
 from kraft.remote import placement
 from kraft.remote import runs as _remote_runs
@@ -339,9 +340,45 @@ async def config_error_session(db, run_dirs, common: dict, log: str) -> str:
     )
 
 
-async def _place(db, run_dirs, task, node, row, launch, runner, common):
-    """None to go on; otherwise the status that stops or parks the step: a `config_error` session
-    for a placement that cannot hold, `WAITING` while the machine is offline or full."""
+def _is_group(runner: str | None) -> bool:
+    return _remote_launch.is_group(runner)
+
+
+async def _place_group(
+    db, run_dirs, stack, task, node, row, launch, runner, common, t, *, resume: bool
+):
+    """`(blocked, placed)`: `blocked` is None to go on, else the status that stops or parks the
+    step; `placed` the `Placement` holding the slot a step on a group was given. A scope-running
+    step holds none here: each scope places itself."""
+    blocked = await _check_filing(db, run_dirs, task, row, launch, runner, common)
+    if blocked is not None:
+        return blocked, None
+    if isinstance(t, BuiltinTask):
+        return None, None
+    repos = [launch.repo_entry] if launch and launch.repo_entry else []
+    p = await stack.enter_async_context(
+        _remote_launch.placed(
+            db,
+            row,
+            node.id,
+            task.path,
+            runner,
+            repos,
+            session_key=ids.session_ref(row["id"], common["session_id"]),
+            resume=resume,
+            can_park=True,
+        )
+    )
+    if p.refusal:
+        return await config_error_session(db, run_dirs, common, f"{task.path}: {p.refusal}\n"), None
+    if p.wait:
+        await _note_waiting(db, row, node, task, p.wait)
+        return WAITING, None
+    return None, p
+
+
+async def _check_filing(db, run_dirs, task, row, launch, runner, common):
+    """A `config_error` session's status for a runner that cannot hold, else None."""
     runs = _remote_runs.current()
     if runs is None:
         return await config_error_session(
@@ -361,6 +398,17 @@ async def _place(db, run_dirs, task, node, row, launch, runner, common):
     )
     if problems:
         return await config_error_session(db, run_dirs, common, f"{task.path}: {problems[0]}\n")
+    return None
+
+
+async def _place(db, run_dirs, task, node, row, launch, runner, common):
+    """None to go on; otherwise the status that stops or parks the step: a `config_error` session
+    for a placement that cannot hold, `WAITING` while the machine is offline or full."""
+    blocked = await _check_filing(db, run_dirs, task, row, launch, runner, common)
+    if blocked is not None:
+        return blocked
+    runs = _remote_runs.current()
+    repos = [launch.repo_entry] if launch and launch.repo_entry else []
     pinned = (
         db.read(lambda c: store.pinned_machine(c, row["id"], node.id))
         if runner == placement.ANY
@@ -837,35 +885,56 @@ async def _run_changed_test_scopes(
     base = _current_base_ref(db, work_item_row["id"])
 
     async def _run(cmd: list[str], targeted: bool = False) -> str:
-        return await _subprocess.run_task(
+        scope_common = {
+            **common,
+            "session_id": db.read(lambda c, w=common["work_item_id"]: store.new_session_id(c, w)),
+        }
+
+        async def go(on: str | None, claim, time_cap: _caps.Deadline | None) -> str:
+            return await _subprocess.run_task(
+                db,
+                run_dirs,
+                cmd=cmd,
+                cwd=worktree,
+                repo_entry=repo_entry,
+                env={
+                    **TEST_ENV,
+                    **(
+                        {
+                            "KRAFT_CHANGED_FILES": str(changed_files),
+                            **({"KRAFT_TEST_BASE": base} if base else {}),
+                        }
+                        if targeted
+                        else {}
+                    ),
+                },
+                # A sandbox does not mount the item's run folder: the list goes in read-only.
+                ro_paths=(str(changed_files),) if targeted else (),
+                sandbox=sandbox,
+                checkout=checkout,
+                time_cap=time_cap,
+                runner=on,
+                placed_claim=claim,
+                **scope_common,
+            )
+
+        if not _is_group(runner):
+            return await go(runner, None, time_cap)
+
+        async def attempt(on, claim, waited_s):
+            return await go(on, claim, _remote_launch.extend(time_cap, waited_s))
+
+        # Each scope places itself: one may run remote while the next runs locally.
+        return await _remote_launch.run_placed(
             db,
-            run_dirs,
-            cmd=cmd,
-            cwd=worktree,
-            repo_entry=repo_entry,
-            env={
-                **TEST_ENV,
-                **(
-                    {
-                        "KRAFT_CHANGED_FILES": str(changed_files),
-                        **({"KRAFT_TEST_BASE": base} if base else {}),
-                    }
-                    if targeted
-                    else {}
-                ),
-            },
-            # A sandbox does not mount the item's run folder: the list goes in read-only.
-            ro_paths=(str(changed_files),) if targeted else (),
-            sandbox=sandbox,
-            checkout=checkout,
-            time_cap=time_cap,
-            runner=runner,
-            **{
-                **common,
-                "session_id": db.read(
-                    lambda c, w=common["work_item_id"]: store.new_session_id(c, w)
-                ),
-            },
+            work_item_row,
+            node.id,
+            task.path,
+            runner,
+            [repo_entry] if repo_entry is not None else [],
+            session_id=scope_common["session_id"],
+            resume=False,
+            attempt=attempt,
         )
 
     # What the round picked, before any of it runs: a node's view draws the scopes still to
@@ -1387,6 +1456,16 @@ def _takes_the_checkout(t) -> bool:
 
 
 async def _dispatch_task(
+    db, run_dirs, task: ResolvedTask, node: ResolvedNode, work_item_row, worktree, **kw
+) -> str:
+    """`_dispatch_task_in`, holding the slot of a step placed on a group until it ends."""
+    async with contextlib.AsyncExitStack() as stack:
+        return await _dispatch_task_in(
+            db, run_dirs, task, node, work_item_row, worktree, stack=stack, **kw
+        )
+
+
+async def _dispatch_task_in(
     db,
     run_dirs,
     task: ResolvedTask,
@@ -1394,6 +1473,7 @@ async def _dispatch_task(
     work_item_row,
     worktree,
     *,
+    stack: contextlib.AsyncExitStack,
     instruction_override: str | None = None,
     round: int = 0,
     steer: Steer | None = None,
@@ -1516,13 +1596,34 @@ async def _dispatch_task(
     # Where the step runs. A placed one waits for its machine or stops: it must never run on the
     # server instead (the anti-goal of `kraft.remote`).
     runner = placement.LOCAL
+    placed = None  # the `Placement` of a step on a group, holding its slot until the stack ends
+    group_runner = None
     if _takes_the_checkout(t):
         runner = placement.runner_for(work_item_row, task.runner, node.id)
-        blocked = (
-            await _place(db, run_dirs, task, node, work_item_row, launch, runner, common)
-            if runner != placement.LOCAL
-            else await _await_local_worker(db, work_item_row, node, task)
-        )
+        if _is_group(runner):
+            group_runner = runner
+            # A session to `--resume` goes back to its machine; whether the harness can resume
+            # it is settled later, so a harness that cannot still waits for that machine.
+            resume = (
+                isinstance(t, AgentTask)
+                and instruction_override is None
+                and db.read(
+                    lambda c: store.resumable_agent_session(
+                        c, work_item_row["id"], node.id, task.path
+                    )
+                )
+                is not None
+            )
+            blocked, placed = await _place_group(
+                db, run_dirs, stack, task, node, work_item_row, launch, runner, common, t,
+                resume=resume,
+            )  # fmt: skip
+            if placed is not None:
+                runner = placed.runner
+        elif runner != placement.LOCAL:
+            blocked = await _place(db, run_dirs, task, node, work_item_row, launch, runner, common)
+        else:
+            blocked = await _await_local_worker(db, work_item_row, node, task)
         if blocked is not None:
             return blocked
     # Right before a task that needs the folder, never on the walk's entry; a
@@ -1646,6 +1747,7 @@ async def _dispatch_task(
                 checkout=checkout,
                 time_cap=time_cap,
                 runner=placement.remote(runner),
+                placed_claim=placed.held if placed is not None else None,
                 **common,
             )
         )
@@ -1900,30 +2002,46 @@ async def _dispatch_task(
                 ),
             }
         await tried.launching(here, common["session_id"])
-        status, final = await _launch_agent(
-            db,
-            run_dirs,
-            t,
-            node,
-            work_item_row,
-            worktree,
-            task=task,
-            inv=inv,
-            harness_id=cand.harness,
-            harnesses=harnesses,
-            sandbox=sandbox,
-            checkout=checkout,
-            launch=launch,
-            common=common,
-            # A resumed provider session is the task's own launch's, never a
-            # fallback's: no `--resume` across a switch.
-            resumable=primary and instruction_override is None,
-            instruction=instruction + tried.note,
-            note=note,
-            note_source=note_source,
-            time_cap=time_cap,
-            runner=runner,
-        )
+        # A step on a group holds one slot per session: the first launch has the one dispatch
+        # took; a fallback's new session is placed by `run_agent_task` itself.
+        if not primary and placed is not None:
+            placed.release()
+        slot = placed if primary else None
+        while True:
+            try:
+                status, final = await _launch_agent(
+                    db,
+                    run_dirs,
+                    t,
+                    node,
+                    work_item_row,
+                    worktree,
+                    task=task,
+                    inv=inv,
+                    harness_id=cand.harness,
+                    harnesses=harnesses,
+                    sandbox=sandbox,
+                    checkout=checkout,
+                    launch=launch,
+                    common=common,
+                    # A resumed provider session is the task's own launch's, never a
+                    # fallback's: no `--resume` across a switch.
+                    resumable=primary and instruction_override is None,
+                    instruction=instruction + tried.note,
+                    note=note,
+                    note_source=note_source,
+                    time_cap=time_cap,
+                    runner=slot.runner if slot is not None else group_runner or runner,
+                    placed_claim=slot.held if slot is not None else None,
+                )
+                break
+            except _remote_launch.PlaceAgain as again:
+                # The member it was given cannot take this launch (a codex hook it cannot
+                # trust): another, or the local worker, or the wait.
+                await slot.choose(again.needs)
+                if slot.wait:
+                    await _note_waiting(db, work_item_row, node, task, slot.wait)
+                    return WAITING
         if final:
             return status
         if status != RATE_LIMITED or not listed:
@@ -2195,6 +2313,7 @@ async def _launch_agent(
     note_source: str,
     time_cap,
     runner: str | None = None,
+    placed_claim=None,
 ) -> tuple[str, bool]:
     """One candidate's launch for `dispatch_node`: `(status, final)`, `final`
     when the launch never started and the status is the task's answer as it
@@ -2283,6 +2402,7 @@ async def _launch_agent(
             time_cap=time_cap,
             harness_id=harness_id,
             runner=placement.remote(runner),
+            placed_claim=placed_claim,
             **common,
         )
     except _agent.LaunchRefused as exc:

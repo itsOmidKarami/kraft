@@ -63,7 +63,7 @@ async def create_work_item(
     API's presence rule: left at `...` it is not sent and the policy default
     applies; `None` is an explicit "no cap".
 
-    `runner` is where the item's steps run: a machine from workers.yaml, `any`,
+    `runner` is where the item's steps run: a machine or a group from workers.yaml, `any`,
     or `local`; unset, the chain decides.
     """
     if repo is None:
@@ -834,6 +834,7 @@ async def add_worker(
     capacity: int | None = None,
     repos: list[str] | None = None,
     give_up_after: str | None = None,
+    groups: list[str] | None = None,
 ) -> dict:
     """Register a machine. Without `ssh` the answer carries its one-time token
     and the command to run on it; with `ssh` the server connects once and
@@ -846,6 +847,7 @@ async def add_worker(
             ("capacity", capacity),
             ("repos", repos),
             ("give_up_after", give_up_after),
+            ("groups", groups),
         )
         if value is not None
     }

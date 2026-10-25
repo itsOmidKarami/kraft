@@ -1113,6 +1113,33 @@ def running_local_sessions(conn) -> int:
     ).fetchone()[0]
 
 
+def pinned_runner(
+    conn, work_item_id: str, node_id: str, hook_point: str | None = None
+) -> str | None:
+    """Where a task's latest *started* session since the node was last entered ran: its machine,
+    or `"local"` when it ran on the local worker (no machine, a pid). None before any. A group
+    step that resumes a session goes back to it, as that session's state lives there. A
+    `hook_point` of None is any task of the node (an escalation turn, a review reply)."""
+    entered = (
+        conn.execute(
+            "SELECT MAX(created_at) FROM events "
+            "WHERE work_item_id = ? AND type = ? AND node_id = ?",
+            (work_item_id, ChainEvent.NODE_STARTED, node_id),
+        ).fetchone()[0]
+        or ""
+    )
+    row = conn.execute(
+        "SELECT runner, pid FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
+        "AND (? IS NULL OR hook_point = ?) AND created_at >= ? "
+        "AND (runner IS NOT NULL OR pid IS NOT NULL) "
+        "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        (work_item_id, node_id, hook_point, hook_point, entered),
+    ).fetchone()
+    if row is None:
+        return None
+    return row["runner"] if row["runner"] is not None else "local"
+
+
 def pinned_machine(conn, work_item_id: str, node_id: str) -> str | None:
     """The machine of the node's latest remote session since the node was last entered: where an
     `any` step started stays where it started for the rest of the pass (resume state lives

@@ -126,7 +126,7 @@ enforced-by: tests/adapters/test_subprocess_remote.py::test_a_launch_that_ends_b
 origin: src/kraft/remote/launch.py §release
 
 ## REQ step-waits-for-an-offline-or-full-machine
-WHILE the machine a step is placed on is offline or full, the system SHALL park the step as waiting with no session row, SHALL NOT run it elsewhere, and SHALL NOT count the wait against its time cap.
+WHILE the named machine a step is placed on is offline or full, the system SHALL park the step as waiting with no session row, SHALL NOT run it elsewhere, and SHALL NOT count the wait against its time cap.
 enforced-by: tests/executor/test_dispatch_remote.py::test_a_step_on_an_offline_machine_parks_the_item_and_runs_when_it_returns, tests/adapters/test_subprocess_remote.py::test_a_step_waiting_for_a_full_machine_has_no_session_row_and_never_runs_elsewhere, tests/adapters/test_subprocess_remote.py::test_a_wait_moves_the_time_cap_on_by_however_long_it_lasted
 origin: src/kraft/executor/dispatch.py §_dispatch_task
 
@@ -309,3 +309,38 @@ origin: src/kraft/remote/jobs.py §from_frame
 IF a machine runs another major version of Kraft than the server, THEN the server SHALL refuse it with the version to update to.
 enforced-by: tests/remote/test_protocol.py::test_another_major_is_turned_away_whatever_the_protocol[another-major-same-protocol], tests/remote/test_protocol.py::test_another_major_is_turned_away_whatever_the_protocol[same-major], tests/remote/test_protocol.py::test_protocol_refusal_text[same-major-other-protocol]
 origin: src/kraft/remote/protocol.py §server_handshake
+
+## REQ group-names-share-the-machine-namespace
+IF a machine is named like a group, or a group like a machine, THEN the system SHALL refuse `workers.yaml` or the machine being added, naming the clash.
+enforced-by: tests/remote/test_registry.py::test_a_bad_group_is_refused[clashes-with-a-machine], tests/remote/test_registry.py::test_a_bad_group_is_refused[local-joins-a-machines-name], tests/api/test_workers.py::test_groups_are_written_kept_and_checked_against_machine_names
+origin: src/kraft/remote/registry.py §WorkersFile
+
+## REQ step-on-a-group-takes-a-members-slot-when-it-chooses
+WHERE a step's runner names a group, the system SHALL take the slot of the first remote member, in name order, that is online, allowed for the item's repos and under its limit, else the local worker's slot when the local worker is a member, and SHALL hold it from the choice until the launch ends.
+enforced-by: tests/remote/test_launch.py::test_the_first_free_remote_member_is_taken_and_reserved_then_given_back_on_exit, tests/remote/test_launch.py::test_the_local_worker_is_taken_when_every_remote_member_is_busy_or_refuses, tests/remote/test_launch.py::test_two_placements_never_take_one_free_slot, tests/executor/test_dispatch_group.py::test_a_free_remote_member_takes_the_step, tests/executor/test_dispatch_group.py::test_a_busy_remote_member_sends_the_step_to_the_local_worker_at_once
+origin: src/kraft/remote/launch.py §Placement
+
+## REQ step-on-a-group-parks-while-no-member-is-free
+WHILE no member of a group has a free slot, the system SHALL park the step as waiting for a machine in the group, with no session row, and start it on the first member that frees.
+enforced-by: tests/executor/test_dispatch_group.py::test_a_step_with_no_free_member_parks_and_runs_on_whichever_frees_first, tests/executor/test_dispatch_group.py::test_a_group_with_only_the_local_worker_free_waits_for_its_slot_not_a_refusal
+origin: src/kraft/executor/dispatch.py §_place_group
+
+## REQ member-that-turns-a-step-away-is-passed-over
+WHEN a member of a group turns the step away at its own limit, the system SHALL place the step on another member, or the local worker, and SHALL leave the first alone until it reports a free slot.
+enforced-by: tests/remote/test_launch.py::test_a_member_that_refuses_the_reservation_is_marked_full_and_the_next_is_taken, tests/executor/test_dispatch_group.py::test_a_machine_that_refuses_the_reservation_sends_the_step_on_to_the_local_worker
+origin: src/kraft/remote/launch.py §Placement
+
+## REQ resumed-session-on-a-group-returns-to-its-machine
+WHEN a step on a group resumes a session, the system SHALL wait for the machine, or the local worker, that session started on, and SHALL NOT place a launch that does not resume by where an earlier one ran.
+enforced-by: tests/remote/test_launch.py::test_a_resumed_session_goes_back_to_where_it_ran_and_waits_for_it, tests/remote/test_launch.py::test_an_escalation_or_review_reply_runs_where_its_nodes_task_ran[on-a-machine], tests/remote/test_launch.py::test_an_escalation_or_review_reply_runs_where_its_nodes_task_ran[on-the-local-worker], tests/store/test_pinned_machine.py::test_a_tasks_runner_is_where_its_latest_started_session_ran_local_when_it_ran_there
+origin: src/kraft/store/sessions.py §pinned_runner
+
+## REQ group-refuses-items-no-member-can-take
+IF no member of a group could take an item (it is in place or has workspace members, submodules or Git LFS, and the local worker is not a member), THEN the system SHALL refuse it at filing, naming the group.
+enforced-by: tests/remote/test_placement.py::test_a_group_holds_when_a_member_could_take_the_item[remote-only-in-place], tests/remote/test_placement.py::test_a_group_with_a_submodule_checkout_names_why_no_remote_member_can_take_it, tests/remote/test_placement.py::test_a_group_holds_when_a_member_could_take_the_item[with-local-in-place]
+origin: src/kraft/remote/placement.py §group_problem
+
+## REQ step-on-a-group-places-again-for-a-missing-cap
+IF the member a step on a group was given lacks a capability the launch needs, THEN the system SHALL place the step again, on a capable member or the local worker.
+enforced-by: tests/remote/test_launch.py::test_a_launch_the_group_member_cannot_take_places_the_step_again, tests/remote/test_launch.py::test_a_codex_step_places_again_on_the_local_worker_when_no_remote_member_has_the_cap
+origin: src/kraft/remote/launch.py §run_placed

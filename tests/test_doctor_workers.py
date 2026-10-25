@@ -62,4 +62,7 @@ def test_a_chain_placed_on_a_machine_workers_yaml_lacks_fails_the_chains_row(app
     }
     (tmp_path / "templates" / "chains" / "placed.yaml").write_text(yaml.safe_dump(placed))
     row = {r["name"]: r for r in asyncio.run(doctor.run_checks())}["chains"]
-    assert not row["ok"] and "runner 'ghost' is not a machine in workers.yaml" in row["detail"]
+    assert (
+        not row["ok"]
+        and "runner 'ghost' is not a machine or a group in workers.yaml" in row["detail"]
+    )

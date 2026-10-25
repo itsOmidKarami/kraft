@@ -723,6 +723,7 @@ async def dispatch(
             # has started nothing, and its queued replay records the message.
             on_session=record,
             runner=_placement.remote(_placement.node_runner(row, row["current_node_id"])),
+            follow_node=True,
         )
     except store.CheckoutBusy:
         raise
