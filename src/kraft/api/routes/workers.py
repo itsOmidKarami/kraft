@@ -29,7 +29,7 @@ class AddWorker(BaseModel):
 
     name: str
     ssh: str | None = None
-    capacity: int = 1
+    capacity: int | None = None
     repos: list[str] | None = None
     give_up_after: str | None = None
 

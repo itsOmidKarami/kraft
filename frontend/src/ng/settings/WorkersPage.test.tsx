@@ -31,6 +31,14 @@ describe("Settings › Workers", () => {
     expect(offline).toHaveTextContent("never gives up");
   });
 
+  it("says when the machine's own limit is the one in use", async () => {
+    const limited = { ...WORKERS_FIXTURE[0], capacity: 1, capacity_source: "machine", machine_capacity: 1 } as Machine;
+    stubFetch({ "GET /workers": [200, { workers: [LOCAL_ROW, limited] }] });
+    mount();
+    const table = await screen.findByRole("table", { name: "Machines" });
+    expect(within(table).getAllByRole("row")[1]).toHaveTextContent("1 of 1 · machine's limit");
+  });
+
   it("says how to add a machine when there is none", async () => {
     stubFetch({ "GET /workers": [200, { workers: [] satisfies Machine[] }] });
     mount();

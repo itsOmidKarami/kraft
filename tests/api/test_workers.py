@@ -82,6 +82,23 @@ def test_the_local_workers_running_count_comes_from_the_session_rows(client, mon
     assert client.get("/api/workers").json()["workers"][0]["slots_used"] == 3
 
 
+def test_a_machine_added_without_a_capacity_writes_none_and_its_row_says_who_sets_the_limit(client):
+    client.post("/api/workers", json={"name": "home"})
+    assert "capacity" not in _file(client)["workers"]["home"]
+    (row,) = _machines(client)
+    assert (row["capacity"], row["capacity_source"], row["machine_capacity"]) == (
+        1,
+        "default",
+        None,
+    )
+
+
+def test_the_local_worker_row_carries_the_limit_workers_yaml_sets(client):
+    (client.app.state.templates_dir / "workers.yaml").write_text("local:\n  capacity: 3\n")
+    assert client.post("/api/templates/reload").json()["refused_workers"] is None
+    assert client.get("/api/workers").json()["workers"][0]["capacity"] == 3
+
+
 def test_a_local_block_survives_adding_and_removing_a_machine(client):
     path = client.app.state.templates_dir / "workers.yaml"
     path.write_text("local:\n  capacity: 2\n")

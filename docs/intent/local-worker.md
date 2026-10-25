@@ -66,9 +66,24 @@ enforced-by: tests/api/test_startup.py::test_startup_local_link_none_installed_w
 origin: src/kraft/api/startup.py
 
 ## REQ settings-lists-the-local-worker-apart
-The system SHALL list the local worker first among the workers, with its running sessions and no capacity, and SHALL NOT let it be removed.
-enforced-by: tests/api/test_workers.py::test_the_local_worker_is_listed_first_and_cannot_be_removed, tests/api/test_workers.py::test_the_local_workers_running_count_comes_from_the_session_rows, tests/cli/test_worker.py::test_list_with_no_machines_shows_only_the_local_worker
+The system SHALL list the local worker first among the workers, with its running sessions and the limit `workers.yaml`'s `local:` block sets (none when it sets none), and SHALL NOT let it be removed.
+enforced-by: tests/api/test_workers.py::test_the_local_worker_is_listed_first_and_cannot_be_removed, tests/api/test_workers.py::test_the_local_workers_running_count_comes_from_the_session_rows, tests/api/test_workers.py::test_the_local_worker_row_carries_the_limit_workers_yaml_sets, tests/cli/test_worker.py::test_list_with_no_machines_shows_only_the_local_worker
 origin: src/kraft/api/routes/workers.py
+
+## REQ local-limit-bounds-its-sessions
+WHILE the local worker runs as many sessions as `local: capacity:` in `workers.yaml`, the system SHALL hold another local session before it has a session row, say so as a waiting event, and start it when a slot frees without counting the wait against its time cap.
+enforced-by: tests/adapters/test_subprocess_local.py::test_a_session_beyond_the_local_limit_waits_with_no_row_and_says_how_long, tests/remote/test_local_link.py::test_a_local_limit_hands_out_that_many_slots_and_takes_one_back_on_release, tests/remote/test_hub.py::test_applying_workers_yaml_hands_the_local_workers_limit_to_its_link[local0-2]
+origin: src/kraft/adapters/subprocess.py §run_task
+
+## REQ local-slot-is-given-back-however-the-session-ends
+WHEN a local session ends before or after it starts, whatever way it returns or is cancelled, the system SHALL give its local slot back.
+enforced-by: tests/adapters/test_subprocess_local.py::test_a_session_that_returns_early_gives_its_local_slot_back[refused-spawn], tests/adapters/test_subprocess_local.py::test_a_session_that_returns_early_gives_its_local_slot_back[before-launch-raises]
+origin: src/kraft/adapters/subprocess.py §run_task
+
+## REQ adopted-local-session-counts-against-the-limit
+WHILE a local session adopted after a restart runs, the system SHALL count it against the local limit whatever the limit says, and SHALL free its slot when its process exits, before an escalation resumes.
+enforced-by: tests/worker/test_reattach_local.py::test_an_adopted_local_session_holds_a_slot_until_it_exits, tests/worker/test_reattach_local.py::test_an_escalation_resumed_after_an_adopted_session_does_not_wait_on_its_slot
+origin: src/kraft/worker/reattach.py §_guarded_adopt
 
 ## REQ clean-stop-leaves-a-running-local-session-running
 WHEN the server stops cleanly, the system SHALL leave a local session of a worktree item that is still running, uncapped and not paused running, with its row `running`, its sandbox and its egress route open, for the next start to adopt through the worker.

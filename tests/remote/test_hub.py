@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from unittest.mock import AsyncMock
 
 import pytest
 from support.remote import attach, memory_pair
@@ -348,11 +349,7 @@ class _Peer:
         self.task = None
 
     async def serve(self, t, welcome):
-        await protocol.pump(t, on_frame=_ignore)
-
-
-async def _ignore(frame):
-    return None
+        await protocol.pump(t, on_frame=AsyncMock())
 
 
 async def _online(hub, *caps):
