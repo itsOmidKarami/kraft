@@ -10,6 +10,7 @@ import signal
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 from kraft import item_paths, store
 from kraft.remote import blobs, bundle, protocol, registry
@@ -68,6 +69,16 @@ def workers_file(**machines) -> registry.WorkersFile:
             }
         }
     )
+
+
+class Peer:
+    """A machine for `attach` that only takes part in the handshake and the pings."""
+
+    def __init__(self) -> None:
+        self.task = None
+
+    async def serve(self, t, welcome) -> None:
+        await protocol.pump(t, on_frame=AsyncMock())
 
 
 async def attach(

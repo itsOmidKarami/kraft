@@ -79,6 +79,8 @@ class Worker(_Strict):
     repos: list[str] | None = None
     give_up_after: str = DEFAULT_GIVE_UP
     groups: list[str] = Field(default_factory=list)
+    #: False: running steps finish and nothing new starts here.
+    enabled: bool = True
 
     @field_validator("groups")
     @classmethod
@@ -127,6 +129,7 @@ class LocalWorker(_Strict):
 
     capacity: int | None = Field(default=None, ge=1)
     groups: list[str] = Field(default_factory=list)
+    enabled: bool = True
 
     @field_validator("groups")
     @classmethod
@@ -192,11 +195,17 @@ class WorkersFile(_Strict):
         checked again: a machine named like a group is a `ValidationError`."""
         return type(self).model_validate({"workers": workers, "local": self.local})
 
+    def with_local(self, local: LocalWorker) -> WorkersFile:
+        """A copy with the `local:` block replaced and the machines kept, checked again."""
+        return type(self).model_validate({"workers": self.workers, "local": local})
+
     def to_yaml(self) -> dict:
         doc = self.model_dump(exclude_none=True)
         for entry in [*doc["workers"].values(), *([doc["local"]] if "local" in doc else [])]:
             if not entry["groups"]:
                 del entry["groups"]
+            if entry["enabled"]:
+                del entry["enabled"]
         return doc
 
 

@@ -17,6 +17,11 @@
           "default": null,
           "title": "Capacity"
         },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
         "groups": {
           "items": {
             "type": "string"
@@ -43,6 +48,11 @@
           ],
           "default": null,
           "title": "Capacity"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
         },
         "give_up_after": {
           "default": "2h",

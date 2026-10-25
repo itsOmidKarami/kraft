@@ -115,6 +115,26 @@ async def test_a_session_beyond_the_local_limit_waits_with_no_row_and_says_how_l
     assert moved.at - cap.at >= 0.5 and moved.hit == cap.hit and seen[-1]["waited_s"] >= 0.5
 
 
+async def test_a_session_waits_for_a_disabled_local_worker_and_starts_once_it_is_enabled(
+    run,  # noqa: F811
+    database,
+):
+    link = local_link.current()
+    link.enabled = False
+    waiter = asyncio.create_task(run(["/bin/sh", "-c", "echo after"], "s1"))
+    await asyncio.sleep(0.7)
+    assert _row(database, "s1") is None and not waiter.done()  # no session row while it waits
+    link.enabled = True
+    status, _ = await asyncio.wait_for(waiter, 10)
+    assert status == "done"
+    waiting = database.read(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE type = 'remote_step_waiting'"
+        ).fetchall()
+    )
+    assert len(waiting) == 1 and "waiting for local (disabled)" in waiting[0]["payload"]
+
+
 @pytest.mark.parametrize("how", ["refused-spawn", "before-launch-raises"])
 async def test_a_session_that_returns_early_gives_its_local_slot_back(run, how):  # noqa: F811
     link = local_link.current()
