@@ -139,6 +139,20 @@ async def test_stop_kills_what_the_session_backgrounded_even_when_it_ignores_sig
             os.killpg(leader.pid, signal.SIGKILL)
 
 
+def test_a_key_that_is_running_is_not_started_twice(tmp_path):
+    jobs = LocalJobs(tmp_path)
+    log = tmp_path / "l"
+    log.write_bytes(b"")
+    first = jobs.spawn("w/s", ["sleep", "30"], cwd=str(tmp_path), env=bare_env(), log_path=str(log))
+    try:
+        with pytest.raises(SpawnRefused, match="already running"):
+            jobs.spawn("w/s", ["sleep", "30"], cwd=str(tmp_path), env=bare_env(), log_path=str(log))
+        assert jobs.running() == ["w/s"] and jobs._children["w/s"].pid == first.pid
+    finally:
+        os.killpg(first.pid, signal.SIGKILL)
+        jobs._children["w/s"].wait()
+
+
 def test_two_tables_removing_one_record_do_not_fail(tmp_path):
     a = LocalJobs(tmp_path)
     b = LocalJobs(tmp_path)

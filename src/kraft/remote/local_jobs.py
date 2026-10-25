@@ -98,6 +98,9 @@ class LocalJobs:
         `log_path` (the server created and truncated it), stdin closed."""
         if not _valid(key):
             raise SpawnRefused(f"not a session key: {key!r}")
+        if self._group(key) is not None:
+            # One session per key, whatever order frames from two connections arrive in.
+            raise SpawnRefused(f"session {key} is already running")
         try:
             with open(log_path, "ab") as log:
                 proc = subprocess.Popen(
