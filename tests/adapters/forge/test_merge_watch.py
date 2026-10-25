@@ -311,6 +311,36 @@ def _advance_base(repo, name: str) -> str:
     return commit_all(repo, name)
 
 
+async def test_a_skipped_root_is_still_the_repo_the_merge_commit_is_found_in(
+    run_forge, item_on, database, repo
+):
+    """Kraft-h6wi2: with the root dropped as pointer-only the first target is a
+    member, whose merge request landed on the member's own base -- its merged
+    commit is not on the branch whose CI is read."""
+    asked: list = []
+
+    class _Recording(_Merged):
+        async def find_mr(self, *, repo, branch):
+            asked.append(repo)
+            return await super().find_mr(repo=repo, branch=branch)
+
+    fake = _Recording(None, ci_states=["success"])
+    run_forge.item = await item_on(back_half(), repo=repo)
+    for path, role, rank in ((repo / "a", "submodule", 1), (repo, "root", 2)):
+        await database.write(
+            lambda c, p=path, r=role, k=rank: c.execute(
+                "INSERT INTO work_item_repos (work_item_id, repo_path, role, "
+                "submodule_path, merge_rank, created_at, updated_at) VALUES "
+                "('w1', ?, ?, ?, ?, 'now', 'now')",
+                (str(p), r, p.name if r == "submodule" else None, k),
+            )
+        )
+
+    await run_forge(fake, "merge_watch", repo=repo)
+
+    assert asked == [repo]
+
+
 async def test_merge_watch_stays_on_the_merge_commit_when_the_base_moves(
     run_forge, repo, wait_clock
 ):

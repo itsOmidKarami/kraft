@@ -1859,16 +1859,19 @@ async def run_task(
         targets = [t for t in targets if t[0] not in untouched]
 
     if handler == "merge_watch" and targets:
-        # `merge_watch` ignores the per-target `repo` entirely -- it reads
-        # the item's base branch in `orig_repo`. One pass, not one per target: a
-        # multi-repo item would otherwise poll the same branch N times and
-        # file N identical follow-up beads (gate review). Root by preference,
-        # first target when `root_policy == "skip"` already dropped it -- the
-        # choice is cosmetic (it only decides `_run_one`'s unused `repo`
-        # argument), but it keeps the log line naming the repo a reader
-        # expects. After the `multi` block above on purpose: that block still
-        # needs the root row to resolve `root_has_changes`.
-        targets = [next((t for t in targets if t[2] == "root"), targets[0])]
+        # `merge_watch` reads the item's base branch in `orig_repo`, and finds
+        # the merge commit it watches through `repo`'s merge request
+        # (Kraft-h6wi2). One pass, not one per target: a multi-repo item would
+        # otherwise poll the same branch N times and file N identical
+        # follow-up beads (gate review). Always the root: a member's merge
+        # request landed on the member's own base, not this one, so its
+        # merged commit is never on the branch whose CI is read. With
+        # `root_policy == "skip"` the root has no merge request, and the watch
+        # starts from the base's tip. After the `multi` block above on
+        # purpose: that block still needs the root row to resolve
+        # `root_has_changes`.
+        root = next((r for r in rows if r["role"] == "root"), None)
+        targets = [(root["id"], Path(root["repo_path"]), "root") if root else targets[0]]
 
     if handler == "open_mr" and multi and not targets:
         # Every selected repository untouched: the workspace form of
