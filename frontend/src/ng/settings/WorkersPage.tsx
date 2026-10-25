@@ -2,9 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { plural } from "../../format";
 import type { Machine } from "../../types";
 import { detailOf, request } from "../http";
+import { sendLater, UNDO_WINDOW_MS } from "../later";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
+import { showToast } from "../ui/Toast";
 import { AddWorkerDialog } from "./AddWorkerDialog";
+import { EditWorkerDialog } from "./EditWorkerDialog";
 import { Block } from "./parts";
 import { EVERY_REPO, TERMINAL_NOTE, groupsWords, modeWords, slotsWords, stateReason, stateWord } from "./workersWords";
 import "./settings.css";
@@ -17,7 +20,9 @@ export function WorkersPage() {
   const [machines, setMachines] = useState<Machine[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  // Machines taken off the page for the undo window: a re-read inside it must not bring them back.
+  const [removing, setRemoving] = useState<string[]>([]);
   const load = useCallback(async () => {
     const r = await request<{ workers: Machine[] }>("/workers");
     if (r.status !== 200) return setError(detailOf(r.body));
@@ -26,7 +31,27 @@ export function WorkersPage() {
   }, []);
   useEffect(() => void load(), [load]);
 
-  const disabled = machines?.filter((m) => !m.enabled).length ?? 0;
+  /** Remove `name` after the undo window, or at once if the page is left. The server refuses it
+   *  then if a step started on the machine meanwhile: the row comes back, with its reason. */
+  const remove = (name: string) => {
+    setRemoving((r) => [...r, name]);
+    const done = () => setRemoving((r) => r.filter((n) => n !== name));
+    let refused = false;
+    const { undo } = sendLater(async ({ keepalive }) => {
+      const r = await request(`/workers/${encodeURIComponent(name)}`, { method: "DELETE", ...(keepalive && { keepalive }) });
+      refused = r.status !== 200;
+      done();
+      if (refused) showToast(detailOf(r.body), { tone: "error" });
+      void load();
+    }, UNDO_WINDOW_MS);
+    showToast(`Removed ${name}`, {
+      ms: UNDO_WINDOW_MS,
+      action: { label: "Undo", run: () => { if (undo()) done(); else if (!refused) showToast(`Too late to undo: ${name} was removed.`); } },
+    });
+  };
+
+  const shown = machines?.filter((m) => !removing.includes(m.name));
+  const disabled = shown?.filter((m) => !m.enabled).length ?? 0;
   return (
     <div className="ng-settings">
       <div className="set-page is-cards">
@@ -35,16 +60,16 @@ export function WorkersPage() {
           <p className="lede">The machines that run work item steps, and whether each is reachable.</p>
         </div>
         {error && <p className="set-error" role="alert">{error}</p>}
-        {machines && (
+        {shown && (
           <Block
             id="set-wk-machines"
             title="Machines"
             card
-            aside={`${plural(machines.length, "machine")}${disabled ? ` · ${disabled} disabled` : ""}`}
+            aside={`${plural(shown.length, "machine")}${disabled ? ` · ${disabled} disabled` : ""}`}
             action={<Button onClick={() => setAdding(true)}>Add machine</Button>}
           >
             <div className="set-wk-body">
-              {machines.length === 0 ? (
+              {shown.length === 0 ? (
                 <p className="set-hint">No machines yet. Add one with Add machine.</p>
               ) : (
                 <div className="set-wk-scroll">
@@ -62,7 +87,7 @@ export function WorkersPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {machines.map((m) => (
+                      {shown.map((m) => (
                         <tr key={m.name}>
                           <td className="set-mono">{m.name}</td>
                           <td>{modeWords(m)}</td>
@@ -88,6 +113,7 @@ export function WorkersPage() {
           </Block>
         )}
       </div>
+      {editing && <EditWorkerDialog name={editing} onClose={() => setEditing(null)} onSaved={() => void load()} onRemove={remove} />}
       {adding && <AddWorkerDialog onClose={() => setAdding(false)} onAdded={() => void load()} onEdit={setEditing} />}
     </div>
   );

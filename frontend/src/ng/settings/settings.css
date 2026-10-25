@@ -220,3 +220,7 @@
 .set-wk-lead { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: var(--fs-body); }
 .set-wk-cmd { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
 .set-wk-cmd-actions { display: flex; gap: 8px; }
+.set-wk-switch { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 10px; font-size: var(--fs-meta); }
+.set-wk-switch > .field-hint { grid-column: 2; }
+.set-wk-rotate { display: flex; gap: 8px; }
+.set-wk-remove { margin-right: auto; }
