@@ -363,3 +363,46 @@ def test_start_worker_goes_out_of_the_units_cgroup_under_systemd(
         assert first[:5] == ["systemd-run", "--user", "--scope", "--collect", "--quiet"]
         assert "--setenv=KRAFT_HOME=/home/k" in first
         assert first[-len(worker) :] == worker
+
+
+def test_a_local_limit_hands_out_that_many_slots_and_takes_one_back_on_release():
+    row = local_link._Row()
+    row.capacity = 1
+    assert row.take("w/a") and row.take("w/a")  # holding one already is a success
+    assert not row.take("w/b") and not row.free()
+    row.release("w/a")
+    assert row.take("w/b")
+    row.release("w/missing")  # not held: nothing happens
+    assert row.snapshot_row(0)["capacity"] == 1
+
+
+def test_no_limit_takes_any_number_and_an_adopted_session_counts_past_the_limit():
+    row = local_link._Row()
+    assert all(row.take(f"w/{i}") for i in range(20)) and row.snapshot_row(0)["capacity"] is None
+    row.capacity = 1
+    row.adopt("w/adopted")
+    row.adopt("w/also")
+    assert not row.free() and not row.take("w/new")
+
+
+async def test_a_session_waiting_for_a_slot_says_so_once_and_takes_it_when_one_frees():
+    row = local_link._Row()
+    row.capacity = 1
+    row.take("w/a")
+    said = []
+
+    async def on_wait(text):
+        said.append(text)
+
+    waiter = asyncio.create_task(row.take_waiting("w/b", on_wait, poll_s=0.01))
+    await asyncio.sleep(0.1)
+    assert said == ["waiting for local (1 of 1 running)"] and not waiter.done()
+    row.release("w/a")
+    assert await asyncio.wait_for(waiter, 1) >= 0.05
+    assert not row.free()
+    cancelled = asyncio.create_task(row.take_waiting("w/c", None, poll_s=0.01))
+    await asyncio.sleep(0.05)
+    cancelled.cancel()
+    await asyncio.gather(cancelled, return_exceptions=True)
+    row.release("w/b")
+    assert row.free()  # the cancelled wait took nothing

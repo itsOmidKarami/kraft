@@ -739,31 +739,59 @@ async def run_task(db, run_dirs, *, session_id: str, work_item_id: str, **kwargs
     """`_run_task`, closing the session it wrote when whatever ends it -- a
     cancel, most often a co-task's failure or a stop -- comes before the
     launch: an in-place item's row left `pending` would hold its checkout's
-    lease (`store.folder_holder`) until a restart. Whatever it still holds then is given back,
-    on every way out."""
+    lease (`store.folder_holder`) until a restart. A local session first takes one of
+    the local worker's slots (`workers.yaml`'s `local: capacity:`), before it has a session row;
+    what it holds, the slot and a machine's claim alike, is given back on every way out."""
+    from kraft.remote import local_link
+
     held = _Held()
+    link = local_link.current() if kwargs.get("runner") in (None, "local") else None
+    key = ids.session_ref(work_item_id, session_id)
     try:
-        return await _run_task(
-            db, run_dirs, session_id=session_id, work_item_id=work_item_id, held=held, **kwargs
-        )
-    except BaseException as exc:
-        if asyncio.get_running_loop() in _STOPPING:
-            raise
+        if link is not None:
+            waited = await link.take_waiting(key, _said_waiting(db, work_item_id, kwargs))
+            if waited > 0.05:
+                kwargs["waited_s"] = waited
+                if (cap := kwargs.get("time_cap")) is not None:
+                    kwargs["time_cap"] = caps.Deadline(cap.at + waited, cap.hit)
         try:
-            if await db.write(lambda c: _close_unlaunched(c, session_id, work_item_id)):
-                files = kwargs.get("files") or item_paths.session_files(
-                    run_dirs, work_item_id, session_id
-                )
-                with open(files.log, "a", opener=private) as log:
-                    log.write(f"kraft: {str(exc) or 'ended before its launch was recorded'}\n")
-        except Exception:  # noqa: BLE001 -- never in place of what ended the task
-            logger.exception("could not close session %s, ended before its launch", session_id)
-        raise
+            return await _run_task(
+                db, run_dirs, session_id=session_id, work_item_id=work_item_id, held=held, **kwargs
+            )
+        except BaseException as exc:
+            if asyncio.get_running_loop() in _STOPPING:
+                raise
+            try:
+                if await db.write(lambda c: _close_unlaunched(c, session_id, work_item_id)):
+                    files = kwargs.get("files") or item_paths.session_files(
+                        run_dirs, work_item_id, session_id
+                    )
+                    with open(files.log, "a", opener=private) as log:
+                        log.write(f"kraft: {str(exc) or 'ended before its launch was recorded'}\n")
+            except Exception:  # noqa: BLE001 -- never in place of what ended the task
+                logger.exception("could not close session %s, ended before its launch", session_id)
+            raise
     finally:
+        if link is not None:
+            link.release(key)
         if held.claim is not None:
             from kraft.remote import launch as _launch
 
             _launch.release(held.claim)
+
+
+def _said_waiting(db, work_item_id: str, kwargs: dict):
+    """What a session waiting for a local slot says: an event for the board. It has no log yet."""
+
+    async def say(text: str) -> None:
+        payload = {"task": kwargs["hook_point"], "node_id": kwargs["node_id"], "reason": text}
+        await db.write(
+            lambda c: events.append(
+                c, work_item_id, RemoteEvent.STEP_WAITING, payload, node_id=kwargs["node_id"]
+            )
+        )
+
+    return say
 
 
 def _close_unlaunched(conn, session_id: str, work_item_id: str) -> bool:
@@ -877,6 +905,8 @@ async def _run_task(
     codex_hook: dict | None = None,
     #: Where this call records the claim it holds until `Runs.launch` takes it over.
     held: _Held | None = None,
+    #: Seconds `run_task` waited for a local slot: the log's first line says so.
+    waited_s: float = 0.0,
 ) -> str:
     held = held if held is not None else _Held()
     runner = None if runner == "local" else runner
@@ -1299,6 +1329,9 @@ async def _run_task(
         )
         log = open(log_path, "w", opener=private)
         try:
+            if waited_s:
+                log.write(f"kraft: waited {waited_s:.1f} s for a local slot\n")
+                log.flush()
             try:
                 # A missing cwd still raises from `Popen` below and is unaffected;
                 # only the missing-binary half has to move up here, because the

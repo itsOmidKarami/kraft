@@ -446,3 +446,12 @@ async def test_a_step_no_connected_machine_can_take_for_want_of_a_cap_is_refused
     assert "harness 'codex' cannot run the hook" in refusal.refusal
     assert "update Kraft on that machine" in refusal.refusal
     assert hub.decide(runner, []).machine == "gpu"
+
+
+@pytest.mark.parametrize(("local", "capacity"), [({"capacity": 2}, 2), (None, None)])
+async def test_applying_workers_yaml_hands_the_local_workers_limit_to_its_link(local, capacity):
+    from kraft.remote import local_link
+
+    hub = Hub("2.3.0")
+    hub.apply(registry.WorkersFile.model_validate({"local": local} if local is not None else {}))
+    assert local_link.current().capacity == capacity

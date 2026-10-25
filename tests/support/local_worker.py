@@ -12,7 +12,7 @@ import pytest
 
 from kraft.remote import local_link, local_serve, protocol
 from kraft.remote.local_jobs import LocalJobs
-from kraft.remote.local_link import DirectLink
+from kraft.remote.local_link import DirectLink, _Row
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport
 
 #: The install of the worker `RunningWorker` and `ThreadedWorker` run, and the link a test makes.
@@ -73,12 +73,12 @@ def kill_group(pid: int) -> None:
         os.killpg(pid, signal.SIGKILL)
 
 
-class ScriptedLink:
+class ScriptedLink(_Row):
     """A local-worker link whose `hold` answers from a script and counts what it was asked."""
 
     def __init__(self, answers) -> None:
+        super().__init__(connected=True)
         self.answers, self.calls = iter(answers), []
-        self.connected = True
 
     async def hold(self, keys, *, timeout=15.0):
         self.calls.append([key for key, _pid, _start in keys])

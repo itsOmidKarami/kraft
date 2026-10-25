@@ -15,7 +15,7 @@ from pathlib import Path
 
 from kraft import caps
 from kraft.config import RepoEntry
-from kraft.remote import placement, protocol, registry
+from kraft.remote import local_link, placement, protocol, registry
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport
 
 logger = logging.getLogger(__name__)
@@ -117,6 +117,8 @@ class Hub:
         machine, and drop a removed one or one whose credential changed (a
         revoked token must not keep a live connection)."""
         previous, self._entries, self._file = self._entries, {}, file
+        if (link := local_link.current()) is not None:
+            link.capacity = file.local.capacity if file.local is not None else None
         for name, worker in file.workers.items():
             entry = previous.pop(name, None)
             if entry is None:

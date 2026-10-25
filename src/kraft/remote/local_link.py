@@ -174,10 +174,13 @@ def _start_worker(run_base: Path, install: str) -> None:
 
 
 class _Row:
-    """Whether a worker is connected, and what the Settings row says about it."""
+    """Whether a worker is connected, what the Settings row says about it, and how many local
+    sessions it may run at once (`workers.yaml`'s `local: capacity:`; None: no limit)."""
 
     def __init__(self, *, connected: bool = False, peer_version: str | None = None) -> None:
         self.connected, self.peer_version = connected, peer_version
+        self.capacity: int | None = None
+        self._held: set[str] = set()  # the session keys that hold one of the slots
         self.since: str | None = None
         self._up = asyncio.Event()
         if connected:
@@ -195,6 +198,43 @@ class _Row:
         else:
             self._up.clear()
 
+    def free(self) -> bool:
+        return self.capacity is None or len(self._held) < self.capacity
+
+    def take(self, key: str) -> bool:
+        """A slot for `key`, if one is free. Already holding one is a success. Nothing awaits
+        between the check and the add, so two sessions cannot both take the last slot."""
+        if key in self._held:
+            return True
+        if not self.free():
+            return False
+        self._held.add(key)
+        return True
+
+    async def take_waiting(
+        self,
+        key: str,
+        on_wait: Callable[[str], Awaitable[None]] | None = None,
+        poll_s: float = 0.5,
+    ) -> float:
+        """`take`, waiting for a slot (said once through `on_wait`); the seconds it waited.
+        Cancelling the wait takes nothing."""
+        began, said = time.monotonic(), None
+        while not self.take(key):
+            text = f"waiting for local ({len(self._held)} of {self.capacity} running)"
+            if on_wait is not None and text != said:
+                await on_wait(text)
+                said = text
+            await asyncio.sleep(poll_s)
+        return time.monotonic() - began
+
+    def release(self, key: str) -> None:
+        self._held.discard(key)
+
+    def adopt(self, key: str) -> None:
+        """A slot for a session running before a restart: counted whatever the limit says."""
+        self._held.add(key)
+
     def snapshot_row(self, running: int) -> dict:
         return {
             "name": "local",
@@ -202,7 +242,7 @@ class _Row:
             "online": self.connected,
             "reason": None if self.connected else "starting",
             "slots_used": running,
-            "capacity": None,
+            "capacity": self.capacity,
             "repos": None,
             "last_seen": self.since,
             "kraft_version": self.peer_version,
