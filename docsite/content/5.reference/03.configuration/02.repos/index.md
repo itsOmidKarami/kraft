@@ -256,7 +256,6 @@ Forge clocks are compared with Kraft's push time as they are, with no allowance 
 
 The two waits are a chain's `mr.ci` task before the merge and its `mr.post_merge_ci` task after it. Each records `ci_not_configured` when it passes at once because `ci_checks` is `false`. It does not touch `mr.automated_review` or `mr.external_approval`.
 
-<!-- not new: the ci_checks section shipped; this paragraph adds what the post-merge wait does without it -->
 With `ci_checks` left on, `mr.post_merge_ci` still passes on a merge commit that has no CI run at all five minutes after its wait started, and records `post_merge_ci_absent`. That is a branch whose CI does not run on a push, such as a workflow on `pull_request` only, merged into a branch other than the default. A commit with any run, even a pending one, is waited for as before.
 
 ## In this section
