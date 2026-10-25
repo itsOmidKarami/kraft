@@ -1131,6 +1131,7 @@
       "capacity": "_",
       "capacity_source": "_",
       "give_up_after": "_",
+      "groups": [],
       "kraft_version": "_",
       "last_seen": "_",
       "machine_capacity": "_",

@@ -20,13 +20,13 @@ def test_runner_is_a_flag_with_a_help_line_on_each_verb(capsys, verb):
 
 
 def test_a_runner_is_set_from_the_terminal_at_filing_and_afterwards(app, monkeypatch, capsys, repo):
-    """`--runner` at filing; `set-overrides --runner` and `set-node-override --runner` after. The
-    machine is in workers.yaml first, because the lifespan the `app` fixture opens per call reads
-    the file."""
+    """`--runner` at filing; `set-overrides --runner` and `set-node-override --runner` after (the
+    last names a group). The machine is in workers.yaml first, because the lifespan the `app`
+    fixture opens per call reads the file."""
     from kraft.remote import registry
 
     (pathlib.Path(os.environ["KRAFT_CONFIG_DIR"]) / "workers.yaml").write_text(
-        f"workers:\n  gpu:\n    token_sha256: {registry.hash_token('kwt_x')}\n"
+        f"workers:\n  gpu:\n    token_sha256: {registry.hash_token('kwt_x')}\n    groups: [farm]\n"
     )
     asyncio.run(client.ensure_repo(str(repo)))
     monkeypatch.chdir(repo)
@@ -36,7 +36,7 @@ def test_a_runner_is_set_from_the_terminal_at_filing_and_afterwards(app, monkeyp
     wid = json.loads(capsys.readouterr().out)["id"]
     cli.main(["item", "set-overrides", wid, "--runner", "any", "--json"])
     cli.main(
-        ["item", "set-node-override", wid, "--node", "implementation", "--runner", "gpu", "--json"]
+        ["item", "set-node-override", wid, "--node", "implementation", "--runner", "farm", "--json"]
     )
     capsys.readouterr()
     cli.main(["view", "show", wid, "--json"])
@@ -44,7 +44,7 @@ def test_a_runner_is_set_from_the_terminal_at_filing_and_afterwards(app, monkeyp
     assert item["agent_overrides"] == {"runner": "any"}
     assert item["node_overrides"] == {
         "plan": {"runner": "any"},
-        "implementation": {"runner": "gpu"},
+        "implementation": {"runner": "farm"},
     }
 
 

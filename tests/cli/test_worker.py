@@ -7,6 +7,7 @@ import json
 import pytest
 
 from kraft import cli, paths
+from kraft.config import read_yaml
 
 
 def _run(capsys, *argv):
@@ -128,3 +129,15 @@ def test_the_slots_column_says_who_set_the_limit(row, slots):
 def test_add_without_a_capacity_writes_none(app, capsys):
     assert _run(capsys, "add", "home")[0] == 0
     assert "capacity" not in (paths.config_dir() / "workers.yaml").read_text()
+
+
+def test_add_writes_each_group_and_list_shows_them(app, capsys):
+    code, _ = _run(capsys, "add", "gpu-2", "--group", "gpu", "--group", "linux")
+    assert code == 0
+    assert read_yaml(paths.config_dir() / "workers.yaml")["workers"]["gpu-2"]["groups"] == [
+        "gpu",
+        "linux",
+    ]
+    _, listing = _run(capsys, "list")
+    header, _local, row = listing.splitlines()
+    assert "GROUPS" in header and "gpu,linux" in row

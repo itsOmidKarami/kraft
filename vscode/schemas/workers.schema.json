@@ -16,6 +16,13 @@
           ],
           "default": null,
           "title": "Capacity"
+        },
+        "groups": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Groups",
+          "type": "array"
         }
       },
       "title": "LocalWorker",
@@ -41,6 +48,13 @@
           "default": "2h",
           "title": "Give Up After",
           "type": "string"
+        },
+        "groups": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Groups",
+          "type": "array"
         },
         "repos": {
           "anyOf": [

@@ -112,7 +112,7 @@ AUTO_REVIEW_SEGMENT = "auto_review"
 #: name cannot stop a chain over a cosmetic field (R32).
 Icon = Annotated[StrictStr, Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$")]
 
-#: Where a step runs: `local`, `any` or a machine name (`kraft.remote.placement`).
+#: Where a step runs: `local`, `any`, a machine or a group (`kraft.remote.placement`).
 RUNNER = Annotated[StrictStr, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]{0,38}$")]
 
 _DURATION = re.compile(r"^(\d+)(s|m|h|d)$")

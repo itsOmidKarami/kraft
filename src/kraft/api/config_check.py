@@ -617,8 +617,8 @@ def launch_problems(
 
 
 def runner_issues(templates_dir: Path, library: TemplateLibrary) -> list[TemplateIssue]:
-    """A chain that places a step on a machine `workers.yaml` does not have. (Which repos a machine
-    may work on depends on the item, so that is checked when an item is filed.)"""
+    """A chain that places a step on a machine or group `workers.yaml` does not have. (Which repos
+    a machine may work on depends on the item, so that is checked when an item is filed.)"""
     try:
         workers = workers_registry.WorkersFile.load(Path(templates_dir) / workers_registry.FILE)
     except config_mod.ConfigError:
@@ -630,12 +630,16 @@ def runner_issues(templates_dir: Path, library: TemplateLibrary) -> list[Templat
         except TemplateLibraryError:
             continue  # the lint above already reports it
         for runner in sorted(placement.library_runners(resolved)):
-            if runner != placement.ANY and runner not in workers.workers:
+            if (
+                runner != placement.ANY
+                and runner not in workers.workers
+                and not workers.is_group(runner)
+            ):
                 issues.append(
                     TemplateIssue(
                         library.chain_file(chain_id),
                         chain_id,
-                        f"runner {runner!r} is not a machine in workers.yaml",
+                        f"runner {runner!r} is not a machine or a group in workers.yaml",
                     )
                 )
     return issues

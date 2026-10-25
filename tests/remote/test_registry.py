@@ -4,6 +4,7 @@ collide with a placement value, tokens kept only as hashes."""
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from kraft.config import ConfigError, RepoEntry
 from kraft.remote import registry
@@ -78,6 +79,45 @@ def test_a_capacity_is_unset_unless_written_and_a_local_block_loads(tmp_path):
     assert "capacity" not in loaded.to_yaml()["workers"]["a"]
     assert loaded.with_workers({}).local.capacity == 2
     assert _load(tmp_path, "workers:\n").local is None
+
+
+def test_groups_list_remote_members_in_name_order_then_local():
+    f = registry.WorkersFile.model_validate(
+        {
+            "workers": {
+                "b": {"ssh": "b", "groups": ["gpu"]},
+                "a": {"ssh": "a", "groups": ["gpu", "linux"]},
+            },
+            "local": {"groups": ["gpu"]},
+        }
+    )
+    assert f.groups() == {"gpu": ["a", "b", "local"], "linux": ["a"]}
+    assert f.is_group("gpu") and not f.is_group("a")
+    plain = registry.WorkersFile.model_validate({"workers": {"c": {"ssh": "c"}}})
+    assert "groups" not in plain.to_yaml()["workers"]["c"]
+    assert plain.groups() == {}
+
+
+@pytest.mark.parametrize(
+    ("doc", "says"),
+    [
+        ({"workers": {"gpu": {"ssh": "h", "groups": ["gpu"]}}}, "gpu"),
+        ({"workers": {"a": {"ssh": "h", "groups": ["any"]}}}, "reserved"),
+        ({"workers": {"a": {"ssh": "h", "groups": ["Bad Name"]}}}, "Bad Name"),
+        ({"workers": {}, "local": {"groups": ["local"]}}, "reserved"),
+        ({"workers": {"a": {"ssh": "h"}}, "local": {"groups": ["a"]}}, "shar"),
+    ],
+    ids=[
+        "clashes-with-a-machine",
+        "reserved",
+        "bad-shape",
+        "local-in-group-local",
+        "local-joins-a-machines-name",
+    ],
+)
+def test_a_bad_group_is_refused(doc, says):
+    with pytest.raises(ValidationError, match=says):
+        registry.WorkersFile.model_validate(doc)
 
 
 def test_an_empty_workers_key_is_no_machines(tmp_path):

@@ -87,7 +87,7 @@ async def test_a_cap_the_machine_enforced_ends_the_session_time_capped(rig, monk
 @pytest.mark.parametrize(
     ("runner", "kwargs", "says"),
     [
-        ("ghost", {}, "'ghost' is not a machine in workers.yaml"),
+        ("ghost", {}, "'ghost' is not a machine or a group in workers.yaml"),
     ],
     ids=["unknown-machine"],
 )

@@ -108,6 +108,11 @@ class Runs:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
+    def owns(self, key: str) -> bool:
+        """Whether a run for step `key` is live: it holds the step's claim until it finishes."""
+        run = self._runs.get(key)
+        return run is not None and run.exit_code is None
+
     def find(self, work_item_id: str, session_id: str) -> Run | None:
         return self._runs.get(ids.session_ref(work_item_id, session_id))
 

@@ -45,6 +45,7 @@ from kraft.worker.worktree_read import read_no_follow
 
 if TYPE_CHECKING:
     from kraft.config import RepoEntry
+    from kraft.remote.hub import Claim
 
 logger = logging.getLogger(__name__)
 
@@ -905,6 +906,8 @@ async def _run_task(
     codex_hook: dict | None = None,
     #: Where this call records the claim it holds until `Runs.launch` takes it over.
     held: _Held | None = None,
+    #: The slot `launch.placed` took for a step whose runner is a group: used instead of claiming.
+    placed_claim: Claim | None = None,
     #: Seconds `run_task` waited for a local slot: the log's first line says so.
     waited_s: float = 0.0,
 ) -> str:
@@ -930,6 +933,7 @@ async def _run_task(
             runner=runner,
             repo_entry=repo_entry,
             time_cap=time_cap,
+            held=placed_claim,
             needs=(
                 {
                     CODEX_HOOK: f"harness {codex_hook['harness']!r} cannot run Kraft's "

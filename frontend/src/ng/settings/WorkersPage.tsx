@@ -4,7 +4,7 @@ import type { Machine } from "../../types";
 import { detailOf, request } from "../http";
 import { Badge } from "../ui/Badge";
 import { Block } from "./parts";
-import { ADD_COMMAND, EVERY_REPO, NO_MACHINES, READ_ONLY_NOTE, giveUpWords, isLocal, modeWords, slotsWords, stateWords } from "./workersWords";
+import { ADD_COMMAND, EVERY_REPO, NO_MACHINES, READ_ONLY_NOTE, giveUpWords, groupsWords, isLocal, modeWords, slotsWords, stateWords } from "./workersWords";
 import "./settings.css";
 
 /** Settings › Workers: the machines `kraft admin worker list` prints, read-only. Adding one is the
@@ -40,6 +40,7 @@ export function WorkersPage() {
                     <th scope="col">Mode</th>
                     <th scope="col">State</th>
                     <th scope="col" className="is-num">Running</th>
+                    <th scope="col">Groups</th>
                     <th scope="col">Kraft</th>
                   </tr>
                 </thead>
@@ -49,6 +50,7 @@ export function WorkersPage() {
                     <td>{modeWords(local)}</td>
                     <td>{local.online ? <Badge tone="ok">{stateWords(local)}</Badge> : stateWords(local)}</td>
                     <td className="is-num">{slotsWords(local)}</td>
+                    <td>{groupsWords(local)}</td>
                     <td className="set-mono">{local.kraft_version ?? ""}</td>
                   </tr>
                 </tbody>
@@ -69,6 +71,7 @@ export function WorkersPage() {
                       <th scope="col">Mode</th>
                       <th scope="col">State</th>
                       <th scope="col" className="is-num">Slots</th>
+                      <th scope="col">Groups</th>
                       <th scope="col">Repos</th>
                       <th scope="col">Last seen</th>
                       <th scope="col">Kraft</th>
@@ -82,6 +85,7 @@ export function WorkersPage() {
                         <td>{modeWords(m)}</td>
                         <td>{m.online ? <Badge tone="ok">{stateWords(m)}</Badge> : stateWords(m)}</td>
                         <td className="is-num">{slotsWords(m)}</td>
+                        <td>{groupsWords(m)}</td>
                         <td>{m.repos?.length ? m.repos.join(", ") : EVERY_REPO}</td>
                         <td>{m.last_seen ? ago(m.last_seen) : "never"}</td>
                         <td className="set-mono">{m.kraft_version ?? ""}</td>
