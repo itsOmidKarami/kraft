@@ -11,7 +11,7 @@ from support.harness import entry_of, v1_node
 
 from kraft import executor
 from kraft import policy as _policy
-from kraft.executor import dispatch
+from kraft.executor import dispatch, prompts
 
 NO_SETUP = entry_of({"setup_command": ""})
 
@@ -365,3 +365,77 @@ async def test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring
     reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
     assert reason.endswith(f"was not measured again: fix: {doubt}")
     assert it.row()["stop_kind"] == "stuck"
+
+
+DOUBT = "Not a metadata problem: this needs a code fix in the fix loop."
+
+
+async def _doubted_in_a_fix_loop(item_on, script, *, judge: str | None):
+    """A node whose `a` fails once and whose node repair says `DOUBT`; its fix
+    loop's one task is `cycle`, judged by `judge` (the verdict it writes) or
+    unjudged."""
+    loop = {"tasks": [_sub("cycle")], "max_attempts": 2}
+    if judge is not None:
+        loop["judge"] = _sub("judge")
+    it = await item_on(
+        [v1_node(steps=[{"id": "check", "tasks": [_sub("a")]}], on_failure=_fix(), fix_loop=loop)]
+    )
+
+    async def concerned(_row):
+        (it.run_dirs.results / "s-fix.json").write_text(
+            json.dumps({"status": "done_with_concerns", "concerns": DOUBT})
+        )
+        await it.session("s-fix", "build.on_failure.main.fix", "done_with_concerns")
+
+    async def judged(_row):
+        verdict = {"verdict": judge, "concerns": "the judge's reasoning"}
+        (it.run_dirs.results / "s-judge.json").write_text(json.dumps(verdict))
+        await it.session("s-judge", "build.fix_loop.judge", "done", round=0)
+
+    script.plan = {"a": ["failed", "done"], "fix": ["done_with_concerns"]}
+    script.effects["fix"] = concerned
+    script.effects["judge"] = judged
+    return it
+
+
+async def test_a_doubted_repair_in_a_fix_loop_node_is_judged_then_fixed(item_on, script):
+    """`a-repair-with-concerns-stops-for-a-human-rather-than-re-measuring`
+    (Kraft-yi005): d3f47aa7's repair said "needs a code fix in the fix loop"
+    and the item stopped instead of entering it. The loop works on the node's
+    own failure, with the judge ruling first on what the repair said."""
+    it = await _doubted_in_a_fix_loop(item_on, script, judge="continue")
+
+    assert await _walk(it, policy=_policy.Policy(loops={}, default=_policy.Cap(3, 3600))) == (
+        "completed"
+    )
+    assert script.calls == ["a", "fix", "judge", "cycle", "a"]
+    assert DOUBT in script.instructions["judge"][0]
+    [cycle] = script.instructions["cycle"]
+    assert cycle.startswith(prompts.FIX_PROMPT.format(node_id="build", failed="a"))
+    assert DOUBT in cycle
+    assert not it.events("work_item_needs_human")
+
+
+async def test_a_judge_stops_a_doubted_repair_before_any_fix(item_on, script):
+    """b5afe84c's case: a repair that says there is nothing to fix costs one
+    judge session, not a fix cycle."""
+    it = await _doubted_in_a_fix_loop(item_on, script, judge="stop_needs_human")
+
+    assert await _walk(it, policy=_policy.Policy(loops={}, default=_policy.Cap(3, 3600))) == (
+        "needs_human"
+    )
+    assert script.calls == ["a", "fix", "judge"]
+    assert it.events("fix_cycle_started") == []
+    reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
+    assert reason == "judge: the judge's reasoning"
+
+
+async def test_a_doubted_repair_in_a_judgeless_fix_loop_node_still_fixes(item_on, script):
+    """With no judge to rule, the loop runs its cycle as for any failure."""
+    it = await _doubted_in_a_fix_loop(item_on, script, judge=None)
+
+    assert await _walk(it, policy=_policy.Policy(loops={}, default=_policy.Cap(3, 3600))) == (
+        "completed"
+    )
+    assert script.calls == ["a", "fix", "cycle", "a"]
+    assert DOUBT in script.instructions["cycle"][0]

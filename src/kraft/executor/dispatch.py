@@ -3358,6 +3358,7 @@ async def judge_verdict(
     policy: _policy.Policy,
     launch: LaunchContext | None,
     budget: _policy.Budget,
+    doubts: list[str] | None = None,
 ) -> tuple[str, str]:
     """Ask the fix loop's judge whether the cycle about to be dispatched is
     still worth it (2026-09-12-verify-fix-loop-judge-design). Returns
@@ -3372,6 +3373,9 @@ async def judge_verdict(
     `cap` is the caller's already-resolved cap, not re-resolved here: the judge
     is shown the same budget the loop will actually enforce, and one resolution
     per cycle cannot disagree with itself.
+
+    `doubts` is what a node-level repair said when it finished
+    `done_with_concerns` and handed the failure to this loop (Kraft-yi005).
     """
     judge = node.judge
     if judge is None:
@@ -3390,7 +3394,7 @@ async def judge_verdict(
         cap_attempts=cap.attempts,
         elapsed_s=int(elapsed),
         cap_wall_clock_s=cap.wall_clock_s,
-    )
+    ) + prompts.repair_doubts_judge_note(doubts or [])
     status = await dispatch_node(
         db,
         run_dirs,

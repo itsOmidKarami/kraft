@@ -75,6 +75,31 @@ def judge_note(reasoning: str) -> str:
     return _JUDGE_NOTE.format(reasoning=reasoning.strip()) if reasoning.strip() else ""
 
 
+#: What the node's `on_failure` repair said when it finished `done_with_concerns`
+#: and the node has a fix loop (Kraft-yi005): its diagnosis, usually "this needs
+#: a code fix". The judge reads it before the first cycle is paid for, and the
+#: fix cycle that follows is handed it as the repair's findings.
+_REPAIR_DOUBTS_JUDGE = (
+    "\n\nBefore this cycle, the node's on_failure repair ran and finished with "
+    "concerns, so the failure was handed to the fix loop instead of being "
+    "re-measured:\n\n{doubts}\n\nIf the repair says nothing can be fixed here, "
+    "stop rather than spend a cycle."
+)
+_REPAIR_DOUBTS_FIX = (
+    "\n\nThe node's on_failure repair ran first and could not resolve this. It "
+    "finished with concerns:\n\n{doubts}\n\nTreat that as its diagnosis of the "
+    "failure above."
+)
+
+
+def repair_doubts_judge_note(doubts: list[str]) -> str:
+    return _REPAIR_DOUBTS_JUDGE.format(doubts="\n".join(doubts)) if doubts else ""
+
+
+def repair_doubts_fix_note(doubts: list[str]) -> str:
+    return _REPAIR_DOUBTS_FIX.format(doubts="\n".join(doubts)) if doubts else ""
+
+
 #: What a retry with no explicit steer and no rejection to fall back on leads
 #: with (Kraft-7sec, second half): the same per-finding bullets a fix cycle's
 #: own FIX_FINDINGS already uses -- not a second findings format to keep in

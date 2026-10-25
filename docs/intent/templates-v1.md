@@ -1180,8 +1180,14 @@ enforced-by: tests/executor/test_recovery.py::test_a_recovery_that_does_not_take
 
 When a task, step or execution-node recovery handler finishes
 `done_with_concerns`, the system SHALL stop for a human with the handler's
-concerns as the reason and SHALL NOT measure the recovered scope again.
-enforced-by: tests/executor/test_recovery.py::test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring[task], tests/executor/test_recovery.py::test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring[step], tests/executor/test_recovery.py::test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring[node], tests/executor/test_base_change.py::test_a_conflict_handler_s_concerns_do_not_stop_its_resolved_rebase
+concerns as the reason and SHALL NOT measure the recovered scope again. The
+exception is an execution-node recovery in a node with a fix loop: the system
+SHALL hand the node's failure and the handler's concerns to the fix loop, whose
+judge, where the node has one, SHALL rule before the first fix cycle, and
+`stop_needs_human` stops the item before any cycle is spent. In a node without a
+fix loop that stop is a stuck stop, which the node's declared escalation or
+automatic escalation may answer.
+enforced-by: tests/executor/test_recovery.py::test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring[task], tests/executor/test_recovery.py::test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring[step], tests/executor/test_recovery.py::test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring[node], tests/executor/test_recovery.py::test_a_doubted_repair_in_a_fix_loop_node_is_judged_then_fixed, tests/executor/test_recovery.py::test_a_judge_stops_a_doubted_repair_before_any_fix, tests/executor/test_recovery.py::test_a_doubted_repair_in_a_judgeless_fix_loop_node_still_fixes, tests/executor/test_base_change.py::test_a_conflict_handler_s_concerns_do_not_stop_its_resolved_rebase
 origin: src/kraft/executor/dispatch.py §run_recovery -- for an ordinary task doubts are information for the next gate (`_ADVANCING`); for a repair they are a verdict on whether repair was possible at all (Kraft-s7c04.56, b5afe84c). A conflict handler is excluded: its `done_with_concerns` means "resolved, but upstream touches this item" and rides `CONFLICT_RESOLVED` into the span's reopened gates.
 
 ## REQ fix-loop-is-an-exec-node-control

@@ -95,8 +95,11 @@ ESCALATION_COMMITTED = "escalation_committed"
 #: A recovery handler finished `done_with_concerns` (Kraft-s7c04.56). For an
 #: ordinary task doubts are information for the next gate (`_ADVANCING`); for
 #: a repair they are a verdict on whether repair was possible at all, so the
-#: node is not measured again and a human reads them instead. A conflict
-#: handler is not a repair here: its concerns ride `CONFLICT_RESOLVED`.
+#: node is not measured again and a human reads them instead. Two exceptions
+#: at the node-level repair (Kraft-yi005): in a node with a `fix_loop` the
+#: failure goes to the loop, whose judge rules on the concerns before the first
+#: cycle; in a node without one it is a stuck stop an escalation may answer.
+#: A conflict handler is not a repair here: its concerns ride `CONFLICT_RESOLVED`.
 REPAIR_DOUBTED = "repair_doubted"
 
 #: A `read_only` step or node changed the worktree (`executor.read_only`). A
@@ -149,7 +152,7 @@ SCOPE: dict[str, str] = {
     WAIT_TIMED_OUT: "stop",  # the wait ran out; a person decides, not a fix loop
     INFRA_STOP: "stop",  # forge's own fault; a fix loop cannot fix it
     MERGE_REJECTED: "task",  # the queue dropped the merge; repairable like a conflict
-    REPAIR_DOUBTED: "stop",  # a repair doubts itself; a person decides
+    REPAIR_DOUBTED: "stop",  # a repair doubts itself; a person decides (a fix loop takes it first)
     READ_ONLY_VIOLATED: "stop",  # a read_only scope wrote; a person looks
     CHECKOUT_REFUSED: "stop",  # the person's checkout; never forced, never retried
     UNREVIEWED_HEAD: "stop",  # the merge would push code no final review saw
