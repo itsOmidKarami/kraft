@@ -66,6 +66,8 @@ class LocalProc:
         )
         if alive:
             return None
+        if self._reap is not None:
+            self._reap()  # a leader that died after the reap above is a zombie in its group until now
         self._code = self._exit_code()
         return self._code
 

@@ -25,6 +25,13 @@ def _gone(pid: int) -> bool:
     return not psutil.pid_exists(pid) or psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
 
 
+def _until_zombie(pid, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while psutil.Process(pid).status() != psutil.STATUS_ZOMBIE:
+        assert time.monotonic() < deadline, "the child never exited"
+        time.sleep(0.01)
+
+
 async def _until(predicate, seconds=5.0):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -80,6 +87,33 @@ def test_proc_poll(tmp_path, exit_file, code):
     assert proc.poll() == code
     exit_path.write_text("7")
     assert proc.poll() == code and proc.returncode == code  # cached once the process is gone
+
+
+def test_proc_poll_reaps_a_leader_that_dies_during_the_check(tmp_path, monkeypatch):
+    """Kraft-e0bg7: the leader exits between the reap and the liveness check (a SIGTERM
+    landing). A code cached without a reap leaves a zombie in the group, which Linux counts
+    as a member, so `_kill_group` paid its whole grace."""
+    child = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    real = local_link.identity_ok
+    first = [True]
+
+    def dies_now(pid, start):
+        if first[0]:
+            first[0] = False
+            child.kill()
+            _until_zombie(pid)
+        return real(pid, start)
+
+    monkeypatch.setattr(local_link, "identity_ok", dies_now)
+    proc = LocalProc(
+        child.pid, psutil.Process(child.pid).create_time(), tmp_path / "x.exit", reap=child.poll
+    )
+    try:
+        assert proc.poll() == -9
+        assert child.returncode is not None  # reaped: no zombie left in the group
+    finally:
+        child.kill()
+        child.wait()
 
 
 def test_proc_poll_alive_without_a_start_time(tmp_path):
