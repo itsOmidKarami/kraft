@@ -29,6 +29,10 @@ class ForgeEvent(StrEnum):
     #: The merge commit had no CI run at all once the grace was up, so the
     #: post-merge wait passed without checking anything (Kraft-rbjo3).
     POST_MERGE_CI_ABSENT = "post_merge_ci_absent"
+    #: The post-merge wait's commit had its run cancelled for a newer push to the
+    #: base, so the wait moved onto the base's tip, which holds the merge
+    #: (Kraft-h6wi2).
+    POST_MERGE_CI_MOVED = "post_merge_ci_moved"
     AUTOMATED_REVIEW_NOT_CONFIGURED = "automated_review_not_configured"
     AUTOMATED_REVIEW_ERRORED = "automated_review_errored"
     MERGE_QUEUE_DROPPED = "merge_queue_dropped"
@@ -60,6 +64,7 @@ FORGE_EVENT_TRAITS = total(
         ForgeEvent.CI_RUN_ABANDONED: _PLAIN,
         ForgeEvent.CI_NOT_CONFIGURED: _PLAIN,
         ForgeEvent.POST_MERGE_CI_ABSENT: _PLAIN,
+        ForgeEvent.POST_MERGE_CI_MOVED: _PLAIN,
         ForgeEvent.AUTOMATED_REVIEW_NOT_CONFIGURED: _PLAIN,
         ForgeEvent.AUTOMATED_REVIEW_ERRORED: _PLAIN,
         ForgeEvent.MERGE_QUEUE_DROPPED: _PLAIN,

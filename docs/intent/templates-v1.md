@@ -1883,6 +1883,23 @@ wait out its timeout; a commit with any run, pending included, SHALL keep
 waiting.
 enforced-by: tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human[no-run-past-the-grace], tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human[no-run-within-the-grace], tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human[a-pending-run-times-out]
 
+## REQ post-merge-wait-watches-the-merge-commit
+
+The post-merge CI wait SHALL read the CI of the commit the item merged, kept
+from its first observation, and SHALL NOT move to a newer commit on the base
+branch because one has merged since.
+enforced-by: tests/adapters/forge/test_merge_watch.py::test_merge_watch_stays_on_the_merge_commit_when_the_base_moves, tests/adapters/forge/test_merge_watch.py::test_a_later_red_commit_is_not_this_items_break, tests/adapters/forge/test_merge_watch.py::test_with_no_merge_commit_the_first_tip_is_kept[no-merge-request], tests/adapters/forge/test_merge_watch.py::test_with_no_merge_commit_the_first_tip_is_kept[merged-without-a-commit]
+origin: src/kraft/adapters/forge/run.py
+
+## REQ post-merge-wait-follows-a-superseded-run
+
+WHEN the watched commit's run was cancelled and the base branch has moved past
+that commit, the post-merge CI wait SHALL move to the base's tip, record the
+move as an event and restart its no-CI grace, and a cancel while the watched
+commit is the tip SHALL stop for a person.
+enforced-by: tests/adapters/forge/test_merge_watch.py::test_a_superseded_run_moves_the_watch_to_the_new_tip, tests/adapters/forge/test_merge_watch.py::test_a_cancel_on_the_tip_still_stops_for_a_person, tests/adapters/forge/test_merge_watch.py::test_a_move_restarts_the_no_ci_grace
+origin: src/kraft/adapters/forge/run.py
+
 ## REQ scope-time-caps-bound-their-own-scope
 
 A time cap MAY be configured on the work item (its instance, repository, chain

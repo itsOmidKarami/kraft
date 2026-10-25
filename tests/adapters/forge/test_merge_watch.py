@@ -381,3 +381,55 @@ async def test_an_unresolved_merge_commit_pins_nothing(run_forge, repo, wait_clo
 
     assert (first[0], second[0]) == ("waiting", "done")
     assert fake.asked == [merged]
+
+
+def _an_hour_ago() -> str:
+    from datetime import UTC, datetime, timedelta
+
+    return (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+
+
+async def test_a_superseded_run_moves_the_watch_to_the_new_tip(run_forge, repo, wait_clock):
+    """The forge keeps one pending run per concurrency group, so a merge
+    commit's run is cancelled for the next push before it starts. The tip
+    holds this merge, so its CI answers instead."""
+    merged = _head(repo)
+    tip = _advance_base(repo, "later.txt")
+    fake = _Merged(merged, ci_states=["pending", "success"], ci_cancelled_at=[_an_hour_ago(), ""])
+
+    first = await run_forge(fake, "merge_watch", "s1", repo=repo)
+    wait_clock.advance(60)
+    second = await run_forge(fake, "merge_watch", "s2", repo=repo)
+
+    assert (first[0], second[0]) == ("waiting", "done")
+    assert fake.asked == [merged, tip]
+    [moved] = run_forge.events("post_merge_ci_moved")
+    assert (moved["from"], moved["to"]) == (merged, tip)
+    assert "cancelled" in moved["why"]
+
+
+async def test_a_cancel_on_the_tip_still_stops_for_a_person(run_forge, repo):
+    fake = _Merged(_head(repo), ci_states=["pending"], ci_cancelled_at=[_an_hour_ago()])
+
+    assert await run_forge(fake, "merge_watch", repo=repo) == ("infra_stop", "infra_stop")
+
+    assert run_forge.events("ci_run_abandoned")
+    assert not run_forge.events("post_merge_ci_moved")
+
+
+async def test_a_move_restarts_the_no_ci_grace(run_forge, repo, wait_clock):
+    """The new tip may have no run registered yet. Measured from the wait's
+    start, that would pass it as "no CI" at once."""
+    merged = _head(repo)
+    tip = _advance_base(repo, "later.txt")
+    fake = _Merged(merged, ci_states=["pending"], ci_cancelled_at=["", _an_hour_ago(), ""])
+
+    await run_forge(fake, "merge_watch", "s1", repo=repo)
+    wait_clock.advance(6 * 60)
+    await run_forge(fake, "merge_watch", "s2", repo=repo)  # moves onto the tip
+    fake.ci_no_checks = True
+    third = await run_forge(fake, "merge_watch", "s3", repo=repo)
+
+    assert third[0] == "waiting"
+    assert fake.asked[-1] == tip
+    assert not run_forge.events("post_merge_ci_absent")

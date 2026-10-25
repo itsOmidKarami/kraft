@@ -310,7 +310,7 @@ async def test_a_wait_timeout_and_a_loop_cap_are_reported_apart(walk, item_on, w
         ("mr.automated_review", {"review_results": ["pending", "clean"]}),
         ("mr.external_approval", {"approval_states": ["pending", "approved"]}),
         ("mr.merge", {"merge_delay": 1}),
-        ("mr.post_merge_ci", {"branch_ci_states": ["pending", "success"]}),
+        ("mr.post_merge_ci", {"branch_ci_states": ["pending", "success"], "merged": [1]}),
     ],
     ids=["ci", "automated-review", "external-approval", "merge-completion", "post-merge-ci"],
 )

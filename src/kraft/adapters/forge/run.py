@@ -593,12 +593,15 @@ NO_POST_MERGE_CI_GRACE = timedelta(minutes=5)
 
 
 def _no_run_past_grace(db, work_item_id: str, task: str) -> bool:
-    """Whether `task`'s wait started `NO_POST_MERGE_CI_GRACE` ago or more. A
-    first look has no wait yet, so it never is."""
+    """Whether `task`'s wait, or its watch of the commit it last moved onto,
+    started `NO_POST_MERGE_CI_GRACE` ago or more. A first look has no wait
+    yet, so it never is."""
     wait = db.read(lambda c: waits.open_wait(c, work_item_id, task))
     if wait is None:
         return False
-    started = datetime.fromisoformat(wait.started["started_at"])
+    started = datetime.fromisoformat(
+        (wait.last or {}).get("grace_from") or wait.started["started_at"]
+    )
     return waits.now() - started >= NO_POST_MERGE_CI_GRACE
 
 
@@ -1473,11 +1476,42 @@ async def _run_one(
                     ci_status, forge=forge, repo=orig_repo, branch=base, head_sha=head_sha
                 )
                 if status == "abandoned":
+                    # A run cancelled for a newer push to the base (they share a
+                    # concurrency group, and the forge keeps one pending run) has
+                    # a successor: the tip holds this merge, and its CI answers
+                    # too. With the watched commit still the tip, a person did it.
+                    tip = await _builtins.upstream_head(orig_repo, base)
+                    if tip is None or tip == head_sha:
+                        return (
+                            log,
+                            await _stop_for_abandoned_run(db, work_item_id, node_id, log),
+                            None,
+                            None,
+                        )
+                    payload = {
+                        "node_id": node_id,
+                        "task": hook_point,
+                        "repo": str(orig_repo),
+                        "branch": base,
+                        "from": head_sha,
+                        "to": tip,
+                        "why": log.rstrip().splitlines()[-1],
+                    }
+                    await db.write(
+                        lambda c: events.append(
+                            c, work_item_id, ForgeEvent.POST_MERGE_CI_MOVED, payload
+                        )
+                    )
+                    moved = waits.now()
+                    note = WaitNote(
+                        None, {"watched_sha": tip, "grace_from": moved.isoformat()}, False, moved
+                    )
                     return (
-                        log,
-                        await _stop_for_abandoned_run(db, work_item_id, node_id, log),
-                        None,
-                        None,
+                        f"{log.rstrip()}\nwatching {tip[:7]} on {base} instead, which holds "
+                        f"{head_sha[:7]}\n",
+                        "waiting",
+                        findings,
+                        note,
                     )
                 if status == "infra":
                     # Same counter, same key format, as `ci_poll`'s own

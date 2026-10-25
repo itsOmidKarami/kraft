@@ -473,6 +473,8 @@ Every task takes these keys, then the keys of its kind. A task takes no
 | `wait.grace_period` | duration | `60s` | Only on `mr.automated_review`: how long a review bot must stay quiet after its last activity on the head to count as finished. Refused on any other target. _Added in next_ |
 | `reviewers` | list | unset | Only on `mr.automated_review`: the reviewers it waits for, each `{bot: LOGIN}` or `{check: NAME}`. The item's `reviewers` override and the repo's `automated_review` come first. `[]` names none. _Added in next_ |
 
+`mr.post_merge_ci` watches the CI of the commit the item merged, however many merges land on the base branch after it. A run cancelled for a newer push moves the watch onto the base's tip, which holds that merge, and records `post_merge_ci_moved`.
+
 ```yaml
 wait: {polling: {initial_interval: 30s, max_interval: 5m}}
 policy: {total_time_cap_minutes: 90}
