@@ -7,7 +7,7 @@ import { Field } from "../ui/Field";
 import { showToast } from "../ui/Toast";
 import { Switch } from "../ui/Switch";
 import { WorkerTokenDialog } from "./WorkerTokenDialog";
-import { capacityValue, CapacityField, GroupsField, ReposField, useRepoChoices, type RepoScope } from "./workerForm";
+import { capacityValue, CapacityField, GiveUpField, GroupsField, ReposField, useRepoChoices, type RepoScope } from "./workerForm";
 import { isLocal } from "./workersWords";
 
 type Rotated = { serve_command: string; note: string };
@@ -56,7 +56,7 @@ function EditForm({ machine: m, onClose, onSaved, onRemove }: { machine: Machine
   const changes: Record<string, unknown> = {
     ...(enabled !== m.enabled && { enabled }),
     ...(newCapacity !== m.configured_capacity && { capacity: newCapacity }),
-    ...(!local && giveUp.trim() !== m.give_up_after && { give_up_after: giveUp.trim() }),
+    ...(!local && giveUp !== m.give_up_after && { give_up_after: giveUp }),
     ...(!same(groups, m.groups) && { groups }),
     ...(!local && (scope === "every" ? m.repos !== null : !m.repos || !same(repos, m.repos)) && { repos: scope === "every" ? null : repos }),
     ...(m.ssh !== null && ssh.trim() !== m.ssh && { ssh: ssh.trim() }),
@@ -95,11 +95,16 @@ function EditForm({ machine: m, onClose, onSaved, onRemove }: { machine: Machine
       onClose={onClose}
       dirty={busy || changed}
       className="set-wk-dlg"
-      footer={<>
-        {!local && <Button variant="danger" className="set-wk-remove" disabled={busy || m.remove_blocked !== null} aria-describedby={m.remove_blocked ? "set-wk-blocked" : undefined} onClick={() => { onClose(); onRemove(m.name); }}>Remove machine</Button>}
-        <Button onClick={onClose} disabled={busy}>Cancel</Button>
-        <Button variant="primary" disabled={!changed || busy} onClick={save}>Save</Button>
-      </>}
+      footer={
+        <div className="set-wk-foot">
+          <div className="set-wk-foot-row">
+            {!local && <Button variant="danger" className="set-wk-remove" disabled={busy || m.remove_blocked !== null} aria-describedby={m.remove_blocked ? "set-wk-blocked" : undefined} onClick={() => { onClose(); onRemove(m.name); }}>Remove machine</Button>}
+            <Button onClick={onClose} disabled={busy}>Cancel</Button>
+            <Button variant="primary" disabled={!changed || busy} onClick={save}>Save</Button>
+          </div>
+          {!local && m.remove_blocked && <p id="set-wk-blocked" className="set-hint">{m.remove_blocked}</p>}
+        </div>
+      }
     >
       <form className="set-wk-form" onSubmit={(e) => { e.preventDefault(); if (changed && !busy) void save(); }}>
         {error && <p className="set-error" role="alert">{error}</p>}
@@ -108,12 +113,10 @@ function EditForm({ machine: m, onClose, onSaved, onRemove }: { machine: Machine
           <span className="field-label">Takes new steps</span>
           <span id="set-wk-takes" className="field-hint">Off: running steps finish, nothing new starts.</span>
         </div>
-        <CapacityField text={capacity} onChange={setCapacity} hint={capacityHint} />
-        {!local && (
-          <Field label="Give up after" hint="How long a step waits for the machine to come back: 2h, 30m, never. Applies when the machine next connects.">
-            <input value={giveUp} onChange={(e) => setGiveUp(e.target.value)} />
-          </Field>
-        )}
+        <div className="set-wk-pair">
+          <CapacityField text={capacity} onChange={setCapacity} hint={capacityHint} />
+          {!local && <GiveUpField value={giveUp} onChange={setGiveUp} hint="How long a step waits for the machine to come back. Applies when the machine next connects." />}
+        </div>
         <GroupsField groups={groups} onChange={setGroups} />
         {!local && <ReposField scope={scope} repos={repos} choices={choices} onScope={setScope} onRepos={setRepos} />}
         {m.ssh !== null && (
@@ -135,7 +138,7 @@ function EditForm({ machine: m, onClose, onSaved, onRemove }: { machine: Machine
             <span className="field-hint">Rotating stops the current token at once; run serve again with the new one. Until then the machine is offline, and its running steps keep going up to its give-up time.</span>
           </div>
         )}
-        {m.remove_blocked && <p id="set-wk-blocked" className="set-hint">{m.remove_blocked}</p>}
+        <p className="set-hint">Changes apply from the next step; running steps finish where they are.</p>
       </form>
     </Dialog>
   );

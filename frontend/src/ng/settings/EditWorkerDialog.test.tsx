@@ -1,15 +1,14 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WORKERS_FIXTURE } from "../../../e2e/contract/mocks/fixtures";
 import type { Machine } from "../../types";
 import { stubFetch } from "../item/testkit";
 import { Toaster } from "../ui/Toast";
 import { EditWorkerDialog } from "./EditWorkerDialog";
-import { LOCAL_ROW } from "./testkit";
+import { fixture, LOCAL_ROW } from "./testkit";
 
-const SSH = { ...(WORKERS_FIXTURE[0] as Machine), machine_capacity: 1, capacity: 1, capacity_source: "machine", remove_blocked: null, holders: [] } as Machine;
-const BUSY = WORKERS_FIXTURE[0] as Machine;
-const DIAL = WORKERS_FIXTURE[1] as Machine;
+const SSH = { ...(fixture("gpu-box") as Machine), machine_capacity: 1, capacity: 1, capacity_source: "machine", remove_blocked: null, holders: [] } as Machine;
+const BUSY = fixture("gpu-box") as Machine;
+const DIAL = fixture("home-server") as Machine;
 
 const open = async (m: Machine, answers: Parameters<typeof stubFetch>[0] = {}) => {
   const calls = stubFetch({ "GET /workers": [200, { workers: [LOCAL_ROW, SSH, DIAL] }], "GET /repos": [200, { repos: [{ name: "kraft" }, { name: "docs" }] }], ...answers });
@@ -21,6 +20,7 @@ const open = async (m: Machine, answers: Parameters<typeof stubFetch>[0] = {}) =
 };
 const save = () => fireEvent.click(screen.getByRole("button", { name: "Save" }));
 const field = (label: RegExp) => screen.getByRole("textbox", { name: label });
+const giveUp = () => screen.getByRole("combobox", { name: /Give up after/ });
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -32,7 +32,8 @@ describe("EditWorkerDialog", () => {
     expect(screen.getByText(/running steps finish, nothing new starts/)).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: /Steps at once/ })).toHaveValue(2);
     expect(screen.getByText(/In use: 1\. The machine's own limit is 1\./)).toBeInTheDocument();
-    expect(field(/Give up after/)).toHaveValue("2h");
+    expect(giveUp()).toHaveValue("2h");
+    expect(screen.getByText("Changes apply from the next step; running steps finish where they are.")).toBeInTheDocument();
     expect(field(/ssh host/)).toHaveValue("gpu-box.lan");
     expect(screen.getByText("gpu")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Only some" })).toBeChecked();
@@ -53,7 +54,7 @@ describe("EditWorkerDialog", () => {
 
   it("sends groups, repos, give-up time and host when they change, and every repo as null", async () => {
     const { patches } = await open(SSH, { "PATCH /workers/gpu-box": [200, { worker: SSH }] });
-    fireEvent.change(field(/Give up after/), { target: { value: "never" } });
+    fireEvent.change(giveUp(), { target: { value: "never" } });
     fireEvent.change(field(/ssh host/), { target: { value: "box2.lan" } });
     const groups = screen.getByRole("textbox", { name: "Add to Groups" });
     fireEvent.change(groups, { target: { value: "big" } });
@@ -62,6 +63,15 @@ describe("EditWorkerDialog", () => {
     save();
     await screen.findByText(/Saved gpu-box/);
     expect(patches()[0].body).toEqual({ give_up_after: "never", groups: ["gpu", "linux", "big"], repos: null, ssh: "box2.lan" });
+  });
+
+  it("keeps a give-up time that is no preset as an extra option with its own text, and sends nothing for it", async () => {
+    const odd = { ...SSH, give_up_after: "45m" } as Machine;
+    const { patches } = await open(odd, { "GET /workers": [200, { workers: [LOCAL_ROW, odd, DIAL] }] });
+    expect(giveUp()).toHaveValue("45m");
+    expect(within(giveUp()).getAllByRole("option").map((o) => o.textContent)).toEqual(["30 minutes", "1 hour", "2 hours", "8 hours", "1 day", "never", "45m"]);
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(patches()).toEqual([]);
   });
 
   it("shows the server's refusal above the form and stays open", async () => {
@@ -105,7 +115,10 @@ describe("EditWorkerDialog", () => {
     await open(BUSY, { "GET /workers": [200, { workers: [LOCAL_ROW, BUSY, DIAL] }] });
     expect(screen.getByRole("button", { name: "Remove machine" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Remove machine" })).toHaveAccessibleDescription(BUSY.remove_blocked!);
-    expect(screen.getByText(BUSY.remove_blocked!)).toBeInTheDocument();
+    const why = screen.getByText(BUSY.remove_blocked!);
+    expect(why).toBeInTheDocument();
+    expect(why).toHaveAttribute("id", screen.getByRole("button", { name: "Remove machine" }).getAttribute("aria-describedby"));
+    expect(why.closest(".dialog-footer")).not.toBeNull();
   });
 
   it("Remove machine closes the dialog and hands the removal to the page", async () => {

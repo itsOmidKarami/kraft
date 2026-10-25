@@ -3,11 +3,8 @@ import type { Machine } from "../../types";
 export const NO_MACHINES = "No machines yet. Add one in a terminal:";
 export const ADD_COMMAND = "kraft admin worker add NAME --ssh HOST";
 /** The phone's: it lists machines and changes none. */
-export const READ_ONLY_NOTE = "Machines are added and removed in a terminal (kraft admin worker) or through the MCP tools; this page only lists them.";
-/** The desktop's, under the card. */
-export const TERMINAL_NOTE = "The terminal does the same with kraft admin worker, and both write workers.yaml.";
+export const READ_ONLY_NOTE = "Add and edit machines in Settings on a wider screen, or with kraft admin worker in a terminal.";
 export const EVERY_REPO = "every repo";
-export const NO_GROUPS = "none";
 
 /** The State column's word. Never colour alone: a badge carries it. */
 export const stateWord = (m: Machine): "online" | "offline" | "disabled" => (!m.enabled ? "disabled" : m.online ? "online" : "offline");
@@ -29,11 +26,19 @@ export const slotsWords = (m: Machine) => {
   return m.capacity_source === "machine" ? `${of} · machine's limit` : of;
 };
 
-/** The groups a machine is in, which a step's `runner` can name. */
-export const groupsWords = (m: Machine) => (m.groups.length ? m.groups.join(", ") : NO_GROUPS);
-
 /** The row for this machine's own worker, apart from the machines it can dial. */
 export const isLocal = (m: Machine) => m.mode === "local";
 
 /** What the Connects column says: how Kraft reaches the machine. */
 export const modeWords = (m: Machine) => (isLocal(m) ? "this machine" : m.mode === "ssh" ? "over ssh" : "dials in");
+
+/** The presets of Give up after: `workers.yaml`'s value, then how it reads. */
+export const GIVE_UP_PRESETS = [
+  { value: "30m", label: "30 minutes" },
+  { value: "1h", label: "1 hour" },
+  { value: "2h", label: "2 hours" },
+  { value: "8h", label: "8 hours" },
+  { value: "1d", label: "1 day" },
+  { value: "never", label: "never" },
+];
+export const DEFAULT_GIVE_UP = "2h";

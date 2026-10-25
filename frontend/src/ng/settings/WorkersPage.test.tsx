@@ -7,7 +7,7 @@ import { stubFetch } from "../item/testkit";
 import { _resetLaterForTests, UNDO_WINDOW_MS } from "../later";
 import { Toaster } from "../ui/Toast";
 import { WorkersPage } from "./WorkersPage";
-import { LOCAL_ROW, WithHeader } from "./testkit";
+import { fixture, LOCAL_ROW, WithHeader } from "./testkit";
 
 const mount = () =>
   render(
@@ -24,8 +24,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const DISABLED = { ...WORKERS_FIXTURE[1], name: "old-box", enabled: false } as Machine;
-const rows = (...extra: Machine[]) => [200, { workers: [LOCAL_ROW, ...(WORKERS_FIXTURE as Machine[]), ...extra] }] as [number, unknown];
+const GPU = fixture("gpu-box");
+const HOME = fixture("home-server");
+const DISABLED = { ...HOME, name: "old-box", enabled: false } as Machine;
+const rows = (...extra: Machine[]) => [200, { workers: [LOCAL_ROW, GPU, HOME, ...extra] }] as [number, unknown];
 
 describe("Settings › Workers", () => {
   it("is one table, this machine first, with each machine's connection, state, running steps, groups, repos and version", async () => {
@@ -36,13 +38,53 @@ describe("Settings › Workers", () => {
     const [mine, online, offline, off] = within(table).getAllByRole("row").slice(1);
     expect(mine).toHaveTextContent(/^localthis machineonline3 · no limitgpuevery repo2\.5\.0Edit$/);
     expect(online).toHaveTextContent(/^gpu-boxover sshonline1 of 2gpu, linuxkraft2\.4\.0Edit$/);
-    expect(offline).toHaveTextContent(/^home-serverdials inoffline\s*disconnected: end of stream0 of 1noneevery repo2\.4\.0Edit$/);
+    expect(offline).toHaveTextContent(/^home-serverdials inoffline\s*disconnected: end of stream0 of 1—every repo2\.4\.0Edit$/);
     expect(off).toHaveTextContent(/^old-boxdials indisabledoffline: disconnected: end of stream/);
     expect(screen.getByText("4 machines · 1 disabled")).toBeInTheDocument();
   });
 
+  it("shows offline in the neutral tone, not red, and keeps green for online", async () => {
+    stubFetch({ "GET /workers": rows() });
+    mount();
+    const table = await screen.findByRole("table", { name: "Machines" });
+    expect(within(table).getByText("offline")).toHaveClass("is-muted");
+    expect(within(table).getAllByText("online")[0]).toHaveClass("is-ok");
+    expect(within(table).queryByText("offline")).not.toHaveClass("is-bad");
+  });
+
+  it("shows an unknown version and an empty Groups cell as a muted dash, and right-aligns Running", async () => {
+    stubFetch({ "GET /workers": rows({ ...HOME, name: "fresh-box", kraft_version: null } as Machine) });
+    mount();
+    const row = (await screen.findByText("fresh-box")).closest("tr")!;
+    const cells = within(row).getAllByRole("cell");
+    for (const i of [4, 6]) expect(cells[i].querySelector(".set-wk-dash")).toHaveTextContent("—");
+    expect(cells[3]).toHaveClass("is-num");
+    expect(screen.getByRole("columnheader", { name: "Running" })).toHaveClass("is-num");
+  });
+
+  it("dims a disabled row's name, connects, running, repos and version, but not its Edit button", async () => {
+    stubFetch({ "GET /workers": rows(DISABLED) });
+    mount();
+    const row = (await screen.findByText("old-box")).closest("tr")!;
+    expect(row).toHaveClass("is-off");
+    const dim = [...row.querySelectorAll("td.is-dim")].map((c) => c.textContent);
+    expect(dim).toEqual(["old-box", "dials in", "0 of 1", "every repo", "2.4.0"]);
+    expect(within(row).getByRole("button", { name: "Edit old-box" }).closest("td")).not.toHaveClass("is-dim");
+    expect(screen.getByText("gpu-box").closest("tr")).not.toHaveClass("is-off");
+  });
+
+  describe("the demo's fixture", () => {
+    it("has this machine's worker first, with no holders, and a disabled machine", () => {
+      const [first, ...rest] = WORKERS_FIXTURE as Machine[];
+      expect(first).toMatchObject({ name: "local", mode: "local", holders: [] });
+      expect(first.remove_blocked).toMatch(/cannot be removed/);
+      expect(rest.filter((m) => !m.enabled).map((m) => m.name)).toEqual(["build-box"]);
+      expect(rest.map((m) => m.mode)).toEqual(["ssh", "dial-in", "ssh"]);
+    });
+  });
+
   it("says a disabled machine takes no new steps, in words next to its badge", async () => {
-    stubFetch({ "GET /workers": rows({ ...WORKERS_FIXTURE[0], name: "idle-box", enabled: false } as Machine) });
+    stubFetch({ "GET /workers": rows({ ...GPU, name: "idle-box", enabled: false } as Machine) });
     mount();
     const row = (await screen.findByText("idle-box")).closest("tr")!;
     expect(within(row).getByText("disabled")).toHaveClass("badge");
@@ -55,11 +97,14 @@ describe("Settings › Workers", () => {
     await screen.findByRole("table", { name: "Machines" });
     expect(screen.getByRole("button", { name: "Add machine" })).toBeInTheDocument();
     for (const name of ["local", "gpu-box", "home-server"]) expect(screen.getByRole("button", { name: `Edit ${name}` })).toBeInTheDocument();
-    expect(screen.getByText(/The terminal does the same with kraft admin worker, and both write workers\.yaml\./)).toBeInTheDocument();
+    const note = screen.getByText(/The terminal does the same with/);
+    expect(note).toHaveTextContent("The terminal does the same with kraft admin worker, and both write workers.yaml.");
+    expect([...note.querySelectorAll("code")].map((c) => c.textContent)).toEqual(["kraft admin worker", "workers.yaml"]);
+    expect(note.closest("section")).toBeNull();
   });
 
   it("says when the machine's own limit is the one in use", async () => {
-    const limited = { ...WORKERS_FIXTURE[0], capacity: 1, capacity_source: "machine", machine_capacity: 1 } as Machine;
+    const limited = { ...GPU, capacity: 1, capacity_source: "machine", machine_capacity: 1 } as Machine;
     stubFetch({ "GET /workers": [200, { workers: [LOCAL_ROW, limited] }] });
     mount();
     const table = await screen.findByRole("table", { name: "Machines" });
@@ -78,7 +123,7 @@ describe("Settings › Workers", () => {
   it("reads the list again after a machine is added", async () => {
     const calls = stubFetch({
       "GET /workers": rows(),
-      "POST /workers": [201, { worker: { ...WORKERS_FIXTURE[1], name: "new-box" }, token: "t0k", serve_command: "kraft admin worker serve --server http://h:1 --token t0k", note: "" }],
+      "POST /workers": [201, { worker: { ...HOME, name: "new-box" }, token: "t0k", serve_command: "kraft admin worker serve --server http://h:1 --token t0k", note: "" }],
     });
     mount();
     await screen.findByRole("table", { name: "Machines" });
@@ -99,7 +144,7 @@ describe("Settings › Workers", () => {
   });
 
   describe("removing a machine", () => {
-    const FREE = { ...WORKERS_FIXTURE[1] } as Machine;
+    const FREE = { ...HOME } as Machine;
     const deletes = (calls: ReturnType<typeof stubFetch>) => calls.filter((c) => c.method === "DELETE");
     /** The page with `home-server` up for removal: its Edit dialog open, then Remove machine pressed. */
     const removeHome = async (answers: Parameters<typeof stubFetch>[0] = {}) => {

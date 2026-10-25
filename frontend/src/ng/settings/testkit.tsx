@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { Machine, StoragePreview, StorageUsage } from "../../types";
 import { HeaderActionsHost } from "../shell/HeaderActions";
+import { WORKERS_FIXTURE } from "../../../e2e/contract/mocks/fixtures";
 
 /** Stands in for the shell's header, so a page's header buttons render. */
 export function WithHeader({ children }: { children: ReactNode }) {
@@ -54,4 +55,6 @@ export function storagePreview(over: Partial<StoragePreview> = {}): StoragePrevi
 export const bulkOk = (...ids: string[]): [number, unknown] => [200, { results: ids.map((id) => ({ id, ok: true, status: "completed" })) }];
 
 /** `GET /workers` always lists this machine's own worker first. */
+/** A machine of the demo's WORKERS_FIXTURE, by name (the fixture's order is the demo's, not the tests'). */
+export const fixture = (name: string) => WORKERS_FIXTURE.find((m) => m.name === name) as Machine;
 export const LOCAL_ROW: Machine = { name: "local", mode: "local", online: true, reason: null, enabled: true, ssh: null, slots_used: 3, capacity: null, configured_capacity: null, groups: ["gpu"], repos: null, last_seen: "2026-10-24T09:00:00+00:00", kraft_version: "2.5.0", give_up_after: "never", holders: [], remove_blocked: "the local worker is part of this Kraft and cannot be removed; disable it instead" };

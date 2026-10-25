@@ -9,10 +9,12 @@ import { showToast } from "../ui/Toast";
 import { AddWorkerDialog } from "./AddWorkerDialog";
 import { EditWorkerDialog } from "./EditWorkerDialog";
 import { Block } from "./parts";
-import { EVERY_REPO, TERMINAL_NOTE, groupsWords, modeWords, slotsWords, stateReason, stateWord } from "./workersWords";
+import { EVERY_REPO, modeWords, slotsWords, stateReason, stateWord } from "./workersWords";
+
+const Dash = () => <span className="set-wk-dash">—</span>;
 import "./settings.css";
 
-const STATE_TONE = { online: "ok", offline: "bad", disabled: "muted" } as const;
+const STATE_TONE = { online: "ok", offline: "muted", disabled: "muted" } as const;
 
 /** Settings › Workers: the machines `kraft admin worker list` prints, with the same operations
  *  (add, edit, enable or disable, remove). The server enforces every rule and this page shows its words. */
@@ -79,7 +81,7 @@ export function WorkersPage() {
                         <th scope="col">Name</th>
                         <th scope="col">Connects</th>
                         <th scope="col">State</th>
-                        <th scope="col">Running</th>
+                        <th scope="col" className="is-num">Running</th>
                         <th scope="col">Groups</th>
                         <th scope="col">Repos</th>
                         <th scope="col">Version</th>
@@ -88,19 +90,19 @@ export function WorkersPage() {
                     </thead>
                     <tbody>
                       {shown.map((m) => (
-                        <tr key={m.name}>
-                          <td className="set-mono">{m.name}</td>
-                          <td>{modeWords(m)}</td>
+                        <tr key={m.name} className={m.enabled ? undefined : "is-off"}>
+                          <td className="set-mono is-dim">{m.name}</td>
+                          <td className="is-dim">{modeWords(m)}</td>
                           <td>
                             <div className="set-wk-state">
                               <Badge tone={STATE_TONE[stateWord(m)]}>{stateWord(m)}</Badge>
                               {stateReason(m) && <span className="set-wk-why">{stateReason(m)}</span>}
                             </div>
                           </td>
-                          <td className="is-num">{slotsWords(m)}</td>
-                          <td>{groupsWords(m)}</td>
-                          <td>{m.repos?.length ? m.repos.join(", ") : EVERY_REPO}</td>
-                          <td className="set-mono">{m.kraft_version ?? ""}</td>
+                          <td className="is-num is-dim">{slotsWords(m)}</td>
+                          <td>{m.groups.length ? m.groups.join(", ") : <Dash />}</td>
+                          <td className="is-dim">{m.repos?.length ? m.repos.join(", ") : EVERY_REPO}</td>
+                          <td className="set-mono is-dim">{m.kraft_version ?? <Dash />}</td>
                           <td className="is-act"><Button onClick={() => setEditing(m.name)} aria-label={`Edit ${m.name}`}>Edit</Button></td>
                         </tr>
                       ))}
@@ -108,9 +110,13 @@ export function WorkersPage() {
                   </table>
                 </div>
               )}
-              <p className="set-hint">{TERMINAL_NOTE}</p>
             </div>
           </Block>
+        )}
+        {shown && (
+          <p className="set-hint set-wk-note">
+            The terminal does the same with <code className="set-mono">kraft admin worker</code>, and both write <code className="set-mono">workers.yaml</code>.
+          </p>
         )}
       </div>
       {editing && <EditWorkerDialog name={editing} onClose={() => setEditing(null)} onSaved={() => void load()} onRemove={remove} />}

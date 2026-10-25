@@ -26,15 +26,13 @@ export function WorkerTokenDialog({ name, serveCommand, note, title, onClose }: 
       footer={<Button variant="primary" onClick={onClose}>Done</Button>}
     >
       <div className="set-wk-token">
-        <p className="set-wk-lead">
-          Run this on {name}. <Badge tone="info">shown once</Badge>
-        </p>
-        <pre className="set-wk-cmd" aria-label={`Command to run on ${name}`}>{onThreeLines(serveCommand)}</pre>
-        <div className="set-wk-cmd-actions">
-          <Button onClick={copy}>{copied ? "Copied" : "Copy"}</Button>
+        <p className="set-wk-lead">Run this on {name}.</p>
+        <div className="set-wk-cmdbox">
+          <pre className="set-wk-cmd" aria-label={`Command to run on ${name}`}>{onThreeLines(serveCommand)}</pre>
+          <Button className="set-wk-copy" onClick={copy}>{copied ? "Copied" : "Copy"}</Button>
         </div>
         {note && <p className="set-hint">{note}</p>}
-        <p className="set-hint">Kraft keeps only the hash of the token. If it is lost, rotate it from Edit {name}.</p>
+        <p className="set-hint set-wk-once"><Badge tone="warn">shown once</Badge> Kraft keeps only the hash of the token. If it is lost, rotate it from Edit {name}.</p>
       </div>
     </Dialog>
   );

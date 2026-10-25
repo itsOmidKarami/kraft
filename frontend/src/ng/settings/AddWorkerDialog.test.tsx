@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WORKERS_FIXTURE } from "../../../e2e/contract/mocks/fixtures";
 import type { Machine } from "../../types";
 import { stubFetch } from "../item/testkit";
 import { AddWorkerDialog } from "./AddWorkerDialog";
+import { fixture } from "./testkit";
 
 const SERVE = "kraft admin worker serve --server http://10.0.0.5:8080 --token abc123";
-const ROW = WORKERS_FIXTURE[0] as Machine;
+const ROW = fixture("gpu-box") as Machine;
 const REPOS = { repos: [{ name: "kraft", path: "/r/kraft" }, { name: "docs", path: "/r/docs" }] };
 
 const mount = (answers: Parameters<typeof stubFetch>[0] = {}) => {
@@ -53,7 +53,7 @@ describe("AddWorkerDialog", () => {
     type(/^Name/, "gpu-box");
     type(/ssh host/, "gpu-box.lan");
     fireEvent.change(screen.getByRole("spinbutton", { name: /Steps at once/ }), { target: { value: "3" } });
-    type(/Give up after/, "30m");
+    fireEvent.change(screen.getByRole("combobox", { name: /Give up after/ }), { target: { value: "30m" } });
     const groups = screen.getByRole("textbox", { name: "Add to Groups" });
     fireEvent.change(groups, { target: { value: "gpu" } });
     fireEvent.keyDown(groups, { key: "Enter" });
@@ -65,6 +65,27 @@ describe("AddWorkerDialog", () => {
     press("Add and connect");
     await screen.findByText("gpu-box is added");
     expect(posts()).toEqual([{ method: "POST", path: "/workers", body: { name: "gpu-box", ssh: "gpu-box.lan", capacity: 3, give_up_after: "30m", groups: ["gpu"], repos: ["kraft"] } }]);
+  });
+
+  it("offers Give up after as presets with 2 hours chosen, and sends it only when changed", async () => {
+    mount();
+    const select = screen.getByRole("combobox", { name: /Give up after/ });
+    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["30 minutes", "1 hour", "2 hours", "8 hours", "1 day", "never"]);
+    expect(select).toHaveValue("2h");
+  });
+
+  it("sizes the Connects choice to its content and sets Steps at once and Give up after side by side", () => {
+    mount();
+    expect(screen.getByRole("radiogroup", { name: "Connects" }).parentElement).toHaveClass("set-wk-field");
+    const pair = screen.getByRole("spinbutton", { name: /Steps at once/ }).closest(".set-wk-pair")!;
+    expect(within(pair as HTMLElement).getByRole("combobox", { name: /Give up after/ })).toBeInTheDocument();
+  });
+
+  it("the pills ask for 'Add a group' and, once Only some is chosen, 'Add a repo'", async () => {
+    mount();
+    expect(screen.getByPlaceholderText("Add a group")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Only some" }));
+    expect(await screen.findByPlaceholderText("Add a repo")).toBeInTheDocument();
   });
 
   it("sends only the name and host when nothing else was set", async () => {
@@ -102,7 +123,9 @@ describe("AddWorkerDialog", () => {
     press("Add machine");
     expect(await screen.findByText("home-server is added")).toBeInTheDocument();
     expect(posts()[0].body).toEqual({ name: "home-server" });
-    expect(screen.getByText("shown once")).toHaveClass("badge");
+    expect(screen.getByText("shown once")).toHaveClass("badge", "is-warn");
+    expect(screen.getByText("shown once").parentElement).toHaveTextContent("Kraft keeps only the hash");
+    expect(screen.getByLabelText("Command to run on home-server").parentElement).toContainElement(screen.getByRole("button", { name: "Copy" }));
     expect(screen.getByLabelText("Command to run on home-server").textContent).toBe("kraft admin worker serve \\\n  --server http://10.0.0.5:8080 \\\n  --token abc123");
     expect(screen.getByText("Replace the address.")).toBeInTheDocument();
     press("Copy");

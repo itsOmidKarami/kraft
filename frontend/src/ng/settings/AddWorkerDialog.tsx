@@ -7,7 +7,8 @@ import { Dialog } from "../ui/Dialog";
 import { Field } from "../ui/Field";
 import { Segmented } from "../ui/Segmented";
 import { WorkerTokenDialog } from "./WorkerTokenDialog";
-import { capacityValue, CapacityField, GroupsField, ReposField, useRepoChoices, type RepoScope } from "./workerForm";
+import { DEFAULT_GIVE_UP } from "./workersWords";
+import { capacityValue, CapacityField, GiveUpField, GroupsField, ReposField, useRepoChoices, type RepoScope } from "./workerForm";
 
 type Probe = { connected: boolean; detail: string };
 type Answer = { worker: Machine; probe?: Probe; serve_command?: string; note?: string };
@@ -20,7 +21,7 @@ export function AddWorkerDialog({ onClose, onAdded, onEdit }: { onClose: () => v
   const [how, setHow] = useState<"ssh" | "dial-in">("ssh");
   const [ssh, setSsh] = useState("");
   const [capacity, setCapacity] = useState("");
-  const [giveUp, setGiveUp] = useState("");
+  const [giveUp, setGiveUp] = useState(DEFAULT_GIVE_UP);
   const [groups, setGroups] = useState<string[]>([]);
   const [scope, setScope] = useState<RepoScope>("every");
   const [repos, setRepos] = useState<string[]>([]);
@@ -38,7 +39,7 @@ export function AddWorkerDialog({ onClose, onAdded, onEdit }: { onClose: () => v
       name: name.trim(),
       ...(how === "ssh" && { ssh: ssh.trim() }),
       ...(cap !== undefined && { capacity: cap }),
-      ...(giveUp.trim() && { give_up_after: giveUp.trim() }),
+      ...(giveUp !== DEFAULT_GIVE_UP && { give_up_after: giveUp }),
       ...(groups.length && { groups }),
       ...(scope === "some" && { repos }),
     }));
@@ -99,10 +100,10 @@ export function AddWorkerDialog({ onClose, onAdded, onEdit }: { onClose: () => v
             <input value={ssh} onChange={(e) => setSsh(e.target.value)} />
           </Field>
         )}
-        <CapacityField text={capacity} onChange={setCapacity} hint="Blank: the machine's own limit, or 1." />
-        <Field label="Give up after" hint="How long a step waits for the machine to come back: 2h, 30m, never. Blank: 2h.">
-          <input value={giveUp} onChange={(e) => setGiveUp(e.target.value)} />
-        </Field>
+        <div className="set-wk-pair">
+          <CapacityField text={capacity} onChange={setCapacity} hint="Blank: the machine's own limit, or 1." />
+          <GiveUpField value={giveUp} onChange={setGiveUp} hint="How long a step waits for the machine to come back." />
+        </div>
         <GroupsField groups={groups} onChange={setGroups} />
         <ReposField scope={scope} repos={repos} choices={choices} onScope={setScope} onRepos={setRepos} />
       </form>
