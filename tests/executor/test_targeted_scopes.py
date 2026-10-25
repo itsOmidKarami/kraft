@@ -201,14 +201,14 @@ async def _item_with_an_own_commit(item_on, *, origin=None, stored=None):
 
 def _bare_origin(tmp_path):
     origin = tmp_path / "origin.git"
-    git(tmp_path, "init", "-q", "--bare", str(origin))
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
     return origin
 
 
 def _origin_gains_other_txt(tmp_path, repo):
     """`origin/main` gains `other.txt`, fetched into `repo`'s remote-tracking ref."""
     other = tmp_path / "other"
-    git(tmp_path, "clone", "-q", str(tmp_path / "origin.git"), str(other))
+    git(tmp_path, "clone", "-q", "-b", "main", str(tmp_path / "origin.git"), str(other))
     write(other, "other.txt", "y")
     commit_all(other)
     git(other, "push", "-q", "origin", "main")
