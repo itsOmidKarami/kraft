@@ -421,7 +421,10 @@ def test_the_log_says_what_it_cannot_follow(board, monkeypatch, sessions, failur
 
 
 def _logging(app) -> list:
-    return [w for w in app.query_one("#item").workers if w.group == "log" and not w.is_finished]
+    # A cancelled worker reaches CANCELLED a loop turn after cancel(); it is
+    # already let go, so a read in that gap must not count it as following.
+    workers = app.query_one("#item").workers
+    return [w for w in workers if w.group == "log" and not (w.is_finished or w.is_cancelled)]
 
 
 def _forever(monkeypatch) -> None:
