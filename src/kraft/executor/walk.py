@@ -571,11 +571,7 @@ async def _sentinel_stop(
     if verdict == BUDGET:
         return await stops.stop_for_budget(db, work_item_id, node, budget)
     if verdict == REPAIR_DOUBTED:
-        doubts = "; ".join(dispatch.repair_doubts(db, work_item_id, node, failed))
-        reason = (
-            f"a repair in node {node.id} finished with concerns, so the node "
-            f"was not measured again: {doubts}"
-        )
+        reason = _doubted_repair_reason(db, work_item_id, node, failed)
         # `stuck`, not `failed`: nothing failed, the repair doubts itself and a
         # person decides (`context.py`'s "a person decides").
         await db.write(
@@ -583,6 +579,14 @@ async def _sentinel_stop(
         )
         return "needs_human"
     return None
+
+
+def _doubted_repair_reason(db, work_item_id: str, node: ResolvedNode, doubted) -> str:
+    doubts = "; ".join(dispatch.repair_doubts(db, work_item_id, node, doubted))
+    return (
+        f"a repair in node {node.id} finished with concerns, so the node "
+        f"was not measured again: {doubts}"
+    )
 
 
 @dataclass(frozen=True)
@@ -594,8 +598,10 @@ class _Stuck:
     ever reading `needs_human`.
 
     **The one definition of the stuck set** (Ruling 176): a task failed after
-    recovery, an exhausted fix-loop cap, a stall, and the judge's
-    `stop_needs_human` -- the four places this is constructed. Automatic
+    recovery, an exhausted fix-loop cap, a stall, the judge's
+    `stop_needs_human`, and a node-level repair that finished with concerns in
+    a node with no fix loop (Kraft-yi005) -- the five places this is
+    constructed. Automatic
     escalation answers these and nothing else: the node's declared escalation
     reads this value, and the generic `gates.auto_escalate_stuck` reads the
     `stuck` mark `_stop_stuck` records from it. Every other stop (config,
@@ -1810,6 +1816,14 @@ async def _walk_node_once(
                     loop_severities=loop_severities,
                     spent=spent,
                 )
+                if verdict == REPAIR_DOUBTED:
+                    # No fix loop to take it (Kraft-yi005): a stuck stop, so the
+                    # node's escalation or `gates.auto_escalate_stuck` answers
+                    # it before a person is asked.
+                    return _Stuck(
+                        _doubted_repair_reason(db, work_item_id, node, failed),
+                        kind=StopKind.STUCK,
+                    )
                 # The same ladder as the measurement: a repair that could not
                 # start, or a re-measure that hit a sentinel, is not "task
                 # failed" (review finding 1).

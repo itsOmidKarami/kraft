@@ -158,7 +158,7 @@ async def test_the_generic_auto_escalation_does_not_follow_a_declared_one(
 # -- Ruling 176: one stuck set, read by both mechanisms ----------------------
 #
 # A node's declared escalation and the generic `auto_escalate_stuck` answer the
-# same four stops and nothing else. Every other stop goes straight to a human
+# same five stops and nothing else. Every other stop goes straight to a human
 # under its own named cause, declared escalation or not.
 
 _REVIEWER = Path(__file__).parents[1] / "support" / "fake_reviewer.py"
@@ -229,6 +229,18 @@ def _returns(stop, event=None):
     return arrange
 
 
+async def _doubted(it, script, monkeypatch, tmp_path):
+    """The node's repair ends `done_with_concerns`."""
+
+    async def concerned(_row):
+        result = {"status": "done_with_concerns", "concerns": "needs a code fix"}
+        (it.run_dirs.results / "s-repair.json").write_text(json.dumps(result))
+        await it.session("s-repair", "build.on_failure.main.repair", "done_with_concerns")
+
+    script.plan = {"check": ["failed"], "repair": ["done_with_concerns"]}
+    script.effects = {"repair": concerned}
+
+
 def _loopless(**fields):
     return {"id": "build", "kind": "exec", "tasks": [_sub("check")], **fields}
 
@@ -244,6 +256,11 @@ STUCK = {
         lambda: {**_loopless(), "fix_loop": {"tasks": [_sub("fix")], "max_attempts": 1}},
         _returns("failed"),
         "build.fix_loop exhausted",
+    ),
+    "doubted repair without a fix loop": (
+        lambda: _loopless(on_failure={"tasks": [_sub("repair")]}),
+        _doubted,
+        "finished with concerns, so the node was not measured again: repair: needs a code fix",
     ),
     "stall": (_reviewing_node, _stall, "stuck: "),
     "judge stop_needs_human": (
@@ -327,7 +344,7 @@ async def _generic(it, monkeypatch):
 async def test_a_stuck_stop_is_escalated_by_exactly_one_mechanism(
     item_on, script, monkeypatch, tmp_path, stub_app, kind, declared
 ):
-    """Ruling 176: the four stuck stops. A node that declares an escalation
+    """Ruling 176: the five stuck stops. A node that declares an escalation
     hands them to it, and the generic fallback stands aside; a node that does
     not gets the generic one."""
     it = await _stopped(item_on, script, monkeypatch, tmp_path, stub_app, kind, declared=declared)
