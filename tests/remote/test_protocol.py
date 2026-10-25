@@ -176,6 +176,32 @@ async def test_the_machine_hello_lists_its_caps():
     assert peer.caps == frozenset({"a", "b"})
 
 
+@pytest.mark.parametrize(
+    ("capacity", "reported"),
+    [(None, None), (3, 3)],
+    ids=["no-limit", "limit"],
+)
+async def test_a_machines_own_limit_travels_in_its_hello_caps(capacity, reported):
+    server, machine = memory_pair()
+    peer, _ = await asyncio.gather(
+        _server(server),
+        protocol.machine_handshake(
+            machine, kraft_version="2.3.0", token="good", caps=protocol.machine_caps(capacity)
+        ),
+    )
+    assert protocol.RESERVE in peer.caps
+    assert protocol.reported_capacity(peer.caps) == reported
+
+
+@pytest.mark.parametrize(
+    "caps",
+    [{"codex_hook"}, {"capacity=x"}, {"capacity=0"}, {"capacity=-2"}, {"capacity="}],
+    ids=["absent", "word", "zero", "negative", "empty"],
+)
+def test_a_limit_that_is_not_reported_cleanly_reads_as_none(caps):
+    assert protocol.reported_capacity(caps) is None
+
+
 async def test_a_silent_peer_times_out_the_handshake():
     server, _machine = memory_pair()
     with pytest.raises(protocol.Closed):

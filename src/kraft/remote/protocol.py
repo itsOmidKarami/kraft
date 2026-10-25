@@ -21,7 +21,16 @@ Protocol 2. `id` is the job key `"<work item id>/<session id>"`. Frames:
   come back.
 - `started`, machine to server: `{id}`; setup is done and the command launched.
 - `rejected`, machine to server: `{id, outcome, reason}`; the command never
-  started. `outcome` is `config_error` or `failed`.
+  started. `outcome` is `config_error`, `failed`, or `full` (a `job` that skipped `reserve`
+  arrived at a machine with no free slot of its own; its blobs are dropped unread).
+- `reserve`, server to machine: `{rid, id}`, before it builds the job; the machine holds a slot
+  for `id` and answers `reserved`: `{rid, id, ok, capacity}`. `ok` is false when it has no free
+  slot of its own, and `capacity` is its limit (null when it sets none). The `job` for `id`
+  turns the slot into a running job. `unreserve`: `{id}`, the server will not send that job.
+  `reserves`: `{ids}`, on every connect, the reservations the server still holds: the machine
+  drops the older ones it holds that are not listed. A machine lists `reserve` in its caps.
+- `capacity`, machine to server: `{capacity}`, the machine's own limit changed (null: it has
+  none). The first value is in the hello's caps as `capacity=N`.
 - `log`, machine to server: `{id, offset, data}`, bytes of `session.log` from
   `offset`.
 - `sync`, server to machine on every connect: `{jobs: [{id, offset}]}`. The
@@ -52,7 +61,10 @@ PROTOCOL_VERSION = 2
 #: wrong is sent only to a peer that lists it.
 #: The machine has its own codex trust Kraft's hook (`JobSpec.codex_hook`).
 CODEX_HOOK = "codex_hook"
-CAPS: frozenset[str] = frozenset({CODEX_HOOK})
+#: The machine holds a slot for a step before the server sends it (`reserve`).
+RESERVE = "reserve"
+CAPS: frozenset[str] = frozenset({CODEX_HOOK, RESERVE})
+_CAPACITY = "capacity="
 HANDSHAKE_S = 10.0
 PING_S = 20.0
 DEAD_S = 60.0
@@ -101,6 +113,20 @@ def _caps(raw: object) -> frozenset[str]:
     if isinstance(raw, list) and all(isinstance(c, str) for c in raw):
         return frozenset(raw)
     return frozenset()
+
+
+def machine_caps(capacity: int | None) -> frozenset[str]:
+    """A machine's hello caps: `CAPS`, and `capacity=N` when it has a limit of its own."""
+    return CAPS if capacity is None else CAPS | {f"{_CAPACITY}{capacity}"}
+
+
+def reported_capacity(caps: Iterable[str]) -> int | None:
+    """The limit a machine's caps report, or None (none reported, or not a whole number >= 1)."""
+    for cap in caps:
+        if cap.startswith(_CAPACITY):
+            value = cap.removeprefix(_CAPACITY)
+            return int(value) if value.isascii() and value.isdigit() and int(value) >= 1 else None
+    return None
 
 
 def _major(version: str) -> int | None:
