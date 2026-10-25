@@ -32,6 +32,7 @@ class AddWorker(BaseModel):
     capacity: int | None = None
     repos: list[str] | None = None
     give_up_after: str | None = None
+    groups: list[str] = []
 
 
 def _forbid_sessions(request: Request) -> None:
@@ -104,7 +105,7 @@ async def add_worker(body: AddWorker, request: Request):
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     token = None if body.ssh else registry.new_token()
-    fields = {"ssh": body.ssh, "capacity": body.capacity, "repos": body.repos}
+    fields = {"ssh": body.ssh, "capacity": body.capacity, "repos": body.repos, "groups": body.groups}
     if body.give_up_after is not None:
         fields["give_up_after"] = body.give_up_after
     if token is not None:
@@ -129,7 +130,10 @@ async def add_worker(body: AddWorker, request: Request):
     def add(current: registry.WorkersFile) -> registry.WorkersFile:
         if body.name in current.workers:
             raise HTTPException(409, f"a worker named {body.name!r} already exists")
-        return current.with_workers({**current.workers, body.name: worker})
+        try:
+            return current.with_workers({**current.workers, body.name: worker})
+        except ValidationError as exc:
+            raise HTTPException(422, config_mod.first_error(exc, "workers")) from exc
 
     await _edit(request, add)
     if token is None:
