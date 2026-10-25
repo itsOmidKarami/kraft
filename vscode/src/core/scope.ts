@@ -3,7 +3,7 @@ import { posix, win32 } from "node:path";
 export const FILES: ReadonlySet<string> = new Set([
   "library.yaml", "policy.yaml", "harnesses.yaml", "repos.yaml",
   "intake.yaml", "access.yaml", "sandbox.yaml", "theme.yaml", "notify.yaml", "update.yaml", "detectors.yaml",
-  "addons.yaml",
+  "addons.yaml", "workers.yaml",
 ]);
 const CHAIN = /^chains\/[a-z][a-z0-9_-]*\.yaml$/;
 
@@ -27,6 +27,7 @@ export const ABOUT: Readonly<Record<string, string>> = {
   "theme.yaml": "The web UI's look",
   "detectors.yaml": "How a connect finds a repo's commands",
   "addons.yaml": "Add-on collections and installed add-ons",
+  "workers.yaml": "Remote worker machines and their repos",
   "library.yaml": "Nodes, tasks and steps the chains extend",
 };
 
