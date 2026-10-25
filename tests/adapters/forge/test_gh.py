@@ -236,8 +236,29 @@ async def test_gh_branch_ci_status_reads_runs_not_a_pull_request(cli, tmp_path):
     assert (status.state, status.sha) == ("failed", "deadbeef")
     assert status.failed_jobs[0].failure_reason == "script_failure"
     assert cli.calls("gh") == [
-        "run list --branch main -L 20 --json status,conclusion,headSha,url,name,createdAt,updatedAt"
+        "run list --branch main --commit deadbeef -L 20 "
+        "--json status,conclusion,headSha,url,name,createdAt,updatedAt"
     ]
+
+
+async def test_gh_branch_ci_status_finds_a_commits_runs_on_a_busy_branch(cli, tmp_path):
+    """Kraft-h6wi2: the branch's newest 20 runs are all newer commits', so the
+    watched commit is found by asking for its own runs, not by filtering those."""
+    busy = ",".join(
+        f'{{"status":"completed","conclusion":"failure","headSha":"newer{n}","name":"test"}}'
+        for n in range(20)
+    )
+    watched = '{"status":"completed","conclusion":"success","headSha":"deadbeef","name":"test"}'
+    gh = cli.bindir / "gh"
+    gh.write_text(
+        f"#!/bin/sh\ncase \"$*\" in\n  *--commit*) echo '[{watched}]' ;;\n"
+        f"  *) echo '[{busy}]' ;;\nesac\n"
+    )
+    gh.chmod(0o755)
+
+    status = await forge.GhCli().branch_ci_status(repo=tmp_path, branch="main", head_sha="deadbeef")
+
+    assert (status.state, status.sha, status.no_checks) == ("success", "deadbeef", False)
 
 
 _CHECK_RUNS = "api repos/{owner}/{repo}/commits/other-sha/check-runs?per_page=1"

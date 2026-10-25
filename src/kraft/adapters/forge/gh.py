@@ -635,8 +635,9 @@ class GhCli(mr_ops.CliWaits):
         current branch normally has no open PR left for `ci_status`'s `gh pr
         view` to resolve, and it would raise instead of reading the branch's
         runs at all. `gh run list --branch` reads the branch's own workflow
-        runs directly, no PR involved. `pipeline_id` is unused, same reason
-        as in `ci_status`: gh's checks are per-commit, not per-pipeline.
+        runs directly, no PR involved, those of `head_sha` alone. `pipeline_id`
+        is unused, same reason as in `ci_status`: gh's checks are per-commit,
+        not per-pipeline.
         `head_sha` is the caller's own freshly-fetched upstream head, not this
         checkout's possibly-stale local HEAD, so it is what runs are matched
         against here.
@@ -649,6 +650,11 @@ class GhCli(mr_ops.CliWaits):
                 "list",
                 "--branch",
                 branch,
+                # That commit's own runs, not the branch's newest 20: on a busy
+                # branch the commit a caller keeps watching falls out of that
+                # window and would read as never having run (Kraft-h6wi2).
+                "--commit",
+                head_sha,
                 "-L",
                 "20",
                 "--json",
