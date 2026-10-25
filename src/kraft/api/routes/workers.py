@@ -105,7 +105,12 @@ async def add_worker(body: AddWorker, request: Request):
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     token = None if body.ssh else registry.new_token()
-    fields = {"ssh": body.ssh, "capacity": body.capacity, "repos": body.repos, "groups": body.groups}
+    fields = {
+        "ssh": body.ssh,
+        "capacity": body.capacity,
+        "repos": body.repos,
+        "groups": body.groups,
+    }
     if body.give_up_after is not None:
         fields["give_up_after"] = body.give_up_after
     if token is not None:
