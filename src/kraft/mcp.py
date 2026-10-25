@@ -250,6 +250,7 @@ def build() -> MCPServer:
         repos: list[str] | None = None,
         give_up_after: str | None = None,
         groups: list[str] | None = None,
+        enabled: bool = True,
     ) -> dict:
         """Register a machine that may run work item steps. With `ssh` (a host
         or ~/.ssh/config alias) Kraft connects to it once and reports the
@@ -259,7 +260,7 @@ def build() -> MCPServer:
         else 1). `repos` limits it to those connected
         repos; `give_up_after` is a duration like 2h or "never". `groups` puts it in
         those groups (a step's `runner` can name a group; names share one namespace with
-        machines). Machine
+        machines). `enabled=False` registers it taking no new steps. Machine
         management is a person's call: ask first."""
         return await client.add_worker(
             name,
@@ -268,18 +269,70 @@ def build() -> MCPServer:
             repos=repos,
             give_up_after=give_up_after,
             groups=groups,
+            enabled=enabled,
         )
+
+    @server.tool()
+    async def edit_worker(
+        name: str,
+        enabled: bool | None = None,
+        capacity: int | None = None,
+        unset_capacity: bool = False,
+        give_up_after: str | None = None,
+        groups: list[str] | None = None,
+        repos: list[str] | None = None,
+        every_repo: bool = False,
+        ssh: str | None = None,
+    ) -> dict:
+        """Change a registered machine, or the local worker (`local`: only `enabled`,
+        `capacity` and `groups`). Only what you pass changes. `enabled=False` stops new steps
+        starting on it (running ones finish); `enabled=True` lets it take them again.
+        `capacity` caps its steps at once; `unset_capacity` drops that cap, so the machine's own
+        limit applies (for `local`: no limit). `groups` replaces its groups (`[]` leaves them
+        all). `repos` limits it to those connected repos; `every_repo` lifts the limit.
+        `give_up_after` is a duration like 2h or "never", and reaches the machine when it next
+        connects. `ssh` is a new host for a machine Kraft dials, refused while a step runs on
+        it. Machine management is a person's call: ask first."""
+        if unset_capacity and capacity is not None:
+            raise ValueError("capacity and unset_capacity cannot both be given")
+        if every_repo and repos is not None:
+            raise ValueError("repos and every_repo cannot both be given")
+        given = {
+            "enabled": enabled,
+            "capacity": capacity,
+            "give_up_after": give_up_after,
+            "groups": groups,
+            "repos": repos,
+            "ssh": ssh,
+        }
+        fields: dict = {key: value for key, value in given.items() if value is not None}
+        if unset_capacity:
+            fields["capacity"] = None
+        if every_repo:
+            fields["repos"] = None
+        return await client.edit_worker(name, fields)
+
+    @server.tool()
+    async def rotate_worker_token(name: str) -> dict:
+        """Give a dial-in machine a new token, returned once with the command to run on it.
+        The old token stops working at once and the machine's connection ends; its running
+        steps wait for it until its `give_up_after`. Machine management is a person's call:
+        ask first."""
+        return await client.rotate_worker_token(name)
 
     @server.tool()
     async def list_workers() -> dict:
         """List the registered machines: mode, online or offline and why,
-        slots used, the limit in use and who set it, groups, repos, last seen, Kraft version."""
+        slots used, the limit in use and who set it, whether it takes new steps (`enabled`),
+        groups, repos, last seen, Kraft version, the items whose steps it holds (`holders`) and,
+        when it holds any, why it cannot be removed (`remove_blocked`)."""
         return await client.list_workers()
 
     @server.tool()
     async def remove_worker(name: str) -> dict:
-        """Remove a registered machine and revoke its token or ssh entry. Its
-        running sessions are treated as gone."""
+        """Remove a registered machine and revoke its token or ssh entry. Refused while any step
+        holds the machine, and the local worker cannot be removed; the refusal says which items,
+        and what to do (disable it so nothing new starts, then remove it once they end)."""
         return await client.remove_worker(name)
 
     @server.tool()

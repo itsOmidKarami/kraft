@@ -37,6 +37,8 @@ def test_the_tools_are_registered():
         "create_work_item",
         "ensure_repo",
         "add_worker",
+        "edit_worker",
+        "rotate_worker_token",
         "list_workers",
         "remove_worker",
         "approve_gate",
@@ -103,9 +105,58 @@ def test_the_worker_tools_call_the_same_client_functions_the_cli_does(
         "repos": None,
         "give_up_after": None,
         "groups": groups,
+        "enabled": True,
     }
     assert calls == [("gpu", expected)]
     assert "kwt_x" in result.content[0].text
+
+
+@pytest.mark.parametrize(
+    ("given", "fields"),
+    [
+        ({"enabled": False}, {"enabled": False}),
+        ({"capacity": 3}, {"capacity": 3}),
+        ({"unset_capacity": True}, {"capacity": None}),
+        ({"groups": []}, {"groups": []}),
+        ({"repos": ["a"]}, {"repos": ["a"]}),
+        ({"every_repo": True}, {"repos": None}),
+        ({"give_up_after": "never", "ssh": "box"}, {"give_up_after": "never", "ssh": "box"}),
+    ],
+    ids=["disable", "capacity", "unset-capacity", "no-groups", "repos", "every-repo", "two"],
+)
+def test_edit_worker_sends_only_what_it_was_given(monkeypatch, given, fields):
+    calls = []
+
+    async def edit(name, sent):
+        calls.append((name, sent))
+        return {"worker": {"name": name}}
+
+    monkeypatch.setattr(mcp.client, "edit_worker", edit)
+    asyncio.run(mcp.build().call_tool("edit_worker", {"name": "gpu", **given}))
+    assert calls == [("gpu", fields)]
+
+
+@pytest.mark.parametrize(
+    "given",
+    [{"capacity": 2, "unset_capacity": True}, {"repos": ["a"], "every_repo": True}],
+    ids=["capacity", "repos"],
+)
+def test_edit_worker_refuses_a_value_and_its_undoing_together(monkeypatch, given):
+    async def edit(name, sent):
+        raise AssertionError("nothing may be sent")
+
+    monkeypatch.setattr(mcp.client, "edit_worker", edit)
+    with pytest.raises(Exception, match="cannot both be given"):
+        asyncio.run(mcp.build().call_tool("edit_worker", {"name": "gpu", **given}))
+
+
+def test_rotate_worker_token_calls_the_same_client_function_the_cli_does(monkeypatch):
+    async def rotate(name):
+        return {"token": "kwt_new", "worker": {"name": name}}
+
+    monkeypatch.setattr(mcp.client, "rotate_worker_token", rotate)
+    result = asyncio.run(mcp.build().call_tool("rotate_worker_token", {"name": "gpu"}))
+    assert "kwt_new" in result.content[0].text
 
 
 def test_no_standalone_steer_tool_is_exposed():

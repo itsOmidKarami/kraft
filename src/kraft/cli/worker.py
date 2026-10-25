@@ -1,7 +1,8 @@
 """`kraft admin worker`: the machines that may run work item steps.
 
-`add`, `list` and `remove` ask the server, which owns `workers.yaml`. `serve`
-and `check` run on the machine itself and need no server of their own."""
+`add`, `edit`, `enable`, `disable`, `rotate-token`, `list` and `remove` ask the server,
+which owns `workers.yaml`. `serve` and `check` run on the machine itself and need no
+server of their own."""
 
 from __future__ import annotations
 
@@ -16,6 +17,18 @@ from pathlib import Path
 from kraft import client, render, update
 from kraft.cli import common
 
+#: `--capacity none`: no limit of the server's own; the machine's applies (for `local`, none).
+_NO_LIMIT = "none"
+
+
+def _capacity(text: str) -> int | str:
+    if text == _NO_LIMIT:
+        return text
+    try:
+        return int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number or {_NO_LIMIT!r}") from None
+
 
 def _render_added(result: dict) -> str:
     worker = result["worker"]
@@ -27,6 +40,19 @@ def _render_added(result: dict) -> str:
         f"added {worker['name']} (dial-in)",
         "",
         f"token (shown once, keep it): {result['token']}",
+        "",
+        "run this on the machine:",
+        f"  {result['serve_command']}",
+    ]
+    if result.get("note"):
+        lines += ["", result["note"]]
+    return "\n".join(lines)
+
+
+def _render_token(result: dict) -> str:
+    lines = [
+        f"new token for {result['worker']['name']} (shown once, keep it): {result['token']}",
+        "the old token no longer works and the machine's connection ended",
         "",
         "run this on the machine:",
         f"  {result['serve_command']}",
@@ -49,6 +75,14 @@ def _slots(w: dict) -> str:
     return f"{of} (machine)" if w.get("capacity_source") == "machine" else of
 
 
+def _state(w: dict) -> str:
+    """`online`, `offline: why`, or `disabled` (with `· offline: why` after it when it is)."""
+    offline = "" if w["online"] else f"offline: {w['reason']}"
+    if w.get("enabled") is False:
+        return f"disabled · {offline}" if offline else "disabled"
+    return offline or "online"
+
+
 def _render_list(result: dict) -> str:
     rows = result["workers"]
     if not rows:
@@ -59,7 +93,7 @@ def _render_list(result: dict) -> str:
             (
                 w["name"],
                 "this machine" if w["mode"] == "local" else w["mode"],
-                "online" if w["online"] else f"offline: {w['reason']}",
+                _state(w),
                 _slots(w),
                 ",".join(w.get("groups") or []) or "-",
                 ",".join(w["repos"]) if w["repos"] else "all",
@@ -84,6 +118,7 @@ def _cmd_add(ns: argparse.Namespace) -> None:
             repos=repos,
             give_up_after=ns.give_up_after,
             groups=ns.group or None,
+            enabled=not ns.disabled,
         )
     )
     common.emit(result, _render_added, ns.json)
@@ -101,6 +136,56 @@ def _cmd_remove(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.remove_worker(ns.name)), lambda r: f"removed {r['removed']}", ns.json
     )
+
+
+def _edit_fields(ns: argparse.Namespace) -> dict:
+    """What `kraft admin worker edit` was asked to change: only the flags that were given."""
+    fields: dict = {}
+    if ns.capacity is not None:
+        fields["capacity"] = None if ns.capacity == _NO_LIMIT else ns.capacity
+    if ns.give_up_after is not None:
+        fields["give_up_after"] = ns.give_up_after
+    if ns.group:
+        fields["groups"] = ns.group
+    if ns.no_groups:
+        fields["groups"] = []
+    if ns.every_repo:
+        fields["repos"] = None
+    elif ns.repos is not None:
+        fields["repos"] = [r for r in ns.repos.split(",") if r]
+    if ns.ssh is not None:
+        fields["ssh"] = ns.ssh
+    return fields
+
+
+def _edited(result: dict, fields: dict) -> str:
+    name = result["worker"]["name"]
+    lines = [f"updated {name}"]
+    if "give_up_after" in fields:
+        lines.append(f"{name} learns its new give-up-after the next time it connects")
+    return "\n".join(lines)
+
+
+def _cmd_edit(ns: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    fields = _edit_fields(ns)
+    if not fields:
+        parser.error("nothing to change: give at least one of the flags below")
+    result = asyncio.run(client.edit_worker(ns.name, fields))
+    common.emit(result, lambda r: _edited(r, fields), ns.json)
+
+
+def _cmd_enabled(ns: argparse.Namespace, enabled: bool) -> None:
+    result = asyncio.run(client.edit_worker(ns.name, {"enabled": enabled}))
+    say = (
+        f"{ns.name} takes new steps"
+        if enabled
+        else f"{ns.name} is disabled: running steps finish, nothing new starts"
+    )
+    common.emit(result, lambda _: say, ns.json)
+
+
+def _cmd_rotate(ns: argparse.Namespace) -> None:
+    common.emit(asyncio.run(client.rotate_worker_token(ns.name)), _render_token, ns.json)
 
 
 def _cmd_serve(ns: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
@@ -210,7 +295,69 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
         metavar="DURATION",
         help="how long a vanished machine's work is waited for: 2h, 30m, 1d or never",
     )
+    add_p.add_argument(
+        "--disabled", action="store_true", help="register it taking no new steps (see `enable`)"
+    )
     add_p.set_defaults(func=_cmd_add)
+
+    edit_p = verbs.add_parser(
+        "edit",
+        parents=[common_parser],
+        help="change a machine (`local`: only --capacity and the groups); the rest stays",
+    )
+    edit_p.add_argument("name")
+    edit_p.add_argument(
+        "--capacity",
+        type=_capacity,
+        metavar="N|none",
+        help="steps it runs at once, at most; none: the machine's own limit (local: no limit)",
+    )
+    edit_p.add_argument(
+        "--give-up-after",
+        metavar="DURATION",
+        help="2h, 30m, 1d or never; the machine learns it the next time it connects",
+    )
+    groups = edit_p.add_mutually_exclusive_group()
+    groups.add_argument(
+        "--group",
+        action="append",
+        metavar="G",
+        help="its groups become exactly these (repeatable)",
+    )
+    groups.add_argument("--no-groups", action="store_true", help="take it out of every group")
+    repos = edit_p.add_mutually_exclusive_group()
+    repos.add_argument("--repos", metavar="A,B", help="limit it to these connected repos")
+    repos.add_argument(
+        "--every-repo", action="store_true", help="lift the limit: it may work on every repo"
+    )
+    edit_p.add_argument(
+        "--ssh",
+        metavar="HOST",
+        help="a new host, for a machine Kraft dials; refused while it runs steps",
+    )
+    edit_p.set_defaults(func=lambda ns: _cmd_edit(ns, edit_p))
+
+    enable_p = verbs.add_parser(
+        "enable", parents=[common_parser], help="let a machine take new steps again"
+    )
+    enable_p.add_argument("name")
+    enable_p.set_defaults(func=lambda ns: _cmd_enabled(ns, True))
+
+    disable_p = verbs.add_parser(
+        "disable",
+        parents=[common_parser],
+        help="take no new steps on a machine; the ones running finish",
+    )
+    disable_p.add_argument("name")
+    disable_p.set_defaults(func=lambda ns: _cmd_enabled(ns, False))
+
+    rotate_p = verbs.add_parser(
+        "rotate-token",
+        parents=[common_parser],
+        help="a new token for a dial-in machine; the old one stops working at once",
+    )
+    rotate_p.add_argument("name")
+    rotate_p.set_defaults(func=_cmd_rotate)
 
     list_p = verbs.add_parser(
         "list", parents=[common_parser], help="the machines, online or offline and why"
@@ -218,7 +365,9 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
     list_p.set_defaults(func=_cmd_list)
 
     remove_p = verbs.add_parser(
-        "remove", parents=[common_parser], help="forget a machine and end its connection"
+        "remove",
+        parents=[common_parser],
+        help="forget a machine and end its connection; refused while it runs a step",
     )
     remove_p.add_argument("name")
     remove_p.set_defaults(func=_cmd_remove)
