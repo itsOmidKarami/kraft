@@ -49,7 +49,7 @@ def test_the_most_specific_setting_wins(node_ov, item_ov, library, want):
     ("runner", "repos", "says"),
     [
         ("local", ["kraft"], None),
-        ("nope", ["kraft"], "'nope' is not a machine in workers.yaml"),
+        ("nope", ["kraft"], "'nope' is not a machine or a group in workers.yaml"),
         ("gpu", ["kraft"], None),
         ("gpu", ["infra"], "machine 'gpu' is not allowed for repo 'infra'"),
         ("any", ["infra"], None),  # any-box has no repos: limit
@@ -114,6 +114,58 @@ def test_filing_problems_name_both_settings_for_in_place(tmp_path):
         )
         == []
     )
+
+
+@pytest.mark.parametrize(
+    ("runner", "in_place", "says"),
+    [
+        ("gpu", True, "group 'gpu' has no machine that can take an in-place item; add the local"),
+        ("mixed", True, None),
+        ("gpu", False, None),
+        ("nope", False, "'nope' is not a machine or a group in workers.yaml"),
+    ],
+    ids=["remote-only-in-place", "with-local-in-place", "remote-only-plain", "unknown"],
+)
+def test_a_group_holds_when_a_member_could_take_the_item(tmp_path, runner, in_place, says):
+    repo = make_repo(tmp_path)
+    workers = registry.WorkersFile.model_validate(
+        {
+            "workers": {
+                "gpu-1": {"ssh": "g1", "groups": ["gpu", "mixed"]},
+            },
+            "local": {"groups": ["mixed"]},
+        }
+    )
+    got = placement.filing_problems(
+        [runner],
+        workers=workers,
+        repos=[entry_of({"path": str(repo), "name": "kraft"})],
+        in_place=in_place,
+        repo_path=repo,
+    )
+    assert (got == []) if says is None else (len(got) == 1 and says in got[0])
+
+
+def test_a_group_whose_remote_members_do_not_allow_the_repo_and_has_no_local_is_refused():
+    workers = registry.WorkersFile.model_validate(
+        {"workers": {"gpu-1": {"ssh": "g1", "groups": ["gpu"], "repos": ["kraft"]}}}
+    )
+    got = placement.refusal(
+        "gpu", workers=workers, repos=[entry_of({"path": "/r/infra", "name": "infra"})]
+    )
+    assert "group 'gpu'" in got and "infra" in got
+
+
+def test_a_group_with_a_submodule_checkout_names_why_no_remote_member_can_take_it(tmp_path):
+    repo = make_repo(tmp_path)
+    (repo / ".gitmodules").write_text('[submodule "x"]\n\tpath = x\n\turl = ./x\n')
+    workers = registry.WorkersFile.model_validate(
+        {"workers": {"gpu-1": {"ssh": "g1", "groups": ["gpu"]}}}
+    )
+    (got,) = placement.filing_problems(
+        ["gpu"], workers=workers, repos=[], in_place=False, repo_path=repo
+    )
+    assert "group 'gpu'" in got and "submodules" in got
 
 
 def test_library_runners_lists_every_machine_the_chain_names():

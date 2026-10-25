@@ -9,7 +9,7 @@ import secrets
 import shlex
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from kraft import harness as _harness
 from kraft import ids, inplace, item_paths, store, when_free
@@ -40,6 +40,9 @@ from kraft.worker import callback as _callback
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 from kraft.worker.worktree_read import open_dir_no_symlinks
+
+if TYPE_CHECKING:
+    from kraft.remote.hub import Claim
 
 logger = logging.getLogger(__name__)
 
@@ -985,7 +988,51 @@ def _harness_reach(row, h: _harness.Harness) -> HarnessReach:
     return frozen.get(h.id) or HarnessReach()
 
 
-async def run_agent_task(
+async def run_agent_task(db, run_dirs, *, follow_node: bool = False, **kw) -> str:
+    """`_run_agent_task`, a step whose `runner` is a group placed on one of its members first
+    (`launch.run_placed`) unless the caller already did (`placed_claim`). `follow_node`: an
+    escalation turn or a review reply goes back to where its node's tasks last ran."""
+    runner = kw.get("runner")
+    if kw.get("placed_claim") is not None or runner is None:
+        return await _run_agent_task(db, run_dirs, **kw)
+    # Lazy: `kraft.remote` imports `store`, which imports this module.
+    from kraft.remote import launch as _launch
+
+    if not _launch.is_group(runner):
+        return await _run_agent_task(db, run_dirs, **kw)
+    work_item_id = kw["work_item_id"]
+    row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    repo_entry = kw.get("repo_entry")
+
+    async def attempt(on, claim, waited_s):
+        return await _run_agent_task(
+            db,
+            run_dirs,
+            **{
+                **kw,
+                "runner": on,
+                "placed_claim": claim,
+                "time_cap": _launch.extend(kw.get("time_cap"), waited_s),
+            },
+        )
+
+    return await _launch.run_placed(
+        db,
+        row,
+        kw["node_id"],
+        kw["hook_point"],
+        runner,
+        [repo_entry] if repo_entry is not None else [],
+        session_id=kw["session_id"],
+        resume=follow_node or bool(kw.get("resume_session_id")),
+        pin_node=follow_node,
+        attempt=attempt,
+    )
+
+
+async def _run_agent_task(
     db,
     run_dirs,
     *,
@@ -1048,6 +1095,8 @@ async def run_agent_task(
     on_session: Callable[[], Awaitable[None]] | None = None,
     #: The machine this launch runs on (`kraft.remote.placement`), or None for the server.
     runner: str | None = None,
+    #: The slot `launch.placed` took for a step whose runner is a group.
+    placed_claim: Claim | None = None,
 ) -> str:
     runner = None if runner == "local" else runner
     # An update holds the moment: no session starts until the server restarts.
@@ -1258,6 +1307,20 @@ async def run_agent_task(
             # its own interpreter runs it: the machine puts the flags where this marks.
             codex_hook = {"harness": harness, "hook": h.id, "exe": exe}
             hook_argv = (_MACHINE_HOOK_FLAGS,)
+            if placed_claim is not None:
+                # Lazy: `kraft.remote` imports `store`, which imports this module.
+                from kraft.remote import launch as _launch
+                from kraft.remote import runs as _remote_runs
+                from kraft.remote.protocol import CODEX_HOOK
+
+                if CODEX_HOOK not in _remote_runs.current().hub.caps(placed_claim.machine):
+                    # A group's member that cannot trust the hook: `launch.placed` places again.
+                    raise _launch.PlaceAgain(
+                        {
+                            CODEX_HOOK: f"harness {harness!r} cannot run Kraft's permission "
+                            "hook, which this launch's policy needs"
+                        }
+                    )
         else:
             try:
                 # The session's own codex vouches for the hook: a sandbox's is the
@@ -1428,6 +1491,7 @@ async def run_agent_task(
         before_launch=before_launch if borrows or on_session else None,
         runner=runner,
         codex_hook=codex_hook,
+        placed_claim=placed_claim,
     )
     if borrows:
         await inplace.check_task(db, run_dirs, item_row, Path(cwd), node_id, hook_point)

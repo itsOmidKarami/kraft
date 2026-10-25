@@ -194,8 +194,8 @@ def build() -> MCPServer:
         unless a human asked for them. `chain_template` is `chain`'s 1.x
         name, still read; pass `chain`.
 
-        `runner` is where the item's steps run: a machine from workers.yaml,
-        `any` or `local`. A machine name must be in workers.yaml; a sandboxed,
+        `runner` is where the item's steps run: a machine or a group from
+        workers.yaml, `any` or `local`. A name must be in workers.yaml; a sandboxed,
         in-place, workspace-member, submodule or Git LFS item is refused. Leave
         it out unless a human asked for one."""
         return await client.create_work_item(
@@ -473,8 +473,8 @@ def build() -> MCPServer:
         itself. `clear` resets every field, the runner too, back to the template's own
         binding; naming a field replaces the stored override rather than merging
         with it, but a call that does not name `runner` keeps the stored one. `runner` is
-        where the steps run: a machine from workers.yaml,
-        `any` or `local`; a sandboxed, in-place, workspace-member, submodule or
+        where the steps run: a machine or a group from
+        workers.yaml, `any` or `local`; a sandboxed, in-place, workspace-member, submodule or
         Git LFS item is refused. It takes effect at the next step launch."""
         return await client.set_agent_overrides(
             model, escalate_model, effort, runner=runner, clear=clear, work_item_id=work_item_id
@@ -502,8 +502,8 @@ def build() -> MCPServer:
         over the repository's; `[]` expects none) -- without touching the Policy
         screen's system defaults or the chain everyone else uses. A
         model/effort the node's harness refuses is refused here. `runner` is
-        where the node's steps run: a machine from workers.yaml, `any` or
-        `local`; a sandboxed, in-place, workspace-member, submodule or Git LFS
+        where the node's steps run: a machine or a group from workers.yaml,
+        `any` or `local`; a sandboxed, in-place, workspace-member, submodule or Git LFS
         item is refused. `clear` resets this node back to the template's own
         binding; naming a field sets it and keeps the node's other fields.
         409s once the node has started, except a `runner` alone, which takes

@@ -633,7 +633,7 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     create.add_argument(
         "--runner",
         metavar="NAME",
-        help="where its steps run: a machine from workers.yaml, any, or local",
+        help="where its steps run: a machine or a group from workers.yaml, any, or local",
     )
     create.add_argument(
         "--autostart",
@@ -884,7 +884,7 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     set_overrides.add_argument(
         "--runner",
         metavar="NAME",
-        help="where its steps run: a machine from workers.yaml, any, or local",
+        help="where its steps run: a machine or a group from workers.yaml, any, or local",
     )
     set_overrides.add_argument(
         "--clear",
@@ -927,7 +927,7 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     set_node_override.add_argument(
         "--runner",
         metavar="NAME",
-        help="where its steps run: a machine from workers.yaml, any, or local",
+        help="where its steps run: a machine or a group from workers.yaml, any, or local",
     )
     set_node_override.add_argument(
         "--extra-prompt", help="text appended to every agent task's instruction in this node"

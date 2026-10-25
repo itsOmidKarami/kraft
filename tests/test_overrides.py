@@ -123,7 +123,9 @@ def test_text_that_is_no_model_id_is_refused_naming_the_rule(model):
     ids=["agent-not-a-string", "agent-bad-name", "node-not-a-string", "node-bad-name"],
 )
 def test_a_runner_is_local_any_or_a_machine_name(check, fields):
-    assert check(fields)[0].endswith("'runner' must be local, any or a machine name")
+    assert check(fields)[0].endswith(
+        "'runner' must be local, any, a machine or a group from workers.yaml"
+    )
 
 
 def test_a_runner_name_is_accepted():
