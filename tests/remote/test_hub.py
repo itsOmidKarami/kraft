@@ -61,6 +61,9 @@ async def test_an_unconnected_machine_lists_offline_and_never_connected():
         "capacity": 2,
         "capacity_source": "server",
         "machine_capacity": None,
+        "configured_capacity": 2,
+        "enabled": True,
+        "ssh": None,
         "groups": [],
         "repos": ["kraft"],
         "last_seen": None,
@@ -514,3 +517,63 @@ async def test_a_group_still_hands_a_codex_step_only_to_a_member_that_lists_the_
     await attach(hub, _Peer(), "a", caps=frozenset(), token="kwt_a")
     await attach(hub, _Peer(), "b", caps=frozenset({"codex_hook"}), token="kwt_b")
     assert hub.decide("gpu", [], needs={"codex_hook": "the hook"}).machine == "b"
+
+
+def _disableable(**gpu):
+    """`gpu` and `gpu-2`, both in group `pool`; `gpu` takes `gpu`'s overrides."""
+    return registry.WorkersFile.model_validate(
+        {
+            "workers": {
+                n: {
+                    "token_sha256": registry.hash_token(f"kwt_{n}"),
+                    "groups": ["pool"],
+                    **(gpu if n == "gpu" else {}),
+                }
+                for n in ("gpu", "gpu-2")
+            }
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("runner", "machine", "wait"),
+    [
+        ("gpu", None, "waiting for gpu (disabled)"),
+        ("any", "gpu-2", None),
+        ("pool", "gpu-2", None),
+    ],
+)
+@pytest.mark.parametrize("online", [True, False], ids=["online", "offline"])
+async def test_a_disabled_machine_takes_no_new_step_and_a_named_wait_says_it_is_disabled(
+    runner, machine, wait, online
+):
+    hub = Hub("2.3.0")
+    hub.apply(_disableable(enabled=False))
+    await attach(hub, _Peer(), "gpu-2", caps=frozenset(), token="kwt_gpu-2")
+    if online:
+        await attach(hub, _Peer(), "gpu", caps=frozenset(), token="kwt_gpu")
+    assert hub.free("gpu", []) is False
+    verdict = hub.decide(runner, [])
+    assert (verdict.machine, verdict.wait) == (machine, wait)
+    assert _row(hub, "gpu")["enabled"] is False
+    assert _row(hub, "gpu")["configured_capacity"] is None and _row(hub, "gpu")["ssh"] is None
+
+
+async def test_a_machine_enabled_again_takes_a_step():
+    hub = Hub("2.3.0")
+    hub.apply(_disableable(enabled=False))
+    await attach(hub, _Peer(), "gpu", caps=frozenset(), token="kwt_gpu")
+    assert hub.decide("gpu", []).wait == "waiting for gpu (disabled)"
+    hub.apply(_disableable())
+    assert hub.decide("gpu", []).machine == "gpu"
+
+
+@pytest.mark.parametrize(
+    ("local", "enabled"), [({"enabled": False}, False), ({"capacity": 2}, True), (None, True)]
+)
+async def test_applying_workers_yaml_hands_the_local_workers_enabled_to_its_link(local, enabled):
+    from kraft.remote import local_link
+
+    hub = Hub("2.3.0")
+    hub.apply(registry.WorkersFile.model_validate({"local": local} if local is not None else {}))
+    assert local_link.current().enabled is enabled

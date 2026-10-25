@@ -81,6 +81,19 @@ def test_a_capacity_is_unset_unless_written_and_a_local_block_loads(tmp_path):
     assert _load(tmp_path, "workers:\n").local is None
 
 
+def test_enabled_is_on_unless_written_and_the_file_omits_it_while_it_is_on(tmp_path):
+    loaded = _load(
+        tmp_path,
+        "workers:\n  a:\n    ssh: h\n  b:\n    ssh: h\n    enabled: false\n"
+        "local:\n  enabled: false\n",
+    )
+    assert loaded.workers["a"].enabled and not loaded.workers["b"].enabled
+    doc = loaded.to_yaml()
+    assert "enabled" not in doc["workers"]["a"]
+    assert doc["workers"]["b"]["enabled"] is False and doc["local"]["enabled"] is False
+    assert "enabled" not in registry.WorkersFile.model_validate({"local": {}}).to_yaml()["local"]
+
+
 def test_groups_list_remote_members_in_name_order_then_local():
     f = registry.WorkersFile.model_validate(
         {

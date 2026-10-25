@@ -44,6 +44,17 @@ async def test_a_step_runs_on_the_machine_and_its_result_comes_home_before_it_is
     )  # the staging ref is gone
 
 
+async def test_a_step_running_on_a_machine_that_is_then_disabled_finishes_and_frees_its_slot(rig):
+    script = "import time; time.sleep(0.3); print('done anyway')"
+    run = await rig.run([sys.executable, "-c", script])
+    rig.hub.apply(workers_file(gpu={"capacity": 2, "enabled": False}))
+    assert rig.hub.decide("gpu", []).wait == "waiting for gpu (disabled)"
+    await rig.done(run)
+    assert run.exit_code == 0 and run.spool.read_text() == "done anyway\n"
+    assert rig.hub.slots_used("gpu") == 0
+    assert rig.hub.decide("gpu", []).wait == "waiting for gpu (disabled)"
+
+
 async def test_the_second_step_is_sent_only_what_the_machine_lacks_and_sees_the_first_steps_work(
     rig,
 ):

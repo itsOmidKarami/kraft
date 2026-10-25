@@ -120,6 +120,7 @@ class Hub:
         if (link := local_link.current()) is not None:
             link.capacity = file.local.capacity if file.local is not None else None
             link.groups = list(file.local.groups) if file.local is not None else []
+            link.enabled = file.local.enabled if file.local is not None else True
         for name, worker in file.workers.items():
             entry = previous.pop(name, None)
             if entry is None:
@@ -342,6 +343,7 @@ class Hub:
         e = self._entries.get(name)
         return (
             e is not None
+            and e.worker.enabled
             and e.online
             and set(needs) <= e.caps
             and (e.full_until is None or self._mono() >= e.full_until)
@@ -349,7 +351,7 @@ class Hub:
         )
 
     def free(self, name: str, repos: Sequence[RepoEntry], needs: Collection[str] = ()) -> bool:
-        """Could `name` take a step now: online, allowed for `repos`, listing every cap in
+        """Could `name` take a step now: enabled, online, allowed for `repos`, listing every cap in
         `needs`, not just turned a step away, and a slot under its limit."""
         e = self._entries.get(name)
         return e is not None and placement.allows(e.worker, repos) and self._has_slot(name, needs)
@@ -431,6 +433,8 @@ class Hub:
         if named:
             if first is None:
                 return Verdict(wait=f"{wait_text} (offline: not connected yet)")
+            if not first.worker.enabled:  # the person's choice, so it outranks offline
+                return Verdict(wait=f"{wait_text} (disabled)")
             if not first.online:
                 return Verdict(wait=f"{wait_text} (offline: {first.reason})")
             return Verdict(wait=f"{wait_text} (full)")
@@ -521,6 +525,9 @@ class Hub:
                 "capacity": self.limit(name),
                 "capacity_source": self.limit_source(name),
                 "machine_capacity": e.machine_capacity,
+                "enabled": e.worker.enabled,
+                "ssh": e.worker.ssh,
+                "configured_capacity": e.worker.capacity,
                 "groups": list(e.worker.groups),
                 "repos": e.worker.repos,
                 "last_seen": (
