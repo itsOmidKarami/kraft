@@ -338,6 +338,11 @@ def resolve_invocation(
     )
 
 
+#: Where a machine step's codex hook flags go in its command line (`JobSpec.codex_hook`); a NUL
+#: is in no real argument.
+_MACHINE_HOOK_FLAGS = "\0codex-hook-flags"
+
+
 class LaunchRefused(ValueError):
     """`run_agent_task` refused to start anything: the harness is unknown, or a
     merged option names a capability it does not declare. A configuration
@@ -1240,6 +1245,7 @@ async def run_agent_task(
     if hooked:
         _install_hook(h, Path(cwd), allowed_tools, deny_tools, grants, sandbox, in_place=in_place)
     hook_argv: tuple[str, ...] = ()
+    codex_hook: dict | None = None
     if h.permission_hook == "codex" and _hook_install.needs_hook(allowed_tools, deny_tools, grants):
         exe = shlex.split(command) if command else [h.command[0]]
         if sandbox and runner:
@@ -1247,30 +1253,36 @@ async def run_agent_task(
                 f"harness {harness!r}: codex's hook trust is checked against the image that runs "
                 f"it; a sandboxed codex step cannot run on a machine yet"
             )
-        try:
-            # The session's own codex vouches for the hook: a sandbox's is the
-            # image's, and another version may hash it otherwise (skipped).
-            oneshot_runner = (
-                await asyncio.to_thread(
-                    _backends.for_sandbox(sandbox).oneshot,
-                    sandbox,
-                    cwd,
-                    _backends.for_sandbox(sandbox).home(run_dirs, work_item_id),
-                    executables=(exe[0],),
-                    work_item_id=work_item_id,
+        if runner:
+            # The machine's own codex vouches for the hook, in its copy of the worktree, and
+            # its own interpreter runs it: the machine puts the flags where this marks.
+            codex_hook = {"harness": harness, "hook": h.id, "exe": exe}
+            hook_argv = (_MACHINE_HOOK_FLAGS,)
+        else:
+            try:
+                # The session's own codex vouches for the hook: a sandbox's is the
+                # image's, and another version may hash it otherwise (skipped).
+                oneshot_runner = (
+                    await asyncio.to_thread(
+                        _backends.for_sandbox(sandbox).oneshot,
+                        sandbox,
+                        cwd,
+                        _backends.for_sandbox(sandbox).home(run_dirs, work_item_id),
+                        executables=(exe[0],),
+                        work_item_id=work_item_id,
+                    )
+                    if sandbox
+                    else None
                 )
-                if sandbox
-                else None
-            )
-            hook_argv = await _hook_install.codex_hook_flags(
-                exe, _hook_install.hook_argv(h.id, sandbox), Path(cwd), oneshot_runner
-            )
-        except (_hook_install.CodexTrustError, _sandbox.SandboxNotReady) as exc:
-            # Never launched unenforced, never with every hook trusted.
-            raise LaunchRefused(
-                f"harness {harness!r} cannot run Kraft's permission hook, which this "
-                f"launch's policy needs: {exc}"
-            ) from exc
+                hook_argv = await _hook_install.codex_hook_flags(
+                    exe, _hook_install.hook_argv(h.id, sandbox), Path(cwd), oneshot_runner
+                )
+            except (_hook_install.CodexTrustError, _sandbox.SandboxNotReady) as exc:
+                # Never launched unenforced, never with every hook trusted.
+                raise LaunchRefused(
+                    f"harness {harness!r} cannot run Kraft's permission hook, which this "
+                    f"launch's policy needs: {exc}"
+                ) from exc
     rules_env: dict[str, str] = {}
     rules_argv: tuple[str, ...] = ()
     rules_files: tuple[str, ...] = ()
@@ -1320,6 +1332,9 @@ async def run_agent_task(
         options=options,
         extra=(*hook_argv, *rules_argv),
     )
+    if codex_hook is not None:
+        codex_hook["at"] = cmd.index(_MACHINE_HOOK_FLAGS)
+        del cmd[codex_hook["at"]]
     reader = log_reader(h)
     config_env = _config_dir(
         run_dirs,
@@ -1412,6 +1427,7 @@ async def run_agent_task(
         ro_paths=(*rules_files, *remote_ro),
         before_launch=before_launch if borrows or on_session else None,
         runner=runner,
+        codex_hook=codex_hook,
     )
     if borrows:
         await inplace.check_task(db, run_dirs, item_row, Path(cwd), node_id, hook_point)

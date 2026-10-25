@@ -907,6 +907,9 @@ async def _run_task(
     idle_limit: bool = False,
     #: The machine this step runs on (`kraft.remote.placement`), or None for the server.
     runner: str | None = None,
+    #: `JobSpec.codex_hook`: the machine's own codex trusts Kraft's hook there. Only
+    #: `run_agent_task` sets it, and only with a `runner`.
+    codex_hook: dict | None = None,
 ) -> str:
     runner = None if runner == "local" else runner
     idle_s = IDLE_MINUTES * 60 if idle_limit and IDLE_MINUTES else None
@@ -919,6 +922,7 @@ async def _run_task(
         from kraft.remote import launch as _launch
         from kraft.remote import runs as _remote_runs
         from kraft.remote import standin as _standin
+        from kraft.remote.protocol import CODEX_HOOK
 
         claim, refusal, time_cap = await _launch.claim(
             db,
@@ -929,6 +933,16 @@ async def _run_task(
             repo_entry=repo_entry,
             time_cap=time_cap,
         )
+        hub = _remote_runs.current().hub if claim is not None else None
+        if codex_hook is not None and hub is not None and CODEX_HOOK not in hub.caps(claim.machine):
+            # An older machine ignores the field and runs codex with Kraft's hook untrusted:
+            # skipped without a word, its policy unenforced.
+            hub.release(claim)
+            refusal = (
+                f"harness {codex_hook['harness']!r} cannot run Kraft's permission hook, which "
+                f"this launch's policy needs: machine {claim.machine!r} runs a Kraft that "
+                f"cannot have its own codex trust the hook; update Kraft on that machine"
+            )
     files = files or item_paths.session_files(run_dirs, work_item_id, session_id)
     # Kraft's own folder: the log, and the two sidecars below, are written
     # by the host and never handed to the worker (`SessionFiles`).
@@ -1284,6 +1298,7 @@ async def _run_task(
                         time_cap=time_cap,
                         idle_s=idle_s,
                         **sandbox_job,
+                        codex_hook=codex_hook,
                     )
                     run = await _remote_runs.current().launch(
                         spec, claim, entries=entries, folder=files.folder

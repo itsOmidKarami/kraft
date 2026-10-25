@@ -4,13 +4,16 @@ import asyncio
 import contextlib
 import json
 import sys
+from pathlib import Path
 
 import pytest
 from support.chain_builders import v1_node
 from support.fake_backend import Remote
 from support.harness import entry_of, v1_chain
+from support.remote import attach
 
 from kraft import caps
+from kraft.adapters import hook_install
 from kraft.adapters import subprocess as sp
 from kraft.remote import launch
 from kraft.remote import runs as runs_mod
@@ -242,3 +245,46 @@ async def test_a_remote_standin_is_stopped_by_a_clean_stop(rig):
         await task
 
     assert not psutil.pid_exists(row["pid"]) or psutil.Process(row["pid"]).status() == "zombie"
+
+
+FAKE_CODEX = [sys.executable, str(Path(__file__).parents[1] / "support/fake_codex_app_server.py")]
+CODEX_HOOK = {"harness": "codex", "hook": "codex", "exe": FAKE_CODEX, "at": 3}
+
+
+async def test_a_machine_step_gets_the_hook_flags_its_own_codex_trusted(rig, monkeypatch, tmp_path):
+    """Its codex is asked in its copy of the worktree, and the hook it trusts is the machine's
+    interpreter's: the flags go in where the server marked, before the rest of the command."""
+    monkeypatch.setattr(hook_install, "_codex_flags", {})
+    monkeypatch.setenv("FAKE_CODEX_LOG", str(tmp_path / "codex.log"))
+    cmd = [sys.executable, "-c", "import sys, json; print(json.dumps(sys.argv[1:]))", "tail"]
+    assert await _run(rig, "s1", cmd, runner="gpu", codex_hook=dict(CODEX_HOOK)) == "done"
+    args = json.loads(rig.files("s1").log.read_text())
+    assert [args[0], args[2], args[4], args[6]] == ["-c", "-c", "-c", "tail"]
+    hook, state = args[1], args[5]
+    assert f"{sys.executable} -I -m kraft admin permission-hook codex" in hook
+    assert state.startswith("hooks.state=") and "trusted_hash=" in state
+    assert len((tmp_path / "codex.log").read_text().splitlines()) == 2
+
+
+@pytest.mark.parametrize(
+    ("caps", "mode", "says"),
+    [
+        ((), "ok", "update Kraft on that machine"),
+        (None, "distrust", "did not trust"),
+    ],
+    ids=["machine-lacks-the-cap", "machine-codex-distrusts"],
+)
+async def test_a_machine_step_whose_hook_the_machine_cannot_trust_is_refused_and_never_runs(
+    rig_offline, monkeypatch, tmp_path, caps, mode, says
+):
+    """Never the server's codex asked instead, never a launch with the hook skipped."""
+    monkeypatch.setattr(hook_install, "_codex_flags", {})
+    monkeypatch.setenv("FAKE_CODEX_MODE", mode)
+    marker = tmp_path / "ran"
+    await attach(rig_offline.hub, rig_offline.machine, **({} if caps is None else {"caps": caps}))
+    cmd = [sys.executable, "-c", f"open({str(marker)!r}, 'w')"]
+    status = await _run(rig_offline, "s1", cmd, runner="gpu", codex_hook=dict(CODEX_HOOK))
+    log = rig_offline.files("s1").log.read_text()
+    assert status == "config_error" and says in log
+    assert "'codex' cannot run Kraft's permission hook" in log
+    assert not marker.exists() and rig_offline.hub.slots_used("gpu") == 0
