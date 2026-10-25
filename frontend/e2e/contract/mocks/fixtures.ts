@@ -763,10 +763,12 @@ function settingsFor(variant: Variant, theme: { mode?: string; density?: string;
   };
 }
 
-/** `GET /workers`: two machines, one reachable and one that dropped. */
+/** `GET /workers`: this machine's own worker first, then a busy ssh machine, a dial-in one that dropped, and a disabled one. */
 export const WORKERS_FIXTURE = [
+  { name: "local", mode: "local", online: true, reason: null, slots_used: 1, capacity: null, configured_capacity: null, enabled: true, ssh: null, groups: [], repos: null, last_seen: null, kraft_version: "2.5.0", give_up_after: "never", holders: [], remove_blocked: "the local worker is part of this Kraft and cannot be removed; disable it instead" },
   { name: "gpu-box", mode: "ssh", online: true, reason: "", slots_used: 1, capacity: 2, capacity_source: "server", machine_capacity: null, configured_capacity: 2, enabled: true, ssh: "gpu-box.lan", groups: ["gpu", "linux"], repos: ["kraft"], last_seen: "2026-10-23T09:58:00+00:00", kraft_version: "2.4.0", give_up_after: "2h", holders: [{ id: "a1b2c3d4", title: "Add the export button", steps: 1 }], remove_blocked: "gpu-box is running 1 step of Add the export button. Disable it so nothing new starts (Takes new steps off in Settings › Workers, or kraft admin worker disable gpu-box), then remove it once they end. A step held by a machine that is offline is freed by pausing or cancelling its item." },
   { name: "home-server", mode: "dial-in", online: false, reason: "disconnected: end of stream", slots_used: 0, capacity: 1, capacity_source: "default", machine_capacity: null, configured_capacity: null, enabled: true, ssh: null, groups: [], repos: null, last_seen: "2026-10-23T08:12:00+00:00", kraft_version: "2.4.0", give_up_after: "never", holders: [], remove_blocked: null },
+  { name: "build-box", mode: "ssh", online: true, reason: "", slots_used: 0, capacity: 1, capacity_source: "default", machine_capacity: null, configured_capacity: null, enabled: false, ssh: "build-box.lan", groups: ["linux"], repos: null, last_seen: "2026-10-23T09:40:00+00:00", kraft_version: "2.4.0", give_up_after: "2h", holders: [], remove_blocked: null },
 ];
 
 function analyticsFor(variant: Variant) {

@@ -822,7 +822,24 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if (p === "/sessions") return json(st.sessions);
     if ((m = p.match(/^\/sessions\/[^/]+$/))) return { status: 204 };
     if (p === "/analytics") return json(S.analytics);
-    if (p === "/workers") return json({ workers: WORKERS_FIXTURE });
+    if (p === "/workers" && method === "GET") return json({ workers: WORKERS_FIXTURE });
+    // The Add, Edit, Remove and rotate-token answers, plausible and not kept: the list reads the fixture again.
+    if (p === "/workers" && method === "POST") {
+      const b = req.json() ?? {};
+      const worker = { ...WORKERS_FIXTURE[2], name: b.name ?? "new-box", mode: b.ssh ? "ssh" : "dial-in", ssh: b.ssh ?? null, online: false, reason: "never connected", slots_used: 0, last_seen: null, kraft_version: null, groups: b.groups ?? [], repos: b.repos ?? null, give_up_after: b.give_up_after ?? "2h", holders: [], remove_blocked: null };
+      if (b.ssh) return json({ worker, probe: { connected: true, detail: "connected" } }, 201);
+      return json({ worker, token: DEMO_TOKEN, serve_command: `kraft admin worker serve --server http://localhost:8080 --token ${DEMO_TOKEN}`, note: "Replace the address with one the machine can reach." }, 201);
+    }
+    if ((m = p.match(/^\/workers\/([^/]+)\/rotate-token$/)) && method === "POST") {
+      const worker = WORKERS_FIXTURE.find((w) => w.name === decodeURIComponent(m![1])) ?? WORKERS_FIXTURE[2];
+      return json({ worker, token: DEMO_TOKEN, serve_command: `kraft admin worker serve --server http://localhost:8080 --token ${DEMO_TOKEN}`, note: "Replace the address with one the machine can reach." });
+    }
+    if ((m = p.match(/^\/workers\/([^/]+)$/)) && (method === "PATCH" || method === "DELETE")) {
+      const name = decodeURIComponent(m[1]);
+      const worker = WORKERS_FIXTURE.find((w) => w.name === name);
+      if (!worker) return json({ detail: `no machine named ${name}` }, 404);
+      return json(method === "DELETE" ? { removed: name } : { worker: { ...worker, ...(req.json() ?? {}) } });
+    }
     if (p === "/storage") return json(storageFor([...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id].item)));
     if (p === "/storage/preview" && method === "POST") {
       const usage = storageFor([...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id].item));
@@ -841,6 +858,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
   return Object.assign(serve, { motion: opts.motion ? motion(S, T, opts.motion === true ? {} : opts.motion) : null });
 }
 
+const DEMO_TOKEN = "k7Qm2xV9demo-token-shown-once";
 const GB = 1024 ** 3;
 /** `GET /storage` for the demo's own items: each worktree 0.4–2G, the finished ones what a clean-up would free, under a 40G quota. */
 function storageFor(items: any[]) {

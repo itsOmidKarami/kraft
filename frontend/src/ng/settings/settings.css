@@ -201,3 +201,38 @@
 .set-line-row { padding-block: calc(4px + var(--row-pad-add)); }
 .set-linkrow { padding-block: calc(10px + var(--row-pad-add)); }
 .set-event { padding-block: calc(4px + var(--row-pad-add)); }
+
+/* Settings › Workers: the machines table (styled like analytics' .an-table, which settings/ may not style), and the Add and Edit dialogs. */
+.set-block-head .set-block-aside { margin-left: auto; }
+.set-block-action { display: inline-flex; align-items: center; gap: 8px; }
+.set-wk-body { display: flex; flex-direction: column; gap: 8px; padding: 0 8px 4px; }
+.set-wk-scroll { overflow-x: auto; }
+.set-wk-table { width: 100%; border-collapse: collapse; font-size: var(--fs-label); }
+.set-wk-table th { padding: 4px 8px; font-size: var(--fs-label); font-weight: 400; text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.set-wk-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); color: var(--text); vertical-align: middle; }
+.set-wk-table .is-num { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.set-wk-table tr.is-off td.is-dim { color: var(--text-muted); }
+.set-wk-dash { color: var(--text-muted); }
+.set-wk-note { padding: 0 4px; }
+.set-wk-table .is-act { text-align: right; white-space: nowrap; }
+.set-wk-state { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.set-wk-why { font-size: var(--fs-meta); color: var(--text-muted); overflow-wrap: anywhere; }
+.set-wk-dlg.dialog { box-sizing: border-box; width: min(560px, 100%); }
+.set-wk-form, .set-wk-token { display: flex; flex-direction: column; gap: 14px; }
+.set-wk-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-meta); }
+.set-wk-lead { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: var(--fs-body); }
+.set-wk-cmd { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
+.set-wk-cmdbox { position: relative; }
+.set-wk-cmdbox .set-wk-cmd { padding-right: 76px; }
+.set-wk-copy { position: absolute; top: 6px; right: 6px; }
+.set-wk-once .badge { margin-right: 6px; }
+.set-wk-field > .segmented { align-self: flex-start; }
+.set-wk-field .pill-input { min-height: 28px; padding: 0 8px; border-radius: 6px; background: var(--surface); font: inherit; font-size: var(--fs-meta); }
+.set-wk-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.set-wk-foot { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.set-wk-foot-row { display: flex; justify-content: flex-end; gap: 8px; }
+.set-wk-switch { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 10px; font-size: var(--fs-meta); }
+.set-wk-switch > .field-hint { grid-column: 2; }
+.set-wk-rotate { display: flex; gap: 8px; }
+.set-wk-remove { margin-right: auto; }
+@media (max-width: 767px) { .set-wk-pair { grid-template-columns: minmax(0, 1fr); } }

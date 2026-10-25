@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { useStore } from "../../store";
 import { detailOf, jsonBody, request } from "../http";
 import { act } from "../item/actions";
+import { sendLater, UNDO_WINDOW_MS } from "../later";
 import { showToast } from "../ui/Toast";
 
 /** B9: one call, an answer per id (W6 brief D). */
@@ -12,9 +13,6 @@ export type BulkOutcome = { action: BulkAction; ids: string[]; results: BulkItem
 export const VERB: Record<BulkAction, string> = { pause: "paused", cancel: "cancelled", archive: "archived", restore: "restored", retry: "retried", resume: "resumed" };
 export const items = (n: number) => `${n} item${n === 1 ? "" : "s"}`;
 
-/** The window between confirming a bulk Cancel and sending it (R3): Undo in it sends nothing. */
-export const CANCEL_WINDOW_MS = 5000;
-
 /** Retry and Resume have no bulk route: the item page's own call, one per item, answered in the bulk shape. */
 async function eachOne(action: "retry" | "resume", ids: string[]): Promise<BulkOutcome> {
   const results = await Promise.all(ids.map(async (id): Promise<BulkItemResult> => {
@@ -24,28 +22,29 @@ async function eachOne(action: "retry" | "resume", ids: string[]): Promise<BulkO
   return { action, ids, results };
 }
 
-async function post(action: BulkAction, ids: string[], reason?: string): Promise<BulkOutcome> {
-  const r = await request<{ results: BulkItemResult[] }>("/work-items/bulk", jsonBody("POST", { action, ids, ...(reason ? { reason } : {}) }));
+async function post(action: BulkAction, ids: string[], reason?: string, keepalive?: boolean): Promise<BulkOutcome> {
+  const r = await request<{ results: BulkItemResult[] }>("/work-items/bulk", { ...jsonBody("POST", { action, ids, ...(reason ? { reason } : {}) }), ...(keepalive ? { keepalive } : {}) });
   return r.status >= 200 && r.status < 300 ? { action, ids, results: r.body.results } : { action, ids, error: detailOf(r.body) };
 }
 
 /** One id per call, so a slow run (archiving deletes worktrees) can say how far it got. */
-async function oneByOne(action: BulkAction, ids: string[], reason: string | undefined, onEach: (ok: boolean) => void): Promise<BulkOutcome> {
+async function oneByOne(action: BulkAction, ids: string[], reason: string | undefined, onEach: (ok: boolean) => void, keepalive?: boolean): Promise<BulkOutcome> {
   const results: BulkItemResult[] = [];
   for (const id of ids) {
-    const out = await post(action, [id], reason);
+    const out = await post(action, [id], reason, keepalive);
     results.push(...("results" in out ? out.results : [{ id, ok: false, error: out.error }]));
     onEach("results" in out && out.results.some((r) => r.id === id && r.ok));
   }
   return { action, ids, results };
 }
 
-/** `onEach`, when given, sends the ids one at a time and is told after each whether it went through. */
-export async function sendBulk(action: BulkAction, ids: string[], reason?: string, onEach?: (ok: boolean) => void): Promise<BulkOutcome> {
+/** `onEach`, when given, sends the ids one at a time and is told after each whether it went through.
+ *  `keepalive` lets the browser finish the request after the page is gone. */
+export async function sendBulk(action: BulkAction, ids: string[], reason?: string, onEach?: (ok: boolean) => void, keepalive?: boolean): Promise<BulkOutcome> {
   let out: BulkOutcome;
   if (action === "retry" || action === "resume") out = await eachOne(action, ids);
-  else if (onEach) out = await oneByOne(action, ids, reason, onEach);
-  else out = await post(action, ids, reason);
+  else if (onEach) out = await oneByOne(action, ids, reason, onEach, keepalive);
+  else out = await post(action, ids, reason, keepalive);
   // The list moves on every action; read it once rather than wait on each item's events.
   useStore.getState().bootstrap().catch(() => {});
   const ok = "results" in out ? out.results.filter((x) => x.ok).map((x) => x.id) : [];
@@ -63,19 +62,9 @@ export const useBulk = create<{ last: BulkOutcome | null; set: (o: BulkOutcome |
   set: (last) => set({ last }),
 }));
 
-/** A confirmed bulk Cancel, held for the window. Module state, not the
- *  board's: moving to another page inside the window still sends it; a
- *  full reload drops it, and nothing is sent. Returns the Undo, true when it
- *  caught the send in time. */
+/** A confirmed bulk Cancel, held for the undo window. Leaving the page inside it sends it at
+ *  once. Returns the Undo, true when it caught the send in time. */
 export function cancelLater(ids: string[], reason: string): () => boolean {
-  let sent = false;
-  const timer = setTimeout(() => {
-    sent = true;
-    void sendBulk("cancel", ids, reason);
-  }, CANCEL_WINDOW_MS);
-  return () => {
-    if (sent) return false;
-    clearTimeout(timer);
-    return true;
-  };
+  const { undo } = sendLater(({ keepalive }) => sendBulk("cancel", ids, reason, undefined, keepalive), UNDO_WINDOW_MS);
+  return undo;
 }

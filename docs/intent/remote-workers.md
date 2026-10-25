@@ -250,6 +250,16 @@ The system SHALL list the registered machines in Settings with their state.
 enforced-by: frontend/src/ng/settings/WorkersPage.test.tsx::Settings › Workers, tests/api/test_api_shapes.py::test_the_table_is_what_the_server_returns
 origin: frontend/src/ng/settings/WorkersPage.tsx
 
+## REQ settings-manages-machines
+The system SHALL let a person add, edit, enable or disable a machine and rotate a dial-in machine's token in Settings, SHALL show a dial-in token once, and SHALL show the server's own words for every refusal.
+enforced-by: frontend/src/ng/settings/AddWorkerDialog.test.tsx::AddWorkerDialog, frontend/src/ng/settings/EditWorkerDialog.test.tsx::EditWorkerDialog
+origin: frontend/src/ng/settings/WorkersPage.tsx
+
+## REQ settings-removal-waits-for-undo
+WHEN a machine is removed in Settings, the system SHALL hold the request for an Undo window, SHALL send it at once if the page is left, and IF the server then refuses it, SHALL bring the row back with the server's reason.
+enforced-by: frontend/src/ng/settings/WorkersPage.test.tsx::Settings › Workers > removing a machine, frontend/src/ng/later.test.ts::sendLater
+origin: frontend/src/ng/later.ts
+
 ## REQ doctor-names-a-chain-on-an-unknown-machine
 IF a chain places a step on a machine that is not in workers.yaml, THEN doctor SHALL fail its chains row naming the machine.
 enforced-by: tests/test_doctor_workers.py::test_a_chain_placed_on_a_machine_workers_yaml_lacks_fails_the_chains_row
